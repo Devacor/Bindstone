@@ -1,0 +1,105 @@
+{
+    "Textures":
+    {
+        "DogAndFox":
+        {
+            "Type": "File",
+            "File": "Assets/Images/dogfox.png",
+            "Repeat": "false",
+            "SubTextures":
+            {
+                "Dog_0":
+                {
+                    "X": "0",
+                    "Y": "0",
+                    "Width": "128",
+                    "Height": "128"
+                },
+                "Dog_1":
+                {
+                    "X": "128",
+                    "Y": "0",
+                    "Width": "128",
+                    "Height": "128"
+                },
+                "Dog_2":
+                {
+                    "X": "256",
+                    "Y": "0",
+                    "Width": "128",
+                    "Height": "128"
+                },
+                "Dog_3":
+                {
+                    "X": "384",
+                    "Y": "0",
+                    "Width": "128",
+                    "Height": "128"
+                },
+                "FoxBounce_0":
+                {
+                    "X": "0",
+                    "Y": "256",
+                    "Width": "128",
+                    "Height": "128"
+                },
+                "FoxBounce_1":
+                {
+                    "X": "128",
+                    "Y": "256",
+                    "Width": "128",
+                    "Height": "128"
+                },
+                "FoxBounce_2":
+                {
+                    "X": "256",
+                    "Y": "256",
+                    "Width": "128",
+                    "Height": "128"
+                },
+                "FoxStand_0":
+                {
+                    "X": "0",
+                    "Y": "128",
+                    "Width": "128",
+                    "Height": "128"
+                },
+                "FoxStand_1":
+                {
+                    "X": "128",
+                    "Y": "128",
+                    "Width": "128",
+                    "Height": "128"
+                },
+                "FoxStand_2":
+                {
+                    "X": "256",
+                    "Y": "128",
+                    "Width": "128",
+                    "Height": "128"
+                },
+                "Ground":
+                {
+                    "X": "256",
+                    "Y": "384",
+                    "Width": "256",
+                    "Height": "128"
+                },
+                "Moon":
+                {
+                    "X": "128",
+                    "Y": "384",
+                    "Width": "128",
+                    "Height": "128"
+                },
+                "Sun":
+                {
+                    "X": "0",
+                    "Y": "384",
+                    "Width": "128",
+                    "Height": "128"
+                }
+            }
+        }
+    }
+}

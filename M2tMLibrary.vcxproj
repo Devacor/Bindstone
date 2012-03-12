@@ -1,0 +1,120 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{732BFA09-4C56-4F49-BE0E-1E4A2A129DA4}</ProjectGuid>
+    <RootNamespace>M2tMLibrary</RootNamespace>
+    <VCTargetsPath Condition="'$(VCTargetsPath11)' != '' and '$(VSVersion)' == '' and $(VisualStudioVersion) == ''">$(VCTargetsPath11)</VCTargetsPath>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v110</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+    <IncludePath>$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);$(SolutionDir)../External/boost_1_49_0/</IncludePath>
+    <LibraryPath>$(SolutionDir)../External/boost_1_49_0/stage/lib/;$(LibraryPath)</LibraryPath>
+    <SourcePath>$(VCInstallDir)atlmfc\src\mfc;$(VCInstallDir)atlmfc\src\mfcm;$(VCInstallDir)atlmfc\src\atl;$(VCInstallDir)crt\src;$(SolutionDir)../External/boost_1_49_0/libs/;</SourcePath>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <MinimalRebuild>true</MinimalRebuild>
+      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <Optimization>Disabled</Optimization>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../External/boost_1_49_0/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>glu32.lib;SDL.lib;SDLmain.lib;SDL_image.lib;SDL_ttf.lib;opengl32.lib;SDL_mixer.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <SubSystem>Console</SubSystem>
+      <Profile>true</Profile>
+      <AdditionalLibraryDirectories>$(SolutionDir)../External/boost_1_49_0/stage/lib/;</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <EnablePREfast>false</EnablePREfast>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>glu32.lib;SDL.lib;SDLmain.lib;SDL_image.lib;SDL_ttf.lib;opengl32.lib;SDL_mixer.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <SubSystem>Windows</SubSystem>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Animation\frameSwapper.cpp" />
+    <ClCompile Include="Source\Audio\sound.cpp" />
+    <ClCompile Include="Source\exampleCode.cpp" />
+    <ClCompile Include="Source\main.cpp">
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">./;./Source</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="Source\Render\drawShapes.cpp" />
+    <ClCompile Include="Source\Render\matrix.cpp" />
+    <ClCompile Include="Source\Render\points.cpp" />
+    <ClCompile Include="Source\Render\render.cpp" />
+    <ClCompile Include="Source\Render\text.cpp" />
+    <ClCompile Include="Source\Render\textures.cpp" />
+    <ClCompile Include="Source\Utility\generalUtility.cpp" />
+    <ClCompile Include="Source\Utility\notification.cpp" />
+    <ClCompile Include="Source\Utility\stopwatch.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Source\Animation\frameSwapper.h" />
+    <ClInclude Include="Source\Animation\package.h" />
+    <ClInclude Include="Source\Audio\package.h" />
+    <ClInclude Include="Source\Audio\sound.h" />
+    <ClInclude Include="Source\exampleCode.h" />
+    <ClInclude Include="Source\Render\drawShapes.h" />
+    <ClInclude Include="Source\Render\matrix.h" />
+    <ClInclude Include="Source\Render\package.h" />
+    <ClInclude Include="Source\Render\points.h" />
+    <ClInclude Include="Source\Render\render.h" />
+    <ClInclude Include="Source\Render\text.h" />
+    <ClInclude Include="Source\Render\textures.h" />
+    <ClInclude Include="Source\Utility\generalUtility.h" />
+    <ClInclude Include="Source\Utility\notification.h" />
+    <ClInclude Include="Source\Utility\package.h" />
+    <ClInclude Include="Source\Utility\stopwatch.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

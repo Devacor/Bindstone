@@ -1,2 +1,4 @@
 *.sdf
 *.opensdf
+/Debug/*
+/Release/*

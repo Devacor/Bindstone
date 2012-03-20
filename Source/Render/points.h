@@ -1,7 +1,7 @@
 #ifndef __POINTS_H__
 #define __POINTS_H__
 
-namespace M2Rend {
+namespace MV {
 
    class DrawPoint;
 
@@ -48,24 +48,24 @@ namespace M2Rend {
       
       bool atOrigin(){return x == 0 && y == 0 && z == 0;}
       
-      bool operator+=(const Point& a_other);
-      bool operator-=(const Point& a_other);
-      bool operator*=(const Point& a_other);
-      bool operator/=(const Point& a_other);
-      bool operator*=(const double& a_other);
-      bool operator/=(const double& a_other);
+      Point& operator+=(const Point& a_other);
+      Point& operator-=(const Point& a_other);
+      Point& operator*=(const Point& a_other);
+      Point& operator/=(const Point& a_other);
+      Point& operator*=(const double& a_other);
+      Point& operator/=(const double& a_other);
 
       double x, y, z;
    };
 
-   Point operator+(const Point& a_left, const Point& a_right);
-   Point operator-(const Point& a_left, const Point& a_right);
-   Point operator*(const Point& a_left, const Point& a_right);
-   Point operator/(const Point& a_left, const Point& a_right);
-   Point operator*(const Point& a_left, const double& a_right);
-   Point operator/(const Point& a_left, const double& a_right);
-   bool operator==(const Point& a_left, const Point& a_right);
-   bool operator!=(const Point& a_left, const Point& a_right);
+   const Point operator+(const Point& a_left, const Point& a_right);
+   const Point operator-(const Point& a_left, const Point& a_right);
+   const Point operator*(const Point& a_left, const Point& a_right);
+   const Point operator/(const Point& a_left, const Point& a_right);
+   const Point operator*(const Point& a_left, const double& a_right);
+   const Point operator/(const Point& a_left, const double& a_right);
+   const bool operator==(const Point& a_left, const Point& a_right);
+   const bool operator!=(const Point& a_left, const Point& a_right);
 
    class DrawPoint : public Point, public Color, public TexturePoint{
    public:
@@ -80,15 +80,16 @@ namespace M2Rend {
       DrawPoint& operator=(const Color& a_other);
       DrawPoint& operator=(const TexturePoint& a_other);
 
-      DrawPoint operator+(DrawPoint& a_other);
-      DrawPoint operator-(DrawPoint& a_other);
-      bool operator+=(DrawPoint& a_other);
-      bool operator-=(DrawPoint& a_other);
+      DrawPoint& operator+=(const DrawPoint& a_other);
+      DrawPoint& operator-=(const DrawPoint& a_other);
 
       void copyPosition(DrawPoint& a_other);
       void copyTexture(DrawPoint& a_other);
       void copyColor(DrawPoint& a_other);
    };
+
+   const DrawPoint operator+(const DrawPoint& a_left, const DrawPoint & a_right);
+   const DrawPoint operator-(const DrawPoint& a_left, const DrawPoint & a_right);
 
 }
 #endif

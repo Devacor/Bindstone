@@ -23,9 +23,7 @@
 #include "Render/render.h"
 #include "Utility/package.h"
 
-namespace M2Rend {
-   const double PIE = 3.14159265358979323846;
-
+namespace MV {
    class BoxAABB{
    public:
       BoxAABB(){initialize(Point());}
@@ -153,7 +151,7 @@ namespace M2Rend {
       //example call DrawRectangle *rect = ourScene->getChild("id")->getThis<DrawRectangle>();
       template<typename DerivedClass>
       std::shared_ptr<DerivedClass> getThis(){
-         M2Util::require((typeid(DerivedClass) == typeid(*this)), M2Util::PointerException(std::string("DrawShape::getThis() was called with the wrong type info supplied.  Requested conversion: (") + typeid(DerivedClass).name() + ") Actual type: (" + typeid (*this).name() + ")"));
+         require((typeid(DerivedClass) == typeid(*this)), PointerException(std::string("DrawShape::getThis() was called with the wrong type info supplied.  Requested conversion: (") + typeid(DerivedClass).name() + ") Actual type: (" + typeid (*this).name() + ")"));
          return std::dynamic_pointer_cast<DerivedClass>(shared_from_this());
       }
    protected:

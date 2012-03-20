@@ -5,7 +5,7 @@
 
 #include <boost/property_tree/json_parser.hpp>
 
-namespace M2Rend {
+namespace MV {
    boost::property_tree::ptree MainTexture::save() const{
       boost::property_tree::ptree outputStructure;
       outputStructure.put("Type", ((dynamicTexture)?"Dynamic":"File"));
@@ -72,10 +72,10 @@ namespace M2Rend {
    TextureManager::~TextureManager(){
    }
 
-   MainTexture* TextureManager::createEmptyTexture(const std::string &name, unsigned int width, unsigned int height, std::function<void(M2Rend::MainTexture&)> reloadCallback){
+   MainTexture* TextureManager::createEmptyTexture(const std::string &name, unsigned int width, unsigned int height, std::function<void(MainTexture&)> reloadCallback){
       unsigned int originalWidth = width, originalHeight = height;
-      width = M2Util::roundUpPowerOfTwo(width);
-      height = M2Util::roundUpPowerOfTwo(height);
+      width = roundUpPowerOfTwo(width);
+      height = roundUpPowerOfTwo(height);
       
       GLuint txtnumber;						// Texture ID
       unsigned int* data;						// Stored Data
@@ -287,7 +287,7 @@ namespace M2Rend {
       h = img->h; 
 
       //Check that the image's width is valid and then check that the image's width is a power of 2
-      if(!M2Util::isPowerOfTwo(w) || !M2Util::isPowerOfTwo(h)){
+      if(!isPowerOfTwo(w) || !isPowerOfTwo(h)){
          return false;
       }
 

@@ -1,15 +1,15 @@
 #include "exampleCode.h"
 #include "boost/asio.hpp"
 
-bool acceptInput(SDL_Event &event, FoxJump &foxJump, M2Rend::Draw2D &renderer, M2Rend::TextureManager &textures, M2Rend::TextLibrary &text, M2Rend::TextBox &textBox);
+bool acceptInput(SDL_Event &event, FoxJump &foxJump, MV::Draw2D &renderer, MV::TextureManager &textures, MV::TextLibrary &text, MV::TextBox &textBox);
 void quit(void);
 
 int main(int argc, char *argv[]){
    srand ((unsigned int)time(0));
    //RENDERER SETUP:::::::::::::::::::::::::::::::::
-   M2Rend::Draw2D renderer;
-   renderer.setBackgroundColor(M2Rend::Color(0.25f, 0.45f, 0.65f));
-   M2Rend::Point worldSize(800, 600, 0), windowSize(800, 600, 0);
+   MV::Draw2D renderer;
+   renderer.setBackgroundColor(MV::Color(0.25f, 0.45f, 0.65f));
+   MV::Point worldSize(800, 600, 0), windowSize(800, 600, 0);
 
    renderer.useFullScreen(false);
    renderer.allowWindowResize(true);
@@ -21,19 +21,19 @@ int main(int argc, char *argv[]){
    //M2Rend::parseTextStateList();
    //WORLD SETUP::::::::::::::::::::::::::::::
    //Set up managing objects
-   M2Rend::TextureManager textures;
+   MV::TextureManager textures;
    
-   M2Rend::FrameSwapperRegister animationLibrary;
+   MV::FrameSwapperRegister animationLibrary;
    LoadTexturesAndAnimations(textures, animationLibrary);
 
-   M2Rend::TextLibrary textLibrary(&renderer);
-   M2Rend::Scene mainScene(&renderer);
+   MV::TextLibrary textLibrary(&renderer);
+   MV::Scene mainScene(&renderer);
 
    CreateTextScene(mainScene, textLibrary);
    CreateDogFoxScene(mainScene, textures);
 
    //Initialize the individual animation objects for the dog and fox.
-   M2Rend::FrameSwapper dogAnimation, foxAnimation;
+   MV::FrameSwapper dogAnimation, foxAnimation;
    dogAnimation.setFrameList(animationLibrary.getDefinition("DogStand"));
    dogAnimation.start();
 
@@ -61,8 +61,8 @@ int main(int argc, char *argv[]){
 
    MusicPlayList.beginPlaying();
 
-   M2Rend::TextBox textBox(&textures, &textLibrary, "bluehighway1", UTF_CHAR_STR("The quick [[f|bluehighway2]][[c|.6:.25:0]]brown fox [[f|bluehighway3]][[c|1:1:0]]jumped[[f|]][[c|]] over the [[f|annabel]][[c|.25:.5:1]]lazy[[f|]][[c|]] dog!"), 300, 100);
-   textBox.scene()->placeAt(M2Rend::Point(300, 100));
+   MV::TextBox textBox(&textures, &textLibrary, "bluehighway1", UTF_CHAR_STR("The quick [[f|bluehighway2]][[c|.6:.25:0]]brown fox [[f|bluehighway3]][[c|1:1:0]]jumped[[f|]][[c|]] over the [[f|annabel]][[c|.25:.5:1]]lazy[[f|]][[c|]] dog!"), 300, 100);
+   textBox.scene()->placeAt(MV::Point(300, 100));
    mainScene.add(textBox.scene(), "TextBoxScene");
    //GAME LOOP::::::::::::::::::::::::::::::::::::
    SDL_Event event;
@@ -93,7 +93,7 @@ int main(int argc, char *argv[]){
    return 0;
 }
 
-bool acceptInput(SDL_Event &event, FoxJump &foxJump, M2Rend::Draw2D &renderer, M2Rend::TextureManager &textures, M2Rend::TextLibrary &text, M2Rend::TextBox &textBox){
+bool acceptInput(SDL_Event &event, FoxJump &foxJump, MV::Draw2D &renderer, MV::TextureManager &textures, MV::TextLibrary &text, MV::TextBox &textBox){
    while(SDL_PollEvent(&event)){
       textBox.setText(event);
       switch(event.type){
@@ -109,10 +109,10 @@ bool acceptInput(SDL_Event &event, FoxJump &foxJump, M2Rend::Draw2D &renderer, M
             foxJump.initiateJump();
             break;
          case SDLK_DOWN:
-            textBox.translateScrollPosition(M2Rend::Point(0, 10));
+            textBox.translateScrollPosition(MV::Point(0, 10));
             break;
          case SDLK_UP:
-            textBox.translateScrollPosition(M2Rend::Point(0, -10));
+            textBox.translateScrollPosition(MV::Point(0, -10));
             break;
          }
          break;

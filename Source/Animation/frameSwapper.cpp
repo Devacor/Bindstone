@@ -1,6 +1,6 @@
 #include "frameSwapper.h"
 
-namespace M2Rend{
+namespace MV{
    void FrameSwapperDefinition::addFrame(const Frame &a_Frame){
       frameList.push_back(a_Frame);
    }

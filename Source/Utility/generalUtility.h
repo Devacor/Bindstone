@@ -10,19 +10,19 @@
 #define UTF_CHAR_STR(stringVal) L##stringVal
 #define MEMBER_FUNCTION_POINTER(_class, _object) std::bind(&_class, _object, std::placeholders::_1)
 
-namespace M2Util {
+namespace MV {
    typedef wchar_t UtfChar;
    typedef std::wstring UtfString;
 
    enum AngleType {DEGREES, RADIANS};
    const double PIE = 3.14159265358979323846;
 
-   std::string getNewStringId();
+   std::string getNewStringId(std::string a_baseName = "__M2_SID_");
 
    //Some general exceptions that can be used
-   class M2ExceptionBase {
+   class MVExceptionBase {
    public:
-      M2ExceptionBase(){}
+      MVExceptionBase(){}
 
       void setExceptionMessage(std::string a_exceptionPrefix, std::string a_exceptionMessage){
          exceptionMessage = "[" + a_exceptionPrefix + "] = (" + a_exceptionMessage + ")";
@@ -37,22 +37,22 @@ namespace M2Util {
       std::string exceptionMessage;
    };
 
-   class DefaultException : public M2ExceptionBase {
+   class DefaultException : public MVExceptionBase {
    public:
       DefaultException(){setExceptionMessage("Default Exception");}
       DefaultException(std::string a_exceptionMessage){setExceptionMessage("Default Exception", a_exceptionMessage);}
    };
-   class RangeException : public M2ExceptionBase {
+   class RangeException : public MVExceptionBase {
    public:
       RangeException(){setExceptionMessage("Range Exception");}
       RangeException(std::string a_exceptionMessage){setExceptionMessage("Range Exception", a_exceptionMessage);}
    };
-   class ResourceException : public M2ExceptionBase {
+   class ResourceException : public MVExceptionBase {
    public:
       ResourceException(){setExceptionMessage("Resource Exception");}
       ResourceException(std::string a_exceptionMessage){setExceptionMessage("Resource Exception", a_exceptionMessage);}
    };
-   class PointerException : public M2ExceptionBase {
+   class PointerException : public MVExceptionBase {
    public:
       PointerException(){setExceptionMessage("Pointer Exception");}
       PointerException(std::string a_exceptionMessage){setExceptionMessage("Pointer Exception", a_exceptionMessage);}

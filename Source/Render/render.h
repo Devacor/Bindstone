@@ -15,7 +15,7 @@
 #include <string>
 #include <iostream>
 
-namespace M2Rend {
+namespace MV {
 
    #if SDL_BYTEORDER == SDL_BIG_ENDIAN
      const Uint32 SDL_RMASK = 0xff000000;

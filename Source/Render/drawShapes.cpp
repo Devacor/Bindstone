@@ -1,6 +1,6 @@
 #include "drawShapes.h"
 #include <numeric>
-namespace M2Rend {
+namespace MV {
    /*************************\
    | ------BoundingBox------ |
    \*************************/
@@ -154,7 +154,7 @@ namespace M2Rend {
    }
 
    BoxAABB DrawShape::getWorldAABB(){
-      M2Util::require(renderer != nullptr, M2Util::PointerException("DrawShape::getAABB requires a rendering context."));
+      require(renderer != nullptr, PointerException("DrawShape::getAABB requires a rendering context."));
       alertParent("pushMatrix");
       pushMatrix();
       int elements = (int)Pnt.size();
@@ -182,7 +182,7 @@ namespace M2Rend {
    }
 
    PointVolume DrawShape::getWorldPoints(){
-      M2Util::require(renderer != nullptr, M2Util::PointerException("DrawShape::getWorldPoints requires a rendering context."));
+      require(renderer != nullptr, PointerException("DrawShape::getWorldPoints requires a rendering context."));
       alertParent("pushMatrix");
       pushMatrix();
       int elements = (int)Pnt.size();
@@ -196,7 +196,7 @@ namespace M2Rend {
    }
 
    Point DrawShape::getWorldPoint(Point a_local){
-      M2Util::require(renderer != nullptr, M2Util::PointerException("DrawShape::getWorldPoint requires a rendering context."));
+      require(renderer != nullptr, PointerException("DrawShape::getWorldPoint requires a rendering context."));
       alertParent("pushMatrix");
       pushMatrix();
       Point ourPoint;
@@ -267,11 +267,9 @@ namespace M2Rend {
 
    std::shared_ptr<std::vector<GLfloat>> DrawShape::getPositionVertexArray(){
       auto returnArray = std::make_shared<std::vector<GLfloat>>(Pnt.size()*3);
-      TransformMatrix transformationMatrix(projectionMatrix().top());
-      transformationMatrix*=modelviewMatrix().top();
+      TransformMatrix transformationMatrix(projectionMatrix().top() * modelviewMatrix().top());
       for(size_t i = 0;i < Pnt.size();++i){
-         TransformMatrix transformedPoint(transformationMatrix);
-         transformedPoint*=TransformMatrix(Pnt[i]);
+         TransformMatrix transformedPoint(transformationMatrix * TransformMatrix(Pnt[i]));
          (*returnArray)[i*3+0] = static_cast<float>(transformedPoint.getX());
          (*returnArray)[i*3+1] = static_cast<float>(transformedPoint.getY());
          (*returnArray)[i*3+2] = static_cast<float>(transformedPoint.getZ());
@@ -477,7 +475,7 @@ namespace M2Rend {
       if(cell != DrawList.end()){
          return cell->second;
       }
-      M2Util::require(0, M2Util::ResourceException("Scene::getChild was unable to find an element matching the ID: (" + a_childId + ")"));
+      require(0, ResourceException("Scene::getChild was unable to find an element matching the ID: (" + a_childId + ")"));
       return nullptr;
    }
 
@@ -628,7 +626,7 @@ namespace M2Rend {
    }
 
    bool PointVolume::volumeCollision( PointVolume &a_compareVolume,  Draw2D* a_renderer){
-      M2Util::require(a_renderer != nullptr, M2Util::PointerException("PointVolume::volumeCollision was passed a null renderer."));
+      require(a_renderer != nullptr, PointerException("PointVolume::volumeCollision was passed a null renderer."));
       Point point1 = getCenter();
       Point point2 = a_compareVolume.getCenter();
 

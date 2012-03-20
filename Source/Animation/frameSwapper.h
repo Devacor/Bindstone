@@ -8,7 +8,7 @@
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
-namespace M2Rend{
+namespace MV{
    struct Frame{
       Frame(){duration = -1;}
       Frame(std::string a_mainTexture, std::string a_subTexture, int a_duration = -1)
@@ -72,7 +72,7 @@ namespace M2Rend{
       FrameSwapperDefinition *framesListReference;
 
       int defaultDuration;
-      M2Util::Stopwatch timer;
+      Stopwatch timer;
       Int64 previousFrame, nextFrame;
 
       std::list<Frame>::iterator frame;

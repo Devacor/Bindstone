@@ -7,7 +7,7 @@
 
 typedef int64_t Int64;
 
-namespace M2Util {
+namespace MV {
    /*------------------------------*\
    | M2tM's Stopwatch:              |
    | basically keeps track of time  |

@@ -43,7 +43,7 @@ GLint GLAPI MESA_gluProject(GLdouble objx, GLdouble objy, GLdouble objz, const G
       return(GL_TRUE);
 }
 
-namespace M2Rend {
+namespace MV {
 
    MatrixStack& projectionMatrix(){
       static MatrixStack projectionMatrix;
@@ -95,13 +95,13 @@ namespace M2Rend {
    }
 
    void glExtensionFramebufferObject::createFramebuffer( Framebuffer &a_framebuffer ){
-      M2Util::require(initialized, M2Util::ResourceException("CreateFramebuffer failed because the extension could not be loaded"));
+      require(initialized, ResourceException("CreateFramebuffer failed because the extension could not be loaded"));
       pglGenFramebuffersEXT(1, &a_framebuffer.framebuffer);
       pglGenRenderbuffersEXT(1, &a_framebuffer.renderbuffer);
    }
 
    void glExtensionFramebufferObject::startUsingFramebuffer( const Framebuffer &a_framebuffer ){
-      M2Util::require(initialized, M2Util::ResourceException("StartUsingFramebuffer failed because the extension could not be loaded"));
+      require(initialized, ResourceException("StartUsingFramebuffer failed because the extension could not be loaded"));
       
       glViewport( 0, 0, a_framebuffer.width, a_framebuffer.height );
       projectionMatrix().push().makeOrtho(0, a_framebuffer.width, 0, a_framebuffer.height, -128.0f, 128.0f);
@@ -109,11 +109,11 @@ namespace M2Rend {
       pglBindFramebufferEXT(GL_FRAMEBUFFER_EXT, a_framebuffer.framebuffer);
       pglFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, *a_framebuffer.texture, 0);
       pglBindRenderbufferEXT(GL_RENDERBUFFER_EXT, a_framebuffer.renderbuffer);
-      pglRenderbufferStorageEXT( GL_RENDERBUFFER_EXT, GL_DEPTH_COMPONENT24, M2Util::roundUpPowerOfTwo(a_framebuffer.width), M2Util::roundUpPowerOfTwo(a_framebuffer.height));
+      pglRenderbufferStorageEXT( GL_RENDERBUFFER_EXT, GL_DEPTH_COMPONENT24, roundUpPowerOfTwo(a_framebuffer.width), roundUpPowerOfTwo(a_framebuffer.height));
    }
 
    void glExtensionFramebufferObject::stopUsingFramebuffer(){
-      M2Util::require(initialized, M2Util::ResourceException("StopUsingFramebuffer failed because the extension could not be loaded"));
+      require(initialized, ResourceException("StopUsingFramebuffer failed because the extension could not be loaded"));
       pglBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0); 
       pglBindRenderbufferEXT(GL_RENDERBUFFER_EXT, 0);
 

@@ -24,7 +24,7 @@
 #define GLNULL GLuint(NULL)
 #endif
 
-namespace M2Rend {
+namespace MV {
    struct MainTexture;
    /*---------------------------------------*\
    | SubTexture:                             |
@@ -88,7 +88,7 @@ namespace M2Rend {
       std::string file;
       std::map<std::string, SubTexture> subTextures;
       bool dynamicTexture;
-      std::function<void(M2Rend::MainTexture&)> reloadCallback;
+      std::function<void(MainTexture&)> reloadCallback;
       bool repeat;
    };
 
@@ -105,7 +105,7 @@ namespace M2Rend {
       TextureManager();
       ~TextureManager();
 
-      MainTexture* createEmptyTexture(const std::string &name, unsigned int width, unsigned int height, std::function<void(M2Rend::MainTexture&)> reloadCallback = nullptr);
+      MainTexture* createEmptyTexture(const std::string &name, unsigned int width, unsigned int height, std::function<void(MainTexture&)> reloadCallback = nullptr);
 
       bool loadTexture(const std::string &name, const std::string &file, bool repeat = 0);
       bool addSubTexture(const std::string &mainName, SubTexture &subTextureToAdd);

@@ -38,9 +38,14 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);$(SolutionDir)../External/boost_1_49_0/</IncludePath>
-    <LibraryPath>$(SolutionDir)../External/boost_1_49_0/stage/lib/;$(LibraryPath)</LibraryPath>
-    <SourcePath>$(VCInstallDir)atlmfc\src\mfc;$(VCInstallDir)atlmfc\src\mfcm;$(VCInstallDir)atlmfc\src\atl;$(VCInstallDir)crt\src;$(SolutionDir)../External/boost_1_49_0/libs/;</SourcePath>
+    <IncludePath>$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/</IncludePath>
+    <LibraryPath>$(SolutionDir)../external/boost_1_49_0/stage/lib/;$(SolutionDir)../external/libs/;$(LibraryPath)</LibraryPath>
+    <SourcePath>$(VCInstallDir)atlmfc\src\mfc;$(VCInstallDir)atlmfc\src\mfcm;$(VCInstallDir)atlmfc\src\atl;$(VCInstallDir)crt\src;$(SolutionDir)../external/boost_1_49_0/libs/;$(SolutionDir)../external/libs/</SourcePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)../external/boost_1_49_0/stage/lib/;$(SolutionDir)../external/libs/;$(LibraryPath)</LibraryPath>
+    <SourcePath>$(SolutionDir)../external/boost_1_49_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath)</SourcePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -50,14 +55,14 @@
       <Optimization>Disabled</Optimization>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../External/boost_1_49_0/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>glu32.lib;SDL.lib;SDLmain.lib;SDL_image.lib;SDL_ttf.lib;opengl32.lib;SDL_mixer.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
       <Profile>true</Profile>
-      <AdditionalLibraryDirectories>$(SolutionDir)../External/boost_1_49_0/stage/lib/;</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)../external/boost_1_49_0/stage/lib/;$(SolutionDir)../external/libs/</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -68,7 +73,7 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <EnablePREfast>false</EnablePREfast>
     </ClCompile>
     <Link>
@@ -77,6 +82,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalDependencies>glu32.lib;SDL.lib;SDLmain.lib;SDL_image.lib;SDL_ttf.lib;opengl32.lib;SDL_mixer.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Windows</SubSystem>
+      <AdditionalLibraryDirectories>$(SolutionDir)../external/boost_1_49_0/stage/lib/;$(SolutionDir)../external/libs/</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

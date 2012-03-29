@@ -51,10 +51,7 @@ namespace MV {
    };
 
    const Matrix operator-(const Matrix &a_left, const Matrix &a_right);
-   const Matrix operator-(const Matrix &a_left, const MatrixValue &a_right);
-
    const Matrix operator+(const Matrix &a_left, const Matrix &a_right);
-   const Matrix operator+(const Matrix &a_left, const MatrixValue &a_right);
 
    const Matrix operator*(const Matrix &a_left, const Matrix &a_right);
    const Matrix operator*(const Matrix &a_left, const MatrixValue &a_right);

@@ -1,4 +1,6 @@
 *.sdf
 *.opensdf
+*.exe
+*.log
 /Debug/*
 /Release/*

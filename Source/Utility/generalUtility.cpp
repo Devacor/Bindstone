@@ -33,7 +33,9 @@ namespace MV {
 
    std::string wideToChar(UtfChar wc){
       std::vector<char> c(MB_CUR_MAX);
-      int totalBytes = wctomb(&c[0], wc);
+      mbstate_t ignore;
+      memset (&ignore, '\0', sizeof (ignore));
+      int totalBytes = wcrtomb(&c[0], wc, &ignore);
       std::string result;
       for(int i = 0;i < totalBytes;++i){
          result+=c[i];

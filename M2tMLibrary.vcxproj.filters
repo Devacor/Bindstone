@@ -23,6 +23,9 @@
     <Filter Include="Source Files\Utility">
       <UniqueIdentifier>{34830686-1a99-4cc8-a232-157e9d01c0f6}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Game">
+      <UniqueIdentifier>{357f5be2-2b40-4677-a018-e9ccb77ea492}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Animation\frameSwapper.cpp">
@@ -62,6 +65,9 @@
       <Filter>Source Files\Utility</Filter>
     </ClCompile>
     <ClCompile Include="Source\Render\matrix.cpp">
+      <Filter>Source Files\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\tiles.cpp">
       <Filter>Source Files\Render</Filter>
     </ClCompile>
   </ItemGroup>
@@ -112,6 +118,9 @@
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
     <ClInclude Include="Source\Render\matrix.h">
+      <Filter>Source Files\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\tiles.h">
       <Filter>Source Files\Render</Filter>
     </ClInclude>
   </ItemGroup>

@@ -139,7 +139,7 @@ namespace MV {
       
       virtual void setColor(const Color &a_newColor);
 
-      void setTexture(GLuint *a_textureId);
+      void setTexture(const GLuint *a_textureId);
       void removeTexture();
 
       //Used to determine sorting based on getDepth
@@ -178,7 +178,7 @@ namespace MV {
 
       bool hasTexture;
       bool needsBoundRecalculate;
-      GLuint *texture;
+      const GLuint *texture;
       std::vector<DrawPoint> Pnt;
       DrawShape *myParent;
 
@@ -271,9 +271,9 @@ namespace MV {
       Pnt[3] = a_TopRight;
    }
 
-   void AssignTextureToRectangle(DrawRectangle &a_rectangle, SubTexture *a_texture, bool a_flip = false);
-   void AssignTextureToRectangle(DrawRectangle &a_rectangle, MainTexture *a_texture, bool a_flip = false);
-   void AssignTextureToRectangle(DrawRectangle &a_rectangle, GLuint *a_texture, bool a_flip = false);
+   void AssignTextureToRectangle(DrawRectangle &a_rectangle, const SubTexture *a_texture, bool a_flip = false);
+   void AssignTextureToRectangle(DrawRectangle &a_rectangle, const MainTexture *a_texture, bool a_flip = false);
+   void AssignTextureToRectangle(DrawRectangle &a_rectangle, const GLuint *a_texture, bool a_flip = false);
 
    class Scene : public DrawShape{
    public:
@@ -298,7 +298,7 @@ namespace MV {
       virtual void clear();
 
       virtual std::shared_ptr<DrawShape> get(const std::string& a_childId);
-      //convenient return value conversion getChild<DrawShapeType>(childId)
+      //convenient return value conversion get<DrawShapeType>(childId)
       template<typename DerivedClass>
       std::shared_ptr<DerivedClass> get(const std::string& a_childId){
          return get(a_childId)->getThis<DerivedClass>();

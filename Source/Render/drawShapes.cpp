@@ -60,7 +60,7 @@ namespace MV {
       }
    }
 
-   void DrawShape::setTexture( GLuint *a_textureId ){
+   void DrawShape::setTexture( const GLuint *a_textureId ){
       texture = a_textureId;
       hasTexture = true;
    }
@@ -360,7 +360,7 @@ namespace MV {
       defaultDraw(GL_QUADS);
    }
 
-   void AssignTextureToRectangle(DrawRectangle &a_rectangle, SubTexture *a_texture, bool a_flip){
+   void AssignTextureToRectangle(DrawRectangle &a_rectangle, const SubTexture *a_texture, bool a_flip){
       TexturePoint TmpPoint[4];
       TmpPoint[0].textureX = a_texture->percentX;
       TmpPoint[0].textureY = a_texture->percentY;
@@ -384,23 +384,18 @@ namespace MV {
       a_rectangle.setTexture(a_texture->parentTexture);
    }
 
-   void AssignTextureToRectangle(DrawRectangle &a_rectangle, MainTexture *a_texture, bool a_flip){
+   void AssignTextureToRectangle(DrawRectangle &a_rectangle, const MainTexture *a_texture, bool a_flip){
       AssignTextureToRectangle(a_rectangle, &(a_texture->texture), a_flip);
    }
 
-   void AssignTextureToRectangle(DrawRectangle &a_rectangle, GLuint *a_texture, bool a_flip){
+   void AssignTextureToRectangle(DrawRectangle &a_rectangle, const GLuint *a_texture, bool a_flip){
       TexturePoint TmpPoint[4];
-      //*
+
       TmpPoint[0].textureX = 0.0;   TmpPoint[0].textureY = 0.0;
       TmpPoint[1].textureX = 1.0;   TmpPoint[1].textureY = 0.0;
       TmpPoint[2].textureX = 1.0;   TmpPoint[2].textureY = 1.0;
       TmpPoint[3].textureX = 0.0;   TmpPoint[3].textureY = 1.0;
-      /*/
-      TmpPoint[0].textureX = 0.0;   TmpPoint[0].textureY = 1.0;
-      TmpPoint[1].textureX = 0.0;   TmpPoint[1].textureY = 0.0;
-      TmpPoint[2].textureX = 1.0;   TmpPoint[2].textureY = 1.0;
-      TmpPoint[3].textureX = 1.0;   TmpPoint[3].textureY = 0.0;
-      //*/
+
       if(a_flip){
          std::swap(TmpPoint[0].textureY, TmpPoint[1].textureY);
          std::swap(TmpPoint[0].textureX, TmpPoint[1].textureX);

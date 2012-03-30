@@ -98,6 +98,7 @@
     <ClCompile Include="Source\Render\render.cpp" />
     <ClCompile Include="Source\Render\text.cpp" />
     <ClCompile Include="Source\Render\textures.cpp" />
+    <ClCompile Include="Source\Render\tiles.cpp" />
     <ClCompile Include="Source\Utility\generalUtility.cpp" />
     <ClCompile Include="Source\Utility\notification.cpp" />
     <ClCompile Include="Source\Utility\stopwatch.cpp" />
@@ -115,6 +116,7 @@
     <ClInclude Include="Source\Render\render.h" />
     <ClInclude Include="Source\Render\text.h" />
     <ClInclude Include="Source\Render\textures.h" />
+    <ClInclude Include="Source\Render\tiles.h" />
     <ClInclude Include="Source\Utility\generalUtility.h" />
     <ClInclude Include="Source\Utility\notification.h" />
     <ClInclude Include="Source\Utility\package.h" />

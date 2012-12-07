@@ -1,6 +1,18 @@
 #ifndef __TEXTURES_H__
 #define __TEXTURES_H__
 
+#if defined(WIN32) && !defined(GL_BGR)
+#define GL_BGR GL_BGR_EXT
+#endif
+
+#if !defined(WIN32) && !defined(GLNULL)
+#define GLNULL GLuint(NULL)
+#endif
+
+#ifndef GLNULL
+#define GLNULL 0
+#endif
+
 #include <fstream>
 #include <map>
 #include <vector>
@@ -12,17 +24,6 @@
 #include <SDL/SDL_image.h>
 
 #include <boost/property_tree/ptree.hpp>
-
-#ifndef GLNULL
-#define GLNULL 0
-#endif
-#if defined(WIN32) && !defined(GL_BGR)
-#define GL_BGR GL_BGR_EXT
-#endif
-
-#ifndef WIN32
-#define GLNULL GLuint(NULL)
-#endif
 
 namespace MV {
    struct MainTexture;
@@ -108,7 +109,7 @@ namespace MV {
       MainTexture* createEmptyTexture(const std::string &name, unsigned int width, unsigned int height, std::function<void(MainTexture&)> reloadCallback = nullptr);
 
       bool loadTexture(const std::string &name, const std::string &file, bool repeat = 0);
-      bool addSubTexture(const std::string &mainName, SubTexture &subTextureToAdd);
+      bool addSubTexture(const std::string &mainName, const SubTexture &subTextureToAdd);
 
       int getNumMainTextures(){return (int)mainTextures.size();}
       MainTexture *getMainTexture(const std::string &mainName);

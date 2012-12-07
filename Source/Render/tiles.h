@@ -24,15 +24,15 @@ namespace MV {
       std::shared_ptr<Scene> scene(){
          return mainScene;
       }
-      std::shared_ptr<DrawRectangle> tile(unsigned int a_x, unsigned int a_y){
-         mainScene->get<Scene>("tiles")->get<DrawRectangle>(getChildId(a_x, a_y));
+      std::shared_ptr<DrawRectangle> tile(size_t a_x, size_t a_y){
+         return mainScene->get<Scene>("tiles")->get<DrawRectangle>(getChildId(a_x, a_y));
       }
 
       //returns bottom left point for a tile
-      Point pointForTile(unsigned int a_x, unsigned int a_y){
+      Point pointForTile(size_t a_x, size_t a_y){
          return Point(static_cast<double>(a_x)*tileWidth, static_cast<double>(a_y+1)*tileHeight, a_y+decorationZOffset);
       }
-      Point pointForTile(unsigned int a_x, unsigned int a_y, double a_zOffsetOverride){
+      Point pointForTile(size_t a_x, size_t a_y, double a_zOffsetOverride){
          return Point(static_cast<double>(a_x)*tileWidth, static_cast<double>(a_y+1)*tileHeight, a_y+a_zOffsetOverride);
       }
    private:
@@ -53,7 +53,7 @@ namespace MV {
          }
       }
 
-      std::string getChildId(unsigned int a_x, unsigned int a_y){
+      std::string getChildId(size_t a_x, size_t a_y){
          return boost::lexical_cast<std::string>(a_x)+"_"+boost::lexical_cast<std::string>(a_y);
       }
 

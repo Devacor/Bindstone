@@ -249,7 +249,7 @@ namespace MV {
       auto positionVertexArray = getPositionVertexArray();
       glVertexPointer(3, GL_FLOAT, 0, &(*(positionVertexArray))[0]);
       
-      glDrawArrays(drawType,0,Pnt.size());
+      glDrawArrays(drawType,0,static_cast<GLsizei>(Pnt.size()));
 
       glDisableClientState(GL_COLOR_ARRAY);
       glDisableClientState(GL_VERTEX_ARRAY);

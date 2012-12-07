@@ -10,6 +10,8 @@
 #ifndef _DRAWSHAPES_H_
 #define _DRAWSHAPES_H_
 
+#define GL_GLEXT_PROTOTYPES
+#define GLX_GLEXT_PROTOTYPES
 #include <stdio.h>
 #include <iostream>
 #include <algorithm>
@@ -188,7 +190,7 @@ namespace MV {
 
    private:
       void defaultDrawRenderStep(GLenum drawType);
-      void DrawShape::bindOrDisableTexture(const std::shared_ptr<std::vector<GLfloat>> &texturePoints);
+      void bindOrDisableTexture(const std::shared_ptr<std::vector<GLfloat>> &texturePoints);
    };
 
    class DrawPixel : public DrawShape{

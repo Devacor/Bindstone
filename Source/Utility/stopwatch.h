@@ -1,5 +1,6 @@
 #ifndef __stopwatch_h__
 #define __stopwatch_h__
+#undef check
 #include "SDL/SDL.h"
 #include <iostream>
 #include <string>

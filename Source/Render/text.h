@@ -1,6 +1,8 @@
 #ifndef __TEXT_H__
 #define __TEXT_H__
 
+#define GL_GLEXT_PROTOTYPES
+#define GLX_GLEXT_PROTOTYPES
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -67,6 +69,7 @@ namespace MV {
       FontDefinition& operator=(FontDefinition &a_other){
          font = a_other.font;
          a_other.font = nullptr;
+		 return *this;
       }
    };
 

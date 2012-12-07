@@ -143,8 +143,8 @@ namespace MV {
 
    bool TextLibrary::loadFont( std::string a_identifier, int a_pointSize, std::string a_fontFileLocation ){
       if(loadedFonts.find(a_identifier) == loadedFonts.end()){
-         TTF_Font* newFont;
-         if(newFont = TTF_OpenFont(a_fontFileLocation.c_str(), a_pointSize)) {
+         TTF_Font* newFont = TTF_OpenFont(a_fontFileLocation.c_str(), a_pointSize);
+         if(newFont) {
             loadedFonts[a_identifier].font = newFont;
             return true;
          }else{
@@ -250,7 +250,7 @@ namespace MV {
          TTF_Font *currentFont = loadedFonts[glyphList.first].font;
          std::for_each(glyphList.second.begin(), glyphList.second.end(), [&](std::pair<const UtfChar, TextCharacter> &glyph){
             if(glyph.second.isSet()){
-               Uint16 text[] = {glyph.first, '\0'};
+               Uint16 text[] = {static_cast<Uint16>(glyph.first), '\0'};
                glyph.second.assignSDLSurface(TTF_RenderUNICODE_Blended(currentFont, text, white), glyph.first);
             }
          });
@@ -268,7 +268,7 @@ namespace MV {
       TTF_Font* fontFace = loadedFonts[a_identifier].font;
       std::for_each(a_text.begin(), a_text.end(), [&](UtfChar renderChar){
          if(!a_characterList[renderChar].isSet()){
-            Uint16 text[] = {renderChar, '\0'};
+            Uint16 text[] = {static_cast<Uint16>(renderChar), '\0'};
             a_characterList[renderChar].assignSDLSurface(TTF_RenderUNICODE_Blended(fontFace, text, white), renderChar);
          }
       });

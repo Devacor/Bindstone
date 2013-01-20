@@ -24,17 +24,43 @@
 #include "Render/matrix.h"
 
 #ifdef __APPLE__
-#include <OpenGL/OpenGL.h>
-#include <OpenGL/glext.h>
+	#import "TargetConditionals.h" 
+	#ifdef TARGET_OS_IPHONE
+		#define __IPHONEOS__ 1
+	#endif
 #endif
 
-#include "SDL/SDL.h"
-#include "SDL/SDL_opengl.h"
+#if defined(TARGET_OS_IPHONE) || defined(__ANDROID__)
+	#define HAVE_OPENGLES 1
+#else
+	#include <OpenGL/OpenGL.h>
+	#include <OpenGL/glext.h>
+#endif
+
+#include <SDL.h>
+
+#ifdef HAVE_OPENGLES
+	#include <SDL_opengl.h>
+	#include <SDL_opengles.h>
+	typedef GLfloat GLdouble; //opengles has no GLdouble
+#else
+	#include <SDL_opengl.h>
+#endif
+
+#ifdef GL_DEPTH_COMPONENT24
+	#define GL_DEPTH_COMPONENT_DEFAULT GL_DEPTH_COMPONENT24
+#elif GL_DEPTH_COMPONENT24_OES
+	#define GL_DEPTH_COMPONENT_DEFAULT GL_DEPTH_COMPONENT24_OES
+#else
+	#define GL_DEPTH_COMPONENT_DEFAULT GL_DEPTH_COMPONENT16
+#endif
 
 #include <string>
 #include <iostream>
 
 namespace MV {
+
+	class Draw2D;
 
 	#if SDL_BYTEORDER == SDL_BIG_ENDIAN
 	  const Uint32 SDL_RMASK = 0xff000000;
@@ -68,7 +94,6 @@ namespace MV {
 	};
 
 	struct Framebuffer{
-	public:
 		Framebuffer(){}
 		Framebuffer(GLuint *a_texture, int a_width, int a_height):
 			texture(a_texture),
@@ -77,21 +102,24 @@ namespace MV {
 		}
 		GLuint framebuffer;
 		GLuint renderbuffer;
+		GLuint depthbuffer;
 		GLuint *texture;
 		int width, height;
 	};
 
 	class glExtensionFramebufferObject{
 	public:
-		glExtensionFramebufferObject(int &a_windowWidth, int &a_windowHeight);
+		glExtensionFramebufferObject(Draw2D *a_renderer);
 
 		bool framebufferObjectExtensionEnabled(){return initialized;}
 		void createFramebuffer(Framebuffer &a_framebuffer);
+		void deleteFramebuffer(Framebuffer &a_framebuffer);
 
 		void startUsingFramebuffer(const Framebuffer &a_framebuffer);
 		void stopUsingFramebuffer();
 	protected:
-	
+		std::vector<GLint> originalFramebufferIds;
+		std::vector<GLint> originalRenderbufferIds;
 #ifdef WIN32
 		PFNGLISRENDERBUFFEREXTPROC pglIsRenderbufferEXT;
 		PFNGLBINDRENDERBUFFEREXTPROC pglBindRenderbufferEXT;
@@ -113,7 +141,7 @@ namespace MV {
 #endif
 		void loadExtensionFramebufferObject(char* a_extensionsList);
 	private:
-		int &windowWidth, &windowHeight;
+		Draw2D *renderer;
 		bool initialized;
 	};
 
@@ -149,8 +177,8 @@ namespace MV {
 		public glExtensionVertexBufferObject
 	{
 	public:
-		glExtensions(int &a_windowWidth, int &a_windowHeight):
-			glExtensionFramebufferObject(a_windowWidth, a_windowHeight){
+		glExtensions(Draw2D *a_renderer):
+			glExtensionFramebufferObject(a_renderer){
 		}
 	protected:
 		void initializeExtensions(){
@@ -166,13 +194,14 @@ namespace MV {
 	class Draw2D : public glExtensions {
 	public:
 		Draw2D();
-		~Draw2D(){}
+		~Draw2D();
 
 		void setWindowTitle(std::string a_title);
 
 		//Warning: Any time the window is resized the OpenGL context is trashed and all textures must be re-loaded.
 		void allowWindowResize(bool a_allowResize);
 		void useFullScreen(bool a_isFullScreen);
+		void useBorderlessWindow(bool a_isBorderless);
 		bool initialize(int a_windowsWidth, int a_windowsHeight, double a_worldsWidth = -1, double a_worldsHeight = -1, bool a_requireExtensions = false);
 
 		void setBackgroundColor(Color a_newColor);
@@ -180,6 +209,7 @@ namespace MV {
 		void resizeWorldSpace(double a_drawingWidth, double a_drawingHeight);
 		void clearScreen();
 		void updateScreen();
+		void refreshContext(); //only update the opengl context
 
 		Point getWindowSize();
 		Point getWorldSize();
@@ -194,6 +224,8 @@ namespace MV {
 		Point getWindowToWorldPoint(Point a_windowPoint);
 
 		bool isWindowFullScreen();
+		
+		void summarizeDisplayMode() const;
 	private:
 		int fullScreenTransition();
 		bool setupSDL();
@@ -201,10 +233,15 @@ namespace MV {
 
 		Color backgroundColor;
 		std::string windowTitle;
-		int SDLflags;
+		uint32_t SDLflags;
 		int windowWidth, windowHeight;
 		double worldWidth, worldHeight;
 		bool windowIsFullScreen, initialized;
+		SDL_Renderer *sdlRenderer;
+		SDL_Window *window;
+		SDL_GLContext glcontext;
 	};
+	
+	void checkSDLError(int line = -1);
 }
 #endif

@@ -5,25 +5,25 @@
         {
             "0":
             {
-                "Duration": "-1",
+                "Duration": "-1.0",
                 "MainTexture": "DogAndFox",
                 "SubTexture": "Dog_0"
             },
             "1":
             {
-                "Duration": "-1",
+                "Duration": "-1.0",
                 "MainTexture": "DogAndFox",
                 "SubTexture": "Dog_1"
             },
             "2":
             {
-                "Duration": "-1",
+                "Duration": "-1.0",
                 "MainTexture": "DogAndFox",
                 "SubTexture": "Dog_2"
             },
             "3":
             {
-                "Duration": "-1",
+                "Duration": "-1.0",
                 "MainTexture": "DogAndFox",
                 "SubTexture": "Dog_3"
             }
@@ -32,25 +32,25 @@
         {
             "0":
             {
-                "Duration": "-1",
+                "Duration": "-1.0",
                 "MainTexture": "DogAndFox",
                 "SubTexture": "FoxBounce_0"
             },
             "1":
             {
-                "Duration": "-1",
+                "Duration": "-1.0",
                 "MainTexture": "DogAndFox",
                 "SubTexture": "FoxBounce_1"
             },
             "2":
             {
-                "Duration": "-1",
+                "Duration": "-1.0",
                 "MainTexture": "DogAndFox",
                 "SubTexture": "FoxBounce_2"
             },
             "3":
             {
-                "Duration": "-1",
+                "Duration": "-1.0",
                 "MainTexture": "DogAndFox",
                 "SubTexture": "FoxBounce_1"
             }
@@ -59,25 +59,25 @@
         {
             "0":
             {
-                "Duration": "-1",
+                "Duration": "-1.0",
                 "MainTexture": "DogAndFox",
                 "SubTexture": "FoxStand_0"
             },
             "1":
             {
-                "Duration": "-1",
+                "Duration": "-1.0",
                 "MainTexture": "DogAndFox",
                 "SubTexture": "FoxStand_1"
             },
             "2":
             {
-                "Duration": "-1",
+                "Duration": "-1.0",
                 "MainTexture": "DogAndFox",
                 "SubTexture": "FoxStand_2"
             },
             "3":
             {
-                "Duration": "-1",
+                "Duration": "-1.0",
                 "MainTexture": "DogAndFox",
                 "SubTexture": "FoxStand_1"
             }
@@ -86,7 +86,7 @@
         {
             "0":
             {
-                "Duration": "-1",
+                "Duration": "-1.0",
                 "MainTexture": "NULL",
                 "SubTexture": "NULL"
             }

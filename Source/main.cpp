@@ -1,11 +1,7 @@
-#ifdef __APPLE__
-#include "SDLMain.h"
-#endif
-
 #include "exampleCode.h"
 #include "boost/asio.hpp"
 
-bool acceptInput(SDL_Event &event, FoxJump &foxJump, MV::Draw2D &renderer, MV::TextureManager &textures, MV::TextLibrary &text, MV::TextBox &textBox);
+bool acceptInput(SDL_Event &event, FoxJump &foxJump, MV::Draw2D &renderer, MV::TextureManager &textures/*, MV::TextLibrary &text, MV::TextBox &textBox*/);
 void quit(void);
 
 int main(int argc, char *argv[]){
@@ -13,7 +9,7 @@ int main(int argc, char *argv[]){
 	srand ((unsigned int)time(0));
 	//RENDERER SETUP:::::::::::::::::::::::::::::::::
 	MV::Draw2D renderer;
-	MV::Point worldSize(800, 600, 0), windowSize(800, 600, 0);
+	MV::Point worldSize(800, 600, 0), windowSize(480, 320, 0);
 
 	renderer.useFullScreen(false);
 	renderer.allowWindowResize(true);
@@ -22,8 +18,7 @@ int main(int argc, char *argv[]){
 	}
 	renderer.setBackgroundColor(MV::Color(0.25f, 0.45f, 0.65f));
 	atexit(quit);
-
-	//M2Rend::parseTextStateList();
+	
 	//WORLD SETUP::::::::::::::::::::::::::::::
 	//Set up managing objects
 	MV::TextureManager textures;
@@ -74,7 +69,7 @@ int main(int argc, char *argv[]){
 	bool done = false;
 	while(!done){
 		//Handle window closing/SDL quitting, and the jump button
-		done = acceptInput(event, foxJump, renderer, textures, textLibrary, textBox);
+		done = acceptInput(event, foxJump, renderer, textures/*, textLibrary, textBox*/);
 		
 		//Spin the text and alter its color and spin the sky
 		ManipulateText(mainScene);
@@ -86,10 +81,13 @@ int main(int argc, char *argv[]){
 		//Update the animation on the fox and dog
 		UpdateAnimation(mainScene, textures, *GetDogShape(mainScene), dogAnimation);
 		UpdateAnimation(mainScene, textures, *GetFoxShape(mainScene), foxAnimation, foxJump.isFlipped());
-
+		
 		//Update the screen
+		
 		renderer.clearScreen();
+		
 		mainScene.draw();
+		
 		renderer.updateScreen();
 
 		//Delay a moment to avoid hogging the CPU
@@ -102,13 +100,15 @@ int main(int argc, char *argv[]){
 	return 0;
 }
 
-bool acceptInput(SDL_Event &event, FoxJump &foxJump, MV::Draw2D &renderer, MV::TextureManager &textures, MV::TextLibrary &text, MV::TextBox &textBox){
+bool acceptInput(SDL_Event &event, FoxJump &foxJump, MV::Draw2D &renderer, MV::TextureManager &textures/*, MV::TextLibrary &text, MV::TextBox &textBox*/){
 	while(SDL_PollEvent(&event)){
-		textBox.setText(event);
+		//textBox.setText(event);
 		switch(event.type){
 		case SDL_QUIT:
 			return true;
 			break;
+		case SDL_FINGERDOWN:
+			foxJump.initiateJump();
 		case SDL_KEYDOWN:
 			switch(event.key.keysym.sym){
 			case SDLK_ESCAPE:
@@ -118,19 +118,14 @@ bool acceptInput(SDL_Event &event, FoxJump &foxJump, MV::Draw2D &renderer, MV::T
 				foxJump.initiateJump();
 				break;
 			case SDLK_DOWN:
-				textBox.translateScrollPosition(MV::Point(0, 10));
+				//textBox.translateScrollPosition(MV::Point(0, 10));
 				break;
 			case SDLK_UP:
-				textBox.translateScrollPosition(MV::Point(0, -10));
+				//textBox.translateScrollPosition(MV::Point(0, -10));
 				break;
 			default:
 				break;
 			}
-			break;
-		case SDL_VIDEORESIZE:
-				renderer.resizeWindow(event.resize.w, event.resize.h);
-				text.reloadTextures();
-				textures.reloadAllTextures();
 			break;
 		}
 	}

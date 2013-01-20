@@ -1,0 +1,443 @@
+TlibSDL_image
+v5
+r1
+cCheck dependencies
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_bmp.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_gif.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_jpg.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_ImageIO.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m normal i386 objective-c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_lbm.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pcx.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_png.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pnm.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tga.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tif.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_webp.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xcf.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xpm.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xv.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xxx.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+cLibtool /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release/libSDL2_image.a normal i386
+
+N/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk
+c00000000504916AD0000000000000110
+t1346967213
+s272
+
+N/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk/usr/include/stdio.h
+c0000000050AB0DC00000000000004523
+t1353387456
+s17699
+
+N/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk/usr/include/string.h
+c0000000050AB0DC00000000000001A3A
+t1353387456
+s6714
+
+N/Users/michael/git/SDL/include/SDL_endian.h
+c0000000050C2EE600000000000001898
+t1354952288
+s6296
+
+N/Users/michael/git/SDL/include/SDL_error.h
+c0000000050F743820000000000000891
+t1358381954
+s2193
+
+N/Users/michael/git/SDL/include/SDL_video.h
+c0000000050F74382000000000000767C
+t1358381954
+s30332
+
+N/Users/michael/git/SDL_image/SDL_image.h
+c0000000050F743A1000000000000171B
+t1358381985
+s5915
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_ImageIO.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_bmp.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_gif.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_jpg.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_lbm.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pcx.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_png.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pnm.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tga.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tif.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_webp.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xcf.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xpm.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xv.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xxx.o
+t2
+s0
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/SDL2_image.LinkFileList
+c0000000050FB461400000000000007A0
+t1358644756
+s1952
+
+N/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release/libSDL2_image.a
+t2
+s0
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG.c
+c0000000050F743A1000000000000190C
+t1358381985
+s6412
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m
+c0000000050F743A1000000000000683D
+t1358381985
+s26685
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c
+c0000000050F743A100000000000053C1
+t1358381985
+s21441
+i<stdio.h>
+i<string.h>
+i"SDL_image.h"
+i"SDL_error.h"
+i"SDL_video.h"
+i"SDL_endian.h"
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.c
+c0000000050F743A10000000000003A71
+t1358381985
+s14961
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.c
+c0000000050F743A100000000000037C7
+t1358381985
+s14279
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.c
+c0000000050F743A100000000000031AF
+t1358381985
+s12719
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.c
+c0000000050F743A10000000000001A67
+t1358381985
+s6759
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c
+c0000000050F743A100000000000044DE
+t1358381985
+s17630
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.c
+c0000000050F743A1000000000000178A
+t1358381985
+s6026
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.c
+c0000000050F743A10000000000001EF2
+t1358381985
+s7922
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.c
+c0000000050F743A10000000000001C3E
+t1358381985
+s7230
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c
+c0000000050F743A10000000000001BF3
+t1358381985
+s7155
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.c
+c0000000050F743A1000000000000482A
+t1358381985
+s18474
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.c
+c0000000050F743A10000000000009638
+t1358381985
+s38456
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.c
+c0000000050F743A10000000000000E34
+t1358381985
+s3636
+
+N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.c
+c0000000050F743A1000000000000082C
+t1358381985
+s2092
+
+CCheck dependencies
+r0
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection18"Check dependencies6c9697947dabb641^dfc2a6947dabb641^---0#1#0#--18"Check dependencies36"60ADBC03-003F-460A-A54E-34DED4257592-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.770177
+e380337556.853364
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection55"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG.c624dc5947dabb641^8676da947dabb641^---0#0#0#-19%DVTDocumentLocation2@63"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG.c0000000000000000^2737"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG.o ../IMG.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG.o36"8C40B9ED-FEF3-4AD9-82FF-7F76390786C8-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_ImageIO.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m normal i386 objective-c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.656299
+e380337556.915729
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_ImageIO.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m
+xnormal
+xi386
+xobjective-c
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection63"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m5664a8947dabb641^486dea947dabb641^---0#0#0#-19%DVTDocumentLocation2@71"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m0000000000000000^3175"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_ImageIO.o ../IMG_ImageIO.m normal i386 objective-c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x objective-c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wno-implicit-atomic-properties -Wno-receiver-is-weak -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -Wno-selector -Wno-strict-selector-match -Wno-undeclared-selector -Wno-deprecated-implementations -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wprotocol -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -fobjc-abi-version=2 -fobjc-legacy-dispatch "-DIBOutlet=__attribute__((iboutlet))" "-DIBOutletCollection(ClassName)=__attribute__((iboutletcollection(ClassName)))" "-DIBAction=void)__attribute__((ibaction)" -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_ImageIO.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_ImageIO.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_ImageIO.o36"A52191C4-1817-4B6B-A9FD-50053965BA26-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_bmp.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.656166
+e380337556.826616
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_bmp.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c4165a8947dabb641^919dd3947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c0000000000000000^2761"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_bmp.o ../IMG_bmp.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_bmp.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_bmp.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_bmp.o36"4D241F91-6EB4-4739-8372-532D02243B01-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_gif.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.656175
+e380337556.680502
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_gif.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.ccb64a8947dabb641^5035ae947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.c0000000000000000^2761"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_gif.o ../IMG_gif.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_gif.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_gif.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_gif.o36"836F0C10-6B55-47FF-AED1-149317C53AEE-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_jpg.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.656197
+e380337556.679569
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_jpg.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.ccb64a8947dabb641^94fbad947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.c0000000000000000^2761"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_jpg.o ../IMG_jpg.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_jpg.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_jpg.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_jpg.o36"F9981BEE-EFB1-4AF8-B488-4EBB56E58AA7-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_lbm.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.656311
+e380337556.803198
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_lbm.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.ce965a8947dabb641^739ecd947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.c0000000000000000^2761"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_lbm.o ../IMG_lbm.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_lbm.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_lbm.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_lbm.o36"C266FA6F-4A5D-4151-B133-D0E8C2960F0F-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pcx.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.656316
+e380337556.769540
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pcx.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.cf163a8947dabb641^c500c5947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.c0000000000000000^2761"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pcx.o ../IMG_pcx.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pcx.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pcx.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pcx.o36"74D3749A-329F-44A3-BD25-6F8E2FD45BC1-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_png.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.656390
+e380337556.679542
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_png.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c8066a8947dabb641^3e03ae947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c0000000000000000^2761"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_png.o ../IMG_png.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_png.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_png.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_png.o36"7FB18D3E-D7CC-469F-99B7-056EC4A96218-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pnm.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.656416
+e380337556.768744
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pnm.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.cc366a8947dabb641^1fd9c4947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.c0000000000000000^2761"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pnm.o ../IMG_pnm.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pnm.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pnm.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_pnm.o36"51F8F7E6-20CF-48EC-81A3-9230F927C42A-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tga.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.681279
+e380337556.703436
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tga.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.c5395ae947dabb641^ce39b4947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.c0000000000000000^2761"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tga.o ../IMG_tga.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tga.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tga.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tga.o36"ADD0E45D-9177-46F7-A492-E149238E7A31-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tif.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.681282
+e380337556.704488
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tif.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.cd09bae947dabb641^4359b4947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.c0000000000000000^2761"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tif.o ../IMG_tif.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tif.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tif.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tif.o36"71431FAD-66FF-427A-85E4-5ECCA18BE8D4-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_webp.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.681361
+e380337556.762291
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_webp.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection60"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c4b93ae947dabb641^2e38c3947dabb641^---0#0#0#-19%DVTDocumentLocation2@68"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c0000000000000000^2767"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_webp.o ../IMG_webp.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_webp.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_webp.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_webp.o36"8147FF57-7971-420E-8AA0-5FC7CEA5B90A-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xcf.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.704843
+e380337556.778251
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xcf.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.c1c98b4947dabb641^4949c7947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.c0000000000000000^2761"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xcf.o ../IMG_xcf.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xcf.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xcf.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xcf.o36"C0C67697-FED5-4385-83EA-A619EC8DD7EE-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xpm.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.704845
+e380337556.833447
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xpm.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.c7098b4947dabb641^fb5cd5947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.c0000000000000000^2761"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xpm.o ../IMG_xpm.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xpm.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xpm.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xpm.o36"69A29FEE-1C28-4FBA-BED2-87ACC3C2345B-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xv.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.763578
+e380337556.839453
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xv.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection58"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.cf9a0c3947dabb641^0ce7d6947dabb641^---0#0#0#-19%DVTDocumentLocation2@66"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.c0000000000000000^2755"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xv.o ../IMG_xv.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xv.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xv.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xv.o36"8AEEE150-0C8E-4039-A5F6-B88AB1D4572C-
+
+CCompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xxx.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler
+s380337556.770035
+e380337556.836908
+r1
+xCompileC
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xxx.o
+x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.c
+xnormal
+xi386
+xc
+xcom.apple.compilers.llvm.clang.1_0.compiler
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.ce047c5947dabb641^2d41d6947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.c0000000000000000^2761"CompileC /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xxx.o ../IMG_xxx.c normal i386 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch i386 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -fexceptions -fasm-blocks -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -mios-simulator-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources/i386 -I/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xxx.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xxx.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.c -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_xxx.o36"7BBC1329-EBA6-4981-9456-3A6A71223BAE-
+
+CLibtool /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release/libSDL2_image.a normal i386
+s380337556.922671
+e380337556.928676
+r1
+xLibtool
+x/Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release/libSDL2_image.a
+xnormal
+xi386
+o/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_gif.o has no symbols
+o/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_jpg.o has no symbols
+o/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_png.o has no symbols
+o/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tga.o has no symbols
+o/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tif.o has no symbols
+lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection102"Libtool /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release/libSDL2_image.a normal i386e44bec947dabb641^d2c2ed947dabb641^-1195"/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_gif.o has no symbols/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_jpg.o has no symbols/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_png.o has no symbols/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tga.o has no symbols/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/IMG_tif.o has no symbols-0#0#0#--1348"Libtool /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release/libSDL2_image.a normal i386    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv IPHONEOS_DEPLOYMENT_TARGET 3.0    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool -static -arch_only i386 -syslibroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator6.0.sdk -Lbuild -filelist /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release.build/libSDL_image.build/Objects-normal/i386/SDL2_image.LinkFileList -o /Users/michael/git/build/sdl_image/iphonesimulator6.0-i386-Release/libSDL2_image.a36"026719D2-3513-4CCB-BCFE-A1F8FCBEDA18-
+

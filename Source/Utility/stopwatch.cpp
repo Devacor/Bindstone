@@ -1,73 +1,75 @@
 #include "stopwatch.h"
 
 namespace MV {
-   Int64 Stopwatch::check(){
-      if(paused){
-         return (Int64)(pausetime-prevtime)+timeOffset;
-      }
-      return timerfunc(false);
-   }
+	Stopwatch::TimeType Stopwatch::check(){
+		if(paused){
+			return pausetime-prevtime + timeOffset;
+		}
+		return timerfunc(false);
+	}
 
-   Int64 Stopwatch::pause(){
-      Int64 curtime = SDL_GetTicks();
-      pausetime = curtime;
-      paused = true;
-      return timerfunc(false);
-   }
+	Stopwatch::TimeType Stopwatch::pause(){
+		pausetime = systemTime();
+		paused = true;
+		return timerfunc(false);
+	}
 
-   Int64 Stopwatch::resume(){
-      Int64 curtime = SDL_GetTicks();
-      if(paused){
-         prevtime+=curtime-pausetime;
-      }
-      paused = false;
-      return timerfunc(false);
-   }
+	Stopwatch::TimeType Stopwatch::resume(){
+		if(paused){
+			prevtime+=systemTime()-pausetime;
+		}
+		paused = false;
+		return timerfunc(false);
+	}
 
-   void Stopwatch::start(){
-      timerfunc(true);
-   }
+	void Stopwatch::start(){
+		timerfunc(true);
+	}
 
-   Int64 Stopwatch::stop(){
-      started = false;
-      if(paused){
-         return Int64(pausetime-prevtime)+timeOffset;
-      }else{
-         return Int64(SDL_GetTicks()-prevtime)+timeOffset;
-      }
-   }
+	Stopwatch::TimeType Stopwatch::stop(){
+		started = false;
+		if(paused){
+			return pausetime-prevtime + timeOffset;
+		}else{
+			return systemTime()-prevtime + timeOffset;
+		}
+	}
+	
+	Stopwatch::TimeType Stopwatch::systemTime() const{
+		return static_cast<double>(SDL_GetPerformanceCounter()) / static_cast<double>(SDL_GetPerformanceFrequency());
+	}
 
-   Int64 Stopwatch::timerfunc(bool reset){
-      Int64 curtime = SDL_GetTicks();
-      if(!started){
-         prevtime=curtime;
-         started = true;
-         return (0)+timeOffset;
-      }else{
-         Int64 diff=curtime-prevtime;
-         if(reset){prevtime=curtime;}
-         return Int64(diff)+timeOffset;
-      }
-   }
+	Stopwatch::TimeType Stopwatch::timerfunc(bool reset){
+		TimeType curtime = systemTime();
+		if(!started){
+			prevtime=curtime;
+			started = true;
+			return timeOffset;
+		}else{
+			TimeType diff=curtime-prevtime;
+			if(reset){prevtime=curtime;}
+			return diff+timeOffset;
+		}
+	}
 
-   Int64 Stopwatch::delta(const std::string &deltaName, bool resetDelta){
-      if(deltaVals.find(deltaName) == deltaVals.end()){ //if no delta by that name is found
-         deltaVals[deltaName].deltaspot = check();  //set the delta to the current time
-         return 0;
-      }
-      Int64 PreviousTime = deltaVals[deltaName].deltaspot;
-      Int64 CurrentTime = check();
-      if(resetDelta){
-         deltaVals[deltaName].deltaspot = CurrentTime; //update delta
-      }
-      return CurrentTime - PreviousTime;
-   }
+	Stopwatch::TimeType Stopwatch::delta(const std::string &deltaName, bool resetDelta){
+		if(deltaVals.find(deltaName) == deltaVals.end()){ //if no delta by that name is found
+			deltaVals[deltaName].deltaspot = check();  //set the delta to the current time
+			return 0;
+		}
+		TimeType PreviousTime = deltaVals[deltaName].deltaspot;
+		Stopwatch::TimeType CurrentTime = check();
+		if(resetDelta){
+			deltaVals[deltaName].deltaspot = CurrentTime; //update delta
+		}
+		return CurrentTime - PreviousTime;
+	}
 
-   void Stopwatch::setTimeOffset( Int64 offsetMilliseconds ){
-      timeOffset = offsetMilliseconds;
-   }
+	void Stopwatch::setTimeOffset( TimeType offsetMilliseconds ){
+		timeOffset = offsetMilliseconds;
+	}
 
-   Int64 Stopwatch::getTimeOffset(){
-      return timeOffset;
-   }
+	Stopwatch::TimeType Stopwatch::getTimeOffset(){
+		return timeOffset;
+	}
 }

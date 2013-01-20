@@ -7,11 +7,21 @@
 		<key>wargame.xcscheme</key>
 		<dict>
 			<key>orderHint</key>
-			<integer>0</integer>
+			<integer>7</integer>
+		</dict>
+		<key>wargameiOS.xcscheme</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>8</integer>
 		</dict>
 	</dict>
 	<key>SuppressBuildableAutocreation</key>
 	<dict>
+		<key>4C275D9416A74CF500C65AA2</key>
+		<dict>
+			<key>primary</key>
+			<true/>
+		</dict>
 		<key>4C63C8BB1670A18B00AC944C</key>
 		<dict>
 			<key>primary</key>

@@ -19,13 +19,13 @@ namespace MV {
 #ifdef __APPLE__
 	//from http://developer.apple.com/library/mac/#qa/qa1361/_index.html
 	static bool AmIBeingDebugged(void)
-    // Returns true if the current process is being debugged (either
-    // running under the debugger or has a debugger attached post facto).
+	 // Returns true if the current process is being debugged (either
+	 // running under the debugger or has a debugger attached post facto).
 	{
-		int                 junk;
-		int                 mib[4];
-		struct kinfo_proc   info;
-		size_t              size;
+		int					  junk;
+		int					  mib[4];
+		struct kinfo_proc	info;
+		size_t				  size;
 		
 		// Initialize the flags so that, if sysctl fails for some bizarre
 		// reason, we get a predictable result.

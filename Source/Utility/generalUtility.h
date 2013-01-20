@@ -19,7 +19,7 @@ namespace MV {
 	enum AngleType {DEGREES, RADIANS};
 	const double PIE = 3.14159265358979323846;
 
-	std::string getNewStringId(std::string a_baseName = "__M2_SID_");
+	std::string getNewStringId(std::string a_baseName = "__MV_SID_");
 
 	void initializeFilesystem();
 

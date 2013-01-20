@@ -8,7 +8,7 @@ this setup code.
 
 -Michael Hamilton
 /*/
-#include <SDL/SDL.h>
+#include <SDL.h>
 #include "Utility/package.h"
 #include "Render/package.h"
 #include "Audio/package.h"
@@ -41,26 +41,26 @@ void UpdateSky(MV::Scene &mainScene);
 //This is a really simple hard-coded jump sequence to provide a limited amount of interactivity in the demo.
 class FoxJump{
 public:
-   FoxJump(MV::FrameSwapperRegister *frameReg, MV::FrameSwapper *foxAnim, std::shared_ptr<MV::DrawRectangle> foxShape);
-   ~FoxJump(){}
+	FoxJump(MV::FrameSwapperRegister *frameReg, MV::FrameSwapper *foxAnim, std::shared_ptr<MV::DrawRectangle> foxShape);
+	~FoxJump(){}
 
-   //Call this to initiate a jump sequence (or do nothing if the fox is already jumping)
-   void initiateJump();
+	//Call this to initiate a jump sequence (or do nothing if the fox is already jumping)
+	void initiateJump();
 
-   //Call each frame to update
-   void updateJump();
+	//Call each frame to update
+	void updateJump();
 
-   //Checks the direction the fox is moving and decides if the animation should be flipped
-   bool isFlipped();
+	//Checks the direction the fox is moving and decides if the animation should be flipped
+	bool isFlipped();
 private:
-   std::shared_ptr<MV::DrawRectangle> foxBox;
-   MV::FrameSwapperRegister *frameRegister;
-   MV::FrameSwapper *foxSwapper;
-   double directionX, directionY;
-   double movedX, movedY;
-   double distanceX, distanceY;
-   bool inJump;
+	std::shared_ptr<MV::DrawRectangle> foxBox;
+	MV::FrameSwapperRegister *frameRegister;
+	MV::FrameSwapper *foxSwapper;
+	double directionX, directionY;
+	double movedX, movedY;
+	double distanceX, distanceY;
+	bool inJump;
 
-   const double jumpCompletionTime;
-   MV::Stopwatch timer;
+	const double jumpCompletionTime;
+	MV::Stopwatch timer;
 };

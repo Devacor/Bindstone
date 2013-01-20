@@ -8,8 +8,12 @@
 #ifndef _SDLMain_h_
 #define _SDLMain_h_
 
-#import <Cocoa/Cocoa.h>
-
+#if TARGET_OS_MAC
+	#import <Cocoa/Cocoa.h>
+#else
+	#import <Foundation/Foundation.h>
+	#import <UIKit/UIKit.h>
+#endif
 @interface SDLMain : NSObject
 @end
 

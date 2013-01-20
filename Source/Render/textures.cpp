@@ -1,9 +1,14 @@
 #include "textures.h"
 #include <iostream>
 #include <algorithm>
+#include <SDL_image.h>
 #include "Utility/generalUtility.h"
 
 #include <boost/property_tree/json_parser.hpp>
+
+#ifndef GL_BGR
+	#define GL_BGR 0x80E0
+#endif
 
 namespace MV {
 	boost::property_tree::ptree MainTexture::save() const{
@@ -86,10 +91,12 @@ namespace MV {
 		glGenTextures(1, &txtnumber);					// Create 1 Texture
 		glBindTexture(GL_TEXTURE_2D, txtnumber);			// Bind The Texture
 		// Build Texture Using Information In data
-		glTexImage2D(GL_TEXTURE_2D, 0, 4, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
 		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
 		delete [] data;							// Release data
 		MainTexture tmp;
 		tmp.dynamicTexture = true;
@@ -116,20 +123,69 @@ namespace MV {
 		return false;
 	}
 
+
+	SDL_Surface* convert_to_power_of_two(SDL_Surface* surface)
+	{
+		int width = roundUpPowerOfTwo(surface->w);
+		int height = roundUpPowerOfTwo(surface->h);
+		
+		SDL_Surface* pot_surface = SDL_CreateRGBSurface(0, width, height, 32,
+														0x00ff0000, 0x0000ff00,
+														0x000000ff, 0xff000000);
+		SDL_Rect dstrect;
+		dstrect.w = surface->w;
+		dstrect.h = surface->h;
+		dstrect.x = 0;
+		dstrect.y = 0;
+		SDL_SetSurfaceAlphaMod(surface, 0);
+		SDL_BlitSurface(surface, NULL, pot_surface, &dstrect);
+		SDL_FreeSurface(surface);
+		
+		return pot_surface;
+	}
+	
+	GLenum getTextureFormat(SDL_Surface* img){
+		int nOfColors = img->format->BytesPerPixel;
+		if (nOfColors == 4){	  // contains an alpha channel
+			if (img->format->Rmask == 0x000000ff){
+				return GL_RGBA;
+			}else{
+				return GL_BGRA;
+			}
+		} else if (nOfColors == 3){	  // no alpha channel
+			if (img->format->Rmask == 0x000000ff){
+				return GL_RGB;
+			}else{
+				return GL_BGR;
+			}
+		}
+		return 0;
+	}
+	
+	GLenum getInternalTextureFormat(SDL_Surface* img){
+		int nOfColors = img->format->BytesPerPixel;
+		if (nOfColors == 4){	  // contains an alpha channel
+			return GL_RGBA;
+		} else if (nOfColors == 3){	  // no alpha channel
+			return GL_RGB;
+		}
+		return 0;
+	}
+
 	bool TextureManager::loadTexture(const std::string &mainName, const std::string &file, bool repeat){
 		MainTexture txtToAdd;
 		txtToAdd.repeat = repeat;
 		txtToAdd.name = mainName;
 		txtToAdd.file = file;
 		txtToAdd.dynamicTexture = 0;
-		//Create the texture
-		bool success = loadTextureFromFile(file, txtToAdd.texture, txtToAdd.width, txtToAdd.height, repeat);
 
-		if(success){
-			mainTextures[mainName] = txtToAdd;
-			return true;
+		if(!loadTextureFromFile(file, txtToAdd.texture, txtToAdd.width, txtToAdd.height, repeat)){
+			std::cout << "Error loading texture (" << mainName << "): " << file << std::endl;
+			return false;
 		}
-		return false;
+		
+		mainTextures[mainName] = txtToAdd;
+		return true;
 	}
 
 	bool TextureManager::reloadTexture(MainTexture &ourTexture){
@@ -265,9 +321,9 @@ namespace MV {
 	}
 
 	bool TextureManager::loadTextureFromFile(const std::string &file, GLuint &imageLoaded, int &w, int &h, bool repeat) {
-		SDL_Surface *img = nullptr;
-		img = IMG_Load(file.c_str());
-		if(img == nullptr){
+		SDL_Surface *img = IMG_Load(file.c_str());
+		if(!img){
+			std::cerr << "Failed to load texture: (" << file << ") " << SDL_GetError() << std::endl;
 			return false;
 		}
 
@@ -279,50 +335,33 @@ namespace MV {
 
 	//Load an opengl texture
 	bool TextureManager::loadTextureFromSurface(SDL_Surface *img, GLuint &imageLoaded, int &w, int &h, bool repeat) {
-		GLenum texture_format;
-		bool mipmaps = 1;
-		int nOfColors;
-
 		// Build the texture from the surface
 		w = img->w;
 		h = img->h; 
 
 		//Check that the image's width is valid and then check that the image's width is a power of 2
 		if(!isPowerOfTwo(w) || !isPowerOfTwo(h)){
+			std::cerr << "Texture needs to be a power of two!" << std::endl;
 			return false;
 		}
-
-		nOfColors = img->format->BytesPerPixel;
-		if (nOfColors == 4){	  // contains an alpha channel
-			if (img->format->Rmask == 0x000000ff){
-				texture_format = GL_RGBA;
-			}else{
-				texture_format = GL_BGRA;
-			}
-		} else if (nOfColors == 3){	  // no alpha channel
-			if (img->format->Rmask == 0x000000ff){
-				texture_format = GL_RGB;
-			}else{
-				texture_format = GL_BGR;
-			}
-		} else {
+		
+		GLenum textureFormat = getTextureFormat(img);
+		if(!textureFormat){
+			std::cerr << "Unable to determine texture format!" << std::endl;
 			return false;
 		}
-
+		
 		glGenTextures(1, &imageLoaded);		// Generate texture ID
 		glBindTexture(GL_TEXTURE_2D, imageLoaded);
-
-		glTexImage2D(GL_TEXTURE_2D, 0, nOfColors, img->w, img->h, 0, texture_format, GL_UNSIGNED_BYTE, img->pixels);
-
+		
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-
-		if(mipmaps){
-			gluBuild2DMipmaps(GL_TEXTURE_2D, nOfColors, img->w, img->h, texture_format, GL_UNSIGNED_BYTE, img->pixels);
-		}
+		
+		glTexImage2D(GL_TEXTURE_2D, 0, getInternalTextureFormat(img), img->w, img->h, 0, textureFormat, GL_UNSIGNED_BYTE, img->pixels);
+		
 		return true;
 	}
 

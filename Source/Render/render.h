@@ -32,9 +32,6 @@
 
 #if defined(TARGET_OS_IPHONE) || defined(__ANDROID__)
 	#define HAVE_OPENGLES 1
-#else
-	#include <OpenGL/OpenGL.h>
-	#include <OpenGL/glext.h>
 #endif
 
 #include <SDL.h>
@@ -44,7 +41,9 @@
 	#include <SDL_opengles.h>
 	typedef GLfloat GLdouble; //opengles has no GLdouble
 #else
+	#define NO_SDL_GLEXT
 	#include <SDL_opengl.h>
+	#include "glext.h"
 #endif
 
 #ifdef GL_DEPTH_COMPONENT24
@@ -183,63 +182,139 @@ namespace MV {
 	protected:
 		void initializeExtensions(){
 			char* extensionsList = (char*) glGetString(GL_EXTENSIONS);
-			loadExtensionBlendMode(extensionsList);
-			loadExtensionFramebufferObject(extensionsList);
-			loadExtensionVertexBufferObject(extensionsList);
+			if(!extensionsList){
+				std::cerr << "ERROR: Could not load extensions list from glGetString(GL_EXTENSIONS)" << std::endl;
+			}else{
+				loadExtensionBlendMode(extensionsList);
+				loadExtensionFramebufferObject(extensionsList);
+				loadExtensionVertexBufferObject(extensionsList);
+			}
 		}
+	};
+
+	class Draw2D;
+	struct ProjectionDetails {
+		ProjectionDetails(const Draw2D &a_renderer):
+			renderer(a_renderer){
+		}
+			
+		Point projectScreen(const Point &a_point);
+		Point projectWorld(const Point &a_point);
+		Point unProjectScreen(const Point &a_point);
+		Point unProjectWorld(const Point &a_point);
+
+		const Draw2D &renderer;
+	};
+
+	class Window {
+		friend Draw2D;
+	public:
+		~Window();
+		void setTitle(const std::string &a_title);
+
+		void resize(const Size<int> &a_size);
+		Window& allowUserResize(bool a_maintainProportions = true, Size<int> a_minSize = Size<int>(1, 1), Size<int> a_maxSize = Size<int>(1000000, 1000000));
+		Window& lockUserResize();
+
+		Window& windowedMode();
+		void fullScreenMode();
+		void fullScreenWindowedMode();
+
+		Window& borderless();
+		Window& bordered();
+
+		int height() const;
+		int width() const;
+		Size<int> size() const;
+
+		bool handleEvent(const SDL_Event &event);
+	private:
+		Window(Draw2D &a_renderer);
+		bool initialize();
+		void ensureValidGLContext();
+		void refreshContext();
+		void updateScreen();
+		void updateWindowResizeLimits();
+		void conformToAspectRatio(int &a_width, int &a_height) const;
+
+		SDL_GLContext glcontext;
+		bool initialized;
+
+		void updateAspectRatio();
+		bool maintainProportions;
+		Size<int> windowSize;
+		double aspectRatio;
+		uint32_t SDLflags;
+		std::string title;
+
+		bool vsync;
+		bool userCanResize;
+		Size<int> minSize;
+		Size<int> maxSize;
+
+		SDL_Window *window;
+		Draw2D &renderer;
+	};
+
+	class RenderWorld {
+		friend Draw2D;
+	public:
+		void resize(const Size<> &a_size);
+
+		double height() const;
+		double width() const;
+		Size<> size() const;
+	private:
+		RenderWorld(Draw2D& a_renderer);
+		Size<> worldSize;
+
+		Draw2D &renderer;
 	};
 
 	//If attempting to make multiple instances of Draw2D bear in mind it modifies global state in the
 	//projection matrices, OpenGL, and SDL.
 	class Draw2D : public glExtensions {
+		friend Window;
+		friend RenderWorld;
 	public:
 		Draw2D();
 		~Draw2D();
 
-		void setWindowTitle(std::string a_title);
+		Window& window();
+		const Window& window() const;
 
-		//Warning: Any time the window is resized the OpenGL context is trashed and all textures must be re-loaded.
-		void allowWindowResize(bool a_allowResize);
-		void useFullScreen(bool a_isFullScreen);
-		void useBorderlessWindow(bool a_isBorderless);
-		bool initialize(int a_windowsWidth, int a_windowsHeight, double a_worldsWidth = -1, double a_worldsHeight = -1, bool a_requireExtensions = false);
+		RenderWorld& world();
+		const RenderWorld& world() const;
+
+		//call for every event to handle window actions correctly
+		bool handleEvent(const SDL_Event &event);
+
+		bool initialize(Size<int> a_window, Size<> a_world = Size<>(-1, -1), bool a_requireExtensions = false, bool summarize = false);
 
 		void setBackgroundColor(Color a_newColor);
-		bool resizeWindow(int a_x = -1, int a_y = -1);
-		void resizeWorldSpace(double a_drawingWidth, double a_drawingHeight);
+		
 		void clearScreen();
 		void updateScreen();
-		void refreshContext(); //only update the opengl context
 
-		Point getWindowSize();
-		Point getWorldSize();
+		Point worldFromLocal(const Point &a_localPoint ) const;
+		Point screenFromLocal(const Point &a_localPoint ) const;
 
-		//Given a point x, y return the position in world space where that will be rendered
-		//within the current projection/modelview.  Gets the final world point after transformations
-		//from an object's local points.
-		Point getObjectToWorldPoint(double a_objectX, double a_objectY);
-		Point getObjectToWorldPoint(Point a_worldPoint);
+		Point localFromWorld(const Point &a_worldPoint) const;
+		Point localFromScreen(const Point &a_screenPoint) const;
 
-		Point getWindowToWorldPoint(double a_windowX, double a_windowY);
-		Point getWindowToWorldPoint(Point a_windowPoint);
-
-		bool isWindowFullScreen();
+		Point screenFromWorld(const Point &a_worldPoint) const;
+		Point worldFromScreen(const Point &a_screenPoint) const;
 		
 		void summarizeDisplayMode() const;
 	private:
-		int fullScreenTransition();
 		bool setupSDL();
 		void setupOpengl();
 
 		Color backgroundColor;
-		std::string windowTitle;
-		uint32_t SDLflags;
-		int windowWidth, windowHeight;
-		double worldWidth, worldHeight;
-		bool windowIsFullScreen, initialized;
+		bool initialized;
 		SDL_Renderer *sdlRenderer;
-		SDL_Window *window;
-		SDL_GLContext glcontext;
+		Window sdlWindow;
+		RenderWorld mvWorld;
 	};
 	
 	void checkSDLError(int line = -1);

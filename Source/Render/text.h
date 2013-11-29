@@ -84,7 +84,7 @@ namespace MV {
 
 		bool loadFont(std::string a_identifier, int a_pointSize, std::string a_fontFileLocation);
 
-		std::shared_ptr<Scene> composeScene(std::vector<TextState> a_textStateList, double a_maxWidth = 0, TextWrapMethod a_wrapMethod = SOFT);
+		std::shared_ptr<DrawNode> composeScene(std::vector<TextState> a_textStateList, double a_maxWidth = 0, TextWrapMethod a_wrapMethod = SOFT);
 
 		//Call this when the OpenGL context is destroyed to re-load the textures.
 		void reloadTextures();
@@ -161,7 +161,7 @@ namespace MV {
 			renderTextWindowTexture();
 		}
 
-		std::shared_ptr<Scene> scene(){
+		std::shared_ptr<DrawNode> scene(){
 			return textBoxFullScene;
 		}
 
@@ -185,8 +185,8 @@ namespace MV {
 
 		bool initialized;
 		int width, height;
-		std::shared_ptr<Scene> textBoxFullScene;
-		Scene textTextureScene;
+		std::shared_ptr<DrawNode> textBoxFullScene;
+		DrawNode textTextureScene;
 		TextLibrary *textLibrary;
 		TextureManager *textures;
 		MainTexture *textWindowTexture;

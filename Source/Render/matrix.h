@@ -9,6 +9,7 @@
 #include <vector>
 #include <algorithm>
 #include <memory>
+#include <utility>
 #include "Render/points.h"
 #include "Utility/package.h"
 
@@ -25,26 +26,38 @@ namespace MV {
 	typedef double MatrixValue;	
 #endif
 
-	typedef std::vector<MatrixValue> MatrixRow;
-	typedef std::vector<MatrixRow> MatrixContainer;
-
 	class Matrix {
-	public:
-		Matrix(int a_size, MatrixValue value = 0.0):content(a_size,MatrixRow(a_size, value)),sizeX(a_size),sizeY(a_size){}
-		Matrix(int a_x, int a_y, MatrixValue value = 0.0):content(a_x,MatrixRow(a_y, value)),sizeX(a_x),sizeY(a_y){}
+	private:
+		class MatrixRowAccess {
+		public:
+			MatrixRowAccess(std::shared_ptr<std::vector<MatrixValue>> a_matrixArray, size_t a_x);
 
-		int getSizeX() const{return sizeX;}
-		int getSizeY() const{return sizeY;}
+			void setCurrentX(size_t a_currentX) const;
+
+			MatrixValue& operator[](size_t a_index);
+			const MatrixValue& operator[](size_t a_index) const;
+			void resize(size_t a_x);
+		private:
+			mutable size_t currentX;
+			std::shared_ptr<std::vector<MatrixValue>> matrixArray;
+			size_t sizeX;
+		};
+
+	public:
+		Matrix(size_t a_size, MatrixValue a_value = 0.0);
+		Matrix(size_t a_x, size_t a_y, MatrixValue a_value = 0.0);
+		Matrix(const Matrix& a_other);
+		Matrix(Matrix&& a_other);
+
+		size_t getSizeX() const{return sizeX;}
+		size_t getSizeY() const{return sizeY;}
 
 		void print();
 
-		MatrixRow& operator[] (const int a_index){
-			return content[a_index];
-		}
+		MatrixRowAccess& operator[] (size_t a_index);
+		const MatrixRowAccess& operator[] (size_t a_index) const;
 
-		const MatrixRow& operator[] (const int a_index) const{
-			return content[a_index];
-		}
+		Matrix& clear(MatrixValue a_value = 0.0);
 
 		Matrix& operator+=(const Matrix& a_other);
 		Matrix& operator-=(const Matrix& a_other);
@@ -53,11 +66,15 @@ namespace MV {
 		Matrix& operator*=(const MatrixValue& a_other);
 		Matrix& operator/=(const MatrixValue& a_other);
 
+		Matrix& operator=(const Matrix& a_other);
+		Matrix& operator=(Matrix&& a_other);
+
 		std::shared_ptr<std::vector<MatrixValue>> getMatrixArray();
 	protected:
-		int sizeX, sizeY;
-		MatrixContainer content;
-		bool sizeIsDirty;
+		size_t sizeX, sizeY;
+		std::shared_ptr<std::vector<MatrixValue>> matrixArray;
+	private:
+		MatrixRowAccess rowAccessor;
 	};
 
 	const Matrix operator-(const Matrix &a_left, const Matrix &a_right);
@@ -70,19 +87,23 @@ namespace MV {
 
 	class TransformMatrix : public Matrix {
 	public:
-		TransformMatrix(const TransformMatrix &a_matrix):Matrix(static_cast<Matrix>(a_matrix)){}
+		TransformMatrix(const TransformMatrix &a_matrix):Matrix(a_matrix){}
 		TransformMatrix(const Matrix &a_matrix):Matrix(a_matrix){}
+
+		TransformMatrix(const TransformMatrix &&a_matrix):Matrix(std::move(a_matrix)){}
+		TransformMatrix(const Matrix &&a_matrix):Matrix(std::move(a_matrix)){}
+
 		TransformMatrix(MatrixValue a_value = 0.0);
 		TransformMatrix(const Point &a_position);
 
 		MatrixValue getX() const{
-			return content[3][0];
+			return (*this)[3][0];
 		}
 		MatrixValue getY() const{
-			return content[3][1];
+			return (*this)[3][1];
 		}
 		MatrixValue getZ() const{
-			return content[3][2];
+			return (*this)[3][2];
 		}
 
 		TransformMatrix& makeIdentity();
@@ -99,7 +120,8 @@ namespace MV {
 
 	class MatrixStack {
 	public:
-		MatrixStack(){
+		MatrixStack(const std::string &a_name = ""):
+			name(a_name){
 			push(TransformMatrix());
 		}
 
@@ -111,6 +133,7 @@ namespace MV {
 
 	private:
 		std::vector<TransformMatrix> stack;
+		std::string name;
 	};
 }
 

@@ -129,6 +129,15 @@ namespace MV {
 		return tmpPoint/=a_right;
 	}
 
+	std::ostream& operator<<(std::ostream& os, const Point& a_point){
+		os << "(" << a_point.x << ", " << a_point.y << ", " << a_point.z << ")";
+		return os;
+	}
+	std::istream& operator>>(std::istream& is, Point &a_point){
+		is >> a_point.x >> a_point.y >> a_point.z;
+		return is;
+	}
+
 	/*************************\
 	| -------DrawPoint------- |
 	\*************************/
@@ -194,6 +203,18 @@ namespace MV {
 
 	void DrawPoint::copyColor( DrawPoint& a_other ){
 		R = a_other.R; G = a_other.G; B = a_other.B;
+	}
+
+	/**************************\
+	| -------Conversion------- |
+	\**************************/
+
+	Point pointFromSize(const Size<double>& a_size){
+		return Point(a_size.width, a_size.height, a_size.depth);
+	}
+
+	Size<double> sizeFromPoint(const Point& a_point){
+		return Size<double>(a_point.x, a_point.y, a_point.z);
 	}
 
 }

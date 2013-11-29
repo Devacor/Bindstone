@@ -5,9 +5,17 @@
       <Configuration>Debug</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="Release|Win32">
       <Configuration>Release</Configuration>
       <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
@@ -21,10 +29,22 @@
     <CharacterSet>MultiByte</CharacterSet>
     <PlatformToolset>v110</PlatformToolset>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v110</PlatformToolset>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v110</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v110</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -32,7 +52,13 @@
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
@@ -42,9 +68,20 @@
     <LibraryPath>$(SolutionDir)../external/boost_1_49_0/stage/lib/;$(SolutionDir)../external/libs/;$(LibraryPath)</LibraryPath>
     <SourcePath>$(VCInstallDir)atlmfc\src\mfc;$(VCInstallDir)atlmfc\src\mfcm;$(VCInstallDir)atlmfc\src\atl;$(VCInstallDir)crt\src;$(SolutionDir)../external/boost_1_49_0/libs/;$(SolutionDir)../external/libs/</SourcePath>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <IncludePath>$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/</IncludePath>
+    <LibraryPath>$(SolutionDir)../external/boost_1_49_0/stage/lib/;$(SolutionDir)../external/libs/;$(LibraryPath)</LibraryPath>
+    <SourcePath>$(VCInstallDir)atlmfc\src\mfc;$(VCInstallDir)atlmfc\src\mfcm;$(VCInstallDir)atlmfc\src\atl;$(VCInstallDir)crt\src;$(SolutionDir)../external/boost_1_49_0/libs/;$(SolutionDir)../external/libs/</SourcePath>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)../external/boost_1_49_0/stage/lib/;$(SolutionDir)../external/libs/;$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(SolutionDir)../external/boost_1_49_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/;$(SolutionDir)../external/libs/;$(LibraryPath)</LibraryPath>
+    <SourcePath>$(SolutionDir)../external/boost_1_49_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath)</SourcePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)../external/boost_1_49_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/;$(SolutionDir)../external/libs/;$(LibraryPath)</LibraryPath>
     <SourcePath>$(SolutionDir)../external/boost_1_49_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath)</SourcePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -52,6 +89,23 @@
       <WarningLevel>Level3</WarningLevel>
       <MinimalRebuild>true</MinimalRebuild>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <Optimization>Disabled</Optimization>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>glu32.lib;SDL.lib;SDLmain.lib;SDL_image.lib;SDL_ttf.lib;opengl32.lib;SDL_mixer.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <SubSystem>Console</SubSystem>
+      <Profile>true</Profile>
+      <AdditionalLibraryDirectories>$(SolutionDir)../external/boost_1_49_0/stage/lib/;$(SolutionDir)../external/libs/</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>Disabled</Optimization>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -73,24 +127,46 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_52_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <EnablePREfast>false</EnablePREfast>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>glu32.lib;SDL.lib;SDLmain.lib;SDL_image.lib;SDL_ttf.lib;opengl32.lib;SDL_mixer.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Windows</SubSystem>
-      <AdditionalLibraryDirectories>$(SolutionDir)../external/boost_1_49_0/stage/lib/;$(SolutionDir)../external/libs/</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)../external/boost_1_52_0/stage/lib/;$(SolutionDir)../external/libs/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/</AdditionalLibraryDirectories>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_52_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <EnablePREfast>false</EnablePREfast>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <SubSystem>Console</SubSystem>
+      <AdditionalLibraryDirectories>$(SolutionDir)../external/boost_1_52_0/stage/lib/;$(SolutionDir)../external/libs/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Source\Animation\frameSwapper.cpp" />
     <ClCompile Include="Source\Audio\sound.cpp" />
-    <ClCompile Include="Source\exampleCode.cpp" />
+    <ClCompile Include="Source\game.cpp" />
+    <ClCompile Include="Source\Game\pathGrid.cpp" />
     <ClCompile Include="Source\main.cpp">
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">./;./Source</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">./;./Source</AdditionalIncludeDirectories>
     </ClCompile>
     <ClCompile Include="Source\Render\drawShapes.cpp" />
     <ClCompile Include="Source\Render\matrix.cpp" />
@@ -108,8 +184,10 @@
     <ClInclude Include="Source\Animation\package.h" />
     <ClInclude Include="Source\Audio\package.h" />
     <ClInclude Include="Source\Audio\sound.h" />
-    <ClInclude Include="Source\exampleCode.h" />
+    <ClInclude Include="Source\game.h" />
+    <ClInclude Include="Source\Game\pathGrid.h" />
     <ClInclude Include="Source\Render\drawShapes.h" />
+    <ClInclude Include="Source\Render\glext.h" />
     <ClInclude Include="Source\Render\matrix.h" />
     <ClInclude Include="Source\Render\package.h" />
     <ClInclude Include="Source\Render\points.h" />

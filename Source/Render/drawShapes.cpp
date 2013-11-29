@@ -33,7 +33,7 @@ namespace MV {
 		expandWith(a_compareBox.maxPoint);
 	}
 
-	bool BoxAABB::pointContained( const Point &a_comparePoint ) const{
+	bool BoxAABB::pointContainedZ( const Point &a_comparePoint ) const{
 		if(a_comparePoint.x >= minPoint.x && a_comparePoint.y >= minPoint.y && a_comparePoint.z >= minPoint.z){
 			if(a_comparePoint.x <= maxPoint.x && a_comparePoint.y <= maxPoint.y && a_comparePoint.z <= maxPoint.z){
 				return true;
@@ -42,71 +42,118 @@ namespace MV {
 		return false;
 	}
 
-	bool BoxAABB::pointContainedXY( const Point &a_comparePoint ) const{
+	bool BoxAABB::pointContained( const Point &a_comparePoint ) const{
 		if((a_comparePoint.x >= minPoint.x && a_comparePoint.y >= minPoint.y) && (a_comparePoint.x <= maxPoint.x && a_comparePoint.y <= maxPoint.y)){
 			return true;
 		}
 		return false;
 	}
 
+	void BoxAABB::sanitize() {
+		if(minPoint.x > maxPoint.x){std::swap(minPoint.x, maxPoint.x);}
+		if(minPoint.y > maxPoint.y){std::swap(minPoint.y, maxPoint.y);}
+		if(minPoint.z > maxPoint.z){std::swap(minPoint.z, maxPoint.z);}
+	}
+
+	std::ostream& operator<<(std::ostream& a_os, const BoxAABB& a_box){
+		a_os << "[" << a_box.minPoint << " - " << a_box.maxPoint << "]";
+		return a_os;
+	}
+
+	std::istream& operator>>(std::istream& a_is, BoxAABB& a_box){
+		a_is >> a_box.minPoint >> a_box.maxPoint;
+		return a_is;
+	}
+
 	/*************************\
 	| -------DrawShape------- |
 	\*************************/
 
-	void DrawShape::setColor( const Color &a_newColor ){
-		int elements = (int)Pnt.size();
+	void DrawNode::setColor( const Color &a_newColor ){
+		int elements = (int)points.size();
 		for(int i = 0;i < elements;i++){
-			Pnt[i] = a_newColor;
+			points[i] = a_newColor;
 		}
 	}
 
-	void DrawShape::setTexture( const GLuint *a_textureId ){
+	void DrawNode::setTexture( const GLuint *a_textureId ){
 		texture = a_textureId;
 		hasTexture = true;
 	}
 
-	void DrawShape::removeTexture(){
+	bool DrawNode::remove(std::shared_ptr<DrawNode> a_childItem){
+		size_t originalSize = drawList.size();
+		for(auto cell = drawList.begin();cell != drawList.end();){
+			if(*(cell->second) == *a_childItem){
+				drawList.erase(cell++);
+			}else{
+				++cell;
+			}
+		}
+		return originalSize != drawList.size();
+	}
+
+	bool DrawNode::remove(const std::string &a_childId){
+		size_t originalSize = drawList.size();
+		drawList.erase(a_childId);
+		return originalSize != drawList.size();
+	}
+
+	void DrawNode::clear(){
+		drawList.clear();
+	}
+
+	std::shared_ptr<DrawNode> DrawNode::get(const std::string &a_childId){
+		auto cell = drawList.find(a_childId);
+		if(cell != drawList.end()){
+			return cell->second;
+		}
+		require(0, ResourceException("Scene::getChild was unable to find an element matching the ID: (" + a_childId + ")"));
+		return nullptr;
+	}
+
+	void DrawNode::removeTexture(){
 		hasTexture = false;
 	}
 
-	double DrawShape::getDepth(){
+	double DrawNode::getDepth(){
 		if(depthOverride){
 			return overrideDepthValue;
 		}
-		int elements = (int)Pnt.size();
+		int elements = (int)points.size();
 		double total = 0;
 		for(int i = 0;i < elements;i++){
-			total+=Pnt[i].z;
+			total+=points[i].z;
 		}
 		total/=(double)elements;
 		return total;
 	}
 
-	bool DrawShape::operator<( DrawShape &a_other ){
+	bool DrawNode::operator<( DrawNode &a_other ){
 		return getDepth() < a_other.getDepth();
 	}
 
-	bool DrawShape::operator>( DrawShape &a_other ){
+	bool DrawNode::operator>( DrawNode &a_other ){
 		return getDepth() > a_other.getDepth();
 	}
 
-	bool DrawShape::operator==( DrawShape &a_other ){
+	bool DrawNode::operator==( DrawNode &a_other ){
 		return getDepth() == a_other.getDepth();
 	}
 
-	Point DrawShape::getScale(){
+	Point DrawNode::getScale(){
 		return scaleTo;
 	}
 
-	AxisAngles DrawShape::getRotation(){
+	AxisAngles DrawNode::getRotation(){
 		return rotateTo;
 	}
 
-	Point DrawShape::getLocation(){
+	Point DrawNode::getLocation(){
 		return translateTo;
 	}
 
-	Point DrawShape::getRelativeLocation(){
+	Point DrawNode::getRelativeLocation(){
 		Point resultPoint;
 		resultPoint = translateTo;
 		if(myParent){
@@ -115,7 +162,7 @@ namespace MV {
 		return resultPoint;
 	}
 
-	Point DrawShape::getRelativeScale(){
+	Point DrawNode::getRelativeScale(){
 		Point resultPoint;
 		resultPoint = scaleTo;
 		if(myParent){
@@ -124,7 +171,7 @@ namespace MV {
 		return resultPoint;
 	}
 
-	Point DrawShape::getRelativeRotation(){
+	Point DrawNode::getRelativeRotation(){
 		Point resultPoint;
 		resultPoint = rotateTo;
 		if(myParent){
@@ -133,86 +180,226 @@ namespace MV {
 		return resultPoint;
 	}
 
-	void DrawShape::scale( double a_newScale ){
+	void DrawNode::scale( double a_newScale ){
 		scale( Point(a_newScale, a_newScale, a_newScale) );
 	}
 
-	void DrawShape::scale( const Point &a_scaleValue ){
+	void DrawNode::scale( const Point &a_scaleValue ){
 		scaleTo = a_scaleValue;
 	}
 
-	void DrawShape::incrementScale( double a_newScale ){
+	void DrawNode::incrementScale( double a_newScale ){
 		incrementScale( Point(a_newScale, a_newScale, a_newScale) );
 	}
 
-	void DrawShape::incrementScale( const AxisMagnitude &a_scaleValue ){
+	void DrawNode::incrementScale( const AxisMagnitude &a_scaleValue ){
 		scaleTo += a_scaleValue;
 	}
 
-	void DrawShape::setParent( DrawShape* a_parentItem ){
+	void DrawNode::setParent( DrawNode* a_parentItem ){
 		myParent = a_parentItem;
 	}
 
-	BoxAABB DrawShape::getWorldAABB(){
-		require(renderer != nullptr, PointerException("DrawShape::getAABB requires a rendering context."));
+	BoxAABB DrawNode::getWorldAABB(bool includeChildren){
+		require(renderer != nullptr, PointerException("DrawShape::getWorldAABB requires a rendering context."));
 		alertParent("pushMatrix");
 		pushMatrix();
-		int elements = (int)Pnt.size();
 		BoxAABB tmpBox;
-		if(elements > 0){
-			tmpBox.initialize(renderer->getObjectToWorldPoint(Pnt[0]));
-			for(int i = 0;i < elements;i++){
-				tmpBox.expandWith(renderer->getObjectToWorldPoint(Pnt[i]));
+		if(!points.empty()){
+			tmpBox.initialize(renderer->worldFromLocal(points[0]));
+			std::for_each(points.begin()++, points.end(), [&](Point &point){
+				tmpBox.expandWith(renderer->worldFromLocal(point));
+			});
+		}
+		if(includeChildren && !drawList.empty()){
+			if(!points.empty()){
+				tmpBox.initialize(drawList[0]->getWorldAABB());
+			}else{
+				tmpBox.expandWith(drawList[0]->getWorldAABB());
 			}
+			std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
+				tmpBox.expandWith(cell.second->getWorldAABB());
+			});
 		}
 		popMatrix();
 		alertParent("popMatrix");
 		return tmpBox;
 	}
 
-	BoxAABB DrawShape::getLocalAABB(){
+	BoxAABB DrawNode::getScreenAABB(bool includeChildren){
+		require(renderer != nullptr, PointerException("DrawShape::getScreenAABB requires a rendering context."));
+		alertParent("pushMatrix");
+		pushMatrix();
 		BoxAABB tmpBox;
-		if(!Pnt.empty()){
-			tmpBox.initialize(Pnt[0]);
-			std::for_each(Pnt.begin(), Pnt.end(), [&](Point &point){
+		if(!points.empty()){
+			tmpBox.initialize(renderer->screenFromLocal(points[0]));
+			std::for_each(points.begin(), points.end(), [&](Point &point){
+				tmpBox.expandWith(renderer->screenFromLocal(point));
+			});
+		}
+		if(includeChildren && !drawList.empty()){
+			if(!points.empty()){
+				tmpBox.initialize(drawList[0]->getScreenAABB());
+			}else{
+				tmpBox.expandWith(drawList[0]->getScreenAABB());
+			}
+			std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
+				tmpBox.expandWith(cell.second->getScreenAABB());
+			});
+		}
+		popMatrix();
+		alertParent("popMatrix");
+		return tmpBox;
+	}
+
+	BoxAABB DrawNode::getLocalAABB(){
+		BoxAABB tmpBox;
+		if(!points.empty()){
+			tmpBox.initialize(points[0]);
+			std::for_each(points.begin(), points.end(), [&](Point &point){
 				tmpBox.expandWith(point);
 			});
 		}
 		return tmpBox;
 	}
 
-	PointVolume DrawShape::getWorldPoints(){
-		require(renderer != nullptr, PointerException("DrawShape::getWorldPoints requires a rendering context."));
+	Point DrawNode::worldFromLocal(const Point &a_local){
+		require(renderer != nullptr, PointerException("DrawShape::worldFromLocal requires a rendering context."));
 		alertParent("pushMatrix");
 		pushMatrix();
-		int elements = (int)Pnt.size();
-		PointVolume pointList;
-		for(int i = 0;i < elements;i++){
-			pointList.addPoint(renderer->getObjectToWorldPoint(Pnt[i]));
-		}
+		Point ourPoint = renderer->worldFromLocal(a_local);
 		popMatrix();
 		alertParent("popMatrix");
-		return pointList;
+		return ourPoint;
 	}
-
-	Point DrawShape::getWorldPoint(Point a_local){
-		require(renderer != nullptr, PointerException("DrawShape::getWorldPoint requires a rendering context."));
+	Point DrawNode::screenFromLocal(const Point &a_local){
+		require(renderer != nullptr, PointerException("DrawShape::screenFromLocal requires a rendering context."));
 		alertParent("pushMatrix");
 		pushMatrix();
-		Point ourPoint;
-		ourPoint = renderer->getObjectToWorldPoint(a_local);
+		Point ourPoint = renderer->screenFromLocal(a_local);
+		popMatrix();
+		alertParent("popMatrix");
+		return ourPoint;
+	}
+	Point DrawNode::localFromScreen(const Point &a_screen){
+		require(renderer != nullptr, PointerException("DrawShape::localFromScreen requires a rendering context."));
+		alertParent("pushMatrix");
+		pushMatrix();
+		Point ourPoint = renderer->localFromScreen(a_screen);
+		popMatrix();
+		alertParent("popMatrix");
+		return ourPoint;
+	}
+	Point DrawNode::localFromWorld(const Point &a_world){
+		require(renderer != nullptr, PointerException("DrawShape::localFromWorld requires a rendering context."));
+		alertParent("pushMatrix");
+		pushMatrix();
+		Point ourPoint = renderer->localFromWorld(a_world);
 		popMatrix();
 		alertParent("popMatrix");
 		return ourPoint;
 	}
 
-	void DrawShape::pushMatrix(){
-		modelviewMatrix().push();
-		if(!translateTo.atOrigin()){
-			modelviewMatrix().top().translate(translateTo.x, translateTo.y, translateTo.z);
+	std::vector<Point> DrawNode::worldFromLocal(std::vector<Point> a_local){
+		require(renderer != nullptr, PointerException("DrawShape::worldFromLocal requires a rendering context."));
+		alertParent("pushMatrix");
+		pushMatrix();
+		for(Point& point : a_local){
+			point = renderer->worldFromLocal(point);
 		}
+		popMatrix();
+		alertParent("popMatrix");
+		return a_local;
+	}
+
+	std::vector<Point> DrawNode::screenFromLocal(std::vector<Point> a_local){
+		require(renderer != nullptr, PointerException("DrawShape::screenFromLocal requires a rendering context."));
+		alertParent("pushMatrix");
+		pushMatrix();
+		for(Point& point : a_local){
+			point = renderer->screenFromLocal(point);
+		}
+		popMatrix();
+		alertParent("popMatrix");
+		return a_local;
+	}
+
+	std::vector<Point> DrawNode::localFromWorld(std::vector<Point> a_world){
+		require(renderer != nullptr, PointerException("DrawShape::localFromWorld requires a rendering context."));
+		alertParent("pushMatrix");
+		pushMatrix();
+		for(Point& point : a_world){
+			point = renderer->localFromWorld(point);
+		}
+		popMatrix();
+		alertParent("popMatrix");
+		return a_world;
+	}
+
+	std::vector<Point> DrawNode::localFromScreen(std::vector<Point> a_screen){
+		require(renderer != nullptr, PointerException("DrawShape::localFromScreen requires a rendering context."));
+		alertParent("pushMatrix");
+		pushMatrix();
+		for(Point& point : a_screen){
+			point = renderer->localFromScreen(point);
+		}
+		popMatrix();
+		alertParent("popMatrix");
+		return a_screen;
+	}
+
+	BoxAABB DrawNode::worldFromLocal(BoxAABB a_local){
+		require(renderer != nullptr, PointerException("DrawShape::worldFromLocal requires a rendering context."));
+		alertParent("pushMatrix");
+		pushMatrix();
+		a_local.minPoint = renderer->worldFromLocal(a_local.minPoint);
+		a_local.maxPoint = renderer->worldFromLocal(a_local.maxPoint);
+		a_local.sanitize();
+		popMatrix();
+		alertParent("popMatrix");
+		return a_local;
+	}
+	BoxAABB DrawNode::screenFromLocal(BoxAABB a_local){
+		require(renderer != nullptr, PointerException("DrawShape::screenFromLocal requires a rendering context."));
+		alertParent("pushMatrix");
+		pushMatrix();
+		a_local.minPoint = renderer->screenFromLocal(a_local.minPoint);
+		a_local.maxPoint = renderer->screenFromLocal(a_local.maxPoint);
+		a_local.sanitize();
+		popMatrix();
+		alertParent("popMatrix");
+		return a_local;
+	}
+	BoxAABB DrawNode::localFromScreen(BoxAABB a_screen){
+		require(renderer != nullptr, PointerException("DrawShape::localFromScreen requires a rendering context."));
+		alertParent("pushMatrix");
+		pushMatrix();
+		a_screen.minPoint = renderer->localFromScreen(a_screen.minPoint);
+		a_screen.maxPoint = renderer->localFromScreen(a_screen.maxPoint);
+		a_screen.sanitize();
+		popMatrix();
+		alertParent("popMatrix");
+		return a_screen;
+	}
+	BoxAABB DrawNode::localFromWorld(BoxAABB a_world){
+		require(renderer != nullptr, PointerException("DrawShape::localFromWorld requires a rendering context."));
+		alertParent("pushMatrix");
+		pushMatrix();
+		a_world.minPoint = renderer->localFromWorld(a_world.minPoint);
+		a_world.maxPoint = renderer->localFromWorld(a_world.maxPoint);
+		a_world.sanitize();
+		popMatrix();
+		alertParent("popMatrix");
+		return a_world;
+	}
+
+	void DrawNode::pushMatrix(){
+		modelviewMatrix().push();
 		if(!scaleTo.atOrigin()){
 			modelviewMatrix().top().scale(scaleTo.x, scaleTo.y, scaleTo.z);
+		}
+		if(!translateTo.atOrigin()){
+			modelviewMatrix().top().translate(translateTo.x, translateTo.y, translateTo.z);
 		}
 		if(!rotateTo.atOrigin()){
 			modelviewMatrix().top().translate(rotateOrigin.x, rotateOrigin.y, rotateOrigin.z);
@@ -221,11 +408,11 @@ namespace MV {
 		}
 	}
 
-	void DrawShape::popMatrix(){
+	void DrawNode::popMatrix(){
 		modelviewMatrix().pop();
 	}
 
-	void DrawShape::bindOrDisableTexture(const std::shared_ptr<std::vector<GLfloat>> &texturePoints){
+	void DrawNode::bindOrDisableTexture(const std::shared_ptr<std::vector<GLfloat>> &texturePoints){
 		if(hasTexture && texture != NULL){
 			glEnable(GL_TEXTURE_2D);
 			glBindTexture(GL_TEXTURE_2D, *texture);
@@ -237,7 +424,7 @@ namespace MV {
 		}
 	}
 
-	void DrawShape::defaultDrawRenderStep( GLenum drawType ){
+	void DrawNode::defaultDrawRenderStep( GLenum drawType ){
 		auto textureVertexArray = getTextureVertexArray();
 		bindOrDisableTexture(textureVertexArray);
 
@@ -249,7 +436,7 @@ namespace MV {
 		auto positionVertexArray = getPositionVertexArray();
 		glVertexPointer(3, GL_FLOAT, 0, &(*(positionVertexArray))[0]);
 		
-		glDrawArrays(drawType,0,static_cast<GLsizei>(Pnt.size()));
+		glDrawArrays(drawType,0,static_cast<GLsizei>(points.size()));
 
 		glDisableClientState(GL_COLOR_ARRAY);
 		glDisableClientState(GL_VERTEX_ARRAY);
@@ -259,17 +446,17 @@ namespace MV {
 		}
 	}
 
-	void DrawShape::defaultDraw( GLenum drawType ){
+	void DrawNode::defaultDraw( GLenum drawType ){
 		pushMatrix();
 		defaultDrawRenderStep(drawType);
 		popMatrix();
 	}
 
-	std::shared_ptr<std::vector<GLfloat>> DrawShape::getPositionVertexArray(){
-		auto returnArray = std::make_shared<std::vector<GLfloat>>(Pnt.size()*3);
+	std::shared_ptr<std::vector<GLfloat>> DrawNode::getPositionVertexArray(){
+		auto returnArray = std::make_shared<std::vector<GLfloat>>(points.size()*3);
 		TransformMatrix transformationMatrix(projectionMatrix().top() * modelviewMatrix().top());
-		for(size_t i = 0;i < Pnt.size();++i){
-			TransformMatrix transformedPoint(transformationMatrix * TransformMatrix(Pnt[i]));
+		for(size_t i = 0;i < points.size();++i){
+			TransformMatrix transformedPoint(transformationMatrix * TransformMatrix(points[i]));
 			(*returnArray)[i*3+0] = static_cast<float>(transformedPoint.getX());
 			(*returnArray)[i*3+1] = static_cast<float>(transformedPoint.getY());
 			(*returnArray)[i*3+2] = static_cast<float>(transformedPoint.getZ());
@@ -277,24 +464,75 @@ namespace MV {
 		return returnArray;
 	}
 
-	std::shared_ptr<std::vector<GLfloat>> DrawShape::getTextureVertexArray(){
-		auto returnArray = std::make_shared<std::vector<GLfloat>>(Pnt.size()*2);
-		for(size_t i = 0;i < Pnt.size();++i){
-			(*returnArray)[i*2+0] = static_cast<float>(Pnt[i].textureX);
-			(*returnArray)[i*2+1] = static_cast<float>(Pnt[i].textureY);
+	std::shared_ptr<std::vector<GLfloat>> DrawNode::getTextureVertexArray(){
+		auto returnArray = std::make_shared<std::vector<GLfloat>>(points.size()*2);
+		for(size_t i = 0;i < points.size();++i){
+			(*returnArray)[i*2+0] = static_cast<float>(points[i].textureX);
+			(*returnArray)[i*2+1] = static_cast<float>(points[i].textureY);
 		}
 		return returnArray;
 	}
 
-	std::shared_ptr<std::vector<GLfloat>> DrawShape::getColorVertexArray(){
-		auto returnArray = std::make_shared<std::vector<GLfloat>>(Pnt.size()*4);
-		for(size_t i = 0;i < Pnt.size();++i){
-			(*returnArray)[i*4+0] = static_cast<float>(Pnt[i].R);
-			(*returnArray)[i*4+1] = static_cast<float>(Pnt[i].G);
-			(*returnArray)[i*4+2] = static_cast<float>(Pnt[i].B);
-			(*returnArray)[i*4+3] = static_cast<float>(Pnt[i].A);
+	std::shared_ptr<std::vector<GLfloat>> DrawNode::getColorVertexArray(){
+		auto returnArray = std::make_shared<std::vector<GLfloat>>(points.size()*4);
+		for(size_t i = 0;i < points.size();++i){
+			(*returnArray)[i*4+0] = static_cast<float>(points[i].R);
+			(*returnArray)[i*4+1] = static_cast<float>(points[i].G);
+			(*returnArray)[i*4+2] = static_cast<float>(points[i].B);
+			(*returnArray)[i*4+3] = static_cast<float>(points[i].A);
 		}
 		return returnArray;
+	}
+
+	void DrawNode::draw(){
+		pushMatrix();
+		if(drawSorted){
+			sortedRender();
+		}else{
+			unsortedRender();
+		}
+		drawImplementation();
+		popMatrix();
+	}
+
+	void DrawNode::sortedRender(){
+		if(!isSorted){
+			drawListVector.clear();
+			std::for_each(drawList.begin(), drawList.end(), [&](DrawListType::value_type &cell){
+				drawListVector.push_back(std::shared_ptr<DrawNode>(cell.second));
+			});
+			std::sort(drawListVector.begin(), drawListVector.end(), [](DrawListVectorType::value_type one, DrawListVectorType::value_type two){
+				return *one < *two;
+			});
+			isSorted = true;
+		}
+		std::for_each(drawListVector.begin(), drawListVector.end(), [](DrawListVectorType::value_type &shape){
+			shape->draw();
+		});
+	}
+
+	void DrawNode::unsortedRender(){
+		std::for_each(drawList.begin(), drawList.end(), [](DrawListType::value_type &shape){
+			shape.second->draw();
+		});
+	}
+
+	void DrawNode::sortScene( bool a_depthMatters ){
+		drawSorted = a_depthMatters;
+	}
+
+	std::string DrawNode::getMessage(const std::string &a_message ){
+		if(a_message == "NeedsSort"){
+			alertParent(a_message);
+			isSorted = false;
+		}else if(a_message == "pushMatrix"){
+			alertParent(a_message);
+			pushMatrix();
+		}else if(a_message == "popMatrix"){
+			popMatrix();
+			alertParent(a_message);
+		}
+		return "";
 	}
 
 	/*************************\
@@ -303,10 +541,10 @@ namespace MV {
 
 	void DrawPixel::setPoint( const DrawPoint &a_point ){
 		alertParent("NeedsSort");
-		Pnt[0] = a_point;
+		points[0] = a_point;
 	}
 
-	void DrawPixel::draw(){
+	void DrawPixel::drawImplementation(){
 		defaultDraw(GL_POINTS);
 	}
 
@@ -316,11 +554,11 @@ namespace MV {
 
 	void DrawLine::setEnds( const DrawPoint &a_startPoint, const DrawPoint &a_endPoint ){
 		alertParent("NeedsSort");
-		Pnt[0] = a_startPoint;
-		Pnt[1] = a_endPoint;
+		points[0] = a_startPoint;
+		points[1] = a_endPoint;
 	}
 
-	void DrawLine::draw(){
+	void DrawLine::drawImplementation(){
 		defaultDraw(GL_LINES);
 	}
 
@@ -339,48 +577,66 @@ namespace MV {
 		bottomRight.y = std::max(a_topLeft.y,a_bottomRight.y);
 		topLeft.z = a_topLeft.z; bottomRight.z = a_bottomRight.z;
 
-		Pnt[0] = topLeft;
-		Pnt[1].x = topLeft.x;	Pnt[1].y = bottomRight.y;	Pnt[1].z = (bottomRight.z + topLeft.z) / 2;
-		Pnt[2] = bottomRight;
-		Pnt[3].x = bottomRight.x;	Pnt[3].y = topLeft.y;	Pnt[3].z = (bottomRight.z + topLeft.z) / 2;
+		points[0] = topLeft;
+		points[1].x = topLeft.x;	points[1].y = bottomRight.y;	points[1].z = (bottomRight.z + topLeft.z) / 2;
+		points[2] = bottomRight;
+		points[3].x = bottomRight.x;	points[3].y = topLeft.y;	points[3].z = (bottomRight.z + topLeft.z) / 2;
 	}
 
-	void DrawRectangle::setSizeAndLocation( const DrawPoint &a_centerPoint, double a_width, double a_height ){
+	void DrawRectangle::setTwoCorners( const Point &a_topLeft, const Point &a_bottomRight ){
+		if((a_topLeft.z + a_bottomRight.z) / 2.0 != getDepth()){
+			alertParent("NeedsSort");
+		}
+		Point topLeft = a_topLeft, bottomRight = a_bottomRight;
+		topLeft.x = std::min(a_topLeft.x,a_bottomRight.x);
+		bottomRight.x = std::max(a_topLeft.x,a_bottomRight.x);
+		topLeft.y = std::min(a_topLeft.y,a_bottomRight.y);
+		bottomRight.y = std::max(a_topLeft.y,a_bottomRight.y);
+		topLeft.z = a_topLeft.z; bottomRight.z = a_bottomRight.z;
+
+		points[0] = topLeft;
+		points[1].x = topLeft.x;	points[1].y = bottomRight.y;	points[1].z = (bottomRight.z + topLeft.z) / 2;
+		points[2] = bottomRight;
+		points[3].x = bottomRight.x;	points[3].y = topLeft.y;	points[3].z = (bottomRight.z + topLeft.z) / 2;
+	}
+
+	void DrawRectangle::setTwoCorners( const BoxAABB &a_bounds){
+		setTwoCorners(a_bounds.minPoint, a_bounds.maxPoint);
+	}
+
+	void DrawRectangle::setSizeAndLocation( const Point &a_centerPoint, double a_width, double a_height ){
 		double halfWidth = a_width/2, halfHeight = a_height/2;
 		
-		DrawPoint topLeft = a_centerPoint;
+		Point topLeft = a_centerPoint;
 		topLeft.x=-halfHeight; topLeft.y=-halfHeight;
 		
-		DrawPoint bottomRight = a_centerPoint;
+		Point bottomRight = a_centerPoint;
 		bottomRight.x=halfWidth; bottomRight.y=halfHeight;
 		
 		setTwoCorners(topLeft, bottomRight);
 		placeAt(a_centerPoint);
 	}
 
-	void DrawRectangle::setSizeAndCornerLocation( const DrawPoint &a_topLeft, double a_width, double a_height ){
-		DrawPoint topLeft = a_topLeft;
-		topLeft.x=0; topLeft.y=0;
-		
-		DrawPoint bottomRight = a_topLeft;
-		bottomRight.x=a_width; bottomRight.y=a_height;
+	void DrawRectangle::setSizeAndCornerLocation( const Point &a_topLeft, double a_width, double a_height ){
+		Point topLeft(0, 0);
+		Point bottomRight(a_width, a_height);
 		
 		setTwoCorners(topLeft, bottomRight);
 		placeAt(a_topLeft);
 	}
 
 	void DrawRectangle::resetTextureCoordinates(){
-		Pnt[0].textureX = 0.0; Pnt[0].textureY = 0.0;
-		Pnt[1].textureX = 0.0; Pnt[1].textureY = 1.0;
-		Pnt[2].textureX = 1.0; Pnt[2].textureY = 1.0;
-		Pnt[3].textureX = 1.0; Pnt[3].textureY = 0.0;
+		points[0].textureX = 0.0; points[0].textureY = 0.0;
+		points[1].textureX = 0.0; points[1].textureY = 1.0;
+		points[2].textureX = 1.0; points[2].textureY = 1.0;
+		points[3].textureX = 1.0; points[3].textureY = 0.0;
 	}
 
-	void DrawRectangle::draw(){
+	void DrawRectangle::drawImplementation(){
 		defaultDraw(GL_TRIANGLE_FAN);
 	}
 
-	void AssignTextureToRectangle(DrawRectangle &a_rectangle, const SubTexture *a_texture, bool a_flip){
+	void AssignTextureToRectangle(DrawRectangle &a_rectangle, const SubTexture *a_texture, bool a_resize, bool a_flip){
 		TexturePoint TmpPoint[4];
 		TmpPoint[0].textureX = a_texture->percentX;
 		TmpPoint[0].textureY = a_texture->percentY;
@@ -402,10 +658,17 @@ namespace MV {
 		}
 		a_rectangle.applyToCorners(TmpPoint[0], TmpPoint[1], TmpPoint[2], TmpPoint[3]);
 		a_rectangle.setTexture(a_texture->parentTexture);
+
+		if(a_resize){
+			a_rectangle.setTwoCorners(MV::Point(0, 0), MV::Point(a_texture->width, a_texture->height));
+		}
 	}
 
-	void AssignTextureToRectangle(DrawRectangle &a_rectangle, const MainTexture *a_texture, bool a_flip){
+	void AssignTextureToRectangle(DrawRectangle &a_rectangle, const MainTexture *a_texture, bool a_resize, bool a_flip){
 		AssignTextureToRectangle(a_rectangle, &(a_texture->texture), a_flip);
+		if(a_resize){
+			a_rectangle.setTwoCorners(MV::Point(0, 0), MV::Point(a_texture->width, a_texture->height));
+		}
 	}
 
 	void AssignTextureToRectangle(DrawRectangle &a_rectangle, const GLuint *a_texture, bool a_flip){
@@ -427,166 +690,6 @@ namespace MV {
 	}
 
 	/*************************\
-	| ---------Scene--------- |
-	\*************************/
-
-	Scene::Scene():drawSorted(true),isSorted(false){}
-
-	Scene::Scene(Draw2D *a_renderer):DrawShape(a_renderer),drawSorted(true),isSorted(false){}
-
-	Scene::~Scene(){
-		clear();
-	}
-
-	void Scene::setRenderer( Draw2D* a_renderer ){
-		renderer = a_renderer;
-		for(auto& cell : DrawList){
-			cell.second->setRenderer(a_renderer);
-		}
-	}
-
-	void Scene::clear(){
-		DrawList.clear();
-	}
-
-	std::shared_ptr<DrawShape> Scene::add(std::shared_ptr<DrawShape> a_childItem, const std::string &a_childId){
-		alertParent("NeedsSort");
-		isSorted = 0;
-		remove(a_childId);
-		if(renderer){
-			a_childItem->setRenderer(renderer);
-		}
-		a_childItem->setParent(this);
-		DrawList[a_childId] = a_childItem;
-		return a_childItem;
-	}
-
-	bool Scene::remove(std::shared_ptr<DrawShape> a_childItem){
-		size_t originalSize = DrawList.size();
-		for(auto cell = DrawList.begin();cell != DrawList.end();){
-			if(*(cell->second) == *a_childItem){
-				DrawList.erase(cell++);
-			}else{
-				++cell;
-			}
-		}
-		return originalSize != DrawList.size();
-	}
-
-	bool Scene::remove(const std::string &a_childId){
-		size_t originalSize = DrawList.size();
-		DrawList.erase(a_childId);
-		return originalSize != DrawList.size();
-	}
-
-	std::shared_ptr<DrawShape> Scene::get(const std::string &a_childId){
-		auto cell = DrawList.find(a_childId);
-		if(cell != DrawList.end()){
-			return cell->second;
-		}
-		require(0, ResourceException("Scene::getChild was unable to find an element matching the ID: (" + a_childId + ")"));
-		return nullptr;
-	}
-
-	void Scene::draw(){
-		pushMatrix();
-		if(drawSorted){
-			sortedRender();
-		}else{
-			unsortedRender();
-		}
-		popMatrix();
-	}
-
-	void Scene::sortedRender(){
-		if(!isSorted){
-			DrawListVector.clear();
-			std::for_each(DrawList.begin(), DrawList.end(), [&](DrawListType::value_type &cell){
-				DrawListVector.push_back(std::shared_ptr<DrawShape>(cell.second));
-			});
-			std::sort(DrawListVector.begin(), DrawListVector.end(), [](DrawListVectorType::value_type one, DrawListVectorType::value_type two){
-				return *one < *two;
-			});
-			isSorted = true;
-		}
-		std::for_each(DrawListVector.begin(), DrawListVector.end(), [](DrawListVectorType::value_type &shape){
-			shape->draw();
-		});
-	}
-
-	void Scene::unsortedRender(){
-		std::for_each(DrawList.begin(), DrawList.end(), [](DrawListType::value_type &shape){
-			shape.second->draw();
-		});
-	}
-
-	double Scene::getDepth(){
-		int elements = 0;
-		double total = 0;
-		for(auto cell = DrawList.begin();cell != DrawList.end();++cell,++elements){
-			total+=cell->second->getDepth();
-		}
-		total/=(elements!=0)?static_cast<double>(elements):1;
-		return total;
-	}
-
-	std::string Scene::getMessage(const std::string &a_message ){
-		if(a_message == "NeedsSort"){
-			alertParent(a_message);
-			isSorted = 0;
-		}else if(a_message == "pushMatrix"){
-			alertParent(a_message);
-			pushMatrix();
-		}else if(a_message == "popMatrix"){
-			popMatrix();
-			alertParent(a_message);
-		}
-		return "";
-	}
-
-	void Scene::sortScene( bool a_depthMatters ){
-		drawSorted = a_depthMatters;
-	}
-
-	void Scene::setColor( Color a_newColor ){
-		for(auto cell = DrawList.begin();cell != DrawList.end();cell++){
-			cell->second->setColor(a_newColor);
-		}
-	}
-
-	BoxAABB Scene::getWorldAABB(){
-		BoxAABB tmpBox1, tmpBox2;
-		bool first = true;
-		std::for_each(DrawList.begin(), DrawList.end(), [&](const DrawListType::value_type &cell){
-			tmpBox1 = cell.second->getWorldAABB();
-			if(first){
-				tmpBox2.initialize(tmpBox1);
-				first = false;
-			}else{
-				tmpBox2.expandWith(tmpBox1);
-			}
-		});
-		return tmpBox2;
-	}
-
-	BoxAABB Scene::getLocalAABB(){
-		BoxAABB tmpBox1, tmpBox2;
-		bool first = true;
-		std::for_each(DrawList.begin(), DrawList.end(), [&](const DrawListType::value_type &cell){
-			tmpBox1 = cell.second->getLocalAABB();
-			tmpBox1.maxPoint += cell.second->getLocation();
-			tmpBox1.minPoint += cell.second->getLocation();
-			if(first){
-				tmpBox2.initialize(tmpBox1);
-				first = false;
-			}else{
-				tmpBox2.expandWith(tmpBox1);
-			}
-		});
-		return tmpBox2;
-	}
-
-	/*************************\
 	| ------PointVolume------ |
 	\*************************/
 
@@ -596,11 +699,9 @@ namespace MV {
 		Point p1,p2;
 		int totalPoints = (int)points.size();
 		for (i=0;i<totalPoints;i++) {
-			p1.x = points[i].x - a_comparePoint.x;
-			p1.y = points[i].y - a_comparePoint.y;
-			p2.x = points[(i+1)%totalPoints].x - a_comparePoint.x;
-			p2.y = points[(i+1)%totalPoints].y - a_comparePoint.y;
-			angle += getAngle((float)p1.x,(float)p1.y,(float)p2.x,(float)p2.y);
+			p1 = points[i]-a_comparePoint;
+			p2 = points[(i+1)%totalPoints] - a_comparePoint;
+			angle += getAngle(p1, p2);
 		}
 		if(angle < 0){angle*=-1;}
 		if (angle < PIE){
@@ -612,12 +713,11 @@ namespace MV {
 		points.push_back(a_newPoint);
 	}
 
-	double PointVolume::getAngle( double a_x1, double a_y1, double a_x2, double a_y2 ){
-		double dtheta,theta1,theta2;
+	double PointVolume::getAngle(const Point &a_p1, const Point &a_p2){
+		double theta1 = atan2(a_p1.y,a_p1.x);
+		double theta2 = atan2(a_p2.y,a_p2.x);
+		double dtheta = theta2 - theta1;
 
-		theta1 = atan2(a_y1,a_x1);
-		theta2 = atan2(a_y2,a_x2);
-		dtheta = theta2 - theta1;
 		while (dtheta > PIE){
 			dtheta -= PIE*2.0;
 		}
@@ -635,12 +735,12 @@ namespace MV {
 		return average;
 	}
 
-	bool PointVolume::volumeCollision( PointVolume &a_compareVolume,  Draw2D* a_renderer){
+	bool PointVolume::volumeCollision(PointVolume &a_compareVolume, Draw2D* a_renderer){
 		require(a_renderer != nullptr, PointerException("PointVolume::volumeCollision was passed a null renderer."));
 		Point point1 = getCenter();
 		Point point2 = a_compareVolume.getCenter();
 
-		double angle = getAngle(point1.x, point1.y, point2.x, point2.y);
+		double angle = getAngle(point1, point2);
 		angle = angle * (180.0 / PIE);
 		angle+=90.0;
 
@@ -650,12 +750,12 @@ namespace MV {
 
 		totalPoints = (int)points.size();
 		for(int i = 0;i < totalPoints;i++){
-			tmpVolume1.addPoint(a_renderer->getObjectToWorldPoint(points[i]));
+			tmpVolume1.addPoint(a_renderer->worldFromLocal(points[i]));
 		}
 
 		totalPoints = (int)a_compareVolume.points.size();
 		for(int i = 0;i < totalPoints;i++){
-			tmpVolume2.addPoint(a_renderer->getObjectToWorldPoint(a_compareVolume.points[i]));
+			tmpVolume2.addPoint(a_renderer->worldFromLocal(a_compareVolume.points[i]));
 		}
 
 		modelviewMatrix().pop();

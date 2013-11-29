@@ -7,7 +7,7 @@ namespace MV {
 
 	class Tiles {
 	public:
-		Tiles(std::shared_ptr<Scene> a_mainScene, const SubTexture& a_initTexture, size_t a_x, size_t a_y, double a_tileWidth, double a_tileHeight):
+		Tiles(std::shared_ptr<DrawNode> a_mainScene, const SubTexture& a_initTexture, size_t a_x, size_t a_y, double a_tileWidth, double a_tileHeight):
 			tileCountX(a_x),
 			tileCountY(a_y),
 			tileWidth(a_tileWidth),
@@ -18,14 +18,14 @@ namespace MV {
 			createBlankTiles(a_initTexture);
 		}
 
-		std::shared_ptr<Scene> decorations(){
-			return mainScene->get<Scene>("decorations");
+		std::shared_ptr<DrawNode> decorations(){
+			return mainScene->get<DrawNode>("decorations");
 		}
-		std::shared_ptr<Scene> scene(){
+		std::shared_ptr<DrawNode> scene(){
 			return mainScene;
 		}
 		std::shared_ptr<DrawRectangle> tile(size_t a_x, size_t a_y){
-			return mainScene->get<Scene>("tiles")->get<DrawRectangle>(getChildId(a_x, a_y));
+			return mainScene->get<DrawNode>("tiles")->get<DrawRectangle>(getChildId(a_x, a_y));
 		}
 
 		//returns bottom left point for a tile
@@ -37,13 +37,13 @@ namespace MV {
 		}
 	private:
 		void initializeScene(){
-			mainScene->make<Scene>("decorations");
-			mainScene->make<Scene>("tiles");
+			mainScene->make<DrawNode>("decorations");
+			mainScene->make<DrawNode>("tiles");
 		}
 
 		void createBlankTiles(const SubTexture &a_initTexture) {
 			mainScene->clear();
-			auto tiles = mainScene->make<Scene>("tiles");
+			auto tiles = mainScene->make<DrawNode>("tiles");
 			for(size_t y = 0;y < tileCountY;++y){
 				for(size_t x = 0;x < tileCountX;++x){
 					auto rect = mainScene->make<DrawRectangle>(getChildId(x, y));
@@ -59,7 +59,7 @@ namespace MV {
 
 		typedef std::vector<std::string> TileRow;
 
-		std::shared_ptr<Scene> mainScene;
+		std::shared_ptr<DrawNode> mainScene;
 		double decorationZOffset;
 		double tileWidth, tileHeight;
 		size_t tileCountX, tileCountY;

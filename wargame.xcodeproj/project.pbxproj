@@ -96,6 +96,41 @@
 			remoteGlobalIDString = 6382B1B10FB0FC5100ECAC02;
 			remoteInfo = Freetype2;
 		};
+		C5109F971759C8C1006B539B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C5109F911759C8C1006B539B /* SDL.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = FD6526630DE8FCCB002AD96B;
+			remoteInfo = libSDL;
+		};
+		C5109F991759C8C1006B539B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C5109F911759C8C1006B539B /* SDL.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = 006E982211955059001DE610;
+			remoteInfo = testsdl;
+		};
+		C5109FA51759C8D9006B539B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C5109FA11759C8D9006B539B /* SDL_mixer.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = BE1FA95407AF96B2004B6283;
+			remoteInfo = "Static Library";
+		};
+		C5109FA71759C8FA006B539B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C5109F911759C8C1006B539B /* SDL.xcodeproj */;
+			proxyType = 1;
+			remoteGlobalIDString = FD6526620DE8FCCB002AD96B;
+			remoteInfo = libSDL;
+		};
+		C5109FAB1759C8FA006B539B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C5109FA11759C8D9006B539B /* SDL_mixer.xcodeproj */;
+			proxyType = 1;
+			remoteGlobalIDString = BE1FA90707AF96B2004B6283;
+			remoteInfo = "Static Library";
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -157,6 +192,8 @@
 		4CE6118B16A813FE0094DB76 /* ImageIO.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ImageIO.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk/System/Library/Frameworks/ImageIO.framework; sourceTree = DEVELOPER_DIR; };
 		4CE6119B16A81B580094DB76 /* freetype2.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = freetype2.xcodeproj; path = "../freetype2-ios/freetype2.xcodeproj"; sourceTree = "<group>"; };
 		4CE611A916A81C8A0094DB76 /* MobileCoreServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MobileCoreServices.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk/System/Library/Frameworks/MobileCoreServices.framework; sourceTree = DEVELOPER_DIR; };
+		C5109F911759C8C1006B539B /* SDL.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = SDL.xcodeproj; path = "../SDL/Xcode-iOS/SDL/SDL.xcodeproj"; sourceTree = "<group>"; };
+		C5109FA11759C8D9006B539B /* SDL_mixer.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = SDL_mixer.xcodeproj; path = "../SDL_mixer/Xcode-iOS/SDL_mixer.xcodeproj"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -209,6 +246,8 @@
 		4C12C51516A88F82004FCD6D /* SubProjects */ = {
 			isa = PBXGroup;
 			children = (
+				C5109FA11759C8D9006B539B /* SDL_mixer.xcodeproj */,
+				C5109F911759C8C1006B539B /* SDL.xcodeproj */,
 				4C12C7E816AB7EED004FCD6D /* SDL_ttf.xcodeproj */,
 				4CE6119B16A81B580094DB76 /* freetype2.xcodeproj */,
 			);
@@ -306,6 +345,23 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		C5109F921759C8C1006B539B /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C5109F981759C8C1006B539B /* libSDL2.a */,
+				C5109F9A1759C8C1006B539B /* testsdl.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		C5109FA21759C8D9006B539B /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C5109FA61759C8D9006B539B /* libSDL2_mixer.a */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -320,6 +376,8 @@
 			buildRules = (
 			);
 			dependencies = (
+				C5109FA81759C8FA006B539B /* PBXTargetDependency */,
+				C5109FAC1759C8FA006B539B /* PBXTargetDependency */,
 				4C12C7F416AB7F06004FCD6D /* PBXTargetDependency */,
 				4C12C7F216AB7F02004FCD6D /* PBXTargetDependency */,
 			);
@@ -370,6 +428,14 @@
 					ProjectRef = 4CE6119B16A81B580094DB76 /* freetype2.xcodeproj */;
 				},
 				{
+					ProductGroup = C5109F921759C8C1006B539B /* Products */;
+					ProjectRef = C5109F911759C8C1006B539B /* SDL.xcodeproj */;
+				},
+				{
+					ProductGroup = C5109FA21759C8D9006B539B /* Products */;
+					ProjectRef = C5109FA11759C8D9006B539B /* SDL_mixer.xcodeproj */;
+				},
+				{
 					ProductGroup = 4C12C7E916AB7EED004FCD6D /* Products */;
 					ProjectRef = 4C12C7E816AB7EED004FCD6D /* SDL_ttf.xcodeproj */;
 				},
@@ -395,6 +461,27 @@
 			fileType = archive.ar;
 			path = libFreetype2.a;
 			remoteRef = 4CE611A216A81B580094DB76 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		C5109F981759C8C1006B539B /* libSDL2.a */ = {
+			isa = PBXReferenceProxy;
+			fileType = archive.ar;
+			path = libSDL2.a;
+			remoteRef = C5109F971759C8C1006B539B /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		C5109F9A1759C8C1006B539B /* testsdl.app */ = {
+			isa = PBXReferenceProxy;
+			fileType = wrapper.application;
+			path = testsdl.app;
+			remoteRef = C5109F991759C8C1006B539B /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		C5109FA61759C8D9006B539B /* libSDL2_mixer.a */ = {
+			isa = PBXReferenceProxy;
+			fileType = archive.ar;
+			path = libSDL2_mixer.a;
+			remoteRef = C5109FA51759C8D9006B539B /* PBXContainerItemProxy */;
 			sourceTree = BUILT_PRODUCTS_DIR;
 		};
 /* End PBXReferenceProxy section */
@@ -465,6 +552,16 @@
 			isa = PBXTargetDependency;
 			name = "Static Library";
 			targetProxy = 4C12C7F316AB7F06004FCD6D /* PBXContainerItemProxy */;
+		};
+		C5109FA81759C8FA006B539B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = libSDL;
+			targetProxy = C5109FA71759C8FA006B539B /* PBXContainerItemProxy */;
+		};
+		C5109FAC1759C8FA006B539B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = "Static Library";
+			targetProxy = C5109FAB1759C8FA006B539B /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 

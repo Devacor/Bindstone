@@ -27,10 +27,61 @@ namespace MV{
 		return result/=a_right;
 	}
 
+	Matrix::MatrixRowAccess::MatrixRowAccess( std::shared_ptr<std::vector<MatrixValue>> a_matrixArray, size_t a_x ) :
+		matrixArray(a_matrixArray),
+		sizeX(a_x),
+		currentX(0){
+	}
+
+	MatrixValue& Matrix::MatrixRowAccess::operator[]( size_t a_index ) {
+		return (*matrixArray)[(sizeX * currentX) + (a_index)];
+	}
+
+	const MatrixValue& Matrix::MatrixRowAccess::operator[]( size_t a_index ) const {
+		return (*matrixArray)[(sizeX * currentX) + (a_index)];
+	}
+
+	void Matrix::MatrixRowAccess::setCurrentX( size_t a_currentX ) const {
+		currentX = a_currentX;
+	}
+
+	void Matrix::MatrixRowAccess::resize(size_t a_x){
+		sizeX = a_x;
+	}
+
+	Matrix::Matrix( size_t a_size, MatrixValue a_value ) :
+		sizeX(a_size),
+		sizeY(a_size),
+		matrixArray(std::make_shared<std::vector<MatrixValue>>(a_size*a_size, a_value)),
+		rowAccessor(matrixArray, a_size){
+	}
+
+	Matrix::Matrix( size_t a_x, size_t a_y, MatrixValue a_value ) :
+		sizeX(a_x),
+		sizeY(a_y),
+		matrixArray(std::make_shared<std::vector<MatrixValue>>(a_x*a_y, a_value)),
+		rowAccessor(matrixArray, a_x){
+	}
+
+	Matrix::Matrix( const Matrix& a_other ):
+		sizeX(a_other.sizeX),
+		sizeY(a_other.sizeY),
+		matrixArray(std::make_shared<std::vector<MatrixValue>>(a_other.matrixArray->begin(), a_other.matrixArray->end())),
+		rowAccessor(matrixArray, a_other.sizeX){
+	}
+
+	Matrix::Matrix( Matrix&& a_other ):
+		sizeX(std::move(a_other.sizeX)),
+		sizeY(std::move(a_other.sizeY)),
+		matrixArray(std::move(a_other.matrixArray)),
+		rowAccessor(matrixArray, sizeX){
+		a_other.matrixArray.reset();
+	}
+
 	void Matrix::print(){
-		for( int y=0;y<sizeY;++y){
-			for( int x=0;x<sizeX;++x){
-				std::cout << content[x][y] << " ";
+		for( size_t y=0;y<sizeY;++y){
+			for( size_t x=0;x<sizeX;++x){
+				std::cout << "(" << (x*sizeX)+(y) << ":" << (*this)[x][y] << ") ";
 			}
 			std::cout << std::endl;
 		}
@@ -38,9 +89,9 @@ namespace MV{
 
 	Matrix& Matrix::operator+=( const Matrix& a_other ){
 		require(getSizeX() == a_other.getSizeY(), RangeException(std::string("Invalid Matrix multiplication in operator+=, mismatched sizes: ")+boost::lexical_cast<std::string>(getSizeX())+" != "+boost::lexical_cast<std::string>(a_other.getSizeY())));
-		for(int x=0; x < getSizeX(); ++x){
-			for(int y=0; y < getSizeY(); ++y){
-				content[x][y]+=a_other[x][y];
+		for(size_t x=0; x < getSizeX(); ++x){
+			for(size_t y=0; y < getSizeY(); ++y){
+				(*this)[x][y]+=a_other[x][y];
 			}
 		}
 		return *this;
@@ -48,9 +99,9 @@ namespace MV{
 
 	Matrix& Matrix::operator-=( const Matrix& a_other ){
 		require(getSizeX() == a_other.getSizeY(), RangeException(std::string("Invalid Matrix multiplication in operator-=, mismatched sizes: ")+boost::lexical_cast<std::string>(getSizeX())+" != "+boost::lexical_cast<std::string>(a_other.getSizeY())));
-		for(int x=0; x < getSizeX(); ++x){
-			for(int y=0; y < getSizeY(); ++y){
-				content[x][y]-=a_other[x][y];
+		for(size_t x=0; x < getSizeX(); ++x){
+			for(size_t y=0; y < getSizeY(); ++y){
+				(*this)[x][y]-=a_other[x][y];
 			}
 		}
 		return *this;
@@ -58,13 +109,13 @@ namespace MV{
 
 	Matrix& Matrix::operator*=( const Matrix& a_other ){
 		require(getSizeX() == a_other.getSizeY(), RangeException(std::string("Invalid Matrix multiplication in operator*=, mismatched sizes: ")+boost::lexical_cast<std::string>(getSizeX())+" != "+boost::lexical_cast<std::string>(a_other.getSizeY())));
-		int resultX = getSizeY(), resultY = a_other.getSizeX(), commonSize = sizeX;
+		size_t resultX = getSizeY(), resultY = a_other.getSizeX(), commonSize = sizeX;
 		Matrix result(resultY, resultX);
 
-		for(int x=0; x < resultX; ++x){
-			for(int y=0; y < resultY; ++y){
-				for(int common=0; common < commonSize; ++common){
-					result[y][x] += content[common][x] * a_other[y][common];
+		for(size_t x=0; x < resultX; ++x){
+			for(size_t y=0; y < resultY; ++y){
+				for(size_t common=0; common < commonSize; ++common){
+					result[y][x] += (*this)[common][x] * a_other[y][common];
 				}
 			}
 		}
@@ -74,36 +125,59 @@ namespace MV{
 	}
 
 	Matrix& Matrix::operator*=( const MatrixValue& a_other ){
-		std::for_each(content.begin(), content.end(), [&](MatrixRow &row){
-			std::for_each(row.begin(), row.end(), [&](MatrixValue &value){
-				value*=a_other;
-			});
+		std::for_each(matrixArray->begin(), matrixArray->end(), [&](MatrixValue &value){
+			value*=a_other;
 		});
 		return *this;
 	}
 
 	Matrix& Matrix::operator/=( const MatrixValue& a_other ){
-		std::for_each(content.begin(), content.end(), [&](MatrixRow &row){
-			std::for_each(row.begin(), row.end(), [&](MatrixValue &value){
-				value/=a_other;
-			});
+		std::for_each(matrixArray->begin(), matrixArray->end(), [&](MatrixValue &value){
+			value/=a_other;
 		});
 		return *this;
 	}
 
 	std::shared_ptr<std::vector<MatrixValue>> Matrix::getMatrixArray(){
-		auto matrixArrayRepresentation = std::make_shared<std::vector<MatrixValue>>(sizeX*sizeY);
-		for(int y=0; y < sizeY; ++y){
-			for(int x=0; x < sizeX; ++x){
-				(*matrixArrayRepresentation)[y*sizeX + x] = content[x][y];
-			}
-		}
+		return matrixArray;
+	}
 
-		return matrixArrayRepresentation;
+	Matrix& Matrix::clear( MatrixValue a_value ) {
+		std::for_each(matrixArray->begin(), matrixArray->end(), [&](MatrixValue &value){
+			value=a_value;
+		});
+		return *this;
+	}
+
+	Matrix::MatrixRowAccess& Matrix::operator[]( size_t a_index ) {
+		rowAccessor.setCurrentX(a_index);
+		return rowAccessor;
+	}
+
+	const Matrix::MatrixRowAccess& Matrix::operator[]( size_t a_index ) const {
+		rowAccessor.setCurrentX(a_index);
+		return rowAccessor;
+	}
+
+	Matrix& Matrix::operator=(const Matrix& a_other){
+		*matrixArray = *a_other.matrixArray;
+		sizeX = a_other.sizeX;
+		sizeY = a_other.sizeY;
+		rowAccessor.resize(sizeX);
+		return *this;
+	}
+
+	Matrix& Matrix::operator=(Matrix&& a_other){
+		matrixArray = std::move(a_other.matrixArray);
+		a_other.matrixArray.reset();
+		sizeX = std::move(a_other.sizeX);
+		sizeY = std::move(a_other.sizeY);
+		rowAccessor.resize(sizeX);
+		return *this;
 	}
 
 
-	TransformMatrix::TransformMatrix( MatrixValue a_value /*= 0.0*/ ) :Matrix(4, a_value){
+	TransformMatrix::TransformMatrix( MatrixValue a_value ) :Matrix(4, a_value){
 		makeIdentity();
 	}
 
@@ -113,9 +187,9 @@ namespace MV{
 	}
 
 	TransformMatrix& TransformMatrix::makeIdentity(){
-		content = MatrixContainer(sizeY, MatrixRow(sizeX, 0.0));
-		for(int i=0; i < getSizeX() && i < getSizeY();++i){
-			content[i][i] = 1;
+		clear();
+		for(size_t i=0; i < getSizeX() && i < getSizeY();++i){
+			(*this)[i][i] = 1.0;
 		}
 		return *this;
 	}
@@ -129,14 +203,15 @@ namespace MV{
 		MatrixValue ty = - ((a_top + a_bottom)/(a_top - a_bottom));
 		MatrixValue tz = - ((a_far + a_near)/(a_far - a_near));
 
-		content = MatrixContainer(sizeY, MatrixRow(sizeX, 0.0));
-		content[0][0] = a;
-		content[1][1] = b;
-		content[2][2] = c;
-		content[3][3] = 1.0;
-		content[3][0] = tx;
-		content[3][1] = ty;
-		content[3][2] = tz;
+		clear();
+		(*this)[0][0] = a;
+		(*this)[1][1] = b;
+		(*this)[2][2] = c;
+		(*this)[3][3] = 1.0;
+		(*this)[3][0] = tx;
+		(*this)[3][1] = ty;
+		(*this)[3][2] = tz;
+
 		return *this;
 	}
 
@@ -189,6 +264,7 @@ namespace MV{
 		translation[3][1] = a_y;
 		translation[3][2] = a_z;
 		*this *= translation;
+
 		return *this;
 	}
 
@@ -218,16 +294,25 @@ namespace MV{
 	}
 
 	TransformMatrix& MatrixStack::push(){
+		if(!name.empty()){
+			std::cout << "Matrix: " << name << ".push()" << std::endl;
+		}
 		stack.push_back(stack.back());
 		return stack.back();
 	}
 
 	TransformMatrix& MatrixStack::push( const TransformMatrix &matrix ){
+		if(!name.empty()){
+			std::cout << "Matrix: " << name << ".push(m)" << std::endl;
+		}
 		stack.push_back(matrix);
 		return stack.back();
 	}
 
 	void MatrixStack::pop(){
+		if(!name.empty()){
+			std::cout << "Matrix: " << name << ".pop()" << std::endl;
+		}
 		stack.pop_back();
 		if(stack.empty()){
 			push(TransformMatrix());
@@ -235,6 +320,9 @@ namespace MV{
 	}
 
 	void MatrixStack::clear(){
+		if(!name.empty()){
+			std::cout << "Matrix: " << name << ".clear()" << std::endl;
+		}
 		stack.clear();
 		push(TransformMatrix());
 	}

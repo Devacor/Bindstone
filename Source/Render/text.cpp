@@ -146,7 +146,7 @@ namespace MV {
 
 	TextLibrary::TextLibrary( Draw2D *a_rendering ){
 		require(a_rendering != nullptr, PointerException("TextLibrary::TextLibrary was passed a null Draw2D pointer."));
-		white.r = 255; white.g = 255; white.b = 255; white.unused = 0;
+		white.r = 255; white.g = 255; white.b = 255; white.a = 0;
 		render = a_rendering;
 		if(!TTF_WasInit()){
 			TTF_Init();
@@ -169,8 +169,8 @@ namespace MV {
 	}
 
 	//TODO: organize this method better.
-	std::shared_ptr<Scene> TextLibrary::composeScene(std::vector<TextState> a_textStateList, double a_maxWidth, TextWrapMethod a_wrapMethod){
-		auto textScene = std::make_shared<Scene>(render);
+	std::shared_ptr<DrawNode> TextLibrary::composeScene(std::vector<TextState> a_textStateList, double a_maxWidth, TextWrapMethod a_wrapMethod){
+		auto textScene = std::make_shared<DrawNode>(render);
 		if(a_textStateList.empty()){return textScene;}
 
 		Color currentColor;
@@ -292,7 +292,7 @@ namespace MV {
 		textures(a_textures),
 		fontIdentifier(a_fontIdentifier),
 		textTextureScene(a_textLibrary->getRenderer()),
-		textBoxFullScene(std::make_shared<Scene>(a_textLibrary->getRenderer())),
+		textBoxFullScene(std::make_shared<DrawNode>(a_textLibrary->getRenderer())),
 		width(a_width),
 		height(a_height),
 		initialized(false){
@@ -303,7 +303,7 @@ namespace MV {
 		render(a_textLibrary->getRenderer()),
 		textures(a_textures),
 		fontIdentifier(a_fontIdentifier),
-		textTextureScene(a_textLibrary->getRenderer()), textBoxFullScene(std::make_shared<Scene>(a_textLibrary->getRenderer())),
+		textTextureScene(a_textLibrary->getRenderer()), textBoxFullScene(std::make_shared<DrawNode>(a_textLibrary->getRenderer())),
 		width(a_width),
 		height(a_height),
 		initialized(false){
@@ -346,8 +346,9 @@ namespace MV {
 				backspace();
 				break;
 			default:
-				if(event.key.keysym.unicode != 0){
-					appendTextUint(event.key.keysym.unicode);
+#pragma message ( "WARNING: This needs to be addressed!" )
+				if(event.key.keysym.unused != 0){
+					appendTextUint(event.key.keysym.unused);
 				}
 				break;
 			}

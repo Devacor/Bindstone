@@ -34,9 +34,6 @@
     <ClCompile Include="Source\Audio\sound.cpp">
       <Filter>Source Files\Audio</Filter>
     </ClCompile>
-    <ClCompile Include="Source\exampleCode.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="Source\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -70,6 +67,12 @@
     <ClCompile Include="Source\Render\tiles.cpp">
       <Filter>Source Files\Render</Filter>
     </ClCompile>
+    <ClCompile Include="Source\game.cpp">
+      <Filter>Source Files\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Game\pathGrid.cpp">
+      <Filter>Source Files\Game</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -83,9 +86,6 @@
     </ClInclude>
     <ClInclude Include="Source\Audio\sound.h">
       <Filter>Source Files\Audio</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\exampleCode.h">
-      <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="Source\Render\drawShapes.h">
       <Filter>Source Files\Render</Filter>
@@ -122,6 +122,15 @@
     </ClInclude>
     <ClInclude Include="Source\Render\tiles.h">
       <Filter>Source Files\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\glext.h">
+      <Filter>Source Files\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\game.h">
+      <Filter>Source Files\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\pathGrid.h">
+      <Filter>Source Files\Game</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

@@ -45,14 +45,19 @@ namespace MV {
 		double getHeight() const{return (maxPoint-minPoint).y;}
 
 		//includes z
-		bool pointContained(const Point &a_comparePoint) const;
+		bool pointContainedZ(const Point &a_comparePoint) const;
 
 		//ignores z
-		bool pointContainedXY(const Point &a_comparePoint) const;
+		bool pointContained(const Point &a_comparePoint) const;
+
+		void sanitize();
 
 		Point centerPoint(){return minPoint + ((minPoint + maxPoint) / 2.0);}
 		Point minPoint, maxPoint;
 	};
+
+	std::ostream& operator<<(std::ostream& a_os, const BoxAABB& a_point);
+	std::istream& operator>>(std::istream& a_is, BoxAABB& a_point);
 
 	class PointVolume{
 	public:
@@ -68,40 +73,82 @@ namespace MV {
 		std::vector<Point> points;
 	private:
 		//get angle within proper range between two points (-pi to +pi)
-		double getAngle(double a_x1, double a_y1, double a_x2, double a_y2);
+		double getAngle(const Point &a_p1, const Point &a_p2);
 	};
 
 	typedef Point AxisAngles;
 	typedef Point AxisMagnitude;
 
 	//Abstract Base Class
-	class DrawShape : public std::enable_shared_from_this<DrawShape> {
+	class DrawNode : public std::enable_shared_from_this<DrawNode> {
 	public:
-		DrawShape():renderer(nullptr),myParent(nullptr),hasTexture(false),depthOverride(false){}
-		DrawShape(Draw2D* a_renderer):renderer(a_renderer),myParent(nullptr),hasTexture(false),depthOverride(false){}
-		virtual ~DrawShape(){}
+		DrawNode():renderer(nullptr),myParent(nullptr),hasTexture(false),depthOverride(false),drawSorted(true),isSorted(false){}
+		DrawNode(Draw2D* a_renderer):renderer(a_renderer),myParent(nullptr),hasTexture(false),depthOverride(false),drawSorted(true),isSorted(false){}
+		virtual ~DrawNode(){}
 
 		//Must be set or initialized in the constructor
 		virtual void setRenderer(Draw2D* a_renderer){renderer = a_renderer;}
 		Draw2D* getRenderer(){return renderer;}
 
-		//For composite collections
-		virtual std::shared_ptr<DrawShape> add(std::shared_ptr<DrawShape> a_childItem, std::string a_childId){return nullptr;}
-		virtual bool remove(std::shared_ptr<DrawShape> a_childItem, bool a_deleteOnRemove = true){return false;}
-		virtual bool remove(std::string a_childId, bool a_deleteOnRemove = true){return false;}
+		virtual void clear();
 
-		virtual void draw() = 0;
-		virtual double getDepth();
+		//For composite collections
+		template<typename TypeToAdd>
+		std::shared_ptr<TypeToAdd> add(std::shared_ptr<TypeToAdd> a_childItem, const std::string &a_childId) {
+			alertParent("NeedsSort");
+			isSorted = 0;
+			if(renderer){
+				a_childItem->setRenderer(renderer);
+			}
+			a_childItem->setParent(this);
+			drawList[a_childId] = a_childItem;
+			return a_childItem;
+		}
+
+		template<typename TypeToMake>
+		std::shared_ptr<TypeToMake> make(const std::string &a_childId) {
+			auto newChild = std::make_shared<TypeToMake>();
+			add(newChild, a_childId);
+			return newChild;
+		}
+
+		bool remove(std::shared_ptr<DrawNode> a_childItem);
+		bool remove(const std::string &a_childId);
+
+		std::shared_ptr<DrawNode> get(const std::string& a_childId);
+		//convenient return value conversion get<DrawShapeType>(childId)
+		template<typename DerivedClass>
+		std::shared_ptr<DerivedClass> get(const std::string& a_childId){
+			return get(a_childId)->getThis<DerivedClass>();
+		}
+
+		void draw();
+		double getDepth();
 
 		//Axis Aligned Bounding Box
-		virtual BoxAABB getWorldAABB();
+		virtual BoxAABB getWorldAABB(bool includeChildren = true);
+		virtual BoxAABB getScreenAABB(bool includeChildren = true);
 		virtual BoxAABB getLocalAABB();
 
-		//Get all points
-		virtual PointVolume getWorldPoints();
-		virtual Point getWorldPoint(Point a_local);
+		//Point conversion
+		Point worldFromLocal(const Point &a_local);
+		Point screenFromLocal(const Point &a_local);
+		Point localFromScreen(const Point &a_screen);
+		Point localFromWorld(const Point &a_world);
+
+		//If you have several points this is way more efficient.
+		std::vector<Point> worldFromLocal(std::vector<Point> a_local);
+		std::vector<Point> screenFromLocal(std::vector<Point> a_local);
+		std::vector<Point> localFromScreen(std::vector<Point> a_screen);
+		std::vector<Point> localFromWorld(std::vector<Point> a_world);
+
+		BoxAABB worldFromLocal(BoxAABB a_local);
+		BoxAABB screenFromLocal(BoxAABB a_local);
+		BoxAABB localFromScreen(BoxAABB a_screen);
+		BoxAABB localFromWorld(BoxAABB a_world);
+
 		//For command type alerts
-		void setParent(DrawShape* a_parentItem);
+		void setParent(DrawNode* a_parentItem);
 
 		void scale(double a_newScale);
 		void scale(const Point &a_scaleValue);
@@ -141,6 +188,8 @@ namespace MV {
 				alertParent("NeedsSort");
 			}
 		}
+		//true to render the sorted list, false to render unordered.  Default behavior is true.
+		void sortScene(bool a_depthMatters);
 
 		Point getLocation();
 		Point getRotation();
@@ -156,9 +205,9 @@ namespace MV {
 		void removeTexture();
 
 		//Used to determine sorting based on getDepth
-		bool operator<(DrawShape &a_other);
-		bool operator>(DrawShape &a_other);
-		bool operator==(DrawShape &a_other);
+		bool operator<(DrawNode &a_other);
+		bool operator>(DrawNode &a_other);
+		bool operator==(DrawNode &a_other);
 
 		//Retrieve and convert this to the desired type, argument required for gathering the type.
 		//example call DrawRectangle *rect = ourScene->getChild("id")->getThis<DrawRectangle>();
@@ -169,9 +218,11 @@ namespace MV {
 		}
 	protected:
 		void defaultDraw(GLenum drawType);
+		void sortedRender();
+		void unsortedRender();
 
 		//Command passing
-		virtual std::string getMessage(const std::string &a_message){return "UNHANDLED";}
+		virtual std::string getMessage(const std::string &a_message);
 		void alertParent(const std::string &a_message){if(myParent!=nullptr){myParent->getMessage(a_message);}}
 		
 		void pushMatrix();
@@ -192,160 +243,121 @@ namespace MV {
 		bool hasTexture;
 		bool needsBoundRecalculate;
 		const GLuint *texture;
-		std::vector<DrawPoint> Pnt;
-		DrawShape *myParent;
+		std::vector<DrawPoint> points;
+		DrawNode *myParent;
 
 		Draw2D *renderer;
 
 		GLenum drawType;
 
+		bool drawSorted, isSorted;
+		typedef std::vector<std::shared_ptr<DrawNode>> DrawListVectorType;
+		DrawListVectorType drawListVector;
+		typedef std::map<std::string, std::shared_ptr<DrawNode>> DrawListType;
+		DrawListType drawList;
+
 	private:
+		virtual void drawImplementation(){} //override this in subclasses
 		void defaultDrawRenderStep(GLenum drawType);
 		void bindOrDisableTexture(const std::shared_ptr<std::vector<GLfloat>> &texturePoints);
 	};
 
-	class DrawPixel : public DrawShape{
+	class DrawPixel : public DrawNode{
 	public:
 		DrawPixel(){
-			Pnt.resize(1);
+			points.resize(1);
 		}
-		DrawPixel(Draw2D *a_renderer):DrawShape(a_renderer){
-			Pnt.resize(1);
+		DrawPixel(Draw2D *a_renderer):DrawNode(a_renderer){
+			points.resize(1);
 		}
 		virtual ~DrawPixel(){}
-
-		virtual void draw();
 
 		void setPoint(const DrawPoint &a_point);
 
 		template<typename PointAssign>
 		void applyToPoint(const PointAssign &a_values);
+
+	private:
+		virtual void drawImplementation();
 	};
 
 	template<typename PointAssign>
 	void DrawPixel::applyToPoint(const PointAssign &a_values){
 		alertParent("NeedsSort");
-		Pnt[0] = a_values;
+		points[0] = a_values;
 	}
 
-	class DrawLine : public DrawShape{
+	class DrawLine : public DrawNode{
 	public:
 		DrawLine(){
-			Pnt.resize(2);
+			points.resize(2);
 		}
 		DrawLine(Draw2D *a_renderer):
-			DrawShape(a_renderer){
+			DrawNode(a_renderer){
 			
-			Pnt.resize(2);
+			points.resize(2);
 		}
 	  
 		virtual ~DrawLine(){}
-
-		virtual void draw();
 
 		void setEnds(const DrawPoint &a_startPoint, const DrawPoint &a_endPoint);
 
 		template<typename PointAssign>
 		void applyToEnds(const PointAssign &a_startPoint, const PointAssign &a_endPoint);
+	private:
+		virtual void drawImplementation();
 	};
 
 	template<typename PointAssign>
 	void DrawLine::applyToEnds(const PointAssign &a_startPoint, const PointAssign &a_endPoint){
 		alertParent("NeedsSort");
-		Pnt[0] = a_startPoint;
-		Pnt[1] = a_endPoint;
+		points[0] = a_startPoint;
+		points[1] = a_endPoint;
 	}
 
-	class DrawRectangle : public DrawShape{
+	class DrawRectangle : public DrawNode{
 	public:
 		DrawRectangle(){
-			Pnt.resize(4);
+			points.resize(4);
 			resetTextureCoordinates();
 		}
-		DrawRectangle(Draw2D *a_renderer):DrawShape(a_renderer){
-			Pnt.resize(4);
+		DrawRectangle(Draw2D *a_renderer):DrawNode(a_renderer){
+			points.resize(4);
 			resetTextureCoordinates();
 		}
 		virtual ~DrawRectangle(){;}
 
-		virtual void draw();
-
 		void setTwoCorners(const DrawPoint &a_TopLeft, const DrawPoint &a_TopRight);
-		void setSizeAndLocation(const DrawPoint &a_CenterPoint, double a_width, double a_height);
-		void setSizeAndCornerLocation(const DrawPoint &a_TopLeft, double a_width, double a_height);
+		void setTwoCorners(const Point &a_TopLeft, const Point &a_TopRight);
+
+		void setTwoCorners(const BoxAABB &a_bounds);
+
+		void setSizeAndLocation(const Point &a_CenterPoint, double a_width, double a_height);
+		void setSizeAndCornerLocation(const Point &a_TopLeft, double a_width, double a_height);
 
 		template<typename PointAssign>
 		void applyToCorners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight);
 
 		void resetTextureCoordinates();
+	private:
+		virtual void drawImplementation();
 	};
 
 	template<typename PointAssign>
 	void DrawRectangle::applyToCorners(const PointAssign & a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomRight, const PointAssign & a_BottomLeft){
-		alertParent("NeedsSort");
-		Pnt[0] = a_TopLeft;
-		Pnt[1] = a_BottomLeft;
-		Pnt[2] = a_BottomRight;
-		Pnt[3] = a_TopRight;
+		double originalDepth = getDepth();
+		points[0] = a_TopLeft;
+		points[1] = a_BottomLeft;
+		points[2] = a_BottomRight;
+		points[3] = a_TopRight;
+		if(originalDepth != getDepth()){
+			alertParent("NeedsSort");
+		}
 	}
 
-	void AssignTextureToRectangle(DrawRectangle &a_rectangle, const SubTexture *a_texture, bool a_flip = false);
-	void AssignTextureToRectangle(DrawRectangle &a_rectangle, const MainTexture *a_texture, bool a_flip = false);
+	void AssignTextureToRectangle(DrawRectangle &a_rectangle, const SubTexture *a_texture, bool a_resize = true, bool a_flip = false);
+	void AssignTextureToRectangle(DrawRectangle &a_rectangle, const MainTexture *a_texture, bool a_resize = true, bool a_flip = false);
 	void AssignTextureToRectangle(DrawRectangle &a_rectangle, const GLuint *a_texture, bool a_flip = false);
-
-	class Scene : public DrawShape{
-	public:
-		Scene();
-		Scene(Draw2D *a_renderer);
-		virtual ~Scene();
-
-		virtual void setRenderer(Draw2D *a_renderer);
-
-		std::shared_ptr<DrawShape> add(std::shared_ptr<DrawShape> a_childItem, const std::string &a_childId);
-
-		template<typename TypeToMake>
-		std::shared_ptr<TypeToMake> make(const std::string &a_childId) {
-			auto newChild = std::make_shared<TypeToMake>();
-			add(newChild, a_childId);
-			return newChild;
-		}
-
-		virtual bool remove(std::shared_ptr<DrawShape> a_childItem);
-		virtual bool remove(const std::string &a_childId);
-
-		virtual void clear();
-
-		virtual std::shared_ptr<DrawShape> get(const std::string& a_childId);
-		//convenient return value conversion get<DrawShapeType>(childId)
-		template<typename DerivedClass>
-		std::shared_ptr<DerivedClass> get(const std::string& a_childId){
-			return get(a_childId)->getThis<DerivedClass>();
-		}
-
-		virtual double getDepth();
-
-		virtual BoxAABB getWorldAABB();
-		virtual BoxAABB getLocalAABB();
-
-		virtual void setColor(Color a_newColor);
-
-		virtual void draw();
-
-		//true to render the sorted list, false to render unordered.  Default behavior is true.
-		void sortScene(bool a_depthMatters);
-	protected:
-		virtual std::string getMessage(const std::string &a_message);
-
-		bool drawSorted, isSorted;
-		typedef std::vector<std::shared_ptr<DrawShape>> DrawListVectorType;
-		DrawListVectorType DrawListVector;
-		typedef std::map<std::string, std::shared_ptr<DrawShape>> DrawListType;
-		DrawListType DrawList;
-
-	private:
-		void sortedRender();
-		void unsortedRender();
-	};
 
 }
 

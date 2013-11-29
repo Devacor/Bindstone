@@ -4,4 +4,5 @@
 *.log
 /Debug/*
 /Release/*
+/x64/*
 .DS_Store

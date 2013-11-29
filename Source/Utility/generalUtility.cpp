@@ -7,12 +7,14 @@
 #include <algorithm>
 
 #ifdef __APPLE__
-#include "CoreFoundation/CoreFoundation.h"
-#include <assert.h>
-#include <stdbool.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <sys/sysctl.h>
+	#include "CoreFoundation/CoreFoundation.h"
+	#include <assert.h>
+	#include <stdbool.h>
+	#include <sys/types.h>
+	#include <unistd.h>
+	#include <sys/sysctl.h>
+#else
+	#include <windows.h>
 #endif
 
 namespace MV {
@@ -52,6 +54,14 @@ namespace MV {
 	}
 #endif
 
+
+	void systemSleep(int time){
+#ifdef __APPLE__
+		sleep(time);
+#else
+		Sleep(time);
+#endif
+	}
 
 	void initializeFilesystem(){
 #ifdef __APPLE__

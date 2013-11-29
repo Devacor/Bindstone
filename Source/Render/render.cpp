@@ -3,11 +3,8 @@
 
 
 namespace MESA {
-	//these two methods taken from the MESA library.
-	static void gluMultMatrixVecd(const GLdouble matrix[16], const GLdouble in[4], GLdouble out[4]) {
-		int i;
-
-		for (i=0; i<4; i++) {
+	void gluMultMatrixVecd(const GLdouble matrix[16], const GLdouble in[4], GLdouble out[4]) {
+		for (int i=0; i<4; i++) {
 			out[i] = 
 				in[0] * matrix[0*4+i] +
 				in[1] * matrix[1*4+i] +
@@ -15,17 +12,83 @@ namespace MESA {
 				in[3] * matrix[3*4+i];
 		}
 	}
-	GLint extern gluProject(GLdouble objx, GLdouble objy, GLdouble objz, const GLdouble modelMatrix[16], const GLdouble projMatrix[16], const GLint viewport[4], GLdouble *winx, GLdouble *winy, GLdouble *winz) {
-		GLdouble in[4];
-		GLdouble out[4];
+
+	int gluInvertMatrixd(const GLdouble m[16], GLdouble invOut[16]) {
+		double inv[16], det;
+
+		inv[0] =   m[5]*m[10]*m[15] - m[5]*m[11]*m[14] - m[9]*m[6]*m[15]
+				 + m[9]*m[7]*m[14] + m[13]*m[6]*m[11] - m[13]*m[7]*m[10];
+		inv[4] =  -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15]
+				 - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
+		inv[8] =   m[4]*m[9]*m[15] - m[4]*m[11]*m[13] - m[8]*m[5]*m[15]
+				 + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
+		inv[12] = -m[4]*m[9]*m[14] + m[4]*m[10]*m[13] + m[8]*m[5]*m[14]
+				 - m[8]*m[6]*m[13] - m[12]*m[5]*m[10] + m[12]*m[6]*m[9];
+		inv[1] =  -m[1]*m[10]*m[15] + m[1]*m[11]*m[14] + m[9]*m[2]*m[15]
+				 - m[9]*m[3]*m[14] - m[13]*m[2]*m[11] + m[13]*m[3]*m[10];
+		inv[5] =   m[0]*m[10]*m[15] - m[0]*m[11]*m[14] - m[8]*m[2]*m[15]
+				 + m[8]*m[3]*m[14] + m[12]*m[2]*m[11] - m[12]*m[3]*m[10];
+		inv[9] =  -m[0]*m[9]*m[15] + m[0]*m[11]*m[13] + m[8]*m[1]*m[15]
+				 - m[8]*m[3]*m[13] - m[12]*m[1]*m[11] + m[12]*m[3]*m[9];
+		inv[13] =  m[0]*m[9]*m[14] - m[0]*m[10]*m[13] - m[8]*m[1]*m[14]
+				 + m[8]*m[2]*m[13] + m[12]*m[1]*m[10] - m[12]*m[2]*m[9];
+		inv[2] =   m[1]*m[6]*m[15] - m[1]*m[7]*m[14] - m[5]*m[2]*m[15]
+				 + m[5]*m[3]*m[14] + m[13]*m[2]*m[7] - m[13]*m[3]*m[6];
+		inv[6] =  -m[0]*m[6]*m[15] + m[0]*m[7]*m[14] + m[4]*m[2]*m[15]
+				 - m[4]*m[3]*m[14] - m[12]*m[2]*m[7] + m[12]*m[3]*m[6];
+		inv[10] =  m[0]*m[5]*m[15] - m[0]*m[7]*m[13] - m[4]*m[1]*m[15]
+				 + m[4]*m[3]*m[13] + m[12]*m[1]*m[7] - m[12]*m[3]*m[5];
+		inv[14] = -m[0]*m[5]*m[14] + m[0]*m[6]*m[13] + m[4]*m[1]*m[14]
+				 - m[4]*m[2]*m[13] - m[12]*m[1]*m[6] + m[12]*m[2]*m[5];
+		inv[3] =  -m[1]*m[6]*m[11] + m[1]*m[7]*m[10] + m[5]*m[2]*m[11]
+				 - m[5]*m[3]*m[10] - m[9]*m[2]*m[7] + m[9]*m[3]*m[6];
+		inv[7] =   m[0]*m[6]*m[11] - m[0]*m[7]*m[10] - m[4]*m[2]*m[11]
+				 + m[4]*m[3]*m[10] + m[8]*m[2]*m[7] - m[8]*m[3]*m[6];
+		inv[11] = -m[0]*m[5]*m[11] + m[0]*m[7]*m[9] + m[4]*m[1]*m[11]
+				 - m[4]*m[3]*m[9] - m[8]*m[1]*m[7] + m[8]*m[3]*m[5];
+		inv[15] =  m[0]*m[5]*m[10] - m[0]*m[6]*m[9] - m[4]*m[1]*m[10]
+				 + m[4]*m[2]*m[9] + m[8]*m[1]*m[6] - m[8]*m[2]*m[5];
+
+		det = m[0]*inv[0] + m[1]*inv[4] + m[2]*inv[8] + m[3]*inv[12];
+		if (det == 0){
+			return GL_FALSE;
+		}
+		det = 1.0 / det;
+
+		for (int i = 0; i < 16; i++){
+			invOut[i] = inv[i] * det;
+		}
+		return GL_TRUE;
+	}
+
+	void gluMultMatricesd(const GLdouble a[16], const GLdouble b[16], GLdouble r[16]){
+		for (int i = 0; i < 4; i++) {
+			for (int j = 0; j < 4; j++) {
+				r[i*4+j] = 
+				a[i*4+0]*b[0*4+j] +
+				a[i*4+1]*b[1*4+j] +
+				a[i*4+2]*b[2*4+j] +
+				a[i*4+3]*b[3*4+j];
+			}
+		}
+	}
+
+	GLint gluProject(GLdouble objx, GLdouble objy, GLdouble objz, 
+		const GLdouble modelMatrix[16], const GLdouble projMatrix[16], const GLint viewport[4],
+		GLdouble *winx, GLdouble *winy, GLdouble *winz){
+
+		double in[4];
+		double out[4];
 
 		in[0]=objx;
 		in[1]=objy;
 		in[2]=objz;
 		in[3]=1.0;
-		MESA::gluMultMatrixVecd(modelMatrix, in, out);
-		MESA::gluMultMatrixVecd(projMatrix, out, in);
-		if (in[3] == 0.0) return(GL_FALSE);
+		gluMultMatrixVecd(modelMatrix, in, out);
+		gluMultMatrixVecd(projMatrix, out, in);
+		if (in[3] == 0.0){
+			return(GL_FALSE);
+		}
 		in[0] /= in[3];
 		in[1] /= in[3];
 		in[2] /= in[3];
@@ -43,20 +106,99 @@ namespace MESA {
 		*winz=in[2];
 		return(GL_TRUE);
 	}
+
+	GLint gluUnProject(GLdouble winx, GLdouble winy, GLdouble winz,
+		const GLdouble modelMatrix[16], const GLdouble projMatrix[16], const GLint viewport[4],
+		GLdouble *objx, GLdouble *objy, GLdouble *objz) {
+
+		double finalMatrix[16];
+		double in[4];
+		double out[4];
+
+		gluMultMatricesd(modelMatrix, projMatrix, finalMatrix);
+		if (!gluInvertMatrixd(finalMatrix, finalMatrix)){
+			return(GL_FALSE);
+		}
+
+		in[0]=winx;
+		in[1]=winy;
+		in[2]=winz;
+		in[3]=1.0;
+
+		/* Map x and y from window coordinates */
+		in[0] = (in[0] - viewport[0]) / viewport[2];
+		in[1] = (in[1] - viewport[1]) / viewport[3];
+
+		/* Map to range -1 to 1 */
+		in[0] = in[0] * 2 - 1;
+		in[1] = in[1] * 2 - 1;
+		in[2] = in[2] * 2 - 1;
+
+		gluMultMatrixVecd(finalMatrix, in, out);
+		if (out[3] == 0.0){
+			return(GL_FALSE);
+		}
+		out[0] /= out[3];
+		out[1] /= out[3];
+		out[2] /= out[3];
+		*objx = out[0];
+		*objy = out[1];
+		*objz = out[2];
+		return(GL_TRUE);
+	}
 }
 
 namespace MV {
 
+	Point ProjectionDetails::projectScreen(const Point &a_point){
+		Point result;
+		GLint viewport[4];
+		glGetIntegerv(GL_VIEWPORT, viewport);
+		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*modelviewMatrix().top().getMatrixArray())[0], &(*projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
+			std::cerr << "gluProject failure!" << std::endl;
+		}
+		result.y=renderer.window().height()-result.y;
+		return result;
+	}
+
+	Point ProjectionDetails::projectWorld(const Point &a_point){
+		Point result;
+		GLint viewport[4];
+		glGetIntegerv(GL_VIEWPORT, viewport);
+		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*modelviewMatrix().top().getMatrixArray())[0], &(*projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
+			std::cerr << "gluProject failure!" << std::endl;
+		}
+		result.y/=renderer.window().height()/renderer.world().height();
+		result.x/=renderer.window().width()/renderer.world().width();
+		result.y=renderer.world().height()-result.y;
+		return result;
+	}
+
+	Point ProjectionDetails::unProjectScreen(const Point &a_point){
+		Point result;
+		GLint viewport[4];
+		glGetIntegerv(GL_VIEWPORT, viewport);
+		if(MESA::gluUnProject(static_cast<GLint>(a_point.x), static_cast<GLint>(renderer.window().height()-a_point.y), 0, &(*modelviewMatrix().top().getMatrixArray())[0], &(*projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
+			std::cerr << "gluUnProject failure!" << std::endl;
+		}
+		return result;
+	}
+
+	Point ProjectionDetails::unProjectWorld(const Point &a_point){
+		return unProjectScreen(renderer.screenFromWorld(a_point));
+	}
+
 	void checkSDLError(int line)
 	{
 		const char *error = SDL_GetError();
-		if (*error != '\0')
+		while (*error != '\0')
 		{
 			std::cerr << "SDL Error: " << error << std::endl;
 			if (line != -1){
-				std::cerr << "Line: " << error << std::endl;
+				std::cerr << "Line: " << line << std::endl;
 			}
 			SDL_ClearError();
+			error = SDL_GetError();
 		}
 	}
 
@@ -189,13 +331,18 @@ namespace MV {
 			std::cout << "Stop Using Framebuffer failure: " << glCheckFramebufferStatusOES(GL_FRAMEBUFFER_OES) << std::endl;
 		}
 #endif
-		glViewport( 0, 0, renderer->getWindowSize().x, renderer->getWindowSize().y);
+		glViewport( 0, 0, renderer->window().width(), renderer->window().height());
 		projectionMatrix().pop();
 	}
 	
 	void glExtensionFramebufferObject::deleteFramebuffer( Framebuffer &a_framebuffer ){
+#ifdef WIN32
+		pglDeleteFramebuffersEXT(1, &a_framebuffer.framebuffer);
+		pglDeleteRenderbuffersEXT(1, &a_framebuffer.renderbuffer);
+#else
 		glDeleteFramebuffersOES(1, &a_framebuffer.framebuffer);
 		glDeleteRenderbuffersOES(1, &a_framebuffer.renderbuffer);
+#endif
 		a_framebuffer.framebuffer = 0;
 		a_framebuffer.renderbuffer = 0;
 	}
@@ -253,93 +400,145 @@ namespace MV {
 	}
 
 	/*************************\
-	| --------Draw2D--------- |
+	| --------Window--------- |
 	\*************************/
 
-	Draw2D::Draw2D() :
-		glExtensions(this),
-		backgroundColor(0.0, 0.0, 0.0, 0.0),
-		windowTitle("M2tM Application"),
-		initialized(0),
-		windowIsFullScreen(0),
+	Window::Window(Draw2D &a_renderer):
+		renderer(a_renderer),
+		maintainProportions(true),
+		SDLflags(SDL_WINDOW_OPENGL|SDL_WINDOW_SHOWN|SDL_WINDOW_RESIZABLE),
+		initialized(false),
+		vsync(false),
+		userCanResize(false),
 		glcontext(0){
-		SDLflags=SDL_WINDOW_OPENGL|SDL_WINDOW_SHOWN;
+		
+		updateAspectRatio();
 	}
-	
-	Draw2D::~Draw2D(){
+
+	Window::~Window(){
 		SDL_GL_DeleteContext(glcontext);
 		SDL_DestroyWindow(window);
 	}
 
-	void Draw2D::allowWindowResize( bool a_allowResize ){
-		if(a_allowResize){
-			SDLflags = SDLflags | SDL_WINDOW_RESIZABLE;
-		}else{
-			SDLflags = SDLflags & ~ SDL_WINDOW_RESIZABLE;
+	void Window::setTitle(const std::string &a_title){
+		title = a_title;
+	}
+
+	void Window::resize(const Size<int> &a_size){
+		windowSize = a_size;
+		updateAspectRatio();
+		if(initialized){
+			SDL_SetWindowSize(window, windowSize.width, windowSize.height);
+			renderer.setupOpengl();
+			if(!userCanResize){
+				lockUserResize();
+			}
 		}
 	}
 
-	void Draw2D::useFullScreen( bool a_isFullScreen ){
-		if(a_isFullScreen){
-			SDLflags = SDLflags | SDL_WINDOW_FULLSCREEN;
+	Window& Window::allowUserResize(bool a_maintainProportions, Size<int> a_minSize, Size<int> a_maxSize){
+		maintainProportions = a_maintainProportions;
+		minSize = a_minSize;
+		maxSize = a_maxSize;
+		userCanResize = true;
+		if(initialized){
+			updateWindowResizeLimits();
+		}
+		return *this;
+	}
+
+	Window& Window::lockUserResize(){
+		userCanResize = false;
+		if(initialized){
+			SDL_GetWindowSize(window, &windowSize.width, &windowSize.height);
+			updateAspectRatio();
+			minSize = Size<int>(windowSize.width, windowSize.height);
+			maxSize = minSize;
+			updateWindowResizeLimits();
 		}else{
-			SDLflags = SDLflags & ~ SDL_WINDOW_FULLSCREEN;
+			minSize = Size<int>(windowSize.width, windowSize.height);
+			maxSize = minSize;
+		}
+		return *this;
+	}
+
+	void Window::updateWindowResizeLimits(){
+		if(initialized){
+			SDL_SetWindowMinimumSize(window, std::max(minSize.width, 1), std::max(minSize.height, 1));
+			SDL_SetWindowMaximumSize(window, std::max(maxSize.width, 1), std::max(maxSize.height, 1));
+			checkSDLError(__LINE__);
+		}
+	}
+
+	Window& Window::windowedMode(){
+		SDLflags = SDLflags & ~ SDL_WINDOW_FULLSCREEN;
+		SDLflags = SDLflags & ~ SDL_WINDOW_FULLSCREEN_DESKTOP;
+		if(initialized){
+			SDL_SetWindowFullscreen(window, 0);
+		}
+		return *this;
+	}
+
+	void Window::fullScreenMode(){
+		SDLflags = SDLflags | SDL_WINDOW_FULLSCREEN;
+		SDLflags = SDLflags & ~ SDL_WINDOW_FULLSCREEN_DESKTOP;
+		if(initialized){
+			SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+		}
+	}
+
+	void Window::fullScreenWindowedMode(){
+		SDLflags = SDLflags | SDL_WINDOW_FULLSCREEN_DESKTOP;
+		SDLflags = SDLflags & ~ SDL_WINDOW_FULLSCREEN;
+		if(initialized){
+			SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
 		}
 	}
 	
-	void Draw2D::useBorderlessWindow( bool a_isBorderless ){
-		if(a_isBorderless){
-			SDLflags = SDLflags | SDL_WINDOW_BORDERLESS;
+	Window& Window::borderless(){
+		SDLflags = SDLflags | SDL_WINDOW_BORDERLESS;
+		if(initialized){
+			SDL_SetWindowBordered(window, SDL_FALSE);
+		}
+		return *this;
+	}
+
+	Window& Window::bordered(){
+		SDLflags = SDLflags & ~ SDL_WINDOW_BORDERLESS;
+		if(initialized){
+			SDL_SetWindowBordered(window, SDL_TRUE);
+		}
+		return *this;
+	}
+
+	int Window::height() const{
+		return windowSize.height;
+	}
+
+	int Window::width() const{
+		return windowSize.width;
+	}
+
+	Size<int> Window::size() const{
+		return windowSize;
+	}
+
+	void Window::updateAspectRatio(){
+		aspectRatio = (windowSize.height != 0) ? static_cast<double>(windowSize.width)/static_cast<double>(windowSize.height) : 0.0;
+	}
+
+	void Window::conformToAspectRatio(int &a_width, int &a_height) const{
+		if(a_width < a_height){
+			a_width = static_cast<int>(a_height * aspectRatio);
 		}else{
-			SDLflags = SDLflags & ~ SDL_WINDOW_BORDERLESS;
+			a_height = static_cast<int>(a_width / aspectRatio);
 		}
 	}
 
-	bool Draw2D::initialize(int a_windowsWidth, int a_windowsHeight, double a_drawingWidth, double a_drawingHeight, bool a_requireExtensions){
-		windowWidth = a_windowsWidth; windowHeight = a_windowsHeight;
-		if(a_drawingWidth == -1 || a_drawingHeight == -1){
-			worldWidth = windowWidth; worldHeight = windowHeight;
-		}else{
-			worldWidth = a_drawingWidth; worldHeight = a_drawingHeight;
-		}
-		if(setupSDL()){
-			setupOpengl();
-			initializeExtensions();
-			summarizeDisplayMode();
-			return true;
-		}
-		return false;
-	}
-	
-	void Draw2D::summarizeDisplayMode() const{
-		SDL_DisplayMode mode;
-		SDL_GetCurrentDisplayMode(0, &mode);
-		int width, height;
-		
-		SDL_GetWindowSize(window, &width, &height);
+	bool Window::initialize(){
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 
-		std::cout << "\\/==================================================\\/" << std::endl;
-		std::cout << "Window	  : (" << width << " x " << height << ")" << std::endl;
-		std::cout << "Driver	  : " << SDL_GetCurrentVideoDriver() << std::endl;
-		std::cout << "Screen bpp : " << SDL_BITSPERPIXEL(mode.format) << std::endl;
-		std::cout << "Vendor	  : " << glGetString(GL_VENDOR) << std::endl;
-		std::cout << "Renderer	: " << glGetString(GL_RENDERER) << std::endl;
-		std::cout << "Version	 : " << glGetString(GL_VERSION) << std::endl;
-		std::cout << "Extensions : " << glGetString(GL_EXTENSIONS) << std::endl;
-		std::cout << "/\\==================================================/\\" << std::endl;
-	}
-
-	bool Draw2D::setupSDL(){
-		if( SDL_GetNumVideoDrivers() < 1 || SDL_VideoInit(0) < 0 ){
-			// Failed, exit
-			std::cerr << "Video initialization failed: " << SDL_GetError() << std::endl;
-			return false;
-		}
-		windowIsFullScreen = 0;
-		if(SDLflags&SDL_WINDOW_FULLSCREEN){
-			windowIsFullScreen = 1;
-		}
-		
         SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
         SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
         SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
@@ -359,19 +558,20 @@ namespace MV {
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
 		
-		SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 0);
+		SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
 		
 		SDL_GL_SetAttribute(SDL_GL_RETAINED_BACKING, 1);
 		
 		SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1 );
 		
-		window = SDL_CreateWindow(windowTitle.c_str(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowWidth, windowHeight, SDLflags);
+		window = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowSize.width, windowSize.height, SDLflags);
 		if(!window){
 			std::cerr << "Window creation failed: " << SDL_GetError() << std::endl;
 			atexit(SDL_Quit); // Quit SDL at exit.
 			return false;
 		}
-		SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+		SDL_GetWindowSize(window, &windowSize.width, &windowSize.height);
+		updateAspectRatio();
 		checkSDLError(__LINE__);
 		
 		SDL_DisplayMode displayMode;
@@ -386,12 +586,17 @@ namespace MV {
 		checkSDLError(__LINE__);
 		
 		SDL_ShowWindow(window);
-		
 		initialized = true;
+
+		//must happen after we flag initialized as true.
+		if(!userCanResize){
+			lockUserResize();
+		}
+
 		return true;
 	}
 
-	void Draw2D::setupOpengl(){
+	void Window::ensureValidGLContext(){
 		if(!glcontext){
 			glcontext = SDL_GL_CreateContext(window);
 			if(!glcontext){
@@ -403,17 +608,143 @@ namespace MV {
 				std::cerr << "SDL_GL_MakeCurrent(): " << SDL_GetError() << std::endl;
 				atexit(SDL_Quit);
 			}
-			SDL_GL_SetSwapInterval(0);
+			SDL_GL_SetSwapInterval(vsync);
 		}
+	}
+
+	bool Window::handleEvent(const SDL_Event &event){
+		switch(event.type){
+			case SDL_WINDOWEVENT:
+				switch(event.window.event){
+					case SDL_WINDOWEVENT_RESIZED:
+						Size<int> newSize(event.window.data1, event.window.data2);
+						double oldRatio = aspectRatio;
+						if(maintainProportions){
+							conformToAspectRatio(newSize.width, newSize.height);
+						}
+						resize(newSize);
+						if(maintainProportions){
+							aspectRatio = oldRatio; //just prevent resize from mucking with this.
+						}
+						return true;
+					break;
+				}
+			break;
+		}
+		return false;
+	}
+
+	void Window::refreshContext(){
+		ensureValidGLContext();
+		if(SDL_GL_MakeCurrent(window, glcontext)){
+			std::cerr << "Problem with refreshContext()." << SDL_GetError() << std::endl;
+		}
+	}
+
+	void Window::updateScreen(){
+		SDL_GL_SwapWindow( window );
+	}
+
+	/************************\
+	| --------World--------- |
+	\************************/
+
+	RenderWorld::RenderWorld(Draw2D &a_renderer):
+		renderer(a_renderer){
+	}
+
+	void RenderWorld::resize( const Size<> &a_size ){
+		worldSize = a_size;
+		if(renderer.initialized){
+			renderer.setupOpengl();
+		}
+	}
+
+	double RenderWorld::height() const{
+		return worldSize.height;
+	}
+
+	double RenderWorld::width() const{
+		return worldSize.width;
+	}
+
+	Size<> RenderWorld::size() const{
+		return worldSize;
+	}
+
+	/*************************\
+	| --------Draw2D--------- |
+	\*************************/
+
+	Draw2D::Draw2D() :
+		glExtensions(this),
+		backgroundColor(0.0, 0.0, 0.0, 0.0),
+		initialized(0),
+		sdlWindow(*this),
+		mvWorld(*this){
+	}
+
+	Draw2D::~Draw2D(){
+	}
+
+	bool Draw2D::initialize(Size<int> a_window, Size<> a_world, bool a_requireExtensions, bool a_summarize){
+		sdlWindow.resize(a_window);
+		if(a_world.width < 0 || a_world.height < 0){
+			a_world = a_window;
+		}
+		mvWorld.resize(a_world);
+
+		if(setupSDL()){
+			setupOpengl();
+			initializeExtensions();
+			if(a_summarize){
+				summarizeDisplayMode();
+			}
+			return true;
+		}
+		return false;
+	}
+	
+	void Draw2D::summarizeDisplayMode() const{
+		SDL_DisplayMode mode;
+		SDL_GetCurrentDisplayMode(0, &mode);
+
+		std::cout << "\\/==================================================\\/" << std::endl;
+		std::cout << "Window	  : (" << sdlWindow.width() << " x " << sdlWindow.height() << ")" << std::endl;
+		std::cout << "Driver	  : " << SDL_GetCurrentVideoDriver() << std::endl;
+		std::cout << "Screen bpp : " << SDL_BITSPERPIXEL(mode.format) << std::endl;
+		std::cout << "Vendor	  : " << glGetString(GL_VENDOR) << std::endl;
+		std::cout << "Renderer	: " << glGetString(GL_RENDERER) << std::endl;
+		std::cout << "Version	 : " << glGetString(GL_VERSION) << std::endl;
+		std::cout << "Extensions : " << glGetString(GL_EXTENSIONS) << std::endl;
+		std::cout << "/\\==================================================/\\" << std::endl;
+	}
+
+	bool Draw2D::setupSDL(){
+		if( SDL_GetNumVideoDrivers() < 1 || SDL_VideoInit(0) < 0 ){
+			// Failed, exit
+			std::cerr << "Video initialization failed: " << SDL_GetError() << std::endl;
+			return false;
+		}
+		if(!sdlWindow.initialize()){
+			std::cerr << "Window initialization failed!" << std::endl;
+			return false;
+		}
+		
+		initialized = true;
+		return true;
+	}
+
+	void Draw2D::setupOpengl(){
+		sdlWindow.ensureValidGLContext();
 		checkSDLError(__LINE__);
-		std::cout << "2ErrCH: " << glGetError() << std::endl;
 		
 		SDL_GL_SetSwapInterval(0);
 		
-		glViewport( 0, 0, windowWidth, windowHeight );
+		glViewport( 0, 0, sdlWindow.width(), sdlWindow.height() );
 
 		projectionMatrix().clear(); //ensure nothing else has trampled on us.
-		projectionMatrix().top().makeOrtho(0, worldWidth, worldHeight, 0, -128.0, 128.0);
+		projectionMatrix().top().makeOrtho(0, mvWorld.width(), mvWorld.height(), 0, -128.0, 128.0);
 
 		glClearColor(backgroundColor.R,backgroundColor.G,backgroundColor.B,backgroundColor.A);
 		
@@ -445,140 +776,73 @@ namespace MV {
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	}
 
-	bool Draw2D::resizeWindow( int a_x, int a_y ){
-		/*if(a_x > 0 && a_y > 0){
-			windowWidth = a_x; windowHeight = a_y;
+	bool Draw2D::handleEvent(const SDL_Event &event){
+		if(sdlWindow.handleEvent(event)){
+			return true;
 		}
-		int fullScreenResult = fullScreenTransition();
-		if(fullScreenResult==-1){
-			if(SDL_SetVideoMode(a_x, a_y, 32, SDLflags)==NULL){
-				return false;
-			}else{
-				setupOpengl();
-				return true;
-			}
-		}
-		return fullScreenResult != 0;*/
 		return false;
 	}
 
-	void Draw2D::resizeWorldSpace( double a_worldsWidth, double a_worldsHeight ){
-		worldWidth = a_worldsWidth; worldHeight = a_worldsHeight;
-		setupOpengl();
-	}
-
-	int Draw2D::fullScreenTransition(){
-		/*if(!windowIsFullScreen && (SDLflags & SDL_FULLSCREEN)){
-			SDL_QuitSubSystem(SDL_INIT_VIDEO);
-			if(setupSDL()){
-				setupOpengl();
-				return 1;
-			}
-			return 0;
-		}else if(windowIsFullScreen && !(SDLflags & SDL_FULLSCREEN)){
-			SDL_QuitSubSystem(SDL_INIT_VIDEO);
-			if(setupSDL()){
-				setupOpengl();
-				return 1;
-			}
-			return 0;
-		}*/
-		return -1;
-	}
-
-	bool Draw2D::isWindowFullScreen(){
-		return windowIsFullScreen;
-	}
-
 	void Draw2D::clearScreen(){
-		refreshContext();
+		sdlWindow.refreshContext();
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	}
 
-	void Draw2D::refreshContext(){
-		if(SDL_GL_MakeCurrent(window, glcontext)){
-			std::cerr << "Problem with refreshContext()." << SDL_GetError() << std::endl;
-		}
-	}
-
 	void Draw2D::updateScreen(){
-		SDL_GL_SwapWindow( window );
+		sdlWindow.updateScreen();
 	}
 
-	void Draw2D::setWindowTitle( std::string a_title ){
-		windowTitle = a_title;
-		if(initialized){
-			//SDL_WM_SetCaption(windowTitle.c_str(), windowTitle.c_str());
-		}
+	Point Draw2D::worldFromLocal(const Point &a_localPoint ) const{
+		MV::ProjectionDetails projectIt(*this);
+		return projectIt.projectWorld(a_localPoint);
 	}
 
-	Point Draw2D::getObjectToWorldPoint( double a_worldX, double a_worldY ){
-		GLint viewport[4];
-		glGetIntegerv(GL_VIEWPORT, viewport);
-
-		GLdouble x, y, z;
-		MESA::gluProject(a_worldX, a_worldY, 0.0, &(*modelviewMatrix().top().getMatrixArray())[0], &(*projectionMatrix().top().getMatrixArray())[0], viewport, &x, &y, &z);
-		Point tmpPoint(x, y, z);
-		
-		//Re-orient for our actual window position based on 0, 0 as top left instead of bottom left.
-		tmpPoint.y-=windowHeight;
-		tmpPoint.y*=-1.0;
-		//Finally, retrieve the actual location of the object in the world by taking into account the window dimensions
-		//in relation to the screen dimensions.
-		double scaleDifferenceY = worldHeight/(double)windowHeight, scaleDifferenceX = worldWidth/(double)windowWidth;
-
-		tmpPoint.x*=scaleDifferenceX;
-		tmpPoint.y*=scaleDifferenceY;
-
-		return tmpPoint;
+	Point Draw2D::screenFromLocal(const Point &a_localPoint) const{
+		MV::ProjectionDetails projectIt(*this);
+		return projectIt.projectScreen(a_localPoint);
 	}
 
-	Point Draw2D::getObjectToWorldPoint( Point a_worldPoint ){
-		return getObjectToWorldPoint(a_worldPoint.x, a_worldPoint.y);
+	Point Draw2D::localFromWorld(const Point &a_worldPoint ) const{
+		MV::ProjectionDetails projectIt(*this);
+		return projectIt.unProjectWorld(a_worldPoint);
 	}
 
-	Point Draw2D::getWindowToWorldPoint( double a_windowX, double a_windowY ){
-		GLint viewport[4];
-		glGetIntegerv(GL_VIEWPORT, viewport);
-
-		GLdouble x, y, z;
-		MESA::gluProject(a_windowX, a_windowY, 0.0, &(*modelviewMatrix().top().getMatrixArray())[0], &(*projectionMatrix().top().getMatrixArray())[0], viewport, &x, &y, &z);
-		Point tmpPoint(x, y, z);
-		
-		//Re-orient for our actual window position based on 0, 0 as top left instead of bottom left.
-		tmpPoint.y-=windowHeight;
-		tmpPoint.y*=-1.0;
-		//Finally, retrieve the actual location of the object in the world by taking into account the window dimensions
-		//in relation to the screen dimensions.
-		double scaleDifferenceY = worldHeight/(double)windowHeight, scaleDifferenceX = worldWidth/(double)windowWidth;
-
-		tmpPoint.x*=scaleDifferenceX;
-		tmpPoint.y*=scaleDifferenceY;
-
-		return tmpPoint;
+	Point Draw2D::localFromScreen(const Point &a_worldPoint ) const{
+		MV::ProjectionDetails projectIt(*this);
+		return projectIt.unProjectScreen(a_worldPoint);
 	}
 
-	Point Draw2D::getWindowToWorldPoint( Point a_windowPoint ){
-		return getWindowToWorldPoint(a_windowPoint.x, a_windowPoint.y);
+	Point Draw2D::worldFromScreen(const Point &a_screenPoint) const{
+		double widthRatio = window().width()/world().width();
+		double heightRatio = window().height()/world().height();
+		return Point(a_screenPoint.x/widthRatio, a_screenPoint.y/heightRatio, a_screenPoint.z);
 	}
 
-	Point Draw2D::getWorldSize(){
-		Point tmpPoint;
-		tmpPoint.x = worldWidth;
-		tmpPoint.y = worldHeight;
-		return tmpPoint;
-	}
-
-	Point Draw2D::getWindowSize(){
-		Point tmpPoint;
-		tmpPoint.x = windowWidth;
-		tmpPoint.y = windowHeight;
-		return tmpPoint;
+	Point Draw2D::screenFromWorld(const Point &a_worldPoint) const{
+		double widthRatio = window().width()/world().width();
+		double heightRatio = window().height()/world().height();
+		return Point(a_worldPoint.x*widthRatio, a_worldPoint.y*heightRatio, a_worldPoint.z);
 	}
 
 	void Draw2D::setBackgroundColor( Color a_newColor ){
 		backgroundColor = a_newColor;
 		glClearColor(backgroundColor.R,backgroundColor.G,backgroundColor.B,backgroundColor.A);
+	}
+
+	Window& Draw2D::window(){
+		return sdlWindow;
+	}
+
+	const Window& Draw2D::window() const{
+		return sdlWindow;
+	}
+
+	RenderWorld& Draw2D::world(){
+		return mvWorld;
+	}
+
+	const RenderWorld& Draw2D::world() const{
+		return mvWorld;
 	}
 
 }

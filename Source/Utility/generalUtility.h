@@ -23,6 +23,8 @@ namespace MV {
 
 	void initializeFilesystem();
 
+	void systemSleep(int time);
+
 	//Some general exceptions that can be used
 	class MVExceptionBase {
 	public:

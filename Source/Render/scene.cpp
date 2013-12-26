@@ -321,7 +321,11 @@ namespace MV {
 
 		BoxAABB Node::getWorldAABB(bool includeChildren){
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			BoxAABB tmpBox;
 			if(!points.empty()){
 				tmpBox.initialize(renderer->worldFromLocal(points[0]));
@@ -339,14 +343,16 @@ namespace MV {
 					tmpBox.expandWith(cell.second->getWorldAABB());
 				});
 			}
-			popMatrix();
-			alertParent("popMatrix");
 			return tmpBox;
 		}
 
 		BoxAABB Node::getScreenAABB(bool includeChildren){
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			BoxAABB tmpBox;
 			if(!points.empty()){
 				tmpBox.initialize(castPoint<double>(renderer->screenFromLocal(points[0])));
@@ -364,8 +370,6 @@ namespace MV {
 					tmpBox.expandWith(cell.second->getScreenAABB());
 				});
 			}
-			popMatrix();
-			alertParent("popMatrix");
 			return tmpBox;
 		}
 
@@ -382,48 +386,58 @@ namespace MV {
 
 		Point<> Node::worldFromLocal(const Point<> &a_local){
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			Point<> ourPoint = renderer->worldFromLocal(a_local);
-			popMatrix();
-			alertParent("popMatrix");
 			return ourPoint;
 		}
 		Point<int> Node::screenFromLocal(const Point<> &a_local){
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			Point<int> ourPoint = renderer->screenFromLocal(a_local);
-			popMatrix();
-			alertParent("popMatrix");
 			return ourPoint;
 		}
 		Point<> Node::localFromScreen(const Point<int> &a_screen){
 			require(renderer != nullptr, PointerException("DrawShape::localFromScreen requires a rendering context."));
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			Point<> ourPoint = renderer->localFromScreen(a_screen);
-			popMatrix();
-			alertParent("popMatrix");
 			return ourPoint;
 		}
 		Point<> Node::localFromWorld(const Point<> &a_world){
 			require(renderer != nullptr, PointerException("DrawShape::localFromWorld requires a rendering context."));
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			Point<> ourPoint = renderer->localFromWorld(a_world);
-			popMatrix();
-			alertParent("popMatrix");
 			return ourPoint;
 		}
 
 		std::vector<Point<>> Node::worldFromLocal(std::vector<Point<>> a_local){
 			require(renderer != nullptr, PointerException("DrawShape::worldFromLocal requires a rendering context."));
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			for(Point<>& point : a_local){
 				point = renderer->worldFromLocal(point);
 			}
-			popMatrix();
-			alertParent("popMatrix");
 			return a_local;
 		}
 
@@ -431,24 +445,28 @@ namespace MV {
 			require(renderer != nullptr, PointerException("DrawShape::screenFromLocal requires a rendering context."));
 			std::vector<Point<int>> processed;
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			for(const Point<>& point : a_local){
 				processed.push_back(renderer->screenFromLocal(point));
 			}
-			popMatrix();
-			alertParent("popMatrix");
 			return processed;
 		}
 
 		std::vector<Point<>> Node::localFromWorld(std::vector<Point<>> a_world){
 			require(renderer != nullptr, PointerException("DrawShape::localFromWorld requires a rendering context."));
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			for(Point<>& point : a_world){
 				point = renderer->localFromWorld(point);
 			}
-			popMatrix();
-			alertParent("popMatrix");
 			return a_world;
 		}
 
@@ -456,62 +474,73 @@ namespace MV {
 			require(renderer != nullptr, PointerException("DrawShape::localFromScreen requires a rendering context."));
 			std::vector<Point<>> processed;
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			for(const Point<int>& point : a_screen){
 				processed.push_back(renderer->localFromScreen(point));
 			}
-			popMatrix();
-			alertParent("popMatrix");
 			return processed;
 		}
 
 		BoxAABB Node::worldFromLocal(BoxAABB a_local){
 			require(renderer != nullptr, PointerException("DrawShape::worldFromLocal requires a rendering context."));
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			a_local.minPoint = renderer->worldFromLocal(a_local.minPoint);
 			a_local.maxPoint = renderer->worldFromLocal(a_local.maxPoint);
 			a_local.sanitize();
-			popMatrix();
-			alertParent("popMatrix");
 			return a_local;
 		}
 		BoxAABB Node::screenFromLocal(BoxAABB a_local){
 			require(renderer != nullptr, PointerException("DrawShape::screenFromLocal requires a rendering context."));
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			a_local.minPoint = castPoint<double>(renderer->screenFromLocal(a_local.minPoint));
 			a_local.maxPoint = castPoint<double>(renderer->screenFromLocal(a_local.maxPoint));
 			a_local.sanitize();
-			popMatrix();
-			alertParent("popMatrix");
 			return a_local;
 		}
 		BoxAABB Node::localFromScreen(BoxAABB a_screen){
 			require(renderer != nullptr, PointerException("DrawShape::localFromScreen requires a rendering context."));
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			a_screen.minPoint = renderer->localFromScreen(castPoint<int>(a_screen.minPoint));
 			a_screen.maxPoint = renderer->localFromScreen(castPoint<int>(a_screen.maxPoint));
 			a_screen.sanitize();
-			popMatrix();
-			alertParent("popMatrix");
 			return a_screen;
 		}
 		BoxAABB Node::localFromWorld(BoxAABB a_world){
 			require(renderer != nullptr, PointerException("DrawShape::localFromWorld requires a rendering context."));
 			alertParent("pushMatrix");
+			SCOPE_EXIT{alertParent("popMatrix");};
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			a_world.minPoint = renderer->localFromWorld(a_world.minPoint);
 			a_world.maxPoint = renderer->localFromWorld(a_world.maxPoint);
 			a_world.sanitize();
-			popMatrix();
-			alertParent("popMatrix");
 			return a_world;
 		}
 
 		void Node::pushMatrix(){
 			renderer->modelviewMatrix().push();
+			auto rollback = scopeGuard([&](){renderer->modelviewMatrix().pop();});
 			if(!scaleTo.atOrigin()){
 				renderer->modelviewMatrix().top().scale(scaleTo.x, scaleTo.y, scaleTo.z);
 			}
@@ -523,6 +552,7 @@ namespace MV {
 				renderer->modelviewMatrix().top().rotateX(rotateTo.x).rotateY(rotateTo.y).rotateZ(rotateTo.z);
 				renderer->modelviewMatrix().top().translate(-rotateOrigin.x, -rotateOrigin.y, -rotateOrigin.z);
 			}
+			rollback.dismiss();
 		}
 
 		void Node::popMatrix(){
@@ -565,8 +595,9 @@ namespace MV {
 
 		void Node::defaultDraw(GLenum drawType){
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			defaultDrawRenderStep(drawType);
-			popMatrix();
 		}
 
 		std::shared_ptr<std::vector<GLfloat>> Node::getPositionVertexArray(){
@@ -603,14 +634,17 @@ namespace MV {
 
 		void Node::draw(){
 			if(isVisible && preDraw()){
-				pushMatrix();
-				if(drawSorted){
-					sortedRender();
-				} else{
-					unsortedRender();
+				{
+					pushMatrix();
+					SCOPE_EXIT{popMatrix();};
+
+					if(drawSorted){
+						sortedRender();
+					} else{
+						unsortedRender();
+					}
+					drawImplementation();
 				}
-				drawImplementation();
-				popMatrix();
 				postDraw();
 			}
 		}

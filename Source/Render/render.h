@@ -73,9 +73,6 @@ namespace MV {
 	  const Uint32 SDL_AMASK = 0xff000000;
 	#endif
 
-	MatrixStack& projectionMatrix();
-	MatrixStack& modelviewMatrix();
-
 	class glExtensionBlendMode{
 	public:
 		glExtensionBlendMode();
@@ -92,33 +89,54 @@ namespace MV {
 		bool initialized;
 	};
 
-	struct Framebuffer{
-		Framebuffer(){}
-		Framebuffer(GLuint *a_texture, int a_width, int a_height):
-			texture(a_texture),
-			width(a_width),
-			height(a_height){
+	class glExtensionFramebufferObject;
+	class Framebuffer : public std::enable_shared_from_this<Framebuffer> {
+	public:
+		~Framebuffer();
+
+		void start();
+		void stop();
+
+		void setTextureId(GLuint a_texture){
+			texture = a_texture;
 		}
+		GLuint textureId() const{
+			return texture;
+		}
+
+		void setSize(const Size<int> &a_size){
+			frameSize = a_size;
+		}
+		Size<int> size() const{
+			return frameSize;
+		}
+	private:
+		friend glExtensionFramebufferObject;
+		Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, Size<int> a_size);
+
 		GLuint framebuffer;
 		GLuint renderbuffer;
 		GLuint depthbuffer;
-		GLuint *texture;
-		int width, height;
+		GLuint texture;
+		Size<int> frameSize;
+
+		Draw2D *renderer;
 	};
 
 	class glExtensionFramebufferObject{
+		friend Framebuffer;
 	public:
 		glExtensionFramebufferObject(Draw2D *a_renderer);
 
 		bool framebufferObjectExtensionEnabled(){return initialized;}
-		void createFramebuffer(Framebuffer &a_framebuffer);
-		void deleteFramebuffer(Framebuffer &a_framebuffer);
+		std::shared_ptr<Framebuffer> makeFramebuffer(const Size<int> &a_size, GLuint a_texture);
 
-		void startUsingFramebuffer(const Framebuffer &a_framebuffer);
+		void startUsingFramebuffer(std::shared_ptr<Framebuffer> a_framebuffer, bool a_push = true);
 		void stopUsingFramebuffer();
 	protected:
-		std::vector<GLint> originalFramebufferIds;
-		std::vector<GLint> originalRenderbufferIds;
+		GLint originalFramebufferId;
+		GLint originalRenderbufferId;
+		std::vector< std::shared_ptr<Framebuffer> > activeFramebuffers;
 #ifdef WIN32
 		PFNGLISRENDERBUFFEREXTPROC pglIsRenderbufferEXT;
 		PFNGLBINDRENDERBUFFEREXTPROC pglBindRenderbufferEXT;
@@ -140,6 +158,7 @@ namespace MV {
 #endif
 		void loadExtensionFramebufferObject(char* a_extensionsList);
 	private:
+		void deleteFramebuffer(Framebuffer &a_framebuffer);
 		Draw2D *renderer;
 		bool initialized;
 	};
@@ -198,10 +217,10 @@ namespace MV {
 			renderer(a_renderer){
 		}
 			
-		Point projectScreen(const Point &a_point);
-		Point projectWorld(const Point &a_point);
-		Point unProjectScreen(const Point &a_point);
-		Point unProjectWorld(const Point &a_point);
+		Point<int> projectScreen(const Point<> &a_point);
+		Point<> projectWorld(const Point<> &a_point);
+		Point<> unProjectScreen(const Point<int> &a_point);
+		Point<> unProjectWorld(const Point<> &a_point);
 
 		const Draw2D &renderer;
 	};
@@ -286,24 +305,40 @@ namespace MV {
 		RenderWorld& world();
 		const RenderWorld& world() const;
 
+		MatrixStack& projectionMatrix(){
+			return contextProjectionMatrix;
+		}
+
+		MatrixStack& modelviewMatrix(){
+			return contextModelviewMatrix;
+		}
+
+		const MatrixStack& projectionMatrix() const{
+			return contextProjectionMatrix;
+		}
+
+		const MatrixStack& modelviewMatrix() const{
+			return contextModelviewMatrix;
+		}
+
 		//call for every event to handle window actions correctly
 		bool handleEvent(const SDL_Event &event);
 
-		bool initialize(Size<int> a_window, Size<> a_world = Size<>(-1, -1), bool a_requireExtensions = false, bool summarize = false);
+		bool initialize(Size<int> a_window, Size<> a_world = Size<>(-1, -1), bool a_requireExtensions = false, bool a_summarize = false);
 
 		void setBackgroundColor(Color a_newColor);
 		
 		void clearScreen();
 		void updateScreen();
 
-		Point worldFromLocal(const Point &a_localPoint ) const;
-		Point screenFromLocal(const Point &a_localPoint ) const;
+		Point<> worldFromLocal(const Point<> &a_localPoint ) const;
+		Point<int> screenFromLocal(const Point<> &a_localPoint ) const;
 
-		Point localFromWorld(const Point &a_worldPoint) const;
-		Point localFromScreen(const Point &a_screenPoint) const;
+		Point<> localFromWorld(const Point<> &a_worldPoint) const;
+		Point<> localFromScreen(const Point<int> &a_screenPoint) const;
 
-		Point screenFromWorld(const Point &a_worldPoint) const;
-		Point worldFromScreen(const Point &a_screenPoint) const;
+		Point<int> screenFromWorld(const Point<> &a_worldPoint) const;
+		Point<> worldFromScreen(const Point<int> &a_screenPoint) const;
 		
 		void summarizeDisplayMode() const;
 	private:
@@ -315,6 +350,9 @@ namespace MV {
 		SDL_Renderer *sdlRenderer;
 		Window sdlWindow;
 		RenderWorld mvWorld;
+
+		MatrixStack contextProjectionMatrix;
+		MatrixStack contextModelviewMatrix;
 	};
 	
 	void checkSDLError(int line = -1);

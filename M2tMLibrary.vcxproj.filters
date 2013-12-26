@@ -37,9 +37,6 @@
     <ClCompile Include="Source\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Render\drawShapes.cpp">
-      <Filter>Source Files\Render</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Render\points.cpp">
       <Filter>Source Files\Render</Filter>
     </ClCompile>
@@ -73,6 +70,18 @@
     <ClCompile Include="Source\Game\pathGrid.cpp">
       <Filter>Source Files\Game</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Network\network.cpp">
+      <Filter>Source Files\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Animation\actionSequence.cpp">
+      <Filter>Source Files\Animation</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\scene.cpp">
+      <Filter>Source Files\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\compositeScene.cpp">
+      <Filter>Source Files\Render</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -86,9 +95,6 @@
     </ClInclude>
     <ClInclude Include="Source\Audio\sound.h">
       <Filter>Source Files\Audio</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Render\drawShapes.h">
-      <Filter>Source Files\Render</Filter>
     </ClInclude>
     <ClInclude Include="Source\Render\package.h">
       <Filter>Source Files\Render</Filter>
@@ -131,6 +137,24 @@
     </ClInclude>
     <ClInclude Include="Source\Game\pathGrid.h">
       <Filter>Source Files\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\signal.h">
+      <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Network\network.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Animation\actionSequence.h">
+      <Filter>Source Files\Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Network\package.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\scene.h">
+      <Filter>Source Files\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\compositeScene.h">
+      <Filter>Source Files\Render</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

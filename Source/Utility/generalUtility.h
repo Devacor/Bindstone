@@ -1,5 +1,5 @@
-#ifndef __MISFUNC_H__
-#define __MISFUNC_H__
+#ifndef __MV_GENERALUTILITY_H__
+#define __MV_GENERALUTILITY_H__
 
 #undef require
 
@@ -10,7 +10,6 @@
 #include <iostream>
 
 #define UTF_CHAR_STR(stringVal) L##stringVal
-#define MEMBER_FUNCTION_POINTER(_class, _object) std::bind(&_class, _object, std::placeholders::_1)
 
 namespace MV {
 	typedef wchar_t UtfChar;

@@ -3,6 +3,7 @@
 #include "Render/package.h"
 #include "Audio/package.h"
 #include "Animation/package.h"
+#include "Network/package.h"
 #include <string>
 #include <ctime>
 
@@ -15,33 +16,30 @@ public:
 	void handleInput();
 	void render();
 private:
-	std::shared_ptr<MV::DrawNode> initializeCatapultScene();
-	void loadCatapultTextures();
+	//MV::TextBox testBox;
+	std::shared_ptr<MV::Scene::Node> initializeCatapultScene();
 	void initializeWindow();
-	void loadPatternTextures();
+	//std::shared_ptr<MV::Scene::Node> initializeTextScene();
 
 	MV::Draw2D renderer;
 
-	MV::TextureManager textures;
+	MV::SharedTextures textures;
 	MV::FrameSwapperRegister animationLibrary;
 
 	MV::TextLibrary textLibrary;
-	MV::DrawNode mainScene;
-	MV::DrawRectangle testShape;
+	std::shared_ptr<MV::Scene::Node> mainScene;
+	std::shared_ptr<MV::Scene::Rectangle> testShape;
 
 	MV::AxisAngles angleIncrement;
 
 	bool done;
 	struct MouseState {
 		void update(){
-			int x, y;
-			uint32_t state = SDL_GetMouseState(&x, &y);
-			position.x = x;
-			position.y = y;
+			uint32_t state = SDL_GetMouseState(&position.x, &position.y);
 			left = (state & SDL_BUTTON(1)) != false;
 			right = (state & SDL_BUTTON(2)) != false;
 		}
-		MV::Point position;
+		MV::Point<int> position;
 		bool left;
 		bool right;
 	};

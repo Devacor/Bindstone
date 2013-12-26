@@ -8,7 +8,7 @@
 #include <math.h>
 #include "Utility/package.h"
 #include "Render/render.h"
-#include "Render/drawShapes.h"
+#include "Render/scene.h"
 #include "SDL_ttf.h"
 
 namespace MV {
@@ -29,25 +29,21 @@ namespace MV {
 
 	class TextCharacter {
 	public:
-		TextCharacter():set(false),textureId(0),character(' '){}
+		TextCharacter():glyphCharacter(' '){}
 		~TextCharacter(){}
 
-		void assignSDLSurface(SDL_Surface *a_newSurface, UtfChar a_glyphChar);
+		void setCharacter(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter);
 
-		bool isSet();
+		bool isSet() const;
 
-		UtfChar getChar();
-		GLuint* getTextureId();
-		Point getCharacterSize();
-		Point getTextureSize();
+		UtfChar character() const;
+		std::shared_ptr<TextureHandle> texture() const;
+		Size<int> characterSize() const;
+		Size<int> textureSize() const;
 	private:
-		void assignSurfaceToOpenGL(SDL_Surface *a_newSurface, int a_widthPowerOfTwo, int a_heightPowerOfTwo);
-		void generateTexture(SDL_Surface *a_surface);
-
-		bool set;
-		UtfChar character;
-		Point size, textureSize;
-		GLuint textureId;
+		UtfChar glyphCharacter;
+		std::shared_ptr<SurfaceTextureDefinition> glyphTexture;
+		std::shared_ptr<TextureHandle> glyphHandle;
 	};
 
 	struct FontDefinition{
@@ -84,7 +80,7 @@ namespace MV {
 
 		bool loadFont(std::string a_identifier, int a_pointSize, std::string a_fontFileLocation);
 
-		std::shared_ptr<DrawNode> composeScene(std::vector<TextState> a_textStateList, double a_maxWidth = 0, TextWrapMethod a_wrapMethod = SOFT);
+		std::shared_ptr<Scene::Node> composeScene(std::vector<TextState> a_textStateList, double a_maxWidth = 0, TextWrapMethod a_wrapMethod = SOFT);
 
 		//Call this when the OpenGL context is destroyed to re-load the textures.
 		void reloadTextures();
@@ -104,10 +100,8 @@ namespace MV {
 
 	class TextBox{
 	public:
-		TextBox(TextureManager *a_textures, TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, int a_width, int a_height);
-		TextBox(TextureManager *a_textures, TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, int a_width, int a_height);
-
-		void initialize();
+		TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, Size<> a_size);
+		TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, Size<> a_size);
 
 		void setText(const UtfString &a_text, const std::string &a_fontIdentifier = "");
 		void setText(UtfChar a_char, const std::string &a_fontIdentifier = ""){
@@ -148,50 +142,70 @@ namespace MV {
 
 		UtfString getText(){return text;}
 
-		void setTextBoxSize(int a_width, int a_height);
+		void setTextBoxSize(Size<> a_size);
 
-		void setScrollPosition(const Point &a_position){
-			require(initialized, DefaultException("TextBox::setScrollPosition called before initialization."));
-			textTextureScene.placeAt(a_position);
+		void setScrollPosition(Point<> a_position, bool a_overScroll = false){
+			if(0 && !a_overScroll){
+				Size<> contentSize = getContentSize();
+				if(contentSize.height < boxSize.height){
+					a_position.y = 0;
+				}else if(a_position.y > contentSize.height - boxSize.height){
+					a_position.y = contentSize.height - boxSize.height;
+				}
+				if(contentSize.width < boxSize.width){
+					a_position.x = 0;
+				}else if(a_position.x > contentSize.width - boxSize.width){
+					a_position.x = contentSize.width - boxSize.width;
+				}
+			}
+			std::cout << a_position << std::endl;
+			textTextureScene->placeAt(a_position);
 			renderTextWindowTexture();
 		}
-		void translateScrollPosition(const Point &a_position){
-			require(initialized, DefaultException("TextBox::translateScrollPosition called before initialization."));
-			textTextureScene.translate(a_position);
-			renderTextWindowTexture();
+		void translateScrollPosition(Point<> a_position, bool a_overScroll = false){
+			setScrollPosition(textTextureScene->getLocation() + a_position, a_overScroll);
 		}
 
-		std::shared_ptr<DrawNode> scene(){
+		Point<> getScrollPosition() const{
+			require(textTextureScene != nullptr, PointerException("TextBox::getScrollPosition has no textBoxFullScene initialized!"));
+			return textTextureScene->getLocation();
+		}
+
+		Size<> getContentSize(){
+			require(textTextureScene != nullptr, PointerException("TextBox::getContentSize has no textBoxFullScene initialized!"));
+			return textTextureScene->getWorldAABB().getSize();
+		}
+
+		std::shared_ptr<Scene::Node> scene(){
 			return textBoxFullScene;
 		}
 
 		void draw(){
-			require(initialized, DefaultException("TextBox::draw called before initialization."));
 			textBoxFullScene->draw();
 		}
 	private:
+		void initialize(const UtfString &a_text);
 		void initializeTextWindowTexture();
 
 		void renderTextWindowTexture();
 
 		//it is important to reload TextLibrary textures before reloading the atlas textures as rendering
 		//here relies on the textures being valid in the TextLibrary.
-		void reloadTexture(MainTexture &textureUpdating){
-			render->createFramebuffer(textWindowFramebuffer);
+		void reloadTexture(std::shared_ptr<TextureDefinition> textureUpdating){
+			//render->makeFramebuffer(textWindowFramebuffer);
 			renderTextWindowTexture();
 		}
 
 		void initializeTextBoxFullScene();
 
-		bool initialized;
-		int width, height;
-		std::shared_ptr<DrawNode> textBoxFullScene;
-		DrawNode textTextureScene;
+		Size<> boxSize;
+		std::shared_ptr<Scene::Node> textBoxFullScene;
+		std::shared_ptr<Scene::Node> textTextureScene;
 		TextLibrary *textLibrary;
-		TextureManager *textures;
-		MainTexture *textWindowTexture;
+		std::shared_ptr<TextureDefinition> textWindowTexture;
+		std::shared_ptr<TextureHandle> textWindowHandle;
 		Draw2D *render;
-		Framebuffer textWindowFramebuffer;
+		std::shared_ptr<Framebuffer> textWindowFramebuffer;
 		UtfString text;
 		std::string fontIdentifier;
 		std::string textureHandle;

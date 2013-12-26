@@ -150,22 +150,22 @@ namespace MESA {
 
 namespace MV {
 
-	Point ProjectionDetails::projectScreen(const Point &a_point){
-		Point result;
+	Point<int> ProjectionDetails::projectScreen(const Point<> &a_point){
+		Point<> result;
 		GLint viewport[4];
 		glGetIntegerv(GL_VIEWPORT, viewport);
-		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*modelviewMatrix().top().getMatrixArray())[0], &(*projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
+		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*renderer.modelviewMatrix().top().getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
 			std::cerr << "gluProject failure!" << std::endl;
 		}
 		result.y=renderer.window().height()-result.y;
-		return result;
+		return castPoint<int>(result);
 	}
 
-	Point ProjectionDetails::projectWorld(const Point &a_point){
-		Point result;
+	Point<> ProjectionDetails::projectWorld(const Point<> &a_point){
+		Point<> result;
 		GLint viewport[4];
 		glGetIntegerv(GL_VIEWPORT, viewport);
-		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*modelviewMatrix().top().getMatrixArray())[0], &(*projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
+		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*renderer.modelviewMatrix().top().getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
 			std::cerr << "gluProject failure!" << std::endl;
 		}
 		result.y/=renderer.window().height()/renderer.world().height();
@@ -174,17 +174,17 @@ namespace MV {
 		return result;
 	}
 
-	Point ProjectionDetails::unProjectScreen(const Point &a_point){
-		Point result;
+	Point<> ProjectionDetails::unProjectScreen(const Point<int> &a_point){
+		Point<> result;
 		GLint viewport[4];
 		glGetIntegerv(GL_VIEWPORT, viewport);
-		if(MESA::gluUnProject(static_cast<GLint>(a_point.x), static_cast<GLint>(renderer.window().height()-a_point.y), 0, &(*modelviewMatrix().top().getMatrixArray())[0], &(*projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
+		if(MESA::gluUnProject(static_cast<GLint>(a_point.x), static_cast<GLint>(renderer.window().height() - a_point.y), 0, &(*renderer.modelviewMatrix().top().getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
 			std::cerr << "gluUnProject failure!" << std::endl;
 		}
 		return result;
 	}
 
-	Point ProjectionDetails::unProjectWorld(const Point &a_point){
+	Point<> ProjectionDetails::unProjectWorld(const Point<> &a_point){
 		return unProjectScreen(renderer.screenFromWorld(a_point));
 	}
 
@@ -200,16 +200,6 @@ namespace MV {
 			SDL_ClearError();
 			error = SDL_GetError();
 		}
-	}
-
-	MatrixStack& projectionMatrix(){
-		static MatrixStack projectionMatrix;
-		return projectionMatrix;
-	}
-
-	MatrixStack& modelviewMatrix(){
-		static MatrixStack modelviewMatrix;
-		return modelviewMatrix;
 	}
 
 	/*************************\
@@ -264,36 +254,39 @@ namespace MV {
 		pglGetFramebufferAttachmentParameterivEXT(nullptr),pglGenerateMipmapEXT(nullptr)
 #endif
 		{
+
+		glGetIntegerv(GL_FRAMEBUFFER_BINDING_EXT, &originalFramebufferId);
+		glGetIntegerv(GL_RENDERBUFFER_BINDING_EXT, &originalRenderbufferId);
 	}
 
-	void glExtensionFramebufferObject::createFramebuffer( Framebuffer &a_framebuffer ){
+	std::shared_ptr<Framebuffer> glExtensionFramebufferObject::makeFramebuffer(const Size<int> &a_size, GLuint a_texture){
 		require(initialized, ResourceException("CreateFramebuffer failed because the extension could not be loaded"));
+		GLuint framebufferId = 0, renderbufferId = 0, depthbufferId = 0;
 #ifdef WIN32
-		pglGenFramebuffersEXT(1, &a_framebuffer.framebuffer);
-		pglGenRenderbuffersEXT(1, &a_framebuffer.renderbuffer);
+		pglGenFramebuffersEXT(1, &framebufferId);
+		pglGenRenderbuffersEXT(1, &renderbufferId);
+		//pglGenRenderbuffersEXT(1, &depthbufferId); //not used right now
 #else
-		glGenFramebuffersOES(1, &a_framebuffer.framebuffer);
-		glGenRenderbuffersOES(1, &a_framebuffer.renderbuffer);
-		glGenRenderbuffersOES(1, &a_framebuffer.depthbuffer);
+		glGenFramebuffersOES(1, &framebufferId);
+		glGenRenderbuffersOES(1, &renderbufferId);
+		glGenRenderbuffersOES(1, &depthbufferId);
 #endif
+		return std::shared_ptr<Framebuffer>(new Framebuffer(renderer, framebufferId, renderbufferId, depthbufferId, a_texture, a_size));
 	}
 
-	void glExtensionFramebufferObject::startUsingFramebuffer( const Framebuffer &a_framebuffer ){
+	void glExtensionFramebufferObject::startUsingFramebuffer( std::shared_ptr<Framebuffer> a_framebuffer, bool a_push ){
 		require(initialized, ResourceException("StartUsingFramebuffer failed because the extension could not be loaded"));
-		
+		if(a_push){
+			activeFramebuffers.push_back(a_framebuffer);
+		}
 #ifdef WIN32
-		pglBindFramebufferEXT(GL_FRAMEBUFFER_EXT, a_framebuffer.framebuffer);
-		pglFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, *a_framebuffer.texture, 0);
-		pglBindRenderbufferEXT(GL_RENDERBUFFER_EXT, a_framebuffer.renderbuffer);
-		pglRenderbufferStorageEXT( GL_RENDERBUFFER_EXT, GL_DEPTH_COMPONENT24, roundUpPowerOfTwo(a_framebuffer.width), roundUpPowerOfTwo(a_framebuffer.height));
+		pglBindFramebufferEXT(GL_FRAMEBUFFER_EXT, a_framebuffer->framebuffer);
+		pglFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, a_framebuffer->texture, 0);
+		pglBindRenderbufferEXT(GL_RENDERBUFFER_EXT, a_framebuffer->renderbuffer);
+		pglRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, GL_DEPTH_COMPONENT24, roundUpPowerOfTwo(a_framebuffer->frameSize.width), roundUpPowerOfTwo(a_framebuffer->frameSize.height));
 #else
-		originalFramebufferIds.push_back(0);
-		originalRenderbufferIds.push_back(0);
-		glGetIntegerv(GL_FRAMEBUFFER_BINDING_OES, &originalFramebufferIds[0]);
-		glGetIntegerv(GL_RENDERBUFFER_BINDING_OES, &originalRenderbufferIds[0]);
-		
-		int width = roundUpPowerOfTwo(a_framebuffer.width);
-		int height = roundUpPowerOfTwo(a_framebuffer.height);
+		int width = roundUpPowerOfTwo(a_framebuffer.frameSize.width);
+		int height = roundUpPowerOfTwo(a_framebuffer.frameSize.height);
 		
 		glBindFramebufferOES(GL_FRAMEBUFFER_OES, a_framebuffer.framebuffer);
 		glBindRenderbufferOES(GL_RENDERBUFFER_OES, a_framebuffer.renderbuffer);
@@ -305,46 +298,48 @@ namespace MV {
 		glRenderbufferStorageOES(GL_RENDERBUFFER_OES, GL_DEPTH_COMPONENT16_OES, width, height);
 		glFramebufferRenderbufferOES(GL_FRAMEBUFFER_OES, GL_DEPTH_ATTACHMENT_OES, GL_RENDERBUFFER_OES, a_framebuffer.depthbuffer);
 		
-		glFramebufferTexture2DOES(GL_FRAMEBUFFER_OES, GL_COLOR_ATTACHMENT0_OES, GL_TEXTURE_2D, *a_framebuffer.texture, 0);
+		glFramebufferTexture2DOES(GL_FRAMEBUFFER_OES, GL_COLOR_ATTACHMENT0_OES, GL_TEXTURE_2D, a_framebuffer.texture, 0);
 
 		if(glCheckFramebufferStatusOES(GL_FRAMEBUFFER_OES) != GL_FRAMEBUFFER_COMPLETE_OES){
 			std::cout << "Start Using Framebuffer failure: " << glCheckFramebufferStatusOES(GL_FRAMEBUFFER_OES) << std::endl;
 		}
 #endif
-		glViewport( 0, 0, a_framebuffer.width, a_framebuffer.height );
-		projectionMatrix().push().makeOrtho(0, a_framebuffer.width, 0, a_framebuffer.height, -128.0f, 128.0f);
+		glViewport(0, 0, a_framebuffer->frameSize.width, a_framebuffer->frameSize.height);
+		renderer->projectionMatrix().push().makeOrtho(0, a_framebuffer->frameSize.width, 0, a_framebuffer->frameSize.height, -128.0f, 128.0f);
 		renderer->clearScreen();
 	}
 
 	void glExtensionFramebufferObject::stopUsingFramebuffer(){
 		require(initialized, ResourceException("StopUsingFramebuffer failed because the extension could not be loaded"));
+		activeFramebuffers.pop_back();
+		if(!activeFramebuffers.empty()){
+			startUsingFramebuffer(activeFramebuffers.back(), false);
+		} else {
 #ifdef WIN32
-		pglBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0); 
-		pglBindRenderbufferEXT(GL_RENDERBUFFER_EXT, 0);
+			pglBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);
+			pglBindRenderbufferEXT(GL_RENDERBUFFER_EXT, 0);
 #else
-		glBindFramebufferOES(GL_FRAMEBUFFER_OES, originalFramebufferIds.back());
-		glBindRenderbufferOES(GL_RENDERBUFFER_OES, originalRenderbufferIds.back());
-		originalFramebufferIds.pop_back();
-		originalRenderbufferIds.pop_back();
-		
-		if(glCheckFramebufferStatusOES(GL_FRAMEBUFFER_OES) != GL_FRAMEBUFFER_COMPLETE_OES){
-			std::cout << "Stop Using Framebuffer failure: " << glCheckFramebufferStatusOES(GL_FRAMEBUFFER_OES) << std::endl;
-		}
+			glBindFramebufferOES(GL_FRAMEBUFFER_OES, originalFramebufferId);
+			glBindRenderbufferOES(GL_RENDERBUFFER_OES, originalRenderbufferId);
 #endif
-		glViewport( 0, 0, renderer->window().width(), renderer->window().height());
-		projectionMatrix().pop();
+			glViewport(0, 0, renderer->window().width(), renderer->window().height());
+			renderer->projectionMatrix().pop();
+		}
 	}
 	
 	void glExtensionFramebufferObject::deleteFramebuffer( Framebuffer &a_framebuffer ){
 #ifdef WIN32
 		pglDeleteFramebuffersEXT(1, &a_framebuffer.framebuffer);
 		pglDeleteRenderbuffersEXT(1, &a_framebuffer.renderbuffer);
+		//pglDeleteRenderbuffersEXT(1, &a_framebuffer.depthbuffer); //not used currently
 #else
 		glDeleteFramebuffersOES(1, &a_framebuffer.framebuffer);
 		glDeleteRenderbuffersOES(1, &a_framebuffer.renderbuffer);
+		glDeleteRenderbuffersOES(1, &a_framebuffer.depthbuffer);
 #endif
 		a_framebuffer.framebuffer = 0;
 		a_framebuffer.renderbuffer = 0;
+		a_framebuffer.depthbuffer = 0;
 	}
 
 	void glExtensionFramebufferObject::loadExtensionFramebufferObject( char* a_extensionsList ){
@@ -792,36 +787,36 @@ namespace MV {
 		sdlWindow.updateScreen();
 	}
 
-	Point Draw2D::worldFromLocal(const Point &a_localPoint ) const{
+	Point<> Draw2D::worldFromLocal(const Point<> &a_localPoint ) const{
 		MV::ProjectionDetails projectIt(*this);
 		return projectIt.projectWorld(a_localPoint);
 	}
 
-	Point Draw2D::screenFromLocal(const Point &a_localPoint) const{
+	Point<int> Draw2D::screenFromLocal(const Point<> &a_localPoint) const{
 		MV::ProjectionDetails projectIt(*this);
 		return projectIt.projectScreen(a_localPoint);
 	}
 
-	Point Draw2D::localFromWorld(const Point &a_worldPoint ) const{
+	Point<> Draw2D::localFromWorld(const Point<> &a_worldPoint ) const{
 		MV::ProjectionDetails projectIt(*this);
 		return projectIt.unProjectWorld(a_worldPoint);
 	}
 
-	Point Draw2D::localFromScreen(const Point &a_worldPoint ) const{
+	Point<> Draw2D::localFromScreen(const Point<int> &a_worldPoint ) const{
 		MV::ProjectionDetails projectIt(*this);
 		return projectIt.unProjectScreen(a_worldPoint);
 	}
 
-	Point Draw2D::worldFromScreen(const Point &a_screenPoint) const{
+	Point<> Draw2D::worldFromScreen(const Point<int> &a_screenPoint) const{
 		double widthRatio = window().width()/world().width();
 		double heightRatio = window().height()/world().height();
-		return Point(a_screenPoint.x/widthRatio, a_screenPoint.y/heightRatio, a_screenPoint.z);
+		return Point<>(static_cast<double>(a_screenPoint.x)/widthRatio, static_cast<double>(a_screenPoint.y)/heightRatio, static_cast<double>(a_screenPoint.z));
 	}
 
-	Point Draw2D::screenFromWorld(const Point &a_worldPoint) const{
+	Point<int> Draw2D::screenFromWorld(const Point<> &a_worldPoint) const{
 		double widthRatio = window().width()/world().width();
 		double heightRatio = window().height()/world().height();
-		return Point(a_worldPoint.x*widthRatio, a_worldPoint.y*heightRatio, a_worldPoint.z);
+		return Point<int>(static_cast<int>(a_worldPoint.x*widthRatio), static_cast<int>(a_worldPoint.y*heightRatio), static_cast<int>(a_worldPoint.z));
 	}
 
 	void Draw2D::setBackgroundColor( Color a_newColor ){
@@ -843,6 +838,27 @@ namespace MV {
 
 	const RenderWorld& Draw2D::world() const{
 		return mvWorld;
+	}
+
+	Framebuffer::Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, Size<int> a_size) :
+		renderbuffer(a_renderbuffer),
+		framebuffer(a_framebuffer),
+		depthbuffer(a_depthbuffer),
+		texture(a_texture),
+		frameSize(a_size),
+		renderer(a_renderer){
+	}
+
+	Framebuffer::~Framebuffer(){
+		renderer->deleteFramebuffer(*this);
+	}
+
+	void Framebuffer::start() {
+		renderer->startUsingFramebuffer(shared_from_this());
+	}
+
+	void Framebuffer::stop() {
+		renderer->stopUsingFramebuffer();
 	}
 
 }

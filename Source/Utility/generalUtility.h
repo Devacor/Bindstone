@@ -8,6 +8,7 @@
 #include <iostream>
 #include <cmath>
 #include <iostream>
+#include <functional>
 
 #define UTF_CHAR_STR(stringVal) L##stringVal
 

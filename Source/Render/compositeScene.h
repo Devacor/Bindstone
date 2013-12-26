@@ -17,6 +17,8 @@ namespace MV {
 
 			void setSize(const Size<> &a_size);
 
+
+			void refreshTexture(bool a_forceRefresh = false);
 			void clearTextureCoordinates();
 			void updateTextureCoordinates();
 		protected:

@@ -204,6 +204,7 @@
     <ClInclude Include="Source\Utility\generalUtility.h" />
     <ClInclude Include="Source\Utility\notification.h" />
     <ClInclude Include="Source\Utility\package.h" />
+    <ClInclude Include="Source\Utility\scopeGuard.hpp" />
     <ClInclude Include="Source\Utility\signal.h" />
     <ClInclude Include="Source\Utility\stopwatch.h" />
   </ItemGroup>

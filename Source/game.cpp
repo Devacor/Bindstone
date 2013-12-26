@@ -15,12 +15,13 @@ Game::Game() :
 
 	initializeWindow();
 
-	auto clipped = mainScene->make<MV::Scene::Clipped>("clipped", MV::Size<>(20, 200));
+	auto clipped = mainScene->make<MV::Scene::Clipped>("clipped", MV::Size<>(200, 200));
 	//auto clipped = mainScene->make<MV::Scene::Node>("clipped");
 	clipped->add("catapult", initializeCatapultScene());
 	//mainScene->add("textbox", initializeTextScene());
+	auto pointtest = MV::Point<>(-clipped->getLocalAABB().getSize().width / 2.0, 0);
 	//mainScene->get("clipped")->placeAt(MV::Point<>(-clipped->getLocalAABB().getSize().width / 2.0, 0));
-	//mainScene->placeAt(MV::Point<>(renderer.world().width() / 2, renderer.world().height() / 2));
+	mainScene->placeAt(MV::Point<>(renderer.world().width() / 2, renderer.world().height() / 2));
 
 	mainScene->make<MV::Scene::Node>("container");
 	mainScene->get<MV::Scene::Node>("container")->placeAt(MV::Point<>(20, 80));

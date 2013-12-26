@@ -33,27 +33,40 @@ namespace MV {
 			alertParent("Changed");
 		}
 
-		bool Clipped::preDraw() {
-			if(dirtyTexture){
+		void Clipped::refreshTexture(bool a_forceRefresh) {
+			if(a_forceRefresh || dirtyTexture){
 				dirtyTexture = false;
 				auto textureSize = castSize<int>(sizeFromPoint(points[2]));
 				setTexture(clippedTexture->makeHandle(Point<int>(), textureSize));
 				framebuffer->setTextureId(clippedTexture->textureId());
+				{
+					renderer->modelviewMatrix().push();
+					SCOPE_EXIT{renderer->modelviewMatrix().pop();};
+					renderer->modelviewMatrix().top().makeIdentity();
 
-				pushMatrix();
-				framebuffer->start();
-				if(drawSorted){
-					sortedRender();
-				} else{
-					unsortedRender();
+					pushMatrix();
+					SCOPE_EXIT{popMatrix();};
+
+					framebuffer->start();
+					SCOPE_EXIT{framebuffer->stop();};
+
+					if(drawSorted){
+						sortedRender();
+					} else{
+						unsortedRender();
+					}
 				}
-				framebuffer->stop();
-				popMatrix();
 			}
+		}
+
+		bool Clipped::preDraw() {
+			refreshTexture();
+
 			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
 			defaultDraw(GL_TRIANGLE_FAN);
-			popMatrix();
-			return false; //Nope, we won't be doing any more draw steps!
+
+			return false; //returning false blocks the default rendering steps for this node.
 		}
 
 		bool Clipped::getMessage(const std::string &a_message) {

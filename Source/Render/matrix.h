@@ -69,7 +69,7 @@ namespace MV {
 		Matrix& operator=(const Matrix& a_other);
 		Matrix& operator=(Matrix&& a_other);
 
-		std::shared_ptr<std::vector<MatrixValue>> getMatrixArray();
+		std::shared_ptr<std::vector<MatrixValue>> getMatrixArray() const;
 	protected:
 		size_t sizeX, sizeY;
 		std::shared_ptr<std::vector<MatrixValue>> matrixArray;
@@ -94,7 +94,7 @@ namespace MV {
 		TransformMatrix(const Matrix &&a_matrix):Matrix(std::move(a_matrix)){}
 
 		TransformMatrix(MatrixValue a_value = 0.0);
-		TransformMatrix(const Point &a_position);
+		TransformMatrix(const Point<MatrixValue> &a_position);
 
 		MatrixValue getX() const{
 			return (*this)[3][0];
@@ -126,6 +126,7 @@ namespace MV {
 		}
 
 		TransformMatrix& top();
+		const TransformMatrix& top() const;
 		TransformMatrix& push();
 		TransformMatrix& push(const TransformMatrix &matrix);
 		void pop();

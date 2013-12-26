@@ -138,7 +138,7 @@ namespace MV{
 		return *this;
 	}
 
-	std::shared_ptr<std::vector<MatrixValue>> Matrix::getMatrixArray(){
+	std::shared_ptr<std::vector<MatrixValue>> Matrix::getMatrixArray() const{
 		return matrixArray;
 	}
 
@@ -181,7 +181,7 @@ namespace MV{
 		makeIdentity();
 	}
 
-	TransformMatrix::TransformMatrix( const Point &a_position ) :Matrix(4){
+	TransformMatrix::TransformMatrix( const Point<MatrixValue> &a_position ) :Matrix(4){
 		makeIdentity();
 		position(a_position.x, a_position.y, a_position.z);
 	}
@@ -288,8 +288,11 @@ namespace MV{
 		return *this;
 	}
 
-
 	TransformMatrix& MatrixStack::top(){
+		return stack.back();
+	}
+
+	const TransformMatrix& MatrixStack::top() const{
 		return stack.back();
 	}
 

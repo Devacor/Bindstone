@@ -1,13 +1,13 @@
 #ifndef __TILES_H__
 #define __TILES_H__
 
-#include "drawShapes.h"
+#include "scene.h"
 
 namespace MV {
-
+	/*
 	class Tiles {
 	public:
-		Tiles(std::shared_ptr<DrawNode> a_mainScene, const SubTexture& a_initTexture, size_t a_x, size_t a_y, double a_tileWidth, double a_tileHeight):
+		Tiles(std::shared_ptr<DrawNode> a_mainScene, const std::shared_ptr<TextureHandle>& a_initTexture, size_t a_x, size_t a_y, double a_tileWidth, double a_tileHeight):
 			tileCountX(a_x),
 			tileCountY(a_y),
 			tileWidth(a_tileWidth),
@@ -29,11 +29,11 @@ namespace MV {
 		}
 
 		//returns bottom left point for a tile
-		Point pointForTile(size_t a_x, size_t a_y){
-			return Point(static_cast<double>(a_x)*tileWidth, static_cast<double>(a_y+1)*tileHeight, a_y+decorationZOffset);
+		Point<> pointForTile(size_t a_x, size_t a_y){
+			return Point<>(static_cast<double>(a_x)*tileWidth, static_cast<double>(a_y+1)*tileHeight, a_y+decorationZOffset);
 		}
-		Point pointForTile(size_t a_x, size_t a_y, double a_zOffsetOverride){
-			return Point(static_cast<double>(a_x)*tileWidth, static_cast<double>(a_y+1)*tileHeight, a_y+a_zOffsetOverride);
+		Point<> pointForTile(size_t a_x, size_t a_y, double a_zOffsetOverride){
+			return Point<>(static_cast<double>(a_x)*tileWidth, static_cast<double>(a_y+1)*tileHeight, a_y+a_zOffsetOverride);
 		}
 	private:
 		void initializeScene(){
@@ -64,6 +64,7 @@ namespace MV {
 		double tileWidth, tileHeight;
 		size_t tileCountX, tileCountY;
 	};
+*/
 }
 
 #endif

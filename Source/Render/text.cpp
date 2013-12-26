@@ -8,9 +8,7 @@ namespace MV {
 		std::vector<std::string> colorStrings;
 		boost::split(colorStrings, a_colorString, boost::is_any_of(":"));
 		Color result;
-		if(colorStrings.empty()){
-			//do nothing
-		}else{
+		if(!colorStrings.empty()){
 			if(colorStrings.size() >= 1){
 				try{result.R = boost::lexical_cast<float>(colorStrings[0]);}catch(boost::bad_lexical_cast){result.R = 1.0;}
 			}
@@ -71,74 +69,33 @@ namespace MV {
 	| -----TextCharacter----- |
 	\*************************/
 
-	void TextCharacter::assignSDLSurface(SDL_Surface *a_newSurface, UtfChar a_glyphChar){
-		require(a_newSurface != nullptr, PointerException("TextCharacter::assignSDLSurface was passed a null SDL_Surface pointer."));
-		set = true;
-		character = a_glyphChar;
-
-		int widthPowerOfTwo = roundUpPowerOfTwo(a_newSurface->w);
-		int heightPowerOfTwo = roundUpPowerOfTwo(a_newSurface->h);
-
-		size = Point(a_newSurface->w, a_newSurface->h);
-		textureSize = Point(widthPowerOfTwo, heightPowerOfTwo);
-
-		assignSurfaceToOpenGL(a_newSurface, widthPowerOfTwo, heightPowerOfTwo);
+	bool TextCharacter::isSet() const{
+		return glyphTexture != nullptr;
 	}
 
-	void TextCharacter::assignSurfaceToOpenGL( SDL_Surface *a_img, int a_widthPowerOfTwo, int a_heightPowerOfTwo ){
-		require(a_img != nullptr, PointerException("TextCharacter::assignSurfaceToOpenGL was passed a null SDL_Surface pointer."));
-		//SDL_Surface *surface = SDL_CreateRGBSurface(0, a_widthPowerOfTwo, a_heightPowerOfTwo, 32, SDL_RMASK, SDL_GMASK, SDL_BMASK, SDL_AMASK);
-		//SDL_Surface *surface = SDL_CreateRGBSurface(0, a_widthPowerOfTwo, a_heightPowerOfTwo, 32, 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
-		
-		int bpp;
-		Uint32 Rmask, Gmask, Bmask, Amask;
-		SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_ABGR8888, &bpp, &Rmask, &Gmask, &Bmask, &Amask);
-		SDL_Surface *surface = SDL_CreateRGBSurface(0, a_widthPowerOfTwo, a_heightPowerOfTwo, bpp, Rmask, Gmask, Bmask, Amask);
-		
-		SDL_SetSurfaceBlendMode(a_img, SDL_BLENDMODE_NONE);
-		SDL_BlitSurface(a_img, 0, surface, 0);
-
-		SDL_FreeSurface(a_img);
-		generateTexture(surface);
+	UtfChar TextCharacter::character() const{
+		return glyphCharacter;
 	}
 
-	void TextCharacter::generateTexture( SDL_Surface *a_surface ){
-		require(a_surface != nullptr, PointerException("TextCharacter::generateTexture was passed a null SDL_Surface pointer."));
-
-		glGenTextures(1, &textureId);
-		
-		glBindTexture(GL_TEXTURE_2D, textureId);
-		
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		
-		glTexImage2D(GL_TEXTURE_2D, 0, getInternalTextureFormat(a_surface), a_surface->w, a_surface->h, 0, getTextureFormat(a_surface), GL_UNSIGNED_BYTE, a_surface->pixels);
-		
-		SDL_FreeSurface(a_surface);
+	std::shared_ptr<TextureHandle> TextCharacter::texture() const{
+		return glyphHandle;
 	}
 
-	bool TextCharacter::isSet(){
-		return set;
+	Size<int> TextCharacter::characterSize() const{
+		return glyphTexture->surfaceSize();
 	}
 
-	UtfChar TextCharacter::getChar(){
-		return character;
+	Size<int> TextCharacter::textureSize() const{
+		return glyphTexture->size();
 	}
 
-	GLuint* TextCharacter::getTextureId(){
-		return &textureId;
+	void TextCharacter::setCharacter(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter) {
+		glyphTexture = a_texture;
+		glyphHandle = glyphTexture->makeHandle();
+		glyphHandle->setBounds(Point<int>(), glyphTexture->surfaceSize());
+		glyphCharacter = a_glyphCharacter;
 	}
 
-	Point TextCharacter::getCharacterSize(){
-		return size;
-	}
-
-	Point TextCharacter::getTextureSize(){
-		return textureSize;
-	}
 
 	/*************************\
 	| ----------Text--------- |
@@ -168,9 +125,9 @@ namespace MV {
 		return false;
 	}
 
-	//TODO: organize this method better.
-	std::shared_ptr<DrawNode> TextLibrary::composeScene(std::vector<TextState> a_textStateList, double a_maxWidth, TextWrapMethod a_wrapMethod){
-		auto textScene = std::make_shared<DrawNode>(render);
+	//TODO: organize this method better.  This method is a beast.
+	std::shared_ptr<Scene::Node> TextLibrary::composeScene(std::vector<TextState> a_textStateList, double a_maxWidth, TextWrapMethod a_wrapMethod){
+		auto textScene = Scene::Node::make(render);
 		if(a_textStateList.empty()){return textScene;}
 
 		Color currentColor;
@@ -195,7 +152,7 @@ namespace MV {
 					int newBaseLine = TTF_FontAscent(specifiedFont->second.font);
 					if(newBaseLine > baseLine){
 						for(size_t i = previousLine;i < characterCount;++i){
-							textScene->get(boost::lexical_cast<std::string>(i))->translate(Point(0, (newBaseLine-baseLine)));
+							textScene->get(boost::lexical_cast<std::string>(i))->translate(Point<>(0, (newBaseLine-baseLine)));
 						}
 						offset = 0;
 						lineHeight = newLineHeight;
@@ -206,11 +163,11 @@ namespace MV {
 				}
 
 				for(auto renderChar = current->text.begin();renderChar != current->text.end();++renderChar){
-					nextCharacterLocationX += (*characterList)[*renderChar].getCharacterSize().x;
+					nextCharacterLocationX += (*characterList)[*renderChar].characterSize().width;
 					bool lineWidthExceeded = (a_maxWidth!=0 && nextCharacterLocationX > a_maxWidth);
 					if(*renderChar == '\n' || lineWidthExceeded){
 						characterLocationX = 0;
-						nextCharacterLocationX = (!lineWidthExceeded)?0:(*characterList)[*renderChar].getCharacterSize().x;
+						nextCharacterLocationX = (!lineWidthExceeded)?0:(*characterList)[*renderChar].characterSize().width;
 						characterLocationY+=lineHeight;
 						offset = 0;
 						lineHeight = TTF_FontLineSkip(specifiedFont->second.font);
@@ -222,7 +179,7 @@ namespace MV {
 								previousLine = characterCount - distance;
 								for(;distance > 0;--distance){
 									auto renderedCharacter = textScene->get(boost::lexical_cast<std::string>(characterCount-distance));
-									renderedCharacter->placeAt(Point(characterLocationX, renderedCharacter->getLocation().y+lineHeight));
+									renderedCharacter->placeAt(Point<>(characterLocationX, renderedCharacter->getLocation().y+lineHeight));
 									characterLocationX+=currentLineCharacterSizes[currentLineContent.size()-distance];
 								}
 								nextCharacterLocationX+=characterLocationX;
@@ -237,15 +194,14 @@ namespace MV {
 						currentLineCharacterSizes.clear();
 					}
 					if(*renderChar != '\n'){
-						auto character = std::make_shared<DrawRectangle>(render);
-						character->setTwoCorners(Point(), Point((*characterList)[*renderChar].getTextureSize().x, (*characterList)[*renderChar].getTextureSize().y, 0));
-						character->translate(Point(characterLocationX, characterLocationY + offset));
-						AssignTextureToRectangle(*character, (*characterList)[*renderChar].getTextureId());
+						auto character = Scene::Rectangle::make(render, Point<>(), castSize<double>((*characterList)[*renderChar].textureSize()), false);
+						character->translate(Point<>(characterLocationX, characterLocationY + offset));
+						character->setTexture((*characterList)[*renderChar].texture());
 						character->setColor(currentColor);
-						textScene->add(character, boost::lexical_cast<std::string>(characterCount));
+						textScene->add(boost::lexical_cast<std::string>(characterCount), character);
 						characterLocationX = nextCharacterLocationX;
 						currentLineContent.push_back(*renderChar);
-						currentLineCharacterSizes.push_back((*characterList)[*renderChar].getCharacterSize().x);
+						currentLineCharacterSizes.push_back((*characterList)[*renderChar].characterSize().width);
 						characterCount++;
 					}
 				}
@@ -263,7 +219,8 @@ namespace MV {
 			std::for_each(glyphList.second.begin(), glyphList.second.end(), [&](std::pair<const UtfChar, TextCharacter> &glyph){
 				if(glyph.second.isSet()){
 					Uint16 text[] = {static_cast<Uint16>(glyph.first), '\0'};
-					glyph.second.assignSDLSurface(TTF_RenderUNICODE_Blended(currentFont, text, white), glyph.first);
+					//glyph.second.setCharacter(SurfaceTextureDefinition::make(), glyph.first); //TEXTURE
+					//glyph.second.assignSDLSurface(TTF_RenderUNICODE_Blended(currentFont, text, white), glyph.first);
 				}
 			});
 		});
@@ -280,113 +237,95 @@ namespace MV {
 		TTF_Font* fontFace = loadedFonts[a_identifier].font;
 		std::for_each(a_text.begin(), a_text.end(), [&](UtfChar renderChar){
 			if(!a_characterList[renderChar].isSet()){
-				Uint16 text[] = {static_cast<Uint16>(renderChar), '\0'};
-				a_characterList[renderChar].assignSDLSurface(TTF_RenderUNICODE_Blended(fontFace, text, white), renderChar);
+				a_characterList[renderChar].setCharacter(
+					SurfaceTextureDefinition::make("", [=](){
+						Uint16 text[] = {static_cast<Uint16>(renderChar), '\0'};
+						return TTF_RenderUNICODE_Blended(fontFace, text, white); 
+					}),
+					renderChar
+				);
 			}
 		});
 	}
 
-	TextBox::TextBox(TextureManager *a_textures, TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, int a_width, int a_height):
+	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, Size<> a_size):
 		textLibrary(a_textLibrary),
 		render(a_textLibrary->getRenderer()),
-		textures(a_textures),
 		fontIdentifier(a_fontIdentifier),
-		textTextureScene(a_textLibrary->getRenderer()),
-		textBoxFullScene(std::make_shared<DrawNode>(a_textLibrary->getRenderer())),
-		width(a_width),
-		height(a_height),
-		initialized(false){
+		textTextureScene(Scene::Node::make(a_textLibrary->getRenderer())),
+		textBoxFullScene(Scene::Node::make(a_textLibrary->getRenderer())),
+		boxSize(a_size){
+
+		initialize(UTF_CHAR_STR("\0"));
 	}
 
-	TextBox::TextBox( TextureManager *a_textures, TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, int a_width, int a_height ) :
+	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, Size<> a_size) :
 		textLibrary(a_textLibrary),
 		render(a_textLibrary->getRenderer()),
-		textures(a_textures),
 		fontIdentifier(a_fontIdentifier),
-		textTextureScene(a_textLibrary->getRenderer()), textBoxFullScene(std::make_shared<DrawNode>(a_textLibrary->getRenderer())),
-		width(a_width),
-		height(a_height),
-		initialized(false){
+		textTextureScene(Scene::Node::make(a_textLibrary->getRenderer())),
+		textBoxFullScene(Scene::Node::make(a_textLibrary->getRenderer())),
+		boxSize(a_size){
 		
-		initialize();
+		initialize(a_text);
 	}
 
-	void TextBox::initialize(){
-		if(!initialized){
-			initialized = true;
-			textureHandle = getNewStringId();
+	void TextBox::initialize(const UtfString &a_text){
+		textureHandle = getNewStringId();
 
-			initializeTextWindowTexture();
-			initializeTextBoxFullScene();
+		initializeTextWindowTexture();
+		initializeTextBoxFullScene();
 
-			render->createFramebuffer(textWindowFramebuffer);
-			setText(UTF_CHAR_STR(""), fontIdentifier);
-		}
+		//render->makeFramebuffer(textWindowFramebuffer);
+		setText(a_text, fontIdentifier);
 	}
 
-	void TextBox::setText( const UtfString &a_text, const std::string &a_fontIdentifier /*= ""*/ ){
-		require(initialized, DefaultException("TextBox::setText called before initialization."));
+	void TextBox::setText(const UtfString &a_text, const std::string &a_fontIdentifier){
 		if(a_fontIdentifier != ""){fontIdentifier = a_fontIdentifier;}
 		text = a_text;
-		textTextureScene.add(textLibrary->composeScene(parseTextStateList(fontIdentifier, text), width), "Text");
+		textTextureScene->add("Text", textLibrary->composeScene(parseTextStateList(fontIdentifier, text), boxSize.width));
 		renderTextWindowTexture();
 	}
 
 
 	bool TextBox::setText( SDL_Event &event ){
-		require(initialized, DefaultException("TextBox::setText called before initialization."));
-		if(event.type == SDL_KEYDOWN){
-			switch(event.key.keysym.sym){
-			case SDLK_TAB:
-				break;
-			case SDLK_RETURN:
-				return true;
-				break;
-			case SDLK_BACKSPACE:
-				backspace();
-				break;
-			default:
-#pragma message ( "WARNING: This needs to be addressed!" )
-				if(event.key.keysym.unused != 0){
-					appendTextUint(event.key.keysym.unused);
-				}
-				break;
-			}
+		if(event.type == SDL_TEXTINPUT){
+			appendText(stringToWide(event.text.text));
+		} else if (event.type == SDL_TEXTEDITING) {
+			//whothefuckknows?
+			#pragma message( "WARNING: Figure out how SDL_TEXTEDITING works.")
 		}
 		return false;
 	}
 
-	void TextBox::setTextBoxSize( int a_width, int a_height ){
-		require(initialized, DefaultException("TextBox::setTextBoxSize called before initialization."));
-		width = a_width;
-		height = a_height;
+	void TextBox::setTextBoxSize( Size<> a_size ){
+		boxSize = a_size;
 
-		auto textBoxWindow = textBoxFullScene->get<DrawRectangle>("TextBoxWindow");
-		textBoxWindow->setSizeAndLocation(textBoxWindow->getLocation(), width, height);
+		auto textBoxWindow = textBoxFullScene->get<Scene::Rectangle>("TextBoxWindow");
+		textBoxWindow->setSizeAndLocation(textBoxWindow->getLocation(), boxSize);
 
-		textures->deleteMainTexture(textureHandle);
 		initializeTextWindowTexture();
-		textTextureScene.add(textLibrary->composeScene(parseTextStateList(fontIdentifier, text), width), "Text");
+		textTextureScene->add("Text", textLibrary->composeScene(parseTextStateList(fontIdentifier, text), boxSize.width));
 		renderTextWindowTexture();
 	}
 
 	void TextBox::initializeTextWindowTexture(){
-		textWindowTexture = textures->createEmptyTexture(textureHandle, width, height, MEMBER_FUNCTION_POINTER(TextBox::reloadTexture, this));
-		textWindowFramebuffer.texture = &textWindowTexture->texture;
-		textWindowFramebuffer.width = width;
-		textWindowFramebuffer.height = height;
+		textWindowTexture = DynamicTextureDefinition::make("window", castSize<int>(boxSize));
+		textWindowHandle = textWindowTexture->makeHandle();
+		textWindowFramebuffer->setTextureId(textWindowTexture->textureId());
+		textWindowFramebuffer->setSize(castSize<int>(boxSize));
 	}
 
 	void TextBox::renderTextWindowTexture(){
-		render->startUsingFramebuffer(textWindowFramebuffer);
-		textTextureScene.draw();
+		//render->startUsingFramebuffer(textWindowFramebuffer);
+		textTextureScene->draw();
 		render->stopUsingFramebuffer();
 	}
 
 	void TextBox::initializeTextBoxFullScene(){
-		auto textBoxWindow = std::make_shared<DrawRectangle>();
-		textBoxWindow->setSizeAndLocation(Point(), width, height);
-		AssignTextureToRectangle(*textBoxWindow, textWindowTexture->getSubTexture("FullSize"));
-		textBoxFullScene->add(textBoxWindow, "TextBoxWindow");
+		auto textBoxWindow = Scene::Rectangle::make(render);
+		textBoxWindow->setSizeAndLocation(Point<>(), boxSize);
+		textBoxWindow->setTexture(textWindowTexture->makeHandle());
+		textBoxFullScene->add("TextBoxWindow", textBoxWindow);
 	}
 }

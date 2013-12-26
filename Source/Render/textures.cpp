@@ -1,6 +1,7 @@
 #include "textures.h"
 #include <iostream>
 #include <algorithm>
+#include <cmath>
 #include <SDL_image.h>
 #include "Utility/generalUtility.h"
 
@@ -11,127 +12,19 @@
 #endif
 
 namespace MV {
-	boost::property_tree::ptree MainTexture::save() const{
-		boost::property_tree::ptree outputStructure;
-		outputStructure.put("Type", ((dynamicTexture)?"Dynamic":"File"));
-		outputStructure.put("File", file);
-		outputStructure.put("Repeat", repeat);
-		boost::property_tree::ptree subTextureOutput;
-		std::for_each(subTextures.begin(), subTextures.end(), [&](std::pair<const std::string, SubTexture> current){
-			subTextureOutput.add_child(current.first, current.second.save());
-		});
-		outputStructure.add_child("SubTextures", subTextureOutput);
-		return outputStructure;
-	}
 
-	SubTexture * MainTexture::getSubTexture( const std::string &a_subName ){
-		if(subTextures.find(a_subName) != subTextures.end()){
-			return &(subTextures[a_subName]);
-		}
-		return nullptr;
-	}
+	/**************************************\
+	| ---BareSurfaceAndTextureFunctions--- |
+	\**************************************/
 
-	SubTexture * MainTexture::getSubTexture( int a_index ){
-		auto node = subTextures.begin();
-		for(;a_index > 0 && node != subTextures.end();a_index--){
-			node++;
-		}
-		if(node!=subTextures.end()){
-			return &(node->second);
-		}
-		return nullptr;
-	}
-
-	SubTexture& SubTexture::operator=( MainTexture& a_other ){
-		percentWidth = double(width)/double(a_other.width);
-		percentHeight = double(height)/double(a_other.height);
-		percentX = double(x)/double(a_other.width);
-		percentY = double(y)/double(a_other.height);
-		mainHeight = a_other.height;
-		mainWidth = a_other.width;
-		parentTexture = &a_other.texture;
-
-		return *this;
-	}
-
-	SubTexture::SubTexture( const std::string &a_subName, boost::property_tree::ptree &inputStructure ) :name(a_subName){
-		x = inputStructure.get<int>("X", 0);
-		y = inputStructure.get<int>("Y", 0);
-		width = inputStructure.get<int>("Width", 0);
-		height = inputStructure.get<int>("Height", 0);
-	}
-
-	boost::property_tree::ptree SubTexture::save() const{
-		boost::property_tree::ptree outputStructure;
-		outputStructure.put("X", x);
-		outputStructure.put("Y", y);
-		outputStructure.put("Width", width);
-		outputStructure.put("Height", height);
-		return outputStructure;
-	}
-
-	TextureManager::TextureManager():invalidTexture("M2_INVALID_TEXTURE", 16, 16, ""), invalidSubTexture("M2_INVALID_SUB_TEXTURE", 0, 0, 16, 16){
-		initializeInvalidTexture();
-	}
-
-	TextureManager::~TextureManager(){
-	}
-
-	MainTexture* TextureManager::createEmptyTexture(const std::string &name, unsigned int width, unsigned int height, std::function<void(MainTexture&)> reloadCallback){
-		unsigned int originalWidth = width, originalHeight = height;
-		width = roundUpPowerOfTwo(width);
-		height = roundUpPowerOfTwo(height);
-		
-		GLuint txtnumber;						// Texture ID
-		unsigned int* data;						// Stored Data
-		unsigned int imageSize = (width * height)* 4 * sizeof(unsigned int);
-		// Create Storage Space For Texture Data (128x128x4)
-		data = (unsigned int*)new GLuint[(imageSize)];
-		memset(data, 0,(imageSize));
-		glGenTextures(1, &txtnumber);					// Create 1 Texture
-		glBindTexture(GL_TEXTURE_2D, txtnumber);			// Bind The Texture
-		// Build Texture Using Information In data
-		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-		delete [] data;							// Release data
-		MainTexture tmp;
-		tmp.dynamicTexture = true;
-		tmp.reloadCallback = reloadCallback;
-		tmp.file = "";
-		tmp.height = height;
-		tmp.width = width;
-		tmp.name = name;
-		tmp.texture = txtnumber;
-		tmp.subTextures["FullSize"] = SubTexture("FullSize", 0, 0, originalWidth, originalHeight);
-		mainTextures[name] = tmp;
-		mainTextures[name].subTextures["FullSize"] = mainTextures[name];
-		return &mainTextures[name];
-	}
-
-
-	bool TextureManager::deleteSubTexture(const std::string &mainName, const std::string &subName){
-		if(MainTexture *tmpMain = getMainTexture(mainName)){
-			if(tmpMain && (tmpMain->subTextures.find(subName) != tmpMain->subTextures.end())){
-				tmpMain->subTextures.erase(subName);
-				return true;
-			}
-		}
-		return false;
-	}
-
-
-	SDL_Surface* convert_to_power_of_two(SDL_Surface* surface)
+	SDL_Surface* converToPowerOfTwo(SDL_Surface* surface)
 	{
 		int width = roundUpPowerOfTwo(surface->w);
 		int height = roundUpPowerOfTwo(surface->h);
-		
+
 		SDL_Surface* pot_surface = SDL_CreateRGBSurface(0, width, height, 32,
-														0x00ff0000, 0x0000ff00,
-														0x000000ff, 0xff000000);
+			0x00ff0000, 0x0000ff00,
+			0x000000ff, 0xff000000);
 		SDL_Rect dstrect;
 		dstrect.w = surface->w;
 		dstrect.h = surface->h;
@@ -140,28 +33,28 @@ namespace MV {
 		SDL_SetSurfaceAlphaMod(surface, 0);
 		SDL_BlitSurface(surface, NULL, pot_surface, &dstrect);
 		SDL_FreeSurface(surface);
-		
+
 		return pot_surface;
 	}
-	
+
 	GLenum getTextureFormat(SDL_Surface* img){
 		int nOfColors = img->format->BytesPerPixel;
 		if (nOfColors == 4){	  // contains an alpha channel
 			if (img->format->Rmask == 0x000000ff){
 				return GL_RGBA;
-			}else{
+			} else{
 				return GL_BGRA;
 			}
 		} else if (nOfColors == 3){	  // no alpha channel
 			if (img->format->Rmask == 0x000000ff){
 				return GL_RGB;
-			}else{
+			} else{
 				return GL_BGR;
 			}
 		}
 		return 0;
 	}
-	
+
 	GLenum getInternalTextureFormat(SDL_Surface* img){
 		int nOfColors = img->format->BytesPerPixel;
 		if (nOfColors == 4){	  // contains an alpha channel
@@ -172,306 +65,362 @@ namespace MV {
 		return 0;
 	}
 
-	bool TextureManager::loadTexture(const std::string &mainName, const std::string &file, bool repeat){
-		MainTexture txtToAdd;
-		txtToAdd.repeat = repeat;
-		txtToAdd.name = mainName;
-		txtToAdd.file = file;
-		txtToAdd.dynamicTexture = 0;
+	SDL_Surface* convertToPowerOfTwoSurface(SDL_Surface *a_img){
+		if(a_img != nullptr && (!isPowerOfTwo(a_img->w) || !isPowerOfTwo(a_img->h))){
+			int widthPowerOfTwo = roundUpPowerOfTwo(a_img->w);
+			int heightPowerOfTwo = roundUpPowerOfTwo(a_img->h);
 
-		if(!loadTextureFromFile(file, txtToAdd.texture, txtToAdd.width, txtToAdd.height, repeat)){
-			std::cout << "Error loading texture (" << mainName << "): " << file << std::endl;
-			return false;
+			int bpp;
+			Uint32 Rmask, Gmask, Bmask, Amask;
+			SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_ABGR8888, &bpp, &Rmask, &Gmask, &Bmask, &Amask);
+			SDL_Surface *surface = SDL_CreateRGBSurface(0, widthPowerOfTwo, heightPowerOfTwo, bpp, Rmask, Gmask, Bmask, Amask);
+
+			SDL_SetSurfaceBlendMode(a_img, SDL_BLENDMODE_NONE);
+			require(SDL_BlitSurface(a_img, 0, surface, 0) == 0, ResourceException("SDL_BlitSurface failed to copy!"));
+
+			SDL_FreeSurface(a_img);
+			return surface;
 		}
-		
-		mainTextures[mainName] = txtToAdd;
-		return true;
+		return a_img;
 	}
 
-	bool TextureManager::reloadTexture(MainTexture &ourTexture){
-		if(ourTexture.dynamicTexture){
-			SubTexture *fullSize = ourTexture.getSubTexture("FullSize");
-			createEmptyTexture(ourTexture.name, fullSize->width, fullSize->height, ourTexture.reloadCallback);
-			if(ourTexture.reloadCallback != nullptr){
-				ourTexture.reloadCallback(ourTexture);
-			}
-		}else{
-			//Create the texture
-			bool success = loadTextureFromFile(ourTexture.file, ourTexture.texture, ourTexture.width, ourTexture.height, ourTexture.repeat);
-
-			if(success){
-				return true;
-			}
-		}
-		return false;
-	}
-
-	//Taken from an example in the SDL documentation
-	Uint32 TextureManager::getPixel(SDL_Surface *surface, int x, int y)
-	{
-		int bpp = surface->format->BytesPerPixel;
-		/* Here p is the address to the pixel we want to retrieve */
-		Uint8 *p = (Uint8 *)surface->pixels + y * surface->pitch + x * bpp;
-
-		switch(bpp) {
-		case 1:
-			return *p;
-
-		case 2:
-			return *(Uint16 *)p;
-
-		case 3:
-			if(SDL_BYTEORDER == SDL_BIG_ENDIAN)
-				return p[0] << 16 | p[1] << 8 | p[2];
-			else
-				return p[0] | p[1] << 8 | p[2] << 16;
-
-		case 4:
-			return *(Uint32 *)p;
-		}
-
-		return 0;
-	}
-
-	void TextureManager::setPixel(SDL_Surface *screen, int x, int y, Uint8 r, Uint8 g, Uint8 b, Uint8 a)
-	{
-		Uint8 *ubuff8;
-		Uint16 *ubuff16;
-		Uint32 *ubuff32;
-		Uint32 color;
-		char c1, c2, c3;
-
-		/* Lock the screen, if needed */
-		if(SDL_MUSTLOCK(screen)) {
-			if(SDL_LockSurface(screen) < 0) 
-				return;
-		}
-
-		/* Get the color */
-		color = SDL_MapRGBA( screen->format, r, g, b, a );
-
-		/* How we draw the pixel depends on the bitdepth */
-		switch(screen->format->BytesPerPixel) {
-		case 1: 
-			ubuff8 = (Uint8*) screen->pixels;
-			ubuff8 += (y * screen->pitch) + x; 
-			*ubuff8 = (Uint8) color;
-			break;
-
-		case 2:
-			ubuff8 = (Uint8*) screen->pixels;
-			ubuff8 += (y * screen->pitch) + (x*2);
-			ubuff16 = (Uint16*) ubuff8;
-			*ubuff16 = (Uint16) color; 
-			break;  
-
-		case 3:
-			ubuff8 = (Uint8*) screen->pixels;
-			ubuff8 += (y * screen->pitch) + (x*3);
-
-
-			if(SDL_BYTEORDER == SDL_LIL_ENDIAN) {
-				c1 = (color & 0xFF0000) >> 16;
-				c2 = (color & 0x00FF00) >> 8;
-				c3 = (color & 0x0000FF);
-			} else {
-				c3 = (color & 0xFF0000) >> 16;
-				c2 = (color & 0x00FF00) >> 8;
-				c1 = (color & 0x0000FF);	
-			}
-
-			ubuff8[0] = c3;
-			ubuff8[1] = c2;
-			ubuff8[2] = c1;
-			break;
-
-		case 4:
-			ubuff8 = (Uint8*) screen->pixels;
-			ubuff8 += (y*screen->pitch) + (x*4);
-			ubuff32 = (Uint32*)ubuff8;
-			*ubuff32 = color;
-			break;
-
-		default:
-			std::cerr << "Error: Unknown bit-depth!\n";
-		}
-
-		/* Unlock the screen if needed */
-		if(SDL_MUSTLOCK(screen)) {
-			SDL_UnlockSurface(screen);
-		}
-	}
-
-	void TextureManager::initializeInvalidTexture(){
-		SDL_Surface *img = SDL_CreateRGBSurface(SDL_SWSURFACE, 16, 16, 24, 0, 255, 0, 255);
-		if(img != nullptr){
-			SDL_Rect fillLocation;
-			fillLocation.x = 0; fillLocation.y = 0;
-			fillLocation.w = 8; fillLocation.h = 8;
-			SDL_FillRect(img, &fillLocation, SDL_MapRGB(img->format, 0, 0, 255));
-			fillLocation.x = 8; fillLocation.y = 8;
-			SDL_FillRect(img, &fillLocation, SDL_MapRGB(img->format, 0, 0, 255));
-
-			bool success = loadTextureFromSurface(img, invalidTexture.texture, invalidTexture.width, invalidTexture.height, true);
-			if(!success){
-				std::cerr << "Failed to initialize our default invalid texture!" << std::endl;
-			}
-			SDL_FreeSurface( img );
-		}
-	}
-
-	bool TextureManager::loadTextureFromFile(const std::string &file, GLuint &imageLoaded, int &w, int &h, bool repeat) {
-		SDL_Surface *img = IMG_Load(file.c_str());
-		if(!img){
-			std::cerr << "Failed to load texture: (" << file << ") " << SDL_GetError() << std::endl;
+	bool loadTextureFromFile(const std::string &a_file, GLuint &a_imageLoaded, Size<int> &a_size, bool a_repeat) {
+		SDL_Surface *img = IMG_Load(a_file.c_str());
+		if (!img){
+			std::cerr << "Failed to load texture: (" << a_file << ") " << SDL_GetError() << std::endl;
 			return false;
 		}
 
-		bool result = loadTextureFromSurface(img, imageLoaded, w, h, repeat);
+		bool result = loadTextureFromSurface(img, a_imageLoaded, a_size, a_repeat);
 
-		SDL_FreeSurface( img );
 		return result;
 	}
 
 	//Load an opengl texture
-	bool TextureManager::loadTextureFromSurface(SDL_Surface *img, GLuint &imageLoaded, int &w, int &h, bool repeat) {
-		// Build the texture from the surface
-		w = img->w;
-		h = img->h; 
+	bool loadTextureFromSurface(SDL_Surface *a_img, GLuint &a_imageLoaded, Size<int> &a_size, bool a_repeat) {
+		a_img = convertToPowerOfTwoSurface(a_img);
 
-		//Check that the image's width is valid and then check that the image's width is a power of 2
-		if(!isPowerOfTwo(w) || !isPowerOfTwo(h)){
-			std::cerr << "Texture needs to be a power of two!" << std::endl;
+		if(a_img == nullptr){
+			std::cerr << "ERROR: loadTextureFromSurface was provided a null SDL_Surface!" << std::endl;
 			return false;
 		}
-		
-		GLenum textureFormat = getTextureFormat(img);
+
+		GLenum textureFormat = getTextureFormat(a_img);
 		if(!textureFormat){
 			std::cerr << "Unable to determine texture format!" << std::endl;
 			return false;
 		}
-		
-		glGenTextures(1, &imageLoaded);		// Generate texture ID
-		glBindTexture(GL_TEXTURE_2D, imageLoaded);
-		
+
+		glGenTextures(1, &a_imageLoaded);		// Generate texture ID
+		glBindTexture(GL_TEXTURE_2D, a_imageLoaded);
+
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-		
-		glTexImage2D(GL_TEXTURE_2D, 0, getInternalTextureFormat(img), img->w, img->h, 0, textureFormat, GL_UNSIGNED_BYTE, img->pixels);
-		
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (a_repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (a_repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+
+		glTexImage2D(GL_TEXTURE_2D, 0, getInternalTextureFormat(a_img), a_img->w, a_img->h, 0, textureFormat, GL_UNSIGNED_BYTE, a_img->pixels);
+
+		a_size.width = a_img->w;
+		a_size.height = a_img->h;
+
+		SDL_FreeSurface(a_img);
+
 		return true;
 	}
 
-	MainTexture *TextureManager::getMainTexture(int mainNum){
-		std::map<std::string, MainTexture>::iterator node = mainTextures.begin();
-		for(;mainNum > 0 && node != mainTextures.end();mainNum--){
-			node++;
-		}
-		if(node!=mainTextures.end()){
-			return &(node->second);
-		}
-		return &invalidTexture;
+	/*************************\
+	| ---TextureDefinition--- |
+	\*************************/
+
+	TextureDefinition::TextureDefinition(const std::string &a_name) :
+		textureName(a_name),
+		texture(0){
 	}
 
-	MainTexture *TextureManager::getMainTexture(const std::string &mainName){
-		if((mainTextures.find(mainName) != mainTextures.end())){
-			return &mainTextures[mainName];
+	void TextureDefinition::setOnReload(std::function< void(std::shared_ptr<TextureDefinition>) > a_onReload){
+		onReload = a_onReload;
+	}
+	void TextureDefinition::clearOnReload(){
+		onReload = nullptr;
+	}
+
+	void TextureDefinition::reload(){
+		reloadImplementation();
+		if (onReload){
+			onReload(shared_from_this());
+		}
+	}
+
+	GLuint TextureDefinition::textureId() const{
+		return texture;
+	}
+
+	Size<int> TextureDefinition::size() const{
+		require(textureSize.width > 0 && textureSize.height > 0, ResourceException("The texture hasn't actually loaded yet.  You may need to create a handle to implicitly force a texture load."));
+		return textureSize;
+	}
+
+	std::string TextureDefinition::name() const{
+		return textureName;
+	}
+
+	void TextureDefinition::cleanup(){
+		if (!handles.empty()){
+			handles.erase(std::remove_if(handles.begin(), handles.end(), [](const std::weak_ptr<TextureHandle> &value){return value.expired(); }), handles.end());
+			if (handles.empty()){
+				glDeleteTextures(1, &texture);
+				texture = 0; //just to be certain, glDeleteTextures may not set a texture id to 0.
+				cleanupImplementation();
+			}
+		}
+	}
+
+	std::shared_ptr<TextureHandle> TextureDefinition::makeHandle() {
+		if (handles.empty()){
+			reload();
+		}
+		auto handle = std::shared_ptr<TextureHandle>(new TextureHandle(shared_from_this()));
+		handles.push_back(handle);
+		return handle;
+	}
+
+	std::shared_ptr<TextureHandle> TextureDefinition::makeHandle(const Point<int> &a_position, const Size<int> &a_size) {
+		if (handles.empty()){
+			reload();
+		}
+		auto handle = std::shared_ptr<TextureHandle>(new TextureHandle(shared_from_this(), a_position, a_size));
+		handles.push_back(handle);
+		return handle;
+	}
+
+
+	/*****************************\
+	| ---FileTextureDefinition--- |
+	\*****************************/
+
+	void FileTextureDefinition::reloadImplementation(){
+		loadTextureFromFile(textureName, texture, textureSize, repeat);
+	}
+
+	/********************************\
+	| ---DynamicTextureDefinition--- |
+	\********************************/
+
+	void DynamicTextureDefinition::reloadImplementation() {
+		textureSize.width = roundUpPowerOfTwo(textureSize.width);
+		textureSize.height = roundUpPowerOfTwo(textureSize.height);
+
+		unsigned int* data;						// Stored Data
+		unsigned int imageSize = (textureSize.width * textureSize.height) * 4 * sizeof(unsigned int);
+		// Create Storage Space For Texture Data (128x128x4)
+		data = (unsigned int*)new GLuint[(imageSize)];
+		memset(data, 0, (imageSize));
+		glGenTextures(1, &texture);					// Create 1 Texture
+		glBindTexture(GL_TEXTURE_2D, texture);			// Bind The Texture
+		// Build Texture Using Information In data
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureSize.width, textureSize.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+		delete[] data;							// Release data
+	}
+
+	/********************************\
+	| ---SurfaceTextureDefinition--- |
+	\********************************/
+
+	void SurfaceTextureDefinition::reloadImplementation() {
+		SDL_Surface* newSurface = surfaceGenerator();
+		require(newSurface != nullptr, PointerException("SurfaceTextureDefinition::reloadImplementation was passed a null SDL_Surface pointer."));
+
+		generatedSurfaceSize = Size<int>(newSurface->w, newSurface->h);
+
+		//loads and frees
+		loadTextureFromSurface(newSurface, texture, textureSize, false);
+	}
+
+	Size<int> SurfaceTextureDefinition::surfaceSize() const {
+		return generatedSurfaceSize;
+	}
+
+
+	/*********************\
+	| ---TextureHandle--- |
+	\*********************/
+
+	Size<int> TextureHandle::size() const {
+		return handleSize;
+	}
+
+	Point<int> TextureHandle::position() const {
+		return handlePosition;
+	}
+
+	std::shared_ptr<TextureDefinition> TextureHandle::texture() const {
+		return textureDefinition;
+	}
+
+	TextureHandle::TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const Point<int> &a_position, const Size<int> &a_size) :
+		sizeObserver(sizeChanges),
+		textureDefinition(a_texture),
+		handleSize((a_size == Size<int>(-1, -1)) ? a_texture->size() : a_size),
+		handlePosition(a_position),
+		handlePercentSize(static_cast<double>(size().width) / static_cast<double>(a_texture->size().width), static_cast<double>(size().height) / static_cast<double>(a_texture->size().height)),
+		handlePercentPosition(static_cast<double>(position().x) / static_cast<double>(a_texture->size().width), static_cast<double>(position().y) / static_cast<double>(a_texture->size().height)),
+		handlePercentTopLeft(handlePercentPosition),
+		handlePercentBottomRight(handlePercentPosition.x + handlePercentSize.width, handlePercentPosition.y + handlePercentSize.height),
+		flipX(false),
+		flipY(false){
+	}
+
+	TextureHandle::~TextureHandle() {
+		textureDefinition->cleanup();
+	}
+
+	void TextureHandle::updatePercentBounds(){
+		handlePercentSize = castSize<double>(size()) / castSize<double>(textureDefinition->size());
+		handlePercentPosition = castPoint<double>(position()) / pointFromSize(castSize<double>(textureDefinition->size()));
+
+		updatePercentCorners();
+	}
+
+	void TextureHandle::updateIntegralBounds(){
+		handleSize = castSize<int>(castSize<double>(textureDefinition->size()) * handlePercentSize);
+		handlePosition = castPoint<int>(pointFromSize(castSize<double>(textureDefinition->size())) * handlePercentPosition);
+
+		updatePercentCorners();
+	}
+
+	void TextureHandle::updatePercentCorners(){
+		handlePercentTopLeft.x = handlePercentPosition.x;
+		handlePercentBottomRight.x = handlePercentPosition.x + handlePercentSize.width;
+		if (flipX){ std::swap(handlePercentTopLeft.x, handlePercentBottomRight.x); }
+
+		handlePercentTopLeft.y = handlePercentPosition.y;
+		handlePercentBottomRight.y = handlePercentPosition.x + handlePercentSize.height;
+		if (flipY){ std::swap(handlePercentTopLeft.y, handlePercentBottomRight.y); }
+
+		sizeChanges(shared_from_this());
+	}
+
+	double TextureHandle::percentLeft() const{
+		return handlePercentTopLeft.x;
+	}
+	double TextureHandle::percentRight() const{
+		return handlePercentBottomRight.x;
+	}
+	double TextureHandle::percentTop() const{
+		return handlePercentTopLeft.y;
+	}
+	double TextureHandle::percentBottom() const{
+		return handlePercentBottomRight.y;
+	}
+
+	void TextureHandle::setCorners(const Point<int> &a_topLeft, const Point<int> &a_bottomRight){
+		handleSize = sizeFromPoint(a_bottomRight - a_topLeft);
+		handlePosition = a_topLeft;
+
+		updatePercentBounds();
+	}
+	void TextureHandle::setCorners(const Point<> &a_topLeft, const Point<> &a_bottomRight){
+		handlePercentSize = sizeFromPoint(a_bottomRight - a_topLeft);
+		handlePercentPosition = a_topLeft;
+
+		updateIntegralBounds();
+	}
+
+	void TextureHandle::setBounds(const Point<int> &a_topLeft, const Size<int> &a_size){
+		handleSize = a_size;
+		handlePosition = a_topLeft;
+
+		updatePercentBounds();
+	}
+	void TextureHandle::setBounds(const Point<> &a_topLeft, const Size<> &a_size){
+		handlePercentSize = a_size;
+		handlePercentPosition = a_topLeft;
+
+		updateIntegralBounds();
+	}
+
+	void TextureHandle::setFlipX( bool a_flip ) {
+		flipX = a_flip;
+		updatePercentBounds();
+	}
+
+	void TextureHandle::setFlipY( bool a_flip ) {
+		flipY = a_flip;
+		updatePercentBounds();
+	}
+
+	bool TextureHandle::flippedX() const {
+		return flipX;
+	}
+
+	bool TextureHandle::flippedY() const {
+		return flipY;
+	}
+
+	Size<double> TextureHandle::percentSize() const {
+		return handlePercentSize;
+	}
+
+	Point<double> TextureHandle::percentPosition() const {
+		return handlePercentPosition;
+	}
+
+	Point<double> TextureHandle::percentTopLeft() const {
+		return handlePercentTopLeft;
+	}
+
+	Point<double> TextureHandle::percentBottomRight() const {
+		return handlePercentBottomRight;
+	}
+
+	/**********************\
+	| ---SharedTextures--- |
+	\**********************/
+
+	std::shared_ptr<FileTextureDefinition> SharedTextures::getFileTexture( const std::string &a_filename, bool a_repeat ) {
+		std::string identifier = a_filename + (a_repeat?"1":"0");
+		auto foundDefinition = fileDefinitions.find(a_filename);
+		if(foundDefinition == fileDefinitions.end()){
+			std::shared_ptr<FileTextureDefinition> newDefinition = FileTextureDefinition::make(a_filename, a_repeat);
+			fileDefinitions[a_filename] = newDefinition;
+			return newDefinition;
 		}else{
-			return &invalidTexture;
+			return foundDefinition->second;
 		}
 	}
 
-	GLuint *TextureManager::getMainTextureGLuint(const std::string &mainName){
-		MainTexture *tmp = getMainTexture(mainName);
-		if(tmp){
-			return &tmp->texture;
+	std::shared_ptr<DynamicTextureDefinition> SharedTextures::getDynamicTexture( const std::string &a_name, const Size<int> &a_size ) {
+		std::stringstream identifierMaker;
+		identifierMaker << a_name << a_size;
+		std::string identifier = identifierMaker.str();
+
+		auto foundDefinition = dynamicDefinitions.find(identifier);
+		if(foundDefinition == dynamicDefinitions.end()){
+			std::shared_ptr<DynamicTextureDefinition> newDefinition = DynamicTextureDefinition::make(a_name, a_size);
+			dynamicDefinitions[identifier] = newDefinition;
+			return newDefinition;
 		}else{
-			return &(invalidTexture.texture);
+			return foundDefinition->second;
 		}
 	}
 
-	bool TextureManager::addSubTexture(const std::string &mainName, const SubTexture &subTextureToAdd){
-		MainTexture *tmp = getMainTexture(mainName);
-		if(tmp->name == "M2_INVALID_TEXTURE"){
-			return false;
-		}
-		tmp->subTextures[subTextureToAdd.name]=subTextureToAdd;
-	  tmp->subTextures[subTextureToAdd.name]=*tmp;
-		return true;
-	}
-
-	SubTexture *TextureManager::getSubTexture(const std::string &mainName, const std::string &subName){
-		MainTexture *tmp = getMainTexture(mainName);
-		if(tmp->subTextures.find(subName) != tmp->subTextures.end()){
-			return &(tmp->subTextures[subName]);
-		}
-		invalidSubTexture.width = tmp->width;
-		invalidSubTexture.height = tmp->height;
-		invalidSubTexture = (*tmp);
-		return &invalidSubTexture;
-	}
-
-	void TextureManager::save(const std::string &file){
-		using boost::property_tree::ptree;
-		ptree textureList;
-		std::for_each(mainTextures.begin(), mainTextures.end(), [&](const std::pair<const std::string, MainTexture>& current){
-			textureList.add_child(current.first, current.second.save());
-		});
-		ptree outputStructure;
-		outputStructure.add_child("Textures", textureList);
-		write_json(file, outputStructure);
-	}
-
-	//load a file holding the state of a texture manager.  Loads all images and such
-	//into opengl as well.
-	void TextureManager::load(const std::string &file){
-		using boost::property_tree::ptree;
-		ptree inputStructure;
-		try{
-			read_json(file, inputStructure);
-			ptree textureList = inputStructure.get_child("Textures");
-			std::for_each(textureList.begin(), textureList.end(), [&](boost::property_tree::ptree::value_type currentTexture){
-				std::string type = currentTexture.second.get<std::string>("Type", "");
-				if(type == "File"){
-					std::string textureName = currentTexture.first;
-					std::string fileName = currentTexture.second.get<std::string>("File", "");
-					bool repeating = currentTexture.second.get<bool>("Repeat", false);
-
-					loadTexture(textureName, fileName, repeating);
-
-					ptree subTextureList = currentTexture.second.get_child("SubTextures");
-					std::for_each(subTextureList.begin(), subTextureList.end(), [&](boost::property_tree::ptree::value_type currentSubTexture){
-						addSubTexture(textureName, SubTexture(currentSubTexture.first, currentSubTexture.second));
-					});
-				}
-			});
-		}catch(boost::property_tree::json_parser::json_parser_error &je){
-			std::cerr << "Failed to load texture definition (" << file << ") is it correctly formed?" << std::endl;
-			std::cerr << "Error parsing: " << je.filename() << " on line: " << je.line() << std::endl;
-			std::cerr << je.message() << std::endl;
-		}catch(...){
-			std::cerr << "Failed to load texture definition (" << file << ") is it correctly formed?" << std::endl;
+	std::shared_ptr<SurfaceTextureDefinition> SharedTextures::getSurfaceTexture(const std::string &a_identifier, std::function<SDL_Surface*()> a_surfaceGenerator) {
+		auto foundDefinition = surfaceDefinitions.find(a_identifier);
+		if(foundDefinition == surfaceDefinitions.end()){
+			std::shared_ptr<SurfaceTextureDefinition> newDefinition = SurfaceTextureDefinition::make(a_identifier, a_surfaceGenerator);
+			surfaceDefinitions[a_identifier] = newDefinition;
+			return newDefinition;
+		} else{
+			return foundDefinition->second;
 		}
 	}
 
-	bool TextureManager::deleteMainTexture(const std::string &mainName){
-		if(mainTextures.find(mainName) != mainTextures.end()){
-			mainTextures.erase(mainName);
-			return true;
-		}else{
-			return false;
-		}
-	}
 
-	bool TextureManager::clearSubTextures( const std::string &mainName ){
-		MainTexture *tmpMain = getMainTexture(mainName);
-		if(tmpMain){
-			tmpMain->clearSubTextures();
-			return true;
-		}
-		return false;
-	}
 }

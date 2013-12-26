@@ -55,73 +55,63 @@ namespace MV {
 			depth = a_depth;
 		}
 
+		Size<T>& operator+=(const Size<T>& a_other);
+		Size<T>& operator-=(const Size<T>& a_other);
+		Size<T>& operator*=(const Size<T>& a_other);
+		Size<T>& operator/=(const Size<T>& a_other);
+		Size<T>& operator*=(const T& a_other);
+		Size<T>& operator/=(const T& a_other);
+
 		T width, height;
 		T depth; //may be ignored for most 2d concepts
 	};
 
-	template <class T>
-	std::ostream& operator<<(std::ostream& os, const Size<T>& a_size){
-		os << "(w: " << a_size.width << ", h: " << a_size.height << ", d: " << a_size.depth << ")";
-		return os;
-	}
-
-	template <class T>
-	std::istream& operator>>(std::istream& is, Size<T>& a_size){
-		is >> a_size.width >> a_size.height >> a_size.depth;
-		return is;
-	}
-
+	template <class T = double>
 	class Point{
 	public:
 		Point(){clear();}
-		Point(double a_xPos, double a_yPos, double a_zPos = 0.0){placeAt(a_xPos, a_yPos, a_zPos);}
+		Point(T a_xPos, T a_yPos, T a_zPos = 0.0){placeAt(a_xPos, a_yPos, a_zPos);}
 		
-		virtual void clear();
+		void clear();
 		
-		Point scale(double a_amount);
-		Point placeAt(double a_xPos, double a_yPos, double a_zPos);
-		Point placeAt(double a_xPos, double a_yPos);
-		Point translate(double a_xAmount, double a_yAmount, double a_zAmount);
-		Point translate(double a_xAmount, double a_yAmount);
+		Point<T>& scale(T a_amount);
+		Point<T>& placeAt(T a_xPos, T a_yPos, T a_zPos);
+		Point<T>& placeAt(T a_xPos, T a_yPos);
+		Point<T>& translate(T a_xAmount, T a_yAmount, T a_zAmount);
+		Point<T>& translate(T a_xAmount, T a_yAmount);
 		
 		bool atOrigin(){return x == 0 && y == 0 && z == 0;}
 		
-		Point& operator+=(const Point& a_other);
-		Point& operator-=(const Point& a_other);
-		Point& operator*=(const Point& a_other);
-		Point& operator/=(const Point& a_other);
-		Point& operator*=(const double& a_other);
-		Point& operator/=(const double& a_other);
+		Point<T>& operator+=(const Point<T>& a_other);
+		Point<T>& operator-=(const Point<T>& a_other);
+		Point<T>& operator*=(const Point<T>& a_other);
+		Point<T>& operator/=(const Point<T>& a_other);
+		Point<T>& operator*=(const T& a_other);
+		Point<T>& operator/=(const T& a_other);
 
-		double x, y, z;
+		T x, y, z;
 	};
 
-	const Point operator+(const Point& a_left, const Point& a_right);
-	const Point operator-(const Point& a_left, const Point& a_right);
-	const Point operator*(const Point& a_left, const Point& a_right);
-	const Point operator/(const Point& a_left, const Point& a_right);
-	const Point operator*(const Point& a_left, const double& a_right);
-	const Point operator/(const Point& a_left, const double& a_right);
-	const bool operator==(const Point& a_left, const Point& a_right);
-	const bool operator!=(const Point& a_left, const Point& a_right);
-	std::ostream& operator<<(std::ostream& os, const Point& a_point);
-	std::istream& operator>>(std::istream& is, Point& a_point);
+	template <class Target, class Origin>
+	Point<Target> castPoint(const Point<Origin> &a_point){
+		return Point<Target>(static_cast<Target>(a_point.x), static_cast<Target>(a_point.y), static_cast<Target>(a_point.z));
+	}
 
-	class DrawPoint : public Point, public Color, public TexturePoint{
+	class DrawPoint : public Point<>, public Color, public TexturePoint{
 	public:
 		DrawPoint(){clear();}
 		DrawPoint(double a_xPos, double a_yPos, double a_zPos = 0.0){placeAt(a_xPos, a_yPos, a_zPos);}
-		DrawPoint(const Point& a_position, const Color& a_color = Color(), const TexturePoint &a_texture = TexturePoint()):
-			Point(a_position),
+		DrawPoint(const Point<>& a_position, const Color& a_color = Color(), const TexturePoint &a_texture = TexturePoint()):
+			Point<>(a_position),
 			Color(a_color),
 			TexturePoint(a_texture){	
 		}
 		~DrawPoint(){}
 
-		virtual void clear();
+		void clear();
 
 		DrawPoint& operator=(const DrawPoint& a_other);
-		DrawPoint& operator=(const Point& a_other);
+		DrawPoint& operator=(const Point<>& a_other);
 		DrawPoint& operator=(const Color& a_other);
 		DrawPoint& operator=(const TexturePoint& a_other);
 
@@ -136,8 +126,261 @@ namespace MV {
 	const DrawPoint operator+(const DrawPoint& a_left, const DrawPoint & a_right);
 	const DrawPoint operator-(const DrawPoint& a_left, const DrawPoint & a_right);
 
-	Point pointFromSize(const Size<double>& a_size);
+	/**************************\
+	| -------Conversion------- |
+	\**************************/
 
-	Size<double> sizeFromPoint(const Point& a_point);
+	template <class T>
+	Point<T> pointFromSize(const Size<T>& a_size){
+		return Point<T>(a_size.width, a_size.height, a_size.depth);
+	}
+
+	template <class T>
+	Size<T> sizeFromPoint(const Point<T>& a_point){
+		return Size<T>(a_point.x, a_point.y, a_point.z);
+	}
+
+	/************************\
+	| -------Size IMP------- |
+	\************************/
+
+	template <class Target, class Origin>
+	Size<Target> castSize(const Size<Origin> &a_size){
+		return Size<Target>(static_cast<Target>(a_size.width), static_cast<Target>(a_size.height), static_cast<Target>(a_size.depth));
+	}
+
+	template <class T>
+	Size<T>& MV::Size<T>::operator+=( const Size<T>& a_other ){
+		width+=a_other.width; height+=a_other.height; depth+=a_other.depth;
+		return *this;
+	}
+
+	template <class T>
+	Size<T>& MV::Size<T>::operator-=( const Size<T>& a_other ){
+		width-=a_other.width; height-=a_other.height; depth-=a_other.depth;
+		return *this;
+	}
+
+	template <class T>
+	Size<T>& MV::Size<T>::operator*=( const Size<T>& a_other ){
+		width*=a_other.width; height*=a_other.height; depth*=a_other.depth;
+		return *this;
+	}
+
+	template <class T>
+	Size<T>& MV::Size<T>::operator*=(const T& a_other){
+		width*=a_other; height*=a_other; depth*=a_other;
+		return *this;
+	}
+
+	template <class T>
+	Size<T>& MV::Size<T>::operator/=(const Size<T>& a_other){
+		width/=a_other.width; height/=a_other.height; depth/=(a_other.depth == 0)?1:a_other.depth;
+		return *this;
+	}
+
+	template <class T>
+	Size<T>& MV::Size<T>::operator/=(const T& a_other){
+		if(a_other != 0){
+			width/=a_other; height/=a_other; depth/=a_other;
+		}else{
+			std::cerr << "ERROR: Size<T> operator/=(const T& a_other) divide by 0!" std::endl;
+		}
+		return *this;
+	}
+
+	template <class T>
+	const bool operator==(const Size<T>& a_left, const Size<T>& a_right){
+		return (a_left.width == a_right.width) && (a_left.height == a_right.height) && (a_left.depth == a_right.depth);
+	}
+
+	template <class T>
+	const bool operator!=(const Size<T>& a_left, const Size<T>& a_right){
+		return !(a_left == a_right);
+	}
+
+	template <class T>
+	const Size<T> operator+(const Size<T>& a_left, const Size<T>& a_right){
+		Size<T> tmpPoint = a_left;
+		return tmpPoint+=a_right;
+	}
+
+	template <class T>
+	const Size<T> operator-(const Size<T>& a_left, const Size<T>& a_right){
+		Size<T> tmpPoint = a_left;
+		return tmpPoint-=a_right;
+	}
+
+	template <class T>
+	const Size<T> operator*(const Size<T>& a_left, const Size<T>& a_right){
+		Size<T> tmpPoint = a_left;
+		return tmpPoint*=a_right;
+	}
+
+	template <class T>
+	const Size<T> operator/(const Size<T>& a_left, const Size<T>& a_right){
+		Size<T> tmpPoint = a_left;
+		return tmpPoint/=a_right;
+	}
+
+	template <class T>
+	const Size<T> operator*(const Size<T>& a_left, const T& a_right){
+		Size<T> tmpPoint = a_left;
+		return tmpPoint*=a_right;
+	}
+
+	template <class T>
+	const Size<T> operator/(const Size<T>& a_left, const T& a_right){
+		Size<T> tmpPoint = a_left;
+		return tmpPoint/=a_right;
+	}
+
+	template <class T>
+	std::ostream& operator<<(std::ostream& os, const Size<T>& a_size){
+		os << "(w: " << a_size.width << ", h: " << a_size.height << ", d: " << a_size.depth << ")";
+		return os;
+	}
+
+	template <class T>
+	std::istream& operator>>(std::istream& is, Size<T>& a_size){
+		is >> a_size.width >> a_size.height >> a_size.depth;
+		return is;
+	}
+
+	/*************************\
+	| -------Point IMP------- |
+	\*************************/
+
+	template <class T>
+	void MV::Point<T>::clear(){
+		x = 0; y = 0; z = 0;
+	}
+
+	template <class T>
+	Point<T>& MV::Point<T>::translate( T a_xAmount, T a_yAmount, T a_zAmount ){
+		x+=a_xAmount; y+=a_yAmount; z+=a_zAmount;
+		return *this;
+	}
+
+	template <class T>
+	Point<T>& MV::Point<T>::translate( T a_xAmount, T a_yAmount ){
+		x+=a_xAmount; y+=a_yAmount;
+		return *this;
+	}
+
+	template <class T>
+	Point<T>& MV::Point<T>::placeAt( T a_xPos, T a_yPos, T a_zPos ){
+		x = a_xPos; y = a_yPos; z = a_zPos;
+		return *this;
+	}
+
+	template <class T>
+	Point<T>& MV::Point<T>::placeAt( T a_xPos, T a_yPos ){
+		x = a_xPos; y = a_yPos;
+		return *this;
+	}
+
+	template <class T>
+	Point<T>& MV::Point<T>::scale( T a_amount ){
+		x*=a_amount; y*=a_amount; z*=a_amount;
+		return *this;
+	}
+
+	template <class T>
+	Point<T>& MV::Point<T>::operator+=( const Point<T>& a_other ){
+		x+=a_other.x; y+=a_other.y; z+=a_other.z;
+		return *this;
+	}
+
+	template <class T>
+	Point<T>& MV::Point<T>::operator-=( const Point<T>& a_other ){
+		x-=a_other.x; y-=a_other.y; z-=a_other.z;
+		return *this;
+	}
+
+	template <class T>
+	Point<T>& MV::Point<T>::operator*=( const Point<T>& a_other ){
+		x*=a_other.x; y*=a_other.y; z*=a_other.z;
+		return *this;
+	}
+
+	template <class T>
+	Point<T>& MV::Point<T>::operator*=(const T& a_other){
+		x*=a_other; y*=a_other; z*=a_other;
+		return *this;
+	}
+
+	template <class T>
+	Point<T>& MV::Point<T>::operator/=(const Point<T>& a_other){
+		x/=a_other.x; y/=a_other.y; z/=(a_other.z == 0)?1:a_other.z;
+		return *this;
+	}
+
+	template <class T>
+	Point<T>& MV::Point<T>::operator/=(const T& a_other){
+		if(a_other != 0){
+			x/=a_other; y/=a_other; z/=a_other;
+		}else{
+			std::cerr << "ERROR: Point<T> operator/=(const T& a_other) divide by 0!" << std::endl;
+		}
+		return *this;
+	}
+
+	template <class T>
+	const bool operator==(const Point<T>& a_left, const Point<T>& a_right){
+		return (a_left.x == a_right.x) && (a_left.y == a_right.y) && (a_left.z == a_right.z);
+	}
+
+	template <class T>
+	const bool operator!=(const Point<T>& a_left, const Point<T>& a_right){
+		return !(a_left == a_right);
+	}
+
+	template <class T>
+	const Point<T> operator+(const Point<T>& a_left, const Point<T>& a_right){
+		Point<T> tmpPoint = a_left;
+		return tmpPoint+=a_right;
+	}
+
+	template <class T>
+	const Point<T> operator-(const Point<T>& a_left, const Point<T>& a_right){
+		Point<T> tmpPoint = a_left;
+		return tmpPoint-=a_right;
+	}
+
+	template <class T>
+	const Point<T> operator*(const Point<T>& a_left, const Point<T>& a_right){
+		Point<T> tmpPoint = a_left;
+		return tmpPoint*=a_right;
+	}
+
+	template <class T>
+	const Point<T> operator/(const Point<T>& a_left, const Point<T>& a_right){
+		Point<T> tmpPoint = a_left;
+		return tmpPoint/=a_right;
+	}
+
+	template <class T>
+	const Point<T> operator*(const Point<T>& a_left, const T& a_right){
+		Point<T> tmpPoint = a_left;
+		return tmpPoint*=a_right;
+	}
+
+	template <class T>
+	const Point<T> operator/(const Point<T>& a_left, const T& a_right){
+		Point<T> tmpPoint = a_left;
+		return tmpPoint/=a_right;
+	}
+
+	template <class T>
+	std::ostream& operator<<(std::ostream& os, const Point<T>& a_point){
+		os << "(" << a_point.x << ", " << a_point.y << ", " << a_point.z << ")";
+		return os;
+	}
+	template <class T>
+	std::istream& operator>>(std::istream& is, Point<T> &a_point){
+		is >> a_point.x >> a_point.y >> a_point.z;
+		return is;
+	}
 }
 #endif

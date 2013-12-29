@@ -81,41 +81,41 @@ namespace MV{
 	void Matrix::print(){
 		for( size_t y=0;y<sizeY;++y){
 			for( size_t x=0;x<sizeX;++x){
-				std::cout << "(" << (x*sizeX)+(y) << ":" << (*this)[x][y] << ") ";
+				std::cout << "(" << (x*sizeX)+(y) << ":" << (*this).access(x, y) << ") ";
 			}
 			std::cout << std::endl;
 		}
 	}
 
 	Matrix& Matrix::operator+=( const Matrix& a_other ){
-		require(getSizeX() == a_other.getSizeY(), RangeException(std::string("Invalid Matrix multiplication in operator+=, mismatched sizes: ")+boost::lexical_cast<std::string>(getSizeX())+" != "+boost::lexical_cast<std::string>(a_other.getSizeY())));
+		require(sizeX == a_other.sizeX && sizeY == a_other.sizeY, RangeException("Invalid Matrix addition in operator+=, mismatched sizes."));
 		for(size_t x=0; x < getSizeX(); ++x){
 			for(size_t y=0; y < getSizeY(); ++y){
-				(*this)[x][y]+=a_other[x][y];
+				(*this).access(x, y)+=a_other.access(x, y);
 			}
 		}
 		return *this;
 	}
 
 	Matrix& Matrix::operator-=( const Matrix& a_other ){
-		require(getSizeX() == a_other.getSizeY(), RangeException(std::string("Invalid Matrix multiplication in operator-=, mismatched sizes: ")+boost::lexical_cast<std::string>(getSizeX())+" != "+boost::lexical_cast<std::string>(a_other.getSizeY())));
+		require(sizeX == a_other.sizeX && sizeY == a_other.sizeY, RangeException("Invalid Matrix subtraction in operator-=, mismatched sizes."));
 		for(size_t x=0; x < getSizeX(); ++x){
 			for(size_t y=0; y < getSizeY(); ++y){
-				(*this)[x][y]-=a_other[x][y];
+				(*this).access(x, y)-=a_other.access(x, y);
 			}
 		}
 		return *this;
 	}
 
 	Matrix& Matrix::operator*=( const Matrix& a_other ){
-		require(getSizeX() == a_other.getSizeY(), RangeException(std::string("Invalid Matrix multiplication in operator*=, mismatched sizes: ")+boost::lexical_cast<std::string>(getSizeX())+" != "+boost::lexical_cast<std::string>(a_other.getSizeY())));
+		require(sizeX == a_other.sizeY, RangeException("Invalid Matrix multiplication in operator*=, mismatched sizes."));
 		size_t resultX = getSizeY(), resultY = a_other.getSizeX(), commonSize = sizeX;
 		Matrix result(resultY, resultX);
 
 		for(size_t x=0; x < resultX; ++x){
 			for(size_t y=0; y < resultY; ++y){
 				for(size_t common=0; common < commonSize; ++common){
-					result[y][x] += (*this)[common][x] * a_other[y][common];
+					result.access(y, x) += (*this).access(common, x) * a_other.access(y, common);
 				}
 			}
 		}
@@ -183,13 +183,13 @@ namespace MV{
 
 	TransformMatrix::TransformMatrix( const Point<MatrixValue> &a_position ) :Matrix(4){
 		makeIdentity();
-		position(a_position.x, a_position.y, a_position.z);
+		translate(a_position.x, a_position.y, a_position.z);
 	}
 
 	TransformMatrix& TransformMatrix::makeIdentity(){
 		clear();
 		for(size_t i=0; i < getSizeX() && i < getSizeY();++i){
-			(*this)[i][i] = 1.0;
+			(*this).access(i, i) = 1.0;
 		}
 		return *this;
 	}
@@ -204,13 +204,13 @@ namespace MV{
 		MatrixValue tz = - ((a_far + a_near)/(a_far - a_near));
 
 		clear();
-		(*this)[0][0] = a;
-		(*this)[1][1] = b;
-		(*this)[2][2] = c;
-		(*this)[3][3] = 1.0;
-		(*this)[3][0] = tx;
-		(*this)[3][1] = ty;
-		(*this)[3][2] = tz;
+		(*this).access(0, 0) = a;
+		(*this).access(1, 1) = b;
+		(*this).access(2, 2) = c;
+		(*this).access(3, 3) = 1.0;
+		(*this).access(3, 0) = tx;
+		(*this).access(3, 1) = ty;
+		(*this).access(3, 2) = tz;
 
 		return *this;
 	}
@@ -221,10 +221,10 @@ namespace MV{
 		//0	sin	cos
 		TransformMatrix rotation;
 		rotation.makeIdentity();
-		rotation[1][1] = cos(a_radian);
-		rotation[2][1] = -(sin(a_radian));
-		rotation[1][2] = sin(a_radian);
-		rotation[2][2] = cos(a_radian);
+		rotation.access(1, 1) = cos(a_radian);
+		rotation.access(2, 1) = -(sin(a_radian));
+		rotation.access(1, 2) = sin(a_radian);
+		rotation.access(2, 2) = cos(a_radian);
 		*this *= rotation;
 		return *this;
 	}
@@ -235,10 +235,10 @@ namespace MV{
 		//-sin	0  cos
 		TransformMatrix rotation;
 		rotation.makeIdentity();
-		rotation[0][0] = cos(a_radian);
-		rotation[2][0] = sin(a_radian);
-		rotation[0][2] = -(sin(a_radian));
-		rotation[2][2] = cos(a_radian);
+		rotation.access(0, 0) = cos(a_radian);
+		rotation.access(2, 0) = sin(a_radian);
+		rotation.access(0, 2) = -(sin(a_radian));
+		rotation.access(2, 2) = cos(a_radian);
 		*this *= rotation;
 		return *this;
 	}
@@ -249,31 +249,20 @@ namespace MV{
 		//0		0	  1
 		TransformMatrix rotation;
 		rotation.makeIdentity();
-		rotation[0][0] = cos(a_radian);
-		rotation[1][0] = -(sin(a_radian));
-		rotation[0][1] = sin(a_radian);
-		rotation[1][1] = cos(a_radian);
+		rotation.access(0, 0) = cos(a_radian);
+		rotation.access(1, 0) = -(sin(a_radian));
+		rotation.access(0, 1) = sin(a_radian);
+		rotation.access(1, 1) = cos(a_radian);
 		*this *= rotation;
-		return *this;
-	}
-
-	TransformMatrix& TransformMatrix::position( MatrixValue a_x, MatrixValue a_y, MatrixValue a_z /*= 0.0*/ ){
-		TransformMatrix translation;
-		translation.makeIdentity();
-		translation[3][0] = a_x;
-		translation[3][1] = a_y;
-		translation[3][2] = a_z;
-		*this *= translation;
-
 		return *this;
 	}
 
 	TransformMatrix& TransformMatrix::translate( MatrixValue a_x, MatrixValue a_y, MatrixValue a_z /*= 0.0*/ ){
 		TransformMatrix translation;
 		translation.makeIdentity();
-		translation[3][0] += a_x;
-		translation[3][1] += a_y;
-		translation[3][2] += a_z;
+		translation.access(3, 0) = a_x;
+		translation.access(3, 1) = a_y;
+		translation.access(3, 2) = a_z;
 		*this *= translation;
 		return *this;
 	}
@@ -281,9 +270,9 @@ namespace MV{
 	TransformMatrix& TransformMatrix::scale( MatrixValue a_x, MatrixValue a_y, MatrixValue a_z /*= 1.0*/ ){
 		TransformMatrix scaling;
 		scaling.makeIdentity();
-		scaling[0][0] = a_x;
-		scaling[1][1] = a_y;
-		scaling[2][2] = a_z;
+		scaling.access(0, 0) = a_x;
+		scaling.access(1, 1) = a_y;
+		scaling.access(2, 2) = a_z;
 		*this *= scaling;
 		return *this;
 	}

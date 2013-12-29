@@ -8,20 +8,36 @@
 
 namespace MV {
 
-	template <class T>
+	template <typename T>
 	class Signal {
 	public:
+		typedef std::function<T> FunctionType;
+
 		static std::shared_ptr< Signal<T> > make(std::function<T> a_callback){
 			return std::shared_ptr< Signal<T> >(new Signal<T>(a_callback, ++uniqueId));
 		}
 
 		template <class ...Arg>
 		void notify(Arg... a_parameters){
-			callback(std::forward<Arg>(a_parameters)...);
+			if(!isBlocked){
+				callback(std::forward<Arg>(a_parameters)...);
+			}
 		}
 		template <class ...Arg>
 		void operator()(Arg... a_parameters){
-			callback(std::forward<Arg>(a_parameters)...);
+			if(!isBlocked){
+				callback(std::forward<Arg>(a_parameters)...);
+			}
+		}
+
+		void block(){
+			isBlocked = true;
+		}
+		void unblock(){
+			isBlocked = false;
+		}
+		bool blocked() const{
+			return isBlocked;
 		}
 
 		//For sorting and comparison (removal/avoiding duplicates)
@@ -38,28 +54,38 @@ namespace MV {
 			return id != a_rhs.id;
 		}
 	private:
-		Signal(std::function<T> a_callback, long long a_id) :
+		Signal(std::function<T> a_callback, long long a_id):
 			id(a_id),
-			callback(a_callback){
+			callback(a_callback),
+			isBlocked(false){
 		}
+		bool isBlocked;
 		std::function< T > callback;
 		long long id;
 		static long long uniqueId;
 	};
 
-	template <class T>
+	template <typename T>
+	std::shared_ptr<Signal<T>> makeSignal(std::function<T> a_callback){
+		return Signal<T>::make(a_callback);
+	}
+
+	template <typename T>
 	long long Signal<T>::uniqueId = 0;
 
-	template <class T>
-	class Socket {
+	template <typename T>
+	class Slot {
 	public:
-		//no protection against duplicates
+		typedef std::function<T> FunctionType;
+		typedef std::shared_ptr<Signal<T>> SignalType;
+
+		//No protection against duplicates.
 		std::shared_ptr<Signal<T>> connect(std::function<T> a_callback){
-			auto signal = Signal<T>::make(a_callback);
+			auto signal = makeSignal(a_callback);
 			observers.insert(signal);
 			return signal;
 		}
-		//duplicate shared_ptr's will not be added
+		//Duplicate Signals will not be added. If std::function ever becomes comparable this can all be much safer.
 		void connect(std::shared_ptr<Signal<T>> a_value){
 			observers.insert(a_value);
 		}
@@ -68,7 +94,7 @@ namespace MV {
 			observers.erase(a_value);
 		}
 
-		template <class ...Arg>
+		template <typename ...Arg>
 		void operator()(Arg... a_parameters){
 			for (auto i = observers.begin(); i != observers.end();) {
 				if (i->expired()) {
@@ -83,29 +109,32 @@ namespace MV {
 		std::set< std::weak_ptr< Signal<T> >, std::owner_less<std::weak_ptr<Signal<T>>> > observers;
 	};
 
-	//Can be used as a public SocketRegister member for connecting sockets to a private Socket member.
+	//Can be used as a public SlotRegister member for connecting slots to a private Slot member.
 	//In this way you won't have to write forwarding connect/disconnect boilerplate for your classes.
-	template <class T>
-	class SocketRegister {
+	template <typename T>
+	class SlotRegister {
 	public:
-		SocketRegister(Socket<T> &a_socket) :
-			socket(a_socket){
+		typedef std::function<T> FunctionType;
+		typedef std::shared_ptr<Signal<T>> SignalType;
+
+		SlotRegister(Slot<T> &a_slot) :
+			slot(a_slot){
 		}
 
 		//no protection against duplicates
 		std::shared_ptr<Signal<T>> connect(std::function<T> a_callback){
-			return socket.connect(a_callback);
+			return slot.connect(a_callback);
 		}
 		//duplicate shared_ptr's will not be added
 		void connect(std::shared_ptr<Signal<T>> a_value){
-			socket.connect(a_value);
+			slot.connect(a_value);
 		}
 
 		void disconnect(std::shared_ptr<Signal<T>> a_value){
-			socket.disconnect(a_value);
+			slot.disconnect(a_value);
 		}
 	private:
-		Socket<T> &socket;
+		Slot<T> &slot;
 	};
 
 }

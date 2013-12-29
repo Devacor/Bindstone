@@ -100,7 +100,7 @@ namespace MV {
 
 	class TextureHandle : public std::enable_shared_from_this<TextureHandle> {
 		friend TextureDefinition;
-		Socket<void(std::shared_ptr<TextureHandle>)> sizeChanges;
+		Slot<void(std::shared_ptr<TextureHandle>)> sizeChanges;
 	public:
 		~TextureHandle();
 		typedef Signal<void (std::shared_ptr<TextureHandle>)> Signal;
@@ -133,7 +133,7 @@ namespace MV {
 
 		std::shared_ptr<TextureDefinition> texture() const;
 
-		SocketRegister<void(std::shared_ptr<TextureHandle>)> sizeObserver;
+		SlotRegister<void(std::shared_ptr<TextureHandle>)> sizeObserver;
 	private:
 		TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const Point<int> &a_position = Point<int>(0, 0), const Size<int> &a_size = Size<int>(-1, -1));
 

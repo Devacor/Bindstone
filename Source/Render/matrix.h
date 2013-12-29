@@ -54,6 +54,15 @@ namespace MV {
 
 		void print();
 
+		//A tiny bit faster than operator[] due to less indirection.
+		MatrixValue& access(size_t a_x, size_t a_y){
+			return (*matrixArray)[(sizeX * a_x) + (a_y)];
+		}
+		const MatrixValue& access(size_t a_x, size_t a_y) const{
+			return (*matrixArray)[(sizeX * a_x) + (a_y)];
+		}
+
+		//Enjoy using these, but do not use them in tight loops.
 		MatrixRowAccess& operator[] (size_t a_index);
 		const MatrixRowAccess& operator[] (size_t a_index) const;
 
@@ -97,13 +106,13 @@ namespace MV {
 		TransformMatrix(const Point<MatrixValue> &a_position);
 
 		MatrixValue getX() const{
-			return (*this)[3][0];
+			return (*this).access(3, 0);
 		}
 		MatrixValue getY() const{
-			return (*this)[3][1];
+			return (*this).access(3, 1);
 		}
 		MatrixValue getZ() const{
-			return (*this)[3][2];
+			return (*this).access(3, 2);
 		}
 
 		TransformMatrix& makeIdentity();
@@ -113,7 +122,6 @@ namespace MV {
 		TransformMatrix& rotateY(MatrixValue a_radian);
 		TransformMatrix& rotateZ(MatrixValue a_radian);
 
-		TransformMatrix& position(MatrixValue a_x, MatrixValue a_y, MatrixValue a_z = 0.0);
 		TransformMatrix& translate(MatrixValue a_x, MatrixValue a_y, MatrixValue a_z = 0.0);
 		TransformMatrix& scale(MatrixValue a_x, MatrixValue a_y, MatrixValue a_z = 1.0);
 	};

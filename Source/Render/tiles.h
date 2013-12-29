@@ -24,8 +24,8 @@ namespace MV {
 		std::shared_ptr<DrawNode> scene(){
 			return mainScene;
 		}
-		std::shared_ptr<DrawRectangle> tile(size_t a_x, size_t a_y){
-			return mainScene->get<DrawNode>("tiles")->get<DrawRectangle>(getChildId(a_x, a_y));
+		std::shared_ptr<Rectangle> tile(size_t a_x, size_t a_y){
+			return mainScene->get<Node>("tiles")->get<Rectangle>(getChildId(a_x, a_y));
 		}
 
 		//returns bottom left point for a tile
@@ -46,7 +46,7 @@ namespace MV {
 			auto tiles = mainScene->make<DrawNode>("tiles");
 			for(size_t y = 0;y < tileCountY;++y){
 				for(size_t x = 0;x < tileCountX;++x){
-					auto rect = mainScene->make<DrawRectangle>(getChildId(x, y));
+					auto rect = mainScene->make<Rectangle>(getChildId(x, y));
 					rect->setSizeAndLocation(pointForTile(x, y, 0), tileWidth, tileHeight);
 					AssignTextureToRectangle(*rect, &a_initTexture);
 				}

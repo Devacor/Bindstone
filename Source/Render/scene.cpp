@@ -168,7 +168,7 @@ namespace MV {
 			for(int i = 0; i < elements; i++){
 				points[i] = a_newColor;
 			}
-			alertParent("Change");
+			alertParent(VisualChange::make(shared_from_this()));
 		}
 
 		void Node::setTexture(std::shared_ptr<TextureHandle> a_texture){
@@ -182,7 +182,6 @@ namespace MV {
 				textureSizeSignal.reset();
 			}
 			updateTextureCoordinates();
-			alertParent("Change");
 		}
 
 		std::shared_ptr<TextureHandle> Node::getTexture() const{
@@ -193,7 +192,6 @@ namespace MV {
 			textureSizeSignal.reset();
 			texture.reset();
 			updateTextureCoordinates();
-			alertParent("Change");
 		}
 
 		bool Node::remove(std::shared_ptr<Node> a_childItem){
@@ -205,20 +203,42 @@ namespace MV {
 					++cell;
 				}
 			}
-			alertParent("Change");
-			return originalSize != drawList.size();
+			bool removed = originalSize != drawList.size();
+			if(removed){
+				alertParent(ChildRemoved::make(shared_from_this(), a_childItem));
+				alertParent(VisualChange::make(shared_from_this()));
+			}
+			return removed;
 		}
 
 		bool Node::remove(const std::string &a_childId){
 			size_t originalSize = drawList.size();
-			drawList.erase(a_childId);
-			alertParent("Change");
-			return originalSize != drawList.size();
+			std::shared_ptr<Node> childRemoved;
+			for(auto cell = drawList.begin(); cell != drawList.end();){
+				if(cell->first == a_childId){
+					childRemoved = cell->second;
+					drawList.erase(cell++);
+				} else{
+					++cell;
+				}
+			}
+			
+			bool removed = originalSize != drawList.size();
+			if(removed){
+				alertParent(ChildRemoved::make(shared_from_this(), childRemoved));
+				alertParent(VisualChange::make(shared_from_this()));
+			}
+			return removed;
 		}
 
 		void Node::clear(){
+			auto tmpDrawList = drawList;
 			drawList.clear();
-			alertParent("Change");
+
+			for(auto drawItem : tmpDrawList){
+				alertParent(ChildRemoved::make(shared_from_this(), drawItem.second));
+			}
+			alertParent(VisualChange::make(shared_from_this()));
 		}
 
 		std::shared_ptr<Node> Node::get(const std::string &a_childId){
@@ -266,35 +286,8 @@ namespace MV {
 			return rotateTo;
 		}
 
-		Point<> Node::getLocation(){
+		Point<> Node::getPosition(){
 			return translateTo;
-		}
-
-		Point<> Node::getRelativeLocation(){
-			Point<> resultPoint;
-			resultPoint = translateTo;
-			if(myParent){
-				resultPoint += myParent->getRelativeLocation();
-			}
-			return resultPoint;
-		}
-
-		Point<> Node::getRelativeScale(){
-			Point<> resultPoint;
-			resultPoint = scaleTo;
-			if(myParent){
-				resultPoint += myParent->getRelativeScale();
-			}
-			return resultPoint;
-		}
-
-		Point<> Node::getRelativeRotation(){
-			Point<> resultPoint;
-			resultPoint = rotateTo;
-			if(myParent){
-				resultPoint += myParent->getRelativeRotation();
-			}
-			return resultPoint;
 		}
 
 		void Node::scale(double a_newScale){
@@ -303,7 +296,7 @@ namespace MV {
 
 		void Node::scale(const Point<> &a_scaleValue){
 			scaleTo = a_scaleValue;
-			alertParent("Change");
+			alertParent(VisualChange::make(shared_from_this()));
 		}
 
 		void Node::incrementScale(double a_newScale){
@@ -312,43 +305,68 @@ namespace MV {
 
 		void Node::incrementScale(const AxisMagnitude &a_scaleValue){
 			scaleTo += a_scaleValue;
-			alertParent("Change");
+			alertParent(VisualChange::make(shared_from_this()));
 		}
 
 		void Node::setParent(Node* a_parentItem){
 			myParent = a_parentItem;
 		}
 
-		BoxAABB Node::getWorldAABB(bool includeChildren){
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+		Node* Node::parent() const{
+			return myParent;
+		}
+
+		BoxAABB Node::getWorldAABB(bool a_includeChildren){
+			return getWorldAABBImplementation(a_includeChildren, false);
+		}
+
+		BoxAABB Node::getWorldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(shared_from_this())); renderer->modelviewMatrix().pop(); });
+			if(!a_nestedCall){
+				renderer->modelviewMatrix().push();
+				renderer->modelviewMatrix().top().makeIdentity();
+				alertParent(PushMatrix::make(shared_from_this()));
+			} else{
+				parentPopMatrix.dismiss();
+			}
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
 
 			BoxAABB tmpBox;
+
 			if(!points.empty()){
 				tmpBox.initialize(renderer->worldFromLocal(points[0]));
 				std::for_each(points.begin()++, points.end(), [&](Point<> &point){
 					tmpBox.expandWith(renderer->worldFromLocal(point));
 				});
 			}
-			if(includeChildren && !drawList.empty()){
-				if(!points.empty()){
-					tmpBox.initialize(drawList.begin()->second->getWorldAABB());
+			if(a_includeChildren && !drawList.empty()){
+				if(points.empty()){
+					tmpBox.initialize(drawList.begin()->second->getWorldAABBImplementation(a_includeChildren, true));
 				} else{
-					tmpBox.expandWith(drawList.begin()->second->getWorldAABB());
+					tmpBox.expandWith(drawList.begin()->second->getWorldAABBImplementation(a_includeChildren, true));
 				}
 				std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
-					tmpBox.expandWith(cell.second->getWorldAABB());
+					tmpBox.expandWith(cell.second->getWorldAABBImplementation(a_includeChildren, true));
 				});
 			}
 			return tmpBox;
 		}
 
-		BoxAABB Node::getScreenAABB(bool includeChildren){
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+		BoxAABB Node::getScreenAABB(bool a_includeChildren){
+			return getScreenAABBImplementation(a_includeChildren, false);
+		}
+
+		BoxAABB Node::getScreenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(shared_from_this())); renderer->modelviewMatrix().pop(); });
+			if(!a_nestedCall){
+				renderer->modelviewMatrix().push();
+				renderer->modelviewMatrix().top().makeIdentity();
+				alertParent(PushMatrix::make(shared_from_this()));
+			} else{
+				parentPopMatrix.dismiss();
+			}
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
@@ -360,33 +378,78 @@ namespace MV {
 					tmpBox.expandWith(castPoint<double>(renderer->screenFromLocal(point)));
 				});
 			}
-			if(includeChildren && !drawList.empty()){
-				if(!points.empty()){
-					tmpBox.initialize(drawList.begin()->second->getScreenAABB());
+			if(a_includeChildren && !drawList.empty()){
+				if(points.empty()){
+					tmpBox.initialize(drawList.begin()->second->getScreenAABBImplementation(a_includeChildren, true));
 				} else{
-					tmpBox.expandWith(drawList.begin()->second->getScreenAABB());
+					tmpBox.expandWith(drawList.begin()->second->getScreenAABBImplementation(a_includeChildren, true));
 				}
 				std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
-					tmpBox.expandWith(cell.second->getScreenAABB());
+					tmpBox.expandWith(cell.second->getScreenAABBImplementation(a_includeChildren, true));
 				});
 			}
 			return tmpBox;
 		}
 
-		BoxAABB Node::getLocalAABB(){
+		BoxAABB Node::getLocalAABB(bool a_includeChildren){
+			return getLocalAABBImplementation(a_includeChildren, false);
+		}
+
+		BoxAABB Node::getLocalAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(shared_from_this())); renderer->modelviewMatrix().pop(); });
+			if(!a_nestedCall){
+				renderer->modelviewMatrix().push();
+				renderer->modelviewMatrix().top().makeIdentity();
+				alertParent(PushMatrix::make(shared_from_this()));
+			} else{
+				parentPopMatrix.dismiss();
+			}
+
+			pushMatrix();
+			SCOPE_EXIT{popMatrix();};
+
 			BoxAABB tmpBox;
+
+			if(!points.empty()){
+				tmpBox.initialize(renderer->worldFromLocal(points[0]));
+				std::for_each(points.begin()++, points.end(), [&](Point<> &point){
+					tmpBox.expandWith(renderer->worldFromLocal(point));
+				});
+			}
+			if(a_includeChildren && !drawList.empty()){
+				if(points.empty()){
+					tmpBox.initialize(drawList.begin()->second->getLocalAABBImplementation(a_includeChildren, true));
+				} else{
+					tmpBox.expandWith(drawList.begin()->second->getLocalAABBImplementation(a_includeChildren, true));
+				}
+				std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
+					tmpBox.expandWith(cell.second->getLocalAABBImplementation(a_includeChildren, true));
+				});
+			}
+			return tmpBox;
+		}
+
+		MV::BoxAABB Node::getPointAABB() {
+			BoxAABB tmpBox;
+
 			if(!points.empty()){
 				tmpBox.initialize(points[0]);
-				std::for_each(points.begin(), points.end(), [&](Point<> &point){
+				std::for_each(points.begin()++, points.end(), [&](Point<> &point){
 					tmpBox.expandWith(point);
 				});
 			}
+
 			return tmpBox;
 		}
 
 		Point<> Node::worldFromLocal(const Point<> &a_local){
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+			require(renderer != nullptr, PointerException("DrawShape::worldFromLocal requires a rendering context."));
+			renderer->modelviewMatrix().push();
+			renderer->modelviewMatrix().top().makeIdentity();
+			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
+
+			alertParent(PushMatrix::make(shared_from_this()));
+			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this()));};
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
@@ -395,8 +458,13 @@ namespace MV {
 			return ourPoint;
 		}
 		Point<int> Node::screenFromLocal(const Point<> &a_local){
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+			require(renderer != nullptr, PointerException("DrawShape::screenFromLocal requires a rendering context."));
+			renderer->modelviewMatrix().push();
+			renderer->modelviewMatrix().top().makeIdentity();
+			SCOPE_EXIT{renderer->modelviewMatrix().pop(); };
+
+			alertParent(PushMatrix::make(shared_from_this()));
+			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
@@ -406,8 +474,12 @@ namespace MV {
 		}
 		Point<> Node::localFromScreen(const Point<int> &a_screen){
 			require(renderer != nullptr, PointerException("DrawShape::localFromScreen requires a rendering context."));
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+			renderer->modelviewMatrix().push();
+			renderer->modelviewMatrix().top().makeIdentity();
+			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
+
+			alertParent(PushMatrix::make(shared_from_this()));
+			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
@@ -417,8 +489,12 @@ namespace MV {
 		}
 		Point<> Node::localFromWorld(const Point<> &a_world){
 			require(renderer != nullptr, PointerException("DrawShape::localFromWorld requires a rendering context."));
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+			renderer->modelviewMatrix().push();
+			renderer->modelviewMatrix().top().makeIdentity();
+			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
+
+			alertParent(PushMatrix::make(shared_from_this()));
+			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
@@ -429,8 +505,12 @@ namespace MV {
 
 		std::vector<Point<>> Node::worldFromLocal(std::vector<Point<>> a_local){
 			require(renderer != nullptr, PointerException("DrawShape::worldFromLocal requires a rendering context."));
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+			renderer->modelviewMatrix().push();
+			renderer->modelviewMatrix().top().makeIdentity();
+			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
+
+			alertParent(PushMatrix::make(shared_from_this()));
+			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
@@ -444,8 +524,12 @@ namespace MV {
 		std::vector<Point<int>> Node::screenFromLocal(const std::vector<Point<>> &a_local){
 			require(renderer != nullptr, PointerException("DrawShape::screenFromLocal requires a rendering context."));
 			std::vector<Point<int>> processed;
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+			renderer->modelviewMatrix().push();
+			renderer->modelviewMatrix().top().makeIdentity();
+			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
+
+			alertParent(PushMatrix::make(shared_from_this()));
+			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
@@ -458,8 +542,12 @@ namespace MV {
 
 		std::vector<Point<>> Node::localFromWorld(std::vector<Point<>> a_world){
 			require(renderer != nullptr, PointerException("DrawShape::localFromWorld requires a rendering context."));
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+			renderer->modelviewMatrix().push();
+			renderer->modelviewMatrix().top().makeIdentity();
+			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
+
+			alertParent(PushMatrix::make(shared_from_this()));
+			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
@@ -473,8 +561,12 @@ namespace MV {
 		std::vector<Point<>> Node::localFromScreen(const std::vector<Point<int>> &a_screen){
 			require(renderer != nullptr, PointerException("DrawShape::localFromScreen requires a rendering context."));
 			std::vector<Point<>> processed;
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+			renderer->modelviewMatrix().push();
+			renderer->modelviewMatrix().top().makeIdentity();
+			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
+
+			alertParent(PushMatrix::make(shared_from_this()));
+			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
@@ -487,8 +579,12 @@ namespace MV {
 
 		BoxAABB Node::worldFromLocal(BoxAABB a_local){
 			require(renderer != nullptr, PointerException("DrawShape::worldFromLocal requires a rendering context."));
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+			renderer->modelviewMatrix().push();
+			renderer->modelviewMatrix().top().makeIdentity();
+			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
+
+			alertParent(PushMatrix::make(shared_from_this()));
+			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
@@ -500,8 +596,12 @@ namespace MV {
 		}
 		BoxAABB Node::screenFromLocal(BoxAABB a_local){
 			require(renderer != nullptr, PointerException("DrawShape::screenFromLocal requires a rendering context."));
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+			renderer->modelviewMatrix().push();
+			renderer->modelviewMatrix().top().makeIdentity();
+			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
+
+			alertParent(PushMatrix::make(shared_from_this()));
+			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
@@ -513,8 +613,12 @@ namespace MV {
 		}
 		BoxAABB Node::localFromScreen(BoxAABB a_screen){
 			require(renderer != nullptr, PointerException("DrawShape::localFromScreen requires a rendering context."));
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+			renderer->modelviewMatrix().push();
+			renderer->modelviewMatrix().top().makeIdentity();
+			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
+
+			alertParent(PushMatrix::make(shared_from_this()));
+			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
@@ -526,8 +630,12 @@ namespace MV {
 		}
 		BoxAABB Node::localFromWorld(BoxAABB a_world){
 			require(renderer != nullptr, PointerException("DrawShape::localFromWorld requires a rendering context."));
-			alertParent("pushMatrix");
-			SCOPE_EXIT{alertParent("popMatrix");};
+			renderer->modelviewMatrix().push();
+			renderer->modelviewMatrix().top().makeIdentity();
+			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
+
+			alertParent(PushMatrix::make(shared_from_this()));
+			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
@@ -594,9 +702,6 @@ namespace MV {
 		}
 
 		void Node::defaultDraw(GLenum drawType){
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
 			defaultDrawRenderStep(drawType);
 		}
 
@@ -675,23 +780,6 @@ namespace MV {
 			drawSorted = a_depthMatters;
 		}
 
-		bool Node::getMessage(const std::string &a_message){
-			if(a_message == "NeedsSort"){
-				alertParent(a_message);
-				isSorted = false;
-				return true;
-			} else if(a_message == "pushMatrix"){
-				alertParent(a_message);
-				pushMatrix();
-				return true;
-			} else if(a_message == "popMatrix"){
-				popMatrix();
-				alertParent(a_message);
-				return true;
-			}
-			return false;
-		}
-
 		Node::Node(Draw2D* a_renderer):
 			renderer(a_renderer),
 			myParent(nullptr),
@@ -704,7 +792,7 @@ namespace MV {
 
 		std::shared_ptr<Node> Node::make(Draw2D* a_renderer, const Point<> &a_placement /*= Point<>()*/) {
 			auto node = std::shared_ptr<Node>(new Node(a_renderer));
-			node->placeAt(a_placement);
+			node->locate(a_placement);
 			return node;
 		}
 
@@ -714,23 +802,25 @@ namespace MV {
 
 		void Node::hide() {
 			isVisible = false;
-			alertParent("Change");
+			alertParent(VisualChange::make(shared_from_this()));
 		}
 
 		void Node::show() {
 			isVisible = true;
-			alertParent("Change");
+			alertParent(VisualChange::make(shared_from_this()));
 		}
-
 
 		/*************************\
 		| ---------Pixel--------- |
 		\*************************/
 
 		void Pixel::setPoint(const DrawPoint &a_point){
-			alertParent("NeedsSort");
 			points[0] = a_point;
-			alertParent("Change");
+			if(!depthOverride){
+				depthChanged();
+			}
+
+			alertParent(VisualChange::make(shared_from_this()));
 		}
 
 		void Pixel::drawImplementation(){
@@ -749,10 +839,9 @@ namespace MV {
 		\*************************/
 
 		void Line::setEnds(const DrawPoint &a_startPoint, const DrawPoint &a_endPoint){
-			alertParent("NeedsSort");
 			points[0] = a_startPoint;
 			points[1] = a_endPoint;
-			alertParent("Change");
+			depthChanged();
 		}
 
 		void Line::drawImplementation(){
@@ -776,9 +865,7 @@ namespace MV {
 		\*************************/
 
 		void Rectangle::setTwoCorners(const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight){
-			if(!depthOverride && (a_topLeft.z + a_bottomRight.z) / 2.0 != getDepth()){
-				alertParent("NeedsSort");
-			}
+			bool callDepthChanged = (!depthOverride && (a_topLeft.z + a_bottomRight.z) / 2.0 != getDepth());
 			DrawPoint topLeft = a_topLeft, bottomRight = a_bottomRight;
 			topLeft.x = std::min(a_topLeft.x, a_bottomRight.x);
 			bottomRight.x = std::max(a_topLeft.x, a_bottomRight.x);
@@ -790,13 +877,15 @@ namespace MV {
 			points[1].x = topLeft.x;	points[1].y = bottomRight.y;	points[1].z = (bottomRight.z + topLeft.z) / 2;
 			points[2] = bottomRight;
 			points[3].x = bottomRight.x;	points[3].y = topLeft.y;	points[3].z = (bottomRight.z + topLeft.z) / 2;
-			alertParent("Change");
+			if(callDepthChanged){
+				depthChanged(); //also alerts
+			} else{
+				alertParent(VisualChange::make(shared_from_this()));
+			}
 		}
 
 		void Rectangle::setTwoCorners(const Point<> &a_topLeft, const Point<> &a_bottomRight){
-			if(!depthOverride && (a_topLeft.z + a_bottomRight.z) / 2.0 != getDepth()){
-				alertParent("NeedsSort");
-			}
+			bool callDepthChanged = !depthOverride && (a_topLeft.z + a_bottomRight.z) / 2.0 != getDepth();
 			Point<> topLeft = a_topLeft, bottomRight = a_bottomRight;
 			topLeft.x = std::min(a_topLeft.x, a_bottomRight.x);
 			bottomRight.x = std::max(a_topLeft.x, a_bottomRight.x);
@@ -808,15 +897,18 @@ namespace MV {
 			points[1].x = topLeft.x;	points[1].y = bottomRight.y;	points[1].z = (bottomRight.z + topLeft.z) / 2;
 			points[2] = bottomRight;
 			points[3].x = bottomRight.x;	points[3].y = topLeft.y;	points[3].z = (bottomRight.z + topLeft.z) / 2;
-			alertParent("Change");
+			if(callDepthChanged){
+				depthChanged(); //also alerts
+			} else{
+				alertParent(VisualChange::make(shared_from_this()));
+			}
 		}
 
 		void Rectangle::setTwoCorners(const BoxAABB &a_bounds){
 			setTwoCorners(a_bounds.minPoint, a_bounds.maxPoint);
-			alertParent("Change");
 		}
 
-		void Rectangle::setSizeAndLocation(const Point<> &a_centerPoint, const Size<> &a_size){
+		void Rectangle::setSizeAndCenterPoint(const Point<> &a_centerPoint, const Size<> &a_size){
 			double halfWidth = a_size.width / 2, halfHeight = a_size.height / 2;
 
 			Point<> topLeft = a_centerPoint;
@@ -826,15 +918,12 @@ namespace MV {
 			bottomRight.x = halfWidth; bottomRight.y = halfHeight;
 
 			setTwoCorners(topLeft, bottomRight);
-			placeAt(a_centerPoint);
 		}
 
-		void Rectangle::setSizeAndCornerLocation(const Point<> &a_topLeft, const Size<> &a_size){
-			Point<> topLeft(0, 0);
-			Point<> bottomRight(a_size.width, a_size.height);
+		void Rectangle::setSizeAndCornerPoint(const Point<> &a_topLeft, const Size<> &a_size){
+			Point<> bottomRight(a_topLeft + pointFromSize(a_size));
 
-			setTwoCorners(topLeft, bottomRight);
-			placeAt(a_topLeft);
+			setTwoCorners(a_topLeft, bottomRight);
 		}
 
 		void Rectangle::clearTextureCoordinates(){
@@ -842,7 +931,7 @@ namespace MV {
 			points[1].textureX = 0.0; points[1].textureY = 1.0;
 			points[2].textureX = 1.0; points[2].textureY = 1.0;
 			points[3].textureX = 1.0; points[3].textureY = 0.0;
-			alertParent("Change");
+			alertParent(VisualChange::make(shared_from_this()));
 		}
 
 		void Rectangle::updateTextureCoordinates(){
@@ -851,10 +940,10 @@ namespace MV {
 				points[1].textureX = texture->percentLeft(); points[1].textureY = texture->percentBottom();
 				points[2].textureX = texture->percentRight(); points[2].textureY = texture->percentBottom();
 				points[3].textureX = texture->percentRight(); points[3].textureY = texture->percentTop();
+				alertParent(VisualChange::make(shared_from_this()));
 			} else{
 				clearTextureCoordinates();
 			}
-			alertParent("Change");
 		}
 
 		void Rectangle::drawImplementation(){
@@ -880,11 +969,25 @@ namespace MV {
 		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Point<> &a_point, Size<> &a_size, bool a_center) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
 			if(a_center){
-				rectangle->setSizeAndLocation(a_point, a_size);
+				rectangle->setSizeAndCenterPoint(a_point, a_size);
 			}else{
-				rectangle->setSizeAndCornerLocation(a_point, a_size);
+				rectangle->setSizeAndCornerPoint(a_point, a_size);
 			}
 			return rectangle;
 		}
+
+		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Size<> &a_size) {
+			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			rectangle->setSize(a_size);
+			return rectangle;
+		}
+
+		void Rectangle::setSize(const Size<> &a_size) {
+			points[2] = points[0] + static_cast<DrawPoint>(pointFromSize(a_size));
+			points[1].y = points[2].y;
+			points[3].x = points[2].x;
+			alertParent(VisualChange::make(shared_from_this()));
+		}
+
 	}
 }

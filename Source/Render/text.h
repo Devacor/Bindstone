@@ -9,6 +9,7 @@
 #include "Utility/package.h"
 #include "Render/render.h"
 #include "Render/scene.h"
+#include "Render/compositeScene.h"
 #include "SDL_ttf.h"
 
 namespace MV {
@@ -69,6 +70,7 @@ namespace MV {
 	};
 
 	enum TextWrapMethod{
+		NONE,
 		HARD,
 		SOFT
 	};
@@ -100,6 +102,7 @@ namespace MV {
 
 	class TextBox{
 	public:
+		TextBox(TextLibrary *a_textLibrary, Size<> a_size);
 		TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, Size<> a_size);
 		TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, Size<> a_size);
 
@@ -144,71 +147,40 @@ namespace MV {
 
 		void setTextBoxSize(Size<> a_size);
 
-		void setScrollPosition(Point<> a_position, bool a_overScroll = false){
-			if(0 && !a_overScroll){
-				Size<> contentSize = getContentSize();
-				if(contentSize.height < boxSize.height){
-					a_position.y = 0;
-				}else if(a_position.y > contentSize.height - boxSize.height){
-					a_position.y = contentSize.height - boxSize.height;
-				}
-				if(contentSize.width < boxSize.width){
-					a_position.x = 0;
-				}else if(a_position.x > contentSize.width - boxSize.width){
-					a_position.x = contentSize.width - boxSize.width;
-				}
-			}
-			std::cout << a_position << std::endl;
-			textTextureScene->placeAt(a_position);
-			renderTextWindowTexture();
-		}
+		void setScrollPosition(Point<> a_position, bool a_overScroll = false);
 		void translateScrollPosition(Point<> a_position, bool a_overScroll = false){
-			setScrollPosition(textTextureScene->getLocation() + a_position, a_overScroll);
+			setScrollPosition((contentScrollPosition + a_position), a_overScroll);
 		}
 
 		Point<> getScrollPosition() const{
-			require(textTextureScene != nullptr, PointerException("TextBox::getScrollPosition has no textBoxFullScene initialized!"));
-			return textTextureScene->getLocation();
+			return contentScrollPosition;
 		}
 
 		Size<> getContentSize(){
-			require(textTextureScene != nullptr, PointerException("TextBox::getContentSize has no textBoxFullScene initialized!"));
-			return textTextureScene->getWorldAABB().getSize();
+			return textScene->getLocalAABB().getSize();
 		}
 
 		std::shared_ptr<Scene::Node> scene(){
-			return textBoxFullScene;
+			return textboxScene;
 		}
 
 		void draw(){
-			textBoxFullScene->draw();
+			textboxScene->draw();
 		}
 	private:
 		void initialize(const UtfString &a_text);
-		void initializeTextWindowTexture();
-
-		void renderTextWindowTexture();
-
-		//it is important to reload TextLibrary textures before reloading the atlas textures as rendering
-		//here relies on the textures being valid in the TextLibrary.
-		void reloadTexture(std::shared_ptr<TextureDefinition> textureUpdating){
-			//render->makeFramebuffer(textWindowFramebuffer);
-			renderTextWindowTexture();
-		}
-
-		void initializeTextBoxFullScene();
+		void refreshTextBoxContents();
 
 		Size<> boxSize;
-		std::shared_ptr<Scene::Node> textBoxFullScene;
-		std::shared_ptr<Scene::Node> textTextureScene;
+		Point<> contentScrollPosition;
+		bool firstRun;
+		std::shared_ptr<Scene::Node> textScene;
+		std::shared_ptr<Scene::Clipped> textboxScene;
 		TextLibrary *textLibrary;
-		std::shared_ptr<TextureDefinition> textWindowTexture;
-		std::shared_ptr<TextureHandle> textWindowHandle;
 		Draw2D *render;
-		std::shared_ptr<Framebuffer> textWindowFramebuffer;
+		
 		UtfString text;
 		std::string fontIdentifier;
-		std::string textureHandle;
 	};
 }
 

@@ -213,7 +213,7 @@ namespace MV {
 	{
 	}
 
-	void glExtensionBlendMode::setBlendMode( GLenum a_sfactorRGB, GLenum a_dfactorRGB, GLenum a_sfactorAlpha, GLenum a_dfactorAlpha ){
+	void glExtensionBlendMode::setBlendFunction(GLenum a_sfactorRGB, GLenum a_dfactorRGB, GLenum a_sfactorAlpha, GLenum a_dfactorAlpha){
 		if(initialized){
 #ifdef WIN32
 			pglBlendFuncSeparateEXT(a_sfactorRGB, a_dfactorRGB, a_sfactorAlpha, a_dfactorAlpha);
@@ -222,6 +222,16 @@ namespace MV {
 #endif
 		}else{
 			glBlendFunc(a_sfactorRGB, a_dfactorRGB);
+		}
+	}
+
+	void glExtensionBlendMode::setBlendEquation(GLenum a_rgbBlendFunc, GLenum a_alphaBlendFunc){
+		if(initialized){
+#ifdef WIN32
+			pglBlendEquationSeparateEXT(a_rgbBlendFunc, a_alphaBlendFunc);
+#else
+			glBlendFuncSeparateOES(a_sfactorRGB, a_dfactorRGB, a_sfactorAlpha, a_dfactorAlpha);
+#endif
 		}
 	}
 
@@ -235,6 +245,7 @@ namespace MV {
 			initialized = true;
 			pglBlendFuncSeparateEXT = ( void (APIENTRY*) (GLenum, GLenum, GLenum, GLenum)) SDL_GL_GetProcAddress("glBlendFuncSeparateEXT");
 			pglBlendFuncSeparateEXT(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
+			pglBlendEquationSeparateEXT = (void (APIENTRY*) (GLenum, GLenum)) SDL_GL_GetProcAddress("glBlendEquationSeparateEXT");
 		}
 #else
 		initialized = true;
@@ -259,7 +270,7 @@ namespace MV {
 		glGetIntegerv(GL_RENDERBUFFER_BINDING_EXT, &originalRenderbufferId);
 	}
 
-	std::shared_ptr<Framebuffer> glExtensionFramebufferObject::makeFramebuffer(const Size<int> &a_size, GLuint a_texture){
+	std::shared_ptr<Framebuffer> glExtensionFramebufferObject::makeFramebuffer(const Point<int> &a_position, const Size<int> &a_size, GLuint a_texture){
 		require(initialized, ResourceException("CreateFramebuffer failed because the extension could not be loaded"));
 		GLuint framebufferId = 0, renderbufferId = 0, depthbufferId = 0;
 #ifdef WIN32
@@ -271,7 +282,7 @@ namespace MV {
 		glGenRenderbuffersOES(1, &renderbufferId);
 		glGenRenderbuffersOES(1, &depthbufferId);
 #endif
-		return std::shared_ptr<Framebuffer>(new Framebuffer(renderer, framebufferId, renderbufferId, depthbufferId, a_texture, a_size));
+		return std::shared_ptr<Framebuffer>(new Framebuffer(renderer, framebufferId, renderbufferId, depthbufferId, a_texture, a_size, a_position));
 	}
 
 	void glExtensionFramebufferObject::startUsingFramebuffer( std::shared_ptr<Framebuffer> a_framebuffer, bool a_push ){
@@ -304,7 +315,7 @@ namespace MV {
 			std::cout << "Start Using Framebuffer failure: " << glCheckFramebufferStatusOES(GL_FRAMEBUFFER_OES) << std::endl;
 		}
 #endif
-		glViewport(0, 0, a_framebuffer->frameSize.width, a_framebuffer->frameSize.height);
+		glViewport(a_framebuffer->framePosition.x, a_framebuffer->framePosition.y, a_framebuffer->frameSize.width, a_framebuffer->frameSize.height);
 		renderer->projectionMatrix().push().makeOrtho(0, a_framebuffer->frameSize.width, 0, a_framebuffer->frameSize.height, -128.0f, 128.0f);
 		renderer->clearScreen();
 	}
@@ -756,10 +767,11 @@ namespace MV {
 		glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
 		glHint(GL_GENERATE_MIPMAP_HINT, GL_NICEST);
 		
-		setBlendMode(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
-		
-		glDepthMask(GL_TRUE);
-		glEnable(GL_DEPTH_TEST);
+		setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		setBlendEquation(GL_FUNC_ADD, GL_FUNC_ADD);
+
+		glDepthMask(GL_FALSE);
+		glDisable(GL_DEPTH_TEST);
         glDepthFunc(GL_LEQUAL);
 		
 #ifdef HAVE_OPENGLES
@@ -840,12 +852,13 @@ namespace MV {
 		return mvWorld;
 	}
 
-	Framebuffer::Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, Size<int> a_size) :
+	Framebuffer::Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, const Size<int> &a_size, const Point<int> &a_position) :
 		renderbuffer(a_renderbuffer),
 		framebuffer(a_framebuffer),
 		depthbuffer(a_depthbuffer),
 		texture(a_texture),
 		frameSize(a_size),
+		framePosition(a_position),
 		renderer(a_renderer){
 	}
 

@@ -40,7 +40,7 @@ namespace MV {
 	class Size{
 	public:
 		Size():width(0), height(0), depth(0){}
-		Size(T a_width, T a_height, T a_depth = 0.0):width(a_width),height(a_height),depth(a_depth){}
+		Size(T a_width, T a_height, T a_depth = 0):width(a_width),height(a_height),depth(a_depth){}
 
 		template <class T2>
 		Size(const Size<T2> &a_size):width(a_size.width), height(a_size.height), depth(a_size.depth){}
@@ -70,13 +70,13 @@ namespace MV {
 	class Point{
 	public:
 		Point(){clear();}
-		Point(T a_xPos, T a_yPos, T a_zPos = 0.0){placeAt(a_xPos, a_yPos, a_zPos);}
+		Point(T a_xPos, T a_yPos, T a_zPos = 0){locate(a_xPos, a_yPos, a_zPos);}
 		
 		void clear();
 		
 		Point<T>& scale(T a_amount);
-		Point<T>& placeAt(T a_xPos, T a_yPos, T a_zPos);
-		Point<T>& placeAt(T a_xPos, T a_yPos);
+		Point<T>& locate(T a_xPos, T a_yPos, T a_zPos);
+		Point<T>& locate(T a_xPos, T a_yPos);
 		Point<T>& translate(T a_xAmount, T a_yAmount, T a_zAmount);
 		Point<T>& translate(T a_xAmount, T a_yAmount);
 		
@@ -92,15 +92,10 @@ namespace MV {
 		T x, y, z;
 	};
 
-	template <class Target, class Origin>
-	Point<Target> castPoint(const Point<Origin> &a_point){
-		return Point<Target>(static_cast<Target>(a_point.x), static_cast<Target>(a_point.y), static_cast<Target>(a_point.z));
-	}
-
 	class DrawPoint : public Point<>, public Color, public TexturePoint{
 	public:
 		DrawPoint(){clear();}
-		DrawPoint(double a_xPos, double a_yPos, double a_zPos = 0.0){placeAt(a_xPos, a_yPos, a_zPos);}
+		DrawPoint(double a_xPos, double a_yPos, double a_zPos = 0.0){locate(a_xPos, a_yPos, a_zPos);}
 		DrawPoint(const Point<>& a_position, const Color& a_color = Color(), const TexturePoint &a_texture = TexturePoint()):
 			Point<>(a_position),
 			Color(a_color),
@@ -130,19 +125,25 @@ namespace MV {
 	| -------Conversion------- |
 	\**************************/
 
+
 	template <class T>
 	Point<T> pointFromSize(const Size<T>& a_size){
-		return Point<T>(a_size.width, a_size.height, a_size.depth);
+		return Point<T>{a_size.width, a_size.height, a_size.depth};
 	}
 
 	template <class T>
 	Size<T> sizeFromPoint(const Point<T>& a_point){
-		return Size<T>(a_point.x, a_point.y, a_point.z);
+		return Size<T>{a_point.x, a_point.y, a_point.z};
 	}
 
 	/************************\
 	| -------Size IMP------- |
 	\************************/
+
+	template <typename T>
+	Size<T> size(T a_width, T a_height, T a_depth = 0){
+		return Size<T>{a_width, a_height, a_depth};
+	}
 
 	template <class Target, class Origin>
 	Size<Target> castSize(const Size<Origin> &a_size){
@@ -251,6 +252,16 @@ namespace MV {
 	| -------Point IMP------- |
 	\*************************/
 
+	template <typename T>
+	Point<T> point(T a_xPos, T a_yPos, T a_zPos = 0){
+		return Point<T>{a_xPos, a_yPos, a_zPos};
+	}
+
+	template <class Target, class Origin>
+	Point<Target> castPoint(const Point<Origin> &a_point){
+		return Point<Target>{static_cast<Target>(a_point.x), static_cast<Target>(a_point.y), static_cast<Target>(a_point.z)};
+	}
+
 	template <class T>
 	void MV::Point<T>::clear(){
 		x = 0; y = 0; z = 0;
@@ -269,13 +280,13 @@ namespace MV {
 	}
 
 	template <class T>
-	Point<T>& MV::Point<T>::placeAt( T a_xPos, T a_yPos, T a_zPos ){
+	Point<T>& MV::Point<T>::locate( T a_xPos, T a_yPos, T a_zPos ){
 		x = a_xPos; y = a_yPos; z = a_zPos;
 		return *this;
 	}
 
 	template <class T>
-	Point<T>& MV::Point<T>::placeAt( T a_xPos, T a_yPos ){
+	Point<T>& MV::Point<T>::locate( T a_xPos, T a_yPos ){
 		x = a_xPos; y = a_yPos;
 		return *this;
 	}

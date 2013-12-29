@@ -77,11 +77,13 @@ namespace MV {
 	public:
 		glExtensionBlendMode();
 		bool blendModeExtensionEnabled(){return initialized;}
-		void setBlendMode(GLenum a_sfactorRGB, GLenum a_dfactorRGB, GLenum a_sfactorAlpha, GLenum a_dfactorAlpha);
+		void setBlendFunction(GLenum a_sfactorRGB, GLenum a_dfactorRGB, GLenum a_sfactorAlpha, GLenum a_dfactorAlpha);
+		void setBlendEquation(GLenum a_rgbBlendFunc, GLenum a_alphaBlendFunc);
 	protected:
 
 #ifdef WIN32
 		PFNGLBLENDFUNCSEPARATEEXTPROC pglBlendFuncSeparateEXT;
+		PFNGLBLENDEQUATIONSEPARATEEXTPROC pglBlendEquationSeparateEXT;
 #endif
 
 		void loadExtensionBlendMode(char *a_extensionsList);
@@ -110,15 +112,22 @@ namespace MV {
 		Size<int> size() const{
 			return frameSize;
 		}
+		void setPosition(const Point<int> &a_position){
+			framePosition = a_position;
+		}
+		Point<int> position() const{
+			return framePosition;
+		}
 	private:
 		friend glExtensionFramebufferObject;
-		Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, Size<int> a_size);
+		Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, const Size<int> &a_size, const Point<int> &a_position);
 
 		GLuint framebuffer;
 		GLuint renderbuffer;
 		GLuint depthbuffer;
 		GLuint texture;
 		Size<int> frameSize;
+		Point<int> framePosition;
 
 		Draw2D *renderer;
 	};
@@ -129,7 +138,7 @@ namespace MV {
 		glExtensionFramebufferObject(Draw2D *a_renderer);
 
 		bool framebufferObjectExtensionEnabled(){return initialized;}
-		std::shared_ptr<Framebuffer> makeFramebuffer(const Size<int> &a_size, GLuint a_texture);
+		std::shared_ptr<Framebuffer> makeFramebuffer(const Point<int> &a_position, const Size<int> &a_size, GLuint a_texture);
 
 		void startUsingFramebuffer(std::shared_ptr<Framebuffer> a_framebuffer, bool a_push = true);
 		void stopUsingFramebuffer();

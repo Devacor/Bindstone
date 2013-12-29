@@ -5,35 +5,37 @@
 
 namespace MV {
 	namespace Scene {
-		class Clipped : public Node{
+		class Clipped : public Rectangle, public MessageHandler<VisualChange>{
 			friend Node;
 		public:
-			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, Size<> &a_size){
-				auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-				clipped->setSize(a_size);
-				return clipped;
-			}
+			SCENE_MAKE_FACTORY_METHODS
+
+			static std::shared_ptr<Clipped> make(Draw2D* a_renderer);
+			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight);
+			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const Point<> &a_topLeft, const Point<> &a_bottomRight);
+			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const Point<> &a_point, Size<> &a_size, bool a_center);
+			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const Size<> &a_size);
+
 			virtual ~Clipped(){}
 
-			void setSize(const Size<> &a_size);
-
-
 			void refreshTexture(bool a_forceRefresh = false);
-			void clearTextureCoordinates();
-			void updateTextureCoordinates();
 		protected:
 			Clipped(Draw2D *a_renderer):
-				Node(a_renderer){
-				points.resize(4);
+				Rectangle(a_renderer){
 			}
 
 		private:
 			virtual bool preDraw();
 
-			virtual bool getMessage(const std::string &a_message);
+			virtual void handleBegin(std::shared_ptr<VisualChange>){
+				dirtyTexture = true;
+			}
+			virtual void handleEnd(std::shared_ptr<VisualChange>){
+			}
 
 			std::shared_ptr<DynamicTextureDefinition> clippedTexture;
 			std::shared_ptr<Framebuffer> framebuffer;
+
 			bool dirtyTexture;
 		};
 	}

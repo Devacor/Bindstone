@@ -10,21 +10,20 @@ Game::Game() :
 	textLibrary(&renderer),
 	testShape(MV::Scene::Rectangle::make(&renderer)),
 	done(false),
-	//testBox(&textLibrary, "blue", MV::Size<>(200, 120)),
-	angleIncrement(0, 0, .005){
+	angleIncrement(0, 0, .005),
+	testBox(&textLibrary, "blue", MV::Size<>(100.0, 50.0)){
 
 	initializeWindow();
-
-	auto clipped = mainScene->make<MV::Scene::Clipped>("clipped", MV::Size<>(200, 200));
-	//auto clipped = mainScene->make<MV::Scene::Node>("clipped");
+	//auto clipped = mainScene->make<MV::Scene::Clipped>("clipped", MV::Size<>(200, 200));
+	auto clipped = mainScene->make<MV::Scene::Node>("clipped");
 	clipped->add("catapult", initializeCatapultScene());
-	//mainScene->add("textbox", initializeTextScene());
+	mainScene->add("textbox", initializeTextScene());
 	auto pointtest = MV::Point<>(-clipped->getLocalAABB().getSize().width / 2.0, 0);
 	//mainScene->get("clipped")->placeAt(MV::Point<>(-clipped->getLocalAABB().getSize().width / 2.0, 0));
-	mainScene->placeAt(MV::Point<>(renderer.world().width() / 2, renderer.world().height() / 2));
+	mainScene->locate(MV::Point<>(renderer.world().width() / 2, renderer.world().height() / 2));
 
 	mainScene->make<MV::Scene::Node>("container");
-	mainScene->get<MV::Scene::Node>("container")->placeAt(MV::Point<>(20, 80));
+	mainScene->get<MV::Scene::Node>("container")->locate(MV::Point<>(20, 80));
 	std::shared_ptr<MV::Scene::Rectangle> pattern = mainScene->get<MV::Scene::Node>("container")->make<MV::Scene::Rectangle>("pattern");
 	pattern->setTexture(textures.getFileTexture("Assets/Images/patternTest1.png")->makeHandle());
 
@@ -43,13 +42,20 @@ Game::Game() :
 }
 
 void Game::initializeWindow(){
+	MV::Matrix testMat(4);
+	testMat.access(1, 1) = 1.0;
+	testMat[1][2] = 2.0;
+	testMat.access(1, 3) = 1.0;
+	testMat.print();
+
 	MV::initializeFilesystem();
 	srand (static_cast<unsigned int>(time(0)));
 	//RENDERER SETUP:::::::::::::::::::::::::::::::::
 	MV::Size<> worldSize(960, 640);
 	MV::Size<int> windowSize(960, 640);
+	//MV::Size<int> worldSize(480, 320);
 
-	//renderer.window().windowedMode();
+	renderer.window().windowedMode();
 	
 	if(!renderer.initialize(windowSize, worldSize)){
 		exit(0);
@@ -60,15 +66,34 @@ void Game::initializeWindow(){
 	mouse.update();
 }
 
-bool Game::passTime( double dt ) {
+
+
+bool Game::passTime(double dt) {
 	//std::cerr << MV::toDegrees(mainScene->get("catapult")->get<MV::DrawNode>()->get("arm")->getRotation().z) << std::endl;
 	mainScene->get("clipped")->get("catapult")->get("arm")->incrementRotate(angleIncrement);
 	if(MV::toDegrees(mainScene->get("clipped")->get("catapult")->get("arm")->getRotation().z) > 180 ||
 		MV::toDegrees(mainScene->get("clipped")->get("catapult")->get("arm")->getRotation().z) < 0){
-		angleIncrement*=-1;
+		angleIncrement *= -1;
 	}
 	auto pattern = mainScene->get<MV::Scene::Node>("container")->get<MV::Scene::Rectangle>("pattern");
-	MV::BoxAABB worldAABB = pattern->getScreenAABB();
+
+	mainScene->get("clipped")->setSortDepth(0);
+
+	auto testItem = mainScene->make<MV::Scene::Rectangle>("testThing");
+	std::vector<MV::Point<>> points = {mainScene->get("clipped")->getWorldAABB().minPoint, mainScene->get("clipped")->getWorldAABB().maxPoint};
+	points = testItem->localFromWorld(points);
+	testItem->setTwoCorners(points[0], points[1]);
+	testItem->setColor(MV::Color(1.0, 0.0, 0.0, .25));
+	testItem->setSortDepth(-100);
+
+	auto testItem2 = mainScene->make<MV::Scene::Rectangle>("testThing2");
+	std::vector<MV::Point<>> points2 = {mainScene->get("clipped")->get("catapult")->get("arm")->getWorldAABB().minPoint, mainScene->get("clipped")->get("catapult")->get("arm")->getWorldAABB().maxPoint};
+	points2 = testItem2->localFromWorld(points2);
+	testItem2->setTwoCorners(points2[0], points2[1]);
+
+	testItem2->setColor(MV::Color(0.0, 0.0, 1.0, .5));
+	testItem2->setSortDepth(101);
+	/*MV::BoxAABB worldAABB = pattern->getScreenAABB();
 	MV::BoxAABB screenAABB = pattern->getWorldAABB();
 	MV::BoxAABB localAABB = pattern->getLocalAABB();
 
@@ -77,13 +102,13 @@ bool Game::passTime( double dt ) {
 
 	screenAABB.minPoint = MV::castPoint<double>(renderer.screenFromWorld(screenAABB.minPoint));
 	screenAABB.maxPoint = MV::castPoint<double>(renderer.screenFromWorld(screenAABB.maxPoint));
-	testShape->setTwoCorners(renderer.worldFromScreen(MV::Point<int>(mouse.position.x-5, mouse.position.y-5)), renderer.worldFromScreen(mouse.position));
+	testShape->setTwoCorners(renderer.worldFromScreen(MV::Point<int>(mouse.position.x - 5, mouse.position.y - 5)), renderer.worldFromScreen(mouse.position)); 
 	//std::cout << std::endl << pattern->localFromWorld(renderer.worldFromScreen(mouse.position));
 	if(localAABB.pointContained(pattern->localFromWorld(renderer.worldFromScreen(mouse.position)))){
 		pattern->clearTexture();
 	}else{
 		pattern->setTexture(textures.getFileTexture("Assets/Images/patternTest1.png")->makeHandle());
-	}
+	}*/
 	return !done;
 }
 
@@ -101,20 +126,20 @@ void Game::handleInput() {
 					done = true;
 					break;
 				case SDLK_UP:
-					renderer.window().fullScreenMode();
+					testBox.translateScrollPosition(MV::Point<>(0, -2));
 					break;
 				case SDLK_LEFT:
-					renderer.window().fullScreenWindowedMode();
+					testBox.translateScrollPosition(MV::Point<>(-2, 0));
 					break;
 				case SDLK_DOWN:
-					//testBox.setScrollPosition(MV::Point<>(0, testBox.getScrollPosition().y + 1));
+					testBox.translateScrollPosition(MV::Point<>(0, 2));
 					//renderer.window().windowedMode().bordered();
 					break;
 				case SDLK_SPACE:
-					renderer.window().allowUserResize();
+					//renderer.window().allowUserResize();
 					break;
 				case SDLK_RIGHT:
-					renderer.window().lockUserResize();
+					testBox.translateScrollPosition(MV::Point<>(2, 0));
 					break;
 				}
 				break;
@@ -143,11 +168,11 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	shape->setSortDepth(4);
 
 	auto armScene = catapaultScene->make<MV::Scene::Node>("arm");
-	armScene->placeAt(MV::Point<>(0, -4));
+	armScene->locate(MV::Point<>(0, -4));
 	shape = armScene->make<MV::Scene::Rectangle>("arm");
 	auto armTexture = textures.getFileTexture("Assets/Images/spatula.png");
 	shape->setTexture(armTexture->makeHandle());
-	shape->setSizeAndCornerLocation(MV::Point<>(0, 0), armTexture->size());
+	shape->setSizeAndCornerPoint(MV::Point<>(0, 0), armTexture->size());
 	std::cout << "AT: " << armTexture->size() << std::endl;
 	shape->setSortDepth(2);
 
@@ -159,24 +184,32 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	shape = armScene->make<MV::Scene::Rectangle>("rock");
 	auto rockTexture = textures.getFileTexture("Assets/Images/rock.png");
 	shape->setTexture(rockTexture->makeHandle());
-	shape->setSizeAndCornerLocation(MV::Point<>(0, 0), rockTexture->size());
-	shape->placeAt(MV::Point<>(7, -9));
+	//shape->setSizeAndCornerPoint(MV::Point<>(7, -90), rockTexture->size());
+	shape->setSizeAndCornerPoint(MV::Point<>(0, 0), rockTexture->size());
+	shape->locate(MV::Point<>(70, -90));
+
+	shape = armScene->make<MV::Scene::Rectangle>("rock2");
+	shape->setTexture(rockTexture->makeHandle());
+	shape->setSizeAndCornerPoint(MV::Point<>(70, -90), rockTexture->size());
+	//shape->setSizeAndCornerPoint(MV::Point<>(0, 0), rockTexture->size());
+	shape->locate(MV::Point<>(0, 0));
 	std::cout << "RT: " << rockTexture->size() << std::endl;
 	shape->setSortDepth(1);
 
 	shape = catapaultScene->make<MV::Scene::Rectangle>("joint");
 	auto jointTexture = textures.getFileTexture("Assets/Images/joint.png");
 	shape->setTexture(jointTexture->makeHandle());
-	shape->setSizeAndCornerLocation(MV::Point<>(0, 0), jointTexture->size());
+	shape->setSizeAndCornerPoint(MV::Point<>(0, 0), jointTexture->size());
 	std::cout << "JT: " << jointTexture->size() << std::endl;
 	shape->setSortDepth(3);
 
-	catapaultScene->scale(.5);
+	//catapaultScene->scale(.5);
 	return catapaultScene;
 }
 
-/*std::shared_ptr<MV::Scene::Node> Game::initializeTextScene() {
+std::shared_ptr<MV::Scene::Node> Game::initializeTextScene() {
 	textLibrary.loadFont("blue", 24, "Assets/Fonts/bluehigh.ttf");
-	testBox.setText(MV::stringToWide("This\nis\na\nclear and\nobvious\ntest!"));
+	testBox.setText(MV::stringToWide("This is a clear and obvious test!"));
+	testBox.setScrollPosition(MV::Point<>(0, 8));
 	return testBox.scene();
-}*/
+}

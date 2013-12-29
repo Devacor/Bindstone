@@ -17,31 +17,31 @@ this setup code.
 #include <ctime>
 
 //Create the initial background text and position it.
-void CreateTextScene(MV::Scene &mainScene, MV::TextLibrary &textLibrary);
+void CreateTextScene(std::shared_ptr<MV::Scene::Node> mainScene, MV::TextLibrary &textLibrary);
 
 //Twirl and change the color of the text.
-void ManipulateText(MV::Scene &mainScene);
+void ManipulateText(std::shared_ptr<MV::Scene::Node> mainScene);
 
 //These two functions are hard-coded shortcuts to get the dog and fox shapes from the scene manager.
-std::shared_ptr<MV::DrawRectangle> GetDogShape(MV::Scene &mainScene);
-std::shared_ptr<MV::DrawRectangle> GetFoxShape(MV::Scene &mainScene);
+std::shared_ptr<MV::Scene::Rectangle> GetDogShape(std::shared_ptr<MV::Scene::Node> mainScene);
+std::shared_ptr<MV::Scene::Rectangle> GetFoxShape(std::shared_ptr<MV::Scene::Node> mainScene);
 
 //This loads all the textures for the example.
-void LoadTexturesAndAnimations(MV::TextureManager &textures, MV::FrameSwapperRegister &animationLibrary);
+void LoadTexturesAndAnimations(MV::FrameSwapperRegister &animationLibrary);
 
 //This sets up the Dog, Fox, and Ground objects
-void CreateDogFoxScene(MV::Scene &mainScene, MV::TextureManager &textures);
+void CreateDogFoxScene(std::shared_ptr<MV::Scene::Node> mainScene);
 
 //Update a shape's texture to the current frame of an animation.
-void UpdateAnimation(MV::Scene &mainScene, MV::TextureManager &textures, MV::DrawRectangle &shape, MV::FrameSwapper &animation, bool flipAnimation = false);
+void UpdateAnimation(std::shared_ptr<MV::Scene::Node> mainScene, std::shared_ptr<MV::Scene::Rectangle> shape, MV::FrameSwapper &animation, bool flipAnimation = false);
 
 //Update the sun and moon's rotation
-void UpdateSky(MV::Scene &mainScene);
+void UpdateSky(std::shared_ptr<MV::Scene::Node> mainScene);
 
 //This is a really simple hard-coded jump sequence to provide a limited amount of interactivity in the demo.
 class FoxJump{
 public:
-	FoxJump(MV::FrameSwapperRegister *frameReg, MV::FrameSwapper *foxAnim, std::shared_ptr<MV::DrawRectangle> foxShape);
+	FoxJump(MV::FrameSwapperRegister *frameReg, MV::FrameSwapper *foxAnim, std::shared_ptr<MV::Scene::Rectangle> foxShape);
 	~FoxJump(){}
 
 	//Call this to initiate a jump sequence (or do nothing if the fox is already jumping)
@@ -53,7 +53,7 @@ public:
 	//Checks the direction the fox is moving and decides if the animation should be flipped
 	bool isFlipped();
 private:
-	std::shared_ptr<MV::DrawRectangle> foxBox;
+	std::shared_ptr<MV::Scene::Rectangle> foxBox;
 	MV::FrameSwapperRegister *frameRegister;
 	MV::FrameSwapper *foxSwapper;
 	double directionX, directionY;

@@ -5,6 +5,7 @@
 	#include "Utility/generalUtility.h"
 	#include "Utility/stopwatch.h"
 	#include "Utility/notification.h"
-	#include "Utility/signal.h"
+	#include "Utility/signal.hpp"
+	#include "Utility/messageHandler.hpp"
 
 #endif

@@ -82,6 +82,7 @@
     <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(IncludePath)</IncludePath>
     <LibraryPath>$(SolutionDir)../external/boost_1_55_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/;$(SolutionDir)../external/libs/;$(LibraryPath)</LibraryPath>
     <SourcePath>$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath)</SourcePath>
+    <RunCodeAnalysis>false</RunCodeAnalysis>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -136,6 +137,7 @@
       <AdditionalDependencies>glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Windows</SubSystem>
       <AdditionalLibraryDirectories>$(SolutionDir)../external/boost_1_52_0/stage/lib/;$(SolutionDir)../external/libs/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/</AdditionalLibraryDirectories>
+      <Profile>true</Profile>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -156,12 +158,14 @@
       <AdditionalDependencies>glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
       <AdditionalLibraryDirectories>$(SolutionDir)../external/boost_1_55_0/lib/;$(SolutionDir)../external/libs/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/</AdditionalLibraryDirectories>
+      <Profile>true</Profile>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Source\Animation\actionSequence.cpp" />
     <ClCompile Include="Source\Animation\frameSwapper.cpp" />
     <ClCompile Include="Source\Audio\sound.cpp" />
+    <ClCompile Include="Source\exampleCode.cpp" />
     <ClCompile Include="Source\game.cpp" />
     <ClCompile Include="Source\Game\pathGrid.cpp" />
     <ClCompile Include="Source\main.cpp">
@@ -187,6 +191,7 @@
     <ClInclude Include="Source\Animation\package.h" />
     <ClInclude Include="Source\Audio\package.h" />
     <ClInclude Include="Source\Audio\sound.h" />
+    <ClInclude Include="Source\exampleCode.h" />
     <ClInclude Include="Source\game.h" />
     <ClInclude Include="Source\Game\pathGrid.h" />
     <ClInclude Include="Source\Network\network.h" />
@@ -198,14 +203,16 @@
     <ClInclude Include="Source\Render\package.h" />
     <ClInclude Include="Source\Render\points.h" />
     <ClInclude Include="Source\Render\render.h" />
+    <ClInclude Include="Source\Render\sceneMessages.h" />
     <ClInclude Include="Source\Render\text.h" />
     <ClInclude Include="Source\Render\textures.h" />
     <ClInclude Include="Source\Render\tiles.h" />
     <ClInclude Include="Source\Utility\generalUtility.h" />
+    <ClInclude Include="Source\Utility\messageHandler.hpp" />
     <ClInclude Include="Source\Utility\notification.h" />
     <ClInclude Include="Source\Utility\package.h" />
     <ClInclude Include="Source\Utility\scopeGuard.hpp" />
-    <ClInclude Include="Source\Utility\signal.h" />
+    <ClInclude Include="Source\Utility\signal.hpp" />
     <ClInclude Include="Source\Utility\stopwatch.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

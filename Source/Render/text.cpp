@@ -133,7 +133,7 @@ namespace MV {
 		Color currentColor;
 		int lineHeight, baseLine;
 		int offset = 0;
-		double characterLocationX = 0, nextCharacterLocationX = characterLocationX;
+		double characterLocationX = 0, nextCharacterLocationX = 0;
 		double characterLocationY = 0;
 		size_t characterCount = 0;
 		size_t previousLine = 0;
@@ -165,21 +165,21 @@ namespace MV {
 				for(auto renderChar = current->text.begin();renderChar != current->text.end();++renderChar){
 					nextCharacterLocationX += (*characterList)[*renderChar].characterSize().width;
 					bool lineWidthExceeded = (a_maxWidth!=0 && nextCharacterLocationX > a_maxWidth);
-					if(*renderChar == '\n' || lineWidthExceeded){
+					if(*renderChar == '\n' || (lineWidthExceeded && a_wrapMethod != NONE)){
 						characterLocationX = 0;
 						nextCharacterLocationX = (!lineWidthExceeded)?0:(*characterList)[*renderChar].characterSize().width;
 						characterLocationY+=lineHeight;
 						offset = 0;
 						lineHeight = TTF_FontLineSkip(specifiedFont->second.font);
 						baseLine = TTF_FontAscent(specifiedFont->second.font);
-						if(lineWidthExceeded && a_wrapMethod == SOFT){
+						if(a_wrapMethod == SOFT && lineWidthExceeded && *renderChar != '\n'){
 							auto lastSpace = std::find(currentLineContent.rbegin(), currentLineContent.rend(), UTF_CHAR_STR(' '));
 							size_t distance = std::distance(currentLineContent.rbegin(), lastSpace);
 							if(distance != currentLineContent.size()){
 								previousLine = characterCount - distance;
 								for(;distance > 0;--distance){
 									auto renderedCharacter = textScene->get(boost::lexical_cast<std::string>(characterCount-distance));
-									renderedCharacter->placeAt(Point<>(characterLocationX, renderedCharacter->getLocation().y+lineHeight));
+									renderedCharacter->locate(Point<>(characterLocationX, renderedCharacter->getPosition().y + lineHeight));
 									characterLocationX+=currentLineCharacterSizes[currentLineContent.size()-distance];
 								}
 								nextCharacterLocationX+=characterLocationX;
@@ -194,8 +194,8 @@ namespace MV {
 						currentLineCharacterSizes.clear();
 					}
 					if(*renderChar != '\n'){
-						auto character = Scene::Rectangle::make(render, Point<>(), castSize<double>((*characterList)[*renderChar].textureSize()), false);
-						character->translate(Point<>(characterLocationX, characterLocationY + offset));
+						auto character = Scene::Rectangle::make(render, Point<>(), castSize<double>((*characterList)[*renderChar].characterSize()), false);
+						character->locate(Point<>(characterLocationX, characterLocationY + offset));
 						character->setTexture((*characterList)[*renderChar].texture());
 						character->setColor(currentColor);
 						textScene->add(boost::lexical_cast<std::string>(characterCount), character);
@@ -219,8 +219,13 @@ namespace MV {
 			std::for_each(glyphList.second.begin(), glyphList.second.end(), [&](std::pair<const UtfChar, TextCharacter> &glyph){
 				if(glyph.second.isSet()){
 					Uint16 text[] = {static_cast<Uint16>(glyph.first), '\0'};
-					//glyph.second.setCharacter(SurfaceTextureDefinition::make(), glyph.first); //TEXTURE
-					//glyph.second.assignSDLSurface(TTF_RenderUNICODE_Blended(currentFont, text, white), glyph.first);
+					glyph.second.setCharacter(
+						SurfaceTextureDefinition::make("", [=](){
+							Uint16 text[] = {static_cast<Uint16>(glyph.first), '\0'};
+							return TTF_RenderUNICODE_Blended(currentFont, text, white);
+						}),
+						glyph.first
+					);
 				}
 			});
 		});
@@ -248,45 +253,42 @@ namespace MV {
 		});
 	}
 
+	TextBox::TextBox(TextLibrary *a_textLibrary, Size<> a_size):
+		textLibrary(a_textLibrary),
+		render(a_textLibrary->getRenderer()),
+		textboxScene(Scene::Clipped::make(a_textLibrary->getRenderer(), a_size)),
+		textScene(nullptr),
+		boxSize(a_size){
+		firstRun = true;
+	}
+
 	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, Size<> a_size):
 		textLibrary(a_textLibrary),
 		render(a_textLibrary->getRenderer()),
 		fontIdentifier(a_fontIdentifier),
-		textTextureScene(Scene::Node::make(a_textLibrary->getRenderer())),
-		textBoxFullScene(Scene::Node::make(a_textLibrary->getRenderer())),
+		textboxScene(Scene::Clipped::make(a_textLibrary->getRenderer(), a_size)),
+		textScene(nullptr),
 		boxSize(a_size){
-
-		initialize(UTF_CHAR_STR("\0"));
+		firstRun = true;
 	}
 
 	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, Size<> a_size) :
 		textLibrary(a_textLibrary),
 		render(a_textLibrary->getRenderer()),
 		fontIdentifier(a_fontIdentifier),
-		textTextureScene(Scene::Node::make(a_textLibrary->getRenderer())),
-		textBoxFullScene(Scene::Node::make(a_textLibrary->getRenderer())),
+		textboxScene(Scene::Clipped::make(a_textLibrary->getRenderer(), a_size)),
+		textScene(nullptr),
 		boxSize(a_size){
-		
-		initialize(a_text);
-	}
-
-	void TextBox::initialize(const UtfString &a_text){
-		textureHandle = getNewStringId();
-
-		initializeTextWindowTexture();
-		initializeTextBoxFullScene();
-
-		//render->makeFramebuffer(textWindowFramebuffer);
-		setText(a_text, fontIdentifier);
+		firstRun = true;
+		setText(a_text, a_fontIdentifier);
 	}
 
 	void TextBox::setText(const UtfString &a_text, const std::string &a_fontIdentifier){
 		if(a_fontIdentifier != ""){fontIdentifier = a_fontIdentifier;}
 		text = a_text;
-		textTextureScene->add("Text", textLibrary->composeScene(parseTextStateList(fontIdentifier, text), boxSize.width));
-		renderTextWindowTexture();
-	}
 
+		refreshTextBoxContents();
+	}
 
 	bool TextBox::setText( SDL_Event &event ){
 		if(event.type == SDL_TEXTINPUT){
@@ -300,32 +302,35 @@ namespace MV {
 
 	void TextBox::setTextBoxSize( Size<> a_size ){
 		boxSize = a_size;
+		textboxScene->setSize(a_size);
 
-		auto textBoxWindow = textBoxFullScene->get<Scene::Rectangle>("TextBoxWindow");
-		textBoxWindow->setSizeAndLocation(textBoxWindow->getLocation(), boxSize);
-
-		initializeTextWindowTexture();
-		textTextureScene->add("Text", textLibrary->composeScene(parseTextStateList(fontIdentifier, text), boxSize.width));
-		renderTextWindowTexture();
+		refreshTextBoxContents();
 	}
 
-	void TextBox::initializeTextWindowTexture(){
-		textWindowTexture = DynamicTextureDefinition::make("window", castSize<int>(boxSize));
-		textWindowHandle = textWindowTexture->makeHandle();
-		textWindowFramebuffer->setTextureId(textWindowTexture->textureId());
-		textWindowFramebuffer->setSize(castSize<int>(boxSize));
+	void TextBox::refreshTextBoxContents(){
+		if(fontIdentifier != ""){
+			textScene = textboxScene->add("Text", textLibrary->composeScene(parseTextStateList(fontIdentifier, text), boxSize.width));
+			textScene->locate(contentScrollPosition);
+		} else{
+			std::cerr << "Warning: refreshTextBoxContents called, but no fontIdentifier has been set yet!" << std::endl;
+		}
 	}
 
-	void TextBox::renderTextWindowTexture(){
-		//render->startUsingFramebuffer(textWindowFramebuffer);
-		textTextureScene->draw();
-		render->stopUsingFramebuffer();
+	void TextBox::setScrollPosition(Point<> a_position, bool a_overScroll /*= false*/) {
+		if(!a_overScroll){
+			auto contentSize = getContentSize();
+			if(contentSize.height < boxSize.height){
+				a_position.y = 0;
+			} else if(a_position.y < -(contentSize.height - boxSize.height)){
+				a_position.y = -(contentSize.height - boxSize.height);
+			} else if(a_position.y > 0){
+				a_position.y = 0;
+			}
+
+			a_position.x = 0;
+		}
+		contentScrollPosition = a_position;
+		textScene->locate(contentScrollPosition);
 	}
 
-	void TextBox::initializeTextBoxFullScene(){
-		auto textBoxWindow = Scene::Rectangle::make(render);
-		textBoxWindow->setSizeAndLocation(Point<>(), boxSize);
-		textBoxWindow->setTexture(textWindowTexture->makeHandle());
-		textBoxFullScene->add("TextBoxWindow", textBoxWindow);
-	}
 }

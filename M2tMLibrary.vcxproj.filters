@@ -82,6 +82,9 @@
     <ClCompile Include="Source\Render\compositeScene.cpp">
       <Filter>Source Files\Render</Filter>
     </ClCompile>
+    <ClCompile Include="Source\exampleCode.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -138,9 +141,6 @@
     <ClInclude Include="Source\Game\pathGrid.h">
       <Filter>Source Files\Game</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Utility\signal.h">
-      <Filter>Source Files\Utility</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Network\network.h">
       <Filter>Source Files\Network</Filter>
     </ClInclude>
@@ -158,6 +158,18 @@
     </ClInclude>
     <ClInclude Include="Source\Utility\scopeGuard.hpp">
       <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\signal.hpp">
+      <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\exampleCode.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\messageHandler.hpp">
+      <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\sceneMessages.h">
+      <Filter>Source Files\Render</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

@@ -123,7 +123,7 @@ namespace MV{
 
 			onMouseDownHandle = mouse.onLeftMouseDown.connect([&](MouseState& a_mouse){
 				if(mouseInBounds(a_mouse)){
-					std::cerr << "ON PRESS (" << ourId << "): " << a_mouse.position() << std::endl;
+					std::cout << "ON PRESS (" << ourId << "): " << a_mouse.position() << std::endl;
 					isInPressEvent = true;
 					onPressSlot(thisSharedPtr.lock());
 
@@ -132,7 +132,7 @@ namespace MV{
 					priorMousePosition = dragStartPosition;
 
 					onMouseMoveHandle = a_mouse.onMove.connect([&](MouseState& a_mouseInner){
-						//std::cerr << "ON DRAG (" << ourId << "): " << dragStartPosition << " -> " << a_mouseInner.position() << std::endl;
+						//std::cout << "ON DRAG (" << ourId << "): " << dragStartPosition << " -> " << a_mouseInner.position() << std::endl;
 						onDragSlot(thisSharedPtr.lock(), dragStartPosition, a_mouseInner.position() - priorMousePosition);
 						priorMousePosition = a_mouseInner.position();
 					});
@@ -144,10 +144,10 @@ namespace MV{
 				if(inPressEvent()){
 					isInPressEvent = false;
 					if(mouseInBounds(a_mouse)){
-						std::cerr << "ON RELEASE (" << ourId << "): " << a_mouse.position() << std::endl;
+						std::cout << "ON RELEASE (" << ourId << "): " << a_mouse.position() << std::endl;
 						onAcceptSlot(thisSharedPtr.lock());
 					} else{
-						std::cerr << "ON CANCEL (" << ourId << "): " << a_mouse.position() << std::endl;
+						std::cout << "ON CANCEL (" << ourId << "): " << a_mouse.position() << std::endl;
 						onCancelSlot(thisSharedPtr.lock());
 					}
 					onReleaseSlot(thisSharedPtr.lock());

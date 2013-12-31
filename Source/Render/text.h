@@ -80,9 +80,9 @@ namespace MV {
 		TextLibrary(Draw2D *a_rendering);
 		~TextLibrary(){}
 
-		bool loadFont(std::string a_identifier, int a_pointSize, std::string a_fontFileLocation);
+		bool loadFont(const std::string &a_identifier, int a_pointSize, std::string a_fontFileLocation);
 
-		std::shared_ptr<Scene::Node> composeScene(std::vector<TextState> a_textStateList, double a_maxWidth = 0, TextWrapMethod a_wrapMethod = SOFT);
+		std::shared_ptr<Scene::Node> composeScene(const std::vector<TextState> &a_textStateList, double a_maxWidth = 0, TextWrapMethod a_wrapMethod = SOFT);
 
 		//Call this when the OpenGL context is destroyed to re-load the textures.
 		void reloadTextures();

@@ -26,25 +26,25 @@ public:
 	void addParallelAction( std::shared_ptr<ActionSequence> a_action );
 	
 	void addSequentialAction(std::shared_ptr<ActionSequence> a_action);
-	void addSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, std::string a_matchId);
-	void addSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, std::string a_matchId);
+	void addSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId);
+	void addSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId);
 	void addSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, std::shared_ptr<ActionSequence> a_matchId);
 	void addSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, std::shared_ptr<ActionSequence> a_matchId);
 	
 	void addNonBlockingSequentialAction(std::shared_ptr<ActionSequence> a_action);
-	void addNonBlockingSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, std::string a_matchId);
-	void addNonBlockingSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, std::string a_matchId);
+	void addNonBlockingSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId);
+	void addNonBlockingSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId);
 	void addNonBlockingSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, std::shared_ptr<ActionSequence> a_matchId);
 	void addNonBlockingSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, std::shared_ptr<ActionSequence> a_matchId);
 	
-	void replaceParallelAction(std::string name, std::shared_ptr<ActionSequence> a_action);
-	void replaceSequentialAction(std::string name, std::shared_ptr<ActionSequence> a_action);
+	void replaceParallelAction(const std::string &name, std::shared_ptr<ActionSequence> a_action);
+	void replaceSequentialAction(const std::string &name, std::shared_ptr<ActionSequence> a_action);
 	
-	std::shared_ptr<ActionSequence> getActionSequence(const std::string a_idToFind) const;
+	std::shared_ptr<ActionSequence> getActionSequence(const std::string &a_idToFind) const;
 	bool hasChildren() { return parallelOnCompleteActions.size() > 0 || sequentialOnCompleteActions.size() > 0; }
 	
 	std::string id() const;
-	void addCompletionCallback(ActionSequenceCallback a_callback);
+	void addCompletionCallback(const ActionSequenceCallback &a_callback);
 	bool empty();
 	void forceComplete();
 	
@@ -56,7 +56,7 @@ public:
 	void unblock();
 	void block();
 	
-	void setParent(std::shared_ptr<ActionSequence> a_newParent){
+	void setParent(const std::shared_ptr<ActionSequence> &a_newParent){
 		ourParent = a_newParent;
 	}
 	std::shared_ptr<ActionSequence> parent() const{
@@ -79,10 +79,10 @@ private:
 	virtual void onBlock() {}
 	virtual void onUnblock() {}
 	virtual void onForceComplete() {}
-	virtual void onAddParallelAction( std::shared_ptr<ActionSequence> action ){}
-	virtual void onAddSequentialAction( std::shared_ptr<ActionSequence> action ){}
-	virtual void onCompleteParallelAction( std::shared_ptr<ActionSequence> action ){}
-	virtual void onCompleteSequentialAction( std::shared_ptr<ActionSequence> action ){}
+	virtual void onAddParallelAction(std::shared_ptr<ActionSequence> a_action){}
+	virtual void onAddSequentialAction(std::shared_ptr<ActionSequence> a_action){}
+	virtual void onCompleteParallelAction(std::shared_ptr<ActionSequence> a_action){}
+	virtual void onCompleteSequentialAction(std::shared_ptr<ActionSequence> a_action){}
 
 	virtual void onBeginThisAction() {}
 	virtual void onCompleteThisAction() {}
@@ -102,11 +102,11 @@ private:
 	std::string actionId;
 };
 
-bool operator==(const ActionSequence &action, const std::string &matchId);
-bool operator==(const std::string &matchId, const ActionSequence &action);
+bool operator==(const ActionSequence &a_action, const std::string &a_matchId);
+bool operator==(const std::string &a_matchId, const ActionSequence &a_action);
 
-bool operator==(const std::string &matchId, std::shared_ptr<ActionSequence> action);
-bool operator==(std::shared_ptr<ActionSequence> action, const std::string &matchId);
+bool operator==(const std::string &a_matchId, std::shared_ptr<ActionSequence> a_action);
+bool operator==(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId);
 
 }
 

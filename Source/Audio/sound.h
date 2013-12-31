@@ -196,7 +196,7 @@ public:
 	}
 	void removeSoundInstance(SoundInstance* soundReference){
 		std::map<int, SoundInstance*>::iterator cell;
-		for(cell = soundInstances.begin();cell!=soundInstances.end() && cell->second != soundReference;cell++){;}
+		for(cell = soundInstances.begin();cell!=soundInstances.end() && cell->second != soundReference;++cell){;}
 		if(cell!=soundInstances.end()){
 			soundInstances.erase(cell);
 		}

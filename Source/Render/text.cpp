@@ -110,7 +110,7 @@ namespace MV {
 		}
 	}
 
-	bool TextLibrary::loadFont( std::string a_identifier, int a_pointSize, std::string a_fontFileLocation ){
+	bool TextLibrary::loadFont( const std::string &a_identifier, int a_pointSize, std::string a_fontFileLocation ){
 		if(loadedFonts.find(a_identifier) == loadedFonts.end()){
 			TTF_Font* newFont = TTF_OpenFont(a_fontFileLocation.c_str(), a_pointSize);
 			if(newFont) {
@@ -126,7 +126,7 @@ namespace MV {
 	}
 
 	//TODO: organize this method better.  This method is a beast.
-	std::shared_ptr<Scene::Node> TextLibrary::composeScene(std::vector<TextState> a_textStateList, double a_maxWidth, TextWrapMethod a_wrapMethod){
+	std::shared_ptr<Scene::Node> TextLibrary::composeScene(const std::vector<TextState> &a_textStateList, double a_maxWidth, TextWrapMethod a_wrapMethod){
 		auto textScene = Scene::Node::make(render);
 		if(a_textStateList.empty()){return textScene;}
 
@@ -164,7 +164,7 @@ namespace MV {
 
 				for(auto renderChar = current->text.begin();renderChar != current->text.end();++renderChar){
 					nextCharacterLocationX += (*characterList)[*renderChar].characterSize().width;
-					bool lineWidthExceeded = (a_maxWidth!=0 && nextCharacterLocationX > a_maxWidth);
+					bool lineWidthExceeded = (!equals(a_maxWidth, 0.0) && nextCharacterLocationX > a_maxWidth);
 					if(*renderChar == '\n' || (lineWidthExceeded && a_wrapMethod != NONE)){
 						characterLocationX = 0;
 						nextCharacterLocationX = (!lineWidthExceeded)?0:(*characterList)[*renderChar].characterSize().width;

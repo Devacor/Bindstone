@@ -40,8 +40,8 @@ namespace MV {
 		void expandWith(const BoxAABB &a_compareBox);
 
 		bool isEmpty() const{ return minPoint == maxPoint; }
-		bool flatWidth() const{ return minPoint.x == maxPoint.x; }
-		bool flatHeight() const{ return minPoint.y == maxPoint.y; }
+		bool flatWidth() const{ return equals(minPoint.x, maxPoint.x); }
+		bool flatHeight() const{ return equals(minPoint.y, maxPoint.y); }
 
 		Size<> getSize() const{ return sizeFromPoint(maxPoint - minPoint); }
 

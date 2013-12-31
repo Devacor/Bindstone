@@ -4,6 +4,8 @@
 #include <ostream>
 #include <istream>
 
+#include "Utility/generalUtility.h"
+
 namespace MV {
 
 	class DrawPoint;
@@ -16,6 +18,13 @@ namespace MV {
 		TexturePoint& operator=(const TexturePoint& a_other);
 		TexturePoint& operator=(const DrawPoint& a_other);
 
+		bool operator==(const TexturePoint& a_other) const{
+			return equals(textureX, a_other.textureX) && equals(textureY, a_other.textureY);
+		}
+		bool operator!=(const TexturePoint& a_other) const{
+			return !(*this == a_other);
+		}
+
 		double textureX, textureY;
 	};
 
@@ -26,6 +35,13 @@ namespace MV {
 		~Color(){}
 		Color& operator=(const Color& a_other);
 		Color& operator=(const DrawPoint& a_other);
+
+		bool operator==(const Color& a_other) const{
+			return equals(R, a_other.R) && equals(G, a_other.G) && equals(B, a_other.B) && equals(A, a_other.A);
+		}
+		bool operator!=(const Color& a_other) const{
+			return !(*this == a_other);
+		}
 
 		float R, G, B, A;
 	private:
@@ -69,19 +85,19 @@ namespace MV {
 	template <class T = double>
 	class Point{
 	public:
-		Point(){clear();}
-		Point(T a_xPos, T a_yPos, T a_zPos = 0){locate(a_xPos, a_yPos, a_zPos);}
-		
+		Point(){ clear(); }
+		Point(T a_xPos, T a_yPos, T a_zPos = 0){ locate(a_xPos, a_yPos, a_zPos); }
+
 		void clear();
-		
+
 		Point<T>& scale(T a_amount);
 		Point<T>& locate(T a_xPos, T a_yPos, T a_zPos);
 		Point<T>& locate(T a_xPos, T a_yPos);
 		Point<T>& translate(T a_xAmount, T a_yAmount, T a_zAmount);
 		Point<T>& translate(T a_xAmount, T a_yAmount);
-		
-		bool atOrigin() const{return x == 0 && y == 0 && z == 0;}
-		
+
+		bool atOrigin() const{ return equals<T>(x, 0) && equals<T>(y, 0) && equals<T>(z, 0); }
+
 		Point<T>& operator+=(const Point<T>& a_other);
 		Point<T>& operator-=(const Point<T>& a_other);
 		Point<T>& operator*=(const Point<T>& a_other);
@@ -192,7 +208,7 @@ namespace MV {
 
 	template <class T>
 	const bool operator==(const Size<T>& a_left, const Size<T>& a_right){
-		return (a_left.width == a_right.width) && (a_left.height == a_right.height) && (a_left.depth == a_right.depth);
+		return equals(a_left.width, a_right.width) && equals(a_left.height, a_right.height) && equals(a_left.depth, a_right.depth);
 	}
 
 	template <class T>
@@ -339,7 +355,7 @@ namespace MV {
 
 	template <class T>
 	const bool operator==(const Point<T>& a_left, const Point<T>& a_right){
-		return (a_left.x == a_right.x) && (a_left.y == a_right.y) && (a_left.z == a_right.z);
+		return equals(a_left.x, a_right.x) && equals(a_left.y, a_right.y) && equals(a_left.z, a_right.z);
 	}
 
 	template <class T>

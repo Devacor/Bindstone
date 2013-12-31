@@ -9,6 +9,8 @@
 #include <cmath>
 #include <iostream>
 #include <functional>
+#include <numeric>
+#include <stdint.h>
 
 #define UTF_CHAR_STR(stringVal) L##stringVal
 
@@ -192,6 +194,45 @@ namespace MV {
 			*wrapDist = !(dist1 <= dist2);
 		}
 		return (dist1 <= dist2)?dist1:dist2;
+	}
+
+	//expects the same type for both parameters.
+	template<typename T>
+	bool floatingPointRangeCompareCheck(T value, T delta){
+		return delta == 0. || (value - delta != value);
+	}
+
+	template<typename FT, typename IT>
+	bool floatEqualImplementation(FT lhs, FT rhs, IT maxUlps){
+		require(sizeof(FT) == sizeof(IT), RangeException("Function 'floatEqualImplementation' had an issue!"));
+		IT intDiff = std::abs(*(IT*)&lhs - *(IT*)&rhs);
+		return intDiff <= maxUlps;
+	}
+
+	//inspired by: http://www.cygnus-software.com/papers/comparingfloats/Comparing%20floating%20point%20numbers.htm
+	//good up to 64 bit floating point types.
+	template<typename T>
+	bool equals(T lhs, T rhs){
+		if(std::numeric_limits<T>::epsilon() == 0){ //integral type
+			return lhs == rhs;
+		} else if(lhs == rhs){ //handle simple case equality
+			return true;
+		} else if(!floatingPointRangeCompareCheck(lhs, rhs)){
+			return false;
+		} else{
+			int maxUlps = 1; //precision required
+			if(sizeof(T) == sizeof(int8_t)){
+				return floatEqualImplementation(lhs, rhs, static_cast<int8_t>(maxUlps));
+			} else if(sizeof(T) == sizeof(int16_t)){
+				return floatEqualImplementation(lhs, rhs, static_cast<int16_t>(maxUlps));
+			} else if(sizeof(T) == sizeof(int32_t)){
+				return floatEqualImplementation(lhs, rhs, static_cast<int32_t>(maxUlps));
+			} else if(sizeof(T) == sizeof(int64_t)){
+				return floatEqualImplementation(lhs, rhs, static_cast<int64_t>(maxUlps));
+			} else{
+				require(0, RangeException("Function 'equals' had too big a type to check!"));
+			}
+		}
 	}
 }
 #endif

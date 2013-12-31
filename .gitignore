@@ -5,6 +5,8 @@
 *.opensdf
 *.exe
 *.log
+*.PVS-Studio.cfg
+*.i
 /Debug/*
 /Release/*
 /x64/*

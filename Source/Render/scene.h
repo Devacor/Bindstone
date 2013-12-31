@@ -23,7 +23,7 @@
 #include "Render/render.h"
 #include "Render/textures.h"
 #include "Render/points.h"
-#include "Render/sceneMessages.h"
+#include "Render/sceneMessages.hpp"
 #include "Utility/package.h"
 
 namespace MV {

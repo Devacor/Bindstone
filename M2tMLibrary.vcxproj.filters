@@ -26,6 +26,9 @@
     <Filter Include="Source Files\Game">
       <UniqueIdentifier>{357f5be2-2b40-4677-a018-e9ccb77ea492}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Interface">
+      <UniqueIdentifier>{f65214b0-abc8-45ee-9ef7-d3e8207391ff}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Animation\frameSwapper.cpp">
@@ -84,6 +87,9 @@
     </ClCompile>
     <ClCompile Include="Source\exampleCode.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Interface\mouse.cpp">
+      <Filter>Source Files\Interface</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -168,8 +174,14 @@
     <ClInclude Include="Source\Utility\messageHandler.hpp">
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Render\sceneMessages.h">
+    <ClInclude Include="Source\Interface\package.h">
+      <Filter>Source Files\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\sceneMessages.hpp">
       <Filter>Source Files\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Interface\mouse.h">
+      <Filter>Source Files\Interface</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

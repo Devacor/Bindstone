@@ -271,11 +271,11 @@ namespace MV {
 		}
 
 		bool Node::operator==(Node &a_other){
-			return getDepth() == a_other.getDepth();
+			return equals(getDepth(), a_other.getDepth());
 		}
 
 		bool Node::operator!=(Node &a_other){
-			return getDepth() != a_other.getDepth();
+			return !equals(getDepth(), a_other.getDepth());
 		}
 
 		Point<> Node::getScale(){

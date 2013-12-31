@@ -177,12 +177,21 @@ namespace MV{
 			mouse(a_mouse),
 			eatTouches(true),
 			isInPressEvent(false),
+			shouldUseChildrenInHitDetection(true),
 			onPress(onPressSlot),
 			onRelease(onReleaseSlot),
 			onCancel(onCancelSlot),
 			onAccept(onAcceptSlot),
 			onDrag(onDragSlot),
 			ourId(counter++){
+			
+			//Default to transparent. Allows us to toggle it back visible for testing purposes, or if we want to render a button image directly in the Clickable node.
+			//NOT calling setColor because that relies on shared_from_this.
+			auto alpha = MV::Color(1, 1, 1, 0);
+			int elements = (int)points.size();
+			for(int i = 0; i < elements; i++){
+				points[i] = alpha;
+			}
 		}
 
 		bool Clickable::inPressEvent() const {
@@ -206,7 +215,11 @@ namespace MV{
 		}
 
 		bool Clickable::mouseInBounds(const MouseState& a_state) {
-			return getScreenAABB().pointContained(castPoint<double>(a_state.position()));
+			if(visible()){
+				return getScreenAABB(shouldUseChildrenInHitDetection).pointContained(castPoint<double>(a_state.position()));
+			}else{
+				return false;
+			}
 		}
 
 		Point<> Clickable::locationBeforeDrag() const {

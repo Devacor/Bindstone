@@ -68,7 +68,6 @@ namespace MV{
 			std::shared_ptr<Node> sender;
 		};
 
-		//Abstract Base Class
 		class Clickable :
 			public Rectangle,
 			public MessageHandler<BlockInteraction>{
@@ -95,6 +94,13 @@ namespace MV{
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState &a_mouse, const Point<> &a_topLeft, const Point<> &a_bottomRight);
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState &a_mouse, const Point<> &a_point, Size<> &a_size, bool a_center);
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState &a_mouse, const Size<> &a_size);
+
+			void includeChildrenForHitDetection(){
+				shouldUseChildrenInHitDetection = true;
+			}
+			void ignoreChildrenForHitDetection(){
+				shouldUseChildrenInHitDetection = false;
+			}
 
 			bool inPressEvent() const;
 
@@ -140,6 +146,7 @@ namespace MV{
 			Point<> objectLocationBeforeDrag;
 			bool eatTouches;
 			bool isInPressEvent;
+			bool shouldUseChildrenInHitDetection;
 			MouseState &mouse;
 
 			int ourId;

@@ -169,7 +169,8 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	std::cout << "PT: " << platformTexture->size() << std::endl;
 	shape->setSortDepth(4);
 
-	armScene = catapaultScene->make<MV::Scene::Clickable>("arm", mouse);
+	armScene = catapaultScene->make<MV::Scene::Clickable>("arm", mouse, MV::Point<>(), MV::Size<>(40, 40), false);
+	armScene->ignoreChildrenForHitDetection();
 	armScene->locate(MV::Point<>(0, -4));
 
 	armInputHandles.drag = armScene->onDrag.connect([](std::shared_ptr<MV::Scene::Clickable> armScene, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){

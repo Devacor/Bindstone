@@ -4,6 +4,7 @@
 #include "Audio/package.h"
 #include "Animation/package.h"
 #include "Network/package.h"
+#include "Interface/package.h"
 #include <string>
 #include <ctime>
 
@@ -32,18 +33,12 @@ private:
 
 	MV::AxisAngles angleIncrement;
 
+	std::shared_ptr<MV::Scene::Clickable> armScene;
+
 	bool done;
-	struct MouseState {
-		void update(){
-			uint32_t state = SDL_GetMouseState(&position.x, &position.y);
-			left = (state & SDL_BUTTON(1)) != false;
-			right = (state & SDL_BUTTON(2)) != false;
-		}
-		MV::Point<int> position;
-		bool left;
-		bool right;
-	};
-	MouseState mouse;
+	MV::MouseState mouse;
+
+	MV::Scene::ClickableSignals armInputHandles;
 };
 
 void quit(void);

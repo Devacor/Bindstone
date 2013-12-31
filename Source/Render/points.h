@@ -80,7 +80,7 @@ namespace MV {
 		Point<T>& translate(T a_xAmount, T a_yAmount, T a_zAmount);
 		Point<T>& translate(T a_xAmount, T a_yAmount);
 		
-		bool atOrigin(){return x == 0 && y == 0 && z == 0;}
+		bool atOrigin() const{return x == 0 && y == 0 && z == 0;}
 		
 		Point<T>& operator+=(const Point<T>& a_other);
 		Point<T>& operator-=(const Point<T>& a_other);

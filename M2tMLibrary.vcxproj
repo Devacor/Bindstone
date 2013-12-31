@@ -168,6 +168,7 @@
     <ClCompile Include="Source\exampleCode.cpp" />
     <ClCompile Include="Source\game.cpp" />
     <ClCompile Include="Source\Game\pathGrid.cpp" />
+    <ClCompile Include="Source\Interface\mouse.cpp" />
     <ClCompile Include="Source\main.cpp">
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">./;./Source</AdditionalIncludeDirectories>
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">./;./Source</AdditionalIncludeDirectories>
@@ -194,6 +195,8 @@
     <ClInclude Include="Source\exampleCode.h" />
     <ClInclude Include="Source\game.h" />
     <ClInclude Include="Source\Game\pathGrid.h" />
+    <ClInclude Include="Source\Interface\mouse.h" />
+    <ClInclude Include="Source\Interface\package.h" />
     <ClInclude Include="Source\Network\network.h" />
     <ClInclude Include="Source\Network\package.h" />
     <ClInclude Include="Source\Render\compositeScene.h" />
@@ -203,7 +206,7 @@
     <ClInclude Include="Source\Render\package.h" />
     <ClInclude Include="Source\Render\points.h" />
     <ClInclude Include="Source\Render\render.h" />
-    <ClInclude Include="Source\Render\sceneMessages.h" />
+    <ClInclude Include="Source\Render\sceneMessages.hpp" />
     <ClInclude Include="Source\Render\text.h" />
     <ClInclude Include="Source\Render\textures.h" />
     <ClInclude Include="Source\Render\tiles.h" />

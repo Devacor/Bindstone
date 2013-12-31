@@ -911,19 +911,19 @@ namespace MV {
 		void Rectangle::setSizeAndCenterPoint(const Point<> &a_centerPoint, const Size<> &a_size){
 			double halfWidth = a_size.width / 2, halfHeight = a_size.height / 2;
 
-			Point<> topLeft = a_centerPoint;
-			topLeft.x = -halfHeight; topLeft.y = -halfHeight;
-
-			Point<> bottomRight = a_centerPoint;
-			bottomRight.x = halfWidth; bottomRight.y = halfHeight;
+			Point<> topLeft(-halfWidth, -halfHeight);
+			Point<> bottomRight(halfWidth, halfHeight);
 
 			setTwoCorners(topLeft, bottomRight);
+			locate(a_centerPoint);
 		}
 
 		void Rectangle::setSizeAndCornerPoint(const Point<> &a_topLeft, const Size<> &a_size){
-			Point<> bottomRight(a_topLeft + pointFromSize(a_size));
+			Point<> bottomRight(pointFromSize(a_size));
 
-			setTwoCorners(a_topLeft, bottomRight);
+			setTwoCorners(Point<>(), bottomRight);
+
+			locate(a_topLeft);
 		}
 
 		void Rectangle::clearTextureCoordinates(){

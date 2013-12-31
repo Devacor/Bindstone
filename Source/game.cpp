@@ -15,7 +15,8 @@ Game::Game() :
 
 	initializeWindow();
 	//auto clipped = mainScene->make<MV::Scene::Clipped>("clipped", MV::Size<>(200, 200));
-	auto clipped = mainScene->make<MV::Scene::Node>("clipped");
+	//auto clipped = mainScene->make<MV::Scene::Node>("clipped");
+	auto clipped = mainScene->make<MV::Scene::Clickable>("clipped", mouse);
 	clipped->add("catapult", initializeCatapultScene());
 	mainScene->add("textbox", initializeTextScene());
 	auto pointtest = MV::Point<>(-clipped->getLocalAABB().getSize().width / 2.0, 0);
@@ -92,7 +93,7 @@ bool Game::passTime(double dt) {
 	testItem2->setTwoCorners(points2[0], points2[1]);
 
 	testItem2->setColor(MV::Color(0.0, 0.0, 1.0, .5));
-	testItem2->setSortDepth(101);
+	testItem2->setSortDepth(101);//*/
 	/*MV::BoxAABB worldAABB = pattern->getScreenAABB();
 	MV::BoxAABB screenAABB = pattern->getWorldAABB();
 	MV::BoxAABB localAABB = pattern->getLocalAABB();
@@ -157,8 +158,9 @@ void Game::render() {
 }
 
 std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
+	static int counterthing = 0;
 	auto catapaultScene = MV::Scene::Node::make(&renderer);
-	
+
 	auto platformTexture = textures.getFileTexture("Assets/Images/platform.png");
 	auto textureHandle = platformTexture->makeHandle();
 	auto shape = catapaultScene->make<MV::Scene::Rectangle>("base", MV::Point<>(0, 0), MV::castSize<double>(platformTexture->size()));
@@ -167,8 +169,22 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	std::cout << "PT: " << platformTexture->size() << std::endl;
 	shape->setSortDepth(4);
 
-	auto armScene = catapaultScene->make<MV::Scene::Node>("arm");
+	armScene = catapaultScene->make<MV::Scene::Clickable>("arm", mouse);
 	armScene->locate(MV::Point<>(0, -4));
+
+	armInputHandles.drag = armScene->onDrag.connect([](std::shared_ptr<MV::Scene::Clickable> armScene, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
+		armScene->translate(MV::castPoint<double>(deltaPosition));
+	});
+
+	armInputHandles.release = armScene->onRelease.connect([](std::shared_ptr<MV::Scene::Clickable> armScene){
+		armScene->locate(armScene->locationBeforeDrag());
+	});
+
+	/*armDragHandle = armScene->onDrag.connect([&](std::shared_ptr<MV::Scene::Node>, const MV::Point<int> &startPosition, const MV::Point<int> &currentPosition){
+		MV::Point<> locatePoint = armScene->localFromWorld(renderer.worldFromScreen(currentPosition));
+		std::cout << "Try to locate: " << counterthing++ << ": " << locatePoint << "    -    " << currentPosition << "      -     " << offset << std::endl;
+		armScene->locate(MV::castPoint<double>(currentPosition));
+	});*/
 	shape = armScene->make<MV::Scene::Rectangle>("arm");
 	auto armTexture = textures.getFileTexture("Assets/Images/spatula.png");
 	shape->setTexture(armTexture->makeHandle());

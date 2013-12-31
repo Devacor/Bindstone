@@ -81,13 +81,22 @@ namespace MV {
 
 		//No protection against duplicates.
 		std::shared_ptr<Signal<T>> connect(std::function<T> a_callback){
-			auto signal = makeSignal(a_callback);
-			observers.insert(signal);
-			return signal;
+			if(observerLimit == std::numeric_limits<size_t>::max() || cullDeadObservers() < observerLimit){
+				auto signal = makeSignal(a_callback);
+				observers.insert(signal);
+				return signal;
+			} else{
+				return nullptr;
+			}
 		}
 		//Duplicate Signals will not be added. If std::function ever becomes comparable this can all be much safer.
-		void connect(std::shared_ptr<Signal<T>> a_value){
-			observers.insert(a_value);
+		bool connect(std::shared_ptr<Signal<T>> a_value){
+			if(observerLimit == std::numeric_limits<size_t>::max() || cullDeadObservers() < observerLimit){
+				observers.insert(a_value);
+				return true;
+			}else{
+				return false;
+			}
 		}
 
 		void disconnect(std::shared_ptr<Signal<T>> a_value){
@@ -105,8 +114,28 @@ namespace MV {
 				}
 			}
 		}
+
+		void setObserverLimit(size_t a_newLimit){
+			observerLimit = a_newLimit;
+		}
+		void clearObserverLimit(){
+			observerLimit = std::numeric_limits<size_t>::max();
+		}
+		int getObserverLimit(){
+			return observerLimit;
+		}
+
+		size_t cullDeadObservers(){
+			for(auto i = observers.begin(); i != observers.end();) {
+				if(i->expired()) {
+					observers.erase(i++);
+				}
+			}
+			return observers.size();
+		}
 	private:
 		std::set< std::weak_ptr< Signal<T> >, std::owner_less<std::weak_ptr<Signal<T>>> > observers;
+		size_t observerLimit = std::numeric_limits<size_t>::max();
 	};
 
 	//Can be used as a public SlotRegister member for connecting slots to a private Slot member.
@@ -126,8 +155,8 @@ namespace MV {
 			return slot.connect(a_callback);
 		}
 		//duplicate shared_ptr's will not be added
-		void connect(std::shared_ptr<Signal<T>> a_value){
-			slot.connect(a_value);
+		bool connect(std::shared_ptr<Signal<T>> a_value){
+			return slot.connect(a_value);
 		}
 
 		void disconnect(std::shared_ptr<Signal<T>> a_value){

@@ -53,7 +53,7 @@ bool ActionSequence::shouldDie() const{
 std::string ActionSequence::id() const{
 	return actionId;
 }
-void ActionSequence::addCompletionCallback(ActionSequenceCallback a_callback){
+void ActionSequence::addCompletionCallback(const ActionSequenceCallback &a_callback){
 	callbacks.push_back(a_callback);
 }
 bool ActionSequence::empty(){
@@ -90,7 +90,7 @@ void ActionSequence::block(){
 	onBlock();
 }
 
-std::shared_ptr<ActionSequence> ActionSequence::getActionSequence(const std::string a_matchId) const{
+std::shared_ptr<ActionSequence> ActionSequence::getActionSequence(const std::string &a_matchId) const{
 	ActionSequenceQueue::const_iterator found1 = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	if(found1 != sequentialOnCompleteActions.end()){
 		return *found1;
@@ -104,7 +104,7 @@ std::shared_ptr<ActionSequence> ActionSequence::getActionSequence(const std::str
 	throw(std::out_of_range("ActionSequence::getActionSequence supplied an id not in its list of actions!"));
 }
 
-void ActionSequence::replaceParallelAction(std::string a_matchId, std::shared_ptr<ActionSequence> a_action){
+void ActionSequence::replaceParallelAction(const std::string &a_matchId, std::shared_ptr<ActionSequence> a_action){
 	ActionSequenceList::iterator found = std::find(parallelOnCompleteActions.begin(), parallelOnCompleteActions.end(), a_matchId);
 	if(found != parallelOnCompleteActions.end()){
 		parallelOnCompleteActions.erase(found);
@@ -112,7 +112,7 @@ void ActionSequence::replaceParallelAction(std::string a_matchId, std::shared_pt
 	parallelOnCompleteActions.push_back(a_action);
 }
 
-void ActionSequence::replaceSequentialAction(std::string a_matchId, std::shared_ptr<ActionSequence> a_action){
+void ActionSequence::replaceSequentialAction(const std::string &a_matchId, std::shared_ptr<ActionSequence> a_action){
 	ActionSequenceQueue::iterator found = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	if(found != sequentialOnCompleteActions.end()){
 		sequentialOnCompleteActions.insert(found, a_action);
@@ -134,7 +134,7 @@ void ActionSequence::addNonBlockingSequentialAction(std::shared_ptr<ActionSequen
 	sequentialOnCompleteActions.push_back(a_action);
 	onAddSequentialAction(a_action);
 }
-void ActionSequence::addNonBlockingSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, std::string a_matchId){
+void ActionSequence::addNonBlockingSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId){
 	a_action->setParent(shared_from_this());
 	ActionSequenceQueue::iterator cell = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	if(cell!=sequentialOnCompleteActions.end()){
@@ -144,7 +144,7 @@ void ActionSequence::addNonBlockingSequentialActionAfter(std::shared_ptr<ActionS
 	sequentialOnCompleteActions.insert(cell, a_action);
 	onAddSequentialAction(a_action);
 }
-void ActionSequence::addNonBlockingSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, std::string a_matchId){
+void ActionSequence::addNonBlockingSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId){
 	a_action->setParent(shared_from_this());
 	ActionSequenceQueue::iterator cell = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	a_action->unblock();
@@ -174,7 +174,7 @@ void ActionSequence::addSequentialAction(std::shared_ptr<ActionSequence> a_actio
 	sequentialOnCompleteActions.push_back(a_action);
 	onAddSequentialAction(a_action);
 }
-void ActionSequence::addSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, std::string a_matchId){
+void ActionSequence::addSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId){
 	a_action->setParent(shared_from_this());
 	ActionSequenceQueue::iterator cell = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	if(cell!=sequentialOnCompleteActions.end()){
@@ -183,7 +183,7 @@ void ActionSequence::addSequentialActionAfter(std::shared_ptr<ActionSequence> a_
 	sequentialOnCompleteActions.insert(cell, a_action);
 	onAddSequentialAction(a_action);
 }
-void ActionSequence::addSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, std::string a_matchId){
+void ActionSequence::addSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId){
 	a_action->setParent(shared_from_this());
 	ActionSequenceQueue::iterator cell = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	sequentialOnCompleteActions.insert(cell, a_action);
@@ -238,10 +238,10 @@ void ActionSequence::runAndCompleteSequentialChildActions(double a_dt){
 	}
 }
 
-void ActionSequence::runAndCompleteParallelChildActions(double dt){
+void ActionSequence::runAndCompleteParallelChildActions(double a_dt){
 	for(ActionSequenceList::iterator i = parallelOnCompleteActions.begin();i != parallelOnCompleteActions.end();){
 		bool parallelActionWasDone = (*i)->done() && !(*i)->forceCompleted();
-		if((*i)->passTime(dt)){
+		if((*i)->passTime(a_dt)){
 			std::shared_ptr<ActionSequence> toRemove = *i;
 			if(toRemove->shouldDie()){
 				i = parallelOnCompleteActions.erase(i);
@@ -257,26 +257,26 @@ void ActionSequence::runAndCompleteParallelChildActions(double dt){
 	}
 }
 
-bool ActionSequence::runAndCompleteChildActions(double dt){
-	runAndCompleteSequentialChildActions(dt);
-	runAndCompleteParallelChildActions(dt);
+bool ActionSequence::runAndCompleteChildActions(double a_dt){
+	runAndCompleteSequentialChildActions(a_dt);
+	runAndCompleteParallelChildActions(a_dt);
 	return done();
 }
 
-bool ActionSequence::passTime(double dt){
+bool ActionSequence::passTime(double a_dt){
 	wasForceCompleted = false;
 	if(!isDone){
 		if(!started){
 			onBeginThisAction();
 			started = true;
 		}
-		isDone = passTimeAction(dt);
+		isDone = passTimeAction(a_dt);
 	}
 	if(isDone){
 		if(!started){
 			onBeginThisAction(); //we force completed before starting
 		}
-		if(runAndCompleteChildActions(dt)){
+		if(runAndCompleteChildActions(a_dt)){
 			doCallbacks();
 			onCompleteThisAction();
 			return true;
@@ -285,17 +285,17 @@ bool ActionSequence::passTime(double dt){
 	return false;
 }
 
-bool operator==(const ActionSequence &action, const std::string &matchId){
-	return action.id() == matchId;
+bool operator==(const ActionSequence &a_action, const std::string &a_matchId){
+	return a_action.id() == a_matchId;
 }
-bool operator==(const std::string &matchId, const ActionSequence &action){
-	return action.id() == matchId;
+bool operator==(const std::string &a_matchId, const ActionSequence &a_action){
+	return a_action.id() == a_matchId;
 }
-bool operator==(const std::string &matchId, std::shared_ptr<ActionSequence> action){
-	return action && (action->id() == matchId);
+bool operator==(const std::string &a_matchId, std::shared_ptr<ActionSequence> a_action){
+	return a_action && (a_action->id() == a_matchId);
 }
-bool operator==(std::shared_ptr<ActionSequence> action, const std::string &matchId){
-	return action && (action->id() == matchId);
+bool operator==(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId){
+	return a_action && (a_action->id() == a_matchId);
 }
 
 }

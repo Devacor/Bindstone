@@ -386,10 +386,10 @@ namespace MV {
 
 	std::shared_ptr<FileTextureDefinition> SharedTextures::getFileTexture( const std::string &a_filename, bool a_repeat ) {
 		std::string identifier = a_filename + (a_repeat?"1":"0");
-		auto foundDefinition = fileDefinitions.find(a_filename);
+		auto foundDefinition = fileDefinitions.find(identifier);
 		if(foundDefinition == fileDefinitions.end()){
 			std::shared_ptr<FileTextureDefinition> newDefinition = FileTextureDefinition::make(a_filename, a_repeat);
-			fileDefinitions[a_filename] = newDefinition;
+			fileDefinitions[identifier] = newDefinition;
 			return newDefinition;
 		}else{
 			return foundDefinition->second;

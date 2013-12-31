@@ -89,6 +89,7 @@ namespace MV {
 	//3) Redefine these two methods in each derived class and rely on method name hiding to do the right thing. A macro does this easiest.
 	//
 	//I chose 3 because I like the simplicity of "make" for everything and I care more about the user interface than the class definition.
+	//I don't want to use two synonyms for object creation (create/make) and add should not imply creation.
 #define SCENE_MAKE_FACTORY_METHODS 	\
 	template<typename TypeToMake> \
 	std::shared_ptr<TypeToMake> make(const std::string &a_childId) { \
@@ -105,7 +106,6 @@ namespace MV {
 	}
 
 	namespace Scene {
-		//Abstract Base Class
 		class Node : 
 			public std::enable_shared_from_this<Node>,
 			public MessageHandler<PushMatrix>,
@@ -180,13 +180,13 @@ namespace MV {
 			//2d objects not being displayed orthographically to also twist we have
 			//the full rotational axis available as well.
 			void setRotate(double a_zRotation){
-				if(a_zRotation != 0){
+				if(!equals(a_zRotation, 0.0)){
 					rotateTo.z = a_zRotation;
 					alertParent(VisualChange::make(shared_from_this()));
 				}
 			}
 			void incrementRotate(double a_zRotation){ 
-				if(a_zRotation != 0){
+				if(!equals(a_zRotation, 0.0)){
 					rotateTo.z += a_zRotation;
 					alertParent(VisualChange::make(shared_from_this()));
 				}
@@ -230,10 +230,10 @@ namespace MV {
 			//By default the sort depth is calculated by averaging the z values of all points
 			//setSortDepth manually overrides this calculation.  unsetSortDepth removes this override.
 			void setSortDepth(double a_newDepth){
-				bool changed = a_newDepth != getDepth();
+				bool changed = !equals(a_newDepth, getDepth());
 				depthOverride = true;
 				overrideDepthValue = a_newDepth;
-				if(a_newDepth != getDepth()){
+				if(!equals(a_newDepth, getDepth())){
 					depthChanged();
 					alertParent(VisualChange::make(shared_from_this()));
 				}
@@ -241,7 +241,7 @@ namespace MV {
 			void unsetSortDepth(){
 				double oldDepth = getDepth();
 				depthOverride = false;
-				if(oldDepth != getDepth()){
+				if(!equals(oldDepth, getDepth())){
 					depthChanged();
 					alertParent(VisualChange::make(shared_from_this()));
 				}

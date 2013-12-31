@@ -76,7 +76,7 @@ bool AudioPlayer::setSoundVolume(int volume, const std::string &identifier){
 }
 
 void AudioPlayer::setSoundVolume(int volume){
-	for(soundCell = sounds.begin();soundCell!= sounds.end();soundCell++){
+	for(soundCell = sounds.begin();soundCell!= sounds.end();++soundCell){
 		Mix_VolumeChunk(soundCell->second.soundHandle, volume);
 	}
 }
@@ -178,8 +178,7 @@ bool AudioPlayer::playSound(const std::string &identifier, int channel, int loop
 		channelLastPlayed = Mix_PlayChannelTimed(channel, sounds[identifier].soundHandle, loop, ticks);
 		if(channelLastPlayed==-1) { //probably no channels available.
 			if(currentChannels<maxChannels || maxChannels < 0){
-				currentChannels++;
-				Mix_AllocateChannels(currentChannels);
+				Mix_AllocateChannels(++currentChannels);
 				channelLastPlayed = Mix_PlayChannelTimed(channel, sounds[identifier].soundHandle, loop, ticks);
 				if(channelLastPlayed==-1){
 					currentChannels--;
@@ -209,7 +208,7 @@ void AudioPlayer::stopSound(int channel){
 		}
 	}else{
 		std::map<int, AudioPlayList*>::iterator cell;
-		for(cell = channelsWithCallbacks.begin();cell!=channelsWithCallbacks.end();cell++){
+		for(cell = channelsWithCallbacks.begin();cell!=channelsWithCallbacks.end();++cell){
 			cell->second->continuousPlay(false);
 		}
 	}
@@ -265,7 +264,7 @@ bool AudioPlayer::setMusicPlayAtTime(double position){
 }
 
 void AudioPlayer::copyMusicToPlayList(AudioPlayList& playList){
-	for(musicCell = music.begin();musicCell != music.end();musicCell++){
+	for(musicCell = music.begin();musicCell != music.end();++musicCell){
 		playList.addSoundBack(musicCell->first);
 	}
 }
@@ -285,7 +284,7 @@ AudioPlayList* AudioPlayer::getSoundPlayList(int channel){
 	if(channelsWithCallbacks.find(channel) != channelsWithCallbacks.end()){
 		return channelsWithCallbacks[channel];
 	}
-	return false;
+	return nullptr;
 }
 
 void AudioPlayer::removeSoundPlayList(int channel){
@@ -297,7 +296,7 @@ void AudioPlayer::removeSoundPlayList(int channel){
 void AudioPlayer::removeSoundPlayList( AudioPlayList* playList ){
 	std::map<int, AudioPlayList*>::iterator cell, delCell;
 	bool deletePrevious = false;
-	for(cell = channelsWithCallbacks.begin();cell != channelsWithCallbacks.end();cell++){
+	for(cell = channelsWithCallbacks.begin();cell != channelsWithCallbacks.end();++cell){
 		if(deletePrevious){
 			channelsWithCallbacks.erase(delCell);
 			deletePrevious = false;
@@ -314,7 +313,7 @@ void AudioPlayer::removeSoundPlayList( AudioPlayList* playList ){
 
 void AudioPlayer::updateSoundPositions(){
 	std::map<int, AudioPlayList*>::iterator cell, delCell;
-	for(cell = channelsWithCallbacks.begin();cell != channelsWithCallbacks.end();cell++){
+	for(cell = channelsWithCallbacks.begin();cell != channelsWithCallbacks.end();++cell){
 		cell->second->updatePosition();
 	}
 }
@@ -355,7 +354,7 @@ void AudioPlayList::addSoundFront(const std::string &songName){
 
 void AudioPlayList::removeSound(const std::string &songName){
 	std::list<std::string>::iterator cell;
-	for(cell = songLineup.begin();cell!=songLineup.end() && (*cell) != songName;cell++){;}
+	for(cell = songLineup.begin();cell!=songLineup.end() && (*cell) != songName;++cell){;}
 	if(cell != songLineup.end()){
 		songLineup.erase(cell);
 	}
@@ -391,15 +390,13 @@ void AudioPlayList::clearSounds(){
 
 void AudioPlayList::performShuffle(){
 	std::vector<std::string> TmpSortContainer;
-	std::list<std::string>::iterator cell;
-	std::vector<std::string>::iterator cell2;
-	for(cell = songLineup.begin();cell!=songLineup.end();cell++){
+	for(auto cell = songLineup.begin();cell!=songLineup.end();++cell){
 		TmpSortContainer.push_back(*cell);
 	}
 	std::random_shuffle(TmpSortContainer.begin(), TmpSortContainer.end(), AudioRandom);
 	songLineup.clear();
-	for(cell2 = TmpSortContainer.begin();cell2!=TmpSortContainer.end();cell2++){
-		songLineup.push_back(*cell2);
+	for(auto cell = TmpSortContainer.begin();cell!=TmpSortContainer.end();++cell){
+		songLineup.push_back(*cell);
 	}
 	resetPlayHead();
 }

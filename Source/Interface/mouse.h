@@ -71,6 +71,8 @@ namespace MV{
 		class Clickable :
 			public Rectangle,
 			public MessageHandler<BlockInteraction>{
+			friend cereal::access;
+			friend cereal::allocate<Clickable>;
 		public:
 			typedef void ButtonSlotSignature(std::shared_ptr<Clickable>);
 			typedef void DragSlotSignature(std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &currentPosition);
@@ -121,14 +123,15 @@ namespace MV{
 
 		protected:
 			Clickable(Draw2D *a_renderer, MouseState &a_mouse);
+
 		private:
-			SlotRegister<MouseState::CallbackSignature>::SignalType onMouseDownHandle;
-			SlotRegister<MouseState::CallbackSignature>::SignalType onMouseUpHandle;
+			SlotRegister<MouseState::CallbackSignature>::SharedSignalType onMouseDownHandle;
+			SlotRegister<MouseState::CallbackSignature>::SharedSignalType onMouseUpHandle;
 
-			SlotRegister<MouseState::CallbackSignature>::SignalType onMouseMoveHandle;
+			SlotRegister<MouseState::CallbackSignature>::SharedSignalType onMouseMoveHandle;
 
-			SlotRegister<MouseState::CallbackSignature>::SignalType onMouseButtonBeginHandle;
-			SlotRegister<MouseState::CallbackSignature>::SignalType onMouseButtonEndHandle;
+			SlotRegister<MouseState::CallbackSignature>::SharedSignalType onMouseButtonBeginHandle;
+			SlotRegister<MouseState::CallbackSignature>::SharedSignalType onMouseButtonEndHandle;
 
 			void hookUpSlots();
 
@@ -140,29 +143,47 @@ namespace MV{
 
 			bool mouseInBounds(const MouseState& a_state);
 
-			std::weak_ptr<Clickable> thisSharedPtr;
 			Point<int> dragStartPosition;
 			Point<int> priorMousePosition;
 			Point<> objectLocationBeforeDrag;
-			bool eatTouches;
 			bool isInPressEvent;
+			MouseState *mouse;
+
+			bool eatTouches;
 			bool shouldUseChildrenInHitDetection;
-			MouseState &mouse;
 
 			int ourId;
 			static int counter;
+
+			template <class Archive>
+			void serialize(Archive & archive){
+				archive(CEREAL_NVP(eatTouches), CEREAL_NVP(shouldUseChildrenInHitDetection), CEREAL_NVP(ourId),
+					cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(this)));
+			}
+
+			template <class Archive>
+			static void load_and_allocate(Archive & archive, cereal::allocate<Clickable> &allocate){
+				MouseState mouse;
+				allocate(nullptr, mouse);
+				archive(
+					cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(allocate.get())),
+					cereal::make_nvp("eatTouches", allocate->eatTouches),
+					cereal::make_nvp("shouldUseChildrenInHitDetection", allocate->shouldUseChildrenInHitDetection),
+					cereal::make_nvp("ourId", allocate->ourId)
+				);
+			}
 		};
 
 		struct ClickableSignals {
-			Slot<Clickable::ButtonSlotSignature>::SignalType press;
-			Slot<Clickable::ButtonSlotSignature>::SignalType release;
+			Slot<Clickable::ButtonSlotSignature>::SharedSignalType press;
+			Slot<Clickable::ButtonSlotSignature>::SharedSignalType release;
 
 			//called when release happens over top of the current node.
-			Slot<Clickable::ButtonSlotSignature>::SignalType accept;
+			Slot<Clickable::ButtonSlotSignature>::SharedSignalType accept;
 			//called when release happens outside of the current node.
-			Slot<Clickable::ButtonSlotSignature>::SignalType cancel;
+			Slot<Clickable::ButtonSlotSignature>::SharedSignalType cancel;
 
-			Slot<Clickable::DragSlotSignature>::SignalType drag;
+			Slot<Clickable::DragSlotSignature>::SharedSignalType drag;
 		};
 	}
 }

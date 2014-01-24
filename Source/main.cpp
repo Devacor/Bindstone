@@ -1,12 +1,9 @@
 #include "game.h"
-
-void ourTestFunction(int a_arg){
-	std::cout << "Merry Christmas: " << a_arg << std::endl;
-}
-
+#include "vld.h"
+#include "cerealtest.h"
 int main(int argc, char *argv[]){
+	saveTest();
 	Game gameInstance;
-
 	MV::Stopwatch timer;
 	timer.start();
 	while(gameInstance.passTime(timer.delta("tick"))){

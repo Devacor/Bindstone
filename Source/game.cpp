@@ -71,6 +71,7 @@ void Game::initializeWindow(){
 
 bool Game::passTime(double dt) {
 	//std::cerr << MV::toDegrees(mainScene->get("catapult")->get<MV::DrawNode>()->get("arm")->getRotation().z) << std::endl;
+	/*
 	mainScene->get("clipped")->get("catapult")->get("arm")->incrementRotate(angleIncrement);
 	if(MV::toDegrees(mainScene->get("clipped")->get("catapult")->get("arm")->getRotation().z) > 180 ||
 		MV::toDegrees(mainScene->get("clipped")->get("catapult")->get("arm")->getRotation().z) < 0){
@@ -93,7 +94,11 @@ bool Game::passTime(double dt) {
 	testItem2->setTwoCorners(points2[0], points2[1]);
 
 	testItem2->setColor(MV::Color(0.0, 0.0, 1.0, .5));
-	testItem2->setSortDepth(101);//*/
+	testItem2->setSortDepth(101);
+	
+	*/
+	saveTest();
+	//*/
 	/*MV::BoxAABB worldAABB = pattern->getScreenAABB();
 	MV::BoxAABB screenAABB = pattern->getWorldAABB();
 	MV::BoxAABB localAABB = pattern->getLocalAABB();
@@ -153,7 +158,7 @@ void Game::handleInput() {
 void Game::render() {
 	renderer.clearScreen();
 	mainScene->draw();
-	testShape->draw();
+	//testShape->draw();
 	renderer.updateScreen();
 }
 
@@ -168,8 +173,8 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	shape->setTexture(textureHandle);
 	std::cout << "PT: " << platformTexture->size() << std::endl;
 	shape->setSortDepth(4);
-
-	armScene = catapaultScene->make<MV::Scene::Clickable>("arm", mouse, MV::Point<>(), MV::Size<>(40, 40), false);
+	
+	armScene = catapaultScene->make<MV::Scene::Clickable>("arm", mouse, MV::Point<>(), MV::Size<>(60, 60), false);
 	armScene->ignoreChildrenForHitDetection();
 	armScene->locate(MV::Point<>(0, -4));
 
@@ -177,15 +182,6 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 		armScene->translate(MV::castPoint<double>(deltaPosition));
 	});
 
-	armInputHandles.release = armScene->onRelease.connect([](std::shared_ptr<MV::Scene::Clickable> armScene){
-		armScene->locate(armScene->locationBeforeDrag());
-	});
-
-	/*armDragHandle = armScene->onDrag.connect([&](std::shared_ptr<MV::Scene::Node>, const MV::Point<int> &startPosition, const MV::Point<int> &currentPosition){
-		MV::Point<> locatePoint = armScene->localFromWorld(renderer.worldFromScreen(currentPosition));
-		std::cout << "Try to locate: " << counterthing++ << ": " << locatePoint << "    -    " << currentPosition << "      -     " << offset << std::endl;
-		armScene->locate(MV::castPoint<double>(currentPosition));
-	});*/
 	shape = armScene->make<MV::Scene::Rectangle>("arm");
 	auto armTexture = textures.getFileTexture("Assets/Images/spatula.png");
 	shape->setTexture(armTexture->makeHandle());
@@ -220,7 +216,7 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	std::cout << "JT: " << jointTexture->size() << std::endl;
 	shape->setSortDepth(3);
 
-	//catapaultScene->scale(.5);
+	//catapaultScene->scale(.5);*/
 	return catapaultScene;
 }
 

@@ -1,4 +1,7 @@
 #include "compositeScene.h"
+#include "cereal/archives/json.hpp"
+
+CEREAL_REGISTER_TYPE(MV::Scene::Clipped);
 
 namespace MV {
 	namespace Scene {

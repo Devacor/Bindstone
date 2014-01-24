@@ -57,16 +57,19 @@ namespace MV {
 		}
 
 		TTF_Font* font;
-		FontDefinition(FontDefinition &a_other){
+		FontDefinition(FontDefinition &&a_other){
 			font = a_other.font;
 			a_other.font = nullptr;
 		}
 
-		FontDefinition& operator=(FontDefinition &a_other){
+		FontDefinition& operator=(FontDefinition &&a_other){
 			font = a_other.font;
 			a_other.font = nullptr;
-		 return *this;
+			return *this;
 		}
+
+		FontDefinition(const FontDefinition &a_other) = delete;
+		FontDefinition& operator=(const FontDefinition &a_other) = delete;
 	};
 
 	enum TextWrapMethod{

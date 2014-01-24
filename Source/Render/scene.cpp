@@ -1,5 +1,11 @@
 #include "scene.h"
 #include <numeric>
+
+CEREAL_REGISTER_TYPE(MV::Scene::Node);
+CEREAL_REGISTER_TYPE(MV::Scene::Pixel);
+CEREAL_REGISTER_TYPE(MV::Scene::Line);
+CEREAL_REGISTER_TYPE(MV::Scene::Rectangle);
+
 namespace MV {
 	/*************************\
 	| ------BoundingBox------ |
@@ -172,14 +178,16 @@ namespace MV {
 		}
 
 		void Node::setTexture(std::shared_ptr<TextureHandle> a_texture){
+			if(texture && textureSizeSignal){
+				texture->sizeObserver.disconnect(textureSizeSignal);
+			}
+			textureSizeSignal.reset();
 			texture = a_texture;
 			if(texture){
-				textureSizeSignal = TextureHandle::Signal::make([&](std::shared_ptr<MV::TextureHandle> a_handle){
+				textureSizeSignal = TextureHandle::SignalType::make([&](std::shared_ptr<MV::TextureHandle> a_handle){
 					updateTextureCoordinates();
 				});
 				texture->sizeObserver.connect(textureSizeSignal);
-			} else{
-				textureSizeSignal.reset();
 			}
 			updateTextureCoordinates();
 		}
@@ -195,40 +203,29 @@ namespace MV {
 		}
 
 		bool Node::remove(std::shared_ptr<Node> a_childItem){
-			size_t originalSize = drawList.size();
-			for(auto cell = drawList.begin(); cell != drawList.end();){
-				if(*(cell->second) == *a_childItem){
-					drawList.erase(cell++);
-				} else{
-					++cell;
-				}
-			}
-			bool removed = originalSize != drawList.size();
-			if(removed){
-				alertParent(ChildRemoved::make(shared_from_this(), a_childItem));
+			auto foundChild = std::find_if(drawList.begin(), drawList.end(), [&](const DrawListPairType &item){
+				return item.second == a_childItem;
+			});
+			if(foundChild != drawList.end()){
+				auto removed = foundChild->second;
+				drawList.erase(foundChild);
+				alertParent(ChildRemoved::make(shared_from_this(), removed));
 				alertParent(VisualChange::make(shared_from_this()));
+				return true;
 			}
-			return removed;
+			return false;
 		}
 
 		bool Node::remove(const std::string &a_childId){
-			size_t originalSize = drawList.size();
-			std::shared_ptr<Node> childRemoved;
-			for(auto cell = drawList.begin(); cell != drawList.end();){
-				if(cell->first == a_childId){
-					childRemoved = cell->second;
-					drawList.erase(cell++);
-				} else{
-					++cell;
-				}
-			}
-			
-			bool removed = originalSize != drawList.size();
-			if(removed){
-				alertParent(ChildRemoved::make(shared_from_this(), childRemoved));
+			auto foundChild = drawList.find(a_childId);
+			if(foundChild != drawList.end()){
+				auto removed = foundChild->second;
+				drawList.erase(foundChild);
+				alertParent(ChildRemoved::make(shared_from_this(), removed));
 				alertParent(VisualChange::make(shared_from_this()));
+				return true;
 			}
-			return removed;
+			return false;
 		}
 
 		void Node::clear(){
@@ -312,8 +309,8 @@ namespace MV {
 			myParent = a_parentItem;
 		}
 
-		Node* Node::parent() const{
-			return myParent;
+		std::shared_ptr<Node> Node::parent() const{
+			return myParent->shared_from_this();
 		}
 
 		BoxAABB Node::getWorldAABB(bool a_includeChildren){
@@ -668,7 +665,10 @@ namespace MV {
 		}
 
 		void Node::bindOrDisableTexture(const std::shared_ptr<std::vector<GLfloat>> &texturePoints){
-			if(texture != nullptr){
+			if(texture != nullptr && texture->texture() == nullptr){
+				std::cerr << "Warning: TextureHandle with an unloaded texture: " << texture->name << std::endl;
+			}
+			if(texture != nullptr && texture->texture() != nullptr){
 				glEnable(GL_TEXTURE_2D);
 				glBindTexture(GL_TEXTURE_2D, texture->texture()->textureId());
 				glEnableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -757,16 +757,20 @@ namespace MV {
 		void Node::sortedRender(){
 			if(!isSorted){
 				drawListVector.clear();
-				std::for_each(drawList.begin(), drawList.end(), [&](DrawListType::value_type &cell){
-					drawListVector.push_back(std::shared_ptr<Node>(cell.second));
+				std::transform(drawList.begin(), drawList.end(), std::back_inserter(drawListVector), [](DrawListType::value_type shape){
+					return shape.second;
 				});
 				std::sort(drawListVector.begin(), drawListVector.end(), [](DrawListVectorType::value_type one, DrawListVectorType::value_type two){
-					return *one < *two;
+					return *one.lock() < *two.lock();
 				});
 				isSorted = true;
 			}
 			std::for_each(drawListVector.begin(), drawListVector.end(), [](DrawListVectorType::value_type &shape){
-				shape->draw();
+				if(!shape.expired()){
+					shape.lock()->draw();
+				}else{
+					std::cout << "Error: expired shape in drawListVector!" << std::endl;
+				}
 			});
 		}
 

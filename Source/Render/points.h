@@ -5,6 +5,7 @@
 #include <istream>
 
 #include "Utility/generalUtility.h"
+#include "cereal/cereal.hpp"
 
 namespace MV {
 
@@ -25,6 +26,11 @@ namespace MV {
 			return !(*this == a_other);
 		}
 
+		template <class Archive>
+		void serialize(Archive & archive){
+			archive(CEREAL_NVP(textureX), CEREAL_NVP(textureY));
+		}
+
 		double textureX, textureY;
 	};
 
@@ -41,6 +47,11 @@ namespace MV {
 		}
 		bool operator!=(const Color& a_other) const{
 			return !(*this == a_other);
+		}
+
+		template <class Archive>
+		void serialize(Archive & archive){
+			archive(CEREAL_NVP(R), CEREAL_NVP(G), CEREAL_NVP(B), CEREAL_NVP(A));
 		}
 
 		float R, G, B, A;
@@ -78,6 +89,11 @@ namespace MV {
 		Size<T>& operator*=(const T& a_other);
 		Size<T>& operator/=(const T& a_other);
 
+		template <class Archive>
+		void serialize(Archive & archive){
+			archive(CEREAL_NVP(width), CEREAL_NVP(height), CEREAL_NVP(depth));
+		}
+
 		T width, height;
 		T depth; //may be ignored for most 2d concepts
 	};
@@ -104,6 +120,11 @@ namespace MV {
 		Point<T>& operator/=(const Point<T>& a_other);
 		Point<T>& operator*=(const T& a_other);
 		Point<T>& operator/=(const T& a_other);
+
+		template <class Archive>
+		void serialize(Archive & archive){
+			archive(CEREAL_NVP(x), CEREAL_NVP(y), CEREAL_NVP(z));
+		}
 
 		T x, y, z;
 	};
@@ -132,6 +153,13 @@ namespace MV {
 		void copyPosition(DrawPoint& a_other);
 		void copyTexture(DrawPoint& a_other);
 		void copyColor(DrawPoint& a_other);
+
+		template <class Archive>
+		void serialize(Archive & archive){
+			Point::serialize(archive);
+			Color::serialize(archive);
+			TexturePoint::serialize(archive);
+		}
 	};
 
 	const DrawPoint operator+(const DrawPoint& a_left, const DrawPoint & a_right);

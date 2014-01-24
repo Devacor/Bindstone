@@ -6,6 +6,8 @@
 namespace MV {
 	namespace Scene {
 		class Clipped : public Rectangle, public MessageHandler<VisualChange>{
+			friend cereal::access;
+			friend cereal::allocate<Clipped>;
 			friend Node;
 		public:
 			SCENE_MAKE_FACTORY_METHODS
@@ -19,9 +21,11 @@ namespace MV {
 			virtual ~Clipped(){}
 
 			void refreshTexture(bool a_forceRefresh = false);
+
 		protected:
 			Clipped(Draw2D *a_renderer):
-				Rectangle(a_renderer){
+				Rectangle(a_renderer),
+				dirtyTexture(true){
 			}
 
 		private:
@@ -31,6 +35,17 @@ namespace MV {
 				dirtyTexture = true;
 			}
 			virtual void handleEnd(std::shared_ptr<VisualChange>){
+			}
+
+			template <class Archive>
+			void serialize(Archive & archive){
+				archive(cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(this)));
+			}
+
+			template <class Archive>
+			static void load_and_allocate(Archive & archive, cereal::allocate<Clipped> &allocate){
+				allocate(nullptr);
+				archive(cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(allocate.get())));
 			}
 
 			std::shared_ptr<DynamicTextureDefinition> clippedTexture;

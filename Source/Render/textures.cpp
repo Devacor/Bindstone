@@ -5,11 +5,16 @@
 #include <SDL_image.h>
 #include "Utility/generalUtility.h"
 
-#include <boost/property_tree/json_parser.hpp>
-
 #ifndef GL_BGR
 	#define GL_BGR 0x80E0
 #endif
+
+CEREAL_REGISTER_TYPE(MV::TextureDefinition);
+CEREAL_REGISTER_TYPE(MV::FileTextureDefinition);
+CEREAL_REGISTER_TYPE(MV::DynamicTextureDefinition);
+CEREAL_REGISTER_TYPE(MV::SurfaceTextureDefinition);
+
+CEREAL_REGISTER_TYPE(MV::TextureHandle);
 
 namespace MV {
 
@@ -85,6 +90,7 @@ namespace MV {
 	}
 
 	bool loadTextureFromFile(const std::string &a_file, GLuint &a_imageLoaded, Size<int> &a_size, bool a_repeat) {
+		std::cout << "Loading: " << a_file << std::endl;
 		SDL_Surface *img = IMG_Load(a_file.c_str());
 		if (!img){
 			std::cerr << "Failed to load texture: (" << a_file << ") " << SDL_GetError() << std::endl;
@@ -135,26 +141,22 @@ namespace MV {
 	\*************************/
 
 	TextureDefinition::TextureDefinition(const std::string &a_name) :
+		onReload(onReloadAction),
 		textureName(a_name),
 		texture(0){
 	}
 
-	void TextureDefinition::setOnReload(std::function< void(std::shared_ptr<TextureDefinition>) > a_onReload){
-		onReload = a_onReload;
-	}
-	void TextureDefinition::clearOnReload(){
-		onReload = nullptr;
-	}
-
 	void TextureDefinition::reload(){
 		reloadImplementation();
-		if (onReload){
-			onReload(shared_from_this());
-		}
+		onReloadAction(shared_from_this());
 	}
 
 	GLuint TextureDefinition::textureId() const{
 		return texture;
+	}
+
+	bool TextureDefinition::loaded() const{
+		return textureSize.width > 0 && textureSize.height > 0;
 	}
 
 	Size<int> TextureDefinition::size() const{
@@ -170,6 +172,17 @@ namespace MV {
 		if (!handles.empty()){
 			handles.erase(std::remove_if(handles.begin(), handles.end(), [](const std::weak_ptr<TextureHandle> &value){return value.expired(); }), handles.end());
 			if (handles.empty()){
+				glDeleteTextures(1, &texture);
+				texture = 0; //just to be certain, glDeleteTextures may not set a texture id to 0.
+				cleanupImplementation();
+			}
+		}
+	}
+
+	void TextureDefinition::cleanup(TextureHandle* toRemove){
+		if(!handles.empty()){
+			handles.erase(std::remove_if(handles.begin(), handles.end(), [&](const std::weak_ptr<TextureHandle> &value){return value.expired() || &(*value.lock()) == toRemove; }), handles.end());
+			if(handles.empty()){
 				glDeleteTextures(1, &texture);
 				texture = 0; //just to be certain, glDeleteTextures may not set a texture id to 0.
 				cleanupImplementation();
@@ -267,18 +280,43 @@ namespace MV {
 	TextureHandle::TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const Point<int> &a_position, const Size<int> &a_size) :
 		sizeObserver(sizeChanges),
 		textureDefinition(a_texture),
-		handleSize((a_size == Size<int>(-1, -1)) ? a_texture->size() : a_size),
 		handlePosition(a_position),
-		handlePercentSize(static_cast<double>(size().width) / static_cast<double>(a_texture->size().width), static_cast<double>(size().height) / static_cast<double>(a_texture->size().height)),
-		handlePercentPosition(static_cast<double>(position().x) / static_cast<double>(a_texture->size().width), static_cast<double>(position().y) / static_cast<double>(a_texture->size().height)),
-		handlePercentTopLeft(handlePercentPosition),
-		handlePercentBottomRight(handlePercentPosition.x + handlePercentSize.width, handlePercentPosition.y + handlePercentSize.height),
+		handleSize((a_texture && a_texture->loaded() && a_size == Size<int>(-1, -1)) ? a_texture->size() : a_size),
+		resizeToParent(a_size == Size<int>(-1, -1)),
 		flipX(false),
-		flipY(false){
+		flipY(false),
+		name(a_texture->name()){
+		
+		onParentReload = TextureDefinition::SignalType::make([&](std::shared_ptr<TextureDefinition> a_texture){
+			if(resizeToParent){
+				setBounds(handlePosition, a_texture->size());
+			}
+		});
+		observeTextureReload();
+		if(a_texture && a_texture->loaded()){
+			handlePercentSize = castSize<double>(size()) / castSize<double>(textureDefinition->size());
+			handlePercentPosition = castPoint<double>(position()) / pointFromSize(castSize<double>(textureDefinition->size()));
+
+			handlePercentTopLeft.x = handlePercentPosition.x;
+			handlePercentBottomRight.x = handlePercentPosition.x + handlePercentSize.width;
+			if(flipX){ std::swap(handlePercentTopLeft.x, handlePercentBottomRight.x); }
+
+			handlePercentTopLeft.y = handlePercentPosition.y;
+			handlePercentBottomRight.y = handlePercentPosition.x + handlePercentSize.height;
+			if(flipY){ std::swap(handlePercentTopLeft.y, handlePercentBottomRight.y); }
+		}
 	}
 
 	TextureHandle::~TextureHandle() {
-		textureDefinition->cleanup();
+		if(textureDefinition){
+			textureDefinition->cleanup(this);
+		}
+	}
+
+	void TextureHandle::observeTextureReload(){
+		if(textureDefinition){
+			textureDefinition->onReload.connect(onParentReload);
+		}
 	}
 
 	void TextureHandle::updatePercentBounds(){

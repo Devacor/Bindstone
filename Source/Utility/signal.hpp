@@ -12,6 +12,7 @@ namespace MV {
 	class Signal {
 	public:
 		typedef std::function<T> FunctionType;
+		typedef std::shared_ptr<Signal<T>> SharedType;
 
 		static std::shared_ptr< Signal<T> > make(std::function<T> a_callback){
 			return std::shared_ptr< Signal<T> >(new Signal<T>(a_callback, ++uniqueId));
@@ -66,23 +67,19 @@ namespace MV {
 	};
 
 	template <typename T>
-	std::shared_ptr<Signal<T>> makeSignal(std::function<T> a_callback){
-		return Signal<T>::make(a_callback);
-	}
-
-	template <typename T>
 	long long Signal<T>::uniqueId = 0;
 
 	template <typename T>
 	class Slot {
 	public:
 		typedef std::function<T> FunctionType;
-		typedef std::shared_ptr<Signal<T>> SignalType;
+		typedef Signal<T> SignalType;
+		typedef std::shared_ptr<Signal<T>> SharedSignalType;
 
 		//No protection against duplicates.
 		std::shared_ptr<Signal<T>> connect(std::function<T> a_callback){
 			if(observerLimit == std::numeric_limits<size_t>::max() || cullDeadObservers() < observerLimit){
-				auto signal = makeSignal(a_callback);
+				auto signal = Signal<T>::make(a_callback);
 				observers.insert(signal);
 				return signal;
 			} else{
@@ -144,7 +141,8 @@ namespace MV {
 	class SlotRegister {
 	public:
 		typedef std::function<T> FunctionType;
-		typedef std::shared_ptr<Signal<T>> SignalType;
+		typedef Signal<T> SignalType;
+		typedef std::shared_ptr<Signal<T>> SharedSignalType;
 
 		SlotRegister(Slot<T> &a_slot) :
 			slot(a_slot){

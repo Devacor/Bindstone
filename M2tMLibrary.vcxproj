@@ -43,7 +43,7 @@
     <ConfigurationType>Application</ConfigurationType>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v120</PlatformToolset>
+    <PlatformToolset>CTP_Nov2013</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -69,9 +69,9 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/</IncludePath>
-    <LibraryPath>$(SolutionDir)../external/boost_1_55_0/lib/;$(SolutionDir)../external/libs/;$(LibraryPath)</LibraryPath>
-    <SourcePath>$(VCInstallDir)atlmfc\src\mfc;$(VCInstallDir)atlmfc\src\mfcm;$(VCInstallDir)atlmfc\src\atl;$(VCInstallDir)crt\src;$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/</SourcePath>
+    <IncludePath>$(IncludePath);./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;%(AdditionalIncludeDirectories)</IncludePath>
+    <LibraryPath>$(SolutionDir)../external/boost_1_55_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/;$(SolutionDir)../external/libs/;$(LibraryPath);$(SolutionDir)../external/cereal/include/</LibraryPath>
+    <SourcePath>$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath)</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/;$(IncludePath)</IncludePath>
@@ -79,8 +79,8 @@
     <SourcePath>$(SolutionDir)../external/boost_1_49_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath)</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)../external/boost_1_55_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/;$(SolutionDir)../external/libs/;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/</IncludePath>
+    <LibraryPath>$(SolutionDir)../external/boost_1_55_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/;$(SolutionDir)../external/libs/;$(LibraryPath);$(SolutionDir)../external/cereal/include/</LibraryPath>
     <SourcePath>$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath)</SourcePath>
     <RunCodeAnalysis>false</RunCodeAnalysis>
   </PropertyGroup>
@@ -109,14 +109,15 @@
       <Optimization>Disabled</Optimization>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
       <Profile>true</Profile>
-      <AdditionalLibraryDirectories>$(SolutionDir)../external/boost_1_55_0/stage/lib/;$(SolutionDir)../external/libs/</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)../external/boost_1_55_0/lib/;$(SolutionDir)../external/libs/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -148,8 +149,9 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <EnablePREfast>false</EnablePREfast>
+      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -187,6 +189,56 @@
     <ClCompile Include="Source\Utility\stopwatch.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\external\cereal\include\cereal\access.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\archives\binary.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\archives\json.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\archives\portable_binary.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\archives\xml.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\cereal.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\details\helpers.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\details\polymorphic_impl.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\details\static_object.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\details\traits.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\details\util.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\base64.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidjson\document.h" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidjson\filestream.h" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidjson\genericstream.h" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidjson\internal\pow10.h" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidjson\internal\stack.h" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidjson\internal\strfunc.h" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidjson\prettywriter.h" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidjson\rapidjson.h" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidjson\reader.h" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidjson\stringbuffer.h" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidjson\writer.h" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidxml\rapidxml.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidxml\rapidxml_iterators.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidxml\rapidxml_print.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\external\rapidxml\rapidxml_utils.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\array.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\base_class.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\bitset.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\boost_variant.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\chrono.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\common.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\complex.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\deque.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\forward_list.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\list.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\map.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\memory.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\polymorphic.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\queue.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\set.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\stack.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\string.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\tuple.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\unordered_map.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\unordered_set.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\utility.hpp" />
+    <ClInclude Include="..\external\cereal\include\cereal\types\vector.hpp" />
+    <ClInclude Include="cerealtest.h" />
     <ClInclude Include="Source\Animation\actionSequence.h" />
     <ClInclude Include="Source\Animation\frameSwapper.h" />
     <ClInclude Include="Source\Animation\package.h" />
@@ -217,6 +269,9 @@
     <ClInclude Include="Source\Utility\scopeGuard.hpp" />
     <ClInclude Include="Source\Utility\signal.hpp" />
     <ClInclude Include="Source\Utility\stopwatch.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

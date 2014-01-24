@@ -19,6 +19,13 @@ namespace MV{
 			std::shared_ptr<Node> sender;
 		};
 
+		struct SetRenderer : public MV::Message {
+			static std::shared_ptr<SetRenderer> make(std::shared_ptr<Node> a_sender, MV::Draw2D *renderer){ return std::make_shared<SetRenderer>(a_sender, renderer); }
+			SetRenderer(std::shared_ptr<Node> a_sender, MV::Draw2D *renderer):sender(a_sender), renderer(renderer){}
+			std::shared_ptr<Node> sender;
+			MV::Draw2D *renderer;
+		};
+
 		struct VisualChange : public MV::Message {
 			static std::shared_ptr<VisualChange> make(std::shared_ptr<Node> a_sender){ return std::make_shared<VisualChange>(a_sender); }
 			VisualChange(std::shared_ptr<Node> a_sender):sender(a_sender){}

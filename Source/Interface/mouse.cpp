@@ -1,4 +1,6 @@
 #include "mouse.h"
+#include "cereal/archives/json.hpp"
+CEREAL_REGISTER_TYPE(MV::Scene::Clickable);
 
 namespace MV{
 
@@ -108,49 +110,50 @@ namespace MV{
 		}
 
 		void Clickable::hookUpSlots() {
-			thisSharedPtr = std::static_pointer_cast<Clickable>(shared_from_this());
-			onMouseButtonBeginHandle = mouse.onMouseButtonBegin.connect([&](MouseState& a_mouse){
+			std::shared_ptr<Clickable> thisSharedPtr = std::static_pointer_cast<Clickable>(shared_from_this());
+			SCOPE_EXIT{thisSharedPtr.reset(); };
+			onMouseButtonBeginHandle = mouse->onMouseButtonBegin.connect([&, thisSharedPtr](MouseState& a_mouse){
 				if(mouseInBounds(a_mouse)){
 					if(eatTouches){
-						alertParent(BlockInteraction::make(thisSharedPtr.lock()));
+						alertParent(BlockInteraction::make(thisSharedPtr));
 					}
 				}
 			});
 
-			onMouseButtonEndHandle = mouse.onMouseButtonEnd.connect([&](MouseState& a_mouse){
+			onMouseButtonEndHandle = mouse->onMouseButtonEnd.connect([&, thisSharedPtr](MouseState& a_mouse){
 				unblockInput();
 			});
 
-			onMouseDownHandle = mouse.onLeftMouseDown.connect([&](MouseState& a_mouse){
+			onMouseDownHandle = mouse->onLeftMouseDown.connect([&, thisSharedPtr](MouseState& a_mouse){
 				if(mouseInBounds(a_mouse)){
 					std::cout << "ON PRESS (" << ourId << "): " << a_mouse.position() << std::endl;
 					isInPressEvent = true;
-					onPressSlot(thisSharedPtr.lock());
+					onPressSlot(thisSharedPtr);
 
 					objectLocationBeforeDrag = getPosition();
 					dragStartPosition = a_mouse.position();
 					priorMousePosition = dragStartPosition;
 
-					onMouseMoveHandle = a_mouse.onMove.connect([&](MouseState& a_mouseInner){
+					onMouseMoveHandle = a_mouse.onMove.connect([&, thisSharedPtr](MouseState& a_mouseInner){
 						//std::cout << "ON DRAG (" << ourId << "): " << dragStartPosition << " -> " << a_mouseInner.position() << std::endl;
-						onDragSlot(thisSharedPtr.lock(), dragStartPosition, a_mouseInner.position() - priorMousePosition);
+						onDragSlot(thisSharedPtr, dragStartPosition, a_mouseInner.position() - priorMousePosition);
 						priorMousePosition = a_mouseInner.position();
 					});
 				}
 			});
 
-			onMouseUpHandle = mouse.onLeftMouseUp.connect([&](MouseState& a_mouse){
+			onMouseUpHandle = mouse->onLeftMouseUp.connect([&, thisSharedPtr](MouseState& a_mouse){
 				onMouseMoveHandle = nullptr;
 				if(inPressEvent()){
 					isInPressEvent = false;
 					if(mouseInBounds(a_mouse)){
 						std::cout << "ON RELEASE (" << ourId << "): " << a_mouse.position() << std::endl;
-						onAcceptSlot(thisSharedPtr.lock());
+						onAcceptSlot(thisSharedPtr);
 					} else{
 						std::cout << "ON CANCEL (" << ourId << "): " << a_mouse.position() << std::endl;
-						onCancelSlot(thisSharedPtr.lock());
+						onCancelSlot(thisSharedPtr);
 					}
-					onReleaseSlot(thisSharedPtr.lock());
+					onReleaseSlot(thisSharedPtr);
 				}
 			});
 		}
@@ -174,7 +177,7 @@ namespace MV{
 
 		Clickable::Clickable(Draw2D *a_renderer, MouseState &a_mouse):
 			Rectangle(a_renderer),
-			mouse(a_mouse),
+			mouse(&a_mouse),
 			eatTouches(true),
 			isInPressEvent(false),
 			shouldUseChildrenInHitDetection(true),
@@ -211,7 +214,8 @@ namespace MV{
 		}
 
 		const MouseState& Clickable::getMouse() const {
-			return mouse;
+			require(mouse != nullptr, MV::PointerException("Clickable has a null mouse pointer!"));
+			return *mouse;
 		}
 
 		bool Clickable::mouseInBounds(const MouseState& a_state) {

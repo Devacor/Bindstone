@@ -28,6 +28,7 @@
 
 namespace MV {
 	class BoxAABB{
+		friend cereal::access;
 	public:
 		BoxAABB(){ initialize(Point<>()); }
 		BoxAABB(const Point<> &a_startPoint){ initialize(a_startPoint); }
@@ -55,12 +56,18 @@ namespace MV {
 
 		Point<> centerPoint(){ return minPoint + ((minPoint + maxPoint) / 2.0); }
 		Point<> minPoint, maxPoint;
+	private:
+		template <class Archive>
+		void serialize(Archive & archive){
+			archive(CEREAL_NVP(minPoint), CEREAL_NVP(maxPoint));
+		}
 	};
 
 	std::ostream& operator<<(std::ostream& a_os, const BoxAABB& a_point);
 	std::istream& operator>>(std::istream& a_is, BoxAABB& a_point);
 
 	class PointVolume{
+		friend cereal::access;
 	public:
 		void addPoint(const Point<> &a_newPoint);
 
@@ -75,6 +82,11 @@ namespace MV {
 	private:
 		//get angle within proper range between two points (-pi to +pi)
 		double getAngle(const Point<> &a_p1, const Point<> &a_p2);
+
+		template <class Archive>
+		void serialize(Archive & archive){
+			archive(CEREAL_NVP(points));
+		}
 	};
 
 	typedef Point<> AxisAngles;
@@ -109,7 +121,10 @@ namespace MV {
 		class Node : 
 			public std::enable_shared_from_this<Node>,
 			public MessageHandler<PushMatrix>,
-			public MessageHandler<PopMatrix>{
+			public MessageHandler<PopMatrix>,
+			public MessageHandler<SetRenderer>{
+			friend cereal::access;
+			friend cereal::allocate<Node>;
 		public:
 			virtual ~Node(){}
 
@@ -117,8 +132,22 @@ namespace MV {
 
 			static std::shared_ptr<Node> make(Draw2D* a_renderer, const Point<> &a_placement = Point<>());
 
-			//Must be set or initialized in the constructor
-			virtual void setRenderer(Draw2D* a_renderer){ renderer = a_renderer; }
+			//Sets the renderer
+			virtual void setRenderer(Draw2D* a_renderer, bool includeChildren = true, bool includeParents = true){
+				renderer = a_renderer;
+				if(includeParents){
+					Node* currentParent = this;
+					while(currentParent = currentParent->myParent){
+						setRenderer(a_renderer, false, true);
+					}
+					//alertParent(SetRenderer::make(shared_from_this(), a_renderer));
+				}else if(includeChildren){
+					for(auto &child : drawList){
+						child.second->setRenderer(a_renderer, true, false);
+					}
+					//alertChildren(SetRenderer::make(shared_from_this(), a_renderer));
+				}
+			}
 			Draw2D* getRenderer(){ return renderer; }
 
 			virtual void clear();
@@ -127,8 +156,9 @@ namespace MV {
 			template<typename TypeToAdd>
 			std::shared_ptr<TypeToAdd> add(const std::string &a_childId, std::shared_ptr<TypeToAdd> a_childItem) {
 				isSorted = 0;
+				drawListVector.clear();
 				if(renderer){
-					a_childItem->setRenderer(renderer);
+					a_childItem->setRenderer(renderer, true, false);
 				}
 				a_childItem->setParent(this);
 				drawList[a_childId] = a_childItem;
@@ -168,7 +198,7 @@ namespace MV {
 
 			//For command type alerts
 			void setParent(Node* a_parentItem);
-			Node* parent() const;
+			std::shared_ptr<Node> parent() const;
 
 			void scale(double a_newScale);
 			void scale(const Point<> &a_scaleValue);
@@ -300,6 +330,13 @@ namespace MV {
 			virtual void handleEnd(std::shared_ptr<PopMatrix>){
 			}
 
+			virtual void handleBegin(std::shared_ptr<SetRenderer> message){
+				renderer = message->renderer;
+			}
+			virtual void handleEnd(std::shared_ptr<SetRenderer>){
+			}
+
+			Node():Node(nullptr){} //FOR CEREAL DO NOT USE.
 		protected:
 			Node(Draw2D* a_renderer);
 			void defaultDraw(GLenum drawType);
@@ -314,6 +351,15 @@ namespace MV {
 					a_message->tryToHandleBegin(myParent, a_message);
 					myParent->alertParent(a_message);
 					a_message->tryToHandleEnd(myParent, a_message);
+				}
+			}
+
+			template<typename T>
+			void alertChildren(std::shared_ptr<T> a_message){
+				for(auto& child : drawList){
+					a_message->tryToHandleBegin(child.second.get(), a_message);
+					child.second->alertChildren(a_message);
+					a_message->tryToHandleEnd(child.second.get(), a_message);
 				}
 			}
 
@@ -334,9 +380,9 @@ namespace MV {
 
 			bool isVisible;
 			bool hasTexture;
-			bool needsBoundRecalculate;
+
 			std::shared_ptr<TextureHandle> texture;
-			std::shared_ptr<TextureHandle::Signal> textureSizeSignal;
+			TextureHandle::SignalType::SharedType textureSizeSignal;
 			std::vector<DrawPoint> points;
 			Node *myParent;
 
@@ -345,9 +391,10 @@ namespace MV {
 			GLenum drawType;
 
 			bool drawSorted, isSorted;
-			typedef std::vector<std::shared_ptr<Node>> DrawListVectorType;
+			typedef std::vector<std::weak_ptr<Node>> DrawListVectorType;
 			DrawListVectorType drawListVector;
 			typedef std::map<std::string, std::shared_ptr<Node>> DrawListType;
+			typedef std::pair<std::string, std::shared_ptr<Node>> DrawListPairType;
 			DrawListType drawList;
 
 			void depthChanged(){
@@ -360,7 +407,49 @@ namespace MV {
 		private:
 
 			void childDepthChanged(){
+				drawListVector.clear();
 				isSorted = false;
+			}
+
+			template <class Archive>
+			void serialize(Archive & archive){
+				archive(CEREAL_NVP(translateTo),
+					CEREAL_NVP(rotateTo), CEREAL_NVP(rotateOrigin),
+					CEREAL_NVP(scaleTo),
+					CEREAL_NVP(depthOverride), CEREAL_NVP(overrideDepthValue),
+					CEREAL_NVP(isVisible), CEREAL_NVP(hasTexture),
+					CEREAL_NVP(drawType), CEREAL_NVP(drawSorted),
+					CEREAL_NVP(points),
+					CEREAL_NVP(drawList),
+					CEREAL_NVP(texture));
+
+				for(auto &drawItem : drawList){
+					drawItem.second->setParent(this);
+				}
+			}
+
+			template <class Archive>
+			static void load_and_allocate(Archive & archive, cereal::allocate<Node> &allocate){
+				allocate(nullptr);
+				archive(
+					cereal::make_nvp("translateTo", allocate->translateTo),
+					cereal::make_nvp("rotateTo", allocate->rotateTo),
+					cereal::make_nvp("rotateOrigin", allocate->rotateOrigin),
+					cereal::make_nvp("scaleTo", allocate->scaleTo),
+					cereal::make_nvp("depthOverride", allocate->depthOverride),
+					cereal::make_nvp("overrideDepthValue", allocate->overrideDepthValue),
+					cereal::make_nvp("isVisible", allocate->isVisible),
+					cereal::make_nvp("hasTexture", allocate->hasTexture),
+					cereal::make_nvp("drawType", allocate->drawType),
+					cereal::make_nvp("drawSorted", allocate->drawSorted),
+					cereal::make_nvp("points", allocate->points),
+					cereal::make_nvp("drawList", allocate->drawList),
+					cereal::make_nvp("texture", allocate->texture)
+				);
+
+				for(auto &drawItem : allocate->drawList){
+					drawItem.second->setParent(allocate.get());
+				}
 			}
 
 			virtual BoxAABB getWorldAABBImplementation(bool a_includeChildren, bool a_nestedCall);
@@ -376,6 +465,8 @@ namespace MV {
 		};
 
 		class Pixel : public Node{
+			friend cereal::access;
+			friend cereal::allocate<Pixel>;
 			friend Node;
 		public:
 			SCENE_MAKE_FACTORY_METHODS
@@ -387,6 +478,7 @@ namespace MV {
 
 			template<typename PointAssign>
 			void applyToPoint(const PointAssign &a_values);
+
 		protected:
 			Pixel(Draw2D *a_renderer):Node(a_renderer){
 				points.resize(1);
@@ -394,6 +486,17 @@ namespace MV {
 
 		private:
 			virtual void drawImplementation();
+
+			template <class Archive>
+			void serialize(Archive & archive){
+				archive(cereal::make_nvp("node", cereal::base_class<Node>(this)));
+			}
+
+			template <class Archive>
+			static void load_and_allocate(Archive & archive, cereal::allocate<Pixel> &allocate){
+				allocate(nullptr);
+				archive(cereal::make_nvp("node", cereal::base_class<Node>(allocate.get())));
+			}
 		};
 
 		template<typename PointAssign>
@@ -403,6 +506,8 @@ namespace MV {
 		}
 
 		class Line : public Node{
+			friend cereal::access;
+			friend cereal::allocate<Line>;
 			friend Node;
 		public:
 			SCENE_MAKE_FACTORY_METHODS
@@ -416,6 +521,7 @@ namespace MV {
 
 			template<typename PointAssign>
 			void applyToEnds(const PointAssign &a_startPoint, const PointAssign &a_endPoint);
+
 		protected:
 			Line(Draw2D *a_renderer):
 				Node(a_renderer){
@@ -424,6 +530,17 @@ namespace MV {
 			}
 		private:
 			virtual void drawImplementation();
+
+			template <class Archive>
+			void serialize(Archive & archive){
+				archive(cereal::make_nvp("node", cereal::base_class<Node>(this)));
+			}
+
+			template <class Archive>
+			static void load_and_allocate(Archive & archive, cereal::allocate<Line> &allocate){
+				allocate(nullptr);
+				archive(cereal::make_nvp("node", cereal::base_class<Node>(allocate.get())));
+			}
 		};
 
 		template<typename PointAssign>
@@ -434,6 +551,8 @@ namespace MV {
 		}
 
 		class Rectangle : public Node{
+			friend cereal::access;
+			friend cereal::allocate<Rectangle>;
 			friend Node;
 		public:
 			SCENE_MAKE_FACTORY_METHODS
@@ -472,6 +591,17 @@ namespace MV {
 			}
 		private:
 			virtual void drawImplementation();
+
+			template <class Archive>
+			void serialize(Archive & archive){
+				archive(cereal::make_nvp("node", cereal::base_class<Node>(this)));
+			}
+
+			template <class Archive>
+			static void load_and_allocate(Archive & archive, cereal::allocate<Rectangle> &allocate){
+				allocate(nullptr);
+				archive(cereal::make_nvp("node", cereal::base_class<Node>(allocate.get())));
+			}
 		};
 
 		template<typename PointAssign>

@@ -7,6 +7,10 @@
 *.log
 *.PVS-Studio.cfg
 *.i
+*.i-*
+Microsoft.DTfW.DHL.manifest
+output.txt
+sceneSave.txt
 /Debug/*
 /Release/*
 /x64/*

@@ -1,6 +1,5 @@
 #include "mouse.h"
 #include "cereal/archives/json.hpp"
-CEREAL_REGISTER_TYPE(MV::Scene::Clickable);
 
 namespace MV{
 
@@ -19,11 +18,13 @@ namespace MV{
 	void MouseState::update() {
 		MV::Point<int> newPosition;
 		uint32_t state = SDL_GetMouseState(&newPosition.x, &newPosition.y);
+
 		bool newLeft = (state & SDL_BUTTON(SDL_BUTTON_LEFT)) != false;
 		bool newMiddle = (state & SDL_BUTTON(SDL_BUTTON_MIDDLE)) != false;
 		bool newRight = (state & SDL_BUTTON(SDL_BUTTON_RIGHT)) != false;
 
 		if(newPosition != mousePosition){
+			std::cout << "Mouse Position: " << newPosition << std::endl;
 			oldMousePosition = mousePosition;
 			mousePosition = newPosition;
 			onMoveSlot(*this);
@@ -65,171 +66,6 @@ namespace MV{
 
 	bool MouseState::middleDown() const {
 		return middle;
-	}
-
-
-	namespace Scene {
-		int Clickable::counter = 0;
-
-		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState &a_mouse) {
-			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
-			clipped->hookUpSlots();
-			return clipped;
-		}
-
-		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState &a_mouse, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight) {
-			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
-			clipped->setTwoCorners(a_topLeft, a_bottomRight);
-			clipped->hookUpSlots();
-			return clipped;
-		}
-
-		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState &a_mouse, const Point<> &a_topLeft, const Point<> &a_bottomRight) {
-			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
-			clipped->setTwoCorners(a_topLeft, a_bottomRight);
-			clipped->hookUpSlots();
-			return clipped;
-		}
-
-		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState &a_mouse, const Point<> &a_point, Size<> &a_size, bool a_center) {
-			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
-			if(a_center){
-				clipped->setSizeAndCenterPoint(a_point, a_size);
-			} else{
-				clipped->setSizeAndCornerPoint(a_point, a_size);
-			}
-			clipped->hookUpSlots();
-			return clipped;
-		}
-
-		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState &a_mouse, const Size<> &a_size) {
-			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
-			clipped->setSize(a_size);
-			clipped->hookUpSlots();
-			return clipped;
-		}
-
-		void Clickable::hookUpSlots() {
-			std::shared_ptr<Clickable> thisSharedPtr = std::static_pointer_cast<Clickable>(shared_from_this());
-			SCOPE_EXIT{thisSharedPtr.reset(); };
-			onMouseButtonBeginHandle = mouse->onMouseButtonBegin.connect([&, thisSharedPtr](MouseState& a_mouse){
-				if(mouseInBounds(a_mouse)){
-					if(eatTouches){
-						alertParent(BlockInteraction::make(thisSharedPtr));
-					}
-				}
-			});
-
-			onMouseButtonEndHandle = mouse->onMouseButtonEnd.connect([&, thisSharedPtr](MouseState& a_mouse){
-				unblockInput();
-			});
-
-			onMouseDownHandle = mouse->onLeftMouseDown.connect([&, thisSharedPtr](MouseState& a_mouse){
-				if(mouseInBounds(a_mouse)){
-					std::cout << "ON PRESS (" << ourId << "): " << a_mouse.position() << std::endl;
-					isInPressEvent = true;
-					onPressSlot(thisSharedPtr);
-
-					objectLocationBeforeDrag = getPosition();
-					dragStartPosition = a_mouse.position();
-					priorMousePosition = dragStartPosition;
-
-					onMouseMoveHandle = a_mouse.onMove.connect([&, thisSharedPtr](MouseState& a_mouseInner){
-						//std::cout << "ON DRAG (" << ourId << "): " << dragStartPosition << " -> " << a_mouseInner.position() << std::endl;
-						onDragSlot(thisSharedPtr, dragStartPosition, a_mouseInner.position() - priorMousePosition);
-						priorMousePosition = a_mouseInner.position();
-					});
-				}
-			});
-
-			onMouseUpHandle = mouse->onLeftMouseUp.connect([&, thisSharedPtr](MouseState& a_mouse){
-				onMouseMoveHandle = nullptr;
-				if(inPressEvent()){
-					isInPressEvent = false;
-					if(mouseInBounds(a_mouse)){
-						std::cout << "ON RELEASE (" << ourId << "): " << a_mouse.position() << std::endl;
-						onAcceptSlot(thisSharedPtr);
-					} else{
-						std::cout << "ON CANCEL (" << ourId << "): " << a_mouse.position() << std::endl;
-						onCancelSlot(thisSharedPtr);
-					}
-					onReleaseSlot(thisSharedPtr);
-				}
-			});
-		}
-
-		void Clickable::blockInput() {
-			if(!inPressEvent()){
-				onMouseDownHandle->block();
-				onMouseUpHandle->block();
-				onMouseMoveHandle = nullptr;
-			}
-		}
-
-		void Clickable::unblockInput() {
-			onMouseDownHandle->unblock();
-			onMouseUpHandle->unblock();
-		}
-
-		void Clickable::handleBegin(std::shared_ptr<BlockInteraction>) {
-			blockInput();
-		}
-
-		Clickable::Clickable(Draw2D *a_renderer, MouseState &a_mouse):
-			Rectangle(a_renderer),
-			mouse(&a_mouse),
-			eatTouches(true),
-			isInPressEvent(false),
-			shouldUseChildrenInHitDetection(true),
-			onPress(onPressSlot),
-			onRelease(onReleaseSlot),
-			onCancel(onCancelSlot),
-			onAccept(onAcceptSlot),
-			onDrag(onDragSlot),
-			ourId(counter++){
-			
-			//Default to transparent. Allows us to toggle it back visible for testing purposes, or if we want to render a button image directly in the Clickable node.
-			//NOT calling setColor because that relies on shared_from_this.
-			auto alpha = MV::Color(1, 1, 1, 0);
-			int elements = (int)points.size();
-			for(int i = 0; i < elements; i++){
-				points[i] = alpha;
-			}
-		}
-
-		bool Clickable::inPressEvent() const {
-			return isInPressEvent;
-		}
-
-		void Clickable::startEatingTouches() {
-			eatTouches = true;
-		}
-
-		void Clickable::stopEatingTouches() {
-			eatTouches = false;
-		}
-
-		bool Clickable::isEatingTouches() const {
-			return eatTouches;
-		}
-
-		const MouseState& Clickable::getMouse() const {
-			require(mouse != nullptr, MV::PointerException("Clickable has a null mouse pointer!"));
-			return *mouse;
-		}
-
-		bool Clickable::mouseInBounds(const MouseState& a_state) {
-			if(visible()){
-				return getScreenAABB(shouldUseChildrenInHitDetection).pointContained(castPoint<double>(a_state.position()));
-			}else{
-				return false;
-			}
-		}
-
-		Point<> Clickable::locationBeforeDrag() const {
-			return objectLocationBeforeDrag;
-		}
-
 	}
 
 }

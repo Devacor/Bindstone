@@ -18,7 +18,7 @@
 #include "cereal/types/base_class.hpp"
 
 #include "cereal/archives/json.hpp"
-#include <cereal/types/polymorphic.hpp>
+#include "cereal/types/polymorphic.hpp"
 
 namespace MV {
 	SDL_Surface* converToPowerOfTwo(SDL_Surface* surface);
@@ -71,7 +71,7 @@ namespace MV {
 
 	class FileTextureDefinition : public TextureDefinition {
 		friend cereal::access;
-		friend cereal::allocate<FileTextureDefinition>;
+		friend cereal::construct<FileTextureDefinition>;
 	public:
 		static std::shared_ptr<FileTextureDefinition> make(const std::string &a_filename, bool a_repeat = false){
 			return std::shared_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_repeat));
@@ -91,13 +91,13 @@ namespace MV {
 		}
 
 		template <class Archive>
-		static void load_and_allocate(Archive & archive, cereal::allocate<FileTextureDefinition> &allocate){
+		static void load_and_construct(Archive & archive, cereal::construct<FileTextureDefinition> &construct){
 			bool repeat = false;
 			archive(cereal::make_nvp("repeat", repeat));
-			allocate("", repeat);
-			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(allocate.get())));
-			if(!allocate->handles.empty()){
-				allocate->reloadImplementation();
+			construct("", repeat);
+			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
+			if(!construct->handles.empty()){
+				construct->reloadImplementation();
 			}
 		}
 
@@ -106,7 +106,7 @@ namespace MV {
 
 	class DynamicTextureDefinition : public TextureDefinition {
 		friend cereal::access;
-		friend cereal::allocate<DynamicTextureDefinition>;
+		friend cereal::construct<DynamicTextureDefinition>;
 	public:
 		static std::shared_ptr<DynamicTextureDefinition> make(const std::string &a_name, const Size<int> &a_size){
 			return std::shared_ptr<DynamicTextureDefinition>(new DynamicTextureDefinition(a_name, a_size));
@@ -125,11 +125,11 @@ namespace MV {
 		}
 
 		template <class Archive>
-		static void load_and_allocate(Archive & archive, cereal::allocate<DynamicTextureDefinition> &allocate){
-			allocate("", Size<int>());
-			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(allocate.get())));
-			if(!allocate->handles.empty()){
-				allocate->reloadImplementation();
+		static void load_and_construct(Archive & archive, cereal::construct<DynamicTextureDefinition> &construct){
+			construct("", Size<int>());
+			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
+			if(!construct->handles.empty()){
+				construct->reloadImplementation();
 			}
 		}
 
@@ -138,7 +138,7 @@ namespace MV {
 
 	class SurfaceTextureDefinition : public TextureDefinition {
 		friend cereal::access;
-		friend cereal::allocate<SurfaceTextureDefinition>;
+		friend cereal::construct<SurfaceTextureDefinition>;
 	public:
 		static std::shared_ptr<SurfaceTextureDefinition> make(const std::string &a_name, std::function<SDL_Surface*()> a_surfaceGenerator){
 			return std::shared_ptr<SurfaceTextureDefinition>(new SurfaceTextureDefinition(a_name, a_surfaceGenerator));
@@ -166,9 +166,9 @@ namespace MV {
 		}
 
 		template <class Archive>
-		static void load_and_allocate(Archive & archive, cereal::allocate<SurfaceTextureDefinition> &allocate){
-			allocate("", std::function<SDL_Surface*()>());
-			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(allocate.get())));
+		static void load_and_construct(Archive & archive, cereal::construct<SurfaceTextureDefinition> &construct){
+			construct("", std::function<SDL_Surface*()>());
+			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
 		}
 
 		virtual void reloadImplementation();
@@ -179,7 +179,7 @@ namespace MV {
 
 	class TextureHandle : public std::enable_shared_from_this<TextureHandle> {
 		friend cereal::access;
-		friend cereal::allocate<TextureHandle>;
+		friend cereal::construct<TextureHandle>;
 		friend TextureDefinition;
 		Slot<void(std::shared_ptr<TextureHandle>)> sizeChanges;
 	public:
@@ -229,22 +229,22 @@ namespace MV {
 		}
 
 		template <class Archive>
-		static void load_and_allocate(Archive & archive, cereal::allocate<TextureHandle> &allocate){
+		static void load_and_construct(Archive & archive, cereal::construct<TextureHandle> &construct){
 			std::shared_ptr<TextureDefinition> textureDefinition;
 			archive(CEREAL_NVP(textureDefinition));
-			allocate(textureDefinition);
+			construct(textureDefinition);
 			archive(
-				cereal::make_nvp("handleSize", allocate->handleSize),
-				cereal::make_nvp("handlePosition", allocate->handlePosition),
-				cereal::make_nvp("handlePercentPosition", allocate->handlePercentPosition),
-				cereal::make_nvp("handlePercentSize", allocate->handlePercentSize),
-				cereal::make_nvp("handlePercentTopLeft", allocate->handlePercentTopLeft),
-				cereal::make_nvp("handlePercentBottomRight", allocate->handlePercentBottomRight),
-				cereal::make_nvp("flipX", allocate->flipX),
-				cereal::make_nvp("flipY", allocate->flipY),
-				cereal::make_nvp("name", allocate->name)
+				cereal::make_nvp("handleSize", construct->handleSize),
+				cereal::make_nvp("handlePosition", construct->handlePosition),
+				cereal::make_nvp("handlePercentPosition", construct->handlePercentPosition),
+				cereal::make_nvp("handlePercentSize", construct->handlePercentSize),
+				cereal::make_nvp("handlePercentTopLeft", construct->handlePercentTopLeft),
+				cereal::make_nvp("handlePercentBottomRight", construct->handlePercentBottomRight),
+				cereal::make_nvp("flipX", construct->flipX),
+				cereal::make_nvp("flipY", construct->flipY),
+				cereal::make_nvp("name", construct->name)
 			);
-			allocate->observeTextureReload();
+			construct->observeTextureReload();
 		}
 
 		void updatePercentBounds();

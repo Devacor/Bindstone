@@ -16,30 +16,34 @@ Game::Game() :
 	initializeWindow();
 	//auto clipped = mainScene->make<MV::Scene::Clipped>("clipped", MV::Size<>(200, 200));
 	//auto clipped = mainScene->make<MV::Scene::Node>("clipped");
-	auto clipped = mainScene->make<MV::Scene::Clickable>("clipped", mouse);
+	auto clipped = mainScene->make<MV::Scene::Clickable>("clipped", &mouse);
 	clipped->add("catapult", initializeCatapultScene());
 	mainScene->add("textbox", initializeTextScene());
-	auto pointtest = MV::Point<>(-clipped->getLocalAABB().getSize().width / 2.0, 0);
+	auto pointtest = MV::Point<>(-clipped->localAABB().size().width / 2.0, 0);
 	//mainScene->get("clipped")->placeAt(MV::Point<>(-clipped->getLocalAABB().getSize().width / 2.0, 0));
-	mainScene->locate(MV::Point<>(renderer.world().width() / 2, renderer.world().height() / 2));
+	mainScene->position(MV::Point<>(renderer.world().width() / 2, renderer.world().height() / 2));
 
 	mainScene->make<MV::Scene::Node>("container");
-	mainScene->get<MV::Scene::Node>("container")->locate(MV::Point<>(20, 80));
+	mainScene->get<MV::Scene::Node>("container")->position(MV::Point<>(20, 80));
 	std::shared_ptr<MV::Scene::Rectangle> pattern = mainScene->get<MV::Scene::Node>("container")->make<MV::Scene::Rectangle>("pattern");
-	pattern->setTexture(textures.getFileTexture("Assets/Images/patternTest1.png")->makeHandle());
+	pattern->texture(textures.getFileTexture("Assets/Images/patternTest1.png")->makeHandle());
 
-	testShape->setColor(MV::Color(1, 0, 1, .25));
+	testShape->color(MV::Color(1, 0, 1, .25));
 
 	std::cout << "RWindow: " << renderer.window().size() << std::endl << "RWorld: " << renderer.world().size() << std::endl << "-----" << std::endl;
 
-	std::cout << "Screen: " << pattern->getScreenAABB() << std::endl << "World: " << pattern->getWorldAABB() << std::endl << "Local: " << pattern->getLocalAABB() << std::endl << "---" << std::endl;
+	std::cout << "Screen: " << pattern->screenAABB() << std::endl << "World: " << pattern->worldAABB() << std::endl << "Local: " << pattern->localAABB() << std::endl << "---" << std::endl;
 
-	MV::BoxAABB worldAABB = pattern->getScreenAABB();
-	MV::BoxAABB screenAABB = pattern->getWorldAABB();
+	MV::BoxAABB worldAABB = pattern->screenAABB();
+	MV::BoxAABB screenAABB = pattern->worldAABB();
 
 	testShape->setTwoCorners(worldAABB);
 
-	std::cout << "testShapeWorldTest: " << testShape->getWorldAABB() << std::endl;
+	std::cout << "testShapeWorldTest: " << testShape->worldAABB() << std::endl;
+	hookUpInput();
+
+	saveTest();
+	saveTest();
 }
 
 void Game::initializeWindow(){
@@ -69,7 +73,7 @@ void Game::initializeWindow(){
 
 
 
-bool Game::passTime(double dt) {
+bool Game::update(double dt) {
 	//std::cerr << MV::toDegrees(mainScene->get("catapult")->get<MV::DrawNode>()->get("arm")->getRotation().z) << std::endl;
 	/*
 	mainScene->get("clipped")->get("catapult")->get("arm")->incrementRotate(angleIncrement);
@@ -97,7 +101,6 @@ bool Game::passTime(double dt) {
 	testItem2->setSortDepth(101);
 	
 	*/
-	saveTest();
 	//*/
 	/*MV::BoxAABB worldAABB = pattern->getScreenAABB();
 	MV::BoxAABB screenAABB = pattern->getWorldAABB();
@@ -162,6 +165,12 @@ void Game::render() {
 	renderer.updateScreen();
 }
 
+void Game::hookUpInput(){
+	/*armInputHandles.drag = armScene->onDrag.connect([](std::shared_ptr<MV::Scene::Clickable> armScene, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
+		armScene->translate(MV::castPoint<double>(deltaPosition));
+	});*/
+}
+
 std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	static int counterthing = 0;
 	auto catapaultScene = MV::Scene::Node::make(&renderer);
@@ -170,48 +179,44 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	auto textureHandle = platformTexture->makeHandle();
 	auto shape = catapaultScene->make<MV::Scene::Rectangle>("base", MV::Point<>(0, 0), MV::castSize<double>(platformTexture->size()));
 	//auto currentTexture = textures.getMainTexture("base"); TEXTURE
-	shape->setTexture(textureHandle);
+	shape->texture(textureHandle);
 	std::cout << "PT: " << platformTexture->size() << std::endl;
 	shape->setSortDepth(4);
 	
-	armScene = catapaultScene->make<MV::Scene::Clickable>("arm", mouse, MV::Point<>(), MV::Size<>(60, 60), false);
+	armScene = catapaultScene->make<MV::Scene::Clickable>("clickArm", &mouse, MV::Point<>(), MV::Size<>(60, 60), false);
 	armScene->ignoreChildrenForHitDetection();
-	armScene->locate(MV::Point<>(0, -4));
-
-	armInputHandles.drag = armScene->onDrag.connect([](std::shared_ptr<MV::Scene::Clickable> armScene, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
-		armScene->translate(MV::castPoint<double>(deltaPosition));
-	});
+	armScene->position(MV::Point<>(0, -4));
 
 	shape = armScene->make<MV::Scene::Rectangle>("arm");
 	auto armTexture = textures.getFileTexture("Assets/Images/spatula.png");
-	shape->setTexture(armTexture->makeHandle());
+	shape->texture(armTexture->makeHandle());
 	shape->setSizeAndCornerPoint(MV::Point<>(0, 0), armTexture->size());
 	std::cout << "AT: " << armTexture->size() << std::endl;
 	shape->setSortDepth(2);
 
 	//yum, hard coding yay
-	armScene->setRotateOrigin(MV::Point<>(armTexture->size().width - 62, 25));
+	armScene->rotationOrigin(MV::Point<>(armTexture->size().width - 62, 25));
 
 	armScene->setSortDepth(2);
 
 	shape = armScene->make<MV::Scene::Rectangle>("rock");
 	auto rockTexture = textures.getFileTexture("Assets/Images/rock.png");
-	shape->setTexture(rockTexture->makeHandle());
+	shape->texture(rockTexture->makeHandle());
 	//shape->setSizeAndCornerPoint(MV::Point<>(7, -90), rockTexture->size());
 	shape->setSizeAndCornerPoint(MV::Point<>(0, 0), rockTexture->size());
-	shape->locate(MV::Point<>(70, -90));
+	shape->position(MV::Point<>(70, -90));
 
 	shape = armScene->make<MV::Scene::Rectangle>("rock2");
-	shape->setTexture(rockTexture->makeHandle());
+	shape->texture(rockTexture->makeHandle());
 	shape->setSizeAndCornerPoint(MV::Point<>(70, -90), rockTexture->size());
 	//shape->setSizeAndCornerPoint(MV::Point<>(0, 0), rockTexture->size());
-	shape->locate(MV::Point<>(0, 0));
+	shape->position(MV::Point<>(0, 0));
 	std::cout << "RT: " << rockTexture->size() << std::endl;
 	shape->setSortDepth(1);
 
 	shape = catapaultScene->make<MV::Scene::Rectangle>("joint");
 	auto jointTexture = textures.getFileTexture("Assets/Images/joint.png");
-	shape->setTexture(jointTexture->makeHandle());
+	shape->texture(jointTexture->makeHandle());
 	shape->setSizeAndCornerPoint(MV::Point<>(0, 0), jointTexture->size());
 	std::cout << "JT: " << jointTexture->size() << std::endl;
 	shape->setSortDepth(3);

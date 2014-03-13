@@ -18,7 +18,7 @@ void CreateTextScene(std::shared_ptr<MV::Scene::Node> mainScene, MV::TextLibrary
 	auto text = mainScene->add("text", textLibrary.composeScene(MV::parseTextStateList("bluehighway1", UTF_CHAR_STR("A quick brown fox jumped over the lazy dog."))));
 	//Prepare text to rotate around its center.
 	text->translate(MV::Point<>(150, 250));
-	text->centerRotateOrigin();
+	text->centerRotationOrigin();
 }
 
 void ManipulateText(std::shared_ptr<MV::Scene::Node> mainScene){
@@ -33,8 +33,8 @@ void ManipulateText(std::shared_ptr<MV::Scene::Node> mainScene){
 	if(blue > 1.0){blue = 0.0;}
 	if(green > 1.0){green = 0.0;}
 
-	mainScene->get<MV::Scene::Node>("text")->incrementRotate(MV::Point<>(0.0, 0.0, .05 * direction));
-	mainScene->get<MV::Scene::Node>("text")->setColor(MV::Color(red, blue, green));
+	mainScene->get<MV::Scene::Node>("text")->incrementRotation(MV::Point<>(0.0, 0.0, .05 * direction));
+	mainScene->get<MV::Scene::Node>("text")->color(MV::Color(red, blue, green));
 }
 
 std::shared_ptr<MV::Scene::Rectangle> GetDogShape(std::shared_ptr<MV::Scene::Node> mainScene){
@@ -55,13 +55,13 @@ void CreateDogFoxScene(std::shared_ptr<MV::Scene::Node> mainScene){
 	auto sun = sunAndMoon->make<MV::Scene::Rectangle>("sun");
 	sun->setTwoCorners(MV::Point<>(350, 0, 1), MV::Point<>(450, 100, 1));
 	auto textureSheet = MV::FileTextureDefinition::make("Assets/Images/dogfox.png");
-	sun->setTexture(textureSheet->makeHandle(MV::Point<int>(0, 384), MV::Size<int>(128, 128)));
+	sun->texture(textureSheet->makeHandle(MV::Point<int>(0, 384), MV::Size<int>(128, 128)));
 
 	auto moon = sunAndMoon->make<MV::Scene::Rectangle>("moon");
 	moon->setTwoCorners(MV::Point<>(350, 500, 1), MV::Point<>(450, 600, 1));
-	moon->setTexture(textureSheet->makeHandle(MV::Point<int>(128, 384), MV::Size<int>(128, 128)));
+	moon->texture(textureSheet->makeHandle(MV::Point<int>(128, 384), MV::Size<int>(128, 128)));
 
-	sunAndMoon->setRotateOrigin(MV::Point<>(400, 300, 1));
+	sunAndMoon->rotationOrigin(MV::Point<>(400, 300, 1));
 
 	auto dogFoxScene = mainScene->make<MV::Scene::Node>("DogFox");
 	//These values are hard coded, I could have substituted the numbers for named constants
@@ -75,12 +75,12 @@ void CreateDogFoxScene(std::shared_ptr<MV::Scene::Node> mainScene){
 	auto ground = dogFoxScene->make<MV::Scene::Rectangle>("ground");
 	ground->setTwoCorners(MV::Point<>(300, 325, 1), MV::Point<>(500, 425, 1));
 	ground->getDepth();
-	ground->setTexture(textureSheet->makeHandle(MV::Point<int>(256, 384), MV::Size<int>(256, 128)));
+	ground->texture(textureSheet->makeHandle(MV::Point<int>(256, 384), MV::Size<int>(256, 128)));
 }
 
 void UpdateSky(std::shared_ptr<MV::Scene::Node> mainScene){
-	mainScene->get<MV::Scene::Node>("SunAndMoon")->incrementRotate(MV::point(0.0, 0.0, -0.2));
-	MV::Point<> position = mainScene->get<MV::Scene::Node>("SunAndMoon")->getRotation();
+	mainScene->get<MV::Scene::Node>("SunAndMoon")->incrementRotation(MV::point(0.0, 0.0, -0.2));
+	MV::Point<> position = mainScene->get<MV::Scene::Node>("SunAndMoon")->rotation();
 	float distance = (float)abs(MV::boundBetween(position.z, 0.0, 360.0) - 180.0);
 	float brightness = distance / 180.0f;
 	if(brightness < .1f){brightness = .1f;}
@@ -132,7 +132,7 @@ void FoxJump::updateJump(){
 			inJump = false;
 			foxSwapper->setFrameList(frameRegister->getDefinition("FoxStand"));
 		}
-		foxBox->locate(MV::point(movedX, movedY, 3.0));
+		foxBox->position(MV::point(movedX, movedY, 3.0));
 	}
 }
 

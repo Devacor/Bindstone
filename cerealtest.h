@@ -8,98 +8,65 @@
 #include "cereal/types/base_class.hpp"
 
 #include "cereal/archives/json.hpp"
-#include <cereal/types/polymorphic.hpp>
+#include "cereal/types/polymorphic.hpp"
 
 #include <memory>
 
-class Handle;
-
-struct Node {
-	virtual ~Node(){}
-	std::map<std::string, std::shared_ptr<Node>> children;
-	std::shared_ptr<Handle> handle;
+struct A : std::enable_shared_from_this<A>
+{
+	typedef std::vector<std::shared_ptr<A>> DrawListVectorType;
+	DrawListVectorType drawListVector;
+	static int i;
+	int id;
+	A():id(i++){}
 
 	template <class Archive>
-	void serialize(Archive & archive){
-		archive(CEREAL_NVP(handle), CEREAL_NVP(children));
+	void serialize(Archive & ar)
+	{
+		ar(CEREAL_NVP(drawListVector)); //If we don't actually save the drawListVector it's fine.  If we do, we'll get a crash in the destructor.
+	}
+	virtual ~A(){
+		std::cout << "Destructing: " << id << std::endl;
+		for(auto item : drawListVector){
+			std::cout << "iterating over: " << item->id << std::endl;
+		}
 	}
 };
 
-struct DerivedNode : public Node {
-};
+int A::i = 0;
 
-CEREAL_REGISTER_TYPE(Node);
-CEREAL_REGISTER_TYPE(DerivedNode);
-
-class Definition;
-struct Handle {
-	Handle(){}
-	Handle(int id):id(id){}
-	int id = 0;
-	std::shared_ptr<Definition> definition;
-
+struct B : A
+{
 	template <class Archive>
-	void serialize(Archive & archive){
-		archive(CEREAL_NVP(id), CEREAL_NVP(definition));
+	void serialize(Archive & ar)
+	{
+		ar(CEREAL_NVP(drawListVector)); //If we don't actually save the drawListVector it's fine.  If we do, we'll get a crash in the destructor.
 	}
 };
 
-struct Definition {
-	virtual ~Definition(){}
-	Definition(){}
-	Definition(int id):id(id){}
-	int id = 0;
-	std::vector<std::weak_ptr<Handle>> handles;
-
-	template <class Archive>
-	void serialize(Archive & archive){
-		archive(CEREAL_NVP(id), CEREAL_NVP(handles));
-	}
-};
-
-struct DerivedDefinition : public Definition {
-	DerivedDefinition(){}
-	DerivedDefinition(int id):Definition(id){}
-};
-
-CEREAL_REGISTER_TYPE(Definition);
-CEREAL_REGISTER_TYPE(DerivedDefinition);
+CEREAL_REGISTER_TYPE(B);
 
 void saveTest(){
-	std::stringstream stream;
 	{
-		std::shared_ptr<Node> arm = std::make_shared<DerivedNode>();
-		std::shared_ptr<Node> rock1 = std::make_shared<DerivedNode>();
-		std::shared_ptr<Node> rock2 = std::make_shared<DerivedNode>();
-		arm->children["rock1"] = rock1;
-		arm->children["rock2"] = rock2;
+		cereal::JSONOutputArchive ar(std::cout);
+		std::shared_ptr<A> a = std::make_shared<A>();
+		std::shared_ptr<A> b = std::make_shared<B>();
+		std::shared_ptr<A> c = std::make_shared<A>();
+		a->drawListVector.push_back(b);
 
-		std::shared_ptr<Definition> definition = std::make_shared<DerivedDefinition>(1);
-		rock1->handle = std::make_shared<Handle>(1);
-		rock2->handle = std::make_shared<Handle>(2);
-		rock1->handle->definition = definition;
-		rock2->handle->definition = definition;
+		b->drawListVector.push_back(c);
 
-		cereal::JSONOutputArchive archive(stream);
-		archive(cereal::make_nvp("arm", arm));
+		ar(a);
+
+		auto x = b->shared_from_this();
+		a->drawListVector.clear();
+		a.reset();
+		std::cout << "grood1" << std::endl;
+		b->drawListVector.clear();
+		b.reset();
+		std::cout << "grood2" << std::endl;
+		c.reset();
+		std::cout << "grood3" << std::endl;
 	}
-	std::cout << stream.str() << std::endl;
-	std::cout << std::endl;
-	{
-		cereal::JSONInputArchive archive(stream);
-		std::shared_ptr<Node> arm;
-		archive(cereal::make_nvp("arm", arm));
-
-		cereal::JSONOutputArchive outArchive(stream);
-		outArchive(cereal::make_nvp("arm", arm));
-		
-		std::cout << stream.str() << std::endl;
-		std::cout << std::endl;
-
-		archive(cereal::make_nvp("arm", arm));
-		std::cout << "Arm Child 0 Definition ID: " << arm->children["rock1"]->handle->definition->id << std::endl;
-		std::cout << "Arm Child 1 Definition ID: " << arm->children["rock2"]->handle->definition->id << std::endl;
-	}
-
-	std::cout << "Done" << std::endl;
+	std::cout << "grood4" << std::endl;
 }

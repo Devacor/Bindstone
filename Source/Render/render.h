@@ -241,7 +241,7 @@ namespace MV {
 		void setTitle(const std::string &a_title);
 
 		void resize(const Size<int> &a_size);
-		Window& allowUserResize(bool a_maintainProportions = true, Size<int> a_minSize = Size<int>(1, 1), Size<int> a_maxSize = Size<int>(1000000, 1000000));
+		Window& allowUserResize(bool a_maintainProportions = true, const Size<int> &a_minSize = Size<int>(1, 1), const Size<int> &a_maxSize = Size<int>(1000000, 1000000));
 		Window& lockUserResize();
 
 		Window& windowedMode();

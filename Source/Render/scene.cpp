@@ -169,40 +169,58 @@ namespace MV {
 		| ---------Node---------- |
 		\*************************/
 
-		void Node::setColor(const Color &a_newColor){
+		Color Node::color(const Color &a_newColor){
 			int elements = (int)points.size();
 			for(int i = 0; i < elements; i++){
 				points[i] = a_newColor;
 			}
 			alertParent(VisualChange::make(shared_from_this()));
+			return a_newColor;
 		}
 
-		void Node::setTexture(std::shared_ptr<TextureHandle> a_texture){
-			if(texture && textureSizeSignal){
-				texture->sizeObserver.disconnect(textureSizeSignal);
+		Color Node::color() const{
+			std::vector<Color> colorsToAverage;
+			for(auto point : points){
+				colorsToAverage.push_back(point);
+			}
+			return std::accumulate(colorsToAverage.begin(), colorsToAverage.end(), Color(0, 0, 0, 0)) / static_cast<double>(colorsToAverage.size());
+		}
+
+		std::shared_ptr<TextureHandle> Node::texture(std::shared_ptr<TextureHandle> a_texture){
+			if(ourTexture && textureSizeSignal){
+				ourTexture->sizeObserver.disconnect(textureSizeSignal);
 			}
 			textureSizeSignal.reset();
-			texture = a_texture;
-			if(texture){
+			ourTexture = a_texture;
+			if(ourTexture){
 				textureSizeSignal = TextureHandle::SignalType::make([&](std::shared_ptr<MV::TextureHandle> a_handle){
 					updateTextureCoordinates();
 				});
-				texture->sizeObserver.connect(textureSizeSignal);
+				ourTexture->sizeObserver.connect(textureSizeSignal);
 			}
 			updateTextureCoordinates();
+			return a_texture;
 		}
 
-		std::shared_ptr<TextureHandle> Node::getTexture() const{
-			return texture;
+		std::shared_ptr<TextureHandle> Node::texture() const{
+			return ourTexture;
 		}
 
 		void Node::clearTexture(){
 			textureSizeSignal.reset();
-			texture.reset();
+			ourTexture.reset();
 			updateTextureCoordinates();
 		}
 
-		bool Node::remove(std::shared_ptr<Node> a_childItem){
+		std::shared_ptr<Node> Node::removeFromParent(){
+			auto thisShared = shared_from_this();
+			if(myParent){
+				myParent->remove(thisShared);
+			}
+			return thisShared;
+		}
+
+		std::shared_ptr<Node> Node::remove(std::shared_ptr<Node> a_childItem){
 			auto foundChild = std::find_if(drawList.begin(), drawList.end(), [&](const DrawListPairType &item){
 				return item.second == a_childItem;
 			});
@@ -211,21 +229,21 @@ namespace MV {
 				drawList.erase(foundChild);
 				alertParent(ChildRemoved::make(shared_from_this(), removed));
 				alertParent(VisualChange::make(shared_from_this()));
-				return true;
+				return removed;
 			}
-			return false;
+			return nullptr;
 		}
 
-		bool Node::remove(const std::string &a_childId){
+		std::shared_ptr<Node> Node::remove(const std::string &a_childId){
 			auto foundChild = drawList.find(a_childId);
 			if(foundChild != drawList.end()){
 				auto removed = foundChild->second;
 				drawList.erase(foundChild);
 				alertParent(ChildRemoved::make(shared_from_this(), removed));
 				alertParent(VisualChange::make(shared_from_this()));
-				return true;
+				return removed;
 			}
-			return false;
+			return nullptr;
 		}
 
 		void Node::clear(){
@@ -238,12 +256,16 @@ namespace MV {
 			alertParent(VisualChange::make(shared_from_this()));
 		}
 
-		std::shared_ptr<Node> Node::get(const std::string &a_childId){
+		std::shared_ptr<Node> Node::get(const std::string &a_childId, bool a_throwIfNotFound){
 			auto cell = drawList.find(a_childId);
 			if(cell != drawList.end()){
 				return cell->second;
 			}
-			require(0, ResourceException("Scene::getChild was unable to find an element matching the ID: (" + a_childId + ")"));
+			for(auto &cell : drawList){
+				if(auto foundInChild = cell.second->get(a_childId, a_throwIfNotFound)){
+					return foundInChild;
+				}
+			}
 			return nullptr;
 		}
 
@@ -275,45 +297,82 @@ namespace MV {
 			return !equals(getDepth(), a_other.getDepth());
 		}
 
-		Point<> Node::getScale(){
-			return scaleTo;
-		}
-
-		AxisAngles Node::getRotation(){
+		AxisAngles Node::rotation() const{
 			return rotateTo;
 		}
 
-		Point<> Node::getPosition(){
+		double Node::rotation(double a_zRotation) {
+			if(!equals(a_zRotation, 0.0)){
+				rotateTo.z = a_zRotation;
+				alertParent(VisualChange::make(shared_from_this()));
+			}
+			return a_zRotation;
+		}
+
+		MV::AxisAngles Node::rotation(const AxisAngles &a_rotation) {
+			if(a_rotation != AxisAngles()){
+				rotateTo = a_rotation;
+				alertParent(VisualChange::make(shared_from_this()));
+			}
+			return a_rotation;
+		}
+
+		Point<> Node::position() const{
 			return translateTo;
 		}
 
-		void Node::scale(double a_newScale){
+		Point<> Node::position(const Point<> &a_rhs){
+			if(translateTo != a_rhs){
+				translateTo = a_rhs;
+				alertParent(VisualChange::make(shared_from_this()));
+			}
+			return translateTo;
+		}
+
+		AxisMagnitude Node::scale() const{
+			return scaleTo;
+		}
+		AxisMagnitude Node::scale(const AxisMagnitude &a_rhs){
+			if(scaleTo != a_rhs){
+				scaleTo = a_rhs;
+				alertParent(VisualChange::make(shared_from_this()));
+			}
+			return scaleTo;
+		}
+
+		double Node::scale(double a_newScale){
 			scale(Point<>(a_newScale, a_newScale, a_newScale));
+			return a_newScale;
 		}
 
-		void Node::scale(const Point<> &a_scaleValue){
-			scaleTo = a_scaleValue;
-			alertParent(VisualChange::make(shared_from_this()));
+		AxisMagnitude Node::incrementScale(double a_newScale){
+			return incrementScale(Point<>(a_newScale, a_newScale, a_newScale));
 		}
 
-		void Node::incrementScale(double a_newScale){
-			incrementScale(Point<>(a_newScale, a_newScale, a_newScale));
-		}
-
-		void Node::incrementScale(const AxisMagnitude &a_scaleValue){
+		AxisMagnitude Node::incrementScale(const AxisMagnitude &a_scaleValue){
 			scaleTo += a_scaleValue;
 			alertParent(VisualChange::make(shared_from_this()));
+			return scaleTo;
 		}
 
-		void Node::setParent(Node* a_parentItem){
+		Node* Node::parent(Node* a_parentItem){
 			myParent = a_parentItem;
+			if(myParent == nullptr){
+				return nullptr;
+			}else{
+				return myParent;
+			}
 		}
 
 		std::shared_ptr<Node> Node::parent() const{
-			return myParent->shared_from_this();
+			if(myParent == nullptr){
+				return nullptr;
+			}else{
+				return myParent->shared_from_this();
+			}
 		}
 
-		BoxAABB Node::getWorldAABB(bool a_includeChildren){
+		BoxAABB Node::worldAABB(bool a_includeChildren){
 			return getWorldAABBImplementation(a_includeChildren, false);
 		}
 
@@ -323,7 +382,7 @@ namespace MV {
 				renderer->modelviewMatrix().push();
 				renderer->modelviewMatrix().top().makeIdentity();
 				alertParent(PushMatrix::make(shared_from_this()));
-			} else{
+			}else{
 				parentPopMatrix.dismiss();
 			}
 
@@ -351,16 +410,17 @@ namespace MV {
 			return tmpBox;
 		}
 
-		BoxAABB Node::getScreenAABB(bool a_includeChildren){
+		BoxAABB Node::screenAABB(bool a_includeChildren){
 			return getScreenAABBImplementation(a_includeChildren, false);
 		}
 
 		BoxAABB Node::getScreenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
-			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(shared_from_this())); renderer->modelviewMatrix().pop(); });
+			auto self = shared_from_this();
+			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(self)); renderer->modelviewMatrix().pop(); });
 			if(!a_nestedCall){
 				renderer->modelviewMatrix().push();
 				renderer->modelviewMatrix().top().makeIdentity();
-				alertParent(PushMatrix::make(shared_from_this()));
+				alertParent(PushMatrix::make(self));
 			} else{
 				parentPopMatrix.dismiss();
 			}
@@ -388,7 +448,7 @@ namespace MV {
 			return tmpBox;
 		}
 
-		BoxAABB Node::getLocalAABB(bool a_includeChildren){
+		BoxAABB Node::localAABB(bool a_includeChildren){
 			return getLocalAABBImplementation(a_includeChildren, false);
 		}
 
@@ -426,7 +486,7 @@ namespace MV {
 			return tmpBox;
 		}
 
-		MV::BoxAABB Node::getPointAABB() {
+		MV::BoxAABB Node::baseAABB() {
 			BoxAABB tmpBox;
 
 			if(!points.empty()){
@@ -665,12 +725,12 @@ namespace MV {
 		}
 
 		void Node::bindOrDisableTexture(const std::shared_ptr<std::vector<GLfloat>> &texturePoints){
-			if(texture != nullptr && texture->texture() == nullptr){
-				std::cerr << "Warning: TextureHandle with an unloaded texture: " << texture->name << std::endl;
+			if(ourTexture != nullptr && ourTexture->texture() == nullptr){
+				std::cerr << "Warning: TextureHandle with an unloaded texture: " << ourTexture->name << std::endl;
 			}
-			if(texture != nullptr && texture->texture() != nullptr){
+			if(ourTexture != nullptr && ourTexture->texture() != nullptr){
 				glEnable(GL_TEXTURE_2D);
-				glBindTexture(GL_TEXTURE_2D, texture->texture()->textureId());
+				glBindTexture(GL_TEXTURE_2D, ourTexture->texture()->textureId());
 				glEnableClientState(GL_TEXTURE_COORD_ARRAY);
 
 				glTexCoordPointer(2, GL_FLOAT, 0, &(*texturePoints)[0]);
@@ -695,7 +755,7 @@ namespace MV {
 
 			glDisableClientState(GL_COLOR_ARRAY);
 			glDisableClientState(GL_VERTEX_ARRAY);
-			if(texture != nullptr){
+			if(ourTexture != nullptr){
 				glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 				glDisable(GL_TEXTURE_2D);
 			}
@@ -755,23 +815,15 @@ namespace MV {
 		}
 
 		void Node::sortedRender(){
-			if(!isSorted){
-				drawListVector.clear();
-				std::transform(drawList.begin(), drawList.end(), std::back_inserter(drawListVector), [](DrawListType::value_type shape){
-					return shape.second;
-				});
-				std::sort(drawListVector.begin(), drawListVector.end(), [](DrawListVectorType::value_type one, DrawListVectorType::value_type two){
-					return *one.lock() < *two.lock();
-				});
-				isSorted = true;
-			}
-			std::for_each(drawListVector.begin(), drawListVector.end(), [](DrawListVectorType::value_type &shape){
+			sortDrawListVector();
+			drawListVector.erase(remove_if(drawListVector.begin(), drawListVector.end(), [](DrawListVectorType::value_type &shape){
 				if(!shape.expired()){
 					shape.lock()->draw();
-				}else{
-					std::cout << "Error: expired shape in drawListVector!" << std::endl;
+					return false;
+				} else{
+					return true;
 				}
-			});
+			}), drawListVector.end());
 		}
 
 		void Node::unsortedRender(){
@@ -787,7 +839,6 @@ namespace MV {
 		Node::Node(Draw2D* a_renderer):
 			renderer(a_renderer),
 			myParent(nullptr),
-			hasTexture(false),
 			depthOverride(false),
 			drawSorted(true),
 			isSorted(false),
@@ -796,7 +847,7 @@ namespace MV {
 
 		std::shared_ptr<Node> Node::make(Draw2D* a_renderer, const Point<> &a_placement /*= Point<>()*/) {
 			auto node = std::shared_ptr<Node>(new Node(a_renderer));
-			node->locate(a_placement);
+			node->position(a_placement);
 			return node;
 		}
 
@@ -814,17 +865,72 @@ namespace MV {
 			alertParent(VisualChange::make(shared_from_this()));
 		}
 
+		void Node::sortDrawListVector() {
+			if(!isSorted){
+				drawListVector.clear();
+				std::transform(drawList.begin(), drawList.end(), std::back_inserter(drawListVector), [](DrawListType::value_type shape){
+					return shape.second;
+				});
+				std::sort(drawListVector.begin(), drawListVector.end(), [](DrawListVectorType::value_type one, DrawListVectorType::value_type two){
+					return *one.lock() < *two.lock();
+				});
+				isSorted = true;
+			}
+		}
+
+		std::vector<std::shared_ptr<Node>> Node::children() {
+			std::vector<std::shared_ptr<Node>> childNodes;
+			std::transform(drawList.begin(), drawList.end(), std::back_inserter(childNodes), [](DrawListType::value_type shape){
+				return shape.second;
+			});
+			return childNodes;
+		}
+
+		double Node::incrementRotation(double a_zRotation) {
+			if(!equals(a_zRotation, 0.0)){
+				rotateTo.z += a_zRotation;
+				alertParent(VisualChange::make(shared_from_this()));
+			}
+			return rotateTo.z;
+		}
+
+		MV::AxisAngles Node::incrementRotation(const AxisAngles &a_rotation) {
+			if(a_rotation != AxisAngles()){
+				rotateTo += a_rotation;
+				alertParent(VisualChange::make(shared_from_this()));
+			}
+			return rotateTo;
+		}
+
+		Point<> Node::rotationOrigin(const Point<> &a_origin) {
+			if(rotateOrigin != a_origin){
+				rotateOrigin = a_origin;
+				alertParent(VisualChange::make(shared_from_this()));
+			}
+			return rotateOrigin;
+		}
+
+		Point<> Node::centerRotationOrigin() {
+			auto centerPoint = localAABB().centerPoint();
+			if(rotateOrigin != centerPoint){
+				alertParent(VisualChange::make(shared_from_this()));
+			}
+			return centerPoint;
+		}
+
+
+
+
+
+
 		/*************************\
 		| ---------Pixel--------- |
 		\*************************/
 
 		void Pixel::setPoint(const DrawPoint &a_point){
-			points[0] = a_point;
-			if(!depthOverride){
-				depthChanged();
-			}
+			auto notifyOnChanged = makeScopedDepthChangeNote(this);
 
-			alertParent(VisualChange::make(shared_from_this()));
+			points[0] = a_point;
 		}
 
 		void Pixel::drawImplementation(){
@@ -843,9 +949,10 @@ namespace MV {
 		\*************************/
 
 		void Line::setEnds(const DrawPoint &a_startPoint, const DrawPoint &a_endPoint){
+			auto notifyOnChanged = makeScopedDepthChangeNote(this);
+
 			points[0] = a_startPoint;
 			points[1] = a_endPoint;
-			depthChanged();
 		}
 
 		void Line::drawImplementation(){
@@ -869,7 +976,8 @@ namespace MV {
 		\*************************/
 
 		void Rectangle::setTwoCorners(const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight){
-			bool callDepthChanged = (!depthOverride && (a_topLeft.z + a_bottomRight.z) / 2.0 != getDepth());
+			auto notifyOnChanged = makeScopedDepthChangeNote(this);
+
 			DrawPoint topLeft = a_topLeft, bottomRight = a_bottomRight;
 			topLeft.x = std::min(a_topLeft.x, a_bottomRight.x);
 			bottomRight.x = std::max(a_topLeft.x, a_bottomRight.x);
@@ -881,15 +989,11 @@ namespace MV {
 			points[1].x = topLeft.x;	points[1].y = bottomRight.y;	points[1].z = (bottomRight.z + topLeft.z) / 2;
 			points[2] = bottomRight;
 			points[3].x = bottomRight.x;	points[3].y = topLeft.y;	points[3].z = (bottomRight.z + topLeft.z) / 2;
-			if(callDepthChanged){
-				depthChanged(); //also alerts
-			} else{
-				alertParent(VisualChange::make(shared_from_this()));
-			}
 		}
 
 		void Rectangle::setTwoCorners(const Point<> &a_topLeft, const Point<> &a_bottomRight){
-			bool callDepthChanged = !depthOverride && (a_topLeft.z + a_bottomRight.z) / 2.0 != getDepth();
+			auto notifyOnChanged = makeScopedDepthChangeNote(this);
+
 			Point<> topLeft = a_topLeft, bottomRight = a_bottomRight;
 			topLeft.x = std::min(a_topLeft.x, a_bottomRight.x);
 			bottomRight.x = std::max(a_topLeft.x, a_bottomRight.x);
@@ -901,11 +1005,6 @@ namespace MV {
 			points[1].x = topLeft.x;	points[1].y = bottomRight.y;	points[1].z = (bottomRight.z + topLeft.z) / 2;
 			points[2] = bottomRight;
 			points[3].x = bottomRight.x;	points[3].y = topLeft.y;	points[3].z = (bottomRight.z + topLeft.z) / 2;
-			if(callDepthChanged){
-				depthChanged(); //also alerts
-			} else{
-				alertParent(VisualChange::make(shared_from_this()));
-			}
 		}
 
 		void Rectangle::setTwoCorners(const BoxAABB &a_bounds){
@@ -919,15 +1018,14 @@ namespace MV {
 			Point<> bottomRight(halfWidth, halfHeight);
 
 			setTwoCorners(topLeft, bottomRight);
-			locate(a_centerPoint);
+			position(a_centerPoint);
 		}
 
 		void Rectangle::setSizeAndCornerPoint(const Point<> &a_topLeft, const Size<> &a_size){
 			Point<> bottomRight(pointFromSize(a_size));
 
 			setTwoCorners(Point<>(), bottomRight);
-
-			locate(a_topLeft);
+			position(a_topLeft);
 		}
 
 		void Rectangle::clearTextureCoordinates(){
@@ -939,13 +1037,13 @@ namespace MV {
 		}
 
 		void Rectangle::updateTextureCoordinates(){
-			if(texture != nullptr){
-				points[0].textureX = texture->percentLeft(); points[0].textureY = texture->percentTop();
-				points[1].textureX = texture->percentLeft(); points[1].textureY = texture->percentBottom();
-				points[2].textureX = texture->percentRight(); points[2].textureY = texture->percentBottom();
-				points[3].textureX = texture->percentRight(); points[3].textureY = texture->percentTop();
+			if(ourTexture != nullptr){
+				points[0].textureX = ourTexture->percentLeft(); points[0].textureY = ourTexture->percentTop();
+				points[1].textureX = ourTexture->percentLeft(); points[1].textureY = ourTexture->percentBottom();
+				points[2].textureX = ourTexture->percentRight(); points[2].textureY = ourTexture->percentBottom();
+				points[3].textureX = ourTexture->percentRight(); points[3].textureY = ourTexture->percentTop();
 				alertParent(VisualChange::make(shared_from_this()));
-			} else{
+			} else {
 				clearTextureCoordinates();
 			}
 		}
@@ -970,7 +1068,7 @@ namespace MV {
 			return rectangle;
 		}
 
-		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Point<> &a_point, Size<> &a_size, bool a_center) {
+		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Point<> &a_point, const Size<> &a_size, bool a_center) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
 			if(a_center){
 				rectangle->setSizeAndCenterPoint(a_point, a_size);

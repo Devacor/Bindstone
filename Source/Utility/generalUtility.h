@@ -103,14 +103,14 @@ namespace MV {
 	std::string wideToString(const UtfString& ws);
 	UtfString stringToWide(const std::string& s);
 
-	template <class variable_type>
-	variable_type toDegrees(const variable_type &val){
-		return static_cast<variable_type>(val*(180.0/PIE));
+	template <class Type>
+	Type toDegrees(const Type &val){
+		return static_cast<Type>(val*(180.0 / PIE));
 	}
 
-	template <class variable_type>
-	variable_type toRadians(const variable_type &val){
-		return static_cast<variable_type>(val*(PIE/180.0));
+	template <class Type>
+	Type toRadians(const Type &val){
+		return static_cast<Type>(val*(PIE / 180.0));
 	}
 
 	template <class Type>
@@ -130,14 +130,14 @@ namespace MV {
 		}
 	}
 
-	template <class variable_type>
-	void rotatePoint2D(variable_type &x, variable_type &y, long double angle, AngleType angleUnitIs = DEGREES){
+	template <class Type>
+	void rotatePoint2D(Type &x, Type &y, long double angle, AngleType angleUnitIs = DEGREES){
 		if(angleUnitIs == DEGREES){
 			angle = toRadians(angle);
 		}
-		variable_type tmpX, tmpY;
-		tmpX = variable_type((x * cos(angle)) - (y * sin(angle)));
-		tmpY = variable_type((y * cos(angle)) + (x * sin(angle)));
+		Type tmpX, tmpY;
+		tmpX = Type((x * cos(angle)) - (y * sin(angle)));
+		tmpY = Type((y * cos(angle)) + (x * sin(angle)));
 		x = tmpX; y = tmpY;
 	}
 
@@ -160,8 +160,8 @@ namespace MV {
 		y = (y * cos(aZ)) - (tmpx * sin(aZ));
 	}
 
-	template <class variable_type>
-	variable_type capBetween(const variable_type &val, const variable_type & lowerBound, const variable_type & upperBound){
+	template <class Type>
+	Type capBetween(const Type &val, const Type & lowerBound, const Type & upperBound){
 		return std::min(std::max(val, lowerBound), val);
 	}
 
@@ -172,8 +172,8 @@ namespace MV {
 
 	//returns the shortest distance between two numbers within a given bounding set of values.  If the closest value is the
 	//wraparound value and wrapDist is passed in then wrapDist is set to 1, if it is closer between the two numbers, wrapDist==0
-	template <class variable_type>
-	variable_type getWrappingDistance(variable_type val, variable_type val2, variable_type lowerBound, variable_type upperBound, bool *wrapDist=nullptr){
+	template <class Type>
+	Type getWrappingDistance(Type val, Type val2, Type lowerBound, Type upperBound, bool *wrapDist = nullptr){
 		require<RangeException>(upperBound >= lowerBound);
 		if(val==val2){
 			if(wrapDist != nullptr){*wrapDist = false;}
@@ -181,7 +181,7 @@ namespace MV {
 		}
 		val = boundBetween(val, lowerBound, upperBound);
 		val2 = boundBetween(val2, lowerBound, upperBound);
-		variable_type dist1, dist2;
+		Type dist1, dist2;
 		if(val>val2){
 			dist1 = val-val2;
 			dist2 = (upperBound-val)+val2;
@@ -197,8 +197,8 @@ namespace MV {
 	}
 
 	//expects the same type for both parameters.
-	template<typename T>
-	bool floatingPointRangeCompareCheck(T value, T delta){
+	template<typename Type>
+	bool floatingPointRangeCompareCheck(Type value, Type delta){
 		return delta == 0. || (value - delta != value);
 	}
 

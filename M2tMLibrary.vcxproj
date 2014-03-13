@@ -164,6 +164,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="editor.cpp" />
     <ClCompile Include="Source\Animation\actionSequence.cpp" />
     <ClCompile Include="Source\Animation\frameSwapper.cpp" />
     <ClCompile Include="Source\Audio\sound.cpp" />
@@ -239,6 +240,7 @@
     <ClInclude Include="..\external\cereal\include\cereal\types\utility.hpp" />
     <ClInclude Include="..\external\cereal\include\cereal\types\vector.hpp" />
     <ClInclude Include="cerealtest.h" />
+    <ClInclude Include="editor.h" />
     <ClInclude Include="Source\Animation\actionSequence.h" />
     <ClInclude Include="Source\Animation\frameSwapper.h" />
     <ClInclude Include="Source\Animation\package.h" />

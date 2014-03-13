@@ -57,6 +57,15 @@ namespace MV {
 		}
 
 		TTF_Font* font;
+		std::string file;
+		int size;
+
+		void set(const std::string &a_file, int a_size, TTF_Font* a_font){
+			file = a_file;
+			size = a_size;
+			font = a_font;
+		}
+
 		FontDefinition(FontDefinition &&a_other){
 			font = a_other.font;
 			a_other.font = nullptr;
@@ -66,6 +75,24 @@ namespace MV {
 			font = a_other.font;
 			a_other.font = nullptr;
 			return *this;
+		}
+
+	private:
+		template <class Archive>
+		void save(Archive & archive){
+			archive(
+				CEREAL_NVP(file),
+				CEREAL_NVP(size)
+			);
+		}
+
+		template <class Archive>
+		void load(Archive & archive){
+			archive(
+				CEREAL_NVP(file),
+				CEREAL_NVP(size)
+			);
+			font = TTF_OpenFont(file.c_str(), size);
 		}
 
 		FontDefinition(const FontDefinition &a_other) = delete;
@@ -92,6 +119,25 @@ namespace MV {
 
 		Draw2D *getRenderer(){return render;}
 	private:
+		template <class Archive>
+		void serialize(Archive & archive){
+			archive(
+				CEREAL_NVP(loadedFonts)
+			);
+		}
+
+		template <class Archive>
+		static void load_and_construct(Archive & archive, cereal::construct<TextLibrary> &construct){
+			TextLibrary *renderer = nullptr;
+			archive.extract(
+				cereal::make_nvp("renderer", renderer)
+			);
+			construct(renderer);
+			archive(
+				cereal::make_nvp("loadedFonts", construct()->loadedFonts)
+			);
+		}
+
 		typedef std::map<UtfChar, TextCharacter> CachedGlyphs;
 		typedef std::map<std::string, CachedGlyphs> CachedGlyphList;
 		CachedGlyphs* initGlyphs(const std::string &a_identifier, const UtfString &a_text);
@@ -104,10 +150,12 @@ namespace MV {
 	};
 
 	class TextBox{
+		friend cereal::access;
+		friend cereal::construct<TextBox>;
 	public:
-		TextBox(TextLibrary *a_textLibrary, Size<> a_size);
-		TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, Size<> a_size);
-		TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, Size<> a_size);
+		TextBox(TextLibrary *a_textLibrary, const Size<> &a_size);
+		TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const Size<> &a_size);
+		TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, const Size<> &a_size);
 
 		void setText(const UtfString &a_text, const std::string &a_fontIdentifier = "");
 		void setText(UtfChar a_char, const std::string &a_fontIdentifier = ""){
@@ -160,7 +208,7 @@ namespace MV {
 		}
 
 		Size<> getContentSize(){
-			return textScene->getLocalAABB().getSize();
+			return textScene->localAABB().size();
 		}
 
 		std::shared_ptr<Scene::Node> scene(){
@@ -171,6 +219,33 @@ namespace MV {
 			textboxScene->draw();
 		}
 	private:
+		template <class Archive>
+		void serialize(Archive & archive){
+			archive(
+				CEREAL_NVP(text),
+				CEREAL_NVP(fontIdentifier),
+				CEREAL_NVP(boxSize),
+				CEREAL_NVP(contentScrollPosition)
+			);
+		}
+
+		template <class Archive>
+		static void load_and_construct(Archive & archive, cereal::construct<TextBox> &construct){
+			TextLibrary *textLibrary = nullptr;
+			Size<> boxSize;
+			archive(
+				cereal::make_nvp("boxSize", boxSize)
+			).extract(
+				cereal::make_nvp("textLibrary", textLibrary)
+			);
+			construct(textLibrary, boxSize);
+			archive(
+				cereal::make_nvp("text", construct()->text),
+				cereal::make_nvp("fontIdentifier", construct()->fontIdentifier),
+				cereal::make_nvp("contentScrollPosition", construct()->contentScrollPosition)
+			);
+		}
+
 		void initialize(const UtfString &a_text);
 		void refreshTextBoxContents();
 

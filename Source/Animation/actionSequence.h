@@ -19,7 +19,7 @@ public:
 	virtual ~ActionSequence();
 	
 	//return true on complete
-	bool passTime(double a_dt);
+	bool update(double a_dt);
 	bool done() const; //Action is done running
 	bool shouldDie() const; //Action could be removed
 	
@@ -86,7 +86,7 @@ private:
 
 	virtual void onBeginThisAction() {}
 	virtual void onCompleteThisAction() {}
-	virtual bool passTimeAction(double dt){
+	virtual bool updateAction(double dt){
 		return true;
 	}
 	

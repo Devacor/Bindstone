@@ -94,6 +94,9 @@
     <ClCompile Include="Source\Interface\mouse.cpp">
       <Filter>Source Files\Interface</Filter>
     </ClCompile>
+    <ClCompile Include="editor.cpp">
+      <Filter>Source Files\Game</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -335,6 +338,9 @@
     </ClInclude>
     <ClInclude Include="..\external\cereal\include\cereal\types\vector.hpp">
       <Filter>Cereal</Filter>
+    </ClInclude>
+    <ClInclude Include="editor.h">
+      <Filter>Source Files\Game</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

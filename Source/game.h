@@ -13,10 +13,13 @@ public:
 	Game();
 
 	//return true if we're still good to go
-	bool passTime(double dt);
+	bool update(double dt);
 	void handleInput();
 	void render();
 private:
+	Game(const Game &) = delete;
+	Game& operator=(const Game &) = delete;
+
 	std::shared_ptr<MV::Scene::Node> initializeCatapultScene();
 	void initializeWindow();
 	std::shared_ptr<MV::Scene::Node> initializeTextScene();
@@ -42,11 +45,14 @@ private:
 
 	MV::Stopwatch watch;
 	double lastSecond = 0;
+
+	void hookUpInput();
+
 	void saveTest(){
 		std::cout << "Save Begin" << std::endl;
-		std::shared_ptr<MV::Scene::Node> saveScene;
 		std::stringstream stream;
 		{
+			std::shared_ptr<MV::Scene::Node> saveScene;
 			cereal::JSONOutputArchive archive(stream);
 			saveScene = mainScene->get("clipped");
 			archive(cereal::make_nvp("test", saveScene));
@@ -62,28 +68,29 @@ private:
 
 		{
 			cereal::JSONInputArchive archive(stream);
+			archive.add(cereal::make_nvp("mouse", &mouse), cereal::make_nvp("renderer", &renderer));
 			std::shared_ptr<MV::Scene::Node> loadScene;
-			archive(cereal::make_nvp("test", loadScene));
+			auto nvp = cereal::make_nvp("test", loadScene);
+			archive(nvp);
+			loadScene->shared_from_this();
+			if(!loadScene){
+				std::cout << "What the fuck" << std::endl;
+			}
 			mainScene->add("clipped", loadScene);
+			loadScene->shared_from_this();
+			auto test = loadScene->get<MV::Scene::Clickable>("clickArm");
+			auto test2 = test->shared_from_this();
 		}
+
+		auto test = mainScene->get("clipped");
+		test->shared_from_this_test();
+
 		if(std::floor(watch.check()) > lastSecond){
 			lastSecond = std::floor(watch.check());
 			std::cout << lastSecond << std::endl;
 		}
 		std::cout << "Save End" << std::endl;
-		/*std::stringstream stream;
-		{
-			cereal::JSONOutputArchive archive(stream);
-			archive(cereal::make_nvp("test", textures));
-		}
-		std::cout << stream.str() << std::endl;
-		std::cout << "YAYA" << std::endl;
-		/*{
-			cereal::JSONInputArchive archive(stream);
-			MV::Point<> test2;
-			archive(test2);
-			std::cout << test2 << std::endl;
-		}*/
+		hookUpInput();
 	}
 };
 

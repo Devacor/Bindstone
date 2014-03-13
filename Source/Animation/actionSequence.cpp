@@ -63,7 +63,7 @@ bool ActionSequence::empty(){
 void ActionSequence::forceComplete(){
 	onForceComplete();
 	forceCompleteInternal();
-	passTime(0);
+	update(0);
 	wasForceCompleted = true;
 }
 
@@ -222,8 +222,8 @@ void ActionSequence::runAndCompleteSequentialChildActions(double a_dt){
 	if(!sequentialOnCompleteActions.empty()){
 		bool sequentialActionWasDone = sequentialOnCompleteActions.front()->done();
 		std::shared_ptr<ActionSequence> toRemove = sequentialOnCompleteActions.front();
-		if (sequentialOnCompleteActions.front()->passTime(a_dt)){
-			//need to seek in case passTime messes with our sequentialOnCompleteActions order, used to just pop_front.
+		if (sequentialOnCompleteActions.front()->update(a_dt)){
+			//need to seek in case update messes with our sequentialOnCompleteActions order, used to just pop_front.
 			auto found = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), toRemove);
 			if(found != sequentialOnCompleteActions.end()){
 				sequentialOnCompleteActions.erase(found);
@@ -241,7 +241,7 @@ void ActionSequence::runAndCompleteSequentialChildActions(double a_dt){
 void ActionSequence::runAndCompleteParallelChildActions(double a_dt){
 	for(ActionSequenceList::iterator i = parallelOnCompleteActions.begin();i != parallelOnCompleteActions.end();){
 		bool parallelActionWasDone = (*i)->done() && !(*i)->forceCompleted();
-		if((*i)->passTime(a_dt)){
+		if((*i)->update(a_dt)){
 			std::shared_ptr<ActionSequence> toRemove = *i;
 			if(toRemove->shouldDie()){
 				i = parallelOnCompleteActions.erase(i);
@@ -263,14 +263,14 @@ bool ActionSequence::runAndCompleteChildActions(double a_dt){
 	return done();
 }
 
-bool ActionSequence::passTime(double a_dt){
+bool ActionSequence::update(double a_dt){
 	wasForceCompleted = false;
 	if(!isDone){
 		if(!started){
 			onBeginThisAction();
 			started = true;
 		}
-		isDone = passTimeAction(a_dt);
+		isDone = updateAction(a_dt);
 	}
 	if(isDone){
 		if(!started){

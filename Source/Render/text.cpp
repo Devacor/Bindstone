@@ -114,7 +114,7 @@ namespace MV {
 		if(loadedFonts.find(a_identifier) == loadedFonts.end()){
 			TTF_Font* newFont = TTF_OpenFont(a_fontFileLocation.c_str(), a_pointSize);
 			if(newFont) {
-				loadedFonts[a_identifier].font = newFont;
+				loadedFonts[a_identifier].set(a_fontFileLocation, a_pointSize, newFont);
 				return true;
 			}else{
 				std::cerr << "Error loading font: " << TTF_GetError() << std::endl;
@@ -179,7 +179,7 @@ namespace MV {
 								previousLine = characterCount - distance;
 								for(;distance > 0;--distance){
 									auto renderedCharacter = textScene->get(boost::lexical_cast<std::string>(characterCount-distance));
-									renderedCharacter->locate(Point<>(characterLocationX, renderedCharacter->getPosition().y + lineHeight));
+									renderedCharacter->position(Point<>(characterLocationX, renderedCharacter->position().y + lineHeight));
 									characterLocationX+=currentLineCharacterSizes[currentLineContent.size()-distance];
 								}
 								nextCharacterLocationX+=characterLocationX;
@@ -195,9 +195,9 @@ namespace MV {
 					}
 					if(*renderChar != '\n'){
 						auto character = Scene::Rectangle::make(render, Point<>(), castSize<double>((*characterList)[*renderChar].characterSize()), false);
-						character->locate(Point<>(characterLocationX, characterLocationY + offset));
-						character->setTexture((*characterList)[*renderChar].texture());
-						character->setColor(currentColor);
+						character->position(Point<>(characterLocationX, characterLocationY + offset));
+						character->texture((*characterList)[*renderChar].texture());
+						character->color(currentColor);
 						textScene->add(boost::lexical_cast<std::string>(characterCount), character);
 						characterLocationX = nextCharacterLocationX;
 						currentLineContent.push_back(*renderChar);
@@ -253,8 +253,9 @@ namespace MV {
 		});
 	}
 
-	TextBox::TextBox(TextLibrary *a_textLibrary, Size<> a_size):
+	TextBox::TextBox(TextLibrary *a_textLibrary, const Size<> &a_size):
 		textLibrary(a_textLibrary),
+		fontIdentifier("default"),
 		render(a_textLibrary->getRenderer()),
 		textboxScene(Scene::Clipped::make(a_textLibrary->getRenderer(), a_size)),
 		textScene(nullptr),
@@ -262,7 +263,7 @@ namespace MV {
 		firstRun = true;
 	}
 
-	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, Size<> a_size):
+	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const Size<> &a_size):
 		textLibrary(a_textLibrary),
 		render(a_textLibrary->getRenderer()),
 		fontIdentifier(a_fontIdentifier),
@@ -272,7 +273,7 @@ namespace MV {
 		firstRun = true;
 	}
 
-	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, Size<> a_size) :
+	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, const Size<> &a_size) :
 		textLibrary(a_textLibrary),
 		render(a_textLibrary->getRenderer()),
 		fontIdentifier(a_fontIdentifier),
@@ -310,7 +311,7 @@ namespace MV {
 	void TextBox::refreshTextBoxContents(){
 		if(fontIdentifier != ""){
 			textScene = textboxScene->add("Text", textLibrary->composeScene(parseTextStateList(fontIdentifier, text), boxSize.width));
-			textScene->locate(contentScrollPosition);
+			textScene->position(contentScrollPosition);
 		} else{
 			std::cerr << "Warning: refreshTextBoxContents called, but no fontIdentifier has been set yet!" << std::endl;
 		}
@@ -330,7 +331,7 @@ namespace MV {
 			a_position.x = 0;
 		}
 		contentScrollPosition = a_position;
-		textScene->locate(contentScrollPosition);
+		textScene->position(contentScrollPosition);
 	}
 
 }

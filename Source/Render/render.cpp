@@ -442,7 +442,7 @@ namespace MV {
 		}
 	}
 
-	Window& Window::allowUserResize(bool a_maintainProportions, Size<int> a_minSize, Size<int> a_maxSize){
+	Window& Window::allowUserResize(bool a_maintainProportions, const Size<int> &a_minSize, const Size<int> &a_maxSize){
 		maintainProportions = a_maintainProportions;
 		minSize = a_minSize;
 		maxSize = a_maxSize;

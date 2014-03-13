@@ -6,6 +6,7 @@
 
 #include "Utility/generalUtility.h"
 #include "cereal/cereal.hpp"
+#include "cereal/access.hpp"
 
 namespace MV {
 
@@ -36,27 +37,39 @@ namespace MV {
 
 	class Color{
 	public:
-		Color():R(1.0),G(1.0),B(1.0),A(1.0){}
-		Color(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0){R = validRange(a_Red); G = validRange(a_Green); B = validRange(a_Blue); A = validRange(a_Alpha);}
+		Color():R(1.0f), G(1.0f), B(1.0f), A(1.0f){}
+		Color(uint32_t a_hex, bool a_readAlpha = false);
+		Color(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0f){ R = validColorRange(a_Red); G = validColorRange(a_Green); B = validColorRange(a_Blue); A = validColorRange(a_Alpha); }
 		~Color(){}
 		Color& operator=(const Color& a_other);
 		Color& operator=(const DrawPoint& a_other);
 
-		bool operator==(const Color& a_other) const{
-			return equals(R, a_other.R) && equals(G, a_other.G) && equals(B, a_other.B) && equals(A, a_other.A);
-		}
-		bool operator!=(const Color& a_other) const{
-			return !(*this == a_other);
-		}
+		bool operator==(const Color& a_other) const;
+		bool operator!=(const Color& a_other) const;
+
+		Color& operator+=(const Color& a_other);
+		Color& operator-=(const Color& a_other);
+		Color& operator*=(const Color& a_other);
+		Color& operator/=(const Color& a_other);
+
+		template<typename T>
+		Color& operator*=(T a_other);
+		template<typename T>
+		Color& operator/=(T a_other);
 
 		template <class Archive>
 		void serialize(Archive & archive){
 			archive(CEREAL_NVP(R), CEREAL_NVP(G), CEREAL_NVP(B), CEREAL_NVP(A));
 		}
 
+		uint32_t hex() const;
+		uint32_t hex(uint32_t a_hex, bool a_readAlpha = false);
+
 		float R, G, B, A;
+
+		void normalize();
 	private:
-		float validRange(float a_color){
+		float validColorRange(float a_color){
 			if(a_color > 1.0){a_color = 1.0;}
 			if(a_color < 0.0){a_color = 0.0;}
 			return a_color;
@@ -178,6 +191,45 @@ namespace MV {
 	template <class T>
 	Size<T> sizeFromPoint(const Point<T>& a_point){
 		return Size<T>{a_point.x, a_point.y, a_point.z};
+	}
+
+	/************************\
+	| ------Color IMP------- |
+	\************************/
+
+	Color operator+(const Color &a_lhs, const Color &a_rhs);
+	Color operator-(const Color &a_lhs, const Color &a_rhs);
+
+	Color operator/(const Color &a_lhs, const Color &a_rhs);
+	Color operator*(const Color &a_lhs, const Color &a_rhs);
+
+	template<typename T>
+	Color& operator*(const Color &a_lhs, T a_rhs){
+		Color result = a_lhs;
+		return result *= a_rhs;
+	}
+	template<typename T>
+	Color& operator/(const Color &a_lhs, T a_rhs){
+		Color result = a_lhs;
+		return result *= a_rhs;
+	}
+
+	template <typename T>
+	Color& Color::operator*=(T a_other){
+		R *= static_cast<float>(a_other);
+		G *= static_cast<float>(a_other);
+		B *= static_cast<float>(a_other);
+		A *= static_cast<float>(a_other);
+		return *this;
+	}
+
+	template <typename T>
+	Color& Color::operator/=(T a_other){
+		R /= static_cast<float>(a_other);
+		G /= static_cast<float>(a_other);
+		B /= static_cast<float>(a_other);
+		A /= static_cast<float>(a_other);
+		return *this;
 	}
 
 	/************************\

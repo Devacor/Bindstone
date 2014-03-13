@@ -44,7 +44,7 @@ namespace MV {
 		bool flatWidth() const{ return equals(minPoint.x, maxPoint.x); }
 		bool flatHeight() const{ return equals(minPoint.y, maxPoint.y); }
 
-		Size<> getSize() const{ return sizeFromPoint(maxPoint - minPoint); }
+		Size<> size() const{ return sizeFromPoint(maxPoint - minPoint); }
 
 		//includes z
 		bool pointContainedZ(const Point<> &a_comparePoint) const;
@@ -92,7 +92,6 @@ namespace MV {
 	typedef Point<> AxisAngles;
 	typedef Point<> AxisMagnitude;
 
-
 	//I had three options here: 
 	//1) In derived classes specify using Node::make and then rename Node's static make function to something else so it cannot clash
 	//or
@@ -118,15 +117,45 @@ namespace MV {
 	}
 
 	namespace Scene {
+		template <typename T>
+		class ScopedDepthChangeNote{
+		public:
+			ScopedDepthChangeNote(T* a_target, bool visualChangeRegardless = true):
+				target(a_target),
+				startDepth(a_target->getDepth()){
+			}
+
+			~ScopedDepthChangeNote(){
+				if(startDepth != target->getDepth()){
+					target->depthChanged();
+				} else if(visualChangeRegardless){
+					target->alertParent(VisualChange::make(target->shared_from_this()));
+				}
+			}
+		private:
+			T* target;
+			double startDepth;
+			bool visualChangeRegardless;
+		};
+
+		template <typename T>
+		std::unique_ptr<ScopedDepthChangeNote<T>> makeScopedDepthChangeNote(T* a_target, bool a_visualChangeRegardless = true){
+			return std::move(std::make_unique<ScopedDepthChangeNote<T>>(a_target, a_visualChangeRegardless));
+		}
+
 		class Node : 
 			public std::enable_shared_from_this<Node>,
 			public MessageHandler<PushMatrix>,
-			public MessageHandler<PopMatrix>,
-			public MessageHandler<SetRenderer>{
+			public MessageHandler<PopMatrix>{
 			friend cereal::access;
-			friend cereal::allocate<Node>;
+			friend cereal::construct<Node>;
 		public:
-			virtual ~Node(){}
+			virtual ~Node(){
+				myParent = nullptr;
+				for(auto &child : drawList){
+					child.second->parent(nullptr);
+				}
+			}
 
 			SCENE_MAKE_FACTORY_METHODS
 
@@ -140,15 +169,13 @@ namespace MV {
 					while(currentParent = currentParent->myParent){
 						setRenderer(a_renderer, false, true);
 					}
-					//alertParent(SetRenderer::make(shared_from_this(), a_renderer));
 				}else if(includeChildren){
 					for(auto &child : drawList){
 						child.second->setRenderer(a_renderer, true, false);
 					}
-					//alertChildren(SetRenderer::make(shared_from_this(), a_renderer));
 				}
 			}
-			Draw2D* getRenderer(){ return renderer; }
+			Draw2D* getRenderer() const{ return renderer; }
 
 			virtual void clear();
 
@@ -160,24 +187,25 @@ namespace MV {
 				if(renderer){
 					a_childItem->setRenderer(renderer, true, false);
 				}
-				a_childItem->setParent(this);
+				a_childItem->parent(this);
 				drawList[a_childId] = a_childItem;
 				alertParent(ChildAdded::make(shared_from_this(), a_childItem));
 				alertParent(VisualChange::make(shared_from_this()));
 				return a_childItem;
 			}
 
-			bool remove(std::shared_ptr<Node> a_childItem);
-			bool remove(const std::string &a_childId);
+			std::shared_ptr<Node> Node::removeFromParent();
+			std::shared_ptr<Node> remove(std::shared_ptr<Node> a_childItem);
+			std::shared_ptr<Node> remove(const std::string &a_childId);
 
 			void draw();
 			double getDepth();
 
 			//Axis Aligned Bounding Box
-			BoxAABB getWorldAABB(bool a_includeChildren = true);
-			BoxAABB getScreenAABB(bool a_includeChildren = true);
-			BoxAABB getLocalAABB(bool a_includeChildren = true);
-			BoxAABB getPointAABB();
+			BoxAABB worldAABB(bool a_includeChildren = true);
+			BoxAABB screenAABB(bool a_includeChildren = true);
+			BoxAABB localAABB(bool a_includeChildren = true);
+			BoxAABB baseAABB();
 
 			//Point conversion
 			Point<> worldFromLocal(const Point<> &a_local);
@@ -197,96 +225,52 @@ namespace MV {
 			BoxAABB localFromWorld(BoxAABB a_world);
 
 			//For command type alerts
-			void setParent(Node* a_parentItem);
+			Node* parent(Node* a_parentItem); //returns Node* so that it is safe to call this method in a constructor
 			std::shared_ptr<Node> parent() const;
 
-			void scale(double a_newScale);
-			void scale(const Point<> &a_scaleValue);
-			void incrementScale(double a_newScale);
-			void incrementScale(const AxisMagnitude &a_scaleValue);
+			double scale(double a_newScale);
+			AxisMagnitude scale(const AxisMagnitude &a_scaleValue);
+			AxisMagnitude incrementScale(double a_newScale);
+			AxisMagnitude incrementScale(const AxisMagnitude &a_scaleValue);
+			AxisMagnitude scale() const;
 
-			//Rotation is degrees around each axis from 0 to 360, axis info supplied 
-			//Typically the z axis is the only visible rotation axis, but to allow for
-			//2d objects not being displayed orthographically to also twist we have
-			//the full rotational axis available as well.
-			void setRotate(double a_zRotation){
-				if(!equals(a_zRotation, 0.0)){
-					rotateTo.z = a_zRotation;
-					alertParent(VisualChange::make(shared_from_this()));
-				}
-			}
-			void incrementRotate(double a_zRotation){ 
-				if(!equals(a_zRotation, 0.0)){
-					rotateTo.z += a_zRotation;
-					alertParent(VisualChange::make(shared_from_this()));
-				}
-			}
-			void setRotate(const AxisAngles &a_rotation){
-				if(a_rotation != AxisAngles()){
-					rotateTo = a_rotation;
-					alertParent(VisualChange::make(shared_from_this()));
-				}
-			}
-			void incrementRotate(const AxisAngles &a_rotation){
-				if(a_rotation != AxisAngles()){
-					rotateTo += a_rotation;
-					alertParent(VisualChange::make(shared_from_this()));
-				}
-			}
+			//Rotation is degrees around each axis from 0 to 360, axis info supplied typically the z axis
+			//is the only visible rotation axis, so we default to that with a single value supplied;
+			double incrementRotation(double a_zRotation);
+			AxisAngles incrementRotation(const AxisAngles &a_rotation);
 
-			void setRotateOrigin(const Point<> &a_origin){
-				if(rotateOrigin != a_origin){
-					rotateOrigin = a_origin;
-					alertParent(VisualChange::make(shared_from_this()));
-				}
-			}
-			void centerRotateOrigin(){
-				auto centerPoint = getLocalAABB().centerPoint();
-				if(rotateOrigin != centerPoint){
-					alertParent(VisualChange::make(shared_from_this()));
-				}
-			}
+			double rotation(double a_zRotation);
+			AxisAngles rotation(const AxisAngles &a_rotation);
+			AxisAngles rotation() const;
 
-			void translate(const Point<> &a_translation){
-				locate(translateTo + a_translation);
-			}
-			void locate(const Point<> &a_placement){
-				if(translateTo != a_placement){
-					translateTo = a_placement;
-					alertParent(VisualChange::make(shared_from_this()));
-				}
-			}
+			Point<> rotationOrigin(const Point<> &a_origin);
+			Point<> centerRotationOrigin();
 
 			//By default the sort depth is calculated by averaging the z values of all points
 			//setSortDepth manually overrides this calculation.  unsetSortDepth removes this override.
 			void setSortDepth(double a_newDepth){
-				bool changed = !equals(a_newDepth, getDepth());
+				auto notifyOnChanged = makeScopedDepthChangeNote(this, false);
 				depthOverride = true;
 				overrideDepthValue = a_newDepth;
-				if(!equals(a_newDepth, getDepth())){
-					depthChanged();
-					alertParent(VisualChange::make(shared_from_this()));
-				}
 			}
 			void unsetSortDepth(){
-				double oldDepth = getDepth();
+				auto notifyOnChanged = makeScopedDepthChangeNote(this, false);
 				depthOverride = false;
-				if(!equals(oldDepth, getDepth())){
-					depthChanged();
-					alertParent(VisualChange::make(shared_from_this()));
-				}
 			}
 			//true to render the sorted list, false to render unordered.  Default behavior is true.
 			void sortScene(bool a_depthMatters);
 
-			Point<> getPosition();
-			Point<> getRotation();
-			Point<> getScale();
+			Point<> position(const Point<> &a_rhs);
+			Point<> position() const;
 
-			virtual void setColor(const Color &a_newColor);
+			Point<> translate(const Point<> &a_translation){
+				return position(translateTo + a_translation);
+			}
 
-			void setTexture(std::shared_ptr<TextureHandle> a_texture);
-			std::shared_ptr<TextureHandle> getTexture() const;
+			virtual Color color(const Color &a_newColor);
+			virtual Color color() const;
+			std::shared_ptr<TextureHandle> texture(std::shared_ptr<TextureHandle> a_texture);
+			std::shared_ptr<TextureHandle> texture() const;
 			void clearTexture();
 
 			virtual void clearTextureCoordinates(){ }
@@ -310,12 +294,16 @@ namespace MV {
 				return std::dynamic_pointer_cast<DerivedClass>(shared_from_this());
 			}
 
-			std::shared_ptr<Node> get(const std::string& a_childId);
+			std::shared_ptr<Node> get(const std::string& a_childId, bool a_throwIfNotFound = true);
 			//convenient return value conversion get<DrawShapeType>(childId)
 			template<typename DerivedClass>
-			std::shared_ptr<DerivedClass> get(const std::string& a_childId){
-				return get(a_childId)->get<DerivedClass>();
+			std::shared_ptr<DerivedClass> get(const std::string& a_childId, bool a_throwIfNotFound = true){
+				return get(a_childId, a_throwIfNotFound)->get<DerivedClass>();
 			}
+
+			std::vector<std::shared_ptr<Node>> children();
+
+			void sortDrawListVector();
 
 
 			virtual void handleBegin(std::shared_ptr<PushMatrix>){
@@ -329,21 +317,19 @@ namespace MV {
 			}
 			virtual void handleEnd(std::shared_ptr<PopMatrix>){
 			}
-
-			virtual void handleBegin(std::shared_ptr<SetRenderer> message){
-				renderer = message->renderer;
+			void shared_from_this_test(){
+				auto testIt = shared_from_this();
+				for(auto child : drawList){
+					child.second->shared_from_this_test();
+				}
 			}
-			virtual void handleEnd(std::shared_ptr<SetRenderer>){
+
+			void depthChanged(){
+				if(myParent){
+					myParent->childDepthChanged();
+					alertParent(VisualChange::make(shared_from_this()));
+				}
 			}
-
-			Node():Node(nullptr){} //FOR CEREAL DO NOT USE.
-		protected:
-			Node(Draw2D* a_renderer);
-			void defaultDraw(GLenum drawType);
-			void sortedRender();
-			void unsortedRender();
-
-			void alertForTextureChange(){ alertParent(VisualChange::make(shared_from_this())); }
 
 			template<typename T>
 			void alertParent(std::shared_ptr<T> a_message){
@@ -362,6 +348,14 @@ namespace MV {
 					a_message->tryToHandleEnd(child.second.get(), a_message);
 				}
 			}
+		protected:
+			Node(Draw2D* a_renderer);
+
+			void defaultDraw(GLenum drawType);
+			void sortedRender();
+			void unsortedRender();
+
+			void alertForTextureChange(){ alertParent(VisualChange::make(shared_from_this())); }
 
 			void pushMatrix();
 			void popMatrix();
@@ -379,9 +373,8 @@ namespace MV {
 			double overrideDepthValue;
 
 			bool isVisible;
-			bool hasTexture;
 
-			std::shared_ptr<TextureHandle> texture;
+			std::shared_ptr<TextureHandle> ourTexture;
 			TextureHandle::SignalType::SharedType textureSizeSignal;
 			std::vector<DrawPoint> points;
 			Node *myParent;
@@ -397,13 +390,6 @@ namespace MV {
 			typedef std::pair<std::string, std::shared_ptr<Node>> DrawListPairType;
 			DrawListType drawList;
 
-			void depthChanged(){
-				if(myParent){
-					myParent->childDepthChanged();
-					alertParent(VisualChange::make(shared_from_this()));
-				}
-			}
-
 		private:
 
 			void childDepthChanged(){
@@ -417,38 +403,42 @@ namespace MV {
 					CEREAL_NVP(rotateTo), CEREAL_NVP(rotateOrigin),
 					CEREAL_NVP(scaleTo),
 					CEREAL_NVP(depthOverride), CEREAL_NVP(overrideDepthValue),
-					CEREAL_NVP(isVisible), CEREAL_NVP(hasTexture),
+					CEREAL_NVP(isVisible),
 					CEREAL_NVP(drawType), CEREAL_NVP(drawSorted),
 					CEREAL_NVP(points),
 					CEREAL_NVP(drawList),
-					CEREAL_NVP(texture));
+					cereal::make_nvp("texture", ourTexture)
+				).extract(
+					CEREAL_NVP(renderer)
+				);
 
 				for(auto &drawItem : drawList){
-					drawItem.second->setParent(this);
+					drawItem.second->parent(this);
 				}
 			}
 
 			template <class Archive>
-			static void load_and_allocate(Archive & archive, cereal::allocate<Node> &allocate){
-				allocate(nullptr);
+			static void load_and_construct(Archive & archive, cereal::construct<Node> &construct){
+				construct(nullptr);
 				archive(
-					cereal::make_nvp("translateTo", allocate->translateTo),
-					cereal::make_nvp("rotateTo", allocate->rotateTo),
-					cereal::make_nvp("rotateOrigin", allocate->rotateOrigin),
-					cereal::make_nvp("scaleTo", allocate->scaleTo),
-					cereal::make_nvp("depthOverride", allocate->depthOverride),
-					cereal::make_nvp("overrideDepthValue", allocate->overrideDepthValue),
-					cereal::make_nvp("isVisible", allocate->isVisible),
-					cereal::make_nvp("hasTexture", allocate->hasTexture),
-					cereal::make_nvp("drawType", allocate->drawType),
-					cereal::make_nvp("drawSorted", allocate->drawSorted),
-					cereal::make_nvp("points", allocate->points),
-					cereal::make_nvp("drawList", allocate->drawList),
-					cereal::make_nvp("texture", allocate->texture)
+					cereal::make_nvp("translateTo", construct->translateTo),
+					cereal::make_nvp("rotateTo", construct->rotateTo),
+					cereal::make_nvp("rotateOrigin", construct->rotateOrigin),
+					cereal::make_nvp("scaleTo", construct->scaleTo),
+					cereal::make_nvp("depthOverride", construct->depthOverride),
+					cereal::make_nvp("overrideDepthValue", construct->overrideDepthValue),
+					cereal::make_nvp("isVisible", construct->isVisible),
+					cereal::make_nvp("drawType", construct->drawType),
+					cereal::make_nvp("drawSorted", construct->drawSorted),
+					cereal::make_nvp("points", construct->points),
+					cereal::make_nvp("drawList", construct->drawList),
+					cereal::make_nvp("texture", construct->ourTexture)
+				).extract(
+					cereal::make_nvp("renderer", construct->renderer)
 				);
 
-				for(auto &drawItem : allocate->drawList){
-					drawItem.second->setParent(allocate.get());
+				for(auto &drawItem : construct->drawList){
+					drawItem.second->parent(construct.ptr());
 				}
 			}
 
@@ -466,7 +456,7 @@ namespace MV {
 
 		class Pixel : public Node{
 			friend cereal::access;
-			friend cereal::allocate<Pixel>;
+			friend cereal::construct<Pixel>;
 			friend Node;
 		public:
 			SCENE_MAKE_FACTORY_METHODS
@@ -493,21 +483,21 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_allocate(Archive & archive, cereal::allocate<Pixel> &allocate){
-				allocate(nullptr);
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(allocate.get())));
+			static void load_and_construct(Archive & archive, cereal::construct<Pixel> &construct){
+				construct(nullptr);
+				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
 			}
 		};
 
 		template<typename PointAssign>
 		void Pixel::applyToPoint(const PointAssign &a_values){
-			alertParent(ReSort());
+			auto notifyOnChanged = makeScopedDepthChangeNote(this);
 			points[0] = a_values;
 		}
 
 		class Line : public Node{
 			friend cereal::access;
-			friend cereal::allocate<Line>;
+			friend cereal::construct<Line>;
 			friend Node;
 		public:
 			SCENE_MAKE_FACTORY_METHODS
@@ -537,22 +527,22 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_allocate(Archive & archive, cereal::allocate<Line> &allocate){
-				allocate(nullptr);
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(allocate.get())));
+			static void load_and_construct(Archive & archive, cereal::construct<Line> &construct){
+				construct(nullptr);
+				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
 			}
 		};
 
 		template<typename PointAssign>
 		void Line::applyToEnds(const PointAssign &a_startPoint, const PointAssign &a_endPoint){
-			alertParent(ReSort());
+			auto notifyOnChanged = makeScopedDepthChangeNote(this);
 			points[0] = a_startPoint;
 			points[1] = a_endPoint;
 		}
 
 		class Rectangle : public Node{
 			friend cereal::access;
-			friend cereal::allocate<Rectangle>;
+			friend cereal::construct<Rectangle>;
 			friend Node;
 		public:
 			SCENE_MAKE_FACTORY_METHODS
@@ -561,7 +551,7 @@ namespace MV {
 			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Size<> &a_size);
 			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight);
 			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Point<> &a_topLeft, const Point<> &a_topRight);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Point<> &a_point, Size<> &a_size, bool a_center = false);
+			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Point<> &a_point, const Size<> &a_size, bool a_center = false);
 
 			virtual ~Rectangle(){ }
 
@@ -589,8 +579,9 @@ namespace MV {
 				points[2].textureX = 1.0; points[2].textureY = 1.0;
 				points[3].textureX = 1.0; points[3].textureY = 0.0;
 			}
-		private:
+
 			virtual void drawImplementation();
+		private:
 
 			template <class Archive>
 			void serialize(Archive & archive){
@@ -598,24 +589,19 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_allocate(Archive & archive, cereal::allocate<Rectangle> &allocate){
-				allocate(nullptr);
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(allocate.get())));
+			static void load_and_construct(Archive & archive, cereal::construct<Rectangle> &construct){
+				construct(nullptr);
+				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
 			}
 		};
 
 		template<typename PointAssign>
 		void Rectangle::applyToCorners(const PointAssign & a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomRight, const PointAssign & a_BottomLeft){
-			double originalDepth = getDepth();
+			auto notifyOnChanged = makeScopedDepthChangeNote(this);
 			points[0] = a_TopLeft;
 			points[1] = a_BottomLeft;
 			points[2] = a_BottomRight;
 			points[3] = a_TopRight;
-			if(originalDepth != getDepth()){
-				alertParent(ReSort());
-				alertParent(VisualChange())
-				onChange();
-			}
 		}
 	}
 

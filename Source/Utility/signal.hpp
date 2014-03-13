@@ -54,6 +54,7 @@ namespace MV {
 		bool operator!=(const Signal<T>& a_rhs){
 			return id != a_rhs.id;
 		}
+
 	private:
 		Signal(std::function<T> a_callback, long long a_id):
 			id(a_id),

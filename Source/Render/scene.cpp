@@ -803,12 +803,13 @@ namespace MV {
 					pushMatrix();
 					SCOPE_EXIT{popMatrix();};
 
+					drawImplementation();
 					if(drawSorted){
 						sortedRender();
 					} else{
 						unsortedRender();
 					}
-					drawImplementation();
+
 				}
 				postDraw();
 			}

@@ -1,9 +1,7 @@
 #include "editor.h"
 #include "vld.h"
-#include "cerealtest.h"
 
 int main(int argc, char *argv[]){
-	//saveTest();
 	Editor editor;
 	MV::Stopwatch timer;
 	timer.start();

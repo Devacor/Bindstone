@@ -239,7 +239,6 @@
     <ClInclude Include="..\external\cereal\include\cereal\types\unordered_set.hpp" />
     <ClInclude Include="..\external\cereal\include\cereal\types\utility.hpp" />
     <ClInclude Include="..\external\cereal\include\cereal\types\vector.hpp" />
-    <ClInclude Include="cerealtest.h" />
     <ClInclude Include="editor.h" />
     <ClInclude Include="Source\Animation\actionSequence.h" />
     <ClInclude Include="Source\Animation\frameSwapper.h" />

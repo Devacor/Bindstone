@@ -78,8 +78,7 @@ private:
 			}
 			mainScene->add("clipped", loadScene);
 			loadScene->shared_from_this();
-			auto test = loadScene->get<MV::Scene::Clickable>("clickArm");
-			auto test2 = test->shared_from_this();
+			armScene = loadScene->get<MV::Scene::Clickable>("clickArm");
 		}
 
 		auto test = mainScene->get("clipped");

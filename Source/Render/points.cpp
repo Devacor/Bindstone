@@ -18,12 +18,11 @@ namespace MV {
 	| ---------Color--------- |
 	\*************************/
 
-	Color::Color(uint32_t a_hex, bool a_readAlpha /*= false*/):
-		A(a_readAlpha ? ((a_hex >> 24) & 0xFF) / 255.0 : 1.0f),
-		R(((a_hex >> 16) & 0xFF) / 255.0),
-		G(((a_hex >> 8) & 0xFF) / 255.0),
-		B(((a_hex)& 0xFF) / 255.0) {
-
+	Color::Color(uint32_t a_hex, bool a_readAlphaBits /*= false*/):
+		A(a_readAlphaBits ? ((a_hex >> 24) & 0xFF) / 255.0f : 1.0f),
+		R(((a_hex >> 16) & 0xFF) / 255.0f),
+		G(((a_hex >> 8) & 0xFF) / 255.0f),
+		B(((a_hex)& 0xFF) / 255.0f) {
 	}
 
 	Color& Color::operator=( const Color& a_other ){
@@ -85,11 +84,11 @@ namespace MV {
 			(static_cast<uint32_t>(round(B * static_cast<float>(0xFF))));
 	}
 
-	uint32_t Color::hex(uint32_t a_hex, bool a_readAlpha /*= false*/) {
-		A = (a_readAlpha ? ((a_hex >> 24) & 0xFF) / 255.0 : 1.0f);
-		R = (((a_hex >> 16) & 0xFF) / 255.0);
-		G = (((a_hex >> 8) & 0xFF) / 255.0);
-		B = (((a_hex)& 0xFF) / 255.0);
+	uint32_t Color::hex(uint32_t a_hex, bool a_readAlphaBits /*= false*/) {
+		A = (a_readAlphaBits ? ((a_hex >> 24) & 0xFF) / 255.0f : 1.0f);
+		R = (((a_hex >> 16) & 0xFF) / 255.0f);
+		G = (((a_hex >> 8) & 0xFF) / 255.0f);
+		B = (((a_hex)& 0xFF) / 255.0f);
 		return hex();
 	}
 

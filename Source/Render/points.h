@@ -38,9 +38,10 @@ namespace MV {
 	class Color{
 	public:
 		Color():R(1.0f), G(1.0f), B(1.0f), A(1.0f){}
-		Color(uint32_t a_hex, bool a_readAlpha = false);
+		Color(uint32_t a_hex, bool a_readAlphaBits = false);
 		Color(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0f){ R = validColorRange(a_Red); G = validColorRange(a_Green); B = validColorRange(a_Blue); A = validColorRange(a_Alpha); }
 		~Color(){}
+
 		Color& operator=(const Color& a_other);
 		Color& operator=(const DrawPoint& a_other);
 

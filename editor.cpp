@@ -78,7 +78,7 @@ void Editor::initializeWindow(){
 	AudioPlayer::instance()->initAudio();
 	mouse.update();
 
-	textLibrary.loadFont("default", 16, "Assets/Fonts/hats.ttf");
+	textLibrary.loadFont("default", 24, "Assets/Fonts/hats.ttf");
 	textBox.setText(UTF_CHAR_STR("TEST TEXT"), "default");
 }
 

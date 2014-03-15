@@ -159,16 +159,19 @@ void Game::handleInput() {
 }
 
 void Game::render() {
+	static int staticint = 0;
 	renderer.clearScreen();
 	mainScene->draw();
 	//testShape->draw();
 	renderer.updateScreen();
+	if(staticint++ < 100)
+		saveTest();
 }
 
 void Game::hookUpInput(){
-	/*armInputHandles.drag = armScene->onDrag.connect([](std::shared_ptr<MV::Scene::Clickable> armScene, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
+	armInputHandles.drag = armScene->onDrag.connect([](std::shared_ptr<MV::Scene::Clickable> armScene, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
 		armScene->translate(MV::castPoint<double>(deltaPosition));
-	});*/
+	});
 }
 
 std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){

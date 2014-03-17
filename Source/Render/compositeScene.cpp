@@ -12,7 +12,7 @@ namespace MV {
 
 		void Clipped::refreshTexture(bool a_forceRefresh) {
 			if(a_forceRefresh || dirtyTexture){
-				auto pointAABB = baseAABB();
+				auto pointAABB = basicAABB();
 				auto textureSize = castSize<int>(pointAABB.size());
 				clippedTexture = DynamicTextureDefinition::make("", textureSize);
 				dirtyTexture = false;
@@ -21,14 +21,14 @@ namespace MV {
 				framebuffer->setTextureId(clippedTexture->textureId());
 				{
 					renderer->modelviewMatrix().push();
-					SCOPE_EXIT{renderer->modelviewMatrix().pop(); };
+					SCOPE_EXIT{renderer->modelviewMatrix().pop();};
 					renderer->modelviewMatrix().top().makeIdentity();
 
 					pushMatrix();
-					SCOPE_EXIT{popMatrix(); };
+					SCOPE_EXIT{popMatrix();};
 
 					framebuffer->start();
-					SCOPE_EXIT{framebuffer->stop(); };
+					SCOPE_EXIT{framebuffer->stop();};
 
 					if(drawSorted){
 						sortedRender();
@@ -44,7 +44,7 @@ namespace MV {
 			refreshTexture();
 
 			pushMatrix();
-			SCOPE_EXIT{popMatrix(); };
+			SCOPE_EXIT{popMatrix();};
 			defaultDraw(GL_TRIANGLE_FAN);
 
 			return false; //returning false blocks the default rendering steps for this node.
@@ -190,7 +190,7 @@ namespace MV {
 						self->isInPressEvent = false;
 						if(self->mouseInBounds(a_mouse)){
 							self->onAcceptSlot(self);
-						}else{
+						} else{
 							self->onCancelSlot(self);
 						}
 						if(!thisWeakPtr.expired()){
@@ -382,6 +382,35 @@ namespace MV {
 			} else {
 				idleSceneNode->draw();
 			}
+		}
+
+		BoxAABB Button::getWorldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+			return clickable->getWorldAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
+				(clickable->inPressEvent()) ?
+					activeSceneNode->getWorldAABBImplementation(a_includeChildren, a_nestedCall):
+					idleSceneNode->getWorldAABBImplementation(a_includeChildren, a_nestedCall)
+			);
+		}
+		BoxAABB Button::getScreenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+			return clickable->getScreenAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
+				(clickable->inPressEvent()) ?
+					activeSceneNode->getScreenAABBImplementation(a_includeChildren, a_nestedCall):
+					idleSceneNode->getScreenAABBImplementation(a_includeChildren, a_nestedCall)
+			);
+		}
+		BoxAABB Button::getLocalAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+			return clickable->getLocalAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
+				(clickable->inPressEvent()) ?
+					activeSceneNode->getLocalAABBImplementation(a_includeChildren, a_nestedCall):
+					idleSceneNode->getLocalAABBImplementation(a_includeChildren, a_nestedCall)
+			);
+		}
+		BoxAABB Button::getBasicAABBImplementation() const{
+			return clickable->getBasicAABBImplementation().expandWith(
+				(clickable->inPressEvent()) ?
+					activeSceneNode->getBasicAABBImplementation():
+					idleSceneNode->getBasicAABBImplementation()
+			);
 		}
 
 	}

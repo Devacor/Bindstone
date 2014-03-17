@@ -127,8 +127,10 @@ void Editor::render(){
 }
 
 void Editor::initializeControls(){
-	auto button = makeButton(controls, textLibrary, mouse, MV::size(110.0, 27.0), UTF_CHAR_STR("Create"));
-	button->position(MV::point(8.0, 27.0));
+	auto createButton = makeButton(controls, textLibrary, mouse, MV::size(110.0, 27.0), UTF_CHAR_STR("Create"));
+	createButton->position(MV::point(8.0, 27.0));
+	auto selectButton = makeButton(controls, textLibrary, mouse, MV::size(110.0, 27.0), UTF_CHAR_STR("Select"));
+	selectButton->position(createButton->localAABB().bottomLeftPoint() + MV::point(0.0, 5.0));
 }
 
 
@@ -142,6 +144,10 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 	idleScene->color(MV::Color(0xa8bbe0));
 
 	MV::TextBox activeBox(&a_library, a_fontIdentifier, a_text, a_size), idleBox(&a_library, a_fontIdentifier, a_text, a_size);
+	activeBox.justification(MV::CENTER);
+	idleBox.justification(MV::CENTER);
+
+	activeBox.scene()->position(activeBox.scene()->basicAABB().centerPoint() - activeScene->basicAABB().centerPoint());
 	activeScene->add("text", activeBox.scene());
 	idleScene->add("text", idleBox.scene());
 

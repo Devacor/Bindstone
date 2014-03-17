@@ -24,7 +24,7 @@ namespace MV {
 		minPoint = a_startBox.minPoint; maxPoint = a_startBox.maxPoint;
 	}
 
-	void BoxAABB::expandWith( const Point<> &a_comparePoint ){
+	BoxAABB& BoxAABB::expandWith(const Point<> &a_comparePoint){
 		minPoint.x = std::min(a_comparePoint.x, minPoint.x);
 		minPoint.y = std::min(a_comparePoint.y, minPoint.y);
 		minPoint.z = std::min(a_comparePoint.z, minPoint.z);
@@ -32,11 +32,13 @@ namespace MV {
 		maxPoint.x = std::max(a_comparePoint.x, maxPoint.x);
 		maxPoint.y = std::max(a_comparePoint.y, maxPoint.y);
 		maxPoint.z = std::max(a_comparePoint.z, maxPoint.z);
+		return *this;
 	}
 
-	void BoxAABB::expandWith( const BoxAABB &a_compareBox ){
+	BoxAABB& BoxAABB::expandWith(const BoxAABB &a_compareBox){
 		expandWith(a_compareBox.minPoint);
 		expandWith(a_compareBox.maxPoint);
+		return *this;
 	}
 
 	bool BoxAABB::pointContainedZ( const Point<> &a_comparePoint ) const{
@@ -486,12 +488,16 @@ namespace MV {
 			return tmpBox;
 		}
 
-		MV::BoxAABB Node::baseAABB() {
+		MV::BoxAABB Node::basicAABB() const  {
+			return getBasicAABBImplementation();
+		}
+
+		MV::BoxAABB Node::getBasicAABBImplementation() const {
 			BoxAABB tmpBox;
 
 			if(!points.empty()){
 				tmpBox.initialize(points[0]);
-				std::for_each(points.begin()++, points.end(), [&](Point<> &point){
+				std::for_each(points.begin()++, points.end(), [&](const DrawPoint &point){
 					tmpBox.expandWith(point);
 				});
 			}

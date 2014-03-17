@@ -37,8 +37,9 @@ namespace MV {
 		void initialize(const Point<> &a_startPoint);
 		void initialize(const BoxAABB &a_startBox);
 		void initialize(const Point<> &a_startPoint, const Point<> &a_endPoint);
-		void expandWith(const Point<> &a_comparePoint);
-		void expandWith(const BoxAABB &a_compareBox);
+
+		BoxAABB& expandWith(const Point<> &a_comparePoint);
+		BoxAABB& expandWith(const BoxAABB &a_compareBox);
 
 		bool isEmpty() const{ return minPoint == maxPoint; }
 		bool flatWidth() const{ return equals(minPoint.x, maxPoint.x); }
@@ -54,7 +55,13 @@ namespace MV {
 
 		void sanitize();
 
-		Point<> centerPoint(){ return minPoint + ((minPoint + maxPoint) / 2.0); }
+		Point<> centerPoint() const { return minPoint + ((minPoint + maxPoint) / 2.0); }
+
+		Point<> topLeftPoint() const { return minPoint; }
+		Point<> topRightPoint() const { return point(maxPoint.x, minPoint.y); }
+		Point<> bottomLeftPoint() const { return point(minPoint.x, maxPoint.y); }
+		Point<> bottomRightPoint() const { return maxPoint; }
+
 		Point<> minPoint, maxPoint;
 	private:
 		template <class Archive>
@@ -205,7 +212,7 @@ namespace MV {
 			BoxAABB worldAABB(bool a_includeChildren = true);
 			BoxAABB screenAABB(bool a_includeChildren = true);
 			BoxAABB localAABB(bool a_includeChildren = true);
-			BoxAABB baseAABB();
+			BoxAABB basicAABB() const;
 
 			//Point conversion
 			Point<> worldFromLocal(const Point<> &a_local);
@@ -348,6 +355,13 @@ namespace MV {
 					a_message->tryToHandleEnd(child.second.get(), a_message);
 				}
 			}
+
+			//would have preferred these private, but I moved them public for more flexibility as per the Button class.
+			virtual BoxAABB getWorldAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB getScreenAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB getLocalAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB getBasicAABBImplementation() const;
+
 		protected:
 			Node(Draw2D* a_renderer);
 
@@ -442,9 +456,6 @@ namespace MV {
 				}
 			}
 
-			virtual BoxAABB getWorldAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB getScreenAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB getLocalAABBImplementation(bool a_includeChildren, bool a_nestedCall);
 			virtual bool preDraw(){ return true; }
 			virtual void postDraw(){}
 			virtual void drawImplementation(){} //override this in subclasses

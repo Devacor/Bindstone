@@ -126,7 +126,7 @@ namespace MV {
 	}
 
 	//TODO: organize this method better.  This method is a beast.
-	std::shared_ptr<Scene::Node> TextLibrary::composeScene(const std::vector<TextState> &a_textStateList, double a_maxWidth, TextWrapMethod a_wrapMethod){
+	std::shared_ptr<Scene::Node> TextLibrary::composeScene(const std::vector<TextState> &a_textStateList, double a_maxWidth, TextWrapMethod a_wrapMethod, TextJustification a_justify){
 		auto textScene = Scene::Node::make(render);
 		if(a_textStateList.empty()){return textScene;}
 
@@ -137,8 +137,10 @@ namespace MV {
 		double characterLocationY = 0;
 		size_t characterCount = 0;
 		size_t previousLine = 0;
+		size_t oldPreviousLine = 0;
 		std::vector<UtfChar> currentLineContent;
 		std::vector<double> currentLineCharacterSizes;
+
 		for(auto current = a_textStateList.begin();current != a_textStateList.end();++current){
 			auto specifiedFont = loadedFonts.find(current->fontIdentifier);
 			currentColor = current->color;
@@ -163,6 +165,7 @@ namespace MV {
 				}
 
 				for(auto renderChar = current->text.begin();renderChar != current->text.end();++renderChar){
+					bool needJustify = false;
 					nextCharacterLocationX += (*characterList)[*renderChar].characterSize().width;
 					bool lineWidthExceeded = (!equals(a_maxWidth, 0.0) && nextCharacterLocationX > a_maxWidth);
 					if(*renderChar == '\n' || (lineWidthExceeded && a_wrapMethod != NONE)){
@@ -172,6 +175,7 @@ namespace MV {
 						offset = 0;
 						lineHeight = TTF_FontLineSkip(specifiedFont->second.font);
 						baseLine = TTF_FontAscent(specifiedFont->second.font);
+						size_t oldPreviousLine = previousLine;
 						if(a_wrapMethod == SOFT && lineWidthExceeded && *renderChar != '\n'){
 							auto lastSpace = std::find(currentLineContent.rbegin(), currentLineContent.rend(), UTF_CHAR_STR(' '));
 							size_t distance = std::distance(currentLineContent.rbegin(), lastSpace);
@@ -189,10 +193,16 @@ namespace MV {
 						}else{
 							previousLine = characterCount;
 						}
-						
+						needJustify = true;
+
 						currentLineContent.clear();
 						currentLineCharacterSizes.clear();
 					}
+
+					auto tmpRenderChar = renderChar;
+					auto tmpCurrent = current;
+					bool endOfAllLines = ++tmpCurrent == a_textStateList.end() && ++tmpRenderChar == current->text.end();
+
 					if(*renderChar != '\n'){
 						auto character = Scene::Rectangle::make(render, Point<>(), castSize<double>((*characterList)[*renderChar].characterSize()), false);
 						character->position(Point<>(characterLocationX, characterLocationY + offset));
@@ -202,7 +212,26 @@ namespace MV {
 						characterLocationX = nextCharacterLocationX;
 						currentLineContent.push_back(*renderChar);
 						currentLineCharacterSizes.push_back((*characterList)[*renderChar].characterSize().width);
-						characterCount++;
+						if(!endOfAllLines){
+							characterCount++;
+						}
+					}
+
+					if(endOfAllLines && !needJustify){
+						needJustify = true;
+						previousLine = characterCount;
+					}
+
+					if(needJustify){
+						if(a_justify != LEFT){
+							auto renderedCharacter = textScene->get(boost::lexical_cast<std::string>(previousLine));
+							double lineWidth = renderedCharacter->position().x + renderedCharacter->basicAABB().size().width;
+							double adjustBy = (a_maxWidth - lineWidth);
+							adjustBy/= (a_justify == CENTER) ? 2.0 : 1.0;
+							for(int i = oldPreviousLine; i <= previousLine; ++i){
+								textScene->get(boost::lexical_cast<std::string>(i))->translate(point(adjustBy, 0.0));
+							}
+						}
 					}
 				}
 			}else{
@@ -310,7 +339,7 @@ namespace MV {
 
 	void TextBox::refreshTextBoxContents(){
 		if(fontIdentifier != ""){
-			textScene = textboxScene->add("Text", textLibrary->composeScene(parseTextStateList(fontIdentifier, text), boxSize.width));
+			textScene = textboxScene->add("Text", textLibrary->composeScene(parseTextStateList(fontIdentifier, text), boxSize.width, wrapMethod, textJustification));
 			textScene->position(contentScrollPosition);
 		} else{
 			std::cerr << "Warning: refreshTextBoxContents called, but no fontIdentifier has been set yet!" << std::endl;

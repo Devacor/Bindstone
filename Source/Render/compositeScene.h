@@ -236,6 +236,12 @@ namespace MV {
 
 			void setClickableSizeAndCenterPoint(const Point<> &a_centerPoint, const Size<> &a_size);
 			void setClickableSizeAndCornerPoint(const Point<> &a_cornerPoint, const Size<> &a_size);
+
+			virtual BoxAABB getWorldAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB getScreenAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB getLocalAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB getBasicAABBImplementation() const;
+
 		protected:
 			Button(Draw2D *a_renderer, MouseState *a_mouse);
 

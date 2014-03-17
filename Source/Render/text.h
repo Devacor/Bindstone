@@ -105,6 +105,12 @@ namespace MV {
 		SOFT
 	};
 
+	enum TextJustification{
+		LEFT,
+		CENTER,
+		RIGHT
+	};
+
 	class TextLibrary{
 	public:
 		TextLibrary(Draw2D *a_rendering);
@@ -112,7 +118,7 @@ namespace MV {
 
 		bool loadFont(const std::string &a_identifier, int a_pointSize, std::string a_fontFileLocation);
 
-		std::shared_ptr<Scene::Node> composeScene(const std::vector<TextState> &a_textStateList, double a_maxWidth = 0, TextWrapMethod a_wrapMethod = SOFT);
+		std::shared_ptr<Scene::Node> composeScene(const std::vector<TextState> &a_textStateList, double a_maxWidth = 0, TextWrapMethod a_wrapMethod = SOFT, TextJustification a_justify = LEFT);
 
 		//Call this when the OpenGL context is destroyed to re-load the textures.
 		void reloadTextures();
@@ -156,6 +162,26 @@ namespace MV {
 		TextBox(TextLibrary *a_textLibrary, const Size<> &a_size);
 		TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const Size<> &a_size);
 		TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, const Size<> &a_size);
+
+		void justification(TextJustification a_newJustification){
+			if(a_newJustification != textJustification){
+				textJustification = a_newJustification;
+				refreshTextBoxContents();
+			}
+		}
+		TextJustification justification() const{
+			return textJustification;
+		}
+
+		void wrapping(TextWrapMethod a_newWrapMethod){
+			if(a_newWrapMethod != wrapMethod){
+				wrapMethod = a_newWrapMethod;
+				refreshTextBoxContents();
+			}
+		}
+		TextWrapMethod wrapping() const{
+			return wrapMethod;
+		}
 
 		void setText(const UtfString &a_text, const std::string &a_fontIdentifier = "");
 		void setText(UtfChar a_char, const std::string &a_fontIdentifier = ""){
@@ -225,7 +251,9 @@ namespace MV {
 				CEREAL_NVP(text),
 				CEREAL_NVP(fontIdentifier),
 				CEREAL_NVP(boxSize),
-				CEREAL_NVP(contentScrollPosition)
+				CEREAL_NVP(contentScrollPosition),
+				CEREAL_NVP(wrapMethod),
+				CEREAL_NVP(justification)
 			);
 		}
 
@@ -242,7 +270,9 @@ namespace MV {
 			archive(
 				cereal::make_nvp("text", construct()->text),
 				cereal::make_nvp("fontIdentifier", construct()->fontIdentifier),
-				cereal::make_nvp("contentScrollPosition", construct()->contentScrollPosition)
+				cereal::make_nvp("contentScrollPosition", construct()->contentScrollPosition),
+				cereal::make_nvp("wrapMethod", construct()->wrapMethod),
+				cereal::make_nvp("textJustification", construct()->textJustification)
 			);
 		}
 
@@ -257,6 +287,9 @@ namespace MV {
 		TextLibrary *textLibrary;
 		Draw2D *render;
 		
+		TextJustification textJustification = LEFT;
+		TextWrapMethod wrapMethod = SOFT;
+
 		UtfString text;
 		std::string fontIdentifier;
 	};

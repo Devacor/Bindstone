@@ -1,5 +1,5 @@
-#ifndef _MV_SCENEMESSAGES_H_
-#define _MV_SCENEMESSAGES_H_
+#ifndef _MV_SCENE_MESSAGES_H_
+#define _MV_SCENE_MESSAGES_H_
 
 #include <memory>
 #include "Utility/messageHandler.hpp"
@@ -48,6 +48,32 @@ namespace MV{
 			std::shared_ptr<Node> sender;
 			std::shared_ptr<Node> child;
 		};
+
+		template <typename T>
+		class ScopedDepthChangeNote{
+		public:
+			ScopedDepthChangeNote(T* a_target, bool visualChangeRegardless = true):
+				target(a_target),
+				startDepth(a_target->getDepth()){
+			}
+
+			~ScopedDepthChangeNote(){
+				if(startDepth != target->getDepth()){
+					target->depthChanged();
+				} else if(visualChangeRegardless){
+					target->alertParent(VisualChange::make(target->shared_from_this()));
+				}
+			}
+		private:
+			T* target;
+			double startDepth;
+			bool visualChangeRegardless;
+		};
+
+		template <typename T>
+		std::unique_ptr<ScopedDepthChangeNote<T>> makeScopedDepthChangeNote(T* a_target, bool a_visualChangeRegardless = true){
+			return std::move(std::make_unique<ScopedDepthChangeNote<T>>(a_target, a_visualChangeRegardless));
+		}
 	}
 }
 

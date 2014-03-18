@@ -7,8 +7,8 @@
 | 4 = bot left)                                            |
 \**********************************************************/
 
-#ifndef _MV_SCENE_H_
-#define _MV_SCENE_H_
+#ifndef _MV_SCENE_NODE_H_
+#define _MV_SCENE_NODE_H_
 
 #define GL_GLEXT_PROTOTYPES
 #define GLX_GLEXT_PROTOTYPES
@@ -23,82 +23,11 @@
 #include "Render/render.h"
 #include "Render/textures.h"
 #include "Render/points.h"
-#include "Render/sceneMessages.hpp"
+#include "Render/boxaabb.h"
+#include "sceneMessages.hpp"
 #include "Utility/package.h"
 
 namespace MV {
-	class BoxAABB{
-		friend cereal::access;
-	public:
-		BoxAABB(){ initialize(Point<>()); }
-		BoxAABB(const Point<> &a_startPoint){ initialize(a_startPoint); }
-		BoxAABB(const Point<> &a_startPoint, const Point<> &a_endPoint){ initialize(a_startPoint, a_endPoint); }
-
-		void initialize(const Point<> &a_startPoint);
-		void initialize(const BoxAABB &a_startBox);
-		void initialize(const Point<> &a_startPoint, const Point<> &a_endPoint);
-
-		BoxAABB& expandWith(const Point<> &a_comparePoint);
-		BoxAABB& expandWith(const BoxAABB &a_compareBox);
-
-		bool isEmpty() const{ return minPoint == maxPoint; }
-		bool flatWidth() const{ return equals(minPoint.x, maxPoint.x); }
-		bool flatHeight() const{ return equals(minPoint.y, maxPoint.y); }
-
-		Size<> size() const{ return sizeFromPoint(maxPoint - minPoint); }
-
-		//includes z
-		bool pointContainedZ(const Point<> &a_comparePoint) const;
-
-		//ignores z
-		bool pointContained(const Point<> &a_comparePoint) const;
-
-		void sanitize();
-
-		Point<> centerPoint() const { return minPoint + ((minPoint + maxPoint) / 2.0); }
-
-		Point<> topLeftPoint() const { return minPoint; }
-		Point<> topRightPoint() const { return point(maxPoint.x, minPoint.y); }
-		Point<> bottomLeftPoint() const { return point(minPoint.x, maxPoint.y); }
-		Point<> bottomRightPoint() const { return maxPoint; }
-
-		Point<> minPoint, maxPoint;
-	private:
-		template <class Archive>
-		void serialize(Archive & archive){
-			archive(CEREAL_NVP(minPoint), CEREAL_NVP(maxPoint));
-		}
-	};
-
-	std::ostream& operator<<(std::ostream& a_os, const BoxAABB& a_point);
-	std::istream& operator>>(std::istream& a_is, BoxAABB& a_point);
-
-	class PointVolume{
-		friend cereal::access;
-	public:
-		void addPoint(const Point<> &a_newPoint);
-
-		//ignores z
-		bool pointContained(const Point<> &a_comparePoint);
-
-		bool volumeCollision(PointVolume &a_compareVolume, Draw2D* a_renderer);
-		Point<> getCenter();
-		BoxAABB getAABB();
-
-		std::vector<Point<>> points;
-	private:
-		//get angle within proper range between two points (-pi to +pi)
-		double getAngle(const Point<> &a_p1, const Point<> &a_p2);
-
-		template <class Archive>
-		void serialize(Archive & archive){
-			archive(CEREAL_NVP(points));
-		}
-	};
-
-	typedef Point<> AxisAngles;
-	typedef Point<> AxisMagnitude;
-
 	//I had three options here: 
 	//1) In derived classes specify using Node::make and then rename Node's static make function to something else so it cannot clash
 	//or
@@ -124,32 +53,6 @@ namespace MV {
 	}
 
 	namespace Scene {
-		template <typename T>
-		class ScopedDepthChangeNote{
-		public:
-			ScopedDepthChangeNote(T* a_target, bool visualChangeRegardless = true):
-				target(a_target),
-				startDepth(a_target->getDepth()){
-			}
-
-			~ScopedDepthChangeNote(){
-				if(startDepth != target->getDepth()){
-					target->depthChanged();
-				} else if(visualChangeRegardless){
-					target->alertParent(VisualChange::make(target->shared_from_this()));
-				}
-			}
-		private:
-			T* target;
-			double startDepth;
-			bool visualChangeRegardless;
-		};
-
-		template <typename T>
-		std::unique_ptr<ScopedDepthChangeNote<T>> makeScopedDepthChangeNote(T* a_target, bool a_visualChangeRegardless = true){
-			return std::move(std::make_unique<ScopedDepthChangeNote<T>>(a_target, a_visualChangeRegardless));
-		}
-
 		class Node : 
 			public std::enable_shared_from_this<Node>,
 			public MessageHandler<PushMatrix>,
@@ -464,156 +367,6 @@ namespace MV {
 			void defaultDrawRenderStep(GLenum drawType);
 			void bindOrDisableTexture(const std::shared_ptr<std::vector<GLfloat>> &texturePoints);
 		};
-
-		class Pixel : public Node{
-			friend cereal::access;
-			friend cereal::construct<Pixel>;
-			friend Node;
-		public:
-			SCENE_MAKE_FACTORY_METHODS
-
-			static std::shared_ptr<Pixel> make(Draw2D* a_renderer, const DrawPoint &a_point = DrawPoint());
-			virtual ~Pixel(){}
-
-			void setPoint(const DrawPoint &a_point);
-
-			template<typename PointAssign>
-			void applyToPoint(const PointAssign &a_values);
-
-		protected:
-			Pixel(Draw2D *a_renderer):Node(a_renderer){
-				points.resize(1);
-			}
-
-		private:
-			virtual void drawImplementation();
-
-			template <class Archive>
-			void serialize(Archive & archive){
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(this)));
-			}
-
-			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Pixel> &construct){
-				construct(nullptr);
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
-			}
-		};
-
-		template<typename PointAssign>
-		void Pixel::applyToPoint(const PointAssign &a_values){
-			auto notifyOnChanged = makeScopedDepthChangeNote(this);
-			points[0] = a_values;
-		}
-
-		class Line : public Node{
-			friend cereal::access;
-			friend cereal::construct<Line>;
-			friend Node;
-		public:
-			SCENE_MAKE_FACTORY_METHODS
-
-			static std::shared_ptr<Line> make(Draw2D* a_renderer);
-			static std::shared_ptr<Line> make(Draw2D* a_renderer, const DrawPoint &a_startPoint, const DrawPoint &a_endPoint);
-
-			virtual ~Line(){}
-
-			void setEnds(const DrawPoint &a_startPoint, const DrawPoint &a_endPoint);
-
-			template<typename PointAssign>
-			void applyToEnds(const PointAssign &a_startPoint, const PointAssign &a_endPoint);
-
-		protected:
-			Line(Draw2D *a_renderer):
-				Node(a_renderer){
-
-				points.resize(2);
-			}
-		private:
-			virtual void drawImplementation();
-
-			template <class Archive>
-			void serialize(Archive & archive){
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(this)));
-			}
-
-			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Line> &construct){
-				construct(nullptr);
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
-			}
-		};
-
-		template<typename PointAssign>
-		void Line::applyToEnds(const PointAssign &a_startPoint, const PointAssign &a_endPoint){
-			auto notifyOnChanged = makeScopedDepthChangeNote(this);
-			points[0] = a_startPoint;
-			points[1] = a_endPoint;
-		}
-
-		class Rectangle : public Node{
-			friend cereal::access;
-			friend cereal::construct<Rectangle>;
-			friend Node;
-		public:
-			SCENE_MAKE_FACTORY_METHODS
-
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Size<> &a_size);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Point<> &a_topLeft, const Point<> &a_topRight);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Point<> &a_point, const Size<> &a_size, bool a_center = false);
-
-			virtual ~Rectangle(){ }
-
-			void setSize(const Size<> &a_size);
-
-			void setTwoCorners(const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight);
-			void setTwoCorners(const Point<> &a_topLeft, const Point<> &a_bottomRight);
-
-			void setTwoCorners(const BoxAABB &a_bounds);
-
-			void setSizeAndCenterPoint(const Point<> &a_centerPoint, const Size<> &a_size);
-			void setSizeAndCornerPoint(const Point<> &a_cornerPoint, const Size<> &a_size);
-
-			template<typename PointAssign>
-			void applyToCorners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight);
-
-			virtual void clearTextureCoordinates();
-			virtual void updateTextureCoordinates();
-		protected:
-			Rectangle(Draw2D *a_renderer):Node(a_renderer){
-				points.resize(4);
-
-				points[0].textureX = 0.0; points[0].textureY = 0.0;
-				points[1].textureX = 0.0; points[1].textureY = 1.0;
-				points[2].textureX = 1.0; points[2].textureY = 1.0;
-				points[3].textureX = 1.0; points[3].textureY = 0.0;
-			}
-
-			virtual void drawImplementation();
-		private:
-
-			template <class Archive>
-			void serialize(Archive & archive){
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(this)));
-			}
-
-			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Rectangle> &construct){
-				construct(nullptr);
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
-			}
-		};
-
-		template<typename PointAssign>
-		void Rectangle::applyToCorners(const PointAssign & a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomRight, const PointAssign & a_BottomLeft){
-			auto notifyOnChanged = makeScopedDepthChangeNote(this);
-			points[0] = a_TopLeft;
-			points[1] = a_BottomLeft;
-			points[2] = a_BottomRight;
-			points[3] = a_TopRight;
-		}
 	}
 
 }

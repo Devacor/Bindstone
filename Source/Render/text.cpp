@@ -228,7 +228,7 @@ namespace MV {
 							double lineWidth = renderedCharacter->position().x + renderedCharacter->basicAABB().size().width;
 							double adjustBy = (a_maxWidth - lineWidth);
 							adjustBy/= (a_justify == CENTER) ? 2.0 : 1.0;
-							for(int i = oldPreviousLine; i <= previousLine; ++i){
+							for(size_t i = oldPreviousLine; i <= previousLine; ++i){
 								textScene->get(boost::lexical_cast<std::string>(i))->translate(point(adjustBy, 0.0));
 							}
 						}
@@ -362,5 +362,19 @@ namespace MV {
 		contentScrollPosition = a_position;
 		textScene->position(contentScrollPosition);
 	}
+
+	Size<> TextBox::getContentSize() {
+		return textScene->localAABB().size();
+	}
+
+	std::shared_ptr<Scene::Node> TextBox::scene() {
+		return textboxScene;
+	}
+
+	void TextBox::draw() {
+		textboxScene->draw();
+	}
+
+
 
 }

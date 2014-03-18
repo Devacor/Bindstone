@@ -170,6 +170,7 @@ namespace MV {
 		void deleteFramebuffer(Framebuffer &a_framebuffer);
 		Draw2D *renderer;
 		bool initialized;
+		Color savedClearColor;
 	};
 
 	class glExtensionVertexBufferObject {
@@ -335,7 +336,8 @@ namespace MV {
 
 		bool initialize(Size<int> a_window, Size<> a_world = Size<>(-1, -1), bool a_requireExtensions = false, bool a_summarize = false);
 
-		void setBackgroundColor(Color a_newColor);
+		Color backgroundColor(Color a_newColor);
+		Color backgroundColor() const;
 		
 		void clearScreen();
 		void updateScreen();
@@ -354,7 +356,7 @@ namespace MV {
 		bool setupSDL();
 		void setupOpengl();
 
-		Color backgroundColor;
+		Color clearBackgroundColor;
 		bool initialized;
 		SDL_Renderer *sdlRenderer;
 		Window sdlWindow;

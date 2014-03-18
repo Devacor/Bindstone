@@ -285,7 +285,9 @@ namespace MV {
 		return std::shared_ptr<Framebuffer>(new Framebuffer(renderer, framebufferId, renderbufferId, depthbufferId, a_texture, a_size, a_position));
 	}
 
-	void glExtensionFramebufferObject::startUsingFramebuffer( std::shared_ptr<Framebuffer> a_framebuffer, bool a_push ){
+	void glExtensionFramebufferObject::startUsingFramebuffer(std::shared_ptr<Framebuffer> a_framebuffer, bool a_push){
+		savedClearColor = renderer->backgroundColor();
+		renderer->backgroundColor({0x00000000, true});
 		require(initialized, ResourceException("StartUsingFramebuffer failed because the extension could not be loaded"));
 		if(a_push){
 			activeFramebuffers.push_back(a_framebuffer);
@@ -335,6 +337,7 @@ namespace MV {
 #endif
 			glViewport(0, 0, renderer->window().width(), renderer->window().height());
 			renderer->projectionMatrix().pop();
+			renderer->backgroundColor(savedClearColor);
 		}
 	}
 	
@@ -684,7 +687,7 @@ namespace MV {
 
 	Draw2D::Draw2D() :
 		glExtensions(this),
-		backgroundColor(0.0, 0.0, 0.0, 0.0),
+		clearBackgroundColor(0x3d3d3d),
 		initialized(0),
 		sdlWindow(*this),
 		mvWorld(*this){
@@ -752,7 +755,7 @@ namespace MV {
 		projectionMatrix().clear(); //ensure nothing else has trampled on us.
 		projectionMatrix().top().makeOrtho(0, mvWorld.width(), mvWorld.height(), 0, -128.0, 128.0);
 
-		glClearColor(backgroundColor.R,backgroundColor.G,backgroundColor.B,backgroundColor.A);
+		glClearColor(clearBackgroundColor.R,clearBackgroundColor.G,clearBackgroundColor.B,clearBackgroundColor.A);
 		
         glShadeModel(GL_SMOOTH);
 		
@@ -831,9 +834,14 @@ namespace MV {
 		return Point<int>(static_cast<int>(a_worldPoint.x*widthRatio), static_cast<int>(a_worldPoint.y*heightRatio), static_cast<int>(a_worldPoint.z));
 	}
 
-	void Draw2D::setBackgroundColor( Color a_newColor ){
-		backgroundColor = a_newColor;
-		glClearColor(backgroundColor.R,backgroundColor.G,backgroundColor.B,backgroundColor.A);
+	Color Draw2D::backgroundColor( Color a_newColor ){
+		clearBackgroundColor = a_newColor;
+		glClearColor(clearBackgroundColor.R,clearBackgroundColor.G,clearBackgroundColor.B,clearBackgroundColor.A);
+		return a_newColor;
+	}
+
+	Color Draw2D::backgroundColor() const{
+		return clearBackgroundColor;
 	}
 
 	Window& Draw2D::window(){

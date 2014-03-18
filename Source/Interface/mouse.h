@@ -5,7 +5,6 @@
 #include <memory>
 #include "Render/points.h"
 #include "Utility/signal.hpp"
-#include "Render/scene.h"
 
 namespace MV{
 	class MouseState {

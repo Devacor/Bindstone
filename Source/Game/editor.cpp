@@ -127,10 +127,23 @@ void Editor::render(){
 }
 
 void Editor::initializeControls(){
-	auto createButton = makeButton(controls, textLibrary, mouse, MV::size(110.0, 27.0), UTF_CHAR_STR("Create"));
-	createButton->position(MV::point(8.0, 27.0));
-	auto selectButton = makeButton(controls, textLibrary, mouse, MV::size(110.0, 27.0), UTF_CHAR_STR("Select"));
+	auto draggableBox = controls->make<MV::Scene::Node>("ContextMenu");
+
+	auto createButton = makeButton(draggableBox, textLibrary, mouse, MV::size(110.0, 27.0), UTF_CHAR_STR("Create"));
+	createButton->position({8.0, 28.0});
+	auto selectButton = makeButton(draggableBox, textLibrary, mouse, MV::size(110.0, 27.0), UTF_CHAR_STR("Select"));
 	selectButton->position(createButton->localAABB().bottomLeftPoint() + MV::point(0.0, 5.0));
+
+	auto background = draggableBox->make<MV::Scene::Rectangle>("Background", MV::point(0.0, 20.0), selectButton->localAABB().bottomRightPoint() + MV::point(8.0, 8.0));
+	background->color({0x646b7c});
+	background->setSortDepth(-1.0);
+
+	auto boxHeader = draggableBox->make<MV::Scene::Clickable>("ContextMenuHandle", &mouse, MV::size(background->basicAABB().width(), 20.0));
+	boxHeader->color({0x1b1f29});
+
+	inputHandles.drag = boxHeader->onDrag.connect([](std::shared_ptr<MV::Scene::Clickable> boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
+		boxHeader->parent()->translate(MV::castPoint<double>(deltaPosition));
+	});
 }
 
 

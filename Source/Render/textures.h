@@ -1,5 +1,5 @@
-#ifndef __MV_TEXTURES_H__
-#define __MV_TEXTURES_H__
+#ifndef _MV_TEXTURES_H_
+#define _MV_TEXTURES_H_
 
 #include <fstream>
 #include <map>

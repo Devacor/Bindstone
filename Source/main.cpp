@@ -1,4 +1,4 @@
-#include "editor.h"
+#include "Game/editor.h"
 #include "vld.h"
 
 int main(int argc, char *argv[]){

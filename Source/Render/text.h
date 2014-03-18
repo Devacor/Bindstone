@@ -1,5 +1,5 @@
-#ifndef __TEXT_H__
-#define __TEXT_H__
+#ifndef _MV_TEXT_H_
+#define _MV_TEXT_H_
 
 #define GL_GLEXT_PROTOTYPES
 #define GLX_GLEXT_PROTOTYPES
@@ -8,14 +8,12 @@
 #include <math.h>
 #include "Utility/package.h"
 #include "Render/render.h"
-#include "Render/scene.h"
-#include "Render/compositeScene.h"
+#include "Render/Scene/package.h"
 #include "SDL_ttf.h"
 
 namespace MV {
 	//WARNING:
 	//SDL Supports 16 bit unicode characters, ensure glyph only ever contains characters of that size (not larger) unless that changes.
-
 	struct TextState{
 		TextState(const UtfString &a_text, const Color &a_color, const std::string &a_fontIdentifier)
 			:text(a_text),color(a_color),fontIdentifier(a_fontIdentifier){}
@@ -233,17 +231,11 @@ namespace MV {
 			return contentScrollPosition;
 		}
 
-		Size<> getContentSize(){
-			return textScene->localAABB().size();
-		}
+		Size<> getContentSize();
 
-		std::shared_ptr<Scene::Node> scene(){
-			return textboxScene;
-		}
+		std::shared_ptr<Scene::Node> scene();
 
-		void draw(){
-			textboxScene->draw();
-		}
+		void draw();
 	private:
 		template <class Archive>
 		void serialize(Archive & archive){

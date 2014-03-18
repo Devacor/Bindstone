@@ -18,7 +18,6 @@ namespace MV {
 			public MessageHandler<BlockInteraction>{
 
 			friend cereal::access;
-			friend cereal::construct<Clickable>;
 			friend Button;
 		public:
 			typedef void ButtonSlotSignature(std::shared_ptr<Clickable>);
@@ -144,7 +143,6 @@ namespace MV {
 
 		class Button : public Node {
 			friend cereal::access;
-			friend cereal::construct<Clickable>;
 		public:
 			typedef void ButtonSlotSignature(std::shared_ptr<Clickable>);
 			typedef void DragSlotSignature(std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &currentPosition);

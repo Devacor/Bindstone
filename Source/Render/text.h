@@ -155,7 +155,6 @@ namespace MV {
 
 	class TextBox{
 		friend cereal::access;
-		friend cereal::construct<TextBox>;
 	public:
 		TextBox(TextLibrary *a_textLibrary, const Size<> &a_size);
 		TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const Size<> &a_size);

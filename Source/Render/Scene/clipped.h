@@ -10,7 +10,6 @@ namespace MV {
 			public MessageHandler<VisualChange>{
 
 			friend cereal::access;
-			friend cereal::construct<Clipped>;
 			friend Node;
 		public:
 			SCENE_MAKE_FACTORY_METHODS

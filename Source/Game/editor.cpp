@@ -151,10 +151,10 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 	static long buttonId = 0;
 	auto button = a_parent->make<MV::Scene::Button>(MV::wideToString(a_text) + boost::lexical_cast<std::string>(buttonId++), &a_mouse, a_size);
 	auto activeScene = MV::Scene::Rectangle::make(a_parent->getRenderer(), MV::Point<>(), a_size, false);
-	activeScene->color(MV::Color(0x7a96cf));
+	activeScene->color({0x7a96cf});
 
 	auto idleScene = MV::Scene::Rectangle::make(a_parent->getRenderer(), MV::Point<>(), a_size, false);
-	idleScene->color(MV::Color(0xa8bbe0));
+	idleScene->color({0xa8bbe0});
 
 	MV::TextBox activeBox(&a_library, a_fontIdentifier, a_text, a_size), idleBox(&a_library, a_fontIdentifier, a_text, a_size);
 	activeBox.justification(MV::CENTER);

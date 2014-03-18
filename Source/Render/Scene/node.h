@@ -58,7 +58,6 @@ namespace MV {
 			public MessageHandler<PushMatrix>,
 			public MessageHandler<PopMatrix>{
 			friend cereal::access;
-			friend cereal::construct<Node>;
 		public:
 			virtual ~Node(){
 				myParent = nullptr;

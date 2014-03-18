@@ -71,7 +71,6 @@ namespace MV {
 
 	class FileTextureDefinition : public TextureDefinition {
 		friend cereal::access;
-		friend cereal::construct<FileTextureDefinition>;
 	public:
 		static std::shared_ptr<FileTextureDefinition> make(const std::string &a_filename, bool a_repeat = false){
 			return std::shared_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_repeat));
@@ -106,7 +105,6 @@ namespace MV {
 
 	class DynamicTextureDefinition : public TextureDefinition {
 		friend cereal::access;
-		friend cereal::construct<DynamicTextureDefinition>;
 	public:
 		static std::shared_ptr<DynamicTextureDefinition> make(const std::string &a_name, const Size<int> &a_size){
 			return std::shared_ptr<DynamicTextureDefinition>(new DynamicTextureDefinition(a_name, a_size));
@@ -138,7 +136,6 @@ namespace MV {
 
 	class SurfaceTextureDefinition : public TextureDefinition {
 		friend cereal::access;
-		friend cereal::construct<SurfaceTextureDefinition>;
 	public:
 		static std::shared_ptr<SurfaceTextureDefinition> make(const std::string &a_name, std::function<SDL_Surface*()> a_surfaceGenerator){
 			return std::shared_ptr<SurfaceTextureDefinition>(new SurfaceTextureDefinition(a_name, a_surfaceGenerator));
@@ -179,7 +176,6 @@ namespace MV {
 
 	class TextureHandle : public std::enable_shared_from_this<TextureHandle> {
 		friend cereal::access;
-		friend cereal::construct<TextureHandle>;
 		friend TextureDefinition;
 		Slot<void(std::shared_ptr<TextureHandle>)> sizeChanges;
 	public:

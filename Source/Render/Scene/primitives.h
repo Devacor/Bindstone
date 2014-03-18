@@ -16,7 +16,6 @@ namespace MV {
 	namespace Scene {
 		class Pixel : public Node{
 			friend cereal::access;
-			friend cereal::construct<Pixel>;
 			friend Node;
 		public:
 			SCENE_MAKE_FACTORY_METHODS
@@ -57,7 +56,6 @@ namespace MV {
 
 		class Line : public Node{
 			friend cereal::access;
-			friend cereal::construct<Line>;
 			friend Node;
 		public:
 			SCENE_MAKE_FACTORY_METHODS
@@ -102,7 +100,6 @@ namespace MV {
 
 		class Rectangle : public Node{
 			friend cereal::access;
-			friend cereal::construct<Rectangle>;
 			friend Node;
 		public:
 			SCENE_MAKE_FACTORY_METHODS

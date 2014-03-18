@@ -3,8 +3,8 @@
 |----------------------------------------------------------|
 \**********************************************************/
 
-#ifndef _MATRIX_H_
-#define _MATRIX_H_
+#ifndef _MV_MATRIX_H_
+#define _MV_MATRIX_H_
 
 #include <vector>
 #include <algorithm>

@@ -1,8 +1,6 @@
-#ifndef __RENDER_PACKAGE__
-#define __RENDER_PACKAGE__
-	#include "Render/scene.h"
-	#include "Render/compositeScene.h"
+#ifndef _MV_RENDER_PACKAGE_
+#define _MV_RENDER_PACKAGE_
+	#include "Render/Scene/package.h"
 	#include "Render/textures.h"
 	#include "Render/text.h"
-	#include "Render/tiles.h"
 #endif

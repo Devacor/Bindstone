@@ -8,7 +8,7 @@ void CreateTextScene(std::shared_ptr<MV::Scene::Node> mainScene, MV::TextLibrary
 	textLibrary.loadFont("bluehighway2", 24, "Assets/Fonts/bluehigh.ttf");
 	textLibrary.loadFont("bluehighway3", 42, "Assets/Fonts/bluehigh.ttf");
 
-	mainScene->getRenderer()->setBackgroundColor(MV::Color(0, 0, 0, 0));
+	mainScene->getRenderer()->backgroundColor(MV::Color(0, 0, 0, 0));
 	mainScene->getRenderer()->clearScreen();
 	mainScene->getRenderer()->updateScreen();
 	//Add basic instructions
@@ -85,7 +85,7 @@ void UpdateSky(std::shared_ptr<MV::Scene::Node> mainScene){
 	float brightness = distance / 180.0f;
 	if(brightness < .1f){brightness = .1f;}
 
-	mainScene->getRenderer()->setBackgroundColor(MV::Color(0.25f*brightness, 0.45f*brightness, 0.65f*brightness));
+	mainScene->getRenderer()->backgroundColor(MV::Color(0.25f*brightness, 0.45f*brightness, 0.65f*brightness));
 }
 
 void UpdateAnimation(std::shared_ptr<MV::Scene::Node> mainScene, std::shared_ptr<MV::Scene::Rectangle> shape, MV::FrameSwapper &animation, bool flipAnimation){

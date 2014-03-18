@@ -32,6 +32,9 @@
     <Filter Include="Cereal">
       <UniqueIdentifier>{61a13c6e-f66f-44ba-b2a1-43a50d51af34}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Render\Scene">
+      <UniqueIdentifier>{e93f5cab-d33b-4c4e-be82-c58de8c3a0f2}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Animation\frameSwapper.cpp">
@@ -67,12 +70,6 @@
     <ClCompile Include="Source\Render\matrix.cpp">
       <Filter>Source Files\Render</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Render\tiles.cpp">
-      <Filter>Source Files\Render</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\game.cpp">
-      <Filter>Source Files\Game</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Game\pathGrid.cpp">
       <Filter>Source Files\Game</Filter>
     </ClCompile>
@@ -82,21 +79,31 @@
     <ClCompile Include="Source\Animation\actionSequence.cpp">
       <Filter>Source Files\Animation</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Render\scene.cpp">
-      <Filter>Source Files\Render</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Render\compositeScene.cpp">
-      <Filter>Source Files\Render</Filter>
-    </ClCompile>
     <ClCompile Include="Source\exampleCode.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Interface\mouse.cpp">
       <Filter>Source Files\Interface</Filter>
     </ClCompile>
-    <ClCompile Include="editor.cpp">
+    <ClCompile Include="Source\Game\game.cpp">
       <Filter>Source Files\Game</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Game\editor.cpp">
+      <Filter>Source Files\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\boxaabb.cpp">
+      <Filter>Source Files\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\Scene\node.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\Scene\clipped.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\Scene\button.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\Scene\primitives.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -141,14 +148,8 @@
     <ClInclude Include="Source\Render\matrix.h">
       <Filter>Source Files\Render</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Render\tiles.h">
-      <Filter>Source Files\Render</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Render\glext.h">
       <Filter>Source Files\Render</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\game.h">
-      <Filter>Source Files\Game</Filter>
     </ClInclude>
     <ClInclude Include="Source\Game\pathGrid.h">
       <Filter>Source Files\Game</Filter>
@@ -161,12 +162,6 @@
     </ClInclude>
     <ClInclude Include="Source\Network\package.h">
       <Filter>Source Files\Network</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Render\scene.h">
-      <Filter>Source Files\Render</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Render\compositeScene.h">
-      <Filter>Source Files\Render</Filter>
     </ClInclude>
     <ClInclude Include="Source\Utility\scopeGuard.hpp">
       <Filter>Source Files\Utility</Filter>
@@ -182,9 +177,6 @@
     </ClInclude>
     <ClInclude Include="Source\Interface\package.h">
       <Filter>Source Files\Interface</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Render\sceneMessages.hpp">
-      <Filter>Source Files\Render</Filter>
     </ClInclude>
     <ClInclude Include="Source\Interface\mouse.h">
       <Filter>Source Files\Interface</Filter>
@@ -336,8 +328,32 @@
     <ClInclude Include="..\external\cereal\include\cereal\types\vector.hpp">
       <Filter>Cereal</Filter>
     </ClInclude>
-    <ClInclude Include="editor.h">
+    <ClInclude Include="Source\Game\game.h">
       <Filter>Source Files\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\editor.h">
+      <Filter>Source Files\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\boxaabb.h">
+      <Filter>Source Files\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\button.h">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\node.h">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\package.h">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\sceneMessages.hpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\clipped.h">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\primitives.h">
+      <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

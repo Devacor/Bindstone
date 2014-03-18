@@ -1,88 +1,10 @@
-#include "compositeScene.h"
+#include "button.h"
 #include "cereal/archives/json.hpp"
-CEREAL_REGISTER_TYPE(MV::Scene::Clipped);
+
 CEREAL_REGISTER_TYPE(MV::Scene::Clickable);
 
 namespace MV {
 	namespace Scene {
-
-		/*************************\
-		| --------Clipped-------- |
-		\*************************/
-
-		void Clipped::refreshTexture(bool a_forceRefresh) {
-			if(a_forceRefresh || dirtyTexture){
-				auto pointAABB = basicAABB();
-				auto textureSize = castSize<int>(pointAABB.size());
-				clippedTexture = DynamicTextureDefinition::make("", textureSize);
-				dirtyTexture = false;
-				texture(clippedTexture->makeHandle(Point<int>(), textureSize));
-				framebuffer = renderer->makeFramebuffer(castPoint<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId()); //need to set texture id later anyway
-				framebuffer->setTextureId(clippedTexture->textureId());
-				{
-					renderer->modelviewMatrix().push();
-					SCOPE_EXIT{renderer->modelviewMatrix().pop();};
-					renderer->modelviewMatrix().top().makeIdentity();
-
-					pushMatrix();
-					SCOPE_EXIT{popMatrix();};
-
-					framebuffer->start();
-					SCOPE_EXIT{framebuffer->stop();};
-
-					if(drawSorted){
-						sortedRender();
-					} else{
-						unsortedRender();
-					}
-				}
-				alertParent(VisualChange::make(shared_from_this()));
-			}
-		}
-
-		bool Clipped::preDraw() {
-			refreshTexture();
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-			defaultDraw(GL_TRIANGLE_FAN);
-
-			return false; //returning false blocks the default rendering steps for this node.
-		}
-
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer) {
-			return std::shared_ptr<Clipped>(new Clipped(a_renderer));
-		}
-
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight) {
-			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			clipped->setTwoCorners(a_topLeft, a_bottomRight);
-			return clipped;
-		}
-
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const Point<> &a_topLeft, const Point<> &a_bottomRight) {
-			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			clipped->setTwoCorners(a_topLeft, a_bottomRight);
-			return clipped;
-		}
-
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const Point<> &a_point, const Size<> &a_size, bool a_center) {
-			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			if(a_center){
-				clipped->setSizeAndCenterPoint(a_point, a_size);
-			} else{
-				clipped->setSizeAndCornerPoint(a_point, a_size);
-			}
-			return clipped;
-		}
-
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const Size<> &a_size) {
-			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			clipped->setSize(a_size);
-			return clipped;
-		}
-
-
 		/*************************\
 		| -------Clickable------- |
 		\*************************/
@@ -225,7 +147,7 @@ namespace MV {
 			mouse(a_mouse),
 			eatTouches(true),
 			isInPressEvent(false),
-			shouldUseChildrenInHitDetection(true),
+			shouldUseChildrenInHitDetection(false),
 			onPress(onPressSlot),
 			onRelease(onReleaseSlot),
 			onCancel(onCancelSlot),
@@ -387,30 +309,30 @@ namespace MV {
 		BoxAABB Button::getWorldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			return clickable->getWorldAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
 				(clickable->inPressEvent()) ?
-					activeSceneNode->getWorldAABBImplementation(a_includeChildren, a_nestedCall):
-					idleSceneNode->getWorldAABBImplementation(a_includeChildren, a_nestedCall)
-			);
+				activeSceneNode->getWorldAABBImplementation(a_includeChildren, a_nestedCall) :
+				idleSceneNode->getWorldAABBImplementation(a_includeChildren, a_nestedCall)
+				);
 		}
 		BoxAABB Button::getScreenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			return clickable->getScreenAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
 				(clickable->inPressEvent()) ?
-					activeSceneNode->getScreenAABBImplementation(a_includeChildren, a_nestedCall):
-					idleSceneNode->getScreenAABBImplementation(a_includeChildren, a_nestedCall)
-			);
+				activeSceneNode->getScreenAABBImplementation(a_includeChildren, a_nestedCall) :
+				idleSceneNode->getScreenAABBImplementation(a_includeChildren, a_nestedCall)
+				);
 		}
 		BoxAABB Button::getLocalAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			return clickable->getLocalAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
 				(clickable->inPressEvent()) ?
-					activeSceneNode->getLocalAABBImplementation(a_includeChildren, a_nestedCall):
-					idleSceneNode->getLocalAABBImplementation(a_includeChildren, a_nestedCall)
-			);
+				activeSceneNode->getLocalAABBImplementation(a_includeChildren, a_nestedCall) :
+				idleSceneNode->getLocalAABBImplementation(a_includeChildren, a_nestedCall)
+				);
 		}
 		BoxAABB Button::getBasicAABBImplementation() const{
 			return clickable->getBasicAABBImplementation().expandWith(
 				(clickable->inPressEvent()) ?
-					activeSceneNode->getBasicAABBImplementation():
-					idleSceneNode->getBasicAABBImplementation()
-			);
+				activeSceneNode->getBasicAABBImplementation() :
+				idleSceneNode->getBasicAABBImplementation()
+				);
 		}
 
 	}

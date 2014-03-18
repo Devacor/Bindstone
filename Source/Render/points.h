@@ -1,5 +1,5 @@
-#ifndef __POINTS_H__
-#define __POINTS_H__
+#ifndef _MV_POINTS_H_
+#define _MV_POINTS_H_
 
 #include <ostream>
 #include <istream>

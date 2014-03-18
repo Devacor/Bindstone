@@ -164,12 +164,12 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="editor.cpp" />
+    <ClCompile Include="Source\Game\editor.cpp" />
     <ClCompile Include="Source\Animation\actionSequence.cpp" />
     <ClCompile Include="Source\Animation\frameSwapper.cpp" />
     <ClCompile Include="Source\Audio\sound.cpp" />
     <ClCompile Include="Source\exampleCode.cpp" />
-    <ClCompile Include="Source\game.cpp" />
+    <ClCompile Include="Source\Game\game.cpp" />
     <ClCompile Include="Source\Game\pathGrid.cpp" />
     <ClCompile Include="Source\Interface\mouse.cpp" />
     <ClCompile Include="Source\main.cpp">
@@ -177,14 +177,16 @@
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">./;./Source</AdditionalIncludeDirectories>
     </ClCompile>
     <ClCompile Include="Source\Network\network.cpp" />
-    <ClCompile Include="Source\Render\compositeScene.cpp" />
-    <ClCompile Include="Source\Render\scene.cpp" />
+    <ClCompile Include="Source\Render\boxaabb.cpp" />
+    <ClCompile Include="Source\Render\Scene\button.cpp" />
+    <ClCompile Include="Source\Render\Scene\clipped.cpp" />
+    <ClCompile Include="Source\Render\Scene\node.cpp" />
     <ClCompile Include="Source\Render\matrix.cpp" />
     <ClCompile Include="Source\Render\points.cpp" />
     <ClCompile Include="Source\Render\render.cpp" />
+    <ClCompile Include="Source\Render\Scene\primitives.cpp" />
     <ClCompile Include="Source\Render\text.cpp" />
     <ClCompile Include="Source\Render\textures.cpp" />
-    <ClCompile Include="Source\Render\tiles.cpp" />
     <ClCompile Include="Source\Utility\generalUtility.cpp" />
     <ClCompile Include="Source\Utility\notification.cpp" />
     <ClCompile Include="Source\Utility\stopwatch.cpp" />
@@ -239,30 +241,33 @@
     <ClInclude Include="..\external\cereal\include\cereal\types\unordered_set.hpp" />
     <ClInclude Include="..\external\cereal\include\cereal\types\utility.hpp" />
     <ClInclude Include="..\external\cereal\include\cereal\types\vector.hpp" />
-    <ClInclude Include="editor.h" />
+    <ClInclude Include="Source\Game\editor.h" />
+    <ClInclude Include="Source\Render\boxaabb.h" />
+    <ClInclude Include="Source\Render\Scene\primitives.h" />
+    <ClInclude Include="Source\Render\Scene\button.h" />
     <ClInclude Include="Source\Animation\actionSequence.h" />
     <ClInclude Include="Source\Animation\frameSwapper.h" />
     <ClInclude Include="Source\Animation\package.h" />
     <ClInclude Include="Source\Audio\package.h" />
     <ClInclude Include="Source\Audio\sound.h" />
     <ClInclude Include="Source\exampleCode.h" />
-    <ClInclude Include="Source\game.h" />
+    <ClInclude Include="Source\Game\game.h" />
     <ClInclude Include="Source\Game\pathGrid.h" />
     <ClInclude Include="Source\Interface\mouse.h" />
     <ClInclude Include="Source\Interface\package.h" />
     <ClInclude Include="Source\Network\network.h" />
     <ClInclude Include="Source\Network\package.h" />
-    <ClInclude Include="Source\Render\compositeScene.h" />
-    <ClInclude Include="Source\Render\scene.h" />
+    <ClInclude Include="Source\Render\Scene\clipped.h" />
+    <ClInclude Include="Source\Render\Scene\package.h" />
+    <ClInclude Include="Source\Render\Scene\node.h" />
     <ClInclude Include="Source\Render\glext.h" />
     <ClInclude Include="Source\Render\matrix.h" />
     <ClInclude Include="Source\Render\package.h" />
     <ClInclude Include="Source\Render\points.h" />
     <ClInclude Include="Source\Render\render.h" />
-    <ClInclude Include="Source\Render\sceneMessages.hpp" />
+    <ClInclude Include="Source\Render\Scene\sceneMessages.hpp" />
     <ClInclude Include="Source\Render\text.h" />
     <ClInclude Include="Source\Render\textures.h" />
-    <ClInclude Include="Source\Render\tiles.h" />
     <ClInclude Include="Source\Utility\generalUtility.h" />
     <ClInclude Include="Source\Utility\messageHandler.hpp" />
     <ClInclude Include="Source\Utility\notification.h" />

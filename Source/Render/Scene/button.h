@@ -1,65 +1,11 @@
-#ifndef _MV_COMPOSITESCENE_H_
-#define _MV_COMPOSITESCENE_H_
+#ifndef _MV_SCENE_BUTTON_H_
+#define _MV_SCENE_BUTTON_H_
 
-#include "Render/scene.h"
 #include "Interface/mouse.h"
+#include "Render/Scene/primitives.h"
 
 namespace MV {
 	namespace Scene {
-		class Clipped :
-			public Rectangle,
-			public MessageHandler<VisualChange>{
-
-			friend cereal::access;
-			friend cereal::construct<Clipped>;
-			friend Node;
-		public:
-			SCENE_MAKE_FACTORY_METHODS
-
-			static std::shared_ptr<Clipped> make(Draw2D* a_renderer);
-			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight);
-			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const Point<> &a_topLeft, const Point<> &a_bottomRight);
-			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const Point<> &a_point, const Size<> &a_size, bool a_center = false);
-			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const Size<> &a_size);
-
-			virtual ~Clipped(){}
-
-			void refreshTexture(bool a_forceRefresh = false);
-
-		protected:
-			Clipped(Draw2D *a_renderer):
-				Rectangle(a_renderer),
-				dirtyTexture(true){
-			}
-
-		private:
-			virtual bool preDraw();
-
-			virtual void handleBegin(std::shared_ptr<VisualChange>){
-				dirtyTexture = true;
-			}
-			virtual void handleEnd(std::shared_ptr<VisualChange>){
-			}
-
-			template <class Archive>
-			void serialize(Archive & archive){
-				archive(cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(this)));
-			}
-
-			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Clipped> &construct){
-				construct(nullptr);
-				archive(
-					cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(construct.ptr()))
-				);
-			}
-
-			std::shared_ptr<DynamicTextureDefinition> clippedTexture;
-			std::shared_ptr<Framebuffer> framebuffer;
-
-			bool dirtyTexture;
-		};
-
 		struct BlockInteraction : public MV::Message {
 			static std::shared_ptr<BlockInteraction> make(std::shared_ptr<Node> a_sender){ return std::make_shared<BlockInteraction>(a_sender); }
 			BlockInteraction(std::shared_ptr<Node> a_sender):sender(a_sender){}
@@ -213,7 +159,7 @@ namespace MV {
 			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_topLeft, const Point<> &a_bottomRight);
 			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_point, const Size<> &a_size, bool a_center = false);
 			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size);
-			
+
 			SlotRegister<ButtonSlotSignature> onPress;
 			SlotRegister<ButtonSlotSignature> onRelease;
 			SlotRegister<ButtonSlotSignature> onAccept;

@@ -103,7 +103,9 @@
     <ClCompile Include="Source\Render\Scene\button.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Render\Scene\primitives.cpp" />
+    <ClCompile Include="Source\Render\Scene\primitives.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">

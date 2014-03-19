@@ -38,8 +38,11 @@ namespace MV {
 	class Color{
 	public:
 		Color():R(1.0f), G(1.0f), B(1.0f), A(1.0f){}
-		Color(uint32_t a_hex, bool a_readAlphaBits = false);
-		Color(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0f){ R = validColorRange(a_Red); G = validColorRange(a_Green); B = validColorRange(a_Blue); A = validColorRange(a_Alpha); }
+		//Due to being unable to distinguish between 0x000000 and 0x00000000 we default the 00 bits in the alpha channel to 1.0.
+		//allowFullAlpha overrides this behavior so that if the alpha channel is 00 it is read as 00 instead as FF.
+		Color(uint32_t a_hex, bool a_allowFullAlpha = false);
+		Color(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0f);
+		
 		~Color(){}
 
 		Color& operator=(const Color& a_other);
@@ -60,11 +63,16 @@ namespace MV {
 
 		template <class Archive>
 		void serialize(Archive & archive){
+			normalize();
 			archive(CEREAL_NVP(R), CEREAL_NVP(G), CEREAL_NVP(B), CEREAL_NVP(A));
+			normalize();
 		}
 
 		uint32_t hex() const;
-		uint32_t hex(uint32_t a_hex, bool a_readAlpha = false);
+		uint32_t hex(uint32_t a_hex, bool a_allowFullAlpha = false); //to maintain party with the hex get.
+		
+		Color& set(uint32_t a_hex, bool a_allowFullAlpha = false); //option to get back a Color&
+		Color& set(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0f);
 
 		float R, G, B, A;
 

@@ -44,15 +44,62 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 
 class EditorControlPanel {
 public:
-	EditorControlPanel(std::shared_ptr<MV::Scene::Node> a_scene):
-		scene(a_scene){
+	EditorControlPanel(std::shared_ptr<MV::Scene::Node> a_scene, MV::TextLibrary *a_textLibrary, MV::MouseState *a_mouse):
+		scene(a_scene),
+		textLibrary(a_textLibrary),
+		mouse(a_mouse){
+
+		draggableBox = scene->make<MV::Scene::Node>("ContextMenu");
 	}
 
-	void createNoSelectionScene(){
-		//scene->make<Rectangle>("Background");
+	void createDeselectedScene(){
+		deleteScene();
+
+		auto createButton = makeButton(draggableBox, *textLibrary, *mouse, MV::size(110.0, 27.0), UTF_CHAR_STR("Create"));
+		createButton->position({8.0, 28.0});
+		auto selectButton = makeButton(draggableBox, *textLibrary, *mouse, MV::size(110.0, 27.0), UTF_CHAR_STR("Select"));
+		selectButton->position(createButton->localAABB().bottomLeftPoint() + MV::point(0.0, 5.0));
+
+		auto background = draggableBox->make<MV::Scene::Rectangle>("Background", MV::point(0.0, 20.0), selectButton->localAABB().bottomRightPoint() + MV::point(8.0, 8.0));
+		background->color({0x646b7c});
+		background->setSortDepth(-1.0);
+
+		makeBoxHeader(background->basicAABB().width());
+
+		clickSignals["create"] = createButton->onAccept.connect([&](std::shared_ptr<MV::Scene::Clickable>){
+			deleteScene();
+		});
 	}
 private:
+	void deleteScene(){
+		clickSignals.clear();
+		draggableBox->clear();
+		if(boxHeader){
+			draggableBox->add("ContextMenuHandle", boxHeader);
+		}
+	}
+	void makeBoxHeader(double a_width){
+		if(!boxHeader){
+			boxHeader = draggableBox->make<MV::Scene::Clickable>("ContextMenuHandle", mouse, MV::size(a_width, 20.0));
+			boxHeader->color({0x1b1f29});
+
+			boxHeaderDrag = boxHeader->onDrag.connect([](std::shared_ptr<MV::Scene::Clickable> boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
+				boxHeader->parent()->translate(MV::castPoint<double>(deltaPosition));
+			});
+		}else{
+			boxHeader->setSize({a_width, 20.0});
+		}
+	}
+
 	std::shared_ptr<MV::Scene::Node> scene;
+	std::shared_ptr<MV::Scene::Node> draggableBox;
+	std::shared_ptr<MV::Scene::Clickable> boxHeader;
+	MV::Scene::ClickableSignals::Drag boxHeaderDrag;
+
+	std::map<std::string, MV::Scene::ClickableSignals::Click> clickSignals;
+
+	MV::TextLibrary *textLibrary;
+	MV::MouseState *mouse;
 };
 
 class Editor {
@@ -76,20 +123,19 @@ private:
 	MV::FrameSwapperRegister animationLibrary;
 
 	MV::TextLibrary textLibrary;
-	MV::TextBox textBox;
 
 	std::shared_ptr<MV::Scene::Node> scene;
 	std::shared_ptr<MV::Scene::Node> controls;
 
 	MV::MouseState mouse;
 
-	MV::Scene::ClickableSignals inputHandles;
-
 	MV::Stopwatch watch;
 	double lastSecond = 0;
 	bool done = false;
 
 	Selection selection;
+	EditorControlPanel controlPanel;
+
 };
 
 void sdl_quit(void);

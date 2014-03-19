@@ -4,7 +4,9 @@
 #include <memory>
 #include <utility>
 #include <functional>
+#include <vector>
 #include <set>
+#include "Utility/scopeGuard.hpp"
 
 namespace MV {
 
@@ -98,17 +100,32 @@ namespace MV {
 		}
 
 		void disconnect(std::shared_ptr<Signal<T>> a_value){
-			observers.erase(a_value);
+			if(!inCall){
+				observers.erase(a_value);
+			} else{
+				disconnectQueue.push_back(a_value);
+			}
 		}
 
 		template <typename ...Arg>
 		void operator()(Arg... a_parameters){
+			inCall = true;
+			SCOPE_EXIT{
+				inCall = false;
+				for(auto& i : disconnectQueue){
+					observers.erase(i);
+				}
+				disconnectQueue.clear();
+			};
+
 			for (auto i = observers.begin(); i != observers.end();) {
 				if (i->expired()) {
 					observers.erase(i++);
 				} else {
+					auto next = i;
+					++next;
 					i->lock()->notify(std::forward<Arg>(a_parameters)...);
-					++i;
+					i = next;
 				}
 			}
 		}
@@ -134,6 +151,8 @@ namespace MV {
 	private:
 		std::set< std::weak_ptr< Signal<T> >, std::owner_less<std::weak_ptr<Signal<T>>> > observers;
 		size_t observerLimit = std::numeric_limits<size_t>::max();
+		bool inCall = false;
+		std::vector< std::shared_ptr<Signal<T>> > disconnectQueue;
 	};
 
 	//Can be used as a public SlotRegister member for connecting slots to a private Slot member.

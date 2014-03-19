@@ -10,18 +10,6 @@ namespace MV {
 		\*************************/
 
 		Clickable::~Clickable(){
-			if(onMouseButtonBeginHandle){
-				mouse->onMouseButtonBegin.disconnect(onMouseButtonBeginHandle);
-			}
-			if(onMouseButtonEndHandle){
-				mouse->onMouseButtonEnd.disconnect(onMouseButtonEndHandle);
-			}
-			if(onMouseDownHandle){
-				mouse->onLeftMouseDown.disconnect(onMouseDownHandle);
-			}
-			if(onMouseUpHandle){
-				mouse->onLeftMouseUp.disconnect(onMouseUpHandle);
-			}
 		}
 
 		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse) {
@@ -156,7 +144,7 @@ namespace MV {
 			hookedUp(false){
 			//Default to transparent. Allows us to toggle it back visible for testing purposes, or if we want to render a button image directly in the Clickable node.
 			//NOT calling setColor because that relies on shared_from_this.
-			auto alpha = MV::Color(1, 1, 1, 0);
+			auto alpha = MV::Color(1.0, 1.0, 1.0, 0);
 			int elements = (int)points.size();
 			for(int i = 0; i < elements; i++){
 				points[i] = alpha;

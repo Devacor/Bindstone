@@ -129,16 +129,22 @@ namespace MV {
 			}
 		};
 
+		typedef Slot<Clickable::ButtonSlotSignature>::SharedSignalType ButtonSharedSignalType;
+		typedef Slot<Clickable::ButtonSlotSignature>::SharedSignalType DragSharedSignalType;
+
 		struct ClickableSignals {
-			Slot<Clickable::ButtonSlotSignature>::SharedSignalType press;
-			Slot<Clickable::ButtonSlotSignature>::SharedSignalType release;
+			typedef Slot<Clickable::ButtonSlotSignature>::SharedSignalType Click;
+			typedef Slot<Clickable::DragSlotSignature>::SharedSignalType Drag;
+
+			Click press;
+			Click release;
 
 			//called when release happens over top of the current node.
-			Slot<Clickable::ButtonSlotSignature>::SharedSignalType accept;
+			Click accept;
 			//called when release happens outside of the current node.
-			Slot<Clickable::ButtonSlotSignature>::SharedSignalType cancel;
+			Click cancel;
 
-			Slot<Clickable::DragSlotSignature>::SharedSignalType drag;
+			Drag drag;
 		};
 
 		class Button : public Node {

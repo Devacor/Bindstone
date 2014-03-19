@@ -18,22 +18,28 @@ namespace MV {
 	| ---------Color--------- |
 	\*************************/
 
-	Color::Color(uint32_t a_hex, bool a_readAlphaBits /*= false*/):
-		A(a_readAlphaBits ? ((a_hex >> 24) & 0xFF) / 255.0f : 1.0f),
+	Color::Color(uint32_t a_hex, bool a_allowFullAlpha):
+		A((a_allowFullAlpha || (a_hex & 0xff000000)) ? ((a_hex >> 24) & 0xFF) / 255.0f : 1.0f),
 		R(((a_hex >> 16) & 0xFF) / 255.0f),
 		G(((a_hex >> 8) & 0xFF) / 255.0f),
 		B(((a_hex)& 0xFF) / 255.0f) {
 	}
 
+	Color::Color(float a_Red, float a_Green, float a_Blue, float a_Alpha /*= 1.0f*/):
+		R(validColorRange(a_Red)),
+		G(validColorRange(a_Green)),
+		B(validColorRange(a_Blue)),
+		A(validColorRange(a_Alpha)) {
+	}
+
 	Color& Color::operator=( const Color& a_other ){
-		R = a_other.R; G = a_other.G; B = a_other.B; A = a_other.A;
+		R = validColorRange(a_other.R); G = validColorRange(a_other.G); B = validColorRange(a_other.B); A = validColorRange(a_other.A);
 		normalize();
 		return *this;
 	}
 
 	Color& Color::operator=( const DrawPoint& a_other ){
-		R = a_other.R; G = a_other.G; B = a_other.B; A = a_other.A;
-		normalize();
+		R = validColorRange(a_other.R); G = validColorRange(a_other.G); B = validColorRange(a_other.B); A = validColorRange(a_other.A);
 		return *this;
 	}
 
@@ -84,12 +90,24 @@ namespace MV {
 			(static_cast<uint32_t>(round(B * static_cast<float>(0xFF))));
 	}
 
-	uint32_t Color::hex(uint32_t a_hex, bool a_readAlphaBits /*= false*/) {
-		A = (a_readAlphaBits ? ((a_hex >> 24) & 0xFF) / 255.0f : 1.0f);
+	uint32_t Color::hex(uint32_t a_hex, bool a_allowFullAlpha) {
+		A = ((a_allowFullAlpha || (a_hex & 0xff000000)) ? ((a_hex >> 24) & 0xFF) / 255.0f : 1.0f);
 		R = (((a_hex >> 16) & 0xFF) / 255.0f);
 		G = (((a_hex >> 8) & 0xFF) / 255.0f);
 		B = (((a_hex)& 0xFF) / 255.0f);
 		return hex();
+	}
+
+	Color& Color::set(uint32_t a_hex, bool a_allowFullAlpha){
+		hex(a_hex, a_allowFullAlpha);
+		return *this;
+	}
+	Color& Color::set(float a_Red, float a_Green, float a_Blue, float a_Alpha){
+		R = validColorRange(a_Red);
+		G = validColorRange(a_Green);
+		B = validColorRange(a_Blue);
+		A = validColorRange(a_Alpha);
+		return *this;
 	}
 
 	void Color::normalize() {

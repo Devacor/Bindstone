@@ -1,3 +1,6 @@
+#ifndef _MV_SCOPEGUARD_H_
+#define _MV_SCOPEGUARD_H_
+
 //Lifted from Alexandrescu's ScopeGuard11 talk.
 
 namespace MV {
@@ -49,3 +52,5 @@ namespace MV {
 	CONCATENATE(str, __LINE__)
 #endif
 }
+
+#endif

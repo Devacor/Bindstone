@@ -91,6 +91,7 @@ namespace MV {
 			//For composite collections
 			template<typename TypeToAdd>
 			std::shared_ptr<TypeToAdd> add(const std::string &a_childId, std::shared_ptr<TypeToAdd> a_childItem) {
+				require(a_childItem, MV::PointerException("Node::add was supplied a null child for: " + a_childId));
 				isSorted = 0;
 				drawListVector.clear();
 				if(renderer){

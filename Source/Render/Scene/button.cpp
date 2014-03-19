@@ -144,10 +144,9 @@ namespace MV {
 			hookedUp(false){
 			//Default to transparent. Allows us to toggle it back visible for testing purposes, or if we want to render a button image directly in the Clickable node.
 			//NOT calling setColor because that relies on shared_from_this.
-			auto alpha = MV::Color(1.0, 1.0, 1.0, 0);
-			int elements = (int)points.size();
-			for(int i = 0; i < elements; i++){
-				points[i] = alpha;
+			auto alpha = MV::Color(1, 1, 1, 0);
+			for(auto point : points){
+				point = alpha;
 			}
 		}
 

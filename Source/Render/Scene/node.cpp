@@ -96,16 +96,17 @@ namespace MV {
 			alertParent(VisualChange::make(shared_from_this()));
 		}
 
-		std::shared_ptr<Node> Node::get(const std::string &a_childId, bool a_throwIfNotFound){
+		std::shared_ptr<Node> Node::get(const std::string &a_childId, bool a_throwOnNull){
 			auto cell = drawList.find(a_childId);
 			if(cell != drawList.end()){
 				return cell->second;
 			}
 			for(auto &cell : drawList){
-				if(auto foundInChild = cell.second->get(a_childId, a_throwIfNotFound)){
+				if(auto foundInChild = cell.second->get(a_childId, a_throwOnNull)){
 					return foundInChild;
 				}
 			}
+			require(!a_throwOnNull, MV::ResourceException("Node::get was unable to find child: "+a_childId));
 			return nullptr;
 		}
 

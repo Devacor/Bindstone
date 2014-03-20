@@ -204,11 +204,16 @@ namespace MV {
 				return std::dynamic_pointer_cast<DerivedClass>(shared_from_this());
 			}
 
-			std::shared_ptr<Node> get(const std::string& a_childId, bool a_throwIfNotFound = true);
+			std::shared_ptr<Node> get(const std::string& a_childId, bool a_throwOnNull = true);
 			//convenient return value conversion get<DrawShapeType>(childId)
 			template<typename DerivedClass>
-			std::shared_ptr<DerivedClass> get(const std::string& a_childId, bool a_throwIfNotFound = true){
-				return get(a_childId, a_throwIfNotFound)->get<DerivedClass>();
+			std::shared_ptr<DerivedClass> get(const std::string& a_childId, bool a_throwOnNull = true){
+				auto value = get(a_childId, a_throwOnNull);
+				if(value == nullptr){
+					return nullptr;
+				}else{
+					return value->get<DerivedClass>();
+				}
 			}
 
 			std::vector<std::shared_ptr<Node>> children();

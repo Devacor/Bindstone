@@ -12,9 +12,9 @@
 
 class Selection {
 public:
-	Selection(std::shared_ptr<MV::Scene::Node> a_controls, MV::MouseState &a_mouse):
+	Selection(std::shared_ptr<MV::Scene::Node> a_scene, MV::MouseState &a_mouse):
 		mouse(a_mouse),
-		controls(a_controls),
+		scene(a_scene),
 		id(gid++){
 	}
 
@@ -22,9 +22,10 @@ public:
 	void enable(std::function<void (const MV::BoxAABB &)> a_callback);
 	void enable();
 	void disable();
+	void exitSelection();
 
 private:
-	std::shared_ptr<MV::Scene::Node> controls;
+	std::shared_ptr<MV::Scene::Node> scene;
 
 	std::shared_ptr<MV::Scene::Rectangle> visibleSelection;
 	MV::MouseState &mouse;
@@ -36,70 +37,120 @@ private:
 
 	MV::MouseState::SignalType onMouseMoveHandle;
 	
+	bool inSelection = false;
+
 	static long gid;
 	long id;
 };
 
 std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::UtfString &a_text, const std::string &a_fontIdentifier = "default");
 
-class EditorControlPanel {
+class EditorPanel;
+
+class EditorControls {
 public:
-	EditorControlPanel(std::shared_ptr<MV::Scene::Node> a_scene, MV::TextLibrary *a_textLibrary, MV::MouseState *a_mouse):
-		scene(a_scene),
-		textLibrary(a_textLibrary),
-		mouse(a_mouse){
+	EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::shared_ptr<MV::Scene::Node> a_root, MV::TextLibrary *a_textLibrary, MV::MouseState *a_mouse):
+		editorScene(a_editor),
+		rootScene(a_root),
+		textLibraryHandle(a_textLibrary),
+		mouseHandle(a_mouse){
 
-		draggableBox = scene->make<MV::Scene::Node>("ContextMenu");
+		draggableBox = editorScene->make<MV::Scene::Node>("ContextMenu");
 	}
 
-	void createDeselectedScene(){
-		deleteScene();
-
-		auto createButton = makeButton(draggableBox, *textLibrary, *mouse, MV::size(110.0, 27.0), UTF_CHAR_STR("Create"));
-		createButton->position({8.0, 28.0});
-		auto selectButton = makeButton(draggableBox, *textLibrary, *mouse, MV::size(110.0, 27.0), UTF_CHAR_STR("Select"));
-		selectButton->position(createButton->localAABB().bottomLeftPoint() + MV::point(0.0, 5.0));
-
-		auto background = draggableBox->make<MV::Scene::Rectangle>("Background", MV::point(0.0, 20.0), selectButton->localAABB().bottomRightPoint() + MV::point(8.0, 8.0));
-		background->color({0x646b7c});
-		background->setSortDepth(-1.0);
-
-		makeBoxHeader(background->basicAABB().width());
-
-		clickSignals["create"] = createButton->onAccept.connect([&](std::shared_ptr<MV::Scene::Clickable>){
-			deleteScene();
-		});
+	MV::TextLibrary* textLibrary() const{
+		return textLibraryHandle;
 	}
-private:
+
+	MV::MouseState* mouse() const{
+		return mouseHandle;
+	}
+
+	std::shared_ptr<MV::Scene::Node> root(){
+		return rootScene;
+	}
+
+	template <typename PanelType>
+	void loadPanel(){
+		currentPanel = std::make_unique<PanelType>(*this);
+	}
+
 	void deleteScene(){
-		clickSignals.clear();
+		currentPanel.reset();
 		draggableBox->clear();
 		if(boxHeader){
 			draggableBox->add("ContextMenuHandle", boxHeader);
 		}
 	}
-	void makeBoxHeader(double a_width){
-		if(!boxHeader){
-			boxHeader = draggableBox->make<MV::Scene::Clickable>("ContextMenuHandle", mouse, MV::size(a_width, 20.0));
-			boxHeader->color({0x1b1f29});
 
-			boxHeaderDrag = boxHeader->onDrag.connect([](std::shared_ptr<MV::Scene::Clickable> boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
-				boxHeader->parent()->translate(MV::castPoint<double>(deltaPosition));
-			});
+	void updateBoxHeader(double a_width);
+
+	std::shared_ptr<MV::Scene::Node> content(){
+		auto found = draggableBox->get("content", false);
+		if(found){
+			return found;
 		}else{
-			boxHeader->setSize({a_width, 20.0});
+			return draggableBox->make<MV::Scene::Node>("content");
 		}
 	}
 
-	std::shared_ptr<MV::Scene::Node> scene;
+private:
+	std::shared_ptr<MV::Scene::Node> editorScene;
+	std::shared_ptr<MV::Scene::Node> rootScene;
 	std::shared_ptr<MV::Scene::Node> draggableBox;
 	std::shared_ptr<MV::Scene::Clickable> boxHeader;
 	MV::Scene::ClickableSignals::Drag boxHeaderDrag;
 
-	std::map<std::string, MV::Scene::ClickableSignals::Click> clickSignals;
+	MV::TextLibrary *textLibraryHandle;
+	MV::MouseState *mouseHandle;
 
-	MV::TextLibrary *textLibrary;
-	MV::MouseState *mouse;
+	std::unique_ptr<EditorPanel> currentPanel;
+};
+
+class EditorPanel {
+public:
+	EditorPanel(EditorControls &a_panel):
+		panel(a_panel),
+		selection(a_panel.root(), *a_panel.mouse()){
+	}
+
+	virtual void cancelInput(){
+		selection.exitSelection();
+	}
+
+protected:
+	EditorControls &panel;
+	Selection selection;
+	std::map<std::string, MV::Scene::ClickableSignals::Click> clickSignals;
+};
+
+class DeselectedEditorPanel : public EditorPanel {
+public:
+	DeselectedEditorPanel(EditorControls &a_panel):
+		EditorPanel(a_panel){
+
+		panel.deleteScene();
+		auto node = panel.content();
+		auto createButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0, 27.0), UTF_CHAR_STR("Create"));
+		createButton->position({8.0, 28.0});
+		auto selectButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0, 27.0), UTF_CHAR_STR("Select"));
+		selectButton->position(createButton->localAABB().bottomLeftPoint() + MV::point(0.0, 5.0));
+
+		auto background = node->make<MV::Scene::Rectangle>("Background", MV::point(0.0, 20.0), selectButton->localAABB().bottomRightPoint() + MV::point(8.0, 8.0));
+		background->color({0x646b7c});
+		background->setSortDepth(-1.0);
+
+		panel.updateBoxHeader(background->basicAABB().width());
+
+		clickSignals["create"] = createButton->onAccept.connect([&](std::shared_ptr<MV::Scene::Clickable>){
+			selection.enable();
+			//panel.deleteScene();
+		});
+
+		clickSignals["select"] = selectButton->onAccept.connect([&](std::shared_ptr<MV::Scene::Clickable>){
+			panel.deleteScene();
+		});
+	}
 };
 
 class Editor {
@@ -133,8 +184,7 @@ private:
 	double lastSecond = 0;
 	bool done = false;
 
-	Selection selection;
-	EditorControlPanel controlPanel;
+	EditorControls controlPanel;
 
 };
 

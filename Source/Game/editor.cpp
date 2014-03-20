@@ -18,8 +18,9 @@ void Selection::enable(std::function<void(const MV::BoxAABB &)> a_callback){
 
 void Selection::enable(){
 	onMouseDownHandle = mouse.onLeftMouseDown.connect([&](MV::MouseState &mouse){
+		inSelection = true;
 		selection.initialize(MV::castPoint<double>(mouse.position()));
-		visibleSelection = controls->make<MV::Scene::Rectangle>("Selection_" + boost::lexical_cast<std::string>(id), selection.minPoint, MV::Size<>());
+		visibleSelection = scene->make<MV::Scene::Rectangle>("Selection_" + boost::lexical_cast<std::string>(id), selection.minPoint, MV::Size<>());
 		visibleSelection->color(MV::Color(1.0, 1.0, 0.0, .25));
 		auto originalPosition = visibleSelection->localFromScreen(mouse.position());
 		onMouseMoveHandle = mouse.onMove.connect([&, originalPosition](MV::MouseState &mouse){
@@ -28,29 +29,40 @@ void Selection::enable(){
 	});
 
 	onMouseUpHandle = mouse.onLeftMouseUp.connect([&](MV::MouseState &mouse){
+		if(!inSelection){
+			return;
+		}
+		SCOPE_EXIT{
+			exitSelection(); //callback might throw, let's be safe.
+		};
+
 		selection.expandWith(MV::castPoint<double>(mouse.position()));
 		if(selectedCallback){
 			selectedCallback(selection);
 		}
+	});
+}
 
-		onMouseMoveHandle.reset();
-
+void Selection::exitSelection(){
+	inSelection = false;
+	onMouseMoveHandle.reset();
+	if(visibleSelection){
 		visibleSelection->removeFromParent();
 		visibleSelection.reset();
-	});
+	}
 }
 
 void Selection::disable(){
 	onMouseDownHandle.reset();
 	onMouseUpHandle.reset();
+	exitSelection();
 }
 
 Editor::Editor():
 	textLibrary(&renderer),
 	scene(MV::Scene::Node::make(&renderer)),
 	controls(MV::Scene::Node::make(&renderer)),
-	selection(controls, mouse),
-	controlPanel(controls, &textLibrary, &mouse){
+	controlPanel(controls, scene, &textLibrary, &mouse){
 
 	initializeWindow();
 	initializeControls();
@@ -126,7 +138,7 @@ void Editor::render(){
 }
 
 void Editor::initializeControls(){
-	controlPanel.createDeselectedScene();
+	controlPanel.loadPanel<DeselectedEditorPanel>();
 }
 
 
@@ -151,4 +163,20 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 	button->idleScene(idleScene);
 
 	return button;
+}
+
+void EditorControls::updateBoxHeader(double a_width) {
+	if(!boxHeader){
+		boxHeader = draggableBox->make<MV::Scene::Clickable>("ContextMenuHandle", mouseHandle, MV::size(a_width, 20.0));
+		boxHeader->color({0x1b1f29});
+
+		boxHeaderDrag = boxHeader->onDrag.connect([&](std::shared_ptr<MV::Scene::Clickable> boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
+			if(currentPanel){
+				currentPanel->cancelInput();
+			}
+			draggableBox->translate(MV::castPoint<double>(deltaPosition));
+		});
+	} else{
+		boxHeader->setSize({a_width, 20.0});
+	}
 }

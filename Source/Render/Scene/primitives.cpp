@@ -168,6 +168,12 @@ namespace MV {
 			return rectangle;
 		}
 
+		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const BoxAABB &a_boxAABB) {
+			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			rectangle->setTwoCorners(a_boxAABB);
+			return rectangle;
+		}
+
 		void Rectangle::setSize(const Size<> &a_size) {
 			points[2] = points[0] + static_cast<DrawPoint>(pointFromSize(a_size));
 			points[1].y = points[2].y;

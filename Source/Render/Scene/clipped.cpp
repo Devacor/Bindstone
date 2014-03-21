@@ -80,5 +80,11 @@ namespace MV {
 			clipped->setSize(a_size);
 			return clipped;
 		}
+
+		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const BoxAABB &a_boxAABB) {
+			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
+			clipped->setTwoCorners(a_boxAABB);
+			return clipped;
+		}
 	}
 }

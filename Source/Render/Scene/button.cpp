@@ -50,6 +50,12 @@ namespace MV {
 			return clipped;
 		}
 
+		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB) {
+			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
+			clipped->setTwoCorners(a_boxAABB);
+			return clipped;
+		}
+
 		void Clickable::hookUpSlots() {
 			std::weak_ptr<Node> thisWeakPtr = shared_from_this();
 
@@ -217,6 +223,12 @@ namespace MV {
 		std::shared_ptr<Button> Button::make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size) {
 			auto button = std::shared_ptr<Button>(new Button(a_renderer, a_mouse));
 			button->setClickableSize(a_size);
+			return button;
+		}
+
+		std::shared_ptr<Button> Button::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB) {
+			auto button = std::shared_ptr<Button>(new Button(a_renderer, a_mouse));
+			button->setClickableTwoCorners(a_boxAABB);
 			return button;
 		}
 

@@ -19,6 +19,7 @@ namespace MV {
 			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const Point<> &a_topLeft, const Point<> &a_bottomRight);
 			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const Point<> &a_point, const Size<> &a_size, bool a_center = false);
 			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const Size<> &a_size);
+			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const BoxAABB &a_boxAABB);
 
 			virtual ~Clipped(){}
 

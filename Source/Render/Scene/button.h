@@ -42,6 +42,7 @@ namespace MV {
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_topLeft, const Point<> &a_bottomRight);
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_point, const Size<> &a_size, bool a_center = false);
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size);
+			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB);
 
 			SlotRegister<ButtonSlotSignature> onPress;
 			SlotRegister<ButtonSlotSignature> onRelease;
@@ -163,6 +164,7 @@ namespace MV {
 			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_topLeft, const Point<> &a_bottomRight);
 			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_point, const Size<> &a_size, bool a_center = false);
 			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size);
+			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB);
 
 			SlotRegister<ButtonSlotSignature> onPress;
 			SlotRegister<ButtonSlotSignature> onRelease;

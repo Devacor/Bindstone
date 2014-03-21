@@ -143,13 +143,21 @@ public:
 		panel.updateBoxHeader(background->basicAABB().width());
 
 		clickSignals["create"] = createButton->onAccept.connect([&](std::shared_ptr<MV::Scene::Clickable>){
-			selection.enable();
-			//panel.deleteScene();
+			selection.enable([&](const MV::BoxAABB &a_selected){
+				completeSelection(a_selected);
+			});
 		});
 
 		clickSignals["select"] = selectButton->onAccept.connect([&](std::shared_ptr<MV::Scene::Clickable>){
 			panel.deleteScene();
 		});
+	}
+private:
+	void completeSelection(const MV::BoxAABB &a_selected){
+		static long i = 0;
+		auto newShape = panel.root()->make<MV::Scene::Rectangle>("Constructed_"+ boost::lexical_cast<std::string>(i++), a_selected);
+		newShape->color({0x3355cc});
+		selection.disable();
 	}
 };
 

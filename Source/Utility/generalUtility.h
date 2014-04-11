@@ -12,6 +12,9 @@
 #include <numeric>
 #include <stdint.h>
 
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+
 #define UTF_CHAR_STR(stringVal) L##stringVal
 
 namespace MV {
@@ -21,7 +24,7 @@ namespace MV {
 	enum AngleType {DEGREES, RADIANS};
 	const double PIE = 3.14159265358979323846;
 
-	std::string getNewStringId(std::string a_baseName = "__MV_SID_");
+	std::string stringGUID(std::string a_baseName = "__MV_SID_");
 
 	void initializeFilesystem();
 

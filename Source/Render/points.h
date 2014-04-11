@@ -14,6 +14,7 @@ namespace MV {
 
 	class TexturePoint{
 	public:
+		TexturePoint(double a_textureX, double a_textureY):textureX(a_textureX), textureY(a_textureY){}
 		TexturePoint():textureX(0.0),textureY(0.0){}
 		~TexturePoint(){}
 
@@ -111,6 +112,13 @@ namespace MV {
 		Size<T>& operator*=(const T& a_other);
 		Size<T>& operator/=(const T& a_other);
 
+		bool operator<(const Size<T>& a_other){
+			return (width + height) < (a_other.width + a_other.height);
+		}
+		bool operator>(const Size<T>& a_other){
+			return (width + height) > (a_other.width + a_other.height);
+		}
+
 		template <class Archive>
 		void serialize(Archive & archive){
 			archive(CEREAL_NVP(width), CEREAL_NVP(height), CEREAL_NVP(depth));
@@ -123,7 +131,7 @@ namespace MV {
 	template <class T = double>
 	class Point{
 	public:
-		Point(){ clear(); }
+		Point():x(0),y(0),z(0){}
 		Point(T a_xPos, T a_yPos, T a_zPos = 0){ locate(a_xPos, a_yPos, a_zPos); }
 
 		void clear();
@@ -143,6 +151,13 @@ namespace MV {
 		Point<T>& operator*=(const T& a_other);
 		Point<T>& operator/=(const T& a_other);
 
+		bool operator<(const Size<T>& a_other){
+			return (x + y) < (a_other.x + a_other.y);
+		}
+		bool operator>(const Size<T>& a_other){
+			return (x + y) > (a_other.x + a_other.y);
+		}
+
 		template <class Archive>
 		void serialize(Archive & archive){
 			archive(CEREAL_NVP(x), CEREAL_NVP(y), CEREAL_NVP(z));
@@ -153,7 +168,7 @@ namespace MV {
 
 	class DrawPoint : public Point<>, public Color, public TexturePoint{
 	public:
-		DrawPoint(){clear();}
+		DrawPoint(){}
 		DrawPoint(double a_xPos, double a_yPos, double a_zPos = 0.0){locate(a_xPos, a_yPos, a_zPos);}
 		DrawPoint(const Point<>& a_position, const Color& a_color = Color(), const TexturePoint &a_texture = TexturePoint()):
 			Point<>(a_position),
@@ -171,11 +186,28 @@ namespace MV {
 
 		DrawPoint& operator+=(const DrawPoint& a_other);
 		DrawPoint& operator-=(const DrawPoint& a_other);
+		DrawPoint& operator+=(const Point<>& a_other);
+		DrawPoint& operator-=(const Point<>& a_other);
+		DrawPoint& operator+=(const Color& a_other);
+		DrawPoint& operator-=(const Color& a_other);
+		DrawPoint& operator+=(const TexturePoint& a_other);
+		DrawPoint& operator-=(const TexturePoint& a_other);
 
 		void copyPosition(DrawPoint& a_other);
 		void copyTexture(DrawPoint& a_other);
 		void copyColor(DrawPoint& a_other);
 
+		Point<> point() const{
+			return Point<>(x, y, z);
+		}
+
+		Color color() const{
+			return Color(R, G, B, A);
+		}
+
+		TexturePoint texturePoint() const{
+			return TexturePoint(textureX, textureY);
+		}
 		template <class Archive>
 		void serialize(Archive & archive){
 			Point::serialize(archive);
@@ -186,6 +218,19 @@ namespace MV {
 
 	const DrawPoint operator+(const DrawPoint& a_left, const DrawPoint & a_right);
 	const DrawPoint operator-(const DrawPoint& a_left, const DrawPoint & a_right);
+	const DrawPoint operator+(const DrawPoint& a_left, const Point<> & a_right);
+	const DrawPoint operator-(const DrawPoint& a_left, const Point<> & a_right);
+	const DrawPoint operator+(const DrawPoint& a_left, const Color & a_right);
+	const DrawPoint operator-(const DrawPoint& a_left, const Color & a_right);
+	const DrawPoint operator+(const DrawPoint& a_left, const TexturePoint & a_right);
+	const DrawPoint operator-(const DrawPoint& a_left, const TexturePoint & a_right);
+
+	const DrawPoint operator+(const Point<>& a_left, const DrawPoint & a_right);
+	const DrawPoint operator-(const Point<>& a_left, const DrawPoint & a_right);
+	const DrawPoint operator+(const Color& a_left, const DrawPoint & a_right);
+	const DrawPoint operator-(const Color& a_left, const DrawPoint & a_right);
+	const DrawPoint operator+(const TexturePoint& a_left, const DrawPoint & a_right);
+	const DrawPoint operator-(const TexturePoint& a_left, const DrawPoint & a_right);
 
 	/**************************\
 	| -------Conversion------- |

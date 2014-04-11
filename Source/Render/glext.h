@@ -2720,6 +2720,7 @@ extern "C" {
 
 #ifndef GL_NV_depth_clamp
 #define GL_DEPTH_CLAMP_NV                 0x864F
+#define GL_DEPTH_CLAMP                    0x864F
 #endif
 
 #ifndef GL_NV_occlusion_query

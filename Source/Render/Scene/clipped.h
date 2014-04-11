@@ -48,9 +48,7 @@ namespace MV {
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Clipped> &construct){
 				construct(nullptr);
-				archive(
-					cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(construct.ptr()))
-					);
+				archive(cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(construct.ptr())));
 			}
 
 			std::shared_ptr<DynamicTextureDefinition> clippedTexture;

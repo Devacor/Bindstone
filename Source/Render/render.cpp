@@ -158,6 +158,7 @@ namespace MV {
 			std::cerr << "gluProject failure!" << std::endl;
 		}
 		result.y=renderer.window().height()-result.y;
+		result.z = a_point.z;//restore original z since we're just 2d.
 		return castPoint<int>(result);
 	}
 
@@ -171,6 +172,7 @@ namespace MV {
 		result.y/=renderer.window().height()/renderer.world().height();
 		result.x/=renderer.window().width()/renderer.world().width();
 		result.y=renderer.world().height()-result.y;
+		result.z = a_point.z;//restore original z since we're just 2d.
 		return result;
 	}
 
@@ -181,6 +183,7 @@ namespace MV {
 		if(MESA::gluUnProject(static_cast<GLint>(a_point.x), static_cast<GLint>(renderer.window().height() - a_point.y), 0, &(*renderer.modelviewMatrix().top().getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
 			std::cerr << "gluUnProject failure!" << std::endl;
 		}
+		result.z = a_point.z;//restore original z since we're just 2d.
 		return result;
 	}
 
@@ -775,6 +778,7 @@ namespace MV {
 
 		glDepthMask(GL_FALSE);
 		glDisable(GL_DEPTH_TEST);
+		glEnable(GL_DEPTH_CLAMP);
         glDepthFunc(GL_LEQUAL);
 		
 #ifdef HAVE_OPENGLES

@@ -127,6 +127,7 @@ void Editor::handleInput(){
 		}
 	}
 	mouse.update();
+	controlPanel.handleInput(event);
 }
 
 void Editor::render(){
@@ -142,14 +143,18 @@ void Editor::initializeControls(){
 }
 
 
+void colorTopAndBottom(const std::shared_ptr<MV::Scene::Rectangle> &a_rect, const MV::Color &a_top, const MV::Color &a_bot){
+	a_rect->applyToCorners(a_top, a_top, a_bot, a_bot);
+}
+
 std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::UtfString &a_text, const std::string &a_fontIdentifier){
 	static long buttonId = 0;
 	auto button = a_parent->make<MV::Scene::Button>(MV::wideToString(a_text) + boost::lexical_cast<std::string>(buttonId++), &a_mouse, a_size);
 	auto activeScene = MV::Scene::Rectangle::make(a_parent->getRenderer(), MV::Point<>(), a_size, false);
-	activeScene->color({0x7a96cf});
+	colorTopAndBottom(activeScene, {BUTTON_TOP_ACTIVE}, {BUTTON_BOTTOM_ACTIVE});
 
 	auto idleScene = MV::Scene::Rectangle::make(a_parent->getRenderer(), MV::Point<>(), a_size, false);
-	idleScene->color({0xa8bbe0});
+	colorTopAndBottom(idleScene, {BUTTON_TOP_IDLE}, {BUTTON_BOTTOM_IDLE});
 
 	MV::TextBox activeBox(&a_library, a_fontIdentifier, a_text, a_size), idleBox(&a_library, a_fontIdentifier, a_text, a_size);
 	activeBox.justification(MV::CENTER);
@@ -168,7 +173,7 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 void EditorControls::updateBoxHeader(double a_width) {
 	if(!boxHeader){
 		boxHeader = draggableBox->make<MV::Scene::Clickable>("ContextMenuHandle", mouseHandle, MV::size(a_width, 20.0));
-		boxHeader->color({0x1b1f29});
+		boxHeader->color({BOX_HEADER});
 
 		boxHeaderDrag = boxHeader->onDrag.connect([&](std::shared_ptr<MV::Scene::Clickable> boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
 			if(currentPanel){
@@ -178,5 +183,11 @@ void EditorControls::updateBoxHeader(double a_width) {
 		});
 	} else{
 		boxHeader->setSize({a_width, 20.0});
+	}
+}
+
+void EditorControls::handleInput(SDL_Event &a_event) {
+	if(currentPanel){
+		currentPanel->handleInput(a_event);
 	}
 }

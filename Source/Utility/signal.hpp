@@ -33,6 +33,19 @@ namespace MV {
 			}
 		}
 
+		template <class ...Arg>
+		void notify(){
+			if(!isBlocked){
+				callback();
+			}
+		}
+		template <class ...Arg>
+		void operator()(){
+			if(!isBlocked){
+				callback();
+			}
+		}
+
 		void block(){
 			isBlocked = true;
 		}
@@ -125,6 +138,29 @@ namespace MV {
 					auto next = i;
 					++next;
 					i->lock()->notify(std::forward<Arg>(a_parameters)...);
+					i = next;
+				}
+			}
+		}
+
+		template <typename ...Arg>
+		void operator()(){
+			inCall = true;
+			SCOPE_EXIT{
+				inCall = false;
+				for(auto& i : disconnectQueue){
+					observers.erase(i);
+				}
+				disconnectQueue.clear();
+			};
+
+			for(auto i = observers.begin(); i != observers.end();) {
+				if(i->expired()) {
+					observers.erase(i++);
+				} else {
+					auto next = i;
+					++next;
+					i->lock()->notify();
 					i = next;
 				}
 			}

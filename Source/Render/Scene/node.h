@@ -111,6 +111,11 @@ namespace MV {
 			void draw();
 			double getDepth();
 
+			virtual void normalizeTest(Point<> a_offset);
+			virtual void normalizeToPoint(Point<> a_offset);
+			virtual Point<> normalizeToTopLeft();
+			virtual Point<> normalizeToCenter();
+
 			//Axis Aligned Bounding Box
 			BoxAABB worldAABB(bool a_includeChildren = true);
 			BoxAABB screenAABB(bool a_includeChildren = true);
@@ -265,10 +270,10 @@ namespace MV {
 			}
 
 			//would have preferred these private, but I moved them public for more flexibility as per the Button class.
-			virtual BoxAABB getWorldAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB getScreenAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB getLocalAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB getBasicAABBImplementation() const;
+			virtual BoxAABB worldAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB screenAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB localAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB basicAABBImplementation() const;
 
 		protected:
 			Node(Draw2D* a_renderer);

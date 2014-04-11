@@ -21,7 +21,7 @@ namespace MV {
 			friend Button;
 		public:
 			typedef void ButtonSlotSignature(std::shared_ptr<Clickable>);
-			typedef void DragSlotSignature(std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &currentPosition);
+			typedef void DragSlotSignature(std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &deltaPosition);
 		private:
 
 			Slot<ButtonSlotSignature> onPressSlot;
@@ -38,11 +38,11 @@ namespace MV {
 			SCENE_MAKE_FACTORY_METHODS
 
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse);
-			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight);
-			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_topLeft, const Point<> &a_bottomRight);
+			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight, bool a_center = false);
+			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_topLeft, const Point<> &a_bottomRight, bool a_center = false);
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_point, const Size<> &a_size, bool a_center = false);
-			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size);
-			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB);
+			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center = false);
+			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB, bool a_center = false);
 
 			SlotRegister<ButtonSlotSignature> onPress;
 			SlotRegister<ButtonSlotSignature> onRelease;
@@ -152,7 +152,7 @@ namespace MV {
 			friend cereal::access;
 		public:
 			typedef void ButtonSlotSignature(std::shared_ptr<Clickable>);
-			typedef void DragSlotSignature(std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &currentPosition);
+			typedef void DragSlotSignature(std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &deltaPosition);
 
 		private:
 			std::shared_ptr<Clickable> clickable; //must appear before the SlotRegisters
@@ -189,10 +189,10 @@ namespace MV {
 			void setClickableSizeAndCenterPoint(const Point<> &a_centerPoint, const Size<> &a_size);
 			void setClickableSizeAndCornerPoint(const Point<> &a_cornerPoint, const Size<> &a_size);
 
-			virtual BoxAABB getWorldAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB getScreenAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB getLocalAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB getBasicAABBImplementation() const;
+			virtual BoxAABB worldAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB screenAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB localAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB basicAABBImplementation() const;
 
 		protected:
 			Button(Draw2D *a_renderer, MouseState *a_mouse);

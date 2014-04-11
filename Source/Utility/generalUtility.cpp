@@ -85,7 +85,7 @@ namespace MV {
 #endif
 	}
 
-	std::string getNewStringId(std::string a_baseName){
+	std::string stringGUID(std::string a_baseName){
 		static std::map<std::string, int> counters;
 		return a_baseName+boost::lexical_cast<std::string>(counters[a_baseName]++);
 	}

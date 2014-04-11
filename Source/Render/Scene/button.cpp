@@ -18,16 +18,26 @@ namespace MV {
 			return clipped;
 		}
 
-		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight) {
+		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight, bool a_center) {
 			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
 			clipped->setTwoCorners(a_topLeft, a_bottomRight);
+			if(a_center){
+				clipped->normalizeToCenter();
+			} else{
+				clipped->normalizeToTopLeft();
+			}
 			clipped->hookUpSlots();
 			return clipped;
 		}
 
-		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_topLeft, const Point<> &a_bottomRight) {
+		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_topLeft, const Point<> &a_bottomRight, bool a_center) {
 			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
 			clipped->setTwoCorners(a_topLeft, a_bottomRight);
+			if(a_center){
+				clipped->normalizeToCenter();
+			} else{
+				clipped->normalizeToTopLeft();
+			}
 			clipped->hookUpSlots();
 			return clipped;
 		}
@@ -43,16 +53,27 @@ namespace MV {
 			return clipped;
 		}
 
-		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size) {
+		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center) {
 			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
 			clipped->setSize(a_size);
+			if(a_center){
+				clipped->normalizeToCenter();
+			} else{
+				clipped->normalizeToTopLeft();
+			}
 			clipped->hookUpSlots();
 			return clipped;
 		}
 
-		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB) {
+		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB, bool a_center) {
 			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
 			clipped->setTwoCorners(a_boxAABB);
+			if(a_center){
+				clipped->normalizeToCenter();
+			} else{
+				clipped->normalizeToTopLeft();
+			}
+			clipped->hookUpSlots();
 			return clipped;
 		}
 
@@ -151,7 +172,7 @@ namespace MV {
 			//Default to transparent. Allows us to toggle it back visible for testing purposes, or if we want to render a button image directly in the Clickable node.
 			//NOT calling setColor because that relies on shared_from_this.
 			auto alpha = MV::Color(1, 1, 1, 0);
-			for(auto point : points){
+			for(auto &point : points){
 				point = alpha;
 			}
 		}
@@ -305,33 +326,33 @@ namespace MV {
 			}
 		}
 
-		BoxAABB Button::getWorldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
-			return clickable->getWorldAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
+		BoxAABB Button::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+			return clickable->worldAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
 				(clickable->inPressEvent()) ?
-				activeSceneNode->getWorldAABBImplementation(a_includeChildren, a_nestedCall) :
-				idleSceneNode->getWorldAABBImplementation(a_includeChildren, a_nestedCall)
-				);
+				activeSceneNode->worldAABBImplementation(a_includeChildren, a_nestedCall) :
+				idleSceneNode->worldAABBImplementation(a_includeChildren, a_nestedCall)
+			);
 		}
-		BoxAABB Button::getScreenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
-			return clickable->getScreenAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
+		BoxAABB Button::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+			return clickable->screenAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
 				(clickable->inPressEvent()) ?
-				activeSceneNode->getScreenAABBImplementation(a_includeChildren, a_nestedCall) :
-				idleSceneNode->getScreenAABBImplementation(a_includeChildren, a_nestedCall)
-				);
+				activeSceneNode->screenAABBImplementation(a_includeChildren, a_nestedCall) :
+				idleSceneNode->screenAABBImplementation(a_includeChildren, a_nestedCall)
+			);
 		}
-		BoxAABB Button::getLocalAABBImplementation(bool a_includeChildren, bool a_nestedCall){
-			return clickable->getLocalAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
+		BoxAABB Button::localAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+			return clickable->localAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
 				(clickable->inPressEvent()) ?
-				activeSceneNode->getLocalAABBImplementation(a_includeChildren, a_nestedCall) :
-				idleSceneNode->getLocalAABBImplementation(a_includeChildren, a_nestedCall)
-				);
+				activeSceneNode->localAABBImplementation(a_includeChildren, a_nestedCall) :
+				idleSceneNode->localAABBImplementation(a_includeChildren, a_nestedCall)
+			);
 		}
-		BoxAABB Button::getBasicAABBImplementation() const{
-			return clickable->getBasicAABBImplementation().expandWith(
+		BoxAABB Button::basicAABBImplementation() const{
+			return clickable->basicAABBImplementation().expandWith(
 				(clickable->inPressEvent()) ?
-				activeSceneNode->getBasicAABBImplementation() :
-				idleSceneNode->getBasicAABBImplementation()
-				);
+				activeSceneNode->basicAABBImplementation() :
+				idleSceneNode->basicAABBImplementation()
+			);
 		}
 
 	}

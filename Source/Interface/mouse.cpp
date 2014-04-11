@@ -24,7 +24,6 @@ namespace MV{
 		bool newRight = (state & SDL_BUTTON(SDL_BUTTON_RIGHT)) != false;
 
 		if(newPosition != mousePosition){
-			std::cout << "Mouse Position: " << newPosition << std::endl;
 			oldMousePosition = mousePosition;
 			mousePosition = newPosition;
 			onMoveSlot(*this);

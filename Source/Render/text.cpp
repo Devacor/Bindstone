@@ -103,6 +103,7 @@ namespace MV {
 
 	TextLibrary::TextLibrary( Draw2D *a_rendering ){
 		require(a_rendering != nullptr, PointerException("TextLibrary::TextLibrary was passed a null Draw2D pointer."));
+		SDL_StartTextInput();
 		white.r = 255; white.g = 255; white.b = 255; white.a = 0;
 		render = a_rendering;
 		if(!TTF_WasInit()){
@@ -324,8 +325,14 @@ namespace MV {
 		if(event.type == SDL_TEXTINPUT){
 			appendText(stringToWide(event.text.text));
 		} else if (event.type == SDL_TEXTEDITING) {
-			//whothefuckknows?
-			#pragma message( "WARNING: Figure out how SDL_TEXTEDITING works.")
+			setTemporaryText(stringToWide(event.edit.text), event.edit.start, event.edit.length);
+		} else if(event.type == SDL_KEYDOWN){
+			if(event.key.keysym.sym == SDLK_BACKSPACE && text.length() > 0){
+				text.pop_back();
+				refreshTextBoxContents();
+			}else if(event.key.keysym.sym == SDLK_v && SDL_GetModState() & KMOD_CTRL){
+				appendText(stringToWide(SDL_GetClipboardText()));
+			}
 		}
 		return false;
 	}
@@ -339,7 +346,7 @@ namespace MV {
 
 	void TextBox::refreshTextBoxContents(){
 		if(fontIdentifier != ""){
-			textScene = textboxScene->add("Text", textLibrary->composeScene(parseTextStateList(fontIdentifier, text), boxSize.width, wrapMethod, textJustification));
+			textScene = textboxScene->add("Text", textLibrary->composeScene(parseTextStateList(fontIdentifier, currentTextContents()), boxSize.width, wrapMethod, textJustification));
 			textScene->position(contentScrollPosition);
 		} else{
 			std::cerr << "Warning: refreshTextBoxContents called, but no fontIdentifier has been set yet!" << std::endl;

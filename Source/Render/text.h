@@ -180,6 +180,14 @@ namespace MV {
 			return wrapMethod;
 		}
 
+		UtfString currentTextContents(){
+			if(!editText.empty()){
+
+			} else{
+				return text;
+			}
+		}
+
 		void setText(const UtfString &a_text, const std::string &a_fontIdentifier = "");
 		void setText(UtfChar a_char, const std::string &a_fontIdentifier = ""){
 			setText(UtfString()+a_char, a_fontIdentifier);
@@ -190,6 +198,10 @@ namespace MV {
 		}
 		//any further development to input handling should probably be broken out elsewhere.
 		bool setText(SDL_Event &event);
+
+		void setTemporaryText(const UtfString &a_text, size_t a_cursorStart, size_t a_cursorEnd){
+			editText = a_text;
+		}
 
 		void appendText(const UtfString &a_text){
 			setText(text + a_text);
@@ -282,6 +294,8 @@ namespace MV {
 		TextWrapMethod wrapMethod = SOFT;
 
 		UtfString text;
+		size_t cursor;
+		UtfString editText;
 		std::string fontIdentifier;
 	};
 }

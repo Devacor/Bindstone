@@ -105,11 +105,11 @@ namespace MV {
 			SCENE_MAKE_FACTORY_METHODS
 
 			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Size<> &a_size);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Point<> &a_topLeft, const Point<> &a_topRight);
+			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Size<> &a_size, bool a_center = false);
+			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight, bool a_center = false);
+			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Point<> &a_topLeft, const Point<> &a_bottomRight, bool a_center = false);
 			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Point<> &a_point, const Size<> &a_size, bool a_center = false);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const BoxAABB &a_boxAABB);
+			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const BoxAABB &a_boxAABB, bool a_center = false);
 
 			virtual ~Rectangle(){ }
 

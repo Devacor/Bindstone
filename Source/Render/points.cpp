@@ -188,6 +188,83 @@ namespace MV {
 		return *this;
 	}
 
+	DrawPoint& DrawPoint::operator+=(const Point<>& a_other){
+		x += a_other.x; y += a_other.y; z += a_other.z;
+		return *this;
+	}
+	DrawPoint& DrawPoint::operator-=(const Point<>& a_other){
+		x -= a_other.x; y -= a_other.y; z -= a_other.z;
+		return *this;
+	}
+	DrawPoint& DrawPoint::operator+=(const Color& a_other){
+		R += a_other.R; G += a_other.G; B += a_other.B; A += a_other.B;
+		Color::normalize();
+		return *this;
+	}
+	DrawPoint& DrawPoint::operator-=(const Color& a_other){
+		R -= a_other.R; G -= a_other.G; B -= a_other.B; A -= a_other.B;
+		Color::normalize();
+		return *this;
+	}
+	DrawPoint& DrawPoint::operator+=(const TexturePoint& a_other){
+		textureX += a_other.textureX; textureY += a_other.textureY;
+		return *this;
+	}
+	DrawPoint& DrawPoint::operator-=(const TexturePoint& a_other){
+		textureX -= a_other.textureX; textureY -= a_other.textureY;
+		return *this;
+	}
+
+	const DrawPoint operator+(const DrawPoint& a_left, const Point<> & a_right){
+		DrawPoint result = a_left;
+		return result += a_right;
+	}
+	const DrawPoint operator-(const DrawPoint& a_left, const Point<> & a_right){
+		DrawPoint result = a_left;
+		return result -= a_right;
+	}
+	const DrawPoint operator+(const DrawPoint& a_left, const Color & a_right){
+		DrawPoint result = a_left;
+		return result += a_right;
+	}
+	const DrawPoint operator-(const DrawPoint& a_left, const Color & a_right){
+		DrawPoint result = a_left;
+		return result -= a_right;
+	}
+	const DrawPoint operator+(const DrawPoint& a_left, const TexturePoint & a_right){
+		DrawPoint result = a_left;
+		return result += a_right;
+	}
+	const DrawPoint operator-(const DrawPoint& a_left, const TexturePoint & a_right){
+		DrawPoint result = a_left;
+		return result -= a_right;
+	}
+
+	const DrawPoint operator+(const Point<>& a_left, const DrawPoint & a_right){
+		DrawPoint result = a_right;
+		return result += a_left;
+	}
+	const DrawPoint operator-(const Point<>& a_left, const DrawPoint & a_right){
+		DrawPoint result = a_right;
+		return result -= a_left;
+	}
+	const DrawPoint operator+(const Color& a_left, const DrawPoint & a_right){
+		DrawPoint result = a_right;
+		return result += a_left;
+	}
+	const DrawPoint operator-(const Color& a_left, const DrawPoint & a_right){
+		DrawPoint result = a_right;
+		return result -= a_left;
+	}
+	const DrawPoint operator+(const TexturePoint& a_left, const DrawPoint & a_right){
+		DrawPoint result = a_right;
+		return result += a_left;
+	}
+	const DrawPoint operator-(const TexturePoint& a_left, const DrawPoint & a_right){
+		DrawPoint result = a_right;
+		return result -= a_left;
+	}
+
 	void DrawPoint::clear(){
 		x = 0; y = 0; z = 0;
 		textureX = 0; textureY = 0;

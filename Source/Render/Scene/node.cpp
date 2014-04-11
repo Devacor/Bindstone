@@ -61,6 +61,9 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::remove(std::shared_ptr<Node> a_childItem){
+			if(a_childItem == nullptr){
+				return nullptr;
+			}
 			auto foundChild = std::find_if(drawList.begin(), drawList.end(), [&](const DrawListPairType &item){
 				return item.second == a_childItem;
 			});
@@ -214,10 +217,10 @@ namespace MV {
 		}
 
 		BoxAABB Node::worldAABB(bool a_includeChildren){
-			return getWorldAABBImplementation(a_includeChildren, false);
+			return worldAABBImplementation(a_includeChildren, false);
 		}
 
-		BoxAABB Node::getWorldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+		BoxAABB Node::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(shared_from_this())); renderer->modelviewMatrix().pop(); });
 			if(!a_nestedCall){
 				renderer->modelviewMatrix().push();
@@ -240,22 +243,22 @@ namespace MV {
 			}
 			if(a_includeChildren && !drawList.empty()){
 				if(points.empty()){
-					tmpBox.initialize(drawList.begin()->second->getWorldAABBImplementation(a_includeChildren, true));
+					tmpBox.initialize(drawList.begin()->second->worldAABBImplementation(a_includeChildren, true));
 				} else{
-					tmpBox.expandWith(drawList.begin()->second->getWorldAABBImplementation(a_includeChildren, true));
+					tmpBox.expandWith(drawList.begin()->second->worldAABBImplementation(a_includeChildren, true));
 				}
 				std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
-					tmpBox.expandWith(cell.second->getWorldAABBImplementation(a_includeChildren, true));
+					tmpBox.expandWith(cell.second->worldAABBImplementation(a_includeChildren, true));
 				});
 			}
 			return tmpBox;
 		}
 
 		BoxAABB Node::screenAABB(bool a_includeChildren){
-			return getScreenAABBImplementation(a_includeChildren, false);
+			return screenAABBImplementation(a_includeChildren, false);
 		}
 
-		BoxAABB Node::getScreenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+		BoxAABB Node::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			auto self = shared_from_this();
 			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(self)); renderer->modelviewMatrix().pop(); });
 			if(!a_nestedCall){
@@ -278,22 +281,22 @@ namespace MV {
 			}
 			if(a_includeChildren && !drawList.empty()){
 				if(points.empty()){
-					tmpBox.initialize(drawList.begin()->second->getScreenAABBImplementation(a_includeChildren, true));
+					tmpBox.initialize(drawList.begin()->second->screenAABBImplementation(a_includeChildren, true));
 				} else{
-					tmpBox.expandWith(drawList.begin()->second->getScreenAABBImplementation(a_includeChildren, true));
+					tmpBox.expandWith(drawList.begin()->second->screenAABBImplementation(a_includeChildren, true));
 				}
 				std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
-					tmpBox.expandWith(cell.second->getScreenAABBImplementation(a_includeChildren, true));
+					tmpBox.expandWith(cell.second->screenAABBImplementation(a_includeChildren, true));
 				});
 			}
 			return tmpBox;
 		}
 
 		BoxAABB Node::localAABB(bool a_includeChildren){
-			return getLocalAABBImplementation(a_includeChildren, false);
+			return localAABBImplementation(a_includeChildren, false);
 		}
 
-		BoxAABB Node::getLocalAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+		BoxAABB Node::localAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(shared_from_this())); renderer->modelviewMatrix().pop(); });
 			if(!a_nestedCall){
 				renderer->modelviewMatrix().push();
@@ -316,22 +319,22 @@ namespace MV {
 			}
 			if(a_includeChildren && !drawList.empty()){
 				if(points.empty()){
-					tmpBox.initialize(drawList.begin()->second->getLocalAABBImplementation(a_includeChildren, true));
+					tmpBox.initialize(drawList.begin()->second->localAABBImplementation(a_includeChildren, true));
 				} else{
-					tmpBox.expandWith(drawList.begin()->second->getLocalAABBImplementation(a_includeChildren, true));
+					tmpBox.expandWith(drawList.begin()->second->localAABBImplementation(a_includeChildren, true));
 				}
 				std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
-					tmpBox.expandWith(cell.second->getLocalAABBImplementation(a_includeChildren, true));
+					tmpBox.expandWith(cell.second->localAABBImplementation(a_includeChildren, true));
 				});
 			}
 			return tmpBox;
 		}
 
 		MV::BoxAABB Node::basicAABB() const  {
-			return getBasicAABBImplementation();
+			return basicAABBImplementation();
 		}
 
-		MV::BoxAABB Node::getBasicAABBImplementation() const {
+		MV::BoxAABB Node::basicAABBImplementation() const {
 			BoxAABB tmpBox;
 
 			if(!points.empty()){
@@ -550,7 +553,6 @@ namespace MV {
 
 		void Node::pushMatrix(){
 			renderer->modelviewMatrix().push();
-			auto rollback = scopeGuard([&](){renderer->modelviewMatrix().pop();});
 			if(!scaleTo.atOrigin()){
 				renderer->modelviewMatrix().top().scale(scaleTo.x, scaleTo.y, scaleTo.z);
 			}
@@ -562,7 +564,6 @@ namespace MV {
 				renderer->modelviewMatrix().top().rotateX(rotateTo.x).rotateY(rotateTo.y).rotateZ(rotateTo.z);
 				renderer->modelviewMatrix().top().translate(-rotateOrigin.x, -rotateOrigin.y, -rotateOrigin.z);
 			}
-			rollback.dismiss();
 		}
 
 		void Node::popMatrix(){
@@ -763,6 +764,35 @@ namespace MV {
 			}
 			return centerPoint;
 		}
+
+		void Node::normalizeTest(Point<> a_offset){
+			translate(a_offset);
+			for(auto &point : points){
+				point -= a_offset;
+			}
+		}
+
+		void Node::normalizeToPoint(Point<> a_offset){
+			translate(a_offset);
+			for(auto &point : points){
+				point -= a_offset;
+			}
+		}
+
+		Point<> Node::normalizeToTopLeft() {
+			auto offset = localAABB().topLeftPoint();
+			normalizeToPoint(offset);
+			return offset;
+		}
+
+		Point<> Node::normalizeToCenter() {
+			auto aabb = localAABB();
+			auto offset = (aabb.topLeftPoint() + aabb.bottomRightPoint()) / 2.0;
+			normalizeToPoint(offset);
+			return offset;
+		}
+
+
 
 	}
 }

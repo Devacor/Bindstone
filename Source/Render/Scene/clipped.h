@@ -54,6 +54,10 @@ namespace MV {
 			std::shared_ptr<DynamicTextureDefinition> clippedTexture;
 			std::shared_ptr<Framebuffer> framebuffer;
 
+			virtual void onChildAdded(std::shared_ptr<Node>){
+				dirtyTexture = true;
+			}
+
 			bool dirtyTexture;
 		};
 	}

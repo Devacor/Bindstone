@@ -290,7 +290,6 @@ public:
 		
 		SDL_StartTextInput();
 		ourBox = std::shared_ptr<MV::TextBox>(new MV::TextBox(a_panel.textLibrary(), "default", UTF_CHAR_STR("Create"), MV::size(250.0, 150.0)));
-		ourBox->scene()->translate({100.0, 100.0});
 		node->parent()->add("texttest", ourBox->scene());
 		
 		activeTextbox = ourBox;

@@ -90,7 +90,8 @@ void Editor::initializeWindow(){
 	AudioPlayer::instance()->initAudio();
 	mouse.update();
 
-	textLibrary.loadFont("default", 24, "Assets/Fonts/hats.ttf");
+	textLibrary.loadFont("default", 14, "Assets/Fonts/Verdana.ttf");
+	textLibrary.loadFont("small", 9, "Assets/Fonts/Verdana.ttf");
 }
 
 void Editor::handleInput(){

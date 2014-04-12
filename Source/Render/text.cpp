@@ -205,11 +205,10 @@ namespace MV {
 					bool endOfAllLines = ++tmpCurrent == a_textStateList.end() && ++tmpRenderChar == current->text.end();
 
 					if(*renderChar != '\n'){
-						auto character = Scene::Rectangle::make(render, Point<>(), castSize<double>((*characterList)[*renderChar].characterSize()), false);
+						auto character = textScene->make<Scene::Rectangle>(std::to_string(characterCount), Point<>(), castSize<double>((*characterList)[*renderChar].characterSize()), false);
 						character->position(Point<>(characterLocationX, characterLocationY + offset));
 						character->texture((*characterList)[*renderChar].texture());
 						character->color(currentColor);
-						textScene->add(boost::lexical_cast<std::string>(characterCount), character);
 						characterLocationX = nextCharacterLocationX;
 						currentLineContent.push_back(*renderChar);
 						currentLineCharacterSizes.push_back((*characterList)[*renderChar].characterSize().width);
@@ -251,8 +250,7 @@ namespace MV {
 					Uint16 text[] = {static_cast<Uint16>(glyph.first), '\0'};
 					glyph.second.setCharacter(
 						SurfaceTextureDefinition::make("", [=](){
-							Uint16 text[] = {static_cast<Uint16>(glyph.first), '\0'};
-							return TTF_RenderUNICODE_Blended(currentFont, text, white);
+							return TTF_RenderGlyph_Blended(currentFont, glyph.first, white);
 						}),
 						glyph.first
 					);

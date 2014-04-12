@@ -290,7 +290,8 @@ namespace MV {
 
 	void glExtensionFramebufferObject::startUsingFramebuffer(std::shared_ptr<Framebuffer> a_framebuffer, bool a_push){
 		savedClearColor = renderer->backgroundColor();
-		renderer->backgroundColor({0x00000000, true});
+		renderer->backgroundColor({0x00ffffff, true});
+
 		require(initialized, ResourceException("StartUsingFramebuffer failed because the extension could not be loaded"));
 		if(a_push){
 			activeFramebuffers.push_back(a_framebuffer);

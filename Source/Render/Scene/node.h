@@ -101,6 +101,8 @@ namespace MV {
 				drawList[a_childId] = a_childItem;
 				alertParent(ChildAdded::make(shared_from_this(), a_childItem));
 				alertParent(VisualChange::make(shared_from_this()));
+				a_childItem->onAdded();
+				onChildAdded(a_childItem);
 				return a_childItem;
 			}
 
@@ -374,6 +376,8 @@ namespace MV {
 			virtual void drawImplementation(){} //override this in subclasses
 			virtual void onAdded(){}
 			virtual void onRemoved(){}
+			virtual void onChildAdded(std::shared_ptr<Node>){}
+			virtual void onChildRemoved(std::shared_ptr<Node>){}
 			void defaultDrawRenderStep(GLenum drawType);
 			void bindOrDisableTexture(const std::shared_ptr<std::vector<GLfloat>> &texturePoints);
 		};

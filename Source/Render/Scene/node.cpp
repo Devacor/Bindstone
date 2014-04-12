@@ -72,6 +72,8 @@ namespace MV {
 				drawList.erase(foundChild);
 				alertParent(ChildRemoved::make(shared_from_this(), removed));
 				alertParent(VisualChange::make(shared_from_this()));
+				removed->onRemoved();
+				onChildRemoved(removed);
 				return removed;
 			}
 			return nullptr;
@@ -84,6 +86,8 @@ namespace MV {
 				drawList.erase(foundChild);
 				alertParent(ChildRemoved::make(shared_from_this(), removed));
 				alertParent(VisualChange::make(shared_from_this()));
+				removed->onRemoved();
+				onChildRemoved(removed);
 				return removed;
 			}
 			return nullptr;

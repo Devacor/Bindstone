@@ -16,15 +16,14 @@ namespace MV {
 				clippedTexture = DynamicTextureDefinition::make("", textureSize);
 				dirtyTexture = false;
 				texture(clippedTexture->makeHandle(Point<int>(), textureSize));
-				framebuffer = renderer->makeFramebuffer(castPoint<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId()); //need to set texture id later anyway
-				framebuffer->setTextureId(clippedTexture->textureId());
+				framebuffer = renderer->makeFramebuffer(castPoint<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId());
 				{
 					renderer->modelviewMatrix().push();
 					SCOPE_EXIT{renderer->modelviewMatrix().pop(); };
 					renderer->modelviewMatrix().top().makeIdentity();
 
-					pushMatrix();
-					SCOPE_EXIT{popMatrix(); };
+					/*pushMatrix();
+					SCOPE_EXIT{popMatrix(); };*/
 
 					framebuffer->start();
 					SCOPE_EXIT{framebuffer->stop(); };

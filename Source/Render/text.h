@@ -186,6 +186,26 @@ namespace MV {
 			}
 		}
 
+		Point<> position() const{
+			return basePosition;
+		}
+
+		Point<> position(const Point<> &a_newPosition){
+			basePosition = a_newPosition;
+			shape->position(basePosition + offsetPosition);
+			return basePosition;
+		}
+
+		Point<> offset() const{
+			return offsetPosition;
+		}
+
+		Point<> offset(const Point<> &a_newPosition){
+			offsetPosition = a_newPosition;
+			shape->position(basePosition + offsetPosition);
+			return offsetPosition;
+		}
+
 		bool partOfFormat = false;
 		std::shared_ptr<TextCharacter> character;
 		std::shared_ptr<Scene::Rectangle> shape;
@@ -193,6 +213,8 @@ namespace MV {
 		std::shared_ptr<FormattedState> state;
 
 	private:
+		Point<> basePosition;
+		Point<> offsetPosition;
 		FormattedCharacter(const std::shared_ptr<TextCharacter> &a_character, const std::shared_ptr<FormattedState> &a_state):
 			character(a_character),
 			state(a_state){

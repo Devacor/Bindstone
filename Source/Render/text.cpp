@@ -254,18 +254,18 @@ namespace MV {
 
 		Point<> getPositionForCharacter(size_t a_index){
 			if(a_index > 0){
-				double x = characters[a_index - 1]->shape->position().x + characters[a_index - 1]->characterSize().width;
-				double y = characters[a_index - 1]->shape->position().y;
+				double x = characters[a_index - 1]->position().x + characters[a_index - 1]->characterSize().width;
+				double y = characters[a_index - 1]->position().y;
 				if(characters[a_index - 1]->line != characters[a_index]->line || characters[a_index]->character->character() == UTF_CHAR_STR('\n')){
 					x = 0.0;
 					y += characters[a_index - 1]->line->lineHeight;
 				}
 				return point(x, y);
-			} else if(!characters.empty()){
+			}else if(!characters.empty()){
 				return point(0.0, (characters[a_index]->character->character() == UTF_CHAR_STR('\n'))?
 					static_cast<double>(characters[a_index]->line->lineHeight):
 					0.0);
-			} else{
+			}else{
 				return point(0.0, 0.0);
 			}
 		}
@@ -284,7 +284,7 @@ namespace MV {
 					//TODO!
 				}
 			}
-			characters[a_index]->shape->position(position);
+			characters[a_index]->position(position);
 		}
 
 		void fix(size_t start, size_t end){

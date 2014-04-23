@@ -88,9 +88,6 @@
     <ClCompile Include="Source\Game\game.cpp">
       <Filter>Source Files\Game</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Game\editor.cpp">
-      <Filter>Source Files\Game</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Render\boxaabb.cpp">
       <Filter>Source Files\Render</Filter>
     </ClCompile>
@@ -106,6 +103,13 @@
     <ClCompile Include="Source\Render\Scene\primitives.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Editor\editor.cpp">
+      <Filter>Source Files\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Editor\editorControls.cpp" />
+    <ClCompile Include="Source\Editor\editorSelection.cpp" />
+    <ClCompile Include="Source\Editor\editorPanels.cpp" />
+    <ClCompile Include="Source\Editor\editorFactories.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -333,9 +337,6 @@
     <ClInclude Include="Source\Game\game.h">
       <Filter>Source Files\Game</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Game\editor.h">
-      <Filter>Source Files\Game</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Render\boxaabb.h">
       <Filter>Source Files\Render</Filter>
     </ClInclude>
@@ -357,6 +358,14 @@
     <ClInclude Include="Source\Render\Scene\primitives.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Editor\editor.h">
+      <Filter>Source Files\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Editor\editorControls.h" />
+    <ClInclude Include="Source\Editor\editorSelection.h" />
+    <ClInclude Include="Source\Editor\editorPanels.h" />
+    <ClInclude Include="Source\Editor\editorDefines.h" />
+    <ClInclude Include="Source\Editor\editorFactories.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html">

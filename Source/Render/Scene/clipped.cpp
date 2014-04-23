@@ -22,9 +22,6 @@ namespace MV {
 					SCOPE_EXIT{renderer->modelviewMatrix().pop(); };
 					renderer->modelviewMatrix().top().makeIdentity();
 
-					/*pushMatrix();
-					SCOPE_EXIT{popMatrix(); };*/
-
 					framebuffer->start();
 					SCOPE_EXIT{framebuffer->stop(); };
 

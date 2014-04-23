@@ -12,13 +12,13 @@ void CreateTextScene(std::shared_ptr<MV::Scene::Node> mainScene, MV::TextLibrary
 	mainScene->getRenderer()->clearScreen();
 	mainScene->getRenderer()->updateScreen();
 	//Add basic instructions
-	mainScene->add("instruction", textLibrary.composeScene(MV::parseTextStateList("annabel", UTF_CHAR_STR("Press Space to Jump"))));
+	//mainScene->add("instruction", textLibrary.composeScene(MV::parseTextStateList("annabel", UTF_CHAR_STR("Press Space to Jump"))));
 
 	//Add background text
-	auto text = mainScene->add("text", textLibrary.composeScene(MV::parseTextStateList("bluehighway1", UTF_CHAR_STR("A quick brown fox jumped over the lazy dog."))));
+	//auto text = mainScene->add("text", textLibrary.composeScene(MV::parseTextStateList("bluehighway1", UTF_CHAR_STR("A quick brown fox jumped over the lazy dog."))));
 	//Prepare text to rotate around its center.
-	text->translate(MV::Point<>(150, 250));
-	text->centerRotationOrigin();
+	//text->translate(MV::Point<>(150, 250));
+	//text->centerRotationOrigin();
 }
 
 void ManipulateText(std::shared_ptr<MV::Scene::Node> mainScene){

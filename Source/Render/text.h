@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <memory>
 #include "Utility/package.h"
 #include "Render/render.h"
 #include "Render/Scene/package.h"
@@ -15,39 +16,50 @@ namespace MV {
 	//WARNING:
 	//SDL Supports 16 bit unicode characters, ensure glyph only ever contains characters of that size (not larger) unless that changes.
 	struct TextState{
-		TextState(const UtfString &a_text, const Color &a_color, const std::string &a_fontIdentifier)
-			:text(a_text),color(a_color),fontIdentifier(a_fontIdentifier){}
+		TextState(const UtfString &a_text, const Color &a_color, const std::string &a_fontIdentifier, int a_lineHeight = -1)
+			:text(a_text),color(a_color),fontIdentifier(a_fontIdentifier), lineHeight(a_lineHeight){}
 		UtfString text;
 		Color color;
 		std::string fontIdentifier;
+		int lineHeight;
 	};
 
-	Color parseColorString(std::string a_colorString);
+	extern const UtfString COLOR_IDENTIFIER;
+	extern const UtfString FONT_IDENTIFIER;
+	extern const UtfString HEIGHT_IDENTIFIER;
+
+	Color parseColorString(const UtfString &a_colorString);
 
 	std::vector<TextState> parseTextStateList(std::string a_defaultFontIdentifier, UtfString a_text);
 
+	class FontDefinition;
 	class TextCharacter {
 	public:
-		TextCharacter():glyphCharacter(' '){}
-		~TextCharacter(){}
-
-		void setCharacter(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter);
-
-		bool isSet() const;
+		static std::shared_ptr<TextCharacter> make(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition);
 
 		UtfChar character() const;
 		std::shared_ptr<TextureHandle> texture() const;
 		Size<int> characterSize() const;
 		Size<int> textureSize() const;
+
+		bool isSoftBreakCharacter();
+
+		std::shared_ptr<FontDefinition> font() const;
 	private:
+		TextCharacter(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition);
+
 		UtfChar glyphCharacter;
 		std::shared_ptr<SurfaceTextureDefinition> glyphTexture;
 		std::shared_ptr<TextureHandle> glyphHandle;
+		std::shared_ptr<FontDefinition> fontDefinition;
 	};
 
-	struct FontDefinition{
+	class TextLibrary;
+	class FontDefinition : public std::enable_shared_from_this<FontDefinition>{
 	public:
-		FontDefinition():font(nullptr){}
+		static std::shared_ptr<FontDefinition> make(TextLibrary *a_library, const std::string &a_file, int a_size, TTF_Font* a_font){
+			return std::shared_ptr<FontDefinition>(new FontDefinition(a_library, a_file, a_size, a_font));
+		}
 		~FontDefinition(){
 			if(font != nullptr){
 				TTF_CloseFont(font);
@@ -58,24 +70,14 @@ namespace MV {
 		std::string file;
 		int size;
 
-		void set(const std::string &a_file, int a_size, TTF_Font* a_font){
-			file = a_file;
-			size = a_size;
-			font = a_font;
-		}
+		TextLibrary *library;
 
-		FontDefinition(FontDefinition &&a_other){
-			font = a_other.font;
-			a_other.font = nullptr;
-		}
-
-		FontDefinition& operator=(FontDefinition &&a_other){
-			font = a_other.font;
-			a_other.font = nullptr;
-			return *this;
-		}
+		std::shared_ptr<TextCharacter> getCharacter(UtfChar renderChar);
 
 	private:
+		typedef std::map<UtfChar, std::shared_ptr<TextCharacter>> CachedGlyphs;
+		CachedGlyphs cachedGlyphs;
+
 		template <class Archive>
 		void save(Archive & archive){
 			archive(
@@ -93,6 +95,12 @@ namespace MV {
 			font = TTF_OpenFont(file.c_str(), size);
 		}
 
+		FontDefinition(TextLibrary *a_library, const std::string &a_file, int a_size, TTF_Font* a_font):
+			file(a_file),
+			size(a_size),
+			font(a_font),
+			library(a_library){
+		}
 		FontDefinition(const FontDefinition &a_other) = delete;
 		FontDefinition& operator=(const FontDefinition &a_other) = delete;
 	};
@@ -116,12 +124,9 @@ namespace MV {
 
 		bool loadFont(const std::string &a_identifier, int a_pointSize, std::string a_fontFileLocation);
 
-		std::shared_ptr<Scene::Node> composeScene(const std::vector<TextState> &a_textStateList, double a_maxWidth = 0, TextWrapMethod a_wrapMethod = SOFT, TextJustification a_justify = LEFT);
-
-		//Call this when the OpenGL context is destroyed to re-load the textures.
-		void reloadTextures();
-
 		Draw2D *getRenderer(){return render;}
+
+		std::shared_ptr<FontDefinition> fontDefinition(const std::string &a_identifier) const;
 	private:
 		template <class Archive>
 		void serialize(Archive & archive){
@@ -132,7 +137,7 @@ namespace MV {
 
 		template <class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<TextLibrary> &construct){
-			TextLibrary *renderer = nullptr;
+			Draw2D *renderer = nullptr;
 			archive.extract(
 				cereal::make_nvp("renderer", renderer)
 			);
@@ -142,16 +147,67 @@ namespace MV {
 			);
 		}
 
-		typedef std::map<UtfChar, TextCharacter> CachedGlyphs;
-		typedef std::map<std::string, CachedGlyphs> CachedGlyphList;
-		CachedGlyphs* initGlyphs(const std::string &a_identifier, const UtfString &a_text);
-		void loadIndividualGlyphs(const std::string &a_identifier, const UtfString &a_text, CachedGlyphs &a_characterList);
-
-		std::map<std::string, FontDefinition> loadedFonts;
-		CachedGlyphList cachedGlyphs;
+		std::map<std::string, std::shared_ptr<FontDefinition>> loadedFonts;
 		SDL_Color white;
 		Draw2D *render;
 	};
+
+	struct FormattedState {
+		FormattedState();
+		FormattedState(const std::shared_ptr<FontDefinition> &a_font, const std::shared_ptr<FormattedState> &a_currentState);
+		FormattedState(const Color &a_color, const std::shared_ptr<FormattedState> &a_currentState);
+		FormattedState(int a_minimumLineHeight, const std::shared_ptr<FormattedState> &a_currentState);
+
+		Color color;
+		std::shared_ptr<FontDefinition> font;
+		int minimumLineHeight;
+	};
+
+	struct FormattedCharacter;
+	struct FormattedLine{
+		FormattedLine(const std::shared_ptr<FormattedCharacter> &a_firstCharacter, size_t a_characterIndex, size_t a_lineIndex);
+		int lineHeight;
+		int baseLine;
+		size_t firstCharacterIndex;
+		size_t lastCharacterIndex;
+		size_t lineIndex;
+	};
+
+	struct FormattedCharacter{
+		static std::shared_ptr<FormattedCharacter> make(const std::shared_ptr<TextCharacter> &a_character, const std::shared_ptr<FormattedState> &a_state){
+			return std::shared_ptr<FormattedCharacter>(new FormattedCharacter(a_character, a_state));
+		}
+
+		Size<> characterSize() const{
+			if(partOfFormat){
+				return{0.0, static_cast<double>(character->characterSize().height)};
+			}else{
+				return character->characterSize();
+			}
+		}
+
+		bool partOfFormat = false;
+		std::shared_ptr<TextCharacter> character;
+		std::shared_ptr<Scene::Rectangle> shape;
+		FormattedLine* line;
+		std::shared_ptr<FormattedState> state;
+
+	private:
+		FormattedCharacter(const std::shared_ptr<TextCharacter> &a_character, const std::shared_ptr<FormattedState> &a_state):
+			character(a_character),
+			state(a_state){
+		}
+	};
+
+
+
+
+
+
+
+
+
+
 
 	class TextBox{
 		friend cereal::access;
@@ -243,6 +299,20 @@ namespace MV {
 		}
 
 		Size<> getContentSize();
+		int getMinimumLineHeight() const{
+			return minimumLineHeight;
+		}
+		void setMinimumLineHeight(int a_newLineHeight){
+			minimumLineHeight = a_newLineHeight;
+			refreshTextBoxContents();
+		}
+
+		void makeSingleLine(){
+			isSingleLine = true;
+		}
+		void makeManyLine(){
+			isSingleLine = false;
+		}
 
 		std::shared_ptr<Scene::Node> scene();
 
@@ -297,6 +367,8 @@ namespace MV {
 		size_t cursor;
 		UtfString editText;
 		std::string fontIdentifier;
+		int minimumLineHeight;
+		bool isSingleLine;
 	};
 }
 

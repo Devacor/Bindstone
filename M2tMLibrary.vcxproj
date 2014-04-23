@@ -164,10 +164,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Source\Game\editor.cpp" />
+    <ClCompile Include="Source\Editor\editor.cpp" />
     <ClCompile Include="Source\Animation\actionSequence.cpp" />
     <ClCompile Include="Source\Animation\frameSwapper.cpp" />
     <ClCompile Include="Source\Audio\sound.cpp" />
+    <ClCompile Include="Source\Editor\editorControls.cpp" />
+    <ClCompile Include="Source\Editor\editorFactories.cpp" />
+    <ClCompile Include="Source\Editor\editorPanels.cpp" />
+    <ClCompile Include="Source\Editor\editorSelection.cpp" />
     <ClCompile Include="Source\exampleCode.cpp" />
     <ClCompile Include="Source\Game\game.cpp" />
     <ClCompile Include="Source\Game\pathGrid.cpp" />
@@ -241,7 +245,12 @@
     <ClInclude Include="..\external\cereal\include\cereal\types\unordered_set.hpp" />
     <ClInclude Include="..\external\cereal\include\cereal\types\utility.hpp" />
     <ClInclude Include="..\external\cereal\include\cereal\types\vector.hpp" />
-    <ClInclude Include="Source\Game\editor.h" />
+    <ClInclude Include="Source\Editor\editor.h" />
+    <ClInclude Include="Source\Editor\editorControls.h" />
+    <ClInclude Include="Source\Editor\editorDefines.h" />
+    <ClInclude Include="Source\Editor\editorFactories.h" />
+    <ClInclude Include="Source\Editor\editorPanels.h" />
+    <ClInclude Include="Source\Editor\editorSelection.h" />
     <ClInclude Include="Source\Render\boxaabb.h" />
     <ClInclude Include="Source\Render\Scene\primitives.h" />
     <ClInclude Include="Source\Render\Scene\button.h" />

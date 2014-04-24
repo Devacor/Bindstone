@@ -164,13 +164,18 @@ namespace MV {
 	};
 
 	struct FormattedCharacter;
-	struct FormattedLine{
+	struct FormattedLine : public std::enable_shared_from_this<FormattedLine> {
 		FormattedLine(const std::shared_ptr<FormattedCharacter> &a_firstCharacter, size_t a_characterIndex, size_t a_lineIndex);
+
+		void removeCharacter(size_t a_charcterIndex);
+		void addCharacter(size_t a_charIndex, const std::shared_ptr<FormattedCharacter> &a_newCharacter);
 		int lineHeight;
-		int baseLine;
+
 		size_t firstCharacterIndex;
 		size_t lastCharacterIndex;
 		size_t lineIndex;
+
+		std::map<size_t, int> characterHeights;
 	};
 
 	struct FormattedCharacter{
@@ -209,7 +214,7 @@ namespace MV {
 		bool partOfFormat = false;
 		std::shared_ptr<TextCharacter> character;
 		std::shared_ptr<Scene::Rectangle> shape;
-		FormattedLine* line;
+		std::shared_ptr<FormattedLine> line;
 		std::shared_ptr<FormattedState> state;
 
 	private:
@@ -221,7 +226,104 @@ namespace MV {
 		}
 	};
 
+	struct FormattedText{
+		FormattedText(TextLibrary &a_library):
+		library(a_library){
+		}
 
+		void append(const UtfString &a_text){
+			raw += a_text;
+			auto fixStart = characters.size();
+			std::shared_ptr<FormattedState> initState = !characters.empty() ? characters.back()->state : defaultState;
+			for(auto character : a_text){
+				characters.push_back(FormattedCharacter::make(initState->font->getCharacter(character), initState));
+			}
+			auto fixEnd = characters.size();
+			fix(fixStart, fixEnd);
+		}
+
+		Point<> getPositionForCharacter(size_t a_index) const{
+			if(a_index > 0){
+				double x = characters[a_index - 1]->position().x + characters[a_index - 1]->characterSize().width;
+				double y = characters[a_index - 1]->position().y;
+				if(characters[a_index - 1]->line != characters[a_index]->line || characters[a_index]->character->character() == UTF_CHAR_STR('\n')){
+					x = 0.0;
+					y += characters[a_index - 1]->line->lineHeight;
+				}
+				return point(x, y);
+			} else if(!characters.empty()){
+				return point(0.0, (characters[a_index]->character->character() == UTF_CHAR_STR('\n')) ?
+					static_cast<double>(characters[a_index]->line->lineHeight) :
+					0.0);
+			} else{
+				return point(0.0, 0.0);
+			}
+		}
+
+		void positionCharacter(size_t a_index){
+			auto position = getPositionForCharacter(a_index);
+			if(position.x > width && wrapping != NONE){
+				if(characters[a_index]->line->lineIndex == lines.size() - 1){
+					lines.push_back(std::make_shared<FormattedLine>(characters[a_index], a_index, lines.size()));
+					lines.back()->lineHeight = std::max(defaultState->minimumLineHeight, static_cast<int>(characters[a_index]->characterSize().height));
+				}
+				bool hardWrap = wrapping == HARD;
+				if(wrapping == SOFT){
+					int toBreakIndex = a_index;
+					for(; toBreakIndex > characters[toBreakIndex]->line->firstCharacterIndex && !characters[toBreakIndex]->character->isSoftBreakCharacter(); ++toBreakIndex){}
+					hardWrap = !bumpCharactersToNextLine(toBreakIndex, a_index);
+				}
+				if(hardWrap && a_index != characters[a_index]->line->firstCharacterIndex){
+					position.x = 0.0;
+					position.y += characters[a_index]->line->lineHeight;
+					characters[a_index]->line = lines[characters[a_index]->line->lineIndex + 1];
+				}
+			} else{
+				characters[a_index]->position(position);
+			}
+		}
+
+		bool bumpCharactersToNextLine(size_t a_beginIndex, size_t a_endIndex){
+			if(a_beginIndex != a_endIndex && a_beginIndex != characters[a_beginIndex]->line->firstCharacterIndex){
+				characters[a_beginIndex]->line = lines[characters[a_endIndex]->line->lineIndex + 1];
+				characters[a_beginIndex]->position({0.0, characters[a_beginIndex]->position().y + characters[a_index]->line->lineHeight});
+				for(int i = a_beginIndex + 1; i <= a_endIndex; ++i){
+					characters[i]->position(getPositionForCharacter(i));
+				}
+				return true;
+			}
+			return false;
+		}
+
+		void fix(size_t start, size_t end){
+			for(size_t i = start; i < end; ++i){
+				std::pair<size_t, size_t> found(0, 0);
+				auto state = getTextState(raw, i, characters[i]->state, defaultState, found);
+				auto originalState = characters[i]->state;
+				if(found.first != 0 || found.second != 0){
+					for(size_t j = found.first; characters[j]->state == originalState; ++j){
+						if(j <= found.second){
+							characters[j]->partOfFormat = true;
+						}
+						characters[j]->state = state;
+						//double positionX = getXForCharacter(j);
+						//TODO!
+						//characters[j]->shape->position({, characters[j]->shape->position().y});
+					}
+				}
+			}
+		}
+
+
+		TextLibrary &library;
+		TextWrapMethod wrapping;
+		TextJustification justification;
+		std::vector<std::shared_ptr<FormattedLine>> lines;
+		std::vector<std::shared_ptr<FormattedCharacter>> characters;
+		std::shared_ptr<FormattedState> defaultState;
+		UtfString raw;
+		double width;
+	};
 
 
 

@@ -236,87 +236,6 @@ namespace MV {
 		return a_currentTextState;
 	}
 
-	struct FormattedText{
-		FormattedText(TextLibrary &a_library):
-			library(a_library){
-		}
-
-		void append(const UtfString &a_text){
-			raw += a_text;
-			auto fixStart = characters.size();
-			std::shared_ptr<FormattedState> initState = !characters.empty() ? characters.back()->state : defaultState;
-			for(auto character : a_text){
-				characters.push_back(FormattedCharacter::make(initState->font->getCharacter(character), initState));
-			}
-			auto fixEnd = characters.size();
-			fix(fixStart, fixEnd);
-		}
-
-		Point<> getPositionForCharacter(size_t a_index){
-			if(a_index > 0){
-				double x = characters[a_index - 1]->position().x + characters[a_index - 1]->characterSize().width;
-				double y = characters[a_index - 1]->position().y;
-				if(characters[a_index - 1]->line != characters[a_index]->line || characters[a_index]->character->character() == UTF_CHAR_STR('\n')){
-					x = 0.0;
-					y += characters[a_index - 1]->line->lineHeight;
-				}
-				return point(x, y);
-			}else if(!characters.empty()){
-				return point(0.0, (characters[a_index]->character->character() == UTF_CHAR_STR('\n'))?
-					static_cast<double>(characters[a_index]->line->lineHeight):
-					0.0);
-			}else{
-				return point(0.0, 0.0);
-			}
-		}
-
-		void positionCharacter(size_t a_index){
-			auto position = getPositionForCharacter(a_index);
-			if(position.x > width && wrapping != NONE){
-				if(characters[a_index]->line->lineIndex == lines.size() - 1){
-					lines.push_back(FormattedLine(characters[a_index], a_index, lines.size()));
-					lines.back().lineHeight = std::max(defaultState->minimumLineHeight, static_cast<int>(characters[a_index]->characterSize().height));
-				}
-				if(wrapping == HARD){
-					position.x = 0.0;
-					position.y += characters[a_index]->line->lineHeight;
-				}else if(wrapping == SOFT){
-					//TODO!
-				}
-			}
-			characters[a_index]->position(position);
-		}
-
-		void fix(size_t start, size_t end){
-			for(size_t i = start; i < end; ++i){
-				std::pair<size_t, size_t> found(0, 0);
-				auto state = getTextState(raw, i, characters[i]->state, defaultState, found);
-				auto originalState = characters[i]->state;
-				if(found.first != 0 || found.second != 0){
-					for(size_t j = found.first; characters[j]->state == originalState; ++j){
-						if(j <= found.second){
-							characters[j]->partOfFormat = true;
-						}
-						characters[j]->state = state;
-						//double positionX = getXForCharacter(j);
-						//TODO!
-						//characters[j]->shape->position({, characters[j]->shape->position().y});
-					}
-				}
-			}
-		}
-
-
-		TextLibrary &library;
-		TextWrapMethod wrapping;
-		TextJustification justification;
-		std::vector<FormattedLine> lines;
-		std::vector<std::shared_ptr<FormattedCharacter>> characters;
-		std::shared_ptr<FormattedState> defaultState;
-		UtfString raw;
-		double width;
-	};
-
 	/*std::shared_ptr<Scene::Node> TextLibrary::composeScene(const std::vector<TextState> &a_textStateList, double a_maxWidth, TextWrapMethod a_wrapMethod, TextJustification a_justify, int a_minimumLineHeight, bool a_isSingleLine){
 		UtfString text;
 		std::vector<FormattedLine> lines;
@@ -615,8 +534,35 @@ namespace MV {
 		firstCharacterIndex(a_characterIndex),
 		lastCharacterIndex(a_characterIndex),
 		lineIndex(a_lineIndex),
-		lineHeight(std::max(TTF_FontLineSkip(a_firstCharacter->character->font()->font), a_firstCharacter->state->minimumLineHeight)),
-		baseLine(TTF_FontAscent(a_firstCharacter->character->font()->font)){
+		lineHeight(std::max(TTF_FontLineSkip(a_firstCharacter->character->font()->font), a_firstCharacter->state->minimumLineHeight)){
+
+		characterHeights[a_characterIndex] = lineHeight;
 	}
+
+	void FormattedLine::removeCharacter(size_t a_characterIndex){
+		characterHeights.erase(a_characterIndex);
+		if(!characterHeights.empty()){
+			lineHeight = std::max_element(std::begin(characterHeights), std::end(characterHeights))->second;
+		}else{
+			lineHeight = 0;
+		}
+	}
+
+	void FormattedLine::addCharacter(size_t a_characterIndex, const std::shared_ptr<FormattedCharacter> &a_newCharacter) {
+		firstCharacterIndex = std::min(firstCharacterIndex, a_characterIndex);
+		lastCharacterIndex = std::max(lastCharacterIndex, a_characterIndex);
+
+		auto characterLineHeight = std::max(TTF_FontLineSkip(a_newCharacter->character->font()->font), a_newCharacter->state->minimumLineHeight);
+		lineHeight = std::max(characterLineHeight, lineHeight);
+
+		characterHeights[a_characterIndex] = characterLineHeight;
+
+		if(a_characterIndex == firstCharacterIndex){
+			a_newCharacter->line->removeCharacter(a_characterIndex);
+			a_newCharacter->position({0.0, static_cast<double>(a_newCharacter->line->lineHeight)});
+		}
+		a_newCharacter->line = shared_from_this();
+	}
+
 
 }

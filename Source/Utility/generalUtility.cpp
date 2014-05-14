@@ -85,9 +85,9 @@ namespace MV {
 #endif
 	}
 
-	std::string stringGUID(std::string a_baseName){
-		static std::map<std::string, int> counters;
-		return a_baseName+boost::lexical_cast<std::string>(counters[a_baseName]++);
+	std::string guid(std::string a_baseName){
+		static std::map<std::string, int64_t> counters;
+		return a_baseName+std::to_string(counters[a_baseName]++);
 	}
 	
 	int roundUpPowerOfTwo(int num){

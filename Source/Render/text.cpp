@@ -4,75 +4,6 @@
 
 namespace MV {
 
-	const UtfString COLOR_IDENTIFIER = UTF_CHAR_STR("[[c|");
-	const UtfString FONT_IDENTIFIER = UTF_CHAR_STR("[[f|");
-	const UtfString HEIGHT_IDENTIFIER = UTF_CHAR_STR("[[h|");
-
-	Color parseColorString(const UtfString &a_colorString){
-		if(a_colorString.empty()){ return Color(); }
-		std::vector<std::string> colorStrings;
-		boost::split(colorStrings, a_colorString, boost::is_any_of(":"));
-		Color result;
-		if(!colorStrings.empty()){
-			if(colorStrings.size() >= 1){
-				try{ result.R = boost::lexical_cast<float>(colorStrings[0]); } catch(boost::bad_lexical_cast){ result.R = 1.0; }
-			}
-			if(colorStrings.size() >= 2){
-				try{ result.G = boost::lexical_cast<float>(colorStrings[1]); } catch(boost::bad_lexical_cast){ result.G = 1.0; }
-			}
-			if(colorStrings.size() >= 3){
-				try{ result.B = boost::lexical_cast<float>(colorStrings[2]); } catch(boost::bad_lexical_cast){ result.B = 1.0; }
-			}
-			if(colorStrings.size() >= 4){
-				try{ result.A = boost::lexical_cast<float>(colorStrings[3]); } catch(boost::bad_lexical_cast){ result.A = 1.0; }
-			}
-		}
-		return result;
-	}
-
-	void parseExpression(const UtfString &a_expression, Color &a_currentColor, std::string &a_currentFontIdentifier, const std::string &a_defaultFontIdentifier, int &a_currentLineHeight){
-		if(a_expression[0] == 'f'){
-			a_currentFontIdentifier = wideToString(a_expression.substr(2));
-			if(a_currentFontIdentifier == ""){ a_currentFontIdentifier = a_defaultFontIdentifier; }
-		} else if(a_expression[0] == 'c'){
-			a_currentColor = parseColorString(a_expression.substr(2));
-		} else if(a_expression[0] == 'h'){
-			a_currentLineHeight = boost::lexical_cast<int>(a_expression.substr(2));
-		}
-	}
-
-	std::vector<TextState> parseTextStateList(std::string a_defaultFontIdentifier, UtfString a_text){
-		UtfString commit;
-		Color currentColor;
-		std::string currentFontIdentifier = a_defaultFontIdentifier;
-		std::vector<TextState> textList;
-		std::size_t found = 0, end;
-		int currentLineHeight = -1;
-		while(found != std::string::npos){
-			found = std::min(std::min(a_text.find(UTF_CHAR_STR("[[f|")), a_text.find(UTF_CHAR_STR("[[c|"))), a_text.find(UTF_CHAR_STR("[[h|")));
-			commit = (a_text.substr(0, found));
-			if(!commit.empty()){
-				textList.push_back(TextState(commit, currentColor, currentFontIdentifier, currentLineHeight));
-			}
-
-			if(found != std::string::npos){
-				end = a_text.find(UTF_CHAR_STR("]]"), found);
-				if(end == std::string::npos){
-					commit = a_text.substr(found);
-					if(!commit.empty()){
-						textList.push_back(TextState(a_text.substr(found), currentColor, currentFontIdentifier, currentLineHeight));
-					}
-					break;
-				}
-
-				parseExpression(a_text.substr(found + 2, end - found - 2), currentColor, currentFontIdentifier, a_defaultFontIdentifier, currentLineHeight);
-				a_text = a_text.substr(end + 2);
-			}
-		}
-
-		return textList;
-	}
-
 	/*************************\
 	| -----TextCharacter----- |
 	\*************************/
@@ -86,11 +17,11 @@ namespace MV {
 	}
 
 	Size<int> TextCharacter::characterSize() const{
-		return glyphTexture->surfaceSize();
+		return (glyphTexture) ? glyphTexture->surfaceSize() : Size<int>(0, 0);
 	}
 
 	Size<int> TextCharacter::textureSize() const{
-		return glyphTexture->size();
+		return (glyphTexture) ? glyphTexture->size() : Size<int>(0, 0);
 	}
 
 	TextCharacter::TextCharacter(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition):
@@ -139,19 +70,19 @@ namespace MV {
 			if(newFont) {
 				loadedFonts.insert({a_identifier, FontDefinition::make(this, a_fontFileLocation, a_pointSize, newFont)});
 				return true;
-			}else{
+			} else{
 				std::cerr << "Error loading font: " << TTF_GetError() << std::endl;
 			}
-		}else{
+		} else{
 			std::cerr << "Error, font identifier already used, cannot assign another font to the same id: " << a_identifier << std::endl;
 		}
 		return false;
 	}
-	
+
 	std::shared_ptr<FormattedState> getColorTextState(const UtfString &a_text, const std::shared_ptr<FormattedState> &a_currentTextState, const std::shared_ptr<FormattedState> &a_defaultTextState){
 		if(a_text.empty()){
 			return std::make_shared<FormattedState>(a_defaultTextState->color, a_currentTextState);
-		}else{
+		} else{
 			auto color = parseColorString(a_text);
 			return std::make_shared<FormattedState>(color, a_currentTextState);
 		}
@@ -160,11 +91,11 @@ namespace MV {
 	std::shared_ptr<FormattedState> getFontTextState(const UtfString &a_text, const std::shared_ptr<FormattedState> &a_currentTextState, const std::shared_ptr<FormattedState> &a_defaultTextState){
 		if(a_text.empty()){
 			return std::make_shared<FormattedState>(a_defaultTextState->font, a_currentTextState);
-		}else{
+		} else{
 			auto font = a_defaultTextState->font->library->fontDefinition(wideToString(a_text));
 			if(font){
 				return std::make_shared<FormattedState>(font, a_currentTextState);
-			}else{
+			} else{
 				return a_currentTextState;
 			}
 		}
@@ -173,211 +104,13 @@ namespace MV {
 	std::shared_ptr<FormattedState> getHeightTextState(const UtfString &a_text, const std::shared_ptr<FormattedState> &a_currentTextState, const std::shared_ptr<FormattedState> &a_defaultTextState){
 		if(a_text.empty()){
 			return std::make_shared<FormattedState>(a_defaultTextState->minimumLineHeight, a_currentTextState);
-		}else{
+		} else{
 			int newHeight = -1;
 			try{ newHeight = boost::lexical_cast<int>(a_text); } catch(boost::bad_lexical_cast){}
 			return std::make_shared<FormattedState>(newHeight, a_currentTextState);
 		}
 	}
 
-	std::shared_ptr<FormattedState> backwardGetTextState(const UtfString &a_text, size_t a_i, const std::shared_ptr<FormattedState> &a_currentTextState, const std::shared_ptr<FormattedState> &a_defaultTextState, std::pair<size_t, size_t> &o_range){
-		o_range.first = 0; o_range.second = 0;
-		if(a_i - 1 > 0 && a_text[a_i] == UTF_CHAR_STR(']') && a_text[a_i - 1] == UTF_CHAR_STR(']')){
-			auto begin = a_text.rfind(COLOR_IDENTIFIER, a_i);
-			if(begin == std::string::npos){
-				begin = a_text.rfind(FONT_IDENTIFIER, a_i);
-			} else{
-				begin = a_text.rfind(HEIGHT_IDENTIFIER, a_i);
-			}
-			if(begin != std::string::npos){
-				o_range.first = begin + 4;
-				o_range.second = (begin + 4) - (a_i - 2);
-				auto contents = a_text.substr(o_range.first, o_range.second);
-				if(a_text[begin + 2] == UTF_CHAR_STR('c')){
-					return getColorTextState(contents, a_currentTextState, a_defaultTextState);
-				} else if(a_text[begin + 2] == UTF_CHAR_STR('f')){
-					return getFontTextState(contents, a_currentTextState, a_defaultTextState);
-				} else if(a_text[begin + 2] == UTF_CHAR_STR('h')){
-					return getHeightTextState(contents, a_currentTextState, a_defaultTextState);
-				}
-			}
-		}
-		return nullptr;
-	}
-
-	std::shared_ptr<FormattedState> forwardGetTextState(const UtfString &a_text, size_t a_i, const std::shared_ptr<FormattedState> &a_currentTextState, const std::shared_ptr<FormattedState> &a_defaultTextState, std::pair<size_t, size_t> &o_range){
-		o_range.first = 0; o_range.second = 0;
-		auto symbol = a_text.substr(a_i, 4);
-		if(symbol == COLOR_IDENTIFIER || symbol == FONT_IDENTIFIER || symbol == HEIGHT_IDENTIFIER){
-			auto end = a_text.find(UTF_CHAR_STR("]]"), a_i + 4);
-			if(end != std::string::npos){
-				o_range.first = a_i + 4;
-				o_range.second = end - (a_i + 4);
-				auto contents = a_text.substr(o_range.first, o_range.second);
-				if(symbol == COLOR_IDENTIFIER){
-					return getColorTextState(contents, a_currentTextState, a_defaultTextState);
-				} else if(symbol == FONT_IDENTIFIER){
-					return getFontTextState(contents, a_currentTextState, a_defaultTextState);
-				} else if(symbol == HEIGHT_IDENTIFIER){
-					return getHeightTextState(contents, a_currentTextState, a_defaultTextState);
-				}
-			}
-		}
-		return nullptr;
-	}
-	
-	std::shared_ptr<FormattedState> getTextState(const UtfString &a_text, size_t a_i, const std::shared_ptr<FormattedState> &a_currentTextState, const std::shared_ptr<FormattedState> &a_defaultTextState, std::pair<size_t, size_t> &o_range){
-		std::shared_ptr<FormattedState> state;
-		if(state = backwardGetTextState(a_text, a_i, a_currentTextState, a_defaultTextState, o_range)){
-			return state;
-		} else if(state = forwardGetTextState(a_text, a_i, a_currentTextState, a_defaultTextState, o_range)){
-			return state;
-		}
-		return a_currentTextState;
-	}
-
-	/*std::shared_ptr<Scene::Node> TextLibrary::composeScene(const std::vector<TextState> &a_textStateList, double a_maxWidth, TextWrapMethod a_wrapMethod, TextJustification a_justify, int a_minimumLineHeight, bool a_isSingleLine){
-		UtfString text;
-		std::vector<FormattedLine> lines;
-		for(size_t i = 0; i < text.size(); ++i){
-			getNewTextState(text, 
-		}
-	}*/
-
-	void composeText(TextState &state){
-
-	}
-
-	//TODO: organize this method better.  This method is a beast.
-	//Also, may want to allow editing to avoid having to do full textbox reconstruction!
-	/*std::shared_ptr<Scene::Node> TextLibrary::composeScene(const std::vector<TextState> &a_textStateList, double a_maxWidth, TextWrapMethod a_wrapMethod, TextJustification a_justify, int a_minimumLineHeight, bool a_isSingleLine){
-		auto textScene = Scene::Node::make(render);
-		if(a_textStateList.empty()){return textScene;}
-
-		Color currentColor;
-		int lineHeight, baseLine;
-		int offset = 0;
-		double characterLocationX = 0, nextCharacterLocationX = 0;
-		double characterLocationY = 0, characterLocationYOffset = 0;
-		size_t characterCount = 0;
-		size_t previousLine = 0;
-		size_t oldPreviousLine = 0;
-		std::vector<UtfChar> currentLineContent;
-		std::vector<double> currentLineCharacterSizes;
-		bool endOfAllLines = false;
-
-		for(auto current = a_textStateList.begin(); current != a_textStateList.end() && !endOfAllLines; ++current){
-			auto specifiedFont = loadedFonts.find(current->fontIdentifier);
-			currentColor = current->color;
-			if(specifiedFont != loadedFonts.end()){
-				CachedGlyphs *characterList = initGlyphs(current->fontIdentifier, current->text);
-				if(characterCount != 0){
-					auto fontLineSkip = TTF_FontLineSkip(specifiedFont->second.font);
-					lineHeight = std::max(
-						(current->lineHeight == -1 ? TTF_FontLineSkip(specifiedFont->second.font) : current->lineHeight),
-						a_minimumLineHeight
-					);
-					characterLocationYOffset = (lineHeight - fontLineSkip) / 2.0;
-					baseLine = TTF_FontAscent(specifiedFont->second.font);
-				}else{
-					auto fontLineSkip = TTF_FontLineSkip(specifiedFont->second.font);
-					int newLineHeight = std::max(
-						(current->lineHeight == -1 ? TTF_FontLineSkip(specifiedFont->second.font) : current->lineHeight),
-						a_minimumLineHeight
-					);
-					characterLocationYOffset = (newLineHeight - fontLineSkip) / 2.0;
-					int newBaseLine = TTF_FontAscent(specifiedFont->second.font);
-					if(newBaseLine > baseLine){
-						for(size_t i = previousLine;i < characterCount;++i){
-							textScene->get(boost::lexical_cast<std::string>(i))->translate(Point<>(0, (newBaseLine - baseLine + characterLocationYOffset)));
-						}
-						offset = 0;
-						lineHeight = newLineHeight;
-						baseLine = newBaseLine;
-					}else{
-						offset = baseLine-newBaseLine;
-					}
-				}
-
-				for(auto renderChar = current->text.begin();renderChar != current->text.end();++renderChar){
-					bool needJustify = false;
-					nextCharacterLocationX += (*characterList)[*renderChar].characterSize().width;
-					bool lineWidthExceeded = (!equals(a_maxWidth, 0.0) && nextCharacterLocationX > a_maxWidth);
-					if(*renderChar == '\n' || (lineWidthExceeded && a_wrapMethod != NONE)){
-						if(a_isSingleLine){
-							endOfAllLines = true;
-							break;
-						}
-						characterLocationX = 0;
-						nextCharacterLocationX = (!lineWidthExceeded)?0:(*characterList)[*renderChar].characterSize().width;
-						characterLocationY+=lineHeight;
-						offset = 0;
-						lineHeight = TTF_FontLineSkip(specifiedFont->second.font);
-						baseLine = TTF_FontAscent(specifiedFont->second.font);
-						size_t oldPreviousLine = previousLine;
-						if(a_wrapMethod == SOFT && lineWidthExceeded && *renderChar != '\n'){
-							auto lastSpace = std::find(currentLineContent.rbegin(), currentLineContent.rend(), UTF_CHAR_STR(' '));
-							size_t distance = std::distance(currentLineContent.rbegin(), lastSpace);
-							if(distance != currentLineContent.size()){
-								previousLine = characterCount - distance;
-								for(;distance > 0;--distance){
-									auto renderedCharacter = textScene->get(boost::lexical_cast<std::string>(characterCount-distance));
-									renderedCharacter->position(Point<>(characterLocationX, renderedCharacter->position().y + lineHeight + characterLocationYOffset));
-									characterLocationX+=currentLineCharacterSizes[currentLineContent.size()-distance];
-								}
-								nextCharacterLocationX+=characterLocationX;
-							}else{
-								previousLine = characterCount;
-							}
-						}else{
-							previousLine = characterCount;
-						}
-						needJustify = true;
-
-						currentLineContent.clear();
-						currentLineCharacterSizes.clear();
-					}
-
-					auto tmpRenderChar = renderChar;
-					auto tmpCurrent = current;
-					endOfAllLines = endOfAllLines || (++tmpCurrent == a_textStateList.end() && ++tmpRenderChar == current->text.end());
-
-					if(*renderChar != '\n'){
-						auto character = textScene->make<Scene::Rectangle>(std::to_string(characterCount), Point<>(), castSize<double>((*characterList)[*renderChar].characterSize()), false);
-						character->position(Point<>(characterLocationX, characterLocationY + offset));
-						character->texture((*characterList)[*renderChar].texture());
-						character->color(currentColor);
-						characterLocationX = nextCharacterLocationX;
-						currentLineContent.push_back(*renderChar);
-						currentLineCharacterSizes.push_back((*characterList)[*renderChar].characterSize().width);
-						if(!endOfAllLines){
-							characterCount++;
-						}
-					}
-
-					if(endOfAllLines && !needJustify){
-						needJustify = true;
-						previousLine = characterCount;
-					}
-
-					if(needJustify){
-						if(a_justify != LEFT){
-							auto renderedCharacter = textScene->get(boost::lexical_cast<std::string>(previousLine));
-							double lineWidth = renderedCharacter->position().x + renderedCharacter->basicAABB().size().width;
-							double adjustBy = (a_maxWidth - lineWidth);
-							adjustBy/= (a_justify == CENTER) ? 2.0 : 1.0;
-							for(size_t i = oldPreviousLine; i <= previousLine; ++i){
-								textScene->get(boost::lexical_cast<std::string>(i))->translate(point(adjustBy, 0.0));
-							}
-						}
-					}
-				}
-			}else{
-				std::cerr << "A text scene was requested for a font identifier which is not loaded! (" << current->fontIdentifier << ")" << std::endl;
-			}
-		}
-		return textScene;
-	}*/
 
 	//SDL Supports 16 bit unicode characters, ensure glyph only ever contains characters of that size unless that changes.
 
@@ -394,7 +127,7 @@ namespace MV {
 		TextBox(a_textLibrary, "default", a_size){
 	}
 
-	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const Size<> &a_size):
+	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const Size<> &a_size) :
 		textLibrary(a_textLibrary),
 		render(a_textLibrary->getRenderer()),
 		fontIdentifier(a_fontIdentifier),
@@ -402,11 +135,12 @@ namespace MV {
 		textScene(nullptr),
 		boxSize(a_size),
 		minimumLineHeight(-1),
-		isSingleLine(false){
+		isSingleLine(false),
+		formattedText(*a_textLibrary, a_size.width, a_fontIdentifier){
 		firstRun = true;
 	}
 
-	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, const Size<> &a_size) :
+	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, const Size<> &a_size):
 		textLibrary(a_textLibrary),
 		render(a_textLibrary->getRenderer()),
 		fontIdentifier(a_fontIdentifier),
@@ -414,43 +148,45 @@ namespace MV {
 		textScene(nullptr),
 		boxSize(a_size),
 		minimumLineHeight(-1),
-		isSingleLine(false){
+		isSingleLine(false),
+		formattedText(*a_textLibrary, a_size.width, a_fontIdentifier){
 		firstRun = true;
 		setText(a_text, a_fontIdentifier);
 	}
 
 	void TextBox::setText(const UtfString &a_text, const std::string &a_fontIdentifier){
-		if(a_fontIdentifier != ""){fontIdentifier = a_fontIdentifier;}
+		if(a_fontIdentifier != ""){ fontIdentifier = a_fontIdentifier; }
 		text = a_text;
 
 		refreshTextBoxContents();
 	}
 
-	bool TextBox::setText( SDL_Event &event ){
+	bool TextBox::setText(SDL_Event &event){
 		if(event.type == SDL_TEXTINPUT){
 			appendText(stringToWide(event.text.text));
-		} else if (event.type == SDL_TEXTEDITING) {
+		} else if(event.type == SDL_TEXTEDITING) {
 			setTemporaryText(stringToWide(event.edit.text), event.edit.start, event.edit.length);
 		} else if(event.type == SDL_KEYDOWN){
 			if(event.key.keysym.sym == SDLK_BACKSPACE && text.length() > 0){
 				text.pop_back();
 				refreshTextBoxContents();
-			}else if(event.key.keysym.sym == SDLK_v && SDL_GetModState() & KMOD_CTRL){
+			} else if(event.key.keysym.sym == SDLK_v && SDL_GetModState() & KMOD_CTRL){
 				appendText(stringToWide(SDL_GetClipboardText()));
 			}
 		}
 		return false;
 	}
 
-	void TextBox::setTextBoxSize( Size<> a_size ){
+	void TextBox::setTextBoxSize(Size<> a_size){
 		boxSize = a_size;
 		textboxScene->setSize(a_size);
-
+		formattedText.textWidth = a_size.width;
 		refreshTextBoxContents();
 	}
 
 	void TextBox::refreshTextBoxContents(){
 		if(fontIdentifier != ""){
+			textScene = textboxScene->add("Text", formattedText.append(text));
 			//TODO
 			//textScene = textboxScene->add("Text", textLibrary->composeScene(parseTextStateList(fontIdentifier, currentTextContents()), boxSize.width, wrapMethod, textJustification, minimumLineHeight, isSingleLine));
 			//textScene->position(contentScrollPosition);
@@ -493,14 +229,14 @@ namespace MV {
 		if(!character){
 			character = TextCharacter::make(
 				SurfaceTextureDefinition::make("", [=](){
-					Uint16 text[] = {static_cast<Uint16>(renderChar), '\0'};
-					SDL_Color white;
-					white.r = 255; white.g = 255; white.b = 255; white.a = 0;
-					return TTF_RenderUNICODE_Blended(font, text, white);
-				}),
+				Uint16 text[] = {static_cast<Uint16>(renderChar), '\0'};
+				SDL_Color white;
+				white.r = 255; white.g = 255; white.b = 255; white.a = 0;
+				return TTF_RenderUNICODE_Blended(font, text, white);
+			}),
 				renderChar,
 				shared_from_this()
-			);
+				);
 		}
 		return character;
 	}
@@ -513,8 +249,8 @@ namespace MV {
 
 	FormattedState::FormattedState(const std::shared_ptr<FontDefinition> &a_font, const std::shared_ptr<FormattedState> &a_currentState) :
 		font(a_font),
-		color(a_currentState->color),
-		minimumLineHeight(a_currentState->minimumLineHeight) {
+		color((a_currentState) ? a_currentState->color : Color(1, 1, 1)),
+		minimumLineHeight((a_currentState) ? a_currentState->minimumLineHeight : -1) {
 	}
 
 	FormattedState::FormattedState(const Color &a_color, const std::shared_ptr<FormattedState> &a_currentState):
@@ -530,38 +266,154 @@ namespace MV {
 	}
 
 
-	FormattedLine::FormattedLine(const std::shared_ptr<FormattedCharacter> &a_firstCharacter, size_t a_characterIndex, size_t a_lineIndex):
-		firstCharacterIndex(a_characterIndex),
-		lastCharacterIndex(a_characterIndex),
+	std::shared_ptr<FormattedLine> FormattedLine::make(FormattedText &a_text, size_t a_lineIndex) {
+		auto line = std::shared_ptr<FormattedLine>(new FormattedLine(a_text, a_lineIndex));
+
+		return line;
+	}
+
+	FormattedLine::FormattedLine(FormattedText &a_text, size_t a_lineIndex):
+		text(a_text),
 		lineIndex(a_lineIndex),
-		lineHeight(std::max(TTF_FontLineSkip(a_firstCharacter->character->font()->font), a_firstCharacter->state->minimumLineHeight)){
-
-		characterHeights[a_characterIndex] = lineHeight;
+		lineHeight(0),
+		linePosition(a_text.positionForLine(a_lineIndex)){
 	}
 
-	void FormattedLine::removeCharacter(size_t a_characterIndex){
-		characterHeights.erase(a_characterIndex);
-		if(!characterHeights.empty()){
-			lineHeight = std::max_element(std::begin(characterHeights), std::end(characterHeights))->second;
-		}else{
-			lineHeight = 0;
+	Color parseColorString(const std::string &a_colorString){
+		if(a_colorString.empty()){ return Color(); }
+		std::vector<std::string> colorStrings;
+		boost::split(colorStrings, a_colorString, boost::is_any_of(":"));
+		Color result;
+		if(!colorStrings.empty()){
+			if(colorStrings.size() >= 1){
+				try{ result.R = boost::lexical_cast<float>(colorStrings[0]); } catch(boost::bad_lexical_cast){ result.R = 1.0; }
+			}
+			if(colorStrings.size() >= 2){
+				try{ result.G = boost::lexical_cast<float>(colorStrings[1]); } catch(boost::bad_lexical_cast){ result.G = 1.0; }
+			}
+			if(colorStrings.size() >= 3){
+				try{ result.B = boost::lexical_cast<float>(colorStrings[2]); } catch(boost::bad_lexical_cast){ result.B = 1.0; }
+			}
+			if(colorStrings.size() >= 4){
+				try{ result.A = boost::lexical_cast<float>(colorStrings[3]); } catch(boost::bad_lexical_cast){ result.A = 1.0; }
+			}
+		}
+		return result;
+	}
+
+	std::shared_ptr<FormattedState> FormattedLine::getHeightState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current) {
+		std::string heightString = wideToString(a_text.substr(2));
+		if(heightString.empty()){
+			return std::make_shared<FormattedState>(text.getDefaultState()->minimumLineHeight, a_current);
+		} else{
+			double newMinimumHeight = 0;
+			try{ newMinimumHeight = boost::lexical_cast<double>(heightString); } catch(boost::bad_lexical_cast){ newMinimumHeight = 0.0; }
+			return std::make_shared<FormattedState>(newMinimumHeight, a_current);
 		}
 	}
 
-	void FormattedLine::addCharacter(size_t a_characterIndex, const std::shared_ptr<FormattedCharacter> &a_newCharacter) {
-		firstCharacterIndex = std::min(firstCharacterIndex, a_characterIndex);
-		lastCharacterIndex = std::max(lastCharacterIndex, a_characterIndex);
-
-		auto characterLineHeight = std::max(TTF_FontLineSkip(a_newCharacter->character->font()->font), a_newCharacter->state->minimumLineHeight);
-		lineHeight = std::max(characterLineHeight, lineHeight);
-
-		characterHeights[a_characterIndex] = characterLineHeight;
-
-		if(a_characterIndex == firstCharacterIndex){
-			a_newCharacter->line->removeCharacter(a_characterIndex);
-			a_newCharacter->position({0.0, static_cast<double>(a_newCharacter->line->lineHeight)});
+	std::shared_ptr<FormattedState> FormattedLine::getColorState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current) {
+		std::string colorString = wideToString(a_text.substr(2));
+		if(colorString.empty()){
+			return std::make_shared<FormattedState>(text.getDefaultState()->color, a_current);
+		} else{
+			return std::make_shared<FormattedState>(parseColorString(colorString), a_current);
 		}
-		a_newCharacter->line = shared_from_this();
+	}
+
+	std::shared_ptr<FormattedState> FormattedLine::getFontState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current) {
+		std::string fontIdentifier = wideToString(a_text.substr(2));
+		if(fontIdentifier.empty()){
+			return std::make_shared<FormattedState>(text.getDefaultState()->font, a_current);
+		} else{
+			return std::make_shared<FormattedState>(text.library.fontDefinition(fontIdentifier), a_current);
+		}
+	}
+
+	std::shared_ptr<FormattedState> FormattedLine::getNewState(const UtfString &a_text, const std::shared_ptr<FormattedState> &a_current){
+		if(a_text.length() > 2){
+			if(a_text[0] == 'f'){
+				return getFontState(a_text, a_current);
+			} else if(a_text[0] == 'c'){
+				return getColorState(a_text, a_current);
+			} else if(a_text[0] == 'h'){
+				return getHeightState(a_text, a_current);
+			}
+		}
+		return a_current;
+	}
+
+	void FormattedLine::updateFormatAfterAdd(size_t a_startIndex, size_t a_endIndex){
+		for(size_t i = a_startIndex; i < a_endIndex; ++i){
+			if(!characters[i]->partOfFormat){
+				if(characters[i]->textCharacter == UTF_CHAR_STR(']')){
+					auto previous = text.characterRelativeTo(lineIndex, i, -1); 
+					if(previous && previous->textCharacter == UTF_CHAR_STR(']')){
+						UtfString content;
+						previous = text.characterRelativeTo(lineIndex, i, -2);
+						auto previous2 = text.characterRelativeTo(lineIndex, i, -3);
+						size_t startOfNewState = a_startIndex - 3;
+						for(size_t total = 0; previous && previous2 && (previous->textCharacter != UTF_CHAR_STR('[') && previous->textCharacter != UTF_CHAR_STR('[')) && total < 32; --startOfNewState, ++total){
+							content += previous->textCharacter;
+							previous = text.characterRelativeTo(lineIndex, i, startOfNewState);
+							previous2 = text.characterRelativeTo(lineIndex, i, startOfNewState-1);
+						}
+						if(!content.empty() && previous->textCharacter == UTF_CHAR_STR('[') && previous2->textCharacter == UTF_CHAR_STR('[')){
+							std::reverse(content.begin(), content.end());
+							auto newState = getNewState(content, previous2->state);
+							if(newState != previous2->state){
+								text.applyState(newState, text.absoluteIndexFromRelativeTo(lineIndex, i, startOfNewState - 1), text.absoluteIndex(lineIndex, i));
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	void FormattedLine::addCharacters(size_t a_characterIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters){
+		auto insertIndex = std::min(a_characterIndex, characters.size());
+		characters.insert(characters.begin() + insertIndex, a_characters.begin(), a_characters.end());
+		updateFormatAfterAdd(insertIndex, insertIndex + a_characters.size());
+		fixVisualsFromIndex(a_characterIndex);
+	}
+
+	void FormattedLine::fixVisualsFromIndex(size_t a_characterIndex){
+		if(!characters.empty() && a_characterIndex >= characters.size() || characters[std::max<int64_t>((int64_t)a_characterIndex-1, 0)]->position().x > text.width()){
+			fixVisualsFromIndex(0);
+		}else if(!characters.empty()){
+			characters[0]->position({0, 0});
+			std::vector<std::shared_ptr<FormattedCharacter>> overflow;
+			if(a_characterIndex == 0){
+				a_characterIndex = 1;
+			}
+			updateLineHeight();
+			for(size_t i = a_characterIndex; i < characters.size(); ++i){
+				characters[i]->position({characters[i - 1]->position().x + characters[i - 1]->characterSize().width, linePosition});
+				characters[i]->offsetForLineHeight(lineHeight);
+			}
+		}
+	}
+
+	void FormattedLine::updateLineHeight() {
+		double maxCharacterHeight = 0;
+		if(!characters.empty()){
+			maxCharacterHeight = (*std::max_element(characters.begin(), characters.end(), [](const std::shared_ptr<FormattedCharacter> &a_lhs, const std::shared_ptr<FormattedCharacter> &a_rhs){
+				return a_lhs->characterSize().height < a_rhs->characterSize().height;
+			}))->characterSize().height;
+		}
+		lineHeight = std::max(text.minimumLineHeight(), maxCharacterHeight);
+	}
+
+	std::shared_ptr<FormattedCharacter>& FormattedLine::operator[](size_t a_index) {
+		MV::require(a_index < characters.size(), MV::RangeException("FormattedLine::operator[] supplied invalid index (" + std::to_string(a_index) + " > " + std::to_string(characters.size()) + ")"));
+		return characters[a_index];
+	}
+
+
+	std::shared_ptr<FormattedLine>& FormattedText::operator[](size_t a_index) {
+		MV::require(a_index < lines.size(), MV::RangeException("FormattedText::operator[] supplied invalid index (" + std::to_string(a_index) + " > " + std::to_string(lines.size()) + ")"));
+		return lines[a_index];
 	}
 
 

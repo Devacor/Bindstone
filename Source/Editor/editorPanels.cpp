@@ -58,7 +58,7 @@ void SelectedEditorPanel::handleInput(SDL_Event &a_event) {
 DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	EditorPanel(a_panel) {
 	auto node = panel.content();
-	auto createButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0, 27.0), UTF_CHAR_STR("Create"));
+	auto createButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0, 77.0), UTF_CHAR_STR("Create[[c|1:0:0]]123 456 7890 asdfasdf 12314afasdfa"));
 	createButton->position({8.0, 28.0});
 	auto selectButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0, 27.0), UTF_CHAR_STR("Select"));
 	selectButton->position(createButton->localAABB().bottomLeftPoint() + MV::point(0.0, 5.0));

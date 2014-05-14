@@ -38,15 +38,27 @@ namespace MV {
 	//I chose 3 because I like the simplicity of "make" for everything and I care more about the user interface than the class definition.
 	//I don't want to use two synonyms for object creation (create/make) and add should not imply creation.
 #define SCENE_MAKE_FACTORY_METHODS 	\
-	template<typename TypeToMake> \
-	std::shared_ptr<TypeToMake> make(const std::string &a_childId) { \
-		auto newChild = TypeToMake::make(renderer); \
-		add(a_childId, newChild); \
+	template < typename TypeToMake, typename FirstParameter, typename ...Arg, \
+		typename std::enable_if< \
+			!std::is_same<FirstParameter, const char*>::value && \
+			!std::is_same<FirstParameter, std::string>::value, \
+			int \
+		>::type = 0 \
+	> \
+	std::shared_ptr<TypeToMake> make(FirstParameter a_firstParam, Arg... a_parameters) { \
+		auto newChild = TypeToMake::make(renderer, a_firstParam, std::forward<Arg>(a_parameters)...); \
+		add(guid(), newChild); \
 		return newChild; \
 	} \
 	\
-	template<typename TypeToMake, typename ...Arg> \
-	std::shared_ptr<TypeToMake> make(const std::string &a_childId, Arg... a_parameters) { \
+	template < typename TypeToMake, typename FirstParameter, typename ...Arg, \
+		typename std::enable_if< \
+			std::is_same<FirstParameter, const char*>::value || \
+			std::is_same<FirstParameter, std::string>::value, \
+			int \
+		>::type = 0 \
+	> \
+	std::shared_ptr<TypeToMake> make(FirstParameter a_childId, Arg... a_parameters) { \
 		auto newChild = TypeToMake::make(renderer, std::forward<Arg>(a_parameters)...); \
 		add(a_childId, newChild); \
 		return newChild; \
@@ -92,6 +104,9 @@ namespace MV {
 			template<typename TypeToAdd>
 			std::shared_ptr<TypeToAdd> add(const std::string &a_childId, std::shared_ptr<TypeToAdd> a_childItem) {
 				require(a_childItem, MV::PointerException("Node::add was supplied a null child for: " + a_childId));
+				if(a_childItem->parent().get() == this){
+					remove(a_childItem);
+				}
 				isSorted = 0;
 				drawListVector.clear();
 				if(renderer){
@@ -101,7 +116,7 @@ namespace MV {
 				drawList[a_childId] = a_childItem;
 				alertParent(ChildAdded::make(shared_from_this(), a_childItem));
 				alertParent(VisualChange::make(shared_from_this()));
-				a_childItem->onAdded();
+				a_childItem->onAdded(shared_from_this());
 				onChildAdded(a_childItem);
 				return a_childItem;
 			}
@@ -374,10 +389,10 @@ namespace MV {
 			virtual bool preDraw(){ return true; }
 			virtual void postDraw(){}
 			virtual void drawImplementation(){} //override this in subclasses
-			virtual void onAdded(){}
-			virtual void onRemoved(){}
-			virtual void onChildAdded(std::shared_ptr<Node>){}
-			virtual void onChildRemoved(std::shared_ptr<Node>){}
+			virtual void onAdded(std::shared_ptr<Node> a_parent){}
+			virtual void onRemoved(std::shared_ptr<Node> a_parent){}
+			virtual void onChildAdded(std::shared_ptr<Node> a_child){}
+			virtual void onChildRemoved(std::shared_ptr<Node> a_child){}
 			void defaultDrawRenderStep(GLenum drawType);
 			void bindOrDisableTexture(const std::shared_ptr<std::vector<GLfloat>> &texturePoints);
 		};

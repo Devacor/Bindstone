@@ -87,6 +87,7 @@ namespace MV {
 				drawList.erase(foundChild);
 				alertParent(ChildRemoved::make(shared_from_this(), removed));
 				alertParent(VisualChange::make(shared_from_this()));
+				removed->myParent = nullptr;
 				removed->onRemoved(shared_from_this());
 				onChildRemoved(removed);
 				return removed;

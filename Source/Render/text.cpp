@@ -79,39 +79,6 @@ namespace MV {
 		return false;
 	}
 
-	std::shared_ptr<FormattedState> getColorTextState(const UtfString &a_text, const std::shared_ptr<FormattedState> &a_currentTextState, const std::shared_ptr<FormattedState> &a_defaultTextState){
-		if(a_text.empty()){
-			return std::make_shared<FormattedState>(a_defaultTextState->color, a_currentTextState);
-		} else{
-			auto color = parseColorString(a_text);
-			return std::make_shared<FormattedState>(color, a_currentTextState);
-		}
-	}
-
-	std::shared_ptr<FormattedState> getFontTextState(const UtfString &a_text, const std::shared_ptr<FormattedState> &a_currentTextState, const std::shared_ptr<FormattedState> &a_defaultTextState){
-		if(a_text.empty()){
-			return std::make_shared<FormattedState>(a_defaultTextState->font, a_currentTextState);
-		} else{
-			auto font = a_defaultTextState->font->library->fontDefinition(wideToString(a_text));
-			if(font){
-				return std::make_shared<FormattedState>(font, a_currentTextState);
-			} else{
-				return a_currentTextState;
-			}
-		}
-	}
-
-	std::shared_ptr<FormattedState> getHeightTextState(const UtfString &a_text, const std::shared_ptr<FormattedState> &a_currentTextState, const std::shared_ptr<FormattedState> &a_defaultTextState){
-		if(a_text.empty()){
-			return std::make_shared<FormattedState>(a_defaultTextState->minimumLineHeight, a_currentTextState);
-		} else{
-			int newHeight = -1;
-			try{ newHeight = boost::lexical_cast<int>(a_text); } catch(boost::bad_lexical_cast){}
-			return std::make_shared<FormattedState>(newHeight, a_currentTextState);
-		}
-	}
-
-
 	//SDL Supports 16 bit unicode characters, ensure glyph only ever contains characters of that size unless that changes.
 
 	std::shared_ptr<FontDefinition> TextLibrary::fontDefinition(const std::string &a_identifier) const {
@@ -186,7 +153,8 @@ namespace MV {
 
 	void TextBox::refreshTextBoxContents(){
 		if(fontIdentifier != ""){
-			textScene = textboxScene->add("Text", formattedText.append(text));
+			formattedText.append(text);
+			textScene = textboxScene->add("Text", formattedText.scene);
 			//TODO
 			//textScene = textboxScene->add("Text", textLibrary->composeScene(parseTextStateList(fontIdentifier, currentTextContents()), boxSize.width, wrapMethod, textJustification, minimumLineHeight, isSingleLine));
 			//textScene->position(contentScrollPosition);
@@ -229,14 +197,14 @@ namespace MV {
 		if(!character){
 			character = TextCharacter::make(
 				SurfaceTextureDefinition::make("", [=](){
-				Uint16 text[] = {static_cast<Uint16>(renderChar), '\0'};
-				SDL_Color white;
-				white.r = 255; white.g = 255; white.b = 255; white.a = 0;
-				return TTF_RenderUNICODE_Blended(font, text, white);
-			}),
+					Uint16 text[] = {static_cast<Uint16>(renderChar), '\0'};
+					SDL_Color white;
+					white.r = 255; white.g = 255; white.b = 255; white.a = 0;
+					return TTF_RenderUNICODE_Blended(font, text, white);
+				}),
 				renderChar,
 				shared_from_this()
-				);
+			);
 		}
 		return character;
 	}
@@ -259,7 +227,7 @@ namespace MV {
 		minimumLineHeight(a_currentState->minimumLineHeight) {
 	}
 
-	FormattedState::FormattedState(int a_minimumLineHeight, const std::shared_ptr<FormattedState> &a_currentState):
+	FormattedState::FormattedState(double a_minimumLineHeight, const std::shared_ptr<FormattedState> &a_currentState):
 		font(a_currentState->font),
 		color(a_currentState->color),
 		minimumLineHeight(a_minimumLineHeight) {
@@ -268,7 +236,6 @@ namespace MV {
 
 	std::shared_ptr<FormattedLine> FormattedLine::make(FormattedText &a_text, size_t a_lineIndex) {
 		auto line = std::shared_ptr<FormattedLine>(new FormattedLine(a_text, a_lineIndex));
-
 		return line;
 	}
 
@@ -379,28 +346,38 @@ namespace MV {
 	}
 
 	void FormattedLine::fixVisualsFromIndex(size_t a_characterIndex){
-		if(!characters.empty() && a_characterIndex >= characters.size() || characters[std::max<int64_t>((int64_t)a_characterIndex-1, 0)]->position().x > text.width()){
-			fixVisualsFromIndex(0);
-		}else if(!characters.empty()){
-			characters[0]->position({0, 0});
-			std::vector<std::shared_ptr<FormattedCharacter>> overflow;
+		if(!characters.empty()){
+			characters[0]->position({0, linePosition});
 			if(a_characterIndex == 0){
 				a_characterIndex = 1;
 			}
 			updateLineHeight();
-			for(size_t i = a_characterIndex; i < characters.size(); ++i){
-				characters[i]->position({characters[i - 1]->position().x + characters[i - 1]->characterSize().width, linePosition});
-				characters[i]->offsetForLineHeight(lineHeight);
+			size_t index = a_characterIndex;
+			for(; index < characters.size(); ++index){
+				characters[index]->position({characters[index - 1]->position().x + characters[index - 1]->characterSize().width, linePosition});
+				characters[index]->offset(lineHeight, baseLine);
+				if(text.exceedsWidth(characters[index]->position().x)){
+					std::vector<std::shared_ptr<FormattedCharacter>> overflow(characters.begin() + index-1, characters.end());
+					characters.erase(characters.begin() + index-1, characters.end());
+					if(text.lines.size() <= lineIndex + 1){
+						text.lines.push_back(FormattedLine::make(text, text.lines.size()));
+					}
+					text.lines[lineIndex + 1]->addCharacters(0, overflow);
+					break;
+				}
 			}
 		}
 	}
 
 	void FormattedLine::updateLineHeight() {
 		double maxCharacterHeight = 0;
+		baseLine = 0.0;
 		if(!characters.empty()){
-			maxCharacterHeight = (*std::max_element(characters.begin(), characters.end(), [](const std::shared_ptr<FormattedCharacter> &a_lhs, const std::shared_ptr<FormattedCharacter> &a_rhs){
-				return a_lhs->characterSize().height < a_rhs->characterSize().height;
-			}))->characterSize().height;
+			auto maxHeightCharacter = (*std::max_element(characters.begin(), characters.end(), [](const std::shared_ptr<FormattedCharacter> &a_lhs, const std::shared_ptr<FormattedCharacter> &a_rhs){
+				return a_lhs->character->font()->height() < a_rhs->character->font()->height();
+			}));
+			maxCharacterHeight = maxHeightCharacter->character->font()->height();
+			baseLine = maxHeightCharacter->character->font()->base();
 		}
 		lineHeight = std::max(text.minimumLineHeight(), maxCharacterHeight);
 	}

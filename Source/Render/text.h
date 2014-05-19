@@ -186,7 +186,7 @@ namespace MV {
 		}
 
 		Size<> characterSize() const{
-			if(partOfFormat){
+			if(isPartOfFormat){
 				return{0.0, static_cast<double>(character->characterSize().height)};
 			}else{
 				return character->characterSize();
@@ -217,10 +217,10 @@ namespace MV {
 			return offsetPosition;
 		}
 
-		Point<> offset(double lineHeight, double baseLine){
+		Point<> offset(double a_lineHeight, double a_baseLine){
 			double height = character->font()->height();
 			double base = character->font()->base();
-			offset({offsetPosition.x, (baseLine - base) + ((lineHeight - height) / 2.0)});
+			offset({offsetPosition.x, (a_baseLine - base) + ((a_lineHeight - height) / 2.0)});
 			shape->position(basePosition + offsetPosition);
 			return offsetPosition;
 		}
@@ -233,7 +233,20 @@ namespace MV {
 			shape->color(state->color);
 		}
 
-		bool partOfFormat = false;
+		bool partOfFormat(bool a_isPartOfFormat){
+			isPartOfFormat = a_isPartOfFormat;
+			if(isPartOfFormat){
+				shape->hide();
+			} else{
+				shape->show();
+			}
+			return isPartOfFormat;
+		}
+
+		bool partOfFormat() const{
+			return isPartOfFormat;
+		}
+
 		UtfChar textCharacter;
 		std::shared_ptr<TextCharacter> character;
 		std::shared_ptr<Scene::Rectangle> shape;
@@ -241,6 +254,7 @@ namespace MV {
 		std::shared_ptr<FormattedState> state;
 
 	private:
+		bool isPartOfFormat = false;
 		Point<> basePosition;
 		Point<> offsetPosition;
 		FormattedCharacter(const std::shared_ptr<Scene::Node> &parent, UtfChar a_character, const std::shared_ptr<FormattedState> &a_state):
@@ -368,14 +382,16 @@ namespace MV {
 		}
 
 		void applyState(const std::shared_ptr<FormattedState> &a_newState, size_t a_newFormatStart, size_t a_newFormatEnd){
-			std::shared_ptr<FormattedCharacter> character = characterForIndex(a_newFormatStart);
-			auto originalState = character->state;
-			for(size_t i = a_newFormatStart + 1;character && character->state == originalState;++i){
-				if(i <= a_newFormatEnd){
-					character->partOfFormat = true;
+			std::shared_ptr<FormattedState> originalState;
+			size_t i = a_newFormatStart;
+			for(auto character = characterForIndex(i); character; ++i, character = characterForIndex(i)){
+				if(i == a_newFormatStart){
+					originalState = character->state;
+				}else if(character->state != originalState){
+					break;
 				}
-				character->state = a_newState;
-				character = characterForIndex(i);
+				character->partOfFormat(i <= a_newFormatEnd);
+				character->applyState(a_newState);
 			}
 		}
 
@@ -403,10 +419,10 @@ namespace MV {
 			std::shared_ptr<FormattedLine> line;
 			size_t characterInLineIndex;
 			std::tie(line, characterInLineIndex) = lineForCharacterIndex(a_characterIndex);
-			if(line->empty()){
+			if(characterInLineIndex >= line->size()){
 				return nullptr;
 			}else{
-				return (*line)[characterInLineIndex-1];
+				return (*line)[characterInLineIndex];
 			}
 		}
 		
@@ -414,7 +430,7 @@ namespace MV {
 			std::shared_ptr<FormattedLine> found;
 			size_t foundIndex = 0;
 			int64_t characterIndex = a_characterIndex;
-			for(size_t foundIndex = 0; foundIndex < lines.size() && characterIndex - lines[foundIndex]->size() > 0; ++foundIndex){
+			for(foundIndex = 0; foundIndex < lines.size() && (characterIndex - static_cast<int64_t>(lines[foundIndex]->size())) > 0; ++foundIndex){
 				characterIndex -= lines[foundIndex]->size();
 			}
 			if(foundIndex < lines.size()){

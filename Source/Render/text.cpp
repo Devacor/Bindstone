@@ -312,14 +312,14 @@ namespace MV {
 
 	void FormattedLine::updateFormatAfterAdd(size_t a_startIndex, size_t a_endIndex){
 		for(size_t i = a_startIndex; i < a_endIndex; ++i){
-			if(!characters[i]->partOfFormat){
+			if(!characters[i]->partOfFormat()){
 				if(characters[i]->textCharacter == UTF_CHAR_STR(']')){
 					auto previous = text.characterRelativeTo(lineIndex, i, -1); 
 					if(previous && previous->textCharacter == UTF_CHAR_STR(']')){
 						UtfString content;
 						previous = text.characterRelativeTo(lineIndex, i, -2);
 						auto previous2 = text.characterRelativeTo(lineIndex, i, -3);
-						size_t startOfNewState = a_startIndex - 3;
+						int64_t startOfNewState = -3;
 						for(size_t total = 0; previous && previous2 && (previous->textCharacter != UTF_CHAR_STR('[') && previous->textCharacter != UTF_CHAR_STR('[')) && total < 32; --startOfNewState, ++total){
 							content += previous->textCharacter;
 							previous = text.characterRelativeTo(lineIndex, i, startOfNewState);
@@ -329,7 +329,7 @@ namespace MV {
 							std::reverse(content.begin(), content.end());
 							auto newState = getNewState(content, previous2->state);
 							if(newState != previous2->state){
-								text.applyState(newState, text.absoluteIndexFromRelativeTo(lineIndex, i, startOfNewState - 1), text.absoluteIndex(lineIndex, i));
+								text.applyState(newState, text.absoluteIndexFromRelativeTo(lineIndex, i, startOfNewState), text.absoluteIndex(lineIndex, i));
 							}
 						}
 					}

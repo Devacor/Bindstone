@@ -43,7 +43,10 @@ namespace MV {
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Pixel> &construct){
-				construct(nullptr);
+				Draw2D *renderer = nullptr;
+				archive.extract(cereal::make_nvp("renderer", renderer));
+				require(renderer != nullptr, MV::PointerException("Error: Failed to load a renderer for Pixel node."));
+				construct(renderer);
 				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
 			}
 		};
@@ -86,7 +89,10 @@ namespace MV {
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Line> &construct){
-				construct(nullptr);
+				Draw2D *renderer = nullptr;
+				archive.extract(cereal::make_nvp("renderer", renderer));
+				require(renderer != nullptr, MV::PointerException("Error: Failed to load a renderer for Line node."));
+				construct(renderer);
 				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
 			}
 		};
@@ -148,7 +154,10 @@ namespace MV {
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Rectangle> &construct){
-				construct(nullptr);
+				Draw2D *renderer = nullptr;
+				archive.extract(cereal::make_nvp("renderer", renderer));
+				require(renderer != nullptr, MV::PointerException("Error: Failed to load a renderer for Rectangle node."));
+				construct(renderer);
 				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
 			}
 		};

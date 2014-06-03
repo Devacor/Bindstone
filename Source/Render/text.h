@@ -69,10 +69,10 @@ namespace MV {
 
 		std::shared_ptr<TextCharacter> getCharacter(UtfChar renderChar);
 
-		double height() const{
+		PointPrecision height() const{
 			return lineHeight;
 		}
-		double base() const{
+		PointPrecision base() const{
 			return baseLine;
 		}
 		TextLibrary* library() const{
@@ -82,8 +82,8 @@ namespace MV {
 		std::string file;
 		TTF_Font* font;
 		int size;
-		double lineHeight;
-		double baseLine;
+		PointPrecision lineHeight;
+		PointPrecision baseLine;
 		TextLibrary *textLibrary;
 
 		typedef std::map<UtfChar, std::shared_ptr<TextCharacter>> CachedGlyphs;
@@ -105,8 +105,8 @@ namespace MV {
 			);
 			//TODO! Get textLibrary.
 			font = TTF_OpenFont(file.c_str(), size);
-			lineHeight = TTF_FontLineSkip(font);
-			baseLine = TTF_FontAscent(font);
+			lineHeight = static_cast<PointPrecision>(TTF_FontLineSkip(font));
+			baseLine = static_cast<PointPrecision>(TTF_FontAscent(font));
 		}
 
 		FontDefinition(TextLibrary *a_library, const std::string &a_file, int a_size, TTF_Font* a_font):
@@ -114,8 +114,8 @@ namespace MV {
 			size(a_size),
 			font(a_font),
 			textLibrary(a_library),
-			lineHeight(TTF_FontLineSkip(a_font)),
-			baseLine(TTF_FontAscent(a_font)){
+			lineHeight(static_cast<PointPrecision>(TTF_FontLineSkip(a_font))),
+			baseLine(static_cast<PointPrecision>(TTF_FontAscent(a_font))){
 		}
 		FontDefinition(const FontDefinition &a_other) = delete;
 		FontDefinition& operator=(const FontDefinition &a_other) = delete;
@@ -133,12 +133,28 @@ namespace MV {
 		RIGHT
 	};
 
+	enum class FontStyle : int{
+		NORMAL = TTF_STYLE_NORMAL,
+		BOLD = TTF_STYLE_BOLD,
+		ITALIC = TTF_STYLE_ITALIC,
+		UNDERLINE = TTF_STYLE_UNDERLINE
+	};
+
+	inline FontStyle operator | (FontStyle lhs, FontStyle rhs){
+		return static_cast<FontStyle>((int)lhs | (int)rhs);
+	}
+
+	inline FontStyle& operator |= (FontStyle& a_lhs, FontStyle a_rhs){
+		a_lhs = static_cast<FontStyle>(static_cast<int>(a_lhs) | static_cast<int>(a_rhs));
+		return a_lhs;
+	}
+
 	class TextLibrary{
 	public:
 		TextLibrary(Draw2D *a_rendering);
 		~TextLibrary(){}
 
-		bool loadFont(const std::string &a_identifier, int a_pointSize, std::string a_fontFileLocation);
+		bool loadFont(const std::string &a_identifier, std::string a_fontFileLocation, int a_pointSize, FontStyle a_styleFlags = FontStyle::NORMAL);
 
 		Draw2D *getRenderer(){return render;}
 
@@ -172,11 +188,11 @@ namespace MV {
 		FormattedState();
 		FormattedState(const std::shared_ptr<FontDefinition> &a_font, const std::shared_ptr<FormattedState> &a_currentState = nullptr);
 		FormattedState(const Color &a_color, const std::shared_ptr<FormattedState> &a_currentState);
-		FormattedState(double a_minimumLineHeight, const std::shared_ptr<FormattedState> &a_currentState);
+		FormattedState(PointPrecision a_minimumLineHeight, const std::shared_ptr<FormattedState> &a_currentState);
 
 		Color color;
 		std::shared_ptr<FontDefinition> font;
-		double minimumLineHeight;
+		PointPrecision minimumLineHeight;
 	};
 
 	class FormattedLine;
@@ -187,9 +203,9 @@ namespace MV {
 
 		Size<> characterSize() const{
 			if(isPartOfFormat){
-				return{0.0, static_cast<double>(character->characterSize().height)};
+				return{0.0, static_cast<PointPrecision>(character->characterSize().height)};
 			}else{
-				return character->characterSize();
+				return castSize<PointPrecision>(character->characterSize());
 			}
 		}
 
@@ -203,7 +219,7 @@ namespace MV {
 			return basePosition;
 		}
 
-		void offsetForLineHeight(double a_lineHeight) const{
+		void offsetForLineHeight(PointPrecision a_lineHeight) const{
 			//TODO!
 		}
 
@@ -217,10 +233,10 @@ namespace MV {
 			return offsetPosition;
 		}
 
-		Point<> offset(double a_lineHeight, double a_baseLine){
-			double height = character->font()->height();
-			double base = character->font()->base();
-			offset({offsetPosition.x, (a_baseLine - base) + ((a_lineHeight - height) / 2.0)});
+		Point<> offset(PointPrecision a_lineHeight, PointPrecision a_baseLine){
+			PointPrecision height = character->font()->height();
+			PointPrecision base = character->font()->base();
+			offset({offsetPosition.x, a_baseLine - base});
 			shape->position(basePosition + offsetPosition);
 			return offsetPosition;
 		}
@@ -228,7 +244,7 @@ namespace MV {
 		void applyState(const std::shared_ptr<FormattedState> &a_state){
 			state = a_state;
 			character = state->font->getCharacter(textCharacter);
-			shape->setSize(character->characterSize());
+			shape->setSize(castSize<PointPrecision>(character->characterSize()));
 			shape->texture(character->texture());
 			shape->color(state->color);
 		}
@@ -262,8 +278,8 @@ namespace MV {
 			state(a_state),
 			character(a_state->font->getCharacter(a_character)){
 
-			shape = parent->make<Scene::Rectangle>(character->characterSize());
-			shape->setSize(character->characterSize());
+			shape = parent->make<Scene::Rectangle>(castSize<PointPrecision>(character->characterSize()));
+			shape->setSize(castSize<PointPrecision>(character->characterSize()));
 			shape->texture(character->texture());
 			shape->color(state->color);
 		}
@@ -285,12 +301,24 @@ namespace MV {
 		bool empty() const{
 			return characters.empty();
 		}
-		double height() const{
+		PointPrecision height() const{
 			return lineHeight;
 		}
 
 		size_t index() const{
 			return lineIndex;
+		}
+
+		UtfString string() const{
+			UtfString result;
+			for(auto& character : characters){
+				result+=character->character->character();
+			}
+			return result;
+		}
+
+		void minimumLineHeightChanged(){
+			fixVisualsFromIndex(0);
 		}
 	private:
 		std::string makeCharacterGUID(size_t a_index){
@@ -299,10 +327,10 @@ namespace MV {
 
 		FormattedLine(FormattedText &a_lines, size_t a_lineIndex);
 
-		void updateLineHeight();
 		void ripplePositionUpdate();
 		void updateFormatAfterAdd(size_t a_startIndex, size_t a_endIndex);
-		
+		void updateLineHeight();
+
 		std::shared_ptr<FormattedState> getFontState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current);
 		std::shared_ptr<FormattedState> getColorState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current);
 		std::shared_ptr<FormattedState> getHeightState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current);
@@ -311,12 +339,12 @@ namespace MV {
 
 		void fixVisualsFromIndex(size_t a_characterIndex);
 
-		double lineHeight;
-		double baseLine;
+		PointPrecision lineHeight;
+		PointPrecision baseLine;
 
 		size_t lineIndex;
 
-		double linePosition;
+		PointPrecision linePosition;
 		std::vector<std::shared_ptr<FormattedCharacter>> characters;
 		FormattedText& text;
 	};
@@ -325,36 +353,22 @@ namespace MV {
 
 	class FormattedText{
 	public:
-		FormattedText(TextLibrary &a_library, double a_width, const std::string &a_defaultStateIdentifier, TextWrapMethod a_wrapping = SOFT):
-			library(a_library),
-			textWidth(a_width),
-			defaultState(std::make_shared<FormattedState>(a_library.fontDefinition(a_defaultStateIdentifier))),
-			wrapping(a_wrapping){
+		FormattedText(TextLibrary &a_library, PointPrecision a_width, const std::string &a_defaultStateIdentifier, TextWrapMethod a_wrapping = SOFT);
 
-			scene = Scene::Node::make(library.getRenderer());
-		}
-
-		double width(double a_width){
-			textWidth = a_width;
+		PointPrecision width(PointPrecision a_width);
+		PointPrecision width() const{
 			return textWidth;
 		}
 
-		double width() const{
-			return textWidth;
-		}
-
-		bool exceedsWidth(double a_xPosition) const{
+		bool exceedsWidth(PointPrecision a_xPosition) const{
 			return a_xPosition > textWidth;
 		}
 
-		double positionForLine(size_t a_index){
-			return std::accumulate(lines.begin(), lines.end(), 0.0, [](double a_accumulated, const std::shared_ptr<FormattedLine> &a_line){
-				return a_line->height() + a_accumulated;
-			});
-		}
+		PointPrecision positionForLine(size_t a_index);
 
-		std::shared_ptr<FormattedState> getDefaultState() const{
-			return defaultState;
+		std::shared_ptr<FormattedState> defaultState(const std::string &a_defaultStateIdentifier);
+		std::shared_ptr<FormattedState> defaultState() const{
+			return defaultTextState;
 		}
 
 		std::shared_ptr<FormattedLine>& operator[](size_t a_index);
@@ -366,11 +380,9 @@ namespace MV {
 			return lines.empty();
 		}
 
-		size_t textLength() const{
-			return std::accumulate(lines.begin(), lines.end(), static_cast<size_t>(0), [](size_t a_accumulated, const std::shared_ptr<FormattedLine> &a_line){
-				return a_line->size() + a_accumulated;
-			});
-		}
+		size_t length() const;
+
+		UtfString string() const;
 
 		std::shared_ptr<FormattedCharacter> characterRelativeTo(size_t a_lineIndex, size_t a_characterIndex, int64_t a_relativeCharacterIndex){
 			auto index = absoluteIndex(a_lineIndex, a_characterIndex);
@@ -450,7 +462,7 @@ namespace MV {
 			size_t characterInLineIndex;
 			std::tie(line, characterInLineIndex) = lineForCharacterIndex(a_startIndex);
 
-			std::shared_ptr<FormattedState> foundState = defaultState;
+			std::shared_ptr<FormattedState> foundState = defaultTextState;
 			if(a_startIndex > 0){
 				if(characterInLineIndex > 0){
 					foundState = (*line)[characterInLineIndex - 1]->state;
@@ -493,7 +505,7 @@ namespace MV {
 			if(a_characters.empty()){
 				return;
 			}
-			std::shared_ptr<FormattedState> foundState = defaultState;
+			std::shared_ptr<FormattedState> foundState = defaultTextState;
 			if(lines.empty()){
 				lines.push_back(FormattedLine::make(*this, lines.size()));
 			} else{
@@ -508,18 +520,22 @@ namespace MV {
 			std::vector<std::shared_ptr<FormattedCharacter>> formattedCharacters;
 			for(const UtfChar &character : a_characters){
 				formattedCharacters.push_back(FormattedCharacter::make(scene, character, foundState));
+				rawString.push_back(character);
 			}
 
 			std::shared_ptr<FormattedLine> line = lines.back();
 			line->addCharacters(line->size(), formattedCharacters);
 		}
 
-		double minimumLineHeight() const{
+		PointPrecision minimumLineHeight() const{
 			return minimumTextLineHeight;
 		}
 
-		double minimumLineHeight(double a_minimumLineHeight){
+		PointPrecision minimumLineHeight(PointPrecision a_minimumLineHeight){
 			minimumTextLineHeight = a_minimumLineHeight;
+			for(auto line : lines){
+				line->minimumLineHeightChanged();
+			}
 			return minimumTextLineHeight;
 		}
 
@@ -527,11 +543,11 @@ namespace MV {
 		TextWrapMethod wrapping;
 		TextJustification justification;
 		std::vector<std::shared_ptr<FormattedLine>> lines;
-		std::shared_ptr<FormattedState> defaultState;
+		std::shared_ptr<FormattedState> defaultTextState;
 		std::shared_ptr<Scene::Node> scene;
-		UtfString raw;
-		double textWidth;
-		double minimumTextLineHeight;
+		UtfString rawString;
+		PointPrecision textWidth;
+		PointPrecision minimumTextLineHeight;
 	};
 
 	class TextBox{
@@ -590,7 +606,7 @@ namespace MV {
 		void appendText(const UtfChar a_char){
 			setText(text+a_char);
 		}
-		void appendTextUint(Uint16 a_char){
+		void appendText(Uint16 a_char){
 			UtfChar *character = reinterpret_cast<UtfChar*>(&a_char);
 			appendText(*character);
 		}
@@ -624,12 +640,12 @@ namespace MV {
 		}
 
 		Size<> getContentSize();
-		int getMinimumLineHeight() const{
+		PointPrecision getMinimumLineHeight() const{
 			return minimumLineHeight;
 		}
-		void setMinimumLineHeight(int a_newLineHeight){
+		void setMinimumLineHeight(PointPrecision a_newLineHeight){
 			minimumLineHeight = a_newLineHeight;
-			refreshTextBoxContents();
+			formattedText.minimumLineHeight(a_newLineHeight);
 		}
 
 		void makeSingleLine(){
@@ -693,7 +709,7 @@ namespace MV {
 		size_t cursor;
 		UtfString editText;
 		std::string fontIdentifier;
-		int minimumLineHeight;
+		PointPrecision minimumLineHeight;
 		bool isSingleLine;
 	};
 }

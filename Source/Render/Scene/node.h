@@ -126,7 +126,7 @@ namespace MV {
 			std::shared_ptr<Node> remove(const std::string &a_childId);
 
 			void draw();
-			double getDepth();
+			PointPrecision getDepth();
 
 			virtual void normalizeTest(Point<> a_offset);
 			virtual void normalizeToPoint(Point<> a_offset);
@@ -160,18 +160,18 @@ namespace MV {
 			Node* parent(Node* a_parentItem); //returns Node* so that it is safe to call this method in a constructor
 			std::shared_ptr<Node> parent() const;
 
-			double scale(double a_newScale);
+			PointPrecision scale(PointPrecision a_newScale);
 			AxisMagnitude scale(const AxisMagnitude &a_scaleValue);
-			AxisMagnitude incrementScale(double a_newScale);
+			AxisMagnitude incrementScale(PointPrecision a_newScale);
 			AxisMagnitude incrementScale(const AxisMagnitude &a_scaleValue);
 			AxisMagnitude scale() const;
 
 			//Rotation is degrees around each axis from 0 to 360, axis info supplied typically the z axis
 			//is the only visible rotation axis, so we default to that with a single value supplied;
-			double incrementRotation(double a_zRotation);
+			PointPrecision incrementRotation(PointPrecision a_zRotation);
 			AxisAngles incrementRotation(const AxisAngles &a_rotation);
 
-			double rotation(double a_zRotation);
+			PointPrecision rotation(PointPrecision a_zRotation);
 			AxisAngles rotation(const AxisAngles &a_rotation);
 			AxisAngles rotation() const;
 
@@ -180,7 +180,7 @@ namespace MV {
 
 			//By default the sort depth is calculated by averaging the z values of all points
 			//setSortDepth manually overrides this calculation.  unsetSortDepth removes this override.
-			void setSortDepth(double a_newDepth){
+			void setSortDepth(PointPrecision a_newDepth){
 				auto notifyOnChanged = makeScopedDepthChangeNote(this, false);
 				depthOverride = true;
 				overrideDepthValue = a_newDepth;
@@ -292,6 +292,14 @@ namespace MV {
 			virtual BoxAABB localAABBImplementation(bool a_includeChildren, bool a_nestedCall);
 			virtual BoxAABB basicAABBImplementation() const;
 
+			Shader* shader() const{
+				return shaderProgram;
+			}
+			Shader* shader(const std::string &a_id){
+				shaderProgram = renderer->getShader(a_id);
+				return shaderProgram;
+			}
+
 		protected:
 			Node(Draw2D* a_renderer);
 
@@ -307,6 +315,7 @@ namespace MV {
 			std::shared_ptr<std::vector<GLfloat>> getPositionVertexArray();
 			std::shared_ptr<std::vector<GLfloat>> getTextureVertexArray();
 			std::shared_ptr<std::vector<GLfloat>> getColorVertexArray();
+			std::shared_ptr<std::vector<GLfloat>> getPackedVertexArray();
 
 			Point<> scaleTo;
 			Point<> translateTo;
@@ -314,7 +323,7 @@ namespace MV {
 			Point<> rotateOrigin;
 
 			bool depthOverride;
-			double overrideDepthValue;
+			PointPrecision overrideDepthValue;
 
 			bool isVisible;
 
@@ -334,6 +343,8 @@ namespace MV {
 			typedef std::pair<std::string, std::shared_ptr<Node>> DrawListPairType;
 			DrawListType drawList;
 
+			Shader* shaderProgram = nullptr;
+			GLuint bufferId;
 		private:
 
 			void childDepthChanged(){
@@ -351,19 +362,17 @@ namespace MV {
 					CEREAL_NVP(drawType), CEREAL_NVP(drawSorted),
 					CEREAL_NVP(points),
 					CEREAL_NVP(drawList),
+					cereal::make_nvp("shaderId", (shaderProgram != nullptr)?shaderProgram->id():""),
 					cereal::make_nvp("texture", ourTexture)
-				).extract(
-					CEREAL_NVP(renderer)
 				);
-
-				for(auto &drawItem : drawList){
-					drawItem.second->parent(this);
-				}
 			}
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Node> &construct){
-				construct(nullptr);
+				Draw2D *renderer = nullptr;
+				archive.extract(cereal::make_nvp("renderer", renderer));
+				construct(renderer);
+				std::string shaderId;
 				archive(
 					cereal::make_nvp("translateTo", construct->translateTo),
 					cereal::make_nvp("rotateTo", construct->rotateTo),
@@ -376,11 +385,10 @@ namespace MV {
 					cereal::make_nvp("drawSorted", construct->drawSorted),
 					cereal::make_nvp("points", construct->points),
 					cereal::make_nvp("drawList", construct->drawList),
-					cereal::make_nvp("texture", construct->ourTexture)
-				).extract(
-					cereal::make_nvp("renderer", construct->renderer)
+					cereal::make_nvp("texture", construct->ourTexture),
+					cereal::make_nvp("shaderId", shaderId)
 				);
-
+				construct->shader(shaderId);
 				for(auto &drawItem : construct->drawList){
 					drawItem.second->parent(construct.ptr());
 				}

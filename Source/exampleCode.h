@@ -56,11 +56,11 @@ private:
 	std::shared_ptr<MV::Scene::Rectangle> foxBox;
 	MV::FrameSwapperRegister *frameRegister;
 	MV::FrameSwapper *foxSwapper;
-	double directionX, directionY;
-	double movedX, movedY;
-	double distanceX, distanceY;
+	MV::PointPrecision directionX, directionY;
+	MV::PointPrecision movedX, movedY;
+	MV::PointPrecision distanceX, distanceY;
 	bool inJump;
 
-	const double jumpCompletionTime;
+	const MV::PointPrecision jumpCompletionTime;
 	MV::Stopwatch timer;
 };

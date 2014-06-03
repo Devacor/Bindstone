@@ -34,13 +34,15 @@ void Editor::initializeWindow(){
 	if(!renderer.initialize(windowSize, worldSize)){
 		exit(0);
 	}
+	renderer.loadShader("default", "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
 	atexit(sdl_quit);
 
 	AudioPlayer::instance()->initAudio();
 	mouse.update();
 
-	textLibrary.loadFont("default", 14, "Assets/Fonts/Verdana.ttf");
-	textLibrary.loadFont("small", 9, "Assets/Fonts/Verdana.ttf");
+	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
+	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
+	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 }
 
 void Editor::handleInput(){
@@ -78,12 +80,15 @@ void Editor::handleInput(){
 	}
 	mouse.update();
 	controlPanel.handleInput(event);
+	test = MV::Scene::Rectangle::make(&renderer, MV::BoxAABB({0.05f, 0.05f}, {-.050f, -0.050f}), false);
+	test->color({1, 0, 0});
 }
 
 void Editor::render(){
 	renderer.clearScreen();
-	scene->draw();
-	controls->draw();
+	test->draw();
+	//scene->draw();
+	//controls->draw();
 	//textBox.scene()->draw();
 	renderer.updateScreen();
 }

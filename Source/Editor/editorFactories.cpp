@@ -16,11 +16,11 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 
 	MV::TextBox activeBox(&a_library, a_fontIdentifier, a_size), idleBox(&a_library, a_fontIdentifier, a_size);
 	activeBox.justification(MV::CENTER);
-	//activeBox.setMinimumLineHeight(static_cast<int>(a_size.height));
+	activeBox.setMinimumLineHeight(a_size.height);
 	activeBox.setText(a_text);
 	
 	idleBox.justification(MV::CENTER);
-	//idleBox.setMinimumLineHeight(static_cast<int>(a_size.height));
+	idleBox.setMinimumLineHeight(a_size.height);
 	idleBox.setText(a_text);
 
 	activeBox.scene()->position(activeBox.scene()->basicAABB().centerPoint() - activeScene->basicAABB().centerPoint());

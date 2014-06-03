@@ -10,11 +10,13 @@
 
 namespace MV {
 
+	typedef float PointPrecision;
+
 	class DrawPoint;
 
 	class TexturePoint{
 	public:
-		TexturePoint(double a_textureX, double a_textureY):textureX(a_textureX), textureY(a_textureY){}
+		TexturePoint(PointPrecision a_textureX, PointPrecision a_textureY):textureX(a_textureX), textureY(a_textureY){}
 		TexturePoint():textureX(0.0),textureY(0.0){}
 		~TexturePoint(){}
 
@@ -33,7 +35,7 @@ namespace MV {
 			archive(CEREAL_NVP(textureX), CEREAL_NVP(textureY));
 		}
 
-		double textureX, textureY;
+		PointPrecision textureX, textureY;
 	};
 
 	class Color{
@@ -86,7 +88,7 @@ namespace MV {
 		}
 	};
 
-	template <class T = double>
+	template <class T = PointPrecision>
 	class Size{
 	public:
 		Size():width(0), height(0), depth(0){}
@@ -128,7 +130,7 @@ namespace MV {
 		T depth; //may be ignored for most 2d concepts
 	};
 
-	template <class T = double>
+	template <class T = PointPrecision>
 	class Point{
 	public:
 		Point():x(0),y(0),z(0){}
@@ -169,7 +171,7 @@ namespace MV {
 	class DrawPoint : public Point<>, public Color, public TexturePoint{
 	public:
 		DrawPoint(){}
-		DrawPoint(double a_xPos, double a_yPos, double a_zPos = 0.0){locate(a_xPos, a_yPos, a_zPos);}
+		DrawPoint(PointPrecision a_xPos, PointPrecision a_yPos, PointPrecision a_zPos = 0.0){ locate(a_xPos, a_yPos, a_zPos); }
 		DrawPoint(const Point<>& a_position, const Color& a_color = Color(), const TexturePoint &a_texture = TexturePoint()):
 			Point<>(a_position),
 			Color(a_color),

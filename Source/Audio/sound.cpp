@@ -82,10 +82,6 @@ void AudioPlayer::setSoundVolume(int volume){
 }
 
 bool AudioPlayer::initAudio(){
-	if(SDL_Init(SDL_INIT_AUDIO)==-1){
-		std::cerr << "SDL_Init: " << SDL_GetError();
-		return false;
-	}
 	if(Mix_OpenAudio(audio_rate, audio_format, audio_channels, audio_buffers) != 0) {
 		initialized = false;
 		std::cerr << "Failed to initialize audio." << Mix_GetError();

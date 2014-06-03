@@ -38,10 +38,10 @@ namespace MV {
 		BoxAABB& expandWith(const Point<> &a_comparePoint);
 		BoxAABB& expandWith(const BoxAABB &a_compareBox);
 
-		double width() const{
+		PointPrecision width() const{
 			return (maxPoint - minPoint).x;
 		}
-		double height() const{
+		PointPrecision height() const{
 			return (maxPoint - minPoint).y;
 		}
 
@@ -59,7 +59,7 @@ namespace MV {
 
 		void sanitize();
 
-		Point<> centerPoint() const { return minPoint + ((minPoint + maxPoint) / 2.0); }
+		Point<> centerPoint() const { return minPoint + ((minPoint + maxPoint) / 2.0f); }
 
 		Point<> topLeftPoint() const { return minPoint; }
 		Point<> topRightPoint() const { return point(maxPoint.x, minPoint.y); }
@@ -104,7 +104,7 @@ namespace MV {
 		std::vector<Point<>> points;
 	private:
 		//get angle within proper range between two points (-pi to +pi)
-		double getAngle(const Point<> &a_p1, const Point<> &a_p2);
+		PointPrecision getAngle(const Point<> &a_p1, const Point<> &a_p2);
 
 		template <class Archive>
 		void serialize(Archive & archive){

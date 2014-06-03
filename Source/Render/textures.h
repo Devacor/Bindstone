@@ -197,10 +197,10 @@ namespace MV {
 		double percentBottom() const;
 
 		void setCorners(const Point<int> &a_topLeft, const Point<int> &a_bottomRight);
-		void setCorners(const Point<> &a_topLeft, const Point<> &a_bottomRight);
+		void setCorners(const Point<double> &a_topLeft, const Point<double> &a_bottomRight);
 
 		void setBounds(const Point<int> &a_topLeft, const Size<int> &a_size);
-		void setBounds(const Point<> &a_topLeft, const Size<> &a_size);
+		void setBounds(const Point<double> &a_topLeft, const Size<double> &a_size);
 
 		void setFlipX(bool a_flip);
 		void setFlipY(bool a_flip);

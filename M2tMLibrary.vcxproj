@@ -71,7 +71,7 @@
     <LinkIncremental>true</LinkIncremental>
     <IncludePath>$(IncludePath);./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;%(AdditionalIncludeDirectories)</IncludePath>
     <LibraryPath>$(SolutionDir)../external/boost_1_55_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/;$(SolutionDir)../external/libs/;$(LibraryPath);$(SolutionDir)../external/cereal/include/</LibraryPath>
-    <SourcePath>$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath)</SourcePath>
+    <SourcePath>$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/;$(IncludePath)</IncludePath>
@@ -81,7 +81,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/</IncludePath>
     <LibraryPath>$(SolutionDir)../external/boost_1_55_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/;$(SolutionDir)../external/libs/;$(LibraryPath);$(SolutionDir)../external/cereal/include/</LibraryPath>
-    <SourcePath>$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath)</SourcePath>
+    <SourcePath>$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src</SourcePath>
     <RunCodeAnalysis>false</RunCodeAnalysis>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -164,6 +164,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\external\gl3w\src\gl3w.c" />
     <ClCompile Include="Source\Editor\editor.cpp" />
     <ClCompile Include="Source\Animation\actionSequence.cpp" />
     <ClCompile Include="Source\Animation\frameSwapper.cpp" />

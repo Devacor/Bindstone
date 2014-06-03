@@ -23,6 +23,7 @@ namespace MV {
 
 		std::shared_ptr<Pixel> Pixel::make(Draw2D* a_renderer, const DrawPoint &a_point /*= DrawPoint()*/) {
 			auto point = std::shared_ptr<Pixel>(new Pixel(a_renderer));
+			a_renderer->registerDefaultShader(point);
 			point->setPoint(a_point);
 			return point;
 		}
@@ -44,11 +45,14 @@ namespace MV {
 		}
 
 		std::shared_ptr<Line> Line::make(Draw2D* a_renderer) {
-			return std::shared_ptr<Line>(new Line(a_renderer));
+			auto line = std::shared_ptr<Line>(new Line(a_renderer));
+			a_renderer->registerDefaultShader(line);
+			return line;
 		}
 
 		std::shared_ptr<Line> Line::make(Draw2D* a_renderer, const DrawPoint &a_startPoint, const DrawPoint &a_endPoint) {
 			auto line = std::shared_ptr<Line>(new Line(a_renderer));
+			a_renderer->registerDefaultShader(line);
 			line->setEnds(a_startPoint, a_endPoint);
 			return line;
 		}
@@ -71,7 +75,7 @@ namespace MV {
 			bottomRight.y = std::max(a_topLeft.y, a_bottomRight.y);
 
 			points[0] = topLeft;
-			points[1].x = topLeft.x;	points[1].y = bottomRight.y;	points[1].z = (equals(bottomRight.z, 0.0) && equals(topLeft.z, 0.0)) ? 0.0 : (bottomRight.z + topLeft.z) / 2;
+			points[1].x = topLeft.x;	points[1].y = bottomRight.y;	points[1].z = (equals(bottomRight.z, 0.0f) && equals(topLeft.z, 0.0f)) ? 0.0f : (bottomRight.z + topLeft.z) / 2.0f;
 			points[2] = bottomRight;
 			points[3].x = bottomRight.x;	points[3].y = topLeft.y;	points[3].z = points[1].z;
 		}
@@ -90,7 +94,7 @@ namespace MV {
 			topLeft.z = a_topLeft.z; bottomRight.z = a_bottomRight.z;
 
 			points[0] = topLeft;
-			points[1].x = topLeft.x;	points[1].y = bottomRight.y;	points[1].z = (equals(bottomRight.z, 0.0) && equals(topLeft.z, 0.0))? 0.0 :(bottomRight.z + topLeft.z) / 2;
+			points[1].x = topLeft.x;	points[1].y = bottomRight.y;	points[1].z = (equals(bottomRight.z, 0.0f) && equals(topLeft.z, 0.0f))? 0.0f :(bottomRight.z + topLeft.z) / 2.0f;
 			points[2] = bottomRight;
 			points[3].x = bottomRight.x;	points[3].y = topLeft.y;	points[3].z = points[1].z;
 		}
@@ -100,7 +104,7 @@ namespace MV {
 		}
 
 		void Rectangle::setSizeAndCenterPoint(const Point<> &a_centerPoint, const Size<> &a_size){
-			double halfWidth = (a_size.width == 0.0)?0.0:a_size.width / 2.0, halfHeight = (a_size.height == 0.0)?0.0:a_size.height / 2.0;
+			PointPrecision halfWidth = (equals(a_size.width, 0.0f)) ? 0.0f : a_size.width / 2.0f, halfHeight = (equals(a_size.height, 0.0f)) ? 0.0f : a_size.height / 2.0f;
 
 			Point<> topLeft(-halfWidth, -halfHeight, a_centerPoint.z);
 			Point<> bottomRight(halfWidth, halfHeight, a_centerPoint.z);
@@ -113,24 +117,24 @@ namespace MV {
 			Point<> bottomRight(pointFromSize(a_size));
 			bottomRight.z = a_topLeft.z;
 
-			setTwoCorners(point(0.0, 0.0, a_topLeft.z), bottomRight);
+			setTwoCorners({0.0f, 0.0f, a_topLeft.z}, bottomRight);
 			position(a_topLeft);
 		}
 
 		void Rectangle::clearTextureCoordinates(){
-			points[0].textureX = 0.0; points[0].textureY = 0.0;
-			points[1].textureX = 0.0; points[1].textureY = 1.0;
-			points[2].textureX = 1.0; points[2].textureY = 1.0;
-			points[3].textureX = 1.0; points[3].textureY = 0.0;
+			points[0].textureX = 0.0f; points[0].textureY = 0.0f;
+			points[1].textureX = 0.0f; points[1].textureY = 1.0f;
+			points[2].textureX = 1.0f; points[2].textureY = 1.0f;
+			points[3].textureX = 1.0f; points[3].textureY = 0.0f;
 			alertParent(VisualChange::make(shared_from_this()));
 		}
 
 		void Rectangle::updateTextureCoordinates(){
 			if(ourTexture != nullptr){
-				points[0].textureX = ourTexture->percentLeft(); points[0].textureY = ourTexture->percentTop();
-				points[1].textureX = ourTexture->percentLeft(); points[1].textureY = ourTexture->percentBottom();
-				points[2].textureX = ourTexture->percentRight(); points[2].textureY = ourTexture->percentBottom();
-				points[3].textureX = ourTexture->percentRight(); points[3].textureY = ourTexture->percentTop();
+				points[0].textureX = static_cast<PointPrecision>(ourTexture->percentLeft()); points[0].textureY = static_cast<PointPrecision>(ourTexture->percentTop());
+				points[1].textureX = static_cast<PointPrecision>(ourTexture->percentLeft()); points[1].textureY = static_cast<PointPrecision>(ourTexture->percentBottom());
+				points[2].textureX = static_cast<PointPrecision>(ourTexture->percentRight()); points[2].textureY = static_cast<PointPrecision>(ourTexture->percentBottom());
+				points[3].textureX = static_cast<PointPrecision>(ourTexture->percentRight()); points[3].textureY = static_cast<PointPrecision>(ourTexture->percentTop());
 				alertParent(VisualChange::make(shared_from_this()));
 			} else {
 				clearTextureCoordinates();
@@ -142,11 +146,14 @@ namespace MV {
 		}
 
 		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer) {
-			return std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			a_renderer->registerDefaultShader(rectangle);
+			return rectangle;
 		}
 
 		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight, bool a_center) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			a_renderer->registerDefaultShader(rectangle);
 			rectangle->setTwoCorners(a_topLeft, a_bottomRight);
 			if(a_center){
 				rectangle->normalizeToCenter();
@@ -158,6 +165,7 @@ namespace MV {
 
 		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Point<> &a_topLeft, const Point<> &a_bottomRight, bool a_center) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			a_renderer->registerDefaultShader(rectangle);
 			rectangle->setTwoCorners(a_topLeft, a_bottomRight);
 			if(a_center){
 				rectangle->normalizeToCenter();
@@ -169,6 +177,7 @@ namespace MV {
 
 		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Point<> &a_point, const Size<> &a_size, bool a_center) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			a_renderer->registerDefaultShader(rectangle);
 			if(a_center){
 				rectangle->setSizeAndCenterPoint(a_point, a_size);
 			} else{
@@ -179,6 +188,7 @@ namespace MV {
 
 		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Size<> &a_size, bool a_center) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			a_renderer->registerDefaultShader(rectangle);
 			rectangle->setSize(a_size);
 			if(a_center){
 				rectangle->normalizeToCenter();
@@ -190,6 +200,7 @@ namespace MV {
 
 		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const BoxAABB &a_boxAABB, bool a_center) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			a_renderer->registerDefaultShader(rectangle);
 			rectangle->setTwoCorners(a_boxAABB);
 			if(a_center){
 				rectangle->normalizeToCenter();

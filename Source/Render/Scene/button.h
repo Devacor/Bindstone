@@ -121,7 +121,10 @@ namespace MV {
 					cereal::make_nvp("mouse", mouse)
 				);
 				require(mouse != nullptr, MV::PointerException("Error: Failed to load a mouse handle for Clickable node."));
-				construct(nullptr, mouse);
+				Draw2D *renderer = nullptr;
+				archive.extract(cereal::make_nvp("renderer", renderer));
+				require(renderer != nullptr, MV::PointerException("Error: Failed to load a renderer for Clickable node."));
+				construct(renderer, mouse);
 				archive(
 					cereal::make_nvp("eatTouches", construct->eatTouches),
 					cereal::make_nvp("shouldUseChildrenInHitDetection", construct->shouldUseChildrenInHitDetection),
@@ -220,7 +223,10 @@ namespace MV {
 					cereal::make_nvp("mouse", mouse)
 				);
 				require(mouse != nullptr, MV::PointerException("Error: Failed to load a mouse handle for Button node."));
-				construct(nullptr, mouse);
+				Draw2D *renderer = nullptr;
+				archive.extract(cereal::make_nvp("renderer", renderer));
+				require(renderer != nullptr, MV::PointerException("Error: Failed to load a renderer for Button node."));
+				construct(renderer, mouse);
 				archive(
 					cereal::make_nvp("clickable", construct->clickable),
 					cereal::make_nvp("idleScene", construct->idleSceneNode),

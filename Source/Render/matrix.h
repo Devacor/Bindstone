@@ -20,10 +20,10 @@ namespace MV {
 	#ifdef TARGET_OS_IPHONE
 		typedef float MatrixValue;
 	#else
-		typedef double MatrixValue;
+		typedef float MatrixValue; //used to be double
 	#endif
 #else
-	typedef double MatrixValue;	
+	typedef float MatrixValue;	//used to be double
 #endif
 
 	class Matrix {

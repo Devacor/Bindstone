@@ -63,10 +63,12 @@ namespace MV {
 		}
 	}
 
-	bool TextLibrary::loadFont(const std::string &a_identifier, int a_pointSize, std::string a_fontFileLocation){
+	bool TextLibrary::loadFont(const std::string &a_identifier, std::string a_fontFileLocation, int a_pointSize, FontStyle a_styleFlags){
 		auto found = loadedFonts.find(a_identifier);
 		if(found == loadedFonts.end()){
 			TTF_Font* newFont = TTF_OpenFont(a_fontFileLocation.c_str(), a_pointSize);
+			TTF_SetFontHinting(newFont, TTF_HINTING_LIGHT);
+			TTF_SetFontStyle(newFont, static_cast<int>(a_styleFlags));
 			if(newFont) {
 				loadedFonts.insert({a_identifier, FontDefinition::make(this, a_fontFileLocation, a_pointSize, newFont)});
 				return true;
@@ -101,7 +103,6 @@ namespace MV {
 		textboxScene(Scene::Clipped::make(a_textLibrary->getRenderer(), a_size)),
 		textScene(nullptr),
 		boxSize(a_size),
-		minimumLineHeight(-1),
 		isSingleLine(false),
 		formattedText(*a_textLibrary, a_size.width, a_fontIdentifier){
 		firstRun = true;
@@ -114,7 +115,6 @@ namespace MV {
 		textboxScene(Scene::Clipped::make(a_textLibrary->getRenderer(), a_size)),
 		textScene(nullptr),
 		boxSize(a_size),
-		minimumLineHeight(-1),
 		isSingleLine(false),
 		formattedText(*a_textLibrary, a_size.width, a_fontIdentifier){
 		firstRun = true;
@@ -227,7 +227,7 @@ namespace MV {
 		minimumLineHeight(a_currentState->minimumLineHeight) {
 	}
 
-	FormattedState::FormattedState(double a_minimumLineHeight, const std::shared_ptr<FormattedState> &a_currentState):
+	FormattedState::FormattedState(PointPrecision a_minimumLineHeight, const std::shared_ptr<FormattedState> &a_currentState):
 		font(a_currentState->font),
 		color(a_currentState->color),
 		minimumLineHeight(a_minimumLineHeight) {
@@ -271,10 +271,10 @@ namespace MV {
 	std::shared_ptr<FormattedState> FormattedLine::getHeightState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current) {
 		std::string heightString = wideToString(a_text.substr(2));
 		if(heightString.empty()){
-			return std::make_shared<FormattedState>(text.getDefaultState()->minimumLineHeight, a_current);
+			return std::make_shared<FormattedState>(text.defaultState()->minimumLineHeight, a_current);
 		} else{
-			double newMinimumHeight = 0;
-			try{ newMinimumHeight = boost::lexical_cast<double>(heightString); } catch(boost::bad_lexical_cast){ newMinimumHeight = 0.0; }
+			PointPrecision newMinimumHeight = 0;
+			try{ newMinimumHeight = boost::lexical_cast<PointPrecision>(heightString); } catch(boost::bad_lexical_cast){ newMinimumHeight = 0.0; }
 			return std::make_shared<FormattedState>(newMinimumHeight, a_current);
 		}
 	}
@@ -282,7 +282,7 @@ namespace MV {
 	std::shared_ptr<FormattedState> FormattedLine::getColorState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current) {
 		std::string colorString = wideToString(a_text.substr(2));
 		if(colorString.empty()){
-			return std::make_shared<FormattedState>(text.getDefaultState()->color, a_current);
+			return std::make_shared<FormattedState>(text.defaultState()->color, a_current);
 		} else{
 			return std::make_shared<FormattedState>(parseColorString(colorString), a_current);
 		}
@@ -291,7 +291,7 @@ namespace MV {
 	std::shared_ptr<FormattedState> FormattedLine::getFontState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current) {
 		std::string fontIdentifier = wideToString(a_text.substr(2));
 		if(fontIdentifier.empty()){
-			return std::make_shared<FormattedState>(text.getDefaultState()->font, a_current);
+			return std::make_shared<FormattedState>(text.defaultState()->font, a_current);
 		} else{
 			return std::make_shared<FormattedState>(text.library.fontDefinition(fontIdentifier), a_current);
 		}
@@ -347,16 +347,15 @@ namespace MV {
 
 	void FormattedLine::fixVisualsFromIndex(size_t a_characterIndex){
 		if(!characters.empty()){
-			characters[0]->position({0, linePosition});
-			if(a_characterIndex == 0){
-				a_characterIndex = 1;
-			}
+			characters[a_characterIndex == 0 ? 0 : a_characterIndex - 1]->position({0, linePosition});
 			updateLineHeight();
 			size_t index = a_characterIndex;
 			for(; index < characters.size(); ++index){
-				characters[index]->position({characters[index - 1]->position().x + characters[index - 1]->characterSize().width, linePosition});
+				auto characterPosition = (index > 0) ? characters[index - 1]->position().x + characters[index - 1]->characterSize().width : 0;
+				characters[index]->position({characterPosition, linePosition});
 				characters[index]->offset(lineHeight, baseLine);
-				if(text.exceedsWidth(characters[index]->position().x)){
+				
+				if(index > 0 && text.exceedsWidth(characters[index]->position().x)){
 					std::vector<std::shared_ptr<FormattedCharacter>> overflow(characters.begin() + index-1, characters.end());
 					characters.erase(characters.begin() + index-1, characters.end());
 					if(text.lines.size() <= lineIndex + 1){
@@ -370,7 +369,7 @@ namespace MV {
 	}
 
 	void FormattedLine::updateLineHeight() {
-		double maxCharacterHeight = 0;
+		PointPrecision maxCharacterHeight = 0;
 		baseLine = 0.0;
 		if(!characters.empty()){
 			auto maxHeightCharacter = (*std::max_element(characters.begin(), characters.end(), [](const std::shared_ptr<FormattedCharacter> &a_lhs, const std::shared_ptr<FormattedCharacter> &a_rhs){
@@ -379,7 +378,12 @@ namespace MV {
 			maxCharacterHeight = maxHeightCharacter->character->font()->height();
 			baseLine = maxHeightCharacter->character->font()->base();
 		}
-		lineHeight = std::max(text.minimumLineHeight(), maxCharacterHeight);
+		if(text.minimumLineHeight() > maxCharacterHeight){
+			lineHeight = text.minimumLineHeight();
+			baseLine += (text.minimumLineHeight() - maxCharacterHeight) / 2.0f;
+		} else{
+			lineHeight = maxCharacterHeight;
+		}
 	}
 
 	std::shared_ptr<FormattedCharacter>& FormattedLine::operator[](size_t a_index) {
@@ -393,5 +397,44 @@ namespace MV {
 		return lines[a_index];
 	}
 
+	FormattedText::FormattedText(TextLibrary &a_library, PointPrecision a_width, const std::string &a_defaultStateIdentifier, TextWrapMethod a_wrapping /*= SOFT*/):
+		library(a_library),
+		textWidth(a_width),
+		defaultTextState(std::make_shared<FormattedState>(a_library.fontDefinition(a_defaultStateIdentifier))),
+		wrapping(a_wrapping),
+		minimumTextLineHeight(-1){
+
+		scene = Scene::Node::make(library.getRenderer());
+	}
+
+	PointPrecision FormattedText::width(PointPrecision a_width) {
+		textWidth = a_width;
+		return textWidth;
+	}
+
+	PointPrecision FormattedText::positionForLine(size_t a_index) {
+		return std::accumulate(lines.begin(), lines.end(), 0.0f, [](PointPrecision a_accumulated, const std::shared_ptr<FormattedLine> &a_line){
+			return a_line->height() + a_accumulated;
+		});
+	}
+
+	std::shared_ptr<FormattedState> FormattedText::defaultState(const std::string &a_defaultStateIdentifier) {
+		defaultTextState = std::make_shared<FormattedState>(library.fontDefinition(a_defaultStateIdentifier));
+		return defaultTextState;
+	}
+
+	size_t FormattedText::length() const {
+		return std::accumulate(lines.begin(), lines.end(), static_cast<size_t>(0), [](size_t a_accumulated, const std::shared_ptr<FormattedLine> &a_line){
+			return a_line->size() + a_accumulated;
+		});
+	}
+
+	MV::UtfString FormattedText::string() const {
+		UtfString result;
+		for(auto& line : lines){
+			result += line->string();
+		}
+		return result;
+	}
 
 }

@@ -195,9 +195,9 @@ namespace MV{
 	}
 
 	TransformMatrix& TransformMatrix::makeOrtho( MatrixValue a_left, MatrixValue a_right, MatrixValue a_bottom, MatrixValue a_top, MatrixValue a_near, MatrixValue a_far ){
-		MatrixValue a = 2.0 / (a_right - a_left);
-		MatrixValue b = 2.0 / (a_top - a_bottom);
-		MatrixValue c = -2.0 / (a_far - a_near);
+		MatrixValue a = 2.0f / (a_right - a_left);
+		MatrixValue b = 2.0f / (a_top - a_bottom);
+		MatrixValue c = -2.0f / (a_far - a_near);
 
 		MatrixValue tx = - ((a_right + a_left)/(a_right - a_left));
 		MatrixValue ty = - ((a_top + a_bottom)/(a_top - a_bottom));
@@ -207,7 +207,7 @@ namespace MV{
 		(*this).access(0, 0) = a;
 		(*this).access(1, 1) = b;
 		(*this).access(2, 2) = c;
-		(*this).access(3, 3) = 1.0;
+		(*this).access(3, 3) = 1.0f;
 		(*this).access(3, 0) = tx;
 		(*this).access(3, 1) = ty;
 		(*this).access(3, 2) = tz;

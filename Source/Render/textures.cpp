@@ -364,7 +364,7 @@ namespace MV {
 
 		updatePercentBounds();
 	}
-	void TextureHandle::setCorners(const Point<> &a_topLeft, const Point<> &a_bottomRight){
+	void TextureHandle::setCorners(const Point<double> &a_topLeft, const Point<double> &a_bottomRight){
 		handlePercentSize = sizeFromPoint(a_bottomRight - a_topLeft);
 		handlePercentPosition = a_topLeft;
 
@@ -377,7 +377,7 @@ namespace MV {
 
 		updatePercentBounds();
 	}
-	void TextureHandle::setBounds(const Point<> &a_topLeft, const Size<> &a_size){
+	void TextureHandle::setBounds(const Point<double> &a_topLeft, const Size<double> &a_size){
 		handlePercentSize = a_size;
 		handlePercentPosition = a_topLeft;
 

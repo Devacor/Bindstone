@@ -110,6 +110,7 @@
     <ClCompile Include="Source\Editor\editorSelection.cpp" />
     <ClCompile Include="Source\Editor\editorPanels.cpp" />
     <ClCompile Include="Source\Editor\editorFactories.cpp" />
+    <ClCompile Include="..\external\gl3w\src\gl3w.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">

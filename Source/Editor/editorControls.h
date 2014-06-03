@@ -42,7 +42,7 @@ public:
 
 	void deleteScene();
 
-	void updateBoxHeader(double a_width);
+	void updateBoxHeader(MV::PointPrecision a_width);
 
 	std::shared_ptr<MV::Scene::Node> content();
 

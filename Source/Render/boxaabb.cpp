@@ -1,5 +1,6 @@
 #include "boxaabb.h"
 #include <numeric>
+#include <algorithm>
 
 #include "render.h"
 
@@ -76,7 +77,7 @@ namespace MV {
 
 	bool PointVolume::pointContained(const Point<> &a_comparePoint){
 		int i;
-		double angle = 0;
+		PointPrecision angle = 0;
 		Point<> p1, p2;
 		int totalPoints = (int)points.size();
 		for(i = 0; i<totalPoints; i++) {
@@ -95,16 +96,16 @@ namespace MV {
 		points.push_back(a_newPoint);
 	}
 
-	double PointVolume::getAngle(const Point<> &a_p1, const Point<> &a_p2){
-		double theta1 = atan2(a_p1.y, a_p1.x);
-		double theta2 = atan2(a_p2.y, a_p2.x);
-		double dtheta = theta2 - theta1;
+	PointPrecision PointVolume::getAngle(const Point<> &a_p1, const Point<> &a_p2){
+		PointPrecision theta1 = atan2(a_p1.y, a_p1.x);
+		PointPrecision theta2 = atan2(a_p2.y, a_p2.x);
+		PointPrecision dtheta = theta2 - theta1;
 
-		while(dtheta > PIE){
-			dtheta -= PIE*2.0;
+		while(dtheta > static_cast<PointPrecision>(PIE)){
+			dtheta -= static_cast<PointPrecision>(PIE*2.0);
 		}
 		while(dtheta < -PIE){
-			dtheta += PIE*2.0;
+			dtheta += static_cast<PointPrecision>(PIE*2.0);
 		}
 
 		return(dtheta);
@@ -113,7 +114,7 @@ namespace MV {
 	Point<> PointVolume::getCenter(){
 		int totalPoints = (int)points.size();
 		Point<> average = std::accumulate(points.begin(), points.end(), Point<>());
-		average /= static_cast<double>(totalPoints);
+		average /= static_cast<PointPrecision>(totalPoints);
 		return average;
 	}
 
@@ -122,9 +123,9 @@ namespace MV {
 		Point<> point1 = getCenter();
 		Point<> point2 = a_compareVolume.getCenter();
 
-		double angle = getAngle(point1, point2);
-		angle = angle * (180.0 / PIE);
-		angle += 90.0;
+		PointPrecision angle = getAngle(point1, point2);
+		angle = angle * static_cast<PointPrecision>(180.0 / PIE);
+		angle += 90.0f;
 
 		PointVolume tmpVolume1, tmpVolume2;
 		int totalPoints;

@@ -3,10 +3,10 @@
 
 void CreateTextScene(std::shared_ptr<MV::Scene::Node> mainScene, MV::TextLibrary &textLibrary){
 	//load the font
-	textLibrary.loadFont("annabel", 20, "Assets/Fonts/AnnabelScript.ttf");
-	textLibrary.loadFont("bluehighway1", 12, "Assets/Fonts/bluehigh.ttf");
-	textLibrary.loadFont("bluehighway2", 24, "Assets/Fonts/bluehigh.ttf");
-	textLibrary.loadFont("bluehighway3", 42, "Assets/Fonts/bluehigh.ttf");
+	textLibrary.loadFont("annabel", "Assets/Fonts/AnnabelScript.ttf", 20);
+	textLibrary.loadFont("bluehighway1", "Assets/Fonts/bluehigh.ttf", 12);
+	textLibrary.loadFont("bluehighway2", "Assets/Fonts/bluehigh.ttf", 24);
+	textLibrary.loadFont("bluehighway3", "Assets/Fonts/bluehigh.ttf", 42);
 
 	mainScene->getRenderer()->backgroundColor(MV::Color(0, 0, 0, 0));
 	mainScene->getRenderer()->clearScreen();
@@ -33,7 +33,7 @@ void ManipulateText(std::shared_ptr<MV::Scene::Node> mainScene){
 	if(blue > 1.0){blue = 0.0;}
 	if(green > 1.0){green = 0.0;}
 
-	mainScene->get<MV::Scene::Node>("text")->incrementRotation(MV::Point<>(0.0, 0.0, .05 * direction));
+	mainScene->get<MV::Scene::Node>("text")->incrementRotation(MV::Point<>(0.0f, 0.0f, .05f * direction));
 	mainScene->get<MV::Scene::Node>("text")->color(MV::Color(red, blue, green));
 }
 
@@ -79,9 +79,9 @@ void CreateDogFoxScene(std::shared_ptr<MV::Scene::Node> mainScene){
 }
 
 void UpdateSky(std::shared_ptr<MV::Scene::Node> mainScene){
-	mainScene->get<MV::Scene::Node>("SunAndMoon")->incrementRotation(MV::point(0.0, 0.0, -0.2));
+	mainScene->get<MV::Scene::Node>("SunAndMoon")->incrementRotation(MV::point(0.0f, 0.0f, -0.2f));
 	MV::Point<> position = mainScene->get<MV::Scene::Node>("SunAndMoon")->rotation();
-	float distance = (float)abs(MV::boundBetween(position.z, 0.0, 360.0) - 180.0);
+	float distance = (float)abs(MV::boundBetween(position.z, 0.0f, 360.0f) - 180.0);
 	float brightness = distance / 180.0f;
 	if(brightness < .1f){brightness = .1f;}
 
@@ -117,9 +117,9 @@ void FoxJump::initiateJump(){
 
 void FoxJump::updateJump(){
 	if(inJump){
-		double timeElapsed = static_cast<double>(timer.delta("jumped"));
+		MV::PointPrecision timeElapsed = static_cast<MV::PointPrecision>(timer.delta("jumped"));
 		movedX += directionX * (distanceX * (timeElapsed / jumpCompletionTime));
-		movedY += directionY * (distanceY * (timeElapsed / (jumpCompletionTime / 2.0)));
+		movedY += directionY * (distanceY * (timeElapsed / (jumpCompletionTime / 2.0f)));
 		if(movedY < -distanceY){directionY = 1; movedY = -distanceY;}
 		if(movedX > distanceX || movedX < 0){
 			movedY = 0;
@@ -132,7 +132,7 @@ void FoxJump::updateJump(){
 			inJump = false;
 			foxSwapper->setFrameList(frameRegister->getDefinition("FoxStand"));
 		}
-		foxBox->position(MV::point(movedX, movedY, 3.0));
+		foxBox->position(MV::point(movedX, movedY, 3.0f));
 	}
 }
 

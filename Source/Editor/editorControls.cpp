@@ -1,19 +1,19 @@
 #include "editorControls.h"
 #include "Render/package.h"
 
-void EditorControls::updateBoxHeader(double a_width) {
+void EditorControls::updateBoxHeader(MV::PointPrecision a_width) {
 	if(!boxHeader){
-		boxHeader = draggableBox->make<MV::Scene::Clickable>("ContextMenuHandle", mouseHandle, MV::size(a_width, 20.0));
+		boxHeader = draggableBox->make<MV::Scene::Clickable>("ContextMenuHandle", mouseHandle, MV::size(a_width, 20.0f));
 		boxHeader->color({BOX_HEADER});
 
 		boxHeaderDrag = boxHeader->onDrag.connect([&](std::shared_ptr<MV::Scene::Clickable> boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
 			if(currentPanel){
 				currentPanel->cancelInput();
 			}
-			draggableBox->translate(MV::castPoint<double>(deltaPosition));
+			draggableBox->translate(MV::castPoint<MV::PointPrecision>(deltaPosition));
 		});
 	} else{
-		boxHeader->setSize({a_width, 20.0});
+		boxHeader->setSize({a_width, 20.0f});
 	}
 }
 

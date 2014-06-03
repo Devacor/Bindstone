@@ -14,12 +14,14 @@ namespace MV {
 
 		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse) {
 			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
+			a_renderer->registerDefaultShader(clipped);
 			clipped->hookUpSlots();
 			return clipped;
 		}
 
 		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight, bool a_center) {
 			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
+			a_renderer->registerDefaultShader(clipped);
 			clipped->setTwoCorners(a_topLeft, a_bottomRight);
 			if(a_center){
 				clipped->normalizeToCenter();
@@ -32,6 +34,7 @@ namespace MV {
 
 		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_topLeft, const Point<> &a_bottomRight, bool a_center) {
 			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
+			a_renderer->registerDefaultShader(clipped);
 			clipped->setTwoCorners(a_topLeft, a_bottomRight);
 			if(a_center){
 				clipped->normalizeToCenter();
@@ -44,6 +47,7 @@ namespace MV {
 
 		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_point, const Size<> &a_size, bool a_center) {
 			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
+			a_renderer->registerDefaultShader(clipped);
 			if(a_center){
 				clipped->setSizeAndCenterPoint(a_point, a_size);
 			} else{
@@ -55,6 +59,7 @@ namespace MV {
 
 		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center) {
 			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
+			a_renderer->registerDefaultShader(clipped);
 			clipped->setSize(a_size);
 			if(a_center){
 				clipped->normalizeToCenter();
@@ -67,6 +72,7 @@ namespace MV {
 
 		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB, bool a_center) {
 			auto clipped = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
+			a_renderer->registerDefaultShader(clipped);
 			clipped->setTwoCorners(a_boxAABB);
 			if(a_center){
 				clipped->normalizeToCenter();
@@ -199,7 +205,7 @@ namespace MV {
 
 		bool Clickable::mouseInBounds(const MouseState& a_state) {
 			if(visible()){
-				return screenAABB(shouldUseChildrenInHitDetection).pointContained(castPoint<double>(a_state.position()));
+				return screenAABB(shouldUseChildrenInHitDetection).pointContained(castPoint<PointPrecision>(a_state.position()));
 			} else{
 				return false;
 			}
@@ -222,17 +228,20 @@ namespace MV {
 
 		std::shared_ptr<Button> Button::make(Draw2D* a_renderer, MouseState *a_mouse) {
 			auto button = std::shared_ptr<Button>(new Button(a_renderer, a_mouse));
+			a_renderer->registerDefaultShader(button);
 			return button;
 		}
 
 		std::shared_ptr<Button> Button::make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_topLeft, const Point<> &a_bottomRight) {
 			auto button = std::shared_ptr<Button>(new Button(a_renderer, a_mouse));
+			a_renderer->registerDefaultShader(button);
 			button->clickable->setTwoCorners(a_topLeft, a_bottomRight);
 			return button;
 		}
 
 		std::shared_ptr<Button> Button::make(Draw2D* a_renderer, MouseState *a_mouse, const Point<> &a_point, const Size<> &a_size, bool a_center) {
 			auto button = std::shared_ptr<Button>(new Button(a_renderer, a_mouse));
+			a_renderer->registerDefaultShader(button);
 			if(a_center){
 				button->clickable->setSizeAndCenterPoint(a_point, a_size);
 			} else{
@@ -243,12 +252,14 @@ namespace MV {
 
 		std::shared_ptr<Button> Button::make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size) {
 			auto button = std::shared_ptr<Button>(new Button(a_renderer, a_mouse));
+			a_renderer->registerDefaultShader(button);
 			button->setClickableSize(a_size);
 			return button;
 		}
 
 		std::shared_ptr<Button> Button::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB) {
 			auto button = std::shared_ptr<Button>(new Button(a_renderer, a_mouse));
+			a_renderer->registerDefaultShader(button);
 			button->setClickableTwoCorners(a_boxAABB);
 			return button;
 		}

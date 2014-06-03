@@ -21,15 +21,15 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::unique_pt
 	EditorPanel(a_panel),
 	controls(std::move(a_controls)) {
 
-	double spacing = 28.0;
-	double lastY = 28.0;
+	MV::PointPrecision spacing = 28.0;
+	MV::PointPrecision lastY = 28.0;
 
 	auto node = panel.content();
-	auto createButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0, 27.0), UTF_CHAR_STR("Deselect"));
+	auto createButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0f, 27.0f), UTF_CHAR_STR("Deselect"));
 	createButton->position({8.0, lastY});
 	lastY += spacing;
 
-	ourBox = makeInputField(*panel.textLibrary(), MV::size(50.0, 27.0));
+	ourBox = makeInputField(*panel.textLibrary(), MV::size(50.0f, 27.0f));
 		
 		/*std::shared_ptr<MV::TextBox>(new MV::TextBox(a_panel.textLibrary(), "default", UTF_CHAR_STR("0"), MV::size(50.0, 27.0)));
 	ourBox->justification(MV::CENTER);*/
@@ -38,9 +38,9 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::unique_pt
 	
 	lastY += spacing;
 
-	auto background = node->make<MV::Scene::Rectangle>("Background", MV::point(0.0, 20.0), createButton->localAABB().bottomRightPoint() + MV::point(8.0, 8.0));
+	auto background = node->make<MV::Scene::Rectangle>("Background", MV::point(0.0f, 20.0f), createButton->localAABB().bottomRightPoint() + MV::point(8.0f, 8.0f));
 	background->color({BOX_BACKGROUND});
-	background->setSortDepth(-1.0);
+	background->setSortDepth(-1.0f);
 
 	panel.updateBoxHeader(background->basicAABB().width());
 
@@ -58,14 +58,15 @@ void SelectedEditorPanel::handleInput(SDL_Event &a_event) {
 DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	EditorPanel(a_panel) {
 	auto node = panel.content();
-	auto createButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0, 77.0), UTF_CHAR_STR("Create[[c|1:0:0]]123 456 7890 asdfasdf 12314afasdfa"));
-	createButton->position({8.0, 28.0});
-	auto selectButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0, 27.0), UTF_CHAR_STR("Select"));
-	selectButton->position(createButton->localAABB().bottomLeftPoint() + MV::point(0.0, 5.0));
+	node->position({-20.0f, -20.0f});
+	auto createButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0f, 77.0f), UTF_CHAR_STR("Create[[f|small]][[c|0:0:0]]123 [[f|big]] 456 7890 [[f|default]]asdfasdf 12314afasdfa"));
+	createButton->position({8.0f, 28.0f});
+	auto selectButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0f, 27.0f), UTF_CHAR_STR("Select"));
+	selectButton->position(createButton->localAABB().bottomLeftPoint() + MV::point(0.0f, 5.0f));
 
-	auto background = node->make<MV::Scene::Rectangle>("Background", MV::point(0.0, 20.0), selectButton->localAABB().bottomRightPoint() + MV::point(8.0, 8.0));
+	auto background = node->make<MV::Scene::Rectangle>("Background", MV::point(0.0f, 20.0f), selectButton->localAABB().bottomRightPoint() + MV::point(8.0f, 8.0f));
 	background->color({BOX_BACKGROUND});
-	background->setSortDepth(-1.0);
+	background->setSortDepth(-1.0f);
 
 	panel.updateBoxHeader(background->basicAABB().width());
 

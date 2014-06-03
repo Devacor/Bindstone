@@ -6,6 +6,8 @@
 #ifndef _RENDER_H_
 #define _RENDER_H_
 
+#define NOMINMAX 1
+
 #if defined(WIN32) && !defined(GL_BGR)
 #define GL_BGR GL_BGR_EXT
 #endif
@@ -20,6 +22,9 @@
 
 #include <algorithm>
 #include <functional>
+#include <memory>
+#include <map>
+#include <fstream>
 #include "Render/points.h"
 #include "Render/matrix.h"
 
@@ -41,9 +46,7 @@
 	#include <SDL_opengles.h>
 	typedef GLfloat GLdouble; //opengles has no GLdouble
 #else
-	#define NO_SDL_GLEXT
-	#include <SDL_opengl.h>
-	#include "glext.h"
+	#include "gl3w/include/GL/gl3w.h"
 #endif
 
 #ifdef GL_DEPTH_COMPONENT24
@@ -58,7 +61,9 @@
 #include <iostream>
 
 namespace MV {
-
+	namespace Scene {
+		class Node;
+	}
 	class Draw2D;
 
 	#if SDL_BYTEORDER == SDL_BIG_ENDIAN
@@ -80,12 +85,6 @@ namespace MV {
 		void setBlendFunction(GLenum a_sfactorRGB, GLenum a_dfactorRGB, GLenum a_sfactorAlpha, GLenum a_dfactorAlpha);
 		void setBlendEquation(GLenum a_rgbBlendFunc, GLenum a_alphaBlendFunc);
 	protected:
-
-#ifdef WIN32
-		PFNGLBLENDFUNCSEPARATEEXTPROC pglBlendFuncSeparateEXT;
-		PFNGLBLENDEQUATIONSEPARATEEXTPROC pglBlendEquationSeparateEXT;
-#endif
-
 		void loadExtensionBlendMode(char *a_extensionsList);
 	private:
 		bool initialized;
@@ -146,26 +145,9 @@ namespace MV {
 		GLint originalFramebufferId;
 		GLint originalRenderbufferId;
 		std::vector< std::shared_ptr<Framebuffer> > activeFramebuffers;
-#ifdef WIN32
-		PFNGLISRENDERBUFFEREXTPROC pglIsRenderbufferEXT;
-		PFNGLBINDRENDERBUFFEREXTPROC pglBindRenderbufferEXT;
-		PFNGLDELETERENDERBUFFERSEXTPROC pglDeleteRenderbuffersEXT;
-		PFNGLGENRENDERBUFFERSEXTPROC pglGenRenderbuffersEXT;
-		PFNGLRENDERBUFFERSTORAGEEXTPROC pglRenderbufferStorageEXT;
-		PFNGLGETRENDERBUFFERPARAMETERIVEXTPROC pglGetRenderbufferParameterivEXT;
-		PFNGLISFRAMEBUFFEREXTPROC pglIsFramebufferEXT;
-		PFNGLBINDFRAMEBUFFEREXTPROC pglBindFramebufferEXT;
-		PFNGLDELETEFRAMEBUFFERSEXTPROC pglDeleteFramebuffersEXT;
-		PFNGLGENFRAMEBUFFERSEXTPROC pglGenFramebuffersEXT;
-		PFNGLCHECKFRAMEBUFFERSTATUSEXTPROC pglCheckFramebufferStatusEXT;
-		PFNGLFRAMEBUFFERTEXTURE1DEXTPROC pglFramebufferTexture1DEXT;
-		PFNGLFRAMEBUFFERTEXTURE2DEXTPROC pglFramebufferTexture2DEXT;
-		PFNGLFRAMEBUFFERTEXTURE3DEXTPROC pglFramebufferTexture3DEXT;
-		PFNGLFRAMEBUFFERRENDERBUFFEREXTPROC pglFramebufferRenderbufferEXT;
-		PFNGLGETFRAMEBUFFERATTACHMENTPARAMETERIVEXTPROC pglGetFramebufferAttachmentParameterivEXT;
-		PFNGLGENERATEMIPMAPEXTPROC pglGenerateMipmapEXT;
-#endif
+
 		void loadExtensionFramebufferObject(char* a_extensionsList);
+		void initializeOriginalBufferIds();
 	private:
 		void deleteFramebuffer(Framebuffer &a_framebuffer);
 		Draw2D *renderer;
@@ -173,36 +155,9 @@ namespace MV {
 		Color savedClearColor;
 	};
 
-	class glExtensionVertexBufferObject {
-	public:
-		glExtensionVertexBufferObject():
-			initialized(false){
-		}
-
-		void loadExtensionVertexBufferObject(char* a_extensionsList);
-	protected:
-
-#ifdef WIN32
-		PFNGLBINDBUFFERARBPROC pglBindBufferARB;
-		PFNGLDELETEBUFFERSARBPROC pglDeleteBuffersARB;
-		PFNGLGENBUFFERSARBPROC pglGenBuffersARB;
-		PFNGLISBUFFERARBPROC pglIsBufferARB;
-		PFNGLBUFFERDATAARBPROC pglBufferDataARB;
-		PFNGLBUFFERSUBDATAARBPROC pglBufferSubDataARB;
-		PFNGLGETBUFFERSUBDATAARBPROC pglGetBufferSubDataARB;
-		PFNGLMAPBUFFERARBPROC pglMapBufferARB;
-		PFNGLUNMAPBUFFERARBPROC pglUnmapBufferARB;
-		PFNGLGETBUFFERPARAMETERIVARBPROC pglGetBufferParameterivARB;
-		PFNGLGETBUFFERPOINTERVARBPROC pglGetBufferPointervARB;
-#endif
-	private:
-		bool initialized;
-	};
-
 	class glExtensions :
 		public glExtensionBlendMode,
-		public glExtensionFramebufferObject,
-		public glExtensionVertexBufferObject
+		public glExtensionFramebufferObject
 	{
 	public:
 		glExtensions(Draw2D *a_renderer):
@@ -216,7 +171,6 @@ namespace MV {
 			}else{
 				loadExtensionBlendMode(extensionsList);
 				loadExtensionFramebufferObject(extensionsList);
-				loadExtensionVertexBufferObject(extensionsList);
 			}
 		}
 	};
@@ -272,7 +226,7 @@ namespace MV {
 		void updateAspectRatio();
 		bool maintainProportions;
 		Size<int> windowSize;
-		double aspectRatio;
+		PointPrecision aspectRatio;
 		uint32_t SDLflags;
 		std::string title;
 
@@ -290,14 +244,61 @@ namespace MV {
 	public:
 		void resize(const Size<> &a_size);
 
-		double height() const;
-		double width() const;
+		PointPrecision height() const;
+		PointPrecision width() const;
 		Size<> size() const;
 	private:
 		RenderWorld(Draw2D& a_renderer);
 		Size<> worldSize;
 
 		Draw2D &renderer;
+	};
+
+	class Shader {
+	public:
+		Shader(const std::string &a_stringId, GLuint a_id):
+			stringId(a_stringId),
+			programId(a_id){
+		}
+
+		std::string id() const{
+			return stringId;
+		}
+
+		void use(){
+			glUseProgram(programId);
+		}
+
+		void set(std::string a_variableName, PointPrecision a_value){
+			GLuint offset = variableOffset(a_variableName);
+			if(offset != 0){
+				glUniform1fv(offset, 1, &a_value);
+			} else{
+				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
+			}
+		}
+
+		void set(std::string a_variableName, const TransformMatrix &a_matrix){
+			GLuint offset = variableOffset(a_variableName);
+			if(offset != 0){
+				glUniformMatrix4fv(offset, 1, GL_FALSE, &((*a_matrix.getMatrixArray())[0]));
+			} else{
+				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
+			}
+		}
+	private:
+		GLuint variableOffset(const std::string &a_variableName){
+			auto found = variables.find(a_variableName);
+			if(found != variables.end()){
+				return found->second;
+			}
+			auto offset = glGetAttribLocation(programId, a_variableName.c_str());
+			variables[a_variableName] = offset;
+			return offset;
+		}
+		std::string stringId;
+		GLuint programId;
+		std::map<std::string, GLuint> variables;
 	};
 
 	//If attempting to make multiple instances of Draw2D bear in mind it modifies global state in the
@@ -352,7 +353,23 @@ namespace MV {
 		Point<> worldFromScreen(const Point<int> &a_screenPoint) const;
 		
 		void summarizeDisplayMode() const;
+
+		void defaultBlendFunction();
+
+		Shader* loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename);
+		Shader* loadShaderCode(const std::string &a_id, const std::string &a_vertexShaderCode, const std::string &a_fragmentShaderCode);
+
+		Shader* getShader(const std::string &a_id);
+
+		Shader* defaultShader() const;
+		Shader* defaultShader(GLuint a_newId);
+		Shader* defaultShader(const std::string &a_id);
+
+		void registerDefaultShader(std::shared_ptr<Scene::Node> a_node);
 	private:
+		void validateShaderStatus(GLuint a_id, bool a_isShader);
+		void loadPartOfShader(GLuint a_id, const std::string &a_code);
+
 		bool setupSDL();
 		void setupOpengl();
 
@@ -364,6 +381,14 @@ namespace MV {
 
 		MatrixStack contextProjectionMatrix;
 		MatrixStack contextModelviewMatrix;
+
+		std::map<std::string, Shader> shaders;
+		Shader* defaultShaderPtr = nullptr;
+
+		static bool firstInitializationSDL;
+		static bool firstInitializationOpenGL;
+
+		std::vector<std::shared_ptr<Scene::Node>> needShaderRegistration;
 	};
 	
 	void checkSDLError(int line = -1);

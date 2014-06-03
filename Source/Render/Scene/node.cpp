@@ -1,4 +1,5 @@
 #include "node.h"
+#include "stddef.h"
 #include <numeric>
 
 CEREAL_REGISTER_TYPE(MV::Scene::Node);
@@ -23,7 +24,7 @@ namespace MV {
 			for(auto point : points){
 				colorsToAverage.push_back(point);
 			}
-			return std::accumulate(colorsToAverage.begin(), colorsToAverage.end(), Color(0, 0, 0, 0)) / static_cast<double>(colorsToAverage.size());
+			return std::accumulate(colorsToAverage.begin(), colorsToAverage.end(), Color(0, 0, 0, 0)) / static_cast<PointPrecision>(colorsToAverage.size());
 		}
 
 		std::shared_ptr<TextureHandle> Node::texture(std::shared_ptr<TextureHandle> a_texture){
@@ -119,16 +120,16 @@ namespace MV {
 			return nullptr;
 		}
 
-		double Node::getDepth(){
+		PointPrecision Node::getDepth(){
 			if(depthOverride){
 				return overrideDepthValue;
 			}
 			size_t elements = points.size();
-			double total = 0;
+			PointPrecision total = 0;
 			for(size_t i = 0; i < elements; i++){
 				total += points[i].z;
 			}
-			return total /= static_cast<double>(elements);
+			return total /= static_cast<PointPrecision>(elements);
 		}
 
 		bool Node::operator<(Node &a_other){
@@ -151,8 +152,8 @@ namespace MV {
 			return rotateTo;
 		}
 
-		double Node::rotation(double a_zRotation) {
-			if(!equals(a_zRotation, 0.0)){
+		PointPrecision Node::rotation(PointPrecision a_zRotation) {
+			if(!equals(a_zRotation, 0.0f)){
 				rotateTo.z = a_zRotation;
 				alertParent(VisualChange::make(shared_from_this()));
 			}
@@ -190,12 +191,12 @@ namespace MV {
 			return scaleTo;
 		}
 
-		double Node::scale(double a_newScale){
+		PointPrecision Node::scale(PointPrecision a_newScale){
 			scale(Point<>(a_newScale, a_newScale, a_newScale));
 			return a_newScale;
 		}
 
-		AxisMagnitude Node::incrementScale(double a_newScale){
+		AxisMagnitude Node::incrementScale(PointPrecision a_newScale){
 			return incrementScale(Point<>(a_newScale, a_newScale, a_newScale));
 		}
 
@@ -280,9 +281,9 @@ namespace MV {
 
 			BoxAABB tmpBox;
 			if(!points.empty()){
-				tmpBox.initialize(castPoint<double>(renderer->screenFromLocal(points[0])));
+				tmpBox.initialize(castPoint<PointPrecision>(renderer->screenFromLocal(points[0])));
 				std::for_each(points.begin(), points.end(), [&](Point<> &point){
-					tmpBox.expandWith(castPoint<double>(renderer->screenFromLocal(point)));
+					tmpBox.expandWith(castPoint<PointPrecision>(renderer->screenFromLocal(point)));
 				});
 			}
 			if(a_includeChildren && !drawList.empty()){
@@ -517,8 +518,8 @@ namespace MV {
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
 
-			a_local.minPoint = castPoint<double>(renderer->screenFromLocal(a_local.minPoint));
-			a_local.maxPoint = castPoint<double>(renderer->screenFromLocal(a_local.maxPoint));
+			a_local.minPoint = castPoint<PointPrecision>(renderer->screenFromLocal(a_local.minPoint));
+			a_local.maxPoint = castPoint<PointPrecision>(renderer->screenFromLocal(a_local.maxPoint));
 			a_local.sanitize();
 			return a_local;
 		}
@@ -583,15 +584,49 @@ namespace MV {
 			if(ourTexture != nullptr && ourTexture->texture() != nullptr){
 				glEnable(GL_TEXTURE_2D);
 				glBindTexture(GL_TEXTURE_2D, ourTexture->texture()->textureId());
-				glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+				//glEnableClientState(GL_TEXTURE_COORD_ARRAY);
 
-				glTexCoordPointer(2, GL_FLOAT, 0, &(*texturePoints)[0]);
+				//glTexCoordPointer(2, GL_FLOAT, 0, &(*texturePoints)[0]);
 			} else{
 				glDisable(GL_TEXTURE_2D);
 			}
 		}
 
 		void Node::defaultDrawRenderStep(GLenum drawType){
+			shaderProgram->use();
+
+			if(bufferId == 0){
+				glGenBuffers(1, &bufferId);
+			}
+
+			glBindBuffer(GL_ARRAY_BUFFER, bufferId);
+			//glBufferData(GL_ARRAY_BUFFER, packedVertexArray->size() * sizeof((*(packedVertexArray))[0]), &(*(packedVertexArray))[0], GL_STATIC_DRAW);
+			auto structSize = static_cast<GLsizei>(sizeof(points[0]));
+			glBufferData(GL_ARRAY_BUFFER, points.size() * structSize, &(points[0]), GL_STATIC_DRAW);
+
+			glEnableVertexAttribArray(0);
+			glEnableVertexAttribArray(1);
+			glEnableVertexAttribArray(2);
+
+			auto positionOffset = static_cast<GLsizei>(offsetof(DrawPoint, x));
+			auto textureOffset = static_cast<GLsizei>(offsetof(DrawPoint, textureX));
+			auto colorOffset = static_cast<GLsizei>(offsetof(DrawPoint, R));
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (void*)positionOffset); //Point
+			glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (void*)textureOffset); //UV
+			glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (void*)colorOffset); //Color
+
+			TransformMatrix transformationMatrix(renderer->projectionMatrix().top() * renderer->modelviewMatrix().top());
+			shaderProgram->set("transformation", transformationMatrix);
+
+			glDrawArrays(drawType, 0, static_cast<GLsizei>(points.size()));
+
+			glDisableVertexAttribArray(0);
+			glDisableVertexAttribArray(1);
+			glDisableVertexAttribArray(2);
+			glUseProgram(0);
+		}
+
+		/*void Node::defaultDrawRenderStep(GLenum drawType){
 			auto textureVertexArray = getTextureVertexArray();
 			bindOrDisableTexture(textureVertexArray);
 
@@ -611,10 +646,32 @@ namespace MV {
 				glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 				glDisable(GL_TEXTURE_2D);
 			}
-		}
+		}*/
 
 		void Node::defaultDraw(GLenum drawType){
 			defaultDrawRenderStep(drawType);
+		}
+
+		std::shared_ptr<std::vector<GLfloat>> Node::getPackedVertexArray(){
+			const uint8_t elements = 9;
+			auto returnArray = std::make_shared<std::vector<GLfloat>>(points.size() * elements);
+			TransformMatrix transformationMatrix(renderer->projectionMatrix().top() * renderer->modelviewMatrix().top());
+			for(size_t i = 0; i < points.size(); ++i){
+				TransformMatrix transformedPoint(transformationMatrix * TransformMatrix(points[i]));
+				//(*returnArray)[i * elements + 0] = static_cast<float>(transformedPoint.getX());
+				//(*returnArray)[i * elements + 3] = static_cast<float>(transformedPoint.getY());
+				//(*returnArray)[i * elements + 6] = static_cast<float>(transformedPoint.getZ());
+				(*returnArray)[i * elements + 0] = static_cast<float>(points[i].x);
+				(*returnArray)[i * elements + 1] = static_cast<float>(points[i].y);
+				(*returnArray)[i * elements + 2] = static_cast<float>(points[i].z);
+				(*returnArray)[i * elements + 3] = static_cast<float>(points[i].textureX);
+				(*returnArray)[i * elements + 4] = static_cast<float>(points[i].textureY);
+				(*returnArray)[i * elements + 5] = static_cast<float>(points[i].R);
+				(*returnArray)[i * elements + 6] = static_cast<float>(points[i].G);
+				(*returnArray)[i * elements + 7] = static_cast<float>(points[i].B);
+				(*returnArray)[i * elements + 8] = static_cast<float>(points[i].A);
+			}
+			return returnArray;
 		}
 
 		std::shared_ptr<std::vector<GLfloat>> Node::getPositionVertexArray(){
@@ -695,12 +752,14 @@ namespace MV {
 			depthOverride(false),
 			drawSorted(true),
 			isSorted(false),
-			isVisible(true){
+			isVisible(true),
+			bufferId(0){
 		}
 
 		std::shared_ptr<Node> Node::make(Draw2D* a_renderer, const Point<> &a_placement /*= Point<>()*/) {
 			auto node = std::shared_ptr<Node>(new Node(a_renderer));
 			node->position(a_placement);
+			a_renderer->registerDefaultShader(node);
 			return node;
 		}
 
@@ -739,8 +798,8 @@ namespace MV {
 			return childNodes;
 		}
 
-		double Node::incrementRotation(double a_zRotation) {
-			if(!equals(a_zRotation, 0.0)){
+		PointPrecision Node::incrementRotation(PointPrecision a_zRotation) {
+			if(!equals(a_zRotation, 0.0f)){
 				rotateTo.z += a_zRotation;
 				alertParent(VisualChange::make(shared_from_this()));
 			}
@@ -793,7 +852,7 @@ namespace MV {
 
 		Point<> Node::normalizeToCenter() {
 			auto aabb = localAABB();
-			auto offset = (aabb.topLeftPoint() + aabb.bottomRightPoint()) / 2.0;
+			auto offset = (aabb.topLeftPoint() + aabb.bottomRightPoint()) / 2.0f;
 			normalizeToPoint(offset);
 			return offset;
 		}

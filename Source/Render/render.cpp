@@ -717,12 +717,13 @@ namespace MV {
 		glViewport( 0, 0, sdlWindow.width(), sdlWindow.height() );
 
 		projectionMatrix().clear(); //ensure nothing else has trampled on us.
-		projectionMatrix().top().makeOrtho(0, mvWorld.width(), mvWorld.height(), 0, -128.0, 128.0);
+		projectionMatrix().top().makeOrtho(0, mvWorld.width(), mvWorld.height(), 0, -1.0, 1.0);
 
 		glClearColor(clearBackgroundColor.R,clearBackgroundColor.G,clearBackgroundColor.B,clearBackgroundColor.A);
 		
         //glShadeModel(GL_SMOOTH);
 		
+
 		glEnable (GL_BLEND);
 		
 		glDisable(GL_CULL_FACE);
@@ -742,9 +743,9 @@ namespace MV {
 
 
 #ifdef HAVE_OPENGLES
-		glClearDepthf(16.0f);
+		glClearDepthf(1.0f);
 #else
-		glClearDepth(16.0f);
+		glClearDepth(1.0f);
 #endif
 		
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);

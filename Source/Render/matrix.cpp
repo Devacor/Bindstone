@@ -176,6 +176,16 @@ namespace MV{
 		return *this;
 	}
 
+	MV::Matrix Matrix::transpose() const {
+		Matrix result(*this);
+		for(size_t x = 0; x < sizeX; ++x){
+			for(size_t y = 0; y < sizeY; ++y){
+				result.access(x, y) = accessTransposed(x, y);
+			}
+		}
+		return result;
+	}
+
 
 	TransformMatrix::TransformMatrix( MatrixValue a_value ) :Matrix(4, a_value){
 		makeIdentity();
@@ -278,10 +288,12 @@ namespace MV{
 	}
 
 	TransformMatrix& MatrixStack::top(){
+		MV::require(!stack.empty(), MV::ResourceException("MatrixStack::top() failed, stack is empty!"));
 		return stack.back();
 	}
 
 	const TransformMatrix& MatrixStack::top() const{
+		MV::require(!stack.empty(), MV::ResourceException("MatrixStack::top() failed, stack is empty!"));
 		return stack.back();
 	}
 

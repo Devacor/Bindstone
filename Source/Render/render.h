@@ -259,6 +259,25 @@ namespace MV {
 		Shader(const std::string &a_stringId, GLuint a_id):
 			stringId(a_stringId),
 			programId(a_id){
+			if(!glIsProgram(a_id)){
+				std::cerr << "GL Program Id IS NOT A PROGRAM: " << a_id << std::endl;
+			} else{
+				int total = -1;
+				glGetProgramiv(programId, GL_ACTIVE_UNIFORMS, &total);
+				std::cout << "Shader Id: " << programId << std::endl;
+				for(int i = 0; i < total; ++i)  {
+					int name_len = -1, num = -1;
+					GLenum type = GL_ZERO;
+					char name[256];
+					glGetActiveUniform(programId, GLuint(i), sizeof(name)-1, &name_len, &num, &type, name);
+					name[name_len] = 0;
+					GLuint location = glGetUniformLocation(programId, name);
+					std::cout << "Shader Uniform: [" << name << "] = " << location << std::endl;
+					variables[name] = location;
+				}
+				std::cout << "_" << std::endl;
+			}
+
 		}
 
 		std::string id() const{
@@ -279,22 +298,21 @@ namespace MV {
 		}
 
 		void set(std::string a_variableName, const TransformMatrix &a_matrix){
-			GLuint offset = variableOffset(a_variableName);
-			if(offset != 0){
-				glUniformMatrix4fv(offset, 1, GL_FALSE, &((*a_matrix.getMatrixArray())[0]));
+			GLint offset = variableOffset(a_variableName);
+			if(offset >= 0){
+				GLfloat *mat = &((*a_matrix.getMatrixArray())[0]);
+				glUniformMatrix4fv(offset, 1, GL_FALSE, mat);
 			} else{
 				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
 			}
 		}
 	private:
-		GLuint variableOffset(const std::string &a_variableName){
+		GLint variableOffset(const std::string &a_variableName){
 			auto found = variables.find(a_variableName);
 			if(found != variables.end()){
 				return found->second;
 			}
-			auto offset = glGetAttribLocation(programId, a_variableName.c_str());
-			variables[a_variableName] = offset;
-			return offset;
+			return -1;
 		}
 		std::string stringId;
 		GLuint programId;
@@ -366,6 +384,13 @@ namespace MV {
 		Shader* defaultShader(const std::string &a_id);
 
 		void registerDefaultShader(std::shared_ptr<Scene::Node> a_node);
+
+		void checkGlError(std::string a_location = "[not supplied location]"){
+			GLenum error = glGetError();
+			if(error != GL_NO_ERROR) {
+				std::cerr << "GL Error: (" << error << ")\nencountered in " << a_location << ".\n" << std::endl;
+			}
+		}
 	private:
 		void validateShaderStatus(GLuint a_id, bool a_isShader);
 		void loadPartOfShader(GLuint a_id, const std::string &a_code);

@@ -62,6 +62,15 @@ namespace MV {
 			return (*matrixArray)[(sizeX * a_x) + (a_y)];
 		}
 
+		MatrixValue& accessTransposed(size_t a_x, size_t a_y){
+			return (*matrixArray)[(a_x) + (a_y * sizeY)];
+		}
+		const MatrixValue& accessTransposed(size_t a_x, size_t a_y) const{
+			return (*matrixArray)[(a_x) + (a_y * sizeY)];
+		}
+
+		Matrix transpose() const;
+
 		//Enjoy using these, but do not use them in tight loops.
 		MatrixRowAccess& operator[] (size_t a_index);
 		const MatrixRowAccess& operator[] (size_t a_index) const;

@@ -31,7 +31,7 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::unique_pt
 
 	ourBox = makeInputField(*panel.textLibrary(), MV::size(50.0f, 27.0f));
 		
-		/*std::shared_ptr<MV::TextBox>(new MV::TextBox(a_panel.textLibrary(), "default", UTF_CHAR_STR("0"), MV::size(50.0, 27.0)));
+	/*std::shared_ptr<MV::TextBox>(new MV::TextBox(a_panel.textLibrary(), "default", UTF_CHAR_STR("0"), MV::size(50.0, 27.0)));
 	ourBox->justification(MV::CENTER);*/
 	ourBox->scene()->position({8.0, lastY});
 	node->parent()->add("posX", ourBox->scene());
@@ -58,7 +58,6 @@ void SelectedEditorPanel::handleInput(SDL_Event &a_event) {
 DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	EditorPanel(a_panel) {
 	auto node = panel.content();
-	node->position({-20.0f, -20.0f});
 	auto createButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0f, 77.0f), UTF_CHAR_STR("Create[[f|small]][[c|0:0:0]]123 [[f|big]] 456 7890 [[f|default]]asdfasdf 12314afasdfa"));
 	createButton->position({8.0f, 28.0f});
 	auto selectButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0f, 27.0f), UTF_CHAR_STR("Select"));

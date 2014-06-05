@@ -616,8 +616,9 @@ namespace MV {
 			glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (void*)colorOffset); //Color
 
 			TransformMatrix transformationMatrix(renderer->projectionMatrix().top() * renderer->modelviewMatrix().top());
-			shaderProgram->set("transformation", transformationMatrix);
 
+			shaderProgram->set("transformation", transformationMatrix);
+			
 			glDrawArrays(drawType, 0, static_cast<GLsizei>(points.size()));
 
 			glDisableVertexAttribArray(0);

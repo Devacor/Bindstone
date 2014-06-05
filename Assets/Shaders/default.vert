@@ -8,10 +8,11 @@ layout(location = 2) in vec4 inColor;
 uniform mat4 transformation;
 
 smooth out vec4 color;
+smooth out vec2 uv;
 
 void main(){
-    //gl_Position = vec4(inPosition.x, inPosition.y, inPosition.z, 0);
     color = inColor;
-    gl_Position.xyz = inPosition;
-    gl_Position.w = 1.0;
+    uv = inUV;
+    
+    gl_Position = transformation * vec4(inPosition, 1.0);
 }

@@ -43,6 +43,9 @@ void Editor::initializeWindow(){
 	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
 	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
 	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+
+	test = MV::Scene::Rectangle::make(&renderer, MV::BoxAABB({10.0f, 10.0f}, {100.0f, 100.0f}), false);
+	test->texture(MV::FileTextureDefinition::make("Assets/Images/dogfox.png")->makeHandle());
 }
 
 void Editor::handleInput(){
@@ -80,15 +83,14 @@ void Editor::handleInput(){
 	}
 	mouse.update();
 	controlPanel.handleInput(event);
-	test = MV::Scene::Rectangle::make(&renderer, MV::BoxAABB({0.05f, 0.05f}, {-.050f, -0.050f}), false);
-	test->color({1, 0, 0});
+	//test->color({1, 1, 1});
 }
 
 void Editor::render(){
 	renderer.clearScreen();
-	test->draw();
-	//scene->draw();
-	//controls->draw();
+	//test->draw();
+	scene->draw();
+	controls->draw();
 	//textBox.scene()->draw();
 	renderer.updateScreen();
 }

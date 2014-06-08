@@ -13,6 +13,6 @@ smooth out vec2 uv;
 void main(){
     color = inColor;
     uv = inUV;
-    
+
     gl_Position = transformation * vec4(inPosition, 1.0);
 }

@@ -198,9 +198,7 @@ namespace MV {
 			character = TextCharacter::make(
 				SurfaceTextureDefinition::make("", [=](){
 					Uint16 text[] = {static_cast<Uint16>(renderChar), '\0'};
-					SDL_Color white;
-					white.r = 255; white.g = 255; white.b = 255; white.a = 0;
-					return TTF_RenderUNICODE_Blended(font, text, white);
+					return TTF_RenderUNICODE_Blended(font, text, {255, 255, 255, 255});
 				}),
 				renderChar,
 				shared_from_this()

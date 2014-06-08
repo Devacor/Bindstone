@@ -312,11 +312,6 @@ namespace MV {
 			void pushMatrix();
 			void popMatrix();
 
-			std::shared_ptr<std::vector<GLfloat>> getPositionVertexArray();
-			std::shared_ptr<std::vector<GLfloat>> getTextureVertexArray();
-			std::shared_ptr<std::vector<GLfloat>> getColorVertexArray();
-			std::shared_ptr<std::vector<GLfloat>> getPackedVertexArray();
-
 			Point<> scaleTo;
 			Point<> translateTo;
 			Point<> rotateTo;

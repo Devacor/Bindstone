@@ -229,7 +229,7 @@ namespace MV {
 		unsigned int imageSize = (textureSize.width * textureSize.height) * 4 * sizeof(unsigned int);
 		// Create Storage Space For Texture Data (128x128x4)
 		data = (unsigned int*)new GLuint[(imageSize)];
-		memset(data, 0, (imageSize));
+		memset(data, backgroundColor.hex(), (imageSize));
 		glGenTextures(1, &texture);					// Create 1 Texture
 		glBindTexture(GL_TEXTURE_2D, texture);			// Bind The Texture
 		// Build Texture Using Information In data
@@ -441,7 +441,7 @@ namespace MV {
 
 		auto foundDefinition = dynamicDefinitions.find(identifier);
 		if(foundDefinition == dynamicDefinitions.end()){
-			std::shared_ptr<DynamicTextureDefinition> newDefinition = DynamicTextureDefinition::make(a_name, a_size);
+			std::shared_ptr<DynamicTextureDefinition> newDefinition = DynamicTextureDefinition::make(a_name, a_size, {1.0f, 1.0f, 1.0f, 0.0f});
 			dynamicDefinitions[identifier] = newDefinition;
 			return newDefinition;
 		}else{
@@ -459,6 +459,9 @@ namespace MV {
 			return foundDefinition->second;
 		}
 	}
+
+	std::shared_ptr<DynamicTextureDefinition> SharedTextures::defaultTexture = nullptr;
+	std::shared_ptr<TextureHandle> SharedTextures::defaultHandle = nullptr;
 
 
 }

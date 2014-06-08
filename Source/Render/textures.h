@@ -106,32 +106,35 @@ namespace MV {
 	class DynamicTextureDefinition : public TextureDefinition {
 		friend cereal::access;
 	public:
-		static std::shared_ptr<DynamicTextureDefinition> make(const std::string &a_name, const Size<int> &a_size){
-			return std::shared_ptr<DynamicTextureDefinition>(new DynamicTextureDefinition(a_name, a_size));
+		static std::shared_ptr<DynamicTextureDefinition> make(const std::string &a_name, const Size<int> &a_size, const Color &a_backgroundColor){
+			return std::shared_ptr<DynamicTextureDefinition>(new DynamicTextureDefinition(a_name, a_size, a_backgroundColor));
 		}
 		
-		DynamicTextureDefinition():DynamicTextureDefinition("", Size<int>()){} //only for cereal. DO NOT USE.
 	private:
-		DynamicTextureDefinition(const std::string &a_name, const Size<int> &a_size):
-			TextureDefinition(a_name){
+		DynamicTextureDefinition(const std::string &a_name, const Size<int> &a_size, const Color &a_backgroundColor):
+			TextureDefinition(a_name),
+			backgroundColor(a_backgroundColor){
 			textureSize = a_size;
 		}
 
 		template <class Archive>
 		void serialize(Archive & archive){
-			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
+			archive(CEREAL_NVP(backgroundColor), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
 		}
 
 		template <class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<DynamicTextureDefinition> &construct){
-			construct("", Size<int>());
-			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
+			construct("", Size<int>(), Color());
+			Color backgroundColor;
+			archive(cereal::make_nvp("backgroundColor", backgroundColor), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
+			construct->backgroundColor = backgroundColor;
 			if(!construct->handles.empty()){
 				construct->reloadImplementation();
 			}
 		}
 
 		virtual void reloadImplementation();
+		Color backgroundColor;
 	};
 
 	class SurfaceTextureDefinition : public TextureDefinition {
@@ -277,10 +280,21 @@ namespace MV {
 		void serialize(Archive & archive){
 			archive(CEREAL_NVP(fileDefinitions), CEREAL_NVP(dynamicDefinitions), CEREAL_NVP(surfaceDefinitions));
 		}
+
+		static std::shared_ptr<TextureHandle> white(){
+			if(!defaultTexture){
+				defaultTexture = DynamicTextureDefinition::make("defaultTexture", {1, 1}, {1.0f, 1.0f, 1.0f, 1.0f});
+				defaultHandle = defaultTexture->makeHandle();
+			}
+			return defaultHandle;
+		}
 	private:
 		std::map<std::string, std::shared_ptr<FileTextureDefinition>> fileDefinitions;
 		std::map<std::string, std::shared_ptr<DynamicTextureDefinition>> dynamicDefinitions;
 		std::map<std::string, std::shared_ptr<SurfaceTextureDefinition>> surfaceDefinitions;
+
+		static std::shared_ptr<DynamicTextureDefinition> defaultTexture;
+		static std::shared_ptr<TextureHandle> defaultHandle;
 	};
 
 }

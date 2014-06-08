@@ -13,7 +13,7 @@ namespace MV {
 			if(a_forceRefresh || dirtyTexture){
 				auto pointAABB = basicAABB();
 				auto textureSize = castSize<int>(pointAABB.size());
-				clippedTexture = DynamicTextureDefinition::make("", textureSize);
+				clippedTexture = DynamicTextureDefinition::make("", textureSize, {1.0f, 1.0f, 1.0f, 0.0f});
 				dirtyTexture = false;
 				texture(clippedTexture->makeHandle(Point<int>(), textureSize));
 				framebuffer = renderer->makeFramebuffer(castPoint<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId());

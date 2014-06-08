@@ -600,7 +600,6 @@ namespace MV {
 			}
 
 			glBindBuffer(GL_ARRAY_BUFFER, bufferId);
-			//glBufferData(GL_ARRAY_BUFFER, packedVertexArray->size() * sizeof((*(packedVertexArray))[0]), &(*(packedVertexArray))[0], GL_STATIC_DRAW);
 			auto structSize = static_cast<GLsizei>(sizeof(points[0]));
 			glBufferData(GL_ARRAY_BUFFER, points.size() * structSize, &(points[0]), GL_STATIC_DRAW);
 
@@ -617,6 +616,7 @@ namespace MV {
 
 			TransformMatrix transformationMatrix(renderer->projectionMatrix().top() * renderer->modelviewMatrix().top());
 
+			shaderProgram->set("texture", ourTexture);
 			shaderProgram->set("transformation", transformationMatrix);
 			
 			glDrawArrays(drawType, 0, static_cast<GLsizei>(points.size()));
@@ -627,84 +627,8 @@ namespace MV {
 			glUseProgram(0);
 		}
 
-		/*void Node::defaultDrawRenderStep(GLenum drawType){
-			auto textureVertexArray = getTextureVertexArray();
-			bindOrDisableTexture(textureVertexArray);
-
-			glEnableClientState(GL_COLOR_ARRAY);
-			auto colorVertexArray = getColorVertexArray();
-			glColorPointer(4, GL_FLOAT, 0, &(*colorVertexArray)[0]);
-
-			glEnableClientState(GL_VERTEX_ARRAY);
-			auto positionVertexArray = getPositionVertexArray();
-			glVertexPointer(3, GL_FLOAT, 0, &(*(positionVertexArray))[0]);
-
-			glDrawArrays(drawType, 0, static_cast<GLsizei>(points.size()));
-
-			glDisableClientState(GL_COLOR_ARRAY);
-			glDisableClientState(GL_VERTEX_ARRAY);
-			if(ourTexture != nullptr){
-				glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-				glDisable(GL_TEXTURE_2D);
-			}
-		}*/
-
 		void Node::defaultDraw(GLenum drawType){
 			defaultDrawRenderStep(drawType);
-		}
-
-		std::shared_ptr<std::vector<GLfloat>> Node::getPackedVertexArray(){
-			const uint8_t elements = 9;
-			auto returnArray = std::make_shared<std::vector<GLfloat>>(points.size() * elements);
-			TransformMatrix transformationMatrix(renderer->projectionMatrix().top() * renderer->modelviewMatrix().top());
-			for(size_t i = 0; i < points.size(); ++i){
-				TransformMatrix transformedPoint(transformationMatrix * TransformMatrix(points[i]));
-				//(*returnArray)[i * elements + 0] = static_cast<float>(transformedPoint.getX());
-				//(*returnArray)[i * elements + 3] = static_cast<float>(transformedPoint.getY());
-				//(*returnArray)[i * elements + 6] = static_cast<float>(transformedPoint.getZ());
-				(*returnArray)[i * elements + 0] = static_cast<float>(points[i].x);
-				(*returnArray)[i * elements + 1] = static_cast<float>(points[i].y);
-				(*returnArray)[i * elements + 2] = static_cast<float>(points[i].z);
-				(*returnArray)[i * elements + 3] = static_cast<float>(points[i].textureX);
-				(*returnArray)[i * elements + 4] = static_cast<float>(points[i].textureY);
-				(*returnArray)[i * elements + 5] = static_cast<float>(points[i].R);
-				(*returnArray)[i * elements + 6] = static_cast<float>(points[i].G);
-				(*returnArray)[i * elements + 7] = static_cast<float>(points[i].B);
-				(*returnArray)[i * elements + 8] = static_cast<float>(points[i].A);
-			}
-			return returnArray;
-		}
-
-		std::shared_ptr<std::vector<GLfloat>> Node::getPositionVertexArray(){
-			auto returnArray = std::make_shared<std::vector<GLfloat>>(points.size() * 3);
-			TransformMatrix transformationMatrix(renderer->projectionMatrix().top() * renderer->modelviewMatrix().top());
-			for(size_t i = 0; i < points.size(); ++i){
-				TransformMatrix transformedPoint(transformationMatrix * TransformMatrix(points[i]));
-				(*returnArray)[i * 3 + 0] = static_cast<float>(transformedPoint.getX());
-				(*returnArray)[i * 3 + 1] = static_cast<float>(transformedPoint.getY());
-				(*returnArray)[i * 3 + 2] = static_cast<float>(transformedPoint.getZ());
-			}
-			return returnArray;
-		}
-
-		std::shared_ptr<std::vector<GLfloat>> Node::getTextureVertexArray(){
-			auto returnArray = std::make_shared<std::vector<GLfloat>>(points.size() * 2);
-			for(size_t i = 0; i < points.size(); ++i){
-				(*returnArray)[i * 2 + 0] = static_cast<float>(points[i].textureX);
-				(*returnArray)[i * 2 + 1] = static_cast<float>(points[i].textureY);
-			}
-			return returnArray;
-		}
-
-		std::shared_ptr<std::vector<GLfloat>> Node::getColorVertexArray(){
-			auto returnArray = std::make_shared<std::vector<GLfloat>>(points.size() * 4);
-			for(size_t i = 0; i < points.size(); ++i){
-				(*returnArray)[i * 4 + 0] = static_cast<float>(points[i].R);
-				(*returnArray)[i * 4 + 1] = static_cast<float>(points[i].G);
-				(*returnArray)[i * 4 + 2] = static_cast<float>(points[i].B);
-				(*returnArray)[i * 4 + 3] = static_cast<float>(points[i].A);
-			}
-			return returnArray;
 		}
 
 		void Node::draw(){

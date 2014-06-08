@@ -254,6 +254,7 @@ namespace MV {
 		Draw2D &renderer;
 	};
 
+	class TextureHandle;
 	class Shader {
 	public:
 		Shader(const std::string &a_stringId, GLuint a_id):
@@ -288,29 +289,22 @@ namespace MV {
 			glUseProgram(programId);
 		}
 
-		void set(std::string a_variableName, PointPrecision a_value){
-			GLuint offset = variableOffset(a_variableName);
-			if(offset != 0){
-				glUniform1fv(offset, 1, &a_value);
-			} else{
-				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-			}
-		}
+		void set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_texture, GLuint a_textureBindIndex = 0);
 
-		void set(std::string a_variableName, const TransformMatrix &a_matrix){
-			GLint offset = variableOffset(a_variableName);
-			if(offset >= 0){
-				GLfloat *mat = &((*a_matrix.getMatrixArray())[0]);
-				glUniformMatrix4fv(offset, 1, GL_FALSE, mat);
-			} else{
-				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-			}
-		}
+		void set(std::string a_variableName, PointPrecision a_value);
+
+		void set(std::string a_variableName, const TransformMatrix &a_matrix);
 	private:
 		GLint variableOffset(const std::string &a_variableName){
 			auto found = variables.find(a_variableName);
 			if(found != variables.end()){
 				return found->second;
+			} else{
+				auto foundLocation = glGetUniformLocation(programId, a_variableName.c_str());
+				if(foundLocation >= 0){
+					variables[a_variableName] = foundLocation;
+					return foundLocation;
+				}
 			}
 			return -1;
 		}

@@ -241,6 +241,14 @@ namespace MV {
 			return offsetPosition;
 		}
 
+		Point<> offset(PointPrecision a_x, PointPrecision a_lineHeight, PointPrecision a_baseLine){
+			PointPrecision height = character->font()->height();
+			PointPrecision base = character->font()->base();
+			offset({a_x, a_baseLine - base});
+			shape->position(basePosition + offsetPosition);
+			return offsetPosition;
+		}
+
 		void applyState(const std::shared_ptr<FormattedState> &a_state){
 			state = a_state;
 			character = state->font->getCharacter(textCharacter);
@@ -318,8 +326,18 @@ namespace MV {
 		}
 
 		void minimumLineHeightChanged(){
-			fixVisualsFromIndex(0);
+			fixVisuals();
 		}
+
+		float lineWidth() const{
+			if(characters.empty()){
+				return 0.0f;
+			} else{
+				return characters.back()->position().x + characters.back()->characterSize().width;
+			}
+		}
+
+		void applyAlignment();
 	private:
 		std::string makeCharacterGUID(size_t a_index){
 			return guid(wideToChar(characters[a_index]->character->character()));
@@ -327,7 +345,6 @@ namespace MV {
 
 		FormattedLine(FormattedText &a_lines, size_t a_lineIndex);
 
-		void ripplePositionUpdate();
 		void updateFormatAfterAdd(size_t a_startIndex, size_t a_endIndex);
 		void updateLineHeight();
 
@@ -337,7 +354,7 @@ namespace MV {
 
 		std::shared_ptr<FormattedState> getNewState(const UtfString &a_text, const std::shared_ptr<FormattedState> &a_current);
 
-		void fixVisualsFromIndex(size_t a_characterIndex);
+		void fixVisuals();
 
 		PointPrecision lineHeight;
 		PointPrecision baseLine;
@@ -353,7 +370,7 @@ namespace MV {
 
 	class FormattedText{
 	public:
-		FormattedText(TextLibrary &a_library, PointPrecision a_width, const std::string &a_defaultStateIdentifier, TextWrapMethod a_wrapping = SOFT);
+		FormattedText(TextLibrary &a_library, PointPrecision a_width, const std::string &a_defaultStateIdentifier, TextWrapMethod a_wrapping = SOFT, TextJustification a_justification = LEFT);
 
 		PointPrecision width(PointPrecision a_width);
 		PointPrecision width() const{
@@ -454,6 +471,20 @@ namespace MV {
 			}
 		}
 
+		void removeCharacters(size_t a_startIndex, size_t a_count){
+			/*
+			if(a_count == 0){
+				return;
+			}
+			std::shared_ptr<FormattedLine> lineStart;
+			size_t lineStartCharacter;
+			std::tie(lineStart, lineStartCharacter) = lineForCharacterIndex(a_startIndex);
+
+			std::shared_ptr<FormattedLine> lineEnd;
+			size_t lineEndCharacter;
+			std::tie(lineStart, lineStartCharacter) = lineForCharacterIndex(a_startIndex + a_count);*/
+		}
+
 		void addCharacters(size_t a_startIndex, const UtfString &a_characters){
 			if(a_characters.empty()){
 				return;
@@ -539,15 +570,29 @@ namespace MV {
 			return minimumTextLineHeight;
 		}
 
+		void justification(TextJustification a_newJustification){
+			if(textJustification != a_newJustification){
+				textJustification = a_newJustification;
+				for(auto &line : lines){
+					line->applyAlignment();
+				}
+			}
+		}
+		TextJustification justification() const{
+			return textJustification;
+		}
+
 		TextLibrary &library;
 		TextWrapMethod wrapping;
-		TextJustification justification;
 		std::vector<std::shared_ptr<FormattedLine>> lines;
 		std::shared_ptr<FormattedState> defaultTextState;
 		std::shared_ptr<Scene::Node> scene;
 		UtfString rawString;
 		PointPrecision textWidth;
 		PointPrecision minimumTextLineHeight;
+
+	private:
+		TextJustification textJustification = TextJustification::LEFT;
 	};
 
 	class TextBox{
@@ -558,13 +603,10 @@ namespace MV {
 		TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, const Size<> &a_size);
 
 		void justification(TextJustification a_newJustification){
-			if(a_newJustification != textJustification){
-				textJustification = a_newJustification;
-				refreshTextBoxContents();
-			}
+			formattedText.justification(a_newJustification);
 		}
 		TextJustification justification() const{
-			return textJustification;
+			return formattedText.justification();
 		}
 
 		void wrapping(TextWrapMethod a_newWrapMethod){

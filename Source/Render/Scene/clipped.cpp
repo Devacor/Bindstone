@@ -18,6 +18,9 @@ namespace MV {
 				texture(clippedTexture->makeHandle(Point<int>(), textureSize));
 				framebuffer = renderer->makeFramebuffer(castPoint<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId());
 				{
+					renderer->setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
+					SCOPE_EXIT{renderer->defaultBlendFunction(); };
+
 					renderer->modelviewMatrix().push();
 					SCOPE_EXIT{renderer->modelviewMatrix().pop(); };
 					renderer->modelviewMatrix().top().makeIdentity();

@@ -67,7 +67,7 @@ namespace MV {
 		auto found = loadedFonts.find(a_identifier);
 		if(found == loadedFonts.end()){
 			TTF_Font* newFont = TTF_OpenFont(a_fontFileLocation.c_str(), a_pointSize);
-			TTF_SetFontHinting(newFont, TTF_HINTING_LIGHT);
+			TTF_SetFontHinting(newFont, TTF_HINTING_NORMAL);
 			TTF_SetFontStyle(newFont, static_cast<int>(a_styleFlags));
 			if(newFont) {
 				loadedFonts.insert({a_identifier, FontDefinition::make(this, a_fontFileLocation, a_pointSize, newFont)});
@@ -101,6 +101,7 @@ namespace MV {
 		render(a_textLibrary->getRenderer()),
 		fontIdentifier(a_fontIdentifier),
 		textboxScene(Scene::Clipped::make(a_textLibrary->getRenderer(), a_size)),
+		//textboxScene(Scene::Node::make(a_textLibrary->getRenderer())),
 		textScene(nullptr),
 		boxSize(a_size),
 		isSingleLine(false),
@@ -113,6 +114,7 @@ namespace MV {
 		render(a_textLibrary->getRenderer()),
 		fontIdentifier(a_fontIdentifier),
 		textboxScene(Scene::Clipped::make(a_textLibrary->getRenderer(), a_size)),
+		//textboxScene(Scene::Node::make(a_textLibrary->getRenderer())),
 		textScene(nullptr),
 		boxSize(a_size),
 		isSingleLine(false),
@@ -340,18 +342,30 @@ namespace MV {
 		auto insertIndex = std::min(a_characterIndex, characters.size());
 		characters.insert(characters.begin() + insertIndex, a_characters.begin(), a_characters.end());
 		updateFormatAfterAdd(insertIndex, insertIndex + a_characters.size());
-		fixVisualsFromIndex(a_characterIndex);
+		fixVisuals();
 	}
 
-	void FormattedLine::fixVisualsFromIndex(size_t a_characterIndex){
+	void FormattedLine::applyAlignment(){
+		float width = lineWidth();
+		float offset = 0;
+		if(text.justification() == CENTER){
+			offset = (text.width() - width) / 2.0f;
+		}else if(text.justification() == RIGHT){
+			offset = text.width() - width;
+		}
+		for(size_t index = 0; index < characters.size(); ++index){
+			characters[index]->offset({offset, characters[index]->offset().y});
+		}
+	}
+
+	void FormattedLine::fixVisuals(){
 		if(!characters.empty()){
-			characters[a_characterIndex == 0 ? 0 : a_characterIndex - 1]->position({0, linePosition});
+			characters[0]->position({0, linePosition});
 			updateLineHeight();
-			size_t index = a_characterIndex;
-			for(; index < characters.size(); ++index){
+			for(size_t index = 0; index < characters.size(); ++index){
 				auto characterPosition = (index > 0) ? characters[index - 1]->position().x + characters[index - 1]->characterSize().width : 0;
 				characters[index]->position({characterPosition, linePosition});
-				characters[index]->offset(lineHeight, baseLine);
+				characters[index]->offset(0.0f, lineHeight, baseLine);
 				
 				if(index > 0 && text.exceedsWidth(characters[index]->position().x)){
 					std::vector<std::shared_ptr<FormattedCharacter>> overflow(characters.begin() + index-1, characters.end());
@@ -362,6 +376,9 @@ namespace MV {
 					text.lines[lineIndex + 1]->addCharacters(0, overflow);
 					break;
 				}
+			}
+			if(text.justification() != LEFT){
+				applyAlignment();
 			}
 		}
 	}
@@ -395,11 +412,12 @@ namespace MV {
 		return lines[a_index];
 	}
 
-	FormattedText::FormattedText(TextLibrary &a_library, PointPrecision a_width, const std::string &a_defaultStateIdentifier, TextWrapMethod a_wrapping /*= SOFT*/):
+	FormattedText::FormattedText(TextLibrary &a_library, PointPrecision a_width, const std::string &a_defaultStateIdentifier, TextWrapMethod a_wrapping, TextJustification a_justification):
 		library(a_library),
 		textWidth(a_width),
 		defaultTextState(std::make_shared<FormattedState>(a_library.fontDefinition(a_defaultStateIdentifier))),
 		wrapping(a_wrapping),
+		textJustification(a_justification),
 		minimumTextLineHeight(-1){
 
 		scene = Scene::Node::make(library.getRenderer());

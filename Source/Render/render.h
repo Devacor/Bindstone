@@ -83,6 +83,7 @@ namespace MV {
 		glExtensionBlendMode();
 		bool blendModeExtensionEnabled(){return initialized;}
 		void setBlendFunction(GLenum a_sfactorRGB, GLenum a_dfactorRGB, GLenum a_sfactorAlpha, GLenum a_dfactorAlpha);
+		void setBlendFunction(GLenum a_sfactorRGB, GLenum a_dfactorRGB);
 		void setBlendEquation(GLenum a_rgbBlendFunc, GLenum a_alphaBlendFunc);
 	protected:
 		void loadExtensionBlendMode(char *a_extensionsList);
@@ -371,6 +372,7 @@ namespace MV {
 		Shader* loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename);
 		Shader* loadShaderCode(const std::string &a_id, const std::string &a_vertexShaderCode, const std::string &a_fragmentShaderCode);
 
+		bool hasShader(const std::string &a_id);
 		Shader* getShader(const std::string &a_id);
 
 		Shader* defaultShader() const;

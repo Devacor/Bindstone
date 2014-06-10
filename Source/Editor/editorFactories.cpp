@@ -15,11 +15,11 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 	colorTopAndBottom(idleScene, {BUTTON_TOP_IDLE}, {BUTTON_BOTTOM_IDLE});
 
 	MV::TextBox activeBox(&a_library, a_fontIdentifier, a_size), idleBox(&a_library, a_fontIdentifier, a_size);
-	activeBox.justification(MV::CENTER);
+	activeBox.justification(MV::TextJustification::CENTER);
 	activeBox.setMinimumLineHeight(a_size.height);
 	activeBox.setText(a_text);
 	
-	idleBox.justification(MV::CENTER);
+	idleBox.justification(MV::TextJustification::CENTER);
 	idleBox.setMinimumLineHeight(a_size.height);
 	idleBox.setText(a_text);
 
@@ -35,7 +35,7 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 
 std::shared_ptr<MV::TextBox> makeInputField(MV::TextLibrary &a_textLibrary, const MV::Size<> &a_size, const MV::UtfString &a_startContents) {
 	auto box = std::make_shared<MV::TextBox>(&a_textLibrary, "small", a_startContents, a_size);
-	box->justification(MV::CENTER);
+	box->justification(MV::TextJustification::CENTER);
 	//box->setMinimumLineHeight(static_cast<int>(a_size.height));
 	box->makeSingleLine();
 	auto background = box->scene()->make<MV::Scene::Rectangle>("background", a_size);

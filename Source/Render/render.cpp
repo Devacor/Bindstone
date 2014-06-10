@@ -230,6 +230,10 @@ namespace MV {
 		}
 	}
 
+	void glExtensionBlendMode::setBlendFunction(GLenum a_sfactorRGB, GLenum a_dfactorRGB){
+		glBlendFunc(a_sfactorRGB, a_dfactorRGB);
+	}
+
 	void glExtensionBlendMode::setBlendEquation(GLenum a_rgbBlendFunc, GLenum a_alphaBlendFunc){
 		if(initialized){
 #ifdef WIN32
@@ -278,7 +282,7 @@ namespace MV {
 
 	void glExtensionFramebufferObject::startUsingFramebuffer(std::shared_ptr<Framebuffer> a_framebuffer, bool a_push){
 		savedClearColor = renderer->backgroundColor();
-		renderer->backgroundColor({1.0, 1.0, 1.0, 0.0});
+		renderer->backgroundColor({0.0, 0.0, 0.0, 0.0});
 
 		require(initialized, ResourceException("StartUsingFramebuffer failed because the extension could not be loaded"));
 		if(a_push){
@@ -827,7 +831,7 @@ namespace MV {
 	}
 
 	void Draw2D::defaultBlendFunction() {
-		setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
+		setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	}
 
 	void Draw2D::validateShaderStatus(GLuint a_id, bool a_isShader) {
@@ -884,15 +888,26 @@ namespace MV {
 	}
 
 	Shader* Draw2D::loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename) {
-		std::ifstream vertexShaderFile(a_vertexShaderFilename);
-		MV::require(vertexShaderFile.is_open(), MV::ResourceException("Failed to load vertex shader: " + a_vertexShaderFilename));
-		std::string vertexShaderCode((std::istreambuf_iterator<char>(vertexShaderFile)), std::istreambuf_iterator<char>());
+		auto found = shaders.find(a_id);
+		if(found == shaders.end()){
+			std::ifstream vertexShaderFile(a_vertexShaderFilename);
+			MV::require(vertexShaderFile.is_open(), MV::ResourceException("Failed to load vertex shader: " + a_vertexShaderFilename));
+			std::string vertexShaderCode((std::istreambuf_iterator<char>(vertexShaderFile)), std::istreambuf_iterator<char>());
 
-		std::ifstream fragmentShaderFile(a_fragmentShaderFilename);
-		MV::require(vertexShaderFile.is_open(), MV::ResourceException("Failed to load fragment shader: " + a_fragmentShaderFilename));
-		std::string fragmentShaderCode((std::istreambuf_iterator<char>(fragmentShaderFile)), std::istreambuf_iterator<char>());
+			std::ifstream fragmentShaderFile(a_fragmentShaderFilename);
+			MV::require(vertexShaderFile.is_open(), MV::ResourceException("Failed to load fragment shader: " + a_fragmentShaderFilename));
+			std::string fragmentShaderCode((std::istreambuf_iterator<char>(fragmentShaderFile)), std::istreambuf_iterator<char>());
 
-		return loadShaderCode(a_id, vertexShaderCode, fragmentShaderCode);
+			return loadShaderCode(a_id, vertexShaderCode, fragmentShaderCode);
+		} else{
+			return &found->second;
+		}
+	}
+
+
+	bool Draw2D::hasShader(const std::string &a_id) {
+		auto found = shaders.find(a_id);
+		return found != shaders.end();
 	}
 
 	Shader* Draw2D::getShader(const std::string &a_id) {
@@ -919,9 +934,6 @@ namespace MV {
 			needShaderRegistration.push_back(a_node);
 		}
 	}
-
-
-
 
 	Framebuffer::Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, const Size<int> &a_size, const Point<int> &a_position) :
 		renderbuffer(a_renderbuffer),

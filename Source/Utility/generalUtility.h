@@ -207,7 +207,9 @@ namespace MV {
 
 	template<typename FT, typename IT>
 	bool floatEqualImplementation(FT lhs, FT rhs, IT maxUlps){
-		require(sizeof(FT) == sizeof(IT), RangeException("Function 'floatEqualImplementation' had an issue!"));
+		auto ftSize = sizeof(FT);
+		auto itSize = sizeof(IT);
+		require(ftSize == itSize, RangeException("Function 'floatEqualImplementation' had an issue! Inequal type sizes: " + std::to_string(ftSize) + " != " + std::to_string(itSize)));
 		IT intDiff = std::abs(*(IT*)&lhs - *(IT*)&rhs);
 		return intDiff <= maxUlps;
 	}

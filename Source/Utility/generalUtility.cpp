@@ -87,7 +87,7 @@ namespace MV {
 
 	std::string guid(std::string a_baseName){
 		static std::map<std::string, int64_t> counters;
-		return a_baseName+std::to_string(counters[a_baseName]++);
+		return a_baseName+'_'+std::to_string(counters[a_baseName]++);
 	}
 	
 	int roundUpPowerOfTwo(int num){

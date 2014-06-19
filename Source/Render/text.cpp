@@ -190,10 +190,6 @@ namespace MV {
 		return textboxScene;
 	}
 
-	void TextBox::draw() {
-		textboxScene->draw();
-	}
-
 	std::shared_ptr<TextCharacter> FontDefinition::getCharacter(UtfChar renderChar) {
 		std::shared_ptr<TextCharacter> &character = cachedGlyphs[renderChar];
 		if(!character){
@@ -298,7 +294,7 @@ namespace MV {
 	}
 
 	std::shared_ptr<FormattedState> FormattedLine::getNewState(const UtfString &a_text, const std::shared_ptr<FormattedState> &a_current){
-		if(a_text.length() > 2){
+		if(a_text.length() >= 2){
 			if(a_text[0] == 'f'){
 				return getFontState(a_text, a_current);
 			} else if(a_text[0] == 'c'){
@@ -339,10 +335,12 @@ namespace MV {
 	}
 
 	void FormattedLine::addCharacters(size_t a_characterIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters){
-		auto insertIndex = std::min(a_characterIndex, characters.size());
-		characters.insert(characters.begin() + insertIndex, a_characters.begin(), a_characters.end());
-		updateFormatAfterAdd(insertIndex, insertIndex + a_characters.size());
-		fixVisuals();
+		if(!a_characters.empty()){
+			auto insertIndex = std::min(a_characterIndex, characters.size());
+			characters.insert(characters.begin() + insertIndex, a_characters.begin(), a_characters.end());
+			updateFormatAfterAdd(insertIndex, insertIndex + a_characters.size());
+			fixVisuals();
+		}
 	}
 
 	void FormattedLine::applyAlignment(){
@@ -362,6 +360,7 @@ namespace MV {
 		if(!characters.empty()){
 			characters[0]->position({0, linePosition});
 			updateLineHeight();
+			bool exceeded = false;
 			for(size_t index = 0; index < characters.size(); ++index){
 				auto characterPosition = (index > 0) ? characters[index - 1]->position().x + characters[index - 1]->characterSize().width : 0;
 				characters[index]->position({characterPosition, linePosition});
@@ -374,10 +373,15 @@ namespace MV {
 						text.lines.push_back(FormattedLine::make(text, text.lines.size()));
 					}
 					text.lines[lineIndex + 1]->addCharacters(0, overflow);
+					exceeded = true;
 					break;
 				}
 			}
-			if(text.justification() != LEFT){
+
+			if(!exceeded && lineIndex+1 < text.lines.size()){
+				MV::PointPrecision widthRemaining = text.textWidth - lineWidth();
+				addCharacters(characters.size(), text.lines[lineIndex + 1]->removeLeadingCharactersForWidth(widthRemaining));
+			}else if(text.justification() != LEFT){
 				applyAlignment();
 			}
 		}
@@ -405,6 +409,50 @@ namespace MV {
 		MV::require(a_index < characters.size(), MV::RangeException("FormattedLine::operator[] supplied invalid index (" + std::to_string(a_index) + " > " + std::to_string(characters.size()) + ")"));
 		return characters[a_index];
 	}
+
+	std::vector<std::shared_ptr<FormattedCharacter>> FormattedLine::removeLeadingCharactersForWidth(float a_width) {
+		std::vector<std::shared_ptr<FormattedCharacter>> result;
+		if(text.wrapping == NONE){
+			return result;
+		}
+
+		for(int i = 0; i < characters.size() && a_width - characters[i]->characterSize().width > 0.0f; ++i){
+			result.push_back(characters[i]);
+			a_width -= characters[i]->characterSize().width;
+		}
+
+		if(text.wrapping == HARD){
+			characters.erase(characters.begin(), characters.begin() + result.size());
+		} else if(text.wrapping == SOFT && !result.empty()){
+			size_t i = result.size() - 1;
+			auto found = std::find_if(result.rbegin(), result.rend(), [&](std::shared_ptr<FormattedCharacter> a_element){
+				return a_element->isSoftBreakCharacter();
+			});
+			result.erase(--(found.base()), result.end());
+			if(!result.empty()){
+				characters.erase(characters.begin(), characters.begin() + result.size());
+			}
+		}
+		fixVisuals();
+		return result;
+	}
+
+	std::vector<std::shared_ptr<FormattedCharacter>> FormattedLine::removeCharacters(size_t a_characterIndex, size_t a_totalToRemove) {
+		if(a_characterIndex > characters.size() || a_totalToRemove == 0){
+			return{};
+		} else if(a_totalToRemove + a_characterIndex > characters.size()){
+			a_totalToRemove = characters.size() - a_characterIndex;
+		}
+		std::vector<std::shared_ptr<FormattedCharacter>> result;
+		for(size_t i = a_characterIndex; i < characters.size() && i < a_characterIndex + a_totalToRemove; ++i){
+			result.push_back(characters[i]);
+		}
+		characters.erase(characters.begin() + a_characterIndex, characters.begin() + a_characterIndex + a_totalToRemove-1);
+		fixVisuals();
+		return result;
+	}
+
+
 
 
 	std::shared_ptr<FormattedLine>& FormattedText::operator[](size_t a_index) {

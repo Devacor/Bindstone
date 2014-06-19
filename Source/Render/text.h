@@ -270,6 +270,9 @@ namespace MV {
 		bool partOfFormat() const{
 			return isPartOfFormat;
 		}
+		bool isSoftBreakCharacter() const{
+			return character->isSoftBreakCharacter();
+		}
 
 		UtfChar textCharacter;
 		std::shared_ptr<TextCharacter> character;
@@ -299,8 +302,10 @@ namespace MV {
 	public:
 		static std::shared_ptr<FormattedLine> make(FormattedText &a_text, size_t a_lineIndex);
 
-		void removeCharacters(size_t a_characterIndex, size_t a_totalToRemove);
+		std::vector<std::shared_ptr<FormattedCharacter>> removeCharacters(size_t a_characterIndex, size_t a_totalToRemove);
 		void addCharacters(size_t a_characterIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters);
+
+		std::vector<std::shared_ptr<FormattedCharacter>> removeLeadingCharactersForWidth(float a_width);
 
 		std::shared_ptr<FormattedCharacter>& operator[](size_t a_index);
 		size_t size() const{
@@ -313,6 +318,11 @@ namespace MV {
 			return lineHeight;
 		}
 
+
+		size_t index(size_t a_newIndex){
+			lineIndex = a_newIndex;
+			return lineIndex;
+		}
 		size_t index() const{
 			return lineIndex;
 		}
@@ -472,7 +482,6 @@ namespace MV {
 		}
 
 		void removeCharacters(size_t a_startIndex, size_t a_count){
-			/*
 			if(a_count == 0){
 				return;
 			}
@@ -482,7 +491,21 @@ namespace MV {
 
 			std::shared_ptr<FormattedLine> lineEnd;
 			size_t lineEndCharacter;
-			std::tie(lineStart, lineStartCharacter) = lineForCharacterIndex(a_startIndex + a_count);*/
+			std::tie(lineEnd, lineEndCharacter) = lineForCharacterIndex(a_startIndex + a_count);
+			
+			if(lineStart->index() == lineEnd->index()){
+				lineStart->removeCharacters(lineStartCharacter, lineEndCharacter - lineStartCharacter);
+
+			} else{
+				if(lineEnd->index() - lineStart->index() > 1){
+					lines.erase(lines.begin() + lineStart->index() + 1, lines.begin() + lineEnd->index());
+					for(size_t i = lineStart->index() + 1; i < lines.size(); ++i){
+						lines[i]->index(i);
+					}
+				}
+				lineEnd->removeCharacters(0, lineEndCharacter);
+				lineStart->removeCharacters(lineStartCharacter, lineStart->size() - lineStartCharacter);
+			}
 		}
 
 		void addCharacters(size_t a_startIndex, const UtfString &a_characters){
@@ -610,9 +633,8 @@ namespace MV {
 		}
 
 		void wrapping(TextWrapMethod a_newWrapMethod){
-			if(a_newWrapMethod != wrapMethod){
-				wrapMethod = a_newWrapMethod;
-				refreshTextBoxContents();
+			if(a_newWrapMethod != formattedText.wrapping){
+				formattedText.wrapping = a_newWrapMethod; //do this better later.
 			}
 		}
 		TextWrapMethod wrapping() const{
@@ -699,7 +721,7 @@ namespace MV {
 
 		std::shared_ptr<Scene::Node> scene();
 
-		void draw();
+		FormattedText formattedText;
 	private:
 		template <class Archive>
 		void serialize(Archive & archive){
@@ -746,7 +768,7 @@ namespace MV {
 		TextJustification textJustification = LEFT;
 		TextWrapMethod wrapMethod = SOFT;
 
-		FormattedText formattedText;
+		
 		UtfString text;
 		size_t cursor;
 		UtfString editText;

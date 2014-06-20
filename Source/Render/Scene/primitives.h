@@ -112,22 +112,15 @@ namespace MV {
 
 			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer);
 			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Size<> &a_size, bool a_center = false);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight, bool a_center = false);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Point<> &a_topLeft, const Point<> &a_bottomRight, bool a_center = false);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Point<> &a_point, const Size<> &a_size, bool a_center = false);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const BoxAABB &a_boxAABB, bool a_center = false);
+			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Size<> &a_size, bool a_center = false);
+			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const BoxAABB &a_boxAABB);
 
 			virtual ~Rectangle(){ }
 
-			void setSize(const Size<> &a_size);
+			std::shared_ptr<Rectangle> setSize(const Size<> &a_size, bool a_center = false);
+			std::shared_ptr<Rectangle> setSize(const Size<> &a_size, const Point<> &a_centerPoint);
 
-			void setTwoCorners(const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight);
-			void setTwoCorners(const Point<> &a_topLeft, const Point<> &a_bottomRight);
-
-			void setTwoCorners(const BoxAABB &a_bounds);
-
-			void setSizeAndCenterPoint(const Point<> &a_centerPoint, const Size<> &a_size);
-			void setSizeAndCornerPoint(const Point<> &a_cornerPoint, const Size<> &a_size);
+			std::shared_ptr<Rectangle> setBounds(const BoxAABB &a_bounds);
 
 			template<typename PointAssign>
 			void applyToCorners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight);

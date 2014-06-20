@@ -54,43 +54,22 @@ namespace MV {
 			return clipped;
 		}
 
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight) {
-			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
+		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const Size<> &a_size, bool a_center) {
+			auto clipped = std::shared_ptr<Rectangle>(new Clipped(a_renderer));
 			a_renderer->registerDefaultShader(clipped);
-			clipped->setTwoCorners(a_topLeft, a_bottomRight);
-			return clipped;
+			return clipped->size(a_size, a_center);
 		}
 
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const Point<> &a_topLeft, const Point<> &a_bottomRight) {
-			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
+		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const Size<> &a_size, const Point<> &a_centerPoint) {
+			auto clipped = std::shared_ptr<Rectangle>(new Clipped(a_renderer));
 			a_renderer->registerDefaultShader(clipped);
-			clipped->setTwoCorners(a_topLeft, a_bottomRight);
-			return clipped;
-		}
-
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const Point<> &a_point, const Size<> &a_size, bool a_center) {
-			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			a_renderer->registerDefaultShader(clipped);
-			if(a_center){
-				clipped->setSizeAndCenterPoint(a_point, a_size);
-			} else{
-				clipped->setSizeAndCornerPoint(a_point, a_size);
-			}
-			return clipped;
-		}
-
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const Size<> &a_size) {
-			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			a_renderer->registerDefaultShader(clipped);
-			clipped->setSize(a_size);
-			return clipped;
+			return clipped->size(a_size, a_centerPoint);
 		}
 
 		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const BoxAABB &a_boxAABB) {
-			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
+			auto clipped = std::shared_ptr<Rectangle>(new Clipped(a_renderer));
 			a_renderer->registerDefaultShader(clipped);
-			clipped->setTwoCorners(a_boxAABB);
-			return clipped;
+			return clipped->bounds(a_boxAABB);
 		}
 
 		void Clipped::drawIgnoringClipping(){

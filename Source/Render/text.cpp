@@ -358,6 +358,7 @@ namespace MV {
 
 	void FormattedLine::fixVisuals(){
 		if(!characters.empty()){
+			linePosition = text.positionForLine(lineIndex);
 			characters[0]->position({0, linePosition});
 			updateLineHeight();
 			bool exceeded = false;
@@ -421,17 +422,27 @@ namespace MV {
 			a_width -= characters[i]->characterSize().width;
 		}
 
-		if(text.wrapping == HARD){
-			characters.erase(characters.begin(), characters.begin() + result.size());
-		} else if(text.wrapping == SOFT && !result.empty()){
+		if(text.wrapping == SOFT && !result.empty()){
 			size_t i = result.size() - 1;
-			auto found = std::find_if(result.rbegin(), result.rend(), [&](std::shared_ptr<FormattedCharacter> a_element){
+			auto foundSoftBreak = std::find_if(result.begin(), result.end(), [&](std::shared_ptr<FormattedCharacter> a_element){
 				return a_element->isSoftBreakCharacter();
 			});
-			result.erase(--(found.base()), result.end());
-			if(!result.empty()){
-				characters.erase(characters.begin(), characters.begin() + result.size());
+			
+			if(foundSoftBreak != result.end()){
+				result.erase(foundSoftBreak, result.end());
+			} else{
+				bool lineCanSoftBreak = std::find_if(characters.begin(), characters.end(), [&](std::shared_ptr<FormattedCharacter> a_element){
+					return a_element->isSoftBreakCharacter();
+				}) != characters.end();
+
+				if(lineCanSoftBreak){
+					result.clear();
+				}
 			}
+		}
+
+		if(!result.empty()){
+			characters.erase(characters.begin(), characters.begin() + result.size());
 		}
 		fixVisuals();
 		return result;
@@ -445,9 +456,10 @@ namespace MV {
 		}
 		std::vector<std::shared_ptr<FormattedCharacter>> result;
 		for(size_t i = a_characterIndex; i < characters.size() && i < a_characterIndex + a_totalToRemove; ++i){
+			characters[i]->removeFromParent();
 			result.push_back(characters[i]);
 		}
-		characters.erase(characters.begin() + a_characterIndex, characters.begin() + a_characterIndex + a_totalToRemove-1);
+		characters.erase(characters.begin() + a_characterIndex, characters.begin() + a_characterIndex + a_totalToRemove);
 		fixVisuals();
 		return result;
 	}
@@ -477,7 +489,8 @@ namespace MV {
 	}
 
 	PointPrecision FormattedText::positionForLine(size_t a_index) {
-		return std::accumulate(lines.begin(), lines.end(), 0.0f, [](PointPrecision a_accumulated, const std::shared_ptr<FormattedLine> &a_line){
+		a_index = std::min(a_index, lines.size());
+		return std::accumulate(lines.begin(), lines.begin()+a_index, 0.0f, [](PointPrecision a_accumulated, const std::shared_ptr<FormattedLine> &a_line){
 			return a_line->height() + a_accumulated;
 		});
 	}

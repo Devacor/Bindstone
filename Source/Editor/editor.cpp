@@ -1,6 +1,7 @@
 #include "editor.h"
 #include "editorControls.h"
 #include "editorPanels.h"
+#include "editorFactories.h"
 
 void sdl_quit(void){
 	SDL_Quit();
@@ -46,6 +47,24 @@ void Editor::initializeWindow(){
 
 	test = MV::Scene::Rectangle::make(&renderer, MV::BoxAABB({10.0f, 10.0f}, {100.0f, 100.0f}), false);
 	test->texture(MV::FileTextureDefinition::make("Assets/Images/dogfox.png")->makeHandle());
+
+	box = std::shared_ptr<MV::TextBox>(new MV::TextBox(&textLibrary, MV::size(110.0f, 77.0f)));
+	//box->wrapping(MV::TextWrapMethod::HARD);
+	box->setText(UTF_CHAR_STR("ABCDE FGHIJKLM NOPQRS TUVWXYZ"));
+	//box->formattedText.removeCharacters(3, 13);
+	/*box->formattedText.addCharacters(0, UTF_CHAR_STR("0"));
+	box->formattedText.addCharacters(2, UTF_CHAR_STR("1"));
+	box->formattedText.addCharacters(4, UTF_CHAR_STR("2"));
+	box->formattedText.removeCharacters(0, 1);
+	box->formattedText.removeCharacters(1, 1);
+	box->formattedText.removeCharacters(2, 1);*/
+	/*box->formattedText.removeCharacters(4, 4);
+	box->formattedText.addCharacters(4, UTF_CHAR_STR("INSERTED"));
+	box->formattedText.removeCharacters(6, 4);
+	box->formattedText.addCharacters(6, UTF_CHAR_STR("[INSERTED]"));*/
+	test->make<MV::Scene::Rectangle>("Background", MV::size(65.0f, 36.0f))->color({.5, .25, 0})->setSortDepth(-100);
+
+	//test->color({1, 1, 1});
 }
 
 void Editor::handleInput(){
@@ -65,7 +84,7 @@ void Editor::handleInput(){
 
 					break;
 				case SDLK_LEFT:
-
+					box->formattedText.addCharacters(6, UTF_CHAR_STR("+"));
 					break;
 				case SDLK_DOWN:
 
@@ -74,7 +93,7 @@ void Editor::handleInput(){
 
 					break;
 				case SDLK_RIGHT:
-
+					box->formattedText.removeCharacters(6, 1);
 					break;
 				}
 				break;
@@ -83,14 +102,16 @@ void Editor::handleInput(){
 	}
 	mouse.update();
 	controlPanel.handleInput(event);
-	//test->color({1, 1, 1});
+	//testButton = makeButton(controls, textLibrary, mouse, MV::size(110.0f, 77.0f), UTF_CHAR_STR("ABC DEF GHI JKL MNO PQR STU VWX YZ"));
 }
 
 void Editor::render(){
 	renderer.clearScreen();
-	//test->draw();
-	scene->draw();
-	controls->draw();
+	//scene->draw();
+	//controls->draw();
+	renderer.defaultBlendFunction();
+	test->draw();
+	box->scene()->draw();
 	//textBox.scene()->draw();
 	renderer.updateScreen();
 }

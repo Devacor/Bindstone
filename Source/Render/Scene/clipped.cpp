@@ -92,5 +92,36 @@ namespace MV {
 			clipped->setTwoCorners(a_boxAABB);
 			return clipped;
 		}
+
+		void Clipped::drawIgnoringClipping(){
+			if(isVisible){
+				pushMatrix();
+				SCOPE_EXIT{popMatrix(); };
+
+				if(drawSorted){
+					sortedRender();
+				} else{
+					unsortedRender();
+				}
+			}
+		}
+
+		void Clipped::drawIgnoringClipping(const Point<> &a_positionOverride) {
+			if(isVisible){
+				auto oldPosition = position();
+				position(a_positionOverride);
+				SCOPE_EXIT{position(oldPosition);};
+
+				pushMatrix();
+				SCOPE_EXIT{popMatrix(); };
+
+				if(drawSorted){
+					sortedRender();
+				} else{
+					unsortedRender();
+				}
+			}
+		}
+
 	}
 }

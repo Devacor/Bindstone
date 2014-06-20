@@ -157,11 +157,11 @@ namespace MV {
 			BoxAABB localFromWorld(BoxAABB a_world);
 
 			//For command type alerts
-			Node* parent(Node* a_parentItem); //returns Node* so that it is safe to call this method in a constructor
+			std::shared_ptr<Node> parent(Node* a_parentItem); //returns Node* so that it is safe to call this method in a constructor
 			std::shared_ptr<Node> parent() const;
 
-			PointPrecision scale(PointPrecision a_newScale);
-			AxisMagnitude scale(const AxisMagnitude &a_scaleValue);
+			std::shared_ptr<Node> scale(PointPrecision a_newScale);
+			std::shared_ptr<Node> scale(const AxisMagnitude &a_scaleValue);
 			AxisMagnitude incrementScale(PointPrecision a_newScale);
 			AxisMagnitude incrementScale(const AxisMagnitude &a_scaleValue);
 			AxisMagnitude scale() const;
@@ -171,8 +171,8 @@ namespace MV {
 			PointPrecision incrementRotation(PointPrecision a_zRotation);
 			AxisAngles incrementRotation(const AxisAngles &a_rotation);
 
-			PointPrecision rotation(PointPrecision a_zRotation);
-			AxisAngles rotation(const AxisAngles &a_rotation);
+			std::shared_ptr<Node> rotation(PointPrecision a_zRotation);
+			std::shared_ptr<Node> rotation(const AxisAngles &a_rotation);
 			AxisAngles rotation() const;
 
 			Point<> rotationOrigin(const Point<> &a_origin);
@@ -180,28 +180,31 @@ namespace MV {
 
 			//By default the sort depth is calculated by averaging the z values of all points
 			//setSortDepth manually overrides this calculation.  unsetSortDepth removes this override.
-			void setSortDepth(PointPrecision a_newDepth){
+			std::shared_ptr<Node> setSortDepth(PointPrecision a_newDepth){
 				auto notifyOnChanged = makeScopedDepthChangeNote(this, false);
 				depthOverride = true;
 				overrideDepthValue = a_newDepth;
+				return shared_from_this();
 			}
-			void unsetSortDepth(){
+			std::shared_ptr<Node> unsetSortDepth(){
 				auto notifyOnChanged = makeScopedDepthChangeNote(this, false);
 				depthOverride = false;
+				return shared_from_this();
 			}
 			//true to render the sorted list, false to render unordered.  Default behavior is true.
-			void sortScene(bool a_depthMatters);
+			std::shared_ptr<Node> sortScene(bool a_depthMatters);
 
-			Point<> position(const Point<> &a_rhs);
+			std::shared_ptr<Node> position(const Point<> &a_rhs);
 			Point<> position() const;
 
 			Point<> translate(const Point<> &a_translation){
-				return position(translateTo + a_translation);
+				position(translateTo + a_translation);
+				return position();
 			}
 
-			virtual Color color(const Color &a_newColor);
+			virtual std::shared_ptr<Node> color(const Color &a_newColor);
 			virtual Color color() const;
-			std::shared_ptr<TextureHandle> texture(std::shared_ptr<TextureHandle> a_texture);
+			std::shared_ptr<Node> texture(std::shared_ptr<TextureHandle> a_texture);
 			std::shared_ptr<TextureHandle> texture() const;
 			void clearTexture();
 

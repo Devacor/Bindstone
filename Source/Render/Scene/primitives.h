@@ -112,7 +112,7 @@ namespace MV {
 
 			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer);
 			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Size<> &a_size, bool a_center = false);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Size<> &a_size, bool a_center = false);
+			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Size<> &a_size, const Point<>& a_centerPoint);
 			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const BoxAABB &a_boxAABB);
 
 			virtual ~Rectangle(){ }

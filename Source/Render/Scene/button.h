@@ -178,16 +178,13 @@ namespace MV {
 			std::shared_ptr<Node> activeScene() const;
 			std::shared_ptr<Node> idleScene() const;
 
-			std::shared_ptr<Node> activeScene(std::shared_ptr<Node> a_mouseUp);
-			std::shared_ptr<Node> idleScene(std::shared_ptr<Node> a_mouseDown);
+			std::shared_ptr<Button> activeScene(std::shared_ptr<Node> a_mouseUp);
+			std::shared_ptr<Button> idleScene(std::shared_ptr<Node> a_mouseDown);
 
-			void setClickableSize(const Size<> &a_size);
-
-			void setClickableTwoCorners(const Point<> &a_topLeft, const Point<> &a_bottomRight);
-			void setClickableTwoCorners(const BoxAABB &a_bounds);
-
-			void setClickableSizeAndCenterPoint(const Point<> &a_centerPoint, const Size<> &a_size);
-			void setClickableSizeAndCornerPoint(const Point<> &a_cornerPoint, const Size<> &a_size);
+			std::shared_ptr<Button> clickSize(const Size<> &a_size, bool a_center = false);
+			std::shared_ptr<Button> clickSize(const Size<> &a_size, const Point<>& a_centerPoint);
+			
+			std::shared_ptr<Button> bounds(const BoxAABB &a_boxAABB);
 
 			virtual BoxAABB worldAABBImplementation(bool a_includeChildren, bool a_nestedCall);
 			virtual BoxAABB screenAABBImplementation(bool a_includeChildren, bool a_nestedCall);

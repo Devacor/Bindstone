@@ -239,11 +239,21 @@ namespace MV {
 	\**************************/
 
 
+	//I kept forgetting these names, so I just added pointToSize + pointFromSize doing the same thing.
 	template <class T>
 	Point<T> pointFromSize(const Size<T>& a_size){
 		return Point<T>{a_size.width, a_size.height, a_size.depth};
 	}
+	template <class T>
+	Size<T> pointToSize(const Point<T>& a_point){
+		return Size<T>{a_point.x, a_point.y, a_point.z};
+	}
 
+	//Likewise here, we've got two ways of saying it for convenience.
+	template <class T>
+	Point<T> sizeToPoint(const Size<T>& a_size){
+		return Point<T>{a_size.width, a_size.height, a_size.depth};
+	}
 	template <class T>
 	Size<T> sizeFromPoint(const Point<T>& a_point){
 		return Size<T>{a_point.x, a_point.y, a_point.z};

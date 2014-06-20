@@ -729,7 +729,7 @@ namespace MV {
         //glShadeModel(GL_SMOOTH);
 		
 
-		glEnable (GL_BLEND);
+		glEnable(GL_BLEND);
 		
 		glDisable(GL_CULL_FACE);
 		
@@ -831,7 +831,7 @@ namespace MV {
 	}
 
 	void Draw2D::defaultBlendFunction() {
-		setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 	}
 
 	void Draw2D::validateShaderStatus(GLuint a_id, bool a_isShader) {

@@ -274,6 +274,12 @@ namespace MV {
 			return character->isSoftBreakCharacter();
 		}
 
+		void removeFromParent(){
+			if(shape){
+				shape->removeFromParent();
+			}
+		}
+
 		UtfChar textCharacter;
 		std::shared_ptr<TextCharacter> character;
 		std::shared_ptr<Scene::Rectangle> shape;
@@ -300,6 +306,12 @@ namespace MV {
 	struct FormattedCharacter;
 	class FormattedLine : public std::enable_shared_from_this<FormattedLine> {
 	public:
+		~FormattedLine(){
+			for(auto& character : characters){
+				character->removeFromParent();
+			}
+		}
+
 		static std::shared_ptr<FormattedLine> make(FormattedText &a_text, size_t a_lineIndex);
 
 		std::vector<std::shared_ptr<FormattedCharacter>> removeCharacters(size_t a_characterIndex, size_t a_totalToRemove);

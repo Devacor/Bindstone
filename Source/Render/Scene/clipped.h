@@ -25,6 +25,9 @@ namespace MV {
 
 			void refreshTexture(bool a_forceRefresh = false);
 
+			//Useful for debugging
+			void drawIgnoringClipping();
+			void drawIgnoringClipping(const Point<> &a_positionOverride);
 		protected:
 			Clipped(Draw2D *a_renderer):
 				Rectangle(a_renderer),

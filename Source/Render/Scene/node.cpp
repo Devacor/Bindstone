@@ -10,13 +10,13 @@ namespace MV {
 		| ---------Node---------- |
 		\*************************/
 
-		Color Node::color(const Color &a_newColor){
+		std::shared_ptr<Node> Node::color(const Color &a_newColor){
 			int elements = (int)points.size();
 			for(int i = 0; i < elements; i++){
 				points[i] = a_newColor;
 			}
 			alertParent(VisualChange::make(shared_from_this()));
-			return a_newColor;
+			return shared_from_this();
 		}
 
 		Color Node::color() const{
@@ -27,7 +27,7 @@ namespace MV {
 			return std::accumulate(colorsToAverage.begin(), colorsToAverage.end(), Color(0, 0, 0, 0)) / static_cast<PointPrecision>(colorsToAverage.size());
 		}
 
-		std::shared_ptr<TextureHandle> Node::texture(std::shared_ptr<TextureHandle> a_texture){
+		std::shared_ptr<Node> Node::texture(std::shared_ptr<TextureHandle> a_texture){
 			if(ourTexture && textureSizeSignal){
 				ourTexture->sizeObserver.disconnect(textureSizeSignal);
 			}
@@ -40,7 +40,7 @@ namespace MV {
 				ourTexture->sizeObserver.connect(textureSizeSignal);
 			}
 			updateTextureCoordinates();
-			return a_texture;
+			return shared_from_this();
 		}
 
 		std::shared_ptr<TextureHandle> Node::texture() const{
@@ -152,48 +152,48 @@ namespace MV {
 			return rotateTo;
 		}
 
-		PointPrecision Node::rotation(PointPrecision a_zRotation) {
+		std::shared_ptr<Node> Node::rotation(PointPrecision a_zRotation) {
 			if(!equals(a_zRotation, 0.0f)){
 				rotateTo.z = a_zRotation;
 				alertParent(VisualChange::make(shared_from_this()));
 			}
-			return a_zRotation;
+			return shared_from_this();
 		}
 
-		MV::AxisAngles Node::rotation(const AxisAngles &a_rotation) {
+		std::shared_ptr<Node> Node::rotation(const AxisAngles &a_rotation) {
 			if(a_rotation != AxisAngles()){
 				rotateTo = a_rotation;
 				alertParent(VisualChange::make(shared_from_this()));
 			}
-			return a_rotation;
+			return shared_from_this();
 		}
 
 		Point<> Node::position() const{
 			return translateTo;
 		}
 
-		Point<> Node::position(const Point<> &a_rhs){
+		std::shared_ptr<Node> Node::position(const Point<> &a_rhs){
 			if(translateTo != a_rhs){
 				translateTo = a_rhs;
 				alertParent(VisualChange::make(shared_from_this()));
 			}
-			return translateTo;
+			return shared_from_this();
 		}
 
 		AxisMagnitude Node::scale() const{
 			return scaleTo;
 		}
-		AxisMagnitude Node::scale(const AxisMagnitude &a_rhs){
+		std::shared_ptr<Node> Node::scale(const AxisMagnitude &a_rhs){
 			if(scaleTo != a_rhs){
 				scaleTo = a_rhs;
 				alertParent(VisualChange::make(shared_from_this()));
 			}
-			return scaleTo;
+			return shared_from_this();
 		}
 
-		PointPrecision Node::scale(PointPrecision a_newScale){
+		std::shared_ptr<Node> Node::scale(PointPrecision a_newScale){
 			scale(Point<>(a_newScale, a_newScale, a_newScale));
-			return a_newScale;
+			return shared_from_this();
 		}
 
 		AxisMagnitude Node::incrementScale(PointPrecision a_newScale){
@@ -206,13 +206,9 @@ namespace MV {
 			return scaleTo;
 		}
 
-		Node* Node::parent(Node* a_parentItem){
+		std::shared_ptr<Node> Node::parent(Node* a_parentItem){
 			myParent = a_parentItem;
-			if(myParent == nullptr){
-				return nullptr;
-			}else{
-				return myParent;
-			}
+			return shared_from_this();
 		}
 
 		std::shared_ptr<Node> Node::parent() const{
@@ -667,8 +663,9 @@ namespace MV {
 			});
 		}
 
-		void Node::sortScene(bool a_depthMatters){
+		std::shared_ptr<Node> Node::sortScene(bool a_depthMatters){
 			drawSorted = a_depthMatters;
+			return shared_from_this();
 		}
 
 		Node::Node(Draw2D* a_renderer):

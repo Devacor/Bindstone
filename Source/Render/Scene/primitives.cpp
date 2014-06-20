@@ -63,62 +63,28 @@ namespace MV {
 		| -------Rectangle------- |
 		\*************************/
 
-		void Rectangle::setTwoCorners(const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight){
+		std::shared_ptr<Rectangle> Rectangle::bounds(const BoxAABB &a_bounds){
 			auto notifyOnChanged = makeScopedDepthChangeNote(this);
-
-			DrawPoint topLeft = a_topLeft, bottomRight = a_bottomRight;
-
-			topLeft.x = std::min(a_topLeft.x, a_bottomRight.x);
-			topLeft.y = std::min(a_topLeft.y, a_bottomRight.y);
-
-			bottomRight.x = std::max(a_topLeft.x, a_bottomRight.x);
-			bottomRight.y = std::max(a_topLeft.y, a_bottomRight.y);
-
-			points[0] = topLeft;
-			points[1].x = topLeft.x;	points[1].y = bottomRight.y;	points[1].z = (equals(bottomRight.z, 0.0f) && equals(topLeft.z, 0.0f)) ? 0.0f : (bottomRight.z + topLeft.z) / 2.0f;
-			points[2] = bottomRight;
-			points[3].x = bottomRight.x;	points[3].y = topLeft.y;	points[3].z = points[1].z;
-		}
-
-		void Rectangle::setTwoCorners(const Point<> &a_topLeft, const Point<> &a_bottomRight){
-			auto notifyOnChanged = makeScopedDepthChangeNote(this);
-
-			Point<> topLeft = a_topLeft, bottomRight = a_bottomRight;
 			
-			topLeft.x = std::min(a_topLeft.x, a_bottomRight.x);
-			topLeft.y = std::min(a_topLeft.y, a_bottomRight.y);
-
-			bottomRight.x = std::max(a_topLeft.x, a_bottomRight.x);
-			bottomRight.y = std::max(a_topLeft.y, a_bottomRight.y);
-
-			topLeft.z = a_topLeft.z; bottomRight.z = a_bottomRight.z;
-
-			points[0] = topLeft;
-			points[1].x = topLeft.x;	points[1].y = bottomRight.y;	points[1].z = (equals(bottomRight.z, 0.0f) && equals(topLeft.z, 0.0f))? 0.0f :(bottomRight.z + topLeft.z) / 2.0f;
-			points[2] = bottomRight;
-			points[3].x = bottomRight.x;	points[3].y = topLeft.y;	points[3].z = points[1].z;
+			points[0] = a_bounds.minPoint;
+			points[1].x = a_bounds.minPoint.x;	points[1].y = a_bounds.maxPoint.y;	points[1].z = (equals(a_bounds.maxPoint.z, 0.0f) && equals(a_bounds.minPoint.z, 0.0f))? 0.0f :(a_bounds.maxPoint.z + a_bounds.minPoint.z) / 2.0f;
+			points[2] = a_bounds.maxPoint;
+			points[3].x = a_bounds.maxPoint.x;	points[3].y = a_bounds.minPoint.y;	points[3].z = points[1].z;
+			return shared_from_this();
 		}
 
-		void Rectangle::setTwoCorners(const BoxAABB &a_bounds){
-			setTwoCorners(a_bounds.minPoint, a_bounds.maxPoint);
+		std::shared_ptr<Rectangle> Rectangle::size(const Size<> &a_size, const Point<> &a_centerPoint){
+			Point<> topLeft;
+			Point<> bottomRight = sizeToPoint(a_size);
+			
+			topLeft-=a_centerPoint;
+			bottomRight-=a_centerPoint;
+			
+			return bounds({topLeft, bottomRight});
 		}
-
-		void Rectangle::setSizeAndCenterPoint(const Point<> &a_centerPoint, const Size<> &a_size){
-			PointPrecision halfWidth = (equals(a_size.width, 0.0f)) ? 0.0f : a_size.width / 2.0f, halfHeight = (equals(a_size.height, 0.0f)) ? 0.0f : a_size.height / 2.0f;
-
-			Point<> topLeft(-halfWidth, -halfHeight, a_centerPoint.z);
-			Point<> bottomRight(halfWidth, halfHeight, a_centerPoint.z);
-
-			setTwoCorners(topLeft, bottomRight);
-			position(a_centerPoint);
-		}
-
-		void Rectangle::setSizeAndCornerPoint(const Point<> &a_topLeft, const Size<> &a_size){
-			Point<> bottomRight(pointFromSize(a_size));
-			bottomRight.z = a_topLeft.z;
-
-			setTwoCorners({0.0f, 0.0f, a_topLeft.z}, bottomRight);
-			position(a_topLeft);
+		
+		std::shared_ptr<Rectangle> Rectangle::size(const Size<> &a_size, bool a_center) {
+			return size(a_size, (a_center)?size(a_size.width/2.0f, a_size.height/2.0f):size(0.0f, 0.0f));
 		}
 
 		void Rectangle::clearTextureCoordinates(){
@@ -151,70 +117,22 @@ namespace MV {
 			return rectangle;
 		}
 
-		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const DrawPoint &a_topLeft, const DrawPoint &a_bottomRight, bool a_center) {
-			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
-			a_renderer->registerDefaultShader(rectangle);
-			rectangle->setTwoCorners(a_topLeft, a_bottomRight);
-			if(a_center){
-				rectangle->normalizeToCenter();
-			}else{
-				rectangle->normalizeToTopLeft();
-			}
-			return rectangle;
-		}
-
-		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Point<> &a_topLeft, const Point<> &a_bottomRight, bool a_center) {
-			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
-			a_renderer->registerDefaultShader(rectangle);
-			rectangle->setTwoCorners(a_topLeft, a_bottomRight);
-			if(a_center){
-				rectangle->normalizeToCenter();
-			} else{
-				rectangle->normalizeToTopLeft();
-			}
-			return rectangle;
-		}
-
-		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Point<> &a_point, const Size<> &a_size, bool a_center) {
-			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
-			a_renderer->registerDefaultShader(rectangle);
-			if(a_center){
-				rectangle->setSizeAndCenterPoint(a_point, a_size);
-			} else{
-				rectangle->setSizeAndCornerPoint(a_point, a_size);
-			}
-			return rectangle;
-		}
-
 		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Size<> &a_size, bool a_center) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
 			a_renderer->registerDefaultShader(rectangle);
-			rectangle->setSize(a_size);
-			if(a_center){
-				rectangle->normalizeToCenter();
-			} else{
-				rectangle->normalizeToTopLeft();
-			}
-			return rectangle;
+			return rectangle->size(a_size, a_center);
 		}
 
-		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const BoxAABB &a_boxAABB, bool a_center) {
+		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Size<> &a_size, const Point<> &a_centerPoint) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
 			a_renderer->registerDefaultShader(rectangle);
-			rectangle->setTwoCorners(a_boxAABB);
-			if(a_center){
-				rectangle->normalizeToCenter();
-			} else{
-				rectangle->normalizeToTopLeft();
-			}
-			return rectangle;
+			return rectangle->size(a_size, a_centerPoint);
 		}
 
-		void Rectangle::setSize(const Size<> &a_size) {
-			points[2] = points[0] + static_cast<DrawPoint>(pointFromSize(a_size));
-			points[1].y = points[2].y;
-			points[3].x = points[2].x;
-			alertParent(VisualChange::make(shared_from_this()));
+		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const BoxAABB &a_boxAABB) {
+			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			a_renderer->registerDefaultShader(rectangle);
+			return rectangle->bounds(a_boxAABB);
 		}
 
 	}

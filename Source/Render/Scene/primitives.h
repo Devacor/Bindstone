@@ -117,10 +117,10 @@ namespace MV {
 
 			virtual ~Rectangle(){ }
 
-			std::shared_ptr<Rectangle> setSize(const Size<> &a_size, bool a_center = false);
-			std::shared_ptr<Rectangle> setSize(const Size<> &a_size, const Point<> &a_centerPoint);
+			std::shared_ptr<Rectangle> size(const Size<> &a_size, bool a_center = false);
+			std::shared_ptr<Rectangle> size(const Size<> &a_size, const Point<> &a_centerPoint);
 
-			std::shared_ptr<Rectangle> setBounds(const BoxAABB &a_bounds);
+			std::shared_ptr<Rectangle> bounds(const BoxAABB &a_bounds);
 
 			template<typename PointAssign>
 			void applyToCorners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight);

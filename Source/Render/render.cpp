@@ -282,7 +282,7 @@ namespace MV {
 
 	void glExtensionFramebufferObject::startUsingFramebuffer(std::shared_ptr<Framebuffer> a_framebuffer, bool a_push){
 		savedClearColor = renderer->backgroundColor();
-		renderer->backgroundColor({0.0, 0.0, 0.0, 0.0});
+		renderer->backgroundColor({0, 0, 0, 0});
 
 		require(initialized, ResourceException("StartUsingFramebuffer failed because the extension could not be loaded"));
 		if(a_push){
@@ -831,7 +831,6 @@ namespace MV {
 	}
 
 	void Draw2D::defaultBlendFunction() {
-		//setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 		setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	}
 

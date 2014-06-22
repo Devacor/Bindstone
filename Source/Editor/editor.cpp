@@ -63,7 +63,7 @@ void Editor::initializeWindow(){
 	box->formattedText.addCharacters(4, UTF_CHAR_STR("INSERTED"));
 	box->formattedText.removeCharacters(6, 4);
 	box->formattedText.addCharacters(6, UTF_CHAR_STR("[INSERTED]"));*/
-	renderer.backgroundColor({0, 0, 0, 0});
+
 	box->scene()->make<MV::Scene::Rectangle>(MV::size(65.0f, 36.0f))->color({0, 0, 1, .5})->position({80.0f, 10.0f})->sortDepth(100);
 	box->scene()->make<MV::Scene::Rectangle>(MV::size(65.0f, 36.0f))->color({1, 0, 0, .25})->position({80.0f, 40.0f})->sortDepth(101);
 	box->scene()->make<MV::Scene::Rectangle>(MV::size(65.0f, 36.0f))->color({0, .75, 0, .75})->position({80.0f, 60.0f})->sortDepth(102);

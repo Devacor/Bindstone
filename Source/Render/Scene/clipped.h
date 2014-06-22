@@ -13,6 +13,7 @@ namespace MV {
 			friend Node;
 		public:
 			SCENE_MAKE_FACTORY_METHODS(Clipped)
+			RECTANGLE_OVERRIDES(Clipped)
 
 			static std::shared_ptr<Clipped> make(Draw2D* a_renderer);
 			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const Size<> &a_size, bool a_center = false);
@@ -20,7 +21,7 @@ namespace MV {
 			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const BoxAABB &a_boxAABB);
 
 			virtual ~Clipped(){}
-
+			
 			void refreshTexture(bool a_forceRefresh = false);
 
 			//Useful for debugging

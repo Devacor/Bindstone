@@ -104,6 +104,11 @@ namespace MV {
 			points[1] = a_endPoint;
 		}
 
+#define RECTANGLE_OVERRIDES(T) \
+	std::shared_ptr<T> size(const Size<> &a_size, bool a_center = false){ return std::static_pointer_cast<T>(Rectangle::size(a_size, a_center)); }\
+	std::shared_ptr<T> size(const Size<> &a_size, const Point<> &a_centerPoint){ return std::static_pointer_cast<T>(Rectangle::size(a_size, a_centerPoint)); }\
+	std::shared_ptr<T> bounds(const BoxAABB &a_bounds){ return std::static_pointer_cast<T>(Rectangle::bounds(a_bounds)); }
+
 		class Rectangle : public Node{
 			friend cereal::access;
 			friend Node;

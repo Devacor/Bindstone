@@ -252,7 +252,7 @@ namespace MV {
 		void applyState(const std::shared_ptr<FormattedState> &a_state){
 			state = a_state;
 			character = state->font->getCharacter(textCharacter);
-			shape->setSize(castSize<PointPrecision>(character->characterSize()));
+			shape->size(castSize<PointPrecision>(character->characterSize()));
 			shape->texture(character->texture());
 			shape->color(state->color);
 		}
@@ -296,9 +296,9 @@ namespace MV {
 			character(a_state->font->getCharacter(a_character)){
 
 			shape = parent->make<Scene::Rectangle>(castSize<PointPrecision>(character->characterSize()));
-			shape->setSize(castSize<PointPrecision>(character->characterSize()));
-			shape->texture(character->texture());
-			shape->color(state->color);
+
+			shape->texture(character->texture())->
+				color(state->color);
 		}
 	};
 

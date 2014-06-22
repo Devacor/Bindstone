@@ -66,6 +66,8 @@ namespace MV {
 	}
 	class Draw2D;
 
+	extern const std::string DEFAULT_ID;
+
 	#if SDL_BYTEORDER == SDL_BIG_ENDIAN
 	  const Uint32 SDL_RMASK = 0xff000000;
 	  const Uint32 SDL_GMASK = 0x00ff0000;
@@ -379,7 +381,7 @@ namespace MV {
 		Shader* defaultShader(GLuint a_newId);
 		Shader* defaultShader(const std::string &a_id);
 
-		void registerDefaultShader(std::shared_ptr<Scene::Node> a_node);
+		void registerShader(std::shared_ptr<Scene::Node> a_node);
 
 		void checkGlError(std::string a_location = "[not supplied location]"){
 			GLenum error = glGetError();

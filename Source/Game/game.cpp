@@ -37,7 +37,7 @@ Game::Game() :
 	MV::BoxAABB worldAABB = pattern->screenAABB();
 	MV::BoxAABB screenAABB = pattern->worldAABB();
 
-	testShape->setTwoCorners(worldAABB);
+	testShape->bounds(worldAABB);
 
 	std::cout << "testShapeWorldTest: " << testShape->worldAABB() << std::endl;
 	hookUpInput();
@@ -83,22 +83,22 @@ bool Game::update(double dt) {
 	}
 	auto pattern = mainScene->get<MV::Scene::Node>("container")->get<MV::Scene::Rectangle>("pattern");
 
-	mainScene->get("clipped")->setSortDepth(0);
+	mainScene->get("clipped")->sortDepth(0);
 
 	auto testItem = mainScene->make<MV::Scene::Rectangle>("testThing");
 	std::vector<MV::Point<>> points = {mainScene->get("clipped")->getWorldAABB().minPoint, mainScene->get("clipped")->getWorldAABB().maxPoint};
 	points = testItem->localFromWorld(points);
-	testItem->setTwoCorners(points[0], points[1]);
+	testItem->bounds({points[0], points[1]});
 	testItem->setColor(MV::Color(1.0, 0.0, 0.0, .25));
-	testItem->setSortDepth(-100);
+	testItem->sortDepth(-100);
 
 	auto testItem2 = mainScene->make<MV::Scene::Rectangle>("testThing2");
 	std::vector<MV::Point<>> points2 = {mainScene->get("clipped")->get("catapult")->get("arm")->getWorldAABB().minPoint, mainScene->get("clipped")->get("catapult")->get("arm")->getWorldAABB().maxPoint};
 	points2 = testItem2->localFromWorld(points2);
-	testItem2->setTwoCorners(points2[0], points2[1]);
+	testItem2->bounds({points2[0], points2[1]});
 
 	testItem2->setColor(MV::Color(0.0, 0.0, 1.0, .5));
-	testItem2->setSortDepth(101);
+	testItem2->sortDepth(101);
 	
 	*/
 	//*/
@@ -111,7 +111,7 @@ bool Game::update(double dt) {
 
 	screenAABB.minPoint = MV::castPoint<PointPrecision>(renderer.screenFromWorld(screenAABB.minPoint));
 	screenAABB.maxPoint = MV::castPoint<PointPrecision>(renderer.screenFromWorld(screenAABB.maxPoint));
-	testShape->setTwoCorners(renderer.worldFromScreen(MV::Point<int>(mouse.position.x - 5, mouse.position.y - 5)), renderer.worldFromScreen(mouse.position)); 
+	testShape->bounds({renderer.worldFromScreen(MV::Point<int>(mouse.position.x - 5, mouse.position.y - 5)), renderer.worldFromScreen(mouse.position)}); 
 	//std::cout << std::endl << pattern->localFromWorld(renderer.worldFromScreen(mouse.position));
 	if(localAABB.pointContained(pattern->localFromWorld(renderer.worldFromScreen(mouse.position)))){
 		pattern->clearTexture();
@@ -180,49 +180,49 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 
 	auto platformTexture = textures.getFileTexture("Assets/Images/platform.png");
 	auto textureHandle = platformTexture->makeHandle();
-	auto shape = catapaultScene->make<MV::Scene::Rectangle>("base", MV::Point<>(0, 0), MV::castSize<MV::PointPrecision>(platformTexture->size()));
+	auto shape = catapaultScene->make<MV::Scene::Rectangle>("base", MV::castSize<MV::PointPrecision>(platformTexture->size()));
 	//auto currentTexture = textures.getMainTexture("base"); TEXTURE
 	shape->texture(textureHandle);
 	std::cout << "PT: " << platformTexture->size() << std::endl;
-	shape->setSortDepth(4);
+	shape->sortDepth(4);
 	
-	armScene = catapaultScene->make<MV::Scene::Clickable>("clickArm", &mouse, MV::Point<>(), MV::Size<>(60, 60), false);
+	armScene = catapaultScene->make<MV::Scene::Clickable>("clickArm", &mouse, MV::Size<>(60, 60));
 	armScene->ignoreChildrenForHitDetection();
 	armScene->position(MV::Point<>(0, -4));
 
 	shape = armScene->make<MV::Scene::Rectangle>("arm");
 	auto armTexture = textures.getFileTexture("Assets/Images/spatula.png");
 	shape->texture(armTexture->makeHandle());
-	shape->setSizeAndCornerPoint(MV::Point<>(0, 0), MV::castSize<MV::PointPrecision>(armTexture->size()));
+	shape->size(MV::castSize<MV::PointPrecision>(armTexture->size()));
 	std::cout << "AT: " << armTexture->size() << std::endl;
-	shape->setSortDepth(2);
+	shape->sortDepth(2);
 
 	//yum, hard coding yay
 	armScene->rotationOrigin(MV::Point<>(static_cast<MV::PointPrecision>(armTexture->size().width) - 62, 25));
 
-	armScene->setSortDepth(2);
+	armScene->sortDepth(2);
 
 	shape = armScene->make<MV::Scene::Rectangle>("rock");
 	auto rockTexture = textures.getFileTexture("Assets/Images/rock.png");
 	shape->texture(rockTexture->makeHandle());
 	//shape->setSizeAndCornerPoint(MV::Point<>(7, -90), rockTexture->size());
-	shape->setSizeAndCornerPoint(MV::Point<>(0.0f, 0.0f), MV::castSize<MV::PointPrecision>(rockTexture->size()));
+	shape->size(MV::castSize<MV::PointPrecision>(rockTexture->size()));
 	shape->position(MV::Point<>(70, -90));
 
 	shape = armScene->make<MV::Scene::Rectangle>("rock2");
 	shape->texture(rockTexture->makeHandle());
-	shape->setSizeAndCornerPoint(MV::Point<>(70.0f, -90.0f), MV::castSize<MV::PointPrecision>(rockTexture->size()));
+	shape->size(MV::castSize<MV::PointPrecision>(rockTexture->size()));
 	//shape->setSizeAndCornerPoint(MV::Point<>(0, 0), rockTexture->size());
 	shape->position(MV::Point<>(0, 0));
 	std::cout << "RT: " << rockTexture->size() << std::endl;
-	shape->setSortDepth(1);
+	shape->sortDepth(1);
 
 	shape = catapaultScene->make<MV::Scene::Rectangle>("joint");
 	auto jointTexture = textures.getFileTexture("Assets/Images/joint.png");
 	shape->texture(jointTexture->makeHandle());
-	shape->setSizeAndCornerPoint(MV::Point<>(0, 0), MV::castSize<MV::PointPrecision>(jointTexture->size()));
+	shape->size(MV::castSize<MV::PointPrecision>(jointTexture->size()));
 	std::cout << "JT: " << jointTexture->size() << std::endl;
-	shape->setSortDepth(3);
+	shape->sortDepth(3);
 
 	//catapaultScene->scale(.5);*/
 	return catapaultScene;

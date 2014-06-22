@@ -82,7 +82,6 @@ private:
 		}
 
 		auto test = mainScene->get("clipped");
-		test->shared_from_this_test();
 
 		if(std::floor(watch.check()) > lastSecond){
 			lastSecond = std::floor(watch.check());

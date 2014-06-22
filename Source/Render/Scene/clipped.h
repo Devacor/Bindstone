@@ -12,7 +12,7 @@ namespace MV {
 			friend cereal::access;
 			friend Node;
 		public:
-			SCENE_MAKE_FACTORY_METHODS
+			SCENE_MAKE_FACTORY_METHODS(Clipped)
 
 			static std::shared_ptr<Clipped> make(Draw2D* a_renderer);
 			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const Size<> &a_size, bool a_center = false);
@@ -30,6 +30,7 @@ namespace MV {
 			Clipped(Draw2D *a_renderer):
 				Rectangle(a_renderer),
 				dirtyTexture(true){
+				shaderProgramId = "unblend";
 			}
 
 		private:

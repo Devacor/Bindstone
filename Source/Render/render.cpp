@@ -151,7 +151,7 @@ namespace MESA {
 }
 
 namespace MV {
-
+	const std::string DEFAULT_ID = "default";
 	bool Draw2D::firstInitializationSDL = true;
 	bool Draw2D::firstInitializationOpenGL = true;
 
@@ -831,7 +831,8 @@ namespace MV {
 	}
 
 	void Draw2D::defaultBlendFunction() {
-		setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+		//setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+		setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	}
 
 	void Draw2D::validateShaderStatus(GLuint a_id, bool a_isShader) {
@@ -875,16 +876,24 @@ namespace MV {
 
 		bool makeDefault = shaders.empty();
 
-		shaders.emplace(std::make_pair(a_id, Shader(a_id, programId)));
+		auto emplaceResult = shaders.emplace(std::make_pair(a_id, Shader(a_id, programId)));
+		MV::require(emplaceResult.second, MV::ResourceException("Failed to insert shader to map: " + a_id));
+
+		Shader* shaderPtr = &emplaceResult.first->second;
 		if(makeDefault){
-			defaultShaderPtr = &(shaders.find(a_id)->second);
-			std::for_each(needShaderRegistration.begin(), needShaderRegistration.end(), [&](std::shared_ptr<Scene::Node> a_node){
-				a_node->shader(a_id);
-			});
-			return defaultShaderPtr;
-		}else{
-			return &shaders.find(a_id)->second;
+			defaultShaderPtr = shaderPtr;
 		}
+
+		std::remove_if(needShaderRegistration.begin(), needShaderRegistration.end(), [&](std::shared_ptr<Scene::Node> a_node){
+			if(a_node->shader() == a_id){
+				a_node->shader(a_id);
+				return true;
+			} else{
+				return false;
+			}
+		});
+
+		return shaderPtr;
 	}
 
 	Shader* Draw2D::loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename) {
@@ -927,9 +936,9 @@ namespace MV {
 		return defaultShaderPtr;
 	}
 
-	void Draw2D::registerDefaultShader(std::shared_ptr<Scene::Node> a_node) {
-		if(defaultShaderPtr != nullptr){
-			a_node->shader(defaultShaderPtr->id());
+	void Draw2D::registerShader(std::shared_ptr<Scene::Node> a_node) {
+		if(hasShader(a_node->shader())){
+			a_node->shader(a_node->shader());
 		} else{
 			needShaderRegistration.push_back(a_node);
 		}

@@ -18,7 +18,7 @@ namespace MV {
 			friend cereal::access;
 			friend Node;
 		public:
-			SCENE_MAKE_FACTORY_METHODS
+			SCENE_MAKE_FACTORY_METHODS(Pixel)
 
 			static std::shared_ptr<Pixel> make(Draw2D* a_renderer, const DrawPoint &a_point = DrawPoint());
 			virtual ~Pixel(){}
@@ -61,7 +61,7 @@ namespace MV {
 			friend cereal::access;
 			friend Node;
 		public:
-			SCENE_MAKE_FACTORY_METHODS
+			SCENE_MAKE_FACTORY_METHODS(Line)
 
 			static std::shared_ptr<Line> make(Draw2D* a_renderer);
 			static std::shared_ptr<Line> make(Draw2D* a_renderer, const DrawPoint &a_startPoint, const DrawPoint &a_endPoint);
@@ -108,7 +108,7 @@ namespace MV {
 			friend cereal::access;
 			friend Node;
 		public:
-			SCENE_MAKE_FACTORY_METHODS
+			SCENE_MAKE_FACTORY_METHODS(Rectangle)
 
 			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer);
 			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Size<> &a_size, bool a_center = false);

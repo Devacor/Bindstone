@@ -36,6 +36,7 @@ namespace MV {
 
 		public:
 			SCENE_MAKE_FACTORY_METHODS(Clickable)
+			RECTANGLE_OVERRIDES(Clickable)
 
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse);
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center = false);
@@ -80,7 +81,7 @@ namespace MV {
 			MouseState::SignalType onMouseButtonBeginHandle;
 			MouseState::SignalType onMouseButtonEndHandle;
 
-			void hookUpSlots();
+			std::shared_ptr<Clickable> hookUpSlots();
 			void clearSlots();
 
 			void blockInput();

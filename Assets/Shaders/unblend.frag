@@ -11,6 +11,7 @@ void main(){
 	vec4 textureColor = texture2D(texture, uv.st);
 
 	textureColor/=sqrt(textureColor.a);
+	textureColor.rgb*=color.a;
 
     colorResult = textureColor * color;
 }

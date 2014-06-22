@@ -245,13 +245,7 @@ namespace MV {
 	}
 
 	void glExtensionBlendMode::loadExtensionBlendMode( char *a_extensionsList ){
-#ifdef WIN32
 		initialized = true;
-		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
-#else
-		initialized = true;
-		glBlendFuncSeparateOES(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
-#endif
 	}
 
 	glExtensionFramebufferObject::glExtensionFramebufferObject(Draw2D *a_renderer)

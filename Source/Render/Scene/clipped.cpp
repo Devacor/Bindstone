@@ -19,6 +19,7 @@ namespace MV {
 				texture(clippedTexture->makeHandle(Point<int>(), textureSize));
 				framebuffer = renderer->makeFramebuffer(castPoint<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId());
 				{
+					//alertChildren(SetShader::make("unblend"));
 					renderer->setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 					SCOPE_EXIT{renderer->defaultBlendFunction(); };
 
@@ -35,6 +36,7 @@ namespace MV {
 						unsortedRender();
 					}
 				}
+
 				alertParent(VisualChange::make(shared_from_this()));
 			}
 		}

@@ -14,30 +14,33 @@ namespace MV {
 
 		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse) {
 			auto clickable = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
-			a_renderer->registerDefaultShader(clickable);
+			a_renderer->registerShader(clickable);
 			clickable->hookUpSlots();
 			return clickable;
 		}
 
 		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center) {
 			auto clickable = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
-			a_renderer->registerDefaultShader(clickable);
+			a_renderer->registerShader(clickable);
 			clickable->hookUpSlots();
-			return clickable->size(a_size, a_center);
+			clickable->size(a_size, a_center);
+			return clickable;
 		}
 
 		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, const Point<> &a_centerPoint) {
 			auto clickable = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
-			a_renderer->registerDefaultShader(clickable);
+			a_renderer->registerShader(clickable);
 			clickable->hookUpSlots();
-			return clickable->size(a_size, a_centerPoint);
+			clickable->size(a_size, a_centerPoint);
+			return clickable;
 		}
 
 		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB) {
 			auto clickable = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
-			a_renderer->registerDefaultShader(clickable);
+			a_renderer->registerShader(clickable);
 			clickable->hookUpSlots();
-			return clickable->bounds(a_boxAABB);
+			clickable->bounds(a_boxAABB);
+			return clickable;
 		}
 		
 		void Clickable::hookUpSlots() {
@@ -185,25 +188,25 @@ namespace MV {
 
 		std::shared_ptr<Button> Button::make(Draw2D* a_renderer, MouseState *a_mouse) {
 			auto button = std::shared_ptr<Button>(new Button(a_renderer, a_mouse));
-			a_renderer->registerDefaultShader(button);
+			a_renderer->registerShader(button);
 			return button;
 		}
 		
 		std::shared_ptr<Button> Button::make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center) {
 			auto button = std::shared_ptr<Button>(new Button(a_renderer, a_mouse));
-			a_renderer->registerDefaultShader(button);
+			a_renderer->registerShader(button);
 			return button->clickSize(a_size, a_center);
 		}
 
 		std::shared_ptr<Button> Button::make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, const Point<> &a_centerPoint) {
 			auto button = std::shared_ptr<Button>(new Button(a_renderer, a_mouse));
-			a_renderer->registerDefaultShader(button);
+			a_renderer->registerShader(button);
 			return button->clickSize(a_size, a_centerPoint);
 		}
 
 		std::shared_ptr<Button> Button::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB) {
 			auto button = std::shared_ptr<Button>(new Button(a_renderer, a_mouse));
-			a_renderer->registerDefaultShader(button);
+			a_renderer->registerShader(button);
 			return button->clickBounds(a_boxAABB);
 		}
 
@@ -225,7 +228,7 @@ namespace MV {
 				idleSceneNode->removeFromParent();
 				idleSceneNode->parent(this);
 			}
-			return shared_from_this();
+			return std::static_pointer_cast<Button>(shared_from_this());
 		}
 
 		std::shared_ptr<Button> Button::activeScene(std::shared_ptr<Node> a_activeSceneNode) {
@@ -234,21 +237,21 @@ namespace MV {
 				activeSceneNode->removeFromParent();
 				activeSceneNode->parent(this);
 			}
-			return shared_from_this();
+			return std::static_pointer_cast<Button>(shared_from_this());
 		}
 
 		std::shared_ptr<Button> Button::clickSize(const Size<> &a_size, bool a_center){
 			clickable->size(a_size, a_center);
-			return shared_from_this();
+			return std::static_pointer_cast<Button>(shared_from_this());
 		}
 		std::shared_ptr<Button> Button::clickSize(const Size<> &a_size, const Point<> &a_centerPoint){
 			clickable->size(a_size, a_centerPoint);
-			return shared_from_this();
+			return std::static_pointer_cast<Button>(shared_from_this());
 		}
 
 		std::shared_ptr<Button> Button::clickBounds(const BoxAABB &a_bounds){
-			clickable->setTwoCorners(a_bounds);
-			return shared_from_this();
+			clickable->bounds(a_bounds);
+			return std::static_pointer_cast<Button>(shared_from_this());
 		}
 
 		Button::Button(Draw2D *a_renderer, MouseState *a_mouse):

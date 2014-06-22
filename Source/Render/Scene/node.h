@@ -37,32 +37,55 @@ namespace MV {
 	//
 	//I chose 3 because I like the simplicity of "make" for everything and I care more about the user interface than the class definition.
 	//I don't want to use two synonyms for object creation (create/make) and add should not imply creation.
-#define SCENE_MAKE_FACTORY_METHODS 	\
+#define SCENE_MAKE_FACTORY_METHODS(T)	\
 	template < typename TypeToMake, typename FirstParameter, typename ...Arg, \
-		typename std::enable_if< \
-			!std::is_same<FirstParameter, const char*>::value && \
-			!std::is_same<FirstParameter, std::string>::value, \
-			int \
-		>::type = 0 \
+	typename std::enable_if< \
+	!std::is_same<FirstParameter, const char*>::value && \
+	!std::is_same<FirstParameter, std::string>::value, \
+	int \
+	>::type = 0 \
 	> \
 	std::shared_ptr<TypeToMake> make(FirstParameter a_firstParam, Arg... a_parameters) { \
-		auto newChild = TypeToMake::make(renderer, a_firstParam, std::forward<Arg>(a_parameters)...); \
-		add(guid(), newChild); \
-		return newChild; \
+	auto newChild = TypeToMake::make(renderer, a_firstParam, std::forward<Arg>(a_parameters)...); \
+	add(guid(), newChild); \
+	return newChild; \
 	} \
 	\
 	template < typename TypeToMake, typename FirstParameter, typename ...Arg, \
-		typename std::enable_if< \
-			std::is_same<FirstParameter, const char*>::value || \
-			std::is_same<FirstParameter, std::string>::value, \
-			int \
-		>::type = 0 \
+	typename std::enable_if< \
+	std::is_same<FirstParameter, const char*>::value || \
+	std::is_same<FirstParameter, std::string>::value, \
+	int \
+	>::type = 0 \
 	> \
 	std::shared_ptr<TypeToMake> make(FirstParameter a_childId, Arg... a_parameters) { \
-		auto newChild = TypeToMake::make(renderer, std::forward<Arg>(a_parameters)...); \
-		add(a_childId, newChild); \
-		return newChild; \
-	}
+	auto newChild = TypeToMake::make(renderer, std::forward<Arg>(a_parameters)...); \
+	add(a_childId, newChild); \
+	return newChild; \
+	} \
+	std::shared_ptr<T> parent(Node* a_parentItem){ return std::static_pointer_cast<T>(parentImplementation(a_parentItem)); } \
+	std::shared_ptr<T> removeFromParent(){ return std::static_pointer_cast<T>(removeFromParentImplementation()); } \
+	std::shared_ptr<T> position(const Point<> &a_rhs){ return std::static_pointer_cast<T>(positionImplementation(a_rhs)); } \
+	std::shared_ptr<T> scale(PointPrecision a_newScale){ return std::static_pointer_cast<T>(scaleImplementation(a_newScale)); } \
+	std::shared_ptr<T> scale(const AxisMagnitude &a_scaleValue){ return std::static_pointer_cast<T>(scaleImplementation(a_scaleValue)); } \
+	std::shared_ptr<T> rotation(PointPrecision a_zRotation){ return std::static_pointer_cast<T>(rotationImplementation(a_zRotation)); } \
+	std::shared_ptr<T> rotation(const AxisAngles &a_rotation){ return std::static_pointer_cast<T>(rotationImplementation(a_rotation)); } \
+	std::shared_ptr<T> shader(const std::string &a_id){ return std::static_pointer_cast<T>(shaderImplementation(a_id)); } \
+	std::shared_ptr<T> texture(std::shared_ptr<TextureHandle> a_texture){ return std::static_pointer_cast<T>(textureImplementation(a_texture)); } \
+	std::shared_ptr<T> clearTexture(){ return std::static_pointer_cast<T>(clearTextureImplementation()); } \
+	std::shared_ptr<T> color(const Color &a_newColor){ return std::static_pointer_cast<T>(colorImplementation(a_newColor)); } \
+	std::shared_ptr<T> sortScene(bool a_depthMatters){ return std::static_pointer_cast<T>(sortSceneImplementation(a_depthMatters)); } \
+	std::shared_ptr<T> sortDepth(PointPrecision a_newDepth){ return std::static_pointer_cast<T>(sortDepthImplementation(a_newDepth)); } \
+	std::shared_ptr<T> defaultSortDepth(){ return std::static_pointer_cast<T>(defaultSortDepthImplementation()); } \
+	std::shared_ptr<T> hide(){ return std::static_pointer_cast<T>(hideImplementation()); } \
+	std::shared_ptr<T> show(){ return std::static_pointer_cast<T>(showImplementation()); } \
+	std::shared_ptr<Node> parent() const{ return parentImplementation(); } \
+	AxisMagnitude scale() const { return scaleImplementation(); } \
+	virtual Point<> position() const{ return positionImplementation(); } \
+	AxisAngles rotation() const{ return rotationImplementation(); } \
+	virtual Color color() const { return colorImplementation(); } \
+	std::shared_ptr<TextureHandle> texture() const{ return textureImplementation(); } \
+	std::string shader() const { return shaderImplementation(); }
 
 	namespace Scene {
 		class Node : 
@@ -78,7 +101,7 @@ namespace MV {
 				}
 			}
 
-			SCENE_MAKE_FACTORY_METHODS
+			SCENE_MAKE_FACTORY_METHODS(Node)
 
 			static std::shared_ptr<Node> make(Draw2D* a_renderer, const Point<> &a_placement = Point<>());
 
@@ -121,7 +144,6 @@ namespace MV {
 				return a_childItem;
 			}
 
-			std::shared_ptr<Node> Node::removeFromParent();
 			std::shared_ptr<Node> remove(std::shared_ptr<Node> a_childItem);
 			std::shared_ptr<Node> remove(const std::string &a_childId);
 
@@ -156,64 +178,23 @@ namespace MV {
 			BoxAABB localFromScreen(BoxAABB a_screen);
 			BoxAABB localFromWorld(BoxAABB a_world);
 
-			//For command type alerts
-			std::shared_ptr<Node> parent(Node* a_parentItem); //returns Node* so that it is safe to call this method in a constructor
-			std::shared_ptr<Node> parent() const;
-
-			std::shared_ptr<Node> scale(PointPrecision a_newScale);
-			std::shared_ptr<Node> scale(const AxisMagnitude &a_scaleValue);
 			AxisMagnitude incrementScale(PointPrecision a_newScale);
 			AxisMagnitude incrementScale(const AxisMagnitude &a_scaleValue);
-			AxisMagnitude scale() const;
 
 			//Rotation is degrees around each axis from 0 to 360, axis info supplied typically the z axis
 			//is the only visible rotation axis, so we default to that with a single value supplied;
 			PointPrecision incrementRotation(PointPrecision a_zRotation);
 			AxisAngles incrementRotation(const AxisAngles &a_rotation);
 
-			std::shared_ptr<Node> rotation(PointPrecision a_zRotation);
-			std::shared_ptr<Node> rotation(const AxisAngles &a_rotation);
-			AxisAngles rotation() const;
-
 			Point<> rotationOrigin(const Point<> &a_origin);
 			Point<> centerRotationOrigin();
 
-			//By default the sort depth is calculated by averaging the z values of all points
-			//setSortDepth manually overrides this calculation.  unsetSortDepth removes this override.
-			std::shared_ptr<Node> setSortDepth(PointPrecision a_newDepth){
-				auto notifyOnChanged = makeScopedDepthChangeNote(this, false);
-				depthOverride = true;
-				overrideDepthValue = a_newDepth;
-				return shared_from_this();
-			}
-			std::shared_ptr<Node> unsetSortDepth(){
-				auto notifyOnChanged = makeScopedDepthChangeNote(this, false);
-				depthOverride = false;
-				return shared_from_this();
-			}
-			//true to render the sorted list, false to render unordered.  Default behavior is true.
-			std::shared_ptr<Node> sortScene(bool a_depthMatters);
-
-			std::shared_ptr<Node> position(const Point<> &a_rhs);
-			Point<> position() const;
-
-			Point<> translate(const Point<> &a_translation){
-				position(translateTo + a_translation);
-				return position();
-			}
-
-			virtual std::shared_ptr<Node> color(const Color &a_newColor);
-			virtual Color color() const;
-			std::shared_ptr<Node> texture(std::shared_ptr<TextureHandle> a_texture);
-			std::shared_ptr<TextureHandle> texture() const;
-			void clearTexture();
+			Point<> translate(const Point<> &a_translation);
 
 			virtual void clearTextureCoordinates(){ }
 			virtual void updateTextureCoordinates(){ }
 
 			bool visible() const;
-			void hide();
-			void show();
 
 			//Used to determine sorting based on getDepth
 			bool operator<(Node &a_other);
@@ -257,12 +238,6 @@ namespace MV {
 			}
 			virtual void handleEnd(std::shared_ptr<PopMatrix>){
 			}
-			void shared_from_this_test(){
-				auto testIt = shared_from_this();
-				for(auto child : drawList){
-					child.second->shared_from_this_test();
-				}
-			}
 
 			void depthChanged(){
 				if(myParent){
@@ -295,15 +270,46 @@ namespace MV {
 			virtual BoxAABB localAABBImplementation(bool a_includeChildren, bool a_nestedCall);
 			virtual BoxAABB basicAABBImplementation() const;
 
-			Shader* shader() const{
-				return shaderProgram;
+			void sortLess(){
+				isSorted = isSorted && shouldSortLessThan;
+				shouldSortLessThan = true;
+				sortFunction = [](DrawListVectorType::value_type one, DrawListVectorType::value_type two){
+					return *one.lock() < *two.lock();
+				};
 			}
-			Shader* shader(const std::string &a_id){
-				shaderProgram = renderer->getShader(a_id);
-				return shaderProgram;
+			void sortGreater(){
+				isSorted = isSorted && !shouldSortLessThan;
+				shouldSortLessThan = false;
+				sortFunction = [](DrawListVectorType::value_type one, DrawListVectorType::value_type two){
+					return *one.lock() > *two.lock();
+				};
 			}
-
 		protected:
+			virtual std::shared_ptr<Node> parentImplementation(Node* a_parentItem);
+			virtual std::shared_ptr<Node> removeFromParentImplementation();
+			virtual std::shared_ptr<Node> positionImplementation(const Point<> &a_rhs);
+			virtual std::shared_ptr<Node> scaleImplementation(PointPrecision a_newScale);
+			virtual std::shared_ptr<Node> scaleImplementation(const AxisMagnitude &a_scaleValue);
+			virtual std::shared_ptr<Node> rotationImplementation(PointPrecision a_zRotation);
+			virtual std::shared_ptr<Node> rotationImplementation(const AxisAngles &a_rotation);
+			virtual std::shared_ptr<Node> shaderImplementation(const std::string &a_id);
+			virtual std::shared_ptr<Node> textureImplementation(std::shared_ptr<TextureHandle> a_texture);
+			virtual std::shared_ptr<Node> clearTextureImplementation();
+			virtual std::shared_ptr<Node> colorImplementation(const Color &a_newColor);
+			virtual std::shared_ptr<Node> sortSceneImplementation(bool a_depthMatters);
+			virtual std::shared_ptr<Node> sortDepthImplementation(PointPrecision a_newDepth);
+			virtual std::shared_ptr<Node> defaultSortDepthImplementation();
+			virtual std::shared_ptr<Node> hideImplementation();
+			virtual std::shared_ptr<Node> showImplementation();
+
+			std::shared_ptr<Node> parentImplementation() const;
+			AxisMagnitude scaleImplementation() const;
+			virtual Point<> positionImplementation() const;
+			AxisAngles rotationImplementation() const;
+			virtual Color colorImplementation() const;
+			std::shared_ptr<TextureHandle> textureImplementation() const;
+			std::string shaderImplementation() const;
+
 			Node(Draw2D* a_renderer);
 
 			void defaultDraw(GLenum drawType);
@@ -342,8 +348,12 @@ namespace MV {
 			DrawListType drawList;
 
 			Shader* shaderProgram = nullptr;
+			std::string shaderProgramId;
 			GLuint bufferId;
 		private:
+
+			bool shouldSortLessThan;
+			std::function<bool(DrawListVectorType::value_type, DrawListVectorType::value_type)> sortFunction;
 
 			void childDepthChanged(){
 				drawListVector.clear();

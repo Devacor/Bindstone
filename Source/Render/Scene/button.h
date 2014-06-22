@@ -35,7 +35,7 @@ namespace MV {
 			Slot<DragSlotSignature> onDragSlot;
 
 		public:
-			SCENE_MAKE_FACTORY_METHODS
+			SCENE_MAKE_FACTORY_METHODS(Clickable)
 
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse);
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center = false);
@@ -159,7 +159,7 @@ namespace MV {
 			std::shared_ptr<Clickable> clickable; //must appear before the SlotRegisters
 
 		public:
-			SCENE_MAKE_FACTORY_METHODS
+			SCENE_MAKE_FACTORY_METHODS(Button)
 
 			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse);
 			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center = false);
@@ -184,7 +184,7 @@ namespace MV {
 			std::shared_ptr<Button> clickSize(const Size<> &a_size, bool a_center = false);
 			std::shared_ptr<Button> clickSize(const Size<> &a_size, const Point<>& a_centerPoint);
 			
-			std::shared_ptr<Button> bounds(const BoxAABB &a_boxAABB);
+			std::shared_ptr<Button> clickBounds(const BoxAABB &a_boxAABB);
 
 			virtual BoxAABB worldAABBImplementation(bool a_includeChildren, bool a_nestedCall);
 			virtual BoxAABB screenAABBImplementation(bool a_includeChildren, bool a_nestedCall);

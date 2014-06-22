@@ -93,7 +93,7 @@ namespace MV {
 
 
 	TextBox::TextBox(TextLibrary *a_textLibrary, const Size<> &a_size):
-		TextBox(a_textLibrary, "default", a_size){
+		TextBox(a_textLibrary, DEFAULT_ID, a_size){
 	}
 
 	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const Size<> &a_size) :
@@ -148,7 +148,7 @@ namespace MV {
 
 	void TextBox::setTextBoxSize(Size<> a_size){
 		boxSize = a_size;
-		textboxScene->setSize(a_size);
+		textboxScene->size(a_size);
 		formattedText.textWidth = a_size.width;
 		refreshTextBoxContents();
 	}

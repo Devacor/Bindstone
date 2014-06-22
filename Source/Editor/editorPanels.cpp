@@ -38,9 +38,9 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::unique_pt
 	
 	lastY += spacing;
 
-	auto background = node->make<MV::Scene::Rectangle>("Background", MV::point(0.0f, 20.0f), createButton->localAABB().bottomRightPoint() + MV::point(8.0f, 8.0f));
+	auto background = node->make<MV::Scene::Rectangle>("Background", MV::BoxAABB(MV::point(0.0f, 20.0f), createButton->localAABB().bottomRightPoint() + MV::point(8.0f, 8.0f)));
 	background->color({BOX_BACKGROUND});
-	background->setSortDepth(-1.0f);
+	background->sortDepth(-1.0f);
 
 	panel.updateBoxHeader(background->basicAABB().width());
 
@@ -63,9 +63,9 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	auto selectButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0f, 27.0f), UTF_CHAR_STR("Select"));
 	selectButton->position(createButton->localAABB().bottomLeftPoint() + MV::point(0.0f, 5.0f));
 
-	auto background = node->make<MV::Scene::Rectangle>("Background", MV::point(0.0f, 20.0f), selectButton->localAABB().bottomRightPoint() + MV::point(8.0f, 8.0f));
+	auto background = node->make<MV::Scene::Rectangle>("Background", MV::BoxAABB(MV::point(0.0f, 20.0f), selectButton->localAABB().bottomRightPoint() + MV::point(8.0f, 8.0f)));
 	background->color({BOX_BACKGROUND});
-	background->setSortDepth(-1.0f);
+	background->sortDepth(-1.0f);
 
 	panel.updateBoxHeader(background->basicAABB().width());
 

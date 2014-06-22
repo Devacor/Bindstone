@@ -10,7 +10,7 @@ namespace MV {
 		| ---------Node---------- |
 		\*************************/
 
-		std::shared_ptr<Node> Node::color(const Color &a_newColor){
+		std::shared_ptr<Node> Node::colorImplementation(const Color &a_newColor){
 			int elements = (int)points.size();
 			for(int i = 0; i < elements; i++){
 				points[i] = a_newColor;
@@ -19,7 +19,7 @@ namespace MV {
 			return shared_from_this();
 		}
 
-		Color Node::color() const{
+		Color Node::colorImplementation() const{
 			std::vector<Color> colorsToAverage;
 			for(auto point : points){
 				colorsToAverage.push_back(point);
@@ -27,7 +27,7 @@ namespace MV {
 			return std::accumulate(colorsToAverage.begin(), colorsToAverage.end(), Color(0, 0, 0, 0)) / static_cast<PointPrecision>(colorsToAverage.size());
 		}
 
-		std::shared_ptr<Node> Node::texture(std::shared_ptr<TextureHandle> a_texture){
+		std::shared_ptr<Node> Node::textureImplementation(std::shared_ptr<TextureHandle> a_texture){
 			if(ourTexture && textureSizeSignal){
 				ourTexture->sizeObserver.disconnect(textureSizeSignal);
 			}
@@ -43,17 +43,18 @@ namespace MV {
 			return shared_from_this();
 		}
 
-		std::shared_ptr<TextureHandle> Node::texture() const{
+		std::shared_ptr<TextureHandle> Node::textureImplementation() const{
 			return ourTexture;
 		}
 
-		void Node::clearTexture(){
+		std::shared_ptr<Node> Node::clearTextureImplementation(){
 			textureSizeSignal.reset();
 			ourTexture.reset();
 			updateTextureCoordinates();
+			return shared_from_this();
 		}
 
-		std::shared_ptr<Node> Node::removeFromParent(){
+		std::shared_ptr<Node> Node::removeFromParentImplementation(){
 			auto thisShared = shared_from_this();
 			if(myParent){
 				myParent->remove(thisShared);
@@ -124,6 +125,9 @@ namespace MV {
 			if(depthOverride){
 				return overrideDepthValue;
 			}
+			if(points.empty()){
+				return 0;
+			}
 			size_t elements = points.size();
 			PointPrecision total = 0;
 			for(size_t i = 0; i < elements; i++){
@@ -148,11 +152,11 @@ namespace MV {
 			return !equals(getDepth(), a_other.getDepth());
 		}
 
-		AxisAngles Node::rotation() const{
+		AxisAngles Node::rotationImplementation() const{
 			return rotateTo;
 		}
 
-		std::shared_ptr<Node> Node::rotation(PointPrecision a_zRotation) {
+		std::shared_ptr<Node> Node::rotationImplementation(PointPrecision a_zRotation) {
 			if(!equals(a_zRotation, 0.0f)){
 				rotateTo.z = a_zRotation;
 				alertParent(VisualChange::make(shared_from_this()));
@@ -160,7 +164,7 @@ namespace MV {
 			return shared_from_this();
 		}
 
-		std::shared_ptr<Node> Node::rotation(const AxisAngles &a_rotation) {
+		std::shared_ptr<Node> Node::rotationImplementation(const AxisAngles &a_rotation) {
 			if(a_rotation != AxisAngles()){
 				rotateTo = a_rotation;
 				alertParent(VisualChange::make(shared_from_this()));
@@ -168,11 +172,11 @@ namespace MV {
 			return shared_from_this();
 		}
 
-		Point<> Node::position() const{
+		Point<> Node::positionImplementation() const{
 			return translateTo;
 		}
 
-		std::shared_ptr<Node> Node::position(const Point<> &a_rhs){
+		std::shared_ptr<Node> Node::positionImplementation(const Point<> &a_rhs){
 			if(translateTo != a_rhs){
 				translateTo = a_rhs;
 				alertParent(VisualChange::make(shared_from_this()));
@@ -180,10 +184,10 @@ namespace MV {
 			return shared_from_this();
 		}
 
-		AxisMagnitude Node::scale() const{
+		AxisMagnitude Node::scaleImplementation() const{
 			return scaleTo;
 		}
-		std::shared_ptr<Node> Node::scale(const AxisMagnitude &a_rhs){
+		std::shared_ptr<Node> Node::scaleImplementation(const AxisMagnitude &a_rhs){
 			if(scaleTo != a_rhs){
 				scaleTo = a_rhs;
 				alertParent(VisualChange::make(shared_from_this()));
@@ -191,7 +195,7 @@ namespace MV {
 			return shared_from_this();
 		}
 
-		std::shared_ptr<Node> Node::scale(PointPrecision a_newScale){
+		std::shared_ptr<Node> Node::scaleImplementation(PointPrecision a_newScale){
 			scale(Point<>(a_newScale, a_newScale, a_newScale));
 			return shared_from_this();
 		}
@@ -206,12 +210,12 @@ namespace MV {
 			return scaleTo;
 		}
 
-		std::shared_ptr<Node> Node::parent(Node* a_parentItem){
+		std::shared_ptr<Node> Node::parentImplementation(Node* a_parentItem){
 			myParent = a_parentItem;
 			return shared_from_this();
 		}
 
-		std::shared_ptr<Node> Node::parent() const{
+		std::shared_ptr<Node> Node::parentImplementation() const{
 			if(myParent == nullptr){
 				return nullptr;
 			}else{
@@ -663,7 +667,7 @@ namespace MV {
 			});
 		}
 
-		std::shared_ptr<Node> Node::sortScene(bool a_depthMatters){
+		std::shared_ptr<Node> Node::sortSceneImplementation(bool a_depthMatters){
 			drawSorted = a_depthMatters;
 			return shared_from_this();
 		}
@@ -675,13 +679,16 @@ namespace MV {
 			drawSorted(true),
 			isSorted(false),
 			isVisible(true),
-			bufferId(0){
+			bufferId(0),
+			shaderProgramId(DEFAULT_ID),
+			shaderProgram(nullptr){
+			sortLess();
 		}
 
 		std::shared_ptr<Node> Node::make(Draw2D* a_renderer, const Point<> &a_placement /*= Point<>()*/) {
 			auto node = std::shared_ptr<Node>(new Node(a_renderer));
 			node->position(a_placement);
-			a_renderer->registerDefaultShader(node);
+			a_renderer->registerShader(node);
 			return node;
 		}
 
@@ -689,14 +696,16 @@ namespace MV {
 			return isVisible;
 		}
 
-		void Node::hide() {
+		std::shared_ptr<Node> Node::hideImplementation() {
 			isVisible = false;
 			alertParent(VisualChange::make(shared_from_this()));
+			return shared_from_this();
 		}
 
-		void Node::show() {
+		std::shared_ptr<Node> Node::showImplementation() {
 			isVisible = true;
 			alertParent(VisualChange::make(shared_from_this()));
+			return shared_from_this();
 		}
 
 		void Node::sortDrawListVector() {
@@ -705,9 +714,7 @@ namespace MV {
 				std::transform(drawList.begin(), drawList.end(), std::back_inserter(drawListVector), [](DrawListType::value_type shape){
 					return shape.second;
 				});
-				std::sort(drawListVector.begin(), drawListVector.end(), [](DrawListVectorType::value_type one, DrawListVectorType::value_type two){
-					return *one.lock() < *two.lock();
-				});
+				std::sort(drawListVector.begin(), drawListVector.end(), sortFunction);
 				isSorted = true;
 			}
 		}
@@ -777,6 +784,38 @@ namespace MV {
 			auto offset = (aabb.topLeftPoint() + aabb.bottomRightPoint()) / 2.0f;
 			normalizeToPoint(offset);
 			return offset;
+		}
+
+		std::string Node::shaderImplementation() const {
+			return shaderProgramId;
+		}
+
+		std::shared_ptr<Node> Node::shaderImplementation(const std::string &a_id) {
+			shaderProgramId = a_id;
+			if(renderer->hasShader(a_id)){
+				shaderProgram = renderer->getShader(a_id);
+			} else{
+				renderer->registerShader(shared_from_this());
+			}
+			return shared_from_this();
+		}
+
+		Point<> Node::translate(const Point<> &a_translation) {
+			position(translateTo + a_translation);
+			return position();
+		}
+
+		std::shared_ptr<Node> Node::sortDepthImplementation(PointPrecision a_newDepth) {
+			auto notifyOnChanged = makeScopedDepthChangeNote(this, false);
+			depthOverride = true;
+			overrideDepthValue = a_newDepth;
+			return shared_from_this();
+		}
+
+		std::shared_ptr<Node> Node::defaultSortDepthImplementation() {
+			auto notifyOnChanged = makeScopedDepthChangeNote(this, false);
+			depthOverride = false;
+			return shared_from_this();
 		}
 
 

@@ -13,7 +13,7 @@ void EditorControls::updateBoxHeader(MV::PointPrecision a_width) {
 			draggableBox->translate(MV::castPoint<MV::PointPrecision>(deltaPosition));
 		});
 	} else{
-		boxHeader->setSize({a_width, 20.0f});
+		boxHeader->size({a_width, 20.0f});
 	}
 }
 

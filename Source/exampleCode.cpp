@@ -53,12 +53,12 @@ void CreateDogFoxScene(std::shared_ptr<MV::Scene::Node> mainScene){
 	auto sunAndMoon = mainScene->make<MV::Scene::Node>("SunAndMoon");
 	
 	auto sun = sunAndMoon->make<MV::Scene::Rectangle>("sun");
-	sun->setTwoCorners(MV::Point<>(350, 0, 1), MV::Point<>(450, 100, 1));
+	sun->bounds({MV::Point<>(350, 0, 1), MV::Point<>(450, 100, 1)});
 	auto textureSheet = MV::FileTextureDefinition::make("Assets/Images/dogfox.png");
 	sun->texture(textureSheet->makeHandle(MV::Point<int>(0, 384), MV::Size<int>(128, 128)));
 
 	auto moon = sunAndMoon->make<MV::Scene::Rectangle>("moon");
-	moon->setTwoCorners(MV::Point<>(350, 500, 1), MV::Point<>(450, 600, 1));
+	moon->bounds({MV::Point<>(350, 500, 1), MV::Point<>(450, 600, 1)});
 	moon->texture(textureSheet->makeHandle(MV::Point<int>(128, 384), MV::Size<int>(128, 128)));
 
 	sunAndMoon->rotationOrigin(MV::Point<>(400, 300, 1));
@@ -67,13 +67,13 @@ void CreateDogFoxScene(std::shared_ptr<MV::Scene::Node> mainScene){
 	//These values are hard coded, I could have substituted the numbers for named constants
 	//but the scope of this example is incredibly limited.
 	auto dog = dogFoxScene->make<MV::Scene::Rectangle>("dog");
-	dog->setTwoCorners(MV::Point<>(350, 250, 2), MV::Point<>(450, 350, 2));
+	dog->bounds({MV::Point<>(350, 250, 2), MV::Point<>(450, 350, 2)});
 
 	auto fox = dogFoxScene->make<MV::Scene::Rectangle>("fox");
-	fox->setTwoCorners(MV::Point<>(290, 250, 3), MV::Point<>(390, 350, 3));
+	fox->bounds({MV::Point<>(290, 250, 3), MV::Point<>(390, 350, 3)});
 
 	auto ground = dogFoxScene->make<MV::Scene::Rectangle>("ground");
-	ground->setTwoCorners(MV::Point<>(300, 325, 1), MV::Point<>(500, 425, 1));
+	ground->bounds({MV::Point<>(300, 325, 1), MV::Point<>(500, 425, 1)});
 	ground->getDepth();
 	ground->texture(textureSheet->makeHandle(MV::Point<int>(256, 384), MV::Size<int>(256, 128)));
 }

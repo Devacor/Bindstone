@@ -239,6 +239,7 @@ namespace MV {
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureSize.width, textureSize.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+
 		delete[] data;							// Release data
 	}
 
@@ -441,7 +442,7 @@ namespace MV {
 
 		auto foundDefinition = dynamicDefinitions.find(identifier);
 		if(foundDefinition == dynamicDefinitions.end()){
-			std::shared_ptr<DynamicTextureDefinition> newDefinition = DynamicTextureDefinition::make(a_name, a_size, {1.0f, 1.0f, 1.0f, 0.0f});
+			std::shared_ptr<DynamicTextureDefinition> newDefinition = DynamicTextureDefinition::make(a_name, a_size, {0.0f, 0.0f, 0.0f, 0.0f});
 			dynamicDefinitions[identifier] = newDefinition;
 			return newDefinition;
 		}else{

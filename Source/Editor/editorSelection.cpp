@@ -16,11 +16,11 @@ void Selection::enable(){
 	onMouseDownHandle = mouse.onLeftMouseDown.connect([&](MV::MouseState &mouse){
 		inSelection = true;
 		selection.initialize(MV::castPoint<MV::PointPrecision>(mouse.position()));
-		visibleSelection = scene->make<MV::Scene::Rectangle>("Selection_" + boost::lexical_cast<std::string>(id), selection.minPoint, MV::Size<>());
+		visibleSelection = scene->make<MV::Scene::Rectangle>("Selection_" + boost::lexical_cast<std::string>(id), MV::Size<>())->position(selection.minPoint);
 		visibleSelection->color(MV::Color(1.0, 1.0, 0.0, .25));
 		auto originalPosition = visibleSelection->localFromScreen(mouse.position());
 		onMouseMoveHandle = mouse.onMove.connect([&, originalPosition](MV::MouseState &mouse){
-			visibleSelection->setTwoCorners(originalPosition, visibleSelection->localFromScreen(mouse.position()));
+			visibleSelection->bounds({originalPosition, visibleSelection->localFromScreen(mouse.position())});
 		});
 	});
 
@@ -145,6 +145,6 @@ void EditableElement::dragUpdateFromHandles() {
 
 	auto corners = elementToEdit->localFromScreen(box);
 
-	elementToEdit->setSizeAndCornerPoint(corners.minPoint, corners.size());
-	positionHandle->setSizeAndCornerPoint(corners.minPoint, corners.size());
+	elementToEdit->size(corners.size(), corners.minPoint*-1.0f);
+	positionHandle->size(corners.size(), corners.minPoint*-1.0f);
 }

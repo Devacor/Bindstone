@@ -91,7 +91,8 @@ namespace MV {
 		class Node : 
 			public std::enable_shared_from_this<Node>,
 			public MessageHandler<PushMatrix>,
-			public MessageHandler<PopMatrix>{
+			public MessageHandler<PopMatrix>,
+			public MessageHandler<SetShader>{
 			friend cereal::access;
 		public:
 			virtual ~Node(){
@@ -237,6 +238,12 @@ namespace MV {
 				popMatrix();
 			}
 			virtual void handleEnd(std::shared_ptr<PopMatrix>){
+			}
+
+			virtual void handleBegin(std::shared_ptr<SetShader>){
+			}
+			virtual void handleEnd(std::shared_ptr<SetShader> a_message){
+				shader(a_message->shaderId);
 			}
 
 			void depthChanged(){

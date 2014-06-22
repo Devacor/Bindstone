@@ -32,6 +32,12 @@ namespace MV{
 			std::shared_ptr<Node> sender;
 		};
 
+		struct SetShader : public MV::Message {
+			static std::shared_ptr<SetShader> make(const std::string &a_id){ return std::make_shared<SetShader>(a_id); }
+			SetShader(const std::string &a_id){shaderId = a_id;}
+			std::string shaderId;
+		};
+
 		struct ChildAdded : public MV::Message {
 			static std::shared_ptr<ChildAdded> make(std::shared_ptr<Node> a_sender, std::shared_ptr<Node> a_child){
 				return std::make_shared<ChildAdded>(a_sender, a_child); 

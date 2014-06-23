@@ -50,7 +50,7 @@ void Editor::initializeWindow(){
 	test->texture(MV::FileTextureDefinition::make("Assets/Images/dogfox.png")->makeHandle());
 
 	box = std::shared_ptr<MV::TextBox>(new MV::TextBox(&textLibrary, MV::size(110.0f, 106.0f)));
-	//box->wrapping(MV::TextWrapMethod::HARD);
+	box->wrapping(MV::TextWrapMethod::SOFT);
 	box->setText(UTF_CHAR_STR("ABCDE FGHIJKLM NOPQRS TUVWXYZ"));
 	//box->formattedText.removeCharacters(3, 13);
 	/*box->formattedText.addCharacters(0, UTF_CHAR_STR("0"));
@@ -93,7 +93,7 @@ void Editor::handleInput(){
 
 					break;
 				case SDLK_LEFT:
-					box->formattedText.addCharacters(6, UTF_CHAR_STR("+"));
+					//box->formattedText.addCharacters(6, UTF_CHAR_STR("+"));
 					break;
 				case SDLK_DOWN:
 
@@ -102,13 +102,14 @@ void Editor::handleInput(){
 
 					break;
 				case SDLK_RIGHT:
-					box->formattedText.removeCharacters(6, 1);
+					//box->formattedText.removeCharacters(6, 1);
 					break;
 				}
 				break;
 			}
 		}
 	}
+	box->setText(event);
 	mouse.update();
 	controlPanel.handleInput(event);
 	//testButton = makeButton(controls, textLibrary, mouse, MV::size(110.0f, 77.0f), UTF_CHAR_STR("ABC DEF GHI JKL MNO PQR STU VWX YZ"));

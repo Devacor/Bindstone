@@ -818,6 +818,16 @@ namespace MV {
 			return shared_from_this();
 		}
 
+		std::shared_ptr<Node> Node::blockSerializeImplementation() {
+			markedTemporary = true;
+			return shared_from_this();
+		}
+
+		std::shared_ptr<Node> Node::allowSerializeImplementation() {
+			markedTemporary = false;
+			return shared_from_this();
+		}
+
 
 
 	}

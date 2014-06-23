@@ -79,6 +79,8 @@ namespace MV {
 	std::shared_ptr<T> defaultSortDepth(){ return std::static_pointer_cast<T>(defaultSortDepthImplementation()); } \
 	std::shared_ptr<T> hide(){ return std::static_pointer_cast<T>(hideImplementation()); } \
 	std::shared_ptr<T> show(){ return std::static_pointer_cast<T>(showImplementation()); } \
+	std::shared_ptr<Node> blockSerialize(){ return std::static_pointer_cast<T>(blockSerializeImplementation()); } \
+	std::shared_ptr<Node> allowSerialize(){ return std::static_pointer_cast<T>(allowSerializeImplementation()); } \
 	std::shared_ptr<Node> parent() const{ return parentImplementation(); } \
 	AxisMagnitude scale() const { return scaleImplementation(); } \
 	virtual Point<> position() const{ return positionImplementation(); } \
@@ -308,6 +310,8 @@ namespace MV {
 			virtual std::shared_ptr<Node> defaultSortDepthImplementation();
 			virtual std::shared_ptr<Node> hideImplementation();
 			virtual std::shared_ptr<Node> showImplementation();
+			std::shared_ptr<Node> blockSerializeImplementation();
+			std::shared_ptr<Node> allowSerializeImplementation();
 
 			std::shared_ptr<Node> parentImplementation() const;
 			AxisMagnitude scaleImplementation() const;
@@ -358,7 +362,7 @@ namespace MV {
 			std::string shaderProgramId;
 			GLuint bufferId;
 		private:
-
+			bool markedTemporary = false;
 			bool shouldSortLessThan;
 			std::function<bool(DrawListVectorType::value_type, DrawListVectorType::value_type)> sortFunction;
 
@@ -369,17 +373,19 @@ namespace MV {
 
 			template <class Archive>
 			void serialize(Archive & archive){
-				archive(CEREAL_NVP(translateTo),
-					CEREAL_NVP(rotateTo), CEREAL_NVP(rotateOrigin),
-					CEREAL_NVP(scaleTo),
-					CEREAL_NVP(depthOverride), CEREAL_NVP(overrideDepthValue),
-					CEREAL_NVP(isVisible),
-					CEREAL_NVP(drawType), CEREAL_NVP(drawSorted),
-					CEREAL_NVP(points),
-					CEREAL_NVP(drawList),
-					cereal::make_nvp("shaderId", (shaderProgram != nullptr)?shaderProgram->id():""),
-					cereal::make_nvp("texture", ourTexture)
-				);
+				if(!markedTemporary){
+					archive(CEREAL_NVP(translateTo),
+						CEREAL_NVP(rotateTo), CEREAL_NVP(rotateOrigin),
+						CEREAL_NVP(scaleTo),
+						CEREAL_NVP(depthOverride), CEREAL_NVP(overrideDepthValue),
+						CEREAL_NVP(isVisible),
+						CEREAL_NVP(drawType), CEREAL_NVP(drawSorted),
+						CEREAL_NVP(points),
+						CEREAL_NVP(drawList),
+						cereal::make_nvp("shaderId", (shaderProgram != nullptr) ? shaderProgram->id() : ""),
+						cereal::make_nvp("texture", ourTexture)
+						);
+				}
 			}
 
 			template <class Archive>

@@ -94,6 +94,7 @@ namespace MV {
 
 	TextBox::TextBox(TextLibrary *a_textLibrary, const Size<> &a_size):
 		TextBox(a_textLibrary, DEFAULT_ID, a_size){
+		textScene = textboxScene->add("Text", formattedText.scene());
 	}
 
 	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const Size<> &a_size) :
@@ -107,6 +108,7 @@ namespace MV {
 		isSingleLine(false),
 		formattedText(*a_textLibrary, a_size.width, a_fontIdentifier){
 		firstRun = true;
+		textScene = textboxScene->add("Text", formattedText.scene());
 	}
 
 	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, const Size<> &a_size):
@@ -121,13 +123,13 @@ namespace MV {
 		formattedText(*a_textLibrary, a_size.width, a_fontIdentifier){
 		firstRun = true;
 		setText(a_text, a_fontIdentifier);
+		textScene = textboxScene->add("Text", formattedText.scene());
 	}
 
 	void TextBox::setText(const UtfString &a_text, const std::string &a_fontIdentifier){
 		if(a_fontIdentifier != ""){ fontIdentifier = a_fontIdentifier; }
-		text = a_text;
-
-		refreshTextBoxContents();
+		formattedText.clear();
+		formattedText.append(a_text);
 	}
 
 	bool TextBox::setText(SDL_Event &event){
@@ -136,11 +138,12 @@ namespace MV {
 		} else if(event.type == SDL_TEXTEDITING) {
 			setTemporaryText(stringToWide(event.edit.text), event.edit.start, event.edit.length);
 		} else if(event.type == SDL_KEYDOWN){
-			if(event.key.keysym.sym == SDLK_BACKSPACE && text.length() > 0){
-				text.pop_back();
-				refreshTextBoxContents();
+			if(event.key.keysym.sym == SDLK_BACKSPACE && !formattedText.empty()){
+				backspace();
 			} else if(event.key.keysym.sym == SDLK_v && SDL_GetModState() & KMOD_CTRL){
 				appendText(stringToWide(SDL_GetClipboardText()));
+			} else if(event.key.keysym.sym == SDLK_c && SDL_GetModState() & KMOD_CTRL){
+				SDL_SetClipboardText(wideToString(string()).c_str());
 			}
 		}
 		return false;
@@ -149,20 +152,7 @@ namespace MV {
 	void TextBox::setTextBoxSize(Size<> a_size){
 		boxSize = a_size;
 		textboxScene->size(a_size);
-		formattedText.textWidth = a_size.width;
-		refreshTextBoxContents();
-	}
-
-	void TextBox::refreshTextBoxContents(){
-		if(fontIdentifier != ""){
-			formattedText.append(text);
-			textScene = textboxScene->add("Text", formattedText.scene);
-			//TODO
-			//textScene = textboxScene->add("Text", textLibrary->composeScene(parseTextStateList(fontIdentifier, currentTextContents()), boxSize.width, wrapMethod, textJustification, minimumLineHeight, isSingleLine));
-			//textScene->position(contentScrollPosition);
-		} else{
-			std::cerr << "Warning: refreshTextBoxContents called, but no fontIdentifier has been set yet!" << std::endl;
-		}
+		formattedText.width(a_size.width);
 	}
 
 	void TextBox::setScrollPosition(Point<> a_position, bool a_overScroll /*= false*/) {
@@ -380,7 +370,7 @@ namespace MV {
 			}
 
 			if(!exceeded && lineIndex+1 < text.lines.size()){
-				MV::PointPrecision widthRemaining = text.textWidth - lineWidth();
+				MV::PointPrecision widthRemaining = text.width() - lineWidth();
 				addCharacters(characters.size(), text.lines[lineIndex + 1]->removeLeadingCharactersForWidth(widthRemaining));
 			}else if(text.justification() != LEFT){
 				applyAlignment();
@@ -413,7 +403,7 @@ namespace MV {
 
 	std::vector<std::shared_ptr<FormattedCharacter>> FormattedLine::removeLeadingCharactersForWidth(float a_width) {
 		std::vector<std::shared_ptr<FormattedCharacter>> result;
-		if(text.wrapping == NONE){
+		if(text.textWrapping == NONE){
 			return result;
 		}
 
@@ -422,7 +412,7 @@ namespace MV {
 			a_width -= characters[i]->characterSize().width;
 		}
 
-		if(text.wrapping == SOFT && !result.empty()){
+		if(text.textWrapping == SOFT && !result.empty()){
 			size_t i = result.size() - 1;
 			auto foundSoftBreak = std::find_if(result.begin(), result.end(), [&](std::shared_ptr<FormattedCharacter> a_element){
 				return a_element->isSoftBreakCharacter();
@@ -464,6 +454,53 @@ namespace MV {
 		return result;
 	}
 
+	FormattedLine::~FormattedLine() {
+		for(auto& character : characters){
+			character->removeFromParent();
+		}
+	}
+
+	size_t FormattedLine::size() const {
+		return characters.size();
+	}
+
+	bool FormattedLine::empty() const {
+		return characters.empty();
+	}
+
+	MV::PointPrecision FormattedLine::height() const {
+		return lineHeight;
+	}
+
+	size_t FormattedLine::index(size_t a_newIndex) {
+		lineIndex = a_newIndex;
+		return lineIndex;
+	}
+
+	size_t FormattedLine::index() const {
+		return lineIndex;
+	}
+
+	MV::UtfString FormattedLine::string() const {
+		UtfString result;
+		for(auto& character : characters){
+			result += character->character->character();
+		}
+		return result;
+	}
+
+	void FormattedLine::minimumLineHeightChanged() {
+		fixVisuals();
+	}
+
+	float FormattedLine::lineWidth() const {
+		if(characters.empty()){
+			return 0.0f;
+		} else{
+			return characters.back()->position().x + characters.back()->characterSize().width;
+		}
+	}
+
 
 
 
@@ -476,15 +513,19 @@ namespace MV {
 		library(a_library),
 		textWidth(a_width),
 		defaultTextState(std::make_shared<FormattedState>(a_library.fontDefinition(a_defaultStateIdentifier))),
-		wrapping(a_wrapping),
+		textWrapping(a_wrapping),
 		textJustification(a_justification),
 		minimumTextLineHeight(-1){
 
-		scene = Scene::Node::make(library.getRenderer());
+		textScene = Scene::Node::make(library.getRenderer())->blockSerialize();
 	}
 
 	PointPrecision FormattedText::width(PointPrecision a_width) {
 		textWidth = a_width;
+		return textWidth;
+	}
+
+	MV::PointPrecision FormattedText::width() const {
 		return textWidth;
 	}
 
@@ -500,6 +541,10 @@ namespace MV {
 		return defaultTextState;
 	}
 
+	std::shared_ptr<FormattedState> FormattedText::defaultState() const {
+		return defaultTextState;
+	}
+
 	size_t FormattedText::length() const {
 		return std::accumulate(lines.begin(), lines.end(), static_cast<size_t>(0), [](size_t a_accumulated, const std::shared_ptr<FormattedLine> &a_line){
 			return a_line->size() + a_accumulated;
@@ -512,6 +557,329 @@ namespace MV {
 			result += line->string();
 		}
 		return result;
+	}
+
+	bool FormattedText::exceedsWidth(PointPrecision a_xPosition) const {
+		return a_xPosition > textWidth;
+	}
+
+	size_t FormattedText::size() const {
+		return std::accumulate(lines.begin(), lines.end(), static_cast<size_t>(0), [](size_t a_accumulated, const std::shared_ptr<FormattedLine> &a_line){
+			return a_line->size() + a_accumulated;
+		});;
+	}
+
+	bool FormattedText::empty() const {
+		return lines.empty();
+	}
+
+	void FormattedText::clear() {
+		lines.clear();
+	}
+
+	std::shared_ptr<FormattedCharacter> FormattedText::characterRelativeTo(size_t a_lineIndex, size_t a_characterIndex, int64_t a_relativeCharacterIndex) {
+		auto index = absoluteIndex(a_lineIndex, a_characterIndex);
+		if(a_relativeCharacterIndex + static_cast<int64_t>(index) > 0){
+			return characterForIndex(index + a_relativeCharacterIndex);
+		} else{
+			return nullptr;
+		}
+	}
+
+	void FormattedText::applyState(const std::shared_ptr<FormattedState> &a_newState, size_t a_newFormatStart, size_t a_newFormatEnd) {
+		std::shared_ptr<FormattedState> originalState;
+		size_t i = a_newFormatStart;
+		for(auto character = characterForIndex(i); character; ++i, character = characterForIndex(i)){
+			if(i == a_newFormatStart){
+				originalState = character->state;
+			} else if(character->state != originalState){
+				break;
+			}
+			character->partOfFormat(i <= a_newFormatEnd);
+			character->applyState(a_newState);
+		}
+	}
+
+	size_t FormattedText::absoluteIndexFromRelativeTo(size_t a_lineIndex, size_t a_characterIndex, int64_t a_relativeCharacterIndex) {
+		auto index = absoluteIndex(a_lineIndex, a_characterIndex);
+		if(a_relativeCharacterIndex + static_cast<int64_t>(index) > 0){
+			return index + a_relativeCharacterIndex;
+		} else{
+			return 0;
+		}
+	}
+
+	size_t FormattedText::absoluteIndex(size_t a_lineIndex, size_t a_characterIndex) const {
+		auto accumulatedIndex = std::accumulate(lines.begin(), lines.begin() + std::max<int64_t>(0, static_cast<int64_t>(a_lineIndex)-1), static_cast<size_t>(0), [](size_t a_accumulated, const std::shared_ptr<FormattedLine> &a_line){
+			return a_line->size() + a_accumulated;
+		});
+		return accumulatedIndex + a_characterIndex;
+	}
+
+	std::shared_ptr<FormattedCharacter> FormattedText::characterForIndex(size_t a_characterIndex) {
+		if(lines.empty()){
+			return nullptr;
+		}
+
+		std::shared_ptr<FormattedLine> line;
+		size_t characterInLineIndex;
+		std::tie(line, characterInLineIndex) = lineForCharacterIndex(a_characterIndex);
+		if(characterInLineIndex >= line->size()){
+			return nullptr;
+		} else{
+			return (*line)[characterInLineIndex];
+		}
+	}
+
+	std::tuple<std::shared_ptr<FormattedLine>, size_t> FormattedText::lineForCharacterIndex(size_t a_characterIndex) {
+		std::shared_ptr<FormattedLine> found;
+		size_t foundIndex = 0;
+		int64_t characterIndex = a_characterIndex;
+		for(foundIndex = 0; foundIndex < lines.size() && (characterIndex - static_cast<int64_t>(lines[foundIndex]->size())) > 0; ++foundIndex){
+			characterIndex -= lines[foundIndex]->size();
+		}
+		if(foundIndex < lines.size()){
+			return std::make_tuple(lines[foundIndex], std::min<size_t>(characterIndex, lines[foundIndex]->size()));
+		} else{
+			auto newLine = FormattedLine::make(*this, lines.size());
+			lines.push_back(newLine);
+			return std::make_tuple(newLine, 0);
+		}
+	}
+
+	void FormattedText::removeCharacters(size_t a_startIndex, size_t a_count) {
+		if(a_count == 0){
+			return;
+		}
+		std::shared_ptr<FormattedLine> lineStart;
+		size_t lineStartCharacter;
+		std::tie(lineStart, lineStartCharacter) = lineForCharacterIndex(a_startIndex);
+
+		std::shared_ptr<FormattedLine> lineEnd;
+		size_t lineEndCharacter;
+		std::tie(lineEnd, lineEndCharacter) = lineForCharacterIndex(a_startIndex + a_count);
+
+		if(lineStart->index() == lineEnd->index()){
+			lineStart->removeCharacters(lineStartCharacter, lineEndCharacter - lineStartCharacter);
+			if(lineStart->empty()){
+				removeLines(lineStart->index(), 1);
+			}
+		} else{
+			removeLines(lineStart->index() + 1, lineEnd->index() - lineStart->index() - 1);
+
+			lineEnd->removeCharacters(0, lineEndCharacter);
+			lineStart->removeCharacters(lineStartCharacter, lineStart->size() - lineStartCharacter);
+			if(lineEnd->empty()){
+				removeLines(lineEnd->index(), 1);
+			}
+			if(lineStart->empty()){
+				removeLines(lineStart->index(), 1);
+			}
+		}
+	}
+
+	void FormattedText::removeLines(size_t a_startIndex, size_t a_count) {
+		if(a_count > 0){
+			lines.erase(lines.begin() + a_startIndex, lines.begin() + a_startIndex + a_count);
+			for(size_t i = a_startIndex; i < lines.size(); ++i){
+				lines[i]->index(i);
+			}
+		}
+	}
+
+	void FormattedText::popCharacters(size_t a_count) {
+		removeCharacters(size() - a_count, a_count);
+	}
+
+	void FormattedText::addCharacters(size_t a_startIndex, const UtfString &a_characters) {
+		if(a_characters.empty()){
+			return;
+		}
+		std::shared_ptr<FormattedLine> line;
+		size_t characterInLineIndex;
+		std::tie(line, characterInLineIndex) = lineForCharacterIndex(a_startIndex);
+
+		std::shared_ptr<FormattedState> foundState = defaultTextState;
+		if(a_startIndex > 0){
+			if(characterInLineIndex > 0){
+				foundState = (*line)[characterInLineIndex - 1]->state;
+			} else if(line->index() > 0 && !lines[line->index() - 1]->empty()){
+				auto previousLine = lines[line->index() - 1];
+				foundState = (*previousLine)[previousLine->size() - 1]->state;
+			}
+		}
+
+		std::vector<std::shared_ptr<FormattedCharacter>> formattedCharacters;
+		for(const UtfChar &character : a_characters){
+			formattedCharacters.push_back(FormattedCharacter::make(textScene, character, foundState));
+		}
+
+		line->addCharacters(characterInLineIndex, formattedCharacters);
+	}
+
+	void FormattedText::addCharacters(size_t a_startIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters) {
+		if(a_characters.empty()){
+			return;
+		}
+		std::shared_ptr<FormattedLine> line;
+		size_t characterInLineIndex;
+		std::tie(line, characterInLineIndex) = lineForCharacterIndex(a_startIndex);
+		line->addCharacters(a_startIndex, a_characters);
+	}
+
+	void FormattedText::append(const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters) {
+		if(a_characters.empty()){
+			return;
+		}
+		if(lines.empty()){
+			lines.push_back(FormattedLine::make(*this, lines.size()));
+		}
+		std::shared_ptr<FormattedLine> line = lines.back();
+		line->addCharacters(line->size(), a_characters);
+	}
+
+	void FormattedText::append(const UtfString &a_characters) {
+		if(a_characters.empty()){
+			return;
+		}
+		std::shared_ptr<FormattedState> foundState = defaultTextState;
+		if(lines.empty()){
+			lines.push_back(FormattedLine::make(*this, lines.size()));
+		} else{
+			if(!lines.back()->empty()){
+				foundState = (*lines.back())[lines.back()->size() - 1]->state;
+			} else if(lines.size() > 1 && !lines[lines.size() - 1]->empty()){
+				auto previousLine = lines[lines.size() - 1];
+				foundState = (*previousLine)[previousLine->size() - 1]->state;
+			}
+		}
+
+		std::vector<std::shared_ptr<FormattedCharacter>> formattedCharacters;
+		for(const UtfChar &character : a_characters){
+			formattedCharacters.push_back(FormattedCharacter::make(textScene, character, foundState));
+		}
+
+		std::shared_ptr<FormattedLine> line = lines.back();
+		line->addCharacters(line->size(), formattedCharacters);
+	}
+
+	MV::PointPrecision FormattedText::minimumLineHeight() const {
+		return minimumTextLineHeight;
+	}
+
+	MV::PointPrecision FormattedText::minimumLineHeight(PointPrecision a_minimumLineHeight) {
+		minimumTextLineHeight = a_minimumLineHeight;
+		for(auto line : lines){
+			line->minimumLineHeightChanged();
+		}
+		return minimumTextLineHeight;
+	}
+
+	void FormattedText::justification(TextJustification a_newJustification) {
+		if(textJustification != a_newJustification){
+			textJustification = a_newJustification;
+			for(auto &line : lines){
+				line->applyAlignment();
+			}
+		}
+	}
+
+	MV::TextJustification FormattedText::justification() const {
+		return textJustification;
+	}
+
+	void FormattedText::wrapping(TextWrapMethod a_newWrapping) {
+		textWrapping = a_newWrapping;
+		//TODO: Need to update wrapping.
+	}
+
+	MV::TextWrapMethod FormattedText::wrapping() const {
+		return textWrapping;
+	}
+
+	std::shared_ptr<Scene::Node> FormattedText::scene() const {
+		return textScene;
+	}
+
+
+	std::shared_ptr<FormattedCharacter> FormattedCharacter::make(const std::shared_ptr<Scene::Node> &parent, UtfChar a_character, const std::shared_ptr<FormattedState> &a_state) {
+		return std::shared_ptr<FormattedCharacter>(new FormattedCharacter(parent, a_character, a_state));
+	}
+
+	Size<> FormattedCharacter::characterSize() const {
+		if(isPartOfFormat){
+			return{0.0, static_cast<PointPrecision>(character->characterSize().height)};
+		} else{
+			return castSize<PointPrecision>(character->characterSize());
+		}
+	}
+
+	Point<> FormattedCharacter::position() const {
+		return basePosition;
+	}
+
+	Point<> FormattedCharacter::position(const Point<> &a_newPosition) {
+		basePosition = a_newPosition;
+		shape->position(basePosition + offsetPosition);
+		return basePosition;
+	}
+
+	Point<> FormattedCharacter::offset() const {
+		return offsetPosition;
+	}
+
+	Point<> FormattedCharacter::offset(const Point<> &a_newPosition) {
+		offsetPosition = a_newPosition;
+		shape->position(basePosition + offsetPosition);
+		return offsetPosition;
+	}
+
+	Point<> FormattedCharacter::offset(PointPrecision a_lineHeight, PointPrecision a_baseLine) {
+		PointPrecision height = character->font()->height();
+		PointPrecision base = character->font()->base();
+		offset({offsetPosition.x, a_baseLine - base});
+		shape->position(basePosition + offsetPosition);
+		return offsetPosition;
+	}
+
+	Point<> FormattedCharacter::offset(PointPrecision a_x, PointPrecision a_lineHeight, PointPrecision a_baseLine) {
+		PointPrecision height = character->font()->height();
+		PointPrecision base = character->font()->base();
+		offset({a_x, a_baseLine - base});
+		shape->position(basePosition + offsetPosition);
+		return offsetPosition;
+	}
+
+	void FormattedCharacter::applyState(const std::shared_ptr<FormattedState> &a_state) {
+		state = a_state;
+		character = state->font->getCharacter(textCharacter);
+		shape->size(castSize<PointPrecision>(character->characterSize()));
+		shape->texture(character->texture());
+		shape->color(state->color);
+	}
+
+	bool FormattedCharacter::partOfFormat(bool a_isPartOfFormat) {
+		isPartOfFormat = a_isPartOfFormat;
+		if(isPartOfFormat){
+			shape->hide();
+		} else{
+			shape->show();
+		}
+		return isPartOfFormat;
+	}
+
+	bool FormattedCharacter::partOfFormat() const {
+		return isPartOfFormat;
+	}
+
+	bool FormattedCharacter::isSoftBreakCharacter() const {
+		return character->isSoftBreakCharacter();
+	}
+
+	void FormattedCharacter::removeFromParent() {
+		if(shape){
+			shape->removeFromParent();
+		}
 	}
 
 }

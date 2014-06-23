@@ -19,29 +19,10 @@ namespace MV {
 
 	Color parseColorString(const std::string &a_colorString);
 
-	class FontDefinition;
-	class TextCharacter {
-	public:
-		static std::shared_ptr<TextCharacter> make(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition);
 
-		UtfChar character() const;
-		std::shared_ptr<TextureHandle> texture() const;
-		Size<int> characterSize() const;
-		Size<int> textureSize() const;
-
-		bool isSoftBreakCharacter();
-
-		std::shared_ptr<FontDefinition> font() const;
-	private:
-		TextCharacter(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition);
-
-		UtfChar glyphCharacter;
-		std::shared_ptr<SurfaceTextureDefinition> glyphTexture;
-		std::shared_ptr<TextureHandle> glyphHandle;
-		std::shared_ptr<FontDefinition> fontDefinition;
-	};
-
+	class CharacterDefinition;
 	class TextLibrary;
+	///////////////////////////////////
 	class FontDefinition : public std::enable_shared_from_this<FontDefinition>{
 		friend cereal::access;
 	public:
@@ -54,7 +35,7 @@ namespace MV {
 			}
 		}
 
-		std::shared_ptr<TextCharacter> getCharacter(UtfChar renderChar);
+		std::shared_ptr<CharacterDefinition> characterDefinition(UtfChar renderChar);
 
 		PointPrecision height() const{
 			return lineHeight;
@@ -73,7 +54,7 @@ namespace MV {
 		PointPrecision baseLine;
 		TextLibrary *textLibrary;
 
-		typedef std::map<UtfChar, std::shared_ptr<TextCharacter>> CachedGlyphs;
+		typedef std::map<UtfChar, std::shared_ptr<CharacterDefinition>> CachedGlyphs;
 		CachedGlyphs cachedGlyphs;
 
 		template <class Archive>
@@ -108,6 +89,28 @@ namespace MV {
 		FontDefinition& operator=(const FontDefinition &a_other) = delete;
 	};
 
+	///////////////////////////////////
+	class CharacterDefinition {
+	public:
+		static std::shared_ptr<CharacterDefinition> make(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition);
+
+		UtfChar character() const;
+		std::shared_ptr<TextureHandle> texture() const;
+		Size<int> characterSize() const;
+		Size<int> textureSize() const;
+
+		bool isSoftBreakCharacter();
+
+		std::shared_ptr<FontDefinition> font() const;
+	private:
+		CharacterDefinition(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition);
+
+		UtfChar glyphCharacter;
+		std::shared_ptr<SurfaceTextureDefinition> glyphTexture;
+		std::shared_ptr<TextureHandle> glyphHandle;
+		std::shared_ptr<FontDefinition> fontDefinition;
+	};
+
 	enum TextWrapMethod{
 		NONE,
 		HARD,
@@ -136,6 +139,7 @@ namespace MV {
 		return a_lhs;
 	}
 
+	///////////////////////////////////
 	class TextLibrary{
 	public:
 		TextLibrary(Draw2D *a_rendering);
@@ -171,6 +175,7 @@ namespace MV {
 		Draw2D *render;
 	};
 
+	///////////////////////////////////
 	struct FormattedState {
 		FormattedState();
 		FormattedState(const std::shared_ptr<FontDefinition> &a_font, const std::shared_ptr<FormattedState> &a_currentState = nullptr);
@@ -183,7 +188,9 @@ namespace MV {
 	};
 
 	class FormattedLine;
-	struct FormattedCharacter{
+	///////////////////////////////////
+	class FormattedCharacter{
+	public:
 		static std::shared_ptr<FormattedCharacter> make(const std::shared_ptr<Scene::Node> &parent, UtfChar a_character, const std::shared_ptr<FormattedState> &a_state);
 
 		Size<> characterSize() const;
@@ -204,7 +211,7 @@ namespace MV {
 		void removeFromParent();
 
 		UtfChar textCharacter;
-		std::shared_ptr<TextCharacter> character;
+		std::shared_ptr<CharacterDefinition> character;
 		std::shared_ptr<Scene::Rectangle> shape;
 		std::shared_ptr<FormattedLine> line;
 		std::shared_ptr<FormattedState> state;
@@ -216,7 +223,7 @@ namespace MV {
 		FormattedCharacter(const std::shared_ptr<Scene::Node> &parent, UtfChar a_character, const std::shared_ptr<FormattedState> &a_state):
 			textCharacter(a_character),
 			state(a_state),
-			character(a_state->font->getCharacter(a_character)){
+			character(a_state->font->characterDefinition(a_character)){
 
 			shape = parent->make<Scene::Rectangle>(castSize<PointPrecision>(character->characterSize()));
 
@@ -226,7 +233,7 @@ namespace MV {
 	};
 
 	class FormattedText;
-	struct FormattedCharacter;
+	///////////////////////////////////
 	class FormattedLine : public std::enable_shared_from_this<FormattedLine> {
 	public:
 		~FormattedLine();
@@ -282,6 +289,7 @@ namespace MV {
 
 	std::shared_ptr<FormattedState> getTextState(const UtfString &a_text, size_t a_i, const std::shared_ptr<FormattedState> &a_currentTextState, const std::shared_ptr<FormattedState> &a_defaultTextState, std::pair<size_t, size_t> &o_range);
 
+	///////////////////////////////////
 	class FormattedText{
 		friend FormattedLine;
 	public:
@@ -352,6 +360,7 @@ namespace MV {
 		TextJustification textJustification = TextJustification::LEFT;
 	};
 
+	///////////////////////////////////
 	class TextBox{
 		friend cereal::access;
 	public:

@@ -5,26 +5,37 @@
 namespace MV {
 
 	/*************************\
-	| -----TextCharacter----- |
+	| -----FontDefinition---- |
+	\*************************/
+	
+	std::shared_ptr<CharacterDefinition> FontDefinition::characterDefinition(UtfChar renderChar) {
+		std::shared_ptr<CharacterDefinition> &character = cachedGlyphs[renderChar];
+		if(!character){
+			character = CharacterDefinition::make(
+				SurfaceTextureDefinition::make("", [=](){
+					Uint16 text[] = {static_cast<Uint16>(renderChar), '\0'};
+					return TTF_RenderUNICODE_Blended(font, text, {255, 255, 255, 255});
+				}),
+				renderChar,
+				shared_from_this()
+			);
+		}
+		return character;
+	}
+
+
+
+
+
+	/*************************\
+	| --CharacterDefinition-- |
 	\*************************/
 
-	UtfChar TextCharacter::character() const{
-		return glyphCharacter;
+	std::shared_ptr<CharacterDefinition> CharacterDefinition::make(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition) {
+		return std::shared_ptr<CharacterDefinition>(new CharacterDefinition(a_texture, a_glyphCharacter, a_fontDefinition));
 	}
-
-	std::shared_ptr<TextureHandle> TextCharacter::texture() const{
-		return glyphHandle;
-	}
-
-	Size<int> TextCharacter::characterSize() const{
-		return (glyphTexture) ? glyphTexture->surfaceSize() : Size<int>(0, 0);
-	}
-
-	Size<int> TextCharacter::textureSize() const{
-		return (glyphTexture) ? glyphTexture->size() : Size<int>(0, 0);
-	}
-
-	TextCharacter::TextCharacter(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition):
+	
+	CharacterDefinition::CharacterDefinition(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition):
 		glyphTexture(a_texture),
 		glyphHandle(a_texture->makeHandle()),
 		glyphCharacter(a_glyphCharacter),
@@ -33,24 +44,35 @@ namespace MV {
 		glyphHandle->setBounds(Point<int>(), glyphTexture->surfaceSize());
 	}
 
-	bool TextCharacter::isSoftBreakCharacter() {
+	UtfChar CharacterDefinition::character() const{
+		return glyphCharacter;
+	}
+
+	std::shared_ptr<TextureHandle> CharacterDefinition::texture() const{
+		return glyphHandle;
+	}
+
+	Size<int> CharacterDefinition::characterSize() const{
+		return (glyphTexture) ? glyphTexture->surfaceSize() : Size<int>(0, 0);
+	}
+
+	Size<int> CharacterDefinition::textureSize() const{
+		return (glyphTexture) ? glyphTexture->size() : Size<int>(0, 0);
+	}
+
+	bool CharacterDefinition::isSoftBreakCharacter() {
 		return glyphCharacter == ' ' || glyphCharacter == '-';
 	}
 
-	std::shared_ptr<FontDefinition> TextCharacter::font() const {
+	std::shared_ptr<FontDefinition> CharacterDefinition::font() const {
 		return fontDefinition;
 	}
-
-	std::shared_ptr<TextCharacter> TextCharacter::make(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition) {
-		return std::shared_ptr<TextCharacter>(new TextCharacter(a_texture, a_glyphCharacter, a_fontDefinition));
-	}
-
 
 
 
 
 	/*************************\
-	| ----------Text--------- |
+	| ------TextLibrary------ |
 	\*************************/
 
 	TextLibrary::TextLibrary(Draw2D *a_rendering){
@@ -92,109 +114,11 @@ namespace MV {
 	}
 
 
-	TextBox::TextBox(TextLibrary *a_textLibrary, const Size<> &a_size):
-		TextBox(a_textLibrary, DEFAULT_ID, a_size){
-		textScene = textboxScene->add("Text", formattedText.scene());
-	}
 
-	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const Size<> &a_size) :
-		textLibrary(a_textLibrary),
-		render(a_textLibrary->getRenderer()),
-		fontIdentifier(a_fontIdentifier),
-		textboxScene(Scene::Clipped::make(a_textLibrary->getRenderer(), a_size)),
-		//textboxScene(Scene::Node::make(a_textLibrary->getRenderer())),
-		textScene(nullptr),
-		boxSize(a_size),
-		isSingleLine(false),
-		formattedText(*a_textLibrary, a_size.width, a_fontIdentifier){
-		firstRun = true;
-		textScene = textboxScene->add("Text", formattedText.scene());
-	}
 
-	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, const Size<> &a_size):
-		textLibrary(a_textLibrary),
-		render(a_textLibrary->getRenderer()),
-		fontIdentifier(a_fontIdentifier),
-		textboxScene(Scene::Clipped::make(a_textLibrary->getRenderer(), a_size)),
-		//textboxScene(Scene::Node::make(a_textLibrary->getRenderer())),
-		textScene(nullptr),
-		boxSize(a_size),
-		isSingleLine(false),
-		formattedText(*a_textLibrary, a_size.width, a_fontIdentifier){
-		firstRun = true;
-		setText(a_text, a_fontIdentifier);
-		textScene = textboxScene->add("Text", formattedText.scene());
-	}
-
-	void TextBox::setText(const UtfString &a_text, const std::string &a_fontIdentifier){
-		if(a_fontIdentifier != ""){ fontIdentifier = a_fontIdentifier; }
-		formattedText.clear();
-		formattedText.append(a_text);
-	}
-
-	bool TextBox::setText(SDL_Event &event){
-		if(event.type == SDL_TEXTINPUT){
-			appendText(stringToWide(event.text.text));
-		} else if(event.type == SDL_TEXTEDITING) {
-			setTemporaryText(stringToWide(event.edit.text), event.edit.start, event.edit.length);
-		} else if(event.type == SDL_KEYDOWN){
-			if(event.key.keysym.sym == SDLK_BACKSPACE && !formattedText.empty()){
-				backspace();
-			} else if(event.key.keysym.sym == SDLK_v && SDL_GetModState() & KMOD_CTRL){
-				appendText(stringToWide(SDL_GetClipboardText()));
-			} else if(event.key.keysym.sym == SDLK_c && SDL_GetModState() & KMOD_CTRL){
-				SDL_SetClipboardText(wideToString(string()).c_str());
-			}
-		}
-		return false;
-	}
-
-	void TextBox::setTextBoxSize(Size<> a_size){
-		boxSize = a_size;
-		textboxScene->size(a_size);
-		formattedText.width(a_size.width);
-	}
-
-	void TextBox::setScrollPosition(Point<> a_position, bool a_overScroll /*= false*/) {
-		if(!a_overScroll){
-			auto contentSize = getContentSize();
-			if(contentSize.height < boxSize.height){
-				a_position.y = 0;
-			} else if(a_position.y < -(contentSize.height - boxSize.height)){
-				a_position.y = -(contentSize.height - boxSize.height);
-			} else if(a_position.y > 0){
-				a_position.y = 0;
-			}
-
-			a_position.x = 0;
-		}
-		contentScrollPosition = a_position;
-		textScene->position(contentScrollPosition);
-	}
-
-	Size<> TextBox::getContentSize() {
-		return textScene->localAABB().size();
-	}
-
-	std::shared_ptr<Scene::Node> TextBox::scene() {
-		return textboxScene;
-	}
-
-	std::shared_ptr<TextCharacter> FontDefinition::getCharacter(UtfChar renderChar) {
-		std::shared_ptr<TextCharacter> &character = cachedGlyphs[renderChar];
-		if(!character){
-			character = TextCharacter::make(
-				SurfaceTextureDefinition::make("", [=](){
-					Uint16 text[] = {static_cast<Uint16>(renderChar), '\0'};
-					return TTF_RenderUNICODE_Blended(font, text, {255, 255, 255, 255});
-				}),
-				renderChar,
-				shared_from_this()
-			);
-		}
-		return character;
-	}
-
+	/*************************\
+	| -----FormattedState---- |
+	\*************************/
 
 	FormattedState::FormattedState():
 		font(),
@@ -219,6 +143,101 @@ namespace MV {
 		minimumLineHeight(a_minimumLineHeight) {
 	}
 
+
+
+
+
+	/*************************\
+	| ---FormattedCharacter-- |
+	\*************************/
+
+	std::shared_ptr<FormattedCharacter> FormattedCharacter::make(const std::shared_ptr<Scene::Node> &parent, UtfChar a_character, const std::shared_ptr<FormattedState> &a_state) {
+		return std::shared_ptr<FormattedCharacter>(new FormattedCharacter(parent, a_character, a_state));
+	}
+
+	Size<> FormattedCharacter::characterSize() const {
+		if(isPartOfFormat){
+			return{0.0, static_cast<PointPrecision>(character->characterSize().height)};
+		} else{
+			return castSize<PointPrecision>(character->characterSize());
+		}
+	}
+
+	Point<> FormattedCharacter::position() const {
+		return basePosition;
+	}
+
+	Point<> FormattedCharacter::position(const Point<> &a_newPosition) {
+		basePosition = a_newPosition;
+		shape->position(basePosition + offsetPosition);
+		return basePosition;
+	}
+
+	Point<> FormattedCharacter::offset() const {
+		return offsetPosition;
+	}
+
+	Point<> FormattedCharacter::offset(const Point<> &a_newPosition) {
+		offsetPosition = a_newPosition;
+		shape->position(basePosition + offsetPosition);
+		return offsetPosition;
+	}
+
+	Point<> FormattedCharacter::offset(PointPrecision a_lineHeight, PointPrecision a_baseLine) {
+		PointPrecision height = character->font()->height();
+		PointPrecision base = character->font()->base();
+		offset({offsetPosition.x, a_baseLine - base});
+		shape->position(basePosition + offsetPosition);
+		return offsetPosition;
+	}
+
+	Point<> FormattedCharacter::offset(PointPrecision a_x, PointPrecision a_lineHeight, PointPrecision a_baseLine) {
+		PointPrecision height = character->font()->height();
+		PointPrecision base = character->font()->base();
+		offset({a_x, a_baseLine - base});
+		shape->position(basePosition + offsetPosition);
+		return offsetPosition;
+	}
+
+	void FormattedCharacter::applyState(const std::shared_ptr<FormattedState> &a_state) {
+		state = a_state;
+		character = state->font->characterDefinition(textCharacter);
+		shape->size(castSize<PointPrecision>(character->characterSize()));
+		shape->texture(character->texture());
+		shape->color(state->color);
+	}
+
+	bool FormattedCharacter::partOfFormat(bool a_isPartOfFormat) {
+		isPartOfFormat = a_isPartOfFormat;
+		if(isPartOfFormat){
+			shape->hide();
+		} else{
+			shape->show();
+		}
+		return isPartOfFormat;
+	}
+
+	bool FormattedCharacter::partOfFormat() const {
+		return isPartOfFormat;
+	}
+
+	bool FormattedCharacter::isSoftBreakCharacter() const {
+		return character->isSoftBreakCharacter();
+	}
+
+	void FormattedCharacter::removeFromParent() {
+		if(shape){
+			shape->removeFromParent();
+		}
+	}
+
+
+
+
+
+	/*************************\
+	| -----FormattedLine----- |
+	\*************************/
 
 	std::shared_ptr<FormattedLine> FormattedLine::make(FormattedText &a_text, size_t a_lineIndex) {
 		auto line = std::shared_ptr<FormattedLine>(new FormattedLine(a_text, a_lineIndex));
@@ -503,6 +522,11 @@ namespace MV {
 
 
 
+
+
+	/*************************\
+	| -----FormattedText----- |
+	\*************************/
 
 	std::shared_ptr<FormattedLine>& FormattedText::operator[](size_t a_index) {
 		MV::require(a_index < lines.size(), MV::RangeException("FormattedText::operator[] supplied invalid index (" + std::to_string(a_index) + " > " + std::to_string(lines.size()) + ")"));
@@ -802,84 +826,99 @@ namespace MV {
 	}
 
 
-	std::shared_ptr<FormattedCharacter> FormattedCharacter::make(const std::shared_ptr<Scene::Node> &parent, UtfChar a_character, const std::shared_ptr<FormattedState> &a_state) {
-		return std::shared_ptr<FormattedCharacter>(new FormattedCharacter(parent, a_character, a_state));
+
+
+
+	/*************************\
+	| --------TextBox-------- |
+	\*************************/
+
+	TextBox::TextBox(TextLibrary *a_textLibrary, const Size<> &a_size):
+		TextBox(a_textLibrary, DEFAULT_ID, a_size){
+		textScene = textboxScene->add("Text", formattedText.scene());
 	}
 
-	Size<> FormattedCharacter::characterSize() const {
-		if(isPartOfFormat){
-			return{0.0, static_cast<PointPrecision>(character->characterSize().height)};
-		} else{
-			return castSize<PointPrecision>(character->characterSize());
+	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const Size<> &a_size) :
+		textLibrary(a_textLibrary),
+		render(a_textLibrary->getRenderer()),
+		fontIdentifier(a_fontIdentifier),
+		textboxScene(Scene::Clipped::make(a_textLibrary->getRenderer(), a_size)),
+		//textboxScene(Scene::Node::make(a_textLibrary->getRenderer())),
+		textScene(nullptr),
+		boxSize(a_size),
+		isSingleLine(false),
+		formattedText(*a_textLibrary, a_size.width, a_fontIdentifier){
+		firstRun = true;
+		textScene = textboxScene->add("Text", formattedText.scene());
+	}
+
+	TextBox::TextBox(TextLibrary *a_textLibrary, const std::string &a_fontIdentifier, const UtfString &a_text, const Size<> &a_size):
+		textLibrary(a_textLibrary),
+		render(a_textLibrary->getRenderer()),
+		fontIdentifier(a_fontIdentifier),
+		textboxScene(Scene::Clipped::make(a_textLibrary->getRenderer(), a_size)),
+		//textboxScene(Scene::Node::make(a_textLibrary->getRenderer())),
+		textScene(nullptr),
+		boxSize(a_size),
+		isSingleLine(false),
+		formattedText(*a_textLibrary, a_size.width, a_fontIdentifier){
+		firstRun = true;
+		setText(a_text, a_fontIdentifier);
+		textScene = textboxScene->add("Text", formattedText.scene());
+	}
+
+	void TextBox::setText(const UtfString &a_text, const std::string &a_fontIdentifier){
+		if(a_fontIdentifier != ""){ fontIdentifier = a_fontIdentifier; }
+		formattedText.clear();
+		formattedText.append(a_text);
+	}
+
+	bool TextBox::setText(SDL_Event &event){
+		if(event.type == SDL_TEXTINPUT){
+			appendText(stringToWide(event.text.text));
+		} else if(event.type == SDL_TEXTEDITING) {
+			setTemporaryText(stringToWide(event.edit.text), event.edit.start, event.edit.length);
+		} else if(event.type == SDL_KEYDOWN){
+			if(event.key.keysym.sym == SDLK_BACKSPACE && !formattedText.empty()){
+				backspace();
+			} else if(event.key.keysym.sym == SDLK_v && SDL_GetModState() & KMOD_CTRL){
+				appendText(stringToWide(SDL_GetClipboardText()));
+			} else if(event.key.keysym.sym == SDLK_c && SDL_GetModState() & KMOD_CTRL){
+				SDL_SetClipboardText(wideToString(string()).c_str());
+			}
 		}
+		return false;
 	}
 
-	Point<> FormattedCharacter::position() const {
-		return basePosition;
+	void TextBox::setTextBoxSize(Size<> a_size){
+		boxSize = a_size;
+		textboxScene->size(a_size);
+		formattedText.width(a_size.width);
 	}
 
-	Point<> FormattedCharacter::position(const Point<> &a_newPosition) {
-		basePosition = a_newPosition;
-		shape->position(basePosition + offsetPosition);
-		return basePosition;
-	}
+	void TextBox::setScrollPosition(Point<> a_position, bool a_overScroll /*= false*/) {
+		if(!a_overScroll){
+			auto contentSize = getContentSize();
+			if(contentSize.height < boxSize.height){
+				a_position.y = 0;
+			} else if(a_position.y < -(contentSize.height - boxSize.height)){
+				a_position.y = -(contentSize.height - boxSize.height);
+			} else if(a_position.y > 0){
+				a_position.y = 0;
+			}
 
-	Point<> FormattedCharacter::offset() const {
-		return offsetPosition;
-	}
-
-	Point<> FormattedCharacter::offset(const Point<> &a_newPosition) {
-		offsetPosition = a_newPosition;
-		shape->position(basePosition + offsetPosition);
-		return offsetPosition;
-	}
-
-	Point<> FormattedCharacter::offset(PointPrecision a_lineHeight, PointPrecision a_baseLine) {
-		PointPrecision height = character->font()->height();
-		PointPrecision base = character->font()->base();
-		offset({offsetPosition.x, a_baseLine - base});
-		shape->position(basePosition + offsetPosition);
-		return offsetPosition;
-	}
-
-	Point<> FormattedCharacter::offset(PointPrecision a_x, PointPrecision a_lineHeight, PointPrecision a_baseLine) {
-		PointPrecision height = character->font()->height();
-		PointPrecision base = character->font()->base();
-		offset({a_x, a_baseLine - base});
-		shape->position(basePosition + offsetPosition);
-		return offsetPosition;
-	}
-
-	void FormattedCharacter::applyState(const std::shared_ptr<FormattedState> &a_state) {
-		state = a_state;
-		character = state->font->getCharacter(textCharacter);
-		shape->size(castSize<PointPrecision>(character->characterSize()));
-		shape->texture(character->texture());
-		shape->color(state->color);
-	}
-
-	bool FormattedCharacter::partOfFormat(bool a_isPartOfFormat) {
-		isPartOfFormat = a_isPartOfFormat;
-		if(isPartOfFormat){
-			shape->hide();
-		} else{
-			shape->show();
+			a_position.x = 0;
 		}
-		return isPartOfFormat;
+		contentScrollPosition = a_position;
+		textScene->position(contentScrollPosition);
 	}
 
-	bool FormattedCharacter::partOfFormat() const {
-		return isPartOfFormat;
+	Size<> TextBox::getContentSize() {
+		return textScene->localAABB().size();
 	}
 
-	bool FormattedCharacter::isSoftBreakCharacter() const {
-		return character->isSoftBreakCharacter();
-	}
-
-	void FormattedCharacter::removeFromParent() {
-		if(shape){
-			shape->removeFromParent();
-		}
+	std::shared_ptr<Scene::Node> TextBox::scene() {
+		return textboxScene;
 	}
 
 }

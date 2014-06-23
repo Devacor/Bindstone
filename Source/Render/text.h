@@ -13,24 +13,11 @@
 #include "SDL_ttf.h"
 
 namespace MV {
-	//WARNING:
-	//SDL Supports 16 bit unicode characters, ensure glyph only ever contains characters of that size (not larger) unless that changes.
-	struct TextState{
-		TextState(const UtfString &a_text, const Color &a_color, const std::string &a_fontIdentifier, int a_lineHeight = -1)
-			:text(a_text),color(a_color),fontIdentifier(a_fontIdentifier), lineHeight(a_lineHeight){}
-		UtfString text;
-		Color color;
-		std::string fontIdentifier;
-		int lineHeight;
-	};
-
 	extern const UtfString COLOR_IDENTIFIER;
 	extern const UtfString FONT_IDENTIFIER;
 	extern const UtfString HEIGHT_IDENTIFIER;
 
 	Color parseColorString(const std::string &a_colorString);
-
-	std::vector<TextState> parseTextStateList(std::string a_defaultFontIdentifier, UtfString a_text);
 
 	class FontDefinition;
 	class TextCharacter {

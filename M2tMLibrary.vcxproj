@@ -190,6 +190,7 @@
     <ClCompile Include="Source\Render\points.cpp" />
     <ClCompile Include="Source\Render\render.cpp" />
     <ClCompile Include="Source\Render\Scene\primitives.cpp" />
+    <ClCompile Include="Source\Render\Scene\sliced.cpp" />
     <ClCompile Include="Source\Render\text.cpp" />
     <ClCompile Include="Source\Render\textures.cpp" />
     <ClCompile Include="Source\Utility\generalUtility.cpp" />
@@ -276,6 +277,7 @@
     <ClInclude Include="Source\Render\points.h" />
     <ClInclude Include="Source\Render\render.h" />
     <ClInclude Include="Source\Render\Scene\sceneMessages.hpp" />
+    <ClInclude Include="Source\Render\Scene\sliced.h" />
     <ClInclude Include="Source\Render\text.h" />
     <ClInclude Include="Source\Render\textures.h" />
     <ClInclude Include="Source\Utility\generalUtility.h" />

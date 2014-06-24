@@ -46,34 +46,9 @@ void Editor::initializeWindow(){
 	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
 	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 
-	test = MV::Scene::Rectangle::make(&renderer, MV::BoxAABB({00.0f, 0.0f}, {310.0f, 300.0f}));
-	test->texture(MV::FileTextureDefinition::make("Assets/Images/dogfox.png")->makeHandle());
+	auto slicedthing = scene->make<MV::Scene::Sliced>(MV::Scene::SliceDimensions({8.0f, 8.0f}, {32.0f, 32.0f}), MV::size(100.0f, 50.0f))->position({300.0f, 300.0f});
+	slicedthing->texture(MV::FileTextureDefinition::make("Assets/Images/dogfox.png")->makeHandle({0, 0}, {32, 32}));
 
-	box = std::shared_ptr<MV::TextBox>(new MV::TextBox(&textLibrary, MV::size(110.0f, 106.0f)));
-	box->wrapping(MV::TextWrapMethod::SOFT);
-	box->setText(UTF_CHAR_STR("ABCDE FGHIJKLM NOPQRS TUVWXYZ"));
-	//box->formattedText.removeCharacters(3, 13);
-	/*box->formattedText.addCharacters(0, UTF_CHAR_STR("0"));
-	box->formattedText.addCharacters(2, UTF_CHAR_STR("1"));
-	box->formattedText.addCharacters(4, UTF_CHAR_STR("2"));
-	box->formattedText.removeCharacters(0, 1);
-	box->formattedText.removeCharacters(1, 1);
-	box->formattedText.removeCharacters(2, 1);*/
-	/*box->formattedText.removeCharacters(4, 4);
-	box->formattedText.addCharacters(4, UTF_CHAR_STR("INSERTED"));
-	box->formattedText.removeCharacters(6, 4);
-	box->formattedText.addCharacters(6, UTF_CHAR_STR("[INSERTED]"));*/
-	float extra = 0.0f;
-	box->scene()->make<MV::Scene::Rectangle>(MV::size(65.0f, 36.0f))->color({0, 0, 1, .5f + extra})->position({80.0f, 10.0f})->sortDepth(100);
-	box->scene()->make<MV::Scene::Rectangle>(MV::size(65.0f, 36.0f))->color({1, 0, 0, .25f + extra})->position({80.0f, 40.0f})->sortDepth(101);
-	box->scene()->make<MV::Scene::Rectangle>(MV::size(65.0f, 16.0f))->color({.2f, .2f, .2f, .45f + extra})->position({80.0f, 40.0f})->sortDepth(103);
-	box->scene()->make<MV::Scene::Rectangle>(MV::size(65.0f, 36.0f))->color({0, .75f, 0, .75f + extra})->position({80.0f, 60.0f})->sortDepth(102);
-	test->make<MV::Scene::Rectangle>(MV::size(65.0f, 36.0f))->color({0, 0, 1, .5f + extra})->position({110.0f, 10.0f})->sortDepth(100);
-	test->make<MV::Scene::Rectangle>(MV::size(65.0f, 36.0f))->color({1, 0, 0, .25f + extra})->position({110.0f, 40.0f})->sortDepth(101);
-	test->make<MV::Scene::Rectangle>(MV::size(65.0f, 36.0f))->color({0, .75f, 0, .75f + extra})->position({110.0f, 60.0f})->sortDepth(102);
-	test->make<MV::Scene::Rectangle>(MV::size(65.0f, 16.0f))->color({.2f, .2f, .2f, .45f + extra})->position({80.0f, 40.0f})->sortDepth(103);
-
-	//test->color({1, 1, 1});
 }
 
 void Editor::handleInput(){
@@ -93,7 +68,6 @@ void Editor::handleInput(){
 
 					break;
 				case SDLK_LEFT:
-					//box->formattedText.addCharacters(6, UTF_CHAR_STR("+"));
 					break;
 				case SDLK_DOWN:
 
@@ -102,27 +76,22 @@ void Editor::handleInput(){
 
 					break;
 				case SDLK_RIGHT:
-					//box->formattedText.removeCharacters(6, 1);
 					break;
 				}
 				break;
 			}
 		}
 	}
-	box->setText(event);
 	mouse.update();
 	controlPanel.handleInput(event);
-	//testButton = makeButton(controls, textLibrary, mouse, MV::size(110.0f, 77.0f), UTF_CHAR_STR("ABC DEF GHI JKL MNO PQR STU VWX YZ"));
 }
 
 void Editor::render(){
 	renderer.clearScreen();
-	//scene->draw();
-	//controls->draw();
-	renderer.defaultBlendFunction();
-	test->draw();
-	box->scene()->draw();
-	//textBox.scene()->draw();
+	scene->draw();
+	controls->draw();
+
+
 	renderer.updateScreen();
 }
 

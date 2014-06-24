@@ -38,14 +38,10 @@ private:
 
 	MV::TextLibrary textLibrary;
 
-	std::shared_ptr<MV::Scene::Node> test;
 	std::shared_ptr<MV::Scene::Node> scene;
 	std::shared_ptr<MV::Scene::Node> controls;
 
 	MV::MouseState mouse;
-
-	std::shared_ptr<MV::Scene::Button> testButton;
-	std::shared_ptr<MV::TextBox> box;
 
 	MV::Stopwatch watch;
 	double lastSecond = 0;

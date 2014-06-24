@@ -4,4 +4,5 @@
 	#include "Render/Scene/primitives.h"
 	#include "Render/Scene/clipped.h"
 	#include "Render/Scene/button.h"
+	#include "Render/Scene/sliced.h"
 #endif

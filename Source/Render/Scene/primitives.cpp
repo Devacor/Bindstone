@@ -63,6 +63,31 @@ namespace MV {
 		| -------Rectangle------- |
 		\*************************/
 
+		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer) {
+			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			a_renderer->registerShader(rectangle);
+			return rectangle;
+		}
+
+		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Size<> &a_size, bool a_center) {
+			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			a_renderer->registerShader(rectangle);
+			return rectangle->size(a_size, a_center);
+		}
+
+		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Size<> &a_size, const Point<> &a_centerPoint) {
+			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			a_renderer->registerShader(rectangle);
+			return rectangle->size(a_size, a_centerPoint);
+		}
+
+		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const BoxAABB &a_boxAABB) {
+			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
+			a_renderer->registerShader(rectangle);
+			return rectangle->bounds(a_boxAABB);
+		}
+
+
 		std::shared_ptr<Rectangle> Rectangle::bounds(const BoxAABB &a_bounds){
 			auto notifyOnChanged = makeScopedDepthChangeNote(this);
 			
@@ -110,30 +135,6 @@ namespace MV {
 
 		void Rectangle::drawImplementation(){
 			defaultDraw(GL_TRIANGLE_FAN);
-		}
-
-		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer) {
-			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
-			a_renderer->registerShader(rectangle);
-			return rectangle;
-		}
-
-		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Size<> &a_size, bool a_center) {
-			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
-			a_renderer->registerShader(rectangle);
-			return rectangle->size(a_size, a_center);
-		}
-
-		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Size<> &a_size, const Point<> &a_centerPoint) {
-			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
-			a_renderer->registerShader(rectangle);
-			return rectangle->size(a_size, a_centerPoint);
-		}
-
-		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const BoxAABB &a_boxAABB) {
-			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
-			a_renderer->registerShader(rectangle);
-			return rectangle->bounds(a_boxAABB);
 		}
 
 	}

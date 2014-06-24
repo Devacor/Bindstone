@@ -111,6 +111,9 @@
     <ClCompile Include="Source\Editor\editorPanels.cpp" />
     <ClCompile Include="Source\Editor\editorFactories.cpp" />
     <ClCompile Include="..\external\gl3w\src\gl3w.c" />
+    <ClCompile Include="Source\Render\Scene\sliced.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -367,6 +370,9 @@
     <ClInclude Include="Source\Editor\editorPanels.h" />
     <ClInclude Include="Source\Editor\editorDefines.h" />
     <ClInclude Include="Source\Editor\editorFactories.h" />
+    <ClInclude Include="Source\Render\Scene\sliced.h">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html">

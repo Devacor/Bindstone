@@ -619,7 +619,11 @@ namespace MV {
 			shaderProgram->set("texture", ourTexture);
 			shaderProgram->set("transformation", transformationMatrix);
 			
-			glDrawArrays(drawType, 0, static_cast<GLsizei>(points.size()));
+			if(!vertexIndices.empty()){
+				glDrawElements(GL_TRIANGLE_STRIP, vertexIndices.size(), GL_UNSIGNED_INT, &vertexIndices[0]);
+			} else{
+				glDrawArrays(drawType, 0, static_cast<GLsizei>(points.size()));
+			}
 
 			glDisableVertexAttribArray(0);
 			glDisableVertexAttribArray(1);

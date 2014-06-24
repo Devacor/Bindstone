@@ -344,7 +344,10 @@ namespace MV {
 
 			std::shared_ptr<TextureHandle> ourTexture;
 			TextureHandle::SignalType::SharedType textureSizeSignal;
+
 			std::vector<DrawPoint> points;
+			std::vector<GLuint> vertexIndices; //if empty, use draw arrays, if populated use draw elements
+
 			Node *myParent;
 
 			Draw2D *renderer;

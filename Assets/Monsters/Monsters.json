@@ -1,0 +1,138 @@
+{
+	"effects":{
+		"heal":{
+			"type": "heal",
+			"category": "magic",
+			"attackScale": 0.0,
+			"magicScale": 1.0,
+			"amount": 10.0
+		},
+		"attack":{
+			"type": "attack",
+			"category": "attack",
+			"attackScale": 1.0,
+			"magicScale": 0.0,
+			"amount": 0.0
+		},
+		"root":{
+			"type": "root",
+			"category": "magic",
+			"attackScale": 0.0,
+			"magicScale": 0.25,
+			"amount": 1.5
+		}
+	},
+	"abilities":{
+		"heal":{
+			"effects": ["heal"],
+			"range": 200,
+			"cooldown": 15.0,
+			"animation": "cast",
+			"targets": ["self", "ally"]
+		},
+		"melee":{
+			"effects": ["attack"],
+			"range": 10,
+			"cooldown": 0.5,
+			"animation": "attack",
+			"targets": ["enemy"]
+		},
+		"ranged":{
+			"effects": "attack",
+			"range": 100,
+			"cooldown": 0.5,
+			"animation": "attack",
+			"targets": ["enemy"]
+		}
+		"root":{
+			"effects": ["attack", "root"],
+			"range": 200,
+			"cooldown": 15.0,
+			"animation": "cast",
+			"targets": ["enemy"]
+		}
+	},
+	"creatures":{
+		"base":{
+			"name": "Template",
+			"health": 100,
+			"armor": 10,
+			"resistance": 10,
+			"attack": 10,
+			"magic": 10,
+			"penetration": 0,
+			"focus": 0,
+			"speed": 100,
+			"spawn": 5.0
+		},
+		"baseUpgrade":{
+			"name": "Template",
+			"health": 150,
+			"armor": 15,
+			"resistance": 15,
+			"attack": 15,
+			"magic": 15,
+			"penetration": 0,
+			"focus": 0,
+			"speed": 150,
+			"spawn": 5.0
+		},
+		"life_base":{
+			"template": "base",
+			"visual": "sprout.spine",
+			"name": "Sprout",
+			"attack": 5,
+			"abilities":["melee", "heal"],
+			"description": "Light healing unit with a weak attack"
+		},
+		"life_a":{
+			"template": "baseUpgrade",
+			"visual": "oakShield.spine",
+			"name": "Oaken Shield",
+			"abilities":["melee", "heal"],
+			"attack": 10,
+			"health": 300,
+			"armor": 40,
+			"resistance": 40,
+			"description": "Hulking healing unit with high defenses.",
+			"spawn": 7.0
+		},
+		"life_b":{
+			"template": "baseUpgrade",
+			"visual": "javelin.spine",
+			"name": "Living Javelin",
+			"abilities":["ranged", "heal", "root"],
+			"attack": 30,
+			"magic": 20,
+			"description": "Light ranged healing unit with the ability to root.",
+			"spawn": 7.0
+		}
+	},
+	"buildings":{
+		"life":{
+			"root":{
+				"cost": 100,
+				"icon": "lifebase.png",
+				"name": "Life Tree",
+				"description": "Spawns Life Sprouts",
+				"unit": "life_base"
+			},
+			"upgrades":[
+				{
+					"cost": 200,
+					"icon": "life_a.png",
+					"name": "Life Tree",
+					"description": "Spawns Oaken Shields",
+					"unit": "life_a"
+				},
+				{
+					"cost": 200,
+					"icon": "life_b.png",
+					"name": "Life Tree",
+					"description": "Spawns Living Javelins",
+					"unit": "life_b"
+				}
+			]
+		}
+	}
+}

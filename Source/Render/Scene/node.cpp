@@ -560,9 +560,6 @@ namespace MV {
 
 		void Node::pushMatrix(){
 			renderer->modelviewMatrix().push();
-			if(!scaleTo.atOrigin()){
-				renderer->modelviewMatrix().top().scale(scaleTo.x, scaleTo.y, scaleTo.z);
-			}
 			if(!translateTo.atOrigin()){
 				renderer->modelviewMatrix().top().translate(translateTo.x, translateTo.y, translateTo.z);
 			}
@@ -570,6 +567,9 @@ namespace MV {
 				renderer->modelviewMatrix().top().translate(rotateOrigin.x, rotateOrigin.y, rotateOrigin.z);
 				renderer->modelviewMatrix().top().rotateX(rotateTo.x).rotateY(rotateTo.y).rotateZ(rotateTo.z);
 				renderer->modelviewMatrix().top().translate(-rotateOrigin.x, -rotateOrigin.y, -rotateOrigin.z);
+			}
+			if(!scaleTo.atOrigin()){
+				renderer->modelviewMatrix().top().scale(scaleTo.x, scaleTo.y, scaleTo.z);
 			}
 		}
 

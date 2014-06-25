@@ -9,5 +9,4 @@ out vec4 colorResult;
  
 void main(){
     colorResult = texture2D(texture, uv.st) * color;
-    colorResult.rgb *= colorResult.a;
 }

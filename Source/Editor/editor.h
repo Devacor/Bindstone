@@ -38,8 +38,6 @@ private:
 
 	MV::TextLibrary textLibrary;
 
-	std::shared_ptr<MV::Scene::Node> test;
-	std::shared_ptr<MV::TextBox> box;
 	std::shared_ptr<MV::Scene::Node> scene;
 	std::shared_ptr<MV::Scene::Node> controls;
 

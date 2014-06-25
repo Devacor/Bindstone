@@ -19,8 +19,8 @@ namespace MV {
 				texture(clippedTexture->makeHandle(Point<int>(), textureSize));
 				framebuffer = renderer->makeFramebuffer(castPoint<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId());
 				{
-					//renderer->setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
-					//SCOPE_EXIT{renderer->defaultBlendFunction(); };
+					renderer->setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
+					SCOPE_EXIT{renderer->defaultBlendFunction(); };
 
 					renderer->modelviewMatrix().push();
 					SCOPE_EXIT{renderer->modelviewMatrix().pop(); };
@@ -46,6 +46,8 @@ namespace MV {
 			pushMatrix();
 			SCOPE_EXIT{popMatrix(); };
 
+			renderer->setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+			SCOPE_EXIT{renderer->defaultBlendFunction(); };
 			defaultDraw(GL_TRIANGLE_FAN);
 
 			return false; //returning false blocks the default rendering steps for this node.

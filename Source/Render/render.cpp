@@ -825,7 +825,8 @@ namespace MV {
 	}
 
 	void Draw2D::defaultBlendFunction() {
-		setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		//setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
 	}
 
 	void Draw2D::validateShaderStatus(GLuint a_id, bool a_isShader) {

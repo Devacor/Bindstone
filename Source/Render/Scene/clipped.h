@@ -31,7 +31,6 @@ namespace MV {
 			Clipped(Draw2D *a_renderer):
 				Rectangle(a_renderer),
 				dirtyTexture(true){
-				shaderProgramId = "nopremultiply";
 			}
 
 		private:

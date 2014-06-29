@@ -118,11 +118,11 @@ namespace MV {
 			points[15].textureX = 1.0f; points[15].textureY = 1.0f;
 
 			for(auto & point : points){
-				point.textureX *= textureScale.width;
-				point.textureY *= textureScale.height;
+				point.textureX *= static_cast<PointPrecision>(textureScale.width);
+				point.textureY *= static_cast<PointPrecision>(textureScale.height);
 
-				point.textureX += textureOffset.x;
-				point.textureY += textureOffset.y;
+				point.textureX += static_cast<PointPrecision>(textureOffset.x);
+				point.textureY += static_cast<PointPrecision>(textureOffset.y);
 			}
 			
 			bounds(dimensions);

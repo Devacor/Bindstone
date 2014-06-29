@@ -74,7 +74,7 @@ void CreateDogFoxScene(std::shared_ptr<MV::Scene::Node> mainScene){
 
 	auto ground = dogFoxScene->make<MV::Scene::Rectangle>("ground");
 	ground->bounds({MV::Point<>(300, 325, 1), MV::Point<>(500, 425, 1)});
-	ground->getDepth();
+	ground->depth();
 	ground->texture(textureSheet->makeHandle(MV::Point<int>(256, 384), MV::Size<int>(256, 128)));
 }
 

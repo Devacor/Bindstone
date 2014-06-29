@@ -5,4 +5,5 @@
 	#include "Render/Scene/clipped.h"
 	#include "Render/Scene/button.h"
 	#include "Render/Scene/sliced.h"
+	#include "Render/Scene/text.h"
 #endif

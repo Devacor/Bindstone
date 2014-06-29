@@ -20,7 +20,7 @@ public:
 protected:
 	EditorControls &panel;
 	std::map<std::string, MV::Scene::ClickableSignals::Click> clickSignals;
-	std::shared_ptr<MV::TextBox> activeTextbox;
+	std::shared_ptr<MV::Scene::Text> activeTextbox;
 };
 
 class SelectedEditorPanel : public EditorPanel {
@@ -31,7 +31,7 @@ public:
 
 private:
 	std::unique_ptr<EditableElement> controls;
-	std::shared_ptr<MV::TextBox> ourBox;
+	std::shared_ptr<MV::Scene::Text> ourBox;
 };
 
 class DeselectedEditorPanel : public EditorPanel {

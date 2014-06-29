@@ -60,11 +60,11 @@ namespace MV{
 		public:
 			ScopedDepthChangeNote(T* a_target, bool visualChangeRegardless = true):
 				target(a_target),
-				startDepth(a_target->getDepth()){
+				startDepth(a_target->depth()){
 			}
 
 			~ScopedDepthChangeNote(){
-				if(startDepth != target->getDepth()){
+				if(startDepth != target->depth()){
 					target->depthChanged();
 				} else if(visualChangeRegardless){
 					target->alertParent(VisualChange::make(target->shared_from_this()));

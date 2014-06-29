@@ -100,7 +100,7 @@ namespace MV {
 
 	bool isPowerOfTwo(int num);
 
-	std::string wideToChar(UtfChar wc);
+	std::string wideToString(UtfChar wc);
 	UtfChar charToWide(char c);
 
 	std::string wideToString(const UtfString& ws);

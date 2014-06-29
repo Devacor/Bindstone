@@ -47,6 +47,7 @@ namespace MV {
 	> \
 	std::shared_ptr<TypeToMake> make(FirstParameter a_firstParam, Arg... a_parameters) { \
 	auto newChild = TypeToMake::make(renderer, a_firstParam, std::forward<Arg>(a_parameters)...); \
+	newChild->quietSetDepth(maxDepth + 1.0f); \
 	add(guid(), newChild); \
 	return newChild; \
 	} \
@@ -60,6 +61,7 @@ namespace MV {
 	> \
 	std::shared_ptr<TypeToMake> make(FirstParameter a_childId, Arg... a_parameters) { \
 	auto newChild = TypeToMake::make(renderer, std::forward<Arg>(a_parameters)...); \
+	newChild->quietSetDepth(maxDepth + 1.0f); \
 	add(a_childId, newChild); \
 	return newChild; \
 	} \
@@ -77,8 +79,7 @@ namespace MV {
 	std::shared_ptr<T> clearTexture(){ return std::static_pointer_cast<T>(clearTextureImplementation()); } \
 	std::shared_ptr<T> color(const Color &a_newColor){ return std::static_pointer_cast<T>(colorImplementation(a_newColor)); } \
 	std::shared_ptr<T> sortScene(bool a_depthMatters){ return std::static_pointer_cast<T>(sortSceneImplementation(a_depthMatters)); } \
-	std::shared_ptr<T> sortDepth(PointPrecision a_newDepth){ return std::static_pointer_cast<T>(sortDepthImplementation(a_newDepth)); } \
-	std::shared_ptr<T> defaultSortDepth(){ return std::static_pointer_cast<T>(defaultSortDepthImplementation()); } \
+	std::shared_ptr<T> depth(PointPrecision a_newDepth){ return std::static_pointer_cast<T>(depthImplementation(a_newDepth)); } \
 	std::shared_ptr<T> hide(){ return std::static_pointer_cast<T>(hideImplementation()); } \
 	std::shared_ptr<T> show(){ return std::static_pointer_cast<T>(showImplementation()); } \
 	std::shared_ptr<Node> blockSerialize(){ return std::static_pointer_cast<T>(blockSerializeImplementation()); } \
@@ -89,7 +90,8 @@ namespace MV {
 	AxisAngles rotation() const{ return rotationImplementation(); } \
 	virtual Color color() const { return colorImplementation(); } \
 	std::shared_ptr<TextureHandle> texture() const{ return textureImplementation(); } \
-	std::string shader() const { return shaderImplementation(); }
+	std::string shader() const { return shaderImplementation(); } \
+	PointPrecision depth() const { return sortDepth; }
 
 	namespace Scene {
 		class Node : 
@@ -135,6 +137,7 @@ namespace MV {
 				if(a_childItem->parent().get() == this){
 					remove(a_childItem);
 				}
+				maxDepth = std::max(a_childItem->depth(), maxDepth);
 				isSorted = 0;
 				drawListVector.clear();
 				if(renderer){
@@ -153,7 +156,6 @@ namespace MV {
 			std::shared_ptr<Node> remove(const std::string &a_childId);
 
 			void draw();
-			PointPrecision getDepth();
 
 			virtual void normalizeTest(Point<> a_offset);
 			virtual void normalizeToPoint(Point<> a_offset);
@@ -201,7 +203,6 @@ namespace MV {
 
 			bool visible() const;
 
-			//Used to determine sorting based on getDepth
 			bool operator<(Node &a_other);
 			bool operator>(Node &a_other);
 			bool operator==(Node &a_other);
@@ -257,6 +258,19 @@ namespace MV {
 				}
 			}
 
+			PointPrecision calculateMaxDepthChild(){
+				bool first = true;
+				for(auto &node : drawList){
+					if(first){
+						maxDepth = node.second->depth();
+						first = false;
+					} else{
+						maxDepth = std::max(node.second->depth(), maxDepth);
+					}
+				}
+				return maxDepth;
+			}
+
 			template<typename T>
 			void alertParent(std::shared_ptr<T> a_message){
 				if(myParent != nullptr){
@@ -295,6 +309,10 @@ namespace MV {
 					return *one.lock() > *two.lock();
 				};
 			}
+
+			void quietSetDepth(PointPrecision a_newDepth){
+				sortDepth = a_newDepth;
+			}
 		protected:
 			virtual std::shared_ptr<Node> parentImplementation(Node* a_parentItem);
 			virtual std::shared_ptr<Node> removeFromParentImplementation();
@@ -308,8 +326,7 @@ namespace MV {
 			virtual std::shared_ptr<Node> clearTextureImplementation();
 			virtual std::shared_ptr<Node> colorImplementation(const Color &a_newColor);
 			virtual std::shared_ptr<Node> sortSceneImplementation(bool a_depthMatters);
-			virtual std::shared_ptr<Node> sortDepthImplementation(PointPrecision a_newDepth);
-			virtual std::shared_ptr<Node> defaultSortDepthImplementation();
+			virtual std::shared_ptr<Node> depthImplementation(PointPrecision a_newDepth);
 			virtual std::shared_ptr<Node> hideImplementation();
 			virtual std::shared_ptr<Node> showImplementation();
 			std::shared_ptr<Node> blockSerializeImplementation();
@@ -339,8 +356,7 @@ namespace MV {
 			Point<> rotateTo;
 			Point<> rotateOrigin;
 
-			bool depthOverride;
-			PointPrecision overrideDepthValue;
+			PointPrecision sortDepth = 0.0f;
 
 			bool isVisible;
 
@@ -366,15 +382,13 @@ namespace MV {
 			Shader* shaderProgram = nullptr;
 			std::string shaderProgramId;
 			GLuint bufferId;
+			float maxDepth = -1.0f;
 		private:
 			bool markedTemporary = false;
 			bool shouldSortLessThan;
 			std::function<bool(DrawListVectorType::value_type, DrawListVectorType::value_type)> sortFunction;
 
-			void childDepthChanged(){
-				drawListVector.clear();
-				isSorted = false;
-			}
+			void childDepthChanged();
 
 			template <class Archive>
 			void serialize(Archive & archive){
@@ -382,7 +396,7 @@ namespace MV {
 					archive(CEREAL_NVP(translateTo),
 						CEREAL_NVP(rotateTo), CEREAL_NVP(rotateOrigin),
 						CEREAL_NVP(scaleTo),
-						CEREAL_NVP(depthOverride), CEREAL_NVP(overrideDepthValue),
+						CEREAL_NVP(sortDepth),
 						CEREAL_NVP(isVisible),
 						CEREAL_NVP(drawType), CEREAL_NVP(drawSorted),
 						CEREAL_NVP(points),
@@ -404,8 +418,7 @@ namespace MV {
 					cereal::make_nvp("rotateTo", construct->rotateTo),
 					cereal::make_nvp("rotateOrigin", construct->rotateOrigin),
 					cereal::make_nvp("scaleTo", construct->scaleTo),
-					cereal::make_nvp("depthOverride", construct->depthOverride),
-					cereal::make_nvp("overrideDepthValue", construct->overrideDepthValue),
+					cereal::make_nvp("sortDepth", construct->sortDepth),
 					cereal::make_nvp("isVisible", construct->isVisible),
 					cereal::make_nvp("drawType", construct->drawType),
 					cereal::make_nvp("drawSorted", construct->drawSorted),

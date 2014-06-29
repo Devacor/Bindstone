@@ -71,7 +71,14 @@ namespace MV {
 			});
 			if(foundChild != drawList.end()){
 				auto removed = foundChild->second;
+				auto foundSorted = std::find_if(drawListVector.begin(), drawListVector.end(), [&](std::weak_ptr<Node> a_compare){
+					return !a_compare.expired() && a_compare.lock() == removed;
+				});
+				if(foundSorted != drawListVector.end()){
+					drawListVector.erase(foundSorted);
+				}
 				drawList.erase(foundChild);
+				calculateMaxDepthChild();
 				alertParent(ChildRemoved::make(shared_from_this(), removed));
 				alertParent(VisualChange::make(shared_from_this()));
 				removed->myParent = nullptr;
@@ -86,7 +93,14 @@ namespace MV {
 			auto foundChild = drawList.find(a_childId);
 			if(foundChild != drawList.end()){
 				auto removed = foundChild->second;
+				auto foundSorted = std::find_if(drawListVector.begin(), drawListVector.end(), [&](std::weak_ptr<Node> a_compare){
+					return !a_compare.expired() && a_compare.lock() == removed;
+				});
+				if(foundSorted != drawListVector.end()){
+					drawListVector.erase(foundSorted);
+				}
 				drawList.erase(foundChild);
+				calculateMaxDepthChild();
 				alertParent(ChildRemoved::make(shared_from_this(), removed));
 				alertParent(VisualChange::make(shared_from_this()));
 				removed->myParent = nullptr;
@@ -100,6 +114,7 @@ namespace MV {
 		void Node::clear(){
 			auto tmpDrawList = drawList;
 			drawList.clear();
+			drawListVector.clear();
 
 			for(auto drawItem : tmpDrawList){
 				alertParent(ChildRemoved::make(shared_from_this(), drawItem.second));
@@ -121,35 +136,20 @@ namespace MV {
 			return nullptr;
 		}
 
-		PointPrecision Node::getDepth(){
-			if(depthOverride){
-				return overrideDepthValue;
-			}
-			if(points.empty()){
-				return 0;
-			}
-			size_t elements = points.size();
-			PointPrecision total = 0;
-			for(size_t i = 0; i < elements; i++){
-				total += points[i].z;
-			}
-			return total /= static_cast<PointPrecision>(elements);
-		}
-
 		bool Node::operator<(Node &a_other){
-			return getDepth() < a_other.getDepth();
+			return depth() < a_other.depth();
 		}
 
 		bool Node::operator>(Node &a_other){
-			return getDepth() > a_other.getDepth();
+			return depth() > a_other.depth();
 		}
 
 		bool Node::operator==(Node &a_other){
-			return equals(getDepth(), a_other.getDepth());
+			return equals(depth(), a_other.depth());
 		}
 
 		bool Node::operator!=(Node &a_other){
-			return !equals(getDepth(), a_other.getDepth());
+			return !equals(depth(), a_other.depth());
 		}
 
 		AxisAngles Node::rotationImplementation() const{
@@ -266,12 +266,11 @@ namespace MV {
 		}
 
 		BoxAABB Node::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
-			auto self = shared_from_this();
-			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(self)); renderer->modelviewMatrix().pop(); });
+			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(shared_from_this())); renderer->modelviewMatrix().pop(); });
 			if(!a_nestedCall){
 				renderer->modelviewMatrix().push();
 				renderer->modelviewMatrix().top().makeIdentity();
-				alertParent(PushMatrix::make(self));
+				alertParent(PushMatrix::make(shared_from_this()));
 			} else{
 				parentPopMatrix.dismiss();
 			}
@@ -304,17 +303,21 @@ namespace MV {
 		}
 
 		BoxAABB Node::localAABBImplementation(bool a_includeChildren, bool a_nestedCall){
-			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(shared_from_this())); renderer->modelviewMatrix().pop(); });
+			auto parentPopMatrix = scopeGuard([&](){if(myParent){ myParent->popMatrix(); } renderer->modelviewMatrix().pop(); });
 			if(!a_nestedCall){
 				renderer->modelviewMatrix().push();
 				renderer->modelviewMatrix().top().makeIdentity();
-				alertParent(PushMatrix::make(shared_from_this()));
+				if(myParent){
+					myParent->pushMatrix();
+				}
 			} else{
 				parentPopMatrix.dismiss();
 			}
 
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
+
+			TransformMatrix transformationMatrix(renderer->projectionMatrix().top() * renderer->modelviewMatrix().top());
 
 			BoxAABB tmpBox;
 
@@ -620,7 +623,7 @@ namespace MV {
 			shaderProgram->set("transformation", transformationMatrix);
 			
 			if(!vertexIndices.empty()){
-				glDrawElements(GL_TRIANGLE_STRIP, vertexIndices.size(), GL_UNSIGNED_INT, &vertexIndices[0]);
+				glDrawElements(GL_TRIANGLE_STRIP, static_cast<GLsizei>(vertexIndices.size()), GL_UNSIGNED_INT, &vertexIndices[0]);
 			} else{
 				glDrawArrays(drawType, 0, static_cast<GLsizei>(points.size()));
 			}
@@ -679,7 +682,7 @@ namespace MV {
 		Node::Node(Draw2D* a_renderer):
 			renderer(a_renderer),
 			myParent(nullptr),
-			depthOverride(false),
+			sortDepth(false),
 			drawSorted(true),
 			isSorted(false),
 			isVisible(true),
@@ -809,16 +812,9 @@ namespace MV {
 			return position();
 		}
 
-		std::shared_ptr<Node> Node::sortDepthImplementation(PointPrecision a_newDepth) {
+		std::shared_ptr<Node> Node::depthImplementation(PointPrecision a_newDepth) {
 			auto notifyOnChanged = makeScopedDepthChangeNote(this, false);
-			depthOverride = true;
-			overrideDepthValue = a_newDepth;
-			return shared_from_this();
-		}
-
-		std::shared_ptr<Node> Node::defaultSortDepthImplementation() {
-			auto notifyOnChanged = makeScopedDepthChangeNote(this, false);
-			depthOverride = false;
+			sortDepth = a_newDepth;
 			return shared_from_this();
 		}
 
@@ -830,6 +826,12 @@ namespace MV {
 		std::shared_ptr<Node> Node::allowSerializeImplementation() {
 			markedTemporary = false;
 			return shared_from_this();
+		}
+
+		void Node::childDepthChanged() {
+			calculateMaxDepthChild();
+			drawListVector.clear();
+			isSorted = false;
 		}
 
 

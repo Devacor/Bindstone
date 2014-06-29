@@ -191,7 +191,8 @@
     <ClCompile Include="Source\Render\render.cpp" />
     <ClCompile Include="Source\Render\Scene\primitives.cpp" />
     <ClCompile Include="Source\Render\Scene\sliced.cpp" />
-    <ClCompile Include="Source\Render\text.cpp" />
+    <ClCompile Include="Source\Render\Scene\text.cpp" />
+    <ClCompile Include="Source\Render\formattedText.cpp" />
     <ClCompile Include="Source\Render\textures.cpp" />
     <ClCompile Include="Source\Utility\generalUtility.cpp" />
     <ClCompile Include="Source\Utility\notification.cpp" />
@@ -278,7 +279,8 @@
     <ClInclude Include="Source\Render\render.h" />
     <ClInclude Include="Source\Render\Scene\sceneMessages.hpp" />
     <ClInclude Include="Source\Render\Scene\sliced.h" />
-    <ClInclude Include="Source\Render\text.h" />
+    <ClInclude Include="Source\Render\Scene\text.h" />
+    <ClInclude Include="Source\Render\formattedText.h" />
     <ClInclude Include="Source\Render\textures.h" />
     <ClInclude Include="Source\Utility\generalUtility.h" />
     <ClInclude Include="Source\Utility\messageHandler.hpp" />

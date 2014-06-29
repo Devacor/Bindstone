@@ -86,6 +86,9 @@ void EditableElement::resetHandles() {
 
 		dragUpdateFromHandles();
 	});
+	releaseSignals["topLeft"] = topLeftSizeHandle->onRelease.connect([&](std::shared_ptr<MV::Scene::Clickable> handle){
+		resetHandles();
+	});
 
 	topRightSizeHandle = controlContainer->make<MV::Scene::Clickable>(MV::guid("topRight"), mouse, MV::BoxAABB(rectBox.topRightPoint(), rectBox.topRightPoint() + (handleSize * MV::point(1.0f, -1.0f))));
 	topRightSizeHandle->color({SIZE_HANDLES});
@@ -95,6 +98,9 @@ void EditableElement::resetHandles() {
 		bottomRightSizeHandle->position(MV::point(topRightSizeHandle->position().x, bottomRightSizeHandle->position().y));
 
 		dragUpdateFromHandles();
+	});
+	releaseSignals["topRight"] = topRightSizeHandle->onRelease.connect([&](std::shared_ptr<MV::Scene::Clickable> handle){
+		resetHandles();
 	});
 
 	bottomLeftSizeHandle = controlContainer->make<MV::Scene::Clickable>(MV::guid("bottomLeft"), mouse, MV::BoxAABB(rectBox.bottomLeftPoint(), rectBox.bottomLeftPoint() - (handleSize * MV::point(1.0f, -1.0f))));
@@ -106,6 +112,9 @@ void EditableElement::resetHandles() {
 
 		dragUpdateFromHandles();
 	});
+	releaseSignals["bottomLeft"] = bottomLeftSizeHandle->onRelease.connect([&](std::shared_ptr<MV::Scene::Clickable> handle){
+		resetHandles();
+	});
 
 	bottomRightSizeHandle = controlContainer->make<MV::Scene::Clickable>(MV::guid("bottomRight"), mouse, MV::BoxAABB(rectBox.bottomRightPoint(), rectBox.bottomRightPoint() + (handleSize * MV::point(1.0f, 1.0f))));
 	bottomRightSizeHandle->color({SIZE_HANDLES});
@@ -115,6 +124,9 @@ void EditableElement::resetHandles() {
 		bottomLeftSizeHandle->position(MV::point(bottomLeftSizeHandle->position().x, bottomRightSizeHandle->position().y));
 
 		dragUpdateFromHandles();
+	});
+	releaseSignals["bottomRight"] = bottomRightSizeHandle->onRelease.connect([&](std::shared_ptr<MV::Scene::Clickable> handle){
+		resetHandles();
 	});
 }
 
@@ -134,10 +146,6 @@ void EditableElement::removeHandles() {
 }
 
 void EditableElement::dragUpdateFromHandles() {
-	if((topLeftSizeHandle->position().x - .5) > bottomRightSizeHandle->position().x || (topLeftSizeHandle->position().y - .5) > bottomRightSizeHandle->position().y){
-		resetHandles();
-	}
-
 	auto box = MV::BoxAABB(topLeftSizeHandle->screenAABB().bottomRightPoint(), bottomRightSizeHandle->screenAABB().topLeftPoint());
 
 	elementToEdit->position({});

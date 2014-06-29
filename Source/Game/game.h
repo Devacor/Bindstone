@@ -30,7 +30,7 @@ private:
 	MV::FrameSwapperRegister animationLibrary;
 
 	MV::TextLibrary textLibrary;
-	MV::TextBox testBox;
+	std::shared_ptr<MV::Scene::Text> testBox;
 	std::shared_ptr<MV::Scene::Node> mainScene;
 	std::shared_ptr<MV::Scene::Rectangle> testShape;
 

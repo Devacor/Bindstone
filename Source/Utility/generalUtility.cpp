@@ -108,7 +108,7 @@ namespace MV {
 		return num>0 && ((num & (num-1))==0);
 	}
 
-	std::string wideToChar(UtfChar wc){
+	std::string wideToString(UtfChar wc){
 		std::vector<char> c(MB_CUR_MAX);
 		mbstate_t ignore;
 		memset (&ignore, '\0', sizeof (ignore));
@@ -129,7 +129,7 @@ namespace MV {
 	std::string wideToString(const UtfString& ws){
 		std::string s;
 		std::for_each(ws.begin(), ws.end(), [&](const UtfChar &wc){
-			s+=wideToChar(wc);
+			s+=wideToString(wc);
 		});
 		return s;
 	}

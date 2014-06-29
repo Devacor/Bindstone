@@ -13,7 +13,7 @@ void EditorPanel::cancelInput() {
 
 void EditorPanel::handleInput(SDL_Event &a_event) {
 	if(activeTextbox){
-		activeTextbox->setText(a_event);
+		activeTextbox->text(a_event);
 	}
 }
 
@@ -25,22 +25,23 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::unique_pt
 	MV::PointPrecision lastY = 28.0;
 
 	auto node = panel.content();
-	auto createButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0f, 27.0f), UTF_CHAR_STR("Deselect"));
-	createButton->position({8.0, lastY});
+	auto deselectButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), "Deselect", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Deselect"));
+	deselectButton->position({8.0, lastY});
 	lastY += spacing;
 
-	ourBox = makeInputField(*panel.textLibrary(), MV::size(50.0f, 27.0f));
+	ourBox = makeInputField(node->parent(), *panel.textLibrary(), "posX", MV::size(50.0f, 27.0f));
 		
 	/*std::shared_ptr<MV::TextBox>(new MV::TextBox(a_panel.textLibrary(), "default", UTF_CHAR_STR("0"), MV::size(50.0, 27.0)));
 	ourBox->justification(MV::CENTER);*/
-	ourBox->scene()->position({8.0, lastY});
-	node->parent()->add("posX", ourBox->scene());
+	ourBox->position({8.0, lastY});
+	node->parent()->add("posX", ourBox);
 	
 	lastY += spacing;
+	auto deselectLocalAABB = deselectButton->localAABB();
 
-	auto background = node->make<MV::Scene::Rectangle>("Background", MV::BoxAABB(MV::point(0.0f, 20.0f), createButton->localAABB().bottomRightPoint() + MV::point(8.0f, 8.0f)));
+	auto background = node->make<MV::Scene::Rectangle>("Background", MV::BoxAABB(MV::point(0.0f, 20.0f), deselectButton->localAABB().bottomRightPoint() + MV::point(8.0f, 8.0f)));
 	background->color({BOX_BACKGROUND});
-	background->sortDepth(-1.0f);
+	background->depth(-1.0f);
 
 	panel.updateBoxHeader(background->basicAABB().width());
 
@@ -51,21 +52,21 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::unique_pt
 
 void SelectedEditorPanel::handleInput(SDL_Event &a_event) {
 	if(activeTextbox){
-		activeTextbox->setText(a_event);
+		activeTextbox->text(a_event);
 	}
 }
 
 DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	EditorPanel(a_panel) {
 	auto node = panel.content();
-	auto createButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0f, 77.0f), UTF_CHAR_STR("ABC DEF GHI JKL MNO PQR STU VWX YZ"));
+	auto createButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), "Create", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Create"));
 	createButton->position({8.0f, 28.0f});
-	auto selectButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), MV::size(110.0f, 27.0f), UTF_CHAR_STR("Select"));
+	auto selectButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), "Select", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Select"));
 	selectButton->position(createButton->localAABB().bottomLeftPoint() + MV::point(0.0f, 5.0f));
 
 	auto background = node->make<MV::Scene::Rectangle>("Background", MV::BoxAABB(MV::point(0.0f, 20.0f), selectButton->localAABB().bottomRightPoint() + MV::point(8.0f, 8.0f)));
 	background->color({BOX_BACKGROUND});
-	background->sortDepth(-1.0f);
+	background->depth(-1.0f);
 
 	panel.updateBoxHeader(background->basicAABB().width());
 

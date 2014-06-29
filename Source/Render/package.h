@@ -2,5 +2,5 @@
 #define _MV_RENDER_PACKAGE_
 	#include "Render/Scene/package.h"
 	#include "Render/textures.h"
-	#include "Render/text.h"
+	#include "Render/formattedText.h"
 #endif

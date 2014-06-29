@@ -11,7 +11,7 @@ Game::Game() :
 	testShape(MV::Scene::Rectangle::make(&renderer)),
 	done(false),
 	angleIncrement(0, 0, .005f),
-	testBox(&textLibrary, "blue", MV::Size<>(100.0f, 50.0f)){
+	testBox(MV::Scene::Text::make(&renderer, &textLibrary, MV::Size<>(100.0f, 50.0f), "blue")){
 
 	initializeWindow();
 	//auto clipped = mainScene->make<MV::Scene::Clipped>("clipped", MV::Size<>(200, 200));
@@ -135,20 +135,20 @@ void Game::handleInput() {
 					done = true;
 					break;
 				case SDLK_UP:
-					testBox.translateScrollPosition(MV::Point<>(0, -2));
+					testBox->translateScrollPosition(MV::Point<>(0, -2));
 					break;
 				case SDLK_LEFT:
-					testBox.translateScrollPosition(MV::Point<>(-2, 0));
+					testBox->translateScrollPosition(MV::Point<>(-2, 0));
 					break;
 				case SDLK_DOWN:
-					testBox.translateScrollPosition(MV::Point<>(0, 2));
+					testBox->translateScrollPosition(MV::Point<>(0, 2));
 					//renderer.window().windowedMode().bordered();
 					break;
 				case SDLK_SPACE:
 					//renderer.window().allowUserResize();
 					break;
 				case SDLK_RIGHT:
-					testBox.translateScrollPosition(MV::Point<>(2, 0));
+					testBox->translateScrollPosition(MV::Point<>(2, 0));
 					break;
 				}
 				break;
@@ -184,7 +184,7 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	//auto currentTexture = textures.getMainTexture("base"); TEXTURE
 	shape->texture(textureHandle);
 	std::cout << "PT: " << platformTexture->size() << std::endl;
-	shape->sortDepth(4);
+	shape->depth(4);
 	
 	armScene = catapaultScene->make<MV::Scene::Clickable>("clickArm", &mouse, MV::Size<>(60, 60));
 	armScene->ignoreChildrenForHitDetection();
@@ -195,12 +195,12 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	shape->texture(armTexture->makeHandle());
 	shape->size(MV::castSize<MV::PointPrecision>(armTexture->size()));
 	std::cout << "AT: " << armTexture->size() << std::endl;
-	shape->sortDepth(2);
+	shape->depth(2);
 
 	//yum, hard coding yay
 	armScene->rotationOrigin(MV::Point<>(static_cast<MV::PointPrecision>(armTexture->size().width) - 62, 25));
 
-	armScene->sortDepth(2);
+	armScene->depth(2);
 
 	shape = armScene->make<MV::Scene::Rectangle>("rock");
 	auto rockTexture = textures.getFileTexture("Assets/Images/rock.png");
@@ -215,14 +215,14 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	//shape->setSizeAndCornerPoint(MV::Point<>(0, 0), rockTexture->size());
 	shape->position(MV::Point<>(0, 0));
 	std::cout << "RT: " << rockTexture->size() << std::endl;
-	shape->sortDepth(1);
+	shape->depth(1);
 
 	shape = catapaultScene->make<MV::Scene::Rectangle>("joint");
 	auto jointTexture = textures.getFileTexture("Assets/Images/joint.png");
 	shape->texture(jointTexture->makeHandle());
 	shape->size(MV::castSize<MV::PointPrecision>(jointTexture->size()));
 	std::cout << "JT: " << jointTexture->size() << std::endl;
-	shape->sortDepth(3);
+	shape->depth(3);
 
 	//catapaultScene->scale(.5);*/
 	return catapaultScene;
@@ -230,7 +230,7 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 
 std::shared_ptr<MV::Scene::Node> Game::initializeTextScene() {
 	textLibrary.loadFont("blue", "Assets/Fonts/bluehigh.ttf", 24);
-	testBox.setText(MV::stringToWide("This is a clear and obvious test!"));
-	testBox.setScrollPosition(MV::Point<>(0, 8));
-	return testBox.scene();
+	testBox->text(MV::stringToWide("This is a clear and obvious test!"));
+	testBox->scrollPosition(MV::Point<>(0, 8));
+	return testBox;
 }

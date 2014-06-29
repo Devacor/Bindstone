@@ -52,9 +52,6 @@
     <ClCompile Include="Source\Render\render.cpp">
       <Filter>Source Files\Render</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Render\text.cpp">
-      <Filter>Source Files\Render</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Render\textures.cpp">
       <Filter>Source Files\Render</Filter>
     </ClCompile>
@@ -114,6 +111,12 @@
     <ClCompile Include="Source\Render\Scene\sliced.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Render\Scene\text.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\formattedText.cpp">
+      <Filter>Source Files\Render</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -135,9 +138,6 @@
       <Filter>Source Files\Render</Filter>
     </ClInclude>
     <ClInclude Include="Source\Render\render.h">
-      <Filter>Source Files\Render</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Render\text.h">
       <Filter>Source Files\Render</Filter>
     </ClInclude>
     <ClInclude Include="Source\Render\textures.h">
@@ -372,6 +372,12 @@
     <ClInclude Include="Source\Editor\editorFactories.h" />
     <ClInclude Include="Source\Render\Scene\sliced.h">
       <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\text.h">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\formattedText.h">
+      <Filter>Source Files\Render</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

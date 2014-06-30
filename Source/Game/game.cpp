@@ -169,9 +169,9 @@ void Game::render() {
 }
 
 void Game::hookUpInput(){
-	armInputHandles.drag = armScene->onDrag.connect([](std::shared_ptr<MV::Scene::Clickable> armScene, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
+	/*armInputHandles.drag = armScene->onDrag.connect([](std::shared_ptr<MV::Scene::Clickable> armScene, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
 		armScene->translate(MV::castPoint<MV::PointPrecision>(deltaPosition));
-	});
+	});*/
 }
 
 std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){

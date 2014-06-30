@@ -21,7 +21,7 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::unique_pt
 	EditorPanel(a_panel),
 	controls(std::move(a_controls)) {
 
-	MV::PointPrecision spacing = 28.0;
+	MV::PointPrecision spacing = 33.0;
 	MV::PointPrecision lastY = 28.0;
 
 	auto node = panel.content();
@@ -29,13 +29,9 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::unique_pt
 	deselectButton->position({8.0, lastY});
 	lastY += spacing;
 
-	ourBox = makeInputField(node->parent(), *panel.textLibrary(), "posX", MV::size(50.0f, 27.0f));
-		
-	/*std::shared_ptr<MV::TextBox>(new MV::TextBox(a_panel.textLibrary(), "default", UTF_CHAR_STR("0"), MV::size(50.0, 27.0)));
-	ourBox->justification(MV::CENTER);*/
-	ourBox->position({8.0, lastY});
-	node->parent()->add("posX", ourBox);
-	
+	makeInputField(this, *panel.mouse(), node, *panel.textLibrary(), "posX", MV::size(50.0f, 27.0f))->position({8.0, lastY});
+	makeInputField(this, *panel.mouse(), node, *panel.textLibrary(), "posY", MV::size(50.0f, 27.0f))->position({68.0, lastY});
+
 	lastY += spacing;
 	auto deselectLocalAABB = deselectButton->localAABB();
 
@@ -46,8 +42,6 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::unique_pt
 	panel.updateBoxHeader(background->basicAABB().width());
 
 	SDL_StartTextInput();
-
-	activeTextbox = ourBox;
 }
 
 void SelectedEditorPanel::handleInput(SDL_Event &a_event) {

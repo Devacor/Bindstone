@@ -35,6 +35,9 @@ namespace MV {
 			Slot<DragSlotSignature> onDragSlot;
 
 		public:
+			typedef Slot<Clickable::ButtonSlotSignature>::SharedSignalType Click;
+			typedef Slot<Clickable::DragSlotSignature>::SharedSignalType Drag;
+
 			SCENE_MAKE_FACTORY_METHODS(Clickable)
 			RECTANGLE_OVERRIDES(Clickable)
 
@@ -49,6 +52,10 @@ namespace MV {
 			SlotRegister<ButtonSlotSignature> onCancel;
 
 			SlotRegister<DragSlotSignature> onDrag;
+
+			//Convenient Optional Storage
+			std::map<std::string, Click> clickSignals;
+			std::map<std::string, Drag> dragSignals;
 
 			void includeChildrenForHitDetection(){
 				shouldUseChildrenInHitDetection = true;
@@ -132,24 +139,6 @@ namespace MV {
 			}
 		};
 
-		typedef Slot<Clickable::ButtonSlotSignature>::SharedSignalType ButtonSharedSignalType;
-		typedef Slot<Clickable::ButtonSlotSignature>::SharedSignalType DragSharedSignalType;
-
-		struct ClickableSignals {
-			typedef Slot<Clickable::ButtonSlotSignature>::SharedSignalType Click;
-			typedef Slot<Clickable::DragSlotSignature>::SharedSignalType Drag;
-
-			Click press;
-			Click release;
-
-			//called when release happens over top of the current node.
-			Click accept;
-			//called when release happens outside of the current node.
-			Click cancel;
-
-			Drag drag;
-		};
-
 		class Button : public Node {
 			friend cereal::access;
 		public:
@@ -173,6 +162,10 @@ namespace MV {
 			SlotRegister<ButtonSlotSignature> onCancel;
 
 			SlotRegister<DragSlotSignature> onDrag;
+
+			//Convenient Optional Storage
+			std::map<std::string, Clickable::Click> clickSignals;
+			std::map<std::string, Clickable::Drag> dragSignals;
 
 			MouseState* getMouse() const;
 

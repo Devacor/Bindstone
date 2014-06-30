@@ -236,8 +236,8 @@ namespace MV {
 	public:
 		static std::shared_ptr<FormattedLine> make(FormattedText &a_text, size_t a_lineIndex);
 
-		std::vector<std::shared_ptr<FormattedCharacter>> removeCharacters(size_t a_characterIndex, size_t a_totalToRemove);
-		void addCharacters(size_t a_characterIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters);
+		std::vector<std::shared_ptr<FormattedCharacter>> erase(size_t a_characterIndex, size_t a_totalToRemove);
+		void insert(size_t a_characterIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters);
 
 		std::vector<std::shared_ptr<FormattedCharacter>> removeLeadingCharactersForWidth(float a_width);
 
@@ -321,12 +321,12 @@ namespace MV {
 		std::tuple<std::shared_ptr<FormattedLine>, size_t> lineForCharacterIndex(size_t a_characterIndex);
 
 
-		void removeCharacters(size_t a_startIndex, size_t a_count);
+		void erase(size_t a_startIndex, size_t a_count);
 		void removeLines(size_t a_startIndex, size_t a_count);
-		void popCharacters(size_t a_count);
+		size_t popCharacters(size_t a_count); //return new size
 
-		void addCharacters(size_t a_startIndex, const UtfString &a_characters);
-		void addCharacters(size_t a_startIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters);
+		void insert(size_t a_startIndex, const UtfString &a_characters);
+		void insert(size_t a_startIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters);
 
 		void append(const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters);
 		void append(const UtfString &a_characters);

@@ -59,7 +59,7 @@ private:
 	std::shared_ptr<MV::Scene::Node> rootScene;
 	std::shared_ptr<MV::Scene::Node> draggableBox;
 	std::shared_ptr<MV::Scene::Clickable> boxHeader;
-	MV::Scene::ClickableSignals::Drag boxHeaderDrag;
+	MV::Scene::Clickable::Drag boxHeaderDrag;
 
 	MV::TextLibrary *textLibraryHandle;
 	MV::MouseState *mouseHandle;

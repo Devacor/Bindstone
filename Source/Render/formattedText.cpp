@@ -359,7 +359,7 @@ namespace MV {
 		}
 	}
 
-	void FormattedLine::addCharacters(size_t a_characterIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters){
+	void FormattedLine::insert(size_t a_characterIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters){
 		if(!a_characters.empty()){
 			auto insertIndex = std::min(a_characterIndex, characters.size());
 			characters.insert(characters.begin() + insertIndex, a_characters.begin(), a_characters.end());
@@ -398,7 +398,7 @@ namespace MV {
 					if(text.lines.size() <= lineIndex + 1){
 						text.lines.push_back(FormattedLine::make(text, text.lines.size()));
 					}
-					text.lines[lineIndex + 1]->addCharacters(0, overflow);
+					text.lines[lineIndex + 1]->insert(0, overflow);
 					exceeded = true;
 					break;
 				}
@@ -406,7 +406,7 @@ namespace MV {
 
 			if(!exceeded && lineIndex+1 < text.lines.size()){
 				MV::PointPrecision widthRemaining = text.width() - lineWidth();
-				addCharacters(characters.size(), text.lines[lineIndex + 1]->removeLeadingCharactersForWidth(widthRemaining));
+				insert(characters.size(), text.lines[lineIndex + 1]->removeLeadingCharactersForWidth(widthRemaining));
 			}else if(text.justification() != LEFT){
 				applyAlignment();
 			}
@@ -473,7 +473,7 @@ namespace MV {
 		return result;
 	}
 
-	std::vector<std::shared_ptr<FormattedCharacter>> FormattedLine::removeCharacters(size_t a_characterIndex, size_t a_totalToRemove) {
+	std::vector<std::shared_ptr<FormattedCharacter>> FormattedLine::erase(size_t a_characterIndex, size_t a_totalToRemove) {
 		if(a_characterIndex > characters.size() || a_totalToRemove == 0){
 			return{};
 		} else if(a_totalToRemove + a_characterIndex > characters.size()){
@@ -565,8 +565,8 @@ namespace MV {
 
 	PointPrecision FormattedText::positionForLine(size_t a_index) {
 		a_index = std::min(a_index, lines.size());
-		return std::accumulate(lines.begin(), lines.begin()+a_index, 0.0f, [](PointPrecision a_accumulated, const std::shared_ptr<FormattedLine> &a_line){
-			return a_line->height() + a_accumulated;
+		return std::accumulate(lines.begin(), lines.begin()+a_index, 0.0f, [&](PointPrecision a_accumulated, const std::shared_ptr<FormattedLine> &a_line){
+			return std::max(a_line->height(), minimumTextLineHeight) + a_accumulated;
 		});
 	}
 
@@ -681,7 +681,7 @@ namespace MV {
 		}
 	}
 
-	void FormattedText::removeCharacters(size_t a_startIndex, size_t a_count) {
+	void FormattedText::erase(size_t a_startIndex, size_t a_count) {
 		if(a_count == 0){
 			return;
 		}
@@ -694,15 +694,15 @@ namespace MV {
 		std::tie(lineEnd, lineEndCharacter) = lineForCharacterIndex(a_startIndex + a_count);
 
 		if(lineStart->index() == lineEnd->index()){
-			lineStart->removeCharacters(lineStartCharacter, lineEndCharacter - lineStartCharacter);
+			lineStart->erase(lineStartCharacter, lineEndCharacter - lineStartCharacter);
 			if(lineStart->empty()){
 				removeLines(lineStart->index(), 1);
 			}
 		} else{
 			removeLines(lineStart->index() + 1, lineEnd->index() - lineStart->index() - 1);
 
-			lineEnd->removeCharacters(0, lineEndCharacter);
-			lineStart->removeCharacters(lineStartCharacter, lineStart->size() - lineStartCharacter);
+			lineEnd->erase(0, lineEndCharacter);
+			lineStart->erase(lineStartCharacter, lineStart->size() - lineStartCharacter);
 			if(lineEnd->empty()){
 				removeLines(lineEnd->index(), 1);
 			}
@@ -721,11 +721,13 @@ namespace MV {
 		}
 	}
 
-	void FormattedText::popCharacters(size_t a_count) {
-		removeCharacters(size() - a_count, a_count);
+	size_t FormattedText::popCharacters(size_t a_count) {
+		auto textSize = size() - a_count;
+		erase(textSize, a_count);
+		return textSize;
 	}
 
-	void FormattedText::addCharacters(size_t a_startIndex, const UtfString &a_characters) {
+	void FormattedText::insert(size_t a_startIndex, const UtfString &a_characters) {
 		if(a_characters.empty()){
 			return;
 		}
@@ -748,17 +750,17 @@ namespace MV {
 			formattedCharacters.push_back(FormattedCharacter::make(textScene, character, foundState));
 		}
 
-		line->addCharacters(characterInLineIndex, formattedCharacters);
+		line->insert(characterInLineIndex, formattedCharacters);
 	}
 
-	void FormattedText::addCharacters(size_t a_startIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters) {
+	void FormattedText::insert(size_t a_startIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters) {
 		if(a_characters.empty()){
 			return;
 		}
 		std::shared_ptr<FormattedLine> line;
 		size_t characterInLineIndex;
 		std::tie(line, characterInLineIndex) = lineForCharacterIndex(a_startIndex);
-		line->addCharacters(a_startIndex, a_characters);
+		line->insert(a_startIndex, a_characters);
 	}
 
 	void FormattedText::append(const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters) {
@@ -769,7 +771,7 @@ namespace MV {
 			lines.push_back(FormattedLine::make(*this, lines.size()));
 		}
 		std::shared_ptr<FormattedLine> line = lines.back();
-		line->addCharacters(line->size(), a_characters);
+		line->insert(line->size(), a_characters);
 	}
 
 	void FormattedText::append(const UtfString &a_characters) {
@@ -794,7 +796,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<FormattedLine> line = lines.back();
-		line->addCharacters(line->size(), formattedCharacters);
+		line->insert(line->size(), formattedCharacters);
 	}
 
 	MV::PointPrecision FormattedText::minimumLineHeight() const {

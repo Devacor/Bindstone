@@ -59,10 +59,16 @@ namespace MV{
 			}
 
 			std::shared_ptr<Text> append(const UtfString &a_text){
+				if(cursor >= formattedText.size()){
+					incrementCursor(a_text.size());
+				}
 				formattedText.append(a_text);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
-			std::shared_ptr<Text> append(const UtfChar a_char){
+			std::shared_ptr<Text> append(UtfChar a_char){
+				if(cursor >= formattedText.size()){
+					incrementCursor(1);
+				}
 				formattedText.append(UtfString(1, a_char));
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
@@ -71,13 +77,28 @@ namespace MV{
 				return append(*character);
 			}
 
-			std::shared_ptr<Text> prepend(Uint16 a_char){
+			std::shared_ptr<Text> insertAtCursor(const UtfString &a_text){
+				formattedText.insert(cursor, a_text);
+				incrementCursor(a_text.size());
+				return std::static_pointer_cast<Text>(shared_from_this());
+			}
+			std::shared_ptr<Text> insertAtCursor(UtfChar a_char){
+				formattedText.insert(cursor, UtfString(1, a_char));
+				incrementCursor(1);
+				return std::static_pointer_cast<Text>(shared_from_this());
+			}
+			std::shared_ptr<Text> insertAtCursor(Uint16 a_char){
 				UtfChar *character = reinterpret_cast<UtfChar*>(&a_char);
-				return prepend(*character);
+				formattedText.insert(cursor, UtfString(1, *character));
+				incrementCursor(1);
+				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 
 			std::shared_ptr<Text> backspace(){
-				formattedText.popCharacters(1);
+				if(cursor > 0){
+					formattedText.erase(cursor - 1, 1);
+					incrementCursor(-1);
+				}
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 
@@ -94,10 +115,9 @@ namespace MV{
 
 			Size<> contentSize() const;
 			PointPrecision getMinimumLineHeight() const{
-				return minimumLineHeight;
+				return formattedText.minimumLineHeight();
 			}
 			std::shared_ptr<Text> setMinimumLineHeight(PointPrecision a_newLineHeight){
-				minimumLineHeight = a_newLineHeight;
 				formattedText.minimumLineHeight(a_newLineHeight);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
@@ -109,6 +129,17 @@ namespace MV{
 			std::shared_ptr<Text> makeManyLine(){
 				isSingleLine = false;
 				return std::static_pointer_cast<Text>(shared_from_this());
+			}
+
+			void enableCursor(){
+				displayCursor = true;
+				setCursor(cursor);
+				cursorScene->show();
+			}
+			void disableCursor(){
+				displayCursor = false;
+				setCursor(cursor);
+				cursorScene->hide();
 			}
 		private:
 			Text(Draw2D *a_renderer, TextLibrary *a_textLibrary, const Size<> &a_size, const std::string &a_fontIdentifier);
@@ -157,10 +188,52 @@ namespace MV{
 
 			FormattedText formattedText;
 
+			void incrementCursor(int64_t a_change){
+				setCursor(cursor + a_change);
+			}
+			void setCursor(int64_t a_value){
+				auto maxCursor = formattedText.size();
+				a_value = std::max<int64_t>(std::min<int64_t>(a_value, maxCursor), 0);
+				cursor = a_value;
+				auto cursorCharacter = (cursor < maxCursor || cursor == 0) ? formattedText.characterForIndex(cursor) : formattedText.characterForIndex(cursor - 1);
+				if(cursorCharacter){
+					cursorScene->position(cursorCharacter->position() + cursorCharacter->offset());
+					cursorScene->size({2, cursorCharacter->characterSize().height});
+					if(cursor >= maxCursor) {
+						cursorScene->translate({cursorCharacter->characterSize().width, 0.0f});
+					}
+					if(displayCursor){
+						cursorScene->show();
+					}
+				} else{
+					std::shared_ptr<FormattedLine> line;
+					size_t characterIndex;
+					std::tie(line, characterIndex) = formattedText.lineForCharacterIndex(cursor);
+					float xPosition = 0.0f;
+					if(justification() == TextJustification::CENTER){
+						xPosition = formattedText.width()/2.0f-1.0f;
+					} else if(justification() == TextJustification::RIGHT){
+						xPosition = formattedText.width() - 2.0f;
+					}
+					auto cursorHeight = formattedText.defaultState()->font->height();
+					auto linePositionY = formattedText.positionForLine(line->index());
+					auto cursorLineHeight = std::max<float>(formattedText.minimumLineHeight(), (line) ? line->height() : cursorHeight);
+					linePositionY += cursorLineHeight / 2.0f - cursorHeight / 2.0f;
+					
+					cursorScene->position({xPosition, linePositionY});
+					cursorScene->size({2, cursorHeight});
+
+					if(displayCursor){
+						cursorScene->show();
+					}
+				}
+			}
+
+			bool displayCursor;
 			size_t cursor;
+			std::shared_ptr<Scene::Rectangle> cursorScene;
 			UtfString editText;
 			std::string fontIdentifier;
-			PointPrecision minimumLineHeight;
 			bool isSingleLine;
 		};
 

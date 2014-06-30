@@ -17,9 +17,20 @@ public:
 
 	virtual void handleInput(SDL_Event &a_event);
 
+	void activate(std::shared_ptr<MV::Scene::Text> a_textbox){
+		if(activeTextbox){
+			activeTextbox->disableCursor();
+		}
+		if(a_textbox == activeTextbox){
+			activeTextbox = nullptr;
+		} else{
+			activeTextbox = a_textbox;
+			activeTextbox->enableCursor();
+		}
+	}
 protected:
 	EditorControls &panel;
-	std::map<std::string, MV::Scene::ClickableSignals::Click> clickSignals;
+	std::map<std::string, MV::Scene::Clickable::Click> clickSignals;
 	std::shared_ptr<MV::Scene::Text> activeTextbox;
 };
 

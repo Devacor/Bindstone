@@ -1,5 +1,6 @@
 #include "editorFactories.h"
 #include "editorDefines.h"
+#include "editorPanels.h"
 
 void colorTopAndBottom(const std::shared_ptr<MV::Scene::Rectangle> &a_rect, const MV::Color &a_top, const MV::Color &a_bot){
 	a_rect->applyToCorners(a_top, a_top, a_bot, a_bot);
@@ -33,10 +34,14 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 	return button;
 }
 
-std::shared_ptr<MV::Scene::Text> makeInputField(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_textLibrary, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_startContents){
-	auto background = a_parent->make<MV::Scene::Rectangle>(a_name, a_size);
-	auto box = background->make<MV::Scene::Text>("TextBox", &a_textLibrary, a_size, "small")->justification(MV::TextJustification::CENTER)->text(a_startContents);
-	box->setMinimumLineHeight(static_cast<int>(a_size.height));
+std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::MouseState &a_mouse, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_textLibrary, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_startContents){
+	auto box = a_parent->make<MV::Scene::Text>(a_name, &a_textLibrary, a_size, "small")->justification(MV::TextJustification::CENTER)->text(a_startContents);
+	auto background = box->make<MV::Scene::Rectangle>("Background", a_size)->depth(-1);
+	auto clickable = box->make<MV::Scene::Clickable>("Clickable", &a_mouse, a_size);
+	clickable->clickSignals["register"] = clickable->onAccept.connect([=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+		a_panel->activate(box);
+	});
+	box->setMinimumLineHeight(a_size.height);
 	box->makeSingleLine();
 	colorTopAndBottom(background, {TEXTBOX_TOP}, {TEXTBOX_BOTTOM});
 	return box;

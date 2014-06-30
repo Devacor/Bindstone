@@ -41,7 +41,7 @@ private:
 	bool done;
 	MV::MouseState mouse;
 
-	MV::Scene::ClickableSignals armInputHandles;
+	//MV::Scene::Clickable::Signals armInputHandles;
 
 	MV::Stopwatch watch;
 	double lastSecond = 0;

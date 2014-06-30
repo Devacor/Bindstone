@@ -36,13 +36,16 @@ protected:
 
 class SelectedEditorPanel : public EditorPanel {
 public:
-	SelectedEditorPanel(EditorControls &a_panel, std::unique_ptr<EditableElement> a_controls);
+	SelectedEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableElement> a_controls);
 
 	virtual void handleInput(SDL_Event &a_event);
 
 private:
-	std::unique_ptr<EditableElement> controls;
-	std::shared_ptr<MV::Scene::Text> ourBox;
+	std::shared_ptr<EditableElement> controls;
+	std::shared_ptr<MV::Scene::Text> posY;
+	std::shared_ptr<MV::Scene::Text> posX;
+	std::shared_ptr<MV::Scene::Text> width;
+	std::shared_ptr<MV::Scene::Text> height;
 };
 
 class DeselectedEditorPanel : public EditorPanel {

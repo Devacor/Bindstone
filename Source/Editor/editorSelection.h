@@ -19,6 +19,13 @@ public:
 
 	void resetHandles();
 
+	void position(MV::Point<> a_newPosition);
+	MV::Point<> position() const;
+
+	void size(MV::Size<> a_newSize);
+	MV::Size<> size();
+
+	std::function<void(EditableElement*)> onChange;
 private:
 	void dragUpdateFromHandles();
 

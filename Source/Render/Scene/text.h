@@ -11,9 +11,14 @@ namespace MV{
 		class Text :
 			public Node{
 
+			typedef void TextSlotSignature(std::shared_ptr<Text>);
+
 			friend cereal::access;
 			friend Node;
+
+			Slot<TextSlotSignature> onEnterSlot;
 		public:
+			typedef Slot<TextSlotSignature>::SharedSignalType Enter;
 
 			SCENE_MAKE_FACTORY_METHODS(Text)
 
@@ -23,9 +28,25 @@ namespace MV{
 			UtfString text() const{
 				return formattedText.string();
 			}
-			double number() const{
-				return stod(text());
+			PointPrecision number() const{
+				try{
+					return stof(text());
+				} catch(...){
+					return 0.0f;
+				}
 			}
+			std::shared_ptr<Text> number(PointPrecision a_newText){
+				UtfString str = stringToWide(std::to_string(a_newText));
+				return text(str);
+			}
+			std::shared_ptr<Text> number(int a_newText){
+				UtfString str = stringToWide(std::to_string(a_newText));
+				return text(str);
+			}
+
+			SlotRegister<TextSlotSignature> onEnter;
+			//Convenient Optional Storage
+			std::map<std::string, Enter> enterSignals;
 
 			std::shared_ptr<Text> justification(MV::TextJustification a_newJustification){
 				formattedText.justification(a_newJustification);
@@ -188,46 +209,12 @@ namespace MV{
 
 			FormattedText formattedText;
 
-			void incrementCursor(int64_t a_change){
-				setCursor(cursor + a_change);
-			}
-			void setCursor(int64_t a_value){
-				auto maxCursor = formattedText.size();
-				a_value = std::max<int64_t>(std::min<int64_t>(a_value, maxCursor), 0);
-				cursor = a_value;
-				auto cursorCharacter = (cursor < maxCursor || cursor == 0) ? formattedText.characterForIndex(cursor) : formattedText.characterForIndex(cursor - 1);
-				if(cursorCharacter){
-					cursorScene->position(cursorCharacter->position() + cursorCharacter->offset());
-					cursorScene->size({2, cursorCharacter->characterSize().height});
-					if(cursor >= maxCursor) {
-						cursorScene->translate({cursorCharacter->characterSize().width, 0.0f});
-					}
-					if(displayCursor){
-						cursorScene->show();
-					}
-				} else{
-					std::shared_ptr<FormattedLine> line;
-					size_t characterIndex;
-					std::tie(line, characterIndex) = formattedText.lineForCharacterIndex(cursor);
-					float xPosition = 0.0f;
-					if(justification() == TextJustification::CENTER){
-						xPosition = formattedText.width()/2.0f-1.0f;
-					} else if(justification() == TextJustification::RIGHT){
-						xPosition = formattedText.width() - 2.0f;
-					}
-					auto cursorHeight = formattedText.defaultState()->font->height();
-					auto linePositionY = formattedText.positionForLine(line->index());
-					auto cursorLineHeight = std::max<float>(formattedText.minimumLineHeight(), (line) ? line->height() : cursorHeight);
-					linePositionY += cursorLineHeight / 2.0f - cursorHeight / 2.0f;
-					
-					cursorScene->position({xPosition, linePositionY});
-					cursorScene->size({2, cursorHeight});
+			void incrementCursor(int64_t a_change);
+			void setCursor(int64_t a_value);
 
-					if(displayCursor){
-						cursorScene->show();
-					}
-				}
-			}
+			void positionCursorWithCharacter(size_t a_maxCursor, std::shared_ptr<FormattedCharacter> a_cursorCharacter);
+
+			void positionCursorWithoutCharacter();
 
 			bool displayCursor;
 			size_t cursor;

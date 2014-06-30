@@ -17,9 +17,9 @@ void EditorPanel::handleInput(SDL_Event &a_event) {
 	}
 }
 
-SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::unique_ptr<EditableElement> a_controls):
+SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableElement> a_controls):
 	EditorPanel(a_panel),
-	controls(std::move(a_controls)) {
+	controls(a_controls) {
 
 	MV::PointPrecision spacing = 33.0;
 	MV::PointPrecision lastY = 28.0;
@@ -29,9 +29,53 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::unique_pt
 	deselectButton->position({8.0, lastY});
 	lastY += spacing;
 
-	makeInputField(this, *panel.mouse(), node, *panel.textLibrary(), "posX", MV::size(50.0f, 27.0f))->position({8.0, lastY});
-	makeInputField(this, *panel.mouse(), node, *panel.textLibrary(), "posY", MV::size(50.0f, 27.0f))->position({68.0, lastY});
+	posX = makeInputField(this, *panel.mouse(), node, *panel.textLibrary(), "posX", MV::size(50.0f, 27.0f))->position({8.0, lastY});
+	posY = makeInputField(this, *panel.mouse(), node, *panel.textLibrary(), "posY", MV::size(50.0f, 27.0f))->position({68.0, lastY});
 
+	lastY += spacing;
+	width = makeInputField(this, *panel.mouse(), node, *panel.textLibrary(), "width", MV::size(50.0f, 27.0f))->position({8.0, lastY});
+	height = makeInputField(this, *panel.mouse(), node, *panel.textLibrary(), "height", MV::size(50.0f, 27.0f))->position({68.0, lastY});
+
+	if(controls){
+		auto xClick = posX->get<MV::Scene::Clickable>("Clickable");
+		xClick->clickSignals["updateX"] = xClick->onAccept.connect([=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+			controls->position({posX->number(), posY->number()});
+		});
+		posX->enterSignals["updateX"] = posX->onEnter.connect([=](std::shared_ptr<MV::Scene::Text> a_clickable){
+			controls->position({posX->number(), posY->number()});
+		});
+		auto yClick = posY->get<MV::Scene::Clickable>("Clickable");
+		yClick->clickSignals["updateY"] = xClick->onAccept.connect([=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+			controls->position({posX->number(), posY->number()});
+		});
+		posY->enterSignals["updateY"] = posY->onEnter.connect([=](std::shared_ptr<MV::Scene::Text> a_clickable){
+			controls->position({posX->number(), posY->number()});
+		});
+
+		auto widthClick = width->get<MV::Scene::Clickable>("Clickable");
+		widthClick->clickSignals["updateWidth"] = widthClick->onAccept.connect([=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+			controls->size({width->number(), height->number()});
+		});
+		width->enterSignals["updateWidth"] = width->onEnter.connect([=](std::shared_ptr<MV::Scene::Text> a_clickable){
+			controls->size({width->number(), height->number()});
+		});
+		auto heightClick = width->get<MV::Scene::Clickable>("Clickable");
+		heightClick->clickSignals["updateHeight"] = heightClick->onAccept.connect([=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+			controls->size({width->number(), height->number()});
+		});
+		height->enterSignals["updateHeight"] = height->onEnter.connect([=](std::shared_ptr<MV::Scene::Text> a_clickable){
+			controls->size({width->number(), height->number()});
+		});
+
+		controls->onChange = [=](EditableElement *a_element){
+			//a_element->position({posX->number(), posY->number()});
+			posX->number(static_cast<int>(a_element->position().x));
+			posY->number(static_cast<int>(a_element->position().y));
+
+			width->number(static_cast<int>(a_element->size().width));
+			height->number(static_cast<int>(a_element->size().height));
+		};
+	}
 	lastY += spacing;
 	auto deselectLocalAABB = deselectButton->localAABB();
 
@@ -78,8 +122,8 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 void DeselectedEditorPanel::completeSelection(const MV::BoxAABB &a_selected) {
 	static long i = 0;
 	panel.selection().disable();
-	auto newShape = panel.root()->make<MV::Scene::Rectangle>("Constructed_" + boost::lexical_cast<std::string>(i++), a_selected);
+	auto newShape = panel.root()->make<MV::Scene::Rectangle>("Constructed_" + boost::lexical_cast<std::string>(i++), a_selected.size())->position(a_selected.minPoint);
 	newShape->color({CREATED_DEFAULT});
 
-	panel.loadPanel<SelectedEditorPanel>(std::make_unique<EditableElement>(newShape, panel.editor(), panel.mouse()));
+	panel.loadPanel<SelectedEditorPanel>(std::make_shared<EditableElement>(newShape, panel.editor(), panel.mouse()));
 }

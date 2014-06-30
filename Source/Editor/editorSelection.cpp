@@ -65,9 +65,9 @@ void EditableElement::resetHandles() {
 	auto rectBox = elementToEdit->screenAABB();
 
 	auto handleSize = MV::point(8.0f, 8.0f);
-
+	EditableElement* self = this;
 	positionHandle = controlContainer->make<MV::Scene::Clickable>(MV::guid("position"), mouse, rectBox);
-	dragSignals["position"] = positionHandle->onDrag.connect([&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
+	dragSignals["position"] = positionHandle->onDrag.connect([=](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
 		auto castPosition = MV::castPoint<MV::PointPrecision>(deltaPosition);
 		handle->translate(castPosition);
 		elementToEdit->translate(castPosition);
@@ -75,6 +75,7 @@ void EditableElement::resetHandles() {
 		topRightSizeHandle->translate(castPosition);
 		bottomLeftSizeHandle->translate(castPosition);
 		bottomRightSizeHandle->translate(castPosition);
+		onChange(self);
 	});
 
 	topLeftSizeHandle = controlContainer->make<MV::Scene::Clickable>(MV::guid("topLeft"), mouse, MV::BoxAABB(rectBox.topLeftPoint(), rectBox.topLeftPoint() - (handleSize * MV::point(1.0f, 1.0f))));
@@ -149,10 +150,31 @@ void EditableElement::dragUpdateFromHandles() {
 	auto box = MV::BoxAABB(topLeftSizeHandle->screenAABB().bottomRightPoint(), bottomRightSizeHandle->screenAABB().topLeftPoint());
 
 	elementToEdit->position({});
-	positionHandle->position({});
-
 	auto corners = elementToEdit->localFromScreen(box);
 
-	elementToEdit->size(corners.size(), corners.minPoint*-1.0f);
-	positionHandle->size(corners.size(), corners.minPoint*-1.0f);
+	elementToEdit->size(corners.size());
+	positionHandle->size(corners.size());
+
+	elementToEdit->position(corners.minPoint);
+	positionHandle->position(corners.minPoint);
+
+	onChange(this);
+}
+
+void EditableElement::position(MV::Point<> a_newPosition) {
+	elementToEdit->position(a_newPosition);
+	resetHandles();
+}
+
+MV::Point<> EditableElement::position() const {
+	return elementToEdit->position();
+}
+
+void EditableElement::size(MV::Size<> a_newSize){
+	elementToEdit->size(a_newSize);
+	resetHandles();
+}
+
+MV::Size<> EditableElement::size(){
+	return elementToEdit->localAABB().size();
 }

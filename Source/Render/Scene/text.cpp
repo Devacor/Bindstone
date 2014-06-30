@@ -32,7 +32,8 @@ namespace MV{
 			isSingleLine(false),
 			formattedText(*a_textLibrary, a_size.width, a_fontIdentifier),
 			cursor(0),
-			displayCursor(false){
+			displayCursor(false),
+			onEnter(onEnterSlot){
 			
 			textScene = textboxScene->make<Scene::Node>("ScrollPortion");
 			textScene->add("Text", formattedText.scene());
@@ -51,16 +52,20 @@ namespace MV{
 		bool Text::text(SDL_Event &event){
 			if(event.type == SDL_TEXTINPUT){
 				insertAtCursor(stringToWide(event.text.text));
+				return true;
 			} else if(event.type == SDL_TEXTEDITING) {
 				setTemporaryText(stringToWide(event.edit.text), event.edit.start, event.edit.length);
 			} else if(event.type == SDL_KEYDOWN){
 				if(event.key.keysym.sym == SDLK_BACKSPACE && !formattedText.empty()){
 					backspace();
+					return true;
 				}if(event.key.keysym.sym == SDLK_DELETE && !formattedText.empty() && cursor < formattedText.size()){
 					++cursor; //this is okay because backspace will reposition the cursor.
 					backspace();
+					return true;
 				} else if(event.key.keysym.sym == SDLK_v && SDL_GetModState() & KMOD_CTRL){
 					append(stringToWide(SDL_GetClipboardText()));
+					return true;
 				} else if(event.key.keysym.sym == SDLK_c && SDL_GetModState() & KMOD_CTRL){
 					SDL_SetClipboardText(wideToString(text()).c_str());
 				} else if(event.key.keysym.sym == SDLK_LEFT){
@@ -71,6 +76,8 @@ namespace MV{
 					if(cursor < formattedText.size()){
 						incrementCursor(1);
 					}
+				} else if(event.key.keysym.sym == SDLK_RETURN){
+					onEnterSlot(std::static_pointer_cast<Text>(shared_from_this()));
 				}
 			}
 			return false;
@@ -101,6 +108,56 @@ namespace MV{
 
 		Size<> Text::contentSize() const {
 			return textScene->localAABB().size();
+		}
+
+		void Text::setCursor(int64_t a_value) {
+			auto maxCursor = formattedText.size();
+			a_value = std::max<int64_t>(std::min<int64_t>(a_value, maxCursor), 0);
+			cursor = a_value;
+			auto cursorCharacter = (cursor < maxCursor || cursor == 0) ? formattedText.characterForIndex(cursor) : formattedText.characterForIndex(cursor - 1);
+			if(cursorCharacter){
+				positionCursorWithCharacter(maxCursor, cursorCharacter);
+			} else{
+				positionCursorWithoutCharacter();
+			}
+		}
+
+		void Text::positionCursorWithCharacter(size_t a_maxCursor, std::shared_ptr<FormattedCharacter> a_cursorCharacter) {
+			cursorScene->position(a_cursorCharacter->position() + a_cursorCharacter->offset());
+			cursorScene->size({2, a_cursorCharacter->characterSize().height});
+			if(cursor >= a_maxCursor) {
+				cursorScene->translate({a_cursorCharacter->characterSize().width, 0.0f});
+			}
+			if(displayCursor){
+				cursorScene->show();
+			}
+		}
+
+		void Text::positionCursorWithoutCharacter() {
+			std::shared_ptr<FormattedLine> line;
+			size_t characterIndex;
+			std::tie(line, characterIndex) = formattedText.lineForCharacterIndex(cursor);
+			float xPosition = 0.0f;
+			if(justification() == TextJustification::CENTER){
+				xPosition = formattedText.width() / 2.0f - 1.0f;
+			} else if(justification() == TextJustification::RIGHT){
+				xPosition = formattedText.width() - 2.0f;
+			}
+			auto cursorHeight = formattedText.defaultState()->font->height();
+			auto linePositionY = formattedText.positionForLine(line->index());
+			auto cursorLineHeight = std::max<float>(formattedText.minimumLineHeight(), (line) ? line->height() : cursorHeight);
+			linePositionY += cursorLineHeight / 2.0f - cursorHeight / 2.0f;
+
+			cursorScene->position({xPosition, linePositionY});
+			cursorScene->size({2, cursorHeight});
+
+			if(displayCursor){
+				cursorScene->show();
+			}
+		}
+
+		void Text::incrementCursor(int64_t a_change) {
+			setCursor(cursor + a_change);
 		}
 
 	}

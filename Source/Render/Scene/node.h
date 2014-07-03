@@ -46,10 +46,10 @@ namespace MV {
 	>::type = 0 \
 	> \
 	std::shared_ptr<TypeToMake> make(FirstParameter a_firstParam, Arg... a_parameters) { \
-	auto newChild = TypeToMake::make(renderer, a_firstParam, std::forward<Arg>(a_parameters)...); \
-	newChild->quietSetDepth(maxDepth + 1.0f); \
-	add(guid(), newChild); \
-	return newChild; \
+		auto newChild = TypeToMake::make(renderer, a_firstParam, std::forward<Arg>(a_parameters)...); \
+		newChild->quietSetDepth(maxDepth + 1.0f); \
+		add(guid(), newChild); \
+		return newChild; \
 	} \
 	\
 	template < typename TypeToMake, typename FirstParameter, typename ...Arg, \
@@ -60,10 +60,10 @@ namespace MV {
 	>::type = 0 \
 	> \
 	std::shared_ptr<TypeToMake> make(FirstParameter a_childId, Arg... a_parameters) { \
-	auto newChild = TypeToMake::make(renderer, std::forward<Arg>(a_parameters)...); \
-	newChild->quietSetDepth(maxDepth + 1.0f); \
-	add(a_childId, newChild); \
-	return newChild; \
+		auto newChild = TypeToMake::make(renderer, std::forward<Arg>(a_parameters)...); \
+		newChild->quietSetDepth(maxDepth + 1.0f); \
+		add(a_childId, newChild); \
+		return newChild; \
 	} \
 	std::shared_ptr<T> parent(Node* a_parentItem){ return std::static_pointer_cast<T>(parentImplementation(a_parentItem)); } \
 	std::shared_ptr<T> removeFromParent(){ return std::static_pointer_cast<T>(removeFromParentImplementation()); } \
@@ -370,8 +370,6 @@ namespace MV {
 
 			Draw2D *renderer;
 
-			GLenum drawType;
-
 			bool drawSorted, isSorted;
 			typedef std::vector<std::weak_ptr<Node>> DrawListVectorType;
 			DrawListVectorType drawListVector;
@@ -398,7 +396,7 @@ namespace MV {
 						CEREAL_NVP(scaleTo),
 						CEREAL_NVP(sortDepth),
 						CEREAL_NVP(isVisible),
-						CEREAL_NVP(drawType), CEREAL_NVP(drawSorted),
+						CEREAL_NVP(drawSorted),
 						CEREAL_NVP(points),
 						CEREAL_NVP(drawList),
 						cereal::make_nvp("shaderId", (shaderProgram != nullptr) ? shaderProgram->id() : ""),
@@ -420,7 +418,6 @@ namespace MV {
 					cereal::make_nvp("scaleTo", construct->scaleTo),
 					cereal::make_nvp("sortDepth", construct->sortDepth),
 					cereal::make_nvp("isVisible", construct->isVisible),
-					cereal::make_nvp("drawType", construct->drawType),
 					cereal::make_nvp("drawSorted", construct->drawSorted),
 					cereal::make_nvp("points", construct->points),
 					cereal::make_nvp("drawList", construct->drawList),

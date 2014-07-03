@@ -51,6 +51,8 @@ void Editor::initializeWindow(){
 		rotate(45.0f)->
 		scale(2.0f);
 	scene->make<MV::Scene::Rectangle>(MV::size(10.0f, 10.0f))->position({300.0f, 300.0f});
+
+	auto spineGuy = scene->make<MV::Scene::Spine>("spineGuy", "Assets/Spine/Example/spineboy.json", "Assets/Spine/Example/spineboy.atlas")->position({200.0f, 200.0f})->scale(.5f);
 }
 
 void Editor::handleInput(){

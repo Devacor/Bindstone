@@ -623,7 +623,7 @@ namespace MV {
 			shaderProgram->set("transformation", transformationMatrix);
 			
 			if(!vertexIndices.empty()){
-				glDrawElements(GL_TRIANGLE_STRIP, static_cast<GLsizei>(vertexIndices.size()), GL_UNSIGNED_INT, &vertexIndices[0]);
+				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices.size()), GL_UNSIGNED_INT, &vertexIndices[0]);
 			} else{
 				glDrawArrays(drawType, 0, static_cast<GLsizei>(points.size()));
 			}

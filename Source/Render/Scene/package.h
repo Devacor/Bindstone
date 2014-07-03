@@ -6,4 +6,5 @@
 	#include "Render/Scene/button.h"
 	#include "Render/Scene/sliced.h"
 	#include "Render/Scene/text.h"
+	#include "Render/Scene/spineMV.h"
 #endif

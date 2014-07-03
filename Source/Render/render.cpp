@@ -960,6 +960,35 @@ namespace MV {
 		renderer->stopUsingFramebuffer();
 	}
 
+	void Shader::set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex) {
+		GLuint offset = variableOffset(a_variableName);
+		if(offset >= 0){
+			auto textureId = (a_texture == 0) ?
+				a_texture :
+				SharedTextures::white()->texture()->textureId();
+
+			glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
+			glUniform1i(offset, a_textureBindIndex);
+			glBindTexture(GL_TEXTURE_2D, textureId);
+		} else{
+			std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
+		}
+	}
+
+	void Shader::set(std::string a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex) {
+		GLuint offset = variableOffset(a_variableName);
+		if(offset >= 0){
+			auto textureId = (a_texture != nullptr) ?
+				a_texture->textureId() :
+				SharedTextures::white()->texture()->textureId();
+
+			glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
+			glUniform1i(offset, a_textureBindIndex);
+			glBindTexture(GL_TEXTURE_2D, textureId);
+		} else{
+			std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
+		}
+	}
 
 	void Shader::set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_value, GLuint a_textureBindIndex) {
 		GLuint offset = variableOffset(a_variableName);

@@ -69,9 +69,9 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(IncludePath);./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;%(AdditionalIncludeDirectories)</IncludePath>
+    <IncludePath>$(IncludePath);./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;%(AdditionalIncludeDirectories)</IncludePath>
     <LibraryPath>$(SolutionDir)../external/boost_1_55_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/;$(SolutionDir)../external/libs/;$(LibraryPath);$(SolutionDir)../external/cereal/include/</LibraryPath>
-    <SourcePath>$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src</SourcePath>
+    <SourcePath>$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/spine/spine-c/src/spine/</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/;$(IncludePath)</IncludePath>
@@ -79,9 +79,9 @@
     <SourcePath>$(SolutionDir)../external/boost_1_49_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath)</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/</IncludePath>
+    <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/</IncludePath>
     <LibraryPath>$(SolutionDir)../external/boost_1_55_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/;$(SolutionDir)../external/libs/;$(LibraryPath);$(SolutionDir)../external/cereal/include/</LibraryPath>
-    <SourcePath>$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src</SourcePath>
+    <SourcePath>$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/spine/spine-c/src/spine/</SourcePath>
     <RunCodeAnalysis>false</RunCodeAnalysis>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -109,8 +109,9 @@
       <Optimization>Disabled</Optimization>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -149,9 +150,10 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <EnablePREfast>false</EnablePREfast>
       <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -165,6 +167,30 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\external\gl3w\src\gl3w.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\Animation.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\AnimationState.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\AnimationStateData.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\Atlas.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\AtlasAttachmentLoader.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\Attachment.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\AttachmentLoader.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\Bone.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\BoneData.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\BoundingBoxAttachment.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\Event.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\EventData.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\extension.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\Json.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\MeshAttachment.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\RegionAttachment.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\Skeleton.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\SkeletonBounds.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\SkeletonData.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\SkeletonJson.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\Skin.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\SkinnedMeshAttachment.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\Slot.c" />
+    <ClCompile Include="..\external\spine\spine-c\src\spine\SlotData.c" />
     <ClCompile Include="Source\Editor\editor.cpp" />
     <ClCompile Include="Source\Animation\actionSequence.cpp" />
     <ClCompile Include="Source\Animation\frameSwapper.cpp" />
@@ -191,6 +217,7 @@
     <ClCompile Include="Source\Render\render.cpp" />
     <ClCompile Include="Source\Render\Scene\primitives.cpp" />
     <ClCompile Include="Source\Render\Scene\sliced.cpp" />
+    <ClCompile Include="Source\Render\Scene\spineMV.cpp" />
     <ClCompile Include="Source\Render\Scene\text.cpp" />
     <ClCompile Include="Source\Render\formattedText.cpp" />
     <ClCompile Include="Source\Render\textures.cpp" />
@@ -248,6 +275,31 @@
     <ClInclude Include="..\external\cereal\include\cereal\types\unordered_set.hpp" />
     <ClInclude Include="..\external\cereal\include\cereal\types\utility.hpp" />
     <ClInclude Include="..\external\cereal\include\cereal\types\vector.hpp" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\Animation.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\AnimationState.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\AnimationStateData.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\Atlas.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\AtlasAttachmentLoader.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\Attachment.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\AttachmentLoader.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\Bone.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\BoneData.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\BoundingBoxAttachment.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\Event.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\EventData.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\extension.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\MeshAttachment.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\RegionAttachment.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\Skeleton.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\SkeletonBounds.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\SkeletonData.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\SkeletonJson.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\Skin.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\SkinnedMeshAttachment.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\Slot.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\SlotData.h" />
+    <ClInclude Include="..\external\spine\spine-c\include\spine\spine.h" />
+    <ClInclude Include="..\external\spine\spine-c\src\spine\Json.h" />
     <ClInclude Include="Source\Editor\editor.h" />
     <ClInclude Include="Source\Editor\editorControls.h" />
     <ClInclude Include="Source\Editor\editorDefines.h" />
@@ -279,6 +331,7 @@
     <ClInclude Include="Source\Render\render.h" />
     <ClInclude Include="Source\Render\Scene\sceneMessages.hpp" />
     <ClInclude Include="Source\Render\Scene\sliced.h" />
+    <ClInclude Include="Source\Render\Scene\spineMV.h" />
     <ClInclude Include="Source\Render\Scene\text.h" />
     <ClInclude Include="Source\Render\formattedText.h" />
     <ClInclude Include="Source\Render\textures.h" />

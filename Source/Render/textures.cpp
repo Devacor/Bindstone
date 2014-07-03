@@ -140,7 +140,8 @@ namespace MV {
 	| ---TextureDefinition--- |
 	\*************************/
 
-	TextureDefinition::TextureDefinition(const std::string &a_name) :
+	TextureDefinition::TextureDefinition(const std::string &a_name, bool a_isShared) :
+		isShared(a_isShared),
 		onReload(onReloadAction),
 		textureName(a_name),
 		texture(0){
@@ -148,7 +149,9 @@ namespace MV {
 
 	void TextureDefinition::reload(){
 		reloadImplementation();
-		onReloadAction(shared_from_this());
+		if(isShared){
+			onReloadAction(shared_from_this());
+		}
 	}
 
 	GLuint TextureDefinition::textureId() const{

@@ -257,6 +257,7 @@ namespace MV {
 		Draw2D &renderer;
 	};
 
+	class TextureDefinition;
 	class TextureHandle;
 	class Shader {
 	public:
@@ -293,6 +294,8 @@ namespace MV {
 		}
 
 		void set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_texture, GLuint a_textureBindIndex = 0);
+		void set(std::string a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex = 0);
+		void set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex = 0);
 
 		void set(std::string a_variableName, PointPrecision a_value);
 

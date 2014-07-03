@@ -32,6 +32,7 @@ namespace MV {
 
 	class TextureHandle;
 	class TextureDefinition : public std::enable_shared_from_this<TextureDefinition> {
+		friend cereal::access;
 		Slot<void(std::shared_ptr<TextureDefinition>)> onReloadAction;
 	public:
 		SlotRegister<void(std::shared_ptr<TextureDefinition>)> onReload;
@@ -51,20 +52,22 @@ namespace MV {
 		void cleanup();
 		void cleanup(TextureHandle* toRemove);
 
-		template <class Archive>
-		void serialize(Archive & archive){
-			archive(cereal::make_nvp("name", textureName), cereal::make_nvp("size", textureSize), CEREAL_NVP(handles));
-		}
 	protected:
-		TextureDefinition(const std::string &a_name);
+		TextureDefinition(const std::string &a_name, bool a_isShared = true);
 
 		std::string textureName;
 		Size<int> textureSize;
 		GLuint texture;
 
 		std::vector< std::weak_ptr<TextureHandle> > handles;
+		bool isShared;
 
 	private:
+		template <class Archive>
+		void serialize(Archive & archive){
+			archive(cereal::make_nvp("name", textureName), cereal::make_nvp("size", textureSize), CEREAL_NVP(handles));
+		}
+
 		virtual void reloadImplementation() = 0;
 		virtual void cleanupImplementation(){}
 	};
@@ -75,11 +78,13 @@ namespace MV {
 		static std::shared_ptr<FileTextureDefinition> make(const std::string &a_filename, bool a_repeat = false){
 			return std::shared_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_repeat));
 		}
+		static std::unique_ptr<FileTextureDefinition> makeUnmanaged(const std::string &a_filename, bool a_repeat = false){
+			return std::unique_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_repeat, false));
+		}
 
-		FileTextureDefinition():FileTextureDefinition("", false){} //only for cereal. DO NOT USE.
 	private:
-		FileTextureDefinition(const std::string &a_filename, bool a_repeat):
-			TextureDefinition(a_filename),
+		FileTextureDefinition(const std::string &a_filename, bool a_repeat, bool a_isShared = true):
+			TextureDefinition(a_filename, a_isShared),
 			repeat(a_repeat){
 		}
 		virtual void reloadImplementation();
@@ -296,7 +301,6 @@ namespace MV {
 		static std::shared_ptr<DynamicTextureDefinition> defaultTexture;
 		static std::shared_ptr<TextureHandle> defaultHandle;
 	};
-
 }
 
 #endif

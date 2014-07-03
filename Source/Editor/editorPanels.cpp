@@ -69,11 +69,11 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::shared_pt
 
 		controls->onChange = [=](EditableElement *a_element){
 			//a_element->position({posX->number(), posY->number()});
-			posX->number(static_cast<int>(a_element->position().x));
-			posY->number(static_cast<int>(a_element->position().y));
+			posX->number(static_cast<int>(a_element->position().x + .5f));
+			posY->number(static_cast<int>(a_element->position().y + .5f));
 
-			width->number(static_cast<int>(a_element->size().width));
-			height->number(static_cast<int>(a_element->size().height));
+			width->number(static_cast<int>(a_element->size().width + .5f));
+			height->number(static_cast<int>(a_element->size().height + .5f));
 		};
 	}
 	lastY += spacing;

@@ -211,6 +211,12 @@ namespace MV {
 		return handle;
 	}
 
+	TextureDefinition::~TextureDefinition() {
+		glDeleteTextures(1, &texture);
+		texture = 0; //just to be certain, glDeleteTextures may not set a texture id to 0.
+		cleanupImplementation();
+	}
+
 
 	/*****************************\
 	| ---FileTextureDefinition--- |

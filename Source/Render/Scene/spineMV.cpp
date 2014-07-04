@@ -44,48 +44,59 @@ CEREAL_REGISTER_TYPE(MV::Scene::Spine);
 
 namespace MV{
 	namespace Scene{
+
+		void spineAnimationCallback(spAnimationState* state, int trackIndex, spEventType type, spEvent* event, int loopCount) {
+			if(state && state->rendererObject){
+				reinterpret_cast<Spine*>(state->rendererObject)->onAnimationStateEvent(trackIndex, type, event, loopCount);
+			}
+		}
+
+		void spineTrackEntryCallback(spAnimationState* state, int trackIndex, spEventType type, spEvent* event, int loopCount) {
+			if(state && state->rendererObject){
+				reinterpret_cast<Spine*>(state->rendererObject)->onTrackEntryEvent(trackIndex, type, event, loopCount);
+			}
+		}
+
 		template <typename T>
 		FileTextureDefinition* getSpineTexture(T* attachment){
 			spAtlasRegion* atlasRegion = (attachment && attachment->rendererObject) ? reinterpret_cast<spAtlasRegion*>(attachment->rendererObject) : nullptr;
 			return (atlasRegion && atlasRegion->page && atlasRegion->page->rendererObject) ? reinterpret_cast<FileTextureDefinition*>(atlasRegion->page->rendererObject) : nullptr;
 		}
 
-		std::shared_ptr<Spine> MV::Scene::Spine::make(Draw2D* a_renderer, const std::string &a_skeletonFile, const std::string &a_atlasFile){
-			return Spine::make(a_renderer, a_skeletonFile, a_atlasFile, 1.0f);
-		}
-
-		std::shared_ptr<Spine> MV::Scene::Spine::make(Draw2D* a_renderer, const std::string &a_skeletonFile, const std::string &a_atlasFile, float a_loadScale){
-			auto spine = std::shared_ptr<Spine>(new Spine(a_renderer, a_skeletonFile, a_atlasFile, a_loadScale));
+		std::shared_ptr<Spine> MV::Scene::Spine::make(Draw2D* a_renderer, const FileBundle &a_fileBundle){
+			auto spine = std::shared_ptr<Spine>(new Spine(a_renderer, a_fileBundle));
 			a_renderer->registerShader(spine);
 			return spine;
 		}
 
-		Spine::Spine(Draw2D *a_renderer, const std::string &a_skeletonFile, const std::string &a_atlasFile, float a_loadScale):
+		Spine::Spine(Draw2D *a_renderer, const FileBundle &a_fileBundle):
 			Node(a_renderer),
-			skeletonFile(a_skeletonFile),
-			atlasFile(a_atlasFile),
-			loadScale(a_loadScale){
+			fileBundle(a_fileBundle),
+			autoUpdate(true),
+			timeScale(1.0f){
 
-			atlas = spAtlas_createFromFile(a_atlasFile.c_str(), 0);
-			require(atlas, ResourceException("Error reading atlas file:" + a_atlasFile));
+			atlas = spAtlas_createFromFile(fileBundle.atlasFile.c_str(), 0);
+			require(atlas, ResourceException("Error reading atlas file:" + fileBundle.atlasFile));
 
 			spSkeletonJson* json = spSkeletonJson_create(atlas);
-			json->scale = a_loadScale;
-			spSkeletonData* skeletonData = spSkeletonJson_readSkeletonDataFile(json, a_skeletonFile.c_str());
+			json->scale = fileBundle.loadScale;
+			spSkeletonData* skeletonData = spSkeletonJson_readSkeletonDataFile(json, fileBundle.skeletonFile.c_str());
 
-			require(skeletonData, ResourceException((json->error ? json->error : "Error reading skeleton data file:") + std::string(" ") + a_skeletonFile));
+			require(skeletonData, ResourceException((json->error ? json->error : "Error reading skeleton data file:") + std::string(" ") + fileBundle.skeletonFile));
 
 			spSkeletonJson_dispose(json);
 
 			skeleton = spSkeleton_create(skeletonData);
-			require(skeleton && skeleton->bones && skeleton->bones[0], ResourceException(a_skeletonFile + " has no bones!"));
+			require(skeleton && skeleton->bones && skeleton->bones[0], ResourceException(fileBundle.skeletonFile + " has no bones!"));
 			rootBone = skeleton->bones[0];
 
 			animationState = spAnimationState_create(spAnimationStateData_create(skeleton->data));
 			animationState->rendererObject = this;
-			
+			animationState->listener = spineAnimationCallback;
+
+			spBone_setYDown(true);
 			spineWorldVertices = new float[SPINE_MESH_VERTEX_COUNT_MAX]();
-			update(1.0);
+			update(0.0f);
 		}
 
 		Spine::~Spine() {
@@ -98,6 +109,9 @@ namespace MV{
 				}
 				spSkeleton_dispose(skeleton);
 			}
+			if(animationState){
+				spAnimationState_dispose(animationState);
+			}
 			if(spineWorldVertices){
 				delete[] spineWorldVertices;
 			}
@@ -105,18 +119,19 @@ namespace MV{
 
 		void Spine::update(double a_delta) {
 			if(skeleton){
-				spSkeleton_update(skeleton, static_cast<float>(a_delta));
+				spSkeleton_update(skeleton, static_cast<float>(a_delta) * timeScale);
 				if(animationState){
-					spAnimationState_update(animationState, static_cast<float>(a_delta));
+					spAnimationState_update(animationState, static_cast<float>(a_delta) * timeScale);
 					spAnimationState_apply(animationState, skeleton);
-					spSkeleton_updateWorldTransform(skeleton);
 				}
+				spSkeleton_updateWorldTransform(skeleton);
 			}
 		}
 
 		void Spine::drawImplementation(){
+			conditionalUpdate();
+
 			shaderProgram->use();
-			update(1.0);
 			if(bufferId == 0){
 				glGenBuffers(1, &bufferId);
 			}
@@ -204,7 +219,7 @@ namespace MV{
 					{SP_VERTEX_X4, SP_VERTEX_Y4},
 				};
 
-				MV::Scene::appendQuadVertexIndices(vertexIndices, points.size());
+				MV::Scene::appendQuadVertexIndices(vertexIndices, static_cast<GLuint>(points.size()));
 				for(auto &indexPair : spineVertexIndices){
 					Point<> testPosition(spineWorldVertices[indexPair.first], spineWorldVertices[indexPair.second]);
 					points.push_back(DrawPoint(
@@ -251,5 +266,29 @@ namespace MV{
 			return nullptr;
 		}
 
+		void Spine::conditionalUpdate() {
+			if(autoUpdate){
+				while(timer.frame(TIME_BETWEEN_UPDATES)){
+					update(TIME_BETWEEN_UPDATES);
+				}
+			}
+		}
+
+		double Spine::animateTimeScale() const {
+			return timeScale;
+		}
+
+		const double Spine::TIME_BETWEEN_UPDATES = 60.0 / 1.0;
+
+
+		Spine::FileBundle::FileBundle(const std::string &a_skeletonFile, const std::string &a_atlasFile, float a_loadScale /*= 1.0f*/):
+			skeletonFile(a_skeletonFile),
+			atlasFile(a_atlasFile),
+			loadScale(a_loadScale) {
+		}
+
+		Spine::FileBundle::FileBundle():
+			loadScale(1.0f) {
+		}
 	}
 }

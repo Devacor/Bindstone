@@ -44,6 +44,14 @@ namespace MV {
 		//Stop the timer and return the final time between the start (or the first check) and stop calls.
 		TimeType stop();
 		
+		//Checks the time between calls.
+		TimeType delta(bool a_resetDelta = true);
+
+		//Ultimate convenience, returns true after a certain amount of time, and resets the delta.
+		bool frame(TimeType timeToWait);
+
+		bool frame(const std::string &deltaName, TimeType timeToWait);
+
 		//These values affect the returned time on calls to the base check and stop functions.
 		//does not affect delta, but you can always call getTimeOffset manually if you need this.
 		//All returned times will have timeOffset added to them.
@@ -53,7 +61,7 @@ namespace MV {
 		//checks the time between calls for delta of a given name while the stopwatch is running.
 		//first call returns 0.  Subsequent calls return the time between the current call
 		//and the previous call.  The timer should be running or the delta will not work.
-		TimeType delta(const std::string &deltaName, bool resetDelta = true);
+		TimeType delta(const std::string &deltaName, bool resetDelta = true, TimeType addOverflow = 0.0);
 		void clearDeltas(){deltaVals.clear();}
 		
 		bool isStarted(){return started;}

@@ -152,6 +152,7 @@ namespace MESA {
 
 namespace MV {
 	const std::string DEFAULT_ID = "default";
+	const std::string PREMULTIPLY_ID = "premultiply";
 	bool Draw2D::firstInitializationSDL = true;
 	bool Draw2D::firstInitializationOpenGL = true;
 
@@ -825,7 +826,7 @@ namespace MV {
 	}
 
 	void Draw2D::defaultBlendFunction() {
-		setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 		//setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
 	}
 
@@ -963,7 +964,7 @@ namespace MV {
 	void Shader::set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex) {
 		GLuint offset = variableOffset(a_variableName);
 		if(offset >= 0){
-			auto textureId = (a_texture == 0) ?
+			auto textureId = (a_texture != 0) ?
 				a_texture :
 				SharedTextures::white()->texture()->textureId();
 

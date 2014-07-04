@@ -38,7 +38,7 @@ namespace MV {
 		SlotRegister<void(std::shared_ptr<TextureDefinition>)> onReload;
 		typedef Signal<void(std::shared_ptr<TextureDefinition>)> SignalType;
 
-		virtual ~TextureDefinition(){}
+		virtual ~TextureDefinition();
 		std::shared_ptr<TextureHandle> makeHandle();
 		std::shared_ptr<TextureHandle> makeHandle(const Point<int> &a_position, const Size<int> &a_size);
 

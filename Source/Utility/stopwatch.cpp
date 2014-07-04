@@ -52,7 +52,7 @@ namespace MV {
 		}
 	}
 
-	Stopwatch::TimeType Stopwatch::delta(const std::string &deltaName, bool resetDelta){
+	Stopwatch::TimeType Stopwatch::delta(const std::string &deltaName, bool resetDelta, TimeType addOverflow){
 		if(deltaVals.find(deltaName) == deltaVals.end()){ //if no delta by that name is found
 			deltaVals[deltaName].deltaspot = check();  //set the delta to the current time
 			return 0;
@@ -60,10 +60,15 @@ namespace MV {
 		TimeType PreviousTime = deltaVals[deltaName].deltaspot;
 		Stopwatch::TimeType CurrentTime = check();
 		if(resetDelta){
-			deltaVals[deltaName].deltaspot = CurrentTime; //update delta
+			deltaVals[deltaName].deltaspot = CurrentTime + addOverflow; //update delta
 		}
 		return CurrentTime - PreviousTime;
 	}
+
+	MV::Stopwatch::TimeType Stopwatch::delta(bool a_resetDelta /*= true*/) {
+		return delta("_!_", a_resetDelta);
+	}
+
 
 	void Stopwatch::setTimeOffset( TimeType offsetMilliseconds ){
 		timeOffset = offsetMilliseconds;
@@ -71,5 +76,21 @@ namespace MV {
 
 	Stopwatch::TimeType Stopwatch::getTimeOffset(){
 		return timeOffset;
+	}
+
+	bool Stopwatch::frame(TimeType timeToWait) {
+		return frame("_!_", timeToWait);
+	}
+
+	bool Stopwatch::frame(const std::string &deltaName, TimeType timeToWait) {
+		if(!isStarted()){
+			start();
+		}
+		auto deltaTime = delta(deltaName, false);
+		if(deltaTime >= timeToWait){
+			delta(deltaName, true, timeToWait - deltaTime);
+			return true;
+		}
+		return false;
 	}
 }

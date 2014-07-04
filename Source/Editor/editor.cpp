@@ -36,6 +36,7 @@ void Editor::initializeWindow(){
 		exit(0);
 	}
 	renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
+	renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
 	atexit(sdl_quit);
 
 	AudioPlayer::instance()->initAudio();
@@ -49,10 +50,11 @@ void Editor::initializeWindow(){
 		position({300.0f, 300.0f})->
 		texture(MV::FileTextureDefinition::make("Assets/Images/dogfox.png")->makeHandle({0, 0}, {32, 32}))->
 		rotate(45.0f)->
-		scale(2.0f);
-	scene->make<MV::Scene::Rectangle>(MV::size(10.0f, 10.0f))->position({300.0f, 300.0f});
+		scale(2.0f)->
+		shader(MV::PREMULTIPLY_ID);
+	scene->make<MV::Scene::Rectangle>(MV::size(10.0f, 10.0f))->position({300.0f, 300.0f})->shader(MV::PREMULTIPLY_ID);
 
-	auto spineGuy = scene->make<MV::Scene::Spine>("spineGuy", "Assets/Spine/Example/spineboy.json", "Assets/Spine/Example/spineboy.atlas")->position({200.0f, 200.0f})->scale(.5f);
+	auto spineGuy = scene->make<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Example/spineboy.json", "Assets/Spine/Example/spineboy.atlas"))->position({500.0f, 500.0f})->scale(.5f);
 }
 
 void Editor::handleInput(){

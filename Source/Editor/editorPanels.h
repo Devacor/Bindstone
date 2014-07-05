@@ -30,7 +30,6 @@ public:
 	}
 protected:
 	EditorControls &panel;
-	std::map<std::string, MV::Scene::Clickable::Click> clickSignals;
 	std::shared_ptr<MV::Scene::Text> activeTextbox;
 };
 

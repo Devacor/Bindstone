@@ -54,7 +54,7 @@ void Editor::initializeWindow(){
 		shader(MV::PREMULTIPLY_ID);
 	scene->make<MV::Scene::Rectangle>(MV::size(10.0f, 10.0f))->position({300.0f, 300.0f})->shader(MV::PREMULTIPLY_ID);
 
-	auto spineGuy = scene->make<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Example/spineboy.json", "Assets/Spine/Example/spineboy.atlas"))->position({500.0f, 500.0f})->scale(.5f);
+	auto spineGuy = scene->make<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Example/spineboy.json", "Assets/Spine/Example/spineboy.atlas"))->position({500.0f, 500.0f})->scale(.5f)->animate("run");
 }
 
 void Editor::handleInput(){

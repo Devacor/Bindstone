@@ -38,7 +38,7 @@ std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::MouseS
 	auto box = a_parent->make<MV::Scene::Text>(a_name, &a_textLibrary, a_size, "small")->justification(MV::TextJustification::CENTER)->text(a_startContents);
 	auto background = box->make<MV::Scene::Rectangle>("Background", a_size)->depth(-1);
 	auto clickable = box->make<MV::Scene::Clickable>("Clickable", &a_mouse, a_size);
-	clickable->clickSignals["register"] = clickable->onAccept.connect([=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+	clickable->onAccept.connect("register", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 		a_panel->activate(box);
 	});
 	box->setMinimumLineHeight(a_size.height);

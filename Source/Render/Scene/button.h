@@ -53,10 +53,6 @@ namespace MV {
 
 			SlotRegister<DragSlotSignature> onDrag;
 
-			//Convenient Optional Storage
-			std::map<std::string, Click> clickSignals;
-			std::map<std::string, Drag> dragSignals;
-
 			void includeChildrenForHitDetection(){
 				shouldUseChildrenInHitDetection = true;
 			}
@@ -162,10 +158,6 @@ namespace MV {
 			SlotRegister<ButtonSlotSignature> onCancel;
 
 			SlotRegister<DragSlotSignature> onDrag;
-
-			//Convenient Optional Storage
-			std::map<std::string, Clickable::Click> clickSignals;
-			std::map<std::string, Clickable::Drag> dragSignals;
 
 			MouseState* getMouse() const;
 

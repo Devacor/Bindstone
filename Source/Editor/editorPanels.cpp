@@ -38,32 +38,32 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::shared_pt
 
 	if(controls){
 		auto xClick = posX->get<MV::Scene::Clickable>("Clickable");
-		xClick->clickSignals["updateX"] = xClick->onAccept.connect([=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+		xClick->onAccept.connect("updateX", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 			controls->position({posX->number(), posY->number()});
 		});
-		posX->enterSignals["updateX"] = posX->onEnter.connect([=](std::shared_ptr<MV::Scene::Text> a_clickable){
+		posX->onEnter.connect("updateX", [=](std::shared_ptr<MV::Scene::Text> a_clickable){
 			controls->position({posX->number(), posY->number()});
 		});
 		auto yClick = posY->get<MV::Scene::Clickable>("Clickable");
-		yClick->clickSignals["updateY"] = xClick->onAccept.connect([=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+		yClick->onAccept.connect("updateY", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 			controls->position({posX->number(), posY->number()});
 		});
-		posY->enterSignals["updateY"] = posY->onEnter.connect([=](std::shared_ptr<MV::Scene::Text> a_clickable){
+		posY->onEnter.connect("updateY", [=](std::shared_ptr<MV::Scene::Text> a_clickable){
 			controls->position({posX->number(), posY->number()});
 		});
 
 		auto widthClick = width->get<MV::Scene::Clickable>("Clickable");
-		widthClick->clickSignals["updateWidth"] = widthClick->onAccept.connect([=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+		widthClick->onAccept.connect("updateWidth", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 			controls->size({width->number(), height->number()});
 		});
-		width->enterSignals["updateWidth"] = width->onEnter.connect([=](std::shared_ptr<MV::Scene::Text> a_clickable){
+		width->onEnter.connect("updateWidth", [=](std::shared_ptr<MV::Scene::Text> a_clickable){
 			controls->size({width->number(), height->number()});
 		});
 		auto heightClick = width->get<MV::Scene::Clickable>("Clickable");
-		heightClick->clickSignals["updateHeight"] = heightClick->onAccept.connect([=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+		heightClick->onAccept.connect("updateHeight", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 			controls->size({width->number(), height->number()});
 		});
-		height->enterSignals["updateHeight"] = height->onEnter.connect([=](std::shared_ptr<MV::Scene::Text> a_clickable){
+		height->onEnter.connect("updateHeight", [=](std::shared_ptr<MV::Scene::Text> a_clickable){
 			controls->size({width->number(), height->number()});
 		});
 
@@ -108,13 +108,13 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 
 	panel.updateBoxHeader(background->basicAABB().width());
 
-	clickSignals["create"] = createButton->onAccept.connect([&](std::shared_ptr<MV::Scene::Clickable>){
+	createButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
 		panel.selection().enable([&](const MV::BoxAABB &a_selected){
 			completeSelection(a_selected);
 		});
 	});
 
-	clickSignals["select"] = selectButton->onAccept.connect([&](std::shared_ptr<MV::Scene::Clickable>){
+	selectButton->onAccept.connect("select", [&](std::shared_ptr<MV::Scene::Clickable>){
 		panel.deleteScene();
 	});
 }

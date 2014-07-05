@@ -113,10 +113,12 @@ namespace MV {
 		}
 
 		void disconnect(std::shared_ptr<Signal<T>> a_value){
-			if(!inCall){
-				observers.erase(a_value);
-			} else{
-				disconnectQueue.push_back(a_value);
+			if(a_value){
+				if(!inCall){
+					observers.erase(a_value);
+				} else{
+					disconnectQueue.push_back(a_value);
+				}
 			}
 		}
 
@@ -216,7 +218,16 @@ namespace MV {
 		void disconnect(std::shared_ptr<Signal<T>> a_value){
 			slot.disconnect(a_value);
 		}
+
+		std::shared_ptr<Signal<T>> connect(const std::string &a_id, std::function<T> a_callback){
+			return ownedConnections[a_id] = slot.connect(a_callback);
+		}
+
+		void disconnect(const std::string &a_id){
+			slot.disconnect(ownedConnections[a_id]);
+		}
 	private:
+		std::map<std::string, SharedSignalType> ownedConnections;
 		Slot<T> &slot;
 	};
 

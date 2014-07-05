@@ -45,22 +45,25 @@ CEREAL_REGISTER_TYPE(MV::Scene::Spine);
 namespace MV{
 	namespace Scene{
 
-		void spineAnimationCallback(spAnimationState* state, int trackIndex, spEventType type, spEvent* event, int loopCount) {
-			if(state && state->rendererObject){
-				reinterpret_cast<Spine*>(state->rendererObject)->onAnimationStateEvent(trackIndex, type, event, loopCount);
+		void spineAnimationCallback(spAnimationState* a_state, int a_trackIndex, spEventType a_type, spEvent* a_event, int a_loopCount) {
+			if(a_state && a_state->rendererObject){
+				static_cast<Spine*>(a_state->rendererObject)->onAnimationStateEvent(a_trackIndex, a_type, a_event, a_loopCount);
 			}
 		}
 
-		void spineTrackEntryCallback(spAnimationState* state, int trackIndex, spEventType type, spEvent* event, int loopCount) {
-			if(state && state->rendererObject){
-				reinterpret_cast<Spine*>(state->rendererObject)->onTrackEntryEvent(trackIndex, type, event, loopCount);
+		void spineTrackEntryCallback(spAnimationState* a_state, int a_trackIndex, spEventType a_type, spEvent* a_event, int a_loopCount) {
+			if(a_state && a_state->rendererObject){
+				auto *spine = static_cast<Spine*>(a_state->rendererObject);
+				if(spine){
+					spine->track(a_trackIndex).onAnimationStateEvent(a_trackIndex, a_type, a_event, a_loopCount);
+				}
 			}
 		}
 
 		template <typename T>
 		FileTextureDefinition* getSpineTexture(T* attachment){
-			spAtlasRegion* atlasRegion = (attachment && attachment->rendererObject) ? reinterpret_cast<spAtlasRegion*>(attachment->rendererObject) : nullptr;
-			return (atlasRegion && atlasRegion->page && atlasRegion->page->rendererObject) ? reinterpret_cast<FileTextureDefinition*>(atlasRegion->page->rendererObject) : nullptr;
+			spAtlasRegion* atlasRegion = (attachment && attachment->rendererObject) ? static_cast<spAtlasRegion*>(attachment->rendererObject) : nullptr;
+			return (atlasRegion && atlasRegion->page && atlasRegion->page->rendererObject) ? static_cast<FileTextureDefinition*>(atlasRegion->page->rendererObject) : nullptr;
 		}
 
 		std::shared_ptr<Spine> MV::Scene::Spine::make(Draw2D* a_renderer, const FileBundle &a_fileBundle){
@@ -73,7 +76,10 @@ namespace MV{
 			Node(a_renderer),
 			fileBundle(a_fileBundle),
 			autoUpdate(true),
-			timeScale(1.0f){
+			onStart(onStartSlot),
+			onEnd(onEndSlot),
+			onComplete(onCompleteSlot),
+			onEvent(onEventSlot){
 
 			atlas = spAtlas_createFromFile(fileBundle.atlasFile.c_str(), 0);
 			require(atlas, ResourceException("Error reading atlas file:" + fileBundle.atlasFile));
@@ -119,13 +125,39 @@ namespace MV{
 
 		void Spine::update(double a_delta) {
 			if(skeleton){
-				spSkeleton_update(skeleton, static_cast<float>(a_delta) * timeScale);
+				spSkeleton_update(skeleton, static_cast<float>(a_delta));
 				if(animationState){
-					spAnimationState_update(animationState, static_cast<float>(a_delta) * timeScale);
+					spAnimationState_update(animationState, static_cast<float>(a_delta));
 					spAnimationState_apply(animationState, skeleton);
 				}
 				spSkeleton_updateWorldTransform(skeleton);
 			}
+		}
+
+		AnimationTrack& Spine::track(int a_index){
+			defaultTrack = a_index;
+			auto found = tracks.find(a_index);
+			if(found != tracks.end()){
+				return found->second;
+			} else{
+				return tracks.emplace(a_index, AnimationTrack(a_index, animationState, skeleton)).first->second;
+			}
+		}
+
+		std::shared_ptr<Spine> Spine::animate(const std::string &a_animationName, bool a_loop){
+			track(defaultTrack).animate(a_animationName, a_loop);
+			return std::static_pointer_cast<Spine>(shared_from_this());
+		}
+		std::shared_ptr<Spine> Spine::queueAnimation(const std::string &a_animationName, bool a_loop, double a_delay){
+			track(defaultTrack).queueAnimation(a_animationName, a_loop, a_delay);
+			return std::static_pointer_cast<Spine>(shared_from_this());
+		}
+
+		std::shared_ptr<Spine> Spine::crossfade(const std::string &a_fromAnimation, const std::string &a_toAnimation, double a_duration){
+			if(animationState){
+				spAnimationStateData_setMixByName(animationState->data, a_fromAnimation.c_str(), a_toAnimation.c_str(), a_duration);
+			}
+			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
 
 		void Spine::drawImplementation(){
@@ -226,7 +258,7 @@ namespace MV{
 						testPosition,
 						attachmentColor,
 						TexturePoint(attachment->uvs[indexPair.first], attachment->uvs[indexPair.second])
-					));
+						));
 				}
 
 				return getSpineTexture(attachment);
@@ -241,7 +273,7 @@ namespace MV{
 						Point<>(spineWorldVertices[index], spineWorldVertices[index + 1]),
 						attachmentColor,
 						TexturePoint(attachment->uvs[index], attachment->uvs[index + 1])
-					));
+						));
 					vertexIndices.push_back(static_cast<GLuint>(points.size() - 1));
 				}
 
@@ -257,7 +289,7 @@ namespace MV{
 						Point<>(spineWorldVertices[index], spineWorldVertices[index + 1]),
 						attachmentColor,
 						TexturePoint(attachment->uvs[index], attachment->uvs[index + 1])
-					));
+						));
 					vertexIndices.push_back(static_cast<GLuint>(points.size() - 1));
 				}
 
@@ -274,11 +306,16 @@ namespace MV{
 			}
 		}
 
-		double Spine::animateTimeScale() const {
-			return timeScale;
+		std::shared_ptr<Spine> Spine::timeScale(double a_timeScale){
+			animationState->timeScale = static_cast<float>(a_timeScale);
+			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
 
-		const double Spine::TIME_BETWEEN_UPDATES = 60.0 / 1.0;
+		double Spine::timeScale() const {
+			return static_cast<double>(animationState->timeScale);
+		}
+
+		const double Spine::TIME_BETWEEN_UPDATES = 1.0 / 60.0;
 
 
 		Spine::FileBundle::FileBundle(const std::string &a_skeletonFile, const std::string &a_atlasFile, float a_loadScale /*= 1.0f*/):
@@ -289,6 +326,93 @@ namespace MV{
 
 		Spine::FileBundle::FileBundle():
 			loadScale(1.0f) {
+		}
+
+		//log("%d event: %s, %s: %d, %f, %s", trackIndex, animationName, event->data->name, event->intValue, event->floatValue, event->stringValue);
+		void Spine::onAnimationStateEvent(int a_trackIndex, spEventType type, spEvent* event, int loopCount) {
+			if(type == SP_ANIMATION_START){
+				onStartSlot(std::static_pointer_cast<Spine>(shared_from_this()), a_trackIndex);
+			} else if(type == SP_ANIMATION_END){
+				onEndSlot(std::static_pointer_cast<Spine>(shared_from_this()), a_trackIndex);
+			} else if(type == SP_ANIMATION_COMPLETE){
+				onCompleteSlot(std::static_pointer_cast<Spine>(shared_from_this()), a_trackIndex, loopCount);
+			} else if(type == SP_ANIMATION_EVENT){
+				onEventSlot(std::static_pointer_cast<Spine>(shared_from_this()), a_trackIndex, AnimationEventData((event->data && event->data->name) ? event->data->name : "Anon", (event->stringValue) ? event->stringValue : "", event->intValue, event->floatValue));
+			}
+		}
+
+		void AnimationTrack::onAnimationStateEvent(int a_trackIndex, spEventType type, spEvent* event, int loopCount) {
+			if(a_trackIndex == myTrackIndex){
+				if(type == SP_ANIMATION_START){
+					onStartSlot(*this);
+				} else if(type == SP_ANIMATION_END){
+					onEndSlot(*this);
+				} else if(type == SP_ANIMATION_COMPLETE){
+					onCompleteSlot(*this, loopCount);
+				} else if(type == SP_ANIMATION_EVENT){
+					onEventSlot(*this, AnimationEventData((event->data && event->data->name) ? event->data->name : "Anon", (event->stringValue)?event->stringValue:"", event->intValue, event->floatValue));
+				}
+			}
+		}
+
+		AnimationTrack& AnimationTrack::animate(const std::string &a_animationName, bool a_loop){
+			spAnimation* animation = spSkeletonData_findAnimation(skeleton->data, a_animationName.c_str());
+			if(animation){
+				auto* entry = spAnimationState_setAnimation(animationState, myTrackIndex, animation, a_loop);
+				if(entry && !entry->rendererObject){
+					entry->rendererObject = this;
+					entry->listener = spineTrackEntryCallback;
+				}
+			} else{
+				std::cerr << "Failed to find animation: " << a_animationName << std::endl;
+			}
+			return *this;
+		}
+
+		AnimationTrack& AnimationTrack::queueAnimation(const std::string &a_animationName, bool a_loop, double a_delay){
+			spAnimation* animation = spSkeletonData_findAnimation(skeleton->data, a_animationName.c_str());
+			if(animation){
+				auto* entry = spAnimationState_addAnimation(animationState, myTrackIndex, animation, a_loop, a_delay);
+				if(entry && !entry->rendererObject){
+					entry->rendererObject = this;
+					entry->listener = spineTrackEntryCallback;
+				}
+			} else{
+				std::cerr << "Failed to find animation: " << a_animationName << std::endl;
+			}
+			return *this;
+		}
+
+		AnimationTrack& AnimationTrack::stop(){
+			spAnimationState_clearTrack(animationState, myTrackIndex);
+			return *this;
+		}
+
+		AnimationTrack& AnimationTrack::time(double a_newTime){
+			spAnimationState_getCurrent(animationState, myTrackIndex)->time = static_cast<float>(a_newTime);
+			return *this;
+		}
+		double AnimationTrack::time() const{
+			return static_cast<double>(spAnimationState_getCurrent(animationState, myTrackIndex)->time);
+		}
+
+		AnimationTrack& AnimationTrack::crossfade(double a_newTime){
+			auto *trackState = spAnimationState_getCurrent(animationState, myTrackIndex);
+			trackState->mixDuration = static_cast<float>(a_newTime);
+			trackState->mix = equals(a_newTime, 0.0) ? 1.0f : 0.0f;
+
+			return *this;
+		}
+		double AnimationTrack::crossfade() const{
+			return static_cast<double>(spAnimationState_getCurrent(animationState, myTrackIndex)->mixDuration);
+		}
+
+		AnimationTrack& AnimationTrack::timeScale(double a_newTime){
+			spAnimationState_getCurrent(animationState, myTrackIndex)->timeScale = static_cast<float>(a_newTime);
+			return *this;
+		}
+		double AnimationTrack::timeScale() const{
+			return static_cast<double>(spAnimationState_getCurrent(animationState, myTrackIndex)->timeScale);
 		}
 	}
 }

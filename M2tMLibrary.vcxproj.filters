@@ -38,6 +38,9 @@
     <Filter Include="Spine">
       <UniqueIdentifier>{a9e6e258-2f83-4621-a11a-6dfead5562d8}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Game\Editor">
+      <UniqueIdentifier>{bc2e2e42-7286-4b0a-bdef-60af206310ca}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Animation\frameSwapper.cpp">
@@ -103,13 +106,6 @@
     <ClCompile Include="Source\Render\Scene\primitives.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Editor\editor.cpp">
-      <Filter>Source Files\Game</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Editor\editorControls.cpp" />
-    <ClCompile Include="Source\Editor\editorSelection.cpp" />
-    <ClCompile Include="Source\Editor\editorPanels.cpp" />
-    <ClCompile Include="Source\Editor\editorFactories.cpp" />
     <ClCompile Include="..\external\gl3w\src\gl3w.c" />
     <ClCompile Include="Source\Render\Scene\sliced.cpp">
       <Filter>Source Files\Render\Scene</Filter>
@@ -194,6 +190,21 @@
     </ClCompile>
     <ClCompile Include="Source\Render\Scene\spineMV.cpp">
       <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Editor\editor.cpp">
+      <Filter>Source Files\Game\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Editor\editorControls.cpp">
+      <Filter>Source Files\Game\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Editor\editorFactories.cpp">
+      <Filter>Source Files\Game\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Editor\editorPanels.cpp">
+      <Filter>Source Files\Game\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Editor\editorSelection.cpp">
+      <Filter>Source Files\Game\Editor</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -440,14 +451,6 @@
     <ClInclude Include="Source\Render\Scene\primitives.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Editor\editor.h">
-      <Filter>Source Files\Game</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Editor\editorControls.h" />
-    <ClInclude Include="Source\Editor\editorSelection.h" />
-    <ClInclude Include="Source\Editor\editorPanels.h" />
-    <ClInclude Include="Source\Editor\editorDefines.h" />
-    <ClInclude Include="Source\Editor\editorFactories.h" />
     <ClInclude Include="Source\Render\Scene\sliced.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
@@ -534,6 +537,24 @@
     </ClInclude>
     <ClInclude Include="Source\Render\Scene\spineMV.h">
       <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Editor\editor.h">
+      <Filter>Source Files\Game\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Editor\editorControls.h">
+      <Filter>Source Files\Game\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Editor\editorDefines.h">
+      <Filter>Source Files\Game\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Editor\editorFactories.h">
+      <Filter>Source Files\Game\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Editor\editorPanels.h">
+      <Filter>Source Files\Game\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Editor\editorSelection.h">
+      <Filter>Source Files\Game\Editor</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

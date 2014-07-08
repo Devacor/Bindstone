@@ -414,5 +414,16 @@ namespace MV{
 		double AnimationTrack::timeScale() const{
 			return static_cast<double>(spAnimationState_getCurrent(animationState, myTrackIndex)->timeScale);
 		}
+
+		std::string AnimationTrack::name() const {
+			auto *currentTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
+			return (currentTrack && currentTrack->animation && currentTrack->animation->name) ? currentTrack->animation->name : "NULL";
+		}
+
+		double AnimationTrack::duration() const {
+			auto *currentTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
+			return (currentTrack && currentTrack->animation && currentTrack->animation->duration) ? currentTrack->animation->duration : 0.0f;
+		}
+
 	}
 }

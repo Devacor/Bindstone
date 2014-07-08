@@ -40,9 +40,6 @@ private:
 
 	std::shared_ptr<MV::Scene::Clickable> positionHandle;
 
-	std::map<std::string, MV::Scene::Clickable::Drag> dragSignals;
-	std::map<std::string, MV::Scene::Clickable::Click> releaseSignals;
-
 	std::shared_ptr<MV::Scene::Node> controlContainer;
 };
 

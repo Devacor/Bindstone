@@ -100,6 +100,7 @@ namespace MV {
 			public MessageHandler<PopMatrix>,
 			public MessageHandler<SetShader>{
 			friend cereal::access;
+			friend Draw2D;
 		public:
 			virtual ~Node(){
 				myParent = nullptr;

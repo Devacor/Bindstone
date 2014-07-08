@@ -143,6 +143,7 @@ namespace MV {
 				points[1].textureX = 0.0; points[1].textureY = 1.0;
 				points[2].textureX = 1.0; points[2].textureY = 1.0;
 				points[3].textureX = 1.0; points[3].textureY = 0.0;
+				appendQuadVertexIndices(vertexIndices, 0);
 			}
 
 			virtual void drawImplementation();

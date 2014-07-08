@@ -136,8 +136,10 @@ namespace MV {
 	};
 
 	class MatrixStack {
+		Slot<void()> onChangedSlot;
 	public:
 		MatrixStack(const std::string &a_name = ""):
+			onChanged(onChangedSlot),
 			name(a_name){
 			push(TransformMatrix());
 		}
@@ -149,6 +151,7 @@ namespace MV {
 		void pop();
 		void clear();
 
+		SlotRegister<void()> onChanged;
 	private:
 		std::vector<TransformMatrix> stack;
 		std::string name;

@@ -30,6 +30,7 @@ public:
 
 	template <typename PanelType, typename ...Arg>
 	void loadPanel(Arg... a_parameters){
+		if(currentPanel){ currentPanel->activate(nullptr); }
 		currentPanel = std::make_unique<PanelType>(*this, std::forward<Arg>(a_parameters)...);
 	}
 

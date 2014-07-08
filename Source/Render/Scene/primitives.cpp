@@ -134,7 +134,7 @@ namespace MV {
 		}
 
 		void Rectangle::drawImplementation(){
-			defaultDraw(GL_TRIANGLE_FAN);
+			defaultDraw(GL_TRIANGLES);
 		}
 
 		void appendQuadVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset) {

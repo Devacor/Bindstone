@@ -939,6 +939,45 @@ namespace MV {
 		}
 	}
 
+	void Draw2D::draw(GLenum drawType, std::shared_ptr<Scene::Node> a_node) {
+		a_node->shaderProgram->use();
+
+		if(a_node->bufferId == 0){
+			glGenBuffers(1, &a_node->bufferId);
+		}
+
+		glBindBuffer(GL_ARRAY_BUFFER, a_node->bufferId);
+		auto structSize = static_cast<GLsizei>(sizeof(a_node->points[0]));
+		glBufferData(GL_ARRAY_BUFFER, a_node->points.size() * structSize, &(a_node->points[0]), GL_STATIC_DRAW);
+
+		glEnableVertexAttribArray(0);
+		glEnableVertexAttribArray(1);
+		glEnableVertexAttribArray(2);
+
+		auto positionOffset = static_cast<GLsizei>(offsetof(DrawPoint, x));
+		auto textureOffset = static_cast<GLsizei>(offsetof(DrawPoint, textureX));
+		auto colorOffset = static_cast<GLsizei>(offsetof(DrawPoint, R));
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (void*)positionOffset); //Point
+		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (void*)textureOffset); //UV
+		glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (void*)colorOffset); //Color
+
+		TransformMatrix transformationMatrix(projectionMatrix().top() * modelviewMatrix().top());
+
+		a_node->shaderProgram->set("texture", a_node->ourTexture);
+		a_node->shaderProgram->set("transformation", transformationMatrix);
+
+		if(!a_node->vertexIndices.empty()){
+			glDrawElements(drawType, static_cast<GLsizei>(a_node->vertexIndices.size()), GL_UNSIGNED_INT, &a_node->vertexIndices[0]);
+		} else{
+			glDrawArrays(drawType, 0, static_cast<GLsizei>(a_node->points.size()));
+		}
+
+		glDisableVertexAttribArray(0);
+		glDisableVertexAttribArray(1);
+		glDisableVertexAttribArray(2);
+		glUseProgram(0);
+	}
+
 	Framebuffer::Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, const Size<int> &a_size, const Point<int> &a_position) :
 		renderbuffer(a_renderbuffer),
 		framebuffer(a_framebuffer),

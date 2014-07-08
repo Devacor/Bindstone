@@ -8,7 +8,6 @@ uniform sampler2D texture;
 out vec4 colorResult;
  
 void main(){
-	vec4 textureColor = texture2D(texture, uv.st);
-	textureColor.rgb *= textureColor.a;
-    colorResult = textureColor * color;
+    colorResult = texture2D(texture, uv.st) * color;
+    colorResult.rgb *= colorResult.a;
 }

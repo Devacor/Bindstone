@@ -393,6 +393,8 @@ namespace MV {
 				std::cerr << "GL Error: (" << error << ")\nencountered in " << a_location << ".\n" << std::endl;
 			}
 		}
+
+		void draw(GLenum drawType, std::shared_ptr<Scene::Node> a_node);
 	private:
 		void validateShaderStatus(GLuint a_id, bool a_isShader);
 		void loadPartOfShader(GLuint a_id, const std::string &a_code);

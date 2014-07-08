@@ -182,6 +182,8 @@ namespace MV {
 			for(auto i = observers.begin(); i != observers.end();) {
 				if(i->expired()) {
 					observers.erase(i++);
+				} else{
+					++i;
 				}
 			}
 			return observers.size();

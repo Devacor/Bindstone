@@ -67,6 +67,9 @@ namespace MV {
 			AnimationTrack& animate(const std::string &a_animationName, bool a_loop = true);
 			AnimationTrack& queueAnimation(const std::string &a_animationName, bool a_loop = true, double a_delay = 0.0);
 
+			std::string name() const;
+			double duration() const;
+
 			AnimationTrack& stop();
 			AnimationTrack& time(double a_newTime);
 			double time() const;

@@ -302,6 +302,7 @@ namespace MV{
 			std::cout << "Matrix: " << name << ".push()" << std::endl;
 		}
 		stack.push_back(stack.back());
+		onChangedSlot();
 		return stack.back();
 	}
 
@@ -310,6 +311,7 @@ namespace MV{
 			std::cout << "Matrix: " << name << ".push(m)" << std::endl;
 		}
 		stack.push_back(matrix);
+		onChangedSlot();
 		return stack.back();
 	}
 
@@ -320,6 +322,8 @@ namespace MV{
 		stack.pop_back();
 		if(stack.empty()){
 			push(TransformMatrix());
+		} else{
+			onChangedSlot();
 		}
 	}
 

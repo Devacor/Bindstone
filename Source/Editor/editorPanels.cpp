@@ -26,7 +26,10 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::shared_pt
 
 	auto node = panel.content();
 	auto deselectButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), "Deselect", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Deselect"));
-	deselectButton->position({8.0, lastY});
+	deselectButton->position({8.0, lastY})->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>){
+		panel.loadPanel<DeselectedEditorPanel>();
+	});
+	
 	lastY += spacing;
 
 	posX = makeInputField(this, *panel.mouse(), node, *panel.textLibrary(), "posX", MV::size(50.0f, 27.0f))->position({8.0, lastY});
@@ -38,48 +41,47 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::shared_pt
 
 	if(controls){
 		auto xClick = posX->get<MV::Scene::Clickable>("Clickable");
-		xClick->onAccept.connect("updateX", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+		xClick->onAccept.connect("updateX", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 			controls->position({posX->number(), posY->number()});
 		});
-		posX->onEnter.connect("updateX", [=](std::shared_ptr<MV::Scene::Text> a_clickable){
+		posX->onEnter.connect("updateX", [&](std::shared_ptr<MV::Scene::Text> a_clickable){
 			controls->position({posX->number(), posY->number()});
 		});
 		auto yClick = posY->get<MV::Scene::Clickable>("Clickable");
-		yClick->onAccept.connect("updateY", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+		yClick->onAccept.connect("updateY", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 			controls->position({posX->number(), posY->number()});
 		});
-		posY->onEnter.connect("updateY", [=](std::shared_ptr<MV::Scene::Text> a_clickable){
+		posY->onEnter.connect("updateY", [&](std::shared_ptr<MV::Scene::Text> a_clickable){
 			controls->position({posX->number(), posY->number()});
 		});
 
 		auto widthClick = width->get<MV::Scene::Clickable>("Clickable");
-		widthClick->onAccept.connect("updateWidth", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+		widthClick->onAccept.connect("updateWidth", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 			controls->size({width->number(), height->number()});
 		});
-		width->onEnter.connect("updateWidth", [=](std::shared_ptr<MV::Scene::Text> a_clickable){
+		width->onEnter.connect("updateWidth", [&](std::shared_ptr<MV::Scene::Text> a_clickable){
 			controls->size({width->number(), height->number()});
 		});
 		auto heightClick = width->get<MV::Scene::Clickable>("Clickable");
-		heightClick->onAccept.connect("updateHeight", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+		heightClick->onAccept.connect("updateHeight", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 			controls->size({width->number(), height->number()});
 		});
-		height->onEnter.connect("updateHeight", [=](std::shared_ptr<MV::Scene::Text> a_clickable){
+		height->onEnter.connect("updateHeight", [&](std::shared_ptr<MV::Scene::Text> a_clickable){
 			controls->size({width->number(), height->number()});
 		});
 
-		controls->onChange = [=](EditableElement *a_element){
-			//a_element->position({posX->number(), posY->number()});
-			posX->number(static_cast<int>(a_element->position().x + .5f));
-			posY->number(static_cast<int>(a_element->position().y + .5f));
+		controls->onChange = [&](EditableElement *a_element){
+			posX->number(static_cast<int>(controls->position().x + .5f));
+			posY->number(static_cast<int>(controls->position().y + .5f));
 
-			width->number(static_cast<int>(a_element->size().width + .5f));
-			height->number(static_cast<int>(a_element->size().height + .5f));
+			width->number(static_cast<int>(controls->size().width + .5f));
+			height->number(static_cast<int>(controls->size().height + .5f));
 		};
 	}
 	lastY += spacing;
 	auto deselectLocalAABB = deselectButton->localAABB();
 
-	auto background = node->make<MV::Scene::Rectangle>("Background", MV::BoxAABB(MV::point(0.0f, 20.0f), deselectButton->localAABB().bottomRightPoint() + MV::point(8.0f, 8.0f)));
+	auto background = node->make<MV::Scene::Rectangle>("Background", MV::BoxAABB(MV::point(0.0f, 20.0f), MV::point(deselectLocalAABB.maxPoint.x + 8.0f, lastY)));
 	background->color({BOX_BACKGROUND});
 	background->depth(-1.0f);
 

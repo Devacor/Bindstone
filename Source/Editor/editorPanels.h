@@ -12,7 +12,8 @@ class EditableElement;
 class EditorPanel {
 public:
 	EditorPanel(EditorControls &a_panel);
-
+	virtual ~EditorPanel(){
+	}
 	virtual void cancelInput();
 
 	virtual void handleInput(SDL_Event &a_event);
@@ -36,6 +37,9 @@ protected:
 class SelectedEditorPanel : public EditorPanel {
 public:
 	SelectedEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableElement> a_controls);
+	~SelectedEditorPanel(){
+		int i = 0;
+	}
 
 	virtual void handleInput(SDL_Event &a_event);
 

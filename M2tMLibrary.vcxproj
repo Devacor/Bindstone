@@ -211,6 +211,7 @@
     <ClCompile Include="Source\Render\boxaabb.cpp" />
     <ClCompile Include="Source\Render\Scene\button.cpp" />
     <ClCompile Include="Source\Render\Scene\clipped.cpp" />
+    <ClCompile Include="Source\Render\Scene\emitter.cpp" />
     <ClCompile Include="Source\Render\Scene\node.cpp" />
     <ClCompile Include="Source\Render\matrix.cpp" />
     <ClCompile Include="Source\Render\points.cpp" />
@@ -307,6 +308,7 @@
     <ClInclude Include="Source\Editor\editorPanels.h" />
     <ClInclude Include="Source\Editor\editorSelection.h" />
     <ClInclude Include="Source\Render\boxaabb.h" />
+    <ClInclude Include="Source\Render\Scene\emitter.h" />
     <ClInclude Include="Source\Render\Scene\primitives.h" />
     <ClInclude Include="Source\Render\Scene\button.h" />
     <ClInclude Include="Source\Animation\actionSequence.h" />

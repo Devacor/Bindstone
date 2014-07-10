@@ -347,7 +347,7 @@ namespace MV {
 		if(a_other != 0){
 			width/=a_other; height/=a_other; depth/=a_other;
 		}else{
-			std::cerr << "ERROR: Size<T> operator/=(const T& a_other) divide by 0!" std::endl;
+			std::cerr << "ERROR: Size<T> operator/=(const T& a_other) divide by 0!" << std::endl;
 		}
 		return *this;
 	}

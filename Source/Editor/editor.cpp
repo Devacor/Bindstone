@@ -61,6 +61,8 @@ void Editor::initializeWindow(){
 		queueAnimation("death", false, 5)->
 		queueAnimation("run");
 
+	auto emitter = scene->make<MV::Scene::Emitter>("Emitter")->position({300.0f, 300.0f})->depth(100000.0f);
+
 	spineGuy->track(0).onStart.connect("shoot", [](MV::Scene::AnimationTrack &a_track){
 		int i = 0;
 	});

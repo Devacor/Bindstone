@@ -7,4 +7,5 @@
 	#include "Render/Scene/sliced.h"
 	#include "Render/Scene/text.h"
 	#include "Render/Scene/spineMV.h"
+	#include "Render/Scene/emitter.h"
 #endif

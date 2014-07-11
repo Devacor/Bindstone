@@ -23,10 +23,11 @@ namespace MV {
 		void Emitter::spawnParticle(){
 			Particle particle;
 			particle.color.set(.25f, .45f, .75f);
-			particle.direction.locate(15.0f, 15.0f, 15.0f);
-			particle.rotation.locate(15.0f, 15.0f, 15.0f);
-			particle.speed = 15.0f;
-			particle.speedChange = -5.0f;
+			particle.direction.locate(0.0f, 0.0f, 15.0f);
+			particle.rotation.locate(0.0f, 0.0f, 15.0f);
+			particle.rotationalChange.locate(0.0f, 0.0f, 15.0f);
+			particle.speed = 0.0f;
+			particle.speedChange = 5.0f * (random.number(0, 1) ? 1.0f : -1.0f);
 			particle.scale.set(20.0f, 20.0f);
 			particle.maxLifespan = 5.0f;
 			particles.push_back(particle);
@@ -44,16 +45,26 @@ namespace MV {
 			loadParticlesToPoints();
 		}
 
+
+
 		void Emitter::loadParticlesToPoints() {
 			points.clear();
 			vertexIndices.clear();
 			for(auto &particle : particles){
-				BoxAABB bounds(particle.position - sizeToPoint(particle.scale / 2.0f), particle.position + sizeToPoint(particle.scale / 2.0f));
-				points.push_back(DrawPoint(bounds.topLeftPoint(), particle.color));
-				points.push_back(DrawPoint(bounds.topRightPoint(), particle.color));
-				points.push_back(DrawPoint(bounds.bottomRightPoint(), particle.color));
-				points.push_back(DrawPoint(bounds.bottomLeftPoint(), particle.color));
-				appendQuadVertexIndices(vertexIndices, points.size());
+				BoxAABB bounds(sizeToPoint(particle.scale / 2.0f), sizeToPoint(particle.scale / -2.0f));
+				std::vector<Point<>> corners;
+				corners.push_back(bounds.topLeftPoint());
+				corners.push_back(bounds.topRightPoint());
+				corners.push_back(bounds.bottomRightPoint());
+				corners.push_back(bounds.bottomLeftPoint());
+
+				for(auto& corner : corners){
+					rotatePoint3D(corner.x, corner.y, corner.z, particle.rotation.x, particle.rotation.y, particle.rotation.z);
+					corner += particle.position;
+					points.push_back(DrawPoint(corner, particle.color));
+				}
+
+				appendQuadVertexIndices(vertexIndices, static_cast<GLuint>(points.size()));
 			}
 		}
 

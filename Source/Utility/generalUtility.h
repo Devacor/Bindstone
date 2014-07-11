@@ -11,6 +11,7 @@
 #include <functional>
 #include <numeric>
 #include <stdint.h>
+#include <random>
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
@@ -134,7 +135,7 @@ namespace MV {
 	}
 
 	template <class Type>
-	void rotatePoint2D(Type &x, Type &y, long double angle, AngleType angleUnitIs = DEGREES){
+	void rotatePoint2D(Type &x, Type &y, Type angle, AngleType angleUnitIs = DEGREES){
 		if(angleUnitIs == DEGREES){
 			angle = toRadians(angle);
 		}
@@ -145,16 +146,16 @@ namespace MV {
 	}
 
 	template <class Type>
-	void rotatePoint3D(Type &x, Type &y, Type &z, long double aX, long double aY, long double aZ, long double angle = 1.0, AngleType angleUnitIs = DEGREES){
+	void rotatePoint3D(Type &x, Type &y, Type &z, Type aX, Type aY, Type aZ, Type angle = 1.0, AngleType angleUnitIs = DEGREES){
 		if(angleUnitIs == DEGREES){
 			aY = toRadians(aY); aX = toRadians(aX); aZ = toRadians(aZ);
 		}
 
-		long double tmpy = y;
+		Type tmpy = y;
 		y = (y * cos(aX)) - (z * sin(aX));
 		z = (tmpy * sin(aX)) + (z * cos(aX));
 
-		long double tmpx = x;
+		Type tmpx = x;
 		x = (z * sin(aY)) + (x * cos(aY));
 		z = (z * cos(aY)) - (tmpx * sin(aY));
 
@@ -239,5 +240,34 @@ namespace MV {
 			}
 		}
 	}
+
+	class Random {
+	public:
+		Random():
+			Random(std::random_device{}()){
+		}
+
+		Random(uint64_t a_seed):
+			generatorSeed(a_seed),
+			generator(static_cast<unsigned long>(a_seed)){
+		}
+		uint64_t seed() const{
+			return generatorSeed;
+		}
+		Random& seed(uint64_t a_seed){
+			generator.seed(static_cast<unsigned long>(a_seed));
+		}
+
+		int number(int a_min, int a_max){
+			return std::uniform_int_distribution<int>{a_min, a_max}(generator);
+		}
+
+		double number(double a_min, double a_max){
+			return std::uniform_real_distribution<double>{a_min, std::nextafter(a_max, a_max + 1.0)}(generator);
+		}
+	private:
+		uint64_t generatorSeed;
+		std::mt19937 generator;
+	};
 }
 #endif

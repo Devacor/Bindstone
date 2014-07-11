@@ -10,20 +10,20 @@ namespace MV {
 			//return true if dead.
 			bool update(double a_dt){
 				float timeScale = static_cast<float>(a_dt);
-				totalLifespan += timeScale;
+				totalLifespan = std::min(totalLifespan + timeScale, maxLifespan);
 
 				direction += directionalChange * timeScale;
-				rotationalChange += rotationalChange * timeScale;
+				rotation += rotationalChange * timeScale;
 				scale += scaleChange * timeScale;
 				color += colorChange * timeScale;
 				speed += speedChange * timeScale;
 
 				Point<> normal(0.0f, -speed, 0.0f);
 				rotatePoint3D(normal.x, normal.y, normal.z, direction.x, direction.y, direction.z);
-				position += normal * speed * timeScale;
+				position += normal * timeScale;
 
 				currentFrame = static_cast<int>(boundBetween(static_cast<float>(myTextures.size() * (myAnimationSpeed/timeScale)), 0.0f, static_cast<float>(myTextures.size())));
-				return totalLifespan >= maxLifespan;
+				return totalLifespan == maxLifespan;
 			}
 
 			void reset(){
@@ -104,6 +104,8 @@ namespace MV {
 
 			static const double TIME_BETWEEN_UPDATES;
 			double timeSinceLastParticle = 0.0;
+
+			Random random;
 		};
 	}
 }

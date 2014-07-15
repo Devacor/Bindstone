@@ -75,10 +75,10 @@ namespace MV {
 		return *this;
 	}
 	Color& Color::operator/=(const Color& a_other){
-		R /= a_other.R;
-		G /= a_other.G;
-		B /= a_other.B;
-		A /= a_other.A;
+		R /= (a_other.R != 0) ? a_other.R : 1.0f;
+		G /= (a_other.G != 0) ? a_other.G : 1.0f;
+		B /= (a_other.B != 0) ? a_other.B : 1.0f;
+		A /= (a_other.A != 0) ? a_other.A : 1.0f;
 		normalize();
 		return *this;
 	}
@@ -283,5 +283,10 @@ namespace MV {
 		R = a_other.R; G = a_other.G; B = a_other.B;
 		Color::normalize();
 	}
+
+	MV::Color mix(const Color &a_start, const Color &a_end, float a_percent) {
+		return Color{a_start + a_percent * (a_end - a_start)};
+	}
+
 
 }

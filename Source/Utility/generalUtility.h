@@ -96,6 +96,11 @@ namespace MV {
 		}
 	}
 
+	template<typename T>
+	T mix(const T &a_start, const T &a_end, float a_percent) {
+		return T{a_start + a_percent * (a_end - a_start)};
+	}
+
 	//rounds num up to the next largest power of two (or the current value) and returns that value
 	int roundUpPowerOfTwo(int num);
 
@@ -265,9 +270,22 @@ namespace MV {
 		double number(double a_min, double a_max){
 			return std::uniform_real_distribution<double>{a_min, std::nextafter(a_max, a_max + 1.0)}(generator);
 		}
+
+		float number(float a_min, float a_max){
+			return std::uniform_real_distribution<float>{a_min, std::nextafter(a_max, a_max + 1.0f)}(generator);
+		}
 	private:
 		uint64_t generatorSeed;
 		std::mt19937 generator;
+
+		static Random* instance;
+		friend double RandomNumber(double, double);
+		friend float RandomNumber(float, float);
+		friend int RandomNumber(int, int);
 	};
+
+	double RandomNumber(double a_min, double a_max);
+	float RandomNumber(float a_min, float a_max);
+	int RandomNumber(int a_min, int a_max);
 }
 #endif

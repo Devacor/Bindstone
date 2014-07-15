@@ -6,25 +6,30 @@
 namespace MV {
 	namespace Scene {
 
+		struct ParticleChangeValues {
+			AxisAngles directionalChange;
+			AxisAngles rotationalChange;
+
+			float beginSpeed = 0.0f;
+			float endSpeed = 0.0f;
+
+			Size<> beginScale;
+			Size<> endScale;
+
+			Color beginColor;
+			Color endColor;
+
+			float maxLifespan = 1.0f;
+
+			float gravityMagnitude = 0.0f;
+			AxisAngles gravityDirection;
+
+			float animationFramesPerSecond = 10.0f;
+		};
+
 		struct Particle {
 			//return true if dead.
-			bool update(double a_dt){
-				float timeScale = static_cast<float>(a_dt);
-				totalLifespan = std::min(totalLifespan + timeScale, maxLifespan);
-
-				direction += directionalChange * timeScale;
-				rotation += rotationalChange * timeScale;
-				scale += scaleChange * timeScale;
-				color += colorChange * timeScale;
-				speed += speedChange * timeScale;
-
-				Point<> normal(0.0f, -speed, 0.0f);
-				rotatePoint3D(normal.x, normal.y, normal.z, direction.x, direction.y, direction.z);
-				position += normal * timeScale;
-
-				currentFrame = static_cast<int>(boundBetween(static_cast<float>(myTextures.size() * (myAnimationSpeed/timeScale)), 0.0f, static_cast<float>(myTextures.size())));
-				return totalLifespan == maxLifespan;
-			}
+			bool update(double a_dt);
 
 			void reset(){
 				totalLifespan = 0.0f;
@@ -36,31 +41,34 @@ namespace MV {
 			AxisAngles rotation;
 			Size<> scale;
 			Color color;
-
-			float speedChange;
-			AxisAngles directionalChange;
-			AxisAngles rotationalChange;
-			Size<> scaleChange;
-			Color colorChange;
-
-			std::vector<std::shared_ptr<TextureHandle>> myTextures;
-			float myAnimationSpeed = 1.0f;
-
 			int currentFrame;
 
 			float totalLifespan;
-			float maxLifespan;
+
+			ParticleChangeValues change;
+
+			std::vector<std::shared_ptr<TextureHandle>> myTextures;
+
+			void setGravity(float a_magnitude, const AxisAngles &a_direction = AxisAngles(0.0f, 180.0f, 0.0f));
+		private:
+			Point<> gravityConstant;
 		};
 
 		struct ParticleSpawnProperties {
-			float particleSpawnRate = .25f;
-			float particleSpawnRateVariance = .0f;
+			float particleSpawnRate = 1.0f;
+			float particleSpawnRateVariance = 0.0f;
 
-			Point<> positionVariance;
-			float speedVariance = 0.0f;
-			AxisAngles rotationVariance;
-			Size<> scaleVariance;
-			Color colorVariance;
+			Point<> maximumPosition;
+			Point<> minimumPosition;
+
+			AxisAngles maximumDirection;
+			AxisAngles minimumDirection;
+
+			AxisAngles maximumRotation;
+			AxisAngles minimumRotation;
+
+			ParticleChangeValues minimum;
+			ParticleChangeValues maximum;
 		};
 
 		class Emitter :
@@ -71,7 +79,7 @@ namespace MV {
 		public:
 			SCENE_MAKE_FACTORY_METHODS(Emitter)
 
-			static std::shared_ptr<Emitter> make(Draw2D* a_renderer);
+				static std::shared_ptr<Emitter> make(Draw2D* a_renderer);
 		protected:
 			Emitter(Draw2D *a_renderer):
 				Node(a_renderer){

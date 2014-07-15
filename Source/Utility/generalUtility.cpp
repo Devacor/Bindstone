@@ -168,4 +168,30 @@ namespace MV {
 		return val - (rangeSize * std::floor(val/rangeSize)) + lowerBound;
 	}
 
+	Random* Random::instance = nullptr;
+
+	double RandomNumber(double a_min, double a_max) {
+		if(!Random::instance){
+			Random::instance = new Random();
+		}
+		return Random::instance->number(a_min, a_max);
+	}
+
+	float RandomNumber(float a_min, float a_max) {
+		if(!Random::instance){
+			Random::instance = new Random();
+		}
+		return Random::instance->number(a_min, a_max);
+	}
+
+	int RandomNumber(int a_min, int a_max) {
+		if(!Random::instance){
+			Random::instance = new Random();
+		}
+		return Random::instance->number(a_min, a_max);
+	}
+
+
+
+
 }

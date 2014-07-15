@@ -88,10 +88,12 @@ namespace MV {
 		}
 	};
 
+	Color mix(const Color &a_start, const Color &a_end, float a_percent);
+
 	template <class T = PointPrecision>
 	class Size{
 	public:
-		Size():width(0), height(0), depth(0){}
+		Size():width(1), height(1), depth(1){}
 		Size(T a_width, T a_height, T a_depth = 0):width(a_width),height(a_height),depth(a_depth){}
 
 		template <class T2>
@@ -111,6 +113,8 @@ namespace MV {
 		Size<T>& operator-=(const Size<T>& a_other);
 		Size<T>& operator*=(const Size<T>& a_other);
 		Size<T>& operator/=(const Size<T>& a_other);
+		Size<T>& operator+=(const T& a_other);
+		Size<T>& operator-=(const T& a_other);
 		Size<T>& operator*=(const T& a_other);
 		Size<T>& operator/=(const T& a_other);
 
@@ -167,6 +171,8 @@ namespace MV {
 
 		T x, y, z;
 	};
+
+
 
 	class DrawPoint : public Point<>, public Color, public TexturePoint{
 	public:
@@ -269,17 +275,6 @@ namespace MV {
 	Color operator/(const Color &a_lhs, const Color &a_rhs);
 	Color operator*(const Color &a_lhs, const Color &a_rhs);
 
-	template<typename T>
-	Color& operator*(const Color &a_lhs, T a_rhs){
-		Color result = a_lhs;
-		return result *= a_rhs;
-	}
-	template<typename T>
-	Color& operator/(const Color &a_lhs, T a_rhs){
-		Color result = a_lhs;
-		return result *= a_rhs;
-	}
-
 	template <typename T>
 	Color& Color::operator*=(T a_other){
 		R *= static_cast<float>(a_other);
@@ -291,11 +286,58 @@ namespace MV {
 
 	template <typename T>
 	Color& Color::operator/=(T a_other){
-		R /= static_cast<float>(a_other);
-		G /= static_cast<float>(a_other);
-		B /= static_cast<float>(a_other);
-		A /= static_cast<float>(a_other);
+		R /= static_cast<float>(a_other != 0 ? a_other : 1);
+		G /= static_cast<float>(a_other != 0 ? a_other : 1);
+		B /= static_cast<float>(a_other != 0 ? a_other : 1);
+		A /= static_cast<float>(a_other != 0 ? a_other : 1);
 		return *this;
+	}
+
+	template<typename T>
+	Color& operator*(const Color &a_lhs, T a_rhs){
+		Color result = a_lhs;
+		return result *= a_rhs;
+	}
+	template<typename T>
+	Color& operator/(const Color &a_lhs, T a_rhs){
+		Color result = a_lhs;
+		return result *= a_rhs;
+	}
+
+	template <class T>
+	Color operator+(const Color& a_left, const T& a_right){
+		Color tmpPoint = a_left;
+		return tmpPoint += a_right;
+	}
+
+	template <class T>
+	Color operator-(const Color& a_left, const T& a_right){
+		Color tmpPoint = a_left;
+		return tmpPoint -= a_right;
+	}
+
+	template <class T>
+	Color operator+(const T& a_left, const Color& a_right){
+		Color tmpPoint = Color(a_left, a_left, a_left);
+		return tmpPoint += a_right;
+	}
+
+	template <class T>
+	Color operator-(const T& a_left, const Color& a_right){
+		Color tmpPoint = Color(a_left, a_left, a_left);
+		return tmpPoint -= a_right;
+	}
+
+	template <class T>
+	Color operator*(const T& a_left, const Color& a_right){
+		Color tmpPoint = Color(a_left, a_left, a_left);
+		return tmpPoint *= a_right;
+	}
+
+	template <class T>
+	Color operator/(const T& a_left, const Color& a_right){
+		Color tmpPoint = Color(a_left, a_left, a_left);
+		return tmpPoint /= a_right;
 	}
 
 	/************************\
@@ -331,6 +373,18 @@ namespace MV {
 	}
 
 	template <class T>
+	Size<T>& MV::Size<T>::operator+=(const T& a_other){
+		width += a_other; height += a_other; depth += a_other;
+		return *this;
+	}
+
+	template <class T>
+	Size<T>& MV::Size<T>::operator-=(const T& a_other){
+		width -= a_other.width; height -= a_other.height; depth -= a_other.depth;
+		return *this;
+	}
+
+	template <class T>
 	Size<T>& MV::Size<T>::operator*=(const T& a_other){
 		width*=a_other; height*=a_other; depth*=a_other;
 		return *this;
@@ -338,7 +392,9 @@ namespace MV {
 
 	template <class T>
 	Size<T>& MV::Size<T>::operator/=(const Size<T>& a_other){
-		width/=a_other.width; height/=a_other.height; depth/=(a_other.depth == 0)?1:a_other.depth;
+		width /= (a_other.width == 0) ? 1 : a_other.width;
+		height /= (a_other.height == 0) ? 1 : a_other.height;
+		depth /= (a_other.depth == 0) ? 1 : a_other.depth;
 		return *this;
 	}
 
@@ -363,39 +419,75 @@ namespace MV {
 	}
 
 	template <class T>
-	const Size<T> operator+(const Size<T>& a_left, const Size<T>& a_right){
+	Size<T> operator+(const Size<T>& a_left, const Size<T>& a_right){
+		Size<T> tmpPoint = a_left;
+		return tmpPoint += a_right;
+	}
+
+	template <class T>
+	Size<T> operator-(const Size<T>& a_left, const Size<T>& a_right){
+		Size<T> tmpPoint = a_left;
+		return tmpPoint -= a_right;
+	}
+
+	template <class T>
+	Size<T> operator*(const Size<T>& a_left, const Size<T>& a_right){
+		Size<T> tmpPoint = a_left;
+		return tmpPoint *= a_right;
+	}
+
+	template <class T>
+	Size<T> operator/(const Size<T>& a_left, const Size<T>& a_right){
+		Size<T> tmpPoint = a_left;
+		return tmpPoint /= a_right;
+	}
+
+	template <class T>
+	Size<T> operator+(const Size<T>& a_left, const T& a_right){
 		Size<T> tmpPoint = a_left;
 		return tmpPoint+=a_right;
 	}
 
 	template <class T>
-	const Size<T> operator-(const Size<T>& a_left, const Size<T>& a_right){
+	Size<T> operator-(const Size<T>& a_left, const T& a_right){
 		Size<T> tmpPoint = a_left;
 		return tmpPoint-=a_right;
 	}
 
 	template <class T>
-	const Size<T> operator*(const Size<T>& a_left, const Size<T>& a_right){
+	Size<T> operator*(const Size<T>& a_left, const T& a_right){
 		Size<T> tmpPoint = a_left;
 		return tmpPoint*=a_right;
 	}
 
 	template <class T>
-	const Size<T> operator/(const Size<T>& a_left, const Size<T>& a_right){
+	Size<T> operator/(const Size<T>& a_left, const T& a_right){
 		Size<T> tmpPoint = a_left;
 		return tmpPoint/=a_right;
 	}
 
 	template <class T>
-	const Size<T> operator*(const Size<T>& a_left, const T& a_right){
-		Size<T> tmpPoint = a_left;
-		return tmpPoint*=a_right;
+	Size<T> operator+(const T& a_left, const Size<T>& a_right){
+		Size<T> tmpPoint = Size<T>(a_left, a_left, a_left);
+		return tmpPoint += a_right;
 	}
 
 	template <class T>
-	const Size<T> operator/(const Size<T>& a_left, const T& a_right){
-		Size<T> tmpPoint = a_left;
-		return tmpPoint/=a_right;
+	Size<T> operator-(const T& a_left, const Size<T>& a_right){
+		Size<T> tmpPoint = Size<T>(a_left, a_left, a_left);
+		return tmpPoint -= a_right;
+	}
+
+	template <class T>
+	Size<T> operator*(const T& a_left, const Size<T>& a_right){
+		Size<T> tmpPoint = Size<T>(a_left, a_left, a_left);
+		return tmpPoint *= a_right;
+	}
+
+	template <class T>
+	Size<T> operator/(const T& a_left, const Size<T>& a_right){
+		Size<T> tmpPoint = Size<T>(a_left, a_left, a_left);
+		return tmpPoint /= a_right;
 	}
 
 	template <class T>
@@ -485,7 +577,9 @@ namespace MV {
 
 	template <class T>
 	Point<T>& MV::Point<T>::operator/=(const Point<T>& a_other){
-		x/=a_other.x; y/=a_other.y; z/=(a_other.z == 0)?1:a_other.z;
+		x /= (a_other.x != 0) ? a_other.x : 1;
+		y /= (a_other.y != 0) ? a_other.y : 1;
+		z /= (a_other.z != 0) ? a_other.z : 1;
 		return *this;
 	}
 
@@ -500,41 +594,53 @@ namespace MV {
 	}
 
 	template <class T>
-	const bool operator==(const Point<T>& a_left, const Point<T>& a_right){
+	bool operator==(const Point<T>& a_left, const Point<T>& a_right){
 		return equals(a_left.x, a_right.x) && equals(a_left.y, a_right.y) && equals(a_left.z, a_right.z);
 	}
 
 	template <class T>
-	const bool operator!=(const Point<T>& a_left, const Point<T>& a_right){
+	bool operator!=(const Point<T>& a_left, const Point<T>& a_right){
 		return !(a_left == a_right);
 	}
 
 	template <class T>
-	const Point<T> operator+(const Point<T>& a_left, const Point<T>& a_right){
+	Point<T> operator+(const Point<T>& a_left, const Point<T>& a_right){
 		Point<T> tmpPoint = a_left;
-		return tmpPoint+=a_right;
+		return tmpPoint += a_right;
 	}
 
 	template <class T>
-	const Point<T> operator-(const Point<T>& a_left, const Point<T>& a_right){
+	Point<T> operator-(const Point<T>& a_left, const Point<T>& a_right){
 		Point<T> tmpPoint = a_left;
-		return tmpPoint-=a_right;
+		return tmpPoint -= a_right;
 	}
 
 	template <class T>
-	const Point<T> operator*(const Point<T>& a_left, const Point<T>& a_right){
+	Point<T> operator*(const Point<T>& a_left, const Point<T>& a_right){
 		Point<T> tmpPoint = a_left;
-		return tmpPoint*=a_right;
+		return tmpPoint *= a_right;
 	}
 
 	template <class T>
 	const Point<T> operator/(const Point<T>& a_left, const Point<T>& a_right){
 		Point<T> tmpPoint = a_left;
-		return tmpPoint/=a_right;
+		return tmpPoint /= a_right;
 	}
 
 	template <class T>
-	const Point<T> operator*(const Point<T>& a_left, const T& a_right){
+	Point<T> operator+(const Point<T>& a_left, const T& a_right){
+		Point<T> tmpPoint = a_left;
+		return tmpPoint+=a_right;
+	}
+
+	template <class T>
+	Point<T> operator-(const Point<T>& a_left, const T& a_right){
+		Point<T> tmpPoint = a_left;
+		return tmpPoint-=a_right;
+	}
+
+	template <class T>
+	Point<T> operator*(const Point<T>& a_left, const T& a_right){
 		Point<T> tmpPoint = a_left;
 		return tmpPoint*=a_right;
 	}
@@ -543,6 +649,30 @@ namespace MV {
 	const Point<T> operator/(const Point<T>& a_left, const T& a_right){
 		Point<T> tmpPoint = a_left;
 		return tmpPoint/=a_right;
+	}
+
+	template <class T>
+	Point<T> operator+(const T& a_left, const Point<T>& a_right){
+		Point<T> tmpPoint = Point<T>(a_left, a_left, a_left);
+		return tmpPoint += a_right;
+	}
+
+	template <class T>
+	Point<T> operator-(const T& a_left, const Point<T>& a_right){
+		Point<T> tmpPoint = Point<T>(a_left, a_left, a_left);
+		return tmpPoint -= a_right;
+	}
+
+	template <class T>
+	Point<T> operator*(const T& a_left, const Point<T>& a_right){
+		Point<T> tmpPoint = Point<T>(a_left, a_left, a_left);
+		return tmpPoint *= a_right;
+	}
+
+	template <class T>
+	const Point<T> operator/(const T& a_left, const Point<T>& a_right){
+		Point<T> tmpPoint = Point<T>(a_left, a_left, a_left);
+		return tmpPoint /= a_right;
 	}
 
 	template <class T>

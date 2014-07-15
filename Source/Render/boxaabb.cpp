@@ -164,4 +164,9 @@ namespace MV {
 		}
 		return result;
 	}
+
+	MV::AxisAngles angle(PointPrecision a_angle) {
+		return{0.0f, 0.0f, a_angle};
+	}
+
 }

@@ -155,7 +155,7 @@ namespace MV{
 
 		std::shared_ptr<Spine> Spine::crossfade(const std::string &a_fromAnimation, const std::string &a_toAnimation, double a_duration){
 			if(animationState){
-				spAnimationStateData_setMixByName(animationState->data, a_fromAnimation.c_str(), a_toAnimation.c_str(), a_duration);
+				spAnimationStateData_setMixByName(animationState->data, a_fromAnimation.c_str(), a_toAnimation.c_str(), static_cast<float>(a_duration));
 			}
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
@@ -279,7 +279,7 @@ namespace MV{
 
 				return getSpineTexture(attachment);
 			} else if(slot->attachment->type == SP_ATTACHMENT_SKINNED_MESH){
-				spSkinnedMeshAttachment* attachment = reinterpret_cast<spSkinnedMeshAttachment*>(attachment);
+				spSkinnedMeshAttachment* attachment = reinterpret_cast<spSkinnedMeshAttachment*>(slot->attachment);
 				require(attachment->uvsCount <= SPINE_MESH_VERTEX_COUNT_MAX, ResourceException("UVS exceeded for spine skinned mesh."));
 				spSkinnedMeshAttachment_computeWorldVertices(attachment, slot->skeleton->x, slot->skeleton->y, slot, spineWorldVertices);
 
@@ -372,7 +372,7 @@ namespace MV{
 		AnimationTrack& AnimationTrack::queueAnimation(const std::string &a_animationName, bool a_loop, double a_delay){
 			spAnimation* animation = spSkeletonData_findAnimation(skeleton->data, a_animationName.c_str());
 			if(animation){
-				auto* entry = spAnimationState_addAnimation(animationState, myTrackIndex, animation, a_loop, a_delay);
+				auto* entry = spAnimationState_addAnimation(animationState, myTrackIndex, animation, a_loop, static_cast<float>(a_delay));
 				if(entry && !entry->rendererObject){
 					entry->rendererObject = this;
 					entry->listener = spineTrackEntryCallback;

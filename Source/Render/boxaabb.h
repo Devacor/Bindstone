@@ -114,6 +114,8 @@ namespace MV {
 
 	typedef Point<> AxisAngles;
 	typedef Point<> AxisMagnitude;
+
+	AxisAngles angle(PointPrecision a_angle);
 }
 
 #endif

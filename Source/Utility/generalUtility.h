@@ -97,8 +97,28 @@ namespace MV {
 	}
 
 	template<typename T>
-	T mix(const T &a_start, const T &a_end, float a_percent) {
-		return T{a_start + a_percent * (a_end - a_start)};
+	T mix(const T &a_start, const T &a_end, float a_percent, float a_strength = 1.0f) {
+		return T{pow(a_percent, a_strength) * (a_end - a_start) + a_start};
+	}
+
+	template<typename T>
+	T mixIn(const T &a_start, const T &a_end, float a_percent, float a_strength = 1.0f) {
+		return T{pow(a_percent, a_strength) * (a_end - a_start) + a_start};
+	}
+
+	template<typename T>
+	T mixOut(const T &a_start, const T &a_end, float a_percent, float a_strength = 1.0f) {
+		return T{(1.0f - pow(a_percent, a_strength)) * (a_end - a_start) + a_start};
+	}
+
+	template<typename T>
+	T mixInOut(const T &a_start, const T &a_end, float a_percent, float a_strength = 1.0f) {
+		auto halfRange = ((a_end - a_start) / 2.0f);
+		if(a_percent < .5f){
+			return T{pow(a_percent * 2.0f, a_strength) * halfRange + a_start};
+		} else{
+			return T{a_end - ((1.0f - pow((a_percent - .5f) * 2.0f, a_strength)) * halfRange)};
+		}
 	}
 
 	//rounds num up to the next largest power of two (or the current value) and returns that value

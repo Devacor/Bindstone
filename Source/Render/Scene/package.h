@@ -8,4 +8,5 @@
 	#include "Render/Scene/text.h"
 	#include "Render/Scene/spineMV.h"
 	#include "Render/Scene/emitter.h"
+	#include "Render/Scene/grid.h"
 #endif

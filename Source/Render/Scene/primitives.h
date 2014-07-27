@@ -14,8 +14,6 @@
 
 namespace MV {
 	namespace Scene {
-		void appendQuadVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset);
-
 		class Pixel : public Node{
 			friend cereal::access;
 			friend Node;

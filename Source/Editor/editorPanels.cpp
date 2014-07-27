@@ -21,23 +21,20 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::shared_pt
 	EditorPanel(a_panel),
 	controls(a_controls) {
 
-	MV::PointPrecision spacing = 33.0;
-	MV::PointPrecision lastY = 28.0;
-
 	auto node = panel.content();
-	auto deselectButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), "Deselect", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Deselect"));
-	deselectButton->position({8.0, lastY})->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>){
+	auto grid = node->make<MV::Scene::Grid>("Background")->rowWidth(126.0f)->
+		color({BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}})->
+		padding({3.0f, 4.0f})->position({0.0f, 20.0f});
+	auto deselectButton = makeButton(grid, *panel.textLibrary(), *panel.mouse(), "Deselect", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Deselect"));
+	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>){
 		panel.loadPanel<DeselectedEditorPanel>();
 	});
-	
-	lastY += spacing;
+	float textboxWidth = 52.0f;
+	posX = makeInputField(this, *panel.mouse(), grid, *panel.textLibrary(), "posX", MV::size(textboxWidth, 27.0f));
+	posY = makeInputField(this, *panel.mouse(), grid, *panel.textLibrary(), "posY", MV::size(textboxWidth, 27.0f));
 
-	posX = makeInputField(this, *panel.mouse(), node, *panel.textLibrary(), "posX", MV::size(50.0f, 27.0f))->position({8.0, lastY});
-	posY = makeInputField(this, *panel.mouse(), node, *panel.textLibrary(), "posY", MV::size(50.0f, 27.0f))->position({68.0, lastY});
-
-	lastY += spacing;
-	width = makeInputField(this, *panel.mouse(), node, *panel.textLibrary(), "width", MV::size(50.0f, 27.0f))->position({8.0, lastY});
-	height = makeInputField(this, *panel.mouse(), node, *panel.textLibrary(), "height", MV::size(50.0f, 27.0f))->position({68.0, lastY});
+	width = makeInputField(this, *panel.mouse(), grid, *panel.textLibrary(), "width", MV::size(textboxWidth, 27.0f));
+	height = makeInputField(this, *panel.mouse(), grid, *panel.textLibrary(), "height", MV::size(textboxWidth, 27.0f));
 
 	if(controls){
 		auto xClick = posX->get<MV::Scene::Clickable>("Clickable");
@@ -78,14 +75,9 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::shared_pt
 			height->number(static_cast<int>(controls->size().height + .5f));
 		};
 	}
-	lastY += spacing;
 	auto deselectLocalAABB = deselectButton->localAABB();
 
-	auto background = node->make<MV::Scene::Rectangle>("Background", MV::BoxAABB(MV::point(0.0f, 20.0f), MV::point(deselectLocalAABB.maxPoint.x + 8.0f, lastY)));
-	background->color({BOX_BACKGROUND});
-	background->depth(-1.0f);
-
-	panel.updateBoxHeader(background->basicAABB().width());
+	panel.updateBoxHeader(grid->basicAABB().width());
 
 	SDL_StartTextInput();
 }
@@ -99,16 +91,13 @@ void SelectedEditorPanel::handleInput(SDL_Event &a_event) {
 DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	EditorPanel(a_panel) {
 	auto node = panel.content();
-	auto createButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), "Create", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Create"));
-	createButton->position({8.0f, 28.0f});
-	auto selectButton = makeButton(node, *panel.textLibrary(), *panel.mouse(), "Select", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Select"));
-	selectButton->position(createButton->localAABB().bottomLeftPoint() + MV::point(0.0f, 5.0f));
+	auto grid = node->make<MV::Scene::Grid>("grid")->rowWidth(126.0f)->
+		color({BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}})->
+		padding({3.0f, 4.0f})->position({0.0f, 20.0f});
+	auto createButton = makeButton(grid, *panel.textLibrary(), *panel.mouse(), "Create", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Create"));
+	auto selectButton = makeButton(grid, *panel.textLibrary(), *panel.mouse(), "Select", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Select"));
 
-	auto background = node->make<MV::Scene::Rectangle>("Background", MV::BoxAABB(MV::point(0.0f, 20.0f), selectButton->localAABB().bottomRightPoint() + MV::point(8.0f, 8.0f)));
-	background->color({BOX_BACKGROUND});
-	background->depth(-1.0f);
-
-	panel.updateBoxHeader(background->basicAABB().width());
+	panel.updateBoxHeader(grid->basicAABB().width());
 
 	createButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
 		panel.selection().enable([&](const MV::BoxAABB &a_selected){

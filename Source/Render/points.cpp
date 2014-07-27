@@ -26,20 +26,19 @@ namespace MV {
 	}
 
 	Color::Color(float a_Red, float a_Green, float a_Blue, float a_Alpha /*= 1.0f*/):
-		R(validColorRange(a_Red)),
-		G(validColorRange(a_Green)),
-		B(validColorRange(a_Blue)),
-		A(validColorRange(a_Alpha)) {
+		R(a_Red),
+		G(a_Green),
+		B(a_Blue),
+		A(a_Alpha) {
 	}
 
 	Color& Color::operator=( const Color& a_other ){
-		R = validColorRange(a_other.R); G = validColorRange(a_other.G); B = validColorRange(a_other.B); A = validColorRange(a_other.A);
-		normalize();
+		R = a_other.R; G = a_other.G; B = a_other.B; A = a_other.A;
 		return *this;
 	}
 
 	Color& Color::operator=( const DrawPoint& a_other ){
-		R = validColorRange(a_other.R); G = validColorRange(a_other.G); B = validColorRange(a_other.B); A = validColorRange(a_other.A);
+		R = a_other.R; G = a_other.G; B = a_other.B; A = a_other.A;
 		return *this;
 	}
 
@@ -55,7 +54,6 @@ namespace MV {
 		G += a_other.G;
 		B += a_other.B;
 		A += a_other.A;
-		normalize();
 		return *this;
 	}
 	Color& Color::operator-=(const Color& a_other){
@@ -63,7 +61,6 @@ namespace MV {
 		G -= a_other.G;
 		B -= a_other.B;
 		A -= a_other.A;
-		normalize();
 		return *this;
 	}
 	Color& Color::operator*=(const Color& a_other){
@@ -71,7 +68,6 @@ namespace MV {
 		G *= a_other.G;
 		B *= a_other.B;
 		A *= a_other.A;
-		normalize();
 		return *this;
 	}
 	Color& Color::operator/=(const Color& a_other){
@@ -79,7 +75,6 @@ namespace MV {
 		G /= (a_other.G != 0) ? a_other.G : 1.0f;
 		B /= (a_other.B != 0) ? a_other.B : 1.0f;
 		A /= (a_other.A != 0) ? a_other.A : 1.0f;
-		normalize();
 		return *this;
 	}
 
@@ -90,12 +85,12 @@ namespace MV {
 			(static_cast<uint32_t>(round(B * static_cast<float>(0xFF))));
 	}
 
-	uint32_t Color::hex(uint32_t a_hex, bool a_allowFullAlpha) {
+	Color& Color::hex(uint32_t a_hex, bool a_allowFullAlpha) {
 		A = ((a_allowFullAlpha || (a_hex & 0xff000000)) ? ((a_hex >> 24) & 0xFF) / 255.0f : 1.0f);
 		R = (((a_hex >> 16) & 0xFF) / 255.0f);
 		G = (((a_hex >> 8) & 0xFF) / 255.0f);
 		B = (((a_hex)& 0xFF) / 255.0f);
-		return hex();
+		return *this;
 	}
 
 	Color& Color::set(uint32_t a_hex, bool a_allowFullAlpha){
@@ -103,10 +98,10 @@ namespace MV {
 		return *this;
 	}
 	Color& Color::set(float a_Red, float a_Green, float a_Blue, float a_Alpha){
-		R = validColorRange(a_Red);
-		G = validColorRange(a_Green);
-		B = validColorRange(a_Blue);
-		A = validColorRange(a_Alpha);
+		R = a_Red;
+		G = a_Green;
+		B = a_Blue;
+		A = a_Alpha;
 		return *this;
 	}
 
@@ -116,6 +111,7 @@ namespace MV {
 		B = validColorRange(B);
 		A = validColorRange(A);
 	}
+
 
 	Color operator+(const Color &a_lhs, const Color &a_rhs){
 		Color result = a_lhs;
@@ -135,6 +131,142 @@ namespace MV {
 	Color operator*(const Color &a_lhs, const Color &a_rhs){
 		Color result = a_lhs;
 		return result *= a_rhs;
+	}
+
+
+	/*************************\
+	| ---------Scale--------- |
+	\*************************/
+
+	Scale operator+(Scale a_lhs, const Scale &a_rhs){
+		return a_lhs += a_rhs;
+	}
+
+	Scale operator+(Scale a_lhs, PointPrecision a_rhs){
+		return a_lhs += a_rhs;
+	}
+
+	Scale operator+(PointPrecision a_lhs, Scale a_rhs){
+		return a_rhs += a_lhs;
+	}
+
+	Scale operator-(Scale a_lhs, const Scale &a_rhs){
+		return a_lhs -= a_rhs;
+	}
+
+	Scale operator-(Scale a_lhs, PointPrecision a_rhs){
+		return a_lhs -= a_rhs;
+	}
+
+	Scale operator-(PointPrecision a_lhs, Scale a_rhs){
+		return Scale(a_lhs, a_lhs, a_lhs) -= a_rhs;
+	}
+
+	Scale operator*(Scale a_lhs, const Scale &a_rhs){
+		return a_lhs *= a_rhs;
+	}
+
+	Scale operator*(Scale a_lhs, PointPrecision a_rhs){
+		return a_lhs *= a_rhs;
+	}
+
+	Scale operator*(PointPrecision a_lhs, Scale a_rhs){
+		return a_rhs *= a_lhs;
+	}
+
+	Scale operator/(Scale a_lhs, const Scale &a_rhs){
+		return a_lhs /= a_rhs;
+	}
+
+	Scale operator/(Scale a_lhs, PointPrecision a_rhs){
+		return a_lhs /= a_rhs;
+	}
+
+	Scale operator/(PointPrecision a_lhs, Scale a_rhs){
+		return Scale(a_lhs, a_lhs, a_lhs) /= a_rhs;
+	}
+
+
+	Scale& Scale::operator+=(const Scale& a_other){
+		x += a_other.x;
+		y += a_other.y;
+		z += a_other.z;
+		return *this;
+	}
+	Scale& Scale::operator-=(const Scale& a_other){
+		x -= a_other.x;
+		y -= a_other.y;
+		z -= a_other.z;
+		return *this;
+	}
+	Scale& Scale::operator*=(const Scale& a_other){
+		x *= a_other.x;
+		y *= a_other.y;
+		z *= a_other.z;
+		return *this;
+	}
+	Scale& Scale::operator/=(const Scale& a_other){
+		x /= (a_other.x != 0.0f) ? a_other.x : 1.0f;
+		y /= (a_other.y != 0.0f) ? a_other.y : 1.0f;
+		z /= (a_other.z != 0.0f) ? a_other.z : 1.0f;
+		return *this;
+	}
+	Scale& Scale::operator+=(PointPrecision a_other){
+		x += a_other;
+		y += a_other;
+		z += a_other;
+		return *this;
+	}
+	Scale& Scale::operator-=(PointPrecision a_other){
+		x -= a_other;
+		y -= a_other;
+		z -= a_other;
+		return *this;
+	}
+	Scale& Scale::operator*=(PointPrecision a_other){
+		x *= a_other;
+		y *= a_other;
+		z *= a_other;
+		return *this;
+	}
+	Scale& Scale::operator/=(PointPrecision a_other){
+		x /= (a_other != 0.0f) ? a_other : 1.0f;
+		y /= (a_other != 0.0f) ? a_other : 1.0f;
+		z /= (a_other != 0.0f) ? a_other : 1.0f;
+		return *this;
+	}
+
+
+	bool Scale::operator==(PointPrecision a_other) {
+		return equals(x, a_other) && equals(y, a_other) && equals(z, a_other);
+	}
+
+	bool Scale::operator==(const Scale& a_other) {
+		return equals(x, a_other.x) && equals(y, a_other.y) && equals(z, a_other.z);
+	}
+
+	bool Scale::operator!=(PointPrecision a_other) {
+		return !(*this == a_other);
+	}
+
+	bool Scale::operator!=(const Scale& a_other) {
+		return !(*this == a_other);
+	}
+
+	Point<PointPrecision> scaleToPoint(const Scale &a_scale){
+		return{a_scale.x, a_scale.y, a_scale.z};
+	}
+
+	Point<PointPrecision> pointFromScale(const Scale &a_scale){
+		return scaleToPoint(a_scale);
+	}
+
+	Size<PointPrecision> scaleToSize(const Scale &a_scale){
+		return{a_scale.x, a_scale.y, a_scale.z};
+	}
+
+	Size<PointPrecision> sizeFromScale(const Scale &a_scale){
+		return scaleToSize(a_scale);
 	}
 
 	/*************************\
@@ -283,10 +415,5 @@ namespace MV {
 		R = a_other.R; G = a_other.G; B = a_other.B;
 		Color::normalize();
 	}
-
-	MV::Color mix(const Color &a_start, const Color &a_end, float a_percent) {
-		return Color{a_start + a_percent * (a_end - a_start)};
-	}
-
 
 }

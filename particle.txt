@@ -1,0 +1,125 @@
+{
+    "EmitterProperties": {
+	"maximumParticles": 200000,
+        "minimumSpawnRate": 0,
+        "maximumSpawnRate": 0.005,
+        "minimumPosition": {
+            "x": -10,
+            "y": -10,
+            "z": 0
+        },
+        "maximumPosition": {
+            "x": 10,
+            "y": 10,
+            "z": 0
+        },
+        "minimumDirection": {
+            "x": 0,
+            "y": 0,
+            "z": -45
+        },
+        "maximumDirection": {
+            "x": 0,
+            "y": 0,
+            "z": 45
+        },
+        "minimumRotation": {
+            "x": 0,
+            "y": 0,
+            "z": -30
+        },
+        "maximumRotation": {
+            "x": 0,
+            "y": 0,
+            "z": 45
+        },
+        "minimum": {
+            "directionalChange": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "rotationalChange": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "beginSpeed": 200,
+            "endSpeed": 0,
+            "beginScale": {
+                "x": 10,
+                "y": 10,
+                "z": 1
+            },
+            "endScale": {
+                "x": 15,
+                "y": 15,
+                "z": 1
+            },
+            "beginColor": {
+                "R": 1,
+                "G": 0.15,
+                "B": 0,
+                "A": 1
+            },
+            "endColor": {
+                "R": 1,
+                "G": 1,
+                "B": 1,
+                "A": 0
+            },
+            "maxLifespan": 1,
+            "gravityMagnitude": 100,
+            "gravityDirection": {
+                "x": 0,
+                "y": 0,
+                "z": -180
+            },
+            "animationFramesPerSecond": 10
+        },
+        "maximum": {
+            "directionalChange": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "rotationalChange": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "beginSpeed": 400,
+            "endSpeed": 0,
+            "beginScale": {
+                "x": 12,
+                "y": 12,
+                "z": 1
+            },
+            "endScale": {
+                "x": 20,
+                "y": 20,
+                "z": 1
+            },
+            "beginColor": {
+                "R": 1,
+                "G": 0.35,
+                "B": 0.15,
+                "A": 1
+            },
+            "endColor": {
+                "R": 1,
+                "G": 1,
+                "B": 1,
+                "A": 0
+            },
+            "maxLifespan": 1,
+            "gravityMagnitude": 100,
+            "gravityDirection": {
+                "x": 0,
+                "y": 0,
+                "z": -180
+            },
+            "animationFramesPerSecond": 10
+        }
+    }
+}

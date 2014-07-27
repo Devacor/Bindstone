@@ -127,7 +127,7 @@ namespace MV {
 				points[1].textureX = static_cast<PointPrecision>(ourTexture->percentLeft()); points[1].textureY = static_cast<PointPrecision>(ourTexture->percentBottom());
 				points[2].textureX = static_cast<PointPrecision>(ourTexture->percentRight()); points[2].textureY = static_cast<PointPrecision>(ourTexture->percentBottom());
 				points[3].textureX = static_cast<PointPrecision>(ourTexture->percentRight()); points[3].textureY = static_cast<PointPrecision>(ourTexture->percentTop());
-				alertParent(VisualChange::make(shared_from_this()));
+				alertParent(VisualChange::make(shared_from_this(), false));
 			} else {
 				clearTextureCoordinates();
 			}
@@ -135,15 +135,6 @@ namespace MV {
 
 		void Rectangle::drawImplementation(){
 			defaultDraw(GL_TRIANGLES);
-		}
-
-		void appendQuadVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset) {
-			std::vector<GLuint> quadIndices{
-				a_pointOffset, a_pointOffset + 1,
-				a_pointOffset + 2, a_pointOffset + 2,
-				a_pointOffset + 3, a_pointOffset
-			};
-			a_indices.insert(a_indices.end(), quadIndices.begin(), quadIndices.end());
 		}
 
 	}

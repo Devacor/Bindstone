@@ -45,10 +45,10 @@ void Editor::initializeWindow(){
 	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
 	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
 	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
-
+	auto texture = MV::FileTextureDefinition::make("Assets/Images/dogfox.png");
 	auto slicedthing = scene->make<MV::Scene::Sliced>(MV::Scene::SliceDimensions({8.0f, 8.0f}, {32.0f, 32.0f}), MV::size(100.0f, 50.0f))->
 		position({300.0f, 300.0f})->
-		texture(MV::FileTextureDefinition::make("Assets/Images/dogfox.png")->makeHandle({0, 0}, {32, 32}))->
+		texture(texture->makeHandle({0, 0}, {32, 32}))->
 		rotate(45.0f)->
 		scale(2.0f)->
 		shader(MV::PREMULTIPLY_ID);
@@ -61,11 +61,9 @@ void Editor::initializeWindow(){
 		queueAnimation("death", false, 5)->
 		queueAnimation("run");
 
-	auto emitter = scene->make<MV::Scene::Emitter>("Emitter")->position({300.0f, 300.0f})->depth(100000.0f);
+	auto emitter = scene->make<MV::Scene::Emitter>("Emitter", MV::Scene::loadEmitterProperties("particle.txt"))->position({300.0f, 300.0f})->depth(100000.0f)->
+		texture(texture->makeHandle({35, 0}, {15, 15}))->shader(MV::PREMULTIPLY_ID);
 
-	spineGuy->track(0).onStart.connect("shoot", [](MV::Scene::AnimationTrack &a_track){
-		int i = 0;
-	});
 	spineGuy->crossfade("death", "run", 1);
 }
 

@@ -66,6 +66,20 @@ namespace MV {
 		Point<> bottomLeftPoint() const { return point(minPoint.x, maxPoint.y); }
 		Point<> bottomRightPoint() const { return maxPoint; }
 
+		Point<> operator[](size_t a_index) const{
+			switch(a_index){
+			case 0:
+				return topLeftPoint();
+			case 1:
+				return topRightPoint();
+			case 2:
+				return bottomRightPoint();
+			case 3:
+				return bottomLeftPoint();
+			}
+			return {};
+		}
+
 		BoxAABB& operator+=(const Point<> &a_offset){
 			minPoint += a_offset;
 			maxPoint += a_offset;

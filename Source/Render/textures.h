@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "render.h"
+#include "boxaabb.h"
 
 #include "cereal/cereal.hpp"
 #include "cereal/types/map.hpp"

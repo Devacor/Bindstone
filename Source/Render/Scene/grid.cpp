@@ -260,6 +260,7 @@ namespace MV {
 			});
 
 			bounds.expandWith(bounds.maxPoint + margins.second);
+			return bounds;
 		}
 
 		BoxAABB Grid::calculateBasicAABBFromCells(DrawListVectorType &a_drawListVector) const{

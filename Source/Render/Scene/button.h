@@ -90,7 +90,7 @@ namespace MV {
 			void blockInput();
 			void unblockInput();
 
-			virtual void handleBegin(std::shared_ptr<BlockInteraction>);
+			virtual bool handleBegin(std::shared_ptr<BlockInteraction>);
 			virtual void handleEnd(std::shared_ptr<BlockInteraction>){}
 
 			bool mouseInBounds(const MouseState& a_state);

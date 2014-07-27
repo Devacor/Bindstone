@@ -113,8 +113,9 @@ namespace MV {
 			onMouseUpHandle->unblock();
 		}
 
-		void Clickable::handleBegin(std::shared_ptr<BlockInteraction>) {
+		bool Clickable::handleBegin(std::shared_ptr<BlockInteraction>) {
 			blockInput();
+			return true;
 		}
 
 		Clickable::Clickable(Draw2D *a_renderer, MouseState *a_mouse):

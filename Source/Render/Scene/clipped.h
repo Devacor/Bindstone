@@ -36,8 +36,9 @@ namespace MV {
 		private:
 			virtual bool preDraw();
 
-			virtual void handleBegin(std::shared_ptr<VisualChange>){
+			virtual bool handleBegin(std::shared_ptr<VisualChange>){
 				dirtyTexture = true;
+				return false;
 			}
 			virtual void handleEnd(std::shared_ptr<VisualChange>){
 			}

@@ -236,19 +236,22 @@ namespace MV {
 			void sortDrawListVector();
 
 
-			virtual void handleBegin(std::shared_ptr<PushMatrix>){
+			virtual bool handleBegin(std::shared_ptr<PushMatrix>){
+				return true;
 			}
 			virtual void handleEnd(std::shared_ptr<PushMatrix>){
 				pushMatrix();
 			}
 
-			virtual void handleBegin(std::shared_ptr<PopMatrix>){
+			virtual bool handleBegin(std::shared_ptr<PopMatrix>){
 				popMatrix();
+				return true;
 			}
 			virtual void handleEnd(std::shared_ptr<PopMatrix>){
 			}
 
-			virtual void handleBegin(std::shared_ptr<SetShader>){
+			virtual bool handleBegin(std::shared_ptr<SetShader>){
+				return true;
 			}
 			virtual void handleEnd(std::shared_ptr<SetShader> a_message){
 				shader(a_message->shaderId);
@@ -277,18 +280,20 @@ namespace MV {
 			template<typename T>
 			void alertParent(std::shared_ptr<T> a_message){
 				if(myParent != nullptr){
-					a_message->tryToHandleBegin(myParent, a_message);
-					myParent->alertParent(a_message);
-					a_message->tryToHandleEnd(myParent, a_message);
+					if(a_message->tryToHandleBegin(myParent, a_message)){
+						myParent->alertParent(a_message);
+						a_message->tryToHandleEnd(myParent, a_message);
+					}
 				}
 			}
 
 			template<typename T>
 			void alertChildren(std::shared_ptr<T> a_message){
 				for(auto& child : drawList){
-					a_message->tryToHandleBegin(child.second.get(), a_message);
-					child.second->alertChildren(a_message);
-					a_message->tryToHandleEnd(child.second.get(), a_message);
+					if(a_message->tryToHandleBegin(child.second.get(), a_message)){
+						child.second->alertChildren(a_message);
+						a_message->tryToHandleEnd(child.second.get(), a_message);
+					}
 				}
 			}
 

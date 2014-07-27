@@ -69,8 +69,9 @@ namespace MV {
 		private:
 			virtual bool preDraw();
 
-			virtual void handleBegin(std::shared_ptr<VisualChange> a_change){
+			virtual bool handleBegin(std::shared_ptr<VisualChange> a_change){
 				dirtyGrid = dirtyGrid || a_change->changeShape;
+				return true;
 			}
 			virtual void handleEnd(std::shared_ptr<VisualChange>){
 			}

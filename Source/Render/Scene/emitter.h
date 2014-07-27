@@ -2,6 +2,8 @@
 #define _MV_SCENE_EMITTER_H_
 
 #include "Render/Scene/primitives.h"
+#include "cereal/cereal.hpp"
+#include "cereal/access.hpp"
 
 namespace MV {
 	namespace Scene {
@@ -13,8 +15,8 @@ namespace MV {
 			float beginSpeed = 0.0f;
 			float endSpeed = 0.0f;
 
-			Size<> beginScale;
-			Size<> endScale;
+			Scale beginScale;
+			Scale endScale;
 
 			Color beginColor;
 			Color endColor;
@@ -25,6 +27,18 @@ namespace MV {
 			AxisAngles gravityDirection;
 
 			float animationFramesPerSecond = 10.0f;
+
+			template <class Archive>
+			void serialize(Archive & archive){
+				archive(CEREAL_NVP(directionalChange), CEREAL_NVP(rotationalChange),
+					CEREAL_NVP(beginSpeed), CEREAL_NVP(endSpeed),
+					CEREAL_NVP(beginScale), CEREAL_NVP(endScale),
+					CEREAL_NVP(beginColor), CEREAL_NVP(endColor),
+					CEREAL_NVP(maxLifespan),
+					CEREAL_NVP(gravityMagnitude), CEREAL_NVP(gravityDirection),
+					CEREAL_NVP(animationFramesPerSecond)
+				);
+			}
 		};
 
 		struct Particle {
@@ -39,11 +53,11 @@ namespace MV {
 			float speed;
 			AxisAngles direction;
 			AxisAngles rotation;
-			Size<> scale;
+			Scale scale;
 			Color color;
 			int currentFrame;
 
-			float totalLifespan;
+			float totalLifespan = 0.0f;
 
 			ParticleChangeValues change;
 
@@ -54,9 +68,11 @@ namespace MV {
 			Point<> gravityConstant;
 		};
 
-		struct ParticleSpawnProperties {
-			float particleSpawnRate = 1.0f;
-			float particleSpawnRateVariance = 0.0f;
+		struct EmitterSpawnProperties {
+			uint32_t maximumParticles = std::numeric_limits<uint32_t>::max();
+
+			float minimumSpawnRate = 1.0f;
+			float maximumSpawnRate = 0.0f;
 
 			Point<> maximumPosition;
 			Point<> minimumPosition;
@@ -69,7 +85,20 @@ namespace MV {
 
 			ParticleChangeValues minimum;
 			ParticleChangeValues maximum;
+
+			template <class Archive>
+			void serialize(Archive & archive){
+				archive(CEREAL_NVP(maximumParticles),
+					CEREAL_NVP(minimumSpawnRate), CEREAL_NVP(maximumSpawnRate),
+					CEREAL_NVP(minimumPosition), CEREAL_NVP(maximumPosition),
+					CEREAL_NVP(minimumDirection), CEREAL_NVP(maximumDirection),
+					CEREAL_NVP(minimumRotation), CEREAL_NVP(maximumRotation),
+					CEREAL_NVP(minimum), CEREAL_NVP(maximum)
+				);
+			}
 		};
+
+		EmitterSpawnProperties loadEmitterProperties(const std::string &a_file);
 
 		class Emitter :
 			public Node{
@@ -79,7 +108,8 @@ namespace MV {
 		public:
 			SCENE_MAKE_FACTORY_METHODS(Emitter)
 
-				static std::shared_ptr<Emitter> make(Draw2D* a_renderer);
+			static std::shared_ptr<Emitter> make(Draw2D* a_renderer);
+			static std::shared_ptr<Emitter> make(Draw2D* a_renderer, const EmitterSpawnProperties &a_emitterProperties);
 		protected:
 			Emitter(Draw2D *a_renderer):
 				Node(a_renderer){
@@ -91,7 +121,7 @@ namespace MV {
 
 			template <class Archive>
 			void serialize(Archive & archive){
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(this)));
+				archive(cereal::make_nvp("spawnProperties", spawnProperties), cereal::make_nvp("node", cereal::base_class<Node>(this)));
 			}
 
 			template <class Archive>
@@ -100,19 +130,20 @@ namespace MV {
 				archive.extract(cereal::make_nvp("renderer", renderer));
 				require(renderer != nullptr, MV::PointerException("Error: Failed to load a renderer for Sliced node."));
 				construct(renderer);
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
+				archive(cereal::make_nvp("spawnProperties", construct->spawnProperties), cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
 			}
+
 			void loadParticlesToPoints();
 
 			Stopwatch timer;
 
-			ParticleSpawnProperties spawnProperties;
+			EmitterSpawnProperties spawnProperties;
 
 			std::vector<Particle> particles;
 
 			static const double TIME_BETWEEN_UPDATES;
 			double timeSinceLastParticle = 0.0;
-
+			double nextSpawnDelta = 0.0;
 			Random random;
 		};
 	}

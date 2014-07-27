@@ -131,7 +131,7 @@ namespace MV {
 
 		void Sliced::clearTextureCoordinates(){
 			sliceDimensions(slicedDimensions);
-			alertParent(VisualChange::make(shared_from_this()));
+			alertParent(VisualChange::make(shared_from_this(), false));
 		}
 
 		void Sliced::updateTextureCoordinates(){

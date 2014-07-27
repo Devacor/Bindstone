@@ -6,6 +6,15 @@ CEREAL_REGISTER_TYPE(MV::Scene::Node);
 
 namespace MV {
 	namespace Scene {
+		void appendQuadVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset) {
+			std::vector<GLuint> quadIndices{
+				a_pointOffset, a_pointOffset + 1,
+				a_pointOffset + 2, a_pointOffset + 2,
+				a_pointOffset + 3, a_pointOffset
+			};
+			a_indices.insert(a_indices.end(), quadIndices.begin(), quadIndices.end());
+		}
+
 		/*************************\
 		| ---------Node---------- |
 		\*************************/
@@ -15,7 +24,7 @@ namespace MV {
 			for(int i = 0; i < elements; i++){
 				points[i] = a_newColor;
 			}
-			alertParent(VisualChange::make(shared_from_this()));
+			alertParent(VisualChange::make(shared_from_this(), false));
 			return shared_from_this();
 		}
 
@@ -184,10 +193,10 @@ namespace MV {
 			return shared_from_this();
 		}
 
-		AxisMagnitude Node::scaleImplementation() const{
+		Scale Node::scaleImplementation() const{
 			return scaleTo;
 		}
-		std::shared_ptr<Node> Node::scaleImplementation(const AxisMagnitude &a_rhs){
+		std::shared_ptr<Node> Node::scaleImplementation(const Scale &a_rhs){
 			if(scaleTo != a_rhs){
 				scaleTo = a_rhs;
 				alertParent(VisualChange::make(shared_from_this()));
@@ -196,15 +205,15 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::scaleImplementation(PointPrecision a_newScale){
-			scale(Point<>(a_newScale, a_newScale, a_newScale));
+			scaleImplementation(Scale(a_newScale));
 			return shared_from_this();
 		}
 
-		AxisMagnitude Node::incrementScale(PointPrecision a_newScale){
-			return incrementScale(Point<>(a_newScale, a_newScale, a_newScale));
+		Scale Node::incrementScale(PointPrecision a_newScale){
+			return incrementScale(Scale(a_newScale));
 		}
 
-		AxisMagnitude Node::incrementScale(const AxisMagnitude &a_scaleValue){
+		Scale Node::incrementScale(const Scale &a_scaleValue){
 			scaleTo += a_scaleValue;
 			alertParent(VisualChange::make(shared_from_this()));
 			return scaleTo;
@@ -566,12 +575,12 @@ namespace MV {
 			if(!translateTo.atOrigin()){
 				renderer->modelviewMatrix().top().translate(translateTo.x, translateTo.y, translateTo.z);
 			}
-			if(!rotateTo.atOrigin()){
+			if(rotateTo != 0.0f){
 				renderer->modelviewMatrix().top().translate(rotateOrigin.x, rotateOrigin.y, rotateOrigin.z);
 				renderer->modelviewMatrix().top().rotateX(rotateTo.x).rotateY(rotateTo.y).rotateZ(rotateTo.z);
 				renderer->modelviewMatrix().top().translate(-rotateOrigin.x, -rotateOrigin.y, -rotateOrigin.z);
 			}
-			if(!scaleTo.atOrigin()){
+			if(scaleTo != 1.0f){
 				renderer->modelviewMatrix().top().scale(scaleTo.x, scaleTo.y, scaleTo.z);
 			}
 		}

@@ -69,7 +69,7 @@ namespace MV {
 	std::shared_ptr<T> removeFromParent(){ return std::static_pointer_cast<T>(removeFromParentImplementation()); } \
 	std::shared_ptr<T> position(const Point<> &a_rhs){ return std::static_pointer_cast<T>(positionImplementation(a_rhs)); } \
 	std::shared_ptr<T> scale(PointPrecision a_newScale){ return std::static_pointer_cast<T>(scaleImplementation(a_newScale)); } \
-	std::shared_ptr<T> scale(const AxisMagnitude &a_scaleValue){ return std::static_pointer_cast<T>(scaleImplementation(a_scaleValue)); } \
+	std::shared_ptr<T> scale(const Scale &a_scaleValue){ return std::static_pointer_cast<T>(scaleImplementation(a_scaleValue)); } \
 	std::shared_ptr<T> rotate(PointPrecision a_zRotation){ return std::static_pointer_cast<T>(rotationImplementation(a_zRotation)); } \
 	std::shared_ptr<T> rotate(const AxisAngles &a_rotation){ return std::static_pointer_cast<T>(rotationImplementation(a_rotation)); } \
 	std::shared_ptr<T> rotation(PointPrecision a_zRotation){ return std::static_pointer_cast<T>(rotationImplementation(a_zRotation)); } \
@@ -85,7 +85,7 @@ namespace MV {
 	std::shared_ptr<Node> blockSerialize(){ return std::static_pointer_cast<T>(blockSerializeImplementation()); } \
 	std::shared_ptr<Node> allowSerialize(){ return std::static_pointer_cast<T>(allowSerializeImplementation()); } \
 	std::shared_ptr<Node> parent() const{ return parentImplementation(); } \
-	AxisMagnitude scale() const { return scaleImplementation(); } \
+	Scale scale() const { return scaleImplementation(); } \
 	virtual Point<> position() const{ return positionImplementation(); } \
 	AxisAngles rotation() const{ return rotationImplementation(); } \
 	virtual Color color() const { return colorImplementation(); } \
@@ -94,6 +94,8 @@ namespace MV {
 	PointPrecision depth() const { return sortDepth; }
 
 	namespace Scene {
+		void appendQuadVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset);
+
 		class Node : 
 			public std::enable_shared_from_this<Node>,
 			public MessageHandler<PushMatrix>,
@@ -186,8 +188,8 @@ namespace MV {
 			BoxAABB localFromScreen(BoxAABB a_screen);
 			BoxAABB localFromWorld(BoxAABB a_world);
 
-			AxisMagnitude incrementScale(PointPrecision a_newScale);
-			AxisMagnitude incrementScale(const AxisMagnitude &a_scaleValue);
+			Scale incrementScale(PointPrecision a_newScale);
+			Scale incrementScale(const Scale &a_scaleValue);
 
 			//Rotation is degrees around each axis from 0 to 360, axis info supplied typically the z axis
 			//is the only visible rotation axis, so we default to that with a single value supplied;
@@ -255,7 +257,7 @@ namespace MV {
 			void depthChanged(){
 				if(myParent){
 					myParent->childDepthChanged();
-					alertParent(VisualChange::make(shared_from_this()));
+					alertParent(VisualChange::make(shared_from_this(), false));
 				}
 			}
 
@@ -299,14 +301,14 @@ namespace MV {
 			void sortLess(){
 				isSorted = isSorted && shouldSortLessThan;
 				shouldSortLessThan = true;
-				sortFunction = [](DrawListVectorType::value_type one, DrawListVectorType::value_type two){
+				sortFunction = [](const DrawListVectorType::value_type &one, const DrawListVectorType::value_type &two){
 					return *one.lock() < *two.lock();
 				};
 			}
 			void sortGreater(){
 				isSorted = isSorted && !shouldSortLessThan;
 				shouldSortLessThan = false;
-				sortFunction = [](DrawListVectorType::value_type one, DrawListVectorType::value_type two){
+				sortFunction = [](const DrawListVectorType::value_type &one, const DrawListVectorType::value_type &two){
 					return *one.lock() > *two.lock();
 				};
 			}
@@ -319,7 +321,7 @@ namespace MV {
 			virtual std::shared_ptr<Node> removeFromParentImplementation();
 			virtual std::shared_ptr<Node> positionImplementation(const Point<> &a_rhs);
 			virtual std::shared_ptr<Node> scaleImplementation(PointPrecision a_newScale);
-			virtual std::shared_ptr<Node> scaleImplementation(const AxisMagnitude &a_scaleValue);
+			virtual std::shared_ptr<Node> scaleImplementation(const Scale &a_scaleValue);
 			virtual std::shared_ptr<Node> rotationImplementation(PointPrecision a_zRotation);
 			virtual std::shared_ptr<Node> rotationImplementation(const AxisAngles &a_rotation);
 			virtual std::shared_ptr<Node> shaderImplementation(const std::string &a_id);
@@ -334,7 +336,7 @@ namespace MV {
 			std::shared_ptr<Node> allowSerializeImplementation();
 
 			std::shared_ptr<Node> parentImplementation() const;
-			AxisMagnitude scaleImplementation() const;
+			Scale scaleImplementation() const;
 			virtual Point<> positionImplementation() const;
 			AxisAngles rotationImplementation() const;
 			virtual Color colorImplementation() const;
@@ -347,15 +349,15 @@ namespace MV {
 			void sortedRender();
 			void unsortedRender();
 
-			void alertForTextureChange(){ alertParent(VisualChange::make(shared_from_this())); }
+			void alertForTextureChange(){ alertParent(VisualChange::make(shared_from_this(), false)); }
 
 			void pushMatrix();
 			void popMatrix();
 
-			Point<> scaleTo;
+			Scale scaleTo;
 			Point<> translateTo;
-			Point<> rotateTo;
-			Point<> rotateOrigin;
+			AxisAngles rotateTo;
+			AxisAngles rotateOrigin;
 
 			PointPrecision sortDepth = 0.0f;
 
@@ -382,10 +384,11 @@ namespace MV {
 			std::string shaderProgramId;
 			GLuint bufferId;
 			float maxDepth = -1.0f;
+
+			std::function<bool(const DrawListVectorType::value_type &, const DrawListVectorType::value_type &)> sortFunction;
 		private:
 			bool markedTemporary = false;
 			bool shouldSortLessThan;
-			std::function<bool(DrawListVectorType::value_type, DrawListVectorType::value_type)> sortFunction;
 
 			void childDepthChanged();
 

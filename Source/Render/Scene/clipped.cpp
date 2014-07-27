@@ -36,7 +36,7 @@ namespace MV {
 					}
 				}
 
-				alertParent(VisualChange::make(shared_from_this()));
+				alertParent(VisualChange::make(shared_from_this(), false));
 			}
 		}
 

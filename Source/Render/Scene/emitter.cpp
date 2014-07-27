@@ -40,6 +40,13 @@ namespace MV {
 			return emitter;
 		}
 
+		std::shared_ptr<Emitter> Emitter::make(Draw2D* a_renderer, const EmitterSpawnProperties &a_values) {
+			auto emitter = std::shared_ptr<Emitter>(new Emitter(a_renderer));
+			a_renderer->registerShader(emitter);
+			emitter->spawnProperties = a_values;
+			return emitter;
+		}
+
 		void Emitter::drawImplementation() {
 			while(timer.frame(TIME_BETWEEN_UPDATES)){
 				update(TIME_BETWEEN_UPDATES);
@@ -50,6 +57,7 @@ namespace MV {
 		void Emitter::spawnParticle(){
 			Particle particle;
 
+			particle.position = mix(spawnProperties.minimumPosition, spawnProperties.maximumPosition, RandomNumber(0.0f, 1.0f));
 			particle.rotation = mix(spawnProperties.minimumRotation, spawnProperties.maximumRotation, RandomNumber(0.0f, 1.0f));
 			particle.change.rotationalChange = mix(spawnProperties.minimum.rotationalChange, spawnProperties.maximum.rotationalChange, RandomNumber(0.0f, 1.0f));
 
@@ -72,7 +80,7 @@ namespace MV {
 				mix(spawnProperties.minimum.gravityMagnitude, spawnProperties.maximum.gravityMagnitude, RandomNumber(0.0f, 1.0f)),
 				mix(spawnProperties.minimum.gravityDirection, spawnProperties.maximum.gravityDirection, RandomNumber(0.0f, 1.0f))
 			);
-
+			
 			particles.push_back(particle);
 		}
 
@@ -81,9 +89,11 @@ namespace MV {
 				return a_particle.update(a_dt);
 			}), particles.end());
 			timeSinceLastParticle += a_dt;
-			while(timeSinceLastParticle > spawnProperties.particleSpawnRate){
-				timeSinceLastParticle -= spawnProperties.particleSpawnRate;
+			bool spawned = false;
+			while(timeSinceLastParticle > nextSpawnDelta && particles.size() <= spawnProperties.maximumParticles){
+				timeSinceLastParticle -= nextSpawnDelta;
 				spawnParticle();
+				nextSpawnDelta = RandomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
 			}
 			loadParticlesToPoints();
 		}
@@ -94,20 +104,42 @@ namespace MV {
 			points.clear();
 			vertexIndices.clear();
 			for(auto &particle : particles){
-				BoxAABB bounds(sizeToPoint(particle.scale / 2.0f), sizeToPoint(particle.scale / -2.0f));
-				std::vector<Point<>> corners;
-				corners.push_back(bounds.topLeftPoint());
-				corners.push_back(bounds.topRightPoint());
-				corners.push_back(bounds.bottomRightPoint());
-				corners.push_back(bounds.bottomLeftPoint());
+				BoxAABB bounds(scaleToPoint(particle.scale / 2.0f), scaleToPoint(particle.scale / -2.0f));
+				std::vector<TexturePoint> texturePoints;
+				if(ourTexture){
+					texturePoints.push_back({static_cast<float>(ourTexture->percentLeft()), static_cast<float>(ourTexture->percentTop())});
+					texturePoints.push_back({static_cast<float>(ourTexture->percentLeft()), static_cast<float>(ourTexture->percentBottom())});
+					texturePoints.push_back({static_cast<float>(ourTexture->percentRight()), static_cast<float>(ourTexture->percentBottom())});
+					texturePoints.push_back({static_cast<float>(ourTexture->percentRight()), static_cast<float>(ourTexture->percentTop())});
+				} else{
+					texturePoints.push_back({0.0f, 0.0f});
+					texturePoints.push_back({0.0f, 1.0f});
+					texturePoints.push_back({1.0f, 1.0f});
+					texturePoints.push_back({1.0f, 0.0f});
+				}
 
-				for(auto& corner : corners){
+				for(size_t i = 0;i < 4;++i){
+					auto corner = bounds[i];
 					rotatePoint3D(corner.x, corner.y, corner.z, particle.rotation.x, particle.rotation.y, particle.rotation.z);
 					corner += particle.position;
-					points.push_back(DrawPoint(corner, particle.color));
+					points.push_back(DrawPoint(corner, particle.color, texturePoints[i]));
 				}
 
 				appendQuadVertexIndices(vertexIndices, static_cast<GLuint>(points.size()));
+			}
+		}
+
+		MV::Scene::EmitterSpawnProperties loadEmitterProperties(const std::string &a_file) {
+			try{
+				std::ifstream file(a_file);
+				std::shared_ptr<MV::Scene::Node> saveScene;
+				cereal::JSONInputArchive archive(file);
+				MV::Scene::EmitterSpawnProperties EmitterProperties;
+				archive(CEREAL_NVP(EmitterProperties));
+				return EmitterProperties;
+			} catch(::cereal::RapidJSONException &a_exception){
+				std::cerr << "Failed to load emitter: " << a_exception.what() << std::endl;
+				return {};
 			}
 		}
 

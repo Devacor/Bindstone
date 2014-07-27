@@ -72,7 +72,7 @@ namespace MV {
 		}
 
 		uint32_t hex() const;
-		uint32_t hex(uint32_t a_hex, bool a_allowFullAlpha = false); //to maintain party with the hex get.
+		Color& hex(uint32_t a_hex, bool a_allowFullAlpha = false); //to maintain parity with the hex get.
 		
 		Color& set(uint32_t a_hex, bool a_allowFullAlpha = false); //option to get back a Color&
 		Color& set(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0f);
@@ -82,18 +82,16 @@ namespace MV {
 		void normalize();
 	private:
 		float validColorRange(float a_color){
-			if(a_color > 1.0){a_color = 1.0;}
-			if(a_color < 0.0){a_color = 0.0;}
+			if(a_color > 1.0f){a_color = 1.0f;}
+			if(a_color < 0.0f){a_color = 0.0f;}
 			return a_color;
 		}
 	};
 
-	Color mix(const Color &a_start, const Color &a_end, float a_percent);
-
 	template <class T = PointPrecision>
 	class Size{
 	public:
-		Size():width(1), height(1), depth(1){}
+		Size():width(0), height(0), depth(0){}
 		Size(T a_width, T a_height, T a_depth = 0):width(a_width),height(a_height),depth(a_depth){}
 
 		template <class T2>
@@ -138,7 +136,7 @@ namespace MV {
 	class Point{
 	public:
 		Point():x(0),y(0),z(0){}
-		Point(T a_xPos, T a_yPos, T a_zPos = 0){ locate(a_xPos, a_yPos, a_zPos); }
+		Point(T a_xPos, T a_yPos, T a_zPos = 0):x(a_xPos),y(a_yPos),z(a_zPos){}
 
 		void clear();
 
@@ -157,6 +155,20 @@ namespace MV {
 		Point<T>& operator*=(const T& a_other);
 		Point<T>& operator/=(const T& a_other);
 
+		bool operator==(const Point<T>& a_other){
+			return equals(x, a_other.x) && equals(y, a_other.y) && equals(z, a_other.z);
+		}
+		bool operator==(T a_other){
+			return equals(x, a_other) && equals(y, a_other) && equals(z, a_other);
+		}
+
+		bool operator!=(const Point<T>& a_other){
+			return !(*this == a_other);
+		}
+		bool operator!=(T a_other){
+			return !(*this == a_other);
+		}
+
 		bool operator<(const Size<T>& a_other){
 			return (x + y) < (a_other.x + a_other.y);
 		}
@@ -172,7 +184,70 @@ namespace MV {
 		T x, y, z;
 	};
 
+	class Scale{
+	public:
+		Scale():x(1.0f), y(1.0f), z(1.0f){}
+		Scale(PointPrecision a_scale):x(a_scale), y(a_scale), z(a_scale){}
+		Scale(PointPrecision a_x, PointPrecision a_y, PointPrecision a_z = 1):x(a_x), y(a_y), z(a_z){}
 
+		Scale& operator+=(const Scale& a_other);
+		Scale& operator-=(const Scale& a_other);
+		Scale& operator*=(const Scale& a_other);
+		Scale& operator/=(const Scale& a_other);
+		Scale& operator+=(PointPrecision a_other);
+		Scale& operator-=(PointPrecision a_other);
+		Scale& operator*=(PointPrecision a_other);
+		Scale& operator/=(PointPrecision a_other);
+
+		bool operator==(const Scale& a_other);
+		bool operator==(PointPrecision a_other);
+
+		bool operator!=(const Scale& a_other);
+		bool operator!=(PointPrecision a_other);
+
+		template <class Archive>
+		void serialize(Archive & archive){
+			archive(CEREAL_NVP(x), CEREAL_NVP(y), CEREAL_NVP(z));
+		}
+		PointPrecision x, y, z;
+	};
+
+	Point<PointPrecision> scaleToPoint(const Scale &a_scale);
+	Point<PointPrecision> pointFromScale(const Scale &a_scale);
+
+	Size<PointPrecision> scaleToSize(const Scale &a_scale);
+	Size<PointPrecision> sizeFromScale(const Scale &a_scale);
+
+	template <typename T>
+	Scale scaleFromPoint(const Point<T> &a_point){
+		return {a_point.x, a_point.y, a_point.z};
+	}
+	template <typename T>
+	Scale pointToScale(const Point<T> &a_point){
+		return scaleFromPoint(a_point);
+	}
+
+	template <typename T>
+	Scale scaleFromSize(const Size<T> &a_point){
+		return{a_point.width, a_point.height, a_point.depth};
+	}
+	template <typename T>
+	Scale sizeToScale(const Size<T> &a_point){
+		return scaleFromSize(a_point);
+	}
+
+	Scale operator+(Scale a_lhs, const Scale &a_rhs);
+	Scale operator+(Scale a_lhs, PointPrecision a_rhs);
+	Scale operator+(PointPrecision a_lhs, Scale a_rhs);
+	Scale operator-(Scale a_lhs, const Scale &a_rhs);
+	Scale operator-(Scale a_lhs, PointPrecision a_rhs);
+	Scale operator-(PointPrecision a_lhs, Scale a_rhs);
+	Scale operator*(Scale a_lhs, const Scale &a_rhs);
+	Scale operator*(Scale a_lhs, PointPrecision a_rhs);
+	Scale operator*(PointPrecision a_lhs, Scale a_rhs);
+	Scale operator/(Scale a_lhs, const Scale &a_rhs);
+	Scale operator/(Scale a_lhs, PointPrecision a_rhs);
+	Scale operator/(PointPrecision a_lhs, Scale a_rhs);
 
 	class DrawPoint : public Point<>, public Color, public TexturePoint{
 	public:
@@ -318,25 +393,25 @@ namespace MV {
 
 	template <class T>
 	Color operator+(const T& a_left, const Color& a_right){
-		Color tmpPoint = Color(a_left, a_left, a_left);
+		Color tmpPoint = Color(a_left, a_left, a_left, a_left);
 		return tmpPoint += a_right;
 	}
 
 	template <class T>
 	Color operator-(const T& a_left, const Color& a_right){
-		Color tmpPoint = Color(a_left, a_left, a_left);
+		Color tmpPoint = Color(a_left, a_left, a_left, a_left);
 		return tmpPoint -= a_right;
 	}
 
 	template <class T>
 	Color operator*(const T& a_left, const Color& a_right){
-		Color tmpPoint = Color(a_left, a_left, a_left);
+		Color tmpPoint = Color(a_left, a_left, a_left, a_left);
 		return tmpPoint *= a_right;
 	}
 
 	template <class T>
 	Color operator/(const T& a_left, const Color& a_right){
-		Color tmpPoint = Color(a_left, a_left, a_left);
+		Color tmpPoint = Color(a_left, a_left, a_left, a_left);
 		return tmpPoint /= a_right;
 	}
 
@@ -622,33 +697,28 @@ namespace MV {
 	}
 
 	template <class T>
-	const Point<T> operator/(const Point<T>& a_left, const Point<T>& a_right){
-		Point<T> tmpPoint = a_left;
-		return tmpPoint /= a_right;
+	const Point<T> operator/(Point<T> a_left, const Point<T>& a_right){
+		return a_left /= a_right;
 	}
 
 	template <class T>
-	Point<T> operator+(const Point<T>& a_left, const T& a_right){
-		Point<T> tmpPoint = a_left;
-		return tmpPoint+=a_right;
+	Point<T> operator+(Point<T> a_left, const T& a_right){
+		return a_left+=a_right;
 	}
 
 	template <class T>
-	Point<T> operator-(const Point<T>& a_left, const T& a_right){
-		Point<T> tmpPoint = a_left;
-		return tmpPoint-=a_right;
+	Point<T> operator-(Point<T> a_left, const T& a_right){
+		return a_left-=a_right;
 	}
 
 	template <class T>
-	Point<T> operator*(const Point<T>& a_left, const T& a_right){
-		Point<T> tmpPoint = a_left;
-		return tmpPoint*=a_right;
+	Point<T> operator*(Point<T> a_left, const T& a_right){
+		return a_left*=a_right;
 	}
 
 	template <class T>
-	const Point<T> operator/(const Point<T>& a_left, const T& a_right){
-		Point<T> tmpPoint = a_left;
-		return tmpPoint/=a_right;
+	const Point<T> operator/(Point<T> a_left, const T& a_right){
+		return a_left/=a_right;
 	}
 
 	template <class T>

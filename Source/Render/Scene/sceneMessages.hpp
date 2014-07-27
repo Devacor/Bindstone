@@ -25,11 +25,12 @@ namespace MV{
 			std::shared_ptr<Node> sender;
 			MV::Draw2D *renderer;
 		};
-
+		
 		struct VisualChange : public MV::Message {
-			static std::shared_ptr<VisualChange> make(std::shared_ptr<Node> a_sender){ return std::make_shared<VisualChange>(a_sender); }
-			VisualChange(std::shared_ptr<Node> a_sender):sender(a_sender){}
+			static std::shared_ptr<VisualChange> make(std::shared_ptr<Node> a_sender, bool a_changeShape = true){ return std::make_shared<VisualChange>(a_sender, a_changeShape); }
+			VisualChange(std::shared_ptr<Node> a_sender, bool a_changeShape):sender(a_sender), changeShape(a_changeShape){}
 			std::shared_ptr<Node> sender;
+			bool changeShape;
 		};
 
 		struct SetShader : public MV::Message {
@@ -67,7 +68,7 @@ namespace MV{
 				if(startDepth != target->depth()){
 					target->depthChanged();
 				} else if(visualChangeRegardless){
-					target->alertParent(VisualChange::make(target->shared_from_this()));
+					target->alertParent(VisualChange::make(target->shared_from_this(), false));
 				}
 			}
 		private:

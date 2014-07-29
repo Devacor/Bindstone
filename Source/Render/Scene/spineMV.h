@@ -186,6 +186,7 @@ namespace MV {
 			float* spineWorldVertices = nullptr;
 			static const int SPINE_MESH_VERTEX_COUNT_MAX = 1024;
 
+			static const int MAX_UPDATES = 10;
 			static const double TIME_BETWEEN_UPDATES;
 			bool autoUpdate;
 			Stopwatch timer;

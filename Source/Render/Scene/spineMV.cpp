@@ -300,8 +300,12 @@ namespace MV{
 
 		void Spine::conditionalUpdate() {
 			if(autoUpdate){
-				while(timer.frame(TIME_BETWEEN_UPDATES)){
+				int totalUpdates = 0;
+				while(timer.frame(TIME_BETWEEN_UPDATES) && totalUpdates++ < MAX_UPDATES){
 					update(TIME_BETWEEN_UPDATES);
+				}
+				if(totalUpdates == MAX_UPDATES){
+					update(timer.delta(true));
 				}
 			}
 		}

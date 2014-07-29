@@ -648,7 +648,7 @@ namespace MV {
 		}
 
 		void Node::draw(){
-			if(isVisible && preDraw()){
+			if(preDraw() && isVisible){
 				{
 					pushMatrix();
 					SCOPE_EXIT{popMatrix();};
@@ -841,6 +841,12 @@ namespace MV {
 			calculateMaxDepthChild();
 			drawListVector.clear();
 			isSorted = false;
+		}
+
+		bool Node::toggleVisible() {
+			isVisible = !isVisible;
+			alertParent(VisualChange::make(shared_from_this()));
+			return isVisible;
 		}
 
 

@@ -115,6 +115,7 @@ namespace MV {
 				Node(a_renderer){
 			}
 			virtual void drawImplementation();
+
 		private:
 			void update(double a_dt);
 			void spawnParticle();
@@ -141,7 +142,8 @@ namespace MV {
 
 			std::vector<Particle> particles;
 
-			static const double TIME_BETWEEN_UPDATES;
+			static const double MAX_TIME_STEP;
+			static const int MAX_PARTICLES_PER_FRAME = 2500;
 			double timeSinceLastParticle = 0.0;
 			double nextSpawnDelta = 0.0;
 			Random random;

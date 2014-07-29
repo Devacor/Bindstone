@@ -160,5 +160,17 @@ namespace MV{
 			setCursor(cursor + a_change);
 		}
 
+		bool Text::preDraw() {
+			if(displayCursor){
+				if(timer.frame(BLINK_DURATION)){
+					cursorScene->toggleVisible();
+					timer.delta();
+				}
+			}
+			return true;
+		}
+
+		const double Text::BLINK_DURATION = .35;
+
 	}
 }

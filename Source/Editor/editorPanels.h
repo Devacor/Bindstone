@@ -12,8 +12,7 @@ class EditableElement;
 class EditorPanel {
 public:
 	EditorPanel(EditorControls &a_panel);
-	virtual ~EditorPanel(){
-	}
+	virtual ~EditorPanel();
 	virtual void cancelInput();
 
 	virtual void handleInput(SDL_Event &a_event);

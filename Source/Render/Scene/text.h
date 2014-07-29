@@ -18,6 +18,10 @@ namespace MV{
 
 			Slot<TextSlotSignature> onEnterSlot;
 		public:
+			~Text(){
+				int i = 0;
+			}
+
 			typedef Slot<TextSlotSignature>::SharedSignalType Enter;
 
 			SCENE_MAKE_FACTORY_METHODS(Text)
@@ -162,6 +166,9 @@ namespace MV{
 				setCursor(cursor);
 				cursorScene->hide();
 			}
+		protected:
+			virtual bool preDraw() override;
+
 		private:
 			Text(Draw2D *a_renderer, TextLibrary *a_textLibrary, const Size<> &a_size, const std::string &a_fontIdentifier);
 
@@ -222,6 +229,9 @@ namespace MV{
 			UtfString editText;
 			std::string fontIdentifier;
 			bool isSingleLine;
+
+			static const double BLINK_DURATION;
+			MV::Stopwatch timer;
 		};
 
 	}

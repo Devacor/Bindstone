@@ -17,6 +17,10 @@ void EditorPanel::handleInput(SDL_Event &a_event) {
 	}
 }
 
+EditorPanel::~EditorPanel() {
+	int i = 0;
+}
+
 SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableElement> a_controls):
 	EditorPanel(a_panel),
 	controls(a_controls) {

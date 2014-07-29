@@ -205,6 +205,7 @@ namespace MV {
 			virtual void updateTextureCoordinates(){ }
 
 			bool visible() const;
+			bool toggleVisible();
 
 			bool operator<(Node &a_other);
 			bool operator>(Node &a_other);

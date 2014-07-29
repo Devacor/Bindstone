@@ -32,8 +32,6 @@ namespace MV {
 			rotatePoint3D(gravityConstant.x, gravityConstant.y, gravityConstant.z, a_direction.x, a_direction.y, a_direction.z);
 		}
 
-		const double Emitter::TIME_BETWEEN_UPDATES = 1.0 / 120.0;
-
 		std::shared_ptr<Emitter> Emitter::make(Draw2D* a_renderer) {
 			auto emitter = std::shared_ptr<Emitter>(new Emitter(a_renderer));
 			a_renderer->registerShader(emitter);
@@ -48,9 +46,8 @@ namespace MV {
 		}
 
 		void Emitter::drawImplementation() {
-			while(timer.frame(TIME_BETWEEN_UPDATES)){
-				update(TIME_BETWEEN_UPDATES);
-			}
+			update(std::min(timer.delta(), MAX_TIME_STEP));
+			
 			defaultDraw(GL_TRIANGLES);
 		}
 
@@ -90,10 +87,14 @@ namespace MV {
 			}), particles.end());
 			timeSinceLastParticle += a_dt;
 			bool spawned = false;
-			while(timeSinceLastParticle > nextSpawnDelta && particles.size() <= spawnProperties.maximumParticles){
+			int particlesThisFrame = 0;
+			while(timeSinceLastParticle > nextSpawnDelta && particles.size() <= spawnProperties.maximumParticles && particlesThisFrame++ < MAX_PARTICLES_PER_FRAME){
 				timeSinceLastParticle -= nextSpawnDelta;
 				spawnParticle();
 				nextSpawnDelta = RandomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
+			}
+			if(particlesThisFrame == MAX_PARTICLES_PER_FRAME){
+				timeSinceLastParticle = 0.0f;
 			}
 			loadParticlesToPoints();
 		}
@@ -128,6 +129,8 @@ namespace MV {
 				appendQuadVertexIndices(vertexIndices, static_cast<GLuint>(points.size()));
 			}
 		}
+
+		const double Emitter::MAX_TIME_STEP = 1.0f;
 
 		MV::Scene::EmitterSpawnProperties loadEmitterProperties(const std::string &a_file) {
 			try{

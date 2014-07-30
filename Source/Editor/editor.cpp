@@ -20,7 +20,7 @@ Editor::Editor():
 
 //return true if we're still good to go
 bool Editor::update(double dt){
-	return true;
+	return !done;
 }
 
 void Editor::initializeWindow(){
@@ -41,10 +41,11 @@ void Editor::initializeWindow(){
 
 	AudioPlayer::instance()->initAudio();
 	mouse.update();
-
+	
 	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
 	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
 	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+	/*
 	auto texture = MV::FileTextureDefinition::make("Assets/Images/dogfox.png");
 	auto slicedthing = scene->make<MV::Scene::Sliced>(MV::Scene::SliceDimensions({8.0f, 8.0f}, {32.0f, 32.0f}), MV::size(100.0f, 50.0f))->
 		position({300.0f, 300.0f})->
@@ -64,7 +65,7 @@ void Editor::initializeWindow(){
 	auto emitter = scene->make<MV::Scene::Emitter>("Emitter", MV::Scene::loadEmitterProperties("particle.txt"))->position({300.0f, 300.0f})->depth(100000.0f)->
 		texture(texture->makeHandle({35, 0}, {15, 15}))->shader(MV::PREMULTIPLY_ID);
 
-	spineGuy->crossfade("death", "run", 1);
+	spineGuy->crossfade("death", "run", 1); */
 }
 
 void Editor::handleInput(){

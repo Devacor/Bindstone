@@ -23,11 +23,6 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 	idleBox->justification(MV::TextJustification::CENTER);
 	idleBox->wrapping(MV::TextWrapMethod::HARD)->setMinimumLineHeight(a_size.height)->text(a_text);
 
-	if(a_text.length() > 15){
-		//ABC DEF GHI JKL MNO PQR STU VWX YZ
-		//idleBox.formattedText.removeCharacters(strlen("A")-1, 1);
-	}
-
 	button->activeScene(activeScene);
 	button->idleScene(idleScene);
 
@@ -38,8 +33,16 @@ std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::MouseS
 	auto box = a_parent->make<MV::Scene::Text>(a_name, &a_textLibrary, a_size, "small")->justification(MV::TextJustification::CENTER)->text(a_startContents);
 	auto background = box->make<MV::Scene::Rectangle>("Background", a_size)->depth(-1);
 	auto clickable = box->make<MV::Scene::Clickable>("Clickable", &a_mouse, a_size);
+	std::weak_ptr<MV::Scene::Text> weakBox = box;
 	clickable->onAccept.connect("register", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
-		a_panel->activate(box);
+		if(!weakBox.expired()){
+			a_panel->activate(weakBox.lock());
+		} else{
+			std::cerr << "Error: onAccept failure in box." << std::endl;
+		}
+	});
+	box->onEnter.connect("unregister", [=](std::shared_ptr<MV::Scene::Text> a_text){
+		a_panel->activate(nullptr);
 	});
 	box->setMinimumLineHeight(a_size.height);
 	box->makeSingleLine();

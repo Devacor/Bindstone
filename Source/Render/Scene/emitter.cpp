@@ -47,8 +47,9 @@ namespace MV {
 
 		void Emitter::drawImplementation() {
 			update(std::min(timer.delta(), MAX_TIME_STEP));
-			
-			defaultDraw(GL_TRIANGLES);
+			if(!points.empty()){
+				defaultDraw(GL_TRIANGLES);
+			}
 		}
 
 		void Emitter::spawnParticle(){

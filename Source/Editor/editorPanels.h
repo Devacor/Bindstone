@@ -21,9 +21,9 @@ public:
 		if(activeTextbox){
 			activeTextbox->disableCursor();
 		}
-		if(a_textbox == activeTextbox){
+		if(!a_textbox || a_textbox == activeTextbox){
 			activeTextbox = nullptr;
-		} else{
+		} else if(a_textbox){
 			activeTextbox = a_textbox;
 			activeTextbox->enableCursor();
 		}

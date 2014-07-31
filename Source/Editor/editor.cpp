@@ -45,6 +45,7 @@ void Editor::initializeWindow(){
 	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
 	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
 	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+
 	/*
 	auto texture = MV::FileTextureDefinition::make("Assets/Images/dogfox.png");
 	auto slicedthing = scene->make<MV::Scene::Sliced>(MV::Scene::SliceDimensions({8.0f, 8.0f}, {32.0f, 32.0f}), MV::size(100.0f, 50.0f))->

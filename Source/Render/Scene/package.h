@@ -9,4 +9,5 @@
 	#include "Render/Scene/spineMV.h"
 	#include "Render/Scene/emitter.h"
 	#include "Render/Scene/grid.h"
+	#include "Render/Scene/slider.h"
 #endif

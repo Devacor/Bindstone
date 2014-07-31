@@ -6,8 +6,7 @@
 namespace MV {
 	namespace Scene {
 		class Grid :
-			public Node,
-			public MessageHandler<VisualChange>{
+			public Node{
 
 			friend cereal::access;
 			friend Node;

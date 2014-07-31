@@ -6,6 +6,8 @@
 #include <functional>
 #include <vector>
 #include <set>
+#include <string>
+#include <map>
 #include "Utility/scopeGuard.hpp"
 
 namespace MV {

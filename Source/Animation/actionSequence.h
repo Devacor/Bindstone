@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "Utility/signal.hpp" //todo!
+
 namespace MV {
 
 class ActionSequence;
@@ -56,8 +58,9 @@ public:
 	void unblock();
 	void block();
 	
-	void setParent(const std::shared_ptr<ActionSequence> &a_newParent){
+	std::shared_ptr<ActionSequence> parent(const std::shared_ptr<ActionSequence> &a_newParent){
 		ourParent = a_newParent;
+		return shared_from_this();
 	}
 	std::shared_ptr<ActionSequence> parent() const{
 		return ourParent;

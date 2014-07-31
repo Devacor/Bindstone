@@ -40,7 +40,12 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::shared_pt
 	width = makeInputField(this, *panel.mouse(), grid, *panel.textLibrary(), "width", MV::size(textboxWidth, 27.0f));
 	height = makeInputField(this, *panel.mouse(), grid, *panel.textLibrary(), "height", MV::size(textboxWidth, 27.0f));
 
+	auto sliderThing = grid->make<MV::Scene::Slider>(panel.mouse(), MV::Size<>(100.0f, 10.0f), false);
 	if(controls){
+		sliderThing->onPercentChange.connect("updateX", [&](std::shared_ptr<MV::Scene::Slider> a_slider){
+			controls->position({a_slider->percent() * a_slider->getRenderer()->world().width(), controls->position().y});
+		});
+
 		auto xClick = posX->get<MV::Scene::Clickable>("Clickable");
 		xClick->onAccept.connect("updateX", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 			controls->position({posX->number(), posY->number()});

@@ -123,19 +123,19 @@ void ActionSequence::replaceSequentialAction(const std::string &a_matchId, std::
 }
 
 void ActionSequence::addParallelAction(std::shared_ptr<ActionSequence> a_action){
-	a_action->setParent(shared_from_this());
+	a_action->parent(shared_from_this());
 	parallelOnCompleteActions.push_back(a_action);
 	onAddParallelAction(a_action);
 }
 
 void ActionSequence::addNonBlockingSequentialAction(std::shared_ptr<ActionSequence> a_action){
-	a_action->setParent(shared_from_this());
+	a_action->parent(shared_from_this());
 	a_action->unblock();
 	sequentialOnCompleteActions.push_back(a_action);
 	onAddSequentialAction(a_action);
 }
 void ActionSequence::addNonBlockingSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId){
-	a_action->setParent(shared_from_this());
+	a_action->parent(shared_from_this());
 	ActionSequenceQueue::iterator cell = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	if(cell!=sequentialOnCompleteActions.end()){
 		++cell;
@@ -145,14 +145,14 @@ void ActionSequence::addNonBlockingSequentialActionAfter(std::shared_ptr<ActionS
 	onAddSequentialAction(a_action);
 }
 void ActionSequence::addNonBlockingSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId){
-	a_action->setParent(shared_from_this());
+	a_action->parent(shared_from_this());
 	ActionSequenceQueue::iterator cell = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	a_action->unblock();
 	sequentialOnCompleteActions.insert(cell, a_action);
 	onAddSequentialAction(a_action);
 }
 void ActionSequence::addNonBlockingSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, std::shared_ptr<ActionSequence> a_matchId){
-	a_action->setParent(shared_from_this());
+	a_action->parent(shared_from_this());
 	ActionSequenceQueue::iterator cell = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	if(cell!=sequentialOnCompleteActions.end()){
 		++cell;
@@ -162,7 +162,7 @@ void ActionSequence::addNonBlockingSequentialActionAfter(std::shared_ptr<ActionS
 	onAddSequentialAction(a_action);
 }
 void ActionSequence::addNonBlockingSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, std::shared_ptr<ActionSequence> a_matchId){
-	a_action->setParent(shared_from_this());
+	a_action->parent(shared_from_this());
 	ActionSequenceQueue::iterator cell = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	a_action->unblock();
 	sequentialOnCompleteActions.insert(cell, a_action);
@@ -170,12 +170,12 @@ void ActionSequence::addNonBlockingSequentialActionBefore(std::shared_ptr<Action
 }
 
 void ActionSequence::addSequentialAction(std::shared_ptr<ActionSequence> a_action){
-	a_action->setParent(shared_from_this());
+	a_action->parent(shared_from_this());
 	sequentialOnCompleteActions.push_back(a_action);
 	onAddSequentialAction(a_action);
 }
 void ActionSequence::addSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId){
-	a_action->setParent(shared_from_this());
+	a_action->parent(shared_from_this());
 	ActionSequenceQueue::iterator cell = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	if(cell!=sequentialOnCompleteActions.end()){
 		++cell;
@@ -184,13 +184,13 @@ void ActionSequence::addSequentialActionAfter(std::shared_ptr<ActionSequence> a_
 	onAddSequentialAction(a_action);
 }
 void ActionSequence::addSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, const std::string &a_matchId){
-	a_action->setParent(shared_from_this());
+	a_action->parent(shared_from_this());
 	ActionSequenceQueue::iterator cell = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	sequentialOnCompleteActions.insert(cell, a_action);
 	onAddSequentialAction(a_action);
 }
 void ActionSequence::addSequentialActionAfter(std::shared_ptr<ActionSequence> a_action, std::shared_ptr<ActionSequence> a_matchId){
-	a_action->setParent(shared_from_this());
+	a_action->parent(shared_from_this());
 	ActionSequenceQueue::iterator cell = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	if(cell!=sequentialOnCompleteActions.end()){
 		++cell;
@@ -199,7 +199,7 @@ void ActionSequence::addSequentialActionAfter(std::shared_ptr<ActionSequence> a_
 	onAddSequentialAction(a_action);
 }
 void ActionSequence::addSequentialActionBefore(std::shared_ptr<ActionSequence> a_action, std::shared_ptr<ActionSequence> a_matchId){
-	a_action->setParent(shared_from_this());
+	a_action->parent(shared_from_this());
 	ActionSequenceQueue::iterator cell = std::find(sequentialOnCompleteActions.begin(), sequentialOnCompleteActions.end(), a_matchId);
 	sequentialOnCompleteActions.insert(cell, a_action);
 	onAddSequentialAction(a_action);

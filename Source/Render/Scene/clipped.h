@@ -6,8 +6,7 @@
 namespace MV {
 	namespace Scene {
 		class Clipped :
-			public Rectangle,
-			public MessageHandler<VisualChange>{
+			public Rectangle{
 
 			friend cereal::access;
 			friend Node;

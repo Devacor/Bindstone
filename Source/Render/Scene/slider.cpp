@@ -102,6 +102,8 @@ namespace MV {
 			if(!inUpdateHandlePosition){
 				inUpdateHandlePosition = true;
 				auto areaAabb = dragArea->localAABB();
+				areaAabb.minPoint -= position();
+				areaAabb.maxPoint -= position();
 				auto handleAabb = dragHandle->localAABB();
 				
 				if(areaAabb.width() > areaAabb.height()){

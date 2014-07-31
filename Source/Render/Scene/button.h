@@ -172,15 +172,16 @@ namespace MV {
 			
 			std::shared_ptr<Button> clickBounds(const BoxAABB &a_boxAABB);
 
-			virtual BoxAABB worldAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB screenAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB localAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB basicAABBImplementation() const;
-
 		protected:
 			Button(Draw2D *a_renderer, MouseState *a_mouse);
 
+			virtual BoxAABB worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB basicAABBImplementation() const override;
+
 		private:
+
 			std::shared_ptr<Node> idleSceneNode;
 			std::shared_ptr<Node> activeSceneNode;
 

@@ -212,6 +212,9 @@
     <ClCompile Include="Source\Render\Scene\grid.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Render\Scene\slider.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -566,6 +569,9 @@
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
     <ClInclude Include="Source\Render\Scene\grid.h">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\slider.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
   </ItemGroup>

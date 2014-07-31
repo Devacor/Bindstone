@@ -100,7 +100,8 @@ namespace MV {
 			public std::enable_shared_from_this<Node>,
 			public MessageHandler<PushMatrix>,
 			public MessageHandler<PopMatrix>,
-			public MessageHandler<SetShader>{
+			public MessageHandler<SetShader>,
+			public MessageHandler<VisualChange>{
 			friend cereal::access;
 			friend Draw2D;
 		public:
@@ -123,7 +124,8 @@ namespace MV {
 					while(currentParent = currentParent->myParent){
 						setRenderer(a_renderer, false, true);
 					}
-				}else if(includeChildren){
+				}
+				if(includeChildren){
 					for(auto &child : drawList){
 						child.second->setRenderer(a_renderer, true, false);
 					}
@@ -256,6 +258,12 @@ namespace MV {
 			}
 			virtual void handleEnd(std::shared_ptr<SetShader> a_message){
 				shader(a_message->shaderId);
+			}
+
+			virtual bool handleBegin(std::shared_ptr<VisualChange>){
+				return true;
+			}
+			virtual void handleEnd(std::shared_ptr<VisualChange>){
 			}
 
 			void depthChanged(){

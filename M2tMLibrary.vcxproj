@@ -219,6 +219,7 @@
     <ClCompile Include="Source\Render\render.cpp" />
     <ClCompile Include="Source\Render\Scene\primitives.cpp" />
     <ClCompile Include="Source\Render\Scene\sliced.cpp" />
+    <ClCompile Include="Source\Render\Scene\slider.cpp" />
     <ClCompile Include="Source\Render\Scene\spineMV.cpp" />
     <ClCompile Include="Source\Render\Scene\text.cpp" />
     <ClCompile Include="Source\Render\formattedText.cpp" />
@@ -335,6 +336,7 @@
     <ClInclude Include="Source\Render\render.h" />
     <ClInclude Include="Source\Render\Scene\sceneMessages.hpp" />
     <ClInclude Include="Source\Render\Scene\sliced.h" />
+    <ClInclude Include="Source\Render\Scene\slider.h" />
     <ClInclude Include="Source\Render\Scene\spineMV.h" />
     <ClInclude Include="Source\Render\Scene\text.h" />
     <ClInclude Include="Source\Render\formattedText.h" />

@@ -118,8 +118,8 @@ namespace MV {
 		}
 
 		void Slider::updateDragPercentForMousePosition(const Point<int> &a_screenPoint) {
-			auto aabb = dragArea->localAABB();
-			auto relativePoint = dragArea->localFromScreen(a_screenPoint);
+			auto aabb = dragArea->basicAABB();
+			auto relativePoint = dragArea->localFromScreen(a_screenPoint) + aabb.minPoint;
 
 			auto previousPercent = dragPercent;
 

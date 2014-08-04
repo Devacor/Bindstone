@@ -41,6 +41,7 @@ SelectedEditorPanel::SelectedEditorPanel(EditorControls &a_panel, std::shared_pt
 	height = makeInputField(this, *panel.mouse(), grid, *panel.textLibrary(), "height", MV::size(textboxWidth, 27.0f));
 
 	auto sliderThing = grid->make<MV::Scene::Slider>(panel.mouse(), MV::Size<>(100.0f, 10.0f), false);
+	sliderThing->area()->color({.25f, .25f, .25f, 1.0f});
 	if(controls){
 		sliderThing->onPercentChange.connect("updateX", [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 			controls->position({a_slider->percent() * a_slider->getRenderer()->world().width(), controls->position().y});

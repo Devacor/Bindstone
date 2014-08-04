@@ -192,7 +192,6 @@
     <ClCompile Include="..\external\spine\spine-c\src\spine\Slot.c" />
     <ClCompile Include="..\external\spine\spine-c\src\spine\SlotData.c" />
     <ClCompile Include="Source\Editor\editor.cpp" />
-    <ClCompile Include="Source\Animation\actionSequence.cpp" />
     <ClCompile Include="Source\Animation\frameSwapper.cpp" />
     <ClCompile Include="Source\Audio\sound.cpp" />
     <ClCompile Include="Source\Editor\editorControls.cpp" />
@@ -314,7 +313,6 @@
     <ClInclude Include="Source\Render\Scene\grid.h" />
     <ClInclude Include="Source\Render\Scene\primitives.h" />
     <ClInclude Include="Source\Render\Scene\button.h" />
-    <ClInclude Include="Source\Animation\actionSequence.h" />
     <ClInclude Include="Source\Animation\frameSwapper.h" />
     <ClInclude Include="Source\Animation\package.h" />
     <ClInclude Include="Source\Audio\package.h" />
@@ -345,9 +343,11 @@
     <ClInclude Include="Source\Utility\messageHandler.hpp" />
     <ClInclude Include="Source\Utility\notification.h" />
     <ClInclude Include="Source\Utility\package.h" />
+    <ClInclude Include="Source\Utility\require.hpp" />
     <ClInclude Include="Source\Utility\scopeGuard.hpp" />
     <ClInclude Include="Source\Utility\signal.hpp" />
     <ClInclude Include="Source\Utility\stopwatch.h" />
+    <ClInclude Include="Source\Utility\task.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html" />

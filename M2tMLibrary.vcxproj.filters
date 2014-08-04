@@ -79,9 +79,6 @@
     <ClCompile Include="Source\Network\network.cpp">
       <Filter>Source Files\Network</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Animation\actionSequence.cpp">
-      <Filter>Source Files\Animation</Filter>
-    </ClCompile>
     <ClCompile Include="Source\exampleCode.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -264,9 +261,6 @@
     </ClInclude>
     <ClInclude Include="Source\Network\network.h">
       <Filter>Source Files\Network</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Animation\actionSequence.h">
-      <Filter>Source Files\Animation</Filter>
     </ClInclude>
     <ClInclude Include="Source\Network\package.h">
       <Filter>Source Files\Network</Filter>
@@ -573,6 +567,12 @@
     </ClInclude>
     <ClInclude Include="Source\Render\Scene\slider.h">
       <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\require.hpp">
+      <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\task.hpp">
+      <Filter>Source Files\Utility</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

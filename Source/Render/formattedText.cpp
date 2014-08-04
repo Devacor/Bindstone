@@ -600,7 +600,7 @@ namespace MV {
 	size_t FormattedText::size() const {
 		return std::accumulate(lines.begin(), lines.end(), static_cast<size_t>(0), [](size_t a_accumulated, const std::shared_ptr<FormattedLine> &a_line){
 			return a_line->size() + a_accumulated;
-		});;
+		});
 	}
 
 	bool FormattedText::empty() const {

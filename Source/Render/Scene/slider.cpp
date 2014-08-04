@@ -74,6 +74,7 @@ namespace MV {
 		}
 
 		void Slider::drawImplementation(){
+			dragArea->draw();
 			dragHandle->draw();
 		}
 
@@ -118,7 +119,7 @@ namespace MV {
 
 		void Slider::updateDragPercentForMousePosition(const Point<int> &a_screenPoint) {
 			auto aabb = dragArea->localAABB();
-			auto relativePoint = dragArea->localFromScreen(a_screenPoint) - aabb.minPoint;
+			auto relativePoint = dragArea->localFromScreen(a_screenPoint);
 
 			auto previousPercent = dragPercent;
 
@@ -127,7 +128,7 @@ namespace MV {
 			} else {
 				dragPercent = std::min(std::max(relativePoint.y, 0.0f), aabb.height()) / aabb.height();
 			}
-
+			
 			if(previousPercent != dragPercent){
 				updateHandlePosition();
 				onPercentChangeSlot(std::static_pointer_cast<Slider>(shared_from_this()));

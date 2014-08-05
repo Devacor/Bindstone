@@ -81,7 +81,7 @@ namespace MV {
 		BoxAABB Slider::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			return dragArea->worldAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
 				dragHandle->worldAABBImplementation(a_includeChildren, a_nestedCall)
-			);
+				);
 		}
 		BoxAABB Slider::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			return dragArea->screenAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
@@ -112,6 +112,7 @@ namespace MV {
 				} else{
 					dragHandle->position({mix(areaAabb.minPoint.x, areaAabb.minPoint.x + (areaAabb.width() - handleAabb.width()), .5f), mix(areaAabb.minPoint.y, areaAabb.minPoint.y + (areaAabb.height() - handleAabb.height()), dragPercent)});
 				}
+				onPercentChangeSlot(std::static_pointer_cast<Slider>(shared_from_this()));
 
 				inUpdateHandlePosition = false;
 			}
@@ -129,10 +130,17 @@ namespace MV {
 				dragPercent = std::min(std::max(relativePoint.y, 0.0f), aabb.height()) / aabb.height();
 			}
 			
-			if(previousPercent != dragPercent){
+			if(!equals(previousPercent, dragPercent)){
 				updateHandlePosition();
-				onPercentChangeSlot(std::static_pointer_cast<Slider>(shared_from_this()));
 			}
+		}
+
+		std::shared_ptr<Slider> Slider::percent(PointPrecision a_newPercent) {
+			if(!equals(a_newPercent, dragPercent)){
+				dragPercent = std::min(std::max(0.0f, a_newPercent), 1.0f);
+				updateHandlePosition();
+			}
+			return std::static_pointer_cast<Slider>(shared_from_this());
 		}
 
 	}

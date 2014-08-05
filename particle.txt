@@ -1,4 +1,5 @@
 {
+    "enabled": true,
     "EmitterProperties": {
 	"maximumParticles": 200000,
         "minimumSpawnRate": 0,

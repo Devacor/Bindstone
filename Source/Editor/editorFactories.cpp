@@ -49,3 +49,13 @@ std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::MouseS
 	colorTopAndBottom(background, {TEXTBOX_TOP}, {TEXTBOX_BOTTOM});
 	return box;
 }
+
+std::shared_ptr<MV::Scene::Text> makeLabel(EditorPanel *a_panel, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_textLibrary, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_startContents){
+	auto box = a_parent->make<MV::Scene::Text>(a_name, &a_textLibrary, a_size, "small")->justification(MV::TextJustification::CENTER)->text(a_startContents);
+	auto background = box->make<MV::Scene::Rectangle>("Background", a_size)->depth(-1);
+	box->setMinimumLineHeight(a_size.height);
+	box->makeSingleLine();
+
+	colorTopAndBottom(background, {LABEL_TOP}, {LABEL_BOTTOM});
+	return box;
+}

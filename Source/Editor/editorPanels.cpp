@@ -136,11 +136,11 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 
 	if(controls){
 		minimumRate->onPercentChange.connect("updateStartSize", [=](std::shared_ptr<MV::Scene::Slider> a_slider){
-			controls->elementToEdit->properties().minimumSpawnRate = a_slider->percent() * .1f;
+			controls->elementToEdit->properties().minimumSpawnRate = MV::mixIn(0.0f, 1.0f, a_slider->percent(), 4);
 			maximumRate->percent(a_slider->percent());
 		});
 		maximumRate->onPercentChange.connect("updateStartSize", [&](std::shared_ptr<MV::Scene::Slider> a_slider){
-			controls->elementToEdit->properties().maximumSpawnRate = a_slider->percent() * .1f;
+			controls->elementToEdit->properties().maximumSpawnRate = MV::mixIn(0.0f, 1.0f, a_slider->percent(), 4);
 		});
 
 		startSizeA->onPercentChange.connect("updateStartSize", [=](std::shared_ptr<MV::Scene::Slider> a_slider){

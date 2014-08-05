@@ -134,6 +134,18 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	auto endSizeB = grid->make<MV::Scene::Slider>(panel.mouse(), MV::Size<>(110.0f, 10.0f), false);
 	endSizeB->area()->color({.25f, .25f, .25f, 1.0f});
 
+	makeLabel(this, grid, *panel.textLibrary(), "initialRotation", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Initialize Rotation"));
+	auto minimumRotation = grid->make<MV::Scene::Slider>(panel.mouse(), MV::Size<>(110.0f, 10.0f), false);
+	minimumRotation->area()->color({.25f, .25f, .25f, 1.0f});
+	auto maximumRotation = grid->make<MV::Scene::Slider>(panel.mouse(), MV::Size<>(110.0f, 10.0f), false);
+	maximumRotation->area()->color({.25f, .25f, .25f, 1.0f});
+
+	makeLabel(this, grid, *panel.textLibrary(), "rotationChange", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Rotation Change"));
+	auto startRotationChange = grid->make<MV::Scene::Slider>(panel.mouse(), MV::Size<>(110.0f, 10.0f), false);
+	startRotationChange->area()->color({.25f, .25f, .25f, 1.0f});
+	auto endRotationChange = grid->make<MV::Scene::Slider>(panel.mouse(), MV::Size<>(110.0f, 10.0f), false);
+	endRotationChange->area()->color({.25f, .25f, .25f, 1.0f});
+
 	if(controls){
 		minimumRate->onPercentChange.connect("updateStartSize", [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 			controls->elementToEdit->properties().minimumSpawnRate = MV::mixIn(0.0f, 1.0f, a_slider->percent(), 4);
@@ -157,6 +169,22 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 		});
 		endSizeB->onPercentChange.connect("updateStartSize", [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 			controls->elementToEdit->properties().maximum.endScale = a_slider->percent() * 110.0f;
+		});
+
+		minimumRotation->onPercentChange.connect("updateStartSize", [=](std::shared_ptr<MV::Scene::Slider> a_slider){
+			controls->elementToEdit->properties().minimumRotation = {0.0f, 0.0f, a_slider->percent() * 360.0f};
+			maximumRotation->percent(a_slider->percent());
+		});
+		maximumRotation->onPercentChange.connect("updateStartSize", [&](std::shared_ptr<MV::Scene::Slider> a_slider){
+			controls->elementToEdit->properties().maximumRotation = {0.0f, 0.0f, a_slider->percent() * 360.0f};
+		});
+
+		startRotationChange->onPercentChange.connect("updateStartSize", [=](std::shared_ptr<MV::Scene::Slider> a_slider){
+			controls->elementToEdit->properties().minimum.rotationalChange = {0.0f, 0.0f, a_slider->percent() * 360.0f};
+			endRotationChange->percent(a_slider->percent());
+		});
+		endRotationChange->onPercentChange.connect("updateStartSize", [&](std::shared_ptr<MV::Scene::Slider> a_slider){
+			controls->elementToEdit->properties().maximum.rotationalChange = {0.0f, 0.0f, a_slider->percent() * 360.0f};
 		});
 
 		auto xClick = posX->get<MV::Scene::Clickable>("Clickable");

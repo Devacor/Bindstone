@@ -7,7 +7,8 @@
 #include "Render/package.h"
 
 class EditorControls;
-class EditableElement;
+class EditableRectangle;
+class EditableEmitter;
 
 class EditorPanel {
 public:
@@ -33,17 +34,32 @@ protected:
 	std::shared_ptr<MV::Scene::Text> activeTextbox;
 };
 
-class SelectedEditorPanel : public EditorPanel {
+class SelectedRectangleEditorPanel : public EditorPanel {
 public:
-	SelectedEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableElement> a_controls);
-	~SelectedEditorPanel(){
-		int i = 0;
+	SelectedRectangleEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableRectangle> a_controls);
+	~SelectedRectangleEditorPanel(){
 	}
 
 	virtual void handleInput(SDL_Event &a_event);
 
 private:
-	std::shared_ptr<EditableElement> controls;
+	std::shared_ptr<EditableRectangle> controls;
+	std::shared_ptr<MV::Scene::Text> posY;
+	std::shared_ptr<MV::Scene::Text> posX;
+	std::shared_ptr<MV::Scene::Text> width;
+	std::shared_ptr<MV::Scene::Text> height;
+};
+
+class SelectedEmitterEditorPanel : public EditorPanel {
+public:
+	SelectedEmitterEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableEmitter> a_controls);
+	~SelectedEmitterEditorPanel(){
+	}
+
+	virtual void handleInput(SDL_Event &a_event);
+
+private:
+	std::shared_ptr<EditableEmitter> controls;
 	std::shared_ptr<MV::Scene::Text> posY;
 	std::shared_ptr<MV::Scene::Text> posX;
 	std::shared_ptr<MV::Scene::Text> width;

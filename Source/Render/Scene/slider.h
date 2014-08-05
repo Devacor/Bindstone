@@ -31,6 +31,8 @@ namespace MV {
 			PointPrecision percent() const{
 				return dragPercent;
 			}
+
+			std::shared_ptr<Slider> percent(PointPrecision a_newPercent);
 		protected:
 			Slider(Draw2D *a_renderer):
 				Node(a_renderer),

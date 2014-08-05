@@ -7,11 +7,11 @@
 #include "editorDefines.h"
 class EditorPanel;
 
-class EditableElement {
+class EditableRectangle {
 public:
-	EditableElement(std::shared_ptr<MV::Scene::Rectangle> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
+	EditableRectangle(std::shared_ptr<MV::Scene::Rectangle> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
 
-	~EditableElement(){
+	~EditableRectangle(){
 		removeHandles();
 	}
 
@@ -25,7 +25,7 @@ public:
 	void size(MV::Size<> a_newSize);
 	MV::Size<> size();
 
-	std::function<void(EditableElement*)> onChange;
+	std::function<void(EditableRectangle*)> onChange;
 private:
 	void dragUpdateFromHandles();
 
@@ -70,6 +70,41 @@ private:
 
 	static long gid;
 	long id;
+};
+
+class EditableEmitter {
+public:
+	EditableEmitter(std::shared_ptr<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
+
+	~EditableEmitter(){
+		removeHandles();
+	}
+
+	void removeHandles();
+
+	void resetHandles();
+
+	void position(MV::Point<> a_newPosition);
+	MV::Point<> position() const;
+
+	void size(MV::Size<> a_newSize);
+	MV::Size<> size();
+
+	std::function<void(EditableEmitter*)> onChange;
+	std::shared_ptr<MV::Scene::Emitter> elementToEdit;
+private:
+	void dragUpdateFromHandles();
+
+	MV::MouseState *mouse;
+
+	std::shared_ptr<MV::Scene::Clickable> topLeftSizeHandle;
+	std::shared_ptr<MV::Scene::Clickable> topRightSizeHandle;
+	std::shared_ptr<MV::Scene::Clickable> bottomLeftSizeHandle;
+	std::shared_ptr<MV::Scene::Clickable> bottomRightSizeHandle;
+
+	std::shared_ptr<MV::Scene::Clickable> positionHandle;
+
+	std::shared_ptr<MV::Scene::Node> controlContainer;
 };
 
 #endif

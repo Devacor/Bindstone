@@ -71,8 +71,8 @@ namespace MV {
 		struct EmitterSpawnProperties {
 			uint32_t maximumParticles = std::numeric_limits<uint32_t>::max();
 
-			float minimumSpawnRate = 1.0f;
-			float maximumSpawnRate = 0.0f;
+			float minimumSpawnRate = 0.0f;
+			float maximumSpawnRate = 1.0f;
 
 			Point<> maximumPosition;
 			Point<> minimumPosition;
@@ -110,19 +110,36 @@ namespace MV {
 
 			static std::shared_ptr<Emitter> make(Draw2D* a_renderer);
 			static std::shared_ptr<Emitter> make(Draw2D* a_renderer, const EmitterSpawnProperties &a_emitterProperties);
+
+			std::shared_ptr<Emitter> properties(const EmitterSpawnProperties &a_emitterProperties);
+
+			const EmitterSpawnProperties& properties() const;
+			EmitterSpawnProperties& properties();
+
+			bool enabled() const;
+			bool disabled() const;
+			std::shared_ptr<Emitter> enable();
+			std::shared_ptr<Emitter> disable();
 		protected:
 			Emitter(Draw2D *a_renderer):
 				Node(a_renderer){
 			}
 			virtual void drawImplementation();
 
+			virtual BoxAABB worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB basicAABBImplementation() const override;
+
 		private:
+
 			void update(double a_dt);
 			void spawnParticle();
 
 			template <class Archive>
 			void serialize(Archive & archive){
-				archive(cereal::make_nvp("spawnProperties", spawnProperties), cereal::make_nvp("node", cereal::base_class<Node>(this)));
+				archive(cereal::make_nvp("enabled", spawnParticles), cereal::make_nvp("spawnProperties", spawnProperties),
+					cereal::make_nvp("node", cereal::base_class<Node>(this)));
 			}
 
 			template <class Archive>
@@ -131,10 +148,14 @@ namespace MV {
 				archive.extract(cereal::make_nvp("renderer", renderer));
 				require(renderer != nullptr, MV::PointerException("Error: Failed to load a renderer for Sliced node."));
 				construct(renderer);
-				archive(cereal::make_nvp("spawnProperties", construct->spawnProperties), cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
+				archive(cereal::make_nvp("enabled", construct->spawnParticles), cereal::make_nvp("spawnProperties", construct->spawnProperties),
+					cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
 			}
 
 			void loadParticlesToPoints();
+			
+			MV::Color randomMix(const MV::Color &a_rhs, const MV::Color &a_lhs);
+			MV::Point<> randomMix(const MV::Point<> &a_rhs, const MV::Point<> &a_lhs);
 
 			Stopwatch timer;
 
@@ -142,11 +163,12 @@ namespace MV {
 
 			std::vector<Particle> particles;
 
+			bool spawnParticles = true;
+
 			static const double MAX_TIME_STEP;
 			static const int MAX_PARTICLES_PER_FRAME = 2500;
 			double timeSinceLastParticle = 0.0;
 			double nextSpawnDelta = 0.0;
-			Random random;
 		};
 	}
 }

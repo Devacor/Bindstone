@@ -62,20 +62,20 @@ namespace MV {
 		Point<> centerPoint() const { return minPoint + ((minPoint + maxPoint) / 2.0f); }
 
 		Point<> topLeftPoint() const { return minPoint; }
-		Point<> topRightPoint() const { return point(maxPoint.x, minPoint.y); }
 		Point<> bottomLeftPoint() const { return point(minPoint.x, maxPoint.y); }
 		Point<> bottomRightPoint() const { return maxPoint; }
+		Point<> topRightPoint() const { return point(maxPoint.x, minPoint.y); }
 
 		Point<> operator[](size_t a_index) const{
 			switch(a_index){
 			case 0:
 				return topLeftPoint();
 			case 1:
-				return topRightPoint();
+				return bottomLeftPoint();
 			case 2:
 				return bottomRightPoint();
 			case 3:
-				return bottomLeftPoint();
+				return topRightPoint();
 			}
 			return {};
 		}

@@ -203,6 +203,9 @@ namespace MV {
 		Window& allowUserResize(bool a_maintainProportions = true, const Size<int> &a_minSize = Size<int>(1, 1), const Size<int> &a_maxSize = Size<int>(1000000, 1000000));
 		Window& lockUserResize();
 
+		bool resizeWorldWithWindow() const;
+		Window& resizeWorldWithWindow(bool a_sizeWorldWithWindow);
+
 		Window& windowedMode();
 		void fullScreenMode();
 		void fullScreenWindowedMode();
@@ -213,6 +216,7 @@ namespace MV {
 		int height() const;
 		int width() const;
 		Size<int> size() const;
+		Size<int> resizeDelta() const;
 
 		bool handleEvent(const SDL_Event &event);
 	private:
@@ -229,7 +233,9 @@ namespace MV {
 
 		void updateAspectRatio();
 		bool maintainProportions;
+		bool sizeWorldWithWindow;
 		Size<int> windowSize;
+		Size<int> windowDifferenceFromLastResize;
 		PointPrecision aspectRatio;
 		uint32_t SDLflags;
 		std::string title;
@@ -401,6 +407,8 @@ namespace MV {
 
 		bool setupSDL();
 		void setupOpengl();
+
+		void refreshWorldAndWindowSize();
 
 		Color clearBackgroundColor;
 		bool initialized;

@@ -368,6 +368,7 @@ namespace MV {
 	Window::Window(Draw2D &a_renderer):
 		renderer(a_renderer),
 		maintainProportions(true),
+		sizeWorldWithWindow(false),
 		SDLflags(SDL_WINDOW_OPENGL|SDL_WINDOW_SHOWN|SDL_WINDOW_RESIZABLE),
 		initialized(false),
 		vsync(false),
@@ -387,6 +388,7 @@ namespace MV {
 	}
 
 	void Window::resize(const Size<int> &a_size){
+		windowDifferenceFromLastResize = windowSize - a_size;
 		windowSize = a_size;
 		updateAspectRatio();
 		if(initialized){
@@ -608,6 +610,19 @@ namespace MV {
 		SDL_GL_SwapWindow( window );
 	}
 
+	bool Window::resizeWorldWithWindow() const {
+		return sizeWorldWithWindow;
+	}
+
+	Window& Window::resizeWorldWithWindow(bool a_sizeWorldWithWindow) {
+		sizeWorldWithWindow = a_sizeWorldWithWindow;
+		return *this;
+	}
+
+	Size<int> Window::resizeDelta() const {
+		return windowDifferenceFromLastResize;
+	}
+
 	/************************\
 	| --------World--------- |
 	\************************/
@@ -618,9 +633,9 @@ namespace MV {
 
 	void RenderWorld::resize( const Size<> &a_size ){
 		worldSize = a_size;
-		if(renderer.initialized){
+		/*if(renderer.initialized){
 			renderer.setupOpengl();
-		}
+		}*/
 	}
 
 	PointPrecision RenderWorld::height() const{
@@ -714,10 +729,8 @@ namespace MV {
 		
 		SDL_GL_SetSwapInterval(0);
 		
-		glViewport( 0, 0, sdlWindow.width(), sdlWindow.height() );
+		refreshWorldAndWindowSize();
 
-		projectionMatrix().clear(); //ensure nothing else has trampled on us.
-		projectionMatrix().top().makeOrtho(0, mvWorld.width(), mvWorld.height(), 0, -1.0, 1.0);
 
 		glClearColor(clearBackgroundColor.R,clearBackgroundColor.G,clearBackgroundColor.B,clearBackgroundColor.A);
 		
@@ -753,6 +766,10 @@ namespace MV {
 
 	bool Draw2D::handleEvent(const SDL_Event &event){
 		if(sdlWindow.handleEvent(event)){
+			if(sdlWindow.resizeWorldWithWindow()){
+				mvWorld.resize({mvWorld.width() - static_cast<PointPrecision>(sdlWindow.resizeDelta().width), mvWorld.height() - static_cast<PointPrecision>(sdlWindow.resizeDelta().height)});
+			}
+			refreshWorldAndWindowSize();
 			return true;
 		}
 		return false;
@@ -976,6 +993,13 @@ namespace MV {
 		glDisableVertexAttribArray(1);
 		glDisableVertexAttribArray(2);
 		glUseProgram(0);
+	}
+
+	void Draw2D::refreshWorldAndWindowSize() {
+		glViewport(0, 0, sdlWindow.width(), sdlWindow.height());
+
+		projectionMatrix().clear(); //ensure nothing else has trampled on us.
+		projectionMatrix().top().makeOrtho(0, mvWorld.width(), mvWorld.height(), 0, -1.0, 1.0);
 	}
 
 	Framebuffer::Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, const Size<int> &a_size, const Point<int> &a_position) :

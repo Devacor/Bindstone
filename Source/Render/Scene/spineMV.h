@@ -165,7 +165,7 @@ namespace MV {
 				).extract(
 					cereal::make_nvp("renderer", renderer)
 				);
-				require(renderer != nullptr, MV::PointerException("Error: Failed to load a renderer for Spine node."));
+				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Spine node.");
 				construct(renderer, fileBundle);
 				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
 			}

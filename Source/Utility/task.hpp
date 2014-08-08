@@ -97,7 +97,7 @@ namespace MV {
 			if(foundInSequentials != sequentialTasks.end()){
 				return **foundInParallels;
 			}
-			require(0, ResourceException(std::string("Failed to find: [") + a_name + "] in task: [" + taskName + "]"));
+			require<ResourceException>(false, "Failed to find: [", a_name, "] in task: [", taskName, "]");
 		}
 
 		SlotRegister<void(const Task&)> onStart;

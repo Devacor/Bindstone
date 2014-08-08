@@ -10,10 +10,10 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 	static long buttonId = 0;
 	auto button = a_parent->make<MV::Scene::Button>(MV::wideToString(a_text) + boost::lexical_cast<std::string>(buttonId++), &a_mouse, a_size);
 	auto activeScene = MV::Scene::Rectangle::make(a_parent->getRenderer(), a_size);
-	colorTopAndBottom(activeScene, {BUTTON_TOP_ACTIVE}, {BUTTON_BOTTOM_ACTIVE});
+	colorTopAndBottom(activeScene, {InterfaceColors::BUTTON_TOP_ACTIVE}, {InterfaceColors::BUTTON_BOTTOM_ACTIVE});
 
 	auto idleScene = MV::Scene::Rectangle::make(a_parent->getRenderer(), a_size);
-	colorTopAndBottom(idleScene, {BUTTON_TOP_IDLE}, {BUTTON_BOTTOM_IDLE});
+	colorTopAndBottom(idleScene, {InterfaceColors::BUTTON_TOP_IDLE}, {InterfaceColors::BUTTON_BOTTOM_IDLE});
 
 	auto activeBox = activeScene->make<MV::Scene::Text>("TextBox", &a_library, a_size, a_fontIdentifier);
 	activeBox->justification(MV::TextJustification::CENTER);
@@ -46,7 +46,7 @@ std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::MouseS
 	});
 	box->setMinimumLineHeight(a_size.height);
 	box->makeSingleLine();
-	colorTopAndBottom(background, {TEXTBOX_TOP}, {TEXTBOX_BOTTOM});
+	colorTopAndBottom(background, {InterfaceColors::TEXTBOX_TOP}, {InterfaceColors::TEXTBOX_BOTTOM});
 	return box;
 }
 
@@ -56,6 +56,29 @@ std::shared_ptr<MV::Scene::Text> makeLabel(EditorPanel *a_panel, const std::shar
 	box->setMinimumLineHeight(a_size.height);
 	box->makeSingleLine();
 
-	colorTopAndBottom(background, {LABEL_TOP}, {LABEL_BOTTOM});
+	colorTopAndBottom(background, {InterfaceColors::LABEL_TOP}, {InterfaceColors::LABEL_BOTTOM});
 	return box;
+}
+
+std::shared_ptr<MV::Scene::Slider> makeSlider(MV::MouseState &a_mouse, const std::shared_ptr<MV::Scene::Node> &a_parent, const std::function <void(std::shared_ptr<MV::Scene::Slider>)> &a_method, float a_startPercent){
+	auto slider = a_parent->make<MV::Scene::Slider>(&a_mouse, MV::Size<>(110.0f, 10.0f))->percent(a_startPercent);
+	slider->area()->color({.25f, .25f, .25f, 1.0f});
+	slider->onPercentChange.connect("action", a_method);
+	slider->percent(a_startPercent);
+	return slider;
+}
+
+std::shared_ptr<MV::Scene::Slider> makeSlider(MV::Draw2D &a_renderer, MV::MouseState &a_mouse, const std::function <void(std::shared_ptr<MV::Scene::Slider>)> &a_method, float a_startPercent){
+	auto slider = MV::Scene::Slider::make(&a_renderer, &a_mouse, MV::Size<>(110.0f, 10.0f))->percent(a_startPercent);
+	slider->area()->color({.25f, .25f, .25f, 1.0f});
+	slider->onPercentChange.connect("action", a_method);
+	slider->percent(a_startPercent);
+	return slider;
+}
+
+std::shared_ptr<MV::Scene::Slider> makeSlider(MV::Draw2D &a_renderer, MV::MouseState &a_mouse, float a_startPercent){
+	auto slider = MV::Scene::Slider::make(&a_renderer, &a_mouse, MV::Size<>(110.0f, 10.0f))->percent(a_startPercent);
+	slider->area()->color({.25f, .25f, .25f, 1.0f});
+	slider->percent(a_startPercent);
+	return slider;
 }

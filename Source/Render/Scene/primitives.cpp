@@ -23,7 +23,7 @@ namespace MV {
 
 		std::shared_ptr<Pixel> Pixel::make(Draw2D* a_renderer, const DrawPoint &a_point /*= DrawPoint()*/) {
 			auto point = std::shared_ptr<Pixel>(new Pixel(a_renderer));
-			a_renderer->registerShader(point);
+			point->registerShader();
 			point->setPoint(a_point);
 			return point;
 		}
@@ -46,13 +46,13 @@ namespace MV {
 
 		std::shared_ptr<Line> Line::make(Draw2D* a_renderer) {
 			auto line = std::shared_ptr<Line>(new Line(a_renderer));
-			a_renderer->registerShader(line);
+			line->registerShader();
 			return line;
 		}
 
 		std::shared_ptr<Line> Line::make(Draw2D* a_renderer, const DrawPoint &a_startPoint, const DrawPoint &a_endPoint) {
 			auto line = std::shared_ptr<Line>(new Line(a_renderer));
-			a_renderer->registerShader(line);
+			line->registerShader();
 			line->setEnds(a_startPoint, a_endPoint);
 			return line;
 		}
@@ -65,25 +65,25 @@ namespace MV {
 
 		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
-			a_renderer->registerShader(rectangle);
+			rectangle->registerShader();
 			return rectangle;
 		}
 
 		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Size<> &a_size, bool a_center) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
-			a_renderer->registerShader(rectangle);
+			rectangle->registerShader();
 			return rectangle->size(a_size, a_center);
 		}
 
 		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const Size<> &a_size, const Point<> &a_centerPoint) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
-			a_renderer->registerShader(rectangle);
+			rectangle->registerShader();
 			return rectangle->size(a_size, a_centerPoint);
 		}
 
 		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const BoxAABB &a_boxAABB) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
-			a_renderer->registerShader(rectangle);
+			rectangle->registerShader();
 			return rectangle->bounds(a_boxAABB);
 		}
 

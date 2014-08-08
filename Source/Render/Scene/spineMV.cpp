@@ -68,7 +68,7 @@ namespace MV{
 
 		std::shared_ptr<Spine> MV::Scene::Spine::make(Draw2D* a_renderer, const FileBundle &a_fileBundle){
 			auto spine = std::shared_ptr<Spine>(new Spine(a_renderer, a_fileBundle));
-			a_renderer->registerShader(spine);
+			spine->registerShader();
 			return spine;
 		}
 
@@ -82,18 +82,21 @@ namespace MV{
 			onEvent(onEventSlot){
 
 			atlas = spAtlas_createFromFile(fileBundle.atlasFile.c_str(), 0);
-			require(atlas, ResourceException("Error reading atlas file:" + fileBundle.atlasFile));
+			require<ResourceException>(atlas, "Error reading atlas file:", fileBundle.atlasFile);
 
 			spSkeletonJson* json = spSkeletonJson_create(atlas);
 			json->scale = fileBundle.loadScale;
 			spSkeletonData* skeletonData = spSkeletonJson_readSkeletonDataFile(json, fileBundle.skeletonFile.c_str());
-
-			require(skeletonData, ResourceException((json->error ? json->error : "Error reading skeleton data file:") + std::string(" ") + fileBundle.skeletonFile));
+			if(!skeletonData && json->error){
+				require<ResourceException>(false , json->error);
+			} else if(!skeletonData){
+				require<ResourceException>(false, "Error reading skeleton data file: ", fileBundle.skeletonFile);
+			}
 
 			spSkeletonJson_dispose(json);
 
 			skeleton = spSkeleton_create(skeletonData);
-			require(skeleton && skeleton->bones && skeleton->bones[0], ResourceException(fileBundle.skeletonFile + " has no bones!"));
+			require<ResourceException>(skeleton && skeleton->bones && skeleton->bones[0], fileBundle.skeletonFile, " has no bones!");
 			rootBone = skeleton->bones[0];
 
 			animationState = spAnimationState_create(spAnimationStateData_create(skeleton->data));
@@ -264,7 +267,7 @@ namespace MV{
 				return getSpineTexture(attachment);
 			} else if(slot->attachment->type == SP_ATTACHMENT_MESH){
 				spMeshAttachment* attachment = reinterpret_cast<spMeshAttachment*>(slot->attachment);
-				require(attachment->verticesCount <= SPINE_MESH_VERTEX_COUNT_MAX, ResourceException("VerticesCount exceeded for spine mesh."));
+				require<ResourceException>(attachment->verticesCount <= SPINE_MESH_VERTEX_COUNT_MAX, "VerticesCount exceeded for spine mesh.");
 				spMeshAttachment_computeWorldVertices(attachment, slot->skeleton->x, slot->skeleton->y, slot, spineWorldVertices);
 
 				for(int i = 0; i < attachment->trianglesCount; ++i) {
@@ -280,7 +283,7 @@ namespace MV{
 				return getSpineTexture(attachment);
 			} else if(slot->attachment->type == SP_ATTACHMENT_SKINNED_MESH){
 				spSkinnedMeshAttachment* attachment = reinterpret_cast<spSkinnedMeshAttachment*>(slot->attachment);
-				require(attachment->uvsCount <= SPINE_MESH_VERTEX_COUNT_MAX, ResourceException("UVS exceeded for spine skinned mesh."));
+				require<ResourceException>(attachment->uvsCount <= SPINE_MESH_VERTEX_COUNT_MAX, "UVS exceeded for spine skinned mesh.");
 				spSkinnedMeshAttachment_computeWorldVertices(attachment, slot->skeleton->x, slot->skeleton->y, slot, spineWorldVertices);
 
 				for(int i = 0; i < attachment->trianglesCount; ++i) {

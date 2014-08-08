@@ -88,7 +88,7 @@ namespace MV{
 	}
 
 	Matrix& Matrix::operator+=( const Matrix& a_other ){
-		require(sizeX == a_other.sizeX && sizeY == a_other.sizeY, RangeException("Invalid Matrix addition in operator+=, mismatched sizes."));
+		require<RangeException>(sizeX == a_other.sizeX && sizeY == a_other.sizeY, "Invalid Matrix addition in operator+=, mismatched sizes.");
 		for(size_t x=0; x < getSizeX(); ++x){
 			for(size_t y=0; y < getSizeY(); ++y){
 				(*this).access(x, y)+=a_other.access(x, y);
@@ -98,7 +98,7 @@ namespace MV{
 	}
 
 	Matrix& Matrix::operator-=( const Matrix& a_other ){
-		require(sizeX == a_other.sizeX && sizeY == a_other.sizeY, RangeException("Invalid Matrix subtraction in operator-=, mismatched sizes."));
+		require<RangeException>(sizeX == a_other.sizeX && sizeY == a_other.sizeY, "Invalid Matrix subtraction in operator-=, mismatched sizes.");
 		for(size_t x=0; x < getSizeX(); ++x){
 			for(size_t y=0; y < getSizeY(); ++y){
 				(*this).access(x, y)-=a_other.access(x, y);
@@ -108,7 +108,7 @@ namespace MV{
 	}
 
 	Matrix& Matrix::operator*=( const Matrix& a_other ){
-		require(sizeX == a_other.sizeY, RangeException("Invalid Matrix multiplication in operator*=, mismatched sizes."));
+		require<RangeException>(sizeX == a_other.sizeY, "Invalid Matrix multiplication in operator*=, mismatched sizes.");
 		size_t resultX = getSizeY(), resultY = a_other.getSizeX(), commonSize = sizeX;
 		Matrix result(resultY, resultX);
 
@@ -288,12 +288,12 @@ namespace MV{
 	}
 
 	TransformMatrix& MatrixStack::top(){
-		MV::require(!stack.empty(), MV::ResourceException("MatrixStack::top() failed, stack is empty!"));
+		MV::require<ResourceException>(!stack.empty(), "MatrixStack::top() failed, stack is empty!");
 		return stack.back();
 	}
 
 	const TransformMatrix& MatrixStack::top() const{
-		MV::require(!stack.empty(), MV::ResourceException("MatrixStack::top() failed, stack is empty!"));
+		MV::require<ResourceException>(!stack.empty(), "MatrixStack::top() failed, stack is empty!");
 		return stack.back();
 	}
 

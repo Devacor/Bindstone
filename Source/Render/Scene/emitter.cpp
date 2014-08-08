@@ -34,13 +34,13 @@ namespace MV {
 
 		std::shared_ptr<Emitter> Emitter::make(Draw2D* a_renderer) {
 			auto emitter = std::shared_ptr<Emitter>(new Emitter(a_renderer));
-			a_renderer->registerShader(emitter);
+			emitter->registerShader();
 			return emitter;
 		}
 
 		std::shared_ptr<Emitter> Emitter::make(Draw2D* a_renderer, const EmitterSpawnProperties &a_values) {
 			auto emitter = std::shared_ptr<Emitter>(new Emitter(a_renderer));
-			a_renderer->registerShader(emitter);
+			emitter->registerShader();
 			emitter->spawnProperties = a_values;
 			return emitter;
 		}
@@ -97,7 +97,7 @@ namespace MV {
 				randomMix(spawnProperties.minimum.gravityDirection, spawnProperties.maximum.gravityDirection)
 			);
 			
-			particle.color = particle.change.beginColor;
+			particle.update(0.0f);
 
 			particles.push_back(particle);
 		}

@@ -10,14 +10,14 @@ namespace MV{
 		std::shared_ptr<Text> Text::make(Draw2D* a_renderer, TextLibrary *a_textLibrary, const Size<> &a_size) {
 			auto text = std::shared_ptr<Text>(new Text(a_renderer, a_textLibrary, a_size, DEFAULT_ID));
 			text->add("TextBox", text->textboxScene);
-			a_renderer->registerShader(text);
+			text->registerShader();
 			return text;
 		}
 
 		std::shared_ptr<Text> Text::make(Draw2D* a_renderer, TextLibrary *a_textLibrary, const Size<> &a_size, const std::string &a_fontIdentifier) {
 			auto text = std::shared_ptr<Text>(new Text(a_renderer, a_textLibrary, a_size, a_fontIdentifier));
 			text->add("TextBox", text->textboxScene);
-			a_renderer->registerShader(text);
+			text->registerShader();
 			return text;
 		}
 

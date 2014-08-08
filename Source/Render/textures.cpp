@@ -81,7 +81,7 @@ namespace MV {
 			SDL_Surface *surface = SDL_CreateRGBSurface(0, widthPowerOfTwo, heightPowerOfTwo, bpp, Rmask, Gmask, Bmask, Amask);
 
 			SDL_SetSurfaceBlendMode(a_img, SDL_BLENDMODE_NONE);
-			require(SDL_BlitSurface(a_img, 0, surface, 0) == 0, ResourceException("SDL_BlitSurface failed to copy!"));
+			require<ResourceException>(SDL_BlitSurface(a_img, 0, surface, 0) == 0, "SDL_BlitSurface failed to copy!");
 
 			SDL_FreeSurface(a_img);
 			return surface;
@@ -163,7 +163,7 @@ namespace MV {
 	}
 
 	Size<int> TextureDefinition::size() const{
-		require(textureSize.width > 0 && textureSize.height > 0, ResourceException("The texture hasn't actually loaded yet.  You may need to create a handle to implicitly force a texture load."));
+		require<ResourceException>(textureSize.width > 0 && textureSize.height > 0, "The texture hasn't actually loaded yet.  You may need to create a handle to implicitly force a texture load.");
 		return textureSize;
 	}
 
@@ -258,7 +258,7 @@ namespace MV {
 
 	void SurfaceTextureDefinition::reloadImplementation() {
 		SDL_Surface* newSurface = surfaceGenerator();
-		require(newSurface != nullptr, PointerException("SurfaceTextureDefinition::reloadImplementation was passed a null SDL_Surface pointer."));
+		require<PointerException>(newSurface != nullptr, "SurfaceTextureDefinition::reloadImplementation was passed a null SDL_Surface pointer.");
 
 		generatedSurfaceSize = Size<int>(newSurface->w, newSurface->h);
 

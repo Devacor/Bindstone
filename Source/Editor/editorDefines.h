@@ -13,7 +13,9 @@ enum InterfaceColors {
 	BOX_BACKGROUND = 0x4f4f4f,
 	BOX_HEADER = 0x2d2d2d,
 	CREATED_DEFAULT = 0xdfdfdf,
-	SIZE_HANDLES = 0xffb400
+	SIZE_HANDLES = 0xffb400,
+	SLIDER_BACKGROUND = 0x2c2e36,
+	SIDER_HANDLE = 0x516191
 };
 
 #endif

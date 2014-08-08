@@ -156,10 +156,11 @@ namespace MV {
 	bool Draw2D::firstInitializationSDL = true;
 	bool Draw2D::firstInitializationOpenGL = true;
 
+	static GLint viewport[4];
+
 	Point<int> ProjectionDetails::projectScreen(const Point<> &a_point){
 		Point<> result;
-		GLint viewport[4];
-		glGetIntegerv(GL_VIEWPORT, viewport);
+
 		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*renderer.modelviewMatrix().top().getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
 			std::cerr << "gluProject failure!" << std::endl;
 		}
@@ -170,8 +171,7 @@ namespace MV {
 
 	Point<> ProjectionDetails::projectWorld(const Point<> &a_point){
 		Point<> result;
-		GLint viewport[4];
-		glGetIntegerv(GL_VIEWPORT, viewport);
+
 		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*renderer.modelviewMatrix().top().getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
 			std::cerr << "gluProject failure!" << std::endl;
 		}
@@ -184,8 +184,7 @@ namespace MV {
 
 	Point<> ProjectionDetails::unProjectScreen(const Point<int> &a_point){
 		Point<> result;
-		GLint viewport[4];
-		glGetIntegerv(GL_VIEWPORT, viewport);
+
 		if(MESA::gluUnProject(static_cast<PointPrecision>(a_point.x), static_cast<PointPrecision>(renderer.window().height() - a_point.y), 0, &(*renderer.modelviewMatrix().top().getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
 			std::cerr << "gluUnProject failure!" << std::endl;
 		}
@@ -261,7 +260,7 @@ namespace MV {
 	}
 
 	std::shared_ptr<Framebuffer> glExtensionFramebufferObject::makeFramebuffer(const Point<int> &a_position, const Size<int> &a_size, GLuint a_texture){
-		require(initialized, ResourceException("CreateFramebuffer failed because the extension could not be loaded"));
+		require<ResourceException>(initialized, "CreateFramebuffer failed because the extension could not be loaded");
 		GLuint framebufferId = 0, renderbufferId = 0, depthbufferId = 0;
 #ifdef WIN32
 		glGenFramebuffers(1, &framebufferId);
@@ -279,7 +278,7 @@ namespace MV {
 		savedClearColor = renderer->backgroundColor();
 		renderer->backgroundColor({0, 0, 0, 0});
 
-		require(initialized, ResourceException("StartUsingFramebuffer failed because the extension could not be loaded"));
+		require<ResourceException>(initialized, "StartUsingFramebuffer failed because the extension could not be loaded");
 		if(a_push){
 			activeFramebuffers.push_back(a_framebuffer);
 		}
@@ -309,6 +308,7 @@ namespace MV {
 		}
 #endif
 		glViewport(a_framebuffer->framePosition.x, a_framebuffer->framePosition.y, a_framebuffer->frameSize.width, a_framebuffer->frameSize.height);
+		glGetIntegerv(GL_VIEWPORT, viewport);
 		renderer->projectionMatrix().push().makeOrtho(0, static_cast<MatrixValue>(a_framebuffer->frameSize.width), 0, static_cast<MatrixValue>(a_framebuffer->frameSize.height), -128.0f, 128.0f);
 
 #ifdef WIN32
@@ -323,7 +323,7 @@ namespace MV {
 	}
 
 	void glExtensionFramebufferObject::stopUsingFramebuffer(){
-		require(initialized, ResourceException("StopUsingFramebuffer failed because the extension could not be loaded"));
+		require<ResourceException>(initialized, "StopUsingFramebuffer failed because the extension could not be loaded");
 		activeFramebuffers.pop_back();
 		if(!activeFramebuffers.empty()){
 			startUsingFramebuffer(activeFramebuffers.back(), false);
@@ -336,6 +336,7 @@ namespace MV {
 			glBindRenderbufferOES(GL_RENDERBUFFER_OES, originalRenderbufferId);
 #endif
 			glViewport(0, 0, renderer->window().width(), renderer->window().height());
+			glGetIntegerv(GL_VIEWPORT, viewport);
 			renderer->projectionMatrix().pop();
 			renderer->backgroundColor(savedClearColor);
 		}
@@ -565,7 +566,7 @@ namespace MV {
 				atexit(SDL_Quit);
 			}
 			if(renderer.firstInitializationOpenGL){
-				MV::require(gl3wInit() == 0, MV::PointerException("gl3wInit failed!"));
+				MV::require<PointerException>(gl3wInit() == 0, "gl3wInit failed!");
 				renderer.firstInitializationOpenGL = false;
 			}
 
@@ -633,9 +634,6 @@ namespace MV {
 
 	void RenderWorld::resize( const Size<> &a_size ){
 		worldSize = a_size;
-		/*if(renderer.initialized){
-			renderer.setupOpengl();
-		}*/
 	}
 
 	PointPrecision RenderWorld::height() const{
@@ -860,7 +858,7 @@ namespace MV {
 			glGetShaderiv(a_id, GL_INFO_LOG_LENGTH, &infoLogLength);
 			std::vector<char> vertexShaderErrorMessage(std::max(infoLogLength, int(1)));
 			glGetShaderInfoLog(a_id, infoLogLength, 0, &vertexShaderErrorMessage[0]);
-			MV::require(0, MV::ResourceException(std::string("Shader Error: ") + std::string(vertexShaderErrorMessage.begin(), vertexShaderErrorMessage.end())));
+			MV::require<ResourceException>(false, "Shader Error: ", std::string(vertexShaderErrorMessage.begin(), vertexShaderErrorMessage.end()));
 		}
 	}
 
@@ -889,7 +887,7 @@ namespace MV {
 		bool makeDefault = shaders.empty();
 
 		auto emplaceResult = shaders.emplace(std::make_pair(a_id, Shader(a_id, programId)));
-		MV::require(emplaceResult.second, MV::ResourceException("Failed to insert shader to map: " + a_id));
+		MV::require<ResourceException>(emplaceResult.second, "Failed to insert shader to map: ", a_id);
 
 		Shader* shaderPtr = &emplaceResult.first->second;
 		if(makeDefault){
@@ -912,11 +910,11 @@ namespace MV {
 		auto found = shaders.find(a_id);
 		if(found == shaders.end()){
 			std::ifstream vertexShaderFile(a_vertexShaderFilename);
-			MV::require(vertexShaderFile.is_open(), MV::ResourceException("Failed to load vertex shader: " + a_vertexShaderFilename));
+			MV::require<ResourceException>(vertexShaderFile.is_open(), "Failed to load vertex shader: ", a_vertexShaderFilename);
 			std::string vertexShaderCode((std::istreambuf_iterator<char>(vertexShaderFile)), std::istreambuf_iterator<char>());
 
 			std::ifstream fragmentShaderFile(a_fragmentShaderFilename);
-			MV::require(vertexShaderFile.is_open(), MV::ResourceException("Failed to load fragment shader: " + a_fragmentShaderFilename));
+			MV::require<ResourceException>(vertexShaderFile.is_open(), "Failed to load fragment shader: ", a_fragmentShaderFilename);
 			std::string fragmentShaderCode((std::istreambuf_iterator<char>(fragmentShaderFile)), std::istreambuf_iterator<char>());
 
 			return loadShaderCode(a_id, vertexShaderCode, fragmentShaderCode);
@@ -933,18 +931,18 @@ namespace MV {
 
 	Shader* Draw2D::getShader(const std::string &a_id) {
 		auto found = shaders.find(a_id);
-		MV::require(found != shaders.end(), MV::RangeException("Shader not loaded: " + a_id));
+		MV::require<RangeException>(found != shaders.end(), "Shader not loaded: ", a_id);
 		return &found->second;
 	}
 
 	Shader* Draw2D::defaultShader(const std::string &a_id) {
 		defaultShaderPtr = getShader(a_id);
-		MV::require(defaultShaderPtr != nullptr, MV::PointerException("No default shader."));
+		MV::require<PointerException>(defaultShaderPtr != nullptr, "No default shader.");
 		return defaultShaderPtr;
 	}
 
 	Shader* Draw2D::defaultShader() const {
-		MV::require(defaultShaderPtr != nullptr, MV::PointerException("No default shader."));
+		MV::require<PointerException>(defaultShaderPtr != nullptr, "No default shader.");
 		return defaultShaderPtr;
 	}
 
@@ -997,6 +995,7 @@ namespace MV {
 
 	void Draw2D::refreshWorldAndWindowSize() {
 		glViewport(0, 0, sdlWindow.width(), sdlWindow.height());
+		glGetIntegerv(GL_VIEWPORT, viewport);
 
 		projectionMatrix().clear(); //ensure nothing else has trampled on us.
 		projectionMatrix().top().makeOrtho(0, mvWorld.width(), mvWorld.height(), 0, -1.0, 1.0);

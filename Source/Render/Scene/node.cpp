@@ -141,7 +141,7 @@ namespace MV {
 					return foundInChild;
 				}
 			}
-			require(!a_throwOnNull, MV::ResourceException("Node::get was unable to find child: "+a_childId));
+			require<ResourceException>(!a_throwOnNull, "Node::get was unable to find child: ", a_childId);
 			return nullptr;
 		}
 
@@ -367,7 +367,7 @@ namespace MV {
 		}
 
 		Point<> Node::worldFromLocal(const Point<> &a_local){
-			require(renderer != nullptr, PointerException("DrawShape::worldFromLocal requires a rendering context."));
+			require<PointerException>(renderer != nullptr, "DrawShape::worldFromLocal requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
 			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
@@ -382,7 +382,7 @@ namespace MV {
 			return ourPoint;
 		}
 		Point<int> Node::screenFromLocal(const Point<> &a_local){
-			require(renderer != nullptr, PointerException("DrawShape::screenFromLocal requires a rendering context."));
+			require<PointerException>(renderer != nullptr, "DrawShape::screenFromLocal requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
 			SCOPE_EXIT{renderer->modelviewMatrix().pop(); };
@@ -397,7 +397,7 @@ namespace MV {
 			return ourPoint;
 		}
 		Point<> Node::localFromScreen(const Point<int> &a_screen){
-			require(renderer != nullptr, PointerException("DrawShape::localFromScreen requires a rendering context."));
+			require<PointerException>(renderer != nullptr, "DrawShape::localFromScreen requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
 			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
@@ -412,7 +412,7 @@ namespace MV {
 			return ourPoint;
 		}
 		Point<> Node::localFromWorld(const Point<> &a_world){
-			require(renderer != nullptr, PointerException("DrawShape::localFromWorld requires a rendering context."));
+			require<PointerException>(renderer != nullptr, "DrawShape::localFromWorld requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
 			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
@@ -428,7 +428,7 @@ namespace MV {
 		}
 
 		std::vector<Point<>> Node::worldFromLocal(std::vector<Point<>> a_local){
-			require(renderer != nullptr, PointerException("DrawShape::worldFromLocal requires a rendering context."));
+			require<PointerException>(renderer != nullptr, "DrawShape::worldFromLocal requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
 			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
@@ -446,7 +446,7 @@ namespace MV {
 		}
 
 		std::vector<Point<int>> Node::screenFromLocal(const std::vector<Point<>> &a_local){
-			require(renderer != nullptr, PointerException("DrawShape::screenFromLocal requires a rendering context."));
+			require<PointerException>(renderer != nullptr, "DrawShape::screenFromLocal requires a rendering context.");
 			std::vector<Point<int>> processed;
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
@@ -465,7 +465,7 @@ namespace MV {
 		}
 
 		std::vector<Point<>> Node::localFromWorld(std::vector<Point<>> a_world){
-			require(renderer != nullptr, PointerException("DrawShape::localFromWorld requires a rendering context."));
+			require<PointerException>(renderer != nullptr, "DrawShape::localFromWorld requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
 			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
@@ -483,7 +483,7 @@ namespace MV {
 		}
 
 		std::vector<Point<>> Node::localFromScreen(const std::vector<Point<int>> &a_screen){
-			require(renderer != nullptr, PointerException("DrawShape::localFromScreen requires a rendering context."));
+			require<PointerException>(renderer != nullptr, "DrawShape::localFromScreen requires a rendering context.");
 			std::vector<Point<>> processed;
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
@@ -502,7 +502,7 @@ namespace MV {
 		}
 
 		BoxAABB Node::worldFromLocal(BoxAABB a_local){
-			require(renderer != nullptr, PointerException("DrawShape::worldFromLocal requires a rendering context."));
+			require<PointerException>(renderer != nullptr, "DrawShape::worldFromLocal requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
 			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
@@ -519,7 +519,7 @@ namespace MV {
 			return a_local;
 		}
 		BoxAABB Node::screenFromLocal(BoxAABB a_local){
-			require(renderer != nullptr, PointerException("DrawShape::screenFromLocal requires a rendering context."));
+			require<PointerException>(renderer != nullptr, "DrawShape::screenFromLocal requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
 			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
@@ -536,7 +536,7 @@ namespace MV {
 			return a_local;
 		}
 		BoxAABB Node::localFromScreen(BoxAABB a_screen){
-			require(renderer != nullptr, PointerException("DrawShape::localFromScreen requires a rendering context."));
+			require<PointerException>(renderer != nullptr, "DrawShape::localFromScreen requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
 			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
@@ -553,7 +553,7 @@ namespace MV {
 			return a_screen;
 		}
 		BoxAABB Node::localFromWorld(BoxAABB a_world){
-			require(renderer != nullptr, PointerException("DrawShape::localFromWorld requires a rendering context."));
+			require<PointerException>(renderer != nullptr, "DrawShape::localFromWorld requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
 			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
@@ -703,9 +703,8 @@ namespace MV {
 
 		std::shared_ptr<Node> Node::make(Draw2D* a_renderer, const Point<> &a_placement /*= Point<>()*/) {
 			auto node = std::shared_ptr<Node>(new Node(a_renderer));
-			node->position(a_placement);
-			a_renderer->registerShader(node);
-			return node;
+			node->registerShader();
+			return node->position(a_placement);
 		}
 
 		bool Node::visible() const {
@@ -847,6 +846,22 @@ namespace MV {
 			isVisible = !isVisible;
 			alertParent(VisualChange::make(shared_from_this()));
 			return isVisible;
+		}
+
+		void Node::setRenderer(Draw2D* a_renderer, bool includeChildren /*= true*/, bool includeParents /*= true*/) {
+			renderer = a_renderer;
+
+			if(includeParents){
+				Node* currentParent = this;
+				while(currentParent = currentParent->myParent){
+					setRenderer(a_renderer, false, true);
+				}
+			}
+			if(includeChildren){
+				for(auto &child : drawList){
+					child.second->setRenderer(a_renderer, true, false);
+				}
+			}
 		}
 
 

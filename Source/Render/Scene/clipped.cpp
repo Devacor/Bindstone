@@ -55,29 +55,26 @@ namespace MV {
 
 		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer) {
 			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			a_renderer->registerShader(clipped);
+			clipped->registerShader();
 			return clipped;
 		}
 
 		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const Size<> &a_size, bool a_center) {
 			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			a_renderer->registerShader(clipped);
-			clipped->size(a_size, a_center);
-			return clipped;
+			clipped->registerShader();
+			return clipped->size(a_size, a_center);
 		}
 
 		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const Size<> &a_size, const Point<> &a_centerPoint) {
 			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			a_renderer->registerShader(clipped);
-			clipped->size(a_size, a_centerPoint);
-			return clipped;
+			clipped->registerShader();
+			return clipped->size(a_size, a_centerPoint);
 		}
 
 		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const BoxAABB &a_boxAABB) {
 			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			a_renderer->registerShader(clipped);
-			clipped->bounds(a_boxAABB);
-			return clipped;
+			clipped->registerShader();
+			return clipped->bounds(a_boxAABB);
 		}
 
 		void Clipped::drawIgnoringClipping(){

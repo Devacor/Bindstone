@@ -4,69 +4,133 @@
 #undef require
 
 #include <string>
+#include <tuple>
+#include <sstream>
+#include <stdint.h>
 
 namespace MV {
-	class MVExceptionBase {
-	public:
-		MVExceptionBase(){}
 
-		void setExceptionMessage(std::string a_exceptionPrefix, std::string a_exceptionMessage){
-			exceptionMessage = "[" + a_exceptionPrefix + "] = (" + a_exceptionMessage + ")";
+	inline std::string to_string(int a_type){
+		return std::to_string(a_type);
+	}
+	inline std::string to_string(unsigned int a_type){
+		return std::to_string(a_type);
+	}
+	inline std::string to_string(long a_type){
+		return std::to_string(a_type);
+	}
+	inline std::string to_string(unsigned long a_type){
+		return std::to_string(a_type);
+	}
+	inline std::string to_string(int64_t a_type){
+		return std::to_string(a_type);
+	}
+	inline std::string to_string(uint64_t a_type){
+		return std::to_string(a_type);
+	}
+	inline std::string to_string(long double a_type){
+		return std::to_string(a_type);
+	}
+	inline std::string to_string(double a_type){
+		return std::to_string(a_type);
+	}
+	inline std::string to_string(float a_type){
+		return std::to_string(a_type);
+	}
+	inline std::string& to_string(std::string &a_string){
+		return a_string;
+	}
+	inline const std::string& to_string(const std::string &a_string){
+		return a_string;
+	}
+	inline const char* const to_string(const char * const a_string){
+		return a_string;
+	}
+	inline char* to_string(char *a_string){
+		return a_string;
+	}
+
+	template<class Tuple, std::size_t N>
+	struct TupleStringHelper {
+		static void to_string_combiner(const Tuple& t, std::stringstream &a_stream){
+			TupleStringHelper<Tuple, N - 1>::to_string_combiner(t, a_stream);
+			a_stream << MV::to_string(std::get<N - 1>(t));
 		}
-		void setExceptionMessage(std::string a_exceptionPrefix){
-			exceptionMessage = "[" + a_exceptionPrefix + "]";
+	};
+
+	template<class Tuple>
+	struct TupleStringHelper<Tuple, 1> {
+		static void to_string_combiner(const Tuple& t, std::stringstream &a_stream){
+			a_stream << MV::to_string(std::get<0>(t));
 		}
-		const std::string getExceptionMessage(){
-			return exceptionMessage;
+	};
+
+	template<class... Args>
+	std::string to_string(const std::tuple<Args...>& t){
+		std::stringstream stream;
+		TupleStringHelper<decltype(t), sizeof...(Args)>::to_string_combiner(t, stream);
+		return stream.str();
+	}
+
+	class Exception : public virtual std::runtime_error {
+	public:
+		explicit Exception(const std::string& a_message): std::runtime_error(a_message){}
+		explicit Exception(const char *a_message): std::runtime_error(a_message) {}
+
+		virtual const char * what() const override {
+			prefixWhat("General Exception: ");
+			return combinedWhat.c_str();
 		}
 	protected:
-		std::string exceptionMessage;
-	};
-
-	class DefaultException : public MVExceptionBase {
-	public:
-		DefaultException(){ setExceptionMessage("Default Exception"); }
-		DefaultException(std::string a_exceptionMessage){ setExceptionMessage("Default Exception", a_exceptionMessage); }
-	};
-	class RangeException : public MVExceptionBase {
-	public:
-		RangeException(){ setExceptionMessage("Range Exception"); }
-		RangeException(std::string a_exceptionMessage){ setExceptionMessage("Range Exception", a_exceptionMessage); }
-	};
-	class ResourceException : public MVExceptionBase {
-	public:
-		ResourceException(){ setExceptionMessage("Resource Exception"); }
-		ResourceException(std::string a_exceptionMessage){ setExceptionMessage("Resource Exception", a_exceptionMessage); }
-	};
-	class PointerException : public MVExceptionBase {
-	public:
-		PointerException(){ setExceptionMessage("Pointer Exception"); }
-		PointerException(std::string a_exceptionMessage){ setExceptionMessage("Pointer Exception", a_exceptionMessage); }
-	};
-
-	template <class exception_type>
-	inline exception_type outputAssertionFailed(exception_type exception) {
-		std::cerr << "ASSERTION FAILED! " << exception.getExceptionMessage() << std::endl;
-		return exception;
-	}
-
-	//assert functions (named require to avoid potential name clashes with the common c macro "assert")
-	template <class exception_type, class condition_type>
-	inline void require(condition_type condition){
-		if(!condition){
-			throw outputAssertionFailed<exception_type>(exception_type());
+		void prefixWhat(const char * a_prefix) const{
+			if(combinedWhat.empty()){
+				combinedWhat = a_prefix;
+				combinedWhat += runtime_error::what();
+			}
 		}
-	}
-	template <class exception_type, class condition_type>
-	inline void require(condition_type condition, const exception_type &exception){
-		if(!condition){
-			throw outputAssertionFailed<exception_type>(exception);
+
+		mutable std::string combinedWhat;
+	};
+
+	class RangeException : public Exception {
+	public:
+		explicit RangeException(const std::string& a_message): Exception(a_message), std::runtime_error(a_message){}
+		explicit RangeException(const char *a_message): Exception(a_message), std::runtime_error(a_message) {}
+
+		virtual const char * what() const override {
+			prefixWhat("Range Exception: ");
+			return combinedWhat.c_str();
 		}
-	}
-	template <class condition_type>
-	inline void require(condition_type condition){
-		if(!condition){
-			throw outputAssertionFailed<DefaultException>(DefaultException());
+	};
+
+	class ResourceException : public Exception {
+	public:
+		explicit ResourceException(const std::string& a_message): Exception(a_message), std::runtime_error(a_message){}
+		explicit ResourceException(const char *a_message): Exception(a_message), std::runtime_error(a_message) {}
+
+		virtual const char * what() const override {
+			prefixWhat("Resource Exception: ");
+			return combinedWhat.c_str();
+		}
+	};
+
+	class PointerException : public Exception {
+	public:
+		explicit PointerException(const std::string& a_message): Exception(a_message), std::runtime_error(a_message){}
+		explicit PointerException(const char *a_message): Exception(a_message), std::runtime_error(a_message){}
+
+		virtual const char * what() const override {
+			prefixWhat("Pointer Exception: ");
+			return combinedWhat.c_str();
+		}
+	};
+
+	template <typename ExceptionType, typename ConditionType, typename... Args>
+	inline void require(ConditionType&& a_condition, Args&&... a_args){
+		if(!a_condition){
+			ExceptionType exception(MV::to_string(std::make_tuple(std::forward<Args>(a_args)...)));
+			std::cerr << "ASSERTION FAILED! " << exception.what() << std::endl;
+			throw exception;
 		}
 	}
 }

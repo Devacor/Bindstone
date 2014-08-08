@@ -11,13 +11,13 @@ namespace MV {
 		\*************************/
 		std::shared_ptr<Grid> Grid::make(Draw2D* a_renderer) {
 			auto grid = std::shared_ptr<Grid>(new Grid(a_renderer));
-			a_renderer->registerShader(grid);
+			grid->registerShader();
 			return grid;
 		}
 
 		std::shared_ptr<Grid> Grid::make(Draw2D* a_renderer, const Size<> &a_size) {
 			auto grid = std::shared_ptr<Grid>(new Grid(a_renderer, a_size));
-			a_renderer->registerShader(grid);
+			grid->registerShader();
 			return grid;
 		}
 

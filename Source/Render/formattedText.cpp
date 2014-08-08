@@ -77,7 +77,7 @@ namespace MV {
 	\*************************/
 
 	TextLibrary::TextLibrary(Draw2D *a_rendering){
-		require(a_rendering != nullptr, PointerException("TextLibrary::TextLibrary was passed a null Draw2D pointer."));
+		require<PointerException>(a_rendering != nullptr, "TextLibrary::TextLibrary was passed a null Draw2D pointer.");
 		SDL_StartTextInput();
 		white.r = 255; white.g = 255; white.b = 255; white.a = 0;
 		render = a_rendering;
@@ -432,7 +432,7 @@ namespace MV {
 	}
 
 	std::shared_ptr<FormattedCharacter>& FormattedLine::operator[](size_t a_index) {
-		MV::require(a_index < characters.size(), MV::RangeException("FormattedLine::operator[] supplied invalid index (" + std::to_string(a_index) + " > " + std::to_string(characters.size()) + ")"));
+		MV::require<RangeException>(a_index < characters.size(), "FormattedLine::operator[] supplied invalid index (", a_index, " > ", characters.size(), ")");
 		return characters[a_index];
 	}
 
@@ -539,7 +539,7 @@ namespace MV {
 	\*************************/
 
 	std::shared_ptr<FormattedLine>& FormattedText::operator[](size_t a_index) {
-		MV::require(a_index < lines.size(), MV::RangeException("FormattedText::operator[] supplied invalid index (" + std::to_string(a_index) + " > " + std::to_string(lines.size()) + ")"));
+		MV::require<RangeException>(a_index < lines.size(), "FormattedText::operator[] supplied invalid index (", a_index, " > ", lines.size(), ")");
 		return lines[a_index];
 	}
 

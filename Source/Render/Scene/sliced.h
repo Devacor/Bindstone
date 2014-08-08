@@ -114,7 +114,7 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<Sliced> &construct){
 				Draw2D *renderer = nullptr;
 				archive.extract(cereal::make_nvp("renderer", renderer));
-				require(renderer != nullptr, MV::PointerException("Error: Failed to load a renderer for Sliced node."));
+				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Sliced node.");
 				construct(renderer);
 				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
 			}

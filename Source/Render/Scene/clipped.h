@@ -51,7 +51,7 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<Clipped> &construct){
 				Draw2D *renderer = nullptr;
 				archive.extract(cereal::make_nvp("renderer", renderer));
-				require(renderer != nullptr, MV::PointerException("Error: Failed to load a renderer for Clipped node."));
+				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Clipped node.");
 				construct(renderer);
 				archive(cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(construct.ptr())));
 			}

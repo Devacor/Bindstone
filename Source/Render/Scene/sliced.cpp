@@ -7,25 +7,25 @@ namespace MV {
 
 		std::shared_ptr<Sliced> Sliced::make(Draw2D* a_renderer) {
 			auto sliced = std::shared_ptr<Sliced>(new Sliced(a_renderer));
-			a_renderer->registerShader(sliced);
+			sliced->registerShader();
 			return sliced;
 		}
 
 		std::shared_ptr<Sliced> Sliced::make(Draw2D* a_renderer, const SliceDimensions &a_sliceDimensions, const Size<> &a_size, bool a_center) {
 			auto sliced = std::shared_ptr<Sliced>(new Sliced(a_renderer));
-			a_renderer->registerShader(sliced);
+			sliced->registerShader();
 			return sliced->sliceDimensions(a_sliceDimensions)->size(a_size, a_center);
 		}
 
 		std::shared_ptr<Sliced> Sliced::make(Draw2D* a_renderer, const SliceDimensions &a_sliceDimensions, const Size<> &a_size, const Point<> &a_centerPoint) {
 			auto sliced = std::shared_ptr<Sliced>(new Sliced(a_renderer));
-			a_renderer->registerShader(sliced);
+			sliced->registerShader();
 			return sliced->sliceDimensions(a_sliceDimensions)->size(a_size, a_centerPoint);
 		}
 
 		std::shared_ptr<Sliced> Sliced::make(Draw2D* a_renderer, const SliceDimensions &a_sliceDimensions, const BoxAABB &a_boxAABB) {
 			auto sliced = std::shared_ptr<Sliced>(new Sliced(a_renderer));
-			a_renderer->registerShader(sliced);
+			sliced->registerShader();
 			return sliced->sliceDimensions(a_sliceDimensions)->bounds(a_boxAABB);
 		}
 

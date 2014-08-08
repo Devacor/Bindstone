@@ -122,10 +122,10 @@ namespace MV {
 				archive.extract(
 					cereal::make_nvp("mouse", mouse)
 				);
-				require(mouse != nullptr, MV::PointerException("Error: Failed to load a mouse handle for Clickable node."));
+				require<PointerException>(mouse != nullptr, "Error: Failed to load a mouse handle for Clickable node.");
 				Draw2D *renderer = nullptr;
 				archive.extract(cereal::make_nvp("renderer", renderer));
-				require(renderer != nullptr, MV::PointerException("Error: Failed to load a renderer for Clickable node."));
+				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Clickable node.");
 				construct(renderer, mouse);
 				archive(
 					cereal::make_nvp("eatTouches", construct->eatTouches),
@@ -172,6 +172,8 @@ namespace MV {
 			
 			std::shared_ptr<Button> clickBounds(const BoxAABB &a_boxAABB);
 
+			virtual void setRenderer(Draw2D* a_renderer, bool includeChildren = true, bool includeParents = true) override;
+
 		protected:
 			Button(Draw2D *a_renderer, MouseState *a_mouse);
 
@@ -203,10 +205,10 @@ namespace MV {
 				archive.extract(
 					cereal::make_nvp("mouse", mouse)
 				);
-				require(mouse != nullptr, MV::PointerException("Error: Failed to load a mouse handle for Button node."));
+				require<PointerException>(mouse != nullptr, "Error: Failed to load a mouse handle for Button node.");
 				Draw2D *renderer = nullptr;
 				archive.extract(cereal::make_nvp("renderer", renderer));
-				require(renderer != nullptr, MV::PointerException("Error: Failed to load a renderer for Button node."));
+				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Button node.");
 				construct(renderer, mouse);
 				archive(
 					cereal::make_nvp("clickable", construct->clickable),

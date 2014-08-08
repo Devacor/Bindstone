@@ -47,7 +47,6 @@ namespace MV {
 	> \
 	std::shared_ptr<TypeToMake> make(FirstParameter a_firstParam, Arg... a_parameters) { \
 		auto newChild = TypeToMake::make(renderer, a_firstParam, std::forward<Arg>(a_parameters)...); \
-		newChild->quietSetDepth(maxDepth + 1.0f); \
 		add(guid(), newChild); \
 		return newChild; \
 	} \
@@ -61,7 +60,6 @@ namespace MV {
 	> \
 	std::shared_ptr<TypeToMake> make(FirstParameter a_childId, Arg... a_parameters) { \
 		auto newChild = TypeToMake::make(renderer, std::forward<Arg>(a_parameters)...); \
-		newChild->quietSetDepth(maxDepth + 1.0f); \
 		add(a_childId, newChild); \
 		return newChild; \
 	} \
@@ -117,20 +115,7 @@ namespace MV {
 			static std::shared_ptr<Node> make(Draw2D* a_renderer, const Point<> &a_placement = Point<>());
 
 			//Sets the renderer
-			virtual void setRenderer(Draw2D* a_renderer, bool includeChildren = true, bool includeParents = true){
-				renderer = a_renderer;
-				if(includeParents){
-					Node* currentParent = this;
-					while(currentParent = currentParent->myParent){
-						setRenderer(a_renderer, false, true);
-					}
-				}
-				if(includeChildren){
-					for(auto &child : drawList){
-						child.second->setRenderer(a_renderer, true, false);
-					}
-				}
-			}
+			virtual void setRenderer(Draw2D* a_renderer, bool includeChildren = true, bool includeParents = true);
 			Draw2D* getRenderer() const{ return renderer; }
 
 			virtual void clear();
@@ -138,14 +123,19 @@ namespace MV {
 			//For composite collections
 			template<typename TypeToAdd>
 			std::shared_ptr<TypeToAdd> add(const std::string &a_childId, std::shared_ptr<TypeToAdd> a_childItem) {
-				require(a_childItem, MV::PointerException("Node::add was supplied a null child for: " + a_childId));
-				if(a_childItem->parent().get() == this){
-					remove(a_childItem);
+				require<PointerException>(a_childItem, "Node::add was supplied a null child for: ", a_childId);
+
+				a_childItem->removeFromParent();
+				remove(a_childId);
+
+				if(equals(a_childItem->depth(), 0.0f)){
+					a_childItem->depth(++maxDepth);
 				}
 				maxDepth = std::max(a_childItem->depth(), maxDepth);
+
 				isSorted = 0;
 				drawListVector.clear();
-				if(renderer){
+				if(renderer != a_childItem->renderer){
 					a_childItem->setRenderer(renderer, true, false);
 				}
 				a_childItem->parent(this);
@@ -155,6 +145,11 @@ namespace MV {
 				a_childItem->onAdded(shared_from_this());
 				onChildAdded(a_childItem);
 				return a_childItem;
+			}
+
+			template<typename TypeToAdd>
+			std::shared_ptr<TypeToAdd> add(std::shared_ptr<TypeToAdd> a_childItem) {
+				return add(guid(), a_childItem);
 			}
 
 			std::shared_ptr<Node> remove(std::shared_ptr<Node> a_childItem);
@@ -218,7 +213,7 @@ namespace MV {
 			//example call Rectangle *rect = ourScene->getChild("id")->getThis<Rectangle>();
 			template<typename DerivedClass>
 			std::shared_ptr<DerivedClass> get(){
-				require((typeid(DerivedClass) == typeid(*this)), PointerException(std::string("DrawShape::getThis() was called with the wrong type info supplied.  Requested conversion: (") + typeid(DerivedClass).name() + ") Actual type: (" + typeid (*this).name() + ")"));
+				require<PointerException>(typeid(DerivedClass) == typeid(*this), "DrawShape::getThis() was called with the wrong type info supplied.  Requested conversion: (", typeid(DerivedClass).name(), ") Actual type: (", typeid (*this).name(), ")");
 				return std::dynamic_pointer_cast<DerivedClass>(shared_from_this());
 			}
 
@@ -326,11 +321,11 @@ namespace MV {
 					return *one.lock() > *two.lock();
 				};
 			}
-
-			void quietSetDepth(PointPrecision a_newDepth){
-				sortDepth = a_newDepth;
-			}
 		protected:
+			void registerShader(){
+				renderer->registerShader(shared_from_this());
+			}
+
 			virtual std::shared_ptr<Node> parentImplementation(Node* a_parentItem);
 			virtual std::shared_ptr<Node> removeFromParentImplementation();
 			virtual std::shared_ptr<Node> positionImplementation(const Point<> &a_rhs);
@@ -397,7 +392,7 @@ namespace MV {
 			Shader* shaderProgram = nullptr;
 			std::string shaderProgramId;
 			GLuint bufferId;
-			float maxDepth = -1.0f;
+			float maxDepth = 0.0f;
 
 			std::function<bool(const DrawListVectorType::value_type &, const DrawListVectorType::value_type &)> sortFunction;
 		private:

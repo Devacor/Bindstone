@@ -14,7 +14,7 @@ namespace MV {
 			slider->dragArea = Clickable::make(a_renderer, a_mouse);
 			slider->dragArea->parent(slider.get());
 			slider->dragHandle->parent(slider.get());
-			a_renderer->registerShader(slider);
+			slider->registerShader();
 
 			slider->initializeDragArea();
 			return slider;
@@ -25,7 +25,7 @@ namespace MV {
 			slider->dragArea = Clickable::make(a_renderer, a_mouse, a_size, a_center);
 			slider->dragArea->parent(slider.get());
 			slider->dragHandle->parent(slider.get());
-			a_renderer->registerShader(slider);
+			slider->registerShader();
 
 			slider->initializeDragArea();
 			return slider;
@@ -36,7 +36,7 @@ namespace MV {
 			slider->dragArea = Clickable::make(a_renderer, a_mouse, a_size, a_centerPoint);
 			slider->dragArea->parent(slider.get());
 			slider->dragHandle->parent(slider.get());
-			a_renderer->registerShader(slider);
+			slider->registerShader();
 
 			slider->initializeDragArea();
 			return slider;
@@ -46,7 +46,7 @@ namespace MV {
 			slider->dragArea = Clickable::make(a_renderer, a_mouse, a_boxAABB);
 			slider->dragArea->parent(slider.get());
 			slider->dragHandle->parent(slider.get());
-			a_renderer->registerShader(slider);
+			slider->registerShader();
 
 			slider->initializeDragArea();
 			return slider;
@@ -100,7 +100,7 @@ namespace MV {
 		}
 
 		void Slider::updateHandlePosition() {
-			if(!inUpdateHandlePosition){
+			if(!inUpdateHandlePosition && renderer){
 				inUpdateHandlePosition = true;
 				auto areaAabb = dragArea->localAABB();
 				areaAabb.minPoint -= position();
@@ -139,8 +139,16 @@ namespace MV {
 			if(!equals(a_newPercent, dragPercent)){
 				dragPercent = std::min(std::max(0.0f, a_newPercent), 1.0f);
 				updateHandlePosition();
+			} else{ //call this anyway since we manually set the percent, probably want to fire off the event.
+				onPercentChangeSlot(std::static_pointer_cast<Slider>(shared_from_this()));
 			}
 			return std::static_pointer_cast<Slider>(shared_from_this());
+		}
+
+		void Slider::setRenderer(Draw2D* a_renderer, bool includeChildren /*= true*/, bool includeParents /*= true*/) {
+			Node::setRenderer(a_renderer, includeChildren, includeParents);
+			dragArea->setRenderer(a_renderer, includeChildren, false);
+			dragHandle->setRenderer(a_renderer, includeChildren, false);
 		}
 
 	}

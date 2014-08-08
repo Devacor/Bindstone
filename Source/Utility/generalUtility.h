@@ -169,7 +169,7 @@ namespace MV {
 	bool floatEqualImplementation(FT lhs, FT rhs, IT maxUlps){
 		auto ftSize = sizeof(FT);
 		auto itSize = sizeof(IT);
-		require(ftSize == itSize, RangeException("Function 'floatEqualImplementation' had an issue! Inequal type sizes: " + std::to_string(ftSize) + " != " + std::to_string(itSize)));
+		require<RangeException>(ftSize == itSize, "Function 'floatEqualImplementation' had an issue! Inequal type sizes: ", ftSize, " != ", itSize);
 		IT intDiff = std::abs(*(IT*)&lhs - *(IT*)&rhs);
 		return intDiff <= maxUlps;
 	}
@@ -195,7 +195,7 @@ namespace MV {
 			} else if(sizeof(T) == sizeof(int64_t)){
 				return floatEqualImplementation(lhs, rhs, static_cast<int64_t>(maxUlps));
 			} else{
-				require(0, RangeException("Function 'equals' had too big a type to check!"));
+				require<RangeException>(0, "Function 'equals' had too big a type to check!");
 			}
 		}
 	}
@@ -241,5 +241,11 @@ namespace MV {
 	double RandomNumber(double a_min, double a_max);
 	float RandomNumber(float a_min, float a_max);
 	int RandomNumber(int a_min, int a_max);
+
+	//Generic constructor for automatic type deduction: MV::make<std::pair>(1, 2); and so on (instead of std::pair<int>(1, 2);)
+	template <template <typename...> class TemplateClass, typename... Args>
+	TemplateClass<Args...> make(Args&&... a_args){
+		return TemplateClass<Args...>(std::forward<Args>(a_args)...);
+	}
 }
 #endif

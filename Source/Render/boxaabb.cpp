@@ -119,7 +119,7 @@ namespace MV {
 	}
 
 	bool PointVolume::volumeCollision(PointVolume &a_compareVolume, Draw2D* a_renderer){
-		require(a_renderer != nullptr, PointerException("PointVolume::volumeCollision was passed a null renderer."));
+		require<PointerException>(a_renderer != nullptr, "PointVolume::volumeCollision was passed a null renderer.");
 		Point<> point1 = getCenter();
 		Point<> point2 = a_compareVolume.getCenter();
 

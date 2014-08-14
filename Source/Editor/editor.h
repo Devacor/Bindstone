@@ -31,6 +31,7 @@ private:
 	void initializeWindow();
 	void initializeControls();
 
+	MV::ThreadPool pool;
 	MV::Draw2D renderer;
 
 	MV::SharedTextures textures;
@@ -38,6 +39,7 @@ private:
 
 	MV::TextLibrary textLibrary;
 
+	std::shared_ptr<MV::Scene::Text> fps;
 	std::shared_ptr<MV::Scene::Node> scene;
 	std::shared_ptr<MV::Scene::Node> controls;
 
@@ -46,6 +48,9 @@ private:
 	MV::Stopwatch watch;
 	double lastSecond = 0;
 	bool done = false;
+
+	float accumulatedTime = 0.0f;
+	float accumulatedFrames = 0.0f;
 
 	EditorControls controlPanel;
 };

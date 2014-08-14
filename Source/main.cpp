@@ -1,5 +1,6 @@
 #include "Editor/editor.h"
 #include "vld.h"
+#include "Utility/threadPool.h"
 
 int main(int argc, char *argv[]){
 	Editor editor;

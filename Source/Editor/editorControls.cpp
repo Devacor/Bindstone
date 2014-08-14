@@ -23,12 +23,13 @@ void EditorControls::handleInput(SDL_Event &a_event) {
 	}
 }
 
-EditorControls::EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::shared_ptr<MV::Scene::Node> a_root, MV::TextLibrary *a_textLibrary, MV::MouseState *a_mouse):
+EditorControls::EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::shared_ptr<MV::Scene::Node> a_root, MV::TextLibrary *a_textLibrary, MV::MouseState *a_mouse, MV::ThreadPool *a_pool):
 	editorScene(a_editor),
 	rootScene(a_root),
 	textLibraryHandle(a_textLibrary),
 	mouseHandle(a_mouse),
-	currentSelection(a_root, *a_mouse) {
+	currentSelection(a_root, *a_mouse),
+	poolHandle(a_pool){
 	
 	draggableBox = editorScene->make<MV::Scene::Node>("ContextMenu");
 }

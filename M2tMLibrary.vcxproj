@@ -110,7 +110,7 @@
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501</AdditionalOptions>
       <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -152,7 +152,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <EnablePREfast>false</EnablePREfast>
-      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501</AdditionalOptions>
       <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -226,6 +226,7 @@
     <ClCompile Include="Source\Utility\generalUtility.cpp" />
     <ClCompile Include="Source\Utility\notification.cpp" />
     <ClCompile Include="Source\Utility\stopwatch.cpp" />
+    <ClCompile Include="Source\Utility\threadPool.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\external\cereal\include\cereal\access.hpp" />
@@ -348,6 +349,7 @@
     <ClInclude Include="Source\Utility\signal.hpp" />
     <ClInclude Include="Source\Utility\stopwatch.h" />
     <ClInclude Include="Source\Utility\task.hpp" />
+    <ClInclude Include="Source\Utility\threadPool.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html" />

@@ -32,16 +32,18 @@ namespace MV {
 			rotatePoint3D(gravityConstant.x, gravityConstant.y, gravityConstant.z, a_direction.x, a_direction.y, a_direction.z);
 		}
 
-		std::shared_ptr<Emitter> Emitter::make(Draw2D* a_renderer) {
-			auto emitter = std::shared_ptr<Emitter>(new Emitter(a_renderer));
+		std::shared_ptr<Emitter> Emitter::make(Draw2D* a_renderer, ThreadPool* a_pool) {
+			auto emitter = std::shared_ptr<Emitter>(new Emitter(a_renderer, a_pool));
 			emitter->registerShader();
+			emitter->nextSpawnDelta = 0.0f;
 			return emitter;
 		}
 
-		std::shared_ptr<Emitter> Emitter::make(Draw2D* a_renderer, const EmitterSpawnProperties &a_values) {
-			auto emitter = std::shared_ptr<Emitter>(new Emitter(a_renderer));
+		std::shared_ptr<Emitter> Emitter::make(Draw2D* a_renderer, ThreadPool* a_pool, const EmitterSpawnProperties &a_values) {
+			auto emitter = std::shared_ptr<Emitter>(new Emitter(a_renderer, a_pool));
 			emitter->registerShader();
 			emitter->spawnProperties = a_values;
+			emitter->nextSpawnDelta = RandomNumber(emitter->spawnProperties.minimumSpawnRate, emitter->spawnProperties.maximumSpawnRate);
 			return emitter;
 		}
 
@@ -69,7 +71,7 @@ namespace MV {
 			};
 		}
 
-		void Emitter::spawnParticle(){
+		void Emitter::spawnParticle(size_t a_groupIndex){
 			Particle particle;
 
 			particle.position = randomMix(spawnProperties.minimumPosition, spawnProperties.maximumPosition);
@@ -99,27 +101,85 @@ namespace MV {
 			
 			particle.update(0.0f);
 
-			particles.push_back(particle);
+			particleGroups[a_groupIndex].push_back(particle);
+		}
+
+		void Emitter::spawnParticlesOnMultipleThreads(double a_dt){
+			spawnsFinished = 0;
+			timeSinceLastParticle += a_dt;
+			size_t particlesToSpawn = static_cast<size_t>(timeSinceLastParticle / nextSpawnDelta);
+			size_t totalParticles = std::min(std::accumulate(particleGroups.begin(), particleGroups.end(), static_cast<size_t>(0), [](size_t a_total, std::vector<Particle>& a_group){return a_group.size() + a_total; }), static_cast<size_t>(spawnProperties.maximumParticles));
+			particlesToSpawn = std::min(particlesToSpawn + totalParticles, static_cast<size_t>(spawnProperties.maximumParticles)) - totalParticles;
+
+			double maxTime = .001;
+
+			if(particlesToSpawn > emitterThreads){
+				for(size_t currentThread = 0; currentThread < emitterThreads; ++currentThread){
+					pool->task([=](){
+						MV::Stopwatch timer;
+						timer.start();
+						for(size_t count = 0; timer.check() < maxTime && count < particlesToSpawn / emitterThreads; ++count){
+							spawnParticle(currentThread);
+						}
+					}, [&, a_dt](){
+						if(spawnsFinished+1 == emitterThreads){
+							updateParticlesOnMultipleThreads(a_dt);
+						}
+						++spawnsFinished;
+					});
+				}
+				timeSinceLastParticle = 0.0f;
+				nextSpawnDelta = RandomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
+			} else if(particlesToSpawn > 0){
+				pool->task([=](){
+					auto randomOffset = RandomNumber(0, emitterThreads);
+					for(size_t count = 0; count < particlesToSpawn; ++count){
+						spawnParticle((count + randomOffset) % emitterThreads);
+					}
+				}, [&, a_dt](){
+					updateParticlesOnMultipleThreads(a_dt);
+					spawnsFinished = emitterThreads;
+				});
+				timeSinceLastParticle = 0.0f;
+				nextSpawnDelta = RandomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
+			} else {
+				updateParticlesOnMultipleThreads(a_dt);
+				spawnsFinished = emitterThreads;
+			}
+		}
+
+		void Emitter::updateParticlesOnMultipleThreads(double a_dt){
+			loadParticlesToPoints();
+
+			for(size_t currentThread = 0; currentThread < emitterThreads; ++currentThread){
+				pool->task([=](){
+					particleGroups[currentThread].erase(std::remove_if(particleGroups[currentThread].begin(), particleGroups[currentThread].end(), [&](Particle& a_particle){
+						return a_particle.update(a_dt);
+					}), particleGroups[currentThread].end());
+				}, [&](){
+					++updatesFinished;
+				});
+			}
 		}
 
 		void Emitter::update(double a_dt) {
-			particles.erase(std::remove_if(particles.begin(), particles.end(), [&](Particle& a_particle){
-				return a_particle.update(a_dt);
-			}), particles.end());
-			timeSinceLastParticle += a_dt;
-			bool spawned = false;
-			int particlesThisFrame = 0;
-			if(enabled()){
-				while(timeSinceLastParticle > nextSpawnDelta && particles.size() <= spawnProperties.maximumParticles && particlesThisFrame++ < MAX_PARTICLES_PER_FRAME){
-					timeSinceLastParticle -= nextSpawnDelta;
-					spawnParticle();
+			if(updatesFinished == emitterThreads && spawnsFinished == emitterThreads){
+				if(nextSpawnDelta == 0.0f){
 					nextSpawnDelta = RandomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
 				}
+				updatesFinished = 0;
+
+				bool spawned = false;
+				int particlesThisFrame = 0;
+				if(enabled()){
+					spawnParticlesOnMultipleThreads(a_dt);
+				}
+				if(disabled() || particlesThisFrame == MAX_PARTICLES_PER_FRAME){
+					spawnsFinished = emitterThreads;
+					updateParticlesOnMultipleThreads(a_dt);
+					timeSinceLastParticle = 0.0f;
+				}
 			}
-			if(disabled() || particlesThisFrame == MAX_PARTICLES_PER_FRAME){
-				timeSinceLastParticle = 0.0f;
-			}
-			loadParticlesToPoints();
 		}
 
 		void Emitter::loadParticlesToPoints() {
@@ -138,23 +198,25 @@ namespace MV {
 				texturePoints.push_back({1.0f, 1.0f});
 				texturePoints.push_back({1.0f, 0.0f});
 			}
+			for(auto &&particleGroup : particleGroups){
+				for(auto &&particle : particleGroup){
+					BoxAABB bounds(scaleToPoint(particle.scale / 2.0f), scaleToPoint(particle.scale / -2.0f));
 
-			for(auto &particle : particles){
-				BoxAABB bounds(scaleToPoint(particle.scale / 2.0f), scaleToPoint(particle.scale / -2.0f));
+					for(size_t i = 0; i < 4; ++i){
+						auto corner = bounds[i];
+						rotatePoint3D(corner.x, corner.y, corner.z, particle.rotation.x, particle.rotation.y, particle.rotation.z);
+						corner += particle.position;
+						points.push_back(DrawPoint(corner, particle.color, texturePoints[i]));
+					}
 
-				for(size_t i = 0;i < 4;++i){
-					auto corner = bounds[i];
-					rotatePoint3D(corner.x, corner.y, corner.z, particle.rotation.x, particle.rotation.y, particle.rotation.z);
-					corner += particle.position;
-					points.push_back(DrawPoint(corner, particle.color, texturePoints[i]));
+					appendQuadVertexIndices(vertexIndices, static_cast<GLuint>(points.size()));
 				}
-
-				appendQuadVertexIndices(vertexIndices, static_cast<GLuint>(points.size()));
 			}
 		}
 
 		std::shared_ptr<Emitter> Emitter::properties(const EmitterSpawnProperties &a_emitterProperties) {
 			spawnProperties = a_emitterProperties;
+			nextSpawnDelta = RandomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
 			return std::static_pointer_cast<Emitter>(shared_from_this());
 		}
 
@@ -163,6 +225,7 @@ namespace MV {
 		}
 
 		MV::Scene::EmitterSpawnProperties& Emitter::properties() {
+			nextSpawnDelta = 0.0f;
 			return spawnProperties;
 		}
 
@@ -189,24 +252,15 @@ namespace MV {
 		}
 
 		MV::BoxAABB Emitter::localAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
-			points.clear();
-			points.push_back(spawnProperties.minimumPosition);
-			points.push_back(spawnProperties.maximumPosition);
-			return Node::localAABBImplementation(a_includeChildren, a_nestedCall);
+			return{worldFromLocal(spawnProperties.minimumPosition), worldFromLocal(spawnProperties.maximumPosition)};
 		}
 
 		MV::BoxAABB Emitter::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
-			points.clear();
-			points.push_back(spawnProperties.minimumPosition);
-			points.push_back(spawnProperties.maximumPosition);
-			return Node::screenAABBImplementation(a_includeChildren, a_nestedCall);
+			return {castPoint<PointPrecision>(screenFromLocal(spawnProperties.minimumPosition)), castPoint<PointPrecision>(screenFromLocal(spawnProperties.maximumPosition))};
 		}
 
 		MV::BoxAABB Emitter::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
-			points.clear();
-			points.push_back(spawnProperties.minimumPosition);
-			points.push_back(spawnProperties.maximumPosition);
-			return Node::worldAABBImplementation(a_includeChildren, a_nestedCall);
+			return{worldFromLocal(spawnProperties.minimumPosition), worldFromLocal(spawnProperties.maximumPosition) };
 		}
 
 		const double Emitter::MAX_TIME_STEP = 1.0f;

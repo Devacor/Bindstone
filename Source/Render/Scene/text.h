@@ -19,7 +19,6 @@ namespace MV{
 			Slot<TextSlotSignature> onEnterSlot;
 		public:
 			~Text(){
-				int i = 0;
 			}
 
 			typedef Slot<TextSlotSignature>::SharedSignalType Enter;

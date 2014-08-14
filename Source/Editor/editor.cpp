@@ -12,7 +12,7 @@ Editor::Editor():
 	textLibrary(&renderer),
 	scene(MV::Scene::Node::make(&renderer)),
 	controls(MV::Scene::Node::make(&renderer)),
-	controlPanel(controls, scene, &textLibrary, &mouse){
+	controlPanel(controls, scene, &textLibrary, &mouse, &pool){
 
 	initializeWindow();
 	initializeControls();
@@ -20,6 +20,14 @@ Editor::Editor():
 
 //return true if we're still good to go
 bool Editor::update(double dt){
+	accumulatedTime += static_cast<float>(dt);
+	++accumulatedFrames;
+	if(accumulatedFrames > 60.0f){
+		accumulatedFrames /= 2.0f;
+		accumulatedTime /= 2.0f;
+	}
+	fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
+	pool.run();
 	return !done;
 }
 
@@ -46,6 +54,8 @@ void Editor::initializeWindow(){
 	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
 	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 	
+	fps = scene->make<MV::Scene::Text>(&textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
+
 	/*auto texture = MV::FileTextureDefinition::make("Assets/Images/dogfox.png");
 	auto slicedthing = scene->make<MV::Scene::Sliced>(MV::Scene::SliceDimensions({8.0f, 8.0f}, {32.0f, 32.0f}), MV::size(100.0f, 50.0f))->
 		position({300.0f, 300.0f})->

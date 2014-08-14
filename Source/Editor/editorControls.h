@@ -14,7 +14,7 @@ namespace MV{
 
 class EditorControls {
 public:
-	EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::shared_ptr<MV::Scene::Node> a_root, MV::TextLibrary *a_textLibrary, MV::MouseState *a_mouse);
+	EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::shared_ptr<MV::Scene::Node> a_root, MV::TextLibrary *a_textLibrary, MV::MouseState *a_mouse, MV::ThreadPool *a_pool);
 
 	MV::TextLibrary* textLibrary() const{
 		return textLibraryHandle;
@@ -22,6 +22,10 @@ public:
 
 	MV::MouseState* mouse() const{
 		return mouseHandle;
+	}
+
+	MV::ThreadPool* pool() const{
+		return poolHandle;
 	}
 
 	std::shared_ptr<MV::Scene::Node> root(){
@@ -64,6 +68,7 @@ private:
 
 	MV::TextLibrary *textLibraryHandle;
 	MV::MouseState *mouseHandle;
+	MV::ThreadPool *poolHandle;
 
 	std::unique_ptr<EditorPanel> currentPanel;
 	Selection currentSelection;

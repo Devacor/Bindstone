@@ -9,5 +9,6 @@
 	#include "Utility/signal.hpp"
 	#include "Utility/messageHandler.hpp"
 	#include "Utility/task.hpp"
+	#include "Utility/threadPool.h"
 
 #endif

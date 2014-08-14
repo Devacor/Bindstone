@@ -98,8 +98,8 @@ void SelectedRectangleEditorPanel::handleInput(SDL_Event &a_event) {
 }
 
 SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableEmitter> a_controls):
-	EditorPanel(a_panel),
-	controls(a_controls) {
+EditorPanel(a_panel),
+controls(a_controls) {
 
 	auto node = panel.content();
 	auto grid = node->make<MV::Scene::Grid>("Background")->rowWidth(242.0f)->
@@ -140,23 +140,23 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 
 
 	auto maximumEndSpeed = makeSlider(*node->getRenderer(), *panel.mouse(), [&](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().maximum.endSpeed = MV::mixIn(0.0f, 1000.0f, a_slider->percent(), 2);
-	}, 0.0f);
+		controls->elementToEdit->properties().maximum.endSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
+	}, 0.5f);
 	auto minimumEndSpeed = makeSlider(*node->getRenderer(), *panel.mouse(), [=](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().minimum.endSpeed = MV::mixIn(0.0f, 1000.0f, a_slider->percent(), 2);
+		controls->elementToEdit->properties().minimum.endSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
 		maximumEndSpeed->percent(a_slider->percent());
-	}, 0.0f);
+	}, 0.5f);
 
 	makeLabel(this, grid, *panel.textLibrary(), "initialSpeed", labelSize, UTF_CHAR_STR("Start Speed"));
-	auto startSpeed = makeSlider(*node->getRenderer(), *panel.mouse(), [&](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().maximum.beginSpeed = MV::mixIn(0.0f, 1000.0f, a_slider->percent(), 2);
+	auto startSpeed = makeSlider(*node->getRenderer(), *panel.mouse(), [=](std::shared_ptr<MV::Scene::Slider> a_slider){
+		controls->elementToEdit->properties().maximum.beginSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
 		maximumEndSpeed->percent(a_slider->percent());
-	}, 0.0f);
+	}, 0.5f);
 	makeSlider(*panel.mouse(), grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().minimum.beginSpeed = MV::mixIn(0.0f, 1000.0f, a_slider->percent(), 2);
+		controls->elementToEdit->properties().minimum.beginSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
 		startSpeed->percent(a_slider->percent());
 		minimumEndSpeed->percent(a_slider->percent());
-	}, 0.0f);
+	}, 0.5f);
 	grid->add(startSpeed);
 
 	makeLabel(this, grid, *panel.textLibrary(), "speedChange", labelSize, UTF_CHAR_STR("End Speed"));
@@ -175,34 +175,34 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 
 	makeLabel(this, grid, *panel.textLibrary(), "directionChange", labelSize, UTF_CHAR_STR("Direction Change"));
 	auto maximumDirectionChange = makeSlider(*node->getRenderer(), *panel.mouse(), [&](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().maximum.directionalChange = {0.0f, 0.0f, a_slider->percent() * 1440.0f};
-	}, 0.0f);
+		controls->elementToEdit->properties().maximum.directionalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
+	}, 0.5f);
 	makeSlider(*panel.mouse(), grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().maximum.directionalChange = {0.0f, 0.0f, a_slider->percent() * 1440.0f};
+		controls->elementToEdit->properties().minimum.directionalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
 		maximumDirectionChange->percent(a_slider->percent());
-	}, 0.0f);
+	}, 0.5f);
 	grid->add(maximumDirectionChange);
 
 	auto maximumEndSize = makeSlider(*node->getRenderer(), *panel.mouse(), [=](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().maximum.endScale = a_slider->percent() * 110.0f;
-	}, 0.15f);
+		controls->elementToEdit->properties().maximum.endScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
+	}, 0.5f);
 	auto minimumEndSize = makeSlider(*node->getRenderer(), *panel.mouse(), [=](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().minimum.endScale = a_slider->percent() * 110.0f;
+		controls->elementToEdit->properties().minimum.endScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		maximumEndSize->percent(a_slider->percent());
-	}, 0.15f);
+	}, 0.5f);
 
 	makeLabel(this, grid, *panel.textLibrary(), "startSize", labelSize, UTF_CHAR_STR("Start Size"));
 	auto startSize = makeSlider(*node->getRenderer(), *panel.mouse(), [=](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().maximum.beginScale = a_slider->percent() * 110.0f;
+		controls->elementToEdit->properties().maximum.beginScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		maximumEndSize->percent(a_slider->percent());
 	}, 0.15f);
 	makeSlider(*panel.mouse(), grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().minimum.beginScale = a_slider->percent() * 110.0f;
+		controls->elementToEdit->properties().minimum.beginScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		startSize->percent(a_slider->percent());
 		minimumEndSize->percent(a_slider->percent());
 	}, 0.15f);
 	grid->add(startSize);
-	
+
 	makeLabel(this, grid, *panel.textLibrary(), "endSize", labelSize, UTF_CHAR_STR("End Size"));
 	grid->add(minimumEndSize);
 	grid->add(maximumEndSize);
@@ -219,10 +219,10 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 
 	makeLabel(this, grid, *panel.textLibrary(), "rotationChange", labelSize, UTF_CHAR_STR("Rotation Change"));
 	auto maximumRotationChange = makeSlider(*node->getRenderer(), *panel.mouse(), [&](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().maximum.rotationalChange = {0.0f, 0.0f, a_slider->percent() * 1440.0f};
+		controls->elementToEdit->properties().maximum.rotationalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
 	}, 0.0f);
 	makeSlider(*panel.mouse(), grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().minimum.rotationalChange = {0.0f, 0.0f, a_slider->percent() * 1440.0f};
+		controls->elementToEdit->properties().minimum.rotationalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
 		maximumRotationChange->percent(a_slider->percent());
 	}, 0.0f);
 	grid->add(maximumRotationChange);
@@ -295,7 +295,7 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 		maximumAInitial->percent(a_slider->percent());
 		maximumAEndMin->percent(a_slider->percent());
 	});
-	
+
 	makeLabel(this, grid, *panel.textLibrary(), "initialColorMax", labelSize, UTF_CHAR_STR("Initial Color Max"));
 	grid->add(maximumRInitial);
 	grid->add(maximumGInitial);
@@ -347,11 +347,11 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	});
 
 	controls->onChange = [&](EditableEmitter *a_element){
-		posX->number(static_cast<int>(controls->position().x + .5f));
-		posY->number(static_cast<int>(controls->position().y + .5f));
+		posX->number(std::floor(controls->position().x + .5f));
+		posY->number(std::floor(controls->position().y + .5f));
 
-		width->number(static_cast<int>(controls->size().width + .5f));
-		height->number(static_cast<int>(controls->size().height + .5f));
+		width->number(std::floor(controls->size().width + .5f));
+		height->number(std::floor(controls->size().height + .5f));
 	};
 
 	auto deselectLocalAABB = deselectButton->localAABB();
@@ -396,7 +396,7 @@ void DeselectedEditorPanel::completeSelection(const MV::BoxAABB &a_selected) {
 	//newShape->color({CREATED_DEFAULT});
 
 	//panel.loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(newShape, panel.editor(), panel.mouse()));
-	auto newEmitter = panel.root()->make<MV::Scene::Emitter>("Constructed_" + std::to_string(i++))->position(a_selected.minPoint);
+	auto newEmitter = panel.root()->make<MV::Scene::Emitter>("Constructed_" + std::to_string(i++), panel.pool())->position(a_selected.minPoint);
 	auto editableEmitter = std::make_shared<EditableEmitter>(newEmitter, panel.editor(), panel.mouse());
 	editableEmitter->size(a_selected.size());
 

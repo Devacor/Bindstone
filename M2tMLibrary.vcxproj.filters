@@ -212,6 +212,9 @@
     <ClCompile Include="Source\Render\Scene\slider.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Utility\threadPool.cpp">
+      <Filter>Source Files\Utility</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -572,6 +575,9 @@
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
     <ClInclude Include="Source\Utility\task.hpp">
+      <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\threadPool.h">
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
   </ItemGroup>

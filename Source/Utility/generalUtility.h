@@ -105,7 +105,7 @@ namespace MV {
 	}
 
 	template <class Type>
-	void rotatePoint3D(Type &x, Type &y, Type &z, Type aX, Type aY, Type aZ, Type angle = 1.0, AngleType angleUnitIs = DEGREES){
+	void rotatePoint3D(Type &x, Type &y, Type &z, Type aX, Type aY, Type aZ, AngleType angleUnitIs = DEGREES){
 		if(angleUnitIs == DEGREES){
 			aY = toRadians(aY); aX = toRadians(aX); aZ = toRadians(aZ);
 		}
@@ -121,6 +121,15 @@ namespace MV {
 		tmpx = x;
 		x = (y * sin(aZ)) + (x * cos(aZ));
 		y = (y * cos(aZ)) - (tmpx * sin(aZ));
+	}
+
+	template <class Type>
+	void rotatePoint(Type &a_point, Type a_angle, AngleType angleUnitIs = DEGREES){
+		if(equals(a_angle.x, 0.0f) && equals(a_angle.y, 0.0f)){
+			rotatePoint2D(a_point.x, a_point.y, a_angle.z, angleUnitIs);
+		} else{
+			rotatePoint3D(a_point.x, a_point.y, a_point.z, a_angle.x, a_angle.y, a_angle.z, angleUnitIs);
+		}
 	}
 
 	template <class Type>
@@ -221,6 +230,10 @@ namespace MV {
 			return std::uniform_int_distribution<int>{a_min, a_max}(generator);
 		}
 
+		size_t number(size_t a_min, size_t a_max){
+			return std::uniform_int_distribution<size_t>{a_min, a_max}(generator);
+		}
+
 		double number(double a_min, double a_max){
 			return std::uniform_real_distribution<double>{a_min, std::nextafter(a_max, a_max + 1.0)}(generator);
 		}
@@ -233,19 +246,55 @@ namespace MV {
 		std::mt19937 generator;
 
 		static Random* instance;
-		friend double RandomNumber(double, double);
-		friend float RandomNumber(float, float);
-		friend int RandomNumber(int, int);
+		friend double randomNumber(double, double);
+		friend float randomNumber(float, float);
+		friend int randomNumber(int, int);
+		friend size_t randomNumber(size_t, size_t);
 	};
 
-	double RandomNumber(double a_min, double a_max);
-	float RandomNumber(float a_min, float a_max);
-	int RandomNumber(int a_min, int a_max);
+	double randomNumber(double a_min, double a_max);
+	float randomNumber(float a_min, float a_max);
+	int randomNumber(int a_min, int a_max);
 
 	//Generic constructor for automatic type deduction: MV::make<std::pair>(1, 2); and so on (instead of std::pair<int>(1, 2);)
 	template <template <typename...> class TemplateClass, typename... Args>
 	TemplateClass<Args...> make(Args&&... a_args){
 		return TemplateClass<Args...>(std::forward<Args>(a_args)...);
 	}
+
+	template <typename T>
+	void moveAppend(std::vector<T>& a_dst, std::vector<T>& a_src){
+		a_dst.insert(a_dst.end(), make_move_iterator(a_src.begin()), make_move_iterator(a_src.end()));
+		a_src.clear();
+	}
+
+	template <typename T>
+	void moveAppend(std::vector<T>& a_dst, size_t a_dstOffset, std::vector<T>& a_src){
+		a_dst.insert(a_dst.begin() + a_dstOffset, make_move_iterator(a_src.begin()), make_move_iterator(a_src.end()));
+		a_src.clear();
+	}
+
+	template <typename T>
+	void moveCopy(std::vector<T>& a_dst, size_t a_dstOffset, std::vector<T>& a_src){
+		std::copy(make_move_iterator(a_src.begin()), make_move_iterator(a_src.end()), a_dst.begin() + a_dstOffset);
+		a_src.clear();
+	}
+
+	class atomic_cout {
+		std::ostringstream stream;
+	public:
+		template <typename T>
+		atomic_cout& operator<<(T const& t) {
+			stream << t;
+			return *this;
+		}
+		atomic_cout& operator<<(std::ostream& (*f)(std::ostream& o)) {
+			stream << f;
+			return *this;
+		}
+		~atomic_cout() {
+			std::cout << stream.str();
+		}
+	};
 }
 #endif

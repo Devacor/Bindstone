@@ -195,12 +195,12 @@ controls(a_controls) {
 	auto startSize = makeSlider(*node->getRenderer(), *panel.mouse(), [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		maximumEndSize->percent(a_slider->percent());
-	}, 0.15f);
+	}, 0.55f);
 	makeSlider(*panel.mouse(), grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		startSize->percent(a_slider->percent());
 		minimumEndSize->percent(a_slider->percent());
-	}, 0.15f);
+	}, 0.55f);
 	grid->add(startSize);
 
 	makeLabel(this, grid, *panel.textLibrary(), "endSize", labelSize, UTF_CHAR_STR("End Size"));
@@ -220,11 +220,11 @@ controls(a_controls) {
 	makeLabel(this, grid, *panel.textLibrary(), "rotationChange", labelSize, UTF_CHAR_STR("Rotation Change"));
 	auto maximumRotationChange = makeSlider(*node->getRenderer(), *panel.mouse(), [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.rotationalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
-	}, 0.0f);
+	}, 0.5f);
 	makeSlider(*panel.mouse(), grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.rotationalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
 		maximumRotationChange->percent(a_slider->percent());
-	}, 0.0f);
+	}, 0.5f);
 	grid->add(maximumRotationChange);
 
 	auto maximumREndMax = makeSlider(*node->getRenderer(), *panel.mouse(), [=](std::shared_ptr<MV::Scene::Slider> a_slider){
@@ -390,12 +390,14 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 }
 
 void DeselectedEditorPanel::completeSelection(const MV::BoxAABB &a_selected) {
-	static long i = 0;
-	panel.selection().disable();
-	//auto newShape = panel.root()->make<MV::Scene::Rectangle>("Constructed_" + boost::lexical_cast<std::string>(i++), a_selected.size())->position(a_selected.minPoint);
-	//newShape->color({CREATED_DEFAULT});
+ 	static long i = 0;
+ 	panel.selection().disable();
 
-	//panel.loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(newShape, panel.editor(), panel.mouse()));
+// 	auto newShape = panel.root()->make<MV::Scene::Rectangle>("Constructed_" + boost::lexical_cast<std::string>(i++), a_selected.size())->position(a_selected.minPoint);
+// 	newShape->color({CREATED_DEFAULT});
+// 
+// 	panel.loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(newShape, panel.editor(), panel.mouse()));
+
 	auto newEmitter = panel.root()->make<MV::Scene::Emitter>("Constructed_" + std::to_string(i++), panel.pool())->position(a_selected.minPoint);
 	auto editableEmitter = std::make_shared<EditableEmitter>(newEmitter, panel.editor(), panel.mouse());
 	editableEmitter->size(a_selected.size());

@@ -3,4 +3,5 @@
 	#include "Render/Scene/package.h"
 	#include "Render/textures.h"
 	#include "Render/formattedText.h"
+	#include "Render/texturePacker.h"
 #endif

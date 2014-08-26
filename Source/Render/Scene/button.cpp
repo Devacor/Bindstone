@@ -158,7 +158,7 @@ namespace MV {
 
 		bool Clickable::mouseInBounds(const MouseState& a_state) {
 			if(visible()){
-				return screenAABB(shouldUseChildrenInHitDetection).pointContained(castPoint<PointPrecision>(a_state.position()));
+				return screenAABB(shouldUseChildrenInHitDetection).contains(castPoint<PointPrecision>(a_state.position()));
 			} else{
 				return false;
 			}

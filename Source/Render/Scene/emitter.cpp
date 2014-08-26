@@ -19,7 +19,7 @@ namespace MV {
 			color = mix(change.beginColor, change.endColor, mixValue);
 
 			Point<> distance(0.0f, -speed, 0.0f);
-			rotatePoint3D(distance.x, distance.y, distance.z, direction.x, direction.y, direction.z);
+			rotatePoint(distance, direction);
 			position += distance * timeScale;
 			position += gravityConstant * timeScale;
 
@@ -29,7 +29,7 @@ namespace MV {
 
 		void Particle::setGravity(float a_magnitude, const AxisAngles &a_direction){
 			gravityConstant.locate(0.0f, -a_magnitude, 0.0f);
-			rotatePoint3D(gravityConstant.x, gravityConstant.y, gravityConstant.z, a_direction.x, a_direction.y, a_direction.z);
+			rotatePoint(gravityConstant, a_direction);
 		}
 
 		std::shared_ptr<Emitter> Emitter::make(Draw2D* a_renderer, ThreadPool* a_pool) {
@@ -43,12 +43,13 @@ namespace MV {
 			auto emitter = std::shared_ptr<Emitter>(new Emitter(a_renderer, a_pool));
 			emitter->registerShader();
 			emitter->spawnProperties = a_values;
-			emitter->nextSpawnDelta = RandomNumber(emitter->spawnProperties.minimumSpawnRate, emitter->spawnProperties.maximumSpawnRate);
+			emitter->nextSpawnDelta = randomNumber(emitter->spawnProperties.minimumSpawnRate, emitter->spawnProperties.maximumSpawnRate);
 			return emitter;
 		}
 
 		void Emitter::drawImplementation() {
-			update(std::min(timer.delta(), MAX_TIME_STEP));
+			update();
+			std::lock_guard<std::mutex> guard(lock);
 			if(!points.empty()){
 				defaultDraw(GL_TRIANGLES);
 			}
@@ -56,19 +57,39 @@ namespace MV {
 
 		MV::Point<> Emitter::randomMix(const MV::Point<> &a_rhs, const MV::Point<> &a_lhs){
 			return{
-				mix(a_rhs.x, a_lhs.x, RandomNumber(0.0f, 1.0f)),
-				mix(a_rhs.y, a_lhs.y, RandomNumber(0.0f, 1.0f)), 
-				mix(a_rhs.z, a_lhs.z, RandomNumber(0.0f, 1.0f))
+				mix(a_rhs.x, a_lhs.x, randomNumber(0.0f, 1.0f)),
+				mix(a_rhs.y, a_lhs.y, randomNumber(0.0f, 1.0f)), 
+				mix(a_rhs.z, a_lhs.z, randomNumber(0.0f, 1.0f))
 			};
 		}
 
 		MV::Color Emitter::randomMix(const MV::Color &a_rhs, const MV::Color &a_lhs){
 			return{
-				mix(a_rhs.R, a_lhs.R, RandomNumber(0.0f, 1.0f)),
-				mix(a_rhs.G, a_lhs.G, RandomNumber(0.0f, 1.0f)),
-				mix(a_rhs.B, a_lhs.B, RandomNumber(0.0f, 1.0f)),
-				mix(a_rhs.A, a_lhs.A, RandomNumber(0.0f, 1.0f))
+				mix(a_rhs.R, a_lhs.R, randomNumber(0.0f, 1.0f)),
+				mix(a_rhs.G, a_lhs.G, randomNumber(0.0f, 1.0f)),
+				mix(a_rhs.B, a_lhs.B, randomNumber(0.0f, 1.0f)),
+				mix(a_rhs.A, a_lhs.A, randomNumber(0.0f, 1.0f))
 			};
+		}
+
+		void Emitter::update() {
+			bool falseValue = false;
+			if(updateInProgress.compare_exchange_strong(falseValue, true)){
+				pool->task([this](){
+					double dt = std::min(timer.delta(false), MAX_TIME_STEP);
+					if(dt != 0){
+						timer.delta();
+					}
+					if(nextSpawnDelta == 0){
+						nextSpawnDelta = randomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
+					}
+					if(enabled()){
+						spawnParticlesOnMultipleThreads(dt);
+					}else{
+						updateParticlesOnMultipleThreads(dt);
+					}
+				});
+			}
 		}
 
 		void Emitter::spawnParticle(size_t a_groupIndex){
@@ -81,110 +102,86 @@ namespace MV {
 			particle.direction = randomMix(spawnProperties.minimumDirection, spawnProperties.maximumDirection);
 			particle.change.directionalChange = randomMix(spawnProperties.minimum.directionalChange, spawnProperties.maximum.directionalChange);
 
-			particle.change.beginSpeed = mix(spawnProperties.minimum.beginSpeed, spawnProperties.maximum.beginSpeed, RandomNumber(0.0f, 1.0f));
-			particle.change.endSpeed = mix(spawnProperties.minimum.endSpeed, spawnProperties.maximum.endSpeed, RandomNumber(0.0f, 1.0f));
+			particle.change.beginSpeed = mix(spawnProperties.minimum.beginSpeed, spawnProperties.maximum.beginSpeed, randomNumber(0.0f, 1.0f));
+			particle.change.endSpeed = mix(spawnProperties.minimum.endSpeed, spawnProperties.maximum.endSpeed, randomNumber(0.0f, 1.0f));
 
-			particle.change.beginScale = mix(spawnProperties.minimum.beginScale, spawnProperties.maximum.beginScale, RandomNumber(0.0f, 1.0f));
-			particle.change.endScale = mix(spawnProperties.minimum.endScale, spawnProperties.maximum.endScale, RandomNumber(0.0f, 1.0f));
+			particle.change.beginScale = mix(spawnProperties.minimum.beginScale, spawnProperties.maximum.beginScale, randomNumber(0.0f, 1.0f));
+			particle.change.endScale = mix(spawnProperties.minimum.endScale, spawnProperties.maximum.endScale, randomNumber(0.0f, 1.0f));
 
 			particle.change.beginColor = randomMix(spawnProperties.minimum.beginColor, spawnProperties.maximum.beginColor);
 			particle.change.endColor = randomMix(spawnProperties.minimum.endColor, spawnProperties.maximum.endColor);
 
-			particle.change.animationFramesPerSecond = mix(spawnProperties.minimum.animationFramesPerSecond, spawnProperties.maximum.animationFramesPerSecond, RandomNumber(0.0f, 1.0f));
+			particle.change.animationFramesPerSecond = mix(spawnProperties.minimum.animationFramesPerSecond, spawnProperties.maximum.animationFramesPerSecond, randomNumber(0.0f, 1.0f));
 
-			particle.change.maxLifespan = mix(spawnProperties.minimum.maxLifespan, spawnProperties.maximum.maxLifespan, RandomNumber(0.0f, 1.0f));
+			particle.change.maxLifespan = mix(spawnProperties.minimum.maxLifespan, spawnProperties.maximum.maxLifespan, randomNumber(0.0f, 1.0f));
 
 			particle.setGravity(
-				mix(spawnProperties.minimum.gravityMagnitude, spawnProperties.maximum.gravityMagnitude, RandomNumber(0.0f, 1.0f)),
+				mix(spawnProperties.minimum.gravityMagnitude, spawnProperties.maximum.gravityMagnitude, randomNumber(0.0f, 1.0f)),
 				randomMix(spawnProperties.minimum.gravityDirection, spawnProperties.maximum.gravityDirection)
 			);
 			
 			particle.update(0.0f);
 
-			particleGroups[a_groupIndex].push_back(particle);
+			threadData[a_groupIndex].particles.push_back(particle);
 		}
 
 		void Emitter::spawnParticlesOnMultipleThreads(double a_dt){
-			spawnsFinished = 0;
-			timeSinceLastParticle += a_dt;
-			size_t particlesToSpawn = static_cast<size_t>(timeSinceLastParticle / nextSpawnDelta);
-			size_t totalParticles = std::min(std::accumulate(particleGroups.begin(), particleGroups.end(), static_cast<size_t>(0), [](size_t a_total, std::vector<Particle>& a_group){return a_group.size() + a_total; }), static_cast<size_t>(spawnProperties.maximumParticles));
+			timeSinceLastParticle.store(timeSinceLastParticle.load() + a_dt);
+			size_t particlesToSpawn = static_cast<size_t>(timeSinceLastParticle.load() / nextSpawnDelta);
+			size_t totalParticles = std::min(std::accumulate(threadData.begin(), threadData.end(), static_cast<size_t>(0), [](size_t a_total, ThreadData& a_group){return a_group.particles.size() + a_total; }), static_cast<size_t>(spawnProperties.maximumParticles));
 			particlesToSpawn = std::min(particlesToSpawn + totalParticles, static_cast<size_t>(spawnProperties.maximumParticles)) - totalParticles;
 
 			double maxTime = .001;
 
-			if(particlesToSpawn > emitterThreads){
+			if(particlesToSpawn >= emitterThreads){
+				ThreadPool::TaskList spawnTasks;
 				for(size_t currentThread = 0; currentThread < emitterThreads; ++currentThread){
-					pool->task([=](){
+					spawnTasks.emplace_back([=](){
 						MV::Stopwatch timer;
 						timer.start();
 						for(size_t count = 0; timer.check() < maxTime && count < particlesToSpawn / emitterThreads; ++count){
 							spawnParticle(currentThread);
 						}
-					}, [&, a_dt](){
-						if(spawnsFinished+1 == emitterThreads){
-							updateParticlesOnMultipleThreads(a_dt);
-						}
-						++spawnsFinished;
 					});
 				}
 				timeSinceLastParticle = 0.0f;
-				nextSpawnDelta = RandomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
-			} else if(particlesToSpawn > 0){
-				pool->task([=](){
-					auto randomOffset = RandomNumber(0, emitterThreads);
-					for(size_t count = 0; count < particlesToSpawn; ++count){
-						spawnParticle((count + randomOffset) % emitterThreads);
-					}
-				}, [&, a_dt](){
+				nextSpawnDelta = randomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
+
+				pool->tasks(spawnTasks, [=](){
 					updateParticlesOnMultipleThreads(a_dt);
-					spawnsFinished = emitterThreads;
-				});
+				}, false);
+			} else if(particlesToSpawn > 0) {
+				auto randomOffset = randomNumber(static_cast<size_t>(0), emitterThreads);
+				for(size_t count = 0; count < particlesToSpawn; ++count){
+					spawnParticle((count + randomOffset) % emitterThreads);
+				}
+
 				timeSinceLastParticle = 0.0f;
-				nextSpawnDelta = RandomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
-			} else {
+				nextSpawnDelta = randomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
 				updateParticlesOnMultipleThreads(a_dt);
-				spawnsFinished = emitterThreads;
+			} else{
+				updateParticlesOnMultipleThreads(a_dt);
 			}
 		}
 
 		void Emitter::updateParticlesOnMultipleThreads(double a_dt){
-			loadParticlesToPoints();
-
+			ThreadPool::TaskList spawnTasks;
 			for(size_t currentThread = 0; currentThread < emitterThreads; ++currentThread){
-				pool->task([=](){
-					particleGroups[currentThread].erase(std::remove_if(particleGroups[currentThread].begin(), particleGroups[currentThread].end(), [&](Particle& a_particle){
+				spawnTasks.emplace_back([=](){
+					threadData[currentThread].particles.erase(std::remove_if(threadData[currentThread].particles.begin(), threadData[currentThread].particles.end(), [&](Particle& a_particle){
 						return a_particle.update(a_dt);
-					}), particleGroups[currentThread].end());
-				}, [&](){
-					++updatesFinished;
+					}), threadData[currentThread].particles.end());
+					loadParticlesToPoints(currentThread);
 				});
 			}
+			auto tmpUpdate = pool->tasks(spawnTasks, [=](){
+				loadParticlePointsFromGroups();
+			}, false);
 		}
 
-		void Emitter::update(double a_dt) {
-			if(updatesFinished == emitterThreads && spawnsFinished == emitterThreads){
-				if(nextSpawnDelta == 0.0f){
-					nextSpawnDelta = RandomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
-				}
-				updatesFinished = 0;
-
-				bool spawned = false;
-				int particlesThisFrame = 0;
-				if(enabled()){
-					spawnParticlesOnMultipleThreads(a_dt);
-				}
-				if(disabled() || particlesThisFrame == MAX_PARTICLES_PER_FRAME){
-					spawnsFinished = emitterThreads;
-					updateParticlesOnMultipleThreads(a_dt);
-					timeSinceLastParticle = 0.0f;
-				}
-			}
-		}
-
-		void Emitter::loadParticlesToPoints() {
-			points.clear();
-			vertexIndices.clear();
+		void Emitter::loadParticlesToPoints(size_t a_groupIndex) {
+			threadData[a_groupIndex].points.clear();
+			threadData[a_groupIndex].vertexIndices.clear();
 
 			std::vector<TexturePoint> texturePoints;
 			if(ourTexture){
@@ -198,25 +195,23 @@ namespace MV {
 				texturePoints.push_back({1.0f, 1.0f});
 				texturePoints.push_back({1.0f, 0.0f});
 			}
-			for(auto &&particleGroup : particleGroups){
-				for(auto &&particle : particleGroup){
-					BoxAABB bounds(scaleToPoint(particle.scale / 2.0f), scaleToPoint(particle.scale / -2.0f));
+			for(auto &&particle : threadData[a_groupIndex].particles){
+				BoxAABB bounds(scaleToPoint(particle.scale / 2.0f), scaleToPoint(particle.scale / -2.0f));
 
-					for(size_t i = 0; i < 4; ++i){
-						auto corner = bounds[i];
-						rotatePoint3D(corner.x, corner.y, corner.z, particle.rotation.x, particle.rotation.y, particle.rotation.z);
-						corner += particle.position;
-						points.push_back(DrawPoint(corner, particle.color, texturePoints[i]));
-					}
-
-					appendQuadVertexIndices(vertexIndices, static_cast<GLuint>(points.size()));
+				for(size_t i = 0; i < 4; ++i){
+					auto corner = bounds[i];
+					rotatePoint(corner, particle.rotation);
+					corner += particle.position;
+					threadData[a_groupIndex].points.push_back(DrawPoint(corner, particle.color, texturePoints[i]));
 				}
+
+				appendQuadVertexIndices(threadData[a_groupIndex].vertexIndices, static_cast<GLuint>(threadData[a_groupIndex].points.size()));
 			}
 		}
 
 		std::shared_ptr<Emitter> Emitter::properties(const EmitterSpawnProperties &a_emitterProperties) {
 			spawnProperties = a_emitterProperties;
-			nextSpawnDelta = RandomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
+			nextSpawnDelta = randomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
 			return std::static_pointer_cast<Emitter>(shared_from_this());
 		}
 
@@ -263,7 +258,56 @@ namespace MV {
 			return{worldFromLocal(spawnProperties.minimumPosition), worldFromLocal(spawnProperties.maximumPosition) };
 		}
 
-		const double Emitter::MAX_TIME_STEP = 1.0f;
+		void Emitter::loadParticlePointsFromGroups() {
+			pointBuffer.clear();
+			vertexIndexBuffer.clear();
+
+			size_t pointCount = 0;
+			size_t vertexCount = 0;
+			for(int group = 0; group < emitterThreads; ++group){
+				pointCount += threadData[group].points.size();
+				vertexCount += threadData[group].vertexIndices.size();
+			}
+
+			pointBuffer.resize(pointCount);
+			vertexIndexBuffer.resize(vertexCount);
+
+			size_t pointOffset = 0;
+			size_t vertexOffset = 0;
+			ThreadPool::TaskList copyTasks;
+			for(int group = 0; group < emitterThreads; ++group){
+				copyTasks.emplace_back([=](){
+					size_t indexSize = threadData[group].vertexIndices.size();
+					moveCopy(pointBuffer, pointOffset, threadData[group].points);
+					moveCopy(vertexIndexBuffer, vertexOffset, threadData[group].vertexIndices);
+					for(size_t index = vertexOffset; index < vertexOffset + indexSize; ++index){
+						vertexIndexBuffer[index] += static_cast<GLuint>(pointOffset);
+					}
+				});
+				pointOffset += threadData[group].points.size();
+				vertexOffset += threadData[group].vertexIndices.size();
+			}
+			pool->tasks(copyTasks, [=](){
+				loadPointsFromBufferAndAllowUpdate();
+			}, false);
+		}
+
+		void Emitter::loadPointsFromBufferAndAllowUpdate() {
+			std::lock_guard<std::mutex> guard(lock);
+			points.clear();
+			vertexIndices.clear();
+			std::swap(points, pointBuffer);
+			std::swap(vertexIndices, vertexIndexBuffer);
+			updateInProgress.store(false);
+		}
+
+		Emitter::~Emitter() {
+			while(updateInProgress.load()){
+				std::this_thread::sleep_for(std::chrono::nanoseconds(100));
+			}
+		}
+
+		const double Emitter::MAX_TIME_STEP = .25f;
 
 		MV::Scene::EmitterSpawnProperties loadEmitterProperties(const std::string &a_file) {
 			try{

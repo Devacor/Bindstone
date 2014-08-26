@@ -1,43 +1,65 @@
 #include "threadPool.h"
 
 namespace MV{
-	ThreadPool::ThreadTask::ThreadTask(std::function<void()> a_call):
+	ThreadPool::ThreadTask::ThreadTask(const std::function<void()> &a_call):
 		call(a_call),
-		justFinished(false) {
+		isRun(std::make_unique<std::atomic<bool>>(false)),
+		isFinished(std::make_shared<std::atomic<bool>>(false)),
+		handled(false){
 	}
 
-	ThreadPool::ThreadTask::ThreadTask(std::function<void()> a_call, std::function<void()> a_onFinish):
+	ThreadPool::ThreadTask::ThreadTask(const std::function<void()> &a_call, const std::function<void()> &a_onFinish) :
 		call(a_call),
 		onFinish(a_onFinish),
-		justFinished(false) {
+		isRun(std::make_unique<std::atomic<bool>>(false)),
+		isFinished(std::make_shared<std::atomic<bool>>(false)),
+		handled(false){
 	}
 
 	bool ThreadPool::ThreadTask::finished() {
-		if(justFinished){
-			if(onFinish){
+		if(isFinished->load()){
+			if(onFinish && !handled){
+				handled = true;
 				onFinish();
+				if(groupFinishWaitForFrame && (onGroupFinish && groupCounter && *groupCounter == 0)){
+					(*onGroupFinish)();
+				}
 			}
-			justFinished = false;
 			return true;
 		}
 		return false;
 	}
 
 	void ThreadPool::ThreadTask::operator()() {
-		if(!justFinished){
+		bool isFalse = false;
+		if(isRun->compare_exchange_strong(isFalse, true)){
 			call();
-			justFinished = true;
+			if((groupCounter && --(*groupCounter) == 0)){
+				if(!groupFinishWaitForFrame && onGroupFinish){
+					(*onGroupFinish)();
+				}
+				*isGroupFinished = true;
+			}
+			*isFinished = true;
 		}
 	}
 
-
-	ThreadPool::~ThreadPool() {
-		working.reset();
-		service.run();
+	void ThreadPool::ThreadTask::group(const std::shared_ptr<std::atomic<size_t>> &a_groupCounter, const std::shared_ptr<std::function<void()>> &a_onGroupFinish, const std::shared_ptr<std::atomic<bool>> &a_isGroupFinished, bool a_groupFinishWaitForFrame) {
+		groupCounter = a_groupCounter;
+		onGroupFinish = a_onGroupFinish;
+		groupFinishWaitForFrame = a_groupFinishWaitForFrame;
+		isGroupFinished = a_isGroupFinished;
 	}
 
 	ThreadPool::ThreadPool():
 		ThreadPool(std::thread::hardware_concurrency()) {
+	}
+
+	ThreadPool::~ThreadPool() {
+		service.stop();
+		for(auto&& worker : workers){
+			worker->join();
+		}
 	}
 
 	ThreadPool::ThreadPool(size_t a_threads):
@@ -47,36 +69,74 @@ namespace MV{
 
 		std::cout << "Info: Generating ThreadPool [" << totalThreads << "]" << std::endl;
 
-		for(std::size_t i = 0; i < totalThreads; ++i) {
-			workers.push_back(std::unique_ptr<std::thread>(new std::thread([this]{
+		for(size_t i = 0; i < totalThreads; ++i) {
+			workers.emplace_back(new std::thread([this]{
 				service.run();
-			})));
+			}));
 		}
 	}
 
-	void ThreadPool::task(std::function<void()> a_task) {
-		auto newTask = std::make_shared<ThreadTask>(a_task);
-		runningTasks.push_back(newTask);
-		service.post([=](){(*newTask)();});
+	TaskStatus ThreadPool::task(const std::function<void()> &a_task) {
+		std::lock_guard<std::recursive_mutex> guard(lock);
+
+		runningTasks.push_back({a_task});
+		auto thisTask = runningTasks.end();
+		--thisTask;
+
+		service.post([=](){(*thisTask)();});
+
+		return{thisTask->isFinished};
 	}
 
-	void ThreadPool::task(std::function<void()> a_task, std::function<void()> a_onComplete) {
-		auto newTask = std::make_shared<ThreadTask>(a_task, a_onComplete);
-		runningTasks.push_back(newTask);
-		service.post([=](){(*newTask)();});
+	TaskStatus ThreadPool::task(const std::function<void()> &a_task, const std::function<void()> &a_onComplete) {
+		std::lock_guard<std::recursive_mutex> guard(lock);
+
+		runningTasks.emplace_back(a_task, a_onComplete);
+		auto thisTask = runningTasks.end();
+		--thisTask;
+		auto completed = std::make_shared<std::atomic<bool>>(false);
+		std::weak_ptr<std::atomic<bool>> weakCompleted = completed;
+
+		service.post([=](){(*thisTask)(); if(!weakCompleted.expired()){ *weakCompleted.lock() = true; }});
+
+		return{thisTask->isFinished};
+	}
+
+	TaskStatus ThreadPool::tasks(const TaskList &a_tasks, const std::function<void()> &a_onGroupComplete, bool a_groupFinishWaitForFrame) {
+		auto groupCounter = std::make_shared<std::atomic<size_t>>(a_tasks.size());
+		auto onGroupComplete = std::make_shared<std::function<void()>>(a_onGroupComplete);
+		auto isGroupComplete = std::make_shared<std::atomic<bool>>(false);
+
+		std::lock_guard<std::recursive_mutex> guard(lock);
+		for(auto&& currentTask : a_tasks){
+			runningTasks.emplace_back(currentTask.task, currentTask.onComplete);
+			auto thisTask = runningTasks.end();
+			--thisTask;
+			thisTask->group(groupCounter, onGroupComplete, isGroupComplete, a_groupFinishWaitForFrame);
+
+			service.post([=](){(*thisTask)();});
+		}
+		return {isGroupComplete};
 	}
 
 	size_t ThreadPool::run() {
-		std::vector<std::list<std::shared_ptr<ThreadTask>>::iterator> removeQueue;
-		for(auto a_task = runningTasks.begin();a_task != runningTasks.end();++a_task){
-			if((*a_task)->finished()){
-				removeQueue.push_back(a_task);
-			}
-		}
-		for(std::list<std::shared_ptr<ThreadTask>>::iterator toRemove : removeQueue){
-			runningTasks.erase(toRemove);
-		}
+		std::lock_guard<std::recursive_mutex> guard(lock);
+
+		runningTasks.remove_if([](ThreadTask& a_task){
+			return a_task.finished();
+		});
+
 		return runningTasks.size();
+	}
+
+
+	ThreadPool::TaskDefinition::TaskDefinition(const std::function<void()> &a_task):
+		task(a_task) {
+	}
+
+	ThreadPool::TaskDefinition::TaskDefinition(const std::function<void()> &a_task, const std::function<void()> &a_onComplete) :
+		task(a_task),
+		onComplete(a_onComplete) {
 	}
 
 }

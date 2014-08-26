@@ -13,9 +13,18 @@ namespace MV {
 		minPoint = a_startPoint; maxPoint = a_startPoint;
 	}
 
+	void BoxAABB::initialize(const Size<> &a_size){
+		minPoint.clear(); maxPoint = sizeToPoint(a_size);
+	}
+
 	void BoxAABB::initialize(const Point<> &a_startPoint, const Point<> &a_endPoint){
 		initialize(a_startPoint);
 		expandWith(a_endPoint);
+	}
+
+	void BoxAABB::initialize(const Point<> &a_startPoint, const Size<> &a_size){
+		initialize(a_startPoint);
+		expandWith(a_startPoint + sizeToPoint(a_size));
 	}
 
 	void BoxAABB::initialize(const BoxAABB &a_startBox){
@@ -39,26 +48,36 @@ namespace MV {
 		return *this;
 	}
 
-	bool BoxAABB::pointContainedZ(const Point<> &a_comparePoint) const{
-		if(a_comparePoint.x >= minPoint.x && a_comparePoint.y >= minPoint.y && a_comparePoint.z >= minPoint.z){
-			if(a_comparePoint.x <= maxPoint.x && a_comparePoint.y <= maxPoint.y && a_comparePoint.z <= maxPoint.z){
-				return true;
-			}
-		}
-		return false;
+	bool BoxAABB::contains(const Point<> &a_comparePoint, bool a_useDepth) const{
+		return (a_comparePoint.x >= minPoint.x && a_comparePoint.y >= minPoint.y &&
+			a_comparePoint.x <= maxPoint.x && a_comparePoint.y <= maxPoint.y) &&
+			(!a_useDepth ||
+				(a_comparePoint.z >= minPoint.z && a_comparePoint.z <= maxPoint.z)
+			);
 	}
 
-	bool BoxAABB::pointContained(const Point<> &a_comparePoint) const{
-		if((a_comparePoint.x >= minPoint.x && a_comparePoint.y >= minPoint.y) && (a_comparePoint.x <= maxPoint.x && a_comparePoint.y <= maxPoint.y)){
-			return true;
-		}
-		return false;
+	bool BoxAABB::contains(const BoxAABB& a_other, bool a_useDepth) const {
+		return (minPoint.x <= a_other.minPoint.x && minPoint.y <= a_other.minPoint.y &&
+			maxPoint.x >= a_other.maxPoint.x && maxPoint.y >= a_other.maxPoint.y) &&
+			(!a_useDepth ||
+				(minPoint.z <= a_other.minPoint.z && maxPoint.z >= a_other.maxPoint.z)
+			);
 	}
 
 	void BoxAABB::sanitize() {
 		if(minPoint.x > maxPoint.x){ std::swap(minPoint.x, maxPoint.x); }
 		if(minPoint.y > maxPoint.y){ std::swap(minPoint.y, maxPoint.y); }
 		if(minPoint.z > maxPoint.z){ std::swap(minPoint.z, maxPoint.z); }
+	}
+
+	bool BoxAABB::collides(const BoxAABB &a_other, bool a_useDepth) const {
+		return  !(maxPoint.x <= a_other.minPoint.x ||
+			maxPoint.y <= a_other.minPoint.y ||
+			minPoint.x >= a_other.maxPoint.x ||
+			minPoint.y >= a_other.maxPoint.y) || 
+			(a_useDepth &&
+				!(maxPoint.z <= a_other.minPoint.z || minPoint.z >= a_other.maxPoint.z)
+			);
 	}
 
 	std::ostream& operator<<(std::ostream& a_os, const BoxAABB& a_box){

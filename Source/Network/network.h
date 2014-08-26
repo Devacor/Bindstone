@@ -17,18 +17,18 @@ namespace MV {
 			socket(ioService){
 			std::thread t([&](){ ioService.run(); });
 
-			boost::asio::ip::tcp::resolver 
+			/*boost::asio::ip::tcp::resolver 
 
-			connect();
+			connect();*/
 		}
 	private:
 		void connect(boost::asio::ip::tcp::resolver::iterator a_endpointIterator)
 		{
-			boost::asio::async_connect(socket, a_endpointIterator, [this](boost::system::error_code errorCode, boost::asio::ip::tcp::resolver::iterator){
+			/*boost::asio::async_connect(socket, a_endpointIterator, [this](boost::system::error_code errorCode, boost::asio::ip::tcp::resolver::iterator){
 				if (!errorCode){
 					
 				}
-			});
+			});*/
 		}
 		boost::asio::io_service ioService;
 		boost::asio::ip::tcp::socket socket;

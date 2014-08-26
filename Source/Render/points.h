@@ -107,6 +107,10 @@ namespace MV {
 			depth = a_depth;
 		}
 
+		bool contains(const Size<T>& a_other, bool a_useDepth = false) const{
+			return width >= a_other.width && height >= a_other.height && (!a_useDepth || depth >= a_other.depth);
+		}
+
 		Size<T>& operator+=(const Size<T>& a_other);
 		Size<T>& operator-=(const Size<T>& a_other);
 		Size<T>& operator*=(const Size<T>& a_other);

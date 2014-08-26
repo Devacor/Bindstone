@@ -5,6 +5,8 @@
 #include "cereal/cereal.hpp"
 #include "cereal/access.hpp"
 
+#include <atomic>
+
 namespace MV {
 	namespace Scene {
 
@@ -106,6 +108,8 @@ namespace MV {
 			friend cereal::access;
 			friend Node;
 		public:
+			~Emitter();
+
 			SCENE_MAKE_FACTORY_METHODS(Emitter)
 
 			static std::shared_ptr<Emitter> make(Draw2D* a_renderer, ThreadPool *a_pool);
@@ -123,10 +127,10 @@ namespace MV {
 		protected:
 			Emitter(Draw2D *a_renderer, ThreadPool *a_pool):
 				pool(a_pool),
-				Node(a_renderer){
-				for(size_t i = 0; i < emitterThreads; ++i){
-					particleGroups.push_back(std::vector<Particle>());
-				}
+				Node(a_renderer),
+				threadData(emitterThreads),
+				updateInProgress(false),
+				emitterThreads(a_pool->threads()){
 			}
 			virtual void drawImplementation();
 
@@ -137,7 +141,7 @@ namespace MV {
 
 		private:
 
-			void update(double a_dt);
+			void update();
 			void spawnParticle(size_t a_groupIndex);
 
 			template <class Archive>
@@ -159,29 +163,47 @@ namespace MV {
 					cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
 			}
 
-			void loadParticlesToPoints();
+			void loadParticlesToPoints(size_t a_groupIndex);
 			
 			MV::Color randomMix(const MV::Color &a_rhs, const MV::Color &a_lhs);
 			MV::Point<> randomMix(const MV::Point<> &a_rhs, const MV::Point<> &a_lhs);
 			void spawnParticlesOnMultipleThreads(double a_dt);
 			void updateParticlesOnMultipleThreads(double a_dt);
+
+			void loadParticlePointsFromGroups();
+			void loadPointsFromBufferAndAllowUpdate();
+
+
 			Stopwatch timer;
 
 			EmitterSpawnProperties spawnProperties;
 
-			static const size_t emitterThreads = 7;
-			size_t updatesFinished = emitterThreads;
-			size_t spawnsFinished = emitterThreads;
-			std::vector<std::vector<Particle>> particleGroups;
+			size_t emitterThreads;
+			std::atomic<size_t> buffersCopied = emitterThreads;
+			std::atomic<size_t> updatesFinished = emitterThreads;
+			std::atomic<size_t> spawnsFinished = emitterThreads;
+
+
+			struct ThreadData {
+				std::vector<Particle> particles;
+				std::vector<DrawPoint> points;
+				std::vector<GLuint> vertexIndices;
+			};
+			std::vector<DrawPoint> pointBuffer;
+			std::vector<GLuint> vertexIndexBuffer;
+
+			std::vector<ThreadData> threadData;
 
 			bool spawnParticles = true;
-
+			std::mutex lock;
 			static const double MAX_TIME_STEP;
 			static const int MAX_PARTICLES_PER_FRAME = 2500;
-			double timeSinceLastParticle = 0.0;
-			double nextSpawnDelta = 0.005f;
+			std::atomic<double> timeSinceLastParticle = 0.0;
+			double nextSpawnDelta = 0.0f;
 
 			ThreadPool* pool;
+
+			std::atomic<bool> updateInProgress;
 		};
 	}
 }

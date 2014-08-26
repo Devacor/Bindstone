@@ -62,7 +62,7 @@ namespace MV {
 		}
 
 		void Grid::layoutCellSize(){
-			BoxAABB bounds({0.0f, 0.0f}, {getContentWidth(), cellDimensions.height});
+			BoxAABB bounds(size(getContentWidth(), cellDimensions.height));
 			Point<> cellPosition = cellPadding.first + cellPadding.second + margins.first;
 			size_t index = 0;
 
@@ -92,7 +92,7 @@ namespace MV {
 		}
 
 		void Grid::layoutChildSize(){
-			BoxAABB bounds({0.0f, 0.0f}, {getContentWidth(), cellDimensions.height});
+			BoxAABB bounds(size(getContentWidth(), cellDimensions.height));
 			Point<> cellPosition = cellPadding.first + cellPadding.second + margins.first;
 			size_t index = 0;
 			
@@ -235,7 +235,7 @@ namespace MV {
 		}
 
 		BoxAABB Grid::calculateBasicAABBFromDimensions(DrawListVectorType &a_drawListVector) const{
-			BoxAABB bounds({0.0f, 0.0f}, {getContentWidth(), cellDimensions.height});
+			BoxAABB bounds(size(getContentWidth(), cellDimensions.height));
 			Point<> cellPosition = cellPadding.first + cellPadding.second + margins.first;
 			size_t index = 0;
 
@@ -264,7 +264,7 @@ namespace MV {
 		}
 
 		BoxAABB Grid::calculateBasicAABBFromCells(DrawListVectorType &a_drawListVector) const{
-			BoxAABB bounds({0.0f, 0.0f}, {getContentWidth(), cellDimensions.height});
+			BoxAABB bounds(size(getContentWidth(), cellDimensions.height));
 			Point<> cellPosition = cellPadding.first + cellPadding.second + margins.first;
 			size_t index = 0;
 

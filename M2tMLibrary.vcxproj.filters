@@ -215,6 +215,7 @@
     <ClCompile Include="Source\Utility\threadPool.cpp">
       <Filter>Source Files\Utility</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Render\texturePacker.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -579,6 +580,9 @@
     </ClInclude>
     <ClInclude Include="Source\Utility\threadPool.h">
       <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\texturePacker.h">
+      <Filter>Source Files\Render</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

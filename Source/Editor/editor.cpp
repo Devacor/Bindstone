@@ -56,8 +56,9 @@ void Editor::initializeWindow(){
 	
 	fps = scene->make<MV::Scene::Text>(&textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
 
-	/*auto texture = MV::FileTextureDefinition::make("Assets/Images/dogfox.png");
-	auto slicedthing = scene->make<MV::Scene::Sliced>(MV::Scene::SliceDimensions({8.0f, 8.0f}, {32.0f, 32.0f}), MV::size(100.0f, 50.0f))->
+	auto texture = MV::FileTextureDefinition::make("Assets/Images/dogfox.png");
+	texture->save("Assets/Images/TESTIMAGE.png");
+	/*auto slicedthing = scene->make<MV::Scene::Sliced>(MV::Scene::SliceDimensions({8.0f, 8.0f}, {32.0f, 32.0f}), MV::size(100.0f, 50.0f))->
 		position({300.0f, 300.0f})->
 		texture(texture->makeHandle({0, 0}, {32, 32}))->
 		rotate(45.0f)->

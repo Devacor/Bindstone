@@ -29,11 +29,15 @@ namespace MV {
 	public:
 		BoxAABB(){ initialize(Point<>()); }
 		BoxAABB(const Point<> &a_startPoint){ initialize(a_startPoint); }
+		BoxAABB(const Size<> &a_startSize){ initialize(a_startSize); }
 		BoxAABB(const Point<> &a_startPoint, const Point<> &a_endPoint){ initialize(a_startPoint, a_endPoint); }
+		BoxAABB(const Point<> &a_startPoint, const Size<> &a_size){ initialize(a_startPoint, a_size); }
 
 		void initialize(const Point<> &a_startPoint);
+		void initialize(const Size<> &a_startPoint);
 		void initialize(const BoxAABB &a_startBox);
 		void initialize(const Point<> &a_startPoint, const Point<> &a_endPoint);
+		void initialize(const Point<> &a_startPoint, const Size<> &a_endPoint);
 
 		BoxAABB& expandWith(const Point<> &a_comparePoint);
 		BoxAABB& expandWith(const BoxAABB &a_compareBox);
@@ -45,17 +49,16 @@ namespace MV {
 			return (maxPoint - minPoint).y;
 		}
 
-		bool isEmpty() const{ return minPoint == maxPoint; }
+		bool empty() const{ return minPoint == maxPoint; }
 		bool flatWidth() const{ return equals(minPoint.x, maxPoint.x); }
 		bool flatHeight() const{ return equals(minPoint.y, maxPoint.y); }
 
 		Size<> size() const{ return sizeFromPoint(maxPoint - minPoint); }
 
-		//includes z
-		bool pointContainedZ(const Point<> &a_comparePoint) const;
+		bool contains(const Point<> &a_comparePoint, bool a_useDepth = false) const;
+		bool contains(const BoxAABB& a_other, bool a_useDepth = false) const;
 
-		//ignores z
-		bool pointContained(const Point<> &a_comparePoint) const;
+		bool collides(const BoxAABB &a_other, bool a_useDepth = false) const;
 
 		void sanitize();
 

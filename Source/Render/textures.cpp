@@ -174,22 +174,14 @@ namespace MV {
 	void TextureDefinition::cleanup(){
 		if (!handles.empty()){
 			handles.erase(std::remove_if(handles.begin(), handles.end(), [](const std::weak_ptr<TextureHandle> &value){return value.expired(); }), handles.end());
-			if (handles.empty()){
-				glDeleteTextures(1, &texture);
-				texture = 0; //just to be certain, glDeleteTextures may not set a texture id to 0.
-				cleanupImplementation();
-			}
+			cleanupOpenglTexture();
 		}
 	}
 
 	void TextureDefinition::cleanup(TextureHandle* toRemove){
 		if(!handles.empty()){
 			handles.erase(std::remove_if(handles.begin(), handles.end(), [&](const std::weak_ptr<TextureHandle> &value){return value.expired() || &(*value.lock()) == toRemove; }), handles.end());
-			if(handles.empty()){
-				glDeleteTextures(1, &texture);
-				texture = 0; //just to be certain, glDeleteTextures may not set a texture id to 0.
-				cleanupImplementation();
-			}
+			cleanupOpenglTexture();
 		}
 	}
 
@@ -212,9 +204,27 @@ namespace MV {
 	}
 
 	TextureDefinition::~TextureDefinition() {
-		glDeleteTextures(1, &texture);
-		texture = 0; //just to be certain, glDeleteTextures may not set a texture id to 0.
-		cleanupImplementation();
+		handles.clear();
+		cleanupOpenglTexture();
+	}
+
+	void TextureDefinition::cleanupOpenglTexture() {
+		if(handles.empty()){
+			glDeleteTextures(1, &texture);
+			texture = 0; //just to be certain, glDeleteTextures may not set a texture id to 0.
+			cleanupImplementation();
+			textureSize.set(0, 0);
+		}
+	}
+
+	void TextureDefinition::save(const std::string &a_fileName) {
+		if(!loaded()){
+			reload();
+			saveLoadedTexture(a_fileName, texture);
+			cleanupOpenglTexture();
+		} else{
+			saveLoadedTexture(a_fileName, texture);
+		}
 	}
 
 
@@ -468,6 +478,23 @@ namespace MV {
 		} else{
 			return foundDefinition->second;
 		}
+	}
+
+	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture) {
+		require<ResourceException>(a_texture, "saveLoadedOpenglTexture was supplied a null texture id: ", a_fileName);
+		glBindTexture(GL_TEXTURE_2D, a_texture);
+		GLint textureWidth, textureHeight;
+		glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &textureWidth);
+		glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &textureHeight);
+
+		require<ResourceException>(textureWidth > 0 && textureHeight > 0, "saveLoadedOpenglTexture encountered a 0 dimension image: ", a_fileName);
+
+		std::vector<char> pixels(textureWidth*textureHeight * 4);
+		glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, &pixels[0]);
+
+		SDL_Surface *surf = SDL_CreateRGBSurfaceFrom(&pixels[0], textureWidth, textureHeight, 32, textureWidth * 4, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+		IMG_SavePNG(surf, a_fileName.c_str());
+		SDL_FreeSurface(surf);
 	}
 
 	std::shared_ptr<DynamicTextureDefinition> SharedTextures::defaultTexture = nullptr;

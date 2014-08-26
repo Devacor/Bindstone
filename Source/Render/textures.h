@@ -26,6 +26,8 @@ namespace MV {
 	GLenum getTextureFormat(SDL_Surface* img);
 	GLenum getInternalTextureFormat(SDL_Surface* img);
 
+	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture);
+
 	//These methods are all destructive to the original surface.  Do not rely on SDL_Surface being viable after calling.
 	SDL_Surface* convertToPowerOfTwoSurface(SDL_Surface *a_img);
 	bool loadTextureFromFile(const std::string &file, GLuint &imageLoaded, Size<int> &size, bool repeat);
@@ -51,9 +53,11 @@ namespace MV {
 		bool loaded() const;
 		void reload();
 		void cleanup();
-		void cleanup(TextureHandle* toRemove);
+		void cleanup(TextureHandle* a_toRemove);
 
+		void save(const std::string &a_fileName);
 	protected:
+		void cleanupOpenglTexture();
 		TextureDefinition(const std::string &a_name, bool a_isShared = true);
 
 		std::string textureName;
@@ -158,7 +162,6 @@ namespace MV {
 				reload();
 			}
 		}
-
 	private:
 		SurfaceTextureDefinition(const std::string &a_name, std::function<SDL_Surface*()> a_surfaceGenerator):
 			TextureDefinition(a_name),

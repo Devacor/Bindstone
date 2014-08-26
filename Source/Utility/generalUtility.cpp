@@ -170,28 +170,33 @@ namespace MV {
 
 	Random* Random::instance = nullptr;
 
-	double RandomNumber(double a_min, double a_max) {
+	double randomNumber(double a_min, double a_max) {
 		if(!Random::instance){
 			Random::instance = new Random();
 		}
 		return Random::instance->number(a_min, a_max);
 	}
 
-	float RandomNumber(float a_min, float a_max) {
+	float randomNumber(float a_min, float a_max) {
 		if(!Random::instance){
 			Random::instance = new Random();
 		}
 		return Random::instance->number(a_min, a_max);
 	}
 
-	int RandomNumber(int a_min, int a_max) {
+	int randomNumber(int a_min, int a_max) {
 		if(!Random::instance){
 			Random::instance = new Random();
 		}
 		return Random::instance->number(a_min, a_max);
 	}
 
-
+	size_t randomNumber(size_t a_min, size_t a_max) {
+		if(!Random::instance){
+			Random::instance = new Random();
+		}
+		return Random::instance->number(a_min, a_max);
+	}
 
 
 }

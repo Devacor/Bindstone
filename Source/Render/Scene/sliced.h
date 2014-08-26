@@ -20,7 +20,7 @@ namespace MV {
 				targetSize(a_targetSize){
 			}
 			SliceDimensions():
-				slices({}, {}){
+				slices(){
 			}
 
 			Size<> sliceSize() const{

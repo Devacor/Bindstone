@@ -70,7 +70,7 @@ class DeselectedEditorPanel : public EditorPanel {
 public:
 	DeselectedEditorPanel(EditorControls &a_panel);
 private:
-	void completeSelection(const MV::BoxAABB &a_selected);
+	void completeSelection(const MV::BoxAABB<> &a_selected);
 };
 
 #endif

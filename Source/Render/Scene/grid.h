@@ -58,10 +58,10 @@ namespace MV {
 				appendQuadVertexIndices(vertexIndices, 0);
 			}
 
-			virtual BoxAABB worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB basicAABBImplementation() const override;
+			virtual BoxAABB<> worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB<int> screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB<> localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB<> basicAABBImplementation() const override;
 
 			virtual void drawImplementation();
 
@@ -100,9 +100,9 @@ namespace MV {
 			bool bumpToNextLine(PointPrecision a_currentPosition, size_t a_index) const;
 			void layoutCells();
 			float getContentWidth() const;
-			void setPointsFromBounds(const BoxAABB &a_bounds);
-			BoxAABB calculateBasicAABBFromDimensions(DrawListVectorType &a_drawListVector) const;
-			BoxAABB calculateBasicAABBFromCells(DrawListVectorType &a_drawListVector) const;
+			void setPointsFromBounds(const BoxAABB<> &a_bounds);
+			BoxAABB<> calculateBasicAABBFromDimensions(DrawListVectorType &a_drawListVector) const;
+			BoxAABB<> calculateBasicAABBFromCells(DrawListVectorType &a_drawListVector) const;
 			PointPrecision maximumWidth;
 			Size<> cellDimensions;
 			std::pair<Point<>, Point<>> cellPadding;

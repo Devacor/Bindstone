@@ -134,10 +134,10 @@ namespace MV {
 			}
 			virtual void drawImplementation();
 
-			virtual BoxAABB worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB basicAABBImplementation() const override;
+			virtual BoxAABB<> worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB<int> screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB<> localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB<> basicAABBImplementation() const override;
 
 		private:
 

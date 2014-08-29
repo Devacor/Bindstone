@@ -9,26 +9,6 @@ void LockPrint(const std::string &a_out){
 }
 
 int main(int argc, char *argv[]){
-	MV::TexturePack pack;
-
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-	pack.add({64, 64});
-
-	pack.print();
 	/*
 	MV::ThreadPool pool;
 

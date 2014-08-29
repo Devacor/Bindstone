@@ -23,7 +23,7 @@ namespace MV {
 			return sliced->sliceDimensions(a_sliceDimensions)->size(a_size, a_centerPoint);
 		}
 
-		std::shared_ptr<Sliced> Sliced::make(Draw2D* a_renderer, const SliceDimensions &a_sliceDimensions, const BoxAABB &a_boxAABB) {
+		std::shared_ptr<Sliced> Sliced::make(Draw2D* a_renderer, const SliceDimensions &a_sliceDimensions, const BoxAABB<> &a_boxAABB) {
 			auto sliced = std::shared_ptr<Sliced>(new Sliced(a_renderer));
 			sliced->registerShader();
 			return sliced->sliceDimensions(a_sliceDimensions)->bounds(a_boxAABB);
@@ -31,7 +31,7 @@ namespace MV {
 
 		std::shared_ptr<Sliced> Sliced::size(const Size<> &a_size, const Point<> &a_centerPoint){
 			Point<> topLeft;
-			Point<> bottomRight = sizeToPoint(a_size);
+			Point<> bottomRight = toPoint(a_size);
 
 			topLeft -= a_centerPoint;
 			bottomRight -= a_centerPoint;
@@ -43,7 +43,7 @@ namespace MV {
 			return size(a_size, (a_center) ? point(a_size.width / 2.0f, a_size.height / 2.0f) : point(0.0f, 0.0f));
 		}
 
-		std::shared_ptr<Sliced> MV::Scene::Sliced::bounds(const BoxAABB &a_bounds) {
+		std::shared_ptr<Sliced> MV::Scene::Sliced::bounds(const BoxAABB<> &a_bounds) {
 			dimensions = a_bounds;
 			auto notifyOnChanged = makeScopedDepthChangeNote(this);
 
@@ -142,7 +142,7 @@ namespace MV {
 			return slicedDimensions;
 		}
 
-		MV::BoxAABB Sliced::bounds() const {
+		MV::BoxAABB<> Sliced::bounds() const {
 			return dimensions;
 		}
 

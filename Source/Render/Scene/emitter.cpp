@@ -196,7 +196,7 @@ namespace MV {
 				texturePoints.push_back({1.0f, 0.0f});
 			}
 			for(auto &&particle : threadData[a_groupIndex].particles){
-				BoxAABB bounds(scaleToPoint(particle.scale / 2.0f), scaleToPoint(particle.scale / -2.0f));
+				BoxAABB<> bounds(toPoint(particle.scale / 2.0f), toPoint(particle.scale / -2.0f));
 
 				for(size_t i = 0; i < 4; ++i){
 					auto corner = bounds[i];
@@ -242,19 +242,19 @@ namespace MV {
 			return std::static_pointer_cast<Emitter>(shared_from_this());
 		}
 
-		MV::BoxAABB Emitter::basicAABBImplementation() const  {
+		MV::BoxAABB<> Emitter::basicAABBImplementation() const  {
 			return{spawnProperties.minimumPosition, spawnProperties.maximumPosition};
 		}
 
-		MV::BoxAABB Emitter::localAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
+		MV::BoxAABB<> Emitter::localAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
 			return{worldFromLocal(spawnProperties.minimumPosition), worldFromLocal(spawnProperties.maximumPosition)};
 		}
 
-		MV::BoxAABB Emitter::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
-			return {castPoint<PointPrecision>(screenFromLocal(spawnProperties.minimumPosition)), castPoint<PointPrecision>(screenFromLocal(spawnProperties.maximumPosition))};
+		MV::BoxAABB<int> Emitter::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
+			return {screenFromLocal(spawnProperties.minimumPosition), screenFromLocal(spawnProperties.maximumPosition)};
 		}
 
-		MV::BoxAABB Emitter::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
+		MV::BoxAABB<> Emitter::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
 			return{worldFromLocal(spawnProperties.minimumPosition), worldFromLocal(spawnProperties.maximumPosition) };
 		}
 

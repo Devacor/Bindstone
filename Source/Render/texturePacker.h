@@ -4,26 +4,33 @@
 #include <vector>
 #include <algorithm>
 #include <limits>
+#include <string>
 
-#include "textures.h"
+#include "boxaabb.h"
 #include "points.h"
+#include "textures.h"
 
 namespace MV {
-
+	namespace Scene {
+		class Node;
+	}
 	class TexturePack {
 	public:
-		TexturePack();
+		TexturePack(const Size<int> &a_maximumExtent = Size<int>(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()));
+		bool add(const std::shared_ptr<TextureDefinition> &a_shape, PointPrecision a_scale = 1.0f);
 
-		void add(const Size<> &a_shape);
+		std::string print() const;
 
-		void print() const;
-
+		void addToScene(std::shared_ptr<MV::Scene::Node> scene);
 	private:
-		BoxAABB shapeForBestRegion(const Size<> &a_shape);
+		void updateContainers(const BoxAABB<int> &a_newShape);
+		BoxAABB<int> positionShape(const Size<int> &a_shape);
 
-		std::vector<BoxAABB> regions;
-		std::vector<BoxAABB> shapes;
-		Size<> extent;
+		std::vector<std::pair<BoxAABB<int>, std::shared_ptr<TextureDefinition>>> shapes;
+		std::vector<BoxAABB<int>> containers;
+
+		Size<int> maximumExtent;
+		Size<int> contentExtent;
 	};
 
 }

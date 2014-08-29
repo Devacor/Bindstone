@@ -30,7 +30,7 @@ namespace MV {
 			return clickable->size(a_size, a_centerPoint)->hookUpSlots();
 		}
 
-		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB) {
+		std::shared_ptr<Clickable> Clickable::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB<> &a_boxAABB) {
 			auto clickable = std::shared_ptr<Clickable>(new Clickable(a_renderer, a_mouse));
 			clickable->registerShader();
 			return clickable->bounds(a_boxAABB)->hookUpSlots();
@@ -158,7 +158,7 @@ namespace MV {
 
 		bool Clickable::mouseInBounds(const MouseState& a_state) {
 			if(visible()){
-				return screenAABB(shouldUseChildrenInHitDetection).contains(castPoint<PointPrecision>(a_state.position()));
+				return screenAABB(shouldUseChildrenInHitDetection).contains(a_state.position());
 			} else{
 				return false;
 			}
@@ -197,7 +197,7 @@ namespace MV {
 			return button->clickSize(a_size, a_centerPoint);
 		}
 
-		std::shared_ptr<Button> Button::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB) {
+		std::shared_ptr<Button> Button::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB<> &a_boxAABB) {
 			auto button = std::shared_ptr<Button>(new Button(a_renderer, a_mouse));
 			button->registerShader();
 			return button->clickBounds(a_boxAABB);
@@ -242,7 +242,7 @@ namespace MV {
 			return std::static_pointer_cast<Button>(shared_from_this());
 		}
 
-		std::shared_ptr<Button> Button::clickBounds(const BoxAABB &a_bounds){
+		std::shared_ptr<Button> Button::clickBounds(const BoxAABB<> &a_bounds){
 			clickable->bounds(a_bounds);
 			return std::static_pointer_cast<Button>(shared_from_this());
 		}
@@ -272,28 +272,28 @@ namespace MV {
 			}
 		}
 
-		BoxAABB Button::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+		BoxAABB<> Button::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			return clickable->worldAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
 				(clickable->inPressEvent()) ?
 				activeSceneNode->worldAABBImplementation(a_includeChildren, a_nestedCall) :
 				idleSceneNode->worldAABBImplementation(a_includeChildren, a_nestedCall)
 			);
 		}
-		BoxAABB Button::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+		BoxAABB<int> Button::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			return clickable->screenAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
 				(clickable->inPressEvent()) ?
 				activeSceneNode->screenAABBImplementation(a_includeChildren, a_nestedCall) :
 				idleSceneNode->screenAABBImplementation(a_includeChildren, a_nestedCall)
 			);
 		}
-		BoxAABB Button::localAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+		BoxAABB<> Button::localAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			return clickable->localAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
 				(clickable->inPressEvent()) ?
 				activeSceneNode->localAABBImplementation(a_includeChildren, a_nestedCall) :
 				idleSceneNode->localAABBImplementation(a_includeChildren, a_nestedCall)
 			);
 		}
-		BoxAABB Button::basicAABBImplementation() const{
+		BoxAABB<> Button::basicAABBImplementation() const{
 			return clickable->basicAABBImplementation().expandWith(
 				(clickable->inPressEvent()) ?
 				activeSceneNode->basicAABBImplementation() :

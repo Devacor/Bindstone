@@ -10,7 +10,7 @@
 //these implementations are required for spine!
 void _spAtlasPage_createTexture(spAtlasPage* self, const char* path){
 	auto texture = MV::FileTextureDefinition::makeUnmanaged(path);
-	texture->reload();
+	texture->load();
 	self->width = texture->size().width;
 	self->height = texture->size().height;
 	self->rendererObject = texture.release();
@@ -18,7 +18,7 @@ void _spAtlasPage_createTexture(spAtlasPage* self, const char* path){
 
 void _spAtlasPage_disposeTexture(spAtlasPage* self){
 	auto texture = static_cast<MV::FileTextureDefinition*>(self->rendererObject);
-	texture->cleanup();
+	texture->unload();
 	delete texture;
 }
 

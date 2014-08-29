@@ -166,7 +166,7 @@ namespace MV {
 		if(isPartOfFormat){
 			return{0.0, static_cast<PointPrecision>(character->characterSize().height)};
 		} else{
-			return castSize<PointPrecision>(character->characterSize());
+			return cast<PointPrecision>(character->characterSize());
 		}
 	}
 
@@ -209,7 +209,7 @@ namespace MV {
 	void FormattedCharacter::applyState(const std::shared_ptr<FormattedState> &a_state) {
 		state = a_state;
 		character = state->font->characterDefinition(textCharacter);
-		shape->size(castSize<PointPrecision>(character->characterSize()));
+		shape->size(cast<PointPrecision>(character->characterSize()));
 		shape->texture(character->texture());
 		shape->color(state->color);
 	}
@@ -243,7 +243,7 @@ namespace MV {
 		state(a_state),
 		character(a_state->font->characterDefinition(a_character)) {
 
-		shape = parent->make<Scene::Rectangle>(guid(wideToString(character->character())), castSize<PointPrecision>(character->characterSize()))->
+		shape = parent->make<Scene::Rectangle>(guid(wideToString(character->character())), cast<PointPrecision>(character->characterSize()))->
 			texture(character->texture())->
 			color(state->color);
 	}

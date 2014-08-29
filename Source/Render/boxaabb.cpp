@@ -6,91 +6,6 @@
 
 namespace MV {
 	/*************************\
-	| ------BoundingBox------ |
-	\*************************/
-
-	void BoxAABB::initialize(const Point<> &a_startPoint){
-		minPoint = a_startPoint; maxPoint = a_startPoint;
-	}
-
-	void BoxAABB::initialize(const Size<> &a_size){
-		minPoint.clear(); maxPoint = sizeToPoint(a_size);
-	}
-
-	void BoxAABB::initialize(const Point<> &a_startPoint, const Point<> &a_endPoint){
-		initialize(a_startPoint);
-		expandWith(a_endPoint);
-	}
-
-	void BoxAABB::initialize(const Point<> &a_startPoint, const Size<> &a_size){
-		initialize(a_startPoint);
-		expandWith(a_startPoint + sizeToPoint(a_size));
-	}
-
-	void BoxAABB::initialize(const BoxAABB &a_startBox){
-		minPoint = a_startBox.minPoint; maxPoint = a_startBox.maxPoint;
-	}
-
-	BoxAABB& BoxAABB::expandWith(const Point<> &a_comparePoint){
-		minPoint.x = std::min(a_comparePoint.x, minPoint.x);
-		minPoint.y = std::min(a_comparePoint.y, minPoint.y);
-		minPoint.z = std::min(a_comparePoint.z, minPoint.z);
-
-		maxPoint.x = std::max(a_comparePoint.x, maxPoint.x);
-		maxPoint.y = std::max(a_comparePoint.y, maxPoint.y);
-		maxPoint.z = std::max(a_comparePoint.z, maxPoint.z);
-		return *this;
-	}
-
-	BoxAABB& BoxAABB::expandWith(const BoxAABB &a_compareBox){
-		expandWith(a_compareBox.minPoint);
-		expandWith(a_compareBox.maxPoint);
-		return *this;
-	}
-
-	bool BoxAABB::contains(const Point<> &a_comparePoint, bool a_useDepth) const{
-		return (a_comparePoint.x >= minPoint.x && a_comparePoint.y >= minPoint.y &&
-			a_comparePoint.x <= maxPoint.x && a_comparePoint.y <= maxPoint.y) &&
-			(!a_useDepth ||
-				(a_comparePoint.z >= minPoint.z && a_comparePoint.z <= maxPoint.z)
-			);
-	}
-
-	bool BoxAABB::contains(const BoxAABB& a_other, bool a_useDepth) const {
-		return (minPoint.x <= a_other.minPoint.x && minPoint.y <= a_other.minPoint.y &&
-			maxPoint.x >= a_other.maxPoint.x && maxPoint.y >= a_other.maxPoint.y) &&
-			(!a_useDepth ||
-				(minPoint.z <= a_other.minPoint.z && maxPoint.z >= a_other.maxPoint.z)
-			);
-	}
-
-	void BoxAABB::sanitize() {
-		if(minPoint.x > maxPoint.x){ std::swap(minPoint.x, maxPoint.x); }
-		if(minPoint.y > maxPoint.y){ std::swap(minPoint.y, maxPoint.y); }
-		if(minPoint.z > maxPoint.z){ std::swap(minPoint.z, maxPoint.z); }
-	}
-
-	bool BoxAABB::collides(const BoxAABB &a_other, bool a_useDepth) const {
-		return  !(maxPoint.x <= a_other.minPoint.x ||
-			maxPoint.y <= a_other.minPoint.y ||
-			minPoint.x >= a_other.maxPoint.x ||
-			minPoint.y >= a_other.maxPoint.y) || 
-			(a_useDepth &&
-				!(maxPoint.z <= a_other.minPoint.z || minPoint.z >= a_other.maxPoint.z)
-			);
-	}
-
-	std::ostream& operator<<(std::ostream& a_os, const BoxAABB& a_box){
-		a_os << "[" << a_box.minPoint << " - " << a_box.maxPoint << "]";
-		return a_os;
-	}
-
-	std::istream& operator>>(std::istream& a_is, BoxAABB& a_box){
-		a_is >> a_box.minPoint >> a_box.maxPoint;
-		return a_is;
-	}
-
-	/*************************\
 	| ------PointVolume------ |
 	\*************************/
 
@@ -162,18 +77,14 @@ namespace MV {
 
 		a_renderer->modelviewMatrix().pop();
 
-		BoxAABB box1 = tmpVolume1.getAABB();
-		BoxAABB box2 = tmpVolume2.getAABB();
+		BoxAABB<> box1 = tmpVolume1.getAABB();
+		BoxAABB<> box2 = tmpVolume2.getAABB();
 
-		if((box2.minPoint.x > box1.minPoint.x && box2.maxPoint.x > box1.maxPoint.x) ||
-			(box2.minPoint.x < box1.minPoint.x && box2.maxPoint.x < box1.maxPoint.x)) {
-			return false;
-		}
-		return true;
+		return box1.collides(box2);
 	}
 
-	BoxAABB PointVolume::getAABB(){
-		BoxAABB result;
+	BoxAABB<> PointVolume::getAABB(){
+		BoxAABB<> result;
 		int totalPoints = (int)points.size();
 		if(totalPoints > 0){
 			result.initialize(points[0]);

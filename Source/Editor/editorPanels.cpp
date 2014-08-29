@@ -379,7 +379,7 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	panel.updateBoxHeader(grid->basicAABB().width());
 
 	createButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
-		panel.selection().enable([&](const MV::BoxAABB &a_selected){
+		panel.selection().enable([&](const MV::BoxAABB<> &a_selected){
 			completeSelection(a_selected);
 		});
 	});
@@ -389,7 +389,7 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	});
 }
 
-void DeselectedEditorPanel::completeSelection(const MV::BoxAABB &a_selected) {
+void DeselectedEditorPanel::completeSelection(const MV::BoxAABB<> &a_selected) {
  	static long i = 0;
  	panel.selection().disable();
 

@@ -15,10 +15,10 @@ namespace MV {
 
 			SCENE_MAKE_FACTORY_METHODS(Slider)
 
-				static std::shared_ptr<Slider> make(Draw2D* a_renderer, MouseState *a_mouse);
+			static std::shared_ptr<Slider> make(Draw2D* a_renderer, MouseState *a_mouse);
 			static std::shared_ptr<Slider> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center = false);
 			static std::shared_ptr<Slider> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, const Point<>& a_centerPoint);
-			static std::shared_ptr<Slider> make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB);
+			static std::shared_ptr<Slider> make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB<> &a_boxAABB);
 
 			std::shared_ptr<Clickable> area() const{
 				return dragArea;
@@ -46,10 +46,10 @@ namespace MV {
 
 			virtual void drawImplementation();
 
-			virtual BoxAABB worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB basicAABBImplementation() const override;
+			virtual BoxAABB<> worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB<int> screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB<> localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB<> basicAABBImplementation() const override;
 		private:
 			void updateHandlePosition();
 			void updateDragPercentForMousePosition(const Point<int> &a_screenPoint);

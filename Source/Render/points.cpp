@@ -18,6 +18,11 @@ namespace MV {
 	| ---------Color--------- |
 	\*************************/
 
+	std::ostream& operator<<(std::ostream& os, const Color& a_color){
+		os << "(" << a_color.R << ", " << a_color.G << ", " << a_color.B << ", " << a_color.A << ")";
+		return os;
+	}
+
 	Color::Color(uint32_t a_hex, bool a_allowFullAlpha):
 		A((a_allowFullAlpha || (a_hex & 0xff000000)) ? ((a_hex >> 24) & 0xFF) / 255.0f : 1.0f),
 		R(((a_hex >> 16) & 0xFF) / 255.0f),
@@ -253,20 +258,20 @@ namespace MV {
 		return !(*this == a_other);
 	}
 
-	Point<PointPrecision> scaleToPoint(const Scale &a_scale){
+	Point<PointPrecision> toPoint(const Scale &a_scale){
 		return{a_scale.x, a_scale.y, a_scale.z};
 	}
 
 	Point<PointPrecision> pointFromScale(const Scale &a_scale){
-		return scaleToPoint(a_scale);
+		return toPoint(a_scale);
 	}
 
-	Size<PointPrecision> scaleToSize(const Scale &a_scale){
+	Size<PointPrecision> toSize(const Scale &a_scale){
 		return{a_scale.x, a_scale.y, a_scale.z};
 	}
 
 	Size<PointPrecision> sizeFromScale(const Scale &a_scale){
-		return scaleToSize(a_scale);
+		return toSize(a_scale);
 	}
 
 	/*************************\

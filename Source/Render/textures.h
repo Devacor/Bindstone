@@ -48,12 +48,12 @@ namespace MV {
 		GLuint textureId() const;
 		std::string name() const;
 		Size<int> size() const;
-
+		Size<int> size();
 		//bookkeeping
 		bool loaded() const;
-		void reload();
-		void cleanup();
-		void cleanup(TextureHandle* a_toRemove);
+		void load();
+		void unload();
+		void unload(TextureHandle* a_toRemove);
 
 		void save(const std::string &a_fileName);
 	protected:
@@ -159,7 +159,7 @@ namespace MV {
 		void setSurfaceGenerator(std::function<SDL_Surface*()> a_surfaceGenerator){
 			surfaceGenerator = a_surfaceGenerator;
 			if(!handles.empty()){
-				reload();
+				load();
 			}
 		}
 	private:

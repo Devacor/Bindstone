@@ -232,11 +232,11 @@ namespace MV {
 			}
 		}
 
-		BoxAABB Node::worldAABB(bool a_includeChildren){
+		BoxAABB<> Node::worldAABB(bool a_includeChildren){
 			return worldAABBImplementation(a_includeChildren, false);
 		}
 
-		BoxAABB Node::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+		BoxAABB<> Node::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(shared_from_this())); renderer->modelviewMatrix().pop(); });
 			if(!a_nestedCall){
 				renderer->modelviewMatrix().push();
@@ -249,7 +249,7 @@ namespace MV {
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
 
-			BoxAABB tmpBox;
+			BoxAABB<> tmpBox;
 
 			if(!points.empty()){
 				tmpBox.initialize(renderer->worldFromLocal(points[0]));
@@ -270,11 +270,11 @@ namespace MV {
 			return tmpBox;
 		}
 
-		BoxAABB Node::screenAABB(bool a_includeChildren){
+		BoxAABB<int> Node::screenAABB(bool a_includeChildren){
 			return screenAABBImplementation(a_includeChildren, false);
 		}
 
-		BoxAABB Node::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+		BoxAABB<int> Node::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(shared_from_this())); renderer->modelviewMatrix().pop(); });
 			if(!a_nestedCall){
 				renderer->modelviewMatrix().push();
@@ -287,11 +287,11 @@ namespace MV {
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
 
-			BoxAABB tmpBox;
+			BoxAABB<int> tmpBox;
 			if(!points.empty()){
-				tmpBox.initialize(castPoint<PointPrecision>(renderer->screenFromLocal(points[0])));
+				tmpBox.initialize(renderer->screenFromLocal(points[0]));
 				std::for_each(points.begin(), points.end(), [&](Point<> &point){
-					tmpBox.expandWith(castPoint<PointPrecision>(renderer->screenFromLocal(point)));
+					tmpBox.expandWith(renderer->screenFromLocal(point));
 				});
 			}
 			if(a_includeChildren && !drawList.empty()){
@@ -307,11 +307,11 @@ namespace MV {
 			return tmpBox;
 		}
 
-		BoxAABB Node::localAABB(bool a_includeChildren){
+		BoxAABB<> Node::localAABB(bool a_includeChildren){
 			return localAABBImplementation(a_includeChildren, false);
 		}
 
-		BoxAABB Node::localAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+		BoxAABB<> Node::localAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			auto parentPopMatrix = scopeGuard([&](){if(myParent){ myParent->popMatrix(); } renderer->modelviewMatrix().pop(); });
 			if(!a_nestedCall){
 				renderer->modelviewMatrix().push();
@@ -328,7 +328,7 @@ namespace MV {
 
 			TransformMatrix transformationMatrix(renderer->projectionMatrix().top() * renderer->modelviewMatrix().top());
 
-			BoxAABB tmpBox;
+			BoxAABB<> tmpBox;
 
 			if(!points.empty()){
 				tmpBox.initialize(renderer->worldFromLocal(points[0]));
@@ -349,12 +349,12 @@ namespace MV {
 			return tmpBox;
 		}
 
-		MV::BoxAABB Node::basicAABB() const  {
+		MV::BoxAABB<> Node::basicAABB() const  {
 			return basicAABBImplementation();
 		}
 
-		MV::BoxAABB Node::basicAABBImplementation() const {
-			BoxAABB tmpBox;
+		MV::BoxAABB<> Node::basicAABBImplementation() const {
+			BoxAABB<> tmpBox;
 
 			if(!points.empty()){
 				tmpBox.initialize(points[0]);
@@ -501,7 +501,7 @@ namespace MV {
 			return processed;
 		}
 
-		BoxAABB Node::worldFromLocal(BoxAABB a_local){
+		BoxAABB<> Node::worldFromLocal(const BoxAABB<>& a_local){
 			require<PointerException>(renderer != nullptr, "DrawShape::worldFromLocal requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
@@ -513,12 +513,9 @@ namespace MV {
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
 
-			a_local.minPoint = renderer->worldFromLocal(a_local.minPoint);
-			a_local.maxPoint = renderer->worldFromLocal(a_local.maxPoint);
-			a_local.sanitize();
-			return a_local;
+			return{renderer->worldFromLocal(a_local.minPoint), renderer->worldFromLocal(a_local.maxPoint)};
 		}
-		BoxAABB Node::screenFromLocal(BoxAABB a_local){
+		BoxAABB<int> Node::screenFromLocal(const BoxAABB<>& a_local){
 			require<PointerException>(renderer != nullptr, "DrawShape::screenFromLocal requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
@@ -530,12 +527,9 @@ namespace MV {
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
 
-			a_local.minPoint = castPoint<PointPrecision>(renderer->screenFromLocal(a_local.minPoint));
-			a_local.maxPoint = castPoint<PointPrecision>(renderer->screenFromLocal(a_local.maxPoint));
-			a_local.sanitize();
-			return a_local;
+			return {renderer->screenFromLocal(a_local.minPoint), renderer->screenFromLocal(a_local.maxPoint)};
 		}
-		BoxAABB Node::localFromScreen(BoxAABB a_screen){
+		BoxAABB<> Node::localFromScreen(const BoxAABB<int> &a_screen){
 			require<PointerException>(renderer != nullptr, "DrawShape::localFromScreen requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
@@ -547,12 +541,9 @@ namespace MV {
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
 
-			a_screen.minPoint = renderer->localFromScreen(castPoint<int>(a_screen.minPoint));
-			a_screen.maxPoint = renderer->localFromScreen(castPoint<int>(a_screen.maxPoint));
-			a_screen.sanitize();
-			return a_screen;
+			return {renderer->localFromScreen(a_screen.minPoint), renderer->localFromScreen(a_screen.maxPoint)};
 		}
-		BoxAABB Node::localFromWorld(BoxAABB a_world){
+		BoxAABB<> Node::localFromWorld(const BoxAABB<> &a_world){
 			require<PointerException>(renderer != nullptr, "DrawShape::localFromWorld requires a rendering context.");
 			renderer->modelviewMatrix().push();
 			renderer->modelviewMatrix().top().makeIdentity();
@@ -564,10 +555,7 @@ namespace MV {
 			pushMatrix();
 			SCOPE_EXIT{popMatrix();};
 
-			a_world.minPoint = renderer->localFromWorld(a_world.minPoint);
-			a_world.maxPoint = renderer->localFromWorld(a_world.maxPoint);
-			a_world.sanitize();
-			return a_world;
+			return {renderer->localFromWorld(a_world.minPoint), renderer->localFromWorld(a_world.maxPoint)};
 		}
 
 		void Node::pushMatrix(){

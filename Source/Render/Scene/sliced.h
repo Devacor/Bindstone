@@ -12,10 +12,10 @@ namespace MV {
 		class SliceDimensions {
 		public:
 			SliceDimensions(const Size<> &a_sliceSize, const Size<> a_targetSize):
-				slices(sizeToPoint(a_sliceSize), sizeToPoint(a_sliceSize)),
+				slices(toPoint(a_sliceSize), toPoint(a_sliceSize)),
 				targetSize(a_targetSize){
 			}
-			SliceDimensions(const BoxAABB &a_slices, const Size<> &a_targetSize):
+			SliceDimensions(const BoxAABB<> &a_slices, const Size<> &a_targetSize):
 				slices(a_slices),
 				targetSize(a_targetSize){
 			}
@@ -69,7 +69,7 @@ namespace MV {
 			}
 		private:
 
-			BoxAABB slices;
+			BoxAABB<> slices;
 			Size<> targetSize;
 		};
 
@@ -84,7 +84,7 @@ namespace MV {
 			static std::shared_ptr<Sliced> make(Draw2D* a_renderer);
 			static std::shared_ptr<Sliced> make(Draw2D* a_renderer, const SliceDimensions &a_sliceDimensions, const Size<> &a_size, bool a_center = false);
 			static std::shared_ptr<Sliced> make(Draw2D* a_renderer, const SliceDimensions &a_sliceDimensions, const Size<> &a_size, const Point<>& a_centerPoint);
-			static std::shared_ptr<Sliced> make(Draw2D* a_renderer, const SliceDimensions &a_sliceDimensions, const BoxAABB &a_boxAABB);
+			static std::shared_ptr<Sliced> make(Draw2D* a_renderer, const SliceDimensions &a_sliceDimensions, const BoxAABB<> &a_boxAABB);
 
 			std::shared_ptr<Sliced> sliceDimensions(const SliceDimensions &a_sliceDimensions);
 			SliceDimensions sliceDimensions() const;
@@ -92,8 +92,8 @@ namespace MV {
 			std::shared_ptr<Sliced> size(const Size<> &a_size, bool a_center = false);
 			std::shared_ptr<Sliced> size(const Size<> &a_size, const Point<> &a_centerPoint);
 
-			BoxAABB bounds() const;
-			std::shared_ptr<Sliced> bounds(const BoxAABB &a_bounds);
+			BoxAABB<> bounds() const;
+			std::shared_ptr<Sliced> bounds(const BoxAABB<> &a_bounds);
 
 			virtual void clearTextureCoordinates();
 			virtual void updateTextureCoordinates();
@@ -118,7 +118,7 @@ namespace MV {
 				construct(renderer);
 				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
 			}
-			BoxAABB dimensions;
+			BoxAABB<> dimensions;
 			SliceDimensions slicedDimensions;
 		};
 	}

@@ -166,7 +166,7 @@ namespace MV {
 		}
 		result.y=renderer.window().height()-result.y;
 		result.z = a_point.z;//restore original z since we're just 2d.
-		return castPoint<int>(result);
+		return cast<int>(result);
 	}
 
 	Point<> ProjectionDetails::projectWorld(const Point<> &a_point){
@@ -666,7 +666,7 @@ namespace MV {
 	bool Draw2D::initialize(Size<int> a_window, Size<> a_world, bool a_requireExtensions, bool a_summarize){
 		sdlWindow.resize(a_window);
 		if(a_world.width < 0 || a_world.height < 0){
-			a_world = castSize<PointPrecision>(a_window);
+			a_world = cast<PointPrecision>(a_window);
 		}
 		mvWorld.resize(a_world);
 

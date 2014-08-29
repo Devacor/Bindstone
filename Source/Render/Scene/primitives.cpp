@@ -81,14 +81,14 @@ namespace MV {
 			return rectangle->size(a_size, a_centerPoint);
 		}
 
-		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const BoxAABB &a_boxAABB) {
+		std::shared_ptr<Rectangle> Rectangle::make(Draw2D* a_renderer, const BoxAABB<> &a_boxAABB) {
 			auto rectangle = std::shared_ptr<Rectangle>(new Rectangle(a_renderer));
 			rectangle->registerShader();
 			return rectangle->bounds(a_boxAABB);
 		}
 
 
-		std::shared_ptr<Rectangle> Rectangle::bounds(const BoxAABB &a_bounds){
+		std::shared_ptr<Rectangle> Rectangle::bounds(const BoxAABB<> &a_bounds){
 			auto notifyOnChanged = makeScopedDepthChangeNote(this);
 			
 			points[0] = a_bounds.minPoint;
@@ -101,7 +101,7 @@ namespace MV {
 
 		std::shared_ptr<Rectangle> Rectangle::size(const Size<> &a_size, const Point<> &a_centerPoint){
 			Point<> topLeft;
-			Point<> bottomRight = sizeToPoint(a_size);
+			Point<> bottomRight = toPoint(a_size);
 			
 			topLeft-=a_centerPoint;
 			bottomRight-=a_centerPoint;

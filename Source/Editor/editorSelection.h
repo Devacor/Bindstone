@@ -47,8 +47,8 @@ class Selection {
 public:
 	Selection(std::shared_ptr<MV::Scene::Node> a_scene, MV::MouseState &a_mouse);
 
-	void callback(std::function<void(const MV::BoxAABB &)> a_callback);
-	void enable(std::function<void(const MV::BoxAABB &)> a_callback);
+	void callback(std::function<void(const MV::BoxAABB<> &)> a_callback);
+	void enable(std::function<void(const MV::BoxAABB<> &)> a_callback);
 	void enable();
 	void disable();
 	void exitSelection();
@@ -58,8 +58,8 @@ private:
 
 	std::shared_ptr<MV::Scene::Rectangle> visibleSelection;
 	MV::MouseState &mouse;
-	MV::BoxAABB selection;
-	std::function<void(const MV::BoxAABB &)> selectedCallback;
+	MV::BoxAABB<> selection;
+	std::function<void(const MV::BoxAABB<> &)> selectedCallback;
 
 	MV::MouseState::SignalType onMouseDownHandle;
 	MV::MouseState::SignalType onMouseUpHandle;

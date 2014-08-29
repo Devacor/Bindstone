@@ -88,6 +88,8 @@ namespace MV {
 		}
 	};
 
+	class Scale;
+
 	template <class T = PointPrecision>
 	class Size{
 	public:
@@ -111,6 +113,10 @@ namespace MV {
 			return width >= a_other.width && height >= a_other.height && (!a_useDepth || depth >= a_other.depth);
 		}
 
+		T area(bool a_useDepth = false) const{
+			return width * height * (a_useDepth ? depth : 1);
+		}
+
 		Size<T>& operator+=(const Size<T>& a_other);
 		Size<T>& operator-=(const Size<T>& a_other);
 		Size<T>& operator*=(const Size<T>& a_other);
@@ -119,6 +125,8 @@ namespace MV {
 		Size<T>& operator-=(const T& a_other);
 		Size<T>& operator*=(const T& a_other);
 		Size<T>& operator/=(const T& a_other);
+		Size<T>& operator*=(const Scale& a_other);
+		Size<T>& operator/=(const Scale& a_other);
 
 		bool operator<(const Size<T>& a_other){
 			return (width + height) < (a_other.width + a_other.height);
@@ -158,6 +166,8 @@ namespace MV {
 		Point<T>& operator/=(const Point<T>& a_other);
 		Point<T>& operator*=(const T& a_other);
 		Point<T>& operator/=(const T& a_other);
+		Point<T>& operator*=(const Scale& a_other);
+		Point<T>& operator/=(const Scale& a_other);
 
 		bool operator==(const Point<T>& a_other){
 			return equals(x, a_other.x) && equals(y, a_other.y) && equals(z, a_other.z);
@@ -216,28 +226,16 @@ namespace MV {
 		PointPrecision x, y, z;
 	};
 
-	Point<PointPrecision> scaleToPoint(const Scale &a_scale);
-	Point<PointPrecision> pointFromScale(const Scale &a_scale);
-
-	Size<PointPrecision> scaleToSize(const Scale &a_scale);
-	Size<PointPrecision> sizeFromScale(const Scale &a_scale);
+	Point<PointPrecision> toPoint(const Scale &a_scale);
+	Size<PointPrecision> toSize(const Scale &a_scale);
 
 	template <typename T>
-	Scale scaleFromPoint(const Point<T> &a_point){
-		return {a_point.x, a_point.y, a_point.z};
+	Scale toScale(const Point<T> &a_point){
+		return{a_point.x, a_point.y, a_point.z};
 	}
 	template <typename T>
-	Scale pointToScale(const Point<T> &a_point){
-		return scaleFromPoint(a_point);
-	}
-
-	template <typename T>
-	Scale scaleFromSize(const Size<T> &a_point){
+	Scale toScale(const Size<T> &a_point){
 		return{a_point.width, a_point.height, a_point.depth};
-	}
-	template <typename T>
-	Scale sizeToScale(const Size<T> &a_point){
-		return scaleFromSize(a_point);
 	}
 
 	Scale operator+(Scale a_lhs, const Scale &a_rhs);
@@ -324,29 +322,21 @@ namespace MV {
 	\**************************/
 
 
-	//I kept forgetting these names, so I just added pointToSize + pointFromSize doing the same thing.
 	template <class T>
-	Point<T> pointFromSize(const Size<T>& a_size){
-		return Point<T>{a_size.width, a_size.height, a_size.depth};
+	Size<T> toSize(const Point<T>& a_point){
+		return Size<T>{a_point.x, a_point.y, a_point.z};
 	}
 	template <class T>
-	Size<T> pointToSize(const Point<T>& a_point){
-		return Size<T>{a_point.x, a_point.y, a_point.z};
+	Point<T> toPoint(const Size<T>& a_size){
+		return Point<T>{a_size.width, a_size.height, a_size.depth};
 	}
 
-	//Likewise here, we've got two ways of saying it for convenience.
-	template <class T>
-	Point<T> sizeToPoint(const Size<T>& a_size){
-		return Point<T>{a_size.width, a_size.height, a_size.depth};
-	}
-	template <class T>
-	Size<T> sizeFromPoint(const Point<T>& a_point){
-		return Size<T>{a_point.x, a_point.y, a_point.z};
-	}
 
 	/************************\
 	| ------Color IMP------- |
 	\************************/
+
+	std::ostream& operator<<(std::ostream& os, const Color& a_color);
 
 	Color operator+(const Color &a_lhs, const Color &a_rhs);
 	Color operator-(const Color &a_lhs, const Color &a_rhs);
@@ -429,7 +419,7 @@ namespace MV {
 	}
 
 	template <class Target, class Origin>
-	Size<Target> castSize(const Size<Origin> &a_size){
+	Size<Target> cast(const Size<Origin> &a_size){
 		return Size<Target>(static_cast<Target>(a_size.width), static_cast<Target>(a_size.height), static_cast<Target>(a_size.depth));
 	}
 
@@ -448,6 +438,14 @@ namespace MV {
 	template <class T>
 	Size<T>& MV::Size<T>::operator*=( const Size<T>& a_other ){
 		width*=a_other.width; height*=a_other.height; depth*=a_other.depth;
+		return *this;
+	}
+
+	template <class T>
+	Size<T>& MV::Size<T>::operator*=(const Scale& a_other){
+		width = static_cast<T>(static_cast<PointPrecision>(width) * a_other.x);
+		height = static_cast<T>(static_cast<PointPrecision>(height)* a_other.y);
+		depth = static_cast<T>(static_cast<PointPrecision>(depth)* a_other.z);
 		return *this;
 	}
 
@@ -474,6 +472,14 @@ namespace MV {
 		width /= (a_other.width == 0) ? 1 : a_other.width;
 		height /= (a_other.height == 0) ? 1 : a_other.height;
 		depth /= (a_other.depth == 0) ? 1 : a_other.depth;
+		return *this;
+	}
+
+	template <class T>
+	Size<T>& MV::Size<T>::operator/=(const Scale& a_other){
+		width = static_cast<T>(static_cast<PointPrecision>(width) / (a_other.x == 0) ? 1 : a_other.x);
+		height = static_cast<T>(static_cast<PointPrecision>(height) / (a_other.y == 0) ? 1 : a_other.y);
+		depth = static_cast<T>(static_cast<PointPrecision>(depth) / (a_other.z == 0) ? 1 : a_other.z);
 		return *this;
 	}
 
@@ -517,6 +523,18 @@ namespace MV {
 
 	template <class T>
 	Size<T> operator/(const Size<T>& a_left, const Size<T>& a_right){
+		Size<T> tmpPoint = a_left;
+		return tmpPoint /= a_right;
+	}
+
+	template <class T>
+	Size<T> operator*(const Size<T>& a_left, const Scale& a_right){
+		Size<T> tmpPoint = a_left;
+		return tmpPoint *= a_right;
+	}
+
+	template <class T>
+	Size<T> operator/(const Size<T>& a_left, const Scale& a_right){
 		Size<T> tmpPoint = a_left;
 		return tmpPoint /= a_right;
 	}
@@ -591,7 +609,7 @@ namespace MV {
 	}
 
 	template <class Target, class Origin>
-	Point<Target> castPoint(const Point<Origin> &a_point){
+	Point<Target> cast(const Point<Origin> &a_point){
 		return Point<Target>{static_cast<Target>(a_point.x), static_cast<Target>(a_point.y), static_cast<Target>(a_point.z)};
 	}
 
@@ -649,6 +667,14 @@ namespace MV {
 	}
 
 	template <class T>
+	Point<T>& MV::Point<T>::operator*=(const Scale& a_other){
+		x = static_cast<T>(static_cast<PointPrecision>(x)* a_other.x);
+		y = static_cast<T>(static_cast<PointPrecision>(y)* a_other.y);
+		z = static_cast<T>(static_cast<PointPrecision>(z)* a_other.z);
+		return *this;
+	}
+
+	template <class T>
 	Point<T>& MV::Point<T>::operator*=(const T& a_other){
 		x*=a_other; y*=a_other; z*=a_other;
 		return *this;
@@ -659,6 +685,14 @@ namespace MV {
 		x /= (a_other.x != 0) ? a_other.x : 1;
 		y /= (a_other.y != 0) ? a_other.y : 1;
 		z /= (a_other.z != 0) ? a_other.z : 1;
+		return *this;
+	}
+
+	template <class T>
+	Point<T>& MV::Point<T>::operator/=(const Scale& a_other){
+		x = static_cast<T>(static_cast<PointPrecision>(x) / (a_other.x != 0) ? a_other.x : 1);
+		y = static_cast<T>(static_cast<PointPrecision>(y) / (a_other.y != 0) ? a_other.y : 1);
+		z = static_cast<T>(static_cast<PointPrecision>(z) / (a_other.z != 0) ? a_other.z : 1);
 		return *this;
 	}
 

@@ -44,7 +44,7 @@ namespace MV {
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse);
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center = false);
 			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, const Point<>& a_centerPoint);
-			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB);
+			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB<> &a_boxAABB);
 
 			SlotRegister<ButtonSlotSignature> onPress;
 			SlotRegister<ButtonSlotSignature> onRelease;
@@ -150,7 +150,7 @@ namespace MV {
 			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse);
 			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center = false);
 			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, const Point<>& a_centerPoint);
-			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB);
+			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB<> &a_boxAABB);
 
 			SlotRegister<ButtonSlotSignature> onPress;
 			SlotRegister<ButtonSlotSignature> onRelease;
@@ -170,17 +170,17 @@ namespace MV {
 			std::shared_ptr<Button> clickSize(const Size<> &a_size, bool a_center = false);
 			std::shared_ptr<Button> clickSize(const Size<> &a_size, const Point<>& a_centerPoint);
 			
-			std::shared_ptr<Button> clickBounds(const BoxAABB &a_boxAABB);
+			std::shared_ptr<Button> clickBounds(const BoxAABB<> &a_boxAABB);
 
 			virtual void setRenderer(Draw2D* a_renderer, bool includeChildren = true, bool includeParents = true) override;
 
 		protected:
 			Button(Draw2D *a_renderer, MouseState *a_mouse);
 
-			virtual BoxAABB worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB basicAABBImplementation() const override;
+			virtual BoxAABB<> worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB<int> screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB<> localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			virtual BoxAABB<> basicAABBImplementation() const override;
 
 		private:
 

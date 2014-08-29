@@ -163,10 +163,10 @@ namespace MV {
 			virtual Point<> normalizeToCenter();
 
 			//Axis Aligned Bounding Box
-			BoxAABB worldAABB(bool a_includeChildren = true);
-			BoxAABB screenAABB(bool a_includeChildren = true);
-			BoxAABB localAABB(bool a_includeChildren = true);
-			BoxAABB basicAABB() const;
+			BoxAABB<> worldAABB(bool a_includeChildren = true);
+			BoxAABB<int> screenAABB(bool a_includeChildren = true);
+			BoxAABB<> localAABB(bool a_includeChildren = true);
+			BoxAABB<> basicAABB() const;
 
 			//Point conversion
 			Point<> worldFromLocal(const Point<> &a_local);
@@ -180,10 +180,10 @@ namespace MV {
 			std::vector<Point<>> localFromScreen(const std::vector<Point<int>> &a_screen);
 			std::vector<Point<>> localFromWorld(std::vector<Point<>> a_world);
 
-			BoxAABB worldFromLocal(BoxAABB a_local);
-			BoxAABB screenFromLocal(BoxAABB a_local);
-			BoxAABB localFromScreen(BoxAABB a_screen);
-			BoxAABB localFromWorld(BoxAABB a_world);
+			BoxAABB<> worldFromLocal(const BoxAABB<>& a_local);
+			BoxAABB<int> screenFromLocal(const BoxAABB<>& a_local);
+			BoxAABB<> localFromScreen(const BoxAABB<int>& a_screen);
+			BoxAABB<> localFromWorld(const BoxAABB<>& a_world);
 
 			Scale incrementScale(PointPrecision a_newScale);
 			Scale incrementScale(const Scale &a_scaleValue);
@@ -302,10 +302,10 @@ namespace MV {
 			}
 
 			//would have preferred these private, but I moved them public for more flexibility as per the Button class.
-			virtual BoxAABB worldAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB screenAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB localAABBImplementation(bool a_includeChildren, bool a_nestedCall);
-			virtual BoxAABB basicAABBImplementation() const;
+			virtual BoxAABB<> worldAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB<int> screenAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB<> localAABBImplementation(bool a_includeChildren, bool a_nestedCall);
+			virtual BoxAABB<> basicAABBImplementation() const;
 
 			void sortLess(){
 				isSorted = isSorted && shouldSortLessThan;

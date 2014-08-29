@@ -147,10 +147,12 @@ namespace MV {
 		texture(0){
 	}
 
-	void TextureDefinition::reload(){
-		reloadImplementation();
-		if(isShared){
-			onReloadAction(shared_from_this());
+	void TextureDefinition::load(){
+		if(!loaded()){
+			reloadImplementation();
+			if(isShared){
+				onReloadAction(shared_from_this());
+			}
 		}
 	}
 
@@ -159,26 +161,37 @@ namespace MV {
 	}
 
 	bool TextureDefinition::loaded() const{
-		return textureSize.width > 0 && textureSize.height > 0;
+		return texture != 0;
 	}
 
 	Size<int> TextureDefinition::size() const{
-		require<ResourceException>(textureSize.width > 0 && textureSize.height > 0, "The texture hasn't actually loaded yet.  You may need to create a handle to implicitly force a texture load.");
+		require<ResourceException>(loaded(), "The texture hasn't actually loaded yet.  You may need to create a handle to implicitly force a texture load.");
 		return textureSize;
+	}
+
+	Size<int> TextureDefinition::size(){
+		if(!loaded()){
+			load();
+			auto ourSize = textureSize;
+			cleanupOpenglTexture();
+			return ourSize;
+		} else{
+			return textureSize;
+		}
 	}
 
 	std::string TextureDefinition::name() const{
 		return textureName;
 	}
 
-	void TextureDefinition::cleanup(){
+	void TextureDefinition::unload(){
 		if (!handles.empty()){
 			handles.erase(std::remove_if(handles.begin(), handles.end(), [](const std::weak_ptr<TextureHandle> &value){return value.expired(); }), handles.end());
 			cleanupOpenglTexture();
 		}
 	}
 
-	void TextureDefinition::cleanup(TextureHandle* toRemove){
+	void TextureDefinition::unload(TextureHandle* toRemove){
 		if(!handles.empty()){
 			handles.erase(std::remove_if(handles.begin(), handles.end(), [&](const std::weak_ptr<TextureHandle> &value){return value.expired() || &(*value.lock()) == toRemove; }), handles.end());
 			cleanupOpenglTexture();
@@ -187,7 +200,7 @@ namespace MV {
 
 	std::shared_ptr<TextureHandle> TextureDefinition::makeHandle() {
 		if (handles.empty()){
-			reload();
+			load();
 		}
 		auto handle = std::shared_ptr<TextureHandle>(new TextureHandle(shared_from_this()));
 		handles.push_back(handle);
@@ -196,7 +209,7 @@ namespace MV {
 
 	std::shared_ptr<TextureHandle> TextureDefinition::makeHandle(const Point<int> &a_position, const Size<int> &a_size) {
 		if (handles.empty()){
-			reload();
+			load();
 		}
 		auto handle = std::shared_ptr<TextureHandle>(new TextureHandle(shared_from_this(), a_position, a_size));
 		handles.push_back(handle);
@@ -219,7 +232,7 @@ namespace MV {
 
 	void TextureDefinition::save(const std::string &a_fileName) {
 		if(!loaded()){
-			reload();
+			load();
 			saveLoadedTexture(a_fileName, texture);
 			cleanupOpenglTexture();
 		} else{
@@ -314,8 +327,8 @@ namespace MV {
 		});
 		observeTextureReload();
 		if(a_texture && a_texture->loaded()){
-			handlePercentSize = castSize<double>(size()) / castSize<double>(textureDefinition->size());
-			handlePercentPosition = castPoint<double>(position()) / pointFromSize(castSize<double>(textureDefinition->size()));
+			handlePercentSize = cast<double>(size()) / cast<double>(textureDefinition->size());
+			handlePercentPosition = cast<double>(position()) / toPoint(cast<double>(textureDefinition->size()));
 
 			handlePercentTopLeft.x = handlePercentPosition.x;
 			handlePercentBottomRight.x = handlePercentPosition.x + handlePercentSize.width;
@@ -329,7 +342,7 @@ namespace MV {
 
 	TextureHandle::~TextureHandle() {
 		if(textureDefinition){
-			textureDefinition->cleanup(this);
+			textureDefinition->unload(this);
 		}
 	}
 
@@ -340,15 +353,15 @@ namespace MV {
 	}
 
 	void TextureHandle::updatePercentBounds(){
-		handlePercentSize = castSize<double>(size()) / castSize<double>(textureDefinition->size());
-		handlePercentPosition = castPoint<double>(position()) / pointFromSize(castSize<double>(textureDefinition->size()));
+		handlePercentSize = cast<double>(size()) / cast<double>(textureDefinition->size());
+		handlePercentPosition = cast<double>(position()) / toPoint(cast<double>(textureDefinition->size()));
 
 		updatePercentCorners();
 	}
 
 	void TextureHandle::updateIntegralBounds(){
-		handleSize = castSize<int>(castSize<double>(textureDefinition->size()) * handlePercentSize);
-		handlePosition = castPoint<int>(pointFromSize(castSize<double>(textureDefinition->size())) * handlePercentPosition);
+		handleSize = cast<int>(cast<double>(textureDefinition->size()) * handlePercentSize);
+		handlePosition = cast<int>(toPoint(cast<double>(textureDefinition->size())) * handlePercentPosition);
 
 		updatePercentCorners();
 	}
@@ -379,13 +392,13 @@ namespace MV {
 	}
 
 	void TextureHandle::setCorners(const Point<int> &a_topLeft, const Point<int> &a_bottomRight){
-		handleSize = sizeFromPoint(a_bottomRight - a_topLeft);
+		handleSize = toSize(a_bottomRight - a_topLeft);
 		handlePosition = a_topLeft;
 
 		updatePercentBounds();
 	}
 	void TextureHandle::setCorners(const Point<double> &a_topLeft, const Point<double> &a_bottomRight){
-		handlePercentSize = sizeFromPoint(a_bottomRight - a_topLeft);
+		handlePercentSize = toSize(a_bottomRight - a_topLeft);
 		handlePercentPosition = a_topLeft;
 
 		updateIntegralBounds();

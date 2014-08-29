@@ -41,7 +41,7 @@ namespace MV {
 
 		}
 
-		void Grid::setPointsFromBounds(const BoxAABB &a_bounds){
+		void Grid::setPointsFromBounds(const BoxAABB<> &a_bounds){
 			points[0] = a_bounds.minPoint;
 			points[1].x = a_bounds.minPoint.x;	points[1].y = a_bounds.maxPoint.y;	points[1].z = (equals(a_bounds.maxPoint.z, 0.0f) && equals(a_bounds.minPoint.z, 0.0f)) ? 0.0f : (a_bounds.maxPoint.z + a_bounds.minPoint.z) / 2.0f;
 			points[2] = a_bounds.maxPoint;
@@ -62,7 +62,7 @@ namespace MV {
 		}
 
 		void Grid::layoutCellSize(){
-			BoxAABB bounds(size(getContentWidth(), cellDimensions.height));
+			BoxAABB<> bounds(size(getContentWidth(), cellDimensions.height));
 			Point<> cellPosition = cellPadding.first + cellPadding.second + margins.first;
 			size_t index = 0;
 
@@ -78,7 +78,7 @@ namespace MV {
 					}
 
 					shape.lock()->position(cellPosition - cellPadding.second);
-					bounds.expandWith(cellPosition + sizeToPoint(cellDimensions) - cellPadding.second);
+					bounds.expandWith(cellPosition + toPoint(cellDimensions) - cellPadding.second);
 
 					cellPosition = nextPosition;
 					return false;
@@ -92,7 +92,7 @@ namespace MV {
 		}
 
 		void Grid::layoutChildSize(){
-			BoxAABB bounds(size(getContentWidth(), cellDimensions.height));
+			BoxAABB<> bounds(size(getContentWidth(), cellDimensions.height));
 			Point<> cellPosition = cellPadding.first + cellPadding.second + margins.first;
 			size_t index = 0;
 			
@@ -113,7 +113,7 @@ namespace MV {
 
 					maxHeightInLine = std::max(shapeSize.height, maxHeightInLine);
 					shape.lock()->position(cellPosition - cellPadding.second);
-					bounds.expandWith(cellPosition + sizeToPoint(shapeSize) - cellPadding.second);
+					bounds.expandWith(cellPosition + toPoint(shapeSize) - cellPadding.second);
 
 					cellPosition = nextPosition;
 					return false;
@@ -153,8 +153,8 @@ namespace MV {
 		}
 
 		std::shared_ptr<Grid> Grid::padding(const Size<> &a_padding) {
-			cellPadding.first = sizeToPoint(a_padding);
-			cellPadding.second = sizeToPoint(a_padding);
+			cellPadding.first = toPoint(a_padding);
+			cellPadding.second = toPoint(a_padding);
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
@@ -168,8 +168,8 @@ namespace MV {
 		}
 
 		std::shared_ptr<Grid> Grid::margin(const Size<> &a_margin){
-			margins.first = sizeToPoint(a_margin);
-			margins.second = sizeToPoint(a_margin);
+			margins.first = toPoint(a_margin);
+			margins.second = toPoint(a_margin);
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
@@ -195,17 +195,17 @@ namespace MV {
 			return cellRows;
 		}
 
-		MV::BoxAABB Grid::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
+		MV::BoxAABB<> Grid::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
 			layoutCells();
 			return Node::worldAABBImplementation(a_includeChildren, a_nestedCall);
 		}
 
-		MV::BoxAABB Grid::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
+		MV::BoxAABB<int> Grid::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
 			layoutCells();
 			return Node::screenAABBImplementation(a_includeChildren, a_nestedCall);
 		}
 
-		MV::BoxAABB Grid::localAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
+		MV::BoxAABB<> Grid::localAABBImplementation(bool a_includeChildren, bool a_nestedCall) {
 			layoutCells();
 			return Node::localAABBImplementation(a_includeChildren, a_nestedCall);
 		}
@@ -234,8 +234,8 @@ namespace MV {
 			defaultDraw(GL_TRIANGLES);
 		}
 
-		BoxAABB Grid::calculateBasicAABBFromDimensions(DrawListVectorType &a_drawListVector) const{
-			BoxAABB bounds(size(getContentWidth(), cellDimensions.height));
+		BoxAABB<> Grid::calculateBasicAABBFromDimensions(DrawListVectorType &a_drawListVector) const{
+			BoxAABB<> bounds(size(getContentWidth(), cellDimensions.height));
 			Point<> cellPosition = cellPadding.first + cellPadding.second + margins.first;
 			size_t index = 0;
 
@@ -250,7 +250,7 @@ namespace MV {
 						nextPosition.translate(cellDimensions.width + (cellPadding.first + cellPadding.second).x, 0.0f);
 					}
 
-					bounds.expandWith(cellPosition + sizeToPoint(cellDimensions) - cellPadding.second);
+					bounds.expandWith(cellPosition + toPoint(cellDimensions) - cellPadding.second);
 
 					cellPosition = nextPosition;
 					return false;
@@ -263,8 +263,8 @@ namespace MV {
 			return bounds;
 		}
 
-		BoxAABB Grid::calculateBasicAABBFromCells(DrawListVectorType &a_drawListVector) const{
-			BoxAABB bounds(size(getContentWidth(), cellDimensions.height));
+		BoxAABB<> Grid::calculateBasicAABBFromCells(DrawListVectorType &a_drawListVector) const{
+			BoxAABB<> bounds(size(getContentWidth(), cellDimensions.height));
 			Point<> cellPosition = cellPadding.first + cellPadding.second + margins.first;
 			size_t index = 0;
 
@@ -284,7 +284,7 @@ namespace MV {
 					}
 
 					maxHeightInLine = std::max(shapeSize.height, maxHeightInLine);
-					bounds.expandWith(cellPosition + sizeToPoint(shapeSize) - cellPadding.second);
+					bounds.expandWith(cellPosition + toPoint(shapeSize) - cellPadding.second);
 
 					cellPosition = nextPosition;
 					return false;
@@ -297,7 +297,7 @@ namespace MV {
 			return bounds;
 		}
 
-		MV::BoxAABB Grid::basicAABBImplementation() const {
+		MV::BoxAABB<> Grid::basicAABBImplementation() const {
 			if(dirtyGrid){
 				DrawListVectorType tmpDrawListVector;
 				if(!isSorted){
@@ -315,7 +315,7 @@ namespace MV {
 					return calculateBasicAABBFromCells(tmpDrawListVector);
 				}
 			} else{
-				return BoxAABB(points[0], points[2]);
+				return BoxAABB<>(points[0], points[2]);
 			}
 		}
 

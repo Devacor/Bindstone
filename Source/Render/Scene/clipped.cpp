@@ -13,11 +13,11 @@ namespace MV {
 		void Clipped::refreshTexture(bool a_forceRefresh) {
 			if(a_forceRefresh || dirtyTexture){
 				auto pointAABB = basicAABB();
-				auto textureSize = castSize<int>(pointAABB.size());
+				auto textureSize = cast<int>(pointAABB.size());
 				clippedTexture = DynamicTextureDefinition::make("", textureSize, {0.0f, 0.0f, 0.0f, 0.0f});
 				dirtyTexture = false;
 				texture(clippedTexture->makeHandle(Point<int>(), textureSize));
-				framebuffer = renderer->makeFramebuffer(castPoint<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId());
+				framebuffer = renderer->makeFramebuffer(cast<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId());
 				{
 					renderer->setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
 					SCOPE_EXIT{renderer->defaultBlendFunction(); };
@@ -71,7 +71,7 @@ namespace MV {
 			return clipped->size(a_size, a_centerPoint);
 		}
 
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const BoxAABB &a_boxAABB) {
+		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const BoxAABB<> &a_boxAABB) {
 			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
 			clipped->registerShader();
 			return clipped->bounds(a_boxAABB);
@@ -105,6 +105,16 @@ namespace MV {
 					unsortedRender();
 				}
 			}
+		}
+
+		BoxAABB<> Clipped::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+			return Node::worldAABBImplementation(false, a_nestedCall);
+		}
+		BoxAABB<int> Clipped::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+			return Node::screenAABBImplementation(false, a_nestedCall);
+		}
+		BoxAABB<> Clipped::localAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+			return Node::localAABBImplementation(false, a_nestedCall);
 		}
 
 	}

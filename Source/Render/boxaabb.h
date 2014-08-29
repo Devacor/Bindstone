@@ -1,12 +1,3 @@
-/**********************************************************\
-| Michael Hamilton (maxmike@gmail.com) www.mutedvision.net |
-|----------------------------------------------------------|
-| Primitive drawing shapes go here.  Common notation for   |
-| lists of points is start at the top left corner and go   |
-| clockwise (so 1 = top left, 2 = top right, 3 = bot right |
-| 4 = bot left)                                            |
-\**********************************************************/
-
 #ifndef _MV_BOXAABB_H_
 #define _MV_BOXAABB_H_
 
@@ -18,29 +9,34 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <boost/lexical_cast.hpp>
 
 #include "points.h"
-#include "Utility/package.h"
+#include "Utility/generalUtility.h"
 
 namespace MV {
+
+	template <typename T = PointPrecision>
 	class BoxAABB{
-		friend cereal::access;
 	public:
-		BoxAABB(){ initialize(Point<>()); }
-		BoxAABB(const Point<> &a_startPoint){ initialize(a_startPoint); }
-		BoxAABB(const Size<> &a_startSize){ initialize(a_startSize); }
-		BoxAABB(const Point<> &a_startPoint, const Point<> &a_endPoint){ initialize(a_startPoint, a_endPoint); }
-		BoxAABB(const Point<> &a_startPoint, const Size<> &a_size){ initialize(a_startPoint, a_size); }
+		BoxAABB(){ initialize(Point<T>()); }
+		BoxAABB(const Point<T> &a_startPoint){ initialize(a_startPoint); }
+		BoxAABB(const Size<T> &a_startSize){ initialize(a_startSize); }
+		BoxAABB(const Point<T> &a_startPoint, const Point<T> &a_endPoint){ initialize(a_startPoint, a_endPoint); }
+		BoxAABB(const Point<T> &a_startPoint, const Size<T> &a_size){ initialize(a_startPoint, a_size); }
 
-		void initialize(const Point<> &a_startPoint);
-		void initialize(const Size<> &a_startPoint);
-		void initialize(const BoxAABB &a_startBox);
-		void initialize(const Point<> &a_startPoint, const Point<> &a_endPoint);
-		void initialize(const Point<> &a_startPoint, const Size<> &a_endPoint);
+		void initialize(const Point<T> &a_startPoint);
+		void initialize(const Size<T> &a_startPoint);
+		void initialize(const BoxAABB<T> &a_startBox);
+		void initialize(const Point<T> &a_startPoint, const Point<T> &a_endPoint);
+		void initialize(const Point<T> &a_startPoint, const Size<T> &a_endPoint);
 
-		BoxAABB& expandWith(const Point<> &a_comparePoint);
-		BoxAABB& expandWith(const BoxAABB &a_compareBox);
+		std::vector<BoxAABB<T>> removeFromBounds(const BoxAABB<T> &a_comparePoint);
+
+		BoxAABB<T>& expandWith(const Point<T> &a_comparePoint);
+		BoxAABB<T>& expandWith(const BoxAABB<T> &a_compareBox);
+
+		BoxAABB<T>& contractWith(const Point<T> &a_comparePoint);
+		BoxAABB<T>& contractWith(const BoxAABB<T> &a_compareBox);
 
 		PointPrecision width() const{
 			return (maxPoint - minPoint).x;
@@ -53,23 +49,23 @@ namespace MV {
 		bool flatWidth() const{ return equals(minPoint.x, maxPoint.x); }
 		bool flatHeight() const{ return equals(minPoint.y, maxPoint.y); }
 
-		Size<> size() const{ return sizeFromPoint(maxPoint - minPoint); }
+		Size<T> size() const{ return toSize(maxPoint - minPoint); }
 
-		bool contains(const Point<> &a_comparePoint, bool a_useDepth = false) const;
-		bool contains(const BoxAABB& a_other, bool a_useDepth = false) const;
+		bool contains(const Point<T> &a_comparePoint, bool a_useDepth = false) const;
+		bool contains(const BoxAABB<T>& a_other, bool a_useDepth = false) const;
 
-		bool collides(const BoxAABB &a_other, bool a_useDepth = false) const;
+		bool collides(const BoxAABB<T> &a_other, bool a_useDepth = false) const;
 
 		void sanitize();
 
-		Point<> centerPoint() const { return minPoint + ((minPoint + maxPoint) / 2.0f); }
+		Point<T> centerPoint() const { return minPoint + ((minPoint + maxPoint) / 2.0f); }
 
-		Point<> topLeftPoint() const { return minPoint; }
-		Point<> bottomLeftPoint() const { return point(minPoint.x, maxPoint.y); }
-		Point<> bottomRightPoint() const { return maxPoint; }
-		Point<> topRightPoint() const { return point(maxPoint.x, minPoint.y); }
+		Point<T> topLeftPoint() const { return minPoint; }
+		Point<T> bottomLeftPoint() const { return point(minPoint.x, maxPoint.y); }
+		Point<T> bottomRightPoint() const { return maxPoint; }
+		Point<T> topRightPoint() const { return point(maxPoint.x, minPoint.y); }
 
-		Point<> operator[](size_t a_index) const{
+		Point<T> operator[](size_t a_index) const{
 			switch(a_index){
 			case 0:
 				return topLeftPoint();
@@ -80,34 +76,225 @@ namespace MV {
 			case 3:
 				return topRightPoint();
 			}
-			return {};
+			return{};
 		}
 
-		BoxAABB& operator+=(const Point<> &a_offset){
+		BoxAABB<>& operator+=(const Point<T> &a_offset){
 			minPoint += a_offset;
 			maxPoint += a_offset;
 			return *this;
 		}
-		BoxAABB& operator-=(const Point<> &a_offset){
+		BoxAABB<>& operator-=(const Point<T> &a_offset){
 			minPoint -= a_offset;
 			maxPoint -= a_offset;
 			return *this;
 		}
 
-		Point<> minPoint, maxPoint;
-	private:
-		template <class Archive>
-		void serialize(Archive & archive){
-			archive(CEREAL_NVP(minPoint), CEREAL_NVP(maxPoint));
-		}
+		Point<T> minPoint, maxPoint;
 	};
 
-	std::ostream& operator<<(std::ostream& a_os, const BoxAABB& a_point);
-	std::istream& operator>>(std::istream& a_is, BoxAABB& a_point);
+	template <typename T>
+	std::ostream& operator<<(std::ostream& a_os, const BoxAABB<T>& a_box){
+		a_os << "[" << a_box.minPoint << " - " << a_box.maxPoint << "]";
+		return a_os;
+	}
+
+	template <typename T>
+	std::istream& operator>>(std::istream& a_is, BoxAABB<T>& a_box){
+		a_is >> a_box.minPoint >> a_box.maxPoint;
+		return a_is;
+	}
+
+
+	template <typename T>
+	void BoxAABB<T>::initialize(const Point<T> &a_startPoint){
+		minPoint = a_startPoint; maxPoint = a_startPoint;
+	}
+
+	template <typename T>
+	void BoxAABB<T>::initialize(const Size<T> &a_size){
+		minPoint.clear(); maxPoint = toPoint(a_size);
+	}
+
+	template <typename T>
+	void BoxAABB<T>::initialize(const Point<T> &a_startPoint, const Point<T> &a_endPoint){
+		initialize(a_startPoint);
+		expandWith(a_endPoint);
+	}
+
+	template <typename T>
+	void BoxAABB<T>::initialize(const Point<T> &a_startPoint, const Size<T> &a_size){
+		initialize(a_startPoint);
+		expandWith(a_startPoint + toPoint(a_size));
+	}
+
+	template <typename T>
+	void BoxAABB<T>::initialize(const BoxAABB<T> &a_startBox){
+		minPoint = a_startBox.minPoint; maxPoint = a_startBox.maxPoint;
+	}
+
+	template <typename T>
+	BoxAABB<T>& BoxAABB<T>::expandWith(const Point<T> &a_comparePoint){
+		minPoint.x = std::min(a_comparePoint.x, minPoint.x);
+		minPoint.y = std::min(a_comparePoint.y, minPoint.y);
+		minPoint.z = std::min(a_comparePoint.z, minPoint.z);
+
+		maxPoint.x = std::max(a_comparePoint.x, maxPoint.x);
+		maxPoint.y = std::max(a_comparePoint.y, maxPoint.y);
+		maxPoint.z = std::max(a_comparePoint.z, maxPoint.z);
+		return *this;
+	}
+
+	template <typename T>
+	BoxAABB<T>& BoxAABB<T>::expandWith(const BoxAABB<T> &a_compareBox){
+		expandWith(a_compareBox.minPoint);
+		expandWith(a_compareBox.maxPoint);
+		return *this;
+	}
+
+	template <typename T>
+	std::vector<BoxAABB<T>> BoxAABB<T>::removeFromBounds(const BoxAABB<T> &a_compareBox){
+		if(!collides(a_compareBox)){
+			return{*this};
+		} else if(a_compareBox.contains(*this)){
+			return{};
+		}
+
+		//Slice a side down
+		if(a_compareBox.contains(topLeftPoint()) && a_compareBox.contains(bottomLeftPoint())){
+			return{{point(a_compareBox.maxPoint.x, minPoint.y), maxPoint}};
+		} else if(a_compareBox.contains(topRightPoint()) && a_compareBox.contains(bottomRightPoint())){
+			return{{minPoint, point(a_compareBox.minPoint.x, maxPoint.y)}};
+		} else if(a_compareBox.contains(topLeftPoint()) && a_compareBox.contains(topRightPoint())){
+			return{{point(minPoint.x, a_compareBox.maxPoint.y), maxPoint}};
+		} else if(a_compareBox.contains(bottomLeftPoint()) && a_compareBox.contains(bottomRightPoint())){
+			return{{minPoint, point(maxPoint.x, a_compareBox.minPoint.y)}};
+		}
+
+		//Corners
+		if(a_compareBox.contains(topLeftPoint())){
+			return{
+				{{point(a_compareBox.maxPoint.x, minPoint.y), maxPoint}},
+				{{point(minPoint.x, a_compareBox.maxPoint.y), maxPoint}},
+			};
+		} else if(a_compareBox.contains(topRightPoint())){
+			return{
+				{{minPoint, point(a_compareBox.minPoint.x, maxPoint.y)}},
+				{{point(minPoint.x, a_compareBox.maxPoint.y), maxPoint}},
+			};
+		} else if(a_compareBox.contains(bottomRightPoint())){
+			return{
+				{{minPoint, point(maxPoint.x, a_compareBox.minPoint.y)}},
+				{{minPoint, point(a_compareBox.minPoint.x, maxPoint.y)}},
+			};
+		} else if(a_compareBox.contains(bottomLeftPoint())){
+			return{
+				{{minPoint, point(maxPoint.x, a_compareBox.minPoint.y)}},
+				{{point(a_compareBox.maxPoint.x, minPoint.y), maxPoint}},
+			};
+		}
+
+		//Bisect
+		if(minPoint.x < a_compareBox.minPoint.x && maxPoint.x > a_compareBox.maxPoint.x && (a_compareBox.minPoint.y <= minPoint.y || a_compareBox.maxPoint.y >= maxPoint.y)){
+			std::vector<BoxAABB> regions = {
+				{minPoint, point(a_compareBox.minPoint.x, maxPoint.y)},
+				{point(a_compareBox.maxPoint.x, minPoint.y), maxPoint}
+			};
+			if(minPoint.y < a_compareBox.minPoint.y && !(maxPoint.y > a_compareBox.maxPoint.y)){
+				regions.emplace_back(minPoint, point(maxPoint.x, a_compareBox.minPoint.y));
+			} else if(maxPoint.y > a_compareBox.maxPoint.y){
+				regions.emplace_back(point(minPoint.x, a_compareBox.maxPoint.y), maxPoint);
+			}
+			return regions;
+		} else if(minPoint.y < a_compareBox.minPoint.y && maxPoint.y > a_compareBox.maxPoint.y && (a_compareBox.minPoint.x <= minPoint.x || a_compareBox.maxPoint.x >= maxPoint.x)){
+			std::vector<BoxAABB> regions = {
+				{minPoint, point(maxPoint.x, a_compareBox.minPoint.y)},
+				{point(minPoint.x, a_compareBox.maxPoint.y), maxPoint}
+			};
+			if(minPoint.x < a_compareBox.minPoint.x && !(maxPoint.x > a_compareBox.maxPoint.x)){
+				regions.emplace_back(minPoint, point(a_compareBox.minPoint.x, maxPoint.y));
+			} else if(maxPoint.x > a_compareBox.maxPoint.x){
+				regions.emplace_back(point(a_compareBox.maxPoint.x, minPoint.y), maxPoint);
+			}
+			return regions;
+		}
+
+		if(contains(a_compareBox)){
+			return{
+				{minPoint, point(a_compareBox.minPoint.x, maxPoint.y)},
+				{minPoint, point(maxPoint.x, a_compareBox.minPoint.y)},
+				{point(minPoint.x, a_compareBox.maxPoint.y), maxPoint},
+				{point(a_compareBox.maxPoint.x, minPoint.y), maxPoint}
+			};
+		}
+
+		std::cerr << "Unhandled removeFromBounds!" << std::endl;
+		return{};
+	}
+
+	template <typename T>
+	bool BoxAABB<T>::contains(const Point<T> &a_comparePoint, bool a_useDepth) const{
+		return (a_comparePoint.x >= minPoint.x && a_comparePoint.y >= minPoint.y &&
+			a_comparePoint.x <= maxPoint.x && a_comparePoint.y <= maxPoint.y) &&
+			(!a_useDepth ||
+				(a_comparePoint.z >= minPoint.z && a_comparePoint.z <= maxPoint.z)
+			);
+	}
+
+	template <typename T>
+	bool BoxAABB<T>::contains(const BoxAABB<T>& a_other, bool a_useDepth) const {
+		return (minPoint.x <= a_other.minPoint.x && minPoint.y <= a_other.minPoint.y &&
+			maxPoint.x >= a_other.maxPoint.x && maxPoint.y >= a_other.maxPoint.y) &&
+			(!a_useDepth ||
+				(minPoint.z <= a_other.minPoint.z && maxPoint.z >= a_other.maxPoint.z)
+			);
+	}
+
+	template <typename T>
+	void BoxAABB<T>::sanitize() {
+		if(minPoint.x > maxPoint.x){ std::swap(minPoint.x, maxPoint.x); }
+		if(minPoint.y > maxPoint.y){ std::swap(minPoint.y, maxPoint.y); }
+		if(minPoint.z > maxPoint.z){ std::swap(minPoint.z, maxPoint.z); }
+	}
+
+	template <typename T>
+	bool BoxAABB<T>::collides(const BoxAABB<T> &a_other, bool a_useDepth) const {
+		return  !(maxPoint.x <= a_other.minPoint.x ||
+			maxPoint.y <= a_other.minPoint.y ||
+			minPoint.x >= a_other.maxPoint.x ||
+			minPoint.y >= a_other.maxPoint.y) ||
+			(a_useDepth &&
+				!(maxPoint.z <= a_other.minPoint.z || minPoint.z >= a_other.maxPoint.z)
+			);
+	}
+
+	template <class T>
+	BoxAABB<T> boxaabb(const Point<T> &a_startPoint){
+		return{a_startPoint};
+	}
+
+	template <class T>
+	BoxAABB<T> boxaabb(const Size<T> &a_startSize){
+		return{a_startSize};
+	}
+
+	template <class T>
+	BoxAABB<T> boxaabb(const Point<T> &a_startPoint, const Point<T> &a_endPoint){
+		return{a_startPoint, a_endPoint};
+	}
+
+	template <class T>
+	BoxAABB<T> boxaabb(const Point<T> &a_startPoint, const Size<T> &a_size){
+		return{a_startPoint, a_size};
+	}
+
+	template <class Target, class Origin>
+	BoxAABB<Target> cast(const BoxAABB<Origin> &a_box){
+		return BoxAABB<Target>(cast<Target>(a_box.minPoint), cast<Target>(a_box.maxPoint));
+	}
 
 	class Draw2D;
 	class PointVolume{
-		friend cereal::access;
 	public:
 		void addPoint(const Point<> &a_newPoint);
 
@@ -116,17 +303,12 @@ namespace MV {
 
 		bool volumeCollision(PointVolume &a_compareVolume, Draw2D* a_renderer);
 		Point<> getCenter();
-		BoxAABB getAABB();
+		BoxAABB<> getAABB();
 
 		std::vector<Point<>> points;
 	private:
 		//get angle within proper range between two points (-pi to +pi)
 		PointPrecision getAngle(const Point<> &a_p1, const Point<> &a_p2);
-
-		template <class Archive>
-		void serialize(Archive & archive){
-			archive(CEREAL_NVP(points));
-		}
 	};
 
 	typedef Point<> AxisAngles;

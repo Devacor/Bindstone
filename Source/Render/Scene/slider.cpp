@@ -41,7 +41,7 @@ namespace MV {
 			slider->initializeDragArea();
 			return slider;
 		}
-		std::shared_ptr<Slider> Slider::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB &a_boxAABB){
+		std::shared_ptr<Slider> Slider::make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB<> &a_boxAABB){
 			auto slider = std::shared_ptr<Slider>(new Slider(a_renderer));
 			slider->dragArea = Clickable::make(a_renderer, a_mouse, a_boxAABB);
 			slider->dragArea->parent(slider.get());
@@ -78,22 +78,22 @@ namespace MV {
 			dragHandle->draw();
 		}
 
-		BoxAABB Slider::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+		BoxAABB<> Slider::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			return dragArea->worldAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
 				dragHandle->worldAABBImplementation(a_includeChildren, a_nestedCall)
 				);
 		}
-		BoxAABB Slider::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+		BoxAABB<int> Slider::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			return dragArea->screenAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
 				dragHandle->screenAABBImplementation(a_includeChildren, a_nestedCall)
 			);
 		}
-		BoxAABB Slider::localAABBImplementation(bool a_includeChildren, bool a_nestedCall){
+		BoxAABB<> Slider::localAABBImplementation(bool a_includeChildren, bool a_nestedCall){
 			return dragArea->localAABBImplementation(a_includeChildren, a_nestedCall).expandWith(
 				dragHandle->localAABBImplementation(a_includeChildren, a_nestedCall)
 			);
 		}
-		BoxAABB Slider::basicAABBImplementation() const{
+		BoxAABB<> Slider::basicAABBImplementation() const{
 			return dragArea->basicAABBImplementation().expandWith(
 				dragHandle->basicAABBImplementation()
 			);

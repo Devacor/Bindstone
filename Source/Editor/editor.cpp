@@ -55,9 +55,19 @@ void Editor::initializeWindow(){
 	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 	
 	fps = scene->make<MV::Scene::Text>(&textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
+	std::vector<std::string> names {"patternTest1.png", "platform.png", "rock.png", "jont.png", "slice.png", "spatula.png"};
 
 	auto texture = MV::FileTextureDefinition::make("Assets/Images/dogfox.png");
 	texture->save("Assets/Images/TESTIMAGE.png");
+
+	MV::TexturePack pack;
+
+	for(auto&& name : names){
+		pack.add(MV::FileTextureDefinition::make(std::string("Assets/Images/") + name));
+	}
+
+	pack.addToScene(scene);
+
 	/*auto slicedthing = scene->make<MV::Scene::Sliced>(MV::Scene::SliceDimensions({8.0f, 8.0f}, {32.0f, 32.0f}), MV::size(100.0f, 50.0f))->
 		position({300.0f, 300.0f})->
 		texture(texture->makeHandle({0, 0}, {32, 32}))->

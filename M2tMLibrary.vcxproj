@@ -217,6 +217,7 @@
     <ClCompile Include="Source\Render\points.cpp" />
     <ClCompile Include="Source\Render\render.cpp" />
     <ClCompile Include="Source\Render\Scene\primitives.cpp" />
+    <ClCompile Include="Source\Render\Scene\rectangle.cpp" />
     <ClCompile Include="Source\Render\Scene\sliced.cpp" />
     <ClCompile Include="Source\Render\Scene\slider.cpp" />
     <ClCompile Include="Source\Render\Scene\spineMV.cpp" />
@@ -334,6 +335,7 @@
     <ClInclude Include="Source\Render\package.h" />
     <ClInclude Include="Source\Render\points.h" />
     <ClInclude Include="Source\Render\render.h" />
+    <ClInclude Include="Source\Render\Scene\rectangle.h" />
     <ClInclude Include="Source\Render\Scene\sceneMessages.hpp" />
     <ClInclude Include="Source\Render\Scene\sliced.h" />
     <ClInclude Include="Source\Render\Scene\slider.h" />
@@ -345,6 +347,7 @@
     <ClInclude Include="Source\Utility\generalUtility.h" />
     <ClInclude Include="Source\Utility\messageHandler.hpp" />
     <ClInclude Include="Source\Utility\notification.h" />
+    <ClInclude Include="Source\Utility\optionalCalls.hpp" />
     <ClInclude Include="Source\Utility\package.h" />
     <ClInclude Include="Source\Utility\require.hpp" />
     <ClInclude Include="Source\Utility\scopeGuard.hpp" />

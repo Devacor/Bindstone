@@ -14,20 +14,20 @@ namespace MV {
 			if(a_forceRefresh || dirtyTexture){
 				auto pointAABB = basicAABB();
 				auto textureSize = cast<int>(pointAABB.size());
-				clippedTexture = DynamicTextureDefinition::make("", textureSize, {0.0f, 0.0f, 0.0f, 0.0f});
+				if(!clippedTexture || clippedTexture->size() != textureSize){
+					clippedTexture = DynamicTextureDefinition::make("", textureSize, {0.0f, 0.0f, 0.0f, 0.0f});
+				}
 				dirtyTexture = false;
-				texture(clippedTexture->makeHandle(Point<int>(), textureSize));
-				framebuffer = renderer->makeFramebuffer(cast<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId());
+				texture(clippedTexture->makeHandle(textureSize));
 				{
+					auto framebuffer = renderer->makeFramebuffer(cast<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId())->start();
+
 					renderer->setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
 					SCOPE_EXIT{renderer->defaultBlendFunction(); };
 
 					renderer->modelviewMatrix().push();
 					SCOPE_EXIT{renderer->modelviewMatrix().pop(); };
 					renderer->modelviewMatrix().top().makeIdentity();
-
-					framebuffer->start();
-					SCOPE_EXIT{framebuffer->stop(); };
 
 					if(drawSorted){
 						sortedRender();

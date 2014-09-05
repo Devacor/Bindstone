@@ -10,5 +10,6 @@
 	#include "Utility/messageHandler.hpp"
 	#include "Utility/task.hpp"
 	#include "Utility/threadPool.h"
+	#include "Utility/optionalCalls.hpp"
 
 #endif

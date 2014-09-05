@@ -20,7 +20,7 @@ namespace MV {
 		public:
 			SCENE_MAKE_FACTORY_METHODS(Pixel)
 
-			static std::shared_ptr<Pixel> make(Draw2D* a_renderer, const DrawPoint &a_point = DrawPoint());
+				static std::shared_ptr<Pixel> make(Draw2D* a_renderer, const DrawPoint &a_point = DrawPoint());
 			virtual ~Pixel(){}
 
 			void setPoint(const DrawPoint &a_point);
@@ -63,7 +63,7 @@ namespace MV {
 		public:
 			SCENE_MAKE_FACTORY_METHODS(Line)
 
-			static std::shared_ptr<Line> make(Draw2D* a_renderer);
+				static std::shared_ptr<Line> make(Draw2D* a_renderer);
 			static std::shared_ptr<Line> make(Draw2D* a_renderer, const DrawPoint &a_startPoint, const DrawPoint &a_endPoint);
 
 			virtual ~Line(){}
@@ -102,73 +102,6 @@ namespace MV {
 			auto notifyOnChanged = makeScopedDepthChangeNote(this);
 			points[0] = a_startPoint;
 			points[1] = a_endPoint;
-		}
-
-#define RECTANGLE_OVERRIDES(T) \
-	std::shared_ptr<T> size(const Size<> &a_size, bool a_center = false){ return std::static_pointer_cast<T>(Rectangle::size(a_size, a_center)); }\
-	std::shared_ptr<T> size(const Size<> &a_size, const Point<> &a_centerPoint){ return std::static_pointer_cast<T>(Rectangle::size(a_size, a_centerPoint)); }\
-	std::shared_ptr<T> bounds(const BoxAABB<> &a_bounds){ return std::static_pointer_cast<T>(Rectangle::bounds(a_bounds)); }
-
-
-		class Rectangle : public Node{
-			friend cereal::access;
-			friend Node;
-		public:
-			SCENE_MAKE_FACTORY_METHODS(Rectangle)
-
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Size<> &a_size, bool a_center = false);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const Size<> &a_size, const Point<>& a_centerPoint);
-			static std::shared_ptr<Rectangle> make(Draw2D* a_renderer, const BoxAABB<> &a_boxAABB);
-
-			virtual ~Rectangle(){ }
-
-			std::shared_ptr<Rectangle> size(const Size<> &a_size, bool a_center = false);
-			std::shared_ptr<Rectangle> size(const Size<> &a_size, const Point<> &a_centerPoint);
-
-			std::shared_ptr<Rectangle> bounds(const BoxAABB<> &a_bounds);
-
-			template<typename PointAssign>
-			void applyToCorners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight);
-
-			virtual void clearTextureCoordinates();
-			virtual void updateTextureCoordinates();
-		protected:
-			Rectangle(Draw2D *a_renderer):Node(a_renderer){
-				points.resize(4);
-
-				points[0].textureX = 0.0; points[0].textureY = 0.0;
-				points[1].textureX = 0.0; points[1].textureY = 1.0;
-				points[2].textureX = 1.0; points[2].textureY = 1.0;
-				points[3].textureX = 1.0; points[3].textureY = 0.0;
-				appendQuadVertexIndices(vertexIndices, 0);
-			}
-
-			virtual void drawImplementation();
-		private:
-
-			template <class Archive>
-			void serialize(Archive & archive){
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(this)));
-			}
-
-			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Rectangle> &construct){
-				Draw2D *renderer = nullptr;
-				archive.extract(cereal::make_nvp("renderer", renderer));
-				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Rectangle node.");
-				construct(renderer);
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
-			}
-		};
-
-		template<typename PointAssign>
-		void Rectangle::applyToCorners(const PointAssign & a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomRight, const PointAssign & a_BottomLeft){
-			auto notifyOnChanged = makeScopedDepthChangeNote(this);
-			points[0] = a_TopLeft;
-			points[1] = a_BottomLeft;
-			points[2] = a_BottomRight;
-			points[3] = a_TopRight;
 		}
 	}
 

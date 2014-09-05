@@ -1,7 +1,7 @@
 #ifndef _MV_SCENE_EMITTER_H_
 #define _MV_SCENE_EMITTER_H_
 
-#include "Render/Scene/primitives.h"
+#include "Render/Scene/rectangle.h"
 #include "cereal/cereal.hpp"
 #include "cereal/access.hpp"
 
@@ -146,6 +146,8 @@ namespace MV {
 
 			template <class Archive>
 			void serialize(Archive & archive){
+				std::lock_guard<std::mutex> guard(lock);
+				points.clear();
 				archive(cereal::make_nvp("enabled", spawnParticles), cereal::make_nvp("spawnProperties", spawnProperties),
 					cereal::make_nvp("node", cereal::base_class<Node>(this)));
 			}
@@ -179,10 +181,6 @@ namespace MV {
 			EmitterSpawnProperties spawnProperties;
 
 			size_t emitterThreads;
-			std::atomic<size_t> buffersCopied = emitterThreads;
-			std::atomic<size_t> updatesFinished = emitterThreads;
-			std::atomic<size_t> spawnsFinished = emitterThreads;
-
 
 			struct ThreadData {
 				std::vector<Particle> particles;
@@ -197,7 +195,6 @@ namespace MV {
 			bool spawnParticles = true;
 			std::mutex lock;
 			static const double MAX_TIME_STEP;
-			static const int MAX_PARTICLES_PER_FRAME = 2500;
 			std::atomic<double> timeSinceLastParticle = 0.0;
 			double nextSpawnDelta = 0.0f;
 

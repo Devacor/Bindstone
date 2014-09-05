@@ -211,19 +211,13 @@ namespace MV {
 		}
 
 		void Grid::clearTextureCoordinates() {
-			points[0].textureX = 0.0f; points[0].textureY = 0.0f;
-			points[1].textureX = 0.0f; points[1].textureY = 1.0f;
-			points[2].textureX = 1.0f; points[2].textureY = 1.0f;
-			points[3].textureX = 1.0f; points[3].textureY = 0.0f;
+			clearTexturePoints(points);
 			alertParent(VisualChange::make(shared_from_this(), false));
 		}
 
 		void Grid::updateTextureCoordinates() {
 			if(ourTexture != nullptr){
-				points[0].textureX = static_cast<PointPrecision>(ourTexture->percentLeft()); points[0].textureY = static_cast<PointPrecision>(ourTexture->percentTop());
-				points[1].textureX = static_cast<PointPrecision>(ourTexture->percentLeft()); points[1].textureY = static_cast<PointPrecision>(ourTexture->percentBottom());
-				points[2].textureX = static_cast<PointPrecision>(ourTexture->percentRight()); points[2].textureY = static_cast<PointPrecision>(ourTexture->percentBottom());
-				points[3].textureX = static_cast<PointPrecision>(ourTexture->percentRight()); points[3].textureY = static_cast<PointPrecision>(ourTexture->percentTop());
+				ourTexture->apply(points);
 				alertParent(VisualChange::make(shared_from_this(), false));
 			} else {
 				clearTextureCoordinates();

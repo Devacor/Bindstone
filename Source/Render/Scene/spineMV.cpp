@@ -2,7 +2,7 @@
 #include "spine/spine.h"
 #include "spine/extension.h"
 
-#include "Render/Scene/primitives.h"
+#include "Render/Scene/rectangle.h"
 
 #include <fstream>
 #include <string>
@@ -35,6 +35,8 @@ char* _spUtil_readFile(const char* path, int* length){
 		in.read(&contents[0], *length);
 
 		return contents;
+	} else{
+		std::cerr << "Could not load file: " << path << std::endl;
 	}
 
 	return nullptr;

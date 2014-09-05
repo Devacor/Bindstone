@@ -99,7 +99,7 @@ namespace MV {
 	public:
 		~Framebuffer();
 
-		void start();
+		std::shared_ptr<Framebuffer> start();
 		void stop();
 
 		void setTextureId(GLuint a_texture){
@@ -123,7 +123,7 @@ namespace MV {
 		}
 	private:
 		friend glExtensionFramebufferObject;
-		Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, const Size<int> &a_size, const Point<int> &a_position);
+		Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, const Size<int> &a_size, const Point<int> &a_position, const Color &a_backgroundColor);
 
 		GLuint framebuffer;
 		GLuint renderbuffer;
@@ -131,6 +131,10 @@ namespace MV {
 		GLuint texture;
 		Size<int> frameSize;
 		Point<int> framePosition;
+
+		Color background;
+
+		bool started;
 
 		Draw2D *renderer;
 	};
@@ -141,14 +145,14 @@ namespace MV {
 		glExtensionFramebufferObject(Draw2D *a_renderer);
 
 		bool framebufferObjectExtensionEnabled(){return initialized;}
-		std::shared_ptr<Framebuffer> makeFramebuffer(const Point<int> &a_position, const Size<int> &a_size, GLuint a_texture);
+		std::shared_ptr<Framebuffer> makeFramebuffer(const Point<int> &a_position, const Size<int> &a_size, GLuint a_texture, const Color &a_backgroundColor = Color(0.0f, 0.0f, 0.0f, 0.0f));
 
-		void startUsingFramebuffer(std::shared_ptr<Framebuffer> a_framebuffer, bool a_push = true);
+		void startUsingFramebuffer(std::weak_ptr<Framebuffer> a_framebuffer, bool a_push = true);
 		void stopUsingFramebuffer();
 	protected:
 		GLint originalFramebufferId;
 		GLint originalRenderbufferId;
-		std::vector< std::shared_ptr<Framebuffer> > activeFramebuffers;
+		std::vector< std::weak_ptr<Framebuffer> > activeFramebuffers;
 
 		void loadExtensionFramebufferObject(char* a_extensionsList);
 		void initializeOriginalBufferIds();
@@ -156,6 +160,7 @@ namespace MV {
 		void deleteFramebuffer(Framebuffer &a_framebuffer);
 		Draw2D *renderer;
 		bool initialized;
+		
 		Color savedClearColor;
 	};
 

@@ -169,24 +169,24 @@ namespace MV {
 		Point<T>& operator*=(const Scale& a_other);
 		Point<T>& operator/=(const Scale& a_other);
 
-		bool operator==(const Point<T>& a_other){
+		bool operator==(const Point<T>& a_other) const{
 			return equals(x, a_other.x) && equals(y, a_other.y) && equals(z, a_other.z);
 		}
-		bool operator==(T a_other){
+		bool operator==(T a_other) const{
 			return equals(x, a_other) && equals(y, a_other) && equals(z, a_other);
 		}
 
-		bool operator!=(const Point<T>& a_other){
+		bool operator!=(const Point<T>& a_other) const{
 			return !(*this == a_other);
 		}
-		bool operator!=(T a_other){
+		bool operator!=(T a_other) const{
 			return !(*this == a_other);
 		}
 
-		bool operator<(const Size<T>& a_other){
+		bool operator<(const Size<T>& a_other) const{
 			return (x + y) < (a_other.x + a_other.y);
 		}
-		bool operator>(const Size<T>& a_other){
+		bool operator>(const Size<T>& a_other) const{
 			return (x + y) > (a_other.x + a_other.y);
 		}
 
@@ -231,11 +231,11 @@ namespace MV {
 
 	template <typename T>
 	Scale toScale(const Point<T> &a_point){
-		return{a_point.x, a_point.y, a_point.z};
+		return{static_cast<PointPrecision>(a_point.x), static_cast<PointPrecision>(a_point.y), static_cast<PointPrecision>(a_point.z)};
 	}
 	template <typename T>
 	Scale toScale(const Size<T> &a_point){
-		return{a_point.width, a_point.height, a_point.depth};
+		return {static_cast<PointPrecision>(a_point.width), static_cast<PointPrecision>(a_point.height), static_cast<PointPrecision>(a_point.depth)};
 	}
 
 	Scale operator+(Scale a_lhs, const Scale &a_rhs);
@@ -690,9 +690,9 @@ namespace MV {
 
 	template <class T>
 	Point<T>& MV::Point<T>::operator/=(const Scale& a_other){
-		x = static_cast<T>(static_cast<PointPrecision>(x) / (a_other.x != 0) ? a_other.x : 1);
-		y = static_cast<T>(static_cast<PointPrecision>(y) / (a_other.y != 0) ? a_other.y : 1);
-		z = static_cast<T>(static_cast<PointPrecision>(z) / (a_other.z != 0) ? a_other.z : 1);
+		x = static_cast<T>(static_cast<PointPrecision>(x) / (!equals(a_other.x, 0.0f) ? a_other.x : 1));
+		y = static_cast<T>(static_cast<PointPrecision>(y) / (!equals(a_other.y, 0.0f) ? a_other.y : 1));
+		z = static_cast<T>(static_cast<PointPrecision>(z) / (!equals(a_other.z, 0.0f) ? a_other.z : 1));
 		return *this;
 	}
 

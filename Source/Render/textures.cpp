@@ -22,6 +22,18 @@ namespace MV {
 	| ---BareSurfaceAndTextureFunctions--- |
 	\**************************************/
 
+	bool clearTexturePoints(std::vector<DrawPoint> &a_points) {
+		if(a_points.size() == 4){
+			a_points[0].textureX = 0.0f; a_points[0].textureY = 0.0f;
+			a_points[1].textureX = 0.0f; a_points[1].textureY = 1.0f;
+			a_points[2].textureX = 1.0f; a_points[2].textureY = 1.0f;
+			a_points[3].textureX = 1.0f; a_points[3].textureY = 0.0f;
+			return true;
+		}
+		return false;
+	}
+
+
 	SDL_Surface* converToPowerOfTwo(SDL_Surface* surface)
 	{
 		int width = roundUpPowerOfTwo(surface->w);
@@ -185,17 +197,13 @@ namespace MV {
 	}
 
 	void TextureDefinition::unload(){
-		if (!handles.empty()){
-			handles.erase(std::remove_if(handles.begin(), handles.end(), [](const std::weak_ptr<TextureHandle> &value){return value.expired(); }), handles.end());
-			cleanupOpenglTexture();
-		}
+		handles.erase(std::remove_if(handles.begin(), handles.end(), [](const std::weak_ptr<TextureHandle> &value){return value.expired(); }), handles.end());
+		cleanupOpenglTexture();
 	}
 
 	void TextureDefinition::unload(TextureHandle* toRemove){
-		if(!handles.empty()){
-			handles.erase(std::remove_if(handles.begin(), handles.end(), [&](const std::weak_ptr<TextureHandle> &value){return value.expired() || &(*value.lock()) == toRemove; }), handles.end());
-			cleanupOpenglTexture();
-		}
+		handles.erase(std::remove_if(handles.begin(), handles.end(), [&](const std::weak_ptr<TextureHandle> &value){return value.expired() || &(*value.lock()) == toRemove; }), handles.end());
+		cleanupOpenglTexture();
 	}
 
 	std::shared_ptr<TextureHandle> TextureDefinition::makeHandle() {
@@ -207,11 +215,11 @@ namespace MV {
 		return handle;
 	}
 
-	std::shared_ptr<TextureHandle> TextureDefinition::makeHandle(const Point<int> &a_position, const Size<int> &a_size) {
+	std::shared_ptr<TextureHandle> TextureDefinition::makeHandle(const BoxAABB<int> &a_bounds) {
 		if (handles.empty()){
 			load();
 		}
-		auto handle = std::shared_ptr<TextureHandle>(new TextureHandle(shared_from_this(), a_position, a_size));
+		auto handle = std::shared_ptr<TextureHandle>(new TextureHandle(shared_from_this(), a_bounds));
 		handles.push_back(handle);
 		return handle;
 	}
@@ -222,7 +230,7 @@ namespace MV {
 	}
 
 	void TextureDefinition::cleanupOpenglTexture() {
-		if(handles.empty()){
+		if(texture){
 			glDeleteTextures(1, &texture);
 			texture = 0; //just to be certain, glDeleteTextures may not set a texture id to 0.
 			cleanupImplementation();
@@ -237,6 +245,13 @@ namespace MV {
 			cleanupOpenglTexture();
 		} else{
 			saveLoadedTexture(a_fileName, texture);
+		}
+	}
+
+	void TextureDefinition::reload() {
+		if(loaded()){
+			cleanupOpenglTexture();
+			load();
 		}
 	}
 
@@ -275,6 +290,11 @@ namespace MV {
 		delete[] data;							// Release data
 	}
 
+	void DynamicTextureDefinition::resize(const Size<int> &a_size) {
+		textureSize = a_size;
+		reload();
+	}
+
 	/********************************\
 	| ---SurfaceTextureDefinition--- |
 	\********************************/
@@ -298,45 +318,53 @@ namespace MV {
 	| ---TextureHandle--- |
 	\*********************/
 
-	Size<int> TextureHandle::size() const {
-		return handleSize;
+	std::shared_ptr<TextureHandle> TextureHandle::bounds(const BoxAABB<int> &a_bounds){
+		handleRegion = a_bounds;
+		updatePercentBounds();
+		return shared_from_this();
 	}
 
-	Point<int> TextureHandle::position() const {
-		return handlePosition;
+	BoxAABB<int> TextureHandle::bounds() const {
+		return handleRegion;
+	}
+
+	std::shared_ptr<TextureHandle> TextureHandle::percentBounds(const BoxAABB<PointPrecision> &a_bounds){
+		handlePercent = a_bounds;
+		updateIntegralBounds();
+		return shared_from_this();
+	}
+
+	BoxAABB<PointPrecision> TextureHandle::percentBounds() const {
+		return handlePercent;
 	}
 
 	std::shared_ptr<TextureDefinition> TextureHandle::texture() const {
 		return textureDefinition;
 	}
 
-	TextureHandle::TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const Point<int> &a_position, const Size<int> &a_size) :
+	TextureHandle::TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const BoxAABB<int> &a_bounds) :
 		sizeObserver(sizeChanges),
 		textureDefinition(a_texture),
-		handlePosition(a_position),
-		handleSize((a_texture && a_texture->loaded() && a_size == Size<int>(-1, -1)) ? a_texture->size() : a_size),
-		resizeToParent(a_size == Size<int>(-1, -1)),
-		flipX(false),
-		flipY(false),
-		name(a_texture->name()){
-		
+		handleRegion((a_texture && a_texture->loaded() && a_bounds == BoxAABB<int>(point(-1, -1))) ? a_texture->size() : a_bounds),
+		resizeToParent(a_bounds == BoxAABB<int>(point(-1, -1))),
+		flipTextureX(false),
+		flipTextureY(false),
+		debugName(a_texture->name()){
+
 		onParentReload = TextureDefinition::SignalType::make([&](std::shared_ptr<TextureDefinition> a_texture){
 			if(resizeToParent){
-				setBounds(handlePosition, a_texture->size());
+				bounds({a_texture->size()});
 			}
+			updatePercentBounds();
 		});
 		observeTextureReload();
 		if(a_texture && a_texture->loaded()){
-			handlePercentSize = cast<double>(size()) / cast<double>(textureDefinition->size());
-			handlePercentPosition = cast<double>(position()) / toPoint(cast<double>(textureDefinition->size()));
-
-			handlePercentTopLeft.x = handlePercentPosition.x;
-			handlePercentBottomRight.x = handlePercentPosition.x + handlePercentSize.width;
-			if(flipX){ std::swap(handlePercentTopLeft.x, handlePercentBottomRight.x); }
-
-			handlePercentTopLeft.y = handlePercentPosition.y;
-			handlePercentBottomRight.y = handlePercentPosition.x + handlePercentSize.height;
-			if(flipY){ std::swap(handlePercentTopLeft.y, handlePercentBottomRight.y); }
+			if(resizeToParent){
+				handleRegion = textureDefinition->size();
+				handlePercent = {point(0.0f, 0.0f), point(1.0f, 1.0f)};
+			} else{
+				updatePercentBounds();
+			}
 		}
 	}
 
@@ -353,102 +381,51 @@ namespace MV {
 	}
 
 	void TextureHandle::updatePercentBounds(){
-		handlePercentSize = cast<double>(size()) / cast<double>(textureDefinition->size());
-		handlePercentPosition = cast<double>(position()) / toPoint(cast<double>(textureDefinition->size()));
-
-		updatePercentCorners();
+		handlePercent = cast<PointPrecision>(handleRegion) / toScale(textureDefinition->size());
+		if(flipX()){
+			std::swap(handlePercent.maxPoint.x, handlePercent.minPoint.x);
+		}
+		if(flipY()){
+			std::swap(handlePercent.maxPoint.y, handlePercent.minPoint.y);
+		}
 	}
 
 	void TextureHandle::updateIntegralBounds(){
-		handleSize = cast<int>(cast<double>(textureDefinition->size()) * handlePercentSize);
-		handlePosition = cast<int>(toPoint(cast<double>(textureDefinition->size())) * handlePercentPosition);
-
-		updatePercentCorners();
+		handleRegion = cast<int>(handlePercent * toScale(textureDefinition->size()));
 	}
 
-	void TextureHandle::updatePercentCorners(){
-		handlePercentTopLeft.x = handlePercentPosition.x;
-		handlePercentBottomRight.x = handlePercentPosition.x + handlePercentSize.width;
-		if (flipX){ std::swap(handlePercentTopLeft.x, handlePercentBottomRight.x); }
-
-		handlePercentTopLeft.y = handlePercentPosition.y;
-		handlePercentBottomRight.y = handlePercentPosition.x + handlePercentSize.height;
-		if (flipY){ std::swap(handlePercentTopLeft.y, handlePercentBottomRight.y); }
-
-		sizeChanges(shared_from_this());
-	}
-
-	double TextureHandle::percentLeft() const{
-		return handlePercentTopLeft.x;
-	}
-	double TextureHandle::percentRight() const{
-		return handlePercentBottomRight.x;
-	}
-	double TextureHandle::percentTop() const{
-		return handlePercentTopLeft.y;
-	}
-	double TextureHandle::percentBottom() const{
-		return handlePercentBottomRight.y;
-	}
-
-	void TextureHandle::setCorners(const Point<int> &a_topLeft, const Point<int> &a_bottomRight){
-		handleSize = toSize(a_bottomRight - a_topLeft);
-		handlePosition = a_topLeft;
-
-		updatePercentBounds();
-	}
-	void TextureHandle::setCorners(const Point<double> &a_topLeft, const Point<double> &a_bottomRight){
-		handlePercentSize = toSize(a_bottomRight - a_topLeft);
-		handlePercentPosition = a_topLeft;
-
-		updateIntegralBounds();
-	}
-
-	void TextureHandle::setBounds(const Point<int> &a_topLeft, const Size<int> &a_size){
-		handleSize = a_size;
-		handlePosition = a_topLeft;
-
-		updatePercentBounds();
-	}
-	void TextureHandle::setBounds(const Point<double> &a_topLeft, const Size<double> &a_size){
-		handlePercentSize = a_size;
-		handlePercentPosition = a_topLeft;
-
-		updateIntegralBounds();
-	}
-
-	void TextureHandle::setFlipX( bool a_flip ) {
-		flipX = a_flip;
+	std::shared_ptr<TextureHandle> TextureHandle::flipX( bool a_flip ) {
+		flipTextureX = a_flip;
 		updatePercentBounds();
 	}
 
-	void TextureHandle::setFlipY( bool a_flip ) {
-		flipY = a_flip;
+	std::shared_ptr<TextureHandle> TextureHandle::flipY(bool a_flip) {
+		flipTextureY = a_flip;
 		updatePercentBounds();
 	}
 
-	bool TextureHandle::flippedX() const {
-		return flipX;
+	bool TextureHandle::flipX() const {
+		return flipTextureX;
 	}
 
-	bool TextureHandle::flippedY() const {
-		return flipY;
+	bool TextureHandle::flipY() const {
+		return flipTextureY;
 	}
 
-	Size<double> TextureHandle::percentSize() const {
-		return handlePercentSize;
+
+	std::string TextureHandle::name() const {
+		return debugName;
 	}
 
-	Point<double> TextureHandle::percentPosition() const {
-		return handlePercentPosition;
-	}
-
-	Point<double> TextureHandle::percentTopLeft() const {
-		return handlePercentTopLeft;
-	}
-
-	Point<double> TextureHandle::percentBottomRight() const {
-		return handlePercentBottomRight;
+	bool TextureHandle::apply(std::vector<DrawPoint> &a_points) const {
+		if(a_points.size() == 4){
+			a_points[0].textureX = handlePercent.minPoint.x; a_points[0].textureY = handlePercent.minPoint.y;
+			a_points[1].textureX = handlePercent.minPoint.x; a_points[1].textureY = handlePercent.maxPoint.y;
+			a_points[2].textureX = handlePercent.maxPoint.x; a_points[2].textureY = handlePercent.maxPoint.y;
+			a_points[3].textureX = handlePercent.maxPoint.x; a_points[3].textureY = handlePercent.minPoint.y;
+			return true;
+		}
+		return false;
 	}
 
 	/**********************\

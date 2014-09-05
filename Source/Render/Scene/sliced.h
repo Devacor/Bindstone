@@ -1,7 +1,7 @@
 ﻿#ifndef _MV_SCENE_SLICED_H_
 #define _MV_SCENE_SLICED_H_
 
-#include "Render/Scene/primitives.h"
+#include "Render/Scene/rectangle.h"
 
 namespace MV {
 	namespace Scene {

@@ -39,13 +39,7 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	width = makeInputField(this, *panel.mouse(), grid, *panel.textLibrary(), "width", MV::size(textboxWidth, 27.0f));
 	height = makeInputField(this, *panel.mouse(), grid, *panel.textLibrary(), "height", MV::size(textboxWidth, 27.0f));
 
-	auto sliderThing = grid->make<MV::Scene::Slider>(panel.mouse(), MV::Size<>(100.0f, 10.0f), false);
-	sliderThing->area()->color({.25f, .25f, .25f, 1.0f});
 	if(controls){
-		sliderThing->onPercentChange.connect("updateX", [&](std::shared_ptr<MV::Scene::Slider> a_slider){
-			controls->position({a_slider->percent() * a_slider->getRenderer()->world().width(), controls->position().y});
-		});
-
 		auto xClick = posX->get<MV::Scene::Clickable>("Clickable");
 		xClick->onAccept.connect("updateX", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 			controls->position({posX->number(), posY->number()});
@@ -374,31 +368,101 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 		color({InterfaceColors::BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}})->
 		padding({3.0f, 4.0f})->position({0.0f, 20.0f});
 	auto createButton = makeButton(grid, *panel.textLibrary(), *panel.mouse(), "Create", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Create"));
-	auto selectButton = makeButton(grid, *panel.textLibrary(), *panel.mouse(), "Select", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Select"));
+	fileName = makeInputField(this, *panel.mouse(), grid, *panel.textLibrary(), "Filename", MV::size(110.0f, 27.0f), UTF_CHAR_STR("scene.scene"));
+	auto saveButton = makeButton(grid, *panel.textLibrary(), *panel.mouse(), "Save", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Save"));
+	auto loadButton = makeButton(grid, *panel.textLibrary(), *panel.mouse(), "Load", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Load"));
 
 	panel.updateBoxHeader(grid->basicAABB().width());
 
 	createButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
-		panel.selection().enable([&](const MV::BoxAABB<> &a_selected){
-			completeSelection(a_selected);
-		});
+		panel.loadPanel<ChooseElementCreationType>();
 	});
 
-	selectButton->onAccept.connect("select", [&](std::shared_ptr<MV::Scene::Clickable>){
-		panel.deleteScene();
+	saveButton->onAccept.connect("save", [&](std::shared_ptr<MV::Scene::Clickable>){
+		std::ofstream stream(fileName->text());
+		cereal::JSONOutputArchive archive(stream);
+		archive(cereal::make_nvp("scene", panel.root()));
+	});
+
+	loadButton->onAccept.connect("load", [&](std::shared_ptr<MV::Scene::Clickable>){
+		std::ifstream stream(fileName->text());
+
+		cereal::JSONInputArchive archive(stream);
+
+		archive.add(
+			cereal::make_nvp("mouse", panel.mouse()),
+			cereal::make_nvp("renderer", panel.root()->getRenderer()),
+			cereal::make_nvp("textLibrary", panel.textLibrary()),
+			cereal::make_nvp("pool", panel.pool())
+		);
+
+		std::shared_ptr<MV::Scene::Node> newRoot;
+		archive(cereal::make_nvp("scene", newRoot));
+
+		panel.root(newRoot);
 	});
 }
 
-void DeselectedEditorPanel::completeSelection(const MV::BoxAABB<> &a_selected) {
- 	static long i = 0;
- 	panel.selection().disable();
+ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel):
+	EditorPanel(a_panel) {
 
-// 	auto newShape = panel.root()->make<MV::Scene::Rectangle>("Constructed_" + boost::lexical_cast<std::string>(i++), a_selected.size())->position(a_selected.minPoint);
-// 	newShape->color({CREATED_DEFAULT});
-// 
-// 	panel.loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(newShape, panel.editor(), panel.mouse()));
+	auto node = panel.content();
+	auto grid = node->make<MV::Scene::Grid>("grid")->rowWidth(126.0f)->
+		color({InterfaceColors::BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}})->
+		padding({3.0f, 4.0f})->position({0.0f, 20.0f});
+	auto createRectangleButton = makeButton(grid, *panel.textLibrary(), *panel.mouse(), "Rectangle", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Rectangle"));
+	auto createSpineButton = makeButton(grid, *panel.textLibrary(), *panel.mouse(), "Spine", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Spine"));
+	auto createEmitterButton = makeButton(grid, *panel.textLibrary(), *panel.mouse(), "Emitter", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Emitter"));
+	auto cancel = makeButton(grid, *panel.textLibrary(), *panel.mouse(), "Cancel", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Cancel"));
 
-	auto newEmitter = panel.root()->make<MV::Scene::Emitter>("Constructed_" + std::to_string(i++), panel.pool())->position(a_selected.minPoint);
+	panel.updateBoxHeader(grid->basicAABB().width());
+
+	createRectangleButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
+		panel.selection().enable([&](const MV::BoxAABB<> &a_selected){
+			createRectangle(a_selected);
+		});
+	});
+
+	createSpineButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
+		panel.selection().enable([&](const MV::BoxAABB<> &a_selected){
+			createSpine(a_selected);
+		});
+	});
+
+	createEmitterButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
+		panel.selection().enable([&](const MV::BoxAABB<> &a_selected){
+			createEmitter(a_selected);
+		});
+	});
+
+	cancel->onAccept.connect("select", [&](std::shared_ptr<MV::Scene::Clickable>){
+		panel.loadPanel<DeselectedEditorPanel>();
+	});
+}
+
+void ChooseElementCreationType::createRectangle(const MV::BoxAABB<> &a_selected) {
+	panel.selection().disable();
+
+	auto newShape = panel.root()->make<MV::Scene::Rectangle>(MV::guid("rectangle_"), a_selected.size())->position(a_selected.minPoint);
+	newShape->color({CREATED_DEFAULT});
+	 
+	panel.loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(newShape, panel.editor(), panel.mouse()));
+}
+
+void ChooseElementCreationType::createEmitter(const MV::BoxAABB<> &a_selected) {
+	panel.selection().disable();
+
+	auto newEmitter = panel.root()->make<MV::Scene::Emitter>(MV::guid("emitter_"), panel.pool())->position(a_selected.minPoint);
+	auto editableEmitter = std::make_shared<EditableEmitter>(newEmitter, panel.editor(), panel.mouse());
+	editableEmitter->size(a_selected.size());
+
+	panel.loadPanel<SelectedEmitterEditorPanel>(editableEmitter);
+}
+
+void ChooseElementCreationType::createSpine(const MV::BoxAABB<> &a_selected) {
+	panel.selection().disable();
+
+	auto newEmitter = panel.root()->make<MV::Scene::Emitter>(MV::guid("spine_"), panel.pool())->position(a_selected.minPoint);
 	auto editableEmitter = std::make_shared<EditableEmitter>(newEmitter, panel.editor(), panel.mouse());
 	editableEmitter->size(a_selected.size());
 

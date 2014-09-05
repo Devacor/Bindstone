@@ -32,6 +32,11 @@ public:
 		return rootScene;
 	}
 
+	EditorControls* root(std::shared_ptr<MV::Scene::Node> a_newRoot){
+		rootScene = a_newRoot;
+		return this;
+	}
+
 	template <typename PanelType, typename ...Arg>
 	void loadPanel(Arg... a_parameters){
 		if(currentPanel){ currentPanel->activate(nullptr); }

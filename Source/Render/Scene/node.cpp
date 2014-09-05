@@ -577,21 +577,6 @@ namespace MV {
 			renderer->modelviewMatrix().pop();
 		}
 
-		void Node::bindOrDisableTexture(const std::shared_ptr<std::vector<GLfloat>> &texturePoints){
-			if(ourTexture != nullptr && ourTexture->texture() == nullptr){
-				std::cerr << "Warning: TextureHandle with an unloaded texture: " << ourTexture->name << std::endl;
-			}
-			if(ourTexture != nullptr && ourTexture->texture() != nullptr){
-				glEnable(GL_TEXTURE_2D);
-				glBindTexture(GL_TEXTURE_2D, ourTexture->texture()->textureId());
-				//glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-
-				//glTexCoordPointer(2, GL_FLOAT, 0, &(*texturePoints)[0]);
-			} else{
-				glDisable(GL_TEXTURE_2D);
-			}
-		}
-
 		void Node::defaultDrawRenderStep(GLenum drawType){
 			shaderProgram->use();
 
@@ -793,14 +778,13 @@ namespace MV {
 			return shaderProgramId;
 		}
 
-		std::shared_ptr<Node> Node::shaderImplementation(const std::string &a_id) {
+		void Node::shaderImplementation(const std::string &a_id) {
 			shaderProgramId = a_id;
 			if(renderer->hasShader(a_id)){
 				shaderProgram = renderer->getShader(a_id);
 			} else{
 				renderer->registerShader(shared_from_this());
 			}
-			return shared_from_this();
 		}
 
 		Point<> Node::translate(const Point<> &a_translation) {

@@ -185,10 +185,11 @@ namespace MV {
 
 			std::vector<TexturePoint> texturePoints;
 			if(ourTexture){
-				texturePoints.push_back({static_cast<float>(ourTexture->percentLeft()), static_cast<float>(ourTexture->percentTop())});
-				texturePoints.push_back({static_cast<float>(ourTexture->percentLeft()), static_cast<float>(ourTexture->percentBottom())});
-				texturePoints.push_back({static_cast<float>(ourTexture->percentRight()), static_cast<float>(ourTexture->percentBottom())});
-				texturePoints.push_back({static_cast<float>(ourTexture->percentRight()), static_cast<float>(ourTexture->percentTop())});
+				auto bounds = ourTexture->percentBounds();
+				texturePoints.push_back({static_cast<float>(bounds.minPoint.x), static_cast<float>(bounds.minPoint.y)});
+				texturePoints.push_back({static_cast<float>(bounds.minPoint.x), static_cast<float>(bounds.maxPoint.y)});
+				texturePoints.push_back({static_cast<float>(bounds.maxPoint.x), static_cast<float>(bounds.maxPoint.y)});
+				texturePoints.push_back({static_cast<float>(bounds.maxPoint.x), static_cast<float>(bounds.minPoint.y)});
 			} else{
 				texturePoints.push_back({0.0f, 0.0f});
 				texturePoints.push_back({0.0f, 1.0f});

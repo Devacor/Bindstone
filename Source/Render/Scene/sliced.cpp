@@ -86,11 +86,12 @@ namespace MV {
 		std::shared_ptr<Sliced> Sliced::sliceDimensions(const SliceDimensions &a_sliceDimensions) {
 			slicedDimensions = a_sliceDimensions;
 
-			Point<double> textureOffset;
-			Size<double> textureScale;
+			Point<PointPrecision> textureOffset;
+			Size<PointPrecision> textureScale;
 			if(ourTexture){
-				textureOffset = ourTexture->percentTopLeft();
-				textureScale = ourTexture->percentSize();
+				auto bounds = ourTexture->percentBounds();
+				textureOffset = bounds.minPoint;
+				textureScale = bounds.size();
 			}
 
 			//Top

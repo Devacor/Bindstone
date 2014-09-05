@@ -28,6 +28,8 @@ namespace MV {
 
 	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture);
 
+	bool clearTexturePoints(std::vector<DrawPoint> &a_points);
+
 	//These methods are all destructive to the original surface.  Do not rely on SDL_Surface being viable after calling.
 	SDL_Surface* convertToPowerOfTwoSurface(SDL_Surface *a_img);
 	bool loadTextureFromFile(const std::string &file, GLuint &imageLoaded, Size<int> &size, bool repeat);
@@ -43,7 +45,7 @@ namespace MV {
 
 		virtual ~TextureDefinition();
 		std::shared_ptr<TextureHandle> makeHandle();
-		std::shared_ptr<TextureHandle> makeHandle(const Point<int> &a_position, const Size<int> &a_size);
+		std::shared_ptr<TextureHandle> makeHandle(const BoxAABB<int> &a_bounds);
 
 		GLuint textureId() const;
 		std::string name() const;
@@ -54,6 +56,8 @@ namespace MV {
 		void load();
 		void unload();
 		void unload(TextureHandle* a_toRemove);
+
+		void reload();
 
 		void save(const std::string &a_fileName);
 	protected:
@@ -116,9 +120,11 @@ namespace MV {
 	class DynamicTextureDefinition : public TextureDefinition {
 		friend cereal::access;
 	public:
-		static std::shared_ptr<DynamicTextureDefinition> make(const std::string &a_name, const Size<int> &a_size, const Color &a_backgroundColor){
+		static std::shared_ptr<DynamicTextureDefinition> make(const std::string &a_name, const Size<int> &a_size, const Color &a_backgroundColor = {0.0f, 0.0f, 0.0f, 0.0f}){
 			return std::shared_ptr<DynamicTextureDefinition>(new DynamicTextureDefinition(a_name, a_size, a_backgroundColor));
 		}
+
+		void resize(const Size<int> &a_size);
 		
 	private:
 		DynamicTextureDefinition(const std::string &a_name, const Size<int> &a_size, const Color &a_backgroundColor):
@@ -194,46 +200,36 @@ namespace MV {
 		virtual ~TextureHandle();
 		typedef Signal<void (std::shared_ptr<TextureHandle>)> SignalType;
 
-		Size<int> size() const;
-		Point<int> position() const;
+		std::shared_ptr<TextureHandle> bounds(const BoxAABB<int> &a_bounds);
+		BoxAABB<int> bounds() const;
 
-		Size<double> percentSize() const;
-		Point<double> percentPosition() const;
+		std::shared_ptr<TextureHandle> percentBounds(const BoxAABB<PointPrecision> &a_bounds);
+		BoxAABB<PointPrecision> percentBounds() const;
 
-		Point<double> percentTopLeft() const;
-		Point<double> percentBottomRight() const;
+		std::shared_ptr<TextureHandle> flipX(bool a_flip);
+		bool flipX() const;
 
-		double percentLeft() const;
-		double percentRight() const;
-		double percentTop() const;
-		double percentBottom() const;
+		std::shared_ptr<TextureHandle> flipY(bool a_flip);
+		bool flipY() const;
 
-		void setCorners(const Point<int> &a_topLeft, const Point<int> &a_bottomRight);
-		void setCorners(const Point<double> &a_topLeft, const Point<double> &a_bottomRight);
-
-		void setBounds(const Point<int> &a_topLeft, const Size<int> &a_size);
-		void setBounds(const Point<double> &a_topLeft, const Size<double> &a_size);
-
-		void setFlipX(bool a_flip);
-		void setFlipY(bool a_flip);
-
-		bool flippedX() const;
-		bool flippedY() const;
+		bool apply(std::vector<DrawPoint> &a_points) const;
 
 		std::shared_ptr<TextureDefinition> texture() const;
 
 		SlotRegister<void(std::shared_ptr<TextureHandle>)> sizeObserver;
-		std::string name; //REMOVE THIS
+
+		std::string name() const;
 	private:
-		TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const Point<int> &a_position = Point<int>(0, 0), const Size<int> &a_size = Size<int>(-1, -1));
+		TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const BoxAABB<int> &a_bounds = BoxAABB<int>(point(-1, -1)));
 
 		template <class Archive>
 		void serialize(Archive & archive){
-			archive(CEREAL_NVP(handleSize), CEREAL_NVP(handlePosition),
-				CEREAL_NVP(handlePercentSize), CEREAL_NVP(handlePercentPosition),
-				CEREAL_NVP(handlePercentTopLeft), CEREAL_NVP(handlePercentBottomRight),
-				CEREAL_NVP(flipX), CEREAL_NVP(flipY),
-				CEREAL_NVP(textureDefinition), CEREAL_NVP(name));
+			archive(CEREAL_NVP(handleRegion), CEREAL_NVP(handlePercent),
+				CEREAL_NVP(resizeToParent),
+				cereal::make_nvp("flipX", flipTextureX),
+				cereal::make_nvp("flipY", flipTextureY),
+				CEREAL_NVP(textureDefinition),
+				cereal::make_nvp("name", debugName));
 		}
 
 		template <class Archive>
@@ -242,15 +238,12 @@ namespace MV {
 			archive(CEREAL_NVP(textureDefinition));
 			construct(textureDefinition);
 			archive(
-				cereal::make_nvp("handleSize", construct->handleSize),
-				cereal::make_nvp("handlePosition", construct->handlePosition),
-				cereal::make_nvp("handlePercentPosition", construct->handlePercentPosition),
-				cereal::make_nvp("handlePercentSize", construct->handlePercentSize),
-				cereal::make_nvp("handlePercentTopLeft", construct->handlePercentTopLeft),
-				cereal::make_nvp("handlePercentBottomRight", construct->handlePercentBottomRight),
-				cereal::make_nvp("flipX", construct->flipX),
-				cereal::make_nvp("flipY", construct->flipY),
-				cereal::make_nvp("name", construct->name)
+				cereal::make_nvp("handleRegion", construct->handleRegion),
+				cereal::make_nvp("handlePercent", construct->handlePercent),
+				cereal::make_nvp("resizeToParent", construct->resizeToParent),
+				cereal::make_nvp("flipX", construct->flipTextureX),
+				cereal::make_nvp("flipY", construct->flipTextureY),
+				cereal::make_nvp("name", construct->debugName)
 			);
 			construct->observeTextureReload();
 		}
@@ -260,19 +253,15 @@ namespace MV {
 		void updatePercentCorners();
 		void observeTextureReload();
 
-		Size<int> handleSize;
-		Point<int> handlePosition;
+		BoxAABB<int> handleRegion;
+		BoxAABB<PointPrecision> handlePercent;
 
-		Size<double> handlePercentSize;
-		Point<double> handlePercentPosition;
-
-		Point<double> handlePercentTopLeft;
-		Point<double> handlePercentBottomRight;
-
-		bool flipX;
-		bool flipY;
+		bool flipTextureX;
+		bool flipTextureY;
 
 		bool resizeToParent;
+
+		std::string debugName;
 
 		std::shared_ptr<TextureDefinition> textureDefinition;
 

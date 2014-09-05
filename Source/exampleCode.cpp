@@ -55,11 +55,11 @@ void CreateDogFoxScene(std::shared_ptr<MV::Scene::Node> mainScene){
 	auto sun = sunAndMoon->make<MV::Scene::Rectangle>("sun");
 	sun->bounds({MV::Point<>(350, 0, 1), MV::Point<>(450, 100, 1)});
 	auto textureSheet = MV::FileTextureDefinition::make("Assets/Images/dogfox.png");
-	sun->texture(textureSheet->makeHandle(MV::Point<int>(0, 384), MV::Size<int>(128, 128)));
+	sun->texture(textureSheet->makeHandle({MV::Point<int>(0, 384), MV::Size<int>(128, 128)}));
 
 	auto moon = sunAndMoon->make<MV::Scene::Rectangle>("moon");
 	moon->bounds({MV::Point<>(350, 500, 1), MV::Point<>(450, 600, 1)});
-	moon->texture(textureSheet->makeHandle(MV::Point<int>(128, 384), MV::Size<int>(128, 128)));
+	moon->texture(textureSheet->makeHandle({MV::Point<int>(128, 384), MV::Size<int>(128, 128)}));
 
 	sunAndMoon->rotationOrigin(MV::Point<>(400, 300, 1));
 
@@ -75,7 +75,7 @@ void CreateDogFoxScene(std::shared_ptr<MV::Scene::Node> mainScene){
 	auto ground = dogFoxScene->make<MV::Scene::Rectangle>("ground");
 	ground->bounds({MV::Point<>(300, 325, 1), MV::Point<>(500, 425, 1)});
 	ground->depth();
-	ground->texture(textureSheet->makeHandle(MV::Point<int>(256, 384), MV::Size<int>(256, 128)));
+	ground->texture(textureSheet->makeHandle({MV::Point<int>(256, 384), MV::Size<int>(256, 128)}));
 }
 
 void UpdateSky(std::shared_ptr<MV::Scene::Node> mainScene){

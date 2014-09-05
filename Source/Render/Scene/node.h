@@ -72,7 +72,7 @@ namespace MV {
 	std::shared_ptr<T> rotate(const AxisAngles &a_rotation){ return std::static_pointer_cast<T>(rotationImplementation(a_rotation)); } \
 	std::shared_ptr<T> rotation(PointPrecision a_zRotation){ return std::static_pointer_cast<T>(rotationImplementation(a_zRotation)); } \
 	std::shared_ptr<T> rotation(const AxisAngles &a_rotation){ return std::static_pointer_cast<T>(rotationImplementation(a_rotation)); } \
-	std::shared_ptr<T> shader(const std::string &a_id){ return std::static_pointer_cast<T>(shaderImplementation(a_id)); } \
+	std::shared_ptr<T> shader(const std::string &a_id){ shaderImplementation(a_id); return std::static_pointer_cast<T>(shared_from_this()); } \
 	std::shared_ptr<T> texture(std::shared_ptr<TextureHandle> a_texture){ return std::static_pointer_cast<T>(textureImplementation(a_texture)); } \
 	std::shared_ptr<T> clearTexture(){ return std::static_pointer_cast<T>(clearTextureImplementation()); } \
 	std::shared_ptr<T> color(const Color &a_newColor){ return std::static_pointer_cast<T>(colorImplementation(a_newColor)); } \
@@ -333,7 +333,7 @@ namespace MV {
 			virtual std::shared_ptr<Node> scaleImplementation(const Scale &a_scaleValue);
 			virtual std::shared_ptr<Node> rotationImplementation(PointPrecision a_zRotation);
 			virtual std::shared_ptr<Node> rotationImplementation(const AxisAngles &a_rotation);
-			virtual std::shared_ptr<Node> shaderImplementation(const std::string &a_id);
+			virtual void shaderImplementation(const std::string &a_id);
 			virtual std::shared_ptr<Node> textureImplementation(std::shared_ptr<TextureHandle> a_texture);
 			virtual std::shared_ptr<Node> clearTextureImplementation();
 			virtual std::shared_ptr<Node> colorImplementation(const Color &a_newColor);
@@ -401,27 +401,35 @@ namespace MV {
 
 			void childDepthChanged();
 
+			void postLoadStep(const std::string &a_shaderId) {
+				shaderImplementation(a_shaderId);
+				for(auto &drawItem : drawList){
+					drawItem.second->parent(this);
+				}
+			}
+
 			template <class Archive>
 			void serialize(Archive & archive){
-				if(!markedTemporary){
-					archive(CEREAL_NVP(translateTo),
-						CEREAL_NVP(rotateTo), CEREAL_NVP(rotateOrigin),
-						CEREAL_NVP(scaleTo),
-						CEREAL_NVP(sortDepth),
-						CEREAL_NVP(isVisible),
-						CEREAL_NVP(drawSorted),
-						CEREAL_NVP(points),
-						CEREAL_NVP(drawList),
-						cereal::make_nvp("shaderId", (shaderProgram != nullptr) ? shaderProgram->id() : ""),
-						cereal::make_nvp("texture", ourTexture)
-						);
-				}
+				std::string shaderId = (shaderProgram != nullptr) ? shaderProgram->id() : "";
+				archive(CEREAL_NVP(translateTo),
+					CEREAL_NVP(rotateTo), CEREAL_NVP(rotateOrigin),
+					CEREAL_NVP(scaleTo),
+					CEREAL_NVP(sortDepth),
+					CEREAL_NVP(isVisible),
+					CEREAL_NVP(drawSorted),
+					CEREAL_NVP(points),
+					CEREAL_NVP(drawList),
+					CEREAL_NVP(shaderId),
+					cereal::make_nvp("texture", ourTexture)
+				);
+				postLoadStep(shaderId);
 			}
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Node> &construct){
 				Draw2D *renderer = nullptr;
 				archive.extract(cereal::make_nvp("renderer", renderer));
+				MV::require<PointerException>(renderer != nullptr, "Null renderer in Node::load_and_construct.");
 				construct(renderer);
 				std::string shaderId;
 				archive(
@@ -437,10 +445,7 @@ namespace MV {
 					cereal::make_nvp("texture", construct->ourTexture),
 					cereal::make_nvp("shaderId", shaderId)
 				);
-				construct->shader(shaderId);
-				for(auto &drawItem : construct->drawList){
-					drawItem.second->parent(construct.ptr());
-				}
+				construct->postLoadStep(shaderId);
 			}
 
 			virtual bool preDraw(){ return true; }
@@ -451,7 +456,6 @@ namespace MV {
 			virtual void onChildAdded(std::shared_ptr<Node> a_child){}
 			virtual void onChildRemoved(std::shared_ptr<Node> a_child){}
 			void defaultDrawRenderStep(GLenum drawType);
-			void bindOrDisableTexture(const std::shared_ptr<std::vector<GLfloat>> &texturePoints);
 		};
 	}
 

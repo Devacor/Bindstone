@@ -49,44 +49,44 @@ void Editor::initializeWindow(){
 
 	AudioPlayer::instance()->initAudio();
 	mouse.update();
-	
+
 	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
 	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
 	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
-	
+
 	fps = scene->make<MV::Scene::Text>(&textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
-	std::vector<std::string> names {"patternTest1.png", "platform.png", "rock.png", "joint.png", "slice.png", "spatula.png"};
+	std::vector<std::string> names{"patternTest1.png", "platform.png", "rock.png", "joint.png", "slice.png", "spatula.png"};
 
 	auto texture = MV::FileTextureDefinition::make("Assets/Images/dogfox.png");
 	texture->save("Assets/Images/TESTIMAGE.png");
 
-	MV::TexturePack pack;
+	MV::TexturePack pack(&renderer);
 
 	for(auto&& name : names){
 		pack.add(MV::FileTextureDefinition::make(std::string("Assets/Images/") + name));
 	}
 
-	pack.addToScene(scene);
+	/*pack.addToScene(scene);
 
-	/*auto slicedthing = scene->make<MV::Scene::Sliced>(MV::Scene::SliceDimensions({8.0f, 8.0f}, {32.0f, 32.0f}), MV::size(100.0f, 50.0f))->
+	auto slicedthing = scene->make<MV::Scene::Sliced>(MV::Scene::SliceDimensions({8.0f, 8.0f}, {32.0f, 32.0f}), MV::size(100.0f, 50.0f))->
 		position({300.0f, 300.0f})->
-		texture(texture->makeHandle({0, 0}, {32, 32}))->
+		texture(texture->makeHandle(MV::size(32, 32)))->
 		rotate(45.0f)->
 		scale(2.0f)->
 		shader(MV::PREMULTIPLY_ID);
-	scene->make<MV::Scene::Rectangle>(MV::size(10.0f, 10.0f))->position({300.0f, 300.0f})->shader(MV::PREMULTIPLY_ID);
+	scene->make<MV::Scene::Rectangle>(MV::size(100.0f, 100.0f))->position({500.0f, 400.0f})->texture(texture->makeHandle(MV::size(256, 256)))->shader(MV::PREMULTIPLY_ID);
 
-	auto spineGuy = scene->make<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Example/spineboy.json", "Assets/Spine/Example/spineboy.atlas"))->
+	/*auto spineGuy = scene->make<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Example/spineboy.json", "Assets/Spine/Example/spineboy.atlas"))->
 		position({500.0f, 500.0f})->
 		scale(.5f)->
 		animate("run")->
 		queueAnimation("death", false, 5)->
-		queueAnimation("run");
+		queueAnimation("run");*/
 
-	auto emitter = scene->make<MV::Scene::Emitter>("Emitter", MV::Scene::loadEmitterProperties("particle.txt"))->position({300.0f, 300.0f})->depth(100000.0f)->
-		texture(texture->makeHandle({32, 32}, {32, 32}))->shader(MV::PREMULTIPLY_ID);
+	/*auto emitter = scene->make<MV::Scene::Emitter>("Emitter", &pool, MV::Scene::loadEmitterProperties("particle.txt"))->position({300.0f, 300.0f})->depth(100000.0f)->
+		texture(texture->makeHandle({MV::point(32, 32), MV::size(32, 32)}))->shader(MV::PREMULTIPLY_ID);*/
 
-	spineGuy->crossfade("death", "run", 1); //*/
+	//spineGuy->crossfade("death", "run", 1); //*/
 }
 
 void Editor::handleInput(){
@@ -128,6 +128,7 @@ void Editor::handleInput(){
 
 void Editor::render(){
 	renderer.clearScreen();
+	scene = controlPanel.root();
 	scene->draw();
 	controls->draw();
 	renderer.updateScreen();

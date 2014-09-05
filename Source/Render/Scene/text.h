@@ -187,15 +187,18 @@ namespace MV{
 				TextLibrary *textLibrary = nullptr;
 				Draw2D *renderer = nullptr;
 				Size<> boxSize;
+				std::string fontIdentifier = DEFAULT_ID;
 				archive(
-					cereal::make_nvp("boxSize", boxSize)
+					cereal::make_nvp("boxSize", boxSize),
+					cereal::make_nvp("fontIdentifier", fontIdentifier)
 				).extract(
 					cereal::make_nvp("textLibrary", textLibrary),
 					cereal::make_nvp("renderer", renderer)
 				);
-				construct(renderer, textLibrary, boxSize, "");
+				require<PointerException>(textLibrary != nullptr, "Null textLibrary in Text::load_and_construct.");
+				require<PointerException>(renderer != nullptr, "Null renderer in Text::load_and_construct.");
+				construct(renderer, textLibrary, boxSize, fontIdentifier);
 				archive(
-					cereal::make_nvp("fontIdentifier", construct->fontIdentifier),
 					cereal::make_nvp("contentScrollPosition", construct->contentScrollPosition),
 					cereal::make_nvp("wrapMethod", construct->wrapMethod),
 					cereal::make_nvp("textJustification", construct->textJustification)

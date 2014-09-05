@@ -10,21 +10,22 @@
 
 #include "Utility/require.hpp"
 #include "Utility/signal.hpp"
+#include "Utility/optionalCalls.hpp"
 
 namespace MV {
 
 	class Task {
 	private:
 		Slot<void(const Task&)> onStartSlot;
-		Slot<void(const Task&)> onFinishAllSlot;
-		Slot<void(const Task&)> onFinishTaskSlot;
+		Slot<void(const Task&)> onFinishSlot;
+		Slot<void(const Task&)> onFinishChildrenSlot;
 
 	public:
 		Task():
-			Task("root", [](double){return true; }){
+			Task("root", [](const Task&, double){return true; }){
 		}
 
-		Task(const std::string &a_name, std::function<bool(double)> a_task, bool a_blocking = true, bool a_blockParentCompletion = true):
+		Task(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blocking = true, bool a_blockParentCompletion = true):
 			taskName(a_name),
 			task(a_task),
 			block(a_blocking),
@@ -33,12 +34,16 @@ namespace MV {
 			ourTaskComplete(false),
 			forceCompleteFlag(false),
 			onStart(onStartSlot),
-			onFinishAll(onFinishAllSlot),
-			onFinishTask(onFinishTaskSlot){
+			onFinishChildren(onFinishSlot),
+			onFinish(onFinishChildrenSlot){
 		}
 
-		static Task make(const std::string &a_name, std::function<bool(double)> a_task, bool a_blocking = true, bool a_blockParentCompletion = true){
+		static Task make(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blocking = true, bool a_blockParentCompletion = true){
 			return Task(a_name, a_task, a_blocking, a_blockParentCompletion);
+		}
+
+		std::string name() const{
+			return taskName;
 		}
 
 		bool update(double a_dt){
@@ -46,7 +51,7 @@ namespace MV {
 				updateLocalTask(a_dt);
 				updateParallelTasks(a_dt);
 				if(ourTaskComplete && updateChildTasks(a_dt)){
-					onFinishAllSlot(*this);
+					onFinishSlot(*this);
 					return true;
 				}
 			}
@@ -69,17 +74,17 @@ namespace MV {
 			return block;
 		}
 
-		Task& then(const std::string &a_name, std::function<bool(double)> a_task, bool a_blockParentCompletion = true) {
+		Task& then(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			sequentialTasks.emplace_back(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
 			return *this;
 		}
 
-		Task& thenAlso(const std::string &a_name, std::function<bool(double)> a_task, bool a_blockParentCompletion = true) {
+		Task& thenAlso(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			sequentialTasks.emplace_back(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
 			return *this;
 		}
 
-		Task& also(const std::string &a_name, std::function<bool(double)> a_task, bool a_blockParentCompletion = true) {
+		Task& also(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			parallelTasks.emplace_back(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
 			return *this;
 		}
@@ -94,25 +99,26 @@ namespace MV {
 			auto foundInParallels = std::find_if(parallelTasks.begin(), parallelTasks.end(), [&](const std::shared_ptr<Task> &a_task){
 				return a_task->taskName == a_name;
 			});
-			if(foundInSequentials != sequentialTasks.end()){
+			if(foundInParallels != parallelTasks.end()){
 				return **foundInParallels;
 			}
 			require<ResourceException>(false, "Failed to find: [", a_name, "] in task: [", taskName, "]");
+			return *this; //never called, suppress warning
 		}
 
 		SlotRegister<void(const Task&)> onStart;
-		SlotRegister<void(const Task&)> onFinishTask;
-		SlotRegister<void(const Task&)> onFinishAll;
+		SlotRegister<void(const Task&)> onFinish;
+		SlotRegister<void(const Task&)> onFinishChildren;
 	private:
 
 		void updateLocalTask(double a_dt){
 			if(totalTime == 0.0f){
 				onStartSlot(*this);
 			}
-			totalTime += a_dt * static_cast<int>(forceCompleteFlag);
-			if(!ourTaskComplete && (forceCompleteFlag || task(a_dt))){
+			totalTime += a_dt * static_cast<int>(!forceCompleteFlag);
+			if(!ourTaskComplete && (forceCompleteFlag || task(*this, a_dt))){
 				ourTaskComplete = true;
-				onFinishTaskSlot(*this);
+				onFinishChildrenSlot(*this);
 			}
 		}
 
@@ -148,15 +154,15 @@ namespace MV {
 		void finishAllChildTasks(){
 			for(std::shared_ptr<Task> &task : parallelTasks){
 				if(!task->ourTaskComplete){
-					task->onFinishTaskSlot(*task);
+					task->onFinishChildrenSlot(*task);
 				}
-				task->onFinishAllSlot(*task);
+				task->onFinishSlot(*task);
 			}
 			for(std::shared_ptr<Task> &task : sequentialTasks){
 				if(!task->ourTaskComplete){
-					task->onFinishTaskSlot(*task);
+					task->onFinishChildrenSlot(*task);
 				}
-				task->onFinishAllSlot(*task);
+				task->onFinishSlot(*task);
 			}
 		}
 
@@ -174,7 +180,7 @@ namespace MV {
 			return cleanupChildTasks();
 		}
 
-		std::function<bool(double)> task;
+		std::function<bool(const Task&, double)> task;
 
 		std::vector<std::shared_ptr<Task>> parallelTasks;
 		std::deque<std::shared_ptr<Task>> sequentialTasks;
@@ -188,6 +194,73 @@ namespace MV {
 
 		bool blockParentCompletion;
 	};
+
+	#define CREATE_HOOK_UP_TASK_ACTION(member) \
+	CREATE_HAS_MEMBER(member, (const Task&))\
+	template <typename T, bool b>\
+	struct HookUpTaskAction_##member { \
+		static void apply(Task &a_root, const std::shared_ptr<T> &a_action) {\
+			a_root.member.connect(#member , [=](const Task& a_self){\
+				a_action->member(a_self);\
+			});\
+		}\
+	};\
+	template <typename T>\
+	struct HookUpTaskAction_##member <T, false> {\
+		static void apply(Task &a_root, const std::shared_ptr<T> &a_action) {}\
+	};
+
+	CREATE_HOOK_UP_TASK_ACTION(onStart);
+	CREATE_HOOK_UP_TASK_ACTION(onFinish);
+	CREATE_HOOK_UP_TASK_ACTION(onFinishChildren);
+
+	template <typename T>
+	Task& ParallelTask(Task &a_root, const T &a_action, bool a_blockParentCompletion = true){
+		return ParallelTask(guid("Par_"), a_root, a_action, a_blockParentCompletion);
+	}
+
+	template <typename T>
+	Task& ParallelTask(const std::string &a_id, Task &a_root, const T &a_action, bool a_blockParentCompletion = true){
+		std::shared_ptr<T> sharedAction = std::make_shared<T>(a_action);
+		a_root.also(a_id, [=](const Task& a_task, double a_dt){return sharedAction->update(a_task, a_dt); }, a_blockParentCompletion);
+		auto& task = a_root.get(a_id);
+		HookUpTaskAction_onStart<T, has_onStart<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onFinish<T, has_onFinish<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onFinishChildren<T, has_onFinishChildren<T>::value>::apply(task, sharedAction);
+		return task;
+	}
+
+	template <typename T>
+	Task& SequentialTask(Task &a_root, const T &a_action, bool a_blockParentCompletion = true){
+		return SequentialTask(guid("SeqTask_"), a_root, a_action, a_blockParentCompletion);
+	}
+
+	template <typename T>
+	Task& SequentialTask(const std::string &a_id, Task &a_root, const T &a_action, bool a_blockParentCompletion = true){
+		std::shared_ptr<T> sharedAction = std::make_shared<T>(a_action);
+		a_root.then(a_id, [=](const Task& a_task, double a_dt){return sharedAction->update(a_task, a_dt); }, a_blockParentCompletion);
+		auto& task = a_root.get(a_id);
+		HookUpTaskAction_onStart<T, has_onStart<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onFinish<T, has_onFinish<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onFinishChildren<T, has_onFinishChildren<T>::value>::apply(task, sharedAction);
+		return task;
+	}
+
+	template <typename T>
+	Task& SequentialNonBlockingTask(Task &a_root, const T &a_action, bool a_blockParentCompletion = true){
+		return SequentialNonBlockingTask(guid("SeqTask_"), a_root, a_action, a_blockParentCompletion);
+	}
+
+	template <typename T>
+	Task& SequentialNonBlockingTask(const std::string &a_id, Task &a_root, const T &a_action, bool a_blockParentCompletion = true){
+		std::shared_ptr<T> sharedAction = std::make_shared<T>(a_action);
+		a_root.thenAlso(a_id, [=](const Task& a_task, double a_dt){return sharedAction->update(a_task, a_dt); }, a_blockParentCompletion);
+		auto& task = a_root.get(a_id);
+		HookUpTaskAction_onStart<T, has_onStart<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onFinish<T, has_onFinish<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onFinishChildren<T, has_onFinishChildren<T>::value>::apply(task, sharedAction);
+		return task;
+	}
 }
 
 #endif

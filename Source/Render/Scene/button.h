@@ -2,7 +2,7 @@
 #define _MV_SCENE_BUTTON_H_
 
 #include "Interface/mouse.h"
-#include "Render/Scene/primitives.h"
+#include "Render/Scene/rectangle.h"
 
 namespace MV {
 	namespace Scene {
@@ -202,13 +202,14 @@ namespace MV {
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Button> &construct){
 				MouseState* mouse = nullptr;
+				Draw2D *renderer = nullptr;
 				archive.extract(
-					cereal::make_nvp("mouse", mouse)
+					cereal::make_nvp("mouse", mouse),
+					cereal::make_nvp("renderer", renderer)
 				);
 				require<PointerException>(mouse != nullptr, "Error: Failed to load a mouse handle for Button node.");
-				Draw2D *renderer = nullptr;
-				archive.extract(cereal::make_nvp("renderer", renderer));
 				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Button node.");
+
 				construct(renderer, mouse);
 				archive(
 					cereal::make_nvp("clickable", construct->clickable),

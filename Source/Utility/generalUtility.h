@@ -10,6 +10,7 @@
 #include <numeric>
 #include <stdint.h>
 #include <random>
+#include <type_traits>
 
 #include "Utility/require.hpp"
 #include <boost/uuid/uuid.hpp>

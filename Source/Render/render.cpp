@@ -259,7 +259,7 @@ namespace MV {
 		glGetIntegerv(GL_RENDERBUFFER_BINDING, &originalRenderbufferId);
 	}
 
-	std::shared_ptr<Framebuffer> glExtensionFramebufferObject::makeFramebuffer(const Point<int> &a_position, const Size<int> &a_size, GLuint a_texture){
+	std::shared_ptr<Framebuffer> glExtensionFramebufferObject::makeFramebuffer(const Point<int> &a_position, const Size<int> &a_size, GLuint a_texture, const Color &a_backgroundColor){
 		require<ResourceException>(initialized, "CreateFramebuffer failed because the extension could not be loaded");
 		GLuint framebufferId = 0, renderbufferId = 0, depthbufferId = 0;
 #ifdef WIN32
@@ -271,22 +271,23 @@ namespace MV {
 		glGenRenderbuffersOES(1, &renderbufferId);
 		glGenRenderbuffersOES(1, &depthbufferId);
 #endif
-		return std::shared_ptr<Framebuffer>(new Framebuffer(renderer, framebufferId, renderbufferId, depthbufferId, a_texture, a_size, a_position));
+		return std::shared_ptr<Framebuffer>(new Framebuffer(renderer, framebufferId, renderbufferId, depthbufferId, a_texture, a_size, a_position, a_backgroundColor));
 	}
 
-	void glExtensionFramebufferObject::startUsingFramebuffer(std::shared_ptr<Framebuffer> a_framebuffer, bool a_push){
-		savedClearColor = renderer->backgroundColor();
-		renderer->backgroundColor({0, 0, 0, 0});
+	void glExtensionFramebufferObject::startUsingFramebuffer(std::weak_ptr<Framebuffer> a_framebuffer, bool a_push){
+		require<ResourceException>(initialized && !a_framebuffer.expired(), "StartUsingFramebuffer failed because the extension could not be loaded");
 
-		require<ResourceException>(initialized, "StartUsingFramebuffer failed because the extension could not be loaded");
+		savedClearColor = renderer->backgroundColor();
+		renderer->backgroundColor(a_framebuffer.lock()->background);
+
 		if(a_push){
 			activeFramebuffers.push_back(a_framebuffer);
 		}
 #ifdef WIN32
-		glBindFramebuffer(GL_FRAMEBUFFER, a_framebuffer->framebuffer);
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, a_framebuffer->texture, 0);
-		glBindRenderbuffer(GL_RENDERBUFFER, a_framebuffer->renderbuffer);
-		glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, roundUpPowerOfTwo(a_framebuffer->frameSize.width), roundUpPowerOfTwo(a_framebuffer->frameSize.height));
+		glBindFramebuffer(GL_FRAMEBUFFER, a_framebuffer.lock()->framebuffer);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, a_framebuffer.lock()->texture, 0);
+		glBindRenderbuffer(GL_RENDERBUFFER, a_framebuffer.lock()->renderbuffer);
+		glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, roundUpPowerOfTwo(a_framebuffer.lock()->frameSize.width), roundUpPowerOfTwo(a_framebuffer.lock()->frameSize.height));
 #else
 		int width = roundUpPowerOfTwo(a_framebuffer.frameSize.width);
 		int height = roundUpPowerOfTwo(a_framebuffer.frameSize.height);
@@ -307,9 +308,9 @@ namespace MV {
 			std::cout << "Start Using Framebuffer failure: " << glCheckFramebufferStatusOES(GL_FRAMEBUFFER_OES) << std::endl;
 		}
 #endif
-		glViewport(a_framebuffer->framePosition.x, a_framebuffer->framePosition.y, a_framebuffer->frameSize.width, a_framebuffer->frameSize.height);
+		glViewport(a_framebuffer.lock()->framePosition.x, a_framebuffer.lock()->framePosition.y, a_framebuffer.lock()->frameSize.width, a_framebuffer.lock()->frameSize.height);
 		glGetIntegerv(GL_VIEWPORT, viewport);
-		renderer->projectionMatrix().push().makeOrtho(0, static_cast<MatrixValue>(a_framebuffer->frameSize.width), 0, static_cast<MatrixValue>(a_framebuffer->frameSize.height), -128.0f, 128.0f);
+		renderer->projectionMatrix().push().makeOrtho(0, static_cast<MatrixValue>(a_framebuffer.lock()->frameSize.width), 0, static_cast<MatrixValue>(a_framebuffer.lock()->frameSize.height), -128.0f, 128.0f);
 
 #ifdef WIN32
 		GLenum buffers[] = {GL_COLOR_ATTACHMENT0};
@@ -1001,25 +1002,33 @@ namespace MV {
 		projectionMatrix().top().makeOrtho(0, mvWorld.width(), mvWorld.height(), 0, -1.0, 1.0);
 	}
 
-	Framebuffer::Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, const Size<int> &a_size, const Point<int> &a_position) :
+	Framebuffer::Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, const Size<int> &a_size, const Point<int> &a_position, const Color &a_backgroundColor):
 		renderbuffer(a_renderbuffer),
 		framebuffer(a_framebuffer),
 		depthbuffer(a_depthbuffer),
 		texture(a_texture),
 		frameSize(a_size),
 		framePosition(a_position),
-		renderer(a_renderer){
+		renderer(a_renderer),
+		started(false),
+		background(a_backgroundColor){
 	}
 
 	Framebuffer::~Framebuffer(){
+		if(started){
+			stop();
+		}
 		renderer->deleteFramebuffer(*this);
 	}
 
-	void Framebuffer::start() {
+	std::shared_ptr<Framebuffer> Framebuffer::start() {
+		started = true;
 		renderer->startUsingFramebuffer(shared_from_this());
+		return shared_from_this();
 	}
 
 	void Framebuffer::stop() {
+		started = false;
 		renderer->stopUsingFramebuffer();
 	}
 

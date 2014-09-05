@@ -42,7 +42,7 @@ namespace MV {
 		glyphCharacter(a_glyphCharacter),
 		fontDefinition(a_fontDefinition){
 
-		glyphHandle->setBounds(Point<int>(), glyphTexture->surfaceSize());
+		glyphHandle->bounds(glyphTexture->surfaceSize());
 	}
 
 	UtfChar CharacterDefinition::character() const{

@@ -1,7 +1,7 @@
 #ifndef _MV_SCENE_CLIPPED_H_
 #define _MV_SCENE_CLIPPED_H_
 
-#include "Render/Scene/primitives.h"
+#include "Render/Scene/rectangle.h"
 
 namespace MV {
 	namespace Scene {
@@ -58,10 +58,10 @@ namespace MV {
 				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Clipped node.");
 				construct(renderer);
 				archive(cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(construct.ptr())));
+				construct->dirtyTexture = true;
 			}
 
 			std::shared_ptr<DynamicTextureDefinition> clippedTexture;
-			std::shared_ptr<Framebuffer> framebuffer;
 
 			virtual void onChildAdded(std::shared_ptr<Node>){
 				dirtyTexture = true;

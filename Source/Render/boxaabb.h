@@ -90,6 +90,26 @@ namespace MV {
 			return *this;
 		}
 
+		BoxAABB<>& operator*=(const Scale &a_offset){
+			minPoint *= a_offset;
+			maxPoint *= a_offset;
+			return *this;
+		}
+		BoxAABB<>& operator/=(const Scale &a_offset){
+			minPoint /= a_offset;
+			maxPoint /= a_offset;
+			return *this;
+		}
+
+		bool operator==(const BoxAABB<T> &a_bounds) const{
+			return minPoint == a_bounds.minPoint && maxPoint == a_bounds.maxPoint;
+		}
+
+		template <class Archive>
+		void serialize(Archive & archive){
+			archive(CEREAL_NVP(minPoint), CEREAL_NVP(maxPoint));
+		}
+
 		Point<T> minPoint, maxPoint;
 	};
 
@@ -105,6 +125,29 @@ namespace MV {
 		return a_is;
 	}
 
+	template <typename T>
+	BoxAABB<T> operator+(const BoxAABB<T> &a_lhs, const Point<T> &a_rhs){
+		auto result = a_lhs;
+		return result += a_rhs;
+	}
+
+	template <typename T>
+	BoxAABB<T> operator-(const BoxAABB<T> &a_lhs, const Point<T> &a_rhs){
+		auto result = a_lhs;
+		return result -= a_rhs;
+	}
+
+	template <typename T>
+	BoxAABB<T> operator*(const BoxAABB<T> &a_lhs, const Scale &a_rhs){
+		auto result = a_lhs;
+		return result *= a_rhs;
+	}
+
+	template <typename T>
+	BoxAABB<T> operator/(const BoxAABB<T> &a_lhs, const Scale &a_rhs){
+		auto result = a_lhs;
+		return result /= a_rhs;
+	}
 
 	template <typename T>
 	void BoxAABB<T>::initialize(const Point<T> &a_startPoint){

@@ -1,12 +1,13 @@
 #include "texturePacker.h"
 
-#include "Scene/primitives.h"
+#include "Scene/rectangle.h"
 
 namespace MV{
 	bool TexturePack::add(const std::shared_ptr<TextureDefinition> &a_shape, PointPrecision a_scale) {
 		auto shapeSize = a_shape->size() * Scale(a_scale);
 		auto newShape = positionShape(shapeSize);
 		if(newShape.minPoint.x >= 0){
+			dirty = true;
 			shapes.push_back({newShape, a_shape});
 			updateContainers(newShape);
 
@@ -65,8 +66,11 @@ namespace MV{
 		return out.str();
 	}
 
-	TexturePack::TexturePack(const Size<int> &a_maximumExtent):
-		maximumExtent(a_maximumExtent){
+	TexturePack::TexturePack(MV::Draw2D* a_renderer, const Color &a_color, const Size<int> &a_maximumExtent):
+		renderer(a_renderer),
+		maximumExtent(a_maximumExtent),
+		packedTexture(DynamicTextureDefinition::make("TexturePack", Size<int>(), a_color)),
+		dirty(true){
 		containers.emplace_back(a_maximumExtent);
 	}
 
@@ -89,10 +93,24 @@ namespace MV{
 		}
 	}
 
-	void TexturePack::addToScene(std::shared_ptr<MV::Scene::Node> a_scene) {
+	std::shared_ptr<MV::Scene::Node> TexturePack::makeScene() const {
+		auto scene = Scene::Node::make(renderer);
 		for(auto&& shape : shapes){
-			a_scene->make<MV::Scene::Rectangle>(cast<PointPrecision>(shape.first))->texture(shape.second->makeHandle())->shader(PREMULTIPLY_ID);
+			scene->make<MV::Scene::Rectangle>(cast<PointPrecision>(shape.first))->texture(shape.second->makeHandle())->shader(PREMULTIPLY_ID);
 		}
+		return scene;
+	}
+
+	std::shared_ptr<TextureDefinition> TexturePack::texture() {
+		if(dirty){
+			packedTexture->resize(contentExtent);
+			auto scene = makeScene();
+			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, packedTexture->textureId(), background)->start();
+			renderer->backgroundColor(background);
+			renderer->clearScreen();
+			scene->draw();
+		}
+		return packedTexture;
 	}
 
 }

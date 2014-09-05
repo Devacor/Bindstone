@@ -69,8 +69,18 @@ private:
 class DeselectedEditorPanel : public EditorPanel {
 public:
 	DeselectedEditorPanel(EditorControls &a_panel);
+
 private:
-	void completeSelection(const MV::BoxAABB<> &a_selected);
+	std::shared_ptr<MV::Scene::Text> fileName;
+};
+
+class ChooseElementCreationType : public EditorPanel {
+public:
+	ChooseElementCreationType(EditorControls &a_panel);
+private:
+	void createRectangle(const MV::BoxAABB<> &a_selected);
+	void createEmitter(const MV::BoxAABB<> &a_selected);
+	void createSpine(const MV::BoxAABB<> &a_selected);
 };
 
 #endif

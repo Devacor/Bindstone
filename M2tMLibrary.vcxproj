@@ -223,6 +223,7 @@
     <ClCompile Include="Source\Render\Scene\spineMV.cpp" />
     <ClCompile Include="Source\Render\Scene\text.cpp" />
     <ClCompile Include="Source\Render\formattedText.cpp" />
+    <ClCompile Include="Source\Render\sharedTextures.cpp" />
     <ClCompile Include="Source\Render\texturePacker.cpp" />
     <ClCompile Include="Source\Render\textures.cpp" />
     <ClCompile Include="Source\Utility\generalUtility.cpp" />
@@ -342,6 +343,7 @@
     <ClInclude Include="Source\Render\Scene\spineMV.h" />
     <ClInclude Include="Source\Render\Scene\text.h" />
     <ClInclude Include="Source\Render\formattedText.h" />
+    <ClInclude Include="Source\Render\sharedTextures.h" />
     <ClInclude Include="Source\Render\texturePacker.h" />
     <ClInclude Include="Source\Render\textures.h" />
     <ClInclude Include="Source\Utility\generalUtility.h" />

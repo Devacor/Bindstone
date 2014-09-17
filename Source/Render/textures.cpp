@@ -101,7 +101,7 @@ namespace MV {
 		return a_img;
 	}
 
-	bool loadTextureFromFile(const std::string &a_file, GLuint &a_imageLoaded, Size<int> &a_size, bool a_repeat) {
+	bool loadTextureFromFile(const std::string &a_file, GLuint &a_imageLoaded, Size<int> &a_size, Size<int> &a_originalSize, bool a_powerTwo, bool a_repeat) {
 		std::cout << "Loading: " << a_file << std::endl;
 		SDL_Surface *img = IMG_Load(a_file.c_str());
 		if (!img){
@@ -109,14 +109,18 @@ namespace MV {
 			return false;
 		}
 
-		bool result = loadTextureFromSurface(img, a_imageLoaded, a_size, a_repeat);
+		bool result = loadTextureFromSurface(img, a_imageLoaded, a_size, a_originalSize, a_powerTwo, a_repeat);
 
 		return result;
 	}
 
 	//Load an opengl texture
-	bool loadTextureFromSurface(SDL_Surface *a_img, GLuint &a_imageLoaded, Size<int> &a_size, bool a_repeat) {
-		a_img = convertToPowerOfTwoSurface(a_img);
+	bool loadTextureFromSurface(SDL_Surface *a_img, GLuint &a_imageLoaded, Size<int> &a_size, Size<int> &a_originalSize, bool a_powerTwo, bool a_repeat) {
+		a_originalSize.width = a_img->w;
+		a_originalSize.height = a_img->h;
+		if(a_powerTwo){
+			a_img = convertToPowerOfTwoSurface(a_img);
+		}
 
 		if(a_img == nullptr){
 			std::cerr << "ERROR: loadTextureFromSurface was provided a null SDL_Surface!" << std::endl;
@@ -177,7 +181,7 @@ namespace MV {
 	}
 
 	Size<int> TextureDefinition::size() const{
-		require<ResourceException>(loaded(), "The texture hasn't actually loaded yet.  You may need to create a handle to implicitly force a texture load.");
+		require<ResourceException>(loaded(), "size:: The texture hasn't actually loaded yet.  You may need to create a handle to implicitly force a texture load.");
 		return textureSize;
 	}
 
@@ -192,18 +196,35 @@ namespace MV {
 		}
 	}
 
+	Size<int> TextureDefinition::contentSize() const{
+		require<ResourceException>(loaded(), "contentSize:: The texture hasn't actually loaded yet.  You may need to create a handle to implicitly force a texture load.");
+		return desiredSize;
+	}
+
+	Size<int> TextureDefinition::contentSize(){
+		if(!loaded()){
+			load();
+			auto ourSize = desiredSize;
+			cleanupOpenglTexture();
+			return ourSize;
+		} else{
+			return desiredSize;
+		}
+	}
+
 	std::string TextureDefinition::name() const{
 		return textureName;
 	}
 
 	void TextureDefinition::unload(){
-		handles.erase(std::remove_if(handles.begin(), handles.end(), [](const std::weak_ptr<TextureHandle> &value){return value.expired(); }), handles.end());
 		cleanupOpenglTexture();
 	}
 
 	void TextureDefinition::unload(TextureHandle* toRemove){
 		handles.erase(std::remove_if(handles.begin(), handles.end(), [&](const std::weak_ptr<TextureHandle> &value){return value.expired() || &(*value.lock()) == toRemove; }), handles.end());
-		cleanupOpenglTexture();
+		if(handles.empty()){
+			cleanupOpenglTexture();
+		}
 	}
 
 	std::shared_ptr<TextureHandle> TextureDefinition::makeHandle() {
@@ -261,7 +282,7 @@ namespace MV {
 	\*****************************/
 
 	void FileTextureDefinition::reloadImplementation(){
-		loadTextureFromFile(textureName, texture, textureSize, repeat);
+		loadTextureFromFile(textureName, texture, textureSize, desiredSize, powerTwo, repeat);
 	}
 
 	/********************************\
@@ -292,6 +313,7 @@ namespace MV {
 
 	void DynamicTextureDefinition::resize(const Size<int> &a_size) {
 		textureSize = a_size;
+		desiredSize = a_size;
 		reload();
 	}
 
@@ -306,7 +328,7 @@ namespace MV {
 		generatedSurfaceSize = Size<int>(newSurface->w, newSurface->h);
 
 		//loads and frees
-		loadTextureFromSurface(newSurface, texture, textureSize, false);
+		loadTextureFromSurface(newSurface, texture, textureSize, desiredSize, true, false);
 	}
 
 	Size<int> SurfaceTextureDefinition::surfaceSize() const {
@@ -428,48 +450,6 @@ namespace MV {
 		return false;
 	}
 
-	/**********************\
-	| ---SharedTextures--- |
-	\**********************/
-
-	std::shared_ptr<FileTextureDefinition> SharedTextures::getFileTexture( const std::string &a_filename, bool a_repeat ) {
-		std::string identifier = a_filename + (a_repeat?"1":"0");
-		auto foundDefinition = fileDefinitions.find(identifier);
-		if(foundDefinition == fileDefinitions.end()){
-			std::shared_ptr<FileTextureDefinition> newDefinition = FileTextureDefinition::make(a_filename, a_repeat);
-			fileDefinitions[identifier] = newDefinition;
-			return newDefinition;
-		}else{
-			return foundDefinition->second;
-		}
-	}
-
-	std::shared_ptr<DynamicTextureDefinition> SharedTextures::getDynamicTexture( const std::string &a_name, const Size<int> &a_size ) {
-		std::stringstream identifierMaker;
-		identifierMaker << a_name << a_size;
-		std::string identifier = identifierMaker.str();
-
-		auto foundDefinition = dynamicDefinitions.find(identifier);
-		if(foundDefinition == dynamicDefinitions.end()){
-			std::shared_ptr<DynamicTextureDefinition> newDefinition = DynamicTextureDefinition::make(a_name, a_size, {0.0f, 0.0f, 0.0f, 0.0f});
-			dynamicDefinitions[identifier] = newDefinition;
-			return newDefinition;
-		}else{
-			return foundDefinition->second;
-		}
-	}
-
-	std::shared_ptr<SurfaceTextureDefinition> SharedTextures::getSurfaceTexture(const std::string &a_identifier, std::function<SDL_Surface*()> a_surfaceGenerator) {
-		auto foundDefinition = surfaceDefinitions.find(a_identifier);
-		if(foundDefinition == surfaceDefinitions.end()){
-			std::shared_ptr<SurfaceTextureDefinition> newDefinition = SurfaceTextureDefinition::make(a_identifier, a_surfaceGenerator);
-			surfaceDefinitions[a_identifier] = newDefinition;
-			return newDefinition;
-		} else{
-			return foundDefinition->second;
-		}
-	}
-
 	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture) {
 		require<ResourceException>(a_texture, "saveLoadedOpenglTexture was supplied a null texture id: ", a_fileName);
 		glBindTexture(GL_TEXTURE_2D, a_texture);
@@ -486,9 +466,6 @@ namespace MV {
 		IMG_SavePNG(surf, a_fileName.c_str());
 		SDL_FreeSurface(surf);
 	}
-
-	std::shared_ptr<DynamicTextureDefinition> SharedTextures::defaultTexture = nullptr;
-	std::shared_ptr<TextureHandle> SharedTextures::defaultHandle = nullptr;
 
 
 }

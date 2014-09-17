@@ -96,9 +96,6 @@ namespace MV {
 		Size():width(0), height(0), depth(0){}
 		Size(T a_width, T a_height, T a_depth = 0):width(a_width),height(a_height),depth(a_depth){}
 
-		template <class T2>
-		Size(const Size<T2> &a_size):width(a_size.width), height(a_size.height), depth(a_size.depth){}
-
 		void set(T a_width, T a_height){
 			width = a_width;
 			height = a_height;
@@ -412,6 +409,11 @@ namespace MV {
 	/************************\
 	| -------Size IMP------- |
 	\************************/
+	template <typename T>
+	Size<T> fitAspect(Size<T> a_toConstrain, Size<T> a_maximum){
+		auto ratio = std::min(static_cast<double>(a_maximum.width) / static_cast<double>(a_toConstrain.width), static_cast<double>(a_maximum.height) / static_cast<double>(a_toConstrain.height));
+		return {static_cast<T>(static_cast<double>(a_toConstrain.width) * ratio), static_cast<T>(static_cast<double>(a_toConstrain.height) * ratio)};
+	}
 
 	template <typename T>
 	Size<T> size(T a_width, T a_height, T a_depth = 0){

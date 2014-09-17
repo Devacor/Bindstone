@@ -63,6 +63,13 @@ namespace MV {
 		add(a_childId, newChild); \
 		return newChild; \
 	} \
+	template < typename TypeToMake > \
+	std::shared_ptr<TypeToMake> make() { \
+		auto newChild = TypeToMake::make(renderer); \
+		add(guid(), newChild); \
+		return newChild; \
+	} \
+	\
 	std::shared_ptr<T> parent(Node* a_parentItem){ return std::static_pointer_cast<T>(parentImplementation(a_parentItem)); } \
 	std::shared_ptr<T> removeFromParent(){ return std::static_pointer_cast<T>(removeFromParentImplementation()); } \
 	std::shared_ptr<T> position(const Point<> &a_rhs){ return std::static_pointer_cast<T>(positionImplementation(a_rhs)); } \

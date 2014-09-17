@@ -32,8 +32,8 @@ namespace MV {
 
 	//These methods are all destructive to the original surface.  Do not rely on SDL_Surface being viable after calling.
 	SDL_Surface* convertToPowerOfTwoSurface(SDL_Surface *a_img);
-	bool loadTextureFromFile(const std::string &file, GLuint &imageLoaded, Size<int> &size, bool repeat);
-	bool loadTextureFromSurface(SDL_Surface *img, GLuint &imageLoaded, Size<int> &size, bool repeat);
+	bool loadTextureFromFile(const std::string &file, GLuint &imageLoaded, Size<int> &size, Size<int> &originalSize, bool powerTwo, bool repeat);
+	bool loadTextureFromSurface(SDL_Surface *img, GLuint &imageLoaded, Size<int> &size, Size<int> &originalSize, bool powerTwo, bool repeat);
 
 	class TextureHandle;
 	class TextureDefinition : public std::enable_shared_from_this<TextureDefinition> {
@@ -51,6 +51,8 @@ namespace MV {
 		std::string name() const;
 		Size<int> size() const;
 		Size<int> size();
+		Size<int> contentSize() const;
+		Size<int> contentSize();
 		//bookkeeping
 		bool loaded() const;
 		void load();
@@ -66,6 +68,7 @@ namespace MV {
 
 		std::string textureName;
 		Size<int> textureSize;
+		Size<int> desiredSize;
 		GLuint texture;
 
 		std::vector< std::weak_ptr<TextureHandle> > handles;
@@ -74,7 +77,10 @@ namespace MV {
 	private:
 		template <class Archive>
 		void serialize(Archive & archive){
-			archive(cereal::make_nvp("name", textureName), cereal::make_nvp("size", textureSize), CEREAL_NVP(handles));
+			archive(cereal::make_nvp("name", textureName), cereal::make_nvp("size", textureSize), cereal::make_nvp("contentSize", desiredSize), CEREAL_NVP(handles));
+			if(!handles.empty() && !texture){
+				reloadImplementation();
+			}
 		}
 
 		virtual void reloadImplementation() = 0;
@@ -84,36 +90,42 @@ namespace MV {
 	class FileTextureDefinition : public TextureDefinition {
 		friend cereal::access;
 	public:
-		static std::shared_ptr<FileTextureDefinition> make(const std::string &a_filename, bool a_repeat = false){
-			return std::shared_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_repeat));
+		static std::shared_ptr<FileTextureDefinition> make(const std::string &a_filename, bool a_powerTwo = true, bool a_repeat = false){
+			return std::shared_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_powerTwo, a_repeat));
 		}
-		static std::unique_ptr<FileTextureDefinition> makeUnmanaged(const std::string &a_filename, bool a_repeat = false){
-			return std::unique_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_repeat, false));
+		static std::unique_ptr<FileTextureDefinition> makeUnmanaged(const std::string &a_filename, bool a_powerTwo = true, bool a_repeat = false){
+			return std::unique_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_powerTwo, a_repeat, false));
+		}
+
+
+
+	protected:
+		FileTextureDefinition(const std::string &a_filename, bool a_powerTwo, bool a_repeat, bool a_isShared = true):
+			TextureDefinition(a_filename, a_isShared),
+			repeat(a_repeat),
+			powerTwo(a_powerTwo){
 		}
 
 	private:
-		FileTextureDefinition(const std::string &a_filename, bool a_repeat, bool a_isShared = true):
-			TextureDefinition(a_filename, a_isShared),
-			repeat(a_repeat){
-		}
 		virtual void reloadImplementation();
 
 		template <class Archive>
 		void serialize(Archive & archive){
-			archive(CEREAL_NVP(repeat), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
+			archive(CEREAL_NVP(powerTwo), CEREAL_NVP(repeat), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
 		}
 
 		template <class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<FileTextureDefinition> &construct){
 			bool repeat = false;
-			archive(cereal::make_nvp("repeat", repeat));
-			construct("", repeat);
+			bool powerTwo = true;
+			archive(cereal::make_nvp("powerTwo", powerTwo), cereal::make_nvp("repeat", repeat));
+			construct("", powerTwo, repeat);
 			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
 			if(!construct->handles.empty()){
 				construct->reloadImplementation();
 			}
 		}
-
+		bool powerTwo;
 		bool repeat;
 	};
 
@@ -126,13 +138,15 @@ namespace MV {
 
 		void resize(const Size<int> &a_size);
 		
-	private:
+	protected:
 		DynamicTextureDefinition(const std::string &a_name, const Size<int> &a_size, const Color &a_backgroundColor):
 			TextureDefinition(a_name),
 			backgroundColor(a_backgroundColor){
 			textureSize = a_size;
+			desiredSize = a_size;
 		}
 
+	private:
 		template <class Archive>
 		void serialize(Archive & archive){
 			archive(CEREAL_NVP(backgroundColor), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
@@ -168,12 +182,13 @@ namespace MV {
 				load();
 			}
 		}
-	private:
+	protected:
 		SurfaceTextureDefinition(const std::string &a_name, std::function<SDL_Surface*()> a_surfaceGenerator):
 			TextureDefinition(a_name),
 			surfaceGenerator(a_surfaceGenerator){
 		}
 
+	private:
 		template <class Archive>
 		void serialize(Archive & archive){
 			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
@@ -266,33 +281,6 @@ namespace MV {
 		std::shared_ptr<TextureDefinition> textureDefinition;
 
 		TextureDefinition::SignalType::SharedType onParentReload;
-	};
-
-	class SharedTextures {
-	public:
-		std::shared_ptr<FileTextureDefinition> getFileTexture(const std::string &a_filename, bool a_repeat = false);
-		std::shared_ptr<DynamicTextureDefinition> getDynamicTexture(const std::string &a_identifier, const Size<int> &a_size);
-		std::shared_ptr<SurfaceTextureDefinition> getSurfaceTexture(const std::string &a_identifier, std::function<SDL_Surface*()> a_surfaceGenerator);
-
-		template <class Archive>
-		void serialize(Archive & archive){
-			archive(CEREAL_NVP(fileDefinitions), CEREAL_NVP(dynamicDefinitions), CEREAL_NVP(surfaceDefinitions));
-		}
-
-		static std::shared_ptr<TextureHandle> white(){
-			if(!defaultTexture){
-				defaultTexture = DynamicTextureDefinition::make("defaultTexture", {1, 1}, {1.0f, 1.0f, 1.0f, 1.0f});
-				defaultHandle = defaultTexture->makeHandle();
-			}
-			return defaultHandle;
-		}
-	private:
-		std::map<std::string, std::shared_ptr<FileTextureDefinition>> fileDefinitions;
-		std::map<std::string, std::shared_ptr<DynamicTextureDefinition>> dynamicDefinitions;
-		std::map<std::string, std::shared_ptr<SurfaceTextureDefinition>> surfaceDefinitions;
-
-		static std::shared_ptr<DynamicTextureDefinition> defaultTexture;
-		static std::shared_ptr<TextureHandle> defaultHandle;
 	};
 }
 

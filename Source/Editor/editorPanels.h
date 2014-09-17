@@ -9,7 +9,7 @@
 class EditorControls;
 class EditableRectangle;
 class EditableEmitter;
-
+class TexturePicker;
 class EditorPanel {
 public:
 	EditorPanel(EditorControls &a_panel);
@@ -38,16 +38,21 @@ class SelectedRectangleEditorPanel : public EditorPanel {
 public:
 	SelectedRectangleEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableRectangle> a_controls);
 	~SelectedRectangleEditorPanel(){
+		clearTexturePicker();
 	}
 
 	virtual void handleInput(SDL_Event &a_event);
 
 private:
+	void clearTexturePicker(){
+		picker = nullptr;
+	}
 	std::shared_ptr<EditableRectangle> controls;
 	std::shared_ptr<MV::Scene::Text> posY;
 	std::shared_ptr<MV::Scene::Text> posX;
 	std::shared_ptr<MV::Scene::Text> width;
 	std::shared_ptr<MV::Scene::Text> height;
+	std::shared_ptr<TexturePicker> picker;
 };
 
 class SelectedEmitterEditorPanel : public EditorPanel {
@@ -82,5 +87,6 @@ private:
 	void createEmitter(const MV::BoxAABB<> &a_selected);
 	void createSpine(const MV::BoxAABB<> &a_selected);
 };
+
 
 #endif

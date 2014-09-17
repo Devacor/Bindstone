@@ -185,6 +185,10 @@ MV::Size<> EditableRectangle::size(){
 	return elementToEdit->localAABB().size();
 }
 
+void EditableRectangle::texture(const std::shared_ptr<MV::TextureHandle> a_handle) {
+	elementToEdit->texture(a_handle);
+}
+
 
 
 //EDITABLE EMITTER

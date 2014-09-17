@@ -215,9 +215,14 @@
     <ClCompile Include="Source\Utility\threadPool.cpp">
       <Filter>Source Files\Utility</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Render\texturePacker.cpp" />
     <ClCompile Include="Source\Render\Scene\rectangle.cpp">
       <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\texturePacker.cpp">
+      <Filter>Source Files\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\sharedTextures.cpp">
+      <Filter>Source Files\Render</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -592,6 +597,9 @@
     </ClInclude>
     <ClInclude Include="Source\Utility\optionalCalls.hpp">
       <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\sharedTextures.h">
+      <Filter>Source Files\Render</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

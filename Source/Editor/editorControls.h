@@ -5,6 +5,7 @@
 #include "editorSelection.h"
 #include "editorDefines.h"
 #include "editorPanels.h"
+#include "editorFactories.h"
 
 namespace MV{
 	namespace Scene {
@@ -12,20 +13,77 @@ namespace MV{
 	}
 }
 
+class TexturePicker {
+public:
+	TexturePicker(std::shared_ptr<MV::Scene::Node> a_root, SharedResources a_sharedResources, std::function<void (std::shared_ptr<MV::TextureHandle>)> a_setter):
+		root(a_root),
+		sharedResources(a_sharedResources),
+		packs(sharedResources.textures->packIds()),
+		setter(a_setter){
+
+		initializeRootPicker();
+	}
+
+	~TexturePicker(){
+		box->parent()->removeFromParent();
+	}
+
+private:
+	void initializeRootPicker(){
+		grid = MV::Scene::Grid::make(root->getRenderer(), MV::size(100.0f, 27.0f))->padding({4.0f, 4.0f})->rows(6)->color({BOX_BACKGROUND});
+		auto backButton = makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, "Back", {100.0f, 27.0f}, UTF_CHAR_STR("Back"));
+		backButton->onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+			setter(nullptr);
+		});
+		box = makeDraggableBox("TexturePicker", root, grid->basicAABB().size(), *sharedResources.mouse);
+		box->add("TexturePickerGrid", grid);
+		for(auto&& packId : packs){
+			auto button = makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, packId, {100.0f, 27.0f}, MV::stringToWide(packId));
+			button->onAccept.connect("Accept", [&,packId](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+				initializeImagePicker(packId);
+			});
+		}
+	}
+
+	void initializeImagePicker(const std::string &a_packId){
+		auto cellSize = MV::size(64.0f, 64.0f);
+		grid = MV::Scene::Grid::make(root->getRenderer(), cellSize)->padding({4.0f, 4.0f})->rows(6)->color({BOX_BACKGROUND});
+		auto backButton = makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, "Back", {100.0f, 27.0f}, UTF_CHAR_STR("Back"));
+		backButton->onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+			initializeRootPicker();
+		});
+		box = makeDraggableBox("TexturePicker", root, grid->basicAABB().size(), *sharedResources.mouse);
+		box->add("TexturePickerGrid", grid);
+		auto pack = sharedResources.textures->pack(a_packId);
+		for(auto&& textureId : pack->handleIds()){
+			auto handle = pack->handle(textureId);
+
+			auto button = makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, textureId, cellSize, MV::stringToWide(textureId));
+			button->onAccept.connect("Accept", [&, handle](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+				setter(handle);
+			});
+			button->make<MV::Scene::Rectangle>(MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), cellSize))->texture(handle);
+		}
+	}
+
+	SharedResources sharedResources;
+	std::shared_ptr<MV::Scene::Node> root;
+	std::shared_ptr<MV::Scene::Node> box;
+	std::shared_ptr<MV::Scene::Grid> grid;
+	std::vector<std::string> packs;
+
+	std::string selectedPack;
+	std::shared_ptr<MV::TexturePack> activePack;
+
+	std::function<void(std::shared_ptr<MV::TextureHandle>)> setter;
+};
+
 class EditorControls {
 public:
-	EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::shared_ptr<MV::Scene::Node> a_root, MV::TextLibrary *a_textLibrary, MV::MouseState *a_mouse, MV::ThreadPool *a_pool);
+	EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::shared_ptr<MV::Scene::Node> a_root, SharedResources a_sharedResources);
 
-	MV::TextLibrary* textLibrary() const{
-		return textLibraryHandle;
-	}
-
-	MV::MouseState* mouse() const{
-		return mouseHandle;
-	}
-
-	MV::ThreadPool* pool() const{
-		return poolHandle;
+	SharedResources resources() const{
+		return sharedResources;
 	}
 
 	std::shared_ptr<MV::Scene::Node> root(){
@@ -65,15 +123,13 @@ public:
 	}
 
 private:
+	SharedResources sharedResources;
+
 	std::shared_ptr<MV::Scene::Node> editorScene;
 	std::shared_ptr<MV::Scene::Node> rootScene;
 	std::shared_ptr<MV::Scene::Node> draggableBox;
 	std::shared_ptr<MV::Scene::Clickable> boxHeader;
 	MV::Scene::Clickable::Drag boxHeaderDrag;
-
-	MV::TextLibrary *textLibraryHandle;
-	MV::MouseState *mouseHandle;
-	MV::ThreadPool *poolHandle;
 
 	std::unique_ptr<EditorPanel> currentPanel;
 	Selection currentSelection;

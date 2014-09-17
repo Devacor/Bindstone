@@ -26,7 +26,7 @@ Game::Game() :
 	mainScene->make<MV::Scene::Node>("container");
 	mainScene->get<MV::Scene::Node>("container")->position(MV::Point<>(20, 80));
 	std::shared_ptr<MV::Scene::Rectangle> pattern = mainScene->get<MV::Scene::Node>("container")->make<MV::Scene::Rectangle>("pattern");
-	pattern->texture(textures.getFileTexture("Assets/Images/patternTest1.png")->makeHandle());
+	pattern->texture(textures.file("Assets/Images/patternTest1.png")->makeHandle());
 
 	testShape->color(MV::Color(1, 0, 1, .25));
 
@@ -178,7 +178,7 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	static int counterthing = 0;
 	auto catapaultScene = MV::Scene::Node::make(&renderer);
 
-	auto platformTexture = textures.getFileTexture("Assets/Images/platform.png");
+	auto platformTexture = textures.file("Assets/Images/platform.png");
 	auto textureHandle = platformTexture->makeHandle();
 	auto shape = catapaultScene->make<MV::Scene::Rectangle>("base", MV::cast<MV::PointPrecision>(platformTexture->size()));
 	//auto currentTexture = textures.getMainTexture("base"); TEXTURE
@@ -191,7 +191,7 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	armScene->position(MV::Point<>(0, -4));
 
 	shape = armScene->make<MV::Scene::Rectangle>("arm");
-	auto armTexture = textures.getFileTexture("Assets/Images/spatula.png");
+	auto armTexture = textures.file("Assets/Images/spatula.png");
 	shape->texture(armTexture->makeHandle());
 	shape->size(MV::cast<MV::PointPrecision>(armTexture->size()));
 	std::cout << "AT: " << armTexture->size() << std::endl;
@@ -203,7 +203,7 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	armScene->depth(2);
 
 	shape = armScene->make<MV::Scene::Rectangle>("rock");
-	auto rockTexture = textures.getFileTexture("Assets/Images/rock.png");
+	auto rockTexture = textures.file("Assets/Images/rock.png");
 	shape->texture(rockTexture->makeHandle());
 	//shape->setSizeAndCornerPoint(MV::Point<>(7, -90), rockTexture->size());
 	shape->size(MV::cast<MV::PointPrecision>(rockTexture->size()));
@@ -218,7 +218,7 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 	shape->depth(1);
 
 	shape = catapaultScene->make<MV::Scene::Rectangle>("joint");
-	auto jointTexture = textures.getFileTexture("Assets/Images/joint.png");
+	auto jointTexture = textures.file("Assets/Images/joint.png");
 	shape->texture(jointTexture->makeHandle());
 	shape->size(MV::cast<MV::PointPrecision>(jointTexture->size()));
 	std::cout << "JT: " << jointTexture->size() << std::endl;

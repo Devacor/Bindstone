@@ -19,6 +19,8 @@ public:
 
 	void resetHandles();
 
+	void texture(const std::shared_ptr<MV::TextureHandle> a_handle);
+
 	void position(MV::Point<> a_newPosition);
 	MV::Point<> position() const;
 

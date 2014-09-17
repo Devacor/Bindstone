@@ -1,6 +1,7 @@
 #include "render.h"
 #include "Scene/node.h"
 #include "textures.h"
+#include "sharedTextures.h"
 #include "Utility/generalUtility.h"
 
 

@@ -12,7 +12,7 @@ Editor::Editor():
 	textLibrary(&renderer),
 	scene(MV::Scene::Node::make(&renderer)),
 	controls(MV::Scene::Node::make(&renderer)),
-	controlPanel(controls, scene, &textLibrary, &mouse, &pool){
+	controlPanel(controls, scene, SharedResources(&pool, &textures, &textLibrary, &mouse)){
 
 	initializeWindow();
 	initializeControls();
@@ -54,17 +54,20 @@ void Editor::initializeWindow(){
 	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
 	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 
+	textures.loadPacks("Assets/Atlases", &renderer);
+
 	fps = scene->make<MV::Scene::Text>(&textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
 	std::vector<std::string> names{"patternTest1.png", "platform.png", "rock.png", "joint.png", "slice.png", "spatula.png"};
 
-	auto texture = MV::FileTextureDefinition::make("Assets/Images/dogfox.png");
-	texture->save("Assets/Images/TESTIMAGE.png");
+	/*MV::TexturePack pack(&renderer);
 
-	MV::TexturePack pack(&renderer);
+	std::ifstream stream("Combined.texture");
+	cereal::JSONInputArchive archive(stream);
+	archive.add(cereal::make_nvp("renderer", &renderer));
+	archive(cereal::make_nvp("pack", pack));
 
-	for(auto&& name : names){
-		pack.add(MV::FileTextureDefinition::make(std::string("Assets/Images/") + name));
-	}
+	auto rockHandle = pack.handle("rock.png");
+	scene->make<MV::Scene::Rectangle>(MV::BoxAABB<>(MV::point(100.0f, 100.0f), MV::cast<MV::PointPrecision>(rockHandle->bounds().size())))->texture(rockHandle);*/
 
 	/*pack.addToScene(scene);
 

@@ -2,6 +2,8 @@
 #include "editorDefines.h"
 #include "editorPanels.h"
 
+#include "Render/package.h"
+
 void colorTopAndBottom(const std::shared_ptr<MV::Scene::Rectangle> &a_rect, const MV::Color &a_top, const MV::Color &a_bot){
 	a_rect->applyToCorners(a_top, a_top, a_bot, a_bot);
 }
@@ -81,4 +83,19 @@ std::shared_ptr<MV::Scene::Slider> makeSlider(MV::Draw2D &a_renderer, MV::MouseS
 	slider->area()->color({.25f, .25f, .25f, 1.0f});
 	slider->percent(a_startPercent);
 	return slider;
+}
+
+std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::Size<> a_boxSize, MV::MouseState &a_mouse) {
+	auto box = a_parent->make<MV::Scene::Node>(a_id);
+
+	float headerSize = 20.0f;
+	auto boxContents = box->make<MV::Scene::Node>()->position({0.0f, headerSize});
+
+	auto boxHeader = box->make<MV::Scene::Clickable>("ContextMenuHandle", &a_mouse, MV::size(a_boxSize.width, headerSize))->color({BOX_HEADER});
+
+	boxHeader->onDrag.connect("DragSignal", [](std::shared_ptr<MV::Scene::Clickable> boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
+		boxHeader->parent()->translate(MV::cast<MV::PointPrecision>(deltaPosition));
+	});
+
+	return boxContents;
 }

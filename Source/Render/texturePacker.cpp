@@ -2,13 +2,15 @@
 
 #include "Scene/rectangle.h"
 
+CEREAL_REGISTER_TYPE(MV::PackedTextureDefinition);
+
 namespace MV{
-	bool TexturePack::add(const std::shared_ptr<TextureDefinition> &a_shape, PointPrecision a_scale) {
-		auto shapeSize = a_shape->size() * Scale(a_scale);
+	bool TexturePack::add(const std::string &a_id, const std::shared_ptr<TextureDefinition> &a_shape, PointPrecision a_scale) {
+		auto shapeSize = a_shape->contentSize() * Scale(a_scale);
 		auto newShape = positionShape(shapeSize);
 		if(newShape.minPoint.x >= 0){
 			dirty = true;
-			shapes.push_back({newShape, a_shape});
+			shapes.push_back({a_id, newShape, a_shape});
 			updateContainers(newShape);
 
 			contentExtent = {std::max(newShape.maxPoint.x, contentExtent.width), std::max(newShape.maxPoint.y, contentExtent.height)};
@@ -58,7 +60,7 @@ namespace MV{
 			Color tmp(static_cast<float>(randomNumber(0, 200)), static_cast<float>(randomNumber(0, 200)), static_cast<float>(randomNumber(0, 200)), .25f);
 			//Color tmp(0.0f, 0.0f, 0.0f, .25f);
 			out << "			ctx.fillStyle=\"rgba" << tmp << "\";\n";
-			out << "			ctx.fillRect(" << shape.first.minPoint.x << "," << shape.first.minPoint.y << "," << shape.first.size().width << "," << shape.first.size().height << ");\n";
+			out << "			ctx.fillRect(" << shape.bounds << ");\n";
 		}
 		out << "		</script>\n";
 		out << "	</body>\n";
@@ -69,7 +71,7 @@ namespace MV{
 	TexturePack::TexturePack(MV::Draw2D* a_renderer, const Color &a_color, const Size<int> &a_maximumExtent):
 		renderer(a_renderer),
 		maximumExtent(a_maximumExtent),
-		packedTexture(DynamicTextureDefinition::make("TexturePack", Size<int>(), a_color)),
+		background(a_color),
 		dirty(true){
 		containers.emplace_back(a_maximumExtent);
 	}
@@ -96,21 +98,108 @@ namespace MV{
 	std::shared_ptr<MV::Scene::Node> TexturePack::makeScene() const {
 		auto scene = Scene::Node::make(renderer);
 		for(auto&& shape : shapes){
-			scene->make<MV::Scene::Rectangle>(cast<PointPrecision>(shape.first))->texture(shape.second->makeHandle())->shader(PREMULTIPLY_ID);
+			if(shape.texture){
+				scene->make<MV::Scene::Rectangle>(cast<PointPrecision>(shape.bounds))->texture(shape.texture->makeHandle(shape.texture->contentSize()))->shader(PREMULTIPLY_ID);
+			}
+		}
+		if(consolidatedTexture){
+			scene->make<MV::Scene::Rectangle>(cast<PointPrecision>(consolidatedTexture->size()))->texture(consolidatedTexture->makeHandle())->shader(PREMULTIPLY_ID);
 		}
 		return scene;
 	}
 
-	std::shared_ptr<TextureDefinition> TexturePack::texture() {
-		if(dirty){
-			packedTexture->resize(contentExtent);
+	std::shared_ptr<TextureHandle> TexturePack::contentHandle() {
+		auto sharedPackedTexture = getOrMakeTexture();
+		if(dirty || !sharedPackedTexture || !sharedPackedTexture->loaded()){
+			dirty = false;
+			sharedPackedTexture->resize(contentExtent);
+			auto handle = sharedPackedTexture->makeHandle({contentExtent});
+
 			auto scene = makeScene();
-			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, packedTexture->textureId(), background)->start();
-			renderer->backgroundColor(background);
-			renderer->clearScreen();
+			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, sharedPackedTexture->textureId(), background)->start();
+			scene->draw();
+
+			return handle;
+		} else{
+			return sharedPackedTexture->makeHandle({contentExtent});
+		}
+	}
+
+	std::shared_ptr<TextureHandle> TexturePack::fullHandle() {
+		auto sharedPackedTexture = getOrMakeTexture();
+		if(dirty || !sharedPackedTexture || !sharedPackedTexture->loaded()){
+			dirty = false;
+			sharedPackedTexture->resize(contentExtent);
+			auto handle = sharedPackedTexture->makeHandle();
+
+			auto scene = makeScene();
+			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, sharedPackedTexture->textureId(), background)->start();
+			scene->draw();
+
+			return handle;
+		} else{
+			return sharedPackedTexture->makeHandle();
+		}
+	}
+
+	std::shared_ptr<TextureHandle> TexturePack::handle(const std::string & a_id)
+	{
+		auto foundShape = std::find_if(shapes.begin(), shapes.end(), [&](ShapeDefinition& a_shape){
+			return a_shape.id == a_id;
+		});
+		if(foundShape == shapes.end()){
+			std::cerr << "Failed to find handle: " << a_id << std::endl;
+			return fullHandle();
+		}
+		
+		auto sharedPackedTexture = getOrMakeTexture();
+		if(dirty || !sharedPackedTexture || !sharedPackedTexture->loaded()){
+			dirty = false;
+			sharedPackedTexture->resize(contentExtent);
+			auto handle = sharedPackedTexture->makeHandle(foundShape->bounds);
+
+			auto scene = makeScene();
+			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, sharedPackedTexture->textureId(), background)->start();
+			scene->draw();
+
+			return handle;
+		} else{
+			return sharedPackedTexture->makeHandle(foundShape->bounds);
+		}
+	}
+
+	void TexturePack::consolidate(const std::string & a_fileName){
+		fullHandle()->texture()->save(a_fileName);
+		consolidatedTexture = FileTextureDefinition::make(a_fileName);
+		for(auto&& shape : shapes){
+			shape.texture = nullptr;
+		}
+	}
+
+	std::vector<std::string> TexturePack::handleIds() const {
+		std::vector<std::string> keys;
+		std::transform(shapes.begin(), shapes.end(), std::back_inserter(keys), [](const ShapeDefinition &shape){
+			return shape.id;
+		});
+		return keys;
+	}
+
+	std::shared_ptr<PackedTextureDefinition> TexturePack::getOrMakeTexture() {
+		if(packedTexture.expired()){
+			auto sharedPackedTexture = PackedTextureDefinition::make("TexturePack", shared_from_this(), maximumExtent, background);
+			packedTexture = sharedPackedTexture;
+			return sharedPackedTexture;
+		} else{
+			return packedTexture.lock();
+		}
+	}
+
+	void TexturePack::reloadedPackedTextureChild() {
+		if(!packedTexture.expired() && packedTexture.lock()->loaded()){
+			auto scene = makeScene();
+			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, packedTexture.lock()->textureId(), background)->start();
 			scene->draw();
 		}
-		return packedTexture;
 	}
 
 }

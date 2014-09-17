@@ -12,4 +12,6 @@ std::shared_ptr<MV::Scene::Slider> makeSlider(MV::Draw2D &a_renderer, MV::MouseS
 std::shared_ptr<MV::Scene::Slider> makeSlider(MV::Draw2D &a_renderer, MV::MouseState &a_mouse, float a_startPercent = 1.0f);
 void colorTopAndBottom(const std::shared_ptr<MV::Scene::Rectangle> &a_rect, const MV::Color &a_top, const MV::Color &a_bot);
 
+std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::Size<> a_boxSize, MV::MouseState &a_mouse);
+
 #endif

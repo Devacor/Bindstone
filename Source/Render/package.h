@@ -4,4 +4,5 @@
 	#include "Render/textures.h"
 	#include "Render/formattedText.h"
 	#include "Render/texturePacker.h"
+	#include "Render/sharedTextures.h"
 #endif

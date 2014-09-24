@@ -28,6 +28,7 @@
 #include "Utility/package.h"
 
 namespace MV {
+
 	//I had three options here: 
 	//1) In derived classes specify using Node::make and then rename Node's static make function to something else so it cannot clash
 	//or
@@ -45,7 +46,7 @@ namespace MV {
 	int \
 	>::type = 0 \
 	> \
-	std::shared_ptr<TypeToMake> make(FirstParameter a_firstParam, Arg... a_parameters) { \
+	std::shared_ptr<TypeToMake> make(FirstParameter a_firstParam, Arg &&... a_parameters) { \
 		auto newChild = TypeToMake::make(renderer, a_firstParam, std::forward<Arg>(a_parameters)...); \
 		add(guid(), newChild); \
 		return newChild; \
@@ -58,7 +59,7 @@ namespace MV {
 	int \
 	>::type = 0 \
 	> \
-	std::shared_ptr<TypeToMake> make(FirstParameter a_childId, Arg... a_parameters) { \
+	std::shared_ptr<TypeToMake> make(FirstParameter a_childId, Arg &&... a_parameters) { \
 		auto newChild = TypeToMake::make(renderer, std::forward<Arg>(a_parameters)...); \
 		add(a_childId, newChild); \
 		return newChild; \
@@ -83,7 +84,6 @@ namespace MV {
 	std::shared_ptr<T> texture(std::shared_ptr<TextureHandle> a_texture){ return std::static_pointer_cast<T>(textureImplementation(a_texture)); } \
 	std::shared_ptr<T> clearTexture(){ return std::static_pointer_cast<T>(clearTextureImplementation()); } \
 	std::shared_ptr<T> color(const Color &a_newColor){ return std::static_pointer_cast<T>(colorImplementation(a_newColor)); } \
-	std::shared_ptr<T> sortScene(bool a_depthMatters){ return std::static_pointer_cast<T>(sortSceneImplementation(a_depthMatters)); } \
 	std::shared_ptr<T> depth(PointPrecision a_newDepth){ return std::static_pointer_cast<T>(depthImplementation(a_newDepth)); } \
 	std::shared_ptr<T> hide(){ return std::static_pointer_cast<T>(hideImplementation()); } \
 	std::shared_ptr<T> show(){ return std::static_pointer_cast<T>(showImplementation()); } \
@@ -112,8 +112,8 @@ namespace MV {
 		public:
 			virtual ~Node(){
 				myParent = nullptr;
-				for(auto &child : drawList){
-					child.second->parent(nullptr);
+				for(auto &&child : drawList){
+					child->parent(nullptr);
 				}
 			}
 
@@ -140,13 +140,12 @@ namespace MV {
 				}
 				maxDepth = std::max(a_childItem->depth(), maxDepth);
 
-				isSorted = 0;
-				drawListVector.clear();
 				if(renderer != a_childItem->renderer){
 					a_childItem->setRenderer(renderer, true, false);
 				}
+				a_childItem->nodeId = a_childId;
 				a_childItem->parent(this);
-				drawList[a_childId] = a_childItem;
+				insertSorted(drawList, std::static_pointer_cast<Node>(a_childItem));
 				alertParent(ChildAdded::make(shared_from_this(), a_childItem));
 				alertParent(VisualChange::make(shared_from_this()));
 				a_childItem->onAdded(shared_from_this());
@@ -161,6 +160,10 @@ namespace MV {
 
 			std::shared_ptr<Node> remove(std::shared_ptr<Node> a_childItem);
 			std::shared_ptr<Node> remove(const std::string &a_childId);
+
+			size_t indexOf(std::shared_ptr<Node> a_childItem);
+			size_t myIndex();
+			std::vector<size_t> parentIndexList();
 
 			void draw();
 
@@ -238,9 +241,6 @@ namespace MV {
 
 			std::vector<std::shared_ptr<Node>> children();
 
-			void sortDrawListVector();
-
-
 			virtual bool handleBegin(std::shared_ptr<PushMatrix>){
 				return true;
 			}
@@ -270,19 +270,19 @@ namespace MV {
 
 			void depthChanged(){
 				if(myParent){
-					myParent->childDepthChanged();
+					myParent->childDepthChanged(shared_from_this());
 					alertParent(VisualChange::make(shared_from_this(), false));
 				}
 			}
 
 			PointPrecision calculateMaxDepthChild(){
 				bool first = true;
-				for(auto &node : drawList){
+				for(auto &&node : drawList){
 					if(first){
-						maxDepth = node.second->depth();
+						maxDepth = node->depth();
 						first = false;
 					} else{
-						maxDepth = std::max(node.second->depth(), maxDepth);
+						maxDepth = std::max(node->depth(), maxDepth);
 					}
 				}
 				return maxDepth;
@@ -299,11 +299,27 @@ namespace MV {
 			}
 
 			template<typename T>
+			void alertParentalTree(std::shared_ptr<T> a_message){
+				if(myParent != nullptr){
+					if(a_message->tryToHandleBegin(myParent, a_message)){
+						myParent->alertParentalTree(a_message);
+						a_message->tryToHandleEnd(myParent, a_message);
+					}
+					for(auto&& child : myParent->drawList){
+						if(child.second.get() != this && a_message->tryToHandleBegin(child.get(), a_message)){
+							child->alertChildren(a_message);
+							a_message->tryToHandleEnd(child.get(), a_message);
+						}
+					}
+				}
+			}
+
+			template<typename T>
 			void alertChildren(std::shared_ptr<T> a_message){
-				for(auto& child : drawList){
-					if(a_message->tryToHandleBegin(child.second.get(), a_message)){
-						child.second->alertChildren(a_message);
-						a_message->tryToHandleEnd(child.second.get(), a_message);
+				for(auto&& child : drawList){
+					if(a_message->tryToHandleBegin(child.get(), a_message)){
+						child->alertChildren(a_message);
+						a_message->tryToHandleEnd(child.get(), a_message);
 					}
 				}
 			}
@@ -314,19 +330,8 @@ namespace MV {
 			virtual BoxAABB<> localAABBImplementation(bool a_includeChildren, bool a_nestedCall);
 			virtual BoxAABB<> basicAABBImplementation() const;
 
-			void sortLess(){
-				isSorted = isSorted && shouldSortLessThan;
-				shouldSortLessThan = true;
-				sortFunction = [](const DrawListVectorType::value_type &one, const DrawListVectorType::value_type &two){
-					return *one.lock() < *two.lock();
-				};
-			}
-			void sortGreater(){
-				isSorted = isSorted && !shouldSortLessThan;
-				shouldSortLessThan = false;
-				sortFunction = [](const DrawListVectorType::value_type &one, const DrawListVectorType::value_type &two){
-					return *one.lock() > *two.lock();
-				};
+			std::string name() const{
+				return nodeId;
 			}
 		protected:
 			void registerShader(){
@@ -344,7 +349,6 @@ namespace MV {
 			virtual std::shared_ptr<Node> textureImplementation(std::shared_ptr<TextureHandle> a_texture);
 			virtual std::shared_ptr<Node> clearTextureImplementation();
 			virtual std::shared_ptr<Node> colorImplementation(const Color &a_newColor);
-			virtual std::shared_ptr<Node> sortSceneImplementation(bool a_depthMatters);
 			virtual std::shared_ptr<Node> depthImplementation(PointPrecision a_newDepth);
 			virtual std::shared_ptr<Node> hideImplementation();
 			virtual std::shared_ptr<Node> showImplementation();
@@ -363,7 +367,6 @@ namespace MV {
 
 			void defaultDraw(GLenum drawType);
 			void sortedRender();
-			void unsortedRender();
 
 			void alertForTextureChange(){ alertParent(VisualChange::make(shared_from_this(), false)); }
 
@@ -385,33 +388,28 @@ namespace MV {
 			std::vector<DrawPoint> points;
 			std::vector<GLuint> vertexIndices; //if empty, use draw arrays, if populated use draw elements
 
+			std::string nodeId;
+
 			Node *myParent;
 
 			Draw2D *renderer;
 
-			bool drawSorted, isSorted;
-			typedef std::vector<std::weak_ptr<Node>> DrawListVectorType;
-			DrawListVectorType drawListVector;
-			typedef std::map<std::string, std::shared_ptr<Node>> DrawListType;
-			typedef std::pair<std::string, std::shared_ptr<Node>> DrawListPairType;
+			typedef std::vector<std::shared_ptr<Node>> DrawListType;
 			DrawListType drawList;
 
 			Shader* shaderProgram = nullptr;
 			std::string shaderProgramId;
 			GLuint bufferId;
 			float maxDepth = 0.0f;
-
-			std::function<bool(const DrawListVectorType::value_type &, const DrawListVectorType::value_type &)> sortFunction;
 		private:
 			bool markedTemporary = false;
-			bool shouldSortLessThan;
 
-			void childDepthChanged();
+			void childDepthChanged(std::shared_ptr<Node> a_child);
 
 			void postLoadStep(const std::string &a_shaderId) {
 				shaderImplementation(a_shaderId);
-				for(auto &drawItem : drawList){
-					drawItem.second->parent(this);
+				for(auto &&drawItem : drawList){
+					drawItem->parent(this);
 				}
 			}
 
@@ -423,7 +421,6 @@ namespace MV {
 					CEREAL_NVP(scaleTo),
 					CEREAL_NVP(sortDepth),
 					CEREAL_NVP(isVisible),
-					CEREAL_NVP(drawSorted),
 					CEREAL_NVP(points),
 					CEREAL_NVP(drawList),
 					CEREAL_NVP(shaderId),
@@ -446,7 +443,6 @@ namespace MV {
 					cereal::make_nvp("scaleTo", construct->scaleTo),
 					cereal::make_nvp("sortDepth", construct->sortDepth),
 					cereal::make_nvp("isVisible", construct->isVisible),
-					cereal::make_nvp("drawSorted", construct->drawSorted),
 					cereal::make_nvp("points", construct->points),
 					cereal::make_nvp("drawList", construct->drawList),
 					cereal::make_nvp("texture", construct->ourTexture),

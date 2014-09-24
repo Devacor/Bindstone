@@ -10,9 +10,13 @@ namespace MV{
 		onMiddleMouseUp(onMiddleMouseUpSlot),
 		onRightMouseDown(onRightMouseDownSlot),
 		onRightMouseUp(onRightMouseUpSlot),
-		onMove(onMoveSlot),
-		onMouseButtonBegin(onMouseButtonBeginSlot),
-		onMouseButtonEnd(onMouseButtonEndSlot){
+		onLeftMouseDownEnd(onLeftMouseDownEndSlot),
+		onLeftMouseUpEnd(onLeftMouseUpEndSlot),
+		onMiddleMouseDownEnd(onMiddleMouseDownEndSlot),
+		onMiddleMouseUpEnd(onMiddleMouseUpEndSlot),
+		onRightMouseDownEnd(onRightMouseDownEndSlot),
+		onRightMouseUpEnd(onRightMouseUpEndSlot),
+		onMove(onMoveSlot){
 	}
 
 	void MouseState::update() {
@@ -29,21 +33,23 @@ namespace MV{
 			onMoveSlot(*this);
 		}
 
-		updateButtonState(left, newLeft, onLeftMouseDownSlot, onLeftMouseUpSlot);
-		updateButtonState(middle, newMiddle, onMiddleMouseDownSlot, onMiddleMouseUpSlot);
-		updateButtonState(right, newRight, onRightMouseDownSlot, onRightMouseUpSlot);
+		updateButtonState(left, newLeft, onLeftMouseDownSlot, onLeftMouseUpSlot, onLeftMouseDownEndSlot, onLeftMouseUpEndSlot);
+		updateButtonState(middle, newMiddle, onMiddleMouseDownSlot, onMiddleMouseUpSlot, onMiddleMouseDownEndSlot, onMiddleMouseUpEndSlot);
+		updateButtonState(right, newRight, onRightMouseDownSlot, onRightMouseUpSlot, onRightMouseDownEndSlot, onRightMouseUpEndSlot);
+
+		runExclusiveActions();
 	}
 
-	void MouseState::updateButtonState(bool &oldState, bool newState, Slot<CallbackSignature> &onDown, Slot<CallbackSignature> &onUp) {
+	void MouseState::updateButtonState(bool &oldState, bool newState, Slot<CallbackSignature> &onDown, Slot<CallbackSignature> &onUp, Slot<CallbackSignature> &onDownEnd, Slot<CallbackSignature> &onUpEnd) {
 		if(newState != oldState){
 			oldState = newState;
-			onMouseButtonBeginSlot(*this);
 			if(newState){
 				onDown(*this);
+				onDownEnd(*this);
 			} else{
 				onUp(*this);
+				onUpEnd(*this);
 			}
-			onMouseButtonEndSlot(*this);
 		}
 	}
 
@@ -65,6 +71,24 @@ namespace MV{
 
 	bool MouseState::middleDown() const {
 		return middle;
+	}
+
+	void MouseState::runExclusiveActions() {
+		bool touchesEaten = false;
+		std::sort(nodesToExecute.begin(), nodesToExecute.end());
+		for(auto it = nodesToExecute.begin(); it != nodesToExecute.end(); ++it){
+			if(!touchesEaten){
+				it->enabled();
+				touchesEaten = it->exclusive;
+			} else{
+				it->disabled();
+			}
+		}
+		nodesToExecute.clear();
+	}
+
+	void MouseState::queueExclusiveAction(const ExclusiveMouseAction &a_node) {
+		nodesToExecute.push_back(a_node);
 	}
 
 }

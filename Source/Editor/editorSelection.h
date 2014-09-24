@@ -20,18 +20,23 @@ public:
 	void resetHandles();
 
 	void texture(const std::shared_ptr<MV::TextureHandle> a_handle);
-
+	std::shared_ptr<MV::TextureHandle> texture() const;
 	void position(MV::Point<> a_newPosition);
 	MV::Point<> position() const;
 
 	void size(MV::Size<> a_newSize);
 	MV::Size<> size();
 
+	void aspect(MV::Size<> a_newAspect);
+
+	void repositionHandles(bool a_fireOnChange = true);
+
 	std::function<void(EditableRectangle*)> onChange;
 private:
-	void dragUpdateFromHandles();
 
 	MV::MouseState *mouse;
+
+	MV::Size<> aspectSize;
 
 	std::shared_ptr<MV::Scene::Rectangle> elementToEdit;
 
@@ -91,6 +96,8 @@ public:
 
 	void size(MV::Size<> a_newSize);
 	MV::Size<> size();
+
+	void texture(const std::shared_ptr<MV::TextureHandle> a_handle);
 
 	std::function<void(EditableEmitter*)> onChange;
 	std::shared_ptr<MV::Scene::Emitter> elementToEdit;

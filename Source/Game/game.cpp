@@ -83,14 +83,14 @@ bool Game::update(double dt) {
 	}
 	auto pattern = mainScene->get<MV::Scene::Node>("container")->get<MV::Scene::Rectangle>("pattern");
 
-	mainScene->get("clipped")->sortDepth(0);
+	mainScene->get("clipped")->depth(0);
 
 	auto testItem = mainScene->make<MV::Scene::Rectangle>("testThing");
 	std::vector<MV::Point<>> points = {mainScene->get("clipped")->getWorldAABB().minPoint, mainScene->get("clipped")->getWorldAABB().maxPoint};
 	points = testItem->localFromWorld(points);
 	testItem->bounds({points[0], points[1]});
 	testItem->setColor(MV::Color(1.0, 0.0, 0.0, .25));
-	testItem->sortDepth(-100);
+	testItem->depth(-100);
 
 	auto testItem2 = mainScene->make<MV::Scene::Rectangle>("testThing2");
 	std::vector<MV::Point<>> points2 = {mainScene->get("clipped")->get("catapult")->get("arm")->getWorldAABB().minPoint, mainScene->get("clipped")->get("catapult")->get("arm")->getWorldAABB().maxPoint};
@@ -98,7 +98,7 @@ bool Game::update(double dt) {
 	testItem2->bounds({points2[0], points2[1]});
 
 	testItem2->setColor(MV::Color(0.0, 0.0, 1.0, .5));
-	testItem2->sortDepth(101);
+	testItem2->depth(101);
 	
 	*/
 	//*/

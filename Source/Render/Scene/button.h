@@ -12,6 +12,8 @@ namespace MV {
 			std::shared_ptr<Node> sender;
 		};
 
+		enum ClickType {CLICK_DOWN, CLICK_UP};
+
 		class Button;
 		class Clickable :
 			public Rectangle,
@@ -76,13 +78,13 @@ namespace MV {
 			Clickable(Draw2D *a_renderer, MouseState *a_mouse);
 
 		private:
-			MouseState::SignalType onMouseDownHandle;
-			MouseState::SignalType onMouseUpHandle;
+			MouseState::SignalType onLeftMouseDownHandle;
+			MouseState::SignalType onLeftMouseDownEndHandle;
+
+			MouseState::SignalType onLeftMouseUpHandle;
+			MouseState::SignalType onLeftMouseUpEndHandle;
 
 			MouseState::SignalType onMouseMoveHandle;
-
-			MouseState::SignalType onMouseButtonBeginHandle;
-			MouseState::SignalType onMouseButtonEndHandle;
 
 			std::shared_ptr<Clickable> hookUpSlots();
 			void clearSlots();
@@ -104,9 +106,11 @@ namespace MV {
 			bool hookedUp;
 			MouseState *mouse;
 
+			bool blocked;
+
 			bool eatTouches;
 			bool shouldUseChildrenInHitDetection;
-
+			ClickType clickType;
 			template <class Archive>
 			void serialize(Archive & archive){
 				archive(
@@ -133,6 +137,12 @@ namespace MV {
 					cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(construct.ptr()))
 				);
 			}
+			void acceptClick();
+
+			void acceptUpClick();
+
+			void acceptDownClick();
+
 		};
 
 		class Button : public Node {

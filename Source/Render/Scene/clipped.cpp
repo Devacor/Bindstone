@@ -29,11 +29,7 @@ namespace MV {
 					SCOPE_EXIT{renderer->modelviewMatrix().pop(); };
 					renderer->modelviewMatrix().top().makeIdentity();
 
-					if(drawSorted){
-						sortedRender();
-					} else{
-						unsortedRender();
-					}
+					sortedRender();
 				}
 
 				alertParent(VisualChange::make(shared_from_this(), false));
@@ -82,11 +78,7 @@ namespace MV {
 				pushMatrix();
 				SCOPE_EXIT{popMatrix(); };
 
-				if(drawSorted){
-					sortedRender();
-				} else{
-					unsortedRender();
-				}
+				sortedRender();
 			}
 		}
 
@@ -99,11 +91,7 @@ namespace MV {
 				pushMatrix();
 				SCOPE_EXIT{popMatrix(); };
 
-				if(drawSorted){
-					sortedRender();
-				} else{
-					unsortedRender();
-				}
+				sortedRender();
 			}
 		}
 

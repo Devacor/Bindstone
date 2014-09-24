@@ -31,6 +31,11 @@ namespace MV {
 
 	void systemSleep(int time);
 
+	template< typename T >
+	typename std::vector<std::shared_ptr<T>>::iterator insertSorted(std::vector<std::shared_ptr<T>> & a_vec, std::shared_ptr<T>& a_item){
+		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::shared_ptr<T>& a_lhs, const std::shared_ptr<T> &a_rhs){return *a_lhs < *a_rhs; }), a_item);
+	}
+
 	template<typename T>
 	T mix(const T &a_start, const T &a_end, float a_percent, float a_strength = 1.0f) {
 		return T{pow(a_percent, a_strength) * (a_end - a_start) + a_start};

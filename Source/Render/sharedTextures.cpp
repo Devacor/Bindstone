@@ -83,9 +83,9 @@ namespace MV {
 	std::shared_ptr<TexturePack> SharedTextures::loadPack(const std::string &a_packPath, Draw2D* a_renderer) {
 		auto newPack = pack(path(a_packPath).filename().string(), a_renderer);
 
-		std::vector<std::string> validExtensions {".jpg", ".png", ".bmp", ".tga", ".gif"};
+		std::vector<std::string> validExtensions{".jpg", ".png", ".bmp", ".tga", ".gif"};
 
-		for(auto&& imagePath = directory_iterator(path(a_packPath)); imagePath != directory_iterator();++imagePath){
+		for(auto&& imagePath = directory_iterator(path(a_packPath)); imagePath != directory_iterator(); ++imagePath){
 			if(exists(*imagePath) && is_regular_file(*imagePath)){
 				std::string lowerCaseImageExtension = imagePath->path().extension().string();
 				boost::algorithm::to_lower(lowerCaseImageExtension);
@@ -94,6 +94,13 @@ namespace MV {
 				}
 			}
 		}
+
+		auto combinedSavePath = a_packPath;
+		if(a_packPath.back() == '\\' || a_packPath.back() == '/'){
+			combinedSavePath.pop_back();
+		}
+		combinedSavePath += ".png";
+		newPack->consolidate(combinedSavePath);
 
 		return newPack;
 	}

@@ -66,26 +66,21 @@ namespace MV {
 			Point<> cellPosition = cellPadding.first + cellPadding.second + margins.first;
 			size_t index = 0;
 
-			drawListVector.erase(remove_if(drawListVector.begin(), drawListVector.end(), [&](DrawListVectorType::value_type &shape){
-				if(!shape.expired()){
-					auto nextPosition = cellPosition;
+			for(auto&& shape : drawList){
+				auto nextPosition = cellPosition;
+				nextPosition.translate(cellDimensions.width + (cellPadding.first + cellPadding.second).x, 0.0f);
+				if(bumpToNextLine(nextPosition.x - cellPadding.second.x, index++)){
+					cellPosition.locate(margins.first.x, cellPosition.y + cellDimensions.height);
+					cellPosition += cellPadding.first + cellPadding.second;
+					nextPosition = cellPosition;
 					nextPosition.translate(cellDimensions.width + (cellPadding.first + cellPadding.second).x, 0.0f);
-					if(bumpToNextLine(nextPosition.x - cellPadding.second.x, index++)){
-						cellPosition.locate(margins.first.x, cellPosition.y + cellDimensions.height);
-						cellPosition += cellPadding.first + cellPadding.second;
-						nextPosition = cellPosition;
-						nextPosition.translate(cellDimensions.width + (cellPadding.first + cellPadding.second).x, 0.0f);
-					}
-
-					shape.lock()->position(cellPosition - cellPadding.second);
-					bounds.expandWith(cellPosition + toPoint(cellDimensions) - cellPadding.second);
-
-					cellPosition = nextPosition;
-					return false;
-				} else{
-					return true;
 				}
-			}), drawListVector.end());
+
+				shape->position(cellPosition - cellPadding.second);
+				bounds.expandWith(cellPosition + toPoint(cellDimensions) - cellPadding.second);
+
+				cellPosition = nextPosition;
+			};
 
 			bounds.expandWith(bounds.maxPoint + margins.second);
 			setPointsFromBounds(bounds);
@@ -98,29 +93,24 @@ namespace MV {
 			
 			PointPrecision maxHeightInLine = 0.0f;
 
-			drawListVector.erase(remove_if(drawListVector.begin(), drawListVector.end(), [&](DrawListVectorType::value_type &shape){
-				if(!shape.expired()){
-					auto shapeSize = shape.lock()->localAABB().size();
-					auto nextPosition = cellPosition;
+			for(auto&& shape : drawList){
+				auto shapeSize = shape->localAABB().size();
+				auto nextPosition = cellPosition;
+				nextPosition.translate(shapeSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
+				if(bumpToNextLine(nextPosition.x - cellPadding.second.x, index++)){
+					cellPosition.locate(margins.first.x, cellPosition.y + maxHeightInLine);
+					cellPosition += cellPadding.first + cellPadding.second;
+					maxHeightInLine = 0.0f;
+					nextPosition = cellPosition;
 					nextPosition.translate(shapeSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
-					if(bumpToNextLine(nextPosition.x - cellPadding.second.x, index++)){
-						cellPosition.locate(margins.first.x, cellPosition.y + maxHeightInLine);
-						cellPosition += cellPadding.first + cellPadding.second;
-						maxHeightInLine = 0.0f;
-						nextPosition = cellPosition;
-						nextPosition.translate(shapeSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
-					}
-
-					maxHeightInLine = std::max(shapeSize.height, maxHeightInLine);
-					shape.lock()->position(cellPosition - cellPadding.second);
-					bounds.expandWith(cellPosition + toPoint(shapeSize) - cellPadding.second);
-
-					cellPosition = nextPosition;
-					return false;
-				} else{
-					return true;
 				}
-			}), drawListVector.end());
+
+				maxHeightInLine = std::max(shapeSize.height, maxHeightInLine);
+				shape->position(cellPosition - cellPadding.second);
+				bounds.expandWith(cellPosition + toPoint(shapeSize) - cellPadding.second);
+
+				cellPosition = nextPosition;
+			};
 
 			bounds.expandWith(bounds.maxPoint + margins.second);
 			setPointsFromBounds(bounds);
@@ -128,7 +118,6 @@ namespace MV {
 
 		void Grid::layoutCells(){
 			if(dirtyGrid){
-				sortDrawListVector();
 				if(cellDimensions.width > 0.0f || cellDimensions.height > 0.0f){
 					layoutCellSize();
 				} else{
@@ -228,64 +217,54 @@ namespace MV {
 			defaultDraw(GL_TRIANGLES);
 		}
 
-		BoxAABB<> Grid::calculateBasicAABBFromDimensions(DrawListVectorType &a_drawListVector) const{
+		BoxAABB<> Grid::calculateBasicAABBFromDimensions() const{
 			BoxAABB<> bounds(size(getContentWidth(), cellDimensions.height));
 			Point<> cellPosition = cellPadding.first + cellPadding.second + margins.first;
 			size_t index = 0;
 
-			std::for_each(a_drawListVector.begin(), a_drawListVector.end(), [&](DrawListVectorType::value_type &shape){
-				if(!shape.expired()){
-					auto nextPosition = cellPosition;
+			for(auto&& shape : drawList){
+				auto nextPosition = cellPosition;
+				nextPosition.translate(cellDimensions.width + (cellPadding.first + cellPadding.second).x, 0.0f);
+				if(bumpToNextLine(nextPosition.x - cellPadding.second.x, index++)){
+					cellPosition.locate(margins.first.x, cellPosition.y + cellDimensions.height);
+					cellPosition += cellPadding.first + cellPadding.second;
+					nextPosition = cellPosition;
 					nextPosition.translate(cellDimensions.width + (cellPadding.first + cellPadding.second).x, 0.0f);
-					if(bumpToNextLine(nextPosition.x - cellPadding.second.x, index++)){
-						cellPosition.locate(margins.first.x, cellPosition.y + cellDimensions.height);
-						cellPosition += cellPadding.first + cellPadding.second;
-						nextPosition = cellPosition;
-						nextPosition.translate(cellDimensions.width + (cellPadding.first + cellPadding.second).x, 0.0f);
-					}
-
-					bounds.expandWith(cellPosition + toPoint(cellDimensions) - cellPadding.second);
-
-					cellPosition = nextPosition;
-					return false;
-				} else{
-					return true;
 				}
-			});
+
+				bounds.expandWith(cellPosition + toPoint(cellDimensions) - cellPadding.second);
+
+				cellPosition = nextPosition;
+			}
 
 			bounds.expandWith(bounds.maxPoint + margins.second);
 			return bounds;
 		}
 
-		BoxAABB<> Grid::calculateBasicAABBFromCells(DrawListVectorType &a_drawListVector) const{
+		BoxAABB<> Grid::calculateBasicAABBFromCells() const{
 			BoxAABB<> bounds(size(getContentWidth(), cellDimensions.height));
 			Point<> cellPosition = cellPadding.first + cellPadding.second + margins.first;
 			size_t index = 0;
 
 			PointPrecision maxHeightInLine = 0.0f;
 
-			std::for_each(a_drawListVector.begin(), a_drawListVector.end(), [&](DrawListVectorType::value_type &shape){
-				if(!shape.expired()){
-					auto shapeSize = shape.lock()->localAABB().size();
-					auto nextPosition = cellPosition;
+			for(auto&& shape : drawList){
+				auto shapeSize = shape->localAABB().size();
+				auto nextPosition = cellPosition;
+				nextPosition.translate(shapeSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
+				if(bumpToNextLine(nextPosition.x - cellPadding.second.x, index++)){
+					cellPosition.locate(margins.first.x, cellPosition.y + maxHeightInLine);
+					cellPosition += cellPadding.first + cellPadding.second;
+					maxHeightInLine = 0.0f;
+					nextPosition = cellPosition;
 					nextPosition.translate(shapeSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
-					if(bumpToNextLine(nextPosition.x - cellPadding.second.x, index++)){
-						cellPosition.locate(margins.first.x, cellPosition.y + maxHeightInLine);
-						cellPosition += cellPadding.first + cellPadding.second;
-						maxHeightInLine = 0.0f;
-						nextPosition = cellPosition;
-						nextPosition.translate(shapeSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
-					}
-
-					maxHeightInLine = std::max(shapeSize.height, maxHeightInLine);
-					bounds.expandWith(cellPosition + toPoint(shapeSize) - cellPadding.second);
-
-					cellPosition = nextPosition;
-					return false;
-				} else{
-					return true;
 				}
-			});
+
+				maxHeightInLine = std::max(shapeSize.height, maxHeightInLine);
+				bounds.expandWith(cellPosition + toPoint(shapeSize) - cellPadding.second);
+
+				cellPosition = nextPosition;
+			}
 
 			bounds.expandWith(bounds.maxPoint + margins.second);
 			return bounds;
@@ -293,20 +272,10 @@ namespace MV {
 
 		MV::BoxAABB<> Grid::basicAABBImplementation() const {
 			if(dirtyGrid){
-				DrawListVectorType tmpDrawListVector;
-				if(!isSorted){
-					std::transform(drawList.begin(), drawList.end(), std::back_inserter(tmpDrawListVector), [](DrawListType::value_type shape){
-						return shape.second;
-					});
-					std::sort(tmpDrawListVector.begin(), tmpDrawListVector.end(), sortFunction);
-				} else{
-					tmpDrawListVector = drawListVector;
-				}
-
 				if(cellDimensions.width > 0.0f || cellDimensions.height > 0.0f){
-					return calculateBasicAABBFromDimensions(tmpDrawListVector);
+					return calculateBasicAABBFromDimensions();
 				} else{
-					return calculateBasicAABBFromCells(tmpDrawListVector);
+					return calculateBasicAABBFromCells();
 				}
 			} else{
 				return BoxAABB<>(points[0], points[2]);

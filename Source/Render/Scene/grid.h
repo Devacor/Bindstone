@@ -107,8 +107,8 @@ namespace MV {
 			void layoutCells();
 			float getContentWidth() const;
 			void setPointsFromBounds(const BoxAABB<> &a_bounds);
-			BoxAABB<> calculateBasicAABBFromDimensions(DrawListVectorType &a_drawListVector) const;
-			BoxAABB<> calculateBasicAABBFromCells(DrawListVectorType &a_drawListVector) const;
+			BoxAABB<> calculateBasicAABBFromDimensions() const;
+			BoxAABB<> calculateBasicAABBFromCells() const;
 			PointPrecision maximumWidth;
 			Size<> cellDimensions;
 			std::pair<Point<>, Point<>> cellPadding;

@@ -23,13 +23,13 @@ namespace MV {
 		}
 
 		template <class ...Arg>
-		void notify(Arg... a_parameters){
+		void notify(Arg &&... a_parameters){
 			if(!isBlocked){
 				callback(std::forward<Arg>(a_parameters)...);
 			}
 		}
 		template <class ...Arg>
-		void operator()(Arg... a_parameters){
+		void operator()(Arg &&... a_parameters){
 			if(!isBlocked){
 				callback(std::forward<Arg>(a_parameters)...);
 			}
@@ -125,11 +125,11 @@ namespace MV {
 		}
 
 		template <typename ...Arg>
-		void operator()(Arg... a_parameters){
+		void operator()(Arg &&... a_parameters){
 			inCall = true;
 			SCOPE_EXIT{
 				inCall = false;
-				for(auto& i : disconnectQueue){
+				for(auto&& i : disconnectQueue){
 					observers.erase(i);
 				}
 				disconnectQueue.clear();
@@ -152,7 +152,7 @@ namespace MV {
 			inCall = true;
 			SCOPE_EXIT{
 				inCall = false;
-				for(auto& i : disconnectQueue){
+				for(auto&& i : disconnectQueue){
 					observers.erase(i);
 				}
 				disconnectQueue.clear();

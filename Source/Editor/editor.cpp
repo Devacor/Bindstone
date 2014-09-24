@@ -49,6 +49,16 @@ void Editor::initializeWindow(){
 
 	AudioPlayer::instance()->initAudio();
 	mouse.update();
+	editorMouse.update();
+
+	editorMouse.onLeftMouseDown.connect("initDrag", [&](MV::MouseState& mouse){
+		auto signature = editorMouse.onMove.connect("inDrag", [&](MV::MouseState& a_mouse){
+			//scene->translate(MV::cast<MV::PointPrecision>(a_mouse.position() - a_mouse.oldPosition()));
+		});
+		editorMouse.onLeftMouseUp.connect("cancelDrag", [=](MV::MouseState& a_mouse){
+			a_mouse.onMove.disconnect(signature);
+		});
+	});
 
 	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
 	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
@@ -126,6 +136,7 @@ void Editor::handleInput(){
 		}
 	}
 	mouse.update();
+	editorMouse.update();
 	controlPanel.handleInput(event);
 }
 

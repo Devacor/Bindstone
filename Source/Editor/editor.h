@@ -44,6 +44,7 @@ private:
 	std::shared_ptr<MV::Scene::Node> controls;
 
 	MV::MouseState mouse;
+	MV::MouseState editorMouse;
 
 	MV::Stopwatch watch;
 	double lastSecond = 0;

@@ -28,17 +28,13 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	auto grid = node->make<MV::Scene::Grid>("Background")->rowWidth(126.0f)->
 		color({BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}})->
 		padding({3.0f, 4.0f})->position({0.0f, 20.0f});
-	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Deselect"));
+	auto buttonSize = MV::size(110.0f, 27.0f);
+	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>){
 		panel.loadPanel<DeselectedEditorPanel>();
 	});
 
-	picker = std::make_shared<TexturePicker>(a_panel.editor(), a_panel.resources(), [&](std::shared_ptr<MV::TextureHandle> a_handle){
-		if(a_handle){
-			controls->texture(a_handle);
-		}
-		clearTexturePicker();
-	});
+	OpenTexturePicker();
 
 	float textboxWidth = 52.0f;
 	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f));
@@ -46,6 +42,30 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 
 	width = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "width", MV::size(textboxWidth, 27.0f));
 	height = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "height", MV::size(textboxWidth, 27.0f));
+
+	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "Texture", buttonSize, UTF_CHAR_STR("Texture"))->
+		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
+			OpenTexturePicker();
+		});
+
+	aspectX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "AspectX", MV::size(textboxWidth, 27.0f));
+	aspectY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "AspectY", MV::size(textboxWidth, 27.0f));
+
+	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "SetAspect", buttonSize, UTF_CHAR_STR("Snap Aspect"))->
+		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
+		auto size = controls->texture()->bounds().size();
+		aspectX->number(size.width);
+		aspectY->number(size.height);
+		controls->aspect(MV::cast<MV::PointPrecision>(size));
+	});
+
+	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "SetSize", buttonSize, UTF_CHAR_STR("Snap Size"))->
+		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
+		auto size = controls->texture()->bounds().size();
+		width->number(size.width);
+		height->number(size.width);
+		controls->size(MV::cast<MV::PointPrecision>(size));
+	});
 
 	if(controls){
 		auto xClick = posX->get<MV::Scene::Clickable>("Clickable");
@@ -61,6 +81,13 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 		});
 		posY->onEnter.connect("updateY", [&](std::shared_ptr<MV::Scene::Text> a_clickable){
 			controls->position({posX->number(), posY->number()});
+		});
+
+		aspectX->onEnter.connect("updateAspectX", [&](std::shared_ptr<MV::Scene::Text> a_clickable){
+			controls->aspect({aspectX->number(), aspectY->number()});
+		});
+		aspectY->onEnter.connect("updateAspectY", [&](std::shared_ptr<MV::Scene::Text> a_clickable){
+			controls->aspect({aspectX->number(), aspectY->number()});
 		});
 
 		auto widthClick = width->get<MV::Scene::Clickable>("Clickable");
@@ -81,7 +108,7 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 		controls->onChange = [&](EditableRectangle *a_element){
 			posX->number(static_cast<int>(controls->position().x + .5f));
 			posY->number(static_cast<int>(controls->position().y + .5f));
-			
+
 			width->number(static_cast<int>(controls->size().width + .5f));
 			height->number(static_cast<int>(controls->size().height + .5f));
 		};
@@ -91,6 +118,15 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	panel.updateBoxHeader(grid->basicAABB().width());
 
 	SDL_StartTextInput();
+}
+
+void SelectedRectangleEditorPanel::OpenTexturePicker() {
+	picker = std::make_shared<TexturePicker>(panel.editor(), panel.resources(), [&](std::shared_ptr<MV::TextureHandle> a_handle, bool a_allowClear){
+		if(a_handle || a_allowClear){
+			controls->texture(a_handle);
+		}
+		clearTexturePicker();
+	});
 }
 
 void SelectedRectangleEditorPanel::handleInput(SDL_Event &a_event) {
@@ -107,7 +143,8 @@ controls(a_controls) {
 	auto grid = node->make<MV::Scene::Grid>("Background")->rowWidth(242.0f)->
 		color({InterfaceColors::BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}})->
 		padding({3.0f, 4.0f})->position({0.0f, 20.0f});
-	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", MV::size(226.0f, 27.0f), UTF_CHAR_STR("Deselect"));
+	auto buttonSize = MV::size(226.0f, 27.0f);
+	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>){
 		panel.loadPanel<DeselectedEditorPanel>();
 	});
@@ -117,6 +154,11 @@ controls(a_controls) {
 
 	width = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "width", MV::size(textboxWidth, 27.0f));
 	height = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "height", MV::size(textboxWidth, 27.0f));
+
+	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "Texture", buttonSize, UTF_CHAR_STR("Texture"))->
+		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
+			OpenTexturePicker();
+		});
 
 	const MV::Size<> labelSize{226.0f, 20.0f};
 
@@ -361,6 +403,15 @@ controls(a_controls) {
 	panel.updateBoxHeader(grid->basicAABB().width());
 
 	SDL_StartTextInput();
+}
+
+void SelectedEmitterEditorPanel::OpenTexturePicker() {
+	picker = std::make_shared<TexturePicker>(panel.editor(), panel.resources(), [&](std::shared_ptr<MV::TextureHandle> a_handle, bool a_allowNull){
+		if(a_handle || a_allowNull){
+			controls->texture(a_handle);
+		}
+		clearTexturePicker();
+	});
 }
 
 void SelectedEmitterEditorPanel::handleInput(SDL_Event &a_event) {

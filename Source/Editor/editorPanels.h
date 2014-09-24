@@ -31,28 +31,34 @@ public:
 	}
 protected:
 	EditorControls &panel;
+	std::shared_ptr<TexturePicker> picker;
 	std::shared_ptr<MV::Scene::Text> activeTextbox;
 };
 
 class SelectedRectangleEditorPanel : public EditorPanel {
 public:
 	SelectedRectangleEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableRectangle> a_controls);
+
 	~SelectedRectangleEditorPanel(){
 		clearTexturePicker();
 	}
 
 	virtual void handleInput(SDL_Event &a_event);
-
 private:
+	void OpenTexturePicker();
 	void clearTexturePicker(){
 		picker = nullptr;
 	}
+
+	MV::Scale aspectRatio;
+
 	std::shared_ptr<EditableRectangle> controls;
 	std::shared_ptr<MV::Scene::Text> posY;
 	std::shared_ptr<MV::Scene::Text> posX;
 	std::shared_ptr<MV::Scene::Text> width;
 	std::shared_ptr<MV::Scene::Text> height;
-	std::shared_ptr<TexturePicker> picker;
+	std::shared_ptr<MV::Scene::Text> aspectX;
+	std::shared_ptr<MV::Scene::Text> aspectY;
 };
 
 class SelectedEmitterEditorPanel : public EditorPanel {
@@ -64,6 +70,11 @@ public:
 	virtual void handleInput(SDL_Event &a_event);
 
 private:
+	void OpenTexturePicker();
+	void clearTexturePicker(){
+		picker = nullptr;
+	}
+
 	std::shared_ptr<EditableEmitter> controls;
 	std::shared_ptr<MV::Scene::Text> posY;
 	std::shared_ptr<MV::Scene::Text> posX;

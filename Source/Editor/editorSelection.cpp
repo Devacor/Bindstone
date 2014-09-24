@@ -64,6 +64,20 @@ void EditableRectangle::resetHandles() {
 	removeHandles();
 	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenAABB());
 
+	MV::Size<> currentDimensions = rectBox.size();
+	if(aspectSize.width != 0.0f && aspectSize.height != 0.0f){
+		float aspectRatio = aspectSize.width / aspectSize.height;
+
+		if(currentDimensions.width < currentDimensions.height){
+			currentDimensions.height = currentDimensions.width * aspectSize.height / aspectSize.width;
+		} else if(currentDimensions.width > currentDimensions.height){
+			currentDimensions.width = currentDimensions.height * aspectSize.width / aspectSize.height;
+		}
+	}
+	rectBox.maxPoint = rectBox.minPoint + toPoint(currentDimensions);
+
+	elementToEdit->size(currentDimensions);
+
 	auto handleSize = MV::point(8.0f, 8.0f);
 	EditableRectangle* self = this;
 	positionHandle = controlContainer->make<MV::Scene::Clickable>(MV::guid("position"), mouse, rectBox);
@@ -85,7 +99,7 @@ void EditableRectangle::resetHandles() {
 		topRightSizeHandle->position(MV::point(topRightSizeHandle->position().x, topLeftSizeHandle->position().y));
 		bottomLeftSizeHandle->position(MV::point(topLeftSizeHandle->position().x, bottomLeftSizeHandle->position().y));
 
-		dragUpdateFromHandles();
+		repositionHandles();
 	});
 	topLeftSizeHandle->onRelease.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle){
 		resetHandles();
@@ -98,7 +112,7 @@ void EditableRectangle::resetHandles() {
 		topLeftSizeHandle->position(MV::point(topLeftSizeHandle->position().x, topRightSizeHandle->position().y));
 		bottomRightSizeHandle->position(MV::point(topRightSizeHandle->position().x, bottomRightSizeHandle->position().y));
 
-		dragUpdateFromHandles();
+		repositionHandles();
 	});
 	topRightSizeHandle->onRelease.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle){
 		resetHandles();
@@ -111,7 +125,7 @@ void EditableRectangle::resetHandles() {
 		topLeftSizeHandle->position(MV::point(bottomLeftSizeHandle->position().x, topLeftSizeHandle->position().y));
 		bottomRightSizeHandle->position(MV::point(bottomRightSizeHandle->position().x, bottomLeftSizeHandle->position().y));
 
-		dragUpdateFromHandles();
+		repositionHandles();
 	});
 	bottomLeftSizeHandle->onRelease.connect("bottomLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle){
 		resetHandles();
@@ -124,11 +138,13 @@ void EditableRectangle::resetHandles() {
 		topRightSizeHandle->position(MV::point(bottomRightSizeHandle->position().x, topRightSizeHandle->position().y));
 		bottomLeftSizeHandle->position(MV::point(bottomLeftSizeHandle->position().x, bottomRightSizeHandle->position().y));
 
-		dragUpdateFromHandles();
+		repositionHandles();
 	});
 	bottomRightSizeHandle->onRelease.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle){
 		resetHandles();
 	});
+
+
 }
 
 EditableRectangle::EditableRectangle(std::shared_ptr<MV::Scene::Rectangle> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse):
@@ -152,19 +168,30 @@ void EditableRectangle::removeHandles() {
 	bottomRightSizeHandle.reset();
 }
 
-void EditableRectangle::dragUpdateFromHandles() {
+void EditableRectangle::repositionHandles(bool a_fireOnChange) {
 	auto box = MV::BoxAABB<int>(topLeftSizeHandle->screenAABB().bottomRightPoint(), bottomRightSizeHandle->screenAABB().topLeftPoint());
 
 	elementToEdit->position({});
 	auto corners = elementToEdit->localFromScreen(box);
+	MV::Size<> currentDimensions = corners.size();
 
-	elementToEdit->size(corners.size());
-	positionHandle->size(corners.size());
+	if(aspectSize.width != 0.0f && aspectSize.height != 0.0f){
+		float aspectRatio = aspectSize.width / aspectSize.height;
+
+		if(currentDimensions.width < currentDimensions.height){
+			currentDimensions.height = currentDimensions.width * aspectSize.height / aspectSize.width;
+		} else if(currentDimensions.width > currentDimensions.height){
+			currentDimensions.width = currentDimensions.height * aspectSize.width / aspectSize.height;
+		}
+	}
+	elementToEdit->size(currentDimensions);
+	positionHandle->size(currentDimensions);
 
 	elementToEdit->position(corners.minPoint);
 	positionHandle->position(corners.minPoint);
-
-	onChange(this);
+	if(a_fireOnChange){
+		onChange(this);
+	}
 }
 
 void EditableRectangle::position(MV::Point<> a_newPosition) {
@@ -187,6 +214,15 @@ MV::Size<> EditableRectangle::size(){
 
 void EditableRectangle::texture(const std::shared_ptr<MV::TextureHandle> a_handle) {
 	elementToEdit->texture(a_handle);
+}
+
+std::shared_ptr<MV::TextureHandle> EditableRectangle::texture() const {
+	return elementToEdit->texture();
+}
+
+void EditableRectangle::aspect(MV::Size<> a_newAspect) {
+	aspectSize = a_newAspect;
+	resetHandles();
 }
 
 
@@ -319,4 +355,8 @@ void EditableEmitter::size(MV::Size<> a_newSize){
 
 MV::Size<> EditableEmitter::size(){
 	return MV::BoxAABB<>(elementToEdit->properties().minimumPosition, elementToEdit->properties().maximumPosition).size();
+}
+
+void EditableEmitter::texture(const std::shared_ptr<MV::TextureHandle> a_handle) {
+	elementToEdit->texture(a_handle);
 }

@@ -35,65 +35,18 @@ namespace MV {
 			clickable->registerShader();
 			return clickable->bounds(a_boxAABB)->hookUpSlots();
 		}
-		
+
 		std::shared_ptr<Clickable> Clickable::hookUpSlots() {
-			std::weak_ptr<Node> thisWeakPtr = shared_from_this();
-
-			onMouseButtonBeginHandle = mouse->onMouseButtonBegin.connect([&, thisWeakPtr](MouseState& a_mouse){
-				if(!thisWeakPtr.expired()){
-					auto baseself = thisWeakPtr.lock();
-					auto self = std::dynamic_pointer_cast<Clickable>(baseself);
-					if(self->mouseInBounds(a_mouse)){
-						if(self->eatTouches){
-							self->alertParent(BlockInteraction::make(self));
-						}
-					}
+			onLeftMouseDownHandle = mouse->onLeftMouseDown.connect([&](MouseState& a_mouse){
+				if(mouseInBounds(a_mouse)){
+					a_mouse.queueExclusiveAction({eatTouches, parentIndexList(), [&](){
+						acceptDownClick();
+					}, [](){}});
 				}
 			});
 
-			onMouseButtonEndHandle = mouse->onMouseButtonEnd.connect([&, thisWeakPtr](MouseState& a_mouse){
-				if(!thisWeakPtr.expired()){
-					auto self = std::static_pointer_cast<Clickable>(thisWeakPtr.lock());
-					self->unblockInput();
-				}
-			});
-
-			onMouseDownHandle = mouse->onLeftMouseDown.connect([&, thisWeakPtr](MouseState& a_mouse){
-				if(!thisWeakPtr.expired() && mouseInBounds(a_mouse)){
-					auto self = std::static_pointer_cast<Clickable>(thisWeakPtr.lock());
-					self->isInPressEvent = true;
-					self->onPressSlot(self);
-
-					self->objectLocationBeforeDrag = self->position();
-					self->dragStartPosition = a_mouse.position();
-					self->priorMousePosition = self->dragStartPosition;
-
-					self->onMouseMoveHandle = a_mouse.onMove.connect([&, thisWeakPtr](MouseState& a_mouseInner){
-						if(!thisWeakPtr.expired()){
-							auto self = std::static_pointer_cast<Clickable>(thisWeakPtr.lock());
-							self->onDragSlot(self, self->dragStartPosition, a_mouseInner.position() - self->priorMousePosition);
-							self->priorMousePosition = a_mouseInner.position();
-						}
-					});
-				}
-			});
-
-			onMouseUpHandle = mouse->onLeftMouseUp.connect([&, thisWeakPtr](MouseState& a_mouse){
-				if(!thisWeakPtr.expired()){
-					auto self = std::static_pointer_cast<Clickable>(thisWeakPtr.lock());
-					self->onMouseMoveHandle = nullptr;
-					if(self->inPressEvent()){
-						self->isInPressEvent = false;
-						if(self->mouseInBounds(a_mouse)){
-							self->onAcceptSlot(self);
-						} else{
-							self->onCancelSlot(self);
-						}
-						if(!thisWeakPtr.expired()){
-							self->onReleaseSlot(self);
-						}
-					}
-				}
+			onLeftMouseUpHandle = mouse->onLeftMouseUp.connect([&](MouseState& a_mouse){
+				acceptUpClick();
 			});
 
 			hookedUp = true;
@@ -102,15 +55,17 @@ namespace MV {
 
 		void Clickable::blockInput() {
 			if(!inPressEvent()){
-				onMouseDownHandle->block();
-				onMouseUpHandle->block();
+				onLeftMouseUpHandle->block();
+				onLeftMouseUpHandle->block();
 				onMouseMoveHandle = nullptr;
+				blocked = true;
 			}
 		}
 
 		void Clickable::unblockInput() {
-			onMouseDownHandle->unblock();
-			onMouseUpHandle->unblock();
+			onLeftMouseDownHandle->unblock();
+			onLeftMouseUpHandle->unblock();
+			blocked = false;
 		}
 
 		bool Clickable::handleBegin(std::shared_ptr<BlockInteraction>) {
@@ -173,6 +128,37 @@ namespace MV {
 				hookUpSlots();
 			}
 			Rectangle::drawImplementation();
+		}
+
+		void Clickable::acceptDownClick() {
+			auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
+			isInPressEvent = true;
+			onPressSlot(protectFromDismissal);
+
+			objectLocationBeforeDrag = position();
+			dragStartPosition = mouse->position();
+			priorMousePosition = dragStartPosition;
+
+			onMouseMoveHandle = mouse->onMove.connect([&](MouseState& a_mouseInner){
+				auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
+				onDragSlot(protectFromDismissal, dragStartPosition, a_mouseInner.position() - priorMousePosition);
+				priorMousePosition = a_mouseInner.position();
+			});
+		}
+
+		void Clickable::acceptUpClick() {
+			if(inPressEvent()){
+				auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
+				onMouseMoveHandle = nullptr;
+
+				isInPressEvent = false;
+				if(mouseInBounds(*mouse)){
+					onAcceptSlot(protectFromDismissal);
+				} else{
+					onCancelSlot(protectFromDismissal);
+				}
+				onReleaseSlot(protectFromDismissal);
+			}
 		}
 
 		/*************************\

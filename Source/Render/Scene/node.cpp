@@ -75,17 +75,9 @@ namespace MV {
 			if(a_childItem == nullptr){
 				return nullptr;
 			}
-			auto foundChild = std::find_if(drawList.begin(), drawList.end(), [&](const DrawListPairType &item){
-				return item.second == a_childItem;
-			});
+			auto foundChild = std::find(drawList.begin(), drawList.end(), a_childItem);
 			if(foundChild != drawList.end()){
-				auto removed = foundChild->second;
-				auto foundSorted = std::find_if(drawListVector.begin(), drawListVector.end(), [&](std::weak_ptr<Node> a_compare){
-					return !a_compare.expired() && a_compare.lock() == removed;
-				});
-				if(foundSorted != drawListVector.end()){
-					drawListVector.erase(foundSorted);
-				}
+				auto removed = *foundChild;
 				drawList.erase(foundChild);
 				calculateMaxDepthChild();
 				alertParent(ChildRemoved::make(shared_from_this(), removed));
@@ -99,15 +91,9 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::remove(const std::string &a_childId){
-			auto foundChild = drawList.find(a_childId);
+			auto foundChild = std::find_if(drawList.begin(), drawList.end(), [&](const std::shared_ptr<Node> a_node){return a_node->name() == a_childId;});
 			if(foundChild != drawList.end()){
-				auto removed = foundChild->second;
-				auto foundSorted = std::find_if(drawListVector.begin(), drawListVector.end(), [&](std::weak_ptr<Node> a_compare){
-					return !a_compare.expired() && a_compare.lock() == removed;
-				});
-				if(foundSorted != drawListVector.end()){
-					drawListVector.erase(foundSorted);
-				}
+				auto removed = *foundChild;
 				drawList.erase(foundChild);
 				calculateMaxDepthChild();
 				alertParent(ChildRemoved::make(shared_from_this(), removed));
@@ -123,21 +109,20 @@ namespace MV {
 		void Node::clear(){
 			auto tmpDrawList = drawList;
 			drawList.clear();
-			drawListVector.clear();
 
 			for(auto drawItem : tmpDrawList){
-				alertParent(ChildRemoved::make(shared_from_this(), drawItem.second));
+				alertParent(ChildRemoved::make(shared_from_this(), drawItem));
 			}
 			alertParent(VisualChange::make(shared_from_this()));
 		}
 
 		std::shared_ptr<Node> Node::get(const std::string &a_childId, bool a_throwOnNull){
-			auto cell = drawList.find(a_childId);
+			auto cell = std::find_if(drawList.begin(), drawList.end(), [&](const std::shared_ptr<Node> a_node){return a_node->name() == a_childId; });
 			if(cell != drawList.end()){
-				return cell->second;
+				return *cell;
 			}
 			for(auto &cell : drawList){
-				if(auto foundInChild = cell.second->get(a_childId, a_throwOnNull)){
+				if(auto foundInChild = cell->get(a_childId, a_throwOnNull)){
 					return foundInChild;
 				}
 			}
@@ -146,11 +131,11 @@ namespace MV {
 		}
 
 		bool Node::operator<(Node &a_other){
-			return depth() < a_other.depth();
+			return (depth() == a_other.depth() && name() < a_other.name()) || depth() < a_other.depth();
 		}
 
 		bool Node::operator>(Node &a_other){
-			return depth() > a_other.depth();
+			return (depth() == a_other.depth() && name() > a_other.name()) || depth() > a_other.depth();
 		}
 
 		bool Node::operator==(Node &a_other){
@@ -259,12 +244,12 @@ namespace MV {
 			}
 			if(a_includeChildren && !drawList.empty()){
 				if(points.empty()){
-					tmpBox.initialize(drawList.begin()->second->worldAABBImplementation(a_includeChildren, true));
+					tmpBox.initialize(drawList.front()->worldAABBImplementation(a_includeChildren, true));
 				} else{
-					tmpBox.expandWith(drawList.begin()->second->worldAABBImplementation(a_includeChildren, true));
+					tmpBox.expandWith(drawList.front()->worldAABBImplementation(a_includeChildren, true));
 				}
 				std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
-					tmpBox.expandWith(cell.second->worldAABBImplementation(a_includeChildren, true));
+					tmpBox.expandWith(cell->worldAABBImplementation(a_includeChildren, true));
 				});
 			}
 			return tmpBox;
@@ -296,12 +281,12 @@ namespace MV {
 			}
 			if(a_includeChildren && !drawList.empty()){
 				if(points.empty()){
-					tmpBox.initialize(drawList.begin()->second->screenAABBImplementation(a_includeChildren, true));
+					tmpBox.initialize(drawList.front()->screenAABBImplementation(a_includeChildren, true));
 				} else{
-					tmpBox.expandWith(drawList.begin()->second->screenAABBImplementation(a_includeChildren, true));
+					tmpBox.expandWith(drawList.front()->screenAABBImplementation(a_includeChildren, true));
 				}
 				std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
-					tmpBox.expandWith(cell.second->screenAABBImplementation(a_includeChildren, true));
+					tmpBox.expandWith(cell->screenAABBImplementation(a_includeChildren, true));
 				});
 			}
 			return tmpBox;
@@ -338,12 +323,12 @@ namespace MV {
 			}
 			if(a_includeChildren && !drawList.empty()){
 				if(points.empty()){
-					tmpBox.initialize(drawList.begin()->second->localAABBImplementation(a_includeChildren, true));
+					tmpBox.initialize(drawList.front()->localAABBImplementation(a_includeChildren, true));
 				} else{
-					tmpBox.expandWith(drawList.begin()->second->localAABBImplementation(a_includeChildren, true));
+					tmpBox.expandWith(drawList.front()->localAABBImplementation(a_includeChildren, true));
 				}
 				std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
-					tmpBox.expandWith(cell.second->localAABBImplementation(a_includeChildren, true));
+					tmpBox.expandWith(cell->localAABBImplementation(a_includeChildren, true));
 				});
 			}
 			return tmpBox;
@@ -627,11 +612,7 @@ namespace MV {
 					SCOPE_EXIT{popMatrix();};
 
 					drawImplementation();
-					if(drawSorted){
-						sortedRender();
-					} else{
-						unsortedRender();
-					}
+					sortedRender();
 
 				}
 				postDraw();
@@ -639,39 +620,19 @@ namespace MV {
 		}
 
 		void Node::sortedRender(){
-			sortDrawListVector();
-			drawListVector.erase(remove_if(drawListVector.begin(), drawListVector.end(), [](DrawListVectorType::value_type &shape){
-				if(!shape.expired()){
-					shape.lock()->draw();
-					return false;
-				} else{
-					return true;
-				}
-			}), drawListVector.end());
-		}
-
-		void Node::unsortedRender(){
-			std::for_each(drawList.begin(), drawList.end(), [](DrawListType::value_type &shape){
-				shape.second->draw();
-			});
-		}
-
-		std::shared_ptr<Node> Node::sortSceneImplementation(bool a_depthMatters){
-			drawSorted = a_depthMatters;
-			return shared_from_this();
+			for(auto&& shape : drawList){
+				shape->draw();
+			}
 		}
 
 		Node::Node(Draw2D* a_renderer):
 			renderer(a_renderer),
 			myParent(nullptr),
-			sortDepth(false),
-			drawSorted(true),
-			isSorted(false),
+			sortDepth(0.0f),
 			isVisible(true),
 			bufferId(0),
 			shaderProgramId(DEFAULT_ID),
 			shaderProgram(nullptr){
-			sortLess();
 		}
 
 		std::shared_ptr<Node> Node::make(Draw2D* a_renderer, const Point<> &a_placement /*= Point<>()*/) {
@@ -696,21 +657,10 @@ namespace MV {
 			return shared_from_this();
 		}
 
-		void Node::sortDrawListVector() {
-			if(!isSorted){
-				drawListVector.clear();
-				std::transform(drawList.begin(), drawList.end(), std::back_inserter(drawListVector), [](DrawListType::value_type shape){
-					return shape.second;
-				});
-				std::sort(drawListVector.begin(), drawListVector.end(), sortFunction);
-				isSorted = true;
-			}
-		}
-
 		std::vector<std::shared_ptr<Node>> Node::children() {
 			std::vector<std::shared_ptr<Node>> childNodes;
 			std::transform(drawList.begin(), drawList.end(), std::back_inserter(childNodes), [](DrawListType::value_type shape){
-				return shape.second;
+				return shape;
 			});
 			return childNodes;
 		}
@@ -808,10 +758,13 @@ namespace MV {
 			return shared_from_this();
 		}
 
-		void Node::childDepthChanged() {
-			calculateMaxDepthChild();
-			drawListVector.clear();
-			isSorted = false;
+		void Node::childDepthChanged(std::shared_ptr<Node> a_child) {
+			auto foundChild = std::find(drawList.begin(), drawList.end(), a_child);
+			if(foundChild != drawList.end()){
+				auto removed = *foundChild;
+				drawList.erase(foundChild);
+				insertSorted(drawList, a_child);
+			}
 		}
 
 		bool Node::toggleVisible() {
@@ -831,12 +784,42 @@ namespace MV {
 			}
 			if(includeChildren){
 				for(auto &child : drawList){
-					child.second->setRenderer(a_renderer, true, false);
+					child->setRenderer(a_renderer, true, false);
 				}
 			}
 		}
 
+		size_t Node::indexOf(std::shared_ptr<Node> a_childItem) {
+			size_t i = 0;
+			for(auto&& cell : drawList){
+				if(cell == a_childItem){
+					return i;
+				}
+				++i;
+			}
+			return i;
+		}
 
+		std::vector<size_t> Node::parentIndexList() {
+			std::vector<size_t> list;
+			Node* current = this;
+			Node* previous = myParent;
+			while(current){
+				list.push_back(current->myIndex());
+				previous = current;
+				current = current->myParent;
+			}
+			std::reverse(list.begin(), list.end());
+			return list;
+		}
+
+		size_t Node::myIndex() {
+			size_t i = 0;
+			if(myParent){
+				i = myParent->indexOf(shared_from_this());
+			}
+			return i;
+		}
 
 	}
 }

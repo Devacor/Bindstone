@@ -7,6 +7,31 @@
 #include "Utility/signal.hpp"
 
 namespace MV{
+	struct ExclusiveMouseAction{
+		ExclusiveMouseAction(bool a_exclusive, const std::vector<size_t> &a_fitness, const std::function<void()> &a_enabledCallback, const std::function<void()> &a_disableCallback):
+			exclusive(a_exclusive),
+			fitness(a_fitness),
+			disabled(a_disableCallback),
+			enabled(a_enabledCallback){
+		}
+
+		bool operator<(const ExclusiveMouseAction &a_rhs) const{
+			for(size_t i = 0; i < fitness.size() && i < a_rhs.fitness.size(); ++i){
+				if(fitness[i] > a_rhs.fitness[i]){
+					return false;
+				} else if(fitness[i] < a_rhs.fitness[i]){
+					return true;
+				}
+			}
+			return fitness.size() > a_rhs.fitness.size();
+		}
+
+		bool exclusive;
+		std::vector<size_t> fitness;
+		std::function<void()> disabled;
+		std::function<void()> enabled;
+	};
+
 	class MouseState {
 	public:
 		MouseState();
@@ -22,41 +47,57 @@ namespace MV{
 		bool leftDown() const;
 		bool rightDown() const;
 		bool middleDown() const;
-		Slot<CallbackSignature> onMouseButtonBeginSlot;
+
+		void queueExclusiveAction(const ExclusiveMouseAction &a_node);
+
+		void runExclusiveActions();
 	private:
+		std::vector<ExclusiveMouseAction> nodesToExecute;
 		bool left = false;
 		bool middle = false;
 		bool right = false;
 		MV::Point<int> mousePosition;
 		MV::Point<int> oldMousePosition;
 
-		void updateButtonState(bool &oldState, bool newState, Slot<CallbackSignature> &onDown, Slot<CallbackSignature> &onUp);
-		
-		//Slot<CallbackSignature> onMouseButtonBeginSlot;
-		Slot<CallbackSignature> onMouseButtonEndSlot;
+		void updateButtonState(bool &oldState, bool newState, Slot<CallbackSignature> &onDown, Slot<CallbackSignature> &onUp, Slot<CallbackSignature> &onDownEnd, Slot<CallbackSignature> &onUpEnd);
 
 		Slot<CallbackSignature> onLeftMouseDownSlot;
 		Slot<CallbackSignature> onLeftMouseUpSlot;
 
+		Slot<CallbackSignature> onLeftMouseDownEndSlot;
+		Slot<CallbackSignature> onLeftMouseUpEndSlot;
+
 		Slot<CallbackSignature> onRightMouseDownSlot;
 		Slot<CallbackSignature> onRightMouseUpSlot;
+
+		Slot<CallbackSignature> onRightMouseDownEndSlot;
+		Slot<CallbackSignature> onRightMouseUpEndSlot;
 
 		Slot<CallbackSignature> onMiddleMouseDownSlot;
 		Slot<CallbackSignature> onMiddleMouseUpSlot;
 
+		Slot<CallbackSignature> onMiddleMouseDownEndSlot;
+		Slot<CallbackSignature> onMiddleMouseUpEndSlot;
+
 		Slot<CallbackSignature> onMoveSlot;
 	public:
-		SlotRegister<CallbackSignature> onMouseButtonBegin;
-		SlotRegister<CallbackSignature> onMouseButtonEnd;
-
 		SlotRegister<CallbackSignature> onLeftMouseDown;
 		SlotRegister<CallbackSignature> onLeftMouseUp;
+
+		SlotRegister<CallbackSignature> onLeftMouseDownEnd;
+		SlotRegister<CallbackSignature> onLeftMouseUpEnd;
 
 		SlotRegister<CallbackSignature> onRightMouseDown;
 		SlotRegister<CallbackSignature> onRightMouseUp;
 
+		SlotRegister<CallbackSignature> onRightMouseDownEnd;
+		SlotRegister<CallbackSignature> onRightMouseUpEnd;
+
 		SlotRegister<CallbackSignature> onMiddleMouseDown;
 		SlotRegister<CallbackSignature> onMiddleMouseUp;
+
+		SlotRegister<CallbackSignature> onMiddleMouseDownEnd;
+		SlotRegister<CallbackSignature> onMiddleMouseUpEnd;
 
 		SlotRegister<CallbackSignature> onMove;
 	};

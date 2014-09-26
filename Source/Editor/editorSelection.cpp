@@ -147,9 +147,9 @@ void EditableRectangle::resetHandles() {
 
 }
 
-EditableRectangle::EditableRectangle(std::shared_ptr<MV::Scene::Rectangle> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse):
+EditableRectangle::EditableRectangle(std::shared_ptr<MV::Scene::Rectangle> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
 	elementToEdit(a_elementToEdit),
-	controlContainer(a_controlContainer),
+	controlContainer(a_rootContainer->make<MV::Scene::Node>("Editable")->depth(-100.0f)),
 	mouse(a_mouse) {
 	resetHandles();
 }
@@ -300,9 +300,9 @@ void EditableEmitter::resetHandles() {
 	});
 }
 
-EditableEmitter::EditableEmitter(std::shared_ptr<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse):
+EditableEmitter::EditableEmitter(std::shared_ptr<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
 	elementToEdit(a_elementToEdit),
-	controlContainer(a_controlContainer),
+	controlContainer(a_rootContainer->make<MV::Scene::Node>("Editable")->depth(-100.0f)),
 	mouse(a_mouse) {
 	resetHandles();
 }

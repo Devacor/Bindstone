@@ -604,7 +604,7 @@ namespace MV {
 		void Node::defaultDraw(GLenum drawType){
 			defaultDrawRenderStep(drawType);
 		}
-
+		
 		void Node::draw(){
 			if(preDraw() && isVisible){
 				{

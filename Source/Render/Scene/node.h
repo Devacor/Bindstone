@@ -150,6 +150,7 @@ namespace MV {
 				alertParent(VisualChange::make(shared_from_this()));
 				a_childItem->onAdded(shared_from_this());
 				onChildAdded(a_childItem);
+
 				return a_childItem;
 			}
 

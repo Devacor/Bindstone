@@ -12,7 +12,7 @@ public:
 	EditableRectangle(std::shared_ptr<MV::Scene::Rectangle> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
 
 	~EditableRectangle(){
-		removeHandles();
+		controlContainer->removeFromParent();
 	}
 
 	void removeHandles();
@@ -81,9 +81,10 @@ private:
 
 class EditableEmitter {
 public:
-	EditableEmitter(std::shared_ptr<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
+	EditableEmitter(std::shared_ptr<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
 
 	~EditableEmitter(){
+		controlContainer->removeFromParent();
 		removeHandles();
 	}
 

@@ -26,7 +26,7 @@ bool Editor::update(double dt){
 		accumulatedFrames /= 2.0f;
 		accumulatedTime /= 2.0f;
 	}
-	fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
+	//fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
 	pool.run();
 	return !done;
 }

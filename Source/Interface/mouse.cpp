@@ -75,7 +75,7 @@ namespace MV{
 
 	void MouseState::runExclusiveActions() {
 		bool touchesEaten = false;
-		std::sort(nodesToExecute.begin(), nodesToExecute.end());
+		std::sort(nodesToExecute.rbegin(), nodesToExecute.rend());
 		for(auto it = nodesToExecute.begin(); it != nodesToExecute.end(); ++it){
 			if(!touchesEaten){
 				it->enabled();

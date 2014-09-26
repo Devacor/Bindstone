@@ -17,10 +17,10 @@ namespace MV{
 
 		bool operator<(const ExclusiveMouseAction &a_rhs) const{
 			for(size_t i = 0; i < fitness.size() && i < a_rhs.fitness.size(); ++i){
-				if(fitness[i] > a_rhs.fitness[i]){
-					return false;
-				} else if(fitness[i] < a_rhs.fitness[i]){
+				if(fitness[i] < a_rhs.fitness[i]){
 					return true;
+				} else if(fitness[i] > a_rhs.fitness[i]){
+					return false;
 				}
 			}
 			return fitness.size() > a_rhs.fitness.size();

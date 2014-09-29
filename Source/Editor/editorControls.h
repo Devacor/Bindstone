@@ -24,7 +24,7 @@ public:
 
 private:
 	void initializeRootPicker(){
-		grid = MV::Scene::Grid::make(root->getRenderer(), MV::size(100.0f, 27.0f))->padding({4.0f, 4.0f})->rows(6)->color({BOX_BACKGROUND});
+		grid = MV::Scene::Grid::make(root->getRenderer(), MV::size(100.0f, 27.0f))->padding({3.0f, 4.0f})->rows(6)->color({BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}});
 		makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, "Back", {100.0f, 27.0f}, UTF_CHAR_STR("Back"))->
 			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				setter(nullptr, false);
@@ -33,8 +33,8 @@ private:
 			onAccept.connect("Null", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				setter(nullptr, true);
 			});
-		auto oldNode = root->get("TexturePickerGrid", false);
-		auto pos = oldNode ? oldNode->position() : MV::Point<>(200.0f, 0.0f);
+		
+		auto pos = box ? box->parent()->position() : MV::Point<>(200.0f, 0.0f);
 		box = makeDraggableBox("TexturePicker", root, grid->basicAABB().size(), *sharedResources.mouse);
 		box->parent()->position(pos);
 		box->add("TexturePickerGrid", grid);
@@ -48,13 +48,13 @@ private:
 
 	void initializeImagePicker(const std::string &a_packId){
 		auto cellSize = MV::size(64.0f, 64.0f);
-		grid = MV::Scene::Grid::make(root->getRenderer(), cellSize)->padding({4.0f, 4.0f})->rows(6)->color({BOX_BACKGROUND});
+		grid = MV::Scene::Grid::make(root->getRenderer(), MV::size(100.0f, 27.0f))->padding({3.0f, 4.0f})->rows(6)->color({BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}});
 		makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, "Back", cellSize, UTF_CHAR_STR("Back"))->
 			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				initializeRootPicker();
 			});
-		auto oldNode = root->get("TexturePickerGrid", false);
-		auto pos = oldNode ? oldNode->position() : MV::Point<>(200.0f, 0.0f);
+		
+		auto pos = box ? box->parent()->position() : MV::Point<>(200.0f, 0.0f);
 		box = makeDraggableBox("TexturePicker", root, grid->basicAABB().size(), *sharedResources.mouse);
 		box->parent()->position(pos);
 		box->add("TexturePickerGrid", grid);

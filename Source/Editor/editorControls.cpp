@@ -27,7 +27,7 @@ EditorControls::EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::s
 	sharedResources(a_resources),
 	editorScene(a_editor),
 	rootScene(a_root),
-	currentSelection(a_root, *sharedResources.mouse){
+	currentSelection(a_editor, *sharedResources.mouse){
 	
 	draggableBox = editorScene->make<MV::Scene::Node>("ContextMenu");
 }

@@ -15,3 +15,5 @@ sceneSave.txt
 /Release/*
 /x64/*
 .DS_Store
+/Assets/Atlases/*.png
+runsdvui.cmd

@@ -39,7 +39,7 @@ namespace MV {
 		std::shared_ptr<Clickable> Clickable::hookUpSlots() {
 			onLeftMouseDownHandle = mouse->onLeftMouseDown.connect([&](MouseState& a_mouse){
 				if(mouseInBounds(a_mouse)){
-					a_mouse.queueExclusiveAction({eatTouches, parentIndexList(), [&](){
+					a_mouse.queueExclusiveAction({eatTouches, parentIndexList(100), [&](){
 						acceptDownClick();
 					}, [](){}});
 				}

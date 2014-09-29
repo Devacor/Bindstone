@@ -601,6 +601,9 @@
     <ClInclude Include="Source\Render\sharedTextures.h">
       <Filter>Source Files\Render</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Editor\editorSceneGraphPanel.h">
+      <Filter>Source Files\Game\Editor</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html">

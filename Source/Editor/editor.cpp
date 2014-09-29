@@ -26,7 +26,7 @@ bool Editor::update(double dt){
 		accumulatedFrames /= 2.0f;
 		accumulatedTime /= 2.0f;
 	}
-	//fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
+	fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
 	pool.run();
 	return !done;
 }
@@ -49,15 +49,17 @@ void Editor::initializeWindow(){
 
 	AudioPlayer::instance()->initAudio();
 	mouse.update();
-	editorMouse.update();
-
-	editorMouse.onLeftMouseDown.connect("initDrag", [&](MV::MouseState& mouse){
-		auto signature = editorMouse.onMove.connect("inDrag", [&](MV::MouseState& a_mouse){
-			//scene->translate(MV::cast<MV::PointPrecision>(a_mouse.position() - a_mouse.oldPosition()));
-		});
-		editorMouse.onLeftMouseUp.connect("cancelDrag", [=](MV::MouseState& a_mouse){
-			a_mouse.onMove.disconnect(signature);
-		});
+	
+	mouse.onLeftMouseDown.connect("initDrag", [&](MV::MouseState& a_mouse){
+		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, {10}, [&](){
+			auto signature = mouse.onMove.connect("inDrag", [&](MV::MouseState& a_mouse2){
+				scene->translate(MV::cast<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
+				controlPanel.onSceneDrag(a_mouse2.position() - a_mouse2.oldPosition());
+			});
+			mouse.onLeftMouseUp.connect("cancelDrag", [=](MV::MouseState& a_mouse2){
+				a_mouse2.onMove.disconnect(signature);
+			});
+		}, [](){}));
 	});
 
 	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
@@ -66,7 +68,7 @@ void Editor::initializeWindow(){
 
 	textures.loadPacks("Assets/Atlases", &renderer);
 
-	fps = scene->make<MV::Scene::Text>(&textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
+	fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
 	std::vector<std::string> names{"patternTest1.png", "platform.png", "rock.png", "joint.png", "slice.png", "spatula.png"};
 
 	/*MV::TexturePack pack(&renderer);
@@ -136,7 +138,6 @@ void Editor::handleInput(){
 		}
 	}
 	mouse.update();
-	editorMouse.update();
 	controlPanel.handleInput(event);
 }
 

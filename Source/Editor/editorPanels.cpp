@@ -135,6 +135,10 @@ void SelectedRectangleEditorPanel::handleInput(SDL_Event &a_event) {
 	}
 }
 
+void SelectedRectangleEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
+	controls->repositionHandles();
+}
+
 SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableEmitter> a_controls):
 EditorPanel(a_panel),
 controls(a_controls) {
@@ -420,6 +424,10 @@ void SelectedEmitterEditorPanel::handleInput(SDL_Event &a_event) {
 	}
 }
 
+void SelectedEmitterEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
+	controls->repositionHandles();
+}
+
 DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	EditorPanel(a_panel) {
 	auto node = panel.content();
@@ -477,19 +485,19 @@ ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel):
 	panel.updateBoxHeader(grid->basicAABB().width());
 
 	createRectangleButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
-		panel.selection().enable([&](const MV::BoxAABB<> &a_selected){
+		panel.selection().enable([&](const MV::BoxAABB<int> &a_selected){
 			createRectangle(a_selected);
 		});
 	});
 
 	createSpineButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
-		panel.selection().enable([&](const MV::BoxAABB<> &a_selected){
+		panel.selection().enable([&](const MV::BoxAABB<int> &a_selected){
 			createSpine(a_selected);
 		});
 	});
 
 	createEmitterButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
-		panel.selection().enable([&](const MV::BoxAABB<> &a_selected){
+		panel.selection().enable([&](const MV::BoxAABB<int> &a_selected){
 			createEmitter(a_selected);
 		});
 	});
@@ -499,31 +507,34 @@ ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel):
 	});
 }
 
-void ChooseElementCreationType::createRectangle(const MV::BoxAABB<> &a_selected) {
+void ChooseElementCreationType::createRectangle(const MV::BoxAABB<int> &a_selected) {
 	panel.selection().disable();
+	auto transformedSelection = panel.root()->localFromScreen(a_selected);
 
-	auto newShape = panel.root()->make<MV::Scene::Rectangle>(MV::guid("rectangle_"), a_selected.size())->position(a_selected.minPoint);
+	auto newShape = panel.root()->make<MV::Scene::Rectangle>(MV::guid("rectangle_"), transformedSelection.size())->position(transformedSelection.minPoint);
 	newShape->color({CREATED_DEFAULT});
 	 
 	panel.loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(newShape, panel.editor(), panel.resources().mouse));
 }
 
-void ChooseElementCreationType::createEmitter(const MV::BoxAABB<> &a_selected) {
+void ChooseElementCreationType::createEmitter(const MV::BoxAABB<int> &a_selected) {
 	panel.selection().disable();
+	auto transformedSelection = panel.root()->localFromScreen(a_selected);
 
-	auto newEmitter = panel.root()->make<MV::Scene::Emitter>(MV::guid("emitter_"), panel.resources().pool)->position(a_selected.minPoint);
+	auto newEmitter = panel.root()->make<MV::Scene::Emitter>(MV::guid("emitter_"), panel.resources().pool)->position(transformedSelection.minPoint);
 	auto editableEmitter = std::make_shared<EditableEmitter>(newEmitter, panel.editor(), panel.resources().mouse);
-	editableEmitter->size(a_selected.size());
+	editableEmitter->size(transformedSelection.size());
 
 	panel.loadPanel<SelectedEmitterEditorPanel>(editableEmitter);
 }
 
-void ChooseElementCreationType::createSpine(const MV::BoxAABB<> &a_selected) {
+void ChooseElementCreationType::createSpine(const MV::BoxAABB<int> &a_selected) {
 	panel.selection().disable();
+	auto transformedSelection = panel.root()->localFromScreen(a_selected);
 
-	auto newEmitter = panel.root()->make<MV::Scene::Emitter>(MV::guid("spine_"), panel.resources().pool)->position(a_selected.minPoint);
+	auto newEmitter = panel.root()->make<MV::Scene::Emitter>(MV::guid("spine_"), panel.resources().pool)->position(transformedSelection.minPoint);
 	auto editableEmitter = std::make_shared<EditableEmitter>(newEmitter, panel.editor(), panel.resources().mouse);
-	editableEmitter->size(a_selected.size());
+	editableEmitter->size(transformedSelection.size());
 
 	panel.loadPanel<SelectedEmitterEditorPanel>(editableEmitter);
 }

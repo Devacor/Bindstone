@@ -23,7 +23,7 @@ namespace MV{
 					return false;
 				}
 			}
-			return fitness.size() > a_rhs.fitness.size();
+			return fitness.size() < a_rhs.fitness.size();
 		}
 
 		bool exclusive;

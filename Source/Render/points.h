@@ -421,8 +421,18 @@ namespace MV {
 	}
 
 	template <class Target, class Origin>
-	Size<Target> cast(const Size<Origin> &a_size){
+	inline Size<Target> cast(const Size<Origin> &a_size){
 		return Size<Target>(static_cast<Target>(a_size.width), static_cast<Target>(a_size.height), static_cast<Target>(a_size.depth));
+	}
+
+	template <>
+	inline Size<int> cast(const Size<float> &a_size){
+		return Size<int>{static_cast<int>(std::round(a_size.width)), static_cast<int>(std::round(a_size.height)), static_cast<int>(std::round(a_size.depth))};
+	}
+
+	template <>
+	inline Size<int> cast(const Size<double> &a_size){
+		return Size<int>{static_cast<int>(std::round(a_size.width)), static_cast<int>(std::round(a_size.height)), static_cast<int>(std::round(a_size.depth))};
 	}
 
 	template <class T>
@@ -611,8 +621,18 @@ namespace MV {
 	}
 
 	template <class Target, class Origin>
-	Point<Target> cast(const Point<Origin> &a_point){
+	inline Point<Target> cast(const Point<Origin> &a_point){
 		return Point<Target>{static_cast<Target>(a_point.x), static_cast<Target>(a_point.y), static_cast<Target>(a_point.z)};
+	}
+
+	template <>
+	inline Point<int> cast(const Point<float> &a_point){
+		return Point<int>{static_cast<int>(std::round(a_point.x)), static_cast<int>(std::round(a_point.y)), static_cast<int>(std::round(a_point.z))};
+	}
+
+	template <>
+	inline Point<int> cast(const Point<double> &a_point){
+		return Point<int>{static_cast<int>(std::round(a_point.x)), static_cast<int>(std::round(a_point.y)), static_cast<int>(std::round(a_point.z))};
 	}
 
 	template <class T>

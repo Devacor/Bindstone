@@ -311,6 +311,7 @@
     <ClInclude Include="Source\Editor\editorDefines.h" />
     <ClInclude Include="Source\Editor\editorFactories.h" />
     <ClInclude Include="Source\Editor\editorPanels.h" />
+    <ClInclude Include="Source\Editor\editorSceneGraphPanel.h" />
     <ClInclude Include="Source\Editor\editorSelection.h" />
     <ClInclude Include="Source\Render\boxaabb.h" />
     <ClInclude Include="Source\Render\Scene\emitter.h" />

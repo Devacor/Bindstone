@@ -3,25 +3,27 @@
 
 long Selection::gid = 0;
 
-void Selection::callback(std::function<void(const MV::BoxAABB<> &)> a_callback){
+void Selection::callback(std::function<void(const MV::BoxAABB<int> &)> a_callback){
 	selectedCallback = a_callback;
 }
 
-void Selection::enable(std::function<void(const MV::BoxAABB<> &)> a_callback){
+void Selection::enable(std::function<void(const MV::BoxAABB<int> &)> a_callback){
 	selectedCallback = a_callback;
 	enable();
 }
 
 void Selection::enable(){
 	onMouseDownHandle = mouse.onLeftMouseDown.connect([&](MV::MouseState &mouse){
-		inSelection = true;
-		selection.initialize(MV::cast<MV::PointPrecision>(mouse.position()));
-		visibleSelection = scene->make<MV::Scene::Rectangle>("Selection_" + boost::lexical_cast<std::string>(id), MV::Size<>())->position(selection.minPoint);
-		visibleSelection->color(MV::Color(1.0, 1.0, 0.0, .25));
-		auto originalPosition = visibleSelection->localFromScreen(mouse.position());
-		onMouseMoveHandle = mouse.onMove.connect([&, originalPosition](MV::MouseState &mouse){
-			visibleSelection->bounds({originalPosition, visibleSelection->localFromScreen(mouse.position())});
-		});
+		mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, {10000}, [&](){
+			inSelection = true;
+			selection.initialize(mouse.position());
+			visibleSelection = scene->make<MV::Scene::Rectangle>("Selection_" + std::to_string(id), MV::Size<>())->position(scene->localFromScreen(selection.minPoint));
+			visibleSelection->color(MV::Color(1.0, 1.0, 0.0, .25));
+			auto originalPosition = visibleSelection->localFromScreen(mouse.position());
+			onMouseMoveHandle = mouse.onMove.connect([&, originalPosition](MV::MouseState &mouse){
+				visibleSelection->bounds({originalPosition, visibleSelection->localFromScreen(mouse.position())});
+			});
+		}, [](){}));
 	});
 
 	onMouseUpHandle = mouse.onLeftMouseUp.connect([&](MV::MouseState &mouse){
@@ -32,7 +34,7 @@ void Selection::enable(){
 			exitSelection(); //callback might throw, let's be safe.
 		};
 
-		selection.expandWith(MV::cast<MV::PointPrecision>(mouse.position()));
+		selection.expandWith(mouse.position());
 		if(selectedCallback){
 			selectedCallback(selection);
 		}
@@ -185,10 +187,12 @@ void EditableRectangle::repositionHandles(bool a_fireOnChange) {
 		}
 	}
 	elementToEdit->size(currentDimensions);
-	positionHandle->size(currentDimensions);
-
 	elementToEdit->position(corners.minPoint);
-	positionHandle->position(corners.minPoint);
+
+	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenAABB());
+	positionHandle->bounds(rectBox);
+	positionHandle->position({});
+
 	if(a_fireOnChange){
 		onChange(this);
 	}
@@ -254,7 +258,7 @@ void EditableEmitter::resetHandles() {
 		topRightSizeHandle->position(MV::point(topRightSizeHandle->position().x, topLeftSizeHandle->position().y));
 		bottomLeftSizeHandle->position(MV::point(topLeftSizeHandle->position().x, bottomLeftSizeHandle->position().y));
 
-		dragUpdateFromHandles();
+		repositionHandles();
 	});
 	topLeftSizeHandle->onRelease.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle){
 		resetHandles();
@@ -267,7 +271,7 @@ void EditableEmitter::resetHandles() {
 		topLeftSizeHandle->position(MV::point(topLeftSizeHandle->position().x, topRightSizeHandle->position().y));
 		bottomRightSizeHandle->position(MV::point(topRightSizeHandle->position().x, bottomRightSizeHandle->position().y));
 
-		dragUpdateFromHandles();
+		repositionHandles();
 	});
 	topRightSizeHandle->onRelease.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle){
 		resetHandles();
@@ -280,7 +284,7 @@ void EditableEmitter::resetHandles() {
 		topLeftSizeHandle->position(MV::point(bottomLeftSizeHandle->position().x, topLeftSizeHandle->position().y));
 		bottomRightSizeHandle->position(MV::point(bottomRightSizeHandle->position().x, bottomLeftSizeHandle->position().y));
 
-		dragUpdateFromHandles();
+		repositionHandles();
 	});
 	bottomLeftSizeHandle->onRelease.connect("bottomLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle){
 		resetHandles();
@@ -293,7 +297,7 @@ void EditableEmitter::resetHandles() {
 		topRightSizeHandle->position(MV::point(bottomRightSizeHandle->position().x, topRightSizeHandle->position().y));
 		bottomLeftSizeHandle->position(MV::point(bottomLeftSizeHandle->position().x, bottomRightSizeHandle->position().y));
 
-		dragUpdateFromHandles();
+		repositionHandles();
 	});
 	bottomRightSizeHandle->onRelease.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle){
 		resetHandles();
@@ -321,7 +325,7 @@ void EditableEmitter::removeHandles() {
 	bottomRightSizeHandle.reset();
 }
 
-void EditableEmitter::dragUpdateFromHandles() {
+void EditableEmitter::repositionHandles(bool a_fireOnChange) {
 	auto box = MV::boxaabb(topLeftSizeHandle->screenAABB().bottomRightPoint(), bottomRightSizeHandle->screenAABB().topLeftPoint());
 
 	elementToEdit->position({});
@@ -329,13 +333,15 @@ void EditableEmitter::dragUpdateFromHandles() {
 
 	elementToEdit->properties().minimumPosition = {0.0f, 0.0f};
 	elementToEdit->properties().maximumPosition = MV::toPoint(corners.size());
-
-	positionHandle->size(corners.size());
-
 	elementToEdit->position(corners.minPoint);
-	positionHandle->position(corners.minPoint);
 
-	onChange(this);
+	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenAABB());
+	positionHandle->bounds(rectBox);
+	positionHandle->position({});
+
+	if(a_fireOnChange){
+		onChange(this);
+	}
 }
 
 void EditableEmitter::position(MV::Point<> a_newPosition) {

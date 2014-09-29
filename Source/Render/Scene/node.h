@@ -164,7 +164,7 @@ namespace MV {
 
 			size_t indexOf(std::shared_ptr<Node> a_childItem);
 			size_t myIndex();
-			std::vector<size_t> parentIndexList();
+			std::vector<size_t> parentIndexList(size_t a_globalPriority = 0);
 
 			void draw();
 

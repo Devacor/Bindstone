@@ -18,6 +18,9 @@ public:
 
 	virtual void handleInput(SDL_Event &a_event);
 
+	virtual void onSceneDrag(const MV::Point<int> &a_delta){
+	}
+
 	void activate(std::shared_ptr<MV::Scene::Text> a_textbox){
 		if(activeTextbox){
 			activeTextbox->disableCursor();
@@ -44,6 +47,8 @@ public:
 	}
 
 	virtual void handleInput(SDL_Event &a_event);
+
+	virtual void onSceneDrag(const MV::Point<int> &a_delta);
 private:
 	void OpenTexturePicker();
 	void clearTexturePicker(){
@@ -69,6 +74,7 @@ public:
 
 	virtual void handleInput(SDL_Event &a_event);
 
+	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 private:
 	void OpenTexturePicker();
 	void clearTexturePicker(){
@@ -94,9 +100,9 @@ class ChooseElementCreationType : public EditorPanel {
 public:
 	ChooseElementCreationType(EditorControls &a_panel);
 private:
-	void createRectangle(const MV::BoxAABB<> &a_selected);
-	void createEmitter(const MV::BoxAABB<> &a_selected);
-	void createSpine(const MV::BoxAABB<> &a_selected);
+	void createRectangle(const MV::BoxAABB<int> &a_selected);
+	void createEmitter(const MV::BoxAABB<int> &a_selected);
+	void createSpine(const MV::BoxAABB<int> &a_selected);
 };
 
 

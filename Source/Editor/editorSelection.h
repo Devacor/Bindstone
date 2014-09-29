@@ -54,8 +54,8 @@ class Selection {
 public:
 	Selection(std::shared_ptr<MV::Scene::Node> a_scene, MV::MouseState &a_mouse);
 
-	void callback(std::function<void(const MV::BoxAABB<> &)> a_callback);
-	void enable(std::function<void(const MV::BoxAABB<> &)> a_callback);
+	void callback(std::function<void(const MV::BoxAABB<int> &)> a_callback);
+	void enable(std::function<void(const MV::BoxAABB<int> &)> a_callback);
 	void enable();
 	void disable();
 	void exitSelection();
@@ -65,8 +65,8 @@ private:
 
 	std::shared_ptr<MV::Scene::Rectangle> visibleSelection;
 	MV::MouseState &mouse;
-	MV::BoxAABB<> selection;
-	std::function<void(const MV::BoxAABB<> &)> selectedCallback;
+	MV::BoxAABB<int> selection;
+	std::function<void(const MV::BoxAABB<int> &)> selectedCallback;
 
 	MV::MouseState::SignalType onMouseDownHandle;
 	MV::MouseState::SignalType onMouseUpHandle;
@@ -100,10 +100,11 @@ public:
 
 	void texture(const std::shared_ptr<MV::TextureHandle> a_handle);
 
+	void repositionHandles(bool a_fireOnChange = true);
+
 	std::function<void(EditableEmitter*)> onChange;
 	std::shared_ptr<MV::Scene::Emitter> elementToEdit;
 private:
-	void dragUpdateFromHandles();
 
 	MV::MouseState *mouse;
 

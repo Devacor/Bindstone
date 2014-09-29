@@ -800,7 +800,7 @@ namespace MV {
 			return i;
 		}
 
-		std::vector<size_t> Node::parentIndexList() {
+		std::vector<size_t> Node::parentIndexList(size_t a_globalPriority) {
 			std::vector<size_t> list;
 			Node* current = this;
 			Node* previous = myParent;
@@ -809,6 +809,7 @@ namespace MV {
 				previous = current;
 				current = current->myParent;
 			}
+			list.push_back(a_globalPriority); //This gives us the ability to prioritize more things before any nodes get evaluated.
 			std::reverse(list.begin(), list.end());
 			return list;
 		}

@@ -5,8 +5,8 @@
             "id": 2147483649,
             "data": {
                 "translateTo": {
-                    "x": 0,
-                    "y": 0,
+                    "x": 75,
+                    "y": 294,
                     "z": 0
                 },
                 "rotateTo": {
@@ -30,40 +30,138 @@
                 "drawList": [
                     {
                         "polymorphic_id": 2147483649,
-                        "polymorphic_name": "MV::Scene::Text",
+                        "polymorphic_name": "MV::Scene::Emitter",
                         "ptr_wrapper": {
                             "id": 2147483650,
                             "data": {
-                                "fontIdentifier": "default",
-                                "boxSize": {
-                                    "width": 50,
-                                    "height": 15,
-                                    "depth": 0
+                                "enabled": true,
+                                "spawnProperties": {
+                                    "maximumParticles": 4294967295,
+                                    "minimumSpawnRate": 0.15625,
+                                    "maximumSpawnRate": 0.15625,
+                                    "minimumPosition": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "maximumPosition": {
+                                        "x": 34.999969482421875,
+                                        "y": 26.000015258789063,
+                                        "z": 0
+                                    },
+                                    "minimumDirection": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "maximumDirection": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "minimumRotation": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "maximumRotation": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "minimum": {
+                                        "directionalChange": {
+                                            "x": 0,
+                                            "y": 0,
+                                            "z": 0
+                                        },
+                                        "rotationalChange": {
+                                            "x": 0,
+                                            "y": 0,
+                                            "z": 0
+                                        },
+                                        "beginSpeed": 0,
+                                        "endSpeed": 0,
+                                        "beginScale": {
+                                            "x": 6,
+                                            "y": 6,
+                                            "z": 6
+                                        },
+                                        "endScale": {
+                                            "x": 6,
+                                            "y": 6,
+                                            "z": 6
+                                        },
+                                        "beginColor": {
+                                            "R": 1,
+                                            "G": 1,
+                                            "B": 1,
+                                            "A": 1
+                                        },
+                                        "endColor": {
+                                            "R": 1,
+                                            "G": 1,
+                                            "B": 1,
+                                            "A": 1
+                                        },
+                                        "maxLifespan": 1.3597750663757324,
+                                        "gravityMagnitude": 0,
+                                        "gravityDirection": {
+                                            "x": 0,
+                                            "y": 0,
+                                            "z": 0
+                                        },
+                                        "animationFramesPerSecond": 10
+                                    },
+                                    "maximum": {
+                                        "directionalChange": {
+                                            "x": 0,
+                                            "y": 0,
+                                            "z": 0
+                                        },
+                                        "rotationalChange": {
+                                            "x": 0,
+                                            "y": 0,
+                                            "z": 0
+                                        },
+                                        "beginSpeed": 0,
+                                        "endSpeed": 0,
+                                        "beginScale": {
+                                            "x": 6,
+                                            "y": 6,
+                                            "z": 6
+                                        },
+                                        "endScale": {
+                                            "x": 6,
+                                            "y": 6,
+                                            "z": 6
+                                        },
+                                        "beginColor": {
+                                            "R": 1,
+                                            "G": 1,
+                                            "B": 1,
+                                            "A": 1
+                                        },
+                                        "endColor": {
+                                            "R": 1,
+                                            "G": 1,
+                                            "B": 1,
+                                            "A": 1
+                                        },
+                                        "maxLifespan": 1.3597750663757324,
+                                        "gravityMagnitude": 0,
+                                        "gravityDirection": {
+                                            "x": 0,
+                                            "y": 0,
+                                            "z": 0
+                                        },
+                                        "animationFramesPerSecond": 10
+                                    }
                                 },
-                                "contentScrollPosition": {
-                                    "x": 0,
-                                    "y": 0,
-                                    "z": 0
-                                },
-                                "wrapMethod": {
-                                    "value0": 2
-                                },
-                                "textJustification": {
-                                    "value0": 0
-                                }
-                            }
-                        }
-                    },
-                    {
-                        "polymorphic_id": 2147483650,
-                        "polymorphic_name": "MV::Scene::Rectangle",
-                        "ptr_wrapper": {
-                            "id": 2147483651,
-                            "data": {
                                 "node": {
                                     "translateTo": {
-                                        "x": 173,
-                                        "y": 115,
+                                        "x": 443.99996948242187,
+                                        "y": 26.999984741210938,
                                         "z": 0
                                     },
                                     "rotateTo": {
@@ -83,6 +181,45 @@
                                     },
                                     "sortDepth": 2,
                                     "isVisible": true,
+                                    "points": [],
+                                    "drawList": [],
+                                    "shaderId": "default",
+                                    "texture": {
+                                        "polymorphic_id": 0
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "polymorphic_id": 2147483650,
+                        "polymorphic_name": "MV::Scene::Rectangle",
+                        "ptr_wrapper": {
+                            "id": 2147483651,
+                            "data": {
+                                "node": {
+                                    "translateTo": {
+                                        "x": 14.999969482421875,
+                                        "y": -171.99996948242187,
+                                        "z": 0
+                                    },
+                                    "rotateTo": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "rotateOrigin": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "scaleTo": {
+                                        "x": 1,
+                                        "y": 1,
+                                        "z": 1
+                                    },
+                                    "sortDepth": 3,
+                                    "isVisible": true,
                                     "points": [
                                         {
                                             "x": 0,
@@ -92,71 +229,233 @@
                                             "G": 0.87450981140136719,
                                             "B": 0.87450981140136719,
                                             "A": 1,
-                                            "textureX": 0.263671875,
-                                            "textureY": 0.21484375
+                                            "textureX": 0,
+                                            "textureY": 0
                                         },
                                         {
                                             "x": 0,
-                                            "y": 64,
+                                            "y": 103.99996948242187,
                                             "z": 0,
                                             "R": 0.87450981140136719,
                                             "G": 0.87450981140136719,
                                             "B": 0.87450981140136719,
                                             "A": 1,
-                                            "textureX": 0.263671875,
-                                            "textureY": 0.4296875
+                                            "textureX": 0,
+                                            "textureY": 1
                                         },
                                         {
-                                            "x": 78.545455932617188,
-                                            "y": 64,
+                                            "x": 201.00001525878906,
+                                            "y": 103.99996948242187,
                                             "z": 0,
                                             "R": 0.87450981140136719,
                                             "G": 0.87450981140136719,
                                             "B": 0.87450981140136719,
                                             "A": 1,
-                                            "textureX": 0.52734375,
-                                            "textureY": 0.4296875
+                                            "textureX": 1,
+                                            "textureY": 1
                                         },
                                         {
-                                            "x": 78.545455932617188,
+                                            "x": 201.00001525878906,
                                             "y": 0,
                                             "z": 0,
                                             "R": 0.87450981140136719,
                                             "G": 0.87450981140136719,
                                             "B": 0.87450981140136719,
                                             "A": 1,
-                                            "textureX": 0.52734375,
-                                            "textureY": 0.21484375
+                                            "textureX": 1,
+                                            "textureY": 0
                                         }
                                     ],
                                     "drawList": [],
                                     "shaderId": "default",
                                     "texture": {
+                                        "polymorphic_id": 0
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "polymorphic_id": 1,
+                        "ptr_wrapper": {
+                            "id": 2147483652,
+                            "data": {
+                                "enabled": true,
+                                "spawnProperties": {
+                                    "maximumParticles": 4294967295,
+                                    "minimumSpawnRate": 0.0038467312697321177,
+                                    "maximumSpawnRate": 0.0038467312697321177,
+                                    "minimumPosition": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "maximumPosition": {
+                                        "x": 0,
+                                        "y": 0.9999847412109375,
+                                        "z": 0
+                                    },
+                                    "minimumDirection": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "maximumDirection": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 720
+                                    },
+                                    "minimumRotation": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "maximumRotation": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "minimum": {
+                                        "directionalChange": {
+                                            "x": 0,
+                                            "y": 0,
+                                            "z": -170.18182373046875
+                                        },
+                                        "rotationalChange": {
+                                            "x": 0,
+                                            "y": 0,
+                                            "z": 0
+                                        },
+                                        "beginSpeed": 428.42974853515625,
+                                        "endSpeed": -300.49591064453125,
+                                        "beginScale": {
+                                            "x": 6,
+                                            "y": 6,
+                                            "z": 6
+                                        },
+                                        "endScale": {
+                                            "x": 6,
+                                            "y": 6,
+                                            "z": 6
+                                        },
+                                        "beginColor": {
+                                            "R": 1,
+                                            "G": 1,
+                                            "B": 1,
+                                            "A": 1
+                                        },
+                                        "endColor": {
+                                            "R": 1,
+                                            "G": 1,
+                                            "B": 1,
+                                            "A": 1
+                                        },
+                                        "maxLifespan": 1.3597750663757324,
+                                        "gravityMagnitude": 0,
+                                        "gravityDirection": {
+                                            "x": 0,
+                                            "y": 0,
+                                            "z": 0
+                                        },
+                                        "animationFramesPerSecond": 10
+                                    },
+                                    "maximum": {
+                                        "directionalChange": {
+                                            "x": 0,
+                                            "y": 0,
+                                            "z": -170.18182373046875
+                                        },
+                                        "rotationalChange": {
+                                            "x": 0,
+                                            "y": 0,
+                                            "z": 0
+                                        },
+                                        "beginSpeed": 428.42974853515625,
+                                        "endSpeed": -300.49591064453125,
+                                        "beginScale": {
+                                            "x": 6,
+                                            "y": 6,
+                                            "z": 6
+                                        },
+                                        "endScale": {
+                                            "x": 6,
+                                            "y": 6,
+                                            "z": 6
+                                        },
+                                        "beginColor": {
+                                            "R": 1,
+                                            "G": 1,
+                                            "B": 1,
+                                            "A": 1
+                                        },
+                                        "endColor": {
+                                            "R": 1,
+                                            "G": 1,
+                                            "B": 1,
+                                            "A": 1
+                                        },
+                                        "maxLifespan": 1.3597750663757324,
+                                        "gravityMagnitude": 0,
+                                        "gravityDirection": {
+                                            "x": 0,
+                                            "y": 0,
+                                            "z": 0
+                                        },
+                                        "animationFramesPerSecond": 10
+                                    }
+                                },
+                                "node": {
+                                    "translateTo": {
+                                        "x": 139.99996948242187,
+                                        "y": 118,
+                                        "z": 0
+                                    },
+                                    "rotateTo": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "rotateOrigin": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "scaleTo": {
+                                        "x": 1,
+                                        "y": 1,
+                                        "z": 1
+                                    },
+                                    "sortDepth": 4,
+                                    "isVisible": true,
+                                    "points": [],
+                                    "drawList": [],
+                                    "shaderId": "default",
+                                    "texture": {
                                         "polymorphic_id": 1073741824,
                                         "ptr_wrapper": {
-                                            "id": 2147483652,
+                                            "id": 2147483653,
                                             "data": {
                                                 "handleRegion": {
                                                     "minPoint": {
-                                                        "x": 270,
-                                                        "y": 220,
+                                                        "x": 0,
+                                                        "y": 96,
                                                         "z": 0
                                                     },
                                                     "maxPoint": {
-                                                        "x": 540,
-                                                        "y": 440,
+                                                        "x": 32,
+                                                        "y": 128,
                                                         "z": 0
                                                     }
                                                 },
                                                 "handlePercent": {
                                                     "minPoint": {
-                                                        "x": 0.263671875,
-                                                        "y": 0.21484375,
+                                                        "x": 0,
+                                                        "y": 0.375,
                                                         "z": 0
                                                     },
                                                     "maxPoint": {
-                                                        "x": 0.52734375,
-                                                        "y": 0.4296875,
+                                                        "x": 0.125,
+                                                        "y": 0.5,
                                                         "z": 0
                                                     }
                                                 },
@@ -167,17 +466,351 @@
                                                     "polymorphic_id": 2147483651,
                                                     "polymorphic_name": "MV::PackedTextureDefinition",
                                                     "ptr_wrapper": {
-                                                        "id": 2147483653,
+                                                        "id": 2147483654,
                                                         "data": {
                                                             "texturePack": {
                                                                 "ptr_wrapper": {
-                                                                    "id": 2147483654,
+                                                                    "id": 2147483655,
                                                                     "data": {
                                                                         "packedTexture": {
                                                                             "locked_ptr": {
                                                                                 "polymorphic_id": 1073741824,
                                                                                 "ptr_wrapper": {
+                                                                                    "id": 6
+                                                                                }
+                                                                            }
+                                                                        },
+                                                                        "shapes": [
+                                                                            {
+                                                                                "id": "joint.png",
+                                                                                "bounds": {
+                                                                                    "minPoint": {
+                                                                                        "x": 0,
+                                                                                        "y": 0,
+                                                                                        "z": 0
+                                                                                    },
+                                                                                    "maxPoint": {
+                                                                                        "x": 256,
+                                                                                        "y": 32,
+                                                                                        "z": 0
+                                                                                    }
+                                                                                },
+                                                                                "texture": {
+                                                                                    "polymorphic_id": 0
+                                                                                }
+                                                                            },
+                                                                            {
+                                                                                "id": "platform.png",
+                                                                                "bounds": {
+                                                                                    "minPoint": {
+                                                                                        "x": 0,
+                                                                                        "y": 32,
+                                                                                        "z": 0
+                                                                                    },
+                                                                                    "maxPoint": {
+                                                                                        "x": 256,
+                                                                                        "y": 96,
+                                                                                        "z": 0
+                                                                                    }
+                                                                                },
+                                                                                "texture": {
+                                                                                    "polymorphic_id": 0
+                                                                                }
+                                                                            },
+                                                                            {
+                                                                                "id": "rock.png",
+                                                                                "bounds": {
+                                                                                    "minPoint": {
+                                                                                        "x": 0,
+                                                                                        "y": 96,
+                                                                                        "z": 0
+                                                                                    },
+                                                                                    "maxPoint": {
+                                                                                        "x": 32,
+                                                                                        "y": 128,
+                                                                                        "z": 0
+                                                                                    }
+                                                                                },
+                                                                                "texture": {
+                                                                                    "polymorphic_id": 0
+                                                                                }
+                                                                            },
+                                                                            {
+                                                                                "id": "slice.png",
+                                                                                "bounds": {
+                                                                                    "minPoint": {
+                                                                                        "x": 32,
+                                                                                        "y": 96,
+                                                                                        "z": 0
+                                                                                    },
+                                                                                    "maxPoint": {
+                                                                                        "x": 64,
+                                                                                        "y": 128,
+                                                                                        "z": 0
+                                                                                    }
+                                                                                },
+                                                                                "texture": {
+                                                                                    "polymorphic_id": 0
+                                                                                }
+                                                                            },
+                                                                            {
+                                                                                "id": "spatula.png",
+                                                                                "bounds": {
+                                                                                    "minPoint": {
+                                                                                        "x": 0,
+                                                                                        "y": 128,
+                                                                                        "z": 0
+                                                                                    },
+                                                                                    "maxPoint": {
+                                                                                        "x": 256,
+                                                                                        "y": 160,
+                                                                                        "z": 0
+                                                                                    }
+                                                                                },
+                                                                                "texture": {
+                                                                                    "polymorphic_id": 0
+                                                                                }
+                                                                            }
+                                                                        ],
+                                                                        "maximumExtent": {
+                                                                            "width": 2147483647,
+                                                                            "height": 2147483647,
+                                                                            "depth": 0
+                                                                        },
+                                                                        "contentExtent": {
+                                                                            "width": 256,
+                                                                            "height": 160,
+                                                                            "depth": 0
+                                                                        },
+                                                                        "containers": [
+                                                                            {
+                                                                                "minPoint": {
+                                                                                    "x": 256,
+                                                                                    "y": 0,
+                                                                                    "z": 0
+                                                                                },
+                                                                                "maxPoint": {
+                                                                                    "x": 2147483647,
+                                                                                    "y": 2147483647,
+                                                                                    "z": 0
+                                                                                }
+                                                                            },
+                                                                            {
+                                                                                "minPoint": {
+                                                                                    "x": 0,
+                                                                                    "y": 160,
+                                                                                    "z": 0
+                                                                                },
+                                                                                "maxPoint": {
+                                                                                    "x": 2147483647,
+                                                                                    "y": 2147483647,
+                                                                                    "z": 0
+                                                                                }
+                                                                            },
+                                                                            {
+                                                                                "minPoint": {
+                                                                                    "x": 64,
+                                                                                    "y": 96,
+                                                                                    "z": 0
+                                                                                },
+                                                                                "maxPoint": {
+                                                                                    "x": 2147483647,
+                                                                                    "y": 128,
+                                                                                    "z": 0
+                                                                                }
+                                                                            }
+                                                                        ],
+                                                                        "consolidatedTexture": {
+                                                                            "polymorphic_id": 1073741824,
+                                                                            "ptr_wrapper": {
+                                                                                "id": 2147483656,
+                                                                                "data": {
+                                                                                    "powerTwo": true,
+                                                                                    "repeat": false,
+                                                                                    "base": {
+                                                                                        "name": "Assets/Atlases\\Twitch.png",
+                                                                                        "size": {
+                                                                                            "width": 0,
+                                                                                            "height": 0,
+                                                                                            "depth": 0
+                                                                                        },
+                                                                                        "contentSize": {
+                                                                                            "width": 256,
+                                                                                            "height": 256,
+                                                                                            "depth": 0
+                                                                                        },
+                                                                                        "handles": []
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            },
+                                                            "base": {
+                                                                "backgroundColor": {
+                                                                    "R": 0,
+                                                                    "G": 0,
+                                                                    "B": 0,
+                                                                    "A": 0
+                                                                },
+                                                                "base": {
+                                                                    "name": "TexturePack",
+                                                                    "size": {
+                                                                        "width": 256,
+                                                                        "height": 256,
+                                                                        "depth": 0
+                                                                    },
+                                                                    "contentSize": {
+                                                                        "width": 256,
+                                                                        "height": 160,
+                                                                        "depth": 0
+                                                                    },
+                                                                    "handles": [
+                                                                        {
+                                                                            "locked_ptr": {
+                                                                                "polymorphic_id": 1073741824,
+                                                                                "ptr_wrapper": {
                                                                                     "id": 5
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    ]
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "name": "TexturePack"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "polymorphic_id": 2,
+                        "ptr_wrapper": {
+                            "id": 2147483657,
+                            "data": {
+                                "node": {
+                                    "translateTo": {
+                                        "x": 972.9998779296875,
+                                        "y": 51.999969482421875,
+                                        "z": 0
+                                    },
+                                    "rotateTo": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "rotateOrigin": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "z": 0
+                                    },
+                                    "scaleTo": {
+                                        "x": 1,
+                                        "y": 1,
+                                        "z": 1
+                                    },
+                                    "sortDepth": 5,
+                                    "isVisible": true,
+                                    "points": [
+                                        {
+                                            "x": 0,
+                                            "y": 0,
+                                            "z": 0,
+                                            "R": 0.87450981140136719,
+                                            "G": 0.87450981140136719,
+                                            "B": 0.87450981140136719,
+                                            "A": 1,
+                                            "textureX": 0.263671875,
+                                            "textureY": 0
+                                        },
+                                        {
+                                            "x": 0,
+                                            "y": 111.00001525878906,
+                                            "z": 0,
+                                            "R": 0.87450981140136719,
+                                            "G": 0.87450981140136719,
+                                            "B": 0.87450981140136719,
+                                            "A": 1,
+                                            "textureX": 0.263671875,
+                                            "textureY": 0.21484375
+                                        },
+                                        {
+                                            "x": 132,
+                                            "y": 111.00001525878906,
+                                            "z": 0,
+                                            "R": 0.87450981140136719,
+                                            "G": 0.87450981140136719,
+                                            "B": 0.87450981140136719,
+                                            "A": 1,
+                                            "textureX": 0.52734375,
+                                            "textureY": 0.21484375
+                                        },
+                                        {
+                                            "x": 132,
+                                            "y": 0,
+                                            "z": 0,
+                                            "R": 0.87450981140136719,
+                                            "G": 0.87450981140136719,
+                                            "B": 0.87450981140136719,
+                                            "A": 1,
+                                            "textureX": 0.52734375,
+                                            "textureY": 0
+                                        }
+                                    ],
+                                    "drawList": [],
+                                    "shaderId": "default",
+                                    "texture": {
+                                        "polymorphic_id": 1073741824,
+                                        "ptr_wrapper": {
+                                            "id": 2147483658,
+                                            "data": {
+                                                "handleRegion": {
+                                                    "minPoint": {
+                                                        "x": 270,
+                                                        "y": 0,
+                                                        "z": 0
+                                                    },
+                                                    "maxPoint": {
+                                                        "x": 540,
+                                                        "y": 220,
+                                                        "z": 0
+                                                    }
+                                                },
+                                                "handlePercent": {
+                                                    "minPoint": {
+                                                        "x": 0.263671875,
+                                                        "y": 0,
+                                                        "z": 0
+                                                    },
+                                                    "maxPoint": {
+                                                        "x": 0.52734375,
+                                                        "y": 0.21484375,
+                                                        "z": 0
+                                                    }
+                                                },
+                                                "resizeToParent": false,
+                                                "flipX": false,
+                                                "flipY": false,
+                                                "textureDefinition": {
+                                                    "polymorphic_id": 3,
+                                                    "ptr_wrapper": {
+                                                        "id": 2147483659,
+                                                        "data": {
+                                                            "texturePack": {
+                                                                "ptr_wrapper": {
+                                                                    "id": 2147483660,
+                                                                    "data": {
+                                                                        "packedTexture": {
+                                                                            "locked_ptr": {
+                                                                                "polymorphic_id": 1073741824,
+                                                                                "ptr_wrapper": {
+                                                                                    "id": 11
                                                                                 }
                                                                             }
                                                                         },
@@ -378,7 +1011,7 @@
                                                                         "consolidatedTexture": {
                                                                             "polymorphic_id": 1073741824,
                                                                             "ptr_wrapper": {
-                                                                                "id": 2147483655,
+                                                                                "id": 2147483661,
                                                                                 "data": {
                                                                                     "powerTwo": true,
                                                                                     "repeat": false,
@@ -426,7 +1059,7 @@
                                                                             "locked_ptr": {
                                                                                 "polymorphic_id": 1073741824,
                                                                                 "ptr_wrapper": {
-                                                                                    "id": 4
+                                                                                    "id": 10
                                                                                 }
                                                                             }
                                                                         }
@@ -439,169 +1072,6 @@
                                                 "name": "TexturePack"
                                             }
                                         }
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    {
-                        "polymorphic_id": 2147483652,
-                        "polymorphic_name": "MV::Scene::Emitter",
-                        "ptr_wrapper": {
-                            "id": 2147483656,
-                            "data": {
-                                "enabled": true,
-                                "spawnProperties": {
-                                    "maximumParticles": 4294967295,
-                                    "minimumSpawnRate": 0,
-                                    "maximumSpawnRate": 0,
-                                    "minimumPosition": {
-                                        "x": 0,
-                                        "y": 0,
-                                        "z": 0
-                                    },
-                                    "maximumPosition": {
-                                        "x": 48,
-                                        "y": 42,
-                                        "z": 0
-                                    },
-                                    "minimumDirection": {
-                                        "x": 0,
-                                        "y": 0,
-                                        "z": 0
-                                    },
-                                    "maximumDirection": {
-                                        "x": 0,
-                                        "y": 0,
-                                        "z": 720
-                                    },
-                                    "minimumRotation": {
-                                        "x": 0,
-                                        "y": 0,
-                                        "z": 0
-                                    },
-                                    "maximumRotation": {
-                                        "x": 0,
-                                        "y": 0,
-                                        "z": 0
-                                    },
-                                    "minimum": {
-                                        "directionalChange": {
-                                            "x": 0,
-                                            "y": 0,
-                                            "z": 0
-                                        },
-                                        "rotationalChange": {
-                                            "x": 0,
-                                            "y": 0,
-                                            "z": 0
-                                        },
-                                        "beginSpeed": 206.61114501953125,
-                                        "endSpeed": 206.61114501953125,
-                                        "beginScale": {
-                                            "x": 6,
-                                            "y": 6,
-                                            "z": 6
-                                        },
-                                        "endScale": {
-                                            "x": 6,
-                                            "y": 6,
-                                            "z": 6
-                                        },
-                                        "beginColor": {
-                                            "R": 0.37272727489471436,
-                                            "G": 1,
-                                            "B": 1,
-                                            "A": 1
-                                        },
-                                        "endColor": {
-                                            "R": 0.81818175315856934,
-                                            "G": 1,
-                                            "B": 1,
-                                            "A": 0
-                                        },
-                                        "maxLifespan": 1.3597750663757324,
-                                        "gravityMagnitude": 0,
-                                        "gravityDirection": {
-                                            "x": 0,
-                                            "y": 0,
-                                            "z": 0
-                                        },
-                                        "animationFramesPerSecond": 10
-                                    },
-                                    "maximum": {
-                                        "directionalChange": {
-                                            "x": 0,
-                                            "y": 0,
-                                            "z": 0
-                                        },
-                                        "rotationalChange": {
-                                            "x": 0,
-                                            "y": 0,
-                                            "z": 0
-                                        },
-                                        "beginSpeed": 206.61114501953125,
-                                        "endSpeed": 206.61114501953125,
-                                        "beginScale": {
-                                            "x": 6,
-                                            "y": 6,
-                                            "z": 6
-                                        },
-                                        "endScale": {
-                                            "x": 6,
-                                            "y": 6,
-                                            "z": 6
-                                        },
-                                        "beginColor": {
-                                            "R": 0.37272727489471436,
-                                            "G": 1,
-                                            "B": 1,
-                                            "A": 1
-                                        },
-                                        "endColor": {
-                                            "R": 0.81818175315856934,
-                                            "G": 1,
-                                            "B": 1,
-                                            "A": 0
-                                        },
-                                        "maxLifespan": 1.3597750663757324,
-                                        "gravityMagnitude": 0,
-                                        "gravityDirection": {
-                                            "x": 0,
-                                            "y": 0,
-                                            "z": 0
-                                        },
-                                        "animationFramesPerSecond": 10
-                                    }
-                                },
-                                "node": {
-                                    "translateTo": {
-                                        "x": 309,
-                                        "y": 310,
-                                        "z": 0
-                                    },
-                                    "rotateTo": {
-                                        "x": 0,
-                                        "y": 0,
-                                        "z": 0
-                                    },
-                                    "rotateOrigin": {
-                                        "x": 0,
-                                        "y": 0,
-                                        "z": 0
-                                    },
-                                    "scaleTo": {
-                                        "x": 1,
-                                        "y": 1,
-                                        "z": 1
-                                    },
-                                    "sortDepth": 3,
-                                    "isVisible": true,
-                                    "points": [],
-                                    "drawList": [],
-                                    "shaderId": "default",
-                                    "texture": {
-                                        "polymorphic_id": 0
                                     }
                                 }
                             }

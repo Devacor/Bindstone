@@ -7,12 +7,6 @@
 #include "editorPanels.h"
 #include "editorFactories.h"
 
-namespace MV{
-	namespace Scene {
-		class Node;
-	}
-}
-
 class TexturePicker {
 public:
 	TexturePicker(std::shared_ptr<MV::Scene::Node> a_root, SharedResources a_sharedResources, std::function<void(std::shared_ptr<MV::TextureHandle>, bool)> a_setter):
@@ -39,7 +33,10 @@ private:
 			onAccept.connect("Null", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				setter(nullptr, true);
 			});
+		auto oldNode = root->get("TexturePickerGrid", false);
+		auto pos = oldNode ? oldNode->position() : MV::Point<>(200.0f, 0.0f);
 		box = makeDraggableBox("TexturePicker", root, grid->basicAABB().size(), *sharedResources.mouse);
+		box->parent()->position(pos);
 		box->add("TexturePickerGrid", grid);
 		for(auto&& packId : packs){
 			auto button = makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, packId, {100.0f, 27.0f}, MV::stringToWide(packId));
@@ -56,7 +53,10 @@ private:
 			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				initializeRootPicker();
 			});
+		auto oldNode = root->get("TexturePickerGrid", false);
+		auto pos = oldNode ? oldNode->position() : MV::Point<>(200.0f, 0.0f);
 		box = makeDraggableBox("TexturePicker", root, grid->basicAABB().size(), *sharedResources.mouse);
+		box->parent()->position(pos);
 		box->add("TexturePickerGrid", grid);
 		auto pack = sharedResources.textures->pack(a_packId);
 		for(auto&& textureId : pack->handleIds()){
@@ -97,6 +97,12 @@ public:
 	EditorControls* root(std::shared_ptr<MV::Scene::Node> a_newRoot){
 		rootScene = a_newRoot;
 		return this;
+	}
+
+	void onSceneDrag(const MV::Point<int> &a_delta){
+		if(currentPanel){
+			currentPanel->onSceneDrag(a_delta);
+		}
 	}
 
 	template <typename PanelType, typename ...Arg>

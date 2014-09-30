@@ -25,6 +25,9 @@ namespace MV {
 	enum AngleType {DEGREES, RADIANS};
 	const double PIE = 3.14159265358979323846;
 
+	const float MV_EPSILONF = .0001f;
+	const double MV_EPSILON = .00000001f;
+
 	std::string guid(std::string a_baseName = "guid_");
 
 	void initializeFilesystem();

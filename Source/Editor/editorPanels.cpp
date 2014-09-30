@@ -25,8 +25,8 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	controls(a_controls) {
 
 	auto node = panel.content();
-	auto grid = node->make<MV::Scene::Grid>("Background")->rowWidth(126.0f)->
-		color({BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}})->
+	auto grid = node->make<MV::Scene::Grid>("Background")->rowWidth(116.0f)->
+		color({BOX_BACKGROUND})->margin({5.0f, 4.0f})->
 		padding({3.0f, 4.0f})->position({0.0f, 20.0f});
 	auto buttonSize = MV::size(110.0f, 27.0f);
 	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
@@ -144,8 +144,8 @@ EditorPanel(a_panel),
 controls(a_controls) {
 
 	auto node = panel.content();
-	auto grid = node->make<MV::Scene::Grid>("Background")->rowWidth(242.0f)->
-		color({InterfaceColors::BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}})->
+	auto grid = node->make<MV::Scene::Grid>("Background")->rowWidth(232.0f)->
+		color({InterfaceColors::BOX_BACKGROUND})->margin({5.0f, 4.0f})->
 		padding({3.0f, 4.0f})->position({0.0f, 20.0f});
 	auto buttonSize = MV::size(226.0f, 27.0f);
 	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
@@ -431,8 +431,8 @@ void SelectedEmitterEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
 DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	EditorPanel(a_panel) {
 	auto node = panel.content();
-	auto grid = node->make<MV::Scene::Grid>("grid")->rowWidth(126.0f)->
-		color({InterfaceColors::BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}})->
+	auto grid = node->make<MV::Scene::Grid>("grid")->rowWidth(116.0f)->
+		color({InterfaceColors::BOX_BACKGROUND})->margin({5.0f, 4.0f})->
 		padding({3.0f, 4.0f})->position({0.0f, 20.0f});
 	auto createButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Create", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Create"));
 	fileName = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Filename", MV::size(110.0f, 27.0f), UTF_CHAR_STR("scene.scene"));
@@ -474,8 +474,8 @@ ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel):
 	EditorPanel(a_panel) {
 
 	auto node = panel.content();
-	auto grid = node->make<MV::Scene::Grid>("grid")->rowWidth(126.0f)->
-		color({InterfaceColors::BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}})->
+	auto grid = node->make<MV::Scene::Grid>("grid")->rowWidth(116.0f)->
+		color({InterfaceColors::BOX_BACKGROUND})->margin({5.0f, 4.0f})->
 		padding({3.0f, 4.0f})->position({0.0f, 20.0f});
 	auto createRectangleButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Rectangle", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Rectangle"));
 	auto createSpineButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Spine", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Spine"));

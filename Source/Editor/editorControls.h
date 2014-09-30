@@ -24,7 +24,7 @@ public:
 
 private:
 	void initializeRootPicker(){
-		grid = MV::Scene::Grid::make(root->getRenderer(), MV::size(100.0f, 27.0f))->padding({3.0f, 4.0f})->rows(6)->color({BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}});
+		grid = MV::Scene::Grid::make(root->getRenderer(), MV::size(100.0f, 27.0f))->padding({3.0f, 4.0f})->rows(6)->color({BOX_BACKGROUND})->margin({5.0f, 4.0f});
 		makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, "Back", {100.0f, 27.0f}, UTF_CHAR_STR("Back"))->
 			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				setter(nullptr, false);
@@ -48,7 +48,7 @@ private:
 
 	void initializeImagePicker(const std::string &a_packId){
 		auto cellSize = MV::size(64.0f, 64.0f);
-		grid = MV::Scene::Grid::make(root->getRenderer(), cellSize)->padding({3.0f, 4.0f})->rows(6)->color({BOX_BACKGROUND})->margin({{5.0f, 4.0f}, {0.0f, 8.0f}});
+		grid = MV::Scene::Grid::make(root->getRenderer(), cellSize)->padding({3.0f, 4.0f})->rows(6)->color({BOX_BACKGROUND})->margin({5.0f, 4.0f});
 		makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, "Back", cellSize, UTF_CHAR_STR("Back"))->
 			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				initializeRootPicker();

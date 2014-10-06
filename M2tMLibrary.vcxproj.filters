@@ -224,6 +224,9 @@
     <ClCompile Include="Source\Render\sharedTextures.cpp">
       <Filter>Source Files\Render</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Editor\editorSceneGraphPanel.cpp">
+      <Filter>Source Files\Game\Editor</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -272,9 +275,6 @@
       <Filter>Source Files\Game</Filter>
     </ClInclude>
     <ClInclude Include="Source\Network\network.h">
-      <Filter>Source Files\Network</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Network\package.h">
       <Filter>Source Files\Network</Filter>
     </ClInclude>
     <ClInclude Include="Source\Utility\scopeGuard.hpp">
@@ -603,6 +603,9 @@
     </ClInclude>
     <ClInclude Include="Source\Editor\editorSceneGraphPanel.h">
       <Filter>Source Files\Game\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Network\package.h">
+      <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

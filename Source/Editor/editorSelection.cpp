@@ -64,7 +64,7 @@ Selection::Selection(std::shared_ptr<MV::Scene::Node> a_scene, MV::MouseState &a
 
 void EditableRectangle::resetHandles() {
 	removeHandles();
-	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenAABB());
+	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenAABB(false));
 
 	MV::Size<> currentDimensions = rectBox.size();
 	if(aspectSize.width != 0.0f && aspectSize.height != 0.0f){
@@ -213,7 +213,7 @@ void EditableRectangle::size(MV::Size<> a_newSize){
 }
 
 MV::Size<> EditableRectangle::size(){
-	return elementToEdit->localAABB().size();
+	return elementToEdit->localAABB(false).size();
 }
 
 void EditableRectangle::texture(const std::shared_ptr<MV::TextureHandle> a_handle) {
@@ -235,7 +235,7 @@ void EditableRectangle::aspect(MV::Size<> a_newAspect) {
 
 void EditableEmitter::resetHandles() {
 	removeHandles();
-	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenAABB());
+	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenAABB(false));
 
 	auto handleSize = MV::point(8.0f, 8.0f);
 	EditableEmitter* self = this;

@@ -91,7 +91,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::remove(const std::string &a_childId){
-			auto foundChild = std::find_if(drawList.begin(), drawList.end(), [&](const std::shared_ptr<Node> a_node){return a_node->name() == a_childId;});
+			auto foundChild = std::find_if(drawList.begin(), drawList.end(), [&](const std::shared_ptr<Node> a_node){return a_node->id() == a_childId;});
 			if(foundChild != drawList.end()){
 				auto removed = *foundChild;
 				drawList.erase(foundChild);
@@ -117,7 +117,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::get(const std::string &a_childId, bool a_throwOnNull){
-			auto cell = std::find_if(drawList.begin(), drawList.end(), [&](const std::shared_ptr<Node> a_node){return a_node->name() == a_childId; });
+			auto cell = std::find_if(drawList.begin(), drawList.end(), [&](const std::shared_ptr<Node> a_node){return a_node->id() == a_childId; });
 			if(cell != drawList.end()){
 				return *cell;
 			}
@@ -131,11 +131,11 @@ namespace MV {
 		}
 
 		bool Node::operator<(Node &a_other){
-			return (depth() == a_other.depth() && name() < a_other.name()) || depth() < a_other.depth();
+			return (depth() == a_other.depth() && id() < a_other.id()) || depth() < a_other.depth();
 		}
 
 		bool Node::operator>(Node &a_other){
-			return (depth() == a_other.depth() && name() > a_other.name()) || depth() > a_other.depth();
+			return (depth() == a_other.depth() && id() > a_other.id()) || depth() > a_other.depth();
 		}
 
 		bool Node::operator==(Node &a_other){
@@ -658,11 +658,7 @@ namespace MV {
 		}
 
 		std::vector<std::shared_ptr<Node>> Node::children() {
-			std::vector<std::shared_ptr<Node>> childNodes;
-			std::transform(drawList.begin(), drawList.end(), std::back_inserter(childNodes), [](DrawListType::value_type shape){
-				return shape;
-			});
-			return childNodes;
+			return drawList;
 		}
 
 		PointPrecision Node::incrementRotation(PointPrecision a_zRotation) {
@@ -820,6 +816,24 @@ namespace MV {
 				i = myParent->indexOf(shared_from_this());
 			}
 			return i;
+		}
+
+		void Node::id(const std::string &a_newName) {
+			if(myParent){
+				auto thisShared = shared_from_this();
+				auto foundChild = std::find(myParent->drawList.begin(), myParent->drawList.end(), thisShared);
+				if(foundChild != drawList.end()){
+					auto removed = *foundChild;
+					myParent->drawList.erase(foundChild);
+				}
+
+				myParent->remove(a_newName);
+				nodeId = a_newName;
+
+				insertSorted(myParent->drawList, thisShared);
+			} else{
+				nodeId = a_newName;
+			}
 		}
 
 	}

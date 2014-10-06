@@ -12,7 +12,10 @@ Editor::Editor():
 	textLibrary(&renderer),
 	scene(MV::Scene::Node::make(&renderer)),
 	controls(MV::Scene::Node::make(&renderer)),
-	controlPanel(controls, scene, SharedResources(&pool, &textures, &textLibrary, &mouse)){
+	controlPanel(controls, scene, SharedResources(this, &pool, &textures, &textLibrary, &mouse)),
+	selectorPanel(scene, controls, SharedResources(this, &pool, &textures, &textLibrary, &mouse)){
+
+	scene->id("root");
 
 	initializeWindow();
 	initializeControls();
@@ -27,8 +30,13 @@ bool Editor::update(double dt){
 		accumulatedTime /= 2.0f;
 	}
 	fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
+	selectorPanel.update();
 	pool.run();
 	return !done;
+}
+
+void Editor::sceneUpdated(){
+	selectorPanel.refresh();
 }
 
 void Editor::initializeWindow(){
@@ -70,7 +78,7 @@ void Editor::initializeWindow(){
 
 	fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
 	std::vector<std::string> names{"patternTest1.png", "platform.png", "rock.png", "joint.png", "slice.png", "spatula.png"};
-
+	selectorPanel.refresh();
 	/*MV::TexturePack pack(&renderer);
 
 	std::ifstream stream("Combined.texture");
@@ -143,7 +151,11 @@ void Editor::handleInput(){
 
 void Editor::render(){
 	renderer.clearScreen();
-	scene = controlPanel.root();
+	if(controlPanel.root() != scene){
+		scene = controlPanel.root();
+		scene->id("root");
+		selectorPanel.refresh(scene);
+	}
 	scene->draw();
 	controls->draw();
 	renderer.updateScreen();

@@ -84,6 +84,7 @@ namespace MV {
 			onCancel(onCancelSlot),
 			onAccept(onAcceptSlot),
 			onDrag(onDragSlot),
+			onDrop(onDropSlot),
 			hookedUp(false){
 			auto alpha = MV::Color(1, 1, 1, 0);
 			for(auto &point : points){
@@ -147,17 +148,21 @@ namespace MV {
 		}
 
 		void Clickable::acceptUpClick() {
+			auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
+			bool inBounds = mouseInBounds(*mouse);
 			if(inPressEvent()){
-				auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
 				onMouseMoveHandle = nullptr;
 
 				isInPressEvent = false;
-				if(mouseInBounds(*mouse)){
+				if(inBounds){
 					onAcceptSlot(protectFromDismissal);
 				} else{
 					onCancelSlot(protectFromDismissal);
 				}
 				onReleaseSlot(protectFromDismissal);
+			}
+			if(inBounds){
+				onDropSlot(protectFromDismissal);
 			}
 		}
 
@@ -242,7 +247,8 @@ namespace MV {
 			onRelease(clickable->onReleaseSlot),
 			onDrag(clickable->onDragSlot),
 			onAccept(clickable->onAcceptSlot),
-			onCancel(clickable->onCancelSlot){
+			onCancel(clickable->onCancelSlot),
+			onDrop(clickable->onDropSlot){
 
 			clickable->parent(this);
 			idleSceneNode->parent(this);

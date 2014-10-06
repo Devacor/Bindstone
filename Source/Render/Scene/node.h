@@ -125,6 +125,13 @@ namespace MV {
 			virtual void setRenderer(Draw2D* a_renderer, bool includeChildren = true, bool includeParents = true);
 			Draw2D* getRenderer() const{ return renderer; }
 
+			void normalizeChildDepth() {
+				float currentDepth = 0.0f;
+				for(auto&& child : drawList){
+					child->depth(sortDepth++);
+				}
+			}
+
 			virtual void clear();
 
 			//For composite collections
@@ -156,7 +163,7 @@ namespace MV {
 
 			template<typename TypeToAdd>
 			std::shared_ptr<TypeToAdd> add(std::shared_ptr<TypeToAdd> a_childItem) {
-				return add(guid(), a_childItem);
+				return add(a_childItem->nodeId == "" ? guid() : a_childItem->nodeId, a_childItem);
 			}
 
 			std::shared_ptr<Node> remove(std::shared_ptr<Node> a_childItem);
@@ -331,7 +338,8 @@ namespace MV {
 			virtual BoxAABB<> localAABBImplementation(bool a_includeChildren, bool a_nestedCall);
 			virtual BoxAABB<> basicAABBImplementation() const;
 
-			std::string name() const{
+			void id(const std::string &a_newName);
+			std::string id() const{
 				return nodeId;
 			}
 		protected:
@@ -417,7 +425,9 @@ namespace MV {
 			template <class Archive>
 			void serialize(Archive & archive){
 				std::string shaderId = (shaderProgram != nullptr) ? shaderProgram->id() : "";
-				archive(CEREAL_NVP(translateTo),
+				archive(
+					CEREAL_NVP(nodeId),
+					CEREAL_NVP(translateTo),
 					CEREAL_NVP(rotateTo), CEREAL_NVP(rotateOrigin),
 					CEREAL_NVP(scaleTo),
 					CEREAL_NVP(sortDepth),
@@ -438,6 +448,7 @@ namespace MV {
 				construct(renderer);
 				std::string shaderId;
 				archive(
+					cereal::make_nvp("nodeId", construct->nodeId),
 					cereal::make_nvp("translateTo", construct->translateTo),
 					cereal::make_nvp("rotateTo", construct->rotateTo),
 					cereal::make_nvp("rotateOrigin", construct->rotateOrigin),

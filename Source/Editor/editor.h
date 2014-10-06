@@ -10,6 +10,7 @@
 #include "Network/package.h"
 #include "Interface/package.h"
 
+#include "editorSceneGraphPanel.h"
 #include "editorControls.h"
 
 #include <string>
@@ -24,6 +25,12 @@ public:
 	bool update(double dt);
 	void handleInput();
 	void render();
+	void sceneUpdated();
+
+	EditorControls& panel(){
+		return controlPanel;
+	}
+
 private:
 	Editor(const Editor &) = delete;
 	Editor& operator=(const Editor &) = delete;
@@ -53,6 +60,7 @@ private:
 	float accumulatedFrames = 0.0f;
 
 	EditorControls controlPanel;
+	SceneGraphPanel selectorPanel;
 };
 
 void sdl_quit(void);

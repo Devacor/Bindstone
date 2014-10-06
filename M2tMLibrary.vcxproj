@@ -197,6 +197,7 @@
     <ClCompile Include="Source\Editor\editorControls.cpp" />
     <ClCompile Include="Source\Editor\editorFactories.cpp" />
     <ClCompile Include="Source\Editor\editorPanels.cpp" />
+    <ClCompile Include="Source\Editor\editorSceneGraphPanel.cpp" />
     <ClCompile Include="Source\Editor\editorSelection.cpp" />
     <ClCompile Include="Source\exampleCode.cpp" />
     <ClCompile Include="Source\Game\game.cpp" />

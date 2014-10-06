@@ -29,6 +29,8 @@ namespace MV {
 			Slot<ButtonSlotSignature> onPressSlot;
 			Slot<ButtonSlotSignature> onReleaseSlot;
 
+			Slot<ButtonSlotSignature> onDropSlot;
+
 			//called when release happens over top of the current node.
 			Slot<ButtonSlotSignature> onAcceptSlot;
 			//called when release happens outside of the current node.
@@ -54,6 +56,7 @@ namespace MV {
 			SlotRegister<ButtonSlotSignature> onCancel;
 
 			SlotRegister<DragSlotSignature> onDrag;
+			SlotRegister<ButtonSlotSignature> onDrop;
 
 			void includeChildrenForHitDetection(){
 				shouldUseChildrenInHitDetection = true;
@@ -168,6 +171,7 @@ namespace MV {
 			SlotRegister<ButtonSlotSignature> onCancel;
 
 			SlotRegister<DragSlotSignature> onDrag;
+			SlotRegister<ButtonSlotSignature> onDrop;
 
 			MouseState* getMouse() const;
 

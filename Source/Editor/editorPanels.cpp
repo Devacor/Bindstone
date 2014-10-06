@@ -1,6 +1,7 @@
 #include "editorPanels.h"
 #include "editorControls.h"
 #include "editorFactories.h"
+#include "editor.h"
 
 EditorPanel::EditorPanel(EditorControls &a_panel):
 	panel(a_panel) {
@@ -35,6 +36,13 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	});
 
 	OpenTexturePicker();
+
+	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
+		text(MV::stringToWide(controls->elementToEdit->id()))->
+		onEnter.connect("rename", [&](std::shared_ptr<MV::Scene::Text> a_text){
+			controls->elementToEdit->id(MV::wideToString(a_text->text()));
+			panel.resources().editor->sceneUpdated();
+		});
 
 	float textboxWidth = 52.0f;
 	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f));
@@ -113,7 +121,7 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 			height->number(static_cast<int>(controls->size().height + .5f));
 		};
 	}
-	auto deselectLocalAABB = deselectButton->localAABB();
+	auto deselectLocalAABB = deselectButton->basicAABB();
 
 	panel.updateBoxHeader(grid->basicAABB().width());
 
@@ -121,6 +129,7 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 }
 
 void SelectedRectangleEditorPanel::OpenTexturePicker() {
+	clearTexturePicker();
 	picker = std::make_shared<TexturePicker>(panel.editor(), panel.resources(), [&](std::shared_ptr<MV::TextureHandle> a_handle, bool a_allowClear){
 		if(a_handle || a_allowClear){
 			controls->texture(a_handle);
@@ -152,7 +161,16 @@ controls(a_controls) {
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>){
 		panel.loadPanel<DeselectedEditorPanel>();
 	});
+
+	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
+		text(MV::stringToWide(controls->elementToEdit->id()))->
+		onEnter.connect("rename", [&](std::shared_ptr<MV::Scene::Text> a_text){
+			controls->elementToEdit->id(MV::wideToString(a_text->text()));
+			panel.resources().editor->sceneUpdated();
+		});
+
 	float textboxWidth = 52.0f;
+
 	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f));
 	posY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posY", MV::size(textboxWidth, 27.0f));
 
@@ -402,7 +420,7 @@ controls(a_controls) {
 		height->number(std::floor(controls->size().height + .5f));
 	};
 
-	auto deselectLocalAABB = deselectButton->localAABB();
+	auto deselectLocalAABB = deselectButton->basicAABB();
 
 	panel.updateBoxHeader(grid->basicAABB().width());
 
@@ -513,7 +531,9 @@ void ChooseElementCreationType::createRectangle(const MV::BoxAABB<int> &a_select
 
 	auto newShape = panel.root()->make<MV::Scene::Rectangle>(MV::guid("rectangle_"), transformedSelection.size())->position(transformedSelection.minPoint);
 	newShape->color({CREATED_DEFAULT});
-	 
+	
+	panel.resources().editor->sceneUpdated();
+
 	panel.loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(newShape, panel.editor(), panel.resources().mouse));
 }
 
@@ -525,6 +545,8 @@ void ChooseElementCreationType::createEmitter(const MV::BoxAABB<int> &a_selected
 	auto editableEmitter = std::make_shared<EditableEmitter>(newEmitter, panel.editor(), panel.resources().mouse);
 	editableEmitter->size(transformedSelection.size());
 
+	panel.resources().editor->sceneUpdated();
+
 	panel.loadPanel<SelectedEmitterEditorPanel>(editableEmitter);
 }
 
@@ -535,6 +557,8 @@ void ChooseElementCreationType::createSpine(const MV::BoxAABB<int> &a_selected) 
 	auto newEmitter = panel.root()->make<MV::Scene::Emitter>(MV::guid("spine_"), panel.resources().pool)->position(transformedSelection.minPoint);
 	auto editableEmitter = std::make_shared<EditableEmitter>(newEmitter, panel.editor(), panel.resources().mouse);
 	editableEmitter->size(transformedSelection.size());
+
+	panel.resources().editor->sceneUpdated();
 
 	panel.loadPanel<SelectedEmitterEditorPanel>(editableEmitter);
 }

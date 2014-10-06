@@ -32,13 +32,13 @@ public:
 	void repositionHandles(bool a_fireOnChange = true);
 
 	std::function<void(EditableRectangle*)> onChange;
+
+	std::shared_ptr<MV::Scene::Rectangle> elementToEdit;
 private:
 
 	MV::MouseState *mouse;
 
 	MV::Size<> aspectSize;
-
-	std::shared_ptr<MV::Scene::Rectangle> elementToEdit;
 
 	std::shared_ptr<MV::Scene::Clickable> topLeftSizeHandle;
 	std::shared_ptr<MV::Scene::Clickable> topRightSizeHandle;

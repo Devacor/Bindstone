@@ -77,7 +77,8 @@ namespace MV{
 						incrementCursor(1);
 					}
 				} else if(event.key.keysym.sym == SDLK_RETURN){
-					onEnterSlot(std::static_pointer_cast<Text>(shared_from_this()));
+					auto self = std::static_pointer_cast<Text>(shared_from_this());
+					onEnterSlot(self);
 				}
 			}
 			return false;

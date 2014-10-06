@@ -10,6 +10,10 @@ enum InterfaceColors {
 	BUTTON_BOTTOM_IDLE = 0x636363,
 	BUTTON_TOP_ACTIVE = 0x3d3d3d,
 	BUTTON_BOTTOM_ACTIVE = 0x323232,
+	SCENE_BUTTON_TOP_IDLE = 0x494949,
+	SCENE_BUTTON_BOTTOM_IDLE = 0x3e3e3e,
+	SCENE_BUTTON_TOP_ACTIVE = 0x595959,
+	SCENE_BUTTON_BOTTOM_ACTIVE = 0x4e4e4e,
 	TEXTBOX_TOP = 0x303030,
 	TEXTBOX_BOTTOM = 0x414141,
 	LABEL_TOP = 0x414141,
@@ -21,18 +25,20 @@ enum InterfaceColors {
 	SLIDER_BACKGROUND = 0x2c2e36,
 	SIDER_HANDLE = 0x516191
 };
-
+class Editor;
 struct SharedResources {
-	SharedResources(MV::ThreadPool *a_pool, MV::SharedTextures *a_textures, MV::TextLibrary *a_textLibrary, MV::MouseState *a_mouse):
+	SharedResources(Editor* a_editor, MV::ThreadPool *a_pool, MV::SharedTextures *a_textures, MV::TextLibrary *a_textLibrary, MV::MouseState *a_mouse):
 		pool(a_pool),
 		textures(a_textures),
 		textLibrary(a_textLibrary),
-		mouse(a_mouse){
+		mouse(a_mouse),
+		editor(a_editor){
 	}
 	MV::TextLibrary *textLibrary;
 	MV::MouseState *mouse;
 	MV::ThreadPool *pool;
 	MV::SharedTextures *textures;
+	Editor* editor;
 };
 
 #endif

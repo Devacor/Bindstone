@@ -100,13 +100,7 @@
     <ClCompile Include="Source\Render\Scene\button.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Render\Scene\primitives.cpp">
-      <Filter>Source Files\Render\Scene</Filter>
-    </ClCompile>
     <ClCompile Include="..\external\gl3w\src\gl3w.c" />
-    <ClCompile Include="Source\Render\Scene\sliced.cpp">
-      <Filter>Source Files\Render\Scene</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Render\Scene\text.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
@@ -215,9 +209,6 @@
     <ClCompile Include="Source\Utility\threadPool.cpp">
       <Filter>Source Files\Utility</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Render\Scene\rectangle.cpp">
-      <Filter>Source Files\Render\Scene</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Render\texturePacker.cpp">
       <Filter>Source Files\Render</Filter>
     </ClCompile>
@@ -226,6 +217,15 @@
     </ClCompile>
     <ClCompile Include="Source\Editor\editorSceneGraphPanel.cpp">
       <Filter>Source Files\Game\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\Scene\drawable.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\Scene\sprite.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\Scene\clickable.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -266,9 +266,6 @@
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
     <ClInclude Include="Source\Render\matrix.h">
-      <Filter>Source Files\Render</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Render\glext.h">
       <Filter>Source Files\Render</Filter>
     </ClInclude>
     <ClInclude Include="Source\Game\pathGrid.h">
@@ -457,16 +454,7 @@
     <ClInclude Include="Source\Render\Scene\package.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Render\Scene\sceneMessages.hpp">
-      <Filter>Source Files\Render\Scene</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Render\Scene\clipped.h">
-      <Filter>Source Files\Render\Scene</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Render\Scene\primitives.h">
-      <Filter>Source Files\Render\Scene</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Render\Scene\sliced.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
     <ClInclude Include="Source\Render\Scene\text.h">
@@ -592,9 +580,6 @@
     <ClInclude Include="Source\Render\texturePacker.h">
       <Filter>Source Files\Render</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Render\Scene\rectangle.h">
-      <Filter>Source Files\Render\Scene</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Utility\optionalCalls.hpp">
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
@@ -605,6 +590,15 @@
       <Filter>Source Files\Game\Editor</Filter>
     </ClInclude>
     <ClInclude Include="Source\Network\package.h">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\drawable.h">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\sprite.h">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\clickable.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
   </ItemGroup>

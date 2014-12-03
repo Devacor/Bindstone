@@ -3,17 +3,17 @@
 
 void EditorControls::updateBoxHeader(MV::PointPrecision a_width) {
 	if(!boxHeader){
-		boxHeader = draggableBox->make<MV::Scene::Clickable>("ContextMenuHandle", sharedResources.mouse, MV::size(a_width, 20.0f))->
+		boxHeader = draggableBox->make("ContextMenuHandle")->attach<MV::Scene::Clickable>(*sharedResources.mouse)->bounds(MV::size(a_width, 20.0f))->
 			color({BOX_HEADER});
 
-		boxHeaderDrag = boxHeader->onDrag.connect([&](std::shared_ptr<MV::Scene::Clickable> boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
+		boxHeader->onDrag.connect("header", [&](std::shared_ptr<MV::Scene::Clickable> boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
 			if(currentPanel){
 				currentPanel->cancelInput();
 			}
 			draggableBox->translate(MV::cast<MV::PointPrecision>(deltaPosition));
 		});
 	} else{
-		boxHeader->size({a_width, 20.0f});
+		boxHeader->bounds(MV::Size<>(a_width, 20.0f));
 	}
 }
 
@@ -29,7 +29,7 @@ EditorControls::EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::s
 	rootScene(a_root),
 	currentSelection(a_editor, *sharedResources.mouse){
 	
-	draggableBox = editorScene->make<MV::Scene::Node>("ContextMenu");
+	draggableBox = editorScene->make("ContextMenu");
 }
 
 std::shared_ptr<MV::Scene::Node> EditorControls::content() {
@@ -37,7 +37,7 @@ std::shared_ptr<MV::Scene::Node> EditorControls::content() {
 	if(found){
 		return found;
 	} else{
-		return draggableBox->make<MV::Scene::Node>("content");
+		return draggableBox->make("content");
 	}
 }
 
@@ -45,6 +45,6 @@ void EditorControls::deleteScene() {
 	currentPanel.reset();
 	draggableBox->clear();
 	if(boxHeader){
-		draggableBox->add("ContextMenuHandle", boxHeader);
+		draggableBox->add(boxHeader->owner());
 	}
 }

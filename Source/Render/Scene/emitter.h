@@ -1,10 +1,7 @@
 #ifndef _MV_SCENE_EMITTER_H_
 #define _MV_SCENE_EMITTER_H_
 
-#include "Render/Scene/rectangle.h"
-#include "cereal/cereal.hpp"
-#include "cereal/access.hpp"
-
+#include "sprite.h"
 #include <atomic>
 
 namespace MV {
@@ -31,7 +28,7 @@ namespace MV {
 			float animationFramesPerSecond = 10.0f;
 
 			template <class Archive>
-			void serialize(Archive & archive){
+			void serialize(Archive & archive) {
 				archive(CEREAL_NVP(directionalChange), CEREAL_NVP(rotationalChange),
 					CEREAL_NVP(beginSpeed), CEREAL_NVP(endSpeed),
 					CEREAL_NVP(beginScale), CEREAL_NVP(endScale),
@@ -45,9 +42,29 @@ namespace MV {
 
 		struct Particle {
 			//return true if dead.
-			bool update(double a_dt);
+			bool update(double a_dt) {
+				float timeScale = static_cast<float>(a_dt);
+				totalLifespan = std::min(totalLifespan + timeScale, change.maxLifespan);
 
-			void reset(){
+				float mixValue = totalLifespan / change.maxLifespan;
+
+				direction += change.directionalChange * timeScale;
+				rotation += change.rotationalChange * timeScale;
+
+				speed = mix(change.beginSpeed, change.endSpeed, mixValue);
+				scale = mix(change.beginScale, change.endScale, mixValue);
+				color = mix(change.beginColor, change.endColor, mixValue);
+
+				Point<> distance(0.0f, -speed, 0.0f);
+				rotatePoint(distance, direction);
+				position += distance * timeScale;
+				position += gravityConstant * timeScale;
+
+				currentFrame = static_cast<int>(boundBetween(static_cast<float>(myTextures.size() * (change.animationFramesPerSecond / timeScale)), 0.0f, static_cast<float>(myTextures.size())));
+				return totalLifespan == change.maxLifespan;
+			}
+
+			void reset() {
 				totalLifespan = 0.0f;
 			}
 
@@ -65,7 +82,10 @@ namespace MV {
 
 			std::vector<std::shared_ptr<TextureHandle>> myTextures;
 
-			void setGravity(float a_magnitude, const AxisAngles &a_direction = AxisAngles(0.0f, 180.0f, 0.0f));
+			void setGravity(float a_magnitude, const AxisAngles &a_direction = AxisAngles(0.0f, 180.0f, 0.0f)) {
+				gravityConstant.locate(0.0f, -a_magnitude, 0.0f);
+				rotatePoint(gravityConstant, a_direction);
+			}
 		private:
 			Point<> gravityConstant;
 		};
@@ -89,7 +109,7 @@ namespace MV {
 			ParticleChangeValues maximum;
 
 			template <class Archive>
-			void serialize(Archive & archive){
+			void serialize(Archive & archive) {
 				archive(CEREAL_NVP(maximumParticles),
 					CEREAL_NVP(minimumSpawnRate), CEREAL_NVP(maximumSpawnRate),
 					CEREAL_NVP(minimumPosition), CEREAL_NVP(maximumPosition),
@@ -102,85 +122,80 @@ namespace MV {
 
 		EmitterSpawnProperties loadEmitterProperties(const std::string &a_file);
 
-		class Emitter :
-			public Node{
-
-			friend cereal::access;
+		class Emitter : public Drawable {
 			friend Node;
+			friend cereal::access;
 		public:
-			~Emitter();
-
-			SCENE_MAKE_FACTORY_METHODS(Emitter)
-
-			static std::shared_ptr<Emitter> make(Draw2D* a_renderer, ThreadPool *a_pool);
-			static std::shared_ptr<Emitter> make(Draw2D* a_renderer, ThreadPool *a_pool, const EmitterSpawnProperties &a_emitterProperties);
+			DrawableDerivedAccessors(Emitter)
 
 			std::shared_ptr<Emitter> properties(const EmitterSpawnProperties &a_emitterProperties);
 
 			const EmitterSpawnProperties& properties() const;
+
 			EmitterSpawnProperties& properties();
 
 			bool enabled() const;
 			bool disabled() const;
+
 			std::shared_ptr<Emitter> enable();
 			std::shared_ptr<Emitter> disable();
-		protected:
-			Emitter(Draw2D *a_renderer, ThreadPool *a_pool):
-				pool(a_pool),
-				Node(a_renderer),
-				threadData(emitterThreads),
-				updateInProgress(false),
-				emitterThreads(a_pool->threads()){
-			}
-			virtual void drawImplementation();
 
-			virtual BoxAABB<> worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB<int> screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB<> localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB<> basicAABBImplementation() const override;
+			virtual void update(double a_dt) override;
+
+			~Emitter();
+
+		protected:
+			Emitter(const std::weak_ptr<Node> &a_owner, ThreadPool &a_pool);
+
+			template <class Archive>
+			void serialize(Archive & archive) {
+				archive(
+					CEREAL_NVP(spawnProperties),
+					CEREAL_NVP(spawnParticles),
+					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
+				);
+			}
+
+			template <class Archive>
+			static void load_and_construct(Archive & archive, cereal::construct<Emitter> &construct) {
+				ThreadPool *pool = nullptr;
+				archive.extract(cereal::make_nvp("mouse", pool));
+				MV::require<PointerException>(pool != nullptr, "Null thread pool in Emitter::load_and_construct.");
+				construct(std::shared_ptr<Node>(), *pool);
+				archive(
+					cereal::make_nvp("spawnProperties", construct->spawnProperties),
+					cereal::make_nvp("spawnParticles", construct->spawnParticles),
+					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
+				);
+			}
 
 		private:
+			Point<> randomMix(const Point<> &a_rhs, const Point<> &a_lhs);
 
-			void update();
+			Color randomMix(const Color &a_rhs, const Color &a_lhs);
+
 			void spawnParticle(size_t a_groupIndex);
 
-			template <class Archive>
-			void serialize(Archive & archive){
-				std::lock_guard<std::mutex> guard(lock);
-				points.clear();
-				archive(cereal::make_nvp("enabled", spawnParticles), cereal::make_nvp("spawnProperties", spawnProperties),
-					cereal::make_nvp("node", cereal::base_class<Node>(this)));
-			}
-
-			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Emitter> &construct){
-				Draw2D *renderer = nullptr;
-				ThreadPool *pool = nullptr;
-				archive.extract(cereal::make_nvp("renderer", renderer));
-				archive.extract(cereal::make_nvp("pool", pool));
-				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Emitter node.");
-				require<PointerException>(pool != nullptr, "Error: Failed to load a pool for Emitter node.");
-				construct(renderer, pool);
-				archive(cereal::make_nvp("enabled", construct->spawnParticles), cereal::make_nvp("spawnProperties", construct->spawnProperties),
-					cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
-			}
-
-			void loadParticlesToPoints(size_t a_groupIndex);
-			
-			MV::Color randomMix(const MV::Color &a_rhs, const MV::Color &a_lhs);
-			MV::Point<> randomMix(const MV::Point<> &a_rhs, const MV::Point<> &a_lhs);
 			void spawnParticlesOnMultipleThreads(double a_dt);
+
 			void updateParticlesOnMultipleThreads(double a_dt);
 
+			void loadParticlesToPoints(size_t a_groupIndex);
+
 			void loadParticlePointsFromGroups();
-			void loadPointsFromBufferAndAllowUpdate();
+
+			void Emitter::loadPointsFromBufferAndAllowUpdate();
 
 
-			Stopwatch timer;
+			double accumulatedTimeDelta = 0.0f;
 
 			EmitterSpawnProperties spawnProperties;
 
 			size_t emitterThreads;
+			std::atomic<size_t> buffersCopied = emitterThreads;
+			std::atomic<size_t> updatesFinished = emitterThreads;
+			std::atomic<size_t> spawnsFinished = emitterThreads;
+
 
 			struct ThreadData {
 				std::vector<Particle> particles;
@@ -193,12 +208,12 @@ namespace MV {
 			std::vector<ThreadData> threadData;
 
 			bool spawnParticles = true;
-			std::mutex lock;
 			static const double MAX_TIME_STEP;
+			static const int MAX_PARTICLES_PER_FRAME = 2500;
 			std::atomic<double> timeSinceLastParticle = 0.0;
-			double nextSpawnDelta = 0.0f;
+			double nextSpawnDelta = 0.0;
 
-			ThreadPool* pool;
+			ThreadPool& pool;
 
 			std::atomic<bool> updateInProgress;
 		};

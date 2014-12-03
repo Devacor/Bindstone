@@ -9,7 +9,7 @@ class EditorPanel;
 
 class EditableRectangle {
 public:
-	EditableRectangle(std::shared_ptr<MV::Scene::Rectangle> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
+	EditableRectangle(std::shared_ptr<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
 
 	~EditableRectangle(){
 		controlContainer->removeFromParent();
@@ -33,7 +33,7 @@ public:
 
 	std::function<void(EditableRectangle*)> onChange;
 
-	std::shared_ptr<MV::Scene::Rectangle> elementToEdit;
+	std::shared_ptr<MV::Scene::Sprite> elementToEdit;
 private:
 
 	MV::MouseState *mouse;
@@ -63,7 +63,7 @@ public:
 private:
 	std::shared_ptr<MV::Scene::Node> scene;
 
-	std::shared_ptr<MV::Scene::Rectangle> visibleSelection;
+	std::shared_ptr<MV::Scene::Sprite> visibleSelection;
 	MV::MouseState &mouse;
 	MV::BoxAABB<int> selection;
 	std::function<void(const MV::BoxAABB<int> &)> selectedCallback;

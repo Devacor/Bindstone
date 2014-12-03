@@ -2,19 +2,18 @@
 #include "editor.h"
 
 void SceneGraphPanel::clickedChild(std::shared_ptr<MV::Scene::Node> a_child) {
-	if(std::dynamic_pointer_cast<MV::Scene::Rectangle>(a_child)){
-		sharedResources.editor->panel().loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(std::static_pointer_cast<MV::Scene::Rectangle>(a_child), root, sharedResources.mouse));
-	} else if(std::dynamic_pointer_cast<MV::Scene::Emitter>(a_child)){
-		auto emitter = std::static_pointer_cast<MV::Scene::Emitter>(a_child);
+	if(a_child->component<MV::Scene::Sprite>(true, false)){
+		sharedResources.editor->panel().loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(a_child->component<MV::Scene::Sprite>(), root, sharedResources.mouse));
+	} else if(a_child->component<MV::Scene::Emitter>(true, false)){
+		auto emitter = a_child->component<MV::Scene::Emitter>();
 		auto editableEmitter = std::make_shared<EditableEmitter>(emitter, root, sharedResources.mouse);
-		editableEmitter->size(emitter->basicAABB().size());
+		editableEmitter->size(emitter->bounds().size());
 		sharedResources.editor->panel().loadPanel<SelectedEmitterEditorPanel>(editableEmitter);
 	}
 }
 
-void SceneGraphPanel::loadButtons(std::shared_ptr<MV::Scene::Grid> a_grid, std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth /*= 0*/) {
-	auto children = a_node->children();
-	for(auto&& child : children){
+void SceneGraphPanel::loadButtons(std::shared_ptr<MV::Scene::Node> a_grid, std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth /*= 0*/) {
+	for(auto&& child : *a_grid){
 		makeChildButton(child, a_depth, a_grid);
 	}
 }
@@ -31,20 +30,21 @@ void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nu
 	if(a_newScene){
 		scene = a_newScene;
 	}
-	grid = MV::Scene::Grid::make(root->getRenderer())->rows(1)->color({BOX_BACKGROUND})->margin({5.0f, 5.0f});
+	auto gridNode = MV::Scene::Node::make(root->renderer(), "SceneNodeGrid");
+	grid = gridNode->attach<MV::Scene::Grid>()->rows(1)->color({BOX_BACKGROUND})->margin({5.0f, 5.0f});
 
-	makeChildButton(scene, 0, grid);
+	makeChildButton(scene, 0, gridNode);
 
 	MV::Point<> position;
 	if(box){
 		position = box->parent()->position();
 	}
-	box = makeDraggableBox("SceneNodePicker", root, grid->basicAABB().size(), *sharedResources.mouse);
+	box = makeDraggableBox("SceneNodePicker", root, grid->bounds().size(), *sharedResources.mouse);
 	box->parent()->position(position);
-	box->add("SceneNodeGrid", grid);
+	box->add(gridNode);
 }
 
-void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth, std::shared_ptr<MV::Scene::Grid> a_grid) {
+void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth, std::shared_ptr<MV::Scene::Node> a_grid) {
 	MV::Size<> buttonSize(200.0f, 18.0f);
 	auto buttonName = MV::stringToWide(std::string(a_depth * 3, ' ') + a_node->id());
 
@@ -69,11 +69,11 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 		}
 	});
 
-	auto dragBetween = a_grid->make<MV::Scene::Clickable>(sharedResources.mouse, MV::size(buttonSize.width, 4.0f));
+	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.mouse)->size(MV::size(buttonSize.width, 4.0f));
 	dragBetween->onDrop.connect("dropped", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 		if(activeSelection){
 			activeSelection->depth(a_node->depth() + .01f);
-			activeSelection->normalizeChildDepth();
+			activeSelection->parent()->normalizeDepth();
 		}
 	});
 

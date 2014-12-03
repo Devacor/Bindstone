@@ -52,7 +52,7 @@ namespace MV {
 		return average;
 	}
 
-	bool PointVolume::volumeCollision(PointVolume &a_compareVolume, Draw2D* a_renderer){
+	bool PointVolume::volumeCollision(PointVolume &a_compareVolume, Draw2D* a_renderer, const TransformMatrix &a_matrix){
 		require<PointerException>(a_renderer != nullptr, "PointVolume::volumeCollision was passed a null renderer.");
 		Point<> point1 = getCenter();
 		Point<> point2 = a_compareVolume.getCenter();
@@ -63,19 +63,18 @@ namespace MV {
 
 		PointVolume tmpVolume1, tmpVolume2;
 		int totalPoints;
-		a_renderer->modelviewMatrix().push().makeIdentity().rotateZ(angle);
+		TransformMatrix rotatedMatrix = a_matrix;
+		rotatedMatrix.rotateZ(angle);
 
 		totalPoints = (int)points.size();
 		for(int i = 0; i < totalPoints; i++){
-			tmpVolume1.addPoint(a_renderer->worldFromLocal(points[i]));
+			tmpVolume1.addPoint(a_renderer->worldFromLocal(points[i], rotatedMatrix));
 		}
 
 		totalPoints = (int)a_compareVolume.points.size();
 		for(int i = 0; i < totalPoints; i++){
-			tmpVolume2.addPoint(a_renderer->worldFromLocal(a_compareVolume.points[i]));
+			tmpVolume2.addPoint(a_renderer->worldFromLocal(a_compareVolume.points[i], rotatedMatrix));
 		}
-
-		a_renderer->modelviewMatrix().pop();
 
 		BoxAABB<> box1 = tmpVolume1.getAABB();
 		BoxAABB<> box2 = tmpVolume2.getAABB();

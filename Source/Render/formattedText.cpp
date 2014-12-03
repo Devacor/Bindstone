@@ -76,11 +76,10 @@ namespace MV {
 	| ------TextLibrary------ |
 	\*************************/
 
-	TextLibrary::TextLibrary(Draw2D *a_rendering){
-		require<PointerException>(a_rendering != nullptr, "TextLibrary::TextLibrary was passed a null Draw2D pointer.");
+	TextLibrary::TextLibrary(Draw2D &a_rendering):
+		render(a_rendering){
 		SDL_StartTextInput();
 		white.r = 255; white.g = 255; white.b = 255; white.a = 0;
-		render = a_rendering;
 		if(!TTF_WasInit()){
 			TTF_Init();
 		}
@@ -154,7 +153,7 @@ namespace MV {
 
 	FormattedCharacter::~FormattedCharacter() {
 		if(shape){
-			shape->removeFromParent();
+			shape->owner()->removeFromParent();
 		}
 	}
 
@@ -176,7 +175,7 @@ namespace MV {
 
 	Point<> FormattedCharacter::position(const Point<> &a_newPosition) {
 		basePosition = a_newPosition;
-		shape->position(basePosition + offsetPosition);
+		shape->owner()->position(basePosition + offsetPosition);
 		return basePosition;
 	}
 
@@ -186,7 +185,7 @@ namespace MV {
 
 	Point<> FormattedCharacter::offset(const Point<> &a_newPosition) {
 		offsetPosition = a_newPosition;
-		shape->position(basePosition + offsetPosition);
+		shape->owner()->position(basePosition + offsetPosition);
 		return offsetPosition;
 	}
 
@@ -194,7 +193,7 @@ namespace MV {
 		PointPrecision height = character->font()->height();
 		PointPrecision base = character->font()->base();
 		offset({offsetPosition.x, a_baseLine - base});
-		shape->position(basePosition + offsetPosition);
+		shape->owner()->position(basePosition + offsetPosition);
 		return offsetPosition;
 	}
 
@@ -202,7 +201,7 @@ namespace MV {
 		PointPrecision height = character->font()->height();
 		PointPrecision base = character->font()->base();
 		offset({a_x, a_baseLine - base});
-		shape->position(basePosition + offsetPosition);
+		shape->owner()->position(basePosition + offsetPosition);
 		return offsetPosition;
 	}
 
@@ -234,7 +233,7 @@ namespace MV {
 
 	void FormattedCharacter::removeFromParent() {
 		if(shape){
-			shape->removeFromParent();
+			shape->owner()->removeFromParent();
 		}
 	}
 
@@ -243,7 +242,9 @@ namespace MV {
 		state(a_state),
 		character(a_state->font->characterDefinition(a_character)) {
 
-		shape = parent->make<Scene::Rectangle>(guid(wideToString(character->character())), cast<PointPrecision>(character->characterSize()))->
+		shape = parent->make(guid(wideToString(character->character())))->
+			attach<Scene::Sprite>()->
+			size(cast<PointPrecision>(character->characterSize()))->
 			texture(character->texture())->
 			color(state->color);
 	}
@@ -551,7 +552,7 @@ namespace MV {
 		textJustification(a_justification),
 		minimumTextLineHeight(-1){
 
-		textScene = Scene::Node::make(library.getRenderer())->blockSerialize();
+		textScene = Scene::Node::make(library.renderer())->serializable(false);
 	}
 
 	PointPrecision FormattedText::width(PointPrecision a_width) {

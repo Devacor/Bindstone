@@ -32,7 +32,7 @@ private:
 	MV::TextLibrary textLibrary;
 	std::shared_ptr<MV::Scene::Text> testBox;
 	std::shared_ptr<MV::Scene::Node> mainScene;
-	std::shared_ptr<MV::Scene::Rectangle> testShape;
+	std::shared_ptr<MV::Scene::Sprite> testShape;
 
 	MV::AxisAngles angleIncrement;
 
@@ -76,9 +76,9 @@ private:
 			if(!loadScene){
 				std::cout << "What the fuck" << std::endl;
 			}
-			mainScene->add("clipped", loadScene);
+			mainScene->add(loadScene);
 			loadScene->shared_from_this();
-			armScene = loadScene->get<MV::Scene::Clickable>("clickArm");
+			armScene = loadScene->get("clickArm")->component<MV::Scene::Clickable>();
 		}
 
 		auto test = mainScene->get("clipped");

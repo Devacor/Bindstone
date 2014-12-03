@@ -23,8 +23,8 @@ void CreateTextScene(std::shared_ptr<MV::Scene::Node> mainScene, MV::TextLibrary
 void ManipulateText(std::shared_ptr<MV::Scene::Node> mainScene);
 
 //These two functions are hard-coded shortcuts to get the dog and fox shapes from the scene manager.
-std::shared_ptr<MV::Scene::Rectangle> GetDogShape(std::shared_ptr<MV::Scene::Node> mainScene);
-std::shared_ptr<MV::Scene::Rectangle> GetFoxShape(std::shared_ptr<MV::Scene::Node> mainScene);
+std::shared_ptr<MV::Scene::Sprite> GetDogShape(std::shared_ptr<MV::Scene::Node> mainScene);
+std::shared_ptr<MV::Scene::Sprite> GetFoxShape(std::shared_ptr<MV::Scene::Node> mainScene);
 
 //This loads all the textures for the example.
 void LoadTexturesAndAnimations(MV::FrameSwapperRegister &animationLibrary);
@@ -33,7 +33,7 @@ void LoadTexturesAndAnimations(MV::FrameSwapperRegister &animationLibrary);
 void CreateDogFoxScene(std::shared_ptr<MV::Scene::Node> mainScene);
 
 //Update a shape's texture to the current frame of an animation.
-void UpdateAnimation(std::shared_ptr<MV::Scene::Node> mainScene, std::shared_ptr<MV::Scene::Rectangle> shape, MV::FrameSwapper &animation, bool flipAnimation = false);
+void UpdateAnimation(std::shared_ptr<MV::Scene::Node> mainScene, std::shared_ptr<MV::Scene::Sprite> shape, MV::FrameSwapper &animation, bool flipAnimation = false);
 
 //Update the sun and moon's rotation
 void UpdateSky(std::shared_ptr<MV::Scene::Node> mainScene);
@@ -41,7 +41,7 @@ void UpdateSky(std::shared_ptr<MV::Scene::Node> mainScene);
 //This is a really simple hard-coded jump sequence to provide a limited amount of interactivity in the demo.
 class FoxJump{
 public:
-	FoxJump(MV::FrameSwapperRegister *frameReg, MV::FrameSwapper *foxAnim, std::shared_ptr<MV::Scene::Rectangle> foxShape);
+	FoxJump(MV::FrameSwapperRegister *frameReg, MV::FrameSwapper *foxAnim, std::shared_ptr<MV::Scene::Sprite> foxShape);
 	~FoxJump(){}
 
 	//Call this to initiate a jump sequence (or do nothing if the fox is already jumping)
@@ -53,7 +53,7 @@ public:
 	//Checks the direction the fox is moving and decides if the animation should be flipped
 	bool isFlipped();
 private:
-	std::shared_ptr<MV::Scene::Rectangle> foxBox;
+	std::shared_ptr<MV::Scene::Sprite> foxBox;
 	MV::FrameSwapperRegister *frameRegister;
 	MV::FrameSwapper *foxSwapper;
 	MV::PointPrecision directionX, directionY;

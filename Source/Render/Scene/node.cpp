@@ -1,8 +1,9 @@
 #include "node.h"
 #include "stddef.h"
 #include <numeric>
+#include "cereal/archives/json.hpp"
 
-CEREAL_REGISTER_TYPE(MV::Scene::Node);
+CEREAL_REGISTER_TYPE(MV::Scene::Component);
 
 namespace MV {
 	namespace Scene {
@@ -15,779 +16,297 @@ namespace MV {
 			a_indices.insert(a_indices.end(), quadIndices.begin(), quadIndices.end());
 		}
 
-		/*************************\
-		| ---------Node---------- |
-		\*************************/
+		Node::ReSort::ReSort(const std::shared_ptr<Node> &a_self):
+			self(a_self) {
 
-		std::shared_ptr<Node> Node::colorImplementation(const Color &a_newColor){
-			int elements = (int)points.size();
-			for(int i = 0; i < elements; i++){
-				points[i] = a_newColor;
+			if(self->myParent){
+				auto foundSelf = std::find(self->myParent->childNodes.begin(), self->myParent->childNodes.end(), self);
+				require<PointerException>(foundSelf != self->myParent->childNodes.end(), "Failed to re-sort: [", self->id(), "]");
+				self->myParent->childNodes.erase(foundSelf);
 			}
-			alertParent(VisualChange::make(shared_from_this(), false));
+		}
+
+		Node::ReSort::~ReSort() {
+			if(self->myParent){
+				insertSorted(self->myParent->childNodes, self);
+			}
+		}
+
+
+		void Component::notifyParentOfBoundsChange() {
+			owner()->recalculateLocalBounds();
+		}
+
+		void Component::notifyParentOfComponentChange() {
+			owner()->onComponentUpdateSlot(shared_from_this());
+		}
+
+		std::shared_ptr<Component> Component::remove() {
+			auto self = shared_from_this(); //guard against deallocation
+			onRemoved();
+			return self;
+		}
+
+		std::shared_ptr<Node> Component::owner() const {
+			require<PointerException>(!componentOwner.expired(), "Component owner has expired! You are storing a reference to the component, but not the node that owns it!");
+			return componentOwner.lock();
+		}
+
+		Component::Component(const std::weak_ptr<Node> &a_owner):
+			componentOwner(a_owner) {
+		}
+
+		BoxAABB<int> Component::screenBounds() {
+			return owner()->screenFromLocal(boundsImplementation());
+		}
+
+		BoxAABB<> Component::worldBounds() {
+			return owner()->worldFromLocal(boundsImplementation());
+		}
+
+
+		Node::~Node() {
+			for(auto &&child : childNodes){
+				child->myParent = nullptr;
+			}
+		}
+
+		void Node::draw() {
+			bool allowChildrenToDraw = true;
+			for(auto&& component : childComponents){
+				allowChildrenToDraw = component->draw() && allowChildrenToDraw;
+			}
+			if(allowChildrenToDraw){
+				drawChildren();
+			}
+		}
+
+		void Node::drawChildren() {
+			for(auto&& child : childNodes){
+				child->draw();
+			}
+		}
+
+		void Node::draw(const TransformMatrix &a_overrideParentMatrix) {
+			SCOPE_EXIT{ usingTemporaryMatrix = false; };
+			usingTemporaryMatrix = true;
+			temporaryWorldMatrixTransform = a_overrideParentMatrix * localMatrixTransform;
+			bool allowChildrenToDraw = true;
+			for (auto&& component : childComponents) {
+				allowChildrenToDraw = component->draw() && allowChildrenToDraw;
+			}
+			if (allowChildrenToDraw) {
+				drawChildren(temporaryWorldMatrixTransform);
+			}
+		}
+
+		void Node::drawChildren(const TransformMatrix &a_overrideParentMatrix) {
+			for (auto&& child : childNodes) {
+				child->draw(a_overrideParentMatrix);
+			}
+		}
+
+		void Node::update(double a_delta) {
+			for(auto&& component : childComponents){
+				component->update(a_delta);
+			}
+			for(auto&& child : childNodes){
+				child->update(a_delta);
+			}
+		}
+
+		void Node::drawUpdate(double a_delta) {
+			bool allowChildrenToDraw = true;
+			for(auto&& component : childComponents){
+				component->update(a_delta);
+				allowChildrenToDraw = component->draw() && allowChildrenToDraw;
+			}
+			if(allowChildrenToDraw){
+				for(auto&& child : childNodes){
+					child->drawUpdate(a_delta);
+				}
+			} else{
+				for(auto&& child : childNodes){
+					child->update(a_delta);
+				}
+			}
+		}
+
+		std::shared_ptr<Node> Node::make(Draw2D& a_draw2d, const std::string &a_id) {
+			return std::shared_ptr<Node>(new Node(a_draw2d, a_id));
+		}
+
+		std::shared_ptr<Node> Node::make(const std::string &a_id) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			auto toAdd = Node::make(draw2d, a_id);
+			remove(a_id, false);
+			add(toAdd);
+			return toAdd;
+		}
+
+		std::shared_ptr<Node> Node::make() {
+			return make(MV::guid("id_"));
+		}
+
+		std::shared_ptr<Node> Node::add(const std::shared_ptr<Node> &a_child, bool a_overrideSortDepth) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			if(a_child->myParent != this){
+				a_child->removeFromParent();
+				if(a_overrideSortDepth){
+					a_child->sortDepth = (childNodes.empty()) ? 0.0f : childNodes[childNodes.size() - 1]->sortDepth + 1.0f;
+				}
+				insertSorted(childNodes, a_child);
+				a_child->myParent = this;
+				a_child->onAddSlot(a_child);
+				onChildAddSlot(a_child);
+			}
 			return shared_from_this();
 		}
 
-		Color Node::colorImplementation() const{
-			std::vector<Color> colorsToAverage;
-			for(auto point : points){
-				colorsToAverage.push_back(point);
-			}
-			return std::accumulate(colorsToAverage.begin(), colorsToAverage.end(), Color(0, 0, 0, 0)) / static_cast<PointPrecision>(colorsToAverage.size());
-		}
-
-		std::shared_ptr<Node> Node::textureImplementation(std::shared_ptr<TextureHandle> a_texture){
-			if(ourTexture && textureSizeSignal){
-				ourTexture->sizeObserver.disconnect(textureSizeSignal);
-			}
-			textureSizeSignal.reset();
-			ourTexture = a_texture;
-			if(ourTexture){
-				textureSizeSignal = TextureHandle::SignalType::make([&](std::shared_ptr<MV::TextureHandle> a_handle){
-					updateTextureCoordinates();
-				});
-				ourTexture->sizeObserver.connect(textureSizeSignal);
-			}
-			updateTextureCoordinates();
-			return shared_from_this();
-		}
-
-		std::shared_ptr<TextureHandle> Node::textureImplementation() const{
-			return ourTexture;
-		}
-
-		std::shared_ptr<Node> Node::clearTextureImplementation(){
-			textureSizeSignal.reset();
-			ourTexture.reset();
-			updateTextureCoordinates();
-			return shared_from_this();
-		}
-
-		std::shared_ptr<Node> Node::removeFromParentImplementation(){
-			auto thisShared = shared_from_this();
+		std::shared_ptr<Node> Node::removeFromParent() {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			auto self = shared_from_this();
 			if(myParent){
-				myParent->remove(thisShared);
+				myParent->remove(self);
 			}
-			return thisShared;
+			return self;
 		}
 
-		std::shared_ptr<Node> Node::remove(std::shared_ptr<Node> a_childItem){
-			if(a_childItem == nullptr){
-				return nullptr;
+		std::shared_ptr<Node> Node::remove(const std::string &a_id, bool a_throw) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child){
+				return a_child->id() == a_id;
+			});
+			if(foundNode != childNodes.end()){
+				auto child = *foundNode;
+				childNodes.erase(foundNode);
+				child->onRemoveSlot(child);
+				onChildRemoveSlot(shared_from_this(), child);
+				return child;
 			}
-			auto foundChild = std::find(drawList.begin(), drawList.end(), a_childItem);
-			if(foundChild != drawList.end()){
-				auto removed = *foundChild;
-				drawList.erase(foundChild);
-				calculateMaxDepthChild();
-				alertParent(ChildRemoved::make(shared_from_this(), removed));
-				alertParent(VisualChange::make(shared_from_this()));
-				removed->myParent = nullptr;
-				removed->onRemoved(shared_from_this());
-				onChildRemoved(removed);
-				return removed;
-			}
+			require<ResourceException>(!a_throw, "Failed to remove: [", a_id, "] from parent node: [", nodeId, "]");
 			return nullptr;
 		}
 
-		std::shared_ptr<Node> Node::remove(const std::string &a_childId){
-			auto foundChild = std::find_if(drawList.begin(), drawList.end(), [&](const std::shared_ptr<Node> a_node){return a_node->id() == a_childId;});
-			if(foundChild != drawList.end()){
-				auto removed = *foundChild;
-				drawList.erase(foundChild);
-				calculateMaxDepthChild();
-				alertParent(ChildRemoved::make(shared_from_this(), removed));
-				alertParent(VisualChange::make(shared_from_this()));
-				removed->myParent = nullptr;
-				removed->onRemoved(shared_from_this());
-				onChildRemoved(removed);
-				return removed;
+		std::shared_ptr<Node> Node::remove(const std::shared_ptr<Node> &a_child, bool a_throw) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_ourChild){
+				return a_ourChild == a_child;
+			});
+			if(foundNode != childNodes.end()){
+				auto child = *foundNode;
+				childNodes.erase(foundNode);
+				child->onRemoveSlot(child);
+				onChildRemoveSlot(shared_from_this(), child);
+				return child;
 			}
+			require<ResourceException>(!a_throw, "Failed to remove: [", a_child->id(), "] from parent node: [", nodeId, "]");
 			return nullptr;
 		}
 
-		void Node::clear(){
-			auto tmpDrawList = drawList;
-			drawList.clear();
-
-			for(auto drawItem : tmpDrawList){
-				alertParent(ChildRemoved::make(shared_from_this(), drawItem));
+		std::shared_ptr<Node> Node::clear() {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			auto self = shared_from_this();
+			while(!childNodes.empty()){
+				auto childToRemove = *childNodes.begin();
+				childNodes.erase(childNodes.begin());
+				childToRemove->onRemoveSlot(childToRemove);
+				onChildRemoveSlot(shared_from_this(), childToRemove);
 			}
-			alertParent(VisualChange::make(shared_from_this()));
+			return self;
 		}
 
-		std::shared_ptr<Node> Node::get(const std::string &a_childId, bool a_throwOnNull){
-			auto cell = std::find_if(drawList.begin(), drawList.end(), [&](const std::shared_ptr<Node> a_node){return a_node->id() == a_childId; });
-			if(cell != drawList.end()){
-				return *cell;
+		std::shared_ptr<Node> Node::root() {
+			Node* current = this;
+			while(current->myParent != nullptr){
+				current = current->myParent;
 			}
-			for(auto &cell : drawList){
-				if(auto foundInChild = cell->get(a_childId, a_throwOnNull)){
-					return foundInChild;
+			return current->shared_from_this();
+		}
+
+		std::shared_ptr<Node> Node::get(const std::string &a_id, bool a_throw) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child){
+				return a_child->id() == a_id;
+			});
+			if(foundNode != childNodes.end()){
+				return *foundNode;
+			}
+			for(auto&& child : childNodes){
+				auto found = child->get(a_id, false);
+				if(found != nullptr){
+					return found;
 				}
 			}
-			require<ResourceException>(!a_throwOnNull, "Node::get was unable to find child: ", a_childId);
+			require<ResourceException>(!a_throw, "Failed to get: [", a_id, "] from parent node: [", nodeId, "]");
 			return nullptr;
 		}
 
-		bool Node::operator<(Node &a_other){
-			return (depth() == a_other.depth() && id() < a_other.id()) || depth() < a_other.depth();
+		std::shared_ptr<Node> Node::id(const std::string a_id) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			auto self = shared_from_this();
+			if (nodeId != a_id) {
+				ReSort sort(self);
+				nodeId = a_id;
+			}
+			return self;
 		}
 
-		bool Node::operator>(Node &a_other){
-			return (depth() == a_other.depth() && id() > a_other.id()) || depth() > a_other.depth();
+		std::shared_ptr<Node> Node::depth(PointPrecision a_newDepth) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			auto self = shared_from_this();
+			if (sortDepth != a_newDepth) {
+				ReSort sort(self);
+				sortDepth = a_newDepth;
+				onDepthChangeSlot(self);
+			}
+			return self;
 		}
 
-		bool Node::operator==(Node &a_other){
-			return equals(depth(), a_other.depth());
-		}
-
-		bool Node::operator!=(Node &a_other){
-			return !equals(depth(), a_other.depth());
-		}
-
-		AxisAngles Node::rotationImplementation() const{
-			return rotateTo;
-		}
-
-		std::shared_ptr<Node> Node::rotationImplementation(PointPrecision a_zRotation) {
-			if(!equals(a_zRotation, 0.0f)){
-				rotateTo.z = a_zRotation;
-				alertParent(VisualChange::make(shared_from_this()));
+		std::shared_ptr<Node> Node::normalizeDepth() {
+			PointPrecision currentDepth = 0.0f;
+			for (auto&& childNode : *this) {
+				childNode->sortDepth = currentDepth++;
 			}
 			return shared_from_this();
 		}
 
-		std::shared_ptr<Node> Node::rotationImplementation(const AxisAngles &a_rotation) {
-			if(a_rotation != AxisAngles()){
-				rotateTo = a_rotation;
-				alertParent(VisualChange::make(shared_from_this()));
-			}
-			return shared_from_this();
+		std::shared_ptr<Node> Node::position(const Point<> &a_newPosition) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			translateTo = a_newPosition;
+			auto self = shared_from_this();
+			onTransformChangeSlot(self);
+			return self;
 		}
 
-		Point<> Node::positionImplementation() const{
-			return translateTo;
+		std::shared_ptr<Node> Node::rotation(const AxisAngles &a_newRotation) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			rotateTo = a_newRotation;
+			auto self = shared_from_this();
+			onTransformChangeSlot(self);
+			return self;
 		}
 
-		std::shared_ptr<Node> Node::positionImplementation(const Point<> &a_rhs){
-			if(translateTo != a_rhs){
-				translateTo = a_rhs;
-				alertParent(VisualChange::make(shared_from_this()));
-			}
-			return shared_from_this();
+		std::shared_ptr<Node> Node::scale(const Scale &a_newScale) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			scaleTo = a_newScale;
+			auto self = shared_from_this();
+			onTransformChangeSlot(self);
+			return self;
 		}
 
-		Scale Node::scaleImplementation() const{
-			return scaleTo;
-		}
-		std::shared_ptr<Node> Node::scaleImplementation(const Scale &a_rhs){
-			if(scaleTo != a_rhs){
-				scaleTo = a_rhs;
-				alertParent(VisualChange::make(shared_from_this()));
-			}
-			return shared_from_this();
+		std::shared_ptr<Node> Node::alpha(PointPrecision a_alpha) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			nodeAlpha = a_alpha;
+			recalculateAlpha();
+			auto self = shared_from_this();
+			onAlphaChangeSlot(self);
+			return self;
 		}
 
-		std::shared_ptr<Node> Node::scaleImplementation(PointPrecision a_newScale){
-			scaleImplementation(Scale(a_newScale));
-			return shared_from_this();
-		}
-
-		Scale Node::incrementScale(PointPrecision a_newScale){
-			return incrementScale(Scale(a_newScale));
-		}
-
-		Scale Node::incrementScale(const Scale &a_scaleValue){
-			scaleTo += a_scaleValue;
-			alertParent(VisualChange::make(shared_from_this()));
-			return scaleTo;
-		}
-
-		std::shared_ptr<Node> Node::parentImplementation(Node* a_parentItem){
-			myParent = a_parentItem;
-			return shared_from_this();
-		}
-
-		std::shared_ptr<Node> Node::parentImplementation() const{
-			if(myParent == nullptr){
-				return nullptr;
-			}else{
-				return myParent->shared_from_this();
-			}
-		}
-
-		BoxAABB<> Node::worldAABB(bool a_includeChildren){
-			return worldAABBImplementation(a_includeChildren, false);
-		}
-
-		BoxAABB<> Node::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
-			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(shared_from_this())); renderer->modelviewMatrix().pop(); });
-			if(!a_nestedCall){
-				renderer->modelviewMatrix().push();
-				renderer->modelviewMatrix().top().makeIdentity();
-				alertParent(PushMatrix::make(shared_from_this()));
-			}else{
-				parentPopMatrix.dismiss();
-			}
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			BoxAABB<> tmpBox;
-
-			if(!points.empty()){
-				tmpBox.initialize(renderer->worldFromLocal(points[0]));
-				std::for_each(points.begin()++, points.end(), [&](Point<> &point){
-					tmpBox.expandWith(renderer->worldFromLocal(point));
-				});
-			}
-			if(a_includeChildren && !drawList.empty()){
-				if(points.empty()){
-					tmpBox.initialize(drawList.front()->worldAABBImplementation(a_includeChildren, true));
-				} else{
-					tmpBox.expandWith(drawList.front()->worldAABBImplementation(a_includeChildren, true));
-				}
-				std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
-					tmpBox.expandWith(cell->worldAABBImplementation(a_includeChildren, true));
-				});
-			}
-			return tmpBox;
-		}
-
-		BoxAABB<int> Node::screenAABB(bool a_includeChildren){
-			return screenAABBImplementation(a_includeChildren, false);
-		}
-
-		BoxAABB<int> Node::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
-			auto parentPopMatrix = scopeGuard([&](){alertParent(PopMatrix::make(shared_from_this())); renderer->modelviewMatrix().pop(); });
-			if(!a_nestedCall){
-				renderer->modelviewMatrix().push();
-				renderer->modelviewMatrix().top().makeIdentity();
-				alertParent(PushMatrix::make(shared_from_this()));
-			} else{
-				parentPopMatrix.dismiss();
-			}
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			BoxAABB<int> tmpBox;
-			if(!points.empty()){
-				tmpBox.initialize(renderer->screenFromLocal(points[0]));
-				std::for_each(points.begin(), points.end(), [&](Point<> &point){
-					tmpBox.expandWith(renderer->screenFromLocal(point));
-				});
-			}
-			if(a_includeChildren && !drawList.empty()){
-				if(points.empty()){
-					tmpBox.initialize(drawList.front()->screenAABBImplementation(a_includeChildren, true));
-				} else{
-					tmpBox.expandWith(drawList.front()->screenAABBImplementation(a_includeChildren, true));
-				}
-				std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
-					tmpBox.expandWith(cell->screenAABBImplementation(a_includeChildren, true));
-				});
-			}
-			return tmpBox;
-		}
-
-		BoxAABB<> Node::localAABB(bool a_includeChildren){
-			return localAABBImplementation(a_includeChildren, false);
-		}
-
-		BoxAABB<> Node::localAABBImplementation(bool a_includeChildren, bool a_nestedCall){
-			auto parentPopMatrix = scopeGuard([&](){if(myParent){ myParent->popMatrix(); } renderer->modelviewMatrix().pop(); });
-			if(!a_nestedCall){
-				renderer->modelviewMatrix().push();
-				renderer->modelviewMatrix().top().makeIdentity();
-				if(myParent){
-					myParent->pushMatrix();
-				}
-			} else{
-				parentPopMatrix.dismiss();
-			}
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			TransformMatrix transformationMatrix(renderer->projectionMatrix().top() * renderer->modelviewMatrix().top());
-
-			BoxAABB<> tmpBox;
-
-			if(!points.empty()){
-				tmpBox.initialize(renderer->worldFromLocal(points[0]));
-				std::for_each(points.begin()++, points.end(), [&](Point<> &point){
-					tmpBox.expandWith(renderer->worldFromLocal(point));
-				});
-			}
-			if(a_includeChildren && !drawList.empty()){
-				if(points.empty()){
-					tmpBox.initialize(drawList.front()->localAABBImplementation(a_includeChildren, true));
-				} else{
-					tmpBox.expandWith(drawList.front()->localAABBImplementation(a_includeChildren, true));
-				}
-				std::for_each(drawList.begin()++, drawList.end(), [&](const DrawListType::value_type &cell){
-					tmpBox.expandWith(cell->localAABBImplementation(a_includeChildren, true));
-				});
-			}
-			return tmpBox;
-		}
-
-		MV::BoxAABB<> Node::basicAABB() const  {
-			return basicAABBImplementation();
-		}
-
-		MV::BoxAABB<> Node::basicAABBImplementation() const {
-			BoxAABB<> tmpBox;
-
-			if(!points.empty()){
-				tmpBox.initialize(points[0]);
-				std::for_each(points.begin()++, points.end(), [&](const DrawPoint &point){
-					tmpBox.expandWith(point);
-				});
-			}
-
-			return tmpBox;
-		}
-
-		Point<> Node::worldFromLocal(const Point<> &a_local){
-			require<PointerException>(renderer != nullptr, "DrawShape::worldFromLocal requires a rendering context.");
-			renderer->modelviewMatrix().push();
-			renderer->modelviewMatrix().top().makeIdentity();
-			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
-
-			alertParent(PushMatrix::make(shared_from_this()));
-			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this()));};
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			Point<> ourPoint = renderer->worldFromLocal(a_local);
-			return ourPoint;
-		}
-		Point<int> Node::screenFromLocal(const Point<> &a_local){
-			require<PointerException>(renderer != nullptr, "DrawShape::screenFromLocal requires a rendering context.");
-			renderer->modelviewMatrix().push();
-			renderer->modelviewMatrix().top().makeIdentity();
-			SCOPE_EXIT{renderer->modelviewMatrix().pop(); };
-
-			alertParent(PushMatrix::make(shared_from_this()));
-			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			Point<int> ourPoint = renderer->screenFromLocal(a_local);
-			return ourPoint;
-		}
-		Point<> Node::localFromScreen(const Point<int> &a_screen){
-			require<PointerException>(renderer != nullptr, "DrawShape::localFromScreen requires a rendering context.");
-			renderer->modelviewMatrix().push();
-			renderer->modelviewMatrix().top().makeIdentity();
-			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
-
-			alertParent(PushMatrix::make(shared_from_this()));
-			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			Point<> ourPoint = renderer->localFromScreen(a_screen);
-			return ourPoint;
-		}
-		Point<> Node::localFromWorld(const Point<> &a_world){
-			require<PointerException>(renderer != nullptr, "DrawShape::localFromWorld requires a rendering context.");
-			renderer->modelviewMatrix().push();
-			renderer->modelviewMatrix().top().makeIdentity();
-			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
-
-			alertParent(PushMatrix::make(shared_from_this()));
-			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			Point<> ourPoint = renderer->localFromWorld(a_world);
-			return ourPoint;
-		}
-
-		std::vector<Point<>> Node::worldFromLocal(std::vector<Point<>> a_local){
-			require<PointerException>(renderer != nullptr, "DrawShape::worldFromLocal requires a rendering context.");
-			renderer->modelviewMatrix().push();
-			renderer->modelviewMatrix().top().makeIdentity();
-			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
-
-			alertParent(PushMatrix::make(shared_from_this()));
-			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			for(Point<>& point : a_local){
-				point = renderer->worldFromLocal(point);
-			}
-			return a_local;
-		}
-
-		std::vector<Point<int>> Node::screenFromLocal(const std::vector<Point<>> &a_local){
-			require<PointerException>(renderer != nullptr, "DrawShape::screenFromLocal requires a rendering context.");
-			std::vector<Point<int>> processed;
-			renderer->modelviewMatrix().push();
-			renderer->modelviewMatrix().top().makeIdentity();
-			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
-
-			alertParent(PushMatrix::make(shared_from_this()));
-			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			for(const Point<>& point : a_local){
-				processed.push_back(renderer->screenFromLocal(point));
-			}
-			return processed;
-		}
-
-		std::vector<Point<>> Node::localFromWorld(std::vector<Point<>> a_world){
-			require<PointerException>(renderer != nullptr, "DrawShape::localFromWorld requires a rendering context.");
-			renderer->modelviewMatrix().push();
-			renderer->modelviewMatrix().top().makeIdentity();
-			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
-
-			alertParent(PushMatrix::make(shared_from_this()));
-			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			for(Point<>& point : a_world){
-				point = renderer->localFromWorld(point);
-			}
-			return a_world;
-		}
-
-		std::vector<Point<>> Node::localFromScreen(const std::vector<Point<int>> &a_screen){
-			require<PointerException>(renderer != nullptr, "DrawShape::localFromScreen requires a rendering context.");
-			std::vector<Point<>> processed;
-			renderer->modelviewMatrix().push();
-			renderer->modelviewMatrix().top().makeIdentity();
-			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
-
-			alertParent(PushMatrix::make(shared_from_this()));
-			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			for(const Point<int>& point : a_screen){
-				processed.push_back(renderer->localFromScreen(point));
-			}
-			return processed;
-		}
-
-		BoxAABB<> Node::worldFromLocal(const BoxAABB<>& a_local){
-			require<PointerException>(renderer != nullptr, "DrawShape::worldFromLocal requires a rendering context.");
-			renderer->modelviewMatrix().push();
-			renderer->modelviewMatrix().top().makeIdentity();
-			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
-
-			alertParent(PushMatrix::make(shared_from_this()));
-			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			return{renderer->worldFromLocal(a_local.minPoint), renderer->worldFromLocal(a_local.maxPoint)};
-		}
-		BoxAABB<int> Node::screenFromLocal(const BoxAABB<>& a_local){
-			require<PointerException>(renderer != nullptr, "DrawShape::screenFromLocal requires a rendering context.");
-			renderer->modelviewMatrix().push();
-			renderer->modelviewMatrix().top().makeIdentity();
-			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
-
-			alertParent(PushMatrix::make(shared_from_this()));
-			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			return {renderer->screenFromLocal(a_local.minPoint), renderer->screenFromLocal(a_local.maxPoint)};
-		}
-		BoxAABB<> Node::localFromScreen(const BoxAABB<int> &a_screen){
-			require<PointerException>(renderer != nullptr, "DrawShape::localFromScreen requires a rendering context.");
-			renderer->modelviewMatrix().push();
-			renderer->modelviewMatrix().top().makeIdentity();
-			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
-
-			alertParent(PushMatrix::make(shared_from_this()));
-			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			return {renderer->localFromScreen(a_screen.minPoint), renderer->localFromScreen(a_screen.maxPoint)};
-		}
-		BoxAABB<> Node::localFromWorld(const BoxAABB<> &a_world){
-			require<PointerException>(renderer != nullptr, "DrawShape::localFromWorld requires a rendering context.");
-			renderer->modelviewMatrix().push();
-			renderer->modelviewMatrix().top().makeIdentity();
-			SCOPE_EXIT{renderer->modelviewMatrix().pop();};
-
-			alertParent(PushMatrix::make(shared_from_this()));
-			SCOPE_EXIT{alertParent(PopMatrix::make(shared_from_this())); };
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix();};
-
-			return {renderer->localFromWorld(a_world.minPoint), renderer->localFromWorld(a_world.maxPoint)};
-		}
-
-		void Node::pushMatrix(){
-			renderer->modelviewMatrix().push();
-			if(!translateTo.atOrigin()){
-				renderer->modelviewMatrix().top().translate(translateTo.x, translateTo.y, translateTo.z);
-			}
-			if(rotateTo != 0.0f){
-				renderer->modelviewMatrix().top().translate(rotateOrigin.x, rotateOrigin.y, rotateOrigin.z);
-				renderer->modelviewMatrix().top().rotateX(rotateTo.x).rotateY(rotateTo.y).rotateZ(rotateTo.z);
-				renderer->modelviewMatrix().top().translate(-rotateOrigin.x, -rotateOrigin.y, -rotateOrigin.z);
-			}
-			if(scaleTo != 1.0f){
-				renderer->modelviewMatrix().top().scale(scaleTo.x, scaleTo.y, scaleTo.z);
-			}
-		}
-
-		void Node::popMatrix(){
-			renderer->modelviewMatrix().pop();
-		}
-
-		void Node::defaultDrawRenderStep(GLenum drawType){
-			shaderProgram->use();
-
-			if(bufferId == 0){
-				glGenBuffers(1, &bufferId);
-			}
-
-			glBindBuffer(GL_ARRAY_BUFFER, bufferId);
-			auto structSize = static_cast<GLsizei>(sizeof(points[0]));
-			glBufferData(GL_ARRAY_BUFFER, points.size() * structSize, &(points[0]), GL_STATIC_DRAW);
-
-			glEnableVertexAttribArray(0);
-			glEnableVertexAttribArray(1);
-			glEnableVertexAttribArray(2);
-
-			auto positionOffset = static_cast<GLsizei>(offsetof(DrawPoint, x));
-			auto textureOffset = static_cast<GLsizei>(offsetof(DrawPoint, textureX));
-			auto colorOffset = static_cast<GLsizei>(offsetof(DrawPoint, R));
-			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (void*)positionOffset); //Point
-			glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (void*)textureOffset); //UV
-			glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (void*)colorOffset); //Color
-
-			TransformMatrix transformationMatrix(renderer->projectionMatrix().top() * renderer->modelviewMatrix().top());
-
-			shaderProgram->set("texture", ourTexture);
-			shaderProgram->set("transformation", transformationMatrix);
-			
-			if(!vertexIndices.empty()){
-				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices.size()), GL_UNSIGNED_INT, &vertexIndices[0]);
-			} else{
-				glDrawArrays(drawType, 0, static_cast<GLsizei>(points.size()));
-			}
-
-			glDisableVertexAttribArray(0);
-			glDisableVertexAttribArray(1);
-			glDisableVertexAttribArray(2);
-			glUseProgram(0);
-		}
-
-		void Node::defaultDraw(GLenum drawType){
-			defaultDrawRenderStep(drawType);
-		}
-		
-		void Node::draw(){
-			if(preDraw() && isVisible){
-				{
-					pushMatrix();
-					SCOPE_EXIT{popMatrix();};
-
-					drawImplementation();
-					sortedRender();
-
-				}
-				postDraw();
-			}
-		}
-
-		void Node::sortedRender(){
-			for(auto&& shape : drawList){
-				shape->draw();
-			}
-		}
-
-		Node::Node(Draw2D* a_renderer):
-			renderer(a_renderer),
-			myParent(nullptr),
-			sortDepth(0.0f),
-			isVisible(true),
-			bufferId(0),
-			shaderProgramId(DEFAULT_ID),
-			shaderProgram(nullptr){
-		}
-
-		std::shared_ptr<Node> Node::make(Draw2D* a_renderer, const Point<> &a_placement /*= Point<>()*/) {
-			auto node = std::shared_ptr<Node>(new Node(a_renderer));
-			node->registerShader();
-			return node->position(a_placement);
-		}
-
-		bool Node::visible() const {
-			return isVisible;
-		}
-
-		std::shared_ptr<Node> Node::hideImplementation() {
-			isVisible = false;
-			alertParent(VisualChange::make(shared_from_this()));
-			return shared_from_this();
-		}
-
-		std::shared_ptr<Node> Node::showImplementation() {
-			isVisible = true;
-			alertParent(VisualChange::make(shared_from_this()));
-			return shared_from_this();
-		}
-
-		std::vector<std::shared_ptr<Node>> Node::children() {
-			return drawList;
-		}
-
-		PointPrecision Node::incrementRotation(PointPrecision a_zRotation) {
-			if(!equals(a_zRotation, 0.0f)){
-				rotateTo.z += a_zRotation;
-				alertParent(VisualChange::make(shared_from_this()));
-			}
-			return rotateTo.z;
-		}
-
-		MV::AxisAngles Node::incrementRotation(const AxisAngles &a_rotation) {
-			if(a_rotation != AxisAngles()){
-				rotateTo += a_rotation;
-				alertParent(VisualChange::make(shared_from_this()));
-			}
-			return rotateTo;
-		}
-
-		Point<> Node::rotationOrigin(const Point<> &a_origin) {
-			if(rotateOrigin != a_origin){
-				rotateOrigin = a_origin;
-				alertParent(VisualChange::make(shared_from_this()));
-			}
-			return rotateOrigin;
-		}
-
-		Point<> Node::centerRotationOrigin() {
-			auto centerPoint = localAABB().centerPoint();
-			if(rotateOrigin != centerPoint){
-				alertParent(VisualChange::make(shared_from_this()));
-			}
-			return centerPoint;
-		}
-
-		void Node::normalizeTest(Point<> a_offset){
-			translate(a_offset);
-			for(auto &point : points){
-				point -= a_offset;
-			}
-		}
-
-		void Node::normalizeToPoint(Point<> a_offset){
-			translate(a_offset);
-			for(auto &point : points){
-				point -= a_offset;
-			}
-		}
-
-		Point<> Node::normalizeToTopLeft() {
-			auto offset = localAABB().topLeftPoint();
-			normalizeToPoint(offset);
-			return offset;
-		}
-
-		Point<> Node::normalizeToCenter() {
-			auto aabb = localAABB();
-			auto offset = (aabb.topLeftPoint() + aabb.bottomRightPoint()) / 2.0f;
-			normalizeToPoint(offset);
-			return offset;
-		}
-
-		std::string Node::shaderImplementation() const {
-			return shaderProgramId;
-		}
-
-		void Node::shaderImplementation(const std::string &a_id) {
-			shaderProgramId = a_id;
-			if(renderer->hasShader(a_id)){
-				shaderProgram = renderer->getShader(a_id);
-			} else{
-				renderer->registerShader(shared_from_this());
-			}
-		}
-
-		Point<> Node::translate(const Point<> &a_translation) {
-			position(translateTo + a_translation);
-			return position();
-		}
-
-		std::shared_ptr<Node> Node::depthImplementation(PointPrecision a_newDepth) {
-			auto notifyOnChanged = makeScopedDepthChangeNote(this, false);
-			sortDepth = a_newDepth;
-			return shared_from_this();
-		}
-
-		std::shared_ptr<Node> Node::blockSerializeImplementation() {
-			markedTemporary = true;
-			return shared_from_this();
-		}
-
-		std::shared_ptr<Node> Node::allowSerializeImplementation() {
-			markedTemporary = false;
-			return shared_from_this();
-		}
-
-		void Node::childDepthChanged(std::shared_ptr<Node> a_child) {
-			auto foundChild = std::find(drawList.begin(), drawList.end(), a_child);
-			if(foundChild != drawList.end()){
-				auto removed = *foundChild;
-				drawList.erase(foundChild);
-				insertSorted(drawList, a_child);
-			}
-		}
-
-		bool Node::toggleVisible() {
-			isVisible = !isVisible;
-			alertParent(VisualChange::make(shared_from_this()));
-			return isVisible;
-		}
-
-		void Node::setRenderer(Draw2D* a_renderer, bool includeChildren /*= true*/, bool includeParents /*= true*/) {
-			renderer = a_renderer;
-
-			if(includeParents){
-				Node* currentParent = this;
-				while(currentParent = currentParent->myParent){
-					setRenderer(a_renderer, false, true);
-				}
-			}
-			if(includeChildren){
-				for(auto &child : drawList){
-					child->setRenderer(a_renderer, true, false);
-				}
-			}
-		}
-
-		size_t Node::indexOf(std::shared_ptr<Node> a_childItem) {
+		size_t Node::indexOf(const std::shared_ptr<const Node> &a_childItem) const {
 			size_t i = 0;
-			for(auto&& cell : drawList){
+			for(auto&& cell : childNodes){
 				if(cell == a_childItem){
 					return i;
 				}
@@ -796,13 +315,15 @@ namespace MV {
 			return i;
 		}
 
-		std::vector<size_t> Node::parentIndexList(size_t a_globalPriority) {
+		size_t Node::myIndex() const {
+			return (myParent) ? myParent->indexOf(shared_from_this()) : 0;
+		}
+
+		std::vector<size_t> Node::parentIndexList(size_t a_globalPriority /*= 0*/) {
 			std::vector<size_t> list;
 			Node* current = this;
-			Node* previous = myParent;
 			while(current){
 				list.push_back(current->myIndex());
-				previous = current;
 				current = current->myParent;
 			}
 			list.push_back(a_globalPriority); //This gives us the ability to prioritize more things before any nodes get evaluated.
@@ -810,29 +331,223 @@ namespace MV {
 			return list;
 		}
 
-		size_t Node::myIndex() {
-			size_t i = 0;
-			if(myParent){
-				i = myParent->indexOf(shared_from_this());
+		BoxAABB<> Node::bounds(bool a_includeChildren /*= true*/) const {
+			if(a_includeChildren){
+				if(!localBounds.empty() && !localChildBounds.empty()){
+					return BoxAABB<>(localChildBounds).expandWith(localBounds);
+				} else if(!localChildBounds.empty()){
+					return localChildBounds;
+				}
 			}
-			return i;
+			return localBounds;
 		}
 
-		void Node::id(const std::string &a_newName) {
-			if(myParent){
-				auto thisShared = shared_from_this();
-				auto foundChild = std::find(myParent->drawList.begin(), myParent->drawList.end(), thisShared);
-				if(foundChild != drawList.end()){
-					auto removed = *foundChild;
-					myParent->drawList.erase(foundChild);
+		std::shared_ptr<Node> Node::parent(const std::shared_ptr<Node> &a_parent) {
+			auto self = shared_from_this();
+			a_parent->add(self);
+			return self;
+		}
+
+		void Node::recalculateLocalBounds() {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			if (!childComponents.empty()) {
+				localBounds = childComponents[0]->bounds();
+				for (size_t i = 1; i < childComponents.size(); ++i) {
+					auto componentBounds = childComponents[i]->bounds();
+					if (!componentBounds.empty()) {
+						localBounds.expandWith(componentBounds);
+					}
 				}
+			} else {
+				localBounds = BoxAABB<>();
+			}
+			if (myParent) {
+				myParent->recalculateChildBounds();
+			}
+		}
 
-				myParent->remove(a_newName);
-				nodeId = a_newName;
+		void Node::recalculateChildBounds() {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			if (!childNodes.empty()) {
+				localChildBounds = childNodes[0]->bounds();
+				for (size_t i = 1; i < childNodes.size(); ++i) {
+					auto nodeBounds = childNodes[i]->bounds();
+					if (!nodeBounds.empty()) {
+						localChildBounds.expandWith(nodeBounds);
+					}
+				}
+			} else {
+				localChildBounds = BoxAABB<>();
+			}
+			if (myParent) {
+				myParent->recalculateChildBounds();
+			}
+		}
 
-				insertSorted(myParent->drawList, thisShared);
-			} else{
-				nodeId = a_newName;
+		void Node::recalculateMatrix() {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			localMatrixTransform.makeIdentity();
+
+			if (!translateTo.atOrigin()) {
+				localMatrixTransform.translate(translateTo.x, translateTo.y, translateTo.z);
+			}
+			if (rotateTo != 0.0f) {
+				localMatrixTransform.rotateX(toRadians(rotateTo.x)).rotateY(toRadians(rotateTo.y)).rotateZ(toRadians(rotateTo.z));
+			}
+			if (scaleTo != 1.0f) {
+				localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
+			}
+
+			if (myParent) {
+				worldMatrixTransform = myParent->worldMatrixTransform * localMatrixTransform;
+				parentAccumulatedAlpha = myParent->parentAccumulatedAlpha * nodeAlpha;
+			} else {
+				worldMatrixTransform = localMatrixTransform;
+				parentAccumulatedAlpha = nodeAlpha;
+			}
+		}
+
+		Node::Node(Draw2D &a_draw2d, const std::string &a_id) :
+			draw2d(a_draw2d),
+			nodeId(a_id),
+			onEnable(onEnableSlot),
+			onDisable(onDisableSlot),
+			onShow(onShowSlot),
+			onHide(onHideSlot),
+			onPause(onPauseSlot),
+			onResume(onResumeSlot),
+			onChildAdd(onChildAddSlot),
+			onChildRemove(onChildRemoveSlot),
+			onAdd(onAddSlot),
+			onRemove(onRemoveSlot),
+			onTransformChange(onTransformChangeSlot),
+			onLocalBoundsChange(onLocalBoundsChangeSlot),
+			onDepthChange(onDepthChangeSlot),
+			onAlphaChange(onAlphaChangeSlot) {
+
+			worldMatrixTransform.makeIdentity();
+			onAdd.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
+				onParentTransformChangeSignal = myParent->onTransformChangeSlot.connect([&](const std::shared_ptr<Node> &a_parent) {
+					recalculateMatrix();
+				});
+				onParentAlphaChangeSignal = myParent->onAlphaChangeSlot.connect([&](const std::shared_ptr<Node> &a_parent) {
+					recalculateAlpha();
+				});
+				onTransformChangeSlot(a_self);
+			});
+			onRemove.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
+				onParentTransformChangeSignal = nullptr;
+				onParentAlphaChangeSignal = nullptr;
+				onTransformChangeSlot(a_self);
+			});
+			onTransformChange.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
+				recalculateMatrix();
+			});
+		}
+
+		void Node::recalculateAlpha() {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			parentAccumulatedAlpha = (myParent) ? myParent->parentAccumulatedAlpha * nodeAlpha : nodeAlpha;
+		}
+
+		std::shared_ptr<Node> Node::serializable(bool a_serializable) {
+			allowSerialize = a_serializable;
+			return shared_from_this();
+		}
+
+		bool Node::serializable() const {
+			return allowSerialize;
+		}
+
+		std::shared_ptr<Node> Node::enable() {
+			auto self = shared_from_this();
+			bool changedState = false;
+			if (!allowDraw) {
+				changedState = true;
+				allowDraw = true;
+				onResumeSlot(self);
+			}
+			if (!allowUpdate) {
+				changedState = true;
+				allowUpdate = true;
+				onShowSlot(self);
+			}
+			if (changedState) {
+				onEnableSlot(self);
+			}
+			return self;
+		}
+
+		std::shared_ptr<Node> Node::disable() {
+			auto self = shared_from_this();
+			bool changedState = false;
+			if (allowDraw) {
+				changedState = true;
+				allowDraw = false;
+				onPauseSlot(self);
+			}
+			if (allowUpdate) {
+				changedState = true;
+				allowUpdate = false;
+				onHideSlot(self);
+			}
+			if (changedState) {
+				onDisableSlot(self);
+			}
+			return self;
+		}
+
+		std::shared_ptr<Node> Node::resume() {
+			auto self = shared_from_this();
+			if (!allowUpdate) {
+				allowUpdate = true;
+				onResumeSlot(self);
+				if (allowDraw == true) {
+					onEnableSlot(self);
+				}
+			}
+			return self;
+		}
+
+		std::shared_ptr<Node> Node::pause() {
+			auto self = shared_from_this();
+			if (allowUpdate) {
+				allowUpdate = false;
+				onPauseSlot(self);
+				if (allowDraw == false) {
+					onDisableSlot(self);
+				}
+			}
+			return self;
+		}
+
+		std::shared_ptr<Node> Node::show() {
+			auto self = shared_from_this();
+			if (!allowDraw) {
+				allowDraw = true;
+				onShowSlot(self);
+				if (allowUpdate == true) {
+					onEnableSlot(self);
+				}
+			}
+			return self;
+		}
+
+		std::shared_ptr<Node> Node::hide() {
+			auto self = shared_from_this();
+			if (allowDraw) {
+				allowDraw = false;
+				onHideSlot(self);
+				if (allowUpdate == false) {
+					onDisableSlot(self);
+				}
+			}
+			return self;
+		}
+
+		void Node::postLoadStep() {
+			for (auto &&childNode : childNodes) {
+				childNode->myParent = this;
 			}
 		}
 

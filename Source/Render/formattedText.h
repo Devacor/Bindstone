@@ -14,7 +14,7 @@
 namespace MV {
 	namespace Scene{
 		class Node;
-		class Rectangle;
+		class Sprite;
 	}
 	extern const UtfString COLOR_IDENTIFIER;
 	extern const UtfString FONT_IDENTIFIER;
@@ -148,12 +148,12 @@ namespace MV {
 	class Draw2D;
 	class TextLibrary{
 	public:
-		TextLibrary(Draw2D *a_rendering);
+		TextLibrary(Draw2D& a_rendering);
 		~TextLibrary(){}
 
 		bool loadFont(const std::string &a_identifier, std::string a_fontFileLocation, int a_pointSize, FontStyle a_styleFlags = FontStyle::NORMAL);
 
-		Draw2D *getRenderer(){return render;}
+		Draw2D& renderer(){return render;}
 
 		std::shared_ptr<FontDefinition> fontDefinition(const std::string &a_identifier) const;
 	private:
@@ -170,7 +170,7 @@ namespace MV {
 			archive.extract(
 				cereal::make_nvp("renderer", renderer)
 			);
-			construct(renderer);
+			construct(*renderer);
 			archive(
 				cereal::make_nvp("loadedFonts", construct()->loadedFonts)
 			);
@@ -178,7 +178,7 @@ namespace MV {
 
 		std::map<std::string, std::shared_ptr<FontDefinition>> loadedFonts;
 		SDL_Color white;
-		Draw2D *render;
+		Draw2D& render;
 	};
 
 	///////////////////////////////////
@@ -219,7 +219,7 @@ namespace MV {
 
 		UtfChar textCharacter;
 		std::shared_ptr<CharacterDefinition> character;
-		std::shared_ptr<Scene::Rectangle> shape;
+		std::shared_ptr<Scene::Sprite> shape;
 		std::shared_ptr<FormattedLine> line;
 		std::shared_ptr<FormattedState> state;
 

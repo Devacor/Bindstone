@@ -195,6 +195,9 @@ namespace MV {
 		T x, y, z;
 	};
 
+	typedef Point<> AxisAngles;
+	typedef Point<> AxisMagnitude;
+
 	class Scale{
 	public:
 		Scale():x(1.0f), y(1.0f), z(1.0f){}

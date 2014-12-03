@@ -1,108 +1,150 @@
 #include "clipped.h"
 #include <memory>
 #include "cereal/archives/json.hpp"
+
 CEREAL_REGISTER_TYPE(MV::Scene::Clipped);
 
 namespace MV {
 	namespace Scene {
 
-		/*************************\
-		| --------Clipped-------- |
-		\*************************/
-
-		void Clipped::refreshTexture(bool a_forceRefresh) {
-			if(a_forceRefresh || dirtyTexture){
-				auto pointAABB = basicAABB();
+		void Clipped::refreshTexture(bool a_forceRefreshEvenIfNotDirty /*= true*/) {
+			if (a_forceRefreshEvenIfNotDirty || dirtyTexture) {
+				bool emptyCapturedBounds = capturedBounds.empty();
+				auto pointAABB = emptyCapturedBounds ? bounds() : capturedBounds;
 				auto textureSize = cast<int>(pointAABB.size());
-				if(!clippedTexture || clippedTexture->size() != textureSize){
-					clippedTexture = DynamicTextureDefinition::make("", textureSize, {0.0f, 0.0f, 0.0f, 0.0f});
+				if (!clippedTexture || clippedTexture->size() != textureSize) {
+					clippedTexture = DynamicTextureDefinition::make("", textureSize, { 0.0f, 0.0f, 0.0f, 0.0f });
 				}
-				dirtyTexture = false;
+
 				texture(clippedTexture->makeHandle(textureSize));
 				{
-					auto framebuffer = renderer->makeFramebuffer(cast<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId())->start();
+					auto framebuffer = owner()->renderer().makeFramebuffer(cast<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId())->start();
 
-					renderer->setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
-					SCOPE_EXIT{renderer->defaultBlendFunction(); };
+					owner()->renderer().setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
+					SCOPE_EXIT{ owner()->renderer().defaultBlendFunction(); };
 
-					renderer->modelviewMatrix().push();
-					SCOPE_EXIT{renderer->modelviewMatrix().pop(); };
-					renderer->modelviewMatrix().top().makeIdentity();
-
-					sortedRender();
+					owner()->drawChildren(TransformMatrix());
 				}
-
-				alertParent(VisualChange::make(shared_from_this(), false));
+				notifyParentOfComponentChange();
+				dirtyTexture = false;
 			}
 		}
 
 		bool Clipped::preDraw() {
-			refreshTexture();
-
-			pushMatrix();
-			SCOPE_EXIT{popMatrix(); };
-
-			renderer->setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-			SCOPE_EXIT{renderer->defaultBlendFunction(); };
-			defaultDraw(GL_TRIANGLE_FAN);
-
-			return false; //returning false blocks the default rendering steps for this node.
+			if (shouldDraw) {
+				refreshTexture(false);
+				owner()->renderer().setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+				return true;
+			}
+			return false;
 		}
 
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer) {
-			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			clipped->registerShader();
-			return clipped;
+		bool Clipped::postDraw() {
+			owner()->renderer().defaultBlendFunction();
+			return !shouldDraw;
 		}
 
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const Size<> &a_size, bool a_center) {
-			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			clipped->registerShader();
-			return clipped->size(a_size, a_center);
+		Clipped::Clipped(const std::weak_ptr<Node> &a_owner) :
+			Sprite(a_owner) {
+			
 		}
 
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const Size<> &a_size, const Point<> &a_centerPoint) {
-			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			clipped->registerShader();
-			return clipped->size(a_size, a_centerPoint);
-		}
+		void Clipped::observeNode(const std::shared_ptr<Node>& a_node) {
+			std::vector<std::list<Node::BasicSharedSignalType>::iterator> localBasicSignals;
+			basicSignals.push_back(a_node->onChildAdd.connect([&](const std::shared_ptr<Node> &a_this) {
+				dirtyTexture = true;
+				observeNode(a_this);
+			}));
+			localBasicSignals.push_back(basicSignals.end()--);
+			auto markDirty = [&](const std::shared_ptr<Node> &a_this) {
+				dirtyTexture = true;
+			};
+			basicSignals.push_back(a_node->onDepthChange.connect(markDirty));
+			localBasicSignals.push_back(basicSignals.end()--);
+			basicSignals.push_back(a_node->onAlphaChange.connect(markDirty));
+			localBasicSignals.push_back(basicSignals.end()--);
+			basicSignals.push_back(a_node->onShow.connect(markDirty));
+			localBasicSignals.push_back(basicSignals.end()--);
+			basicSignals.push_back(a_node->onHide.connect(markDirty));
+			localBasicSignals.push_back(basicSignals.end()--);
+			basicSignals.push_back(a_node->onTransformChange.connect(markDirty));
+			localBasicSignals.push_back(basicSignals.end()--);
+			basicSignals.push_back(a_node->onLocalBoundsChange.connect(markDirty));
+			localBasicSignals.push_back(basicSignals.end()--);
+			
+			std::weak_ptr<Component> weakSelf = shared_from_this();
+			componentSignals.push_back(a_node->onComponentUpdate.connect([&, weakSelf](const std::shared_ptr<Component> &a_this){
+				if (a_this != weakSelf.lock()) {
+					dirtyTexture = true;
+				}
+			}));
+			std::list<Node::ComponentSharedSignalType>::iterator localComponentSignal = componentSignals.end()--;
 
-		std::shared_ptr<Clipped> Clipped::make(Draw2D* a_renderer, const BoxAABB<> &a_boxAABB) {
-			auto clipped = std::shared_ptr<Clipped>(new Clipped(a_renderer));
-			clipped->registerShader();
-			return clipped->bounds(a_boxAABB);
-		}
+			basicSignals.push_back(nullptr);
+			localBasicSignals.push_back(basicSignals.end()--);
 
-		void Clipped::drawIgnoringClipping(){
-			if(isVisible){
-				pushMatrix();
-				SCOPE_EXIT{popMatrix(); };
+			auto removeSignalResponder = basicSignals.end()--;
+			*(removeSignalResponder) = Node::BasicSignalType::make([&,localBasicSignals, localComponentSignal](const std::shared_ptr<Node> &a_this) mutable {
+				dirtyTexture = true;
+				componentSignals.erase(localComponentSignal);
+				for (auto&& signalIterator : localBasicSignals) {
+					basicSignals.erase(signalIterator);
+				}
+			});
+			a_node->onRemove.connect(*removeSignalResponder);
 
-				sortedRender();
+			for (auto&& child : *a_node) {
+				observeNode(child);
 			}
 		}
 
-		void Clipped::drawIgnoringClipping(const Point<> &a_positionOverride) {
-			if(isVisible){
-				auto oldPosition = position();
-				position(a_positionOverride);
-				SCOPE_EXIT{position(oldPosition);};
-
-				pushMatrix();
-				SCOPE_EXIT{popMatrix(); };
-
-				sortedRender();
-			}
+		std::shared_ptr<Clipped> Clipped::clearCaptureBounds() {
+			capturedBounds = BoxAABB<>();
+			return std::static_pointer_cast<Clipped>(shared_from_this());
 		}
 
-		BoxAABB<> Clipped::worldAABBImplementation(bool a_includeChildren, bool a_nestedCall){
-			return Node::worldAABBImplementation(false, a_nestedCall);
+		std::shared_ptr<Clipped> Clipped::captureBounds(const BoxAABB<> &a_newCapturedBounds) {
+			capturedBounds = a_newCapturedBounds;
+			dirtyTexture = true;
+			return std::static_pointer_cast<Clipped>(shared_from_this());
 		}
-		BoxAABB<int> Clipped::screenAABBImplementation(bool a_includeChildren, bool a_nestedCall){
-			return Node::screenAABBImplementation(false, a_nestedCall);
+
+		BoxAABB<> Clipped::captureBounds() {
+			return capturedBounds;
 		}
-		BoxAABB<> Clipped::localAABBImplementation(bool a_includeChildren, bool a_nestedCall){
-			return Node::localAABBImplementation(false, a_nestedCall);
+
+		std::shared_ptr<Sprite> Clipped::captureSize(const Size<> &a_size, const Point<> &a_centerPoint) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			Point<> topLeft;
+			Point<> bottomRight = toPoint(a_size);
+
+			topLeft -= a_centerPoint;
+			bottomRight -= a_centerPoint;
+			
+			return captureBounds({ topLeft, bottomRight });
+		}
+
+		std::shared_ptr<Sprite> Clipped::captureSize(const Size<> &a_size, bool a_center /*= false*/) {
+			return captureSize(a_size, (a_center) ? point(a_size.width / 2.0f, a_size.height / 2.0f) : point(0.0f, 0.0f));
+		}
+
+		std::shared_ptr<Clipped> Clipped::bounds(const BoxAABB<> &a_bounds) {
+			dirtyTexture = true;
+			return std::static_pointer_cast<Clipped>(Sprite::bounds(a_bounds));
+		}
+
+		BoxAABB<> Clipped::bounds() {
+			return boundsImplementation();
+		}
+
+		std::shared_ptr<Clipped> Clipped::size(const Size<> &a_size, const Point<> &a_centerPoint) {
+			dirtyTexture = true;
+			return std::static_pointer_cast<Clipped>(Sprite::size(a_size, a_centerPoint));
+		}
+
+		std::shared_ptr<Clipped> Clipped::size(const Size<> &a_size, bool a_center /*= false*/) {
+			dirtyTexture = true;
+			return std::static_pointer_cast<Clipped>(Sprite::size(a_size, a_center));
 		}
 
 	}

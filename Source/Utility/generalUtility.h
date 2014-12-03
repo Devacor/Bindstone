@@ -35,7 +35,7 @@ namespace MV {
 	void systemSleep(int time);
 
 	template< typename T >
-	typename std::vector<std::shared_ptr<T>>::iterator insertSorted(std::vector<std::shared_ptr<T>> & a_vec, std::shared_ptr<T>& a_item){
+	typename std::vector<std::shared_ptr<T>>::iterator insertSorted(std::vector<std::shared_ptr<T>> & a_vec, const std::shared_ptr<T>& a_item){
 		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::shared_ptr<T>& a_lhs, const std::shared_ptr<T> &a_rhs){return *a_lhs < *a_rhs; }), a_item);
 	}
 
@@ -200,7 +200,7 @@ namespace MV {
 			return lhs == rhs;
 		} else if(lhs == rhs){ //handle simple case equality
 			return true;
-		} else if(!floatingPointRangeCompareCheck(lhs, rhs)){
+		} else if(!floatingPointRangeCompareCheck(lhs, rhs) || (lhs < 0 && rhs > 0) || (lhs > 0 && rhs < 0)){
 			return false;
 		} else{
 			int maxUlps = 1; //precision required

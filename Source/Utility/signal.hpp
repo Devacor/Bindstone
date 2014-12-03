@@ -17,6 +17,7 @@ namespace MV {
 	public:
 		typedef std::function<T> FunctionType;
 		typedef std::shared_ptr<Signal<T>> SharedType;
+		typedef std::weak_ptr<Signal<T>> WeakType;
 
 		static std::shared_ptr< Signal<T> > make(std::function<T> a_callback){
 			return std::shared_ptr< Signal<T> >(new Signal<T>(a_callback, ++uniqueId));
@@ -93,6 +94,7 @@ namespace MV {
 		typedef std::function<T> FunctionType;
 		typedef Signal<T> SignalType;
 		typedef std::shared_ptr<Signal<T>> SharedSignalType;
+		typedef std::weak_ptr<Signal<T>> WeakSignalType;
 
 		//No protection against duplicates.
 		std::shared_ptr<Signal<T>> connect(std::function<T> a_callback){
@@ -205,6 +207,7 @@ namespace MV {
 		typedef std::function<T> FunctionType;
 		typedef Signal<T> SignalType;
 		typedef std::shared_ptr<Signal<T>> SharedSignalType;
+		typedef std::weak_ptr<Signal<T>> WeakSignalType;
 
 		SlotRegister(Slot<T> &a_slot) :
 			slot(a_slot){

@@ -2,240 +2,321 @@
 #define _MV_SCENE_TEXT_H_
 
 #include "Render/formattedText.h"
-#include "Render/Scene/node.h"
-#include "Render/Scene/clipped.h"
+#include "sprite.h"
 
 namespace MV{
 	namespace Scene {
 
-		class Text :
-			public Node{
-
-			typedef void TextSlotSignature(std::shared_ptr<Text>);
-
-			friend cereal::access;
+		class Text : public Drawable {
 			friend Node;
+			friend cereal::access;
+
+		public:
+			typedef void TextSlotSignature(const std::shared_ptr<Text> &);
+
+		private:
 
 			Slot<TextSlotSignature> onEnterSlot;
+
 		public:
-			~Text(){
-			}
+			SlotRegister<TextSlotSignature> onEnter;
 
-			typedef Slot<TextSlotSignature>::SharedSignalType Enter;
+			DrawableDerivedAccessors(Text)
 
-			SCENE_MAKE_FACTORY_METHODS(Text)
-
-			static std::shared_ptr<Text> make(Draw2D* a_renderer, TextLibrary *a_textLibrary, const Size<> &a_size);
-			static std::shared_ptr<Text> make(Draw2D* a_renderer, TextLibrary *a_textLibrary, const Size<> &a_size, const std::string &a_fontIdentifier);
-			
-			UtfString text() const{
+			UtfString text() const {
 				return formattedText.string();
 			}
-			PointPrecision number() const{
-				try{
-					return stof(text());
-				} catch(...){
-					return 0.0f;
-				}
-			}
-			std::shared_ptr<Text> number(PointPrecision a_newText){
-				UtfString str = stringToWide(std::to_string(a_newText));
-				return text(str);
-			}
-			std::shared_ptr<Text> number(int a_newText){
-				UtfString str = stringToWide(std::to_string(a_newText));
-				return text(str);
-			}
-
-			SlotRegister<TextSlotSignature> onEnter;
-			//Convenient Optional Storage
-			std::map<std::string, Enter> enterSignals;
-
-			std::shared_ptr<Text> justification(MV::TextJustification a_newJustification){
-				formattedText.justification(a_newJustification);
+			std::shared_ptr<Text> text(const UtfString &a_text, const std::string &a_fontIdentifier = "") {
+				if (a_fontIdentifier != "") { fontIdentifier = a_fontIdentifier; }
+				formattedText.clear();
+				formattedText.append(a_text);
+				setCursor(a_text.size());
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
-			MV::TextJustification justification() const{
-				return formattedText.justification();
-			}
-
-			std::shared_ptr<Text> wrapping(MV::TextWrapMethod a_newWrapMethod){
-				formattedText.wrapping(a_newWrapMethod);
-				return std::static_pointer_cast<Text>(shared_from_this());
-			}
-			MV::TextWrapMethod wrapping() const{
-				return formattedText.wrapping();
-			}
-
-			std::shared_ptr<Text> text(const UtfString &a_text, const std::string &a_fontIdentifier = "");
-			std::shared_ptr<Text> text(UtfChar a_char, const std::string &a_fontIdentifier = ""){
+			std::shared_ptr<Text> text(UtfChar a_char, const std::string &a_fontIdentifier = "") {
 				return text(UtfString() + a_char, a_fontIdentifier);
 			}
-			std::shared_ptr<Text> text(Uint16 a_char, const std::string &a_fontIdentifier = ""){
+			std::shared_ptr<Text> text(Uint16 a_char, const std::string &a_fontIdentifier = "") {
 				UtfChar *character = reinterpret_cast<UtfChar*>(&a_char);
 				return text(*character, a_fontIdentifier);
 			}
-			//any further development to input handling should probably be broken out elsewhere.
-			bool text(SDL_Event &event);
 
-			void setTemporaryText(const UtfString &a_text, size_t a_cursorStart, size_t a_cursorEnd){
-				editText = a_text;
+			bool text(SDL_Event &event) {
+				if (event.type == SDL_TEXTINPUT) {
+					insertAtCursor(stringToWide(event.text.text));
+					return true;
+				} else if (event.type == SDL_TEXTEDITING) {
+					//setTemporaryText(stringToWide(event.edit.text), event.edit.start, event.edit.length);
+				} else if (event.type == SDL_KEYDOWN) {
+					if (event.key.keysym.sym == SDLK_BACKSPACE && !formattedText.empty()) {
+						backspace();
+						return true;
+					}if (event.key.keysym.sym == SDLK_DELETE && !formattedText.empty() && cursor < formattedText.size()) {
+						++cursor; //this is okay because backspace will reposition the cursor.
+						backspace();
+						return true;
+					} else if (event.key.keysym.sym == SDLK_v && SDL_GetModState() & KMOD_CTRL) {
+						append(stringToWide(SDL_GetClipboardText()));
+						return true;
+					} else if (event.key.keysym.sym == SDLK_c && SDL_GetModState() & KMOD_CTRL) {
+						SDL_SetClipboardText(wideToString(text()).c_str());
+					} else if (event.key.keysym.sym == SDLK_LEFT) {
+						if (cursor > 0) {
+							incrementCursor(-1);
+						}
+					} else if (event.key.keysym.sym == SDLK_RIGHT) {
+						if (cursor < formattedText.size()) {
+							incrementCursor(1);
+						}
+					} else if (event.key.keysym.sym == SDLK_RETURN) {
+						auto self = std::static_pointer_cast<Text>(shared_from_this());
+						onEnterSlot(self);
+					}
+				}
+				return false;
 			}
 
-			std::shared_ptr<Text> append(const UtfString &a_text){
-				if(cursor >= formattedText.size()){
+			PointPrecision number() const {
+				try {
+					return stof(text());
+				} catch (...) {
+					return 0.0f;
+				}
+			}
+			std::shared_ptr<Text> number(PointPrecision a_newText) {
+				UtfString str = stringToWide(std::to_string(a_newText));
+				return text(str);
+			}
+			std::shared_ptr<Text> number(int a_newText) {
+				UtfString str = stringToWide(std::to_string(a_newText));
+				return text(str);
+			}
+
+			std::shared_ptr<Text> justification(MV::TextJustification a_newJustification) {
+				formattedText.justification(a_newJustification);
+				return std::static_pointer_cast<Text>(shared_from_this());
+			}
+			MV::TextJustification justification() const {
+				return formattedText.justification();
+			}
+
+			std::shared_ptr<Text> wrapping(MV::TextWrapMethod a_newWrapMethod) {
+				formattedText.wrapping(a_newWrapMethod);
+				return std::static_pointer_cast<Text>(shared_from_this());
+			}
+			MV::TextWrapMethod wrapping() const {
+				return formattedText.wrapping();
+			}
+
+			std::shared_ptr<Text> append(const UtfString &a_text) {
+				if (cursor >= formattedText.size()) {
 					incrementCursor(a_text.size());
 				}
 				formattedText.append(a_text);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
-			std::shared_ptr<Text> append(UtfChar a_char){
-				if(cursor >= formattedText.size()){
+			std::shared_ptr<Text> append(UtfChar a_char) {
+				if (cursor >= formattedText.size()) {
 					incrementCursor(1);
 				}
 				formattedText.append(UtfString(1, a_char));
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
-			std::shared_ptr<Text> append(Uint16 a_char){
+			std::shared_ptr<Text> append(Uint16 a_char) {
 				UtfChar *character = reinterpret_cast<UtfChar*>(&a_char);
 				return append(*character);
 			}
 
-			std::shared_ptr<Text> insertAtCursor(const UtfString &a_text){
+			std::shared_ptr<Text> insertAtCursor(const UtfString &a_text) {
 				formattedText.insert(cursor, a_text);
 				incrementCursor(a_text.size());
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
-			std::shared_ptr<Text> insertAtCursor(UtfChar a_char){
+			std::shared_ptr<Text> insertAtCursor(UtfChar a_char) {
 				formattedText.insert(cursor, UtfString(1, a_char));
 				incrementCursor(1);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
-			std::shared_ptr<Text> insertAtCursor(Uint16 a_char){
+			std::shared_ptr<Text> insertAtCursor(Uint16 a_char) {
 				UtfChar *character = reinterpret_cast<UtfChar*>(&a_char);
 				formattedText.insert(cursor, UtfString(1, *character));
 				incrementCursor(1);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 
-			std::shared_ptr<Text> backspace(){
-				if(cursor > 0){
+			void enableCursor() {
+				displayCursor = true;
+				setCursor(cursor);
+				cursorScene->show();
+			}
+			void disableCursor() {
+				displayCursor = false;
+				setCursor(cursor);
+				cursorScene->hide();
+			}
+
+			std::shared_ptr<Text> backspace() {
+				if (cursor > 0) {
 					formattedText.erase(cursor - 1, 1);
 					incrementCursor(-1);
 				}
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 
-			void textBoxSize(Size<> a_size);
-
-			void scrollPosition(Point<> a_position, bool a_overScroll = false);
-			void translateScrollPosition(Point<> a_position, bool a_overScroll = false){
-				scrollPosition((contentScrollPosition + a_position), a_overScroll);
+			virtual void update(double a_dt) {
+				if (displayCursor) {
+					accumulatedTime += a_dt;
+					if (accumulatedTime > BLINK_DURATION) {
+						fmod(accumulatedTime, BLINK_DURATION);
+						if (cursorScene->visible()) {
+							cursorScene->hide();
+						} else {
+							cursorScene->show();
+						}
+					}
+				}
 			}
 
-			Point<> scrollPosition() const{
-				return contentScrollPosition;
-			}
-
-			Size<> contentSize() const;
-			PointPrecision getMinimumLineHeight() const{
+			PointPrecision minimumLineHeight() const {
 				return formattedText.minimumLineHeight();
 			}
-			std::shared_ptr<Text> setMinimumLineHeight(PointPrecision a_newLineHeight){
+
+			std::shared_ptr<Text> minimumLineHeight(PointPrecision a_newLineHeight) {
 				formattedText.minimumLineHeight(a_newLineHeight);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 
-			std::shared_ptr<Text> makeSingleLine(){
-				isSingleLine = true;
-				return std::static_pointer_cast<Text>(shared_from_this());
-			}
-			std::shared_ptr<Text> makeManyLine(){
-				isSingleLine = false;
-				return std::static_pointer_cast<Text>(shared_from_this());
-			}
-
-			void enableCursor(){
-				displayCursor = true;
-				setCursor(cursor);
-				cursorScene->show();
-			}
-			void disableCursor(){
-				displayCursor = false;
-				setCursor(cursor);
-				cursorScene->hide();
-			}
 		protected:
-			virtual bool preDraw() override;
+			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const Size<> &a_size, const std::string &a_defaultFontIdentifier) :
+				Drawable(a_owner),
+				textLibrary(a_textLibrary),
+				onEnter(onEnterSlot),
+				fontIdentifier(a_defaultFontIdentifier),
+				formattedText(a_textLibrary, a_size.width, DEFAULT_ID),
+				boxSize(a_size) {
 
-		private:
-			Text(Draw2D *a_renderer, TextLibrary *a_textLibrary, const Size<> &a_size, const std::string &a_fontIdentifier);
+				points.resize(4);
+				clearTexturePoints(points);
+				appendQuadVertexIndices(vertexIndices, 0);
+				cursorScene = owner()->make(guid("CURSOR_"))->attach<Sprite>()->size({ 1.0f, 5.0f });
+			}
+
+			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary) :
+				Text(a_owner, a_textLibrary, Size<>(), DEFAULT_ID){
+			}
+			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const Size<> &a_size) :
+				Text(a_owner, a_textLibrary, a_size, DEFAULT_ID) {
+			}
+			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const std::string &a_defaultFontIdentifier) :
+				Text(a_owner, a_textLibrary, Size<>(), a_defaultFontIdentifier) {
+			}
 
 			template <class Archive>
-			void serialize(Archive & archive){
+			void serialize(Archive & archive) {
 				archive(
-					CEREAL_NVP(fontIdentifier),
 					CEREAL_NVP(boxSize),
 					CEREAL_NVP(contentScrollPosition),
+					CEREAL_NVP(textJustification),
 					CEREAL_NVP(wrapMethod),
-					CEREAL_NVP(textJustification)
+					CEREAL_NVP(fontIdentifier),
+					CEREAL_NVP(cursorScene),
+					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Text> &construct){
-				TextLibrary *textLibrary = nullptr;
-				Draw2D *renderer = nullptr;
+			static void load_and_construct(Archive & archive, cereal::construct<Text> &construct) {
+				TextLibrary *library = nullptr;
+				archive.extract(cereal::make_nvp("library", library));
+				MV::require<PointerException>(library != nullptr, "Null TextLibrary in Text::load_and_construct.");
+
+				std::string fontIdentifier;
 				Size<> boxSize;
-				std::string fontIdentifier = DEFAULT_ID;
 				archive(
-					cereal::make_nvp("boxSize", boxSize),
-					cereal::make_nvp("fontIdentifier", fontIdentifier)
-				).extract(
-					cereal::make_nvp("textLibrary", textLibrary),
-					cereal::make_nvp("renderer", renderer)
+					cereal::make_nvp("fontIdentifier", fontIdentifier),
+					cereal::make_nvp("boxSize", boxSize)
 				);
-				require<PointerException>(textLibrary != nullptr, "Null textLibrary in Text::load_and_construct.");
-				require<PointerException>(renderer != nullptr, "Null renderer in Text::load_and_construct.");
-				construct(renderer, textLibrary, boxSize, fontIdentifier);
+
+				construct(std::shared_ptr<Node>(), *library, boxSize, fontIdentifier);
+
 				archive(
 					cereal::make_nvp("contentScrollPosition", construct->contentScrollPosition),
+					cereal::make_nvp("textJustification", construct->textJustification),
 					cereal::make_nvp("wrapMethod", construct->wrapMethod),
-					cereal::make_nvp("textJustification", construct->textJustification)
+					cereal::make_nvp("cursorScene", construct->cursorScene),
+					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
+			}
+
+		private:
+
+			void setCursor(int64_t a_value) {
+				auto maxCursor = formattedText.size();
+				a_value = std::max<int64_t>(std::min<int64_t>(a_value, maxCursor), 0);
+				cursor = a_value;
+				auto cursorCharacter = (cursor < maxCursor || cursor == 0) ? formattedText.characterForIndex(cursor) : formattedText.characterForIndex(cursor - 1);
+				if (cursorCharacter) {
+					positionCursorWithCharacter(maxCursor, cursorCharacter);
+				} else {
+					positionCursorWithoutCharacter();
+				}
+			}
+
+			void positionCursorWithCharacter(size_t a_maxCursor, std::shared_ptr<FormattedCharacter> a_cursorCharacter) {
+				cursorScene->owner()->position(a_cursorCharacter->position() + a_cursorCharacter->offset());
+				cursorScene->size({ 2.0f, a_cursorCharacter->characterSize().height });
+				if (cursor >= a_maxCursor) {
+					cursorScene->owner()->translate({ a_cursorCharacter->characterSize().width, 0.0f });
+				}
+				if (displayCursor) {
+					cursorScene->show();
+				}
+			}
+
+			void positionCursorWithoutCharacter() {
+				std::shared_ptr<FormattedLine> line;
+				size_t characterIndex;
+				std::tie(line, characterIndex) = formattedText.lineForCharacterIndex(cursor);
+				float xPosition = 0.0f;
+				if (justification() == TextJustification::CENTER) {
+					xPosition = formattedText.width() / 2.0f - 1.0f;
+				} else if (justification() == TextJustification::RIGHT) {
+					xPosition = formattedText.width() - 2.0f;
+				}
+				auto cursorHeight = formattedText.defaultState()->font->height();
+				auto linePositionY = formattedText.positionForLine(line->index());
+				auto cursorLineHeight = std::max<float>(formattedText.minimumLineHeight(), (line) ? line->height() : cursorHeight);
+				linePositionY += cursorLineHeight / 2.0f - cursorHeight / 2.0f;
+
+				cursorScene->owner()->position({ xPosition, linePositionY });
+				cursorScene->size({ 2.0f, cursorHeight });
+
+				if (displayCursor) {
+					cursorScene->show();
+				}
+			}
+
+			void incrementCursor(int64_t a_change) {
+				setCursor(cursor + a_change);
 			}
 
 			Size<> boxSize;
 			Point<> contentScrollPosition;
-			
-			std::shared_ptr<Scene::Node> textScene;
-			std::shared_ptr<Scene::Clipped> textboxScene;
-			TextLibrary *textLibrary;
-			Draw2D *render;
 
+			TextLibrary& textLibrary;
 			TextJustification textJustification = LEFT;
 			TextWrapMethod wrapMethod = SOFT;
 
 			FormattedText formattedText;
 
-			void incrementCursor(int64_t a_change);
-			void setCursor(int64_t a_value);
-
-			void positionCursorWithCharacter(size_t a_maxCursor, std::shared_ptr<FormattedCharacter> a_cursorCharacter);
-
-			void positionCursorWithoutCharacter();
-
 			bool displayCursor;
 			size_t cursor;
-			std::shared_ptr<Scene::Rectangle> cursorScene;
-			UtfString editText;
+			std::shared_ptr<MV::Scene::Sprite> cursorScene;
+
 			std::string fontIdentifier;
-			bool isSingleLine;
-
+			double accumulatedTime = 0.0;
 			static const double BLINK_DURATION;
-			MV::Stopwatch timer;
 		};
-
 	}
 }
 

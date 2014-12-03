@@ -11,6 +11,7 @@
 #include <memory>
 
 #include "points.h"
+#include "matrix.h"
 #include "Utility/generalUtility.h"
 
 namespace MV {
@@ -34,9 +35,6 @@ namespace MV {
 
 		BoxAABB<T>& expandWith(const Point<T> &a_comparePoint);
 		BoxAABB<T>& expandWith(const BoxAABB<T> &a_compareBox);
-
-		BoxAABB<T>& contractWith(const Point<T> &a_comparePoint);
-		BoxAABB<T>& contractWith(const BoxAABB<T> &a_compareBox);
 
 		PointPrecision width() const{
 			return (maxPoint - minPoint).x;
@@ -103,6 +101,10 @@ namespace MV {
 
 		bool operator==(const BoxAABB<T> &a_bounds) const{
 			return minPoint == a_bounds.minPoint && maxPoint == a_bounds.maxPoint;
+		}
+
+		bool operator!=(const BoxAABB<T> &a_bounds) const {
+			return !(*this == a_bounds);
 		}
 
 		template <class Archive>
@@ -344,7 +346,7 @@ namespace MV {
 		//ignores z
 		bool pointContained(const Point<> &a_comparePoint);
 
-		bool volumeCollision(PointVolume &a_compareVolume, Draw2D* a_renderer);
+		bool volumeCollision(PointVolume &a_compareVolume, Draw2D* a_renderer, const TransformMatrix &a_matrix);
 		Point<> getCenter();
 		BoxAABB<> getAABB();
 
@@ -353,9 +355,6 @@ namespace MV {
 		//get angle within proper range between two points (-pi to +pi)
 		PointPrecision getAngle(const Point<> &a_p1, const Point<> &a_p2);
 	};
-
-	typedef Point<> AxisAngles;
-	typedef Point<> AxisMagnitude;
 
 	AxisAngles angle(PointPrecision a_angle);
 }

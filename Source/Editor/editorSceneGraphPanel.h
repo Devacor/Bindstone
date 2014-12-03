@@ -25,9 +25,9 @@ public:
 	void update();
 
 private:
-	void loadButtons(std::shared_ptr<MV::Scene::Grid> a_grid, std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth = 0);
+	void loadButtons(std::shared_ptr<MV::Scene::Node> a_grid, std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth = 0);
 
-	void makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth, std::shared_ptr<MV::Scene::Grid> a_grid);
+	void makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth, std::shared_ptr<MV::Scene::Node> a_grid);
 
 	void clickedChild(std::shared_ptr<MV::Scene::Node> a_child);
 

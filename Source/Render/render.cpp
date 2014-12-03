@@ -159,10 +159,10 @@ namespace MV {
 
 	static GLint viewport[4];
 
-	Point<int> ProjectionDetails::projectScreen(const Point<> &a_point){
+	Point<int> ProjectionDetails::projectScreen(const Point<> &a_point, const TransformMatrix &a_modelview){
 		Point<> result;
 
-		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*renderer.modelviewMatrix().top().getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
+		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*a_modelview.getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
 			std::cerr << "gluProject failure!" << std::endl;
 		}
 		result.y=renderer.window().height()-result.y;
@@ -170,10 +170,10 @@ namespace MV {
 		return cast<int>(result);
 	}
 
-	Point<> ProjectionDetails::projectWorld(const Point<> &a_point){
+	Point<> ProjectionDetails::projectWorld(const Point<> &a_point, const TransformMatrix &a_modelview){
 		Point<> result;
 
-		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*renderer.modelviewMatrix().top().getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
+		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*a_modelview.getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
 			std::cerr << "gluProject failure!" << std::endl;
 		}
 		result.y/=renderer.window().height()/renderer.world().height();
@@ -183,18 +183,18 @@ namespace MV {
 		return result;
 	}
 
-	Point<> ProjectionDetails::unProjectScreen(const Point<int> &a_point){
+	Point<> ProjectionDetails::unProjectScreen(const Point<int> &a_point, const TransformMatrix &a_modelview){
 		Point<> result;
 
-		if(MESA::gluUnProject(static_cast<PointPrecision>(a_point.x), static_cast<PointPrecision>(renderer.window().height() - a_point.y), 0, &(*renderer.modelviewMatrix().top().getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
+		if(MESA::gluUnProject(static_cast<PointPrecision>(a_point.x), static_cast<PointPrecision>(renderer.window().height() - a_point.y), 0, &(*a_modelview.getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
 			std::cerr << "gluUnProject failure!" << std::endl;
 		}
 		result.z = static_cast<PointPrecision>(a_point.z);//restore original z since we're just 2d.
 		return result;
 	}
 
-	Point<> ProjectionDetails::unProjectWorld(const Point<> &a_point){
-		return unProjectScreen(renderer.screenFromWorld(a_point));
+	Point<> ProjectionDetails::unProjectWorld(const Point<> &a_point, const TransformMatrix &a_modelview){
+		return unProjectScreen(renderer.screenFromWorld(a_point), a_modelview);
 	}
 
 	void checkSDLError(int line)
@@ -713,6 +713,7 @@ namespace MV {
 				std::cerr << "Video initialization failed: " << SDL_GetError() << std::endl;
 				return false;
 			}
+			gl3wInit();
 		}
 		if(!sdlWindow.initialize()){
 			std::cerr << "Window initialization failed!" << std::endl;
@@ -784,24 +785,24 @@ namespace MV {
 		sdlWindow.updateScreen();
 	}
 
-	Point<> Draw2D::worldFromLocal(const Point<> &a_localPoint ) const{
+	Point<> Draw2D::worldFromLocal(const Point<> &a_localPoint, const TransformMatrix &a_modelview) const{
 		MV::ProjectionDetails projectIt(*this);
-		return projectIt.projectWorld(a_localPoint);
+		return projectIt.projectWorld(a_localPoint, a_modelview);
 	}
 
-	Point<int> Draw2D::screenFromLocal(const Point<> &a_localPoint) const{
+	Point<int> Draw2D::screenFromLocal(const Point<> &a_localPoint, const TransformMatrix &a_modelview) const{
 		MV::ProjectionDetails projectIt(*this);
-		return projectIt.projectScreen(a_localPoint);
+		return projectIt.projectScreen(a_localPoint, a_modelview);
 	}
 
-	Point<> Draw2D::localFromWorld(const Point<> &a_worldPoint ) const{
+	Point<> Draw2D::localFromWorld(const Point<> &a_worldPoint, const TransformMatrix &a_modelview) const{
 		MV::ProjectionDetails projectIt(*this);
-		return projectIt.unProjectWorld(a_worldPoint);
+		return projectIt.unProjectWorld(a_worldPoint, a_modelview);
 	}
 
-	Point<> Draw2D::localFromScreen(const Point<int> &a_worldPoint ) const{
+	Point<> Draw2D::localFromScreen(const Point<int> &a_worldPoint, const TransformMatrix &a_modelview) const{
 		MV::ProjectionDetails projectIt(*this);
-		return projectIt.unProjectScreen(a_worldPoint);
+		return projectIt.unProjectScreen(a_worldPoint, a_modelview);
 	}
 
 	Point<> Draw2D::worldFromScreen(const Point<int> &a_screenPoint) const{
@@ -896,14 +897,14 @@ namespace MV {
 			defaultShaderPtr = shaderPtr;
 		}
 
-		std::remove_if(needShaderRegistration.begin(), needShaderRegistration.end(), [&](std::shared_ptr<Scene::Node> a_node){
-			if(a_node->shader() == a_id){
-				a_node->shader(a_id);
-				return true;
-			} else{
-				return false;
-			}
-		});
+// 		std::remove_if(needShaderRegistration.begin(), needShaderRegistration.end(), [&](std::shared_ptr<Scene::Node> a_node){
+// 			if(a_node->shader() == a_id){
+// 				a_node->shader(a_id);
+// 				return true;
+// 			} else{
+// 				return false;
+// 			}
+// 		});
 
 		return shaderPtr;
 	}
@@ -948,51 +949,51 @@ namespace MV {
 		return defaultShaderPtr;
 	}
 
-	void Draw2D::registerShader(std::shared_ptr<Scene::Node> a_node) {
-		if(hasShader(a_node->shader())){
-			a_node->shader(a_node->shader());
-		} else{
-			needShaderRegistration.push_back(a_node);
-		}
-	}
+// 	void Draw2D::registerShader(std::shared_ptr<Scene::Node> a_node) {
+// 		if (hasShader(a_node->shader())) {
+// 			a_node->shader(a_node->shader());
+// 		} else {
+// 			needShaderRegistration.push_back(a_node);
+// 		}
+// 	}
 
 	void Draw2D::draw(GLenum drawType, std::shared_ptr<Scene::Node> a_node) {
-		a_node->shaderProgram->use();
-
-		if(a_node->bufferId == 0){
-			glGenBuffers(1, &a_node->bufferId);
-		}
-
-		glBindBuffer(GL_ARRAY_BUFFER, a_node->bufferId);
-		auto structSize = static_cast<GLsizei>(sizeof(a_node->points[0]));
-		glBufferData(GL_ARRAY_BUFFER, a_node->points.size() * structSize, &(a_node->points[0]), GL_STATIC_DRAW);
-
-		glEnableVertexAttribArray(0);
-		glEnableVertexAttribArray(1);
-		glEnableVertexAttribArray(2);
-
-		auto positionOffset = static_cast<GLsizei>(offsetof(DrawPoint, x));
-		auto textureOffset = static_cast<GLsizei>(offsetof(DrawPoint, textureX));
-		auto colorOffset = static_cast<GLsizei>(offsetof(DrawPoint, R));
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (void*)positionOffset); //Point
-		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (void*)textureOffset); //UV
-		glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (void*)colorOffset); //Color
-
-		TransformMatrix transformationMatrix(projectionMatrix().top() * modelviewMatrix().top());
-
-		a_node->shaderProgram->set("texture", a_node->ourTexture);
-		a_node->shaderProgram->set("transformation", transformationMatrix);
-
-		if(!a_node->vertexIndices.empty()){
-			glDrawElements(drawType, static_cast<GLsizei>(a_node->vertexIndices.size()), GL_UNSIGNED_INT, &a_node->vertexIndices[0]);
-		} else{
-			glDrawArrays(drawType, 0, static_cast<GLsizei>(a_node->points.size()));
-		}
-
-		glDisableVertexAttribArray(0);
-		glDisableVertexAttribArray(1);
-		glDisableVertexAttribArray(2);
-		glUseProgram(0);
+// 		a_node->shaderProgram->use();
+// 
+// 		if(a_node->bufferId == 0){
+// 			glGenBuffers(1, &a_node->bufferId);
+// 		}
+// 
+// 		glBindBuffer(GL_ARRAY_BUFFER, a_node->bufferId);
+// 		auto structSize = static_cast<GLsizei>(sizeof(a_node->points[0]));
+// 		glBufferData(GL_ARRAY_BUFFER, a_node->points.size() * structSize, &(a_node->points[0]), GL_STATIC_DRAW);
+// 
+// 		glEnableVertexAttribArray(0);
+// 		glEnableVertexAttribArray(1);
+// 		glEnableVertexAttribArray(2);
+// 
+// 		auto positionOffset = static_cast<GLsizei>(offsetof(DrawPoint, x));
+// 		auto textureOffset = static_cast<GLsizei>(offsetof(DrawPoint, textureX));
+// 		auto colorOffset = static_cast<GLsizei>(offsetof(DrawPoint, R));
+// 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (void*)positionOffset); //Point
+// 		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (void*)textureOffset); //UV
+// 		glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (void*)colorOffset); //Color
+// 
+// 		TransformMatrix transformationMatrix(projectionMatrix().top() * modelviewMatrix().top());
+// 
+// 		a_node->shaderProgram->set("texture", a_node->ourTexture);
+// 		a_node->shaderProgram->set("transformation", transformationMatrix);
+// 
+// 		if(!a_node->vertexIndices.empty()){
+// 			glDrawElements(drawType, static_cast<GLsizei>(a_node->vertexIndices.size()), GL_UNSIGNED_INT, &a_node->vertexIndices[0]);
+// 		} else{
+// 			glDrawArrays(drawType, 0, static_cast<GLsizei>(a_node->points.size()));
+// 		}
+// 
+// 		glDisableVertexAttribArray(0);
+// 		glDisableVertexAttribArray(1);
+// 		glDisableVertexAttribArray(2);
+// 		glUseProgram(0);
 	}
 
 	void Draw2D::refreshWorldAndWindowSize() {

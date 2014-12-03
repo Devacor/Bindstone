@@ -1,83 +1,125 @@
 #ifndef _MV_SCENE_SLIDER_H_
 #define _MV_SCENE_SLIDER_H_
 
-#include "Render/Scene/button.h"
+#include "Render/Scene/clickable.h"
 
 namespace MV {
 	namespace Scene {
-		class Slider : public Node{
+		class Slider : public Clickable {
 			friend cereal::access;
-
-			MV::Slot<void(std::shared_ptr<Slider>)> onPercentChangeSlot;
-
+			friend Node;
 		public:
-			MV::SlotRegister<void(std::shared_ptr<Slider>)> onPercentChange;
+			typedef void SliderSlotSignature(std::shared_ptr<Slider>);
+		private:
+			Slot<SliderSlotSignature> onPercentChangeSlot;
+		public:
+			SlotRegister<SliderSlotSignature> onPercentChange;
 
-			SCENE_MAKE_FACTORY_METHODS(Slider)
+			ClickableComponentDerivedAccessors(Slider)
 
-			static std::shared_ptr<Slider> make(Draw2D* a_renderer, MouseState *a_mouse);
-			static std::shared_ptr<Slider> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center = false);
-			static std::shared_ptr<Slider> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, const Point<>& a_centerPoint);
-			static std::shared_ptr<Slider> make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB<> &a_boxAABB);
-
-			std::shared_ptr<Clickable> area() const{
-				return dragArea;
-			}
-
-			std::shared_ptr<Rectangle> handle() const{
-				return dragHandle;
-			}
-
-			PointPrecision percent() const{
+			PointPrecision percent() const {
 				return dragPercent;
 			}
 
-			std::shared_ptr<Slider> percent(PointPrecision a_newPercent);
+			std::shared_ptr<Slider> percent(PointPrecision a_newPercent, bool a_notify = true) {
+				auto oldPercent = dragPercent;
+				dragPercent = std::max(std::min(a_newPercent, 0.0f), 100.0f);
+				auto self = std::static_pointer_cast<Slider>(shared_from_this());
+				if (a_notify && oldPercent != dragPercent) {
+					onPercentChangeSlot(self);
+				}
+				updateHandlePosition();
+				return self;
+			}
 
-			virtual void setRenderer(Draw2D* a_renderer, bool includeChildren = true, bool includeParents = true) override;
+			std::shared_ptr<Slider> handle(const std::shared_ptr<Node> &a_handleNode) {
+				dragHandle = a_handleNode;
+				if (dragHandle->parent() != owner()) {
+					dragHandle->parent(owner());
+				}
+				updateHandlePosition();
+				return std::static_pointer_cast<Slider>(shared_from_this());
+			}
+
+			std::shared_ptr<Node> handle() const {
+				return dragHandle;
+			}
+
 		protected:
-			Slider(Draw2D *a_renderer):
-				Node(a_renderer),
-				dragPercent(0.0f),
-				onPercentChange(onPercentChangeSlot),
-				inUpdateHandlePosition(false),
-				dragHandle(Rectangle::make(a_renderer)){
+			Slider(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse) :
+				Clickable(a_owner, a_mouse),
+				onPercentChange(onPercentChangeSlot) {
 			}
 
-			virtual void drawImplementation();
+			template <class Archive>
+			void serialize(Archive & archive) {
+				archive(
+					CEREAL_NVP(dragPercent),
+					CEREAL_NVP(dragHandle),
+					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
+				);
+			}
 
-			virtual BoxAABB<> worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB<int> screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB<> localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB<> basicAABBImplementation() const override;
+			template <class Archive>
+			static void load_and_construct(Archive & archive, cereal::construct<Slider> &construct) {
+				MouseState *mouse = nullptr;
+				archive.extract(cereal::make_nvp("mouse", mouse));
+				MV::require<PointerException>(mouse != nullptr, "Null mouse in Slider::load_and_construct.");
+				construct(std::shared_ptr<Node>(), *mouse);
+				archive(
+					cereal::make_nvp("dragPercent", construct->dragPercent),
+					cereal::make_nvp("dragHandle", construct->dragHandle),
+					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(construct.ptr()))
+				);
+			}
+
 		private:
-			void updateHandlePosition();
-			void updateDragPercentForMousePosition(const Point<int> &a_screenPoint);
+			virtual void acceptDownClick() {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				Clickable::acceptDownClick();
 
-			void initializeDragArea();
-
-			template <class Archive>
-			void serialize(Archive & archive){
-				archive(cereal::make_nvp("percent", dragPercent), cereal::make_nvp("area", dragArea), 
-					cereal::make_nvp("handle", dragHandle), cereal::make_nvp("node", cereal::base_class<Node>(this)));
+				auto oldPercent = dragPercent;
+				dragPercent = calculatePercentFromPosition(owner()->localFromScreen(mouse().position()));
+				auto self = std::static_pointer_cast<Slider>(shared_from_this()); //keep alive
+				if (dragPercent != oldPercent) {
+					onPercentChangeSlot(self);
+				}
+				updateHandlePosition();
 			}
 
-			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Slider> &construct){
-				Draw2D *renderer = nullptr;
-				archive.extract(cereal::make_nvp("renderer", renderer));
-				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Slider node.");
-				construct(renderer);
-				archive(cereal::make_nvp("percent", construct->dragPercent), cereal::make_nvp("area", construct->dragArea), 
-					cereal::make_nvp("handle", construct->dragHandle), cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
+			PointPrecision calculatePercentFromPosition(const Point<> &a_localPoint) {
+				auto bounds = owner()->bounds();
+				if (bounds.width() >= bounds.height()) {
+					return (a_localPoint.x - bounds.minPoint.x) / bounds.width();
+				} else {
+					return (a_localPoint.y - bounds.minPoint.y) / bounds.height();
+				}
 			}
 
-			std::shared_ptr<Clickable> dragArea;
-			std::shared_ptr<Rectangle> dragHandle;
-			PointPrecision dragPercent;
-			bool inUpdateHandlePosition;
+			void updateHandlePosition() {
+				if (dragHandle) {
+					auto areaBounds = owner()->bounds();
+					auto areaPosition = owner()->position();
+					areaBounds.minPoint -= areaPosition;
+					areaBounds.maxPoint -= areaPosition;
+					auto handleBounds = dragHandle->bounds();
+
+					PointPrecision firstX = areaBounds.minPoint.x + (areaBounds.width() - handleBounds.width());
+					PointPrecision secondY = areaBounds.minPoint.y + (areaBounds.height() - handleBounds.height());
+					if (areaBounds.width() >= areaBounds.height()) {
+						dragHandle->position({ mix(areaBounds.minPoint.x, firstX, dragPercent), mix(areaBounds.minPoint.y, secondY, .5f) });
+					} else {
+						dragHandle->position({ mix(areaBounds.minPoint.x, firstX, .5f), mix(areaBounds.minPoint.y, secondY, dragPercent) });
+					}
+				}
+			}
+
+			PointPrecision dragPercent = 0.0f;
+			std::shared_ptr<Node> dragHandle;
 		};
+
 	}
 }
 
 #endif
+

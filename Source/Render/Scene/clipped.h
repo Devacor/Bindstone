@@ -1,73 +1,71 @@
 #ifndef _MV_SCENE_CLIPPED_H_
 #define _MV_SCENE_CLIPPED_H_
 
-#include "Render/Scene/rectangle.h"
+#include "sprite.h"
 
 namespace MV {
 	namespace Scene {
-		class Clipped :
-			public Rectangle{
 
-			friend cereal::access;
+		class Clipped : public Sprite {
 			friend Node;
+			friend cereal::access;
+
 		public:
-			SCENE_MAKE_FACTORY_METHODS(Clipped)
-			RECTANGLE_OVERRIDES(Clipped)
-
-			static std::shared_ptr<Clipped> make(Draw2D* a_renderer);
-			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const Size<> &a_size, bool a_center = false);
-			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const Size<> &a_size, const Point<>& a_centerPoint);
-			static std::shared_ptr<Clipped> make(Draw2D* a_renderer, const BoxAABB<> &a_boxAABB);
-
-			virtual ~Clipped(){}
-			
-			void refreshTexture(bool a_forceRefresh = false);
-
-			//Useful for debugging
-			void drawIgnoringClipping();
-			void drawIgnoringClipping(const Point<> &a_positionOverride);
-		protected:
-			Clipped(Draw2D *a_renderer):
-				Rectangle(a_renderer),
-				dirtyTexture(true){
+			std::shared_ptr<Clipped> bounds(const BoxAABB<> &a_bounds);
+			BoxAABB<> bounds();
+			std::shared_ptr<Clipped> size(const Size<> &a_size, const Point<> &a_centerPoint);
+			std::shared_ptr<Clipped> size(const Size<> &a_size, bool a_center = false);
+			template<typename PointAssign>
+			std::shared_ptr<PointAssign> corners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight) {
+				dirtyTexture = true;
+				return std::static_pointer_cast<Clipped>(Sprite::corners(a_TopLeft, a_TopRight, a_BottomLeft, a_BottomRight));
 			}
 
-			virtual BoxAABB<> worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB<int> screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB<> localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
+			void refreshTexture(bool a_forceRefreshEvenIfNotDirty = true);
 
+			std::shared_ptr<Clipped> clearCaptureBounds();
+
+			std::shared_ptr<Clipped> captureBounds(const BoxAABB<> &a_newCapturedBounds);
+			BoxAABB<> captureBounds();
+
+			std::shared_ptr<Sprite> captureSize(const Size<> &a_size, const Point<> &a_centerPoint);
+			std::shared_ptr<Sprite> captureSize(const Size<> &a_size, bool a_center = false);
+		protected:
+			Clipped(const std::weak_ptr<Node> &a_owner);
+
+			template <class Archive>
+			void serialize(Archive & archive) {
+				archive(
+					CEREAL_NVP(capturedBounds),
+					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
+				);
+			}
+
+			template <class Archive>
+			static void load_and_construct(Archive & archive, cereal::construct<Clipped> &construct) {
+				construct(std::shared_ptr<Node>());
+				archive(
+					cereal::make_nvp("capturedBounds", construct->capturedBounds),
+					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(construct.ptr()))
+				);
+			}
+
+			virtual void initialize() override {
+				observeNode(owner());
+			}
 		private:
 			virtual bool preDraw();
-
-			virtual bool handleBegin(std::shared_ptr<VisualChange>){
-				dirtyTexture = true;
-				return false;
-			}
-			virtual void handleEnd(std::shared_ptr<VisualChange>){
-			}
-
-			template <class Archive>
-			void serialize(Archive & archive){
-				archive(cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(this)));
-			}
-
-			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Clipped> &construct){
-				Draw2D *renderer = nullptr;
-				archive.extract(cereal::make_nvp("renderer", renderer));
-				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Clipped node.");
-				construct(renderer);
-				archive(cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(construct.ptr())));
-				construct->dirtyTexture = true;
-			}
+			virtual bool postDraw();
 
 			std::shared_ptr<DynamicTextureDefinition> clippedTexture;
+			std::shared_ptr<Framebuffer> framebuffer;
 
-			virtual void onChildAdded(std::shared_ptr<Node>){
-				dirtyTexture = true;
-			}
+			void observeNode(const std::shared_ptr<Node>& a_node);
 
-			bool dirtyTexture;
+			BoxAABB<> capturedBounds;
+			bool dirtyTexture = true;
+			std::list<Node::BasicSharedSignalType> basicSignals;
+			std::list<Node::ComponentSharedSignalType> componentSignals;
 		};
 	}
 }

@@ -1,238 +1,165 @@
 #ifndef _MV_SCENE_BUTTON_H_
 #define _MV_SCENE_BUTTON_H_
 
-#include "Interface/mouse.h"
-#include "Render/Scene/rectangle.h"
+#include "clickable.h"
 
 namespace MV {
 	namespace Scene {
-		struct BlockInteraction : public MV::Message {
-			static std::shared_ptr<BlockInteraction> make(std::shared_ptr<Node> a_sender){ return std::make_shared<BlockInteraction>(a_sender); }
-			BlockInteraction(std::shared_ptr<Node> a_sender):sender(a_sender){}
-			std::shared_ptr<Node> sender;
-		};
 
-		enum ClickType {CLICK_DOWN, CLICK_UP};
-
-		class Button;
-		class Clickable :
-			public Rectangle,
-			public MessageHandler<BlockInteraction>{
-
+		class Button : public Clickable {
 			friend cereal::access;
-			friend Button;
+			friend Node;
 		public:
-			typedef void ButtonSlotSignature(std::shared_ptr<Clickable>);
-			typedef void DragSlotSignature(std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &deltaPosition);
-		private:
+			ClickableComponentDerivedAccessors(Button)
 
-			Slot<ButtonSlotSignature> onPressSlot;
-			Slot<ButtonSlotSignature> onReleaseSlot;
-
-			Slot<ButtonSlotSignature> onDropSlot;
-
-			//called when release happens over top of the current node.
-			Slot<ButtonSlotSignature> onAcceptSlot;
-			//called when release happens outside of the current node.
-			Slot<ButtonSlotSignature> onCancelSlot;
-
-			Slot<DragSlotSignature> onDragSlot;
-
-		public:
-			typedef Slot<Clickable::ButtonSlotSignature>::SharedSignalType Click;
-			typedef Slot<Clickable::DragSlotSignature>::SharedSignalType Drag;
-
-			SCENE_MAKE_FACTORY_METHODS(Clickable)
-			RECTANGLE_OVERRIDES(Clickable)
-
-			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse);
-			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center = false);
-			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, const Point<>& a_centerPoint);
-			static std::shared_ptr<Clickable> make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB<> &a_boxAABB);
-
-			SlotRegister<ButtonSlotSignature> onPress;
-			SlotRegister<ButtonSlotSignature> onRelease;
-			SlotRegister<ButtonSlotSignature> onAccept;
-			SlotRegister<ButtonSlotSignature> onCancel;
-
-			SlotRegister<DragSlotSignature> onDrag;
-			SlotRegister<ButtonSlotSignature> onDrop;
-
-			void includeChildrenForHitDetection(){
-				shouldUseChildrenInHitDetection = true;
-			}
-			void ignoreChildrenForHitDetection(){
-				shouldUseChildrenInHitDetection = false;
+			std::shared_ptr<Node> activeNode() {
+				return activeView;
 			}
 
-			bool inPressEvent() const;
+			std::shared_ptr<Node> idleNode() {
+				return idleView;
+			}
 
-			void startEatingTouches();
-			void stopEatingTouches();
-			bool isEatingTouches() const;
+			std::shared_ptr<Node> disabledNode() {
+				return disabledView;
+			}
 
-			MouseState* getMouse() const;
-
-			Point<> locationBeforeDrag() const;
-
-			virtual ~Clickable();
+			std::shared_ptr<Button> activeNode(const std::shared_ptr<Node> &a_activeView) {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				if (activeView) {
+					activeView->show();
+				}
+				activeView = a_activeView;
+				if (activeView) {
+					if (inPressEvent() && enabled()) {
+						currentView = activeView;
+						activeView->show();
+					} else {
+						activeView->hide();
+					}
+				}
+				return std::static_pointer_cast<Button>(shared_from_this());
+			}
+			std::shared_ptr<Button> idleNode(const std::shared_ptr<Node> &a_idleView) {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				if (idleView) {
+					idleView->show();
+				}
+				idleView = a_idleView;
+				if (idleView) {
+					if (!inPressEvent() && enabled()) {
+						currentView = idleView;
+						idleView->show();
+					} else {
+						idleView->hide();
+					}
+				}
+				return std::static_pointer_cast<Button>(shared_from_this());
+			}
+			std::shared_ptr<Button> disabledNode(const std::shared_ptr<Node> &a_disabledView) {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				if (disabledView) {
+					disabledView->show();
+				}
+				disabledView = a_disabledView;
+				if (disabledView) {
+					if (!enabled()) {
+						currentView = disabledView;
+						disabledView->show();
+					} else {
+						disabledView->hide();
+					}
+				}
+				return std::static_pointer_cast<Button>(shared_from_this());
+			}
 
 		protected:
-			Clickable(Draw2D *a_renderer, MouseState *a_mouse);
+			Button(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse) :
+				Clickable(a_owner, a_mouse) {
+
+				onEnabled.connect(guid(), [&](const std::shared_ptr<Clickable> &a_node) {
+					if (!inPressEvent()) {
+						setCurrentView(idleView);
+					}
+					else {
+						setCurrentView(activeView);
+					}
+				});
+
+				onDisabled.connect(guid(), [&](const std::shared_ptr<Clickable> &a_node) {
+					setCurrentView(disabledView);
+				});
+			}
+
+
+			template <class Archive>
+			void serialize(Archive & archive) {
+				archive(
+					CEREAL_NVP(activeView),
+					CEREAL_NVP(idleView),
+					CEREAL_NVP(disabledView),
+					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
+				);
+			}
+
+			template <class Archive>
+			static void load_and_construct(Archive & archive, cereal::construct<Button> &construct) {
+				MouseState *mouse = nullptr;
+				archive.extract(cereal::make_nvp("mouse", mouse));
+				MV::require<PointerException>(mouse != nullptr, "Null mouse in Button::load_and_construct.");
+				construct(std::shared_ptr<Node>(), *mouse);
+				archive(
+					cereal::make_nvp("activeView", construct->activeView),
+					cereal::make_nvp("idleView", construct->idleView),
+					cereal::make_nvp("disabledView", construct->disabledView),
+					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(construct.ptr()))
+				);
+			}
 
 		private:
-			MouseState::SignalType onLeftMouseDownHandle;
-			MouseState::SignalType onLeftMouseDownEndHandle;
-
-			MouseState::SignalType onLeftMouseUpHandle;
-			MouseState::SignalType onLeftMouseUpEndHandle;
-
-			MouseState::SignalType onMouseMoveHandle;
-
-			std::shared_ptr<Clickable> hookUpSlots();
-			void clearSlots();
-
-			void blockInput();
-			void unblockInput();
-
-			virtual bool handleBegin(std::shared_ptr<BlockInteraction>);
-			virtual void handleEnd(std::shared_ptr<BlockInteraction>){}
-
-			bool mouseInBounds(const MouseState& a_state);
-
-			virtual void drawImplementation();
-
-			Point<int> dragStartPosition;
-			Point<int> priorMousePosition;
-			Point<> objectLocationBeforeDrag;
-			bool isInPressEvent;
-			bool hookedUp;
-			MouseState *mouse;
-
-			bool blocked;
-
-			bool eatTouches;
-			bool shouldUseChildrenInHitDetection;
-			ClickType clickType;
-			template <class Archive>
-			void serialize(Archive & archive){
-				archive(
-					CEREAL_NVP(eatTouches),
-					CEREAL_NVP(shouldUseChildrenInHitDetection),
-					cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(this))
-				);
+			virtual void acceptDownClick() {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				Clickable::acceptDownClick();
+				if (clickDetectionType() != Clickable::BoundsType::NONE) {
+					setCurrentView(activeView);
+				}
 			}
 
-			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Clickable> &construct){
-				MouseState* mouse = nullptr;
-				archive.extract(
-					cereal::make_nvp("mouse", mouse)
-				);
-				require<PointerException>(mouse != nullptr, "Error: Failed to load a mouse handle for Clickable node.");
-				Draw2D *renderer = nullptr;
-				archive.extract(cereal::make_nvp("renderer", renderer));
-				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Clickable node.");
-				construct(renderer, mouse);
-				archive(
-					cereal::make_nvp("eatTouches", construct->eatTouches),
-					cereal::make_nvp("shouldUseChildrenInHitDetection", construct->shouldUseChildrenInHitDetection),
-					cereal::make_nvp("rectangle", cereal::base_class<Rectangle>(construct.ptr()))
-				);
+			virtual void acceptUpClick() {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				Clickable::acceptUpClick();
+				if (clickDetectionType() != Clickable::BoundsType::NONE) {
+					setCurrentView(idleView);
+				}
 			}
-			void acceptClick();
 
-			void acceptUpClick();
+			void setCurrentView(const std::shared_ptr<Node> &a_view) {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				currentView = a_view;
 
-			void acceptDownClick();
+				showOrHideView(activeView);
+				showOrHideView(idleView);
+				showOrHideView(disabledView);
+			}
 
+			void showOrHideView(const std::shared_ptr<Node> &a_view) {
+				if (a_view) {
+					if (a_view == currentView) {
+						a_view->show();
+					}
+					else {
+						a_view->hide();
+					}
+				}
+			}
+
+			std::shared_ptr<Node> currentView;
+
+			std::shared_ptr<Node> activeView;
+			std::shared_ptr<Node> idleView;
+			std::shared_ptr<Node> disabledView;
 		};
 
-		class Button : public Node {
-			friend cereal::access;
-		public:
-			typedef void ButtonSlotSignature(std::shared_ptr<Clickable>);
-			typedef void DragSlotSignature(std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &deltaPosition);
-
-		private:
-			std::shared_ptr<Clickable> clickable; //must appear before the SlotRegisters
-
-		public:
-			SCENE_MAKE_FACTORY_METHODS(Button)
-
-			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse);
-			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, bool a_center = false);
-			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const Size<> &a_size, const Point<>& a_centerPoint);
-			static std::shared_ptr<Button> make(Draw2D* a_renderer, MouseState *a_mouse, const BoxAABB<> &a_boxAABB);
-
-			SlotRegister<ButtonSlotSignature> onPress;
-			SlotRegister<ButtonSlotSignature> onRelease;
-			SlotRegister<ButtonSlotSignature> onAccept;
-			SlotRegister<ButtonSlotSignature> onCancel;
-
-			SlotRegister<DragSlotSignature> onDrag;
-			SlotRegister<ButtonSlotSignature> onDrop;
-
-			MouseState* getMouse() const;
-
-			std::shared_ptr<Node> activeScene() const;
-			std::shared_ptr<Node> idleScene() const;
-
-			std::shared_ptr<Button> activeScene(std::shared_ptr<Node> a_mouseUp);
-			std::shared_ptr<Button> idleScene(std::shared_ptr<Node> a_mouseDown);
-
-			std::shared_ptr<Button> clickSize(const Size<> &a_size, bool a_center = false);
-			std::shared_ptr<Button> clickSize(const Size<> &a_size, const Point<>& a_centerPoint);
-			
-			std::shared_ptr<Button> clickBounds(const BoxAABB<> &a_boxAABB);
-
-			virtual void setRenderer(Draw2D* a_renderer, bool includeChildren = true, bool includeParents = true) override;
-
-		protected:
-			Button(Draw2D *a_renderer, MouseState *a_mouse);
-
-			virtual BoxAABB<> worldAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB<int> screenAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB<> localAABBImplementation(bool a_includeChildren, bool a_nestedCall) override;
-			virtual BoxAABB<> basicAABBImplementation() const override;
-
-		private:
-
-			std::shared_ptr<Node> idleSceneNode;
-			std::shared_ptr<Node> activeSceneNode;
-
-			virtual void drawImplementation();
-
-			template <class Archive>
-			void serialize(Archive & archive){
-				archive(
-					CEREAL_NVP(clickable),
-					cereal::make_nvp("idleScene", idleSceneNode),
-					cereal::make_nvp("activeScene", activeSceneNode),
-					cereal::make_nvp("node", cereal::base_class<Node>(this))
-				);
-			}
-
-			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Button> &construct){
-				MouseState* mouse = nullptr;
-				Draw2D *renderer = nullptr;
-				archive.extract(
-					cereal::make_nvp("mouse", mouse),
-					cereal::make_nvp("renderer", renderer)
-				);
-				require<PointerException>(mouse != nullptr, "Error: Failed to load a mouse handle for Button node.");
-				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Button node.");
-
-				construct(renderer, mouse);
-				archive(
-					cereal::make_nvp("clickable", construct->clickable),
-					cereal::make_nvp("idleScene", construct->idleSceneNode),
-					cereal::make_nvp("activeScene", construct->activeSceneNode),
-					cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr()))
-				);
-			}
-		};
 	}
 }
 

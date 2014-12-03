@@ -265,7 +265,6 @@ namespace MV {
 
 		void updatePercentBounds();
 		void updateIntegralBounds();
-		void updatePercentCorners();
 		void observeTextureReload();
 
 		BoxAABB<int> handleRegion;

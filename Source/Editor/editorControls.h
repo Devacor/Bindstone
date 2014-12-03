@@ -24,22 +24,22 @@ public:
 
 private:
 	void initializeRootPicker(){
-		grid = MV::Scene::Grid::make(root->getRenderer(), MV::size(100.0f, 27.0f))->padding({3.0f, 4.0f})->rows(6)->color({BOX_BACKGROUND})->margin({5.0f, 4.0f});
-		makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, "Back", {100.0f, 27.0f}, UTF_CHAR_STR("Back"))->
+		grid = MV::Scene::Node::make(root->renderer())->attach<MV::Scene::Grid>()->cellSize(MV::size(100.0f, 27.0f))->padding({3.0f, 4.0f})->rows(6)->margin({5.0f, 4.0f})->color({ BOX_BACKGROUND });
+		makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Back", {100.0f, 27.0f}, UTF_CHAR_STR("Back"))->
 			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				setter(nullptr, false);
 			});
-		makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, "Null", {100.0f, 27.0f}, UTF_CHAR_STR("Remove Texture"))->
+		makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Null", {100.0f, 27.0f}, UTF_CHAR_STR("Remove Texture"))->
 			onAccept.connect("Null", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				setter(nullptr, true);
 			});
 		
 		auto pos = box ? box->parent()->position() : MV::Point<>(200.0f, 0.0f);
-		box = makeDraggableBox("TexturePicker", root, grid->basicAABB().size(), *sharedResources.mouse);
+		box = makeDraggableBox("TexturePicker", root, grid->bounds().size(), *sharedResources.mouse);
 		box->parent()->position(pos);
-		box->add("TexturePickerGrid", grid);
+		box->add(grid->owner());
 		for(auto&& packId : packs){
-			auto button = makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, packId, {100.0f, 27.0f}, MV::stringToWide(packId));
+			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, packId, {100.0f, 27.0f}, MV::stringToWide(packId));
 			button->onAccept.connect("Accept", [&,packId](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				initializeImagePicker(packId);
 			});
@@ -48,25 +48,25 @@ private:
 
 	void initializeImagePicker(const std::string &a_packId){
 		auto cellSize = MV::size(64.0f, 64.0f);
-		grid = MV::Scene::Grid::make(root->getRenderer(), cellSize)->padding({3.0f, 4.0f})->rows(6)->color({BOX_BACKGROUND})->margin({5.0f, 4.0f});
-		makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, "Back", cellSize, UTF_CHAR_STR("Back"))->
+		grid = MV::Scene::Node::make(root->renderer())->attach<MV::Scene::Grid>()->cellSize(cellSize)->padding({3.0f, 4.0f})->rows(6)->color({BOX_BACKGROUND})->margin({5.0f, 4.0f});
+		makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Back", cellSize, UTF_CHAR_STR("Back"))->
 			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				initializeRootPicker();
 			});
 		
 		auto pos = box ? box->parent()->position() : MV::Point<>(200.0f, 0.0f);
-		box = makeDraggableBox("TexturePicker", root, grid->basicAABB().size(), *sharedResources.mouse);
+		box = makeDraggableBox("TexturePicker", root, grid->bounds().size(), *sharedResources.mouse);
 		box->parent()->position(pos);
-		box->add("TexturePickerGrid", grid);
+		box->add(grid->owner());
 		auto pack = sharedResources.textures->pack(a_packId);
 		for(auto&& textureId : pack->handleIds()){
 			auto handle = pack->handle(textureId);
 
-			auto button = makeButton(grid, *sharedResources.textLibrary, *sharedResources.mouse, textureId, cellSize, MV::stringToWide(textureId));
+			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId, cellSize, MV::stringToWide(textureId));
 			button->onAccept.connect("Accept", [&, handle](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				setter(handle, false);
 			});
-			button->make<MV::Scene::Rectangle>(MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), cellSize))->texture(handle);
+			button->owner()->attach<MV::Scene::Sprite>()->bounds({ MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), cellSize) })->texture(handle);
 		}
 	}
 
@@ -139,7 +139,6 @@ private:
 	std::shared_ptr<MV::Scene::Node> rootScene;
 	std::shared_ptr<MV::Scene::Node> draggableBox;
 	std::shared_ptr<MV::Scene::Clickable> boxHeader;
-	MV::Scene::Clickable::Drag boxHeaderDrag;
 
 	std::unique_ptr<EditorPanel> currentPanel;
 	Selection currentSelection;

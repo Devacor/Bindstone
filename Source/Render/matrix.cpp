@@ -176,6 +176,16 @@ namespace MV{
 		return *this;
 	}
 
+	TransformMatrix& TransformMatrix::operator=(const TransformMatrix& a_other) {
+		Matrix::operator=(a_other);
+		return *this;
+	}
+
+	TransformMatrix& TransformMatrix::operator=(TransformMatrix&& a_other) {
+		Matrix::operator=(a_other);
+		return *this;
+	}
+
 	MV::Matrix Matrix::transpose() const {
 		Matrix result(*this);
 		for(size_t x = 0; x < sizeX; ++x){

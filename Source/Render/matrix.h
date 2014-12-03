@@ -114,6 +114,9 @@ namespace MV {
 		TransformMatrix(MatrixValue a_value = 0.0);
 		TransformMatrix(const Point<MatrixValue> &a_position);
 
+		TransformMatrix& operator=(const TransformMatrix& a_other);
+		TransformMatrix& operator=(TransformMatrix&& a_other);
+
 		MatrixValue getX() const{
 			return (*this).access(3, 0);
 		}

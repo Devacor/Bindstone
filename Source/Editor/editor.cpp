@@ -9,16 +9,34 @@ void sdl_quit(void){
 }
 
 Editor::Editor():
-	textLibrary(&renderer),
-	scene(MV::Scene::Node::make(&renderer)),
-	controls(MV::Scene::Node::make(&renderer)),
+	textLibrary(renderer),
+	scene(MV::Scene::Node::make(renderer, "root")),
+	controls(MV::Scene::Node::make(renderer)),
 	controlPanel(controls, scene, SharedResources(this, &pool, &textures, &textLibrary, &mouse)),
-	selectorPanel(scene, controls, SharedResources(this, &pool, &textures, &textLibrary, &mouse)){
-
-	scene->id("root");
+	selectorPanel(scene, controls, SharedResources(this, &pool, &textures, &textLibrary, &mouse)),
+	testNode(MV::Scene::Node::make(renderer)){
 
 	initializeWindow();
 	initializeControls();
+
+	auto rockTexture = MV::FileTextureDefinition::make("Assets/Images/rock.png");
+
+	auto middleSquare = testNode->make("middleSquare")->//position({ 480.0f, 320.0f })->
+		attach<MV::Scene::Sprite>()->size({ 100.0f, 100.0f }, true)->color({ 0x00ff00 })->texture(rockTexture->makeHandle())->shader(MV::PREMULTIPLY_ID)->owner()->
+		attach<MV::Scene::Sprite>()->size({ 50.0f, 50.0f }, true)->color({ 0xff0000 })->owner()->
+		attach<MV::Scene::Clipped>()->size({ 100.0f, 100.0f }, true)->captureSize({ 100.0f, 100.0f }, false)->color({ 0x882288 })->owner();
+	//middleSquare->rotation({ 0.0f, 0.0f, 90.0f });
+
+	auto innerSquare = middleSquare->make("twoDeep")->
+		attach<MV::Scene::Sprite>()->size({ 25.0f, 25.0f }, true)->color({ 0x0000ff })->owner();
+
+	auto mostInner = innerSquare->make("threeDeep")->
+		attach<MV::Scene::Sprite>()->size({ 12.0f, 12.0f }, true)->color({ 0xff00ff })->owner();
+
+	innerSquare->position({ 100.0f, 100.0f });
+	innerSquare->rotation({ 0.0f, 0.0f, 45.0f });
+
+	//mostInner->rotation({ 0.0f, 0.0f, 45.0f });
 }
 
 //return true if we're still good to go
@@ -29,6 +47,8 @@ bool Editor::update(double dt){
 		accumulatedFrames /= 2.0f;
 		accumulatedTime /= 2.0f;
 	}
+	testNode->translate(MV::Point<>(10.0, 10.0f) * static_cast<float>(dt));
+	testNode->get("middleSquare")->get("twoDeep")->addRotation(MV::AxisAngles(0.0f, 0.0f, 45.0f) * static_cast<float>(dt))->translate(MV::Point<>(-10.0, -10.0f) * static_cast<float>(dt));
 	fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
 	selectorPanel.update();
 	pool.run();
@@ -76,9 +96,12 @@ void Editor::initializeWindow(){
 
 	textures.loadPacks("Assets/Atlases", &renderer);
 
-	fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
+	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
+	fps = controls->make("FPS")->position({960.0f - 50.0f, 0.0f})->
+		attach<MV::Scene::Text>(textLibrary, MV::size(50.0f, 15.0f))->number(0.0f);
+	
 	std::vector<std::string> names{"patternTest1.png", "platform.png", "rock.png", "joint.png", "slice.png", "spatula.png"};
-	selectorPanel.refresh();
+	//selectorPanel.refresh();
 	/*MV::TexturePack pack(&renderer);
 
 	std::ifstream stream("Combined.texture");
@@ -87,7 +110,7 @@ void Editor::initializeWindow(){
 	archive(cereal::make_nvp("pack", pack));
 
 	auto rockHandle = pack.handle("rock.png");
-	scene->make<MV::Scene::Rectangle>(MV::BoxAABB<>(MV::point(100.0f, 100.0f), MV::cast<MV::PointPrecision>(rockHandle->bounds().size())))->texture(rockHandle);*/
+	scene->make<MV::Scene::Sprite>(MV::BoxAABB<>(MV::point(100.0f, 100.0f), MV::cast<MV::PointPrecision>(rockHandle->bounds().size())))->texture(rockHandle);*/
 
 	/*pack.addToScene(scene);
 
@@ -97,7 +120,7 @@ void Editor::initializeWindow(){
 		rotate(45.0f)->
 		scale(2.0f)->
 		shader(MV::PREMULTIPLY_ID);
-	scene->make<MV::Scene::Rectangle>(MV::size(100.0f, 100.0f))->position({500.0f, 400.0f})->texture(texture->makeHandle(MV::size(256, 256)))->shader(MV::PREMULTIPLY_ID);
+	scene->make<MV::Scene::Sprite>(MV::size(100.0f, 100.0f))->position({500.0f, 400.0f})->texture(texture->makeHandle(MV::size(256, 256)))->shader(MV::PREMULTIPLY_ID);
 
 	/*auto spineGuy = scene->make<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Example/spineboy.json", "Assets/Spine/Example/spineboy.atlas"))->
 		position({500.0f, 500.0f})->
@@ -151,13 +174,15 @@ void Editor::handleInput(){
 
 void Editor::render(){
 	renderer.clearScreen();
-	if(controlPanel.root() != scene){
-		scene = controlPanel.root();
-		scene->id("root");
-		selectorPanel.refresh(scene);
-	}
-	scene->draw();
-	controls->draw();
+	testNode->draw();
+	
+// 	if(controlPanel.root() != scene){
+// 		scene = controlPanel.root();
+// 		scene->id("root");
+// 		selectorPanel.refresh(scene);
+// 	}
+// 	scene->draw();
+// 	controls->draw();
 	renderer.updateScreen();
 }
 

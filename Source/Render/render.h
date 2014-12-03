@@ -190,10 +190,10 @@ namespace MV {
 			renderer(a_renderer){
 		}
 			
-		Point<int> projectScreen(const Point<> &a_point);
-		Point<> projectWorld(const Point<> &a_point);
-		Point<> unProjectScreen(const Point<int> &a_point);
-		Point<> unProjectWorld(const Point<> &a_point);
+		Point<int> projectScreen(const Point<> &a_point, const TransformMatrix &a_modelview);
+		Point<> projectWorld(const Point<> &a_point, const TransformMatrix &a_modelview);
+		Point<> unProjectScreen(const Point<int> &a_point, const TransformMatrix &a_modelview);
+		Point<> unProjectWorld(const Point<> &a_point, const TransformMatrix &a_modelview);
 
 		const Draw2D &renderer;
 	};
@@ -350,16 +350,8 @@ namespace MV {
 			return contextProjectionMatrix;
 		}
 
-		MatrixStack& modelviewMatrix(){
-			return contextModelviewMatrix;
-		}
-
 		const MatrixStack& projectionMatrix() const{
 			return contextProjectionMatrix;
-		}
-
-		const MatrixStack& modelviewMatrix() const{
-			return contextModelviewMatrix;
 		}
 
 		//call for every event to handle window actions correctly
@@ -373,11 +365,11 @@ namespace MV {
 		void clearScreen();
 		void updateScreen();
 
-		Point<> worldFromLocal(const Point<> &a_localPoint ) const;
-		Point<int> screenFromLocal(const Point<> &a_localPoint ) const;
+		Point<> worldFromLocal(const Point<> &a_localPoint, const TransformMatrix &a_modelview) const;
+		Point<int> screenFromLocal(const Point<> &a_localPoint, const TransformMatrix &a_modelview) const;
 
-		Point<> localFromWorld(const Point<> &a_worldPoint) const;
-		Point<> localFromScreen(const Point<int> &a_screenPoint) const;
+		Point<> localFromWorld(const Point<> &a_worldPoint, const TransformMatrix &a_modelview) const;
+		Point<> localFromScreen(const Point<int> &a_screenPoint, const TransformMatrix &a_modelview) const;
 
 		Point<int> screenFromWorld(const Point<> &a_worldPoint) const;
 		Point<> worldFromScreen(const Point<int> &a_screenPoint) const;
@@ -396,7 +388,7 @@ namespace MV {
 		Shader* defaultShader(GLuint a_newId);
 		Shader* defaultShader(const std::string &a_id);
 
-		void registerShader(std::shared_ptr<Scene::Node> a_node);
+		//void registerShader(std::shared_ptr<Scene::Node> a_node);
 
 		void checkGlError(std::string a_location = "[not supplied location]"){
 			GLenum error = glGetError();
@@ -422,15 +414,12 @@ namespace MV {
 		RenderWorld mvWorld;
 
 		MatrixStack contextProjectionMatrix;
-		MatrixStack contextModelviewMatrix;
 
 		std::map<std::string, Shader> shaders;
 		Shader* defaultShaderPtr = nullptr;
 
 		static bool firstInitializationSDL;
 		static bool firstInitializationOpenGL;
-
-		std::vector<std::shared_ptr<Scene::Node>> needShaderRegistration;
 	};
 	
 	void checkSDLError(int line = -1);

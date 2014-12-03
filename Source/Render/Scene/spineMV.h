@@ -15,7 +15,7 @@ namespace MV {
 	namespace Scene {
 		void spineAnimationCallback(spAnimationState* state, int trackIndex, spEventType type, spEvent* event, int loopCount);
 		void spineTrackEntryCallback(spAnimationState* state, int trackIndex, spEventType type, spEvent* event, int loopCount);
-
+		
 		struct AnimationEventData {
 			AnimationEventData(const std::string &a_name, const std::string & a_stringValue, int a_intValue, float a_floatValue):
 			name(a_name),
@@ -87,7 +87,7 @@ namespace MV {
 			spAnimationState *animationState;
 			spSkeleton *skeleton;
 		};
-
+		/*
 		class Spine : public Node{
 			friend cereal::access;
 			friend Node;
@@ -203,7 +203,7 @@ namespace MV {
 				CEREAL_NVP(atlasFile),
 				CEREAL_NVP(loadScale)
 			);
-		}
+		}*/
 
 	}
 }

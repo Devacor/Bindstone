@@ -1,6 +1,6 @@
 #include "texturePacker.h"
 
-#include "Scene/rectangle.h"
+#include "Scene/sprite.h"
 
 CEREAL_REGISTER_TYPE(MV::PackedTextureDefinition);
 
@@ -96,14 +96,14 @@ namespace MV{
 	}
 
 	std::shared_ptr<MV::Scene::Node> TexturePack::makeScene() const {
-		auto scene = Scene::Node::make(renderer);
+		auto scene = Scene::Node::make(*renderer);
 		for(auto&& shape : shapes){
 			if(shape.texture){
-				scene->make<MV::Scene::Rectangle>(cast<PointPrecision>(shape.bounds))->texture(shape.texture->makeHandle(shape.texture->contentSize()))->shader(PREMULTIPLY_ID);
+				scene->make()->attach<MV::Scene::Sprite>()->bounds(cast<PointPrecision>(shape.bounds))->texture(shape.texture->makeHandle(shape.texture->contentSize()))->shader(PREMULTIPLY_ID);
 			}
 		}
 		if(consolidatedTexture){
-			scene->make<MV::Scene::Rectangle>(cast<PointPrecision>(consolidatedTexture->size()))->texture(consolidatedTexture->makeHandle())->shader(PREMULTIPLY_ID);
+			scene->make()->attach<MV::Scene::Sprite>()->bounds(cast<PointPrecision>(consolidatedTexture->size()))->texture(consolidatedTexture->makeHandle())->shader(PREMULTIPLY_ID);
 		}
 		return scene;
 	}

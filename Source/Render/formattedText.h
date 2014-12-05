@@ -219,7 +219,7 @@ namespace MV {
 
 		UtfChar textCharacter;
 		std::shared_ptr<CharacterDefinition> character;
-		std::shared_ptr<Scene::Sprite> shape;
+		std::shared_ptr<Scene::Node> shape;
 		std::shared_ptr<FormattedLine> line;
 		std::shared_ptr<FormattedState> state;
 
@@ -279,8 +279,6 @@ namespace MV {
 		std::vector<std::shared_ptr<FormattedCharacter>> characters;
 		FormattedText& text;
 	};
-
-	std::shared_ptr<FormattedState> getTextState(const UtfString &a_text, size_t a_i, const std::shared_ptr<FormattedState> &a_currentTextState, const std::shared_ptr<FormattedState> &a_defaultTextState, std::pair<size_t, size_t> &o_range);
 
 	///////////////////////////////////
 	class FormattedText{

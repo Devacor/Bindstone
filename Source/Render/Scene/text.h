@@ -26,13 +26,7 @@ namespace MV{
 			UtfString text() const {
 				return formattedText.string();
 			}
-			std::shared_ptr<Text> text(const UtfString &a_text, const std::string &a_fontIdentifier = "") {
-				if (a_fontIdentifier != "") { fontIdentifier = a_fontIdentifier; }
-				formattedText.clear();
-				formattedText.append(a_text);
-				setCursor(a_text.size());
-				return std::static_pointer_cast<Text>(shared_from_this());
-			}
+			std::shared_ptr<Text> text(const UtfString &a_text, const std::string &a_fontIdentifier = "");
 			std::shared_ptr<Text> text(UtfChar a_char, const std::string &a_fontIdentifier = "") {
 				return text(UtfString() + a_char, a_fontIdentifier);
 			}
@@ -41,40 +35,7 @@ namespace MV{
 				return text(*character, a_fontIdentifier);
 			}
 
-			bool text(SDL_Event &event) {
-				if (event.type == SDL_TEXTINPUT) {
-					insertAtCursor(stringToWide(event.text.text));
-					return true;
-				} else if (event.type == SDL_TEXTEDITING) {
-					//setTemporaryText(stringToWide(event.edit.text), event.edit.start, event.edit.length);
-				} else if (event.type == SDL_KEYDOWN) {
-					if (event.key.keysym.sym == SDLK_BACKSPACE && !formattedText.empty()) {
-						backspace();
-						return true;
-					}if (event.key.keysym.sym == SDLK_DELETE && !formattedText.empty() && cursor < formattedText.size()) {
-						++cursor; //this is okay because backspace will reposition the cursor.
-						backspace();
-						return true;
-					} else if (event.key.keysym.sym == SDLK_v && SDL_GetModState() & KMOD_CTRL) {
-						append(stringToWide(SDL_GetClipboardText()));
-						return true;
-					} else if (event.key.keysym.sym == SDLK_c && SDL_GetModState() & KMOD_CTRL) {
-						SDL_SetClipboardText(wideToString(text()).c_str());
-					} else if (event.key.keysym.sym == SDLK_LEFT) {
-						if (cursor > 0) {
-							incrementCursor(-1);
-						}
-					} else if (event.key.keysym.sym == SDLK_RIGHT) {
-						if (cursor < formattedText.size()) {
-							incrementCursor(1);
-						}
-					} else if (event.key.keysym.sym == SDLK_RETURN) {
-						auto self = std::static_pointer_cast<Text>(shared_from_this());
-						onEnterSlot(self);
-					}
-				}
-				return false;
-			}
+			bool text(SDL_Event &event);
 
 			PointPrecision number() const {
 				try {
@@ -144,38 +105,12 @@ namespace MV{
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 
-			void enableCursor() {
-				displayCursor = true;
-				setCursor(cursor);
-				cursorScene->show();
-			}
-			void disableCursor() {
-				displayCursor = false;
-				setCursor(cursor);
-				cursorScene->hide();
-			}
+			void enableCursor();
+			void disableCursor();
 
-			std::shared_ptr<Text> backspace() {
-				if (cursor > 0) {
-					formattedText.erase(cursor - 1, 1);
-					incrementCursor(-1);
-				}
-				return std::static_pointer_cast<Text>(shared_from_this());
-			}
+			std::shared_ptr<Text> backspace();
 
-			virtual void update(double a_dt) {
-				if (displayCursor) {
-					accumulatedTime += a_dt;
-					if (accumulatedTime > BLINK_DURATION) {
-						fmod(accumulatedTime, BLINK_DURATION);
-						if (cursorScene->visible()) {
-							cursorScene->hide();
-						} else {
-							cursorScene->show();
-						}
-					}
-				}
-			}
+			virtual void update(double a_dt);
 
 			PointPrecision minimumLineHeight() const {
 				return formattedText.minimumLineHeight();
@@ -187,22 +122,14 @@ namespace MV{
 			}
 
 		protected:
-			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const Size<> &a_size, const std::string &a_defaultFontIdentifier) :
-				Drawable(a_owner),
-				textLibrary(a_textLibrary),
-				onEnter(onEnterSlot),
-				fontIdentifier(a_defaultFontIdentifier),
-				formattedText(a_textLibrary, a_size.width, DEFAULT_ID),
-				boxSize(a_size) {
-
-				points.resize(4);
-				clearTexturePoints(points);
-				appendQuadVertexIndices(vertexIndices, 0);
-				cursorScene = owner()->make(guid("CURSOR_"))->attach<Sprite>()->size({ 1.0f, 5.0f });
+			virtual void defaultDrawImplementation() {
+				Drawable::defaultDrawImplementation();
 			}
 
+			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const Size<> &a_size, const std::string &a_defaultFontIdentifier);
+
 			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary) :
-				Text(a_owner, a_textLibrary, Size<>(), DEFAULT_ID){
+				Text(a_owner, a_textLibrary, Size<>(), DEFAULT_ID) {
 			}
 			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const Size<> &a_size) :
 				Text(a_owner, a_textLibrary, a_size, DEFAULT_ID) {
@@ -262,39 +189,9 @@ namespace MV{
 				}
 			}
 
-			void positionCursorWithCharacter(size_t a_maxCursor, std::shared_ptr<FormattedCharacter> a_cursorCharacter) {
-				cursorScene->owner()->position(a_cursorCharacter->position() + a_cursorCharacter->offset());
-				cursorScene->size({ 2.0f, a_cursorCharacter->characterSize().height });
-				if (cursor >= a_maxCursor) {
-					cursorScene->owner()->translate({ a_cursorCharacter->characterSize().width, 0.0f });
-				}
-				if (displayCursor) {
-					cursorScene->show();
-				}
-			}
+			void positionCursorWithCharacter(size_t a_maxCursor, std::shared_ptr<FormattedCharacter> a_cursorCharacter);
 
-			void positionCursorWithoutCharacter() {
-				std::shared_ptr<FormattedLine> line;
-				size_t characterIndex;
-				std::tie(line, characterIndex) = formattedText.lineForCharacterIndex(cursor);
-				float xPosition = 0.0f;
-				if (justification() == TextJustification::CENTER) {
-					xPosition = formattedText.width() / 2.0f - 1.0f;
-				} else if (justification() == TextJustification::RIGHT) {
-					xPosition = formattedText.width() - 2.0f;
-				}
-				auto cursorHeight = formattedText.defaultState()->font->height();
-				auto linePositionY = formattedText.positionForLine(line->index());
-				auto cursorLineHeight = std::max<float>(formattedText.minimumLineHeight(), (line) ? line->height() : cursorHeight);
-				linePositionY += cursorLineHeight / 2.0f - cursorHeight / 2.0f;
-
-				cursorScene->owner()->position({ xPosition, linePositionY });
-				cursorScene->size({ 2.0f, cursorHeight });
-
-				if (displayCursor) {
-					cursorScene->show();
-				}
-			}
+			void positionCursorWithoutCharacter();
 
 			void incrementCursor(int64_t a_change) {
 				setCursor(cursor + a_change);
@@ -309,7 +206,7 @@ namespace MV{
 
 			FormattedText formattedText;
 
-			bool displayCursor;
+			bool displayCursor = false;
 			size_t cursor;
 			std::shared_ptr<MV::Scene::Sprite> cursorScene;
 

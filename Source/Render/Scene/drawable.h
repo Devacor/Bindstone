@@ -40,7 +40,7 @@ namespace MV {
 				lazyInitializeShader();
 				if (preDraw()) {
 					SCOPE_EXIT{ allowChildrenToDraw = postDraw(); };
-					defaultDrawVertices();
+					defaultDrawImplementation();
 				}
 				return allowChildrenToDraw;
 			}
@@ -157,7 +157,7 @@ namespace MV {
 				return true;
 			}
 
-			void defaultDrawVertices() {
+			virtual void defaultDrawImplementation() {
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				if (!vertexIndices.empty()) {
 					require<ResourceException>(shaderProgram, "No shader program for Drawable!");

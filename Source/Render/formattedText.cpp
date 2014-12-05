@@ -153,7 +153,7 @@ namespace MV {
 
 	FormattedCharacter::~FormattedCharacter() {
 		if(shape){
-			shape->owner()->removeFromParent();
+			shape->removeFromParent();
 		}
 	}
 
@@ -175,7 +175,7 @@ namespace MV {
 
 	Point<> FormattedCharacter::position(const Point<> &a_newPosition) {
 		basePosition = a_newPosition;
-		shape->owner()->position(basePosition + offsetPosition);
+		shape->position(basePosition + offsetPosition);
 		return basePosition;
 	}
 
@@ -185,7 +185,7 @@ namespace MV {
 
 	Point<> FormattedCharacter::offset(const Point<> &a_newPosition) {
 		offsetPosition = a_newPosition;
-		shape->owner()->position(basePosition + offsetPosition);
+		shape->position(basePosition + offsetPosition);
 		return offsetPosition;
 	}
 
@@ -193,7 +193,7 @@ namespace MV {
 		PointPrecision height = character->font()->height();
 		PointPrecision base = character->font()->base();
 		offset({offsetPosition.x, a_baseLine - base});
-		shape->owner()->position(basePosition + offsetPosition);
+		shape->position(basePosition + offsetPosition);
 		return offsetPosition;
 	}
 
@@ -201,16 +201,17 @@ namespace MV {
 		PointPrecision height = character->font()->height();
 		PointPrecision base = character->font()->base();
 		offset({a_x, a_baseLine - base});
-		shape->owner()->position(basePosition + offsetPosition);
+		shape->position(basePosition + offsetPosition);
 		return offsetPosition;
 	}
 
 	void FormattedCharacter::applyState(const std::shared_ptr<FormattedState> &a_state) {
 		state = a_state;
 		character = state->font->characterDefinition(textCharacter);
-		shape->size(cast<PointPrecision>(character->characterSize()));
-		shape->texture(character->texture());
-		shape->color(state->color);
+		auto sprite = shape->component<Scene::Sprite>();
+		sprite->size(cast<PointPrecision>(character->characterSize()));
+		sprite->texture(character->texture());
+		sprite->color(state->color);
 	}
 
 	bool FormattedCharacter::partOfFormat(bool a_isPartOfFormat) {
@@ -233,7 +234,7 @@ namespace MV {
 
 	void FormattedCharacter::removeFromParent() {
 		if(shape){
-			shape->owner()->removeFromParent();
+			shape->removeFromParent();
 		}
 	}
 
@@ -246,7 +247,9 @@ namespace MV {
 			attach<Scene::Sprite>()->
 			size(cast<PointPrecision>(character->characterSize()))->
 			texture(character->texture())->
-			color(state->color);
+			color(state->color)->
+			shader(MV::PREMULTIPLY_ID)->
+			owner();
 	}
 
 
@@ -595,7 +598,7 @@ namespace MV {
 	}
 
 	bool FormattedText::exceedsWidth(PointPrecision a_xPosition) const {
-		return a_xPosition > textWidth;
+		return textWidth > 0.0f && a_xPosition > textWidth;
 	}
 
 	size_t FormattedText::size() const {

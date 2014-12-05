@@ -405,6 +405,10 @@ namespace MV {
 				worldMatrixTransform = localMatrixTransform;
 				parentAccumulatedAlpha = nodeAlpha;
 			}
+
+			for (auto&& child : childNodes) {
+				child->recalculateMatrix();
+			}
 		}
 
 		Node::Node(Draw2D &a_draw2d, const std::string &a_id) :
@@ -434,11 +438,13 @@ namespace MV {
 					recalculateAlpha();
 				});
 				onTransformChangeSlot(a_self);
+				recalculateAlpha();
 			});
 			onRemove.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
 				onParentTransformChangeSignal = nullptr;
 				onParentAlphaChangeSignal = nullptr;
 				onTransformChangeSlot(a_self);
+				recalculateAlpha();
 			});
 			onTransformChange.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
 				recalculateMatrix();
@@ -448,6 +454,9 @@ namespace MV {
 		void Node::recalculateAlpha() {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			parentAccumulatedAlpha = (myParent) ? myParent->parentAccumulatedAlpha * nodeAlpha : nodeAlpha;
+			for (auto&& child : childNodes) {
+				child->recalculateAlpha();
+			}
 		}
 
 		std::shared_ptr<Node> Node::serializable(bool a_serializable) {

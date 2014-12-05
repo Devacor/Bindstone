@@ -23,7 +23,7 @@ Editor::Editor():
 
 	auto middleSquare = testNode->make("middleSquare")->//position({ 480.0f, 320.0f })->
 		attach<MV::Scene::Sprite>()->size({ 100.0f, 100.0f }, true)->color({ 0x00ff00 })->texture(rockTexture->makeHandle())->shader(MV::PREMULTIPLY_ID)->owner()->
-		attach<MV::Scene::Sprite>()->size({ 50.0f, 50.0f }, true)->color({ 0xff0000 })->owner()->
+		attach<MV::Scene::Sprite>()->size({ 50.0f, 50.0f }, true)->color({ 0x884422 })->owner()->
 		attach<MV::Scene::Clipped>()->size({ 100.0f, 100.0f }, true)->captureSize({ 100.0f, 100.0f }, false)->color({ 0x882288 })->owner();
 	//middleSquare->rotation({ 0.0f, 0.0f, 90.0f });
 
@@ -33,8 +33,17 @@ Editor::Editor():
 	auto mostInner = innerSquare->make("threeDeep")->
 		attach<MV::Scene::Sprite>()->size({ 12.0f, 12.0f }, true)->color({ 0xff00ff })->owner();
 
+	auto textSquare = testNode->make("ourText")->
+		attach<MV::Scene::Text>(textLibrary)->text(UTF_CHAR_STR("This is a test!"));
+	auto clickable = textSquare->owner()->attach<MV::Scene::Clickable>(mouse)->size({ 15.0f, 100.0f })->color({0xFFFF00})->show();
+	clickable->onAccept.connect("Clicked", [](const std::shared_ptr<MV::Scene::Clickable> &a_clickable){
+		std::cout << "Clicked: " << a_clickable->mouse().position() << std::endl;
+	});
+
 	innerSquare->position({ 100.0f, 100.0f });
 	innerSquare->rotation({ 0.0f, 0.0f, 45.0f });
+
+	testNode->position({ 300.0f, 300.0f });
 
 	//mostInner->rotation({ 0.0f, 0.0f, 45.0f });
 }
@@ -47,7 +56,7 @@ bool Editor::update(double dt){
 		accumulatedFrames /= 2.0f;
 		accumulatedTime /= 2.0f;
 	}
-	testNode->translate(MV::Point<>(10.0, 10.0f) * static_cast<float>(dt));
+	//testNode->translate(MV::Point<>(10.0, 10.0f) * static_cast<float>(dt));
 	testNode->get("middleSquare")->get("twoDeep")->addRotation(MV::AxisAngles(0.0f, 0.0f, 45.0f) * static_cast<float>(dt))->translate(MV::Point<>(-10.0, -10.0f) * static_cast<float>(dt));
 	fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
 	selectorPanel.update();

@@ -34,7 +34,7 @@ namespace MV {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = std::static_pointer_cast<Clickable>(shared_from_this());
 			if (a_type == BoundsType::NONE && hitDetectionType != BoundsType::NONE) {
-				onEnabledSlot(self);
+				onDisabledSlot(self);
 			} else if (hitDetectionType == BoundsType::NONE && a_type != BoundsType::NONE) {
 				onDisabledSlot(self);
 			}

@@ -26,7 +26,7 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	controls(a_controls) {
 
 	auto node = panel.content();
-	auto grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->rowWidth(116.0f)->
+	auto grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
 		color({BOX_BACKGROUND})->margin({5.0f, 4.0f})->
 		padding({3.0f, 4.0f})->owner();
 	auto buttonSize = MV::size(110.0f, 27.0f);
@@ -153,7 +153,7 @@ EditorPanel(a_panel),
 controls(a_controls) {
 
 	auto node = panel.content();
-	auto grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->rowWidth(232.0f)->
+	auto grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(232.0f)->
 		color({InterfaceColors::BOX_BACKGROUND})->margin({5.0f, 4.0f})->
 		padding({3.0f, 4.0f})->owner();
 	auto buttonSize = MV::size(226.0f, 27.0f);
@@ -449,7 +449,7 @@ void SelectedEmitterEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
 DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	EditorPanel(a_panel) {
 	auto node = panel.content();
-	auto grid = node->make("grid")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->rowWidth(116.0f)->
+	auto grid = node->make("grid")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
 		color({InterfaceColors::BOX_BACKGROUND})->margin({5.0f, 4.0f})->
 		padding({3.0f, 4.0f})->owner();
 	auto createButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Create", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Create"));
@@ -492,7 +492,7 @@ ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel):
 	EditorPanel(a_panel) {
 
 	auto node = panel.content();
-	auto grid = node->make("grid")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->rowWidth(116.0f)->
+	auto grid = node->make("grid")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
 		color({InterfaceColors::BOX_BACKGROUND})->margin({5.0f, 4.0f})->
 		padding({3.0f, 4.0f})->owner();
 	auto createRectangleButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Rectangle", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Rectangle"));

@@ -6,5 +6,166 @@ CEREAL_REGISTER_TYPE(MV::Scene::Grid);
 namespace MV {
 	namespace Scene {
 
+
+		void Grid::update(double a_delta) {
+			if (dirtyGrid) {
+				layoutCells();
+			}
+		}
+
+		std::shared_ptr<Grid> Grid::padding(const std::pair<Point<>, Point<>> &a_padding) {
+			cellPadding = a_padding;
+			return std::static_pointer_cast<Grid>(shared_from_this());
+		}
+
+		std::shared_ptr<Grid> Grid::padding(const Size<> &a_padding) {
+			cellPadding.first = toPoint(a_padding);
+			cellPadding.second = toPoint(a_padding);
+			return std::static_pointer_cast<Grid>(shared_from_this());
+		}
+
+		std::pair<Point<>, Point<>> Grid::padding() const {
+			return cellPadding;
+		}
+
+		std::shared_ptr<Grid> Grid::margin(const std::pair<Point<>, Point<>> &a_margin) {
+			margins = a_margin;
+			return std::static_pointer_cast<Grid>(shared_from_this());
+		}
+
+		std::shared_ptr<Grid> Grid::margin(const Size<> &a_margin) {
+			margins.first = toPoint(a_margin);
+			margins.second = toPoint(a_margin);
+			return std::static_pointer_cast<Grid>(shared_from_this());
+		}
+
+		std::shared_ptr<Grid> Grid::cellSize(const Size<> &a_size) {
+			cellDimensions = a_size;
+			return std::static_pointer_cast<Grid>(shared_from_this());
+		}
+
+		std::shared_ptr<Grid> Grid::gridWidth(PointPrecision a_rowWidth) {
+			maximumWidth = a_rowWidth;
+			return std::static_pointer_cast<Grid>(shared_from_this());
+		}
+
+		std::shared_ptr<Grid> Grid::columns(size_t a_columns) {
+			cellColumns = a_columns;
+			return std::static_pointer_cast<Grid>(shared_from_this());
+		}
+
+		void Grid::layoutCells() {
+			if (cellDimensions.width > 0.0f || cellDimensions.height > 0.0f) {
+				layoutCellSize();
+			} else {
+				layoutChildSize();
+			}
+			dirtyGrid = false;
+		}
+
+		Grid::Grid(const std::weak_ptr<Node> &a_owner) :
+			Drawable(a_owner),
+			maximumWidth(0.0f),
+			cellColumns(0),
+			dirtyGrid(true) {
+			points.resize(4);
+			clearTexturePoints(points);
+			appendQuadVertexIndices(vertexIndices, 0);
+			observeNode(owner());
+		}
+
+		bool Grid::bumpToNextLine(PointPrecision a_currentPosition, size_t a_index) const {
+			return (maximumWidth > 0.0f && a_currentPosition > maximumWidth) ||
+				(cellColumns > 0 && ((a_index + 1) >= cellColumns && (a_index % cellColumns == 0)));
+		}
+
+		float Grid::getContentWidth() const {
+			if (maximumWidth > 0.0f) {
+				return maximumWidth;
+			} else {
+				return (cellColumns * (cellDimensions.width + cellPadding.first.x + cellPadding.second.x) - cellPadding.first.x - cellPadding.second.x) + margins.first.x + margins.second.x;
+			}
+		}
+
+		void Grid::setPointsFromBounds(const BoxAABB<> &a_bounds) {
+			points[0] = a_bounds.minPoint;
+			points[1].x = a_bounds.minPoint.x;	points[1].y = a_bounds.maxPoint.y;	points[1].z = (a_bounds.maxPoint.z + a_bounds.minPoint.z) / 2.0f;
+			points[2] = a_bounds.maxPoint;
+			points[3].x = a_bounds.maxPoint.x;	points[3].y = a_bounds.minPoint.y;	points[3].z = points[1].z;
+		}
+
+		void Grid::layoutCellSize() {
+			BoxAABB<> calculatedBounds(size(getContentWidth() - margins.second.x, cellDimensions.height + margins.first.y));
+			Point<> cellPosition = margins.first;
+			size_t index = 0;
+
+			for (auto&& node : *owner()) {
+				if (node->visible()) {
+					cellPosition = positionChildNode(cellPosition, index, node, cellDimensions, calculatedBounds);
+					++index;
+				}
+			}
+
+			calculatedBounds.expandWith(calculatedBounds.maxPoint + margins.second);
+
+			setPointsFromBounds(calculatedBounds);
+			if (localBounds != calculatedBounds) {
+				localBounds = calculatedBounds;
+				notifyParentOfBoundsChange();
+			}
+		}
+
+
+		Point<> Grid::positionChildNode(Point<> a_cellPosition, size_t a_index, std::shared_ptr<Node> a_node, const Size<> &a_cellSize, BoxAABB<> &a_calculatedBounds) {
+			auto nextPosition = a_cellPosition;
+			nextPosition.translate(a_cellSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
+			if (bumpToNextLine(nextPosition.x - cellPadding.first.x - margins.first.x, a_index++)) {
+				a_cellPosition.locate(margins.first.x, a_cellPosition.y + a_cellSize.height + cellPadding.first.x + cellPadding.second.y);
+				nextPosition = a_cellPosition;
+				nextPosition.translate(a_cellSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
+			}
+
+			a_node->position(a_cellPosition);
+			a_calculatedBounds.expandWith(a_cellPosition + toPoint(a_cellSize));
+
+			return nextPosition;
+		}
+
+
+		void Grid::layoutChildSize() {
+			BoxAABB<> calculatedBounds(size(getContentWidth() - margins.second.x, cellDimensions.height + margins.first.y));
+			Point<> cellPosition = cellPadding.first + cellPadding.second + margins.first;
+			size_t index = 0;
+
+			PointPrecision maxHeightInLine = 0.0f;
+
+			for (auto&& node : *owner()) {
+				if (node->visible()) {
+					auto shapeSize = node->bounds().size();
+					cellPosition = positionChildNode(cellPosition, index, node, shapeSize, calculatedBounds);
+				}
+			}
+
+			calculatedBounds.expandWith(calculatedBounds.maxPoint + margins.second);
+			setPointsFromBounds(calculatedBounds);
+			if (localBounds != calculatedBounds) {
+				localBounds = calculatedBounds;
+				notifyParentOfBoundsChange();
+			}
+		}
+
+		void Grid::observeNode(const std::shared_ptr<Node>& a_node) {
+			auto markDirty = [&](const std::shared_ptr<Node> &a_this) {
+				dirtyGrid = true;
+			};
+			basicSignals.push_back(a_node->onChildAdd.connect(markDirty));
+			basicSignals.push_back(a_node->onDepthChange.connect(markDirty));
+			basicSignals.push_back(a_node->onShow.connect(markDirty));
+			basicSignals.push_back(a_node->onHide.connect(markDirty));
+			basicSignals.push_back(a_node->onTransformChange.connect(markDirty));
+			basicSignals.push_back(a_node->onLocalBoundsChange.connect(markDirty));
+
+			basicSignals.push_back(nullptr);
+		}
 	}
 }

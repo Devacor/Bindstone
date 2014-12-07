@@ -192,10 +192,6 @@ namespace MV {
 			EmitterSpawnProperties spawnProperties;
 
 			size_t emitterThreads;
-			std::atomic<size_t> buffersCopied = emitterThreads;
-			std::atomic<size_t> updatesFinished = emitterThreads;
-			std::atomic<size_t> spawnsFinished = emitterThreads;
-
 
 			struct ThreadData {
 				std::vector<Particle> particles;

@@ -246,7 +246,11 @@ namespace MV {
 
 		Emitter::Emitter(const std::weak_ptr<Node> &a_owner, ThreadPool &a_pool) :
 			Drawable(a_owner),
-			pool(a_pool) {
+			pool(a_pool),
+			emitterThreads(a_pool.threads()),
+			threadData(emitterThreads),
+			updateInProgress(false){
+
 			points.resize(4);
 			clearTexturePoints(points);
 			appendQuadVertexIndices(vertexIndices, 0);

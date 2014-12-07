@@ -55,6 +55,20 @@ Editor::Editor():
 		auto button = std::static_pointer_cast<MV::Scene::Button>(a_clickable);
 		button->disable();
 	});
+
+	auto emitter = testNode->make("EmitterTest")->position({ -200.0f, 0.0f })->attach<MV::Scene::Emitter>(pool)->properties(MV::Scene::loadEmitterProperties("particle.txt"));
+
+	auto gridNode = testNode->make("Grid")->position({ 100.0f, 100.0f })->attach<MV::Scene::Grid>()->cellSize({ 20.0f, 20.0f })->gridWidth(110.0f)->margin({ 1.0f, 1.0f })->padding({ 1.0f, 1.0f })->owner();
+	for (int i = 0; i < 20; ++i) {
+		gridNode->make()->attach<MV::Scene::Sprite>()->size({ 20.0f, 20.0f })->color({ 0x333333 });
+	}
+
+	auto gridNode2 = testNode->make("Grid2")->position({ 300.0f, 100.0f })->attach<MV::Scene::Grid>()->cellSize({ 20.0f, 20.0f })->columns(5)->margin({ 1.0f, 1.0f })->padding({ 1.0f, 1.0f })->owner();
+	for (int i = 0; i < 20; ++i) {
+		gridNode2->make()->attach<MV::Scene::Sprite>()->size({ 20.0f, 20.0f })->color({ 0x333333 });
+	}
+
+	
 	//mostInner->rotation({ 0.0f, 0.0f, 45.0f });
 }
 
@@ -193,7 +207,7 @@ void Editor::handleInput(){
 
 void Editor::render(){
 	renderer.clearScreen();
-	testNode->draw();
+	testNode->drawUpdate(watch.delta());
 	
 // 	if(controlPanel.root() != scene){
 // 		scene = controlPanel.root();

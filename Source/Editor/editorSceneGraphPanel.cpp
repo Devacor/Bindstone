@@ -31,7 +31,7 @@ void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nu
 		scene = a_newScene;
 	}
 	auto gridNode = MV::Scene::Node::make(root->renderer(), "SceneNodeGrid");
-	grid = gridNode->attach<MV::Scene::Grid>()->rows(1)->color({BOX_BACKGROUND})->margin({5.0f, 5.0f});
+	grid = gridNode->attach<MV::Scene::Grid>()->columns(1)->color({BOX_BACKGROUND})->margin({5.0f, 5.0f});
 
 	makeChildButton(scene, 0, gridNode);
 

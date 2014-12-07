@@ -72,63 +72,79 @@ namespace MV {
 		}
 
 		void Node::draw() {
-			bool allowChildrenToDraw = true;
-			for(auto&& component : childComponents){
-				allowChildrenToDraw = component->draw() && allowChildrenToDraw;
-			}
-			if(allowChildrenToDraw){
-				drawChildren();
+			if (allowDraw) {
+				bool allowChildrenToDraw = true;
+				for (auto&& component : childComponents) {
+					allowChildrenToDraw = component->draw() && allowChildrenToDraw;
+				}
+				if (allowChildrenToDraw) {
+					drawChildren();
+				}
 			}
 		}
 
 		void Node::drawChildren() {
-			for(auto&& child : childNodes){
-				child->draw();
+			if (allowDraw) {
+				for (auto&& child : childNodes) {
+					child->draw();
+				}
 			}
 		}
 
 		void Node::draw(const TransformMatrix &a_overrideParentMatrix) {
-			SCOPE_EXIT{ usingTemporaryMatrix = false; };
-			usingTemporaryMatrix = true;
-			temporaryWorldMatrixTransform = a_overrideParentMatrix * localMatrixTransform;
-			bool allowChildrenToDraw = true;
-			for (auto&& component : childComponents) {
-				allowChildrenToDraw = component->draw() && allowChildrenToDraw;
-			}
-			if (allowChildrenToDraw) {
-				drawChildren(temporaryWorldMatrixTransform);
+			if (allowDraw) {
+				SCOPE_EXIT{ usingTemporaryMatrix = false; };
+				usingTemporaryMatrix = true;
+				temporaryWorldMatrixTransform = a_overrideParentMatrix * localMatrixTransform;
+				bool allowChildrenToDraw = true;
+				for (auto&& component : childComponents) {
+					allowChildrenToDraw = component->draw() && allowChildrenToDraw;
+				}
+				if (allowChildrenToDraw) {
+					drawChildren(temporaryWorldMatrixTransform);
+				}
 			}
 		}
 
 		void Node::drawChildren(const TransformMatrix &a_overrideParentMatrix) {
-			for (auto&& child : childNodes) {
-				child->draw(a_overrideParentMatrix);
+			if (allowDraw) {
+				for (auto&& child : childNodes) {
+					child->draw(a_overrideParentMatrix);
+				}
 			}
 		}
 
 		void Node::update(double a_delta) {
-			for(auto&& component : childComponents){
-				component->update(a_delta);
-			}
-			for(auto&& child : childNodes){
-				child->update(a_delta);
+			if (allowUpdate) {
+				for (auto&& component : childComponents) {
+					component->update(a_delta);
+				}
+				for (auto&& child : childNodes) {
+					child->update(a_delta);
+				}
 			}
 		}
 
 		void Node::drawUpdate(double a_delta) {
-			bool allowChildrenToDraw = true;
-			for(auto&& component : childComponents){
-				component->update(a_delta);
-				allowChildrenToDraw = component->draw() && allowChildrenToDraw;
-			}
-			if(allowChildrenToDraw){
-				for(auto&& child : childNodes){
-					child->drawUpdate(a_delta);
+			if (allowDraw && allowUpdate) {
+				bool allowChildrenToDraw = true;
+				for (auto&& component : childComponents) {
+					component->update(a_delta);
+					allowChildrenToDraw = component->draw() && allowChildrenToDraw;
 				}
-			} else{
-				for(auto&& child : childNodes){
-					child->update(a_delta);
+				if (allowChildrenToDraw) {
+					for (auto&& child : childNodes) {
+						child->drawUpdate(a_delta);
+					}
+				} else {
+					for (auto&& child : childNodes) {
+						child->update(a_delta);
+					}
 				}
+			} else if (allowDraw) {
+				draw();
+			} else if (allowUpdate) {
+				update(a_delta);
 			}
 		}
 

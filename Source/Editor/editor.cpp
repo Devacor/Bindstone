@@ -45,6 +45,16 @@ Editor::Editor():
 
 	testNode->position({ 300.0f, 300.0f });
 
+
+
+	auto button = testNode->make("ButtonTest")->position({ -200.0f, -200.0f })->attach<MV::Scene::Button>(mouse)->size({ 100.0f, 15.0f });
+	button->activeNode(button->owner()->make("Active")->attach<MV::Scene::Sprite>()->size({ 100.0f, 15.0f })->color({0x553355})->owner());
+	button->idleNode(button->owner()->make("Idle")->attach<MV::Scene::Sprite>()->size({ 100.0f, 15.0f })->color({ 0x225522 })->owner());
+	button->disabledNode(button->owner()->make("Disabled")->attach<MV::Scene::Sprite>()->size({ 100.0f, 15.0f })->color({ 0xCCCCCC })->owner());
+	button->onAccept.connect("Accepted", [](const std::shared_ptr<MV::Scene::Clickable> &a_clickable) {
+		auto button = std::static_pointer_cast<MV::Scene::Button>(a_clickable);
+		button->disable();
+	});
 	//mostInner->rotation({ 0.0f, 0.0f, 45.0f });
 }
 

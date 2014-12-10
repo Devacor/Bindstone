@@ -28,14 +28,18 @@ namespace MV {
 			std::shared_ptr<Clipped> captureBounds(const BoxAABB<> &a_newCapturedBounds);
 			BoxAABB<> captureBounds();
 
-			std::shared_ptr<Sprite> captureSize(const Size<> &a_size, const Point<> &a_centerPoint);
-			std::shared_ptr<Sprite> captureSize(const Size<> &a_size, bool a_center = false);
+			std::shared_ptr<Clipped> captureSize(const Size<> &a_size, const Point<> &a_centerPoint);
+			std::shared_ptr<Clipped> captureSize(const Size<> &a_size, bool a_center = false);
+
+			std::shared_ptr<Clipped> refreshShader(const std::string &a_refreshShaderId);
+			std::string refreshShader();
 		protected:
 			Clipped(const std::weak_ptr<Node> &a_owner);
 
 			template <class Archive>
 			void serialize(Archive & archive) {
 				archive(
+					CEREAL_NVP(refreshShaderId),
 					CEREAL_NVP(capturedBounds),
 					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
 				);
@@ -45,6 +49,7 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<Clipped> &construct) {
 				construct(std::shared_ptr<Node>());
 				archive(
+					cereal::make_nvp("refreshShaderId", construct->refreshShaderId),
 					cereal::make_nvp("capturedBounds", construct->capturedBounds),
 					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(construct.ptr()))
 				);
@@ -62,6 +67,7 @@ namespace MV {
 
 			void observeNode(const std::shared_ptr<Node>& a_node);
 
+			std::string refreshShaderId;
 			BoxAABB<> capturedBounds;
 			bool dirtyTexture = true;
 			std::list<Node::BasicSharedSignalType> basicSignals;

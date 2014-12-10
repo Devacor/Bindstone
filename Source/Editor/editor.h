@@ -54,6 +54,7 @@ private:
 	MV::MouseState mouse;
 
 	MV::Stopwatch watch;
+	double lastUpdateDelta = 0.0f;
 	double lastSecond = 0;
 	bool done = false;
 

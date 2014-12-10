@@ -190,9 +190,9 @@ controls(a_controls) {
 	}, .5f);
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimumSpawnRate = MV::mixIn(0.0f, 1.25f, a_slider->percent(), 3);
-		maximumSpawnRate->percent(a_slider->percent());
+		maximumSpawnRate->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, .5f);
-	grid->add(maximumSpawnRate->owner());
+	grid->add(maximumSpawnRate);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "lifeSpan", labelSize, UTF_CHAR_STR("Lifespan"));
 	auto maximumLifespan = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
@@ -200,9 +200,9 @@ controls(a_controls) {
 	}, 0.15f);
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.maxLifespan = MV::mixIn(0.01f, 60.0f, a_slider->percent(), 2);
-		maximumLifespan->percent(a_slider->percent());
+		maximumLifespan->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, 0.15f);
-	grid->add(maximumLifespan->owner());
+	grid->add(maximumLifespan);
 
 
 	auto maximumEndSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
@@ -210,24 +210,24 @@ controls(a_controls) {
 	}, 0.5f);
 	auto minimumEndSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.endSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
-		maximumEndSpeed->percent(a_slider->percent());
+		maximumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, 0.5f);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "initialSpeed", labelSize, UTF_CHAR_STR("Start Speed"));
 	auto startSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
-		maximumEndSpeed->percent(a_slider->percent());
+		maximumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, 0.5f);
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
-		startSpeed->percent(a_slider->percent());
-		minimumEndSpeed->percent(a_slider->percent());
+		startSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
+		minimumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, 0.5f);
-	grid->add(startSpeed->owner());
+	grid->add(startSpeed);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "speedChange", labelSize, UTF_CHAR_STR("End Speed"));
-	grid->add(minimumEndSpeed->owner());
-	grid->add(maximumEndSpeed->owner());
+	grid->add(minimumEndSpeed);
+	grid->add(maximumEndSpeed);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "initialDirection", labelSize, UTF_CHAR_STR("Start Direction"));
 	auto maximumStartDirection = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
@@ -235,9 +235,9 @@ controls(a_controls) {
 	}, 0.0f);
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimumDirection = {0.0f, 0.0f, a_slider->percent() * 720.0f};
-		maximumStartDirection->percent(a_slider->percent());
+		maximumStartDirection->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, 0.0f);
-	grid->add(maximumStartDirection->owner());
+	grid->add(maximumStartDirection);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "directionChange", labelSize, UTF_CHAR_STR("Direction Change"));
 	auto maximumDirectionChange = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
@@ -245,33 +245,33 @@ controls(a_controls) {
 	}, 0.5f);
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.directionalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
-		maximumDirectionChange->percent(a_slider->percent());
+		maximumDirectionChange->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, 0.5f);
-	grid->add(maximumDirectionChange->owner());
+	grid->add(maximumDirectionChange);
 
 	auto maximumEndSize = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.endScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 	}, 0.5f);
 	auto minimumEndSize = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.endScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
-		maximumEndSize->percent(a_slider->percent());
+		maximumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, 0.5f);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "startSize", labelSize, UTF_CHAR_STR("Start Size"));
 	auto startSize = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
-		maximumEndSize->percent(a_slider->percent());
+		maximumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, 0.55f);
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
-		startSize->percent(a_slider->percent());
-		minimumEndSize->percent(a_slider->percent());
+		startSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
+		minimumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, 0.55f);
-	grid->add(startSize->owner());
+	grid->add(startSize);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "endSize", labelSize, UTF_CHAR_STR("End Size"));
-	grid->add(minimumEndSize->owner());
-	grid->add(maximumEndSize->owner());
+	grid->add(minimumEndSize);
+	grid->add(maximumEndSize);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "initialRotation", labelSize, UTF_CHAR_STR("Initialize Rotation"));
 	auto maximumRotation = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
@@ -279,9 +279,9 @@ controls(a_controls) {
 	}, 0.0f);
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimumRotation = {0.0f, 0.0f, a_slider->percent() * 360.0f};
-		maximumRotation->percent(a_slider->percent());
+		maximumRotation->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, 0.0f);
-	grid->add(maximumRotation->owner());
+	grid->add(maximumRotation);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "rotationChange", labelSize, UTF_CHAR_STR("Rotation Change"));
 	auto maximumRotationChange = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
@@ -289,9 +289,9 @@ controls(a_controls) {
 	}, 0.5f);
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.rotationalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
-		maximumRotationChange->percent(a_slider->percent());
+		maximumRotationChange->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, 0.5f);
-	grid->add(maximumRotationChange->owner());
+	grid->add(maximumRotationChange);
 
 	auto maximumREndMax = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.endColor.R = a_slider->percent();
@@ -308,77 +308,77 @@ controls(a_controls) {
 
 	auto maximumREndMin = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.endColor.R = a_slider->percent();
-		maximumREndMax->percent(a_slider->percent());
+		maximumREndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	});
 	auto maximumGEndMin = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.endColor.G = a_slider->percent();
-		maximumGEndMax->percent(a_slider->percent());
+		maximumGEndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	});
 	auto maximumBEndMin = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.endColor.B = a_slider->percent();
-		maximumBEndMax->percent(a_slider->percent());
+		maximumBEndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	});
 	auto maximumAEndMin = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.endColor.A = a_slider->percent();
-		maximumAEndMax->percent(a_slider->percent());
+		maximumAEndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	});
 
 	auto maximumRInitial = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginColor.R = a_slider->percent();
-		maximumREndMax->percent(a_slider->percent());
+		maximumREndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	});
 	auto maximumGInitial = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginColor.G = a_slider->percent();
-		maximumGEndMax->percent(a_slider->percent());
+		maximumGEndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	});
 	auto maximumBInitial = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginColor.B = a_slider->percent();
-		maximumBEndMax->percent(a_slider->percent());
+		maximumBEndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	});
 	auto maximumAInitial = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginColor.A = a_slider->percent();
-		maximumAEndMax->percent(a_slider->percent());
+		maximumAEndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	});
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "initialColorMin", labelSize, UTF_CHAR_STR("Initial Color Min"));
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginColor.R = a_slider->percent();
-		maximumRInitial->percent(a_slider->percent());
-		maximumREndMin->percent(a_slider->percent());
+		maximumRInitial->component<MV::Scene::Slider>()->percent(a_slider->percent());
+		maximumREndMin->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	});
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginColor.G = a_slider->percent();
-		maximumGInitial->percent(a_slider->percent());
-		maximumGEndMin->percent(a_slider->percent());
+		maximumGInitial->component<MV::Scene::Slider>()->percent(a_slider->percent());
+		maximumGEndMin->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	});
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginColor.B = a_slider->percent();
-		maximumBInitial->percent(a_slider->percent());
-		maximumBEndMin->percent(a_slider->percent());
+		maximumBInitial->component<MV::Scene::Slider>()->percent(a_slider->percent());
+		maximumBEndMin->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	});
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginColor.A = a_slider->percent();
-		maximumAInitial->percent(a_slider->percent());
-		maximumAEndMin->percent(a_slider->percent());
+		maximumAInitial->component<MV::Scene::Slider>()->percent(a_slider->percent());
+		maximumAEndMin->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	});
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "initialColorMax", labelSize, UTF_CHAR_STR("Initial Color Max"));
-	grid->add(maximumRInitial->owner());
-	grid->add(maximumGInitial->owner());
-	grid->add(maximumBInitial->owner());
-	grid->add(maximumAInitial->owner());
+	grid->add(maximumRInitial);
+	grid->add(maximumGInitial);
+	grid->add(maximumBInitial);
+	grid->add(maximumAInitial);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "endColorMin", labelSize, UTF_CHAR_STR("End Color Min"));
-	grid->add(maximumREndMin->owner());
-	grid->add(maximumGEndMin->owner());
-	grid->add(maximumBEndMin->owner());
-	grid->add(maximumAEndMin->owner());
+	grid->add(maximumREndMin);
+	grid->add(maximumGEndMin);
+	grid->add(maximumBEndMin);
+	grid->add(maximumAEndMin);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "endColorMax", labelSize, UTF_CHAR_STR("End Color Max"));
-	grid->add(maximumREndMax->owner());
-	grid->add(maximumGEndMax->owner());
-	grid->add(maximumBEndMax->owner());
-	grid->add(maximumAEndMax->owner());
+	grid->add(maximumREndMax);
+	grid->add(maximumGEndMax);
+	grid->add(maximumBEndMax);
+	grid->add(maximumAEndMax);
 
 
 

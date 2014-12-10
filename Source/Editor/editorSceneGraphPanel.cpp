@@ -13,7 +13,7 @@ void SceneGraphPanel::clickedChild(std::shared_ptr<MV::Scene::Node> a_child) {
 }
 
 void SceneGraphPanel::loadButtons(std::shared_ptr<MV::Scene::Node> a_grid, std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth /*= 0*/) {
-	for(auto&& child : *a_grid){
+	for(auto&& child : *a_node){
 		makeChildButton(child, a_depth, a_grid);
 	}
 }

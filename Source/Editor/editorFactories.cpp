@@ -14,9 +14,9 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 	std::vector<MV::Color> boxActiveColors = { { InterfaceColors::BUTTON_TOP_ACTIVE },{ InterfaceColors::BUTTON_BOTTOM_ACTIVE },{ InterfaceColors::BUTTON_BOTTOM_ACTIVE },{ InterfaceColors::BUTTON_TOP_ACTIVE } };
 	std::vector<MV::Color> boxIdleColors = { { InterfaceColors::BUTTON_TOP_IDLE },{ InterfaceColors::BUTTON_BOTTOM_IDLE },{ InterfaceColors::BUTTON_BOTTOM_IDLE },{ InterfaceColors::BUTTON_TOP_IDLE } };
 
-	auto activeScene = MV::Scene::Node::make(a_parent->renderer(), "active")->attach<MV::Scene::Sprite>()->size(a_size)->colors(boxActiveColors)->owner();
+	auto activeScene = button->owner()->make("active")->attach<MV::Scene::Sprite>()->size(a_size)->colors(boxActiveColors)->owner();
 
-	auto idleScene = MV::Scene::Node::make(a_parent->renderer(), "idle")->attach<MV::Scene::Sprite>()->size(a_size)->colors(boxIdleColors)->owner();
+	auto idleScene = button->owner()->make("idle")->attach<MV::Scene::Sprite>()->size(a_size)->colors(boxIdleColors)->owner();
 
 	auto activeBox = activeScene->attach<MV::Scene::Text>(a_library, a_size, a_fontIdentifier);
 	activeBox->justification(MV::TextJustification::CENTER);
@@ -38,9 +38,9 @@ std::shared_ptr<MV::Scene::Button> makeSceneButton(const std::shared_ptr<MV::Sce
 	std::vector<MV::Color> boxIdleColors = { { InterfaceColors::BUTTON_TOP_IDLE },{ InterfaceColors::BUTTON_BOTTOM_IDLE },{ InterfaceColors::BUTTON_BOTTOM_IDLE },{ InterfaceColors::BUTTON_TOP_IDLE } };
 
 	auto button = a_parent->make(MV::wideToString(a_text) + boost::lexical_cast<std::string>(buttonId++))->attach<MV::Scene::Button>(a_mouse)->size(a_size);
-	auto activeScene = MV::Scene::Node::make(a_parent->renderer())->attach<MV::Scene::Sprite>()->size(a_size)->colors(boxActiveColors)->owner();
+	auto activeScene = button->owner()->make("active")->attach<MV::Scene::Sprite>()->size(a_size)->colors(boxActiveColors)->owner();
 
-	auto idleScene = MV::Scene::Node::make(a_parent->renderer())->attach<MV::Scene::Sprite>()->size(a_size)->colors(boxIdleColors)->owner();
+	auto idleScene = button->owner()->make("idle")->attach<MV::Scene::Sprite>()->size(a_size)->colors(boxIdleColors)->owner();
 
 	auto activeBox = activeScene->attach<MV::Scene::Text>(a_library, a_size - MV::size(10.0f, 0.0f), a_fontIdentifier)->
 		justification(MV::TextJustification::LEFT)->
@@ -92,21 +92,23 @@ std::shared_ptr<MV::Scene::Slider> makeSlider(MV::MouseState &a_mouse, const std
 	return slider;
 }
 
-std::shared_ptr<MV::Scene::Slider> makeSlider(MV::Draw2D &a_renderer, MV::MouseState &a_mouse, const std::function <void(std::shared_ptr<MV::Scene::Slider>)> &a_method, float a_startPercent){
-	auto slider = MV::Scene::Node::make(a_renderer, MV::guid("slider_"))->attach<MV::Scene::Slider>(a_mouse)->size(MV::Size<>(110.0f, 10.0f))->percent(a_startPercent);
+std::shared_ptr<MV::Scene::Node> makeSlider(MV::Draw2D &a_renderer, MV::MouseState &a_mouse, const std::function <void(std::shared_ptr<MV::Scene::Slider>)> &a_method, float a_startPercent){
+	auto sliderNode = MV::Scene::Node::make(a_renderer, MV::guid("slider_"));
+	auto slider = sliderNode->attach<MV::Scene::Slider>(a_mouse)->size(MV::Size<>(110.0f, 10.0f))->percent(a_startPercent);
 	slider->color({ .25f, .25f, .25f, 1.0f });
 	slider->handle(MV::Scene::Node::make(slider->owner()->renderer(), "handle")->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f })->owner());
 	slider->onPercentChange.connect("action", a_method);
 	slider->percent(a_startPercent);
-	return slider;
+	return sliderNode;
 }
 
-std::shared_ptr<MV::Scene::Slider> makeSlider(MV::Draw2D &a_renderer, MV::MouseState &a_mouse, float a_startPercent){
-	auto slider = MV::Scene::Node::make(a_renderer, MV::guid("slider_"))->attach<MV::Scene::Slider>(a_mouse)->size(MV::Size<>(110.0f, 10.0f))->percent(a_startPercent);
+std::shared_ptr<MV::Scene::Node> makeSlider(MV::Draw2D &a_renderer, MV::MouseState &a_mouse, float a_startPercent){
+	auto sliderNode = MV::Scene::Node::make(a_renderer, MV::guid("slider_"));
+	auto slider = sliderNode->attach<MV::Scene::Slider>(a_mouse)->size(MV::Size<>(110.0f, 10.0f))->percent(a_startPercent);
 	slider->color({ .25f, .25f, .25f, 1.0f });
 	slider->handle(MV::Scene::Node::make(slider->owner()->renderer(), "handle")->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f })->owner());
 	slider->percent(a_startPercent);
-	return slider;
+	return sliderNode;
 }
 
 std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::Size<> a_boxSize, MV::MouseState &a_mouse) {
@@ -115,7 +117,7 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 	float headerSize = 20.0f;
 	auto boxContents = box->make("contents")->position({ 0.0f, headerSize });
 
-	auto boxHeader = box->attach<MV::Scene::Clickable>(a_mouse)->size(MV::size(a_boxSize.width, headerSize))->color({BOX_HEADER});
+	auto boxHeader = box->attach<MV::Scene::Clickable>(a_mouse)->size(MV::size(a_boxSize.width, headerSize))->color({BOX_HEADER})->show();
 
 	boxHeader->onDrag.connect("DragSignal", [](std::shared_ptr<MV::Scene::Clickable> a_boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
 		a_boxHeader->owner()->translate(MV::cast<MV::PointPrecision>(deltaPosition));

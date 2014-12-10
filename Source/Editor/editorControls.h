@@ -24,7 +24,8 @@ public:
 
 private:
 	void initializeRootPicker(){
-		grid = MV::Scene::Node::make(root->renderer())->attach<MV::Scene::Grid>()->cellSize(MV::size(100.0f, 27.0f))->padding({3.0f, 4.0f})->columns(6)->margin({5.0f, 4.0f})->color({ BOX_BACKGROUND });
+		auto gridNode = MV::Scene::Node::make(root->renderer());
+		grid = gridNode->attach<MV::Scene::Grid>()->cellSize(MV::size(100.0f, 27.0f))->padding({3.0f, 4.0f})->columns(6)->margin({5.0f, 4.0f})->color({ BOX_BACKGROUND });
 		makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Back", {100.0f, 27.0f}, UTF_CHAR_STR("Back"))->
 			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				setter(nullptr, false);
@@ -37,7 +38,7 @@ private:
 		auto pos = box ? box->parent()->position() : MV::Point<>(200.0f, 0.0f);
 		box = makeDraggableBox("TexturePicker", root, grid->bounds().size(), *sharedResources.mouse);
 		box->parent()->position(pos);
-		box->add(grid->owner());
+		box->add(gridNode);
 		for(auto&& packId : packs){
 			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, packId, {100.0f, 27.0f}, MV::stringToWide(packId));
 			button->onAccept.connect("Accept", [&,packId](std::shared_ptr<MV::Scene::Clickable> a_clickable){
@@ -48,7 +49,8 @@ private:
 
 	void initializeImagePicker(const std::string &a_packId){
 		auto cellSize = MV::size(64.0f, 64.0f);
-		grid = MV::Scene::Node::make(root->renderer())->attach<MV::Scene::Grid>()->cellSize(cellSize)->padding({3.0f, 4.0f})->columns(6)->color({BOX_BACKGROUND})->margin({5.0f, 4.0f});
+		auto gridNode = MV::Scene::Node::make(root->renderer());
+		grid = gridNode->attach<MV::Scene::Grid>()->cellSize(cellSize)->padding({3.0f, 4.0f})->columns(6)->color({BOX_BACKGROUND})->margin({5.0f, 4.0f});
 		makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Back", cellSize, UTF_CHAR_STR("Back"))->
 			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				initializeRootPicker();

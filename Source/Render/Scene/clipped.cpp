@@ -9,6 +9,9 @@ namespace MV {
 
 		void Clipped::refreshTexture(bool a_forceRefreshEvenIfNotDirty /*= true*/) {
 			if (a_forceRefreshEvenIfNotDirty || dirtyTexture) {
+				auto originalShaderId = shader();
+				SCOPE_EXIT{ shader(originalShaderId); };
+				shader(refreshShaderId);
 				bool emptyCapturedBounds = capturedBounds.empty();
 				auto pointAABB = emptyCapturedBounds ? bounds() : capturedBounds;
 				auto textureSize = cast<int>(pointAABB.size());
@@ -20,7 +23,6 @@ namespace MV {
 				{
 					auto framebuffer = owner()->renderer().makeFramebuffer(cast<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId())->start();
 
-					owner()->renderer().setBlendFunction(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
 					SCOPE_EXIT{ owner()->renderer().defaultBlendFunction(); };
 
 					owner()->drawChildren(TransformMatrix());
@@ -33,20 +35,20 @@ namespace MV {
 		bool Clipped::preDraw() {
 			if (shouldDraw) {
 				refreshTexture(false);
-				owner()->renderer().setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 				return true;
 			}
 			return false;
 		}
 
 		bool Clipped::postDraw() {
-			owner()->renderer().defaultBlendFunction();
 			return !shouldDraw;
 		}
 
 		Clipped::Clipped(const std::weak_ptr<Node> &a_owner) :
-			Sprite(a_owner) {
+			Sprite(a_owner),
+			refreshShaderId(PREMULTIPLY_ID){
 			
+			shaderProgramId = DEFAULT_ID;
 		}
 
 		void Clipped::observeNode(const std::shared_ptr<Node>& a_node) {
@@ -113,7 +115,7 @@ namespace MV {
 			return capturedBounds;
 		}
 
-		std::shared_ptr<Sprite> Clipped::captureSize(const Size<> &a_size, const Point<> &a_centerPoint) {
+		std::shared_ptr<Clipped> Clipped::captureSize(const Size<> &a_size, const Point<> &a_centerPoint) {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			Point<> topLeft;
 			Point<> bottomRight = toPoint(a_size);
@@ -124,7 +126,7 @@ namespace MV {
 			return captureBounds({ topLeft, bottomRight });
 		}
 
-		std::shared_ptr<Sprite> Clipped::captureSize(const Size<> &a_size, bool a_center /*= false*/) {
+		std::shared_ptr<Clipped> Clipped::captureSize(const Size<> &a_size, bool a_center /*= false*/) {
 			return captureSize(a_size, (a_center) ? point(a_size.width / 2.0f, a_size.height / 2.0f) : point(0.0f, 0.0f));
 		}
 
@@ -145,6 +147,15 @@ namespace MV {
 		std::shared_ptr<Clipped> Clipped::size(const Size<> &a_size, bool a_center /*= false*/) {
 			dirtyTexture = true;
 			return std::static_pointer_cast<Clipped>(Sprite::size(a_size, a_center));
+		}
+
+		std::shared_ptr<Clipped> Clipped::refreshShader(const std::string &a_refreshShaderId) {
+			refreshShaderId = a_refreshShaderId;
+			return std::static_pointer_cast<Clipped>(shared_from_this());
+		}
+
+		std::string Clipped::refreshShader() {
+			return refreshShaderId;
 		}
 
 	}

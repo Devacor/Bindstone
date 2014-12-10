@@ -152,6 +152,10 @@ namespace MV {
 			return std::shared_ptr<Node>(new Node(a_draw2d, a_id));
 		}
 
+		std::shared_ptr<Node> Node::make(Draw2D& a_draw2d) {
+			return make(a_draw2d, guid("root_"));
+		}
+
 		std::shared_ptr<Node> Node::make(const std::string &a_id) {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto toAdd = Node::make(draw2d, a_id);
@@ -196,6 +200,7 @@ namespace MV {
 			if(foundNode != childNodes.end()){
 				auto child = *foundNode;
 				childNodes.erase(foundNode);
+				child->myParent = nullptr;
 				child->onRemoveSlot(child);
 				onChildRemoveSlot(shared_from_this(), child);
 				return child;
@@ -212,6 +217,7 @@ namespace MV {
 			if(foundNode != childNodes.end()){
 				auto child = *foundNode;
 				childNodes.erase(foundNode);
+				child->myParent = nullptr;
 				child->onRemoveSlot(child);
 				onChildRemoveSlot(shared_from_this(), child);
 				return child;
@@ -226,6 +232,7 @@ namespace MV {
 			while(!childNodes.empty()){
 				auto childToRemove = *childNodes.begin();
 				childNodes.erase(childNodes.begin());
+				childToRemove->myParent = nullptr;
 				childToRemove->onRemoveSlot(childToRemove);
 				onChildRemoveSlot(shared_from_this(), childToRemove);
 			}

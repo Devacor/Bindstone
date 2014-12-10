@@ -4,7 +4,7 @@
 void EditorControls::updateBoxHeader(MV::PointPrecision a_width) {
 	if(!boxHeader){
 		boxHeader = draggableBox->make("ContextMenuHandle")->attach<MV::Scene::Clickable>(*sharedResources.mouse)->bounds(MV::size(a_width, 20.0f))->
-			color({BOX_HEADER});
+			color({BOX_HEADER})->show();
 
 		boxHeader->onDrag.connect("header", [&](std::shared_ptr<MV::Scene::Clickable> boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
 			if(currentPanel){
@@ -43,6 +43,7 @@ std::shared_ptr<MV::Scene::Node> EditorControls::content() {
 
 void EditorControls::deleteScene() {
 	currentPanel.reset();
+	auto boxHeaderOwner = (boxHeader) ? boxHeader->owner() : nullptr;
 	draggableBox->clear();
 	if(boxHeader){
 		draggableBox->add(boxHeader->owner());

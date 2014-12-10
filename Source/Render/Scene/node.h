@@ -168,7 +168,8 @@ namespace MV {
 			void draw(const TransformMatrix &a_overrideParentMatrix);
 			void drawChildren(const TransformMatrix &a_overrideParentMatrix);
 
-			static std::shared_ptr<Node> make(Draw2D& a_draw2d, const std::string &a_id = "root");
+			static std::shared_ptr<Node> make(Draw2D& a_draw2d, const std::string &a_id);
+			static std::shared_ptr<Node> make(Draw2D& a_draw2d);
 
 			std::shared_ptr<Node> make(const std::string &a_id);
 			std::shared_ptr<Node> make();
@@ -196,7 +197,7 @@ namespace MV {
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				if (exactType) {
 					for (auto&& currentComponent : childComponents) {
-						if (typeid(currentComponent) == typeid(ComponentType)) {
+						if (typeid(*currentComponent) == typeid(ComponentType)) {
 							return std::static_pointer_cast<ComponentType>(currentComponent);
 						}
 					}
@@ -208,7 +209,13 @@ namespace MV {
 						}
 					}
 				}
-				require<ResourceException>(!a_throwIfNotFound, "Failed to locate component [", typeid(ComponentType).name(), "] in node: [", nodeId, "]");
+				if (a_throwIfNotFound) {
+					std::string componentsString;
+					for (auto&& currentComponent : childComponents) {
+						componentsString += std::string("\n") + typeid(*currentComponent).name();
+					}
+					require<ResourceException>(false, "Failed to locate component [", typeid(ComponentType).name(), "] in node: [", nodeId, "]\nComponents:", componentsString);
+				}
 				return nullptr;
 			}
 
@@ -218,7 +225,7 @@ namespace MV {
 				std::vector<std::shared_ptr<ComponentType>> matchingComponents;
 				if (exactType) {
 					for (auto&& currentComponent : childComponents) {
-						if (typeid(currentComponent) == typeid(ComponentType)) {
+						if (typeid(currentComponent.get()) == typeid(ComponentType)) {
 							matchingComponents.push_back(std::static_pointer_cast<ComponentType>(currentComponent));
 						}
 					}

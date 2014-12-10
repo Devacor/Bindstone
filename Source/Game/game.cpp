@@ -160,7 +160,7 @@ void Game::handleInput() {
 void Game::render() {
 	static int staticint = 0;
 	renderer.clearScreen();
-	mainScene->draw();
+	mainScene->drawUpdate(0.0f);
 	//testShape->draw();
 	renderer.updateScreen();
 	if(staticint++ < 100)

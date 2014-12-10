@@ -15,8 +15,6 @@ namespace MV{
 			fontIdentifier(a_defaultFontIdentifier),
 			formattedText(a_textLibrary, a_size.width, DEFAULT_ID),
 			boxSize(a_size) {
-
-			formattedText.defaultState()->color = Color(1.0f, 0.0f, 0.0f);
 			
 			points.resize(4);
 			for (auto&& point : points) {
@@ -70,7 +68,7 @@ namespace MV{
 			if (displayCursor) {
 				accumulatedTime += a_dt;
 				if (accumulatedTime > BLINK_DURATION) {
-					fmod(accumulatedTime, BLINK_DURATION);
+					accumulatedTime = 0.0;
 					if (cursorScene->visible()) {
 						cursorScene->hide();
 					} else {

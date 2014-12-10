@@ -23,7 +23,7 @@ namespace MV {
 
 			std::shared_ptr<Slider> percent(PointPrecision a_newPercent, bool a_notify = true) {
 				auto oldPercent = dragPercent;
-				dragPercent = std::max(std::min(a_newPercent, 0.0f), 100.0f);
+				dragPercent = std::min(std::max(a_newPercent, 0.0f), 1.0f);
 				auto self = std::static_pointer_cast<Slider>(shared_from_this());
 				if (a_notify && oldPercent != dragPercent) {
 					onPercentChangeSlot(self);
@@ -73,11 +73,23 @@ namespace MV {
 				);
 			}
 
+			virtual void initialize() override {
+				Clickable::initialize();
+				Clickable::onDrag.connect("HandleDrag", [](const std::shared_ptr<Clickable> &a_clickable, const Point<int> &startPosition, const Point<int> &deltaPosition) {
+					auto self = std::static_pointer_cast<Slider>(a_clickable);
+					self->updateDragFromMouse();
+				});
+			}
+
 		private:
 			virtual void acceptDownClick() {
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				Clickable::acceptDownClick();
 
+				updateDragFromMouse();
+			}
+
+			void updateDragFromMouse() {
 				auto oldPercent = dragPercent;
 				dragPercent = calculatePercentFromPosition(owner()->localFromScreen(mouse().position()));
 				auto self = std::static_pointer_cast<Slider>(shared_from_this()); //keep alive
@@ -90,18 +102,15 @@ namespace MV {
 			PointPrecision calculatePercentFromPosition(const Point<> &a_localPoint) {
 				auto bounds = owner()->bounds();
 				if (bounds.width() >= bounds.height()) {
-					return (a_localPoint.x - bounds.minPoint.x) / bounds.width();
+					return std::min(std::max((a_localPoint.x - bounds.minPoint.x) / bounds.width(), 0.0f), 1.0f);
 				} else {
-					return (a_localPoint.y - bounds.minPoint.y) / bounds.height();
+					return std::min(std::max((a_localPoint.y - bounds.minPoint.y) / bounds.height(), 0.0f), 1.0f);
 				}
 			}
 
 			void updateHandlePosition() {
 				if (dragHandle) {
-					auto areaBounds = owner()->bounds();
-					auto areaPosition = owner()->position();
-					areaBounds.minPoint -= areaPosition;
-					areaBounds.maxPoint -= areaPosition;
+					auto areaBounds = bounds();
 					auto handleBounds = dragHandle->bounds();
 
 					PointPrecision firstX = areaBounds.minPoint.x + (areaBounds.width() - handleBounds.width());

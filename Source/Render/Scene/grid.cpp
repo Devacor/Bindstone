@@ -164,8 +164,6 @@ namespace MV {
 			basicSignals.push_back(a_node->onHide.connect(markDirty));
 			basicSignals.push_back(a_node->onTransformChange.connect(markDirty));
 			basicSignals.push_back(a_node->onLocalBoundsChange.connect(markDirty));
-
-			basicSignals.push_back(nullptr);
 		}
 	}
 }

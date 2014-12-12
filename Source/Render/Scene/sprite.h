@@ -91,6 +91,7 @@ namespace MV {
 				archive(
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
+				construct->initialize();
 			}
 
 		private:

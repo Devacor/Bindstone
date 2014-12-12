@@ -27,8 +27,8 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 
 	auto node = panel.content();
 	auto grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
-		color({BOX_BACKGROUND})->margin({5.0f, 4.0f})->
-		padding({3.0f, 4.0f})->owner();
+		color({BOX_BACKGROUND})->margin({4.0f, 4.0f})->
+		padding({2.0f, 2.0f})->owner();
 	auto buttonSize = MV::size(110.0f, 27.0f);
 	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>){
@@ -61,19 +61,23 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 
 	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "SetAspect", buttonSize, UTF_CHAR_STR("Snap Aspect"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
-		auto size = controls->texture()->bounds().size();
-		aspectX->number(size.width);
-		aspectY->number(size.height);
-		controls->aspect(MV::cast<MV::PointPrecision>(size));
-	});
+			if (controls->texture()) {
+				auto size = controls->texture()->bounds().size();
+				aspectX->number(size.width);
+				aspectY->number(size.height);
+				controls->aspect(MV::cast<MV::PointPrecision>(size));
+			}
+		});
 
 	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "SetSize", buttonSize, UTF_CHAR_STR("Snap Size"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
-		auto size = controls->texture()->bounds().size();
-		width->number(size.width);
-		height->number(size.width);
-		controls->size(MV::cast<MV::PointPrecision>(size));
-	});
+			if (controls->texture()) {
+				auto size = controls->texture()->bounds().size();
+				width->number(size.width);
+				height->number(size.width);
+				controls->size(MV::cast<MV::PointPrecision>(size));
+			}
+		});
 
 	if(controls){
 		auto xClick = posX->owner()->component<MV::Scene::Clickable>();
@@ -154,8 +158,8 @@ controls(a_controls) {
 
 	auto node = panel.content();
 	auto grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(232.0f)->
-		color({InterfaceColors::BOX_BACKGROUND})->margin({5.0f, 4.0f})->
-		padding({3.0f, 4.0f})->owner();
+		color({InterfaceColors::BOX_BACKGROUND})->margin({4.0f, 4.0f})->
+		padding({2.0f, 2.0f})->owner();
 	auto buttonSize = MV::size(226.0f, 27.0f);
 	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>){
@@ -450,14 +454,15 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	EditorPanel(a_panel) {
 	auto node = panel.content();
 	auto grid = node->make("grid")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
-		color({InterfaceColors::BOX_BACKGROUND})->margin({5.0f, 4.0f})->
-		padding({3.0f, 4.0f})->owner();
+		color({InterfaceColors::BOX_BACKGROUND})->margin({4.0f, 4.0f})->
+		padding({2.0f, 2.0f})->owner();
 	auto createButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Create", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Create"));
 	fileName = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Filename", MV::size(110.0f, 27.0f), UTF_CHAR_STR("scene.scene"));
 	auto saveButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Save", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Save"));
 	auto loadButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Load", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Load"));
 
 	panel.updateBoxHeader(grid->bounds().width());
+	//panel.updateBoxHeader(grid->component<MV::Scene::Grid>()->bounds().width());
 
 	createButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
 		panel.loadPanel<ChooseElementCreationType>();
@@ -493,8 +498,8 @@ ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel):
 
 	auto node = panel.content();
 	auto grid = node->make("grid")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
-		color({InterfaceColors::BOX_BACKGROUND})->margin({5.0f, 4.0f})->
-		padding({3.0f, 4.0f})->owner();
+		color({InterfaceColors::BOX_BACKGROUND})->margin({4.0f, 4.0f})->
+		padding({2.0f, 2.0f})->owner();
 	auto createRectangleButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Rectangle", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Rectangle"));
 	auto createSpineButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Spine", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Spine"));
 	auto createEmitterButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Emitter", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Emitter"));

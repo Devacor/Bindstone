@@ -313,12 +313,13 @@ EditableEmitter::EditableEmitter(std::shared_ptr<MV::Scene::Emitter> a_elementTo
 }
 
 void EditableEmitter::removeHandles() {
-	controlContainer->remove(positionHandle->owner());
-	controlContainer->remove(topLeftSizeHandle->owner());
-	controlContainer->remove(topRightSizeHandle->owner());
-	controlContainer->remove(bottomLeftSizeHandle->owner());
-	controlContainer->remove(bottomRightSizeHandle->owner());
-
+	if (positionHandle) {
+		controlContainer->remove(positionHandle->owner());
+		controlContainer->remove(topLeftSizeHandle->owner());
+		controlContainer->remove(topRightSizeHandle->owner());
+		controlContainer->remove(bottomLeftSizeHandle->owner());
+		controlContainer->remove(bottomRightSizeHandle->owner());
+	}
 	positionHandle.reset();
 	topLeftSizeHandle.reset();
 	topRightSizeHandle.reset();

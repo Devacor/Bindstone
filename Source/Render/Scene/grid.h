@@ -35,7 +35,7 @@ namespace MV {
 				return maximumWidth;
 			}
 
-			std::shared_ptr<Grid> columns(size_t a_columns);
+			std::shared_ptr<Grid> columns(size_t a_columns, bool a_useChildrenForSize = true);
 			size_t columns() const {
 				return cellColumns;
 			}
@@ -54,6 +54,7 @@ namespace MV {
 					CEREAL_NVP(cellPadding),
 					CEREAL_NVP(margins),
 					CEREAL_NVP(cellColumns),
+					CEREAL_NVP(includeChildrenInChildSize),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
@@ -67,12 +68,16 @@ namespace MV {
 					cereal::make_nvp("cellPadding", construct->cellPadding),
 					cereal::make_nvp("margins", construct->margins),
 					cereal::make_nvp("cellColumns", construct->cellColumns),
+					cereal::make_nvp("includeChildrenInChildSize", construct->includeChildrenInChildSize),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
 				construct->dirtyGrid = true;
+				construct->initialize();
 			}
 
 		private:
+
+			virtual BoxAABB<> boundsImplementation() override;
 
 			bool bumpToNextLine(PointPrecision a_currentPosition, size_t a_index) const;
 
@@ -96,6 +101,7 @@ namespace MV {
 			std::pair<Point<>, Point<>> margins;
 			size_t cellColumns;
 			bool dirtyGrid;
+			bool includeChildrenInChildSize = true;
 		};
 	}
 }

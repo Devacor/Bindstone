@@ -102,6 +102,7 @@ namespace MV {
 					cereal::make_nvp("eatTouches", construct->eatTouches),
 					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(construct.ptr()))
 				);
+				construct->initialize();
 			}
 
 		private:
@@ -117,7 +118,7 @@ namespace MV {
 			MouseState& ourMouse;
 
 			bool eatTouches = true;
-			BoundsType hitDetectionType = BoundsType::NODE_CHILDREN;
+			BoundsType hitDetectionType = BoundsType::LOCAL;
 		};
 
 	}

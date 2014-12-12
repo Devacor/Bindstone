@@ -53,6 +53,7 @@ namespace MV {
 					cereal::make_nvp("capturedBounds", construct->capturedBounds),
 					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(construct.ptr()))
 				);
+				construct->initialize();
 			}
 
 			virtual void initialize() override {

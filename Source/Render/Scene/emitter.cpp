@@ -256,6 +256,10 @@ namespace MV {
 			appendQuadVertexIndices(vertexIndices, 0);
 		}
 
+		BoxAABB<> Emitter::boundsImplementation() {
+			return{ spawnProperties.minimumPosition, spawnProperties.minimumPosition };
+		}
+
 		MV::Scene::EmitterSpawnProperties loadEmitterProperties(const std::string &a_file) {
 			try {
 				std::ifstream file(a_file);

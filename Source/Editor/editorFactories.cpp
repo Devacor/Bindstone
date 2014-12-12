@@ -78,7 +78,6 @@ std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::MouseS
 std::shared_ptr<MV::Scene::Text> makeLabel(EditorPanel *a_panel, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_textLibrary, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_startContents){
 	auto box = a_parent->make(a_name)->attach<MV::Scene::Sprite>()->size(a_size)->colors({ { InterfaceColors::LABEL_TOP },{ InterfaceColors::LABEL_BOTTOM },{ InterfaceColors::LABEL_BOTTOM },{ InterfaceColors::LABEL_TOP } })->owner();
 	auto text = box->attach<MV::Scene::Text>(a_textLibrary, a_size, "small")->justification(MV::TextJustification::CENTER)->minimumLineHeight(a_size.height)->wrapping(MV::TextWrapMethod::NONE)->text(a_startContents);
-	auto background = box->attach<MV::Scene::Sprite>()->size(a_size);
 
 	return text;
 }
@@ -117,7 +116,7 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 	float headerSize = 20.0f;
 	auto boxContents = box->make("contents")->position({ 0.0f, headerSize });
 
-	auto boxHeader = box->attach<MV::Scene::Clickable>(a_mouse)->size(MV::size(a_boxSize.width, headerSize))->color({BOX_HEADER})->show();
+	auto boxHeader = box->attach<MV::Scene::Clickable>(a_mouse)->size({ a_boxSize.width, headerSize })->color({ BOX_HEADER })->show();
 
 	boxHeader->onDrag.connect("DragSignal", [](std::shared_ptr<MV::Scene::Clickable> a_boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
 		a_boxHeader->owner()->translate(MV::cast<MV::PointPrecision>(deltaPosition));

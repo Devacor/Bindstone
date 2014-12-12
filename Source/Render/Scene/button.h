@@ -54,6 +54,7 @@ namespace MV {
 					cereal::make_nvp("disabledView", construct->disabledView),
 					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(construct.ptr()))
 				);
+				construct->initialize();
 			}
 
 		private:

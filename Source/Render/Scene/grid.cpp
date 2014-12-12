@@ -49,18 +49,19 @@ namespace MV {
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
-		std::shared_ptr<Grid> Grid::columns(size_t a_columns) {
+		std::shared_ptr<Grid> Grid::columns(size_t a_columns, bool a_useChildrenForSize) {
 			cellColumns = a_columns;
+			includeChildrenInChildSize = a_useChildrenForSize;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
 		void Grid::layoutCells() {
+			dirtyGrid = false;
 			if (cellDimensions.width > 0.0f || cellDimensions.height > 0.0f) {
 				layoutCellSize();
 			} else {
 				layoutChildSize();
 			}
-			dirtyGrid = false;
 		}
 
 		Grid::Grid(const std::weak_ptr<Node> &a_owner) :
@@ -75,7 +76,8 @@ namespace MV {
 		}
 
 		bool Grid::bumpToNextLine(PointPrecision a_currentPosition, size_t a_index) const {
-			return (maximumWidth > 0.0f && a_currentPosition > maximumWidth) ||
+			return a_index > 0 &&
+				(maximumWidth > 0.0f && a_currentPosition > maximumWidth) ||
 				(cellColumns > 0 && ((a_index + 1) >= cellColumns && (a_index % cellColumns == 0)));
 		}
 
@@ -119,7 +121,7 @@ namespace MV {
 		Point<> Grid::positionChildNode(Point<> a_cellPosition, size_t a_index, std::shared_ptr<Node> a_node, const Size<> &a_cellSize, BoxAABB<> &a_calculatedBounds) {
 			auto nextPosition = a_cellPosition;
 			nextPosition.translate(a_cellSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
-			if (bumpToNextLine(nextPosition.x - cellPadding.first.x - margins.first.x, a_index++)) {
+			if (bumpToNextLine(nextPosition.x - cellPadding.first.x - margins.first.x, a_index)) {
 				a_cellPosition.locate(margins.first.x, a_cellPosition.y + a_cellSize.height + cellPadding.first.x + cellPadding.second.y);
 				nextPosition = a_cellPosition;
 				nextPosition.translate(a_cellSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
@@ -134,19 +136,23 @@ namespace MV {
 
 		void Grid::layoutChildSize() {
 			BoxAABB<> calculatedBounds(size(getContentWidth() - margins.second.x, cellDimensions.height + margins.first.y));
-			Point<> cellPosition = cellPadding.first + cellPadding.second + margins.first;
+			Point<> cellPosition = margins.first;
 			size_t index = 0;
 
 			PointPrecision maxHeightInLine = 0.0f;
 
 			for (auto&& node : *owner()) {
 				if (node->visible()) {
-					auto shapeSize = node->bounds().size();
+					auto nodeBounds = node->bounds(includeChildrenInChildSize);
+					auto shapeSize = nodeBounds.size();
 					cellPosition = positionChildNode(cellPosition, index, node, shapeSize, calculatedBounds);
+					node->translate(nodeBounds.minPoint * -1.0f);
+					++index;
 				}
 			}
 
 			calculatedBounds.expandWith(calculatedBounds.maxPoint + margins.second);
+
 			setPointsFromBounds(calculatedBounds);
 			if (localBounds != calculatedBounds) {
 				localBounds = calculatedBounds;
@@ -164,6 +170,20 @@ namespace MV {
 			basicSignals.push_back(a_node->onHide.connect(markDirty));
 			basicSignals.push_back(a_node->onTransformChange.connect(markDirty));
 			basicSignals.push_back(a_node->onLocalBoundsChange.connect(markDirty));
+
+			basicSignals.push_back(a_node->onBoundsRequest.connect([&](const std::shared_ptr<Node> &a_this){
+				if (dirtyGrid) {
+					layoutCells();
+				}
+			}));
 		}
+
+		BoxAABB<> Grid::boundsImplementation() {
+			if (dirtyGrid) {
+				layoutCells();
+			}
+			return Drawable::boundsImplementation();
+		}
+
 	}
 }

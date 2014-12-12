@@ -25,12 +25,12 @@ public:
 private:
 	void initializeRootPicker(){
 		auto gridNode = MV::Scene::Node::make(root->renderer());
-		grid = gridNode->attach<MV::Scene::Grid>()->cellSize(MV::size(100.0f, 27.0f))->padding({3.0f, 4.0f})->columns(6)->margin({5.0f, 4.0f})->color({ BOX_BACKGROUND });
+		grid = gridNode->attach<MV::Scene::Grid>()->cellSize(MV::size(100.0f, 27.0f))->padding({2.0f, 2.0f})->columns(6)->margin({4.0f, 4.0f})->color({ BOX_BACKGROUND });
 		makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Back", {100.0f, 27.0f}, UTF_CHAR_STR("Back"))->
 			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				setter(nullptr, false);
 			});
-		makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Null", {100.0f, 27.0f}, UTF_CHAR_STR("Remove Texture"))->
+		makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Null", {100.0f, 27.0f}, UTF_CHAR_STR("Clear"))->
 			onAccept.connect("Null", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				setter(nullptr, true);
 			});
@@ -50,7 +50,7 @@ private:
 	void initializeImagePicker(const std::string &a_packId){
 		auto cellSize = MV::size(64.0f, 64.0f);
 		auto gridNode = MV::Scene::Node::make(root->renderer());
-		grid = gridNode->attach<MV::Scene::Grid>()->cellSize(cellSize)->padding({3.0f, 4.0f})->columns(6)->color({BOX_BACKGROUND})->margin({5.0f, 4.0f});
+		grid = gridNode->attach<MV::Scene::Grid>()->cellSize(cellSize)->padding({2.0f, 2.0f})->columns(6)->color({BOX_BACKGROUND})->margin({4.0f, 4.0f});
 		makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Back", cellSize, UTF_CHAR_STR("Back"))->
 			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				initializeRootPicker();

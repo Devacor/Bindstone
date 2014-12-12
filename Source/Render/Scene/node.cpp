@@ -354,7 +354,8 @@ namespace MV {
 			return list;
 		}
 
-		BoxAABB<> Node::bounds(bool a_includeChildren /*= true*/) const {
+		BoxAABB<> Node::bounds(bool a_includeChildren /*= true*/) {
+			onBoundsRequestSlot(shared_from_this());
 			if(a_includeChildren){
 				if(!localBounds.empty() && !localChildBounds.empty()){
 					return BoxAABB<>(localChildBounds).expandWith(localBounds);
@@ -373,19 +374,24 @@ namespace MV {
 
 		void Node::recalculateLocalBounds() {
 			std::lock_guard<std::recursive_mutex> guard(lock);
-			if (!childComponents.empty()) {
-				localBounds = childComponents[0]->bounds();
-				for (size_t i = 1; i < childComponents.size(); ++i) {
-					auto componentBounds = childComponents[i]->bounds();
-					if (!componentBounds.empty()) {
-						localBounds.expandWith(componentBounds);
+			if (!inBoundsCalculation) {
+				inBoundsCalculation = true;
+				SCOPE_EXIT{ inBoundsCalculation = false; };
+
+				if (!childComponents.empty()) {
+					localBounds = childComponents[0]->bounds();
+					for (size_t i = 1; i < childComponents.size(); ++i) {
+						auto componentBounds = childComponents[i]->bounds();
+						if (!componentBounds.empty()) {
+							localBounds.expandWith(componentBounds);
+						}
 					}
+				} else {
+					localBounds = BoxAABB<>();
 				}
-			} else {
-				localBounds = BoxAABB<>();
-			}
-			if (myParent) {
-				myParent->recalculateChildBounds();
+				if (myParent) {
+					myParent->recalculateChildBounds();
+				}
 			}
 		}
 
@@ -441,6 +447,7 @@ namespace MV {
 			onDisable(onDisableSlot),
 			onShow(onShowSlot),
 			onHide(onHideSlot),
+			onBoundsRequest(onBoundsRequestSlot),
 			onPause(onPauseSlot),
 			onResume(onResumeSlot),
 			onChildAdd(onChildAddSlot),
@@ -577,9 +584,13 @@ namespace MV {
 			return self;
 		}
 
-		void Node::postLoadStep() {
+		void Node::postLoadStep(bool a_isRootNode) {
 			for (auto &&childNode : childNodes) {
 				childNode->myParent = this;
+			}
+			if (a_isRootNode) {
+				recalculateAlpha();
+				recalculateMatrix();
 			}
 		}
 

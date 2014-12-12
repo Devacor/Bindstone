@@ -31,6 +31,8 @@ namespace MV {
 			friend cereal::access;
 
 		public:
+			virtual ~Component() {}
+
 			virtual bool draw() { return true; }
 			virtual void update(double a_delta){}
 
@@ -117,6 +119,8 @@ namespace MV {
 			Slot<BasicSignature> onShowSlot;
 			Slot<BasicSignature> onHideSlot;
 
+			Slot<BasicSignature> onBoundsRequestSlot;
+
 			Slot<BasicSignature> onTransformChangeSlot;
 			Slot<BasicSignature> onLocalBoundsChangeSlot;
 			Slot<BasicSignature> onDepthChangeSlot;
@@ -152,6 +156,8 @@ namespace MV {
 			SlotRegister<BasicSignature> onResume;
 			SlotRegister<BasicSignature> onShow;
 			SlotRegister<BasicSignature> onHide;
+
+			SlotRegister<BasicSignature> onBoundsRequest;
 
 			SlotRegister<BasicSignature> onTransformChange;
 			SlotRegister<BasicSignature> onLocalBoundsChange;
@@ -389,13 +395,13 @@ namespace MV {
 
 			std::vector<size_t> parentIndexList(size_t a_globalPriority = 0);
 
-			BoxAABB<> bounds(bool a_includeChildren = true) const;
+			BoxAABB<> bounds(bool a_includeChildren = true);
 
-			BoxAABB<> worldBounds(bool a_includeChildren = true) const{
+			BoxAABB<> worldBounds(bool a_includeChildren = true){
 				return worldFromLocal(bounds(a_includeChildren));
 			}
 
-			BoxAABB<int> screenBounds(bool a_includeChildren = true) const{
+			BoxAABB<int> screenBounds(bool a_includeChildren = true){
 				return screenFromLocal(bounds(a_includeChildren));
 			}
 
@@ -479,13 +485,14 @@ namespace MV {
 
 			Node(Draw2D &a_draw2d, const std::string &a_id);
 
-			void postLoadStep();
+			void postLoadStep(bool a_isRootNode);
 
 			template <class Archive>
 			void serialize(Archive & archive) {
-				if (!allowSerialize) {
+				//if (allowSerialize) {
 					archive(
 						CEREAL_NVP(nodeId),
+						cereal::make_nvp("isRootNode", myParent == nullptr),
 						CEREAL_NVP(allowDraw),
 						CEREAL_NVP(allowUpdate),
 						CEREAL_NVP(translateTo),
@@ -496,7 +503,7 @@ namespace MV {
 						CEREAL_NVP(childNodes),
 						CEREAL_NVP(childComponents)
 					);
-				}
+				//}
 			}
 
 			template <class Archive>
@@ -507,7 +514,9 @@ namespace MV {
 				std::string nodeId;
 				archive(cereal::make_nvp("nodeId", nodeId));
 				construct(*renderer, nodeId);
+				bool isRootNode = false;
 				archive(
+					cereal::make_nvp("isRootNode", isRootNode),
 					cereal::make_nvp("allowDraw", construct->allowDraw),
 					cereal::make_nvp("allowUpdate", construct->allowUpdate),
 					cereal::make_nvp("translateTo", construct->translateTo),
@@ -518,7 +527,7 @@ namespace MV {
 					cereal::make_nvp("childNodes", construct->childNodes),
 					cereal::make_nvp("childComponents", construct->childComponents)
 				);
-				construct->postLoadStep();
+				construct->postLoadStep(isRootNode);
 			}
 
 			mutable std::recursive_mutex lock;
@@ -551,6 +560,8 @@ namespace MV {
 			PointPrecision parentAccumulatedAlpha = 1.0f;
 			bool allowUpdate = true;
 			bool allowDraw = true;
+
+			bool inBoundsCalculation = false;
 		};
 
 	}

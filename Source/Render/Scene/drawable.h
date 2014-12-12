@@ -114,6 +114,7 @@ namespace MV {
 					cereal::make_nvp("points", construct->points),
 					cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
 				);
+				construct->initialize();
 			}
 
 			std::vector<DrawPoint> points;

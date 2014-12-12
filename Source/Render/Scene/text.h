@@ -173,6 +173,7 @@ namespace MV{
 					cereal::make_nvp("cursorScene", construct->cursorScene),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
+				construct->initialize();
 			}
 
 		private:

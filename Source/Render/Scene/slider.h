@@ -17,39 +17,16 @@ namespace MV {
 
 			ClickableComponentDerivedAccessors(Slider)
 
-			PointPrecision percent() const {
-				return dragPercent;
-			}
+			PointPrecision percent() const;
 
-			std::shared_ptr<Slider> percent(PointPrecision a_newPercent, bool a_notify = true) {
-				auto oldPercent = dragPercent;
-				dragPercent = std::min(std::max(a_newPercent, 0.0f), 1.0f);
-				auto self = std::static_pointer_cast<Slider>(shared_from_this());
-				if (a_notify && oldPercent != dragPercent) {
-					onPercentChangeSlot(self);
-				}
-				updateHandlePosition();
-				return self;
-			}
+			std::shared_ptr<Slider> percent(PointPrecision a_newPercent, bool a_notify = true);
 
-			std::shared_ptr<Slider> handle(const std::shared_ptr<Node> &a_handleNode) {
-				dragHandle = a_handleNode;
-				if (dragHandle->parent() != owner()) {
-					dragHandle->parent(owner());
-				}
-				updateHandlePosition();
-				return std::static_pointer_cast<Slider>(shared_from_this());
-			}
+			std::shared_ptr<Slider> handle(const std::shared_ptr<Node> &a_handleNode);
 
-			std::shared_ptr<Node> handle() const {
-				return dragHandle;
-			}
+			std::shared_ptr<Node> handle() const;
 
 		protected:
-			Slider(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse) :
-				Clickable(a_owner, a_mouse),
-				onPercentChange(onPercentChangeSlot) {
-			}
+			Slider(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
 
 			template <class Archive>
 			void serialize(Archive & archive) {
@@ -71,6 +48,7 @@ namespace MV {
 					cereal::make_nvp("dragHandle", construct->dragHandle),
 					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(construct.ptr()))
 				);
+				construct->initialize();
 			}
 
 			virtual void initialize() override {
@@ -82,46 +60,13 @@ namespace MV {
 			}
 
 		private:
-			virtual void acceptDownClick() {
-				std::lock_guard<std::recursive_mutex> guard(lock);
-				Clickable::acceptDownClick();
+			virtual void acceptDownClick();
 
-				updateDragFromMouse();
-			}
+			void updateDragFromMouse();
 
-			void updateDragFromMouse() {
-				auto oldPercent = dragPercent;
-				dragPercent = calculatePercentFromPosition(owner()->localFromScreen(mouse().position()));
-				auto self = std::static_pointer_cast<Slider>(shared_from_this()); //keep alive
-				if (dragPercent != oldPercent) {
-					onPercentChangeSlot(self);
-				}
-				updateHandlePosition();
-			}
+			PointPrecision calculatePercentFromPosition(const Point<> &a_localPoint);
 
-			PointPrecision calculatePercentFromPosition(const Point<> &a_localPoint) {
-				auto bounds = owner()->bounds();
-				if (bounds.width() >= bounds.height()) {
-					return std::min(std::max((a_localPoint.x - bounds.minPoint.x) / bounds.width(), 0.0f), 1.0f);
-				} else {
-					return std::min(std::max((a_localPoint.y - bounds.minPoint.y) / bounds.height(), 0.0f), 1.0f);
-				}
-			}
-
-			void updateHandlePosition() {
-				if (dragHandle) {
-					auto areaBounds = bounds();
-					auto handleBounds = dragHandle->bounds();
-
-					PointPrecision firstX = areaBounds.minPoint.x + (areaBounds.width() - handleBounds.width());
-					PointPrecision secondY = areaBounds.minPoint.y + (areaBounds.height() - handleBounds.height());
-					if (areaBounds.width() >= areaBounds.height()) {
-						dragHandle->position({ mix(areaBounds.minPoint.x, firstX, dragPercent), mix(areaBounds.minPoint.y, secondY, .5f) });
-					} else {
-						dragHandle->position({ mix(areaBounds.minPoint.x, firstX, .5f), mix(areaBounds.minPoint.y, secondY, dragPercent) });
-					}
-				}
-			}
+			void updateHandlePosition();
 
 			PointPrecision dragPercent = 0.0f;
 			std::shared_ptr<Node> dragHandle;

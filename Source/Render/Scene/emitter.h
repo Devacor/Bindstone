@@ -159,7 +159,7 @@ namespace MV {
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Emitter> &construct) {
 				ThreadPool *pool = nullptr;
-				archive.extract(cereal::make_nvp("mouse", pool));
+				archive.extract(cereal::make_nvp("pool", pool));
 				MV::require<PointerException>(pool != nullptr, "Null thread pool in Emitter::load_and_construct.");
 				construct(std::shared_ptr<Node>(), *pool);
 				archive(
@@ -167,9 +167,12 @@ namespace MV {
 					cereal::make_nvp("spawnParticles", construct->spawnParticles),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
+				construct->initialize();
 			}
 
 		private:
+			virtual BoxAABB<> boundsImplementation();
+
 			Point<> randomMix(const Point<> &a_rhs, const Point<> &a_lhs);
 
 			Color randomMix(const Color &a_rhs, const Color &a_lhs);

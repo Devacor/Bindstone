@@ -31,7 +31,7 @@ void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nu
 		scene = a_newScene;
 	}
 	auto gridNode = MV::Scene::Node::make(root->renderer(), "SceneNodeGrid");
-	grid = gridNode->attach<MV::Scene::Grid>()->columns(1)->color({BOX_BACKGROUND})->margin({5.0f, 5.0f});
+	grid = gridNode->attach<MV::Scene::Grid>()->columns(1)->color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f });
 
 	makeChildButton(scene, 0, gridNode);
 
@@ -69,7 +69,7 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 		}
 	});
 
-	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.mouse)->size(MV::size(buttonSize.width, 4.0f));
+	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.mouse)->size(MV::size(buttonSize.width, 4.0f))->show();
 	dragBetween->onDrop.connect("dropped", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 		if(activeSelection){
 			activeSelection->depth(a_node->depth() + .01f);

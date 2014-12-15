@@ -73,7 +73,7 @@ namespace MV {
 			localBasicSignals.push_back(basicSignals.end()--);
 			basicSignals.push_back(a_node->onLocalBoundsChange.connect(markDirty));
 			localBasicSignals.push_back(basicSignals.end()--);
-			
+
 			std::weak_ptr<Component> weakSelf = shared_from_this();
 			componentSignals.push_back(a_node->onComponentUpdate.connect([&, weakSelf](const std::shared_ptr<Component> &a_this){
 				if (a_this != weakSelf.lock()) {

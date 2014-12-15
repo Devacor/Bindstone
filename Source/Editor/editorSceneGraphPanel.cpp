@@ -49,6 +49,15 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 	auto buttonName = MV::stringToWide(std::string(a_depth * 3, ' ') + a_node->id());
 
 	auto button = makeSceneButton(a_grid, *sharedResources.textLibrary, *sharedResources.mouse, a_node->id(), buttonSize, buttonName);
+
+	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.mouse)->size(MV::size(buttonSize.width, 4.0f));
+	dragBetween->onDrop.connect("dropped", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+		if (activeSelection) {
+			activeSelection->depth(a_node->depth() + .01f);
+			activeSelection->parent()->normalizeDepth();
+		}
+	});
+
 	if(a_node->parent()){
 		button->onPress.connect("Press", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 			activeSelection = a_node;
@@ -61,19 +70,23 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 		button->onRelease.connect("Remove", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 			removeSelection = true;
 		});
+
+		a_node->onRemove.connect("RemoveFromList", [&](std::shared_ptr<MV::Scene::Node> a_callingNode) mutable{
+			if (!activeSelection) {
+				removeSelection = true;
+			}
+		});
 	}
 
 	button->onDrop.connect("Back", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 		if(activeSelection && activeSelection != a_node){
-			a_node->add(activeSelection);
-		}
-	});
-
-	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.mouse)->size(MV::size(buttonSize.width, 4.0f))->show();
-	dragBetween->onDrop.connect("dropped", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable){
-		if(activeSelection){
-			activeSelection->depth(a_node->depth() + .01f);
-			activeSelection->parent()->normalizeDepth();
+			try {
+				auto originalWorldPosition = activeSelection->worldPosition();
+				a_node->add(activeSelection);
+				activeSelection->worldPosition(originalWorldPosition);
+			} catch (MV::RangeException &a_e) {
+				std::cerr << a_e.what() << std::endl;
+			}
 		}
 	});
 

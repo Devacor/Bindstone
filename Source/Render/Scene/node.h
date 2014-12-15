@@ -123,6 +123,7 @@ namespace MV {
 
 			Slot<BasicSignature> onTransformChangeSlot;
 			Slot<BasicSignature> onLocalBoundsChangeSlot;
+			Slot<BasicSignature> onChildBoundsChangeSlot;
 			Slot<BasicSignature> onDepthChangeSlot;
 			Slot<BasicSignature> onAlphaChangeSlot;
 
@@ -161,6 +162,7 @@ namespace MV {
 
 			SlotRegister<BasicSignature> onTransformChange;
 			SlotRegister<BasicSignature> onLocalBoundsChange;
+			SlotRegister<BasicSignature> onChildBoundsChange;
 			SlotRegister<BasicSignature> onDepthChange;
 			SlotRegister<BasicSignature> onAlphaChange;
 
@@ -562,6 +564,7 @@ namespace MV {
 			bool allowDraw = true;
 
 			bool inBoundsCalculation = false;
+			bool inChildBoundsCalculation = false;
 		};
 
 	}

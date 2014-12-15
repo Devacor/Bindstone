@@ -257,7 +257,7 @@ namespace MV {
 		}
 
 		BoxAABB<> Emitter::boundsImplementation() {
-			return{ spawnProperties.minimumPosition, spawnProperties.minimumPosition };
+			return{ spawnProperties.minimumPosition, spawnProperties.maximumPosition };
 		}
 
 		MV::Scene::EmitterSpawnProperties loadEmitterProperties(const std::string &a_file) {

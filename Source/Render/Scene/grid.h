@@ -87,7 +87,7 @@ namespace MV {
 
 			void layoutCellSize();
 
-			Point<> positionChildNode(Point<> a_cellPosition, size_t a_index, std::shared_ptr<Node> a_node, const Size<> &a_cellSize, BoxAABB<> &a_calculatedBounds);
+			Point<> positionChildNode(Point<> a_cellPosition, size_t a_index, std::shared_ptr<Node> a_node, const Size<> &a_cellSize, BoxAABB<> &a_calculatedBounds, PointPrecision &a_lineHeight);
 
 			void layoutChildSize();
 

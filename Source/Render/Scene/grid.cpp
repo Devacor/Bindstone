@@ -101,9 +101,10 @@ namespace MV {
 			Point<> cellPosition = margins.first;
 			size_t index = 0;
 
+			PointPrecision lineHeight = 0.0f;
 			for (auto&& node : *owner()) {
 				if (node->visible()) {
-					cellPosition = positionChildNode(cellPosition, index, node, cellDimensions, calculatedBounds);
+					cellPosition = positionChildNode(cellPosition, index, node, cellDimensions, calculatedBounds, lineHeight);
 					++index;
 				}
 			}
@@ -118,13 +119,16 @@ namespace MV {
 		}
 
 
-		Point<> Grid::positionChildNode(Point<> a_cellPosition, size_t a_index, std::shared_ptr<Node> a_node, const Size<> &a_cellSize, BoxAABB<> &a_calculatedBounds) {
+		Point<> Grid::positionChildNode(Point<> a_cellPosition, size_t a_index, std::shared_ptr<Node> a_node, const Size<> &a_cellSize, BoxAABB<> &a_calculatedBounds, PointPrecision &a_lineHeight) {
 			auto nextPosition = a_cellPosition;
 			nextPosition.translate(a_cellSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
 			if (bumpToNextLine(nextPosition.x - cellPadding.first.x - margins.first.x, a_index)) {
-				a_cellPosition.locate(margins.first.x, a_cellPosition.y + a_cellSize.height + cellPadding.first.x + cellPadding.second.y);
+				a_cellPosition.locate(margins.first.x, a_cellPosition.y + a_lineHeight + cellPadding.first.x + cellPadding.second.y);
 				nextPosition = a_cellPosition;
 				nextPosition.translate(a_cellSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
+				a_lineHeight = a_cellSize.height;
+			} else if(a_lineHeight < a_cellSize.height) {
+				a_lineHeight = a_cellSize.height;
 			}
 
 			a_node->position(a_cellPosition);
@@ -141,11 +145,12 @@ namespace MV {
 
 			PointPrecision maxHeightInLine = 0.0f;
 
+			PointPrecision lineHeight = 0.0f;
 			for (auto&& node : *owner()) {
 				if (node->visible()) {
 					auto nodeBounds = node->bounds(includeChildrenInChildSize);
 					auto shapeSize = nodeBounds.size();
-					cellPosition = positionChildNode(cellPosition, index, node, shapeSize, calculatedBounds);
+					cellPosition = positionChildNode(cellPosition, index, node, shapeSize, calculatedBounds, lineHeight);
 					node->translate(nodeBounds.minPoint * -1.0f);
 					++index;
 				}
@@ -169,7 +174,7 @@ namespace MV {
 			basicSignals.push_back(a_node->onShow.connect(markDirty));
 			basicSignals.push_back(a_node->onHide.connect(markDirty));
 			basicSignals.push_back(a_node->onTransformChange.connect(markDirty));
-			basicSignals.push_back(a_node->onLocalBoundsChange.connect(markDirty));
+			basicSignals.push_back(a_node->onChildBoundsChange.connect(markDirty));
 
 			basicSignals.push_back(a_node->onBoundsRequest.connect([&](const std::shared_ptr<Node> &a_this){
 				if (dirtyGrid) {

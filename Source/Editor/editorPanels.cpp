@@ -35,6 +35,12 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 		panel.loadPanel<DeselectedEditorPanel>();
 	});
 
+	auto deleteButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Delete", buttonSize, UTF_CHAR_STR("Delete"));
+	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		controls->elementToEdit->owner()->removeFromParent();
+		panel.loadPanel<DeselectedEditorPanel>();
+	});
+
 	OpenTexturePicker();
 
 	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
@@ -163,6 +169,12 @@ controls(a_controls) {
 	auto buttonSize = MV::size(226.0f, 27.0f);
 	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>){
+		panel.loadPanel<DeselectedEditorPanel>();
+	});
+
+	auto deleteButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Delete", buttonSize, UTF_CHAR_STR("Delete"));
+	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		controls->elementToEdit->owner()->removeFromParent();
 		panel.loadPanel<DeselectedEditorPanel>();
 	});
 
@@ -534,7 +546,7 @@ void ChooseElementCreationType::createRectangle(const MV::BoxAABB<int> &a_select
 	panel.selection().disable();
 	auto transformedSelection = panel.root()->localFromScreen(a_selected);
 
-	auto newShape = panel.root()->make(MV::guid("rectangle_"))->position(transformedSelection.minPoint)->attach<MV::Scene::Sprite>()->size(transformedSelection.size())->color({ CREATED_DEFAULT });
+	auto newShape = panel.root()->make(MV::guid("rectangle"))->position(transformedSelection.minPoint)->attach<MV::Scene::Sprite>()->size(transformedSelection.size())->color({ CREATED_DEFAULT });
 
 	panel.resources().editor->sceneUpdated();
 
@@ -545,7 +557,7 @@ void ChooseElementCreationType::createEmitter(const MV::BoxAABB<int> &a_selected
 	panel.selection().disable();
 	auto transformedSelection = panel.root()->localFromScreen(a_selected);
 
-	auto newEmitter = panel.root()->make(MV::guid("emitter_"))->position(transformedSelection.minPoint)->attach<MV::Scene::Emitter>(*panel.resources().pool);
+	auto newEmitter = panel.root()->make(MV::guid("emitter"))->position(transformedSelection.minPoint)->attach<MV::Scene::Emitter>(*panel.resources().pool);
 	auto editableEmitter = std::make_shared<EditableEmitter>(newEmitter, panel.editor(), panel.resources().mouse);
 	editableEmitter->size(transformedSelection.size());
 
@@ -558,7 +570,7 @@ void ChooseElementCreationType::createSpine(const MV::BoxAABB<int> &a_selected) 
 	panel.selection().disable();
 	auto transformedSelection = panel.root()->localFromScreen(a_selected);
 
-	auto newEmitter = panel.root()->make(MV::guid("spine_"))->position(transformedSelection.minPoint)->attach<MV::Scene::Emitter>(*panel.resources().pool);
+	auto newEmitter = panel.root()->make(MV::guid("spine"))->position(transformedSelection.minPoint)->attach<MV::Scene::Emitter>(*panel.resources().pool);
 	auto editableEmitter = std::make_shared<EditableEmitter>(newEmitter, panel.editor(), panel.resources().mouse);
 	editableEmitter->size(transformedSelection.size());
 

@@ -170,6 +170,10 @@ namespace MV {
 
 		std::shared_ptr<Node> Node::add(const std::shared_ptr<Node> &a_child, bool a_overrideSortDepth) {
 			std::lock_guard<std::recursive_mutex> guard(lock);
+			Node* parentCheck = this;
+			while (parentCheck = parentCheck->myParent) {
+				MV::require<RangeException>(parentCheck != a_child.get(), "Adding [", a_child->id(), "] to [", id(), "] would result in a circular ownership!");
+			}
 			if(a_child->myParent != this){
 				a_child->removeFromParent();
 				if(a_overrideSortDepth){
@@ -200,7 +204,6 @@ namespace MV {
 			if(foundNode != childNodes.end()){
 				auto child = *foundNode;
 				childNodes.erase(foundNode);
-				child->myParent = nullptr;
 				child->onRemoveSlot(child);
 				onChildRemoveSlot(shared_from_this(), child);
 				return child;
@@ -217,7 +220,6 @@ namespace MV {
 			if(foundNode != childNodes.end()){
 				auto child = *foundNode;
 				childNodes.erase(foundNode);
-				child->myParent = nullptr;
 				child->onRemoveSlot(child);
 				onChildRemoveSlot(shared_from_this(), child);
 				return child;
@@ -232,7 +234,6 @@ namespace MV {
 			while(!childNodes.empty()){
 				auto childToRemove = *childNodes.begin();
 				childNodes.erase(childNodes.begin());
-				childToRemove->myParent = nullptr;
 				childToRemove->onRemoveSlot(childToRemove);
 				onChildRemoveSlot(shared_from_this(), childToRemove);
 			}
@@ -375,6 +376,7 @@ namespace MV {
 		void Node::recalculateLocalBounds() {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			if (!inBoundsCalculation) {
+				auto self = shared_from_this();
 				inBoundsCalculation = true;
 				SCOPE_EXIT{ inBoundsCalculation = false; };
 
@@ -392,24 +394,31 @@ namespace MV {
 				if (myParent) {
 					myParent->recalculateChildBounds();
 				}
+				onLocalBoundsChangeSlot(self);
 			}
 		}
 
 		void Node::recalculateChildBounds() {
 			std::lock_guard<std::recursive_mutex> guard(lock);
-			if (!childNodes.empty()) {
-				localChildBounds = childNodes[0]->bounds();
-				for (size_t i = 1; i < childNodes.size(); ++i) {
-					auto nodeBounds = childNodes[i]->bounds();
-					if (!nodeBounds.empty()) {
-						localChildBounds.expandWith(nodeBounds);
+			if (!inChildBoundsCalculation) {
+				inChildBoundsCalculation = true;
+				SCOPE_EXIT{ inChildBoundsCalculation = false; };
+				auto self = shared_from_this();
+				if (!childNodes.empty()) {
+					localChildBounds = childNodes[0]->bounds();
+					for (size_t i = 1; i < childNodes.size(); ++i) {
+						auto nodeBounds = childNodes[i]->bounds();
+						if (!nodeBounds.empty()) {
+							localChildBounds.expandWith(nodeBounds);
+						}
 					}
+				} else {
+					localChildBounds = BoxAABB<>();
 				}
-			} else {
-				localChildBounds = BoxAABB<>();
-			}
-			if (myParent) {
-				myParent->recalculateChildBounds();
+				if (myParent) {
+					myParent->recalculateChildBounds();
+				}
+				onChildBoundsChangeSlot(self);
 			}
 		}
 
@@ -456,6 +465,7 @@ namespace MV {
 			onRemove(onRemoveSlot),
 			onTransformChange(onTransformChangeSlot),
 			onLocalBoundsChange(onLocalBoundsChangeSlot),
+			onChildBoundsChange(onChildBoundsChangeSlot),
 			onDepthChange(onDepthChangeSlot),
 			onAlphaChange(onAlphaChangeSlot) {
 
@@ -471,6 +481,10 @@ namespace MV {
 				recalculateAlpha();
 			});
 			onRemove.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
+				if (myParent) {
+					myParent->onChildBoundsChangeSlot(myParent->shared_from_this());
+					myParent = nullptr;
+				}
 				onParentTransformChangeSignal = nullptr;
 				onParentAlphaChangeSignal = nullptr;
 				onTransformChangeSlot(a_self);

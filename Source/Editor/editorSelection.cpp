@@ -62,6 +62,52 @@ Selection::Selection(std::shared_ptr<MV::Scene::Node> a_scene, MV::MouseState &a
 	id(gid++) {
 }
 
+EditableGrid::EditableGrid(std::shared_ptr<MV::Scene::Grid> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
+	elementToEdit(a_elementToEdit),
+	controlContainer(a_rootContainer->make("Editable")->depth(-100.0f)),
+	mouse(a_mouse) {
+
+	resetHandles();
+}
+
+void EditableGrid::removeHandles() {
+	if (positionHandle) {
+		controlContainer->remove(positionHandle->owner());
+	}
+	positionHandle.reset();
+}
+
+void EditableGrid::resetHandles() {
+	removeHandles();
+	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->owner()->screenBounds(false));
+
+	MV::Size<> currentDimensions = rectBox.size();
+	if (currentDimensions.area() < 25.0f) {
+		currentDimensions.width = 5.0f;
+		currentDimensions.height = 5.0f;
+	}
+
+	rectBox.maxPoint = rectBox.minPoint + toPoint(currentDimensions);
+
+	EditableGrid* self = this;
+	positionHandle = controlContainer->make(MV::guid("position"))->position(rectBox.minPoint)->attach<MV::Scene::Clickable>(*mouse)->size(currentDimensions)->show();
+	positionHandle->onDrag.connect("position", [&, self](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
+		auto castPosition = MV::cast<MV::PointPrecision>(deltaPosition);
+		handle->owner()->translate(castPosition);
+		elementToEdit->owner()->translate(castPosition);
+		onChange(self);
+	});
+}
+
+void EditableGrid::position(MV::Point<> a_newPosition) {
+	elementToEdit->owner()->position(a_newPosition);
+	resetHandles();
+}
+
+MV::Point<> EditableGrid::position() const {
+	return elementToEdit->owner()->position();
+}
+
 void EditableRectangle::resetHandles() {
 	removeHandles();
 	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->owner()->screenBounds(false));
@@ -83,7 +129,7 @@ void EditableRectangle::resetHandles() {
 	auto handleSize = MV::point(8.0f, 8.0f);
 	EditableRectangle* self = this;
 	positionHandle = controlContainer->make(MV::guid("position"))->attach<MV::Scene::Clickable>(*mouse);
-	positionHandle->onDrag.connect("position", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
+	positionHandle->onDrag.connect("position", [&, self](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
 		auto castPosition = MV::cast<MV::PointPrecision>(deltaPosition);
 		handle->owner()->translate(castPosition);
 		elementToEdit->owner()->translate(castPosition);
@@ -146,7 +192,7 @@ void EditableRectangle::resetHandles() {
 		resetHandles();
 	});
 
-
+	repositionHandles(false);
 }
 
 EditableRectangle::EditableRectangle(std::shared_ptr<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
@@ -303,6 +349,8 @@ void EditableEmitter::resetHandles() {
 	bottomRightSizeHandle->onRelease.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle){
 		resetHandles();
 	});
+
+	repositionHandles(false);
 }
 
 EditableEmitter::EditableEmitter(std::shared_ptr<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):

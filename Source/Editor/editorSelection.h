@@ -7,6 +7,33 @@
 #include "editorDefines.h"
 class EditorPanel;
 
+class EditableGrid {
+public:
+	EditableGrid(std::shared_ptr<MV::Scene::Grid> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+
+	~EditableGrid() {
+		controlContainer->removeFromParent();
+	}
+
+	void removeHandles();
+
+	void resetHandles();
+
+	void position(MV::Point<> a_newPosition);
+	MV::Point<> position() const;
+
+	std::function<void(EditableGrid*)> onChange;
+
+	std::shared_ptr<MV::Scene::Grid> elementToEdit;
+private:
+
+	MV::MouseState *mouse;
+
+	std::shared_ptr<MV::Scene::Clickable> positionHandle;
+
+	std::shared_ptr<MV::Scene::Node> controlContainer;
+};
+
 class EditableRectangle {
 public:
 	EditableRectangle(std::shared_ptr<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);

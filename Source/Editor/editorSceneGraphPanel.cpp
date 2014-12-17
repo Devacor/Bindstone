@@ -9,6 +9,8 @@ void SceneGraphPanel::clickedChild(std::shared_ptr<MV::Scene::Node> a_child) {
 		auto editableEmitter = std::make_shared<EditableEmitter>(emitter, root, sharedResources.mouse);
 		editableEmitter->size(emitter->bounds().size());
 		sharedResources.editor->panel().loadPanel<SelectedEmitterEditorPanel>(editableEmitter);
+	} else if (a_child->component<MV::Scene::Grid>(true, false)) {
+		sharedResources.editor->panel().loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(a_child->component<MV::Scene::Grid>(), root, sharedResources.mouse));
 	}
 }
 

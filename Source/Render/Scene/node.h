@@ -123,7 +123,6 @@ namespace MV {
 
 			Slot<BasicSignature> onTransformChangeSlot;
 			Slot<BasicSignature> onLocalBoundsChangeSlot;
-			Slot<BasicSignature> onChildBoundsChangeSlot;
 			Slot<BasicSignature> onDepthChangeSlot;
 			Slot<BasicSignature> onAlphaChangeSlot;
 
@@ -162,7 +161,6 @@ namespace MV {
 
 			SlotRegister<BasicSignature> onTransformChange;
 			SlotRegister<BasicSignature> onLocalBoundsChange;
-			SlotRegister<BasicSignature> onChildBoundsChange;
 			SlotRegister<BasicSignature> onDepthChange;
 			SlotRegister<BasicSignature> onAlphaChange;
 
@@ -228,7 +226,7 @@ namespace MV {
 			}
 
 			template<typename ComponentType>
-			std::vector<std::shared_ptr<ComponentType>> components(bool exactType = true) const{
+			std::vector<std::shared_ptr<ComponentType>> components(bool exactType = true) const {
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				std::vector<std::shared_ptr<ComponentType>> matchingComponents;
 				if (exactType) {
@@ -485,27 +483,36 @@ namespace MV {
 			void recalculateAlpha();
 			void recalculateMatrix();
 
+			void recalculateMatrixAfterLoad();
+			void recalculateBoundsAfterLoad();
+			void recalculateChildBoundsAfterLoad();
+
 			Node(Draw2D &a_draw2d, const std::string &a_id);
 
 			void postLoadStep(bool a_isRootNode);
 
 			template <class Archive>
 			void serialize(Archive & archive) {
-				//if (allowSerialize) {
-					archive(
-						CEREAL_NVP(nodeId),
-						cereal::make_nvp("isRootNode", myParent == nullptr),
-						CEREAL_NVP(allowDraw),
-						CEREAL_NVP(allowUpdate),
-						CEREAL_NVP(translateTo),
-						CEREAL_NVP(rotateTo),
-						CEREAL_NVP(scaleTo),
-						CEREAL_NVP(sortDepth),
-						CEREAL_NVP(nodeAlpha),
-						CEREAL_NVP(childNodes),
-						CEREAL_NVP(childComponents)
-					);
-				//}
+				std::vector<std::shared_ptr<Node>> filteredChildren;
+				std::copy_if(childNodes.begin(), childNodes.end(), std::back_inserter(filteredChildren), [](const auto &a_child){
+					return a_child->allowSerialize;
+				});
+				archive(
+					CEREAL_NVP(nodeId),
+					cereal::make_nvp("isRootNode", myParent == nullptr),
+					CEREAL_NVP(allowDraw),
+					CEREAL_NVP(allowUpdate),
+					CEREAL_NVP(translateTo),
+					CEREAL_NVP(rotateTo),
+					CEREAL_NVP(scaleTo),
+					CEREAL_NVP(sortDepth),
+					CEREAL_NVP(nodeAlpha),
+					cereal::make_nvp("childNodes", filteredChildren),
+					CEREAL_NVP(childComponents)
+				);
+				if (childNodes.empty() && !filteredChildren.empty()) {
+					childNodes = filteredChildren;
+				}
 			}
 
 			template <class Archive>

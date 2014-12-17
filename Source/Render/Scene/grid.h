@@ -75,8 +75,9 @@ namespace MV {
 				construct->initialize();
 			}
 
-		private:
+			virtual void initialize() override;
 
+		private:
 			virtual BoxAABB<> boundsImplementation() override;
 
 			bool bumpToNextLine(PointPrecision a_currentPosition, size_t a_index) const;
@@ -94,6 +95,7 @@ namespace MV {
 			void observeNode(const std::shared_ptr<Node>& a_node);
 
 			std::list<Node::BasicSharedSignalType> basicSignals;
+			std::list<Node::ParentInteractionSharedSignalType> parentInteractionSignals;
 
 			PointPrecision maximumWidth;
 			Size<> cellDimensions;

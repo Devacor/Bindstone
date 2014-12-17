@@ -35,6 +35,18 @@ namespace MV {
 		}
 	}
 
+	void SharedTextures::files(const std::string &a_rootDirectory, bool a_repeat) {
+		std::vector<std::string> validExtensions{ ".jpg", ".png", ".bmp", ".tga", ".gif" };
+		path directory(a_rootDirectory);
+		if (exists(directory)) {
+			for (auto&& imagePath = directory_iterator(directory); imagePath != directory_iterator(); ++imagePath) {
+				if (exists(*imagePath) && is_regular_file(*imagePath)) {
+					file(imagePath->path().string(), a_repeat);
+				}
+			}
+		}
+	}
+
 	std::shared_ptr<DynamicTextureDefinition> SharedTextures::dynamic(const std::string &a_name, const Size<int> &a_size) {
 		std::stringstream identifierMaker;
 		identifierMaker << a_name << a_size;
@@ -61,6 +73,19 @@ namespace MV {
 		}
 	}
 
+	std::vector<std::pair<std::string, bool>> SharedTextures::fileIds() const {
+		std::vector<std::pair<std::string, bool>> keys;
+		std::transform(fileDefinitions.begin(), fileDefinitions.end(), std::back_inserter(keys), [](const std::map<std::string, std::shared_ptr<FileTextureDefinition>>::value_type &pair) {
+			if (pair.first.size() < 1) {
+				return std::pair<std::string, bool>{"", false};
+			}
+			std::string fileName = pair.first.substr(0, pair.first.size() - 1);
+			bool repeating = pair.first[pair.first.size()-2] == '1';
+			return std::pair<std::string, bool>{fileName, repeating};
+		});
+		return keys;
+	}
+
 	std::vector<std::string> SharedTextures::packIds() const {
 		std::vector<std::string> keys;
 		std::transform(texturePacks.begin(), texturePacks.end(), std::back_inserter(keys), [](const std::map<std::string, std::shared_ptr<TexturePack>>::value_type &pair){
@@ -69,18 +94,18 @@ namespace MV {
 		return keys;
 	}
 
-	void SharedTextures::loadPacks(const std::string &a_rootDirectory, Draw2D* a_renderer) {
+	void SharedTextures::assemblePacks(const std::string &a_rootDirectory, Draw2D* a_renderer) {
 		path directory(a_rootDirectory);
 		if(exists(directory)){
 			for(auto&& atlas = directory_iterator(directory); atlas != directory_iterator();++atlas){
 				if(is_directory(*atlas)){
-					loadPack(atlas->path().string(), a_renderer);
+					assemblePack(atlas->path().string(), a_renderer);
 				}
 			}
 		}
 	}
 
-	std::shared_ptr<TexturePack> SharedTextures::loadPack(const std::string &a_packPath, Draw2D* a_renderer) {
+	std::shared_ptr<TexturePack> SharedTextures::assemblePack(const std::string &a_packPath, Draw2D* a_renderer) {
 		auto newPack = pack(path(a_packPath).filename().string(), a_renderer);
 
 		std::vector<std::string> validExtensions{".jpg", ".png", ".bmp", ".tga", ".gif"};
@@ -90,7 +115,7 @@ namespace MV {
 				std::string lowerCaseImageExtension = imagePath->path().extension().string();
 				boost::algorithm::to_lower(lowerCaseImageExtension);
 				if(std::find(validExtensions.begin(), validExtensions.end(), lowerCaseImageExtension) != validExtensions.end()){
-					newPack->add(imagePath->path().filename().string(), file(imagePath->path().string()));
+					newPack->add(imagePath->path().filename().string(), FileTextureDefinition::make(imagePath->path().string(), true, false));
 				}
 			}
 		}

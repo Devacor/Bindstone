@@ -13,6 +13,7 @@ public:
 		root(a_root),
 		sharedResources(a_sharedResources),
 		packs(sharedResources.textures->packIds()),
+		files(sharedResources.textures->fileIds()),
 		setter(a_setter){
 
 		initializeRootPicker();
@@ -39,11 +40,41 @@ private:
 		box = makeDraggableBox("TexturePicker", root, grid->bounds().size(), *sharedResources.mouse);
 		box->parent()->position(pos);
 		box->add(gridNode);
+
+		auto imageButton = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Files", { 100.0f, 27.0f }, MV::stringToWide("Files"));
+		imageButton->onAccept.connect("Accept", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			initializeFilePicker();
+		});
 		for(auto&& packId : packs){
 			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, packId, {100.0f, 27.0f}, MV::stringToWide(packId));
 			button->onAccept.connect("Accept", [&,packId](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				initializeImagePicker(packId);
 			});
+		}
+	}
+
+	void initializeFilePicker() {
+		auto cellSize = MV::size(64.0f, 64.0f);
+		auto gridNode = MV::Scene::Node::make(root->renderer());
+		grid = gridNode->attach<MV::Scene::Grid>()->cellSize(cellSize)->padding({ 2.0f, 2.0f })->columns(6)->color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f });
+		makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Back", cellSize, UTF_CHAR_STR("Back"))->
+			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+				initializeRootPicker();
+			});
+
+		auto pos = box ? box->parent()->position() : MV::Point<>(200.0f, 0.0f);
+		box = makeDraggableBox("TexturePicker", root, grid->bounds().size(), *sharedResources.mouse);
+		box->parent()->position(pos);
+		box->add(grid->owner());
+
+		for (auto&& textureId : files) {
+			auto handle = sharedResources.textures->file(textureId.first, textureId.second)->makeHandle();
+
+			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId.first, cellSize, MV::stringToWide(textureId.first));
+			button->onAccept.connect("Accept", [&, handle](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+				setter(handle, false);
+			});
+			button->owner()->attach<MV::Scene::Sprite>()->bounds({ MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), cellSize) })->texture(handle);
 		}
 	}
 
@@ -76,6 +107,8 @@ private:
 	std::shared_ptr<MV::Scene::Node> root;
 	std::shared_ptr<MV::Scene::Node> box;
 	std::shared_ptr<MV::Scene::Grid> grid;
+
+	std::vector<std::pair<std::string, bool>> files;
 	std::vector<std::string> packs;
 
 	std::string selectedPack;

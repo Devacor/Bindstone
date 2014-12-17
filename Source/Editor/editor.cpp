@@ -18,6 +18,7 @@ Editor::Editor():
 
 	initializeWindow();
 	initializeControls();
+
 	/*
 	auto rockTexture = MV::FileTextureDefinition::make("Assets/Images/rock.png");
 
@@ -130,7 +131,8 @@ void Editor::initializeWindow(){
 	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
 	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 
-	textures.loadPacks("Assets/Atlases", &renderer);
+	textures.assemblePacks("Assets/Atlases", &renderer);
+	textures.files("Assets/Map");
 
 	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
 	fps = controls->make("FPS")->position({960.0f - 50.0f, 0.0f})->

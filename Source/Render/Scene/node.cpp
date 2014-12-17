@@ -403,7 +403,6 @@ namespace MV {
 			if (!inChildBoundsCalculation) {
 				inChildBoundsCalculation = true;
 				SCOPE_EXIT{ inChildBoundsCalculation = false; };
-				auto self = shared_from_this();
 				if (!childNodes.empty()) {
 					localChildBounds = childNodes[0]->bounds();
 					for (size_t i = 1; i < childNodes.size(); ++i) {
@@ -418,7 +417,6 @@ namespace MV {
 				if (myParent) {
 					myParent->recalculateChildBounds();
 				}
-				onChildBoundsChangeSlot(self);
 			}
 		}
 
@@ -447,6 +445,10 @@ namespace MV {
 			for (auto&& child : childNodes) {
 				child->recalculateMatrix();
 			}
+
+			if (myParent) {
+				myParent->recalculateChildBounds();
+			}
 		}
 
 		Node::Node(Draw2D &a_draw2d, const std::string &a_id) :
@@ -465,7 +467,6 @@ namespace MV {
 			onRemove(onRemoveSlot),
 			onTransformChange(onTransformChangeSlot),
 			onLocalBoundsChange(onLocalBoundsChangeSlot),
-			onChildBoundsChange(onChildBoundsChangeSlot),
 			onDepthChange(onDepthChangeSlot),
 			onAlphaChange(onAlphaChangeSlot) {
 
@@ -482,7 +483,7 @@ namespace MV {
 			});
 			onRemove.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
 				if (myParent) {
-					myParent->onChildBoundsChangeSlot(myParent->shared_from_this());
+					myParent->recalculateChildBounds();
 					myParent = nullptr;
 				}
 				onParentTransformChangeSignal = nullptr;
@@ -604,7 +605,72 @@ namespace MV {
 			}
 			if (a_isRootNode) {
 				recalculateAlpha();
-				recalculateMatrix();
+				recalculateMatrixAfterLoad();
+				recalculateBoundsAfterLoad();
+			}
+		}
+
+		void Node::recalculateMatrixAfterLoad() {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			localMatrixTransform.makeIdentity();
+
+			if (!translateTo.atOrigin()) {
+				localMatrixTransform.translate(translateTo.x, translateTo.y, translateTo.z);
+			}
+			if (rotateTo != 0.0f) {
+				localMatrixTransform.rotateX(toRadians(rotateTo.x)).rotateY(toRadians(rotateTo.y)).rotateZ(toRadians(rotateTo.z));
+			}
+			if (scaleTo != 1.0f) {
+				localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
+			}
+
+			if (myParent) {
+				worldMatrixTransform = myParent->worldMatrixTransform * localMatrixTransform;
+				parentAccumulatedAlpha = myParent->parentAccumulatedAlpha * nodeAlpha;
+			} else {
+				worldMatrixTransform = localMatrixTransform;
+				parentAccumulatedAlpha = nodeAlpha;
+			}
+
+			for (auto&& child : childNodes) {
+				child->recalculateMatrix();
+			}
+		}
+
+		void Node::recalculateBoundsAfterLoad() {
+			if (!childComponents.empty()) {
+				localBounds = childComponents[0]->bounds();
+				for (size_t i = 1; i < childComponents.size(); ++i) {
+					auto componentBounds = childComponents[i]->bounds();
+					if (!componentBounds.empty()) {
+						localBounds.expandWith(componentBounds);
+					}
+				}
+			} else {
+				localBounds = BoxAABB<>();
+			}
+			for (auto&& child : childNodes) {
+				child->recalculateBoundsAfterLoad();
+			}
+			if (childNodes.empty()) {
+				recalculateChildBoundsAfterLoad();
+			}
+		}
+
+		void Node::recalculateChildBoundsAfterLoad() {
+			if (!childNodes.empty()) {
+				localChildBounds = childNodes[0]->bounds();
+				for (size_t i = 1; i < childNodes.size(); ++i) {
+					auto nodeBounds = childNodes[i]->bounds();
+					if (!nodeBounds.empty()) {
+						localChildBounds.expandWith(nodeBounds);
+					}
+				}
+			} else {
+				localChildBounds = BoxAABB<>();
+			}
+			if (myParent) {
+				myParent->recalculateChildBoundsAfterLoad();
 			}
 		}
 

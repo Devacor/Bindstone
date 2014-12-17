@@ -12,8 +12,7 @@ public:
 	SceneGraphPanel(std::shared_ptr<MV::Scene::Node> a_scene, std::shared_ptr<MV::Scene::Node> a_root, SharedResources a_sharedResources):
 		root(a_root),
 		scene(a_scene),
-		sharedResources(a_sharedResources),
-		packs(sharedResources.textures->packIds()){
+		sharedResources(a_sharedResources){
 	}
 
 	~SceneGraphPanel(){
@@ -36,7 +35,6 @@ private:
 	std::shared_ptr<MV::Scene::Node> root;
 	std::shared_ptr<MV::Scene::Node> box;
 	std::shared_ptr<MV::Scene::Grid> grid;
-	std::vector<std::string> packs;
 
 	std::shared_ptr<MV::Scene::Node> activeSelection;
 

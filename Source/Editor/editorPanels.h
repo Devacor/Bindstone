@@ -9,6 +9,7 @@
 class EditorControls;
 class EditableRectangle;
 class EditableEmitter;
+class EditableGrid;
 class TexturePicker;
 class EditorPanel {
 public:
@@ -36,6 +37,29 @@ protected:
 	EditorControls &panel;
 	std::shared_ptr<TexturePicker> picker;
 	std::shared_ptr<MV::Scene::Text> activeTextbox;
+};
+
+class SelectedGridEditorPanel : public EditorPanel {
+public:
+	SelectedGridEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableGrid> a_controls);
+
+	~SelectedGridEditorPanel() {
+	}
+
+	virtual void handleInput(SDL_Event &a_event);
+
+	virtual void onSceneDrag(const MV::Point<int> &a_delta);
+
+private:
+	std::shared_ptr<EditableGrid> controls;
+	std::shared_ptr<MV::Scene::Text> posY;
+	std::shared_ptr<MV::Scene::Text> posX;
+	std::shared_ptr<MV::Scene::Text> columns;
+	std::shared_ptr<MV::Scene::Text> width;
+	std::shared_ptr<MV::Scene::Text> paddingX;
+	std::shared_ptr<MV::Scene::Text> paddingY;
+	std::shared_ptr<MV::Scene::Text> marginsX;
+	std::shared_ptr<MV::Scene::Text> marginsY;
 };
 
 class SelectedRectangleEditorPanel : public EditorPanel {
@@ -103,6 +127,7 @@ private:
 	void createRectangle(const MV::BoxAABB<int> &a_selected);
 	void createEmitter(const MV::BoxAABB<int> &a_selected);
 	void createSpine(const MV::BoxAABB<int> &a_selected);
+	void createGrid(const MV::BoxAABB<int> &a_selected);
 };
 
 

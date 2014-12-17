@@ -30,10 +30,13 @@ namespace MV {
 		std::shared_ptr<DynamicTextureDefinition> dynamic(const std::string &a_identifier, const Size<int> &a_size);
 		std::shared_ptr<SurfaceTextureDefinition> surface(const std::string &a_identifier, std::function<SDL_Surface*()> a_surfaceGenerator);
 
+		void files(const std::string &a_rootDirectory, bool a_repeat = false);
+
+		std::vector<std::pair<std::string, bool>> fileIds() const;
 		std::vector<std::string> packIds() const;
 
-		void loadPacks(const std::string &a_rootDirectory, Draw2D* a_renderer);
-		std::shared_ptr<TexturePack> loadPack(const std::string &a_packPath, Draw2D* a_renderer);
+		void assemblePacks(const std::string &a_rootDirectory, Draw2D* a_renderer);
+		std::shared_ptr<TexturePack> assemblePack(const std::string &a_packPath, Draw2D* a_renderer);
 
 		template <class Archive>
 		void serialize(Archive & archive){

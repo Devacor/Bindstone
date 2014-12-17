@@ -72,7 +72,6 @@ namespace MV {
 			points.resize(4);
 			clearTexturePoints(points);
 			appendQuadVertexIndices(vertexIndices, 0);
-			observeNode(owner());
 		}
 
 		bool Grid::bumpToNextLine(PointPrecision a_currentPosition, size_t a_index) const {
@@ -173,13 +172,16 @@ namespace MV {
 			basicSignals.push_back(a_node->onDepthChange.connect(markDirty));
 			basicSignals.push_back(a_node->onShow.connect(markDirty));
 			basicSignals.push_back(a_node->onHide.connect(markDirty));
-			basicSignals.push_back(a_node->onTransformChange.connect(markDirty));
-			basicSignals.push_back(a_node->onChildBoundsChange.connect(markDirty));
+			basicSignals.push_back(a_node->onLocalBoundsChange.connect(markDirty));
 
 			basicSignals.push_back(a_node->onBoundsRequest.connect([&](const std::shared_ptr<Node> &a_this){
 				if (dirtyGrid) {
 					layoutCells();
 				}
+			}));
+
+			parentInteractionSignals.push_back(a_node->onChildRemove.connect([&](const std::shared_ptr<Node> &a_parent, const std::shared_ptr<Node> &a_child) {
+				dirtyGrid = true;
 			}));
 		}
 
@@ -188,6 +190,10 @@ namespace MV {
 				layoutCells();
 			}
 			return Drawable::boundsImplementation();
+		}
+
+		void Grid::initialize() {
+			observeNode(owner());
 		}
 
 	}

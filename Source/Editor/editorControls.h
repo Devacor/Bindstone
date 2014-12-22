@@ -70,11 +70,11 @@ private:
 		for (auto&& textureId : files) {
 			auto handle = sharedResources.textures->file(textureId.first, textureId.second)->makeHandle();
 
-			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId.first, cellSize, MV::toWide(textureId.first));
+			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId.first, cellSize, MV::toWide(""));
 			button->onAccept.connect("Accept", [&, handle](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				setter(handle, false);
 			});
-			button->owner()->attach<MV::Scene::Sprite>()->bounds({ MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), cellSize) })->texture(handle);
+			button->owner()->make("icon")->attach<MV::Scene::Sprite>()->bounds({ MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), cellSize) })->texture(handle);
 		}
 	}
 
@@ -95,11 +95,11 @@ private:
 		for(auto&& textureId : pack->handleIds()){
 			auto handle = pack->handle(textureId);
 
-			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId, cellSize, MV::toWide(textureId));
+			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId, cellSize, MV::toWide(""));
 			button->onAccept.connect("Accept", [&, handle](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				setter(handle, false);
 			});
-			button->owner()->attach<MV::Scene::Sprite>()->bounds({ MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), cellSize) })->texture(handle);
+			button->owner()->make("icon")->attach<MV::Scene::Sprite>()->bounds({ MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), cellSize) })->texture(handle);
 		}
 	}
 

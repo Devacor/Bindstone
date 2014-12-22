@@ -123,7 +123,7 @@ namespace MV {
 
 			Slot<BasicSignature> onTransformChangeSlot;
 			Slot<BasicSignature> onLocalBoundsChangeSlot;
-			Slot<BasicSignature> onDepthChangeSlot;
+			Slot<BasicSignature> onOrderChangeSlot;
 			Slot<BasicSignature> onAlphaChangeSlot;
 
 			Slot<ComponentSignature> onComponentUpdateSlot;
@@ -161,7 +161,7 @@ namespace MV {
 
 			SlotRegister<BasicSignature> onTransformChange;
 			SlotRegister<BasicSignature> onLocalBoundsChange;
-			SlotRegister<BasicSignature> onDepthChange;
+			SlotRegister<BasicSignature> onOrderChange;
 			SlotRegister<BasicSignature> onAlphaChange;
 
 			Slot<ComponentSignature> onComponentUpdate;
@@ -278,6 +278,10 @@ namespace MV {
 				return childNodes.size();
 			}
 
+			bool empty() const {
+				return childNodes.empty();
+			}
+
 			std::vector<std::shared_ptr<Node>>::iterator begin(){
 				return childNodes.begin();
 			}
@@ -311,26 +315,18 @@ namespace MV {
 			Point<> position() const{
 				return translateTo;
 			}
-			Point<> worldPosition() const{
+			Point<> worldPosition(){
 				return worldFromLocal(translateTo);
 			}
-			Point<int> screenPosition() const{
+			Point<int> screenPosition(){
 				return screenFromLocal(translateTo);
 			}
 
 			std::shared_ptr<Node> position(const Point<> &a_newPosition);
-			std::shared_ptr<Node> translate(const Point<> &a_newPosition) {
-				return position(position() + a_newPosition);
-			}
-			std::shared_ptr<Node> worldPosition(const Point<> &a_newPosition){
-				return position(localFromWorld(a_newPosition));
-			}
-			std::shared_ptr<Node> screenPosition(const Point<int> &a_newPosition){
-				return position(localFromScreen(a_newPosition));
-			}
-			std::shared_ptr<Node> nodePosition(const std::shared_ptr<Node> &a_newPosition){
-				return worldPosition(a_newPosition->worldPosition());
-			}
+			std::shared_ptr<Node> translate(const Point<> &a_newPosition);
+			std::shared_ptr<Node> worldPosition(const Point<> &a_newPosition);
+			std::shared_ptr<Node> screenPosition(const Point<int> &a_newPosition);
+			std::shared_ptr<Node> nodePosition(const std::shared_ptr<Node> &a_newPosition);
 
 			AxisAngles rotation() const{
 				return rotateTo;
@@ -343,6 +339,7 @@ namespace MV {
 			Scale scale() const{
 				return scaleTo;
 			}
+			Scale worldScale() const;
 			std::shared_ptr<Node> scale(const Scale &a_newScale);
 			std::shared_ptr<Node> addScale(const Scale &a_incrementScale){
 				return scale(scaleTo + a_incrementScale);
@@ -378,14 +375,16 @@ namespace MV {
 				return parentAccumulatedAlpha;
 			}
 
-			TransformMatrix localTransform() const{
+			TransformMatrix localTransform(){
+				recalculateMatrix();
 				return localMatrixTransform;
 			}
 
-			TransformMatrix worldTransform() const{
+			TransformMatrix worldTransform(){
 				if (usingTemporaryMatrix) {
 					return temporaryWorldMatrixTransform;
 				} else {
+					recalculateMatrix();
 					return worldMatrixTransform;
 				}
 			}
@@ -405,59 +404,26 @@ namespace MV {
 				return screenFromLocal(bounds(a_includeChildren));
 			}
 
-			Point<> worldFromLocal(const Point<> &a_local) const{
-				return draw2d.worldFromLocal(a_local, worldTransform());
-			}
-			Point<int> screenFromLocal(const Point<> &a_local) const{
-				return draw2d.screenFromLocal(a_local, worldTransform());
-			}
-			Point<> localFromScreen(const Point<int> &a_screen) const{
-				return draw2d.localFromScreen(a_screen, worldTransform());
-			}
-			Point<> Node::localFromWorld(const Point<> &a_world) const{
-				return draw2d.localFromWorld(a_world, worldTransform());
-			}
+			Point<> worldFromLocal(const Point<> &a_local);
+			Point<int> screenFromLocal(const Point<> &a_local);
+			Point<> localFromScreen(const Point<int> &a_screen);
+			Point<> localFromWorld(const Point<> &a_world);
 
-			std::vector<Point<>> Node::worldFromLocal(std::vector<Point<>> a_local) const{
-				for(Point<>& point : a_local){
-					point = draw2d.worldFromLocal(point, worldTransform());
-				}
-				return a_local;
-			}
+			std::vector<Point<>> worldFromLocal(std::vector<Point<>> a_local);
+			std::vector<Point<int>> screenFromLocal(const std::vector<Point<>> &a_local);
+			std::vector<Point<>> localFromWorld(std::vector<Point<>> a_world);
+			std::vector<Point<>> localFromScreen(const std::vector<Point<int>> &a_screen);
 
-			std::vector<Point<int>> Node::screenFromLocal(const std::vector<Point<>> &a_local) const{
-				std::vector<Point<int>> processed;
-				for(const Point<>& point : a_local){
-					processed.push_back(draw2d.screenFromLocal(point, worldTransform()));
-				}
-				return processed;
-			}
-
-			std::vector<Point<>> Node::localFromWorld(std::vector<Point<>> a_world) const{
-				for(Point<>& point : a_world){
-					point = draw2d.localFromWorld(point, worldTransform());
-				}
-				return a_world;
-			}
-
-			std::vector<Point<>> Node::localFromScreen(const std::vector<Point<int>> &a_screen) const{
-				std::vector<Point<>> processed;
-				for(const Point<int>& point : a_screen){
-					processed.push_back(draw2d.localFromScreen(point, worldTransform()));
-				}
-				return processed;
-			}
-
-			BoxAABB<> Node::worldFromLocal(const BoxAABB<>& a_local) const{
+			BoxAABB<> worldFromLocal(const BoxAABB<>& a_local){
 				return BoxAABB<>(draw2d.worldFromLocal(a_local.minPoint, worldTransform()), draw2d.worldFromLocal(a_local.maxPoint, worldTransform()));
 			}
-			BoxAABB<int> Node::screenFromLocal(const BoxAABB<>& a_local) const{
+			BoxAABB<int> screenFromLocal(const BoxAABB<>& a_local){
 				return BoxAABB<int>(draw2d.screenFromLocal(a_local.minPoint, worldTransform()), draw2d.screenFromLocal(a_local.maxPoint, worldTransform()));
 			}
-			BoxAABB<> Node::localFromScreen(const BoxAABB<int> &a_screen) const{
+			BoxAABB<> localFromScreen(const BoxAABB<int> &a_screen){
 				return BoxAABB<>(draw2d.localFromScreen(a_screen.minPoint, worldTransform()), draw2d.localFromScreen(a_screen.maxPoint, worldTransform()));
 			}
-			BoxAABB<> Node::localFromWorld(const BoxAABB<> &a_world) const{
+			BoxAABB<> localFromWorld(const BoxAABB<> &a_world){
 				return BoxAABB<>(draw2d.localFromWorld(a_world.minPoint, worldTransform()), draw2d.localFromWorld(a_world.maxPoint, worldTransform()));
 			}
 
@@ -478,17 +444,18 @@ namespace MV {
 
 			bool allowSerialize = true;
 
+			void markMatrixDirty(bool a_rootCall = true);
+
 			void recalculateChildBounds();
 			void recalculateLocalBounds();
 			void recalculateAlpha();
 			void recalculateMatrix();
 
 			void recalculateMatrixAfterLoad();
-			void recalculateBoundsAfterLoad();
-			void recalculateChildBoundsAfterLoad();
 
 			Node(Draw2D &a_draw2d, const std::string &a_id);
 
+			void fixChildOwnership();
 			void postLoadStep(bool a_isRootNode);
 
 			template <class Archive>
@@ -497,9 +464,14 @@ namespace MV {
 				std::copy_if(childNodes.begin(), childNodes.end(), std::back_inserter(filteredChildren), [](const auto &a_child){
 					return a_child->allowSerialize;
 				});
+				std::weak_ptr<Node> weakParent;
+				if (myParent) {
+					weakParent = myParent->shared_from_this();
+				}
 				archive(
 					CEREAL_NVP(nodeId),
 					cereal::make_nvp("isRootNode", myParent == nullptr),
+					cereal::make_nvp("parent", weakParent),
 					CEREAL_NVP(allowDraw),
 					CEREAL_NVP(allowUpdate),
 					CEREAL_NVP(translateTo),
@@ -507,6 +479,8 @@ namespace MV {
 					CEREAL_NVP(scaleTo),
 					CEREAL_NVP(sortDepth),
 					CEREAL_NVP(nodeAlpha),
+					CEREAL_NVP(localBounds),
+					CEREAL_NVP(localChildBounds),
 					cereal::make_nvp("childNodes", filteredChildren),
 					CEREAL_NVP(childComponents)
 				);
@@ -524,8 +498,14 @@ namespace MV {
 				archive(cereal::make_nvp("nodeId", nodeId));
 				construct(*renderer, nodeId);
 				bool isRootNode = false;
+				std::weak_ptr<Node> weakParent;
+				archive(cereal::make_nvp("parent", weakParent));
+				if (!weakParent.expired()) {
+					construct->myParent = weakParent.lock().get();
+				}
 				archive(
 					cereal::make_nvp("isRootNode", isRootNode),
+					cereal::make_nvp("parent", weakParent),
 					cereal::make_nvp("allowDraw", construct->allowDraw),
 					cereal::make_nvp("allowUpdate", construct->allowUpdate),
 					cereal::make_nvp("translateTo", construct->translateTo),
@@ -533,6 +513,8 @@ namespace MV {
 					cereal::make_nvp("scaleTo", construct->scaleTo),
 					cereal::make_nvp("sortDepth", construct->sortDepth),
 					cereal::make_nvp("nodeAlpha", construct->nodeAlpha),
+					cereal::make_nvp("localBounds", construct->localBounds),
+					cereal::make_nvp("localChildBounds", construct->localChildBounds),
 					cereal::make_nvp("childNodes", construct->childNodes),
 					cereal::make_nvp("childComponents", construct->childComponents)
 				);
@@ -552,6 +534,8 @@ namespace MV {
 			Point<> translateTo;
 			AxisAngles rotateTo;
 
+			bool localMatrixDirty = true;
+			bool worldMatrixDirty = true;
 			TransformMatrix localMatrixTransform;
 			TransformMatrix worldMatrixTransform;
 
@@ -566,7 +550,7 @@ namespace MV {
 			Node* myParent = nullptr;
 
 			PointPrecision nodeAlpha = 1.0f;
-			PointPrecision parentAccumulatedAlpha = 1.0f;
+			mutable PointPrecision parentAccumulatedAlpha = 1.0f;
 			bool allowUpdate = true;
 			bool allowDraw = true;
 

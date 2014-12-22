@@ -56,7 +56,7 @@ public:
 
 	void aspect(MV::Size<> a_newAspect);
 
-	void repositionHandles(bool a_fireOnChange = true);
+	void repositionHandles(bool a_fireOnChange = true, bool a_repositionElement = true, bool a_resizeElement = true);
 
 	std::function<void(EditableRectangle*)> onChange;
 
@@ -127,7 +127,7 @@ public:
 
 	void texture(const std::shared_ptr<MV::TextureHandle> a_handle);
 
-	void repositionHandles(bool a_fireOnChange = true);
+	void repositionHandles(bool a_fireOnChange = true, bool a_repositionElement = true, bool a_resizeElement = true);
 
 	std::function<void(EditableEmitter*)> onChange;
 	std::shared_ptr<MV::Scene::Emitter> elementToEdit;

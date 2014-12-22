@@ -108,7 +108,7 @@ namespace MV {
 		return num>0 && ((num & (num-1))==0);
 	}
 
-	std::string wideToString(UtfChar wc){
+	std::string toString(UtfChar wc){
 		std::vector<char> c(MB_CUR_MAX);
 		mbstate_t ignore;
 		memset (&ignore, '\0', sizeof (ignore));
@@ -120,23 +120,25 @@ namespace MV {
 		return result;
 	}
 
-	UtfChar charToWide(char c){
+	UtfChar toWide(char c){
 		wchar_t wc;
 		mbtowc(&wc, &c, 1);
 		return wc;
 	}
 
-	std::string wideToString(const UtfString& ws){
+	std::string toString(const UtfString& ws){
 		std::string s;
 		std::for_each(ws.begin(), ws.end(), [&](const UtfChar &wc){
-			s+=wideToString(wc);
+			s+=toString(wc);
 		});
 		return s;
 	}
 
-	UtfString stringToWide(const std::string& s){
+	UtfString toWide(const std::string& s){
 		UtfString ws;
-		std::transform(s.begin(), s.end(), std::back_inserter(ws), charToWide);
+		std::transform(s.begin(), s.end(), std::back_inserter(ws), [](char c){
+			return toWide(c);
+		});
 		return ws;
 	}
 

@@ -124,15 +124,13 @@ void EditableRectangle::resetHandles() {
 	}
 	rectBox.maxPoint = rectBox.minPoint + toPoint(currentDimensions);
 
-	elementToEdit->size(currentDimensions);
-
 	auto handleSize = MV::point(8.0f, 8.0f);
 	EditableRectangle* self = this;
 	positionHandle = controlContainer->make(MV::guid("position"))->attach<MV::Scene::Clickable>(*mouse);
 	positionHandle->onDrag.connect("position", [&, self](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
 		auto castPosition = MV::cast<MV::PointPrecision>(deltaPosition);
 		handle->owner()->translate(castPosition);
-		elementToEdit->owner()->translate(castPosition);
+		elementToEdit->owner()->position(elementToEdit->owner()->localFromScreen(elementToEdit->owner()->screenPosition() + deltaPosition));
 		topLeftSizeHandle->owner()->translate(castPosition);
 		topRightSizeHandle->owner()->translate(castPosition);
 		bottomLeftSizeHandle->owner()->translate(castPosition);
@@ -192,7 +190,7 @@ void EditableRectangle::resetHandles() {
 		resetHandles();
 	});
 
-	repositionHandles(false);
+	repositionHandles(false, false, false);
 }
 
 EditableRectangle::EditableRectangle(std::shared_ptr<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
@@ -217,11 +215,12 @@ void EditableRectangle::removeHandles() {
 	bottomRightSizeHandle.reset();
 }
 
-void EditableRectangle::repositionHandles(bool a_fireOnChange) {
+void EditableRectangle::repositionHandles(bool a_fireOnChange, bool a_repositionElement, bool a_resizeElement) {
 	auto box = MV::BoxAABB<int>(topLeftSizeHandle->screenBounds().bottomRightPoint(), bottomRightSizeHandle->screenBounds().topLeftPoint());
 
+	auto originalPosition = elementToEdit->owner()->position();
 	elementToEdit->owner()->position({});
-	auto corners = elementToEdit->owner()->localFromScreen(box);
+	auto corners = MV::round(elementToEdit->owner()->localFromScreen(box));
 	MV::Size<> currentDimensions = corners.size();
 
 	if(aspectSize.width != 0.0f && aspectSize.height != 0.0f){
@@ -233,10 +232,16 @@ void EditableRectangle::repositionHandles(bool a_fireOnChange) {
 			currentDimensions.width = currentDimensions.height * aspectSize.width / aspectSize.height;
 		}
 	}
-	elementToEdit->size(currentDimensions);
-	elementToEdit->owner()->position(corners.minPoint);
+	if (a_resizeElement) {
+		elementToEdit->size(currentDimensions);
+	}
+	if (a_repositionElement) {
+		elementToEdit->owner()->position(corners.minPoint);
+	} else {
+		elementToEdit->owner()->position(originalPosition);
+	}
 
-	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenBounds());
+	auto rectBox = MV::round(MV::cast<MV::PointPrecision>(elementToEdit->screenBounds()));
 	positionHandle->bounds(rectBox);
 	positionHandle->owner()->position({});
 
@@ -290,7 +295,7 @@ void EditableEmitter::resetHandles() {
 	positionHandle->onDrag.connect("position", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
 		auto castPosition = MV::cast<MV::PointPrecision>(deltaPosition);
 		handle->owner()->translate(castPosition);
-		elementToEdit->owner()->translate(castPosition);
+		elementToEdit->owner()->position(elementToEdit->owner()->localFromScreen(elementToEdit->owner()->screenPosition() + deltaPosition));
 		topLeftSizeHandle->owner()->translate(castPosition);
 		topRightSizeHandle->owner()->translate(castPosition);
 		bottomLeftSizeHandle->owner()->translate(castPosition);
@@ -350,7 +355,7 @@ void EditableEmitter::resetHandles() {
 		resetHandles();
 	});
 
-	repositionHandles(false);
+	repositionHandles(false, false, false);;
 }
 
 EditableEmitter::EditableEmitter(std::shared_ptr<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
@@ -375,15 +380,22 @@ void EditableEmitter::removeHandles() {
 	bottomRightSizeHandle.reset();
 }
 
-void EditableEmitter::repositionHandles(bool a_fireOnChange) {
+void EditableEmitter::repositionHandles(bool a_fireOnChange, bool a_repositionElement, bool a_resizeElement) {
 	auto box = MV::boxaabb(topLeftSizeHandle->screenBounds().bottomRightPoint(), bottomRightSizeHandle->screenBounds().topLeftPoint());
 
+	auto originalPosition = elementToEdit->owner()->position();
 	elementToEdit->owner()->position({});
 	auto corners = elementToEdit->owner()->localFromScreen(box);
 
-	elementToEdit->properties().minimumPosition = {0.0f, 0.0f};
-	elementToEdit->properties().maximumPosition = MV::toPoint(corners.size());
-	elementToEdit->owner()->position(corners.minPoint);
+	if (a_resizeElement) {
+		elementToEdit->properties().minimumPosition = { 0.0f, 0.0f };
+		elementToEdit->properties().maximumPosition = MV::toPoint(corners.size());
+	}
+	if (a_repositionElement) {
+		elementToEdit->owner()->position(corners.minPoint);
+	} else {
+		elementToEdit->owner()->position(originalPosition);
+	}
 
 	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenBounds());
 	positionHandle->bounds(rectBox);

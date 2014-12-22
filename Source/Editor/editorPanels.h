@@ -21,7 +21,8 @@ public:
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta){
 	}
-
+	virtual void onSceneZoom() {
+	}
 	void activate(std::shared_ptr<MV::Scene::Text> a_textbox){
 		if(activeTextbox){
 			activeTextbox->disableCursor();
@@ -46,10 +47,10 @@ public:
 	~SelectedGridEditorPanel() {
 	}
 
-	virtual void handleInput(SDL_Event &a_event);
+	virtual void handleInput(SDL_Event &a_event)  override;
 
-	virtual void onSceneDrag(const MV::Point<int> &a_delta);
-
+	virtual void onSceneDrag(const MV::Point<int> &a_delta)  override;
+	virtual void onSceneZoom() override;
 private:
 	std::shared_ptr<EditableGrid> controls;
 	std::shared_ptr<MV::Scene::Text> posY;
@@ -70,9 +71,10 @@ public:
 		clearTexturePicker();
 	}
 
-	virtual void handleInput(SDL_Event &a_event);
+	virtual void handleInput(SDL_Event &a_event) override;
 
-	virtual void onSceneDrag(const MV::Point<int> &a_delta);
+	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
+	virtual void onSceneZoom() override;
 private:
 	void OpenTexturePicker();
 	void clearTexturePicker(){
@@ -96,9 +98,10 @@ public:
 	~SelectedEmitterEditorPanel(){
 	}
 
-	virtual void handleInput(SDL_Event &a_event);
+	virtual void handleInput(SDL_Event &a_event) override;
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
+	virtual void onSceneZoom() override;
 private:
 	void OpenTexturePicker();
 	void clearTexturePicker(){

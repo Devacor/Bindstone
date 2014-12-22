@@ -95,13 +95,13 @@ namespace MV {
 			if (allowDraw) {
 				SCOPE_EXIT{ usingTemporaryMatrix = false; };
 				usingTemporaryMatrix = true;
-				temporaryWorldMatrixTransform = a_overrideParentMatrix * localMatrixTransform;
+				temporaryWorldMatrixTransform = a_overrideParentMatrix * localTransform();
 				bool allowChildrenToDraw = true;
 				for (auto&& component : childComponents) {
 					allowChildrenToDraw = component->draw() && allowChildrenToDraw;
 				}
 				if (allowChildrenToDraw) {
-					drawChildren(temporaryWorldMatrixTransform);
+					drawChildren(worldTransform());
 				}
 			}
 		}
@@ -270,8 +270,11 @@ namespace MV {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = shared_from_this();
 			if (nodeId != a_id) {
-				ReSort sort(self);
-				nodeId = a_id;
+				{
+					ReSort sort(self);
+					nodeId = a_id;
+				}
+				onOrderChangeSlot(self);
 			}
 			return self;
 		}
@@ -280,9 +283,11 @@ namespace MV {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = shared_from_this();
 			if (sortDepth != a_newDepth) {
-				ReSort sort(self);
-				sortDepth = a_newDepth;
-				onDepthChangeSlot(self);
+				{
+					ReSort sort(self);
+					sortDepth = a_newDepth;
+				}
+				onOrderChangeSlot(self);
 			}
 			return self;
 		}
@@ -422,32 +427,36 @@ namespace MV {
 
 		void Node::recalculateMatrix() {
 			std::lock_guard<std::recursive_mutex> guard(lock);
-			localMatrixTransform.makeIdentity();
+			
+			bool eitherMatrixUpdated = localMatrixDirty || worldMatrixDirty;
+			if (localMatrixDirty) {
+				localMatrixDirty = false;
+				localMatrixTransform.makeIdentity();
 
-			if (!translateTo.atOrigin()) {
-				localMatrixTransform.translate(translateTo.x, translateTo.y, translateTo.z);
-			}
-			if (rotateTo != 0.0f) {
-				localMatrixTransform.rotateX(toRadians(rotateTo.x)).rotateY(toRadians(rotateTo.y)).rotateZ(toRadians(rotateTo.z));
-			}
-			if (scaleTo != 1.0f) {
-				localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
-			}
-
-			if (myParent) {
-				worldMatrixTransform = myParent->worldMatrixTransform * localMatrixTransform;
-				parentAccumulatedAlpha = myParent->parentAccumulatedAlpha * nodeAlpha;
-			} else {
-				worldMatrixTransform = localMatrixTransform;
-				parentAccumulatedAlpha = nodeAlpha;
+				if (!translateTo.atOrigin()) {
+					localMatrixTransform.translate(translateTo.x, translateTo.y, translateTo.z);
+				}
+				if (rotateTo != 0.0f) {
+					localMatrixTransform.rotateX(toRadians(rotateTo.x)).rotateY(toRadians(rotateTo.y)).rotateZ(toRadians(rotateTo.z));
+				}
+				if (scaleTo != 1.0f) {
+					localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
+				}
 			}
 
-			for (auto&& child : childNodes) {
-				child->recalculateMatrix();
-			}
+			if (eitherMatrixUpdated) {
+				worldMatrixDirty = false;
+				if (myParent) {
+					worldMatrixTransform = myParent->worldTransform() * localMatrixTransform;
+					parentAccumulatedAlpha = myParent->parentAccumulatedAlpha * nodeAlpha;
+				} else {
+					worldMatrixTransform = localMatrixTransform;
+					parentAccumulatedAlpha = nodeAlpha;
+				}
 
-			if (myParent) {
-				myParent->recalculateChildBounds();
+				if (myParent) {
+					myParent->recalculateChildBounds();
+				}
 			}
 		}
 
@@ -467,14 +476,11 @@ namespace MV {
 			onRemove(onRemoveSlot),
 			onTransformChange(onTransformChangeSlot),
 			onLocalBoundsChange(onLocalBoundsChangeSlot),
-			onDepthChange(onDepthChangeSlot),
+			onOrderChange(onOrderChangeSlot),
 			onAlphaChange(onAlphaChangeSlot) {
 
 			worldMatrixTransform.makeIdentity();
 			onAdd.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
-				onParentTransformChangeSignal = myParent->onTransformChangeSlot.connect([&](const std::shared_ptr<Node> &a_parent) {
-					recalculateMatrix();
-				});
 				onParentAlphaChangeSignal = myParent->onAlphaChangeSlot.connect([&](const std::shared_ptr<Node> &a_parent) {
 					recalculateAlpha();
 				});
@@ -492,7 +498,7 @@ namespace MV {
 				recalculateAlpha();
 			});
 			onTransformChange.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
-				recalculateMatrix();
+				markMatrixDirty();
 			});
 		}
 
@@ -599,18 +605,22 @@ namespace MV {
 			return self;
 		}
 
-		void Node::postLoadStep(bool a_isRootNode) {
+		void Node::fixChildOwnership() {
 			for (auto &&childNode : childNodes) {
 				childNode->myParent = this;
 			}
+		}
+
+		void Node::postLoadStep(bool a_isRootNode) {
 			if (a_isRootNode) {
 				recalculateAlpha();
 				recalculateMatrixAfterLoad();
-				recalculateBoundsAfterLoad();
 			}
 		}
 
 		void Node::recalculateMatrixAfterLoad() {
+			localMatrixDirty = false;
+			worldMatrixDirty = false;
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			localMatrixTransform.makeIdentity();
 
@@ -633,44 +643,89 @@ namespace MV {
 			}
 
 			for (auto&& child : childNodes) {
-				child->recalculateMatrix();
+				child->recalculateMatrixAfterLoad();
 			}
 		}
 
-		void Node::recalculateBoundsAfterLoad() {
-			if (!childComponents.empty()) {
-				localBounds = childComponents[0]->bounds();
-				for (size_t i = 1; i < childComponents.size(); ++i) {
-					auto componentBounds = childComponents[i]->bounds();
-					if (!componentBounds.empty()) {
-						localBounds.expandWith(componentBounds);
-					}
-				}
-			} else {
-				localBounds = BoxAABB<>();
-			}
-			for (auto&& child : childNodes) {
-				child->recalculateBoundsAfterLoad();
-			}
-			if (childNodes.empty()) {
-				recalculateChildBoundsAfterLoad();
-			}
+		Point<> Node::localFromScreen(const Point<int> &a_screen) {
+			return draw2d.localFromScreen(a_screen, worldTransform());
 		}
 
-		void Node::recalculateChildBoundsAfterLoad() {
-			if (!childNodes.empty()) {
-				localChildBounds = childNodes[0]->bounds();
-				for (size_t i = 1; i < childNodes.size(); ++i) {
-					auto nodeBounds = childNodes[i]->bounds();
-					if (!nodeBounds.empty()) {
-						localChildBounds.expandWith(nodeBounds);
-					}
-				}
-			} else {
-				localChildBounds = BoxAABB<>();
+		std::vector<Point<>> Node::localFromScreen(const std::vector<Point<int>> &a_screen) {
+			std::vector<Point<>> processed;
+			for (const Point<int>& point : a_screen) {
+				processed.push_back(draw2d.localFromScreen(point, worldTransform()));
 			}
-			if (myParent) {
-				myParent->recalculateChildBoundsAfterLoad();
+			return processed;
+		}
+
+		Point<> Node::localFromWorld(const Point<> &a_world) {
+			return draw2d.localFromWorld(a_world, worldTransform());
+		}
+
+		std::vector<Point<>> Node::localFromWorld(std::vector<Point<>> a_world) {
+			for (Point<>& point : a_world) {
+				point = draw2d.localFromWorld(point, worldTransform());
+			}
+			return a_world;
+		}
+
+		Point<int> Node::screenFromLocal(const Point<> &a_local) {
+			return draw2d.screenFromLocal(a_local, worldTransform());
+		}
+
+		std::vector<Point<int>> Node::screenFromLocal(const std::vector<Point<>> &a_local) {
+			std::vector<Point<int>> processed;
+			for (const Point<>& point : a_local) {
+				processed.push_back(draw2d.screenFromLocal(point, worldTransform()));
+			}
+			return processed;
+		}
+
+		Point<> Node::worldFromLocal(const Point<> &a_local) {
+			return draw2d.worldFromLocal(a_local, worldTransform());
+		}
+
+		std::vector<Point<>> Node::worldFromLocal(std::vector<Point<>> a_local) {
+			for (Point<>& point : a_local) {
+				point = draw2d.worldFromLocal(point, worldTransform());
+			}
+			return a_local;
+		}
+
+		std::shared_ptr<Node> Node::screenPosition(const Point<int> &a_newPosition) {
+			return translate(localFromScreen(a_newPosition));
+		}
+
+		std::shared_ptr<Node> Node::nodePosition(const std::shared_ptr<Node> &a_newPosition) {
+			return worldPosition(a_newPosition->worldPosition());
+		}
+
+		std::shared_ptr<Node> Node::worldPosition(const Point<> &a_newPosition) {
+			return position(localFromWorld(a_newPosition));
+		}
+
+		std::shared_ptr<Node> Node::translate(const Point<> &a_newPosition) {
+			return position(position() + a_newPosition);
+		}
+
+		MV::Scale Node::worldScale() const {
+			auto accumulatedScale = scaleTo;
+			const Node* current = this;
+			while (current = current->myParent) {
+				accumulatedScale *= current->scaleTo;
+			}
+			return accumulatedScale;
+		}
+
+		void Node::markMatrixDirty(bool a_rootCall) {
+			if (a_rootCall) {
+				localMatrixDirty = true;
+			} else {
+				worldMatrixDirty = true;
+			}
+			for (auto&& child : *this) {
+				child->markMatrixDirty(false);
 			}
 		}
 

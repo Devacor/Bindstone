@@ -41,12 +41,12 @@ private:
 		box->parent()->position(pos);
 		box->add(gridNode);
 
-		auto imageButton = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Files", { 100.0f, 27.0f }, MV::stringToWide("Files"));
+		auto imageButton = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Files", { 100.0f, 27.0f }, MV::toWide("Files"));
 		imageButton->onAccept.connect("Accept", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 			initializeFilePicker();
 		});
 		for(auto&& packId : packs){
-			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, packId, {100.0f, 27.0f}, MV::stringToWide(packId));
+			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, packId, {100.0f, 27.0f}, MV::toWide(packId));
 			button->onAccept.connect("Accept", [&,packId](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				initializeImagePicker(packId);
 			});
@@ -70,7 +70,7 @@ private:
 		for (auto&& textureId : files) {
 			auto handle = sharedResources.textures->file(textureId.first, textureId.second)->makeHandle();
 
-			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId.first, cellSize, MV::stringToWide(textureId.first));
+			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId.first, cellSize, MV::toWide(textureId.first));
 			button->onAccept.connect("Accept", [&, handle](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				setter(handle, false);
 			});
@@ -95,7 +95,7 @@ private:
 		for(auto&& textureId : pack->handleIds()){
 			auto handle = pack->handle(textureId);
 
-			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId, cellSize, MV::stringToWide(textureId));
+			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId, cellSize, MV::toWide(textureId));
 			button->onAccept.connect("Accept", [&, handle](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 				setter(handle, false);
 			});
@@ -137,6 +137,12 @@ public:
 	void onSceneDrag(const MV::Point<int> &a_delta){
 		if(currentPanel){
 			currentPanel->onSceneDrag(a_delta);
+		}
+	}
+
+	void onSceneZoom(){
+		if (currentPanel) {
+			currentPanel->onSceneZoom();
 		}
 	}
 

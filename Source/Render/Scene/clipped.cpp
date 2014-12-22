@@ -61,7 +61,7 @@ namespace MV {
 			auto markDirty = [&](const std::shared_ptr<Node> &a_this) {
 				dirtyTexture = true;
 			};
-			basicSignals.push_back(a_node->onDepthChange.connect(markDirty));
+			basicSignals.push_back(a_node->onOrderChange.connect(markDirty));
 			localBasicSignals.push_back(basicSignals.end()--);
 			basicSignals.push_back(a_node->onAlphaChange.connect(markDirty));
 			localBasicSignals.push_back(basicSignals.end()--);

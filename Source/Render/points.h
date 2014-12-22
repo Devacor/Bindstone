@@ -213,11 +213,11 @@ namespace MV {
 		Scale& operator*=(PointPrecision a_other);
 		Scale& operator/=(PointPrecision a_other);
 
-		bool operator==(const Scale& a_other);
-		bool operator==(PointPrecision a_other);
+		bool operator==(const Scale& a_other) const;
+		bool operator==(PointPrecision a_other) const;
 
-		bool operator!=(const Scale& a_other);
-		bool operator!=(PointPrecision a_other);
+		bool operator!=(const Scale& a_other) const;
+		bool operator!=(PointPrecision a_other) const;
 
 		template <class Archive>
 		void serialize(Archive & archive){
@@ -321,6 +321,10 @@ namespace MV {
 	| -------Conversion------- |
 	\**************************/
 
+	template <class T>
+	Point<T> round(const Point<T>& a_point) {
+		return{ std::round(a_point.x), std::round(a_point.y), std::round(a_point.z) };
+	}
 
 	template <class T>
 	Size<T> toSize(const Point<T>& a_point){
@@ -412,6 +416,11 @@ namespace MV {
 	/************************\
 	| -------Size IMP------- |
 	\************************/
+	template <class T>
+	Size<T> round(const Size<T>& a_size) {
+		return{ std::round(a_size.width), std::round(a_size.height), std::round(a_size.depth) };
+	}
+
 	template <typename T>
 	Size<T> fitAspect(Size<T> a_toConstrain, Size<T> a_maximum){
 		auto ratio = std::min(static_cast<double>(a_maximum.width) / static_cast<double>(a_toConstrain.width), static_cast<double>(a_maximum.height) / static_cast<double>(a_toConstrain.height));

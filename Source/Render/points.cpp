@@ -84,10 +84,10 @@ namespace MV {
 	}
 
 	uint32_t Color::hex() const {
-		return (static_cast<uint32_t>(round(A * static_cast<float>(0xFF))) << 24) |
-			(static_cast<uint32_t>(round(R * static_cast<float>(0xFF))) << 16) |
-			(static_cast<uint32_t>(round(G * static_cast<float>(0xFF))) << 8) |
-			(static_cast<uint32_t>(round(B * static_cast<float>(0xFF))));
+		return (static_cast<uint32_t>(std::round(A * static_cast<float>(0xFF))) << 24) |
+			(static_cast<uint32_t>(std::round(R * static_cast<float>(0xFF))) << 16) |
+			(static_cast<uint32_t>(std::round(G * static_cast<float>(0xFF))) << 8) |
+			(static_cast<uint32_t>(std::round(B * static_cast<float>(0xFF))));
 	}
 
 	Color& Color::hex(uint32_t a_hex, bool a_allowFullAlpha) {
@@ -242,19 +242,19 @@ namespace MV {
 	}
 
 
-	bool Scale::operator==(PointPrecision a_other) {
+	bool Scale::operator==(PointPrecision a_other) const {
 		return equals(x, a_other) && equals(y, a_other) && equals(z, a_other);
 	}
 
-	bool Scale::operator==(const Scale& a_other) {
+	bool Scale::operator==(const Scale& a_other) const {
 		return equals(x, a_other.x) && equals(y, a_other.y) && equals(z, a_other.z);
 	}
 
-	bool Scale::operator!=(PointPrecision a_other) {
+	bool Scale::operator!=(PointPrecision a_other) const {
 		return !(*this == a_other);
 	}
 
-	bool Scale::operator!=(const Scale& a_other) {
+	bool Scale::operator!=(const Scale& a_other) const {
 		return !(*this == a_other);
 	}
 

@@ -39,6 +39,15 @@ namespace MV {
 		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::shared_ptr<T>& a_lhs, const std::shared_ptr<T> &a_rhs){return *a_lhs < *a_rhs; }), a_item);
 	}
 
+	template <class Type>
+	Type capBetween(const Type &val, const Type& lowerBound, const Type& upperBound) {
+		if (lowerBound <= upperBound) {
+			return std::min(std::max(val, lowerBound), upperBound);
+		} else {
+			return std::min(std::max(val, upperBound), lowerBound);
+		}
+	}
+
 	template<typename T>
 	T mix(const T &a_start, const T &a_end, float a_percent, float a_strength = 1.0f) {
 		return T{pow(a_percent, a_strength) * (a_end - a_start) + a_start};
@@ -64,16 +73,47 @@ namespace MV {
 		}
 	}
 
+	static inline float percentOfRange(float a_value, float a_start, float a_end) {
+		if (a_start > a_end) {
+			std::swap(a_start, a_end);
+		}
+		a_value = capBetween(a_value, a_start, a_end);
+
+		if (a_start < 0.0f && a_end > 0.0f) {
+			a_value += -a_start;
+			a_end += -a_start;
+			a_start = 0.0f;
+		}
+
+		return (a_value - a_start) / (a_end - a_start);
+	}
+
+	static inline float unmix(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
+		return mix(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
+	}
+
+	static inline float unmixIn(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
+		return mixIn(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
+	}
+
+	static inline float unmixOut(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
+		return mixOut(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
+	}
+
+	static inline float unmixInOut(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
+		return mixInOut(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
+	}
+
 	//rounds num up to the next largest power of two (or the current value) and returns that value
 	int roundUpPowerOfTwo(int num);
 
 	bool isPowerOfTwo(int num);
 
-	std::string wideToString(UtfChar wc);
-	UtfChar charToWide(char c);
+	std::string toString(UtfChar wc);
+	UtfChar toWide(char c);
 
-	std::string wideToString(const UtfString& ws);
-	UtfString stringToWide(const std::string& s);
+	std::string toString(const UtfString& ws);
+	UtfString toWide(const std::string& s);
 
 	template <class Type>
 	Type toDegrees(const Type &val){
@@ -139,11 +179,6 @@ namespace MV {
 		} else{
 			rotatePoint3D(a_point.x, a_point.y, a_point.z, a_angle.x, a_angle.y, a_angle.z, angleUnitIs);
 		}
-	}
-
-	template <class Type>
-	Type capBetween(const Type &val, const Type & lowerBound, const Type & upperBound){
-		return std::min(std::max(val, lowerBound), val);
 	}
 
 	int boundBetween(int val, int lowerBound, int upperBound);

@@ -338,6 +338,11 @@ namespace MV {
 		return BoxAABB<Target>(cast<Target>(a_box.minPoint), cast<Target>(a_box.maxPoint));
 	}
 
+	template <class T>
+	BoxAABB<T> round(const BoxAABB<T>& a_box) {
+		return{ round(a_box.minPoint), round(a_box.maxPoint) };
+	}
+
 	class Draw2D;
 	class PointVolume{
 	public:

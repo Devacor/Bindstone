@@ -56,6 +56,8 @@ namespace MV {
 		}
 
 		void Grid::layoutCells() {
+			allowDirty = false;
+			SCOPE_EXIT{ allowDirty = true; };
 			dirtyGrid = false;
 			if (cellDimensions.width > 0.0f || cellDimensions.height > 0.0f) {
 				layoutCellSize();
@@ -108,7 +110,7 @@ namespace MV {
 				}
 			}
 
-			calculatedBounds.expandWith(calculatedBounds.maxPoint + margins.second);
+			calculatedBounds = calculatedBounds.expandWith(calculatedBounds.maxPoint + margins.second);
 
 			setPointsFromBounds(calculatedBounds);
 			if (localBounds != calculatedBounds) {
@@ -155,7 +157,7 @@ namespace MV {
 				}
 			}
 
-			calculatedBounds.expandWith(calculatedBounds.maxPoint + margins.second);
+			calculatedBounds = calculatedBounds.expandWith(calculatedBounds.maxPoint + margins.second);
 
 			setPointsFromBounds(calculatedBounds);
 			if (localBounds != calculatedBounds) {
@@ -164,25 +166,58 @@ namespace MV {
 			}
 		}
 
-		void Grid::observeNode(const std::shared_ptr<Node>& a_node) {
-			auto markDirty = [&](const std::shared_ptr<Node> &a_this) {
+		void Grid::observeOwner(const std::shared_ptr<Node>& a_node) {
+			basicSignals.push_back(a_node->onChildAdd.connect([&](const std::shared_ptr<Node> &a_this) {
+				if (a_this->id() == "Background") {
+					std::cout << "Background child add!" << std::endl;
+				}
 				dirtyGrid = true;
-			};
-			basicSignals.push_back(a_node->onChildAdd.connect(markDirty));
-			basicSignals.push_back(a_node->onDepthChange.connect(markDirty));
-			basicSignals.push_back(a_node->onShow.connect(markDirty));
-			basicSignals.push_back(a_node->onHide.connect(markDirty));
-			basicSignals.push_back(a_node->onLocalBoundsChange.connect(markDirty));
-
+				observeChildNode(a_this, true);
+			}));
 			basicSignals.push_back(a_node->onBoundsRequest.connect([&](const std::shared_ptr<Node> &a_this){
 				if (dirtyGrid) {
 					layoutCells();
 				}
 			}));
-
 			parentInteractionSignals.push_back(a_node->onChildRemove.connect([&](const std::shared_ptr<Node> &a_parent, const std::shared_ptr<Node> &a_child) {
 				dirtyGrid = true;
 			}));
+			if (owner()->id() == "Background") {
+				std::cout << "Background register!" << std::endl;
+			}
+			for (auto&& child : *a_node) {
+				observeChildNode(child, true);
+			}
+		}
+
+		void Grid::observeChildNode(const std::shared_ptr<Node>& a_node, bool a_calledFromOwner) {
+			auto markDirty = [&](const std::shared_ptr<Node> &a_this) {
+				if (a_this->parent()->id() == "Background") {
+					std::cout << "Background child dirty!" << std::endl;
+				}
+				if (allowDirty) {
+					dirtyGrid = true;
+				}
+			};
+			auto& childSignalBucket = childSignals[a_node];
+			if (a_calledFromOwner) {
+				childSignalBucket.push_back(a_node->onOrderChange.connect(markDirty));
+				childSignalBucket.push_back(a_node->onShow.connect(markDirty));
+				childSignalBucket.push_back(a_node->onHide.connect(markDirty));
+			}
+			childSignalBucket.push_back(a_node->onLocalBoundsChange.connect(markDirty));
+			childSignalBucket.push_back(a_node->onRemove.connect([&](const std::shared_ptr<Node> &a_this){
+				auto found = childSignals.find(a_this);
+				if (found != childSignals.end()) {
+					childSignals.erase(found);
+				}
+			}));
+			childSignalBucket.push_back(a_node->onChildAdd.connect([&](const std::shared_ptr<Node> &a_this) {
+				observeChildNode(a_this, false);
+			}));
+			for (auto&& child : *a_node) {
+				observeChildNode(child, false);
+			}
 		}
 
 		BoxAABB<> Grid::boundsImplementation() {
@@ -193,7 +228,7 @@ namespace MV {
 		}
 
 		void Grid::initialize() {
-			observeNode(owner());
+			observeOwner(owner());
 		}
 
 	}

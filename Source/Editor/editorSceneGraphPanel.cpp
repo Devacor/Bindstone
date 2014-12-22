@@ -48,14 +48,24 @@ void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nu
 
 void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth, std::shared_ptr<MV::Scene::Node> a_grid) {
 	MV::Size<> buttonSize(200.0f, 18.0f);
-	auto buttonName = MV::stringToWide(std::string(a_depth * 3, ' ') + a_node->id());
+	auto buttonName = MV::toWide(std::string(a_depth * 3, ' ') + a_node->id());
 
 	auto button = makeSceneButton(a_grid, *sharedResources.textLibrary, *sharedResources.mouse, a_node->id(), buttonSize, buttonName);
 
-	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.mouse)->size(MV::size(buttonSize.width, 4.0f));
+	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.mouse)->size(MV::size(buttonSize.width, 5.0f));
 	dragBetween->onDrop.connect("dropped", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 		if (activeSelection) {
-			activeSelection->depth(a_node->depth() + .01f);
+			float newDepth = activeSelection->depth();
+			if (a_node->parent() != activeSelection->parent()) {
+				if (a_node->parent() && a_node->parent()->parent() == activeSelection->parent()) {
+					newDepth = a_node->parent()->depth() + .01f;
+				} else if (activeSelection->parent() == a_node) {
+					newDepth = -0.01f;
+				}
+			}else{
+				newDepth = a_node->depth() + .01f;
+			}
+			activeSelection->depth(newDepth);
 			activeSelection->parent()->normalizeDepth();
 		}
 	});

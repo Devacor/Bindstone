@@ -45,11 +45,11 @@ namespace MV{
 				}
 			}
 			std::shared_ptr<Text> number(PointPrecision a_newText) {
-				UtfString str = stringToWide(std::to_string(a_newText));
+				UtfString str = toWide(std::to_string(a_newText));
 				return text(str);
 			}
 			std::shared_ptr<Text> number(int a_newText) {
-				UtfString str = stringToWide(std::to_string(a_newText));
+				UtfString str = toWide(std::to_string(a_newText));
 				return text(str);
 			}
 

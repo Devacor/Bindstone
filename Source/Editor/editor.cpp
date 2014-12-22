@@ -86,7 +86,7 @@ bool Editor::update(double dt){
 	}
 	//testNode->translate(MV::Point<>(10.0, 10.0f) * static_cast<float>(dt));
 	//testNode->get("middleSquare")->get("twoDeep")->addRotation(MV::AxisAngles(0.0f, 0.0f, 45.0f) * static_cast<float>(dt))->translate(MV::Point<>(-10.0, -10.0f) * static_cast<float>(dt));
-	//fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
+	fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
 	selectorPanel.update();
 	pool.run();
 	return !done;
@@ -136,7 +136,7 @@ void Editor::initializeWindow(){
 
 	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
 	fps = controls->make("FPS")->position({960.0f - 50.0f, 0.0f})->
-		attach<MV::Scene::Text>(textLibrary, MV::size(50.0f, 15.0f))->number(0.0f);
+		attach<MV::Scene::Text>(textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->wrapping(MV::TextWrapMethod::NONE);
 	
 	std::vector<std::string> names{"patternTest1.png", "platform.png", "rock.png", "joint.png", "slice.png", "spatula.png"};
 	//selectorPanel.refresh();
@@ -203,6 +203,9 @@ void Editor::handleInput(){
 				break;
 			case SDL_WINDOWEVENT:
 				break;
+			case SDL_MOUSEWHEEL:
+				handleScroll(event.wheel.y);
+				break;
 			}
 		}
 	}
@@ -226,4 +229,14 @@ void Editor::render(){
 
 void Editor::initializeControls(){
 	controlPanel.loadPanel<DeselectedEditorPanel>();
+}
+
+void Editor::handleScroll(int a_amount) {
+	auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount);
+	if (scene->scale().x + screenScale.x > .05f) {
+		auto originalScreenPosition = scene->localFromScreen(mouse.position()) * (MV::toPoint(screenScale));
+		scene->addScale(screenScale);
+		scene->translate(originalScreenPosition * -1.0f);
+		controlPanel.onSceneZoom();
+	}
 }

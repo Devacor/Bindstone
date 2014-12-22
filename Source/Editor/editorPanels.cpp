@@ -42,24 +42,24 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 	});
 
 	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
-		text(MV::stringToWide(controls->elementToEdit->owner()->id()))->
+		text(MV::toWide(controls->elementToEdit->owner()->id()))->
 		onEnter.connect("rename", [&](std::shared_ptr<MV::Scene::Text> a_text) {
-		controls->elementToEdit->owner()->id(MV::wideToString(a_text->text()));
+		controls->elementToEdit->owner()->id(MV::toString(a_text->text()));
 		panel.resources().editor->sceneUpdated();
 	});
 
 	float textboxWidth = 52.0f;
-	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f));
-	posY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posY", MV::size(textboxWidth, 27.0f));
+	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().x))));
+	posY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().y))));
 
-	width = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "width", MV::size(textboxWidth, 27.0f));
-	columns = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "columns", MV::size(textboxWidth, 27.0f));
+	width = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "width", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->gridWidth()))));
+	columns = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "columns", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(a_controls->elementToEdit->columns())));
 
-	paddingX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "paddingX", MV::size(textboxWidth, 27.0f));
-	paddingY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "paddingY", MV::size(textboxWidth, 27.0f));
+	paddingX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "paddingX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->padding().first.x))));
+	paddingY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "paddingY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->padding().first.y))));
 
-	marginsX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "marginsX", MV::size(textboxWidth, 27.0f));
-	marginsY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "marginsY", MV::size(textboxWidth, 27.0f));
+	marginsX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "marginsX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->margin().first.x))));
+	marginsY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "marginsY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->margin().first.y))));
 
 	if (controls) {
 		auto xClick = posX->owner()->component<MV::Scene::Clickable>();
@@ -130,6 +130,10 @@ void SelectedGridEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
 	controls->resetHandles();
 }
 
+void SelectedGridEditorPanel::onSceneZoom() {
+	controls->resetHandles();
+}
+
 SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableRectangle> a_controls):
 	EditorPanel(a_panel),
 	controls(a_controls) {
@@ -153,18 +157,18 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	OpenTexturePicker();
 
 	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
-		text(MV::stringToWide(controls->elementToEdit->owner()->id()))->
+		text(MV::toWide(controls->elementToEdit->owner()->id()))->
 		onEnter.connect("rename", [&](std::shared_ptr<MV::Scene::Text> a_text){
-			controls->elementToEdit->owner()->id(MV::wideToString(a_text->text()));
+			controls->elementToEdit->owner()->id(MV::toString(a_text->text()));
 			panel.resources().editor->sceneUpdated();
 		});
 
 	float textboxWidth = 52.0f;
-	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f));
-	posY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posY", MV::size(textboxWidth, 27.0f));
+	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().x))));
+	posY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().y))));
 
-	width = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "width", MV::size(textboxWidth, 27.0f));
-	height = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "height", MV::size(textboxWidth, 27.0f));
+	width = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "width", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->size().width))));
+	height = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "height", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->size().height))));
 
 	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "Texture", buttonSize, UTF_CHAR_STR("Texture"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
@@ -233,11 +237,11 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 		});
 
 		controls->onChange = [&](EditableRectangle *a_element){
-			posX->number(static_cast<int>(controls->position().x + .5f));
-			posY->number(static_cast<int>(controls->position().y + .5f));
+			posX->number(static_cast<int>(std::lround(controls->position().x)));
+			posY->number(static_cast<int>(std::lround(controls->position().y)));
 
-			width->number(static_cast<int>(controls->size().width + .5f));
-			height->number(static_cast<int>(controls->size().height + .5f));
+			width->number(static_cast<int>(std::lround(controls->size().width)));
+			height->number(static_cast<int>(std::lround(controls->size().height)));
 		};
 	}
 	auto deselectLocalAABB = deselectButton->bounds();
@@ -264,7 +268,11 @@ void SelectedRectangleEditorPanel::handleInput(SDL_Event &a_event) {
 }
 
 void SelectedRectangleEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
-	controls->repositionHandles();
+	controls->repositionHandles(true, true, false);
+}
+
+void SelectedRectangleEditorPanel::onSceneZoom() {
+	controls->resetHandles();
 }
 
 SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableEmitter> a_controls):
@@ -288,19 +296,19 @@ controls(a_controls) {
 	});
 
 	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
-		text(MV::stringToWide(controls->elementToEdit->owner()->id()))->
+		text(MV::toWide(controls->elementToEdit->owner()->id()))->
 		onEnter.connect("rename", [&](const std::shared_ptr<MV::Scene::Text> &a_text){
-			controls->elementToEdit->owner()->id(MV::wideToString(a_text->text()));
+			controls->elementToEdit->owner()->id(MV::toString(a_text->text()));
 			panel.resources().editor->sceneUpdated();
 		});
 
 	float textboxWidth = 52.0f;
 
-	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f));
-	posY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posY", MV::size(textboxWidth, 27.0f));
+	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().x))));
+	posY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().y))));
 
-	width = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "width", MV::size(textboxWidth, 27.0f));
-	height = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "height", MV::size(textboxWidth, 27.0f));
+	width = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "width", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->size().width))));
+	height = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "height", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->size().height))));
 
 	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "Texture", buttonSize, UTF_CHAR_STR("Texture"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
@@ -312,42 +320,42 @@ controls(a_controls) {
 	makeLabel(this, grid, *panel.resources().textLibrary, "spawnRate", labelSize, UTF_CHAR_STR("Spawn Rate"));
 	auto maximumSpawnRate = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximumSpawnRate = MV::mixIn(0.0f, 1.25f, a_slider->percent(), 3);
-	}, .5f);
+	}, MV::unmixIn(0.0f, 1.25f, controls->elementToEdit->properties().maximumSpawnRate, 3));
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimumSpawnRate = MV::mixIn(0.0f, 1.25f, a_slider->percent(), 3);
 		maximumSpawnRate->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, .5f);
+	}, MV::unmixIn(0.0f, 1.25f, controls->elementToEdit->properties().minimumSpawnRate, 3));
 	grid->add(maximumSpawnRate);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "lifeSpan", labelSize, UTF_CHAR_STR("Lifespan"));
 	auto maximumLifespan = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.maxLifespan = MV::mixIn(0.01f, 60.0f, a_slider->percent(), 2);
-	}, 0.15f);
+	}, MV::unmixIn(0.01f, 60.0f, controls->elementToEdit->properties().maximum.maxLifespan, 2));
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.maxLifespan = MV::mixIn(0.01f, 60.0f, a_slider->percent(), 2);
 		maximumLifespan->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, 0.15f);
+	}, MV::unmixIn(0.01f, 60.0f, controls->elementToEdit->properties().minimum.maxLifespan, 2));
 	grid->add(maximumLifespan);
 
 
 	auto maximumEndSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.endSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
-	}, 0.5f);
+	}, MV::unmixInOut(-1000.0f, 1000.0f, controls->elementToEdit->properties().maximum.endSpeed, 2));
 	auto minimumEndSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.endSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
 		maximumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, 0.5f);
+	}, MV::unmixInOut(-1000.0f, 1000.0f, controls->elementToEdit->properties().minimum.endSpeed, 2));
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "initialSpeed", labelSize, UTF_CHAR_STR("Start Speed"));
 	auto startSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
 		maximumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, 0.5f);
+	}, MV::unmixInOut(-1000.0f, 1000.0f, controls->elementToEdit->properties().maximum.beginSpeed, 2));
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
 		startSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
 		minimumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, 0.5f);
+	}, MV::unmixInOut(-1000.0f, 1000.0f, controls->elementToEdit->properties().minimum.beginSpeed, 2));
 	grid->add(startSpeed);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "speedChange", labelSize, UTF_CHAR_STR("End Speed"));
@@ -357,41 +365,41 @@ controls(a_controls) {
 	makeLabel(this, grid, *panel.resources().textLibrary, "initialDirection", labelSize, UTF_CHAR_STR("Start Direction"));
 	auto maximumStartDirection = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximumDirection = {0.0f, 0.0f, a_slider->percent() * 720.0f};
-	}, 0.0f);
+	}, controls->elementToEdit->properties().maximumDirection.z / 720.0f);
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimumDirection = {0.0f, 0.0f, a_slider->percent() * 720.0f};
 		maximumStartDirection->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, 0.0f);
+	}, controls->elementToEdit->properties().minimumDirection.z / 720.0f);
 	grid->add(maximumStartDirection);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "directionChange", labelSize, UTF_CHAR_STR("Direction Change"));
 	auto maximumDirectionChange = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.directionalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
-	}, 0.5f);
+	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().maximum.directionalChange.z));
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.directionalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
 		maximumDirectionChange->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, 0.5f);
+	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().minimum.directionalChange.z));
 	grid->add(maximumDirectionChange);
 
 	auto maximumEndSize = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.endScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
-	}, 0.5f);
+	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().maximum.endScale.x));
 	auto minimumEndSize = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.endScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		maximumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, 0.5f);
+	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().minimum.endScale.x));
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "startSize", labelSize, UTF_CHAR_STR("Start Size"));
 	auto startSize = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		maximumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, 0.55f);
+	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().maximum.beginScale.x));
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		startSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
 		minimumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, 0.55f);
+	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().minimum.beginScale.x));
 	grid->add(startSize);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "endSize", labelSize, UTF_CHAR_STR("End Size"));
@@ -401,91 +409,91 @@ controls(a_controls) {
 	makeLabel(this, grid, *panel.resources().textLibrary, "initialRotation", labelSize, UTF_CHAR_STR("Initialize Rotation"));
 	auto maximumRotation = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximumRotation = {0.0f, 0.0f, a_slider->percent() * 360.0f};
-	}, 0.0f);
+	}, controls->elementToEdit->properties().maximumRotation.z / 360.0f);
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimumRotation = {0.0f, 0.0f, a_slider->percent() * 360.0f};
 		maximumRotation->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, 0.0f);
+	}, controls->elementToEdit->properties().minimumRotation.z / 360.0f);
 	grid->add(maximumRotation);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "rotationChange", labelSize, UTF_CHAR_STR("Rotation Change"));
 	auto maximumRotationChange = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.rotationalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
-	}, 0.5f);
+	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().maximum.rotationalChange.z));
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.rotationalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
 		maximumRotationChange->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, 0.5f);
+	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().minimum.rotationalChange.z));
 	grid->add(maximumRotationChange);
 
 	auto maximumREndMax = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.endColor.R = a_slider->percent();
-	});
+	}, controls->elementToEdit->properties().maximum.endColor.R);
 	auto maximumGEndMax = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.endColor.G = a_slider->percent();
-	});
+	}, controls->elementToEdit->properties().maximum.endColor.G);
 	auto maximumBEndMax = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.endColor.B = a_slider->percent();
-	});
+	}, controls->elementToEdit->properties().maximum.endColor.B);
 	auto maximumAEndMax = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.endColor.A = a_slider->percent();
-	});
+	}, controls->elementToEdit->properties().maximum.endColor.A);
 
 	auto maximumREndMin = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.endColor.R = a_slider->percent();
 		maximumREndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	});
+	}, controls->elementToEdit->properties().minimum.endColor.R);
 	auto maximumGEndMin = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.endColor.G = a_slider->percent();
 		maximumGEndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	});
+	}, controls->elementToEdit->properties().minimum.endColor.G);
 	auto maximumBEndMin = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.endColor.B = a_slider->percent();
 		maximumBEndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	});
+	}, controls->elementToEdit->properties().minimum.endColor.B);
 	auto maximumAEndMin = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.endColor.A = a_slider->percent();
 		maximumAEndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	});
+	}, controls->elementToEdit->properties().minimum.endColor.A);
 
 	auto maximumRInitial = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginColor.R = a_slider->percent();
 		maximumREndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	});
+	}, controls->elementToEdit->properties().maximum.beginColor.R);
 	auto maximumGInitial = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginColor.G = a_slider->percent();
 		maximumGEndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	});
+	}, controls->elementToEdit->properties().maximum.beginColor.G);
 	auto maximumBInitial = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginColor.B = a_slider->percent();
 		maximumBEndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	});
+	}, controls->elementToEdit->properties().maximum.beginColor.B);
 	auto maximumAInitial = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginColor.A = a_slider->percent();
 		maximumAEndMax->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	});
+	}, controls->elementToEdit->properties().maximum.beginColor.A);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "initialColorMin", labelSize, UTF_CHAR_STR("Initial Color Min"));
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginColor.R = a_slider->percent();
 		maximumRInitial->component<MV::Scene::Slider>()->percent(a_slider->percent());
 		maximumREndMin->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	});
+	}, controls->elementToEdit->properties().minimum.beginColor.R);
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginColor.G = a_slider->percent();
 		maximumGInitial->component<MV::Scene::Slider>()->percent(a_slider->percent());
 		maximumGEndMin->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	});
+	}, controls->elementToEdit->properties().minimum.beginColor.G);
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginColor.B = a_slider->percent();
 		maximumBInitial->component<MV::Scene::Slider>()->percent(a_slider->percent());
 		maximumBEndMin->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	});
+	}, controls->elementToEdit->properties().minimum.beginColor.B);
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginColor.A = a_slider->percent();
 		maximumAInitial->component<MV::Scene::Slider>()->percent(a_slider->percent());
 		maximumAEndMin->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	});
+	}, controls->elementToEdit->properties().minimum.beginColor.A);
 
 	makeLabel(this, grid, *panel.resources().textLibrary, "initialColorMax", labelSize, UTF_CHAR_STR("Initial Color Max"));
 	grid->add(maximumRInitial);
@@ -537,12 +545,12 @@ controls(a_controls) {
 		controls->size({width->number(), height->number()});
 	});
 
-	controls->onChange = [&](EditableEmitter *a_element){
-		posX->number(std::floor(controls->position().x + .5f));
-		posY->number(std::floor(controls->position().y + .5f));
+	controls->onChange = [&](EditableEmitter *a_element) {
+		posX->number(static_cast<int>(std::lround(controls->position().x)));
+		posY->number(static_cast<int>(std::lround(controls->position().y)));
 
-		width->number(std::floor(controls->size().width + .5f));
-		height->number(std::floor(controls->size().height + .5f));
+		width->number(static_cast<int>(std::lround(controls->size().width)));
+		height->number(static_cast<int>(std::lround(controls->size().height)));
 	};
 
 	auto deselectLocalAABB = deselectButton->bounds();
@@ -568,7 +576,11 @@ void SelectedEmitterEditorPanel::handleInput(SDL_Event &a_event) {
 }
 
 void SelectedEmitterEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
-	controls->repositionHandles();
+	controls->repositionHandles(true, true, false);
+}
+
+void SelectedEmitterEditorPanel::onSceneZoom() {
+	controls->resetHandles();
 }
 
 DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
@@ -578,7 +590,7 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 		color({InterfaceColors::BOX_BACKGROUND})->margin({4.0f, 4.0f})->
 		padding({2.0f, 2.0f})->owner();
 	auto createButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Create", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Create"));
-	fileName = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Filename", MV::size(110.0f, 27.0f), UTF_CHAR_STR("scene.scene"));
+	fileName = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Filename", MV::size(110.0f, 27.0f), UTF_CHAR_STR("map.scene"));
 	auto saveButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Save", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Save"));
 	auto loadButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Load", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Load"));
 

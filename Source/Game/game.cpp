@@ -229,7 +229,7 @@ std::shared_ptr<MV::Scene::Node> Game::initializeCatapultScene(){
 
 std::shared_ptr<MV::Scene::Node> Game::initializeTextScene() {
 	textLibrary.loadFont("blue", "Assets/Fonts/bluehigh.ttf", 24);
-	testBox->text(MV::stringToWide("This is a clear and obvious test!"));
+	testBox->text(MV::toWide("This is a clear and obvious test!"));
 	//testBox->scrollPosition(MV::Point<>(0, 8));
 	return testBox->owner();
 }

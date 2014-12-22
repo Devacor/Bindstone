@@ -48,6 +48,9 @@ namespace MV {
 
 			template <class Archive>
 			void serialize(Archive & archive) {
+				if (dirtyGrid) {
+					layoutCells();
+				}
 				archive(
 					CEREAL_NVP(maximumWidth),
 					CEREAL_NVP(cellDimensions),
@@ -71,7 +74,7 @@ namespace MV {
 					cereal::make_nvp("includeChildrenInChildSize", construct->includeChildrenInChildSize),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
-				construct->dirtyGrid = true;
+				construct->dirtyGrid = false;
 				construct->initialize();
 			}
 
@@ -92,16 +95,20 @@ namespace MV {
 
 			void layoutChildSize();
 
-			void observeNode(const std::shared_ptr<Node>& a_node);
+			void observeOwner(const std::shared_ptr<Node>& a_node);
+			void observeChildNode(const std::shared_ptr<Node>& a_node, bool a_calledFromOwner);
 
 			std::list<Node::BasicSharedSignalType> basicSignals;
 			std::list<Node::ParentInteractionSharedSignalType> parentInteractionSignals;
+
+			std::map<std::shared_ptr<Node>, std::list<Node::BasicSharedSignalType>> childSignals;
 
 			PointPrecision maximumWidth;
 			Size<> cellDimensions;
 			std::pair<Point<>, Point<>> cellPadding;
 			std::pair<Point<>, Point<>> margins;
 			size_t cellColumns;
+			bool allowDirty = true;
 			bool dirtyGrid;
 			bool includeChildrenInChildSize = true;
 		};

@@ -37,6 +37,7 @@ private:
 
 	void initializeWindow();
 	void initializeControls();
+	void handleScroll(int a_amount);
 
 	MV::ThreadPool pool;
 	MV::Draw2D renderer;

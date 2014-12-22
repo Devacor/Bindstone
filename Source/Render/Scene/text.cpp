@@ -90,7 +90,7 @@ namespace MV{
 
 		bool Text::text(SDL_Event &event) {
 			if (event.type == SDL_TEXTINPUT) {
-				insertAtCursor(stringToWide(event.text.text));
+				insertAtCursor(toWide(event.text.text));
 				return true;
 			} else if (event.type == SDL_TEXTEDITING) {
 				//setTemporaryText(stringToWide(event.edit.text), event.edit.start, event.edit.length);
@@ -103,10 +103,10 @@ namespace MV{
 					backspace();
 					return true;
 				} else if (event.key.keysym.sym == SDLK_v && SDL_GetModState() & KMOD_CTRL) {
-					append(stringToWide(SDL_GetClipboardText()));
+					append(toWide(SDL_GetClipboardText()));
 					return true;
 				} else if (event.key.keysym.sym == SDLK_c && SDL_GetModState() & KMOD_CTRL) {
-					SDL_SetClipboardText(wideToString(text()).c_str());
+					SDL_SetClipboardText(toString(text()).c_str());
 				} else if (event.key.keysym.sym == SDLK_LEFT) {
 					if (cursor > 0) {
 						incrementCursor(-1);

@@ -13,7 +13,7 @@ namespace MV {
 		std::shared_ptr<CharacterDefinition> &character = cachedGlyphs[renderChar];
 		if(!character){
 			character = CharacterDefinition::make(
-				SurfaceTextureDefinition::make(wideToString(renderChar), [=](){
+				SurfaceTextureDefinition::make(toString(renderChar), [=](){
 					Uint16 text[] = {static_cast<Uint16>(renderChar), '\0'};
 					return TTF_RenderUNICODE_Blended(font, text, {255, 255, 255, 255});
 				}),
@@ -243,7 +243,7 @@ namespace MV {
 		state(a_state),
 		character(a_state->font->characterDefinition(a_character)) {
 
-		shape = parent->make(guid(wideToString(character->character())))->
+		shape = parent->make(guid(toString(character->character())))->
 			attach<Scene::Sprite>()->
 			size(cast<PointPrecision>(character->characterSize()))->
 			texture(character->texture())->
@@ -294,7 +294,7 @@ namespace MV {
 	}
 
 	std::shared_ptr<FormattedState> FormattedLine::getHeightState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current) {
-		std::string heightString = wideToString(a_text.substr(2));
+		std::string heightString = toString(a_text.substr(2));
 		if(heightString.empty()){
 			return std::make_shared<FormattedState>(text.defaultState()->minimumLineHeight, a_current);
 		} else{
@@ -305,7 +305,7 @@ namespace MV {
 	}
 
 	std::shared_ptr<FormattedState> FormattedLine::getColorState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current) {
-		std::string colorString = wideToString(a_text.substr(2));
+		std::string colorString = toString(a_text.substr(2));
 		if(colorString.empty()){
 			return std::make_shared<FormattedState>(text.defaultState()->color, a_current);
 		} else{
@@ -314,7 +314,7 @@ namespace MV {
 	}
 
 	std::shared_ptr<FormattedState> FormattedLine::getFontState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current) {
-		std::string fontIdentifier = wideToString(a_text.substr(2));
+		std::string fontIdentifier = toString(a_text.substr(2));
 		if(fontIdentifier.empty()){
 			return std::make_shared<FormattedState>(text.defaultState()->font, a_current);
 		} else{

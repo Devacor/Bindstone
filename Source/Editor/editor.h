@@ -19,7 +19,7 @@
 class EditorControls;
 class Editor {
 public:
-	Editor();
+	Editor(MV::ThreadPool* pool, MV::Draw2D* renderer, MV::TextLibrary* textLibrary);
 
 	//return true if we're still good to go
 	bool update(double dt);
@@ -39,13 +39,12 @@ private:
 	void initializeControls();
 	void handleScroll(int a_amount);
 
-	MV::ThreadPool pool;
-	MV::Draw2D renderer;
+	MV::ThreadPool* pool;
+	MV::Draw2D* renderer;
+	MV::TextLibrary* textLibrary;
 
 	MV::SharedTextures textures;
 	MV::FrameSwapperRegister animationLibrary;
-
-	MV::TextLibrary textLibrary;
 
 	std::shared_ptr<MV::Scene::Text> fps;
 	std::shared_ptr<MV::Scene::Node> scene;
@@ -54,7 +53,6 @@ private:
 
 	MV::MouseState mouse;
 
-	MV::Stopwatch watch;
 	double lastUpdateDelta = 0.0f;
 	double lastSecond = 0;
 	bool done = false;
@@ -65,7 +63,5 @@ private:
 	EditorControls controlPanel;
 	SceneGraphPanel selectorPanel;
 };
-
-void sdl_quit(void);
 
 #endif

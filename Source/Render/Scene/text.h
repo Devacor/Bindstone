@@ -175,6 +175,12 @@ namespace MV{
 				);
 				construct->initialize();
 			}
+			
+			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
+				return cloneHelper(a_parent->attach<Text>(textLibrary, boxSize, fontIdentifier));
+			}
+
+			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
 		private:
 

@@ -16,7 +16,9 @@ public:
 	}
 
 	~SceneGraphPanel(){
-		box->parent()->removeFromParent();
+		if (box && box->parent()) {
+			box->parent()->removeFromParent();
+		}
 	}
 
 	void refresh(std::shared_ptr<MV::Scene::Node> a_newScene = nullptr);

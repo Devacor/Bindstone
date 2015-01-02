@@ -20,6 +20,14 @@
 #include "Render/boxaabb.h"
 #include "Utility/package.h"
 
+#define ComponentDerivedAccessors(ComponentType) \
+std::shared_ptr<ComponentType> remove() { \
+	return std::static_pointer_cast<ComponentType>(removeImplementation()); \
+} \
+std::shared_ptr<ComponentType> clone(const std::shared_ptr<MV::Scene::Node> &a_parent) { \
+	return std::static_pointer_cast<ComponentType>(cloneImplementation(a_parent)); \
+}
+
 namespace MV {
 
 	namespace Scene {
@@ -46,10 +54,22 @@ namespace MV {
 
 			std::shared_ptr<Node> owner() const;
 
-			std::shared_ptr<Component> remove();
+			std::shared_ptr<Component> remove() {
+				return removeImplementation();
+			}
+
+			std::shared_ptr<Component> clone(const std::shared_ptr<Node> &a_parent) {
+				return cloneImplementation(a_parent);
+			}
 
 		protected:
 			Component(const std::weak_ptr<Node> &a_owner);
+
+			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent);
+
+			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
+
+			std::shared_ptr<Component> removeImplementation();
 
 			void notifyParentOfBoundsChange();
 			void notifyParentOfComponentChange();
@@ -438,9 +458,14 @@ namespace MV {
 			std::shared_ptr<Node> serializable(bool a_serializable);
 
 			bool serializable() const;
+
+			std::shared_ptr<Node> clone(const std::shared_ptr<Node> &a_parent = nullptr);
 		private:
 			Node(const Node& a_rhs) = delete;
 			Node& operator=(const Node& a_rhs) = delete;
+
+			std::string getCloneId(const std::string &original) const;
+			std::shared_ptr<Node> cloneInternal(const std::shared_ptr<Node> &a_parent);
 
 			bool allowSerialize = true;
 

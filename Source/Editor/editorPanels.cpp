@@ -198,6 +198,20 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 			}
 		});
 
+	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "FlipX", buttonSize, UTF_CHAR_STR("Flip X"))->
+		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>) {
+			if (controls->texture()) {
+				controls->texture()->flipX(!controls->texture()->flipX());
+			}
+		});
+
+	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "FlipY", buttonSize, UTF_CHAR_STR("Flip Y"))->
+		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>) {
+			if (controls->texture()) {
+				controls->texture()->flipY(!controls->texture()->flipY());
+			}
+		});
+
 	if(controls){
 		auto xClick = posX->owner()->component<MV::Scene::Clickable>();
 		xClick->onAccept.connect("updateX", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
@@ -674,7 +688,7 @@ void ChooseElementCreationType::createRectangle(const MV::BoxAABB<int> &a_select
 	panel.selection().disable();
 	auto transformedSelection = panel.root()->localFromScreen(a_selected);
 
-	auto newShape = panel.root()->make(MV::guid("rectangle"))->position(transformedSelection.minPoint)->attach<MV::Scene::Sprite>()->size(transformedSelection.size())->color({ CREATED_DEFAULT });
+	auto newShape = panel.root()->make(MV::guid("rectangle"))->position(transformedSelection.minPoint)->attach<MV::Scene::Sprite>()->size(transformedSelection.size())->color({ CREATED_DEFAULT })->shader( MV::DEFAULT_ID );
 
 	panel.resources().editor->sceneUpdated();
 

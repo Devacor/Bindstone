@@ -228,7 +228,21 @@ namespace MV {
 		}
 
 		void Grid::initialize() {
+			Drawable::initialize();
 			observeOwner(owner());
+		}
+
+		std::shared_ptr<Component> Grid::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+			Drawable::cloneHelper(a_clone);
+			auto gridClone = std::static_pointer_cast<Grid>(a_clone);
+			gridClone->maximumWidth = maximumWidth;
+			gridClone->cellDimensions = cellDimensions;
+			gridClone->margins = margins;
+			gridClone->cellPadding = cellPadding;
+			gridClone->cellColumns = cellColumns;
+			gridClone->includeChildrenInChildSize = includeChildrenInChildSize;
+			gridClone->dirtyGrid = true;
+			return a_clone;
 		}
 
 	}

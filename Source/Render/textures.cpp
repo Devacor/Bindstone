@@ -23,7 +23,7 @@ namespace MV {
 	\**************************************/
 
 	bool clearTexturePoints(std::vector<DrawPoint> &a_points) {
-		if(a_points.size() == 4){
+		if (a_points.size() == 4) {
 			a_points[0].textureX = 0.0f; a_points[0].textureY = 0.0f;
 			a_points[1].textureX = 0.0f; a_points[1].textureY = 1.0f;
 			a_points[2].textureX = 1.0f; a_points[2].textureY = 1.0f;
@@ -54,36 +54,36 @@ namespace MV {
 		return pot_surface;
 	}
 
-	GLenum getTextureFormat(SDL_Surface* img){
+	GLenum getTextureFormat(SDL_Surface* img) {
 		int nOfColors = img->format->BytesPerPixel;
-		if (nOfColors == 4){	  // contains an alpha channel
-			if (img->format->Rmask == 0x000000ff){
+		if (nOfColors == 4) {	  // contains an alpha channel
+			if (img->format->Rmask == 0x000000ff) {
 				return GL_RGBA;
-			} else{
+			} else {
 				return GL_BGRA;
 			}
-		} else if (nOfColors == 3){	  // no alpha channel
-			if (img->format->Rmask == 0x000000ff){
+		} else if (nOfColors == 3) {	  // no alpha channel
+			if (img->format->Rmask == 0x000000ff) {
 				return GL_RGB;
-			} else{
+			} else {
 				return GL_BGR;
 			}
 		}
 		return 0;
 	}
 
-	GLenum getInternalTextureFormat(SDL_Surface* img){
+	GLenum getInternalTextureFormat(SDL_Surface* img) {
 		int nOfColors = img->format->BytesPerPixel;
-		if (nOfColors == 4){	  // contains an alpha channel
+		if (nOfColors == 4) {	  // contains an alpha channel
 			return GL_RGBA;
-		} else if (nOfColors == 3){	  // no alpha channel
+		} else if (nOfColors == 3) {	  // no alpha channel
 			return GL_RGB;
 		}
 		return 0;
 	}
 
-	SDL_Surface* convertToPowerOfTwoSurface(SDL_Surface *a_img){
-		if(a_img != nullptr && (!isPowerOfTwo(a_img->w) || !isPowerOfTwo(a_img->h))){
+	SDL_Surface* convertToPowerOfTwoSurface(SDL_Surface *a_img) {
+		if (a_img != nullptr && (!isPowerOfTwo(a_img->w) || !isPowerOfTwo(a_img->h))) {
 			int widthPowerOfTwo = roundUpPowerOfTwo(a_img->w);
 			int heightPowerOfTwo = roundUpPowerOfTwo(a_img->h);
 
@@ -104,7 +104,7 @@ namespace MV {
 	bool loadTextureFromFile(const std::string &a_file, GLuint &a_imageLoaded, Size<int> &a_size, Size<int> &a_originalSize, bool a_powerTwo, bool a_repeat) {
 		std::cout << "Loading: " << a_file << std::endl;
 		SDL_Surface *img = IMG_Load(a_file.c_str());
-		if (!img){
+		if (!img) {
 			std::cerr << "Failed to load texture: (" << a_file << ") " << SDL_GetError() << std::endl;
 			return false;
 		}
@@ -118,17 +118,17 @@ namespace MV {
 	bool loadTextureFromSurface(SDL_Surface *a_img, GLuint &a_imageLoaded, Size<int> &a_size, Size<int> &a_originalSize, bool a_powerTwo, bool a_repeat) {
 		a_originalSize.width = a_img->w;
 		a_originalSize.height = a_img->h;
-		if(a_powerTwo){
+		if (a_powerTwo) {
 			a_img = convertToPowerOfTwoSurface(a_img);
 		}
 
-		if(a_img == nullptr){
+		if (a_img == nullptr) {
 			std::cerr << "ERROR: loadTextureFromSurface was provided a null SDL_Surface!" << std::endl;
 			return false;
 		}
 
 		GLenum textureFormat = getTextureFormat(a_img);
-		if(!textureFormat){
+		if (!textureFormat) {
 			std::cerr << "Unable to determine texture format!" << std::endl;
 			return false;
 		}
@@ -160,75 +160,75 @@ namespace MV {
 		isShared(a_isShared),
 		onReload(onReloadAction),
 		textureName(a_name),
-		texture(0){
+		texture(0) {
 	}
 
-	void TextureDefinition::load(){
-		if(!loaded()){
+	void TextureDefinition::load() {
+		if (!loaded()) {
 			reloadImplementation();
-			if(isShared){
+			if (isShared) {
 				onReloadAction(shared_from_this());
 			}
 		}
 	}
 
-	GLuint TextureDefinition::textureId() const{
+	GLuint TextureDefinition::textureId() const {
 		return texture;
 	}
 
-	bool TextureDefinition::loaded() const{
+	bool TextureDefinition::loaded() const {
 		return texture != 0;
 	}
 
-	Size<int> TextureDefinition::size() const{
+	Size<int> TextureDefinition::size() const {
 		require<ResourceException>(loaded(), "size:: The texture hasn't actually loaded yet.  You may need to create a handle to implicitly force a texture load.");
 		return textureSize;
 	}
 
-	Size<int> TextureDefinition::size(){
-		if(!loaded()){
+	Size<int> TextureDefinition::size() {
+		if (!loaded()) {
 			load();
 			auto ourSize = textureSize;
 			cleanupOpenglTexture();
 			return ourSize;
-		} else{
+		} else {
 			return textureSize;
 		}
 	}
 
-	Size<int> TextureDefinition::contentSize() const{
+	Size<int> TextureDefinition::contentSize() const {
 		require<ResourceException>(loaded(), "contentSize:: The texture hasn't actually loaded yet.  You may need to create a handle to implicitly force a texture load.");
 		return desiredSize;
 	}
 
-	Size<int> TextureDefinition::contentSize(){
-		if(!loaded()){
+	Size<int> TextureDefinition::contentSize() {
+		if (!loaded()) {
 			load();
 			auto ourSize = desiredSize;
 			cleanupOpenglTexture();
 			return ourSize;
-		} else{
+		} else {
 			return desiredSize;
 		}
 	}
 
-	std::string TextureDefinition::name() const{
+	std::string TextureDefinition::name() const {
 		return textureName;
 	}
 
-	void TextureDefinition::unload(){
+	void TextureDefinition::unload() {
 		cleanupOpenglTexture();
 	}
 
-	void TextureDefinition::unload(TextureHandle* toRemove){
-		handles.erase(std::remove_if(handles.begin(), handles.end(), [&](const std::weak_ptr<TextureHandle> &value){return value.expired() || &(*value.lock()) == toRemove; }), handles.end());
-		if(handles.empty()){
+	void TextureDefinition::unload(TextureHandle* toRemove) {
+		handles.erase(std::remove_if(handles.begin(), handles.end(), [&](const std::weak_ptr<TextureHandle> &value) {return value.expired() || &(*value.lock()) == toRemove; }), handles.end());
+		if (handles.empty()) {
 			cleanupOpenglTexture();
 		}
 	}
 
 	std::shared_ptr<TextureHandle> TextureDefinition::makeHandle() {
-		if (handles.empty()){
+		if (handles.empty()) {
 			load();
 		}
 		auto handle = std::shared_ptr<TextureHandle>(new TextureHandle(shared_from_this()));
@@ -237,7 +237,7 @@ namespace MV {
 	}
 
 	std::shared_ptr<TextureHandle> TextureDefinition::makeHandle(const BoxAABB<int> &a_bounds) {
-		if (handles.empty()){
+		if (handles.empty()) {
 			load();
 		}
 		auto handle = std::shared_ptr<TextureHandle>(new TextureHandle(shared_from_this(), a_bounds));
@@ -251,7 +251,7 @@ namespace MV {
 	}
 
 	void TextureDefinition::cleanupOpenglTexture() {
-		if(texture){
+		if (texture) {
 			glDeleteTextures(1, &texture);
 			texture = 0; //just to be certain, glDeleteTextures may not set a texture id to 0.
 			cleanupImplementation();
@@ -260,17 +260,17 @@ namespace MV {
 	}
 
 	void TextureDefinition::save(const std::string &a_fileName) {
-		if(!loaded()){
+		if (!loaded()) {
 			load();
 			saveLoadedTexture(a_fileName, texture);
 			cleanupOpenglTexture();
-		} else{
+		} else {
 			saveLoadedTexture(a_fileName, texture);
 		}
 	}
 
 	void TextureDefinition::reload() {
-		if(loaded()){
+		if (loaded()) {
 			cleanupOpenglTexture();
 			load();
 		}
@@ -281,7 +281,7 @@ namespace MV {
 	| ---FileTextureDefinition--- |
 	\*****************************/
 
-	void FileTextureDefinition::reloadImplementation(){
+	void FileTextureDefinition::reloadImplementation() {
 		loadTextureFromFile(textureName, texture, textureSize, desiredSize, powerTwo, repeat);
 	}
 
@@ -340,7 +340,7 @@ namespace MV {
 	| ---TextureHandle--- |
 	\*********************/
 
-	std::shared_ptr<TextureHandle> TextureHandle::bounds(const BoxAABB<int> &a_bounds){
+	std::shared_ptr<TextureHandle> TextureHandle::bounds(const BoxAABB<int> &a_bounds) {
 		handleRegion = a_bounds;
 		updatePercentBounds();
 		return shared_from_this();
@@ -350,7 +350,7 @@ namespace MV {
 		return handleRegion;
 	}
 
-	std::shared_ptr<TextureHandle> TextureHandle::percentBounds(const BoxAABB<PointPrecision> &a_bounds){
+	std::shared_ptr<TextureHandle> TextureHandle::percentBounds(const BoxAABB<PointPrecision> &a_bounds) {
 		handlePercent = a_bounds;
 		updateIntegralBounds();
 		return shared_from_this();
@@ -371,45 +371,50 @@ namespace MV {
 		resizeToParent(a_bounds == BoxAABB<int>(point(-1, -1))),
 		flipTextureX(false),
 		flipTextureY(false),
-		debugName(a_texture->name()){
+		debugName(a_texture->name()) {
 
-		onParentReload = TextureDefinition::SignalType::make([&](std::shared_ptr<TextureDefinition> a_texture){
-			if(resizeToParent){
-				bounds({a_texture->size()});
+		onParentReload = TextureDefinition::SignalType::make([&](std::shared_ptr<TextureDefinition> a_texture) {
+			if (resizeToParent) {
+				bounds({ a_texture->size() });
 			}
 			updatePercentBounds();
 		});
 		observeTextureReload();
-		if(a_texture && a_texture->loaded()){
-			if(resizeToParent){
+		if (a_texture && a_texture->loaded()) {
+			if (resizeToParent) {
 				handleRegion = textureDefinition->size();
-				handlePercent = {point(0.0f, 0.0f), point(1.0f, 1.0f)};
-			} else{
-				updatePercentBounds();
+				handlePercent = { point(0.0f, 0.0f), point(1.0f, 1.0f) };
+			} else {
+				updatePercentBoundsNoSignal();
 			}
 		}
 	}
 
 	TextureHandle::~TextureHandle() {
-		if(textureDefinition){
+		if (textureDefinition) {
 			textureDefinition->unload(this);
 		}
 	}
 
-	void TextureHandle::observeTextureReload(){
-		if(textureDefinition){
+	void TextureHandle::observeTextureReload() {
+		if (textureDefinition) {
 			textureDefinition->onReload.connect(onParentReload);
 		}
 	}
 
-	void TextureHandle::updatePercentBounds(){
+	void TextureHandle::updatePercentBoundsNoSignal() {
 		handlePercent = cast<PointPrecision>(handleRegion) / toScale(textureDefinition->size());
-		if(flipX()){
+		if (flipX()) {
 			std::swap(handlePercent.maxPoint.x, handlePercent.minPoint.x);
 		}
-		if(flipY()){
+		if (flipY()) {
 			std::swap(handlePercent.maxPoint.y, handlePercent.minPoint.y);
 		}
+	}
+
+	void TextureHandle::updatePercentBounds(){
+		updatePercentBoundsNoSignal();
+		sizeChanges(shared_from_this());
 	}
 
 	void TextureHandle::updateIntegralBounds(){
@@ -419,11 +424,13 @@ namespace MV {
 	std::shared_ptr<TextureHandle> TextureHandle::flipX( bool a_flip ) {
 		flipTextureX = a_flip;
 		updatePercentBounds();
+		return shared_from_this();
 	}
 
 	std::shared_ptr<TextureHandle> TextureHandle::flipY(bool a_flip) {
 		flipTextureY = a_flip;
 		updatePercentBounds();
+		return shared_from_this();
 	}
 
 	bool TextureHandle::flipX() const {
@@ -448,6 +455,17 @@ namespace MV {
 			return true;
 		}
 		return false;
+	}
+
+	std::shared_ptr<TextureHandle> TextureHandle::clone() {
+		auto result = textureDefinition->makeHandle();
+		result->flipTextureX = flipTextureX;
+		result->flipTextureY = flipTextureY;
+		result->debugName = debugName;
+		result->resizeToParent = resizeToParent;
+		result->handleRegion = handleRegion;
+		result->handlePercent = handlePercent;
+		return result;
 	}
 
 	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture) {

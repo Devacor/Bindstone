@@ -4,25 +4,26 @@
 #include "node.h"
 
 #define DrawableDerivedAccessors(ComponentType) \
-	std::shared_ptr<ComponentType> color(const Color &a_newColor) { \
-		return std::static_pointer_cast<ComponentType>(Drawable::color(a_newColor)); \
+	ComponentDerivedAccessors(ComponentType) \
+	std::shared_ptr<ComponentType> color(const MV::Color &a_newColor) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::color(a_newColor)); \
 	}\
 	std::shared_ptr<ComponentType> shader(const std::string &a_shaderProgramId) { \
-		return std::static_pointer_cast<ComponentType>(Drawable::shader(a_shaderProgramId)); \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::shader(a_shaderProgramId)); \
 	} \
-	std::shared_ptr<ComponentType> texture(std::shared_ptr<TextureHandle> a_texture) { \
-		return std::static_pointer_cast<ComponentType>(Drawable::texture(a_texture)); \
+	std::shared_ptr<ComponentType> texture(std::shared_ptr<MV::TextureHandle> a_texture) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::texture(a_texture)); \
 	} \
 	std::shared_ptr<ComponentType> show() { \
-		return std::static_pointer_cast<ComponentType>(Drawable::show()); \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::show()); \
 	} \
 	std::shared_ptr<ComponentType> hide() { \
-		return std::static_pointer_cast<ComponentType>(Drawable::hide()); \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::hide()); \
 	} \
-	Color color() const { \
-		return Drawable::color(); \
+	MV::Color color() const { \
+		return MV::Scene::Drawable::color(); \
 	} \
-	std::shared_ptr<TextureHandle> texture() const{ \
+	std::shared_ptr<MV::TextureHandle> texture() const{ \
 		return ourTexture; \
 	} \
 	std::string shader() const { \
@@ -117,6 +118,12 @@ namespace MV {
 				construct->initialize();
 			}
 
+			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
+				return cloneHelper(a_parent->attach<Drawable>());
+			}
+
+			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
+
 			std::vector<DrawPoint> points;
 			std::vector<GLuint> vertexIndices;
 
@@ -132,6 +139,8 @@ namespace MV {
 			GLenum drawType = GL_TRIANGLES;
 
 			bool shouldDraw = true;
+
+			virtual void initialize() override;
 
 		private:
 

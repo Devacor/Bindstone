@@ -168,5 +168,29 @@ namespace MV {
 			Component(a_owner) {
 		}
 
+		void Drawable::initialize() {
+			Component::initialize();
+			if (ourTexture && !textureSizeSignal) {
+				textureSizeSignal = TextureHandle::SignalType::make([&](std::shared_ptr<MV::TextureHandle> a_handle) {
+					updateTextureCoordinates();
+				});
+				ourTexture->sizeObserver.connect(textureSizeSignal);
+			}
+		}
+
+		std::shared_ptr<Component> Drawable::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+			Component::cloneHelper(a_clone);
+			auto drawableClone = std::static_pointer_cast<Drawable>(a_clone);
+			drawableClone->shouldDraw = shouldDraw;
+			drawableClone->ourTexture = (ourTexture) ? ourTexture->clone() : nullptr;
+			drawableClone->shader(shaderProgramId);
+			drawableClone->vertexIndices = vertexIndices;
+			drawableClone->localBounds = localBounds;
+			drawableClone->drawType = drawType;
+			drawableClone->points = points;
+			drawableClone->notifyParentOfBoundsChange();
+			return a_clone;
+		}
+
 	}
 }

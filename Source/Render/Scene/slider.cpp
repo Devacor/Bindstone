@@ -24,11 +24,13 @@ namespace MV {
 		}
 
 		std::shared_ptr<Slider> Slider::handle(const std::shared_ptr<Node> &a_handleNode) {
-			dragHandle = a_handleNode;
-			if (dragHandle->parent() != owner()) {
-				dragHandle->parent(owner());
+			if (a_handleNode) {
+				dragHandle = a_handleNode;
+				if (dragHandle->parent() != owner()) {
+					dragHandle->parent(owner());
+				}
+				updateHandlePosition();
 			}
-			updateHandlePosition();
 			return std::static_pointer_cast<Slider>(shared_from_this());
 		}
 
@@ -81,6 +83,25 @@ namespace MV {
 					dragHandle->position({ mix(areaBounds.minPoint.x, firstX, .5f), mix(areaBounds.minPoint.y, secondY, dragPercent) });
 				}
 			}
+		}
+
+		void Slider::initialize() {
+			Clickable::initialize();
+			Clickable::onDrag.connect("HandleDrag", [](const std::shared_ptr<Clickable> &a_clickable, const Point<int> &startPosition, const Point<int> &deltaPosition) {
+				auto self = std::static_pointer_cast<Slider>(a_clickable);
+				self->updateDragFromMouse();
+			});
+		}
+
+		std::shared_ptr<Component> Slider::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+			Clickable::cloneHelper(a_clone);
+			auto sliderClone = std::static_pointer_cast<Slider>(a_clone);
+			sliderClone->dragPercent = dragPercent;
+			if (dragHandle) {
+				auto foundHandle = sliderClone->owner()->get(dragHandle->id());
+				sliderClone->handle(foundHandle);
+			}
+			return a_clone;
 		}
 
 	}

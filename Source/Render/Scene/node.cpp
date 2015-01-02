@@ -1,6 +1,7 @@
 #include "node.h"
 #include "stddef.h"
 #include <numeric>
+#include <regex>
 #include "cereal/archives/json.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Component);
@@ -41,12 +42,6 @@ namespace MV {
 			owner()->onComponentUpdateSlot(shared_from_this());
 		}
 
-		std::shared_ptr<Component> Component::remove() {
-			auto self = shared_from_this(); //guard against deallocation
-			onRemoved();
-			return self;
-		}
-
 		std::shared_ptr<Node> Component::owner() const {
 			require<PointerException>(!componentOwner.expired(), "Component owner has expired! You are storing a reference to the component, but not the node that owns it!");
 			return componentOwner.lock();
@@ -62,6 +57,20 @@ namespace MV {
 
 		BoxAABB<> Component::worldBounds() {
 			return owner()->worldFromLocal(boundsImplementation());
+		}
+
+		std::shared_ptr<Component> Component::removeImplementation() {
+			auto self = shared_from_this(); //guard against deallocation
+			onRemoved();
+			return self;
+		}
+
+		std::shared_ptr<Component> Component::cloneImplementation(const std::shared_ptr<Node> &a_parent) {
+			return cloneHelper(a_parent->attach<Component>());
+		}
+
+		std::shared_ptr<Component> Component::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+			return a_clone;
 		}
 
 
@@ -727,6 +736,101 @@ namespace MV {
 			for (auto&& child : *this) {
 				child->markMatrixDirty(false);
 			}
+		}
+
+		std::string Node::getCloneId(const std::string &a_original) const {
+			std::regex clonePattern("(.+) (\\(clone ([0-9]*)\\))");
+			std::smatch originalMatches;
+			std::regex_match(a_original, originalMatches, clonePattern);
+			std::string strippedId = (originalMatches.size() > 2) ? originalMatches[1] : a_original;
+			
+			int cloneCount = 0;
+			for (auto&& child : childNodes) {
+				if (cloneCount < 0 && child->nodeId == strippedId) {
+					cloneCount = 1;
+				} else {
+					std::smatch matches;
+					std::regex_match(child->nodeId, matches, clonePattern);
+					if (matches.size() > 3 && matches[1] == strippedId) {
+						cloneCount = std::max(cloneCount, std::stoi(matches[3]) + 1);
+					}
+				}
+			}
+
+			if (cloneCount == 0) {
+				return strippedId;
+			} else {
+				return strippedId + " (clone " + std::to_string(cloneCount) + ")";
+			}
+		}
+
+		std::shared_ptr<Node> Node::clone(const std::shared_ptr<Node> &a_parent) {
+			std::string newNodeId = nodeId;
+			if (a_parent) {
+				newNodeId = a_parent->getCloneId(nodeId);
+			} else if (myParent) {
+				newNodeId = myParent->getCloneId(nodeId);
+			}
+			std::shared_ptr<Node> result = Node::make(draw2d, nodeId);
+
+			result->myParent = a_parent ? a_parent.get() : nullptr;
+			result->allowDraw = allowDraw;
+			result->allowUpdate = allowUpdate;
+			result->translateTo = translateTo;
+			result->rotateTo = rotateTo;
+			result->scaleTo = scaleTo;
+			result->sortDepth = sortDepth;
+			result->nodeAlpha = nodeAlpha;
+			result->localBounds = localBounds;
+			result->localChildBounds = localChildBounds;
+			result->allowSerialize = allowSerialize;
+			result->localMatrixDirty = true;
+			result->worldMatrixDirty = true;
+
+			for (auto&& childNode : childNodes) {
+				result->childNodes.push_back(childNode->cloneInternal(result));
+			}
+
+			for (auto&& childComponent : childComponents) {
+				result->childComponents.push_back(childComponent->clone(result));
+			}
+
+			recalculateAlpha();
+			recalculateMatrixAfterLoad();
+
+			if (a_parent) {
+				a_parent->add(result);
+			}
+
+			return result;
+		}
+
+		std::shared_ptr<Node> Node::cloneInternal(const std::shared_ptr<Node> &a_parent) {
+			std::shared_ptr<Node> result = Node::make(draw2d, nodeId);
+
+			result->myParent = a_parent.get();
+			result->allowDraw = allowDraw;
+			result->allowUpdate = allowUpdate;
+			result->translateTo = translateTo;
+			result->rotateTo = rotateTo;
+			result->scaleTo = scaleTo;
+			result->sortDepth = sortDepth;
+			result->nodeAlpha = nodeAlpha;
+			result->localBounds = localBounds;
+			result->localChildBounds = localChildBounds;
+			result->allowSerialize = allowSerialize;
+			result->localMatrixDirty = true;
+			result->worldMatrixDirty = true;
+
+			for (auto&& childNode : childNodes) {
+				result->childNodes.push_back(childNode->cloneInternal(result));
+			}
+
+			for (auto&& childComponent : childComponents) {
+				result->childComponents.push_back(childComponent->clone(result));
+			}
+
+			return result;
 		}
 
 	}

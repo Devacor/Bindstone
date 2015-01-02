@@ -38,7 +38,7 @@
     <Filter Include="Spine">
       <UniqueIdentifier>{a9e6e258-2f83-4621-a11a-6dfead5562d8}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Game\Editor">
+    <Filter Include="Source Files\Editor">
       <UniqueIdentifier>{bc2e2e42-7286-4b0a-bdef-60af206310ca}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
@@ -183,19 +183,19 @@
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
     <ClCompile Include="Source\Editor\editor.cpp">
-      <Filter>Source Files\Game\Editor</Filter>
+      <Filter>Source Files\Editor</Filter>
     </ClCompile>
     <ClCompile Include="Source\Editor\editorControls.cpp">
-      <Filter>Source Files\Game\Editor</Filter>
+      <Filter>Source Files\Editor</Filter>
     </ClCompile>
     <ClCompile Include="Source\Editor\editorFactories.cpp">
-      <Filter>Source Files\Game\Editor</Filter>
+      <Filter>Source Files\Editor</Filter>
     </ClCompile>
     <ClCompile Include="Source\Editor\editorPanels.cpp">
-      <Filter>Source Files\Game\Editor</Filter>
+      <Filter>Source Files\Editor</Filter>
     </ClCompile>
     <ClCompile Include="Source\Editor\editorSelection.cpp">
-      <Filter>Source Files\Game\Editor</Filter>
+      <Filter>Source Files\Editor</Filter>
     </ClCompile>
     <ClCompile Include="Source\Render\Scene\emitter.cpp">
       <Filter>Source Files\Render\Scene</Filter>
@@ -216,7 +216,7 @@
       <Filter>Source Files\Render</Filter>
     </ClCompile>
     <ClCompile Include="Source\Editor\editorSceneGraphPanel.cpp">
-      <Filter>Source Files\Game\Editor</Filter>
+      <Filter>Source Files\Editor</Filter>
     </ClCompile>
     <ClCompile Include="Source\Render\Scene\drawable.cpp">
       <Filter>Source Files\Render\Scene</Filter>
@@ -226,6 +226,9 @@
     </ClCompile>
     <ClCompile Include="Source\Render\Scene\clickable.cpp">
       <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Game\building.cpp">
+      <Filter>Source Files\Game</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -542,22 +545,22 @@
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
     <ClInclude Include="Source\Editor\editor.h">
-      <Filter>Source Files\Game\Editor</Filter>
+      <Filter>Source Files\Editor</Filter>
     </ClInclude>
     <ClInclude Include="Source\Editor\editorControls.h">
-      <Filter>Source Files\Game\Editor</Filter>
+      <Filter>Source Files\Editor</Filter>
     </ClInclude>
     <ClInclude Include="Source\Editor\editorDefines.h">
-      <Filter>Source Files\Game\Editor</Filter>
+      <Filter>Source Files\Editor</Filter>
     </ClInclude>
     <ClInclude Include="Source\Editor\editorFactories.h">
-      <Filter>Source Files\Game\Editor</Filter>
+      <Filter>Source Files\Editor</Filter>
     </ClInclude>
     <ClInclude Include="Source\Editor\editorPanels.h">
-      <Filter>Source Files\Game\Editor</Filter>
+      <Filter>Source Files\Editor</Filter>
     </ClInclude>
     <ClInclude Include="Source\Editor\editorSelection.h">
-      <Filter>Source Files\Game\Editor</Filter>
+      <Filter>Source Files\Editor</Filter>
     </ClInclude>
     <ClInclude Include="Source\Render\Scene\emitter.h">
       <Filter>Source Files\Render\Scene</Filter>
@@ -587,7 +590,7 @@
       <Filter>Source Files\Render</Filter>
     </ClInclude>
     <ClInclude Include="Source\Editor\editorSceneGraphPanel.h">
-      <Filter>Source Files\Game\Editor</Filter>
+      <Filter>Source Files\Editor</Filter>
     </ClInclude>
     <ClInclude Include="Source\Network\package.h">
       <Filter>Source Files\Render\Scene</Filter>
@@ -600,6 +603,12 @@
     </ClInclude>
     <ClInclude Include="Source\Render\Scene\clickable.h">
       <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\gameEditor.h">
+      <Filter>Source Files\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\building.h">
+      <Filter>Source Files\Game</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

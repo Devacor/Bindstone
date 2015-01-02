@@ -1,4 +1,4 @@
-#include "Editor/editor.h"
+#include "Game/gameEditor.h"
 #include "vld.h"
 #include "Utility/threadPool.h"
 
@@ -12,16 +12,9 @@ bool isDone() {
 }
 
 int main(int argc, char *argv[]){
-	Editor editor;
-	MV::Stopwatch timer;
-	timer.start();
+	GameEditor menu;
 
-	while(editor.update(timer.delta("tick"))){
-		editor.handleInput();
-		editor.render();
-		MV::systemSleep(0);
-	}
-	
-	system("pause");
+	menu.start();
+
 	return 0;
 }

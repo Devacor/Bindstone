@@ -158,5 +158,26 @@ namespace MV {
 			return refreshShaderId;
 		}
 
+		void Clipped::initialize() {
+			Sprite::initialize();
+			observeNode(owner());
+		}
+
+		std::shared_ptr<Component> Clipped::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+			Sprite::cloneHelper(a_clone);
+			auto textClone = std::static_pointer_cast<Clipped>(a_clone);
+			textClone->refreshShader(refreshShaderId);
+			textClone->capturedBounds = capturedBounds;
+			return a_clone;
+		}
+
+		std::shared_ptr<Clipped> Clipped::clone(const std::shared_ptr<Node> &a_parent) {
+			return std::static_pointer_cast<Clipped>(cloneImplementation(a_parent));
+		}
+
+		std::shared_ptr<Clipped> Clipped::remove() {
+			return std::static_pointer_cast<Clipped>(removeImplementation());
+		}
+
 	}
 }

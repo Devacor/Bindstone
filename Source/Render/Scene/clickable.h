@@ -6,11 +6,11 @@
 
 #define ClickableComponentDerivedAccessors(ComponentType) \
 	SpriteDerivedAccessors(ComponentType) \
-	std::shared_ptr<ComponentType> clickDetectionType(BoundsType a_type) { \
-		return std::static_pointer_cast<ComponentType>(Clickable::clickDetectionType(a_type)); \
+	std::shared_ptr<ComponentType> clickDetectionType(MV::Scene::Clickable::BoundsType a_type) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Clickable::clickDetectionType(a_type)); \
 	} \
-	BoundsType clickDetectionType() { \
-		return Clickable::clickDetectionType(); \
+	MV::Scene::Clickable::BoundsType clickDetectionType() { \
+		return MV::Scene::Clickable::clickDetectionType(); \
 	}
 
 namespace MV {
@@ -104,6 +104,12 @@ namespace MV {
 				);
 				construct->initialize();
 			}
+
+			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
+				return cloneHelper(a_parent->attach<Clickable>(mouse()));
+			}
+
+			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
 		private:
 			MouseState::SignalType onLeftMouseDownHandle;

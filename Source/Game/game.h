@@ -16,6 +16,19 @@ public:
 	bool update(double dt);
 	void handleInput();
 	void render();
+
+	MV::ThreadPool* getPool() {
+		return &pool;
+	}
+
+	MV::Draw2D* getRenderer() {
+		return &renderer;
+	}
+
+	MV::TextLibrary* getTextLibrary() {
+		return &textLibrary;
+	}
+
 private:
 	Game(const Game &) = delete;
 	Game& operator=(const Game &) = delete;
@@ -24,72 +37,20 @@ private:
 	void initializeWindow();
 	std::shared_ptr<MV::Scene::Node> initializeTextScene();
 
+	MV::ThreadPool pool;
 	MV::Draw2D renderer;
+	MV::TextLibrary textLibrary;
 
 	MV::SharedTextures textures;
-	MV::FrameSwapperRegister animationLibrary;
-
-	MV::TextLibrary textLibrary;
-	std::shared_ptr<MV::Scene::Text> testBox;
-	std::shared_ptr<MV::Scene::Node> mainScene;
-	std::shared_ptr<MV::Scene::Sprite> testShape;
-
-	MV::AxisAngles angleIncrement;
-
-	std::shared_ptr<MV::Scene::Clickable> armScene;
-
+	
+	std::shared_ptr<MV::Scene::Node> worldScene;
+	
 	bool done;
 	MV::MouseState mouse;
 
+	double lastUpdateDelta;
+
 	//MV::Scene::Clickable::Signals armInputHandles;
-
-	MV::Stopwatch watch;
-	double lastSecond = 0;
-
-	void hookUpInput();
-
-	void saveTest(){
-		std::cout << "Save Begin" << std::endl;
-		std::stringstream stream;
-		{
-			std::shared_ptr<MV::Scene::Node> saveScene;
-			cereal::JSONOutputArchive archive(stream);
-			saveScene = mainScene->get("clipped");
-			archive(cereal::make_nvp("test", saveScene));
-			saveScene->parent()->remove(saveScene);
-			saveScene.reset();
-			if(lastSecond == 0){
-				lastSecond = 1;
-				std::ofstream toFile("sceneSave.txt");
-				toFile << stream.str();
-			}
-		}
-		std::cout << "YAYA" << std::endl;
-
-		{
-			cereal::JSONInputArchive archive(stream);
-			archive.add(cereal::make_nvp("mouse", &mouse), cereal::make_nvp("renderer", &renderer));
-			std::shared_ptr<MV::Scene::Node> loadScene;
-			auto nvp = cereal::make_nvp("test", loadScene);
-			archive(nvp);
-			loadScene->shared_from_this();
-			if(!loadScene){
-				std::cout << "What the fuck" << std::endl;
-			}
-			mainScene->add(loadScene);
-			loadScene->shared_from_this();
-			armScene = loadScene->get("clickArm")->component<MV::Scene::Clickable>();
-		}
-
-		auto test = mainScene->get("clipped");
-
-		if(std::floor(watch.check()) > lastSecond){
-			lastSecond = std::floor(watch.check());
-			std::cout << lastSecond << std::endl;
-		}
-		std::cout << "Save End" << std::endl;
-		hookUpInput();
-	}
 };
 
-void quit(void);
+void sdl_quit(void);

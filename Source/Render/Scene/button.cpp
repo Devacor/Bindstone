@@ -110,5 +110,23 @@ namespace MV {
 			}
 		}
 
+		std::shared_ptr<Component> Button::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+			Clickable::cloneHelper(a_clone);
+			auto buttonClone = std::static_pointer_cast<Button>(a_clone);
+			if (activeView) {
+				auto foundHandle = buttonClone->owner()->get(activeView->id());
+				buttonClone->activeNode(foundHandle);
+			}
+			if (idleView) {
+				auto foundHandle = buttonClone->owner()->get(idleView->id());
+				buttonClone->idleNode(foundHandle);
+			}
+			if (disabledView) {
+				auto foundHandle = buttonClone->owner()->get(disabledView->id());
+				buttonClone->disabledNode(foundHandle);
+			}
+			return a_clone;
+		}
+
 	}
 }

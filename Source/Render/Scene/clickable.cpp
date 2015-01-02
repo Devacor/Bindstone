@@ -138,5 +138,14 @@ namespace MV {
 				return false;
 			}
 		}
+
+		std::shared_ptr<Component> Clickable::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+			Sprite::cloneHelper(a_clone);
+			auto clickableClone = std::static_pointer_cast<Clickable>(a_clone);
+			clickableClone->eatTouches = eatTouches;
+			clickableClone->hitDetectionType = hitDetectionType;
+			return a_clone;
+		}
+
 	}
 }

@@ -21,6 +21,9 @@ namespace MV {
 				return std::static_pointer_cast<Clipped>(Sprite::corners(a_TopLeft, a_TopRight, a_BottomLeft, a_BottomRight));
 			}
 
+			std::shared_ptr<Clipped> clone(const std::shared_ptr<Node> &a_parent);
+			std::shared_ptr<Clipped> remove();
+
 			void refreshTexture(bool a_forceRefreshEvenIfNotDirty = true);
 
 			std::shared_ptr<Clipped> clearCaptureBounds();
@@ -56,9 +59,13 @@ namespace MV {
 				construct->initialize();
 			}
 
-			virtual void initialize() override {
-				observeNode(owner());
+			virtual void initialize() override;
+
+			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
+				return cloneHelper(a_parent->attach<Clipped>());
 			}
+
+			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 		private:
 			virtual bool preDraw();
 			virtual bool postDraw();

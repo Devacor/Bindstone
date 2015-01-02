@@ -200,6 +200,7 @@
     <ClCompile Include="Source\Editor\editorSceneGraphPanel.cpp" />
     <ClCompile Include="Source\Editor\editorSelection.cpp" />
     <ClCompile Include="Source\exampleCode.cpp" />
+    <ClCompile Include="Source\Game\building.cpp" />
     <ClCompile Include="Source\Game\game.cpp" />
     <ClCompile Include="Source\Game\pathGrid.cpp" />
     <ClCompile Include="Source\Interface\mouse.cpp" />
@@ -314,6 +315,8 @@
     <ClInclude Include="Source\Editor\editorPanels.h" />
     <ClInclude Include="Source\Editor\editorSceneGraphPanel.h" />
     <ClInclude Include="Source\Editor\editorSelection.h" />
+    <ClInclude Include="Source\Game\building.h" />
+    <ClInclude Include="Source\Game\gameEditor.h" />
     <ClInclude Include="Source\Render\boxaabb.h" />
     <ClInclude Include="Source\Render\Scene\emitter.h" />
     <ClInclude Include="Source\Render\Scene\grid.h" />

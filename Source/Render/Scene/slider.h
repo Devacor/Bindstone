@@ -51,13 +51,13 @@ namespace MV {
 				construct->initialize();
 			}
 
-			virtual void initialize() override {
-				Clickable::initialize();
-				Clickable::onDrag.connect("HandleDrag", [](const std::shared_ptr<Clickable> &a_clickable, const Point<int> &startPosition, const Point<int> &deltaPosition) {
-					auto self = std::static_pointer_cast<Slider>(a_clickable);
-					self->updateDragFromMouse();
-				});
+			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
+				return cloneHelper(a_parent->attach<Slider>(mouse()));
 			}
+
+			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
+
+			virtual void initialize() override;
 
 		private:
 			virtual void acceptDownClick();

@@ -260,6 +260,15 @@ namespace MV {
 			return{ spawnProperties.minimumPosition, spawnProperties.maximumPosition };
 		}
 
+		std::shared_ptr<Component> Emitter::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+			Drawable::cloneHelper(a_clone);
+			auto emitterClone = std::static_pointer_cast<Emitter>(a_clone);
+			emitterClone->emitterThreads = emitterThreads;
+			emitterClone->spawnProperties = spawnProperties;
+			emitterClone->spawnParticles = spawnParticles;
+			return a_clone;
+		}
+
 		MV::Scene::EmitterSpawnProperties loadEmitterProperties(const std::string &a_file) {
 			try {
 				std::ifstream file(a_file);

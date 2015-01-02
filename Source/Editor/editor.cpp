@@ -3,18 +3,15 @@
 #include "editorPanels.h"
 #include "editorFactories.h"
 
-void sdl_quit(void){
-	SDL_Quit();
-	TTF_Quit();
-}
-
-Editor::Editor():
-	textLibrary(renderer),
-	scene(MV::Scene::Node::make(renderer, "root")),
-	controls(MV::Scene::Node::make(renderer)),
-	controlPanel(controls, scene, SharedResources(this, &pool, &textures, &textLibrary, &mouse)),
-	selectorPanel(scene, controls, SharedResources(this, &pool, &textures, &textLibrary, &mouse)),
-	testNode(MV::Scene::Node::make(renderer)){
+Editor::Editor(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer, MV::TextLibrary* a_textLibrary):
+	pool(a_pool),
+	renderer(a_renderer),
+	textLibrary(a_textLibrary),
+	scene(MV::Scene::Node::make(*renderer, "root")),
+	controls(MV::Scene::Node::make(*renderer)),
+	controlPanel(controls, scene, SharedResources(this, pool, &textures, textLibrary, &mouse)),
+	selectorPanel(scene, controls, SharedResources(this, pool, &textures, textLibrary, &mouse)),
+	testNode(MV::Scene::Node::make(*renderer)){
 
 	initializeWindow();
 	initializeControls();
@@ -88,8 +85,12 @@ bool Editor::update(double dt){
 	//testNode->get("middleSquare")->get("twoDeep")->addRotation(MV::AxisAngles(0.0f, 0.0f, 45.0f) * static_cast<float>(dt))->translate(MV::Point<>(-10.0, -10.0f) * static_cast<float>(dt));
 	fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
 	selectorPanel.update();
-	pool.run();
-	return !done;
+	pool->run();
+	if (done) {
+		done = false;
+		return false;
+	}
+	return true;
 }
 
 void Editor::sceneUpdated(){
@@ -97,22 +98,6 @@ void Editor::sceneUpdated(){
 }
 
 void Editor::initializeWindow(){
-	MV::initializeFilesystem();
-	srand(static_cast<unsigned int>(time(0)));
-	//RENDERER SETUP:::::::::::::::::::::::::::::::::
-	MV::Size<> worldSize(960, 640);
-	MV::Size<int> windowSize(960, 640);
-
-	renderer.window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
-
-	if(!renderer.initialize(windowSize, worldSize)){
-		exit(0);
-	}
-	renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
-	renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
-	atexit(sdl_quit);
-
-	AudioPlayer::instance()->initAudio();
 	mouse.update();
 	
 	mouse.onLeftMouseDown.connect("initDrag", [&](MV::MouseState& a_mouse){
@@ -127,56 +112,18 @@ void Editor::initializeWindow(){
 		}, [](){}));
 	});
 
-	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
-	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
-	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
-
-	textures.assemblePacks("Assets/Atlases", &renderer);
+	textures.assemblePacks("Assets/Atlases", renderer);
 	textures.files("Assets/Map");
 
 	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
 	fps = controls->make("FPS")->position({960.0f - 50.0f, 0.0f})->
-		attach<MV::Scene::Text>(textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->wrapping(MV::TextWrapMethod::NONE);
-	
-	std::vector<std::string> names{"patternTest1.png", "platform.png", "rock.png", "joint.png", "slice.png", "spatula.png"};
-	//selectorPanel.refresh();
-	/*MV::TexturePack pack(&renderer);
-
-	std::ifstream stream("Combined.texture");
-	cereal::JSONInputArchive archive(stream);
-	archive.add(cereal::make_nvp("renderer", &renderer));
-	archive(cereal::make_nvp("pack", pack));
-
-	auto rockHandle = pack.handle("rock.png");
-	scene->make<MV::Scene::Sprite>(MV::BoxAABB<>(MV::point(100.0f, 100.0f), MV::cast<MV::PointPrecision>(rockHandle->bounds().size())))->texture(rockHandle);*/
-
-	/*pack.addToScene(scene);
-
-	auto slicedthing = scene->make<MV::Scene::Sliced>(MV::Scene::SliceDimensions({8.0f, 8.0f}, {32.0f, 32.0f}), MV::size(100.0f, 50.0f))->
-		position({300.0f, 300.0f})->
-		texture(texture->makeHandle(MV::size(32, 32)))->
-		rotate(45.0f)->
-		scale(2.0f)->
-		shader(MV::PREMULTIPLY_ID);
-	scene->make<MV::Scene::Sprite>(MV::size(100.0f, 100.0f))->position({500.0f, 400.0f})->texture(texture->makeHandle(MV::size(256, 256)))->shader(MV::PREMULTIPLY_ID);
-
-	/*auto spineGuy = scene->make<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Example/spineboy.json", "Assets/Spine/Example/spineboy.atlas"))->
-		position({500.0f, 500.0f})->
-		scale(.5f)->
-		animate("run")->
-		queueAnimation("death", false, 5)->
-		queueAnimation("run");*/
-
-	/*auto emitter = scene->make<MV::Scene::Emitter>("Emitter", &pool, MV::Scene::loadEmitterProperties("particle.txt"))->position({300.0f, 300.0f})->depth(100000.0f)->
-		texture(texture->makeHandle({MV::point(32, 32), MV::size(32, 32)}))->shader(MV::PREMULTIPLY_ID);*/
-
-	//spineGuy->crossfade("death", "run", 1); //*/
+		attach<MV::Scene::Text>(*textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->wrapping(MV::TextWrapMethod::NONE);
 }
 
 void Editor::handleInput(){
 	SDL_Event event;
 	while(SDL_PollEvent(&event)){
-		if(!renderer.handleEvent(event)){
+		if(!renderer->handleEvent(event)){
 			switch(event.type){
 			case SDL_QUIT:
 				done = true;
@@ -214,8 +161,7 @@ void Editor::handleInput(){
 }
 
 void Editor::render(){
-	renderer.clearScreen();
-	//testNode->drawUpdate(watch.delta());
+	renderer->clearScreen();
 	
 	if(controlPanel.root() != scene){
 		scene = controlPanel.root();
@@ -224,7 +170,7 @@ void Editor::render(){
 	}
 	scene->drawUpdate(lastUpdateDelta);
 	controls->drawUpdate(lastUpdateDelta);
-	renderer.updateScreen();
+	renderer->updateScreen();
 }
 
 void Editor::initializeControls(){

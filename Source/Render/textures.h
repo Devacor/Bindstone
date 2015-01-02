@@ -234,6 +234,8 @@ namespace MV {
 		SlotRegister<void(std::shared_ptr<TextureHandle>)> sizeObserver;
 
 		std::string name() const;
+
+		std::shared_ptr<TextureHandle> clone();
 	private:
 		TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const BoxAABB<int> &a_bounds = BoxAABB<int>(point(-1, -1)));
 
@@ -264,6 +266,7 @@ namespace MV {
 		}
 
 		void updatePercentBounds();
+		void updatePercentBoundsNoSignal();
 		void updateIntegralBounds();
 		void observeTextureReload();
 

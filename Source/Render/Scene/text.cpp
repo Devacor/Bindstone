@@ -143,5 +143,13 @@ namespace MV{
 			cursorScene->hide();
 		}
 
+		std::shared_ptr<Component> Text::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+			Drawable::cloneHelper(a_clone);
+			auto textClone = std::static_pointer_cast<Text>(a_clone);
+			textClone->wrapping(wrapMethod);
+			textClone->contentScrollPosition = contentScrollPosition;
+			return a_clone;
+		}
+
 	}
 }

@@ -5,21 +5,21 @@
 
 #define SpriteDerivedAccessors(ComponentType) \
 	DrawableDerivedAccessors(ComponentType) \
-	std::shared_ptr<ComponentType> bounds(const BoxAABB<> &a_bounds) { \
-		return std::static_pointer_cast<ComponentType>(Sprite::bounds(a_bounds)); \
+	std::shared_ptr<ComponentType> bounds(const MV::BoxAABB<> &a_bounds) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Sprite::bounds(a_bounds)); \
 	} \
 	BoxAABB<> bounds() { \
 		return boundsImplementation(); \
 	} \
-	std::shared_ptr<ComponentType> size(const Size<> &a_size, const Point<> &a_centerPoint) { \
-		return std::static_pointer_cast<ComponentType>(Sprite::size(a_size, a_centerPoint)); \
+	std::shared_ptr<ComponentType> size(const MV::Size<> &a_size, const MV::Point<> &a_centerPoint) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Sprite::size(a_size, a_centerPoint)); \
 	} \
-	std::shared_ptr<ComponentType> size(const Size<> &a_size, bool a_center = false) { \
-		return std::static_pointer_cast<ComponentType>(Sprite::size(a_size, a_center)); \
+	std::shared_ptr<ComponentType> size(const MV::Size<> &a_size, bool a_center = false) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Sprite::size(a_size, a_center)); \
 	} \
 	template<typename PointAssign> \
 	std::shared_ptr<PointAssign> corners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight){ \
-		return std::static_pointer_cast<ComponentType>(Sprite::corners(a_TopLeft, a_TopRight, a_BottomLeft, a_BottomRight)); \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Sprite::corners(a_TopLeft, a_TopRight, a_BottomLeft, a_BottomRight)); \
 	}
 
 namespace MV {
@@ -92,6 +92,10 @@ namespace MV {
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
 				construct->initialize();
+			}
+
+			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
+				return cloneHelper(a_parent->attach<Sprite>());
 			}
 
 		private:

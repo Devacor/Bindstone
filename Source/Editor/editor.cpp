@@ -83,7 +83,7 @@ bool Editor::update(double dt){
 	}
 	//testNode->translate(MV::Point<>(10.0, 10.0f) * static_cast<float>(dt));
 	//testNode->get("middleSquare")->get("twoDeep")->addRotation(MV::AxisAngles(0.0f, 0.0f, 45.0f) * static_cast<float>(dt))->translate(MV::Point<>(-10.0, -10.0f) * static_cast<float>(dt));
-	fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
+	//fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
 	selectorPanel.update();
 	pool->run();
 	if (done) {
@@ -109,7 +109,7 @@ void Editor::initializeWindow(){
 			mouse.onLeftMouseUp.connect("cancelDrag", [=](MV::MouseState& a_mouse2){
 				a_mouse2.onMove.disconnect(signature);
 			});
-		}, [](){}));
+		}, [](){}, "ControlPanelDrag"));
 	});
 
 	textures.assemblePacks("Assets/Atlases", renderer);

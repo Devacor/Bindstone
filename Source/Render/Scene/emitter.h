@@ -60,7 +60,7 @@ namespace MV {
 				position += distance * timeScale;
 				position += gravityConstant * timeScale;
 
-				currentFrame = static_cast<int>(boundBetween(static_cast<float>(myTextures.size() * (change.animationFramesPerSecond / timeScale)), 0.0f, static_cast<float>(myTextures.size())));
+				currentFrame = static_cast<int>(wrap(static_cast<float>(myTextures.size() * (change.animationFramesPerSecond / timeScale)), 0.0f, static_cast<float>(myTextures.size())));
 				return totalLifespan == change.maxLifespan;
 			}
 
@@ -171,7 +171,7 @@ namespace MV {
 			}
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
-				return cloneHelper(a_parent->attach<Emitter>(pool));
+				return cloneHelper(a_parent->attach<Emitter>(pool).self());
 			}
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);

@@ -27,7 +27,7 @@ namespace MV {
 		}
 		~Stopwatch(){}
 		
-		//starts the timer without returning a value, restarts the timer if already started
+		//starts the timer from 0, restarts the timer if already started
 		void start();
 		
 		//returns the current time delta since it originally was started... OR starts the stopwatch

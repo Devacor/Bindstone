@@ -9,7 +9,7 @@ class EditorPanel;
 
 class EditableGrid {
 public:
-	EditableGrid(std::shared_ptr<MV::Scene::Grid> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+	EditableGrid(MV::Scene::SafeComponent<MV::Scene::Grid> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
 
 	~EditableGrid() {
 		controlContainer->removeFromParent();
@@ -24,19 +24,19 @@ public:
 
 	std::function<void(EditableGrid*)> onChange;
 
-	std::shared_ptr<MV::Scene::Grid> elementToEdit;
+	MV::Scene::SafeComponent<MV::Scene::Grid> elementToEdit;
 private:
 
 	MV::MouseState *mouse;
 
-	std::shared_ptr<MV::Scene::Clickable> positionHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> positionHandle;
 
 	std::shared_ptr<MV::Scene::Node> controlContainer;
 };
 
 class EditableRectangle {
 public:
-	EditableRectangle(std::shared_ptr<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
+	EditableRectangle(MV::Scene::SafeComponent<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
 
 	~EditableRectangle(){
 		controlContainer->removeFromParent();
@@ -60,19 +60,19 @@ public:
 
 	std::function<void(EditableRectangle*)> onChange;
 
-	std::shared_ptr<MV::Scene::Sprite> elementToEdit;
+	MV::Scene::SafeComponent<MV::Scene::Sprite> elementToEdit;
 private:
 
 	MV::MouseState *mouse;
 
 	MV::Size<> aspectSize;
 
-	std::shared_ptr<MV::Scene::Clickable> topLeftSizeHandle;
-	std::shared_ptr<MV::Scene::Clickable> topRightSizeHandle;
-	std::shared_ptr<MV::Scene::Clickable> bottomLeftSizeHandle;
-	std::shared_ptr<MV::Scene::Clickable> bottomRightSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> topLeftSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> topRightSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> bottomLeftSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> bottomRightSizeHandle;
 
-	std::shared_ptr<MV::Scene::Clickable> positionHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> positionHandle;
 
 	std::shared_ptr<MV::Scene::Node> controlContainer;
 };
@@ -90,7 +90,7 @@ public:
 private:
 	std::shared_ptr<MV::Scene::Node> scene;
 
-	std::shared_ptr<MV::Scene::Sprite> visibleSelection;
+	MV::Scene::SafeComponent<MV::Scene::Sprite> visibleSelection;
 	MV::MouseState &mouse;
 	MV::BoxAABB<int> selection;
 	std::function<void(const MV::BoxAABB<int> &)> selectedCallback;
@@ -108,7 +108,7 @@ private:
 
 class EditableEmitter {
 public:
-	EditableEmitter(std::shared_ptr<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+	EditableEmitter(MV::Scene::SafeComponent<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
 
 	~EditableEmitter(){
 		controlContainer->removeFromParent();
@@ -130,17 +130,17 @@ public:
 	void repositionHandles(bool a_fireOnChange = true, bool a_repositionElement = true, bool a_resizeElement = true);
 
 	std::function<void(EditableEmitter*)> onChange;
-	std::shared_ptr<MV::Scene::Emitter> elementToEdit;
+	MV::Scene::SafeComponent<MV::Scene::Emitter> elementToEdit;
 private:
 
 	MV::MouseState *mouse;
 
-	std::shared_ptr<MV::Scene::Clickable> topLeftSizeHandle;
-	std::shared_ptr<MV::Scene::Clickable> topRightSizeHandle;
-	std::shared_ptr<MV::Scene::Clickable> bottomLeftSizeHandle;
-	std::shared_ptr<MV::Scene::Clickable> bottomRightSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> topLeftSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> topRightSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> bottomLeftSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> bottomRightSizeHandle;
 
-	std::shared_ptr<MV::Scene::Clickable> positionHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> positionHandle;
 
 	std::shared_ptr<MV::Scene::Node> controlContainer;
 };

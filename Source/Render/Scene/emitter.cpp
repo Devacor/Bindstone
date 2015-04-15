@@ -162,8 +162,8 @@ namespace MV {
 			for (int group = 0; group < emitterThreads; ++group) {
 				copyTasks.emplace_back([=]() {
 					size_t indexSize = threadData[group].vertexIndices.size();
-					moveCopy(pointBuffer, pointOffset, threadData[group].points);
-					moveCopy(vertexIndexBuffer, vertexOffset, threadData[group].vertexIndices);
+					moveCopy(pointBuffer, threadData[group].points, pointOffset);
+					moveCopy(vertexIndexBuffer, threadData[group].vertexIndices, vertexOffset);
 					for (size_t index = vertexOffset; index < vertexOffset + indexSize; ++index) {
 						vertexIndexBuffer[index] += static_cast<GLuint>(pointOffset);
 					}
@@ -208,7 +208,7 @@ namespace MV {
 			return !spawnParticles;
 		}
 
-		inline std::shared_ptr<Emitter> Emitter::enable() {
+		std::shared_ptr<Emitter> Emitter::enable() {
 			spawnParticles = true;
 			return std::static_pointer_cast<Emitter>(shared_from_this());
 		}

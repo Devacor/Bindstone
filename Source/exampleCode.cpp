@@ -38,11 +38,11 @@ void ManipulateText(std::shared_ptr<MV::Scene::Node> mainScene){
 }
 
 std::shared_ptr<MV::Scene::Sprite> GetDogShape(std::shared_ptr<MV::Scene::Node> mainScene){
-	return mainScene->get("DogFox")->get("dog")->component<MV::Scene::Sprite>();
+	return mainScene->get("DogFox")->get("dog")->component<MV::Scene::Sprite>().self();
 }
 
 std::shared_ptr<MV::Scene::Sprite> GetFoxShape(std::shared_ptr<MV::Scene::Node> mainScene){
-	return mainScene->get("DogFox")->get("fox")->component<MV::Scene::Sprite>();
+	return mainScene->get("DogFox")->get("fox")->component<MV::Scene::Sprite>().self();
 }
 
 void LoadTexturesAndAnimations(MV::FrameSwapperRegister &animationLibrary){
@@ -81,7 +81,7 @@ void CreateDogFoxScene(std::shared_ptr<MV::Scene::Node> mainScene){
 void UpdateSky(std::shared_ptr<MV::Scene::Node> mainScene){
 	mainScene->get("SunAndMoon")->addRotation(MV::point(0.0f, 0.0f, -0.2f));
 	MV::Point<> position = mainScene->get("SunAndMoon")->rotation();
-	float distance = (float)abs(MV::boundBetween(position.z, 0.0f, 360.0f) - 180.0);
+	float distance = (float)abs(MV::wrap(position.z, 0.0f, 360.0f) - 180.0);
 	float brightness = distance / 180.0f;
 	if(brightness < .1f){brightness = .1f;}
 

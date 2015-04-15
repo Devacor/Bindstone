@@ -34,6 +34,7 @@ public:
 			activeTextbox->enableCursor();
 		}
 	}
+
 protected:
 	EditorControls &panel;
 	std::shared_ptr<TexturePicker> picker;

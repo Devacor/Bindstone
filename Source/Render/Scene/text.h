@@ -12,7 +12,7 @@ namespace MV{
 			friend cereal::access;
 
 		public:
-			typedef void TextSlotSignature(const std::shared_ptr<Text> &);
+			typedef void TextSlotSignature(std::shared_ptr<Text>);
 
 		private:
 
@@ -177,7 +177,7 @@ namespace MV{
 			}
 			
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
-				return cloneHelper(a_parent->attach<Text>(textLibrary, boxSize, fontIdentifier));
+				return cloneHelper(a_parent->attach<Text>(textLibrary, boxSize, fontIdentifier).self());
 			}
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);

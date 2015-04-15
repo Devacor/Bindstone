@@ -126,48 +126,84 @@ namespace MV {
 			}
 		}
 
+		void block(std::function<T> a_blockedCallback = nullptr) {
+			isBlocked = true;
+			blockedCallback = a_blockedCallback;
+			calledWhileBlocked = false;
+		}
+
+		bool unblock() {
+			if (isBlocked) {
+				isBlocked = false;
+				return calledWhileBlocked;
+			}
+			return false;
+		}
+
+		bool blocked() const {
+			return isBlocked;
+		}
+
 		template <typename ...Arg>
 		void operator()(Arg &&... a_parameters){
-			inCall = true;
-			SCOPE_EXIT{
-				inCall = false;
-				for(auto&& i : disconnectQueue){
-					observers.erase(i);
-				}
-				disconnectQueue.clear();
-			};
+			if (!isBlocked) {
+				inCall = true;
+				SCOPE_EXIT{
+					inCall = false;
+					for (auto&& i : disconnectQueue) {
+						observers.erase(i);
+					}
+					disconnectQueue.clear();
+				};
 
-			for (auto i = observers.begin(); i != observers.end();) {
-				if (i->expired()) {
-					observers.erase(i++);
-				} else {
-					auto next = i;
-					++next;
-					i->lock()->notify(std::forward<Arg>(a_parameters)...);
-					i = next;
+				for (auto i = observers.begin(); i != observers.end();) {
+					if (i->expired()) {
+						observers.erase(i++);
+					} else {
+						auto next = i;
+						++next;
+						i->lock()->notify(std::forward<Arg>(a_parameters)...);
+						i = next;
+					}
+				}
+			}
+
+			if (isBlocked) {
+				calledWhileBlocked = true;
+				if (blockedCallback) {
+					blockedCallback(std::forward<Arg>(a_parameters)...);
 				}
 			}
 		}
 
 		template <typename ...Arg>
 		void operator()(){
-			inCall = true;
-			SCOPE_EXIT{
-				inCall = false;
-				for(auto&& i : disconnectQueue){
-					observers.erase(i);
-				}
-				disconnectQueue.clear();
-			};
+			if (!isBlocked) {
+				inCall = true;
+				SCOPE_EXIT{
+					inCall = false;
+					for (auto&& i : disconnectQueue) {
+						observers.erase(i);
+					}
+					disconnectQueue.clear();
+				};
 
-			for(auto i = observers.begin(); i != observers.end();) {
-				if(i->expired()) {
-					observers.erase(i++);
-				} else {
-					auto next = i;
-					++next;
-					i->lock()->notify();
-					i = next;
+				for (auto i = observers.begin(); i != observers.end();) {
+					if (i->expired()) {
+						observers.erase(i++);
+					} else {
+						auto next = i;
+						++next;
+						i->lock()->notify();
+						i = next;
+					}
+				}
+			}
+			
+			if (isBlocked){
+				calledWhileBlocked = true;
+				if (blockedCallback) {
+					blockedCallback(std::forward<Arg>(a_parameters)...);
 				}
 			}
 		}
@@ -196,7 +232,10 @@ namespace MV {
 		std::set< std::weak_ptr< Signal<T> >, std::owner_less<std::weak_ptr<Signal<T>>> > observers;
 		size_t observerLimit = std::numeric_limits<size_t>::max();
 		bool inCall = false;
+		bool isBlocked = false;
+		std::function<T> blockedCallback;
 		std::vector< std::shared_ptr<Signal<T>> > disconnectQueue;
+		bool calledWhileBlocked = false;
 	};
 
 	//Can be used as a public SlotRegister member for connecting slots to a private Slot member.
@@ -231,7 +270,14 @@ namespace MV {
 		}
 
 		void disconnect(const std::string &a_id){
-			slot.disconnect(ownedConnections[a_id]);
+			auto connectionToRemove = ownedConnections.find(a_id);
+			if (connectionToRemove != ownedConnections.end()) {
+				slot.disconnect(*connectionToRemove);
+			}
+		}
+
+		bool connected(const std::string &a_id) {
+			return ownedConnections.find(a_id) != ownedConnections.end();
 		}
 	private:
 		std::map<std::string, SharedSignalType> ownedConnections;

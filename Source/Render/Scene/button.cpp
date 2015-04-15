@@ -75,29 +75,43 @@ namespace MV {
 
 		void Button::acceptDownClick() {
 			std::lock_guard<std::recursive_mutex> guard(lock);
-			auto self = shared_from_this(); //guard against deletion
-			Clickable::acceptDownClick();
-			if (clickDetectionType() != Clickable::BoundsType::NONE) {
+			auto self = shared_from_this(); //guard self against deletion
+			Clickable::acceptDownClick(); //this may still pull the "node" rug out from under us, hence the ownerIsAlive check.
+			if (clickDetectionType() != Clickable::BoundsType::NONE && ownerIsAlive()) {
 				setCurrentView(activeView);
 			}
 		}
 
 		void Button::acceptUpClick() {
 			std::lock_guard<std::recursive_mutex> guard(lock);
-			auto self = shared_from_this(); //guard against deletion
+			auto self = shared_from_this();
 			Clickable::acceptUpClick();
-			if (clickDetectionType() != Clickable::BoundsType::NONE) {
+			if (clickDetectionType() != Clickable::BoundsType::NONE && ownerIsAlive()) {
 				setCurrentView(idleView);
 			}
 		}
 
-		void Button::setCurrentView(const std::shared_ptr<Node> &a_view) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
-			currentView = a_view;
+		void Button::cancelPress(bool a_callCancelCallbacks) {
+			if (inPressEvent()) {
+				auto self = std::static_pointer_cast<Button>(shared_from_this());
+				Clickable::cancelPress(a_callCancelCallbacks);
+				if (clickDetectionType() != Clickable::BoundsType::NONE && ownerIsAlive()) {
+					setCurrentView(idleView);
+				}
+			}
+		}
 
-			showOrHideView(activeView);
-			showOrHideView(idleView);
-			showOrHideView(disabledView);
+		void Button::setCurrentView(const std::shared_ptr<Node> &a_view) {
+			if (currentView != a_view) {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				currentView = a_view;
+
+				showOrHideView(activeView);
+				showOrHideView(idleView);
+				showOrHideView(disabledView);
+
+				notifyParentOfComponentChange();
+			}
 		}
 
 		void Button::showOrHideView(const std::shared_ptr<Node> &a_view) {

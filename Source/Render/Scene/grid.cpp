@@ -172,7 +172,7 @@ namespace MV {
 					std::cout << "Background child add!" << std::endl;
 				}
 				dirtyGrid = true;
-				observeChildNode(a_this, true);
+				observeChildNode(a_this);
 			}));
 			basicSignals.push_back(a_node->onBoundsRequest.connect([&](const std::shared_ptr<Node> &a_this){
 				if (dirtyGrid) {
@@ -186,25 +186,21 @@ namespace MV {
 				std::cout << "Background register!" << std::endl;
 			}
 			for (auto&& child : *a_node) {
-				observeChildNode(child, true);
+				observeChildNode(child);
 			}
 		}
 
-		void Grid::observeChildNode(const std::shared_ptr<Node>& a_node, bool a_calledFromOwner) {
+		void Grid::observeChildNode(const std::shared_ptr<Node>& a_node) {
 			auto markDirty = [&](const std::shared_ptr<Node> &a_this) {
-				if (a_this->parent()->id() == "Background") {
-					std::cout << "Background child dirty!" << std::endl;
-				}
 				if (allowDirty) {
 					dirtyGrid = true;
 				}
 			};
 			auto& childSignalBucket = childSignals[a_node];
-			if (a_calledFromOwner) {
-				childSignalBucket.push_back(a_node->onOrderChange.connect(markDirty));
-				childSignalBucket.push_back(a_node->onShow.connect(markDirty));
-				childSignalBucket.push_back(a_node->onHide.connect(markDirty));
-			}
+			childSignalBucket.push_back(a_node->onOrderChange.connect(markDirty));
+			childSignalBucket.push_back(a_node->onShow.connect(markDirty));
+			childSignalBucket.push_back(a_node->onHide.connect(markDirty));
+			childSignalBucket.push_back(a_node->onTransformChange.connect(markDirty));
 			childSignalBucket.push_back(a_node->onLocalBoundsChange.connect(markDirty));
 			childSignalBucket.push_back(a_node->onRemove.connect([&](const std::shared_ptr<Node> &a_this){
 				auto found = childSignals.find(a_this);
@@ -212,12 +208,6 @@ namespace MV {
 					childSignals.erase(found);
 				}
 			}));
-			childSignalBucket.push_back(a_node->onChildAdd.connect([&](const std::shared_ptr<Node> &a_this) {
-				observeChildNode(a_this, false);
-			}));
-			for (auto&& child : *a_node) {
-				observeChildNode(child, false);
-			}
 		}
 
 		BoxAABB<> Grid::boundsImplementation() {

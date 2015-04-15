@@ -35,11 +35,21 @@ namespace MV {
 
 
 		void Component::notifyParentOfBoundsChange() {
-			owner()->recalculateLocalBounds();
+			try{
+				owner()->recalculateLocalBounds();
+			} catch (PointerException &) {
+			}
+		}
+
+		bool Component::ownerIsAlive() const {
+			return !componentOwner.expired();
 		}
 
 		void Component::notifyParentOfComponentChange() {
-			owner()->onComponentUpdateSlot(shared_from_this());
+			try {
+				owner()->onComponentUpdateSlot(shared_from_this());
+			} catch (PointerException &) {
+			}
 		}
 
 		std::shared_ptr<Node> Component::owner() const {
@@ -59,14 +69,8 @@ namespace MV {
 			return owner()->worldFromLocal(boundsImplementation());
 		}
 
-		std::shared_ptr<Component> Component::removeImplementation() {
-			auto self = shared_from_this(); //guard against deallocation
-			onRemoved();
-			return self;
-		}
-
 		std::shared_ptr<Component> Component::cloneImplementation(const std::shared_ptr<Node> &a_parent) {
-			return cloneHelper(a_parent->attach<Component>());
+			return cloneHelper(a_parent->attach<Component>().self());
 		}
 
 		std::shared_ptr<Component> Component::cloneHelper(const std::shared_ptr<Component> &a_clone) {
@@ -83,7 +87,8 @@ namespace MV {
 		void Node::draw() {
 			if (allowDraw) {
 				bool allowChildrenToDraw = true;
-				for (auto&& component : childComponents) {
+				auto stableComponentList = childComponents;
+				for (auto&& component : stableComponentList) {
 					allowChildrenToDraw = component->draw() && allowChildrenToDraw;
 				}
 				if (allowChildrenToDraw) {
@@ -94,7 +99,8 @@ namespace MV {
 
 		void Node::drawChildren() {
 			if (allowDraw) {
-				for (auto&& child : childNodes) {
+				auto stableChildNodes = childNodes;
+				for (auto&& child : stableChildNodes) {
 					child->draw();
 				}
 			}
@@ -102,11 +108,13 @@ namespace MV {
 
 		void Node::draw(const TransformMatrix &a_overrideParentMatrix) {
 			if (allowDraw) {
-				SCOPE_EXIT{ usingTemporaryMatrix = false; };
+				SCOPE_EXIT{ usingTemporaryMatrix = false; worldMatrixDirty = true; localMatrixDirty = true; };
 				usingTemporaryMatrix = true;
-				temporaryWorldMatrixTransform = a_overrideParentMatrix * localTransform();
+				temporaryWorldMatrixTransform = a_overrideParentMatrix;
+				temporaryWorldMatrixTransform *= localTransform();
 				bool allowChildrenToDraw = true;
-				for (auto&& component : childComponents) {
+				auto stableComponentList = childComponents;
+				for (auto&& component : stableComponentList) {
 					allowChildrenToDraw = component->draw() && allowChildrenToDraw;
 				}
 				if (allowChildrenToDraw) {
@@ -117,7 +125,8 @@ namespace MV {
 
 		void Node::drawChildren(const TransformMatrix &a_overrideParentMatrix) {
 			if (allowDraw) {
-				for (auto&& child : childNodes) {
+				auto stableChildNodes = childNodes;
+				for (auto&& child : stableChildNodes) {
 					child->draw(a_overrideParentMatrix);
 				}
 			}
@@ -125,35 +134,42 @@ namespace MV {
 
 		void Node::update(double a_delta) {
 			if (allowUpdate) {
-				for (auto&& component : childComponents) {
+				auto stableComponentList = childComponents;
+				for (auto&& component : stableComponentList) {
 					component->update(a_delta);
 				}
-				for (auto&& child : childNodes) {
+				auto stableChildNodes = childNodes;
+				for (auto&& child : stableChildNodes) {
 					child->update(a_delta);
 				}
+				rootTask.update(a_delta);
 			}
 		}
 
 		void Node::drawUpdate(double a_delta) {
+			auto selfReference = shared_from_this(); //keep us alive no matter the update step
 			if (allowDraw && allowUpdate) {
 				bool allowChildrenToDraw = true;
-				for (auto&& component : childComponents) {
+				auto stableComponentList = childComponents;
+				for (auto&& component : stableComponentList) {
 					component->update(a_delta);
 					allowChildrenToDraw = component->draw() && allowChildrenToDraw;
 				}
+				auto stableChildNodes = childNodes;
 				if (allowChildrenToDraw) {
-					for (auto&& child : childNodes) {
+					for (auto&& child : stableChildNodes) {
 						child->drawUpdate(a_delta);
 					}
 				} else {
-					for (auto&& child : childNodes) {
+					for (auto&& child : stableChildNodes) {
 						child->update(a_delta);
 					}
 				}
+				rootTask.update(a_delta);
 			} else if (allowDraw) {
-				draw();
+				selfReference->draw();
 			} else if (allowUpdate) {
-				update(a_delta);
+				selfReference->update(a_delta);
 			}
 		}
 
@@ -211,10 +227,11 @@ namespace MV {
 				return a_child->id() == a_id;
 			});
 			if(foundNode != childNodes.end()){
+				auto self = shared_from_this();
 				auto child = *foundNode;
 				childNodes.erase(foundNode);
 				child->onRemoveSlot(child);
-				onChildRemoveSlot(shared_from_this(), child);
+				onChildRemoveSlot(self, child);
 				return child;
 			}
 			require<ResourceException>(!a_throw, "Failed to remove: [", a_id, "] from parent node: [", nodeId, "]");
@@ -227,10 +244,11 @@ namespace MV {
 				return a_ourChild == a_child;
 			});
 			if(foundNode != childNodes.end()){
+				auto self = shared_from_this();
 				auto child = *foundNode;
 				childNodes.erase(foundNode);
 				child->onRemoveSlot(child);
-				onChildRemoveSlot(shared_from_this(), child);
+				onChildRemoveSlot(self, child);
 				return child;
 			}
 			require<ResourceException>(!a_throw, "Failed to remove: [", a_child->id(), "] from parent node: [", nodeId, "]");
@@ -244,7 +262,7 @@ namespace MV {
 				auto childToRemove = *childNodes.begin();
 				childNodes.erase(childNodes.begin());
 				childToRemove->onRemoveSlot(childToRemove);
-				onChildRemoveSlot(shared_from_this(), childToRemove);
+				onChildRemoveSlot(self, childToRemove);
 			}
 			return self;
 		}
@@ -357,12 +375,15 @@ namespace MV {
 			return (myParent) ? myParent->indexOf(shared_from_this()) : 0;
 		}
 
-		std::vector<size_t> Node::parentIndexList(size_t a_globalPriority /*= 0*/) {
+		std::vector<size_t> Node::parentIndexList(size_t a_globalPriority, size_t a_modifyLastPriority) {
 			std::vector<size_t> list;
 			Node* current = this;
 			while(current){
 				list.push_back(current->myIndex());
 				current = current->myParent;
+			}
+			if (!list.empty()) {
+				list[0] += a_modifyLastPriority;
 			}
 			list.push_back(a_globalPriority); //This gives us the ability to prioritize more things before any nodes get evaluated.
 			std::reverse(list.begin(), list.end());
@@ -394,6 +415,8 @@ namespace MV {
 				inBoundsCalculation = true;
 				SCOPE_EXIT{ inBoundsCalculation = false; };
 
+				auto oldBounds = localBounds;
+
 				if (!childComponents.empty()) {
 					localBounds = childComponents[0]->bounds();
 					for (size_t i = 1; i < childComponents.size(); ++i) {
@@ -408,7 +431,10 @@ namespace MV {
 				if (myParent) {
 					myParent->recalculateChildBounds();
 				}
-				onLocalBoundsChangeSlot(self);
+
+				if (localBounds != oldBounds) {
+					onLocalBoundsChangeSlot(self);
+				}
 			}
 		}
 
@@ -486,7 +512,9 @@ namespace MV {
 			onTransformChange(onTransformChangeSlot),
 			onLocalBoundsChange(onLocalBoundsChangeSlot),
 			onOrderChange(onOrderChangeSlot),
-			onAlphaChange(onAlphaChangeSlot) {
+			onAlphaChange(onAlphaChangeSlot),
+			onChange(onChangeSlot),
+			onComponentUpdate(onComponentUpdateSlot){
 
 			worldMatrixTransform.makeIdentity();
 			onAdd.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
@@ -495,20 +523,56 @@ namespace MV {
 				});
 				onTransformChangeSlot(a_self);
 				recalculateAlpha();
+				safeOnChange();
 			});
 			onRemove.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
 				if (myParent) {
 					myParent->recalculateChildBounds();
 					myParent = nullptr;
 				}
-				onParentTransformChangeSignal = nullptr;
+
 				onParentAlphaChangeSignal = nullptr;
 				onTransformChangeSlot(a_self);
 				recalculateAlpha();
+				safeOnChange();
 			});
 			onTransformChange.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
 				markMatrixDirty();
+				safeOnChange();
 			});
+			
+			auto onChangeCallback = [](const std::shared_ptr<Node> &a_self) {
+				a_self->safeOnChange();
+			};
+			onShow.connect("SELF", onChangeCallback);
+			onHide.connect("SELF", onChangeCallback);
+			onLocalBoundsChange.connect("SELF", onChangeCallback);
+			onOrderChange.connect("SELF", onChangeCallback);
+			onAlphaChange.connect("SELF", onChangeCallback);
+			onComponentUpdate.connect("SELF", [&](const std::shared_ptr<Component> &a_component){
+				std::shared_ptr<Component> safeguard = a_component;
+				try {
+					auto owningNode = safeguard->owner();
+					owningNode->safeOnChange();
+				} catch (...) {
+					std::cerr << "Failed to call onChangeSlot from onComponentUpdate! Node went out of scope too soon." << std::endl;
+				}
+			});
+
+			onChange.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
+				if (a_self->myParent) {
+					a_self->myParent->onChangeSlot(myParent->shared_from_this());
+				}
+			});
+		}
+
+		void Node::safeOnChange() {
+			std::shared_ptr<Node> safeguard = shared_from_this();
+			if (!inOnChange) {
+				SCOPE_EXIT{ inOnChange = false; };
+				inOnChange = true;
+				onChangeSlot(safeguard);
+			}
 		}
 
 		void Node::recalculateAlpha() {
@@ -792,7 +856,7 @@ namespace MV {
 			}
 
 			for (auto&& childComponent : childComponents) {
-				result->childComponents.push_back(childComponent->clone(result));
+				result->childComponents.push_back(childComponent->clone(result).self());
 			}
 
 			recalculateAlpha();
@@ -827,10 +891,186 @@ namespace MV {
 			}
 
 			for (auto&& childComponent : childComponents) {
-				result->childComponents.push_back(childComponent->clone(result));
+				result->childComponents.push_back(childComponent->clone(result).self());
 			}
 
 			return result;
+		}
+
+		std::shared_ptr<Node> Node::makeOrGet(const std::string &a_id) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			auto foundNode = get(a_id, false);
+			if (foundNode) {
+				return foundNode;
+			} else {
+				auto toAdd = Node::make(draw2d, a_id);
+				add(toAdd);
+				return toAdd;
+			}
+		}
+
+		void Node::unsilenceInternal(bool a_callBatched /*= true*/, bool a_callChanged /*= true*/) {
+			const std::shared_ptr<Node> self = shared_from_this();
+			bool changed = false;
+			if (onChildAddSlot.unblock()) {
+				if (a_callBatched) {
+					try {
+						onChildAddSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+
+			if (onChildRemoveSlot.unblock()) {
+				//TODO: call for each child removed
+				changed = true;
+			}
+
+			if (onAddSlot.unblock()) {
+				if (a_callBatched) {
+					try {
+						onAddSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onRemoveSlot.unblock()) {
+				if (a_callBatched) {
+					try {
+						onRemoveSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+
+			if (onEnableSlot.unblock() && (allowUpdate && allowDraw)) {
+				if (a_callBatched) {
+					try {
+						onEnableSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onDisableSlot.unblock() && (!allowDraw && !allowUpdate)) {
+				if (a_callBatched) {
+					try {
+						onDisableSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onPauseSlot.unblock() && (!allowUpdate)) {
+				if (a_callBatched) {
+					try {
+						onPauseSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onResumeSlot.unblock() && (allowUpdate)) {
+				if (a_callBatched) {
+					try {
+						onResumeSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onShowSlot.unblock() && (allowDraw)) {
+				if (a_callBatched) {
+					try {
+						onShowSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onHideSlot.unblock() && (!allowDraw)) {
+				if (a_callBatched) {
+					try {
+						onHideSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+
+			if (onBoundsRequestSlot.unblock()) {
+				if (a_callBatched) {
+					try {
+						onBoundsRequestSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+
+			if (onTransformChangeSlot.unblock()) {
+				if (a_callBatched) {
+					try {
+						onTransformChangeSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onLocalBoundsChangeSlot.unblock()) {
+				if (a_callBatched) {
+					try {
+						onLocalBoundsChangeSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onOrderChangeSlot.unblock()) {
+				if (a_callBatched) {
+					try {
+						onOrderChangeSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onAlphaChangeSlot.unblock()) {
+				if (a_callBatched) {
+					try {
+						onAlphaChangeSlot(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+
+			if (onComponentUpdateSlot.unblock()) {
+				//TODO: call for each component updated
+				changed = true;
+			}
+
+			onChangeSlot.unblock();
+			if (changed && a_callChanged) {
+				safeOnChange();
+			}
 		}
 
 	}

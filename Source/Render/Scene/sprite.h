@@ -95,7 +95,7 @@ namespace MV {
 			}
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
-				return cloneHelper(a_parent->attach<Sprite>());
+				return cloneHelper(a_parent->attach<Sprite>().self());
 			}
 
 		private:

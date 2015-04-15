@@ -119,7 +119,7 @@ namespace MV {
 			}
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
-				return cloneHelper(a_parent->attach<Drawable>());
+				return cloneHelper(a_parent->attach<Drawable>().self());
 			}
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);

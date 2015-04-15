@@ -10,6 +10,7 @@
 #include <numeric>
 #include <stdint.h>
 #include <random>
+#include <array>
 #include <type_traits>
 
 #include "Utility/require.hpp"
@@ -39,14 +40,31 @@ namespace MV {
 		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::shared_ptr<T>& a_lhs, const std::shared_ptr<T> &a_rhs){return *a_lhs < *a_rhs; }), a_item);
 	}
 
-	template <class Type>
-	Type capBetween(const Type &val, const Type& lowerBound, const Type& upperBound) {
-		if (lowerBound <= upperBound) {
-			return std::min(std::max(val, lowerBound), upperBound);
-		} else {
-			return std::min(std::max(val, upperBound), lowerBound);
-		}
+	template< typename T >
+	typename std::vector<T>::iterator insertSorted(std::vector<T> & a_vec, const T& a_item) {
+		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const T& a_lhs, const T &a_rhs) {return a_lhs < a_rhs; }), a_item);
 	}
+
+	template< typename T >
+	typename std::vector<std::shared_ptr<T>>::iterator insertReverseSorted(std::vector<std::shared_ptr<T>> & a_vec, const std::shared_ptr<T>& a_item) {
+		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::shared_ptr<T>& a_lhs, const std::shared_ptr<T> &a_rhs) {return !(*a_lhs < *a_rhs); }), a_item);
+	}
+
+	template< typename T >
+	typename std::vector<T>::iterator insertReverseSorted(std::vector<T> & a_vec, const T& a_item) {
+		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const T& a_lhs, const T &a_rhs) {return !(a_lhs < a_rhs); }), a_item);
+	}
+
+	template <class T, size_t I, size_t... J>
+	struct MultiArray {
+		typedef typename MultiArray<T, J...>::type Nested;
+		typedef std::array<Nested, I> type;
+	};
+
+	template <class T, size_t I>
+	struct MultiArray<T, I> {
+		typedef std::array<T, I> type;
+	};
 
 	template<typename T>
 	T mix(const T &a_start, const T &a_end, float a_percent, float a_strength = 1.0f) {
@@ -73,11 +91,18 @@ namespace MV {
 		}
 	}
 
+	template <typename T>
+	T clamp(T val, T lowerBound, T upperBound) {
+		using std::swap;
+		if (lowerBound > upperBound) { swap(lowerBound, upperBound); }
+		return std::max(std::min(val, upperBound), lowerBound);
+	}
+
 	static inline float percentOfRange(float a_value, float a_start, float a_end) {
 		if (a_start > a_end) {
 			std::swap(a_start, a_end);
 		}
-		a_value = capBetween(a_value, a_start, a_end);
+		a_value = clamp(a_value, a_start, a_end);
 
 		if (a_start < 0.0f && a_end > 0.0f) {
 			a_value += -a_start;
@@ -126,7 +151,7 @@ namespace MV {
 	}
 
 	template <class Type>
-	Type calculateDistanceBetweenPoints(const Type &x1, const Type &y1, const Type &x2, const Type &y2){
+	double distance(const Type &x1, const Type &y1, const Type &x2, const Type &y2){
 		Type deltaX = x1-x2, deltaY = y1-y2;
 		if(deltaX<0){deltaX*=-1;}
 		if(deltaY<0){deltaY*=-1;}
@@ -134,12 +159,22 @@ namespace MV {
 	}
 
 	template <class Type>
-	long double calculateAngleBetweenPoints(const Type &x1, const Type &y1, const Type &x2, const Type &y2, AngleType returnAs = DEGREES){
+	double distance(const Type &a_lhs, const Type &a_rhs) {
+		return distance(a_lhs.x, a_lhs.y, a_rhs.x, a_rhs.y);
+	}
+
+	template <class Type>
+	double angle(const Type &x1, const Type &y1, const Type &x2, const Type &y2, AngleType returnAs = DEGREES){
 		if(returnAs == DEGREES){
-			return boundBetween(toDegrees(atan2(y2 -y1, x2 - x1)), static_cast<Type>(0.0), static_cast<Type>(360.0));
+			return wrap(toDegrees(atan2(y2 -y1, x2 - x1)), static_cast<Type>(0.0), static_cast<Type>(360.0));
 		}else{
 			return atan2(y2 - y1, x2 - x1);
 		}
+	}
+
+	template <class Type>
+	double angle(const Type &a_lhs, const Type &a_rhs, AngleType returnAs = DEGREES) {
+		return angle(a_lhs.x, a_lhs.y, a_rhs.x, a_rhs.y, returnAs);
 	}
 
 	template <class Type>
@@ -181,22 +216,23 @@ namespace MV {
 		}
 	}
 
-	int boundBetween(int val, int lowerBound, int upperBound);
-	long boundBetween(long val, long lowerBound, long upperBound);
-	float boundBetween(float val, float lowerBound, float upperBound);
-	double boundBetween(double val, double lowerBound, double upperBound);
+	int wrap(int val, int lowerBound, int upperBound);
+	long wrap(long val, long lowerBound, long upperBound);
+	float wrap(float val, float lowerBound, float upperBound);
+	double wrap(double val, double lowerBound, double upperBound);
 
 	//returns the shortest distance between two numbers within a given bounding set of values.  If the closest value is the
 	//wraparound value and wrapDist is passed in then wrapDist is set to 1, if it is closer between the two numbers, wrapDist==0
 	template <class Type>
-	Type getWrappingDistance(Type val, Type val2, Type lowerBound, Type upperBound, bool *wrapDist = nullptr){
-		require<RangeException>(upperBound >= lowerBound);
+	Type wrappingDistance(Type val, Type val2, Type lowerBound, Type upperBound, bool *wrapDist = nullptr){
+		using std::swap;
+		if (lowerBound > upperBound) { swap(lowerBound, upperBound); }
 		if(val==val2){
 			if(wrapDist != nullptr){*wrapDist = false;}
 			return 0;
 		}
-		val = boundBetween(val, lowerBound, upperBound);
-		val2 = boundBetween(val2, lowerBound, upperBound);
+		val = wrap(val, lowerBound, upperBound);
+		val2 = wrap(val2, lowerBound, upperBound);
 		Type dist1, dist2;
 		if(val>val2){
 			dist1 = val-val2;
@@ -313,13 +349,7 @@ namespace MV {
 	}
 
 	template <typename T>
-	void moveAppend(std::vector<T>& a_dst, size_t a_dstOffset, std::vector<T>& a_src){
-		a_dst.insert(a_dst.begin() + a_dstOffset, make_move_iterator(a_src.begin()), make_move_iterator(a_src.end()));
-		a_src.clear();
-	}
-
-	template <typename T>
-	void moveCopy(std::vector<T>& a_dst, size_t a_dstOffset, std::vector<T>& a_src){
+	void moveCopy(std::vector<T>& a_dst, std::vector<T>& a_src, size_t a_dstOffset){
 		std::copy(make_move_iterator(a_src.begin()), make_move_iterator(a_src.end()), a_dst.begin() + a_dstOffset);
 		a_src.clear();
 	}

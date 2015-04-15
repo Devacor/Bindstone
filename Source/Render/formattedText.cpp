@@ -175,7 +175,7 @@ namespace MV {
 
 	Point<> FormattedCharacter::position(const Point<> &a_newPosition) {
 		basePosition = a_newPosition;
-		shape->position(basePosition + offsetPosition);
+		shape->silence()->position(basePosition + offsetPosition);
 		return basePosition;
 	}
 
@@ -185,7 +185,7 @@ namespace MV {
 
 	Point<> FormattedCharacter::offset(const Point<> &a_newPosition) {
 		offsetPosition = a_newPosition;
-		shape->position(basePosition + offsetPosition);
+		shape->silence()->position(basePosition + offsetPosition);
 		return offsetPosition;
 	}
 
@@ -193,7 +193,7 @@ namespace MV {
 		PointPrecision height = character->font()->height();
 		PointPrecision base = character->font()->base();
 		offset({offsetPosition.x, a_baseLine - base});
-		shape->position(basePosition + offsetPosition);
+		shape->silence()->position(basePosition + offsetPosition);
 		return offsetPosition;
 	}
 
@@ -201,13 +201,14 @@ namespace MV {
 		PointPrecision height = character->font()->height();
 		PointPrecision base = character->font()->base();
 		offset({a_x, a_baseLine - base});
-		shape->position(basePosition + offsetPosition);
+		shape->silence()->position(basePosition + offsetPosition);
 		return offsetPosition;
 	}
 
 	void FormattedCharacter::applyState(const std::shared_ptr<FormattedState> &a_state) {
 		state = a_state;
 		character = state->font->characterDefinition(textCharacter);
+		auto silencedShape = shape->silence();
 		auto sprite = shape->component<Scene::Sprite>();
 		sprite->size(cast<PointPrecision>(character->characterSize()));
 		sprite->texture(character->texture());
@@ -217,9 +218,9 @@ namespace MV {
 	bool FormattedCharacter::partOfFormat(bool a_isPartOfFormat) {
 		isPartOfFormat = a_isPartOfFormat;
 		if(isPartOfFormat){
-			shape->hide();
+			shape->silence()->hide();
 		} else{
-			shape->show();
+			shape->silence()->show();
 		}
 		return isPartOfFormat;
 	}
@@ -243,7 +244,7 @@ namespace MV {
 		state(a_state),
 		character(a_state->font->characterDefinition(a_character)) {
 
-		shape = parent->make(guid(toString(character->character())))->
+		shape = parent->silence()->make(guid(toString(character->character())))->
 			attach<Scene::Sprite>()->
 			size(cast<PointPrecision>(character->characterSize()))->
 			texture(character->texture())->

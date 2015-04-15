@@ -10,10 +10,11 @@ namespace MV {
 		void Clipped::refreshTexture(bool a_forceRefreshEvenIfNotDirty /*= true*/) {
 			if (a_forceRefreshEvenIfNotDirty || dirtyTexture) {
 				auto originalShaderId = shader();
-				SCOPE_EXIT{ shader(originalShaderId); };
+				SCOPE_EXIT{ dirtyTexture = false;  shader(originalShaderId); };
 				shader(refreshShaderId);
 				bool emptyCapturedBounds = capturedBounds.empty();
 				auto pointAABB = emptyCapturedBounds ? bounds() : capturedBounds;
+				pointAABB += capturedOffset;
 				auto textureSize = cast<int>(pointAABB.size());
 				if (!clippedTexture || clippedTexture->size() != textureSize) {
 					clippedTexture = DynamicTextureDefinition::make("", textureSize, { 0.0f, 0.0f, 0.0f, 0.0f });
@@ -28,7 +29,6 @@ namespace MV {
 					owner()->drawChildren(TransformMatrix());
 				}
 				notifyParentOfComponentChange();
-				dirtyTexture = false;
 			}
 		}
 
@@ -51,55 +51,6 @@ namespace MV {
 			shaderProgramId = DEFAULT_ID;
 		}
 
-		void Clipped::observeNode(const std::shared_ptr<Node>& a_node) {
-			std::vector<std::list<Node::BasicSharedSignalType>::iterator> localBasicSignals;
-			basicSignals.push_back(a_node->onChildAdd.connect([&](const std::shared_ptr<Node> &a_this) {
-				dirtyTexture = true;
-				observeNode(a_this);
-			}));
-			localBasicSignals.push_back(basicSignals.end()--);
-			auto markDirty = [&](const std::shared_ptr<Node> &a_this) {
-				dirtyTexture = true;
-			};
-			basicSignals.push_back(a_node->onOrderChange.connect(markDirty));
-			localBasicSignals.push_back(basicSignals.end()--);
-			basicSignals.push_back(a_node->onAlphaChange.connect(markDirty));
-			localBasicSignals.push_back(basicSignals.end()--);
-			basicSignals.push_back(a_node->onShow.connect(markDirty));
-			localBasicSignals.push_back(basicSignals.end()--);
-			basicSignals.push_back(a_node->onHide.connect(markDirty));
-			localBasicSignals.push_back(basicSignals.end()--);
-			basicSignals.push_back(a_node->onTransformChange.connect(markDirty));
-			localBasicSignals.push_back(basicSignals.end()--);
-			basicSignals.push_back(a_node->onLocalBoundsChange.connect(markDirty));
-			localBasicSignals.push_back(basicSignals.end()--);
-
-			std::weak_ptr<Component> weakSelf = shared_from_this();
-			componentSignals.push_back(a_node->onComponentUpdate.connect([&, weakSelf](const std::shared_ptr<Component> &a_this){
-				if (a_this != weakSelf.lock()) {
-					dirtyTexture = true;
-				}
-			}));
-			std::list<Node::ComponentSharedSignalType>::iterator localComponentSignal = componentSignals.end()--;
-
-			basicSignals.push_back(nullptr);
-			localBasicSignals.push_back(basicSignals.end()--);
-
-			auto removeSignalResponder = basicSignals.end()--;
-			*(removeSignalResponder) = Node::BasicSignalType::make([&,localBasicSignals, localComponentSignal](const std::shared_ptr<Node> &a_this) mutable {
-				dirtyTexture = true;
-				componentSignals.erase(localComponentSignal);
-				for (auto&& signalIterator : localBasicSignals) {
-					basicSignals.erase(signalIterator);
-				}
-			});
-			a_node->onRemove.connect(*removeSignalResponder);
-
-			for (auto&& child : *a_node) {
-				observeNode(child);
-			}
-		}
-
 		std::shared_ptr<Clipped> Clipped::clearCaptureBounds() {
 			capturedBounds = BoxAABB<>();
 			return std::static_pointer_cast<Clipped>(shared_from_this());
@@ -111,8 +62,23 @@ namespace MV {
 			return std::static_pointer_cast<Clipped>(shared_from_this());
 		}
 
-		BoxAABB<> Clipped::captureBounds() {
+		BoxAABB<> Clipped::captureBounds() const {
 			return capturedBounds;
+		}
+
+		std::shared_ptr<Clipped> MV::Scene::Clipped::clearCaptureOffset() {
+			capturedOffset.clear();
+			return std::static_pointer_cast<Clipped>(shared_from_this());
+		}
+
+		std::shared_ptr<Clipped> Clipped::captureOffset(const Point<> &a_newCapturedOffset) {
+			capturedOffset = a_newCapturedOffset;
+			dirtyTexture = true;
+			return std::static_pointer_cast<Clipped>(shared_from_this());
+		}
+
+		Point<> Clipped::captureOffset() const{
+			return capturedOffset;
 		}
 
 		std::shared_ptr<Clipped> Clipped::captureSize(const Size<> &a_size, const Point<> &a_centerPoint) {
@@ -160,7 +126,9 @@ namespace MV {
 
 		void Clipped::initialize() {
 			Sprite::initialize();
-			observeNode(owner());
+			dirtyObserveSignal = owner()->onChange.connect([&](const std::shared_ptr<Node>& a_ourOwner) {
+				dirtyTexture = true;
+			});
 		}
 
 		std::shared_ptr<Component> Clipped::cloneHelper(const std::shared_ptr<Component> &a_clone) {
@@ -168,15 +136,12 @@ namespace MV {
 			auto textClone = std::static_pointer_cast<Clipped>(a_clone);
 			textClone->refreshShader(refreshShaderId);
 			textClone->capturedBounds = capturedBounds;
+			textClone->capturedOffset = capturedOffset;
 			return a_clone;
 		}
 
 		std::shared_ptr<Clipped> Clipped::clone(const std::shared_ptr<Node> &a_parent) {
 			return std::static_pointer_cast<Clipped>(cloneImplementation(a_parent));
-		}
-
-		std::shared_ptr<Clipped> Clipped::remove() {
-			return std::static_pointer_cast<Clipped>(removeImplementation());
 		}
 
 	}

@@ -18,6 +18,18 @@ namespace MV {
 			clickDetectionType(BoundsType::NONE);
 		}
 
+		void Clickable::cancelPress(bool a_callCancelCallbacks) {
+			if (inPressEvent()) {
+				auto self = std::static_pointer_cast<Clickable>(shared_from_this());
+				onMouseMoveHandle = nullptr;
+				isInPressEvent = false;
+				if (a_callCancelCallbacks) {
+					onCancelSlot(self);
+					onReleaseSlot(self, lastKnownVelocity);
+				}
+			}
+		}
+
 		bool Clickable::enabled() const {
 			return !disabled();
 		}
@@ -34,7 +46,7 @@ namespace MV {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = std::static_pointer_cast<Clickable>(shared_from_this());
 			if (a_type == BoundsType::NONE && hitDetectionType != BoundsType::NONE) {
-				onDisabledSlot(self);
+				onEnabledSlot(self);
 			} else if (hitDetectionType == BoundsType::NONE && a_type != BoundsType::NONE) {
 				onDisabledSlot(self);
 			}
@@ -52,6 +64,19 @@ namespace MV {
 
 		MouseState & Clickable::mouse() const {
 			return ourMouse;
+		}
+
+		size_t Clickable::globalPriority() const {
+			return globalClickPriority;
+		}
+
+		std::shared_ptr<Clickable> Clickable::globalPriority(size_t a_newPriority) {
+			globalClickPriority = a_newPriority;
+			return std::static_pointer_cast<Clickable>(shared_from_this());
+		}
+
+		std::vector<size_t> Clickable::overridePriority() const {
+			return overrideClickPriority;
 		}
 
 		Clickable::Clickable(const std::weak_ptr<Node>& a_owner, MouseState & a_mouse) :
@@ -72,9 +97,9 @@ namespace MV {
 		void Clickable::initialize() {
 			onLeftMouseDownHandle = ourMouse.onLeftMouseDown.connect([&](MouseState& a_mouse) {
 				if (mouseInBounds(a_mouse)) {
-					a_mouse.queueExclusiveAction({ eatTouches, owner()->parentIndexList(100), [&]() {
+					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority.empty() ? owner()->parentIndexList(globalClickPriority) : overrideClickPriority), [&]() {
 						acceptDownClick();
-					}, []() {} });
+					}, []() {}, owner()->id() });
 				}
 			});
 
@@ -96,10 +121,10 @@ namespace MV {
 				} else {
 					onCancelSlot(protectFromDismissal);
 				}
-				onReleaseSlot(protectFromDismissal);
+				onReleaseSlot(protectFromDismissal, lastKnownVelocity);
 			}
 			if (inBounds) {
-				onDropSlot(protectFromDismissal);
+				onDropSlot(protectFromDismissal, lastKnownVelocity);
 			}
 		}
 
@@ -112,10 +137,15 @@ namespace MV {
 			objectLocationBeforeDrag = owner()->position();
 			dragStartPosition = ourMouse.position();
 			priorMousePosition = dragStartPosition;
-
+			lastKnownVelocity.clear();
+			dragTimer.start();
 			onMouseMoveHandle = ourMouse.onMove.connect([&](MouseState& a_mouseInner) {
 				auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
-				onDragSlot(protectFromDismissal, dragStartPosition, a_mouseInner.position() - priorMousePosition);
+				auto dragDeltaPosition = a_mouseInner.position() - priorMousePosition;
+				auto dt = dragTimer.delta();
+				auto proviousLastVelocity = lastKnownVelocity;
+				lastKnownVelocity = (lastKnownVelocity + (cast<MV::PointPrecision>(dragDeltaPosition) * static_cast<MV::PointPrecision>(dt))) / 2.0f;
+				onDragSlot(protectFromDismissal, dragStartPosition, dragDeltaPosition);
 				priorMousePosition = a_mouseInner.position();
 			});
 		}
@@ -125,11 +155,9 @@ namespace MV {
 				BoxAABB<> hitBox;
 				if (hitDetectionType == BoundsType::LOCAL) {
 					hitBox = bounds();
-				}
-				else if (hitDetectionType == BoundsType::NODE) {
+				}else if (hitDetectionType == BoundsType::NODE) {
 					hitBox = owner()->bounds(false);
-				}
-				else if (hitDetectionType == BoundsType::NODE_CHILDREN) {
+				}else if (hitDetectionType == BoundsType::NODE_CHILDREN) {
 					hitBox = owner()->bounds(true);
 				}
 

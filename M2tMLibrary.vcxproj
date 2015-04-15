@@ -191,6 +191,8 @@
     <ClCompile Include="..\external\spine\spine-c\src\spine\SkinnedMeshAttachment.c" />
     <ClCompile Include="..\external\spine\spine-c\src\spine\Slot.c" />
     <ClCompile Include="..\external\spine\spine-c\src\spine\SlotData.c" />
+    <ClCompile Include="Source\ArtificialIntelligence\pathfinding.cpp" />
+    <ClCompile Include="Source\ClickerGame\clickerGame.cpp" />
     <ClCompile Include="Source\Editor\editor.cpp" />
     <ClCompile Include="Source\Animation\frameSwapper.cpp" />
     <ClCompile Include="Source\Audio\sound.cpp" />
@@ -202,7 +204,6 @@
     <ClCompile Include="Source\exampleCode.cpp" />
     <ClCompile Include="Source\Game\building.cpp" />
     <ClCompile Include="Source\Game\game.cpp" />
-    <ClCompile Include="Source\Game\pathGrid.cpp" />
     <ClCompile Include="Source\Interface\mouse.cpp" />
     <ClCompile Include="Source\main.cpp">
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">./;./Source</AdditionalIncludeDirectories>
@@ -214,6 +215,7 @@
     <ClCompile Include="Source\Render\Scene\clipped.cpp" />
     <ClCompile Include="Source\Render\Scene\emitter.cpp" />
     <ClCompile Include="Source\Render\Scene\grid.cpp" />
+    <ClCompile Include="Source\Render\Scene\map.cpp" />
     <ClCompile Include="Source\Render\Scene\node.cpp" />
     <ClCompile Include="Source\Render\matrix.cpp" />
     <ClCompile Include="Source\Render\points.cpp" />
@@ -308,6 +310,8 @@
     <ClInclude Include="..\external\spine\spine-c\include\spine\SlotData.h" />
     <ClInclude Include="..\external\spine\spine-c\include\spine\spine.h" />
     <ClInclude Include="..\external\spine\spine-c\src\spine\Json.h" />
+    <ClInclude Include="Source\ArtificialIntelligence\pathfinding.h" />
+    <ClInclude Include="Source\ClickerGame\clickerGame.h" />
     <ClInclude Include="Source\Editor\editor.h" />
     <ClInclude Include="Source\Editor\editorControls.h" />
     <ClInclude Include="Source\Editor\editorDefines.h" />
@@ -328,12 +332,12 @@
     <ClInclude Include="Source\Audio\sound.h" />
     <ClInclude Include="Source\exampleCode.h" />
     <ClInclude Include="Source\Game\game.h" />
-    <ClInclude Include="Source\Game\pathGrid.h" />
     <ClInclude Include="Source\Interface\mouse.h" />
     <ClInclude Include="Source\Interface\package.h" />
     <ClInclude Include="Source\Network\network.h" />
     <ClInclude Include="Source\Network\package.h" />
     <ClInclude Include="Source\Render\Scene\clipped.h" />
+    <ClInclude Include="Source\Render\Scene\map.h" />
     <ClInclude Include="Source\Render\Scene\package.h" />
     <ClInclude Include="Source\Render\Scene\node.h" />
     <ClInclude Include="Source\Render\matrix.h" />

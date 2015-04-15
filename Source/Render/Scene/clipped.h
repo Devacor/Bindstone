@@ -22,14 +22,18 @@ namespace MV {
 			}
 
 			std::shared_ptr<Clipped> clone(const std::shared_ptr<Node> &a_parent);
-			std::shared_ptr<Clipped> remove();
 
 			void refreshTexture(bool a_forceRefreshEvenIfNotDirty = true);
 
 			std::shared_ptr<Clipped> clearCaptureBounds();
 
 			std::shared_ptr<Clipped> captureBounds(const BoxAABB<> &a_newCapturedBounds);
-			BoxAABB<> captureBounds();
+			BoxAABB<> captureBounds() const;
+
+			std::shared_ptr<Clipped> clearCaptureOffset();
+
+			std::shared_ptr<Clipped> captureOffset(const Point<> &a_newCapturedOffset);
+			Point<> captureOffset() const;
 
 			std::shared_ptr<Clipped> captureSize(const Size<> &a_size, const Point<> &a_centerPoint);
 			std::shared_ptr<Clipped> captureSize(const Size<> &a_size, bool a_center = false);
@@ -44,6 +48,7 @@ namespace MV {
 				archive(
 					CEREAL_NVP(refreshShaderId),
 					CEREAL_NVP(capturedBounds),
+					CEREAL_NVP(capturedOffset),
 					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
 				);
 			}
@@ -54,6 +59,7 @@ namespace MV {
 				archive(
 					cereal::make_nvp("refreshShaderId", construct->refreshShaderId),
 					cereal::make_nvp("capturedBounds", construct->capturedBounds),
+					cereal::make_nvp("capturedOffset", construct->capturedOffset),
 					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(construct.ptr()))
 				);
 				construct->initialize();
@@ -62,7 +68,7 @@ namespace MV {
 			virtual void initialize() override;
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
-				return cloneHelper(a_parent->attach<Clipped>());
+				return cloneHelper(a_parent->attach<Clipped>().self());
 			}
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
@@ -73,13 +79,11 @@ namespace MV {
 			std::shared_ptr<DynamicTextureDefinition> clippedTexture;
 			std::shared_ptr<Framebuffer> framebuffer;
 
-			void observeNode(const std::shared_ptr<Node>& a_node);
-
 			std::string refreshShaderId;
 			BoxAABB<> capturedBounds;
+			Point<> capturedOffset;
 			bool dirtyTexture = true;
-			std::list<Node::BasicSharedSignalType> basicSignals;
-			std::list<Node::ComponentSharedSignalType> componentSignals;
+			Node::BasicSharedSignalType dirtyObserveSignal;
 		};
 	}
 }

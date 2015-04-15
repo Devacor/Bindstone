@@ -24,6 +24,9 @@ void SceneGraphPanel::update(){
 	if(removeSelection){
 		removeSelection = false;
 		activeSelection = nullptr;
+	}
+	if (refreshNeeded) {
+		refreshNeeded = false;
 		refresh();
 	}
 }
@@ -41,9 +44,13 @@ void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nu
 	if(box){
 		position = box->parent()->position();
 	}
-	box = makeDraggableBox("SceneNodePicker", root, grid->bounds().size(), *sharedResources.mouse);
-	box->parent()->position(position);
-	box->add(gridNode);
+	auto box = root->get("SceneNodePicker", false);
+	if (!box) {
+		box = makeDraggableBox("SceneNodePicker", root, grid->bounds().size(), *sharedResources.mouse);
+		box->make("CONTAINER");
+	}
+	box->get("CONTAINER")->remove("SceneNodeGrid", false);
+	box->get("CONTAINER")->add(gridNode);
 }
 
 void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth, std::shared_ptr<MV::Scene::Node> a_grid) {
@@ -53,7 +60,7 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 	auto button = makeSceneButton(a_grid, *sharedResources.textLibrary, *sharedResources.mouse, a_node->id(), buttonSize, buttonName);
 
 	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.mouse)->size(MV::size(buttonSize.width, 5.0f));
-	dragBetween->onDrop.connect("dropped", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+	dragBetween->onDrop.connect("dropped", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable, const MV::Point<float> &) {
 		if (activeSelection) {
 			float newDepth = activeSelection->depth();
 			if (a_node->parent() != activeSelection->parent()) {
@@ -67,6 +74,8 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 			}
 			activeSelection->depth(newDepth);
 			activeSelection->parent()->normalizeDepth();
+			refreshNeeded = true;
+			removeSelection = true;
 		}
 	});
 
@@ -79,7 +88,11 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 			clickedChild(a_node);
 		});
 
-		button->onRelease.connect("Remove", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+		button->onRelease.connect("Remove", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable, const MV::Point<MV::PointPrecision> &){
+			removeSelection = true;
+		});
+
+		button->onCancel.connect("Cancel", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 			removeSelection = true;
 		});
 
@@ -90,12 +103,14 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 		});
 	}
 
-	button->onDrop.connect("Back", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+	button->onDrop.connect("Back", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable, const MV::Point<float> &){
 		if(activeSelection && activeSelection != a_node){
 			try {
 				auto originalWorldPosition = activeSelection->worldPosition();
 				a_node->add(activeSelection);
 				activeSelection->worldPosition(originalWorldPosition);
+				removeSelection = true;
+				refreshNeeded = true;
 			} catch (MV::RangeException &a_e) {
 				std::cerr << a_e.what() << std::endl;
 			}

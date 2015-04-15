@@ -18,7 +18,8 @@ namespace MV {
 	private:
 		Slot<void(const Task&)> onStartSlot;
 		Slot<void(const Task&)> onFinishSlot;
-		Slot<void(const Task&)> onFinishChildrenSlot;
+		Slot<void(const Task&)> onFinishAllSlot;
+		Slot<void()> onCancelSlot;
 
 	public:
 		Task():
@@ -34,8 +35,15 @@ namespace MV {
 			ourTaskComplete(false),
 			forceCompleteFlag(false),
 			onStart(onStartSlot),
-			onFinishChildren(onFinishSlot),
-			onFinish(onFinishChildrenSlot){
+			onFinishAll(onFinishAllSlot),
+			onFinish(onFinishSlot),
+			onCancel(onCancelSlot){
+		}
+
+		~Task() {
+			if (!ourTaskComplete && !cancelled) {
+				onCancelSlot();
+			}
 		}
 
 		static Task make(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blocking = true, bool a_blockParentCompletion = true){
@@ -47,15 +55,22 @@ namespace MV {
 		}
 
 		bool update(double a_dt){
-			if(a_dt > 0.0f){
-				updateLocalTask(a_dt);
-				updateParallelTasks(a_dt);
-				if(ourTaskComplete && updateChildTasks(a_dt)){
-					onFinishSlot(*this);
-					return true;
+			if (!cancelled) {
+				if (a_dt > 0.0f) {
+					updateLocalTask(a_dt);
+					updateParallelTasks(a_dt);
+					if (ourTaskComplete && updateChildTasks(a_dt)) {
+						onFinishAllSlot(*this);
+						onFinishAllSlot.block();
+						return true;
+					}
 				}
 			}
-			return ourTaskComplete && noChildrenBlockingCompletion();
+			return finished();
+		}
+
+		bool finished() {
+			return cancelled || ourTaskComplete && noChildrenBlockingCompletion();
 		}
 
 		double elapsed() const{
@@ -64,6 +79,11 @@ namespace MV {
 
 		void forceComplete(){
 			forceCompleteFlag = true;
+		}
+
+		void cancel() {
+			cancelled = true;
+			onCancelSlot();
 		}
 
 		bool forceCompleted() const{
@@ -76,40 +96,45 @@ namespace MV {
 
 		Task& then(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			sequentialTasks.emplace_back(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+			onFinishAllSlot.unblock();
 			return *this;
 		}
 
 		Task& thenAlso(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			sequentialTasks.emplace_back(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
+			onFinishAllSlot.unblock();
 			return *this;
 		}
 
 		Task& also(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			parallelTasks.emplace_back(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
+			onFinishAllSlot.unblock();
 			return *this;
 		}
 
-		Task& get(const std::string &a_name){
+		Task* get(const std::string &a_name, bool a_throwOnNotFound = true){
 			auto foundInSequentials = std::find_if(sequentialTasks.begin(), sequentialTasks.end(), [&](const std::shared_ptr<Task> &a_task){
 				return a_task->taskName == a_name;
 			});
 			if(foundInSequentials != sequentialTasks.end()){
-				return **foundInSequentials;
+				return &(**foundInSequentials);
 			}
 			auto foundInParallels = std::find_if(parallelTasks.begin(), parallelTasks.end(), [&](const std::shared_ptr<Task> &a_task){
 				return a_task->taskName == a_name;
 			});
 			if(foundInParallels != parallelTasks.end()){
-				return **foundInParallels;
+				return &(**foundInParallels);
 			}
-			require<ResourceException>(false, "Failed to find: [", a_name, "] in task: [", taskName, "]");
-			return *this; //never called, suppress warning
+			require<ResourceException>(!a_throwOnNotFound, "Failed to find: [", a_name, "] in task: [", taskName, "]");
+			return nullptr;
 		}
 
 		SlotRegister<void(const Task&)> onStart;
 		SlotRegister<void(const Task&)> onFinish;
-		SlotRegister<void(const Task&)> onFinishChildren;
+		SlotRegister<void(const Task&)> onFinishAll;
+		Slot<void()> onCancel;
 	private:
+		bool cancelled = false;
 
 		void updateLocalTask(double a_dt){
 			if(totalTime == 0.0f){
@@ -118,7 +143,8 @@ namespace MV {
 			totalTime += a_dt * static_cast<int>(!forceCompleteFlag);
 			if(!ourTaskComplete && (forceCompleteFlag || task(*this, a_dt))){
 				ourTaskComplete = true;
-				onFinishChildrenSlot(*this);
+				onFinishSlot(*this);
+				onFinishSlot.block();
 			}
 		}
 
@@ -141,29 +167,37 @@ namespace MV {
 			}), parallelTasks.end());
 		}
 
-		bool noChildrenBlockingCompletion(){
+		bool noChildrenBlockingCompletion() const{
 			return 
-				(std::find_if(parallelTasks.begin(), parallelTasks.end(), [](const std::shared_ptr<Task> &a_task){
+				(std::find_if(parallelTasks.cbegin(), parallelTasks.cend(), [](const std::shared_ptr<Task> &a_task){
 					return a_task->blockParentCompletion;
 				}) == parallelTasks.end()) &&
-				(std::find_if(sequentialTasks.begin(), sequentialTasks.end(), [](const std::shared_ptr<Task> &a_task){
+				(std::find_if(sequentialTasks.cbegin(), sequentialTasks.cend(), [](const std::shared_ptr<Task> &a_task){
 					return a_task->blockParentCompletion;
 				}) == sequentialTasks.end());
 		}
 
+		void finishOurTaskAndChildren() {
+			bool allFinished = finished();
+			if (!ourTaskComplete) {
+				ourTaskComplete = true;
+				onFinishSlot(*this);
+			}
+			finishAllChildTasks();
+			if (!allFinished) {
+				onFinishAllSlot(*this);
+			}
+		}
+
 		void finishAllChildTasks(){
 			for(std::shared_ptr<Task> &task : parallelTasks){
-				if(!task->ourTaskComplete){
-					task->onFinishChildrenSlot(*task);
-				}
-				task->onFinishSlot(*task);
+				task->finishOurTaskAndChildren();
 			}
+			parallelTasks.clear();
 			for(std::shared_ptr<Task> &task : sequentialTasks){
-				if(!task->ourTaskComplete){
-					task->onFinishChildrenSlot(*task);
-				}
-				task->onFinishSlot(*task);
+				task->finishOurTaskAndChildren();
 			}
+			sequentialTasks.clear();
 		}
 
 		bool cleanupChildTasks(){

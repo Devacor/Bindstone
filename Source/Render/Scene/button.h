@@ -28,6 +28,8 @@ namespace MV {
 			std::shared_ptr<Button> idleNode(const std::shared_ptr<Node> &a_idleView);
 			std::shared_ptr<Button> disabledNode(const std::shared_ptr<Node> &a_disabledView);
 
+			virtual void cancelPress(bool a_callCancelCallbacks = true);
+
 		protected:
 			Button(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
 
@@ -58,7 +60,7 @@ namespace MV {
 			}
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
-				return cloneHelper(a_parent->attach<Button>(mouse()));
+				return cloneHelper(a_parent->attach<Button>(mouse()).self());
 			}
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);

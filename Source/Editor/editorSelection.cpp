@@ -17,13 +17,12 @@ void Selection::enable(){
 		mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, {10000}, [&](){
 			inSelection = true;
 			selection.initialize(mouse.position());
-			visibleSelection = scene->make("Selection_" + std::to_string(id))->position(scene->localFromScreen(selection.minPoint))->attach<MV::Scene::Sprite>();
-			visibleSelection->color(MV::Color(1.0, 1.0, 0.0, .25));
+			visibleSelection = scene->make("Selection_" + std::to_string(id))->position(scene->localFromScreen(selection.minPoint))->attach<MV::Scene::Sprite>()->color(MV::Color(1.0, 1.0, 0.0, .25))->safe();
 			auto originalPosition = visibleSelection->owner()->localFromScreen(mouse.position());
 			onMouseMoveHandle = mouse.onMove.connect([&, originalPosition](MV::MouseState &mouse){
 				visibleSelection->bounds({originalPosition, visibleSelection->owner()->localFromScreen(mouse.position())});
 			});
-		}, [](){}));
+		}, [](){}, "SelectBox"));
 	});
 
 	onMouseUpHandle = mouse.onLeftMouseUp.connect([&](MV::MouseState &mouse){
@@ -62,7 +61,7 @@ Selection::Selection(std::shared_ptr<MV::Scene::Node> a_scene, MV::MouseState &a
 	id(gid++) {
 }
 
-EditableGrid::EditableGrid(std::shared_ptr<MV::Scene::Grid> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
+EditableGrid::EditableGrid(MV::Scene::SafeComponent<MV::Scene::Grid> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
 	elementToEdit(a_elementToEdit),
 	controlContainer(a_rootContainer->make("Editable")->depth(-100.0f)),
 	mouse(a_mouse) {
@@ -90,7 +89,8 @@ void EditableGrid::resetHandles() {
 	rectBox.maxPoint = rectBox.minPoint + toPoint(currentDimensions);
 
 	EditableGrid* self = this;
-	positionHandle = controlContainer->make(MV::guid("position"))->position(rectBox.minPoint)->attach<MV::Scene::Clickable>(*mouse)->size(currentDimensions)->show();
+	positionHandle = controlContainer->make(MV::guid("position"))->position(rectBox.minPoint)->attach<MV::Scene::Clickable>(*mouse);
+	positionHandle->size(currentDimensions)->show();
 	positionHandle->onDrag.connect("position", [&, self](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
 		auto castPosition = MV::cast<MV::PointPrecision>(deltaPosition);
 		handle->owner()->translate(castPosition);
@@ -147,7 +147,7 @@ void EditableRectangle::resetHandles() {
 
 		repositionHandles();
 	});
-	topLeftSizeHandle->onRelease.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle){
+	topLeftSizeHandle->onRelease.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &){
 		resetHandles();
 	});
 
@@ -160,7 +160,7 @@ void EditableRectangle::resetHandles() {
 
 		repositionHandles();
 	});
-	topRightSizeHandle->onRelease.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle){
+	topRightSizeHandle->onRelease.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &){
 		resetHandles();
 	});
 
@@ -173,7 +173,7 @@ void EditableRectangle::resetHandles() {
 
 		repositionHandles();
 	});
-	bottomLeftSizeHandle->onRelease.connect("bottomLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle){
+	bottomLeftSizeHandle->onRelease.connect("bottomLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &){
 		resetHandles();
 	});
 
@@ -186,14 +186,14 @@ void EditableRectangle::resetHandles() {
 
 		repositionHandles();
 	});
-	bottomRightSizeHandle->onRelease.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle){
+	bottomRightSizeHandle->onRelease.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &){
 		resetHandles();
 	});
 
 	repositionHandles(false, false, false);
 }
 
-EditableRectangle::EditableRectangle(std::shared_ptr<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
+EditableRectangle::EditableRectangle(MV::Scene::SafeComponent<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
 	elementToEdit(a_elementToEdit),
 	controlContainer(a_rootContainer->make("Editable")->depth(-100.0f)),
 	mouse(a_mouse) {
@@ -312,7 +312,7 @@ void EditableEmitter::resetHandles() {
 
 		repositionHandles();
 	});
-	topLeftSizeHandle->onRelease.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle){
+	topLeftSizeHandle->onRelease.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &){
 		resetHandles();
 	});
 
@@ -325,7 +325,7 @@ void EditableEmitter::resetHandles() {
 
 		repositionHandles();
 	});
-	topRightSizeHandle->onRelease.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle){
+	topRightSizeHandle->onRelease.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &){
 		resetHandles();
 	});
 
@@ -338,7 +338,7 @@ void EditableEmitter::resetHandles() {
 
 		repositionHandles();
 	});
-	bottomLeftSizeHandle->onRelease.connect("bottomLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle){
+	bottomLeftSizeHandle->onRelease.connect("bottomLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &){
 		resetHandles();
 	});
 
@@ -351,14 +351,14 @@ void EditableEmitter::resetHandles() {
 
 		repositionHandles();
 	});
-	bottomRightSizeHandle->onRelease.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle){
+	bottomRightSizeHandle->onRelease.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &){
 		resetHandles();
 	});
 
 	repositionHandles(false, false, false);;
 }
 
-EditableEmitter::EditableEmitter(std::shared_ptr<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
+EditableEmitter::EditableEmitter(MV::Scene::SafeComponent<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
 	elementToEdit(a_elementToEdit),
 	controlContainer(a_rootContainer->make("Editable")->depth(-100.0f)),
 	mouse(a_mouse) {

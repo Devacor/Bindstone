@@ -41,6 +41,7 @@ private:
 	std::shared_ptr<MV::Scene::Node> activeSelection;
 
 	bool removeSelection = false;
+	bool refreshNeeded = true;
 
 	std::string selectedPack;
 	std::shared_ptr<MV::TexturePack> activePack;

@@ -1,24 +1,25 @@
-#include "game.h"
+#include "clickerGame.h"
+#include "Editor/editorFactories.h"
 
-void sdl_quit(void){
+void sdl_quit_2(void) {
 	SDL_Quit();
 	TTF_Quit();
 }
 
-Game::Game() :
+ClickerGame::ClickerGame() :
 	textLibrary(renderer),
-	done(false){
+	done(false) {
 
 	initializeWindow();
 
 }
 
-void Game::initializeWindow(){
+void ClickerGame::initializeWindow() {
 	MV::initializeFilesystem();
 	srand(static_cast<unsigned int>(time(0)));
 	//RENDERER SETUP:::::::::::::::::::::::::::::::::
-	MV::Size<> worldSize(960, 640);
-	MV::Size<int> windowSize(960, 640);
+	MV::Size<> worldSize(375, 667);
+	MV::Size<int> windowSize(375, 667);
 
 	renderer.window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
 
@@ -27,12 +28,12 @@ void Game::initializeWindow(){
 	}
 	renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
 	renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
-	atexit(sdl_quit);
+	atexit(sdl_quit_2);
 
 	AudioPlayer::instance()->initAudio();
 	mouse.update();
 
-	std::ifstream stream("map.scene");
+	std::ifstream stream("clicker.scene");
 
 	cereal::JSONInputArchive archive(stream);
 
@@ -41,20 +42,9 @@ void Game::initializeWindow(){
 		cereal::make_nvp("renderer", &renderer),
 		cereal::make_nvp("textLibrary", &textLibrary),
 		cereal::make_nvp("pool", &pool)
-	);
+		);
 
 	archive(cereal::make_nvp("scene", worldScene));
-
-	mouse.onLeftMouseDown.connect("initDrag", [&](MV::MouseState& a_mouse) {
-		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
-			auto signature = mouse.onMove.connect("inDrag", [&](MV::MouseState& a_mouse2) {
-				worldScene->translate(MV::cast<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
-			});
-			mouse.onLeftMouseUp.connect("cancelDrag", [=](MV::MouseState& a_mouse2) {
-				a_mouse2.onMove.disconnect(signature);
-			});
-		}, []() {}, "MapDrag"));
-	});
 
 	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
 	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
@@ -62,11 +52,47 @@ void Game::initializeWindow(){
 
 	textures.assemblePacks("Assets/Atlases", &renderer);
 	textures.files("Assets/Map");
+
+	InitializeWorldScene();
 }
 
+void ClickerGame::InitializeWorldScene() {
+	auto clickDamageEffect = worldScene->get("DamageOn")->component<MV::Scene::Emitter>();
+	clickDamageEffect->disable();
 
+	auto enemyButton = worldScene->get("Enemy")->attach<MV::Scene::Clickable>(mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
+	enemyButton->onAccept.connect("ClickEnemy", [&, clickDamageEffect](std::shared_ptr<MV::Scene::Clickable>) {
+		player.click();
+		clickDamageEffect->enable();
+		auto damageDisable = worldScene->task().get("DamageDisable", false);
+		if (damageDisable) {
+			damageDisable->cancel();
+		}
+		double timeToDisable = 1.0;
+		worldScene->task().also("DamageDisable", [=](const MV::Task&, double a_dt) mutable {
+			timeToDisable -= a_dt;
+			if (timeToDisable <= 0.0) {
+				clickDamageEffect->disable();
+				return true;
+			}
+			return false;
+		});
+	});
 
-bool Game::update(double dt) {
+	auto currencyBarNode = worldScene->get("CurrencyBar");
+
+	auto stubbedGoldComponent = currencyBarNode->component<MV::Scene::Sprite>();
+	auto goldTextSize = stubbedGoldComponent->bounds().size();
+	currencyBarNode->detach(stubbedGoldComponent);
+
+	auto goldTextComponent = makeLabel(currencyBarNode, textLibrary, "CurrencyLabel", goldTextSize, UTF_CHAR_STR("0"));
+
+	player.onGoldChange.connect("UpdateGoldValue", [goldTextComponent](uint64_t newValue) {
+		goldTextComponent->text(std::to_wstring(newValue));
+	});
+}
+
+bool ClickerGame::update(double dt) {
 	lastUpdateDelta = dt;
 	if (done) {
 		done = false;
@@ -75,16 +101,16 @@ bool Game::update(double dt) {
 	return true;
 }
 
-void Game::handleInput() {
+void ClickerGame::handleInput() {
 	SDL_Event event;
-	while(SDL_PollEvent(&event)){
-		if(!renderer.handleEvent(event)){
-			switch(event.type){
+	while (SDL_PollEvent(&event)) {
+		if (!renderer.handleEvent(event)) {
+			switch (event.type) {
 			case SDL_QUIT:
 				done = true;
 				break;
 			case SDL_KEYDOWN:
-				switch(event.key.keysym.sym){
+				switch (event.key.keysym.sym) {
 				case SDLK_ESCAPE:
 					done = true;
 					break;
@@ -112,7 +138,7 @@ void Game::handleInput() {
 	mouse.update();
 }
 
-void Game::render() {
+void ClickerGame::render() {
 	renderer.clearScreen();
 	worldScene->drawUpdate(static_cast<float>(lastUpdateDelta));
 	//testShape->draw();

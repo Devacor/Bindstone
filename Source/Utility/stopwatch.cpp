@@ -44,10 +44,16 @@ namespace MV {
 		if(!started){
 			prevtime=curtime;
 			started = true;
+
 			return timeOffset;
 		}else{
 			TimeType diff=curtime-prevtime;
-			if(reset){prevtime=curtime;}
+			if(reset){
+				prevtime=curtime;
+				for (auto&& deltaValue : deltaVals) {
+					deltaValue.second.deltaspot = 0;
+				}
+			}
 			return diff+timeOffset;
 		}
 	}

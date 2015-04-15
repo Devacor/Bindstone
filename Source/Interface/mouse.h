@@ -8,11 +8,12 @@
 
 namespace MV{
 	struct ExclusiveMouseAction{
-		ExclusiveMouseAction(bool a_exclusive, const std::vector<size_t> &a_fitness, const std::function<void()> &a_enabledCallback, const std::function<void()> &a_disableCallback):
+		ExclusiveMouseAction(bool a_exclusive, const std::vector<size_t> &a_fitness, const std::function<void()> &a_enabledCallback, const std::function<void()> &a_disableCallback, const std::string &a_name = ""):
 			exclusive(a_exclusive),
 			fitness(a_fitness),
 			disabled(a_disableCallback),
-			enabled(a_enabledCallback){
+			enabled(a_enabledCallback),
+			name(a_name){
 		}
 
 		bool operator<(const ExclusiveMouseAction &a_rhs) const{
@@ -26,6 +27,7 @@ namespace MV{
 			return fitness.size() < a_rhs.fitness.size();
 		}
 
+		std::string name;
 		bool exclusive;
 		std::vector<size_t> fitness;
 		std::function<void()> disabled;

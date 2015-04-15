@@ -21,11 +21,14 @@
 #include "Utility/package.h"
 
 #define ComponentDerivedAccessors(ComponentType) \
-std::shared_ptr<ComponentType> remove() { \
-	return std::static_pointer_cast<ComponentType>(removeImplementation()); \
+MV::Scene::SafeComponent<ComponentType> clone(const std::shared_ptr<MV::Scene::Node> &a_parent) { \
+	return MV::Scene::SafeComponent<ComponentType>(a_parent, std::static_pointer_cast<ComponentType>(cloneImplementation(a_parent))); \
 } \
-std::shared_ptr<ComponentType> clone(const std::shared_ptr<MV::Scene::Node> &a_parent) { \
-	return std::static_pointer_cast<ComponentType>(cloneImplementation(a_parent)); \
+MV::Scene::SafeComponent<ComponentType> safe() { \
+	return MV::Scene::SafeComponent<ComponentType>(owner(), std::static_pointer_cast<ComponentType>(shared_from_this())); \
+} \
+std::shared_ptr<ComponentType> id(const std::string &a_id) { \
+	return std::static_pointer_cast<ComponentType>(MV::Scene::Component::id(a_id)); \
 }
 
 namespace MV {
@@ -33,7 +36,78 @@ namespace MV {
 	namespace Scene {
 		void appendQuadVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset);
 
+
 		class Node;
+		class Component;
+
+		template <typename T>
+		class SafeComponent {
+		public:
+			SafeComponent(const std::shared_ptr<const Node> &a_node = nullptr, const std::shared_ptr<T> &a_component = nullptr) :
+				wrappedNode(a_node),
+				wrappedComponent(a_component) {
+			}
+
+			void operator=(const SafeComponent<T> &a_other) {
+				wrappedNode = a_other.wrappedNode;
+				wrappedComponent = a_other.wrappedComponent;
+			}
+
+			void operator=(const std::shared_ptr<T> &a_component) {
+				wrappedNode = a_component->owner();
+				wrappedComponent = a_component;
+			}
+
+			std::shared_ptr<T> operator->() const {
+				return wrappedComponent;
+			}
+
+			operator bool() const {
+				return wrappedComponent && wrappedNode;
+			}
+
+			bool operator!() const {
+				return !static_cast<bool>(*this);
+			}
+
+			bool operator==(const SafeComponent& a_other) const {
+				return a_other.wrappedComponent == wrappedComponent;
+			}
+
+			bool operator!=(const SafeComponent& a_other) const {
+				return a_other.wrappedComponent != wrappedComponent;
+			}
+
+			bool operator==(const std::shared_ptr<T> &a_other) const {
+				return a_other == wrappedComponent;
+			}
+
+			bool operator!=(const std::shared_ptr<T> &a_other) const {
+				return a_other != wrappedComponent;
+			}
+
+			std::shared_ptr<T> self() const {
+				return wrappedComponent;
+			}
+
+			std::shared_ptr<Node> owner() const {
+				return wrappedComponent->owner();
+			}
+
+			void reset() {
+				wrappedComponent.reset();
+				wrappedNode.reset();
+			}
+
+			Task& task() {
+				return rootTask;
+			}
+		private:
+			Task rootTask;
+			std::shared_ptr<const Node> wrappedNode;
+			std::shared_ptr<T> wrappedComponent;
+		};
+
 		class Component : public std::enable_shared_from_this<Component> {
 			friend Node;
 			friend cereal::access;
@@ -54,22 +128,33 @@ namespace MV {
 
 			std::shared_ptr<Node> owner() const;
 
-			std::shared_ptr<Component> remove() {
-				return removeImplementation();
+			SafeComponent<Component> clone(const std::shared_ptr<Node> &a_parent) {
+				return SafeComponent<Component>(a_parent, cloneImplementation(a_parent));
 			}
 
-			std::shared_ptr<Component> clone(const std::shared_ptr<Node> &a_parent) {
-				return cloneImplementation(a_parent);
+			SafeComponent<Component> safe() {
+				return SafeComponent<Component>(owner(), shared_from_this());
+			}
+
+			std::string id() const {
+				return componentId;
+			}
+
+			std::shared_ptr<Component> id(const std::string &a_id) {
+				componentId = a_id;
+				return shared_from_this();
 			}
 
 		protected:
+			//owner death *can* occur before node death in cases where a button deletes itself.
+			//In known cases where callback order can cause this to occur it's best we have an explicit query.
+			bool ownerIsAlive() const;
+
 			Component(const std::weak_ptr<Node> &a_owner);
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent);
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
-
-			std::shared_ptr<Component> removeImplementation();
 
 			void notifyParentOfBoundsChange();
 			void notifyParentOfComponentChange();
@@ -89,6 +174,7 @@ namespace MV {
 			template <class Archive>
 			void serialize(Archive & archive) {
 				archive(
+					CEREAL_NVP(componentId),
 					CEREAL_NVP(componentOwner)
 				);
 			}
@@ -97,12 +183,14 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<Component> &construct) {
 				construct(std::shared_ptr<Node>());
 				archive(
+					cereal::make_nvp("componentId", construct->componentId),
 					cereal::make_nvp("componentOwner", construct->componentOwner)
 				);
 				construct->initialize();
 			}
 
 		private:
+			std::string componentId;
 			std::weak_ptr<Node> componentOwner;
 		};
 
@@ -126,7 +214,36 @@ namespace MV {
 			typedef Slot<ComponentSignature>::WeakSignalType ComponentWeakSignalType;
 			typedef Slot<ComponentSignature>::SharedSignalType ComponentSharedSignalType;
 			typedef Slot<ComponentSignature>::SignalType ComponentSignalType;
+
+			class Quiet {
+			public:
+				Quiet(const std::shared_ptr<Node> &a_node) : 
+					node(a_node) {
+					node->silenceInternal();
+				}
+
+				Quiet(const Quiet && a_other) : 
+					node(std::move(a_other.node)) {
+				}
+
+				~Quiet() {
+					if (node) {
+						node->unsilenceInternal();
+					}
+				}
+
+				std::shared_ptr<Node> operator->() const{
+					return node;
+				}
+
+			private:
+				Quiet(const Quiet &) = delete;
+				std::shared_ptr<Node> node;
+			};
+
 		private:
+			friend Quiet;
+
 			Slot<BasicSignature> onChildAddSlot;
 			Slot<ParentInteractionSignature> onChildRemoveSlot;
 			Slot<BasicSignature> onAddSlot;
@@ -145,10 +262,11 @@ namespace MV {
 			Slot<BasicSignature> onLocalBoundsChangeSlot;
 			Slot<BasicSignature> onOrderChangeSlot;
 			Slot<BasicSignature> onAlphaChangeSlot;
-
+			
 			Slot<ComponentSignature> onComponentUpdateSlot;
 
-			Slot<BasicSignature>::SharedSignalType onParentTransformChangeSignal;
+			Slot<BasicSignature> onChangeSlot;
+
 			Slot<BasicSignature>::SharedSignalType onParentAlphaChangeSignal;
 
 			class ReSort {
@@ -184,7 +302,9 @@ namespace MV {
 			SlotRegister<BasicSignature> onOrderChange;
 			SlotRegister<BasicSignature> onAlphaChange;
 
-			Slot<ComponentSignature> onComponentUpdate;
+			SlotRegister<BasicSignature> onChange;
+
+			SlotRegister<ComponentSignature> onComponentUpdate;
 
 			void draw();
 			void drawChildren();
@@ -194,75 +314,132 @@ namespace MV {
 			void draw(const TransformMatrix &a_overrideParentMatrix);
 			void drawChildren(const TransformMatrix &a_overrideParentMatrix);
 
+			Quiet silence() {
+				return Quiet(shared_from_this());
+			}
+
 			static std::shared_ptr<Node> make(Draw2D& a_draw2d, const std::string &a_id);
 			static std::shared_ptr<Node> make(Draw2D& a_draw2d);
 
 			std::shared_ptr<Node> make(const std::string &a_id);
 			std::shared_ptr<Node> make();
 
+			std::shared_ptr<Node> makeOrGet(const std::string &a_id);
+
 			template<typename ComponentType>
-			std::shared_ptr<ComponentType> attach() {
+			SafeComponent<ComponentType> attach() {
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				auto newComponent = std::shared_ptr<ComponentType>(new ComponentType(shared_from_this()));
 				childComponents.push_back(newComponent);
 				newComponent->initialize();
-				return newComponent;
+				return SafeComponent<ComponentType>(shared_from_this(), newComponent);
 			}
 
 			template<typename ComponentType, typename... Args>
-			std::shared_ptr<ComponentType> attach(Args&&... a_arguments){
+			SafeComponent<ComponentType> attach(Args&&... a_arguments){
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				auto newComponent = std::shared_ptr<ComponentType>(new ComponentType(shared_from_this(), std::forward<Args>(a_arguments)...));
 				childComponents.push_back(newComponent);
 				newComponent->initialize();
-				return newComponent;
+				return SafeComponent<ComponentType>(shared_from_this(), newComponent);
 			}
 
 			template<typename ComponentType>
-			std::shared_ptr<ComponentType> component(bool exactType = true, bool a_throwIfNotFound = true) const {
+			std::shared_ptr<Node> detach(bool a_exactType = true, bool a_throwIfNotFound = true) {
 				std::lock_guard<std::recursive_mutex> guard(lock);
-				if (exactType) {
-					for (auto&& currentComponent : childComponents) {
-						if (typeid(*currentComponent) == typeid(ComponentType)) {
-							return std::static_pointer_cast<ComponentType>(currentComponent);
-						}
-					}
-				} else {
-					for (auto&& currentComponent : childComponents) {
-						auto castComponent = std::dynamic_pointer_cast<ComponentType>(currentComponent);
-						if (castComponent) {
-							return castComponent;
-						}
-					}
+				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
+				if (foundComponent != childComponents.end()) {
+					(*foundComponent)->onRemoved();
+					childComponents.erase(foundComponent);
 				}
-				if (a_throwIfNotFound) {
-					std::string componentsString;
-					for (auto&& currentComponent : childComponents) {
-						componentsString += std::string("\n") + typeid(*currentComponent).name();
-					}
-					require<ResourceException>(false, "Failed to locate component [", typeid(ComponentType).name(), "] in node: [", nodeId, "]\nComponents:", componentsString);
-				}
-				return nullptr;
+				return shared_from_this();
 			}
 
 			template<typename ComponentType>
-			std::vector<std::shared_ptr<ComponentType>> components(bool exactType = true) const {
+			std::shared_ptr<Node> detach(std::shared_ptr<ComponentType> a_component) {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				a_component->onRemoved();
+				auto found = std::find(childComponents.begin(), childComponents.end(), a_component);
+				if (found != childComponents.end()) {
+					childComponents.erase(found);
+				}
+				return shared_from_this();
+			}
+
+			template<typename ComponentType>
+			std::shared_ptr<Node> detach(SafeComponent<ComponentType> a_component) {
+				return detach(a_component.self());
+			}
+
+			std::shared_ptr<Node> detach(const std::string &a_componentId, bool a_throwIfNotFound = true) {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				auto found = std::find_if(childComponents.begin(), childComponents.end(), [&](const std::shared_ptr<Component> &a_component) {
+					return a_component->id() == a_componentId;
+				});
+				if (found != childComponents.end()) {
+					childComponents.erase(found);
+				} else if (a_throwIfNotFound) {
+					require<ResourceException>(false, "Component with id [", a_componentId, "] not found in node [", id(), "]");
+				}
+				return shared_from_this();
+			}
+
+			template<typename ComponentType>
+			SafeComponent<ComponentType> component(bool a_exactType = true, bool a_throwIfNotFound = true) const {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
+				if (foundComponent != childComponents.end()) {
+					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
+				}
+				return SafeComponent<ComponentType>(std::shared_ptr<Node>(), std::shared_ptr<ComponentType>());
+			}
+
+			//stop the bool overload from stealing raw strings.
+			template<typename ComponentType>
+			SafeComponent<ComponentType> component(const char *a_componentId, bool a_throwIfNotFound = true) const {
+				return component<ComponentType>(std::string(a_componentId), a_throwIfNotFound);
+			}
+
+			template<typename ComponentType>
+			SafeComponent<ComponentType> component(const std::string &a_componentId, bool a_throwIfNotFound = true) const {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				auto found = std::find_if(childComponents.cbegin(), childComponents.cend(), [&](const std::shared_ptr<Component> &a_component) {
+					return a_component->id() == a_componentId;
+				});
+				if (found != childComponents.cend()) {
+					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*found));
+				} else if (a_throwIfNotFound) {
+					require<ResourceException>(false, "Component with id [", a_componentId, "] not found in node [", id(), "]");
+				}
+				return SafeComponent<ComponentType>(std::shared_ptr<Node>(), std::shared_ptr<ComponentType>());
+			}
+
+			template<typename ComponentType>
+			std::vector<SafeComponent<ComponentType>> components(bool exactType = true) const {
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				std::vector<std::shared_ptr<ComponentType>> matchingComponents;
 				if (exactType) {
 					for (auto&& currentComponent : childComponents) {
 						if (typeid(currentComponent.get()) == typeid(ComponentType)) {
-							matchingComponents.push_back(std::static_pointer_cast<ComponentType>(currentComponent));
+							matchingComponents.push_back(SafeComponent<ComponentType>(shared_from_this(), std::static_pointer_cast<ComponentType>(currentComponent)));
 						}
 					}
 				} else {
 					for (auto&& currentComponent : childComponents) {
 						auto castComponent = std::dynamic_pointer_cast<ComponentType>(currentComponent);
 						if (castComponent) {
-							matchingComponents.push_back(castComponent);
+							matchingComponents.push_back(SafeComponent<ComponentType>(shared_from_this(), castComponent));
 						}
 					}
 				}
+				return matchingComponents;
+			}
+
+			template<typename ComponentType>
+			std::vector<SafeComponent<ComponentType>> componentsInChildren(bool includeComponentsInThis = false, bool exactType = true) const {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				std::vector<SafeComponent<ComponentType>> matchingComponents;
+				componentsInChildrenInternal(exactType, matchingComponents, includeComponentsInThis);
 				return matchingComponents;
 			}
 
@@ -412,7 +589,7 @@ namespace MV {
 			size_t indexOf(const std::shared_ptr<const Node> &a_childItem) const;
 			size_t myIndex() const;
 
-			std::vector<size_t> parentIndexList(size_t a_globalPriority = 0);
+			std::vector<size_t> parentIndexList(size_t a_globalPriority = 0, size_t a_modifyLastPriority = 0);
 
 			BoxAABB<> bounds(bool a_includeChildren = true);
 
@@ -460,7 +637,93 @@ namespace MV {
 			bool serializable() const;
 
 			std::shared_ptr<Node> clone(const std::shared_ptr<Node> &a_parent = nullptr);
+
+			Task& task() {
+				return rootTask;
+			}
 		private:
+			Task rootTask;
+
+			void silenceInternal() {
+				onChildAddSlot.block();
+				onChildRemoveSlot.block();
+				onAddSlot.block();
+				onRemoveSlot.block();
+
+				onEnableSlot.block();
+				onDisableSlot.block();
+				onPauseSlot.block();
+				onResumeSlot.block();
+				onShowSlot.block();
+				onHideSlot.block();
+
+				onBoundsRequestSlot.block();
+
+				onTransformChangeSlot.block();
+				onLocalBoundsChangeSlot.block();
+				onOrderChangeSlot.block();
+				onAlphaChangeSlot.block();
+
+				onComponentUpdateSlot.block();
+
+				onChangeSlot.block();
+			}
+
+			void unsilenceInternal(bool a_callBatched = true, bool a_callChanged = true);
+
+			template<typename ComponentType>
+			std::vector<std::shared_ptr<Component>>::const_iterator componentIterator(bool a_exactType = true, bool a_throwIfNotFound = true) const {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				if (a_exactType) {
+					for (auto currentComponent = childComponents.cbegin(); currentComponent != childComponents.cend(); ++currentComponent) {
+						if (typeid(*(*currentComponent)) == typeid(ComponentType)) {
+							return currentComponent;
+						}
+					}
+				} else {
+					for (auto currentComponent = childComponents.cbegin(); currentComponent != childComponents.cend(); ++currentComponent) {
+						auto castComponent = std::dynamic_pointer_cast<ComponentType>(*currentComponent);
+						if (castComponent) {
+							return currentComponent;
+						}
+					}
+				}
+				if (a_throwIfNotFound) {
+					std::string componentsString;
+					for (auto&& currentComponent : childComponents) {
+						componentsString += std::string("\n") + typeid(*currentComponent).name();
+					}
+					require<ResourceException>(false, "Failed to locate component [", typeid(ComponentType).name(), "] in node: [", nodeId, "]\nComponents:", componentsString);
+				}
+				return childComponents.cend();
+			}
+
+			template<typename ComponentType>
+			void componentsInChildrenInternal(bool exactType, std::vector<SafeComponent<ComponentType>> &matchingComponents, bool includeThis) const {
+				if (includeThis) {
+					std::lock_guard<std::recursive_mutex> guard(lock);
+					if (exactType) {
+						for (auto&& currentComponent : childComponents) {
+							if (typeid(currentComponent.get()) == typeid(ComponentType)) {
+								matchingComponents.push_back(SafeComponent<ComponentType>(shared_from_this(), std::static_pointer_cast<ComponentType>(currentComponent)));
+							}
+						}
+					} else {
+						for (auto&& currentComponent : childComponents) {
+							auto castComponent = std::dynamic_pointer_cast<ComponentType>(currentComponent);
+							if (castComponent) {
+								matchingComponents.push_back(SafeComponent<ComponentType>(shared_from_this(), castComponent));
+							}
+						}
+					}
+				}
+				for(auto&& currentChild : childNodes) {
+					currentChild->componentsInChildrenInternal(exactType, matchingComponents, true);
+				}
+			}
+
+			void safeOnChange();
+
 			Node(const Node& a_rhs) = delete;
 			Node& operator=(const Node& a_rhs) = delete;
 
@@ -579,6 +842,7 @@ namespace MV {
 			bool allowUpdate = true;
 			bool allowDraw = true;
 
+			bool inOnChange = false;
 			bool inBoundsCalculation = false;
 			bool inChildBoundsCalculation = false;
 		};

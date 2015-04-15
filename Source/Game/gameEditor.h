@@ -2,6 +2,7 @@
 #define _MV_GAME_EDITOR_H_
 
 #include "game/game.h"
+#include "ClickerGame/clickerGame.h"
 #include "editor/editor.h"
 
 class GameEditor {
@@ -110,7 +111,7 @@ private:
 	MV::MouseState mouse;
 	std::shared_ptr<MV::Scene::Node> limbo;
 
-	Game game;
+	ClickerGame game;
 	Editor editor;
 };
 

@@ -143,27 +143,28 @@ namespace MV {
 	}
 
 
-	int boundBetween(int val, int lowerBound, int upperBound){
-		return static_cast<int>(boundBetween(static_cast<long>(val), static_cast<long>(lowerBound), static_cast<long>(upperBound)));
+	int wrap(int val, int lowerBound, int upperBound){
+		return static_cast<int>(wrap(static_cast<long>(val), static_cast<long>(lowerBound), static_cast<long>(upperBound)));
 	}
 
-	long boundBetween(long val, long lowerBound, long upperBound){
-		if(lowerBound > upperBound){std::swap(lowerBound, upperBound);}
+	long wrap(long val, long lowerBound, long upperBound){
+		using std::swap;
+		if(lowerBound > upperBound){swap(lowerBound, upperBound);}
 		long rangeSize = upperBound - lowerBound;
 
 		if (val < lowerBound)
 			val += rangeSize * ((lowerBound - val) / rangeSize + 1);
 
 		return lowerBound + (val - lowerBound) % rangeSize;
-
 	}
 
-	float boundBetween(float val, float lowerBound, float upperBound){
-		return static_cast<float>(boundBetween(static_cast<double>(val), static_cast<double>(lowerBound), static_cast<double>(upperBound)));
+	float wrap(float val, float lowerBound, float upperBound){
+		return static_cast<float>(wrap(static_cast<double>(val), static_cast<double>(lowerBound), static_cast<double>(upperBound)));
 	}
 
-	double boundBetween(double val, double lowerBound, double upperBound){
-		if(lowerBound > upperBound){std::swap(lowerBound, upperBound);}
+	double wrap(double val, double lowerBound, double upperBound){
+		using std::swap;
+		if(lowerBound > upperBound){swap(lowerBound, upperBound);}
 		val-=lowerBound; //adjust to 0
 		double rangeSize = upperBound - lowerBound;
 		if(rangeSize == 0){return upperBound;} //avoid dividing by 0

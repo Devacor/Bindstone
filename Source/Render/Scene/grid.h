@@ -81,7 +81,7 @@ namespace MV {
 			virtual void initialize() override;
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
-				return cloneHelper(a_parent->attach<Grid>());
+				return cloneHelper(a_parent->attach<Grid>().self());
 			}
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
@@ -102,7 +102,7 @@ namespace MV {
 			void layoutChildSize();
 
 			void observeOwner(const std::shared_ptr<Node>& a_node);
-			void observeChildNode(const std::shared_ptr<Node>& a_node, bool a_calledFromOwner);
+			void observeChildNode(const std::shared_ptr<Node>& a_node);
 
 			std::list<Node::BasicSharedSignalType> basicSignals;
 			std::list<Node::ParentInteractionSharedSignalType> parentInteractionSignals;

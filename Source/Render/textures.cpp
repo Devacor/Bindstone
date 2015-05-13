@@ -4,6 +4,7 @@
 #include <cmath>
 #include <SDL_image.h>
 #include "Utility/generalUtility.h"
+#include "sharedTextures.h"
 
 #ifndef GL_BGR
 	#define GL_BGR 0x80E0
@@ -134,6 +135,7 @@ namespace MV {
 		}
 
 		glGenTextures(1, &a_imageLoaded);		// Generate texture ID
+		TextureUnloader::increment(a_imageLoaded);
 		glBindTexture(GL_TEXTURE_2D, a_imageLoaded);
 
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -252,8 +254,8 @@ namespace MV {
 
 	void TextureDefinition::cleanupOpenglTexture() {
 		if (texture) {
-			glDeleteTextures(1, &texture);
-			texture = 0; //just to be certain, glDeleteTextures may not set a texture id to 0.
+			TextureUnloader::decrement(texture);
+			texture = 0;
 			cleanupImplementation();
 			textureSize.set(0, 0);
 		}
@@ -282,7 +284,34 @@ namespace MV {
 	\*****************************/
 
 	void FileTextureDefinition::reloadImplementation() {
-		loadTextureFromFile(textureName, texture, textureSize, desiredSize, powerTwo, repeat);
+		if (textures) {
+			auto textureId = SharedTextures::fileId(textureName, repeat);
+			auto foundShared = textures->fileDefinitions.find(textureId);
+			bool justLoaded = false;
+			if (foundShared != textures->fileDefinitions.end()) {
+				if (foundShared->second->texture) {
+					texture = foundShared->second->texture;
+					TextureUnloader::increment(texture);
+					textureSize = foundShared->second->textureSize;
+					desiredSize = foundShared->second->desiredSize;
+					powerTwo = foundShared->second->powerTwo;
+					justLoaded = true;
+				} else {
+					loadTextureFromFile(textureName, texture, textureSize, desiredSize, powerTwo, repeat);
+					foundShared->second->texture = texture;
+					TextureUnloader::increment(texture);
+					foundShared->second->textureSize = textureSize;
+					foundShared->second->desiredSize = desiredSize;
+					foundShared->second->powerTwo = powerTwo;
+					foundShared->second->onReloadAction(foundShared->second);
+				}
+			}else{
+				loadTextureFromFile(textureName, texture, textureSize, desiredSize, powerTwo, repeat);
+				textures->fileDefinitions[textureId] = std::static_pointer_cast<FileTextureDefinition>(shared_from_this());
+			}
+		} else {
+			loadTextureFromFile(textureName, texture, textureSize, desiredSize, powerTwo, repeat);
+		}
 	}
 
 	/********************************\
@@ -299,6 +328,7 @@ namespace MV {
 		data = (unsigned int*)new GLuint[(imageSize)];
 		memset(data, backgroundColor.hex(), (imageSize));
 		glGenTextures(1, &texture);					// Create 1 Texture
+		TextureUnloader::increment(texture);
 		glBindTexture(GL_TEXTURE_2D, texture);			// Bind The Texture
 		// Build Texture Using Information In data
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -485,5 +515,26 @@ namespace MV {
 		SDL_FreeSurface(surf);
 	}
 
+
+	void TextureUnloader::increment(GLuint a_id) {
+		MV::require<MV::ResourceException>(a_id != 0, "Null texture attempted to increment in TextureUnloader!");
+		std::lock_guard<std::mutex> guard(lock);
+		handles[a_id]++;
+	}
+
+	bool TextureUnloader::decrement(GLuint a_id) {
+		MV::require<MV::ResourceException>(a_id != 0, "Null texture attempted to decrement in TextureUnloader!");
+		std::lock_guard<std::mutex> guard(lock);
+		auto handleCount = --handles[a_id];
+		MV::require<MV::ResourceException>(handleCount >= 0, "TextureUnloader: Handle underflow for GLuint id: ", a_id);
+		if (handleCount == 0) {
+			glDeleteTextures(1, &a_id);
+			return true;
+		}
+		return false;
+	}
+
+	std::mutex TextureUnloader::lock;
+	std::map<GLuint, int> TextureUnloader::handles;
 
 }

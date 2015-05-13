@@ -24,6 +24,7 @@
 
 namespace MV {
 	class SharedTextures {
+		friend FileTextureDefinition;
 	public:
 		std::shared_ptr<TexturePack> pack(const std::string &a_name, Draw2D* a_renderer = nullptr);
 		std::shared_ptr<FileTextureDefinition> file(const std::string &a_filename, bool a_repeat = false);
@@ -49,6 +50,10 @@ namespace MV {
 				defaultHandle = defaultTexture->makeHandle();
 			}
 			return defaultHandle;
+		}
+
+		static std::string fileId(const std::string &a_filename, bool a_repeat) {
+			return a_filename + (a_repeat ? "1" : "0");
 		}
 	private:
 		std::map<std::string, std::shared_ptr<TexturePack>> texturePacks;

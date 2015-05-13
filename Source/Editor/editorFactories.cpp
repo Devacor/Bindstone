@@ -163,6 +163,7 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 
 	box->onChange.connect("changeResize", [headerSize, weakBoxContents, &a_mouse](const std::shared_ptr<MV::Scene::Node> &a_self){
 		auto clippedView = a_self->component<MV::Scene::Clipped>();
+		clippedView->blockClippedChildTaps(a_mouse);
 		auto newBounds = weakBoxContents.lock()->bounds();
 		auto sizeOfNode = newBounds.size() + MV::size(0.0f, headerSize);
 		if (sizeOfNode.height > 520.0f) {
@@ -239,4 +240,9 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 	});
 
 	return boxContents;
+}
+
+
+std::shared_ptr<MV::Scene::Node> makeColorPicker(MV::Draw2D &a_renderer, MV::MouseState &a_mouse, const MV::Color &a_startColor) {
+	auto sliderNode = MV::Scene::Node::make(a_renderer, MV::guid("colorpicker_"));
 }

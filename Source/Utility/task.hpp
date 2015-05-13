@@ -21,6 +21,8 @@ namespace MV {
 		Slot<void(const Task&)> onFinishAllSlot;
 		Slot<void()> onCancelSlot;
 
+		Slot<void(const Task&, std::exception &)> onExceptionSlot;
+
 	public:
 		Task():
 			Task("root", [](const Task&, double){return true; }){
@@ -32,12 +34,15 @@ namespace MV {
 			block(a_blocking),
 			blockParentCompletion(a_blockParentCompletion),
 			totalTime(0.0),
+			minimumInterval(0.0),
+			lastCalledInterval(0.0),
 			ourTaskComplete(false),
 			forceCompleteFlag(false),
 			onStart(onStartSlot),
 			onFinishAll(onFinishAllSlot),
 			onFinish(onFinishSlot),
-			onCancel(onCancelSlot){
+			onCancel(onCancelSlot),
+			onException(onExceptionSlot){
 		}
 
 		~Task() {
@@ -50,6 +55,11 @@ namespace MV {
 			return Task(a_name, a_task, a_blocking, a_blockParentCompletion);
 		}
 
+		public Task interval(double a_dt) {
+			minimumInterval = a_dt;
+			return this;
+		}
+
 		std::string name() const{
 			return taskName;
 		}
@@ -60,7 +70,10 @@ namespace MV {
 					updateLocalTask(a_dt);
 					updateParallelTasks(a_dt);
 					if (ourTaskComplete && updateChildTasks(a_dt)) {
-						onFinishAllSlot(*this);
+						try { onFinishAllSlot(*this); } catch (std::exception &a_e) {
+							if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+							onExceptionSlot(*this, a_e);
+						}
 						onFinishAllSlot.block();
 						return true;
 					}
@@ -74,7 +87,7 @@ namespace MV {
 		}
 
 		double elapsed() const{
-			return totalTime;
+			return lastCalledInterval;
 		}
 
 		void forceComplete(){
@@ -83,7 +96,10 @@ namespace MV {
 
 		void cancel() {
 			cancelled = true;
-			onCancelSlot();
+			try { onCancelSlot(); } catch (std::exception &a_e) {
+				if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+				onExceptionSlot(*this, a_e);
+			}
 		}
 
 		bool forceCompleted() const{
@@ -132,19 +148,56 @@ namespace MV {
 		SlotRegister<void(const Task&)> onStart;
 		SlotRegister<void(const Task&)> onFinish;
 		SlotRegister<void(const Task&)> onFinishAll;
-		Slot<void()> onCancel;
+		SlotRegister<void()> onCancel;
+		SlotRegister<void(const Task&, std::exception &)> onException;
 	private:
 		bool cancelled = false;
 
 		void updateLocalTask(double a_dt){
-			if(totalTime == 0.0f){
-				onStartSlot(*this);
+			if (!ourTaskComplete)
+			{
+				if (totalTime == 0.0f) {
+					try { onStartSlot(*this); } catch (std::exception &a_e) {
+						if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+						onExceptionSlot(*this, a_e);
+					}
+				}
+				totalTime += a_dt * static_cast<int>(!forceCompleteFlag);
+
+				if (minimumInterval > 0) {
+					LocalTaskUpdateIntervals();
+				} else {
+					lastCalledInterval = totalTime;
+					LocalTaskUpdateStep(a_dt);
+				}
 			}
-			totalTime += a_dt * static_cast<int>(!forceCompleteFlag);
-			if(!ourTaskComplete && (forceCompleteFlag || task(*this, a_dt))){
-				ourTaskComplete = true;
-				onFinishSlot(*this);
-				onFinishSlot.block();
+		}
+
+		void LocalTaskUpdateIntervals() {
+			int steps = (int)((totalTime - lastCalledInterval) / minimumInterval);
+			for (int i = 0; i < steps; ++i)
+			{
+				lastCalledInterval += minimumInterval;
+				LocalTaskUpdateStep(minimumInterval);
+			}
+		}
+
+		void LocalTaskUpdateStep(double a_dt) {
+			if (!ourTaskComplete) {
+				try {
+					if (forceCompleteFlag || task(*this, a_dt)) {
+						forceCompleteFlag = false;
+						ourTaskComplete = true;
+						try { onFinishSlot(*this); } catch (std::exception &a_e) {
+							if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+							onExceptionSlot(*this, a_e);
+						}
+						onFinishSlot.block();
+					}
+				} catch (std::exception &a_e) {
+					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+					onExceptionSlot(*this, a_e);
+				}
 			}
 		}
 
@@ -163,7 +216,11 @@ namespace MV {
 
 		void updateParallelTasks(double a_dt){
 			parallelTasks.erase(std::remove_if(parallelTasks.begin(), parallelTasks.end(), [&](const std::shared_ptr<Task> &a_task){
-				return a_task->update(a_dt);
+				try { return a_task->update(a_dt); } catch (std::exception &a_e) {
+					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+					onExceptionSlot(*this, a_e);
+					return true;
+				}
 			}), parallelTasks.end());
 		}
 
@@ -181,11 +238,17 @@ namespace MV {
 			bool allFinished = finished();
 			if (!ourTaskComplete) {
 				ourTaskComplete = true;
-				onFinishSlot(*this);
+				try { onFinishSlot(*this); } catch (std::exception &a_e) {
+					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+					onExceptionSlot(*this, a_e);
+				}
 			}
 			finishAllChildTasks();
 			if (!allFinished) {
-				onFinishAllSlot(*this);
+				try { onFinishAllSlot(*this); } catch (std::exception &a_e) {
+					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+					onExceptionSlot(*this, a_e);
+				}
 			}
 		}
 
@@ -222,6 +285,8 @@ namespace MV {
 		bool forceCompleteFlag;
 		std::string taskName;
 		double totalTime;
+		double minimumInterval;
+		double lastCalledInterval;
 
 		bool block;
 		bool ourTaskComplete;

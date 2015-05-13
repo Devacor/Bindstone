@@ -2,7 +2,7 @@
 #define __MV_EDITOR_SCENE_GRAPH_PANEL_H__
 
 #include <memory>
-#include "editorSelection.h"
+#include "editComponents.h"
 #include "editorDefines.h"
 #include "editorPanels.h"
 #include "editorFactories.h"

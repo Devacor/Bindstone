@@ -630,7 +630,8 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 			cereal::make_nvp("mouse", panel.resources().mouse),
 			cereal::make_nvp("renderer", &panel.root()->renderer()),
 			cereal::make_nvp("textLibrary", panel.resources().textLibrary),
-			cereal::make_nvp("pool", panel.resources().pool)
+			cereal::make_nvp("pool", panel.resources().pool),
+			cereal::make_nvp("texture", panel.resources().textures)
 		);
 
 		std::shared_ptr<MV::Scene::Node> newRoot;

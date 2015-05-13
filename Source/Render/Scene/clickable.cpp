@@ -34,7 +34,7 @@ namespace MV {
 			return !disabled();
 		}
 
-		bool Clickable::isEatingTouches() const {
+		bool Clickable::eatingTouches() const {
 			return eatTouches;
 		}
 

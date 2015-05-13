@@ -68,6 +68,7 @@ namespace MV {
 
 	extern const std::string DEFAULT_ID;
 	extern const std::string PREMULTIPLY_ID;
+	extern const std::string COLOR_PICKER_ID;
 
 	#if SDL_BYTEORDER == SDL_BIG_ENDIAN
 	  const Uint32 SDL_RMASK = 0xff000000;

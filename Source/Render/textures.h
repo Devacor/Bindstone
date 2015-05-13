@@ -35,9 +35,20 @@ namespace MV {
 	bool loadTextureFromFile(const std::string &file, GLuint &imageLoaded, Size<int> &size, Size<int> &originalSize, bool powerTwo, bool repeat);
 	bool loadTextureFromSurface(SDL_Surface *img, GLuint &imageLoaded, Size<int> &size, Size<int> &originalSize, bool powerTwo, bool repeat);
 
+	class TextureUnloader {
+	public:
+		static void increment(GLuint a_id);
+		static bool decrement(GLuint a_id);
+	private:
+		static std::mutex lock;
+		static std::map<GLuint, int> handles;
+	};
+
+	class SharedTextures;
 	class TextureHandle;
 	class TextureDefinition : public std::enable_shared_from_this<TextureDefinition> {
 		friend cereal::access;
+	protected:
 		Slot<void(std::shared_ptr<TextureDefinition>)> onReloadAction;
 	public:
 		SlotRegister<void(std::shared_ptr<TextureDefinition>)> onReload;
@@ -97,8 +108,6 @@ namespace MV {
 			return std::unique_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_powerTwo, a_repeat, false));
 		}
 
-
-
 	protected:
 		FileTextureDefinition(const std::string &a_filename, bool a_powerTwo, bool a_repeat, bool a_isShared = true):
 			TextureDefinition(a_filename, a_isShared),
@@ -118,13 +127,15 @@ namespace MV {
 		static void load_and_construct(Archive & archive, cereal::construct<FileTextureDefinition> &construct){
 			bool repeat = false;
 			bool powerTwo = true;
+
 			archive(cereal::make_nvp("powerTwo", powerTwo), cereal::make_nvp("repeat", repeat));
+
 			construct("", powerTwo, repeat);
+			archive.extract(cereal::make_nvp("texture", construct->textures));
 			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
-			if(!construct->handles.empty()){
-				construct->reloadImplementation();
-			}
 		}
+
+		SharedTextures *textures = nullptr;
 		bool powerTwo;
 		bool repeat;
 	};
@@ -158,9 +169,6 @@ namespace MV {
 			Color backgroundColor;
 			archive(cereal::make_nvp("backgroundColor", backgroundColor), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
 			construct->backgroundColor = backgroundColor;
-			if(!construct->handles.empty()){
-				construct->reloadImplementation();
-			}
 		}
 
 		virtual void reloadImplementation();

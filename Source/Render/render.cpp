@@ -154,6 +154,8 @@ namespace MESA {
 namespace MV {
 	const std::string DEFAULT_ID = "default";
 	const std::string PREMULTIPLY_ID = "premultiply";
+	const std::string COLOR_PICKER_ID = "colorPicker";
+
 	bool Draw2D::firstInitializationSDL = true;
 	bool Draw2D::firstInitializationOpenGL = true;
 

@@ -2,7 +2,7 @@
 #define __MV_EDITOR_CONTROLS_H__
 
 #include <memory>
-#include "editorSelection.h"
+#include "editComponents.h"
 #include "editorDefines.h"
 #include "editorPanels.h"
 #include "editorFactories.h"

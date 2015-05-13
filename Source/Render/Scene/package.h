@@ -10,4 +10,5 @@
 	#include "Render/Scene/emitter.h"
 	#include "Render/Scene/grid.h"
 	#include "Render/Scene/slider.h"
+	#include "Render/Scene/palette.h"
 #endif

@@ -131,14 +131,14 @@ namespace MV {
 			for (auto &&particle : threadData[a_groupIndex].particles) {
 				BoxAABB<> bounds(toPoint(particle.scale / 2.0f), toPoint(particle.scale / -2.0f));
 
+				appendQuadVertexIndices(threadData[a_groupIndex].vertexIndices, static_cast<GLuint>(threadData[a_groupIndex].points.size()));
+				
 				for (size_t i = 0; i < 4; ++i) {
 					auto corner = bounds[i];
 					rotatePoint(corner, particle.rotation);
 					corner += particle.position;
 					threadData[a_groupIndex].points.push_back(DrawPoint(corner, particle.color, texturePoints[i]));
 				}
-
-				appendQuadVertexIndices(threadData[a_groupIndex].vertexIndices, static_cast<GLuint>(threadData[a_groupIndex].points.size()));
 			}
 		}
 

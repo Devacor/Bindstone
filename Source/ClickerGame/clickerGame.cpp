@@ -28,6 +28,7 @@ void ClickerGame::initializeWindow() {
 	}
 	renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
 	renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
+	renderer.loadShader(MV::COLOR_PICKER_ID, "Assets/Shaders/default.vert", "Assets/Shaders/colorPicker.frag");
 	atexit(sdl_quit_2);
 
 	AudioPlayer::instance()->initAudio();
@@ -53,9 +54,9 @@ void ClickerGame::initializeWindow() {
 	textures.assemblePacks("Assets/Atlases", &renderer);
 	textures.files("Assets/Map");
 
+
 	InitializeWorldScene();
 }
-
 void ClickerGame::InitializeWorldScene() {
 	auto clickDamageEffect = worldScene->get("DamageOn")->component<MV::Scene::Emitter>();
 	clickDamageEffect->disable();

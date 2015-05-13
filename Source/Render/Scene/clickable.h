@@ -74,7 +74,7 @@ namespace MV {
 
 			void startEatingTouches();
 			void stopEatingTouches();
-			bool isEatingTouches() const;
+			bool eatingTouches() const;
 
 			BoundsType clickDetectionType() const;
 

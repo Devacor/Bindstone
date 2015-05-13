@@ -374,7 +374,7 @@ namespace MV {
 	template<typename T>
 	Color& operator/(const Color &a_lhs, T a_rhs){
 		Color result = a_lhs;
-		return result *= a_rhs;
+		return result /= a_rhs;
 	}
 
 	template <class T>

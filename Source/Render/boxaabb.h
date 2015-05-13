@@ -36,10 +36,10 @@ namespace MV {
 		BoxAABB<T>& expandWith(const Point<T> &a_comparePoint);
 		BoxAABB<T>& expandWith(const BoxAABB<T> &a_compareBox);
 
-		PointPrecision width() const{
+		T width() const{
 			return (maxPoint - minPoint).x;
 		}
-		PointPrecision height() const{
+		T height() const{
 			return (maxPoint - minPoint).y;
 		}
 
@@ -48,6 +48,8 @@ namespace MV {
 		bool flatHeight() const{ return equals(minPoint.y, maxPoint.y); }
 
 		Size<T> size() const{ return toSize(maxPoint - minPoint); }
+
+		Point<PointPrecision> percent(const Point<T> &a_point) const;
 
 		bool contains(const Point<T> &a_comparePoint, bool a_useDepth = false) const;
 		bool contains(const BoxAABB<T>& a_other, bool a_useDepth = false) const;
@@ -114,6 +116,18 @@ namespace MV {
 
 		Point<T> minPoint, maxPoint;
 	};
+
+	template <typename T>
+	Point<PointPrecision> MV::BoxAABB<T>::percent(const Point<T> &a_point) const {
+		Point<PointPrecision> percentResult;
+
+		percentResult.x = std::min<PointPrecision>(std::max<PointPrecision>(static_cast<PointPrecision>(a_point.x - minPoint.x), 0.0f), static_cast<PointPrecision>(maxPoint.x - minPoint.x));
+		percentResult.y = std::min<PointPrecision>(std::max<PointPrecision>(static_cast<PointPrecision>(a_point.y - minPoint.y), 0.0f), static_cast<PointPrecision>(maxPoint.y - minPoint.y));
+		percentResult.z = std::min<PointPrecision>(std::max<PointPrecision>(static_cast<PointPrecision>(a_point.z - minPoint.z), 0.0f), static_cast<PointPrecision>(maxPoint.z - minPoint.z));
+
+		percentResult /= cast<PointPrecision>(toPoint(size()));
+		return percentResult;
+	}
 
 	template <typename T>
 	std::ostream& operator<<(std::ostream& a_os, const BoxAABB<T>& a_box){

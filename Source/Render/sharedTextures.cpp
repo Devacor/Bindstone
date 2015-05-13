@@ -24,7 +24,7 @@ namespace MV {
 	}
 
 	std::shared_ptr<FileTextureDefinition> SharedTextures::file(const std::string &a_filename, bool a_repeat) {
-		std::string identifier = a_filename + (a_repeat ? "1" : "0");
+		std::string identifier = fileId(a_filename, a_repeat);
 		auto foundDefinition = fileDefinitions.find(identifier);
 		if(foundDefinition == fileDefinitions.end()){
 			std::shared_ptr<FileTextureDefinition> newDefinition = FileTextureDefinition::make(a_filename, true, a_repeat);

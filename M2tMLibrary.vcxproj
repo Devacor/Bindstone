@@ -200,7 +200,7 @@
     <ClCompile Include="Source\Editor\editorFactories.cpp" />
     <ClCompile Include="Source\Editor\editorPanels.cpp" />
     <ClCompile Include="Source\Editor\editorSceneGraphPanel.cpp" />
-    <ClCompile Include="Source\Editor\editorSelection.cpp" />
+    <ClCompile Include="Source\Editor\editComponents.cpp" />
     <ClCompile Include="Source\exampleCode.cpp" />
     <ClCompile Include="Source\Game\building.cpp" />
     <ClCompile Include="Source\Game\game.cpp" />
@@ -221,6 +221,7 @@
     <ClCompile Include="Source\Render\points.cpp" />
     <ClCompile Include="Source\Render\render.cpp" />
     <ClCompile Include="Source\Render\Scene\drawable.cpp" />
+    <ClCompile Include="Source\Render\Scene\palette.cpp" />
     <ClCompile Include="Source\Render\Scene\sprite.cpp" />
     <ClCompile Include="Source\Render\Scene\clickable.cpp" />
     <ClCompile Include="Source\Render\Scene\slider.cpp" />
@@ -318,7 +319,7 @@
     <ClInclude Include="Source\Editor\editorFactories.h" />
     <ClInclude Include="Source\Editor\editorPanels.h" />
     <ClInclude Include="Source\Editor\editorSceneGraphPanel.h" />
-    <ClInclude Include="Source\Editor\editorSelection.h" />
+    <ClInclude Include="Source\Editor\editComponents.h" />
     <ClInclude Include="Source\Game\building.h" />
     <ClInclude Include="Source\Game\gameEditor.h" />
     <ClInclude Include="Source\Render\boxaabb.h" />
@@ -344,6 +345,7 @@
     <ClInclude Include="Source\Render\package.h" />
     <ClInclude Include="Source\Render\points.h" />
     <ClInclude Include="Source\Render\render.h" />
+    <ClInclude Include="Source\Render\Scene\palette.h" />
     <ClInclude Include="Source\Render\Scene\sprite.h" />
     <ClInclude Include="Source\Render\Scene\clickable.h" />
     <ClInclude Include="Source\Render\Scene\slider.h" />

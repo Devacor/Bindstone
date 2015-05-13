@@ -2,6 +2,7 @@
 #define _MV_SCENE_CLIPPED_H_
 
 #include "sprite.h"
+#include "Interface/mouse.h"
 
 namespace MV {
 	namespace Scene {
@@ -11,6 +12,9 @@ namespace MV {
 			friend cereal::access;
 
 		public:
+			std::shared_ptr<Clipped> blockClippedChildTaps(MouseState& a_mouse, int a_globalClickPriority = 100);
+			std::shared_ptr<Clipped> unblockClippedChildTaps();
+
 			std::shared_ptr<Clipped> bounds(const BoxAABB<> &a_bounds);
 			BoxAABB<> bounds();
 			std::shared_ptr<Clipped> size(const Size<> &a_size, const Point<> &a_centerPoint);
@@ -78,6 +82,9 @@ namespace MV {
 
 			std::shared_ptr<DynamicTextureDefinition> clippedTexture;
 			std::shared_ptr<Framebuffer> framebuffer;
+
+			MouseState::SignalType onLeftMouseDownHandle;
+			MouseState::SignalType onLeftMouseUpHandle;
 
 			std::string refreshShaderId;
 			BoxAABB<> capturedBounds;

@@ -19,6 +19,8 @@ namespace MV {
 		Slot<void(const Task&)> onStartSlot;
 		Slot<void(const Task&)> onFinishSlot;
 		Slot<void(const Task&)> onFinishAllSlot;
+        Slot<void(const Task&)> onSuspendSlot;
+		Slot<void(const Task&)> onResumeSlot;
 		Slot<void()> onCancelSlot;
 
 		Slot<void(const Task&, std::exception &)> onExceptionSlot;
@@ -33,6 +35,7 @@ namespace MV {
 			task(a_task),
 			block(a_blocking),
 			blockParentCompletion(a_blockParentCompletion),
+			alwaysRunChildren(false),
 			totalTime(0.0),
 			minimumInterval(0.0),
 			lastCalledInterval(0.0),
@@ -42,6 +45,8 @@ namespace MV {
 			onFinishAll(onFinishAllSlot),
 			onFinish(onFinishSlot),
 			onCancel(onCancelSlot),
+			onSuspend(onSuspendSlot),
+			onResume(onResumeSlot),
 			onException(onExceptionSlot){
 		}
 
@@ -65,11 +70,13 @@ namespace MV {
 		}
 
 		bool update(double a_dt){
+			unsuspend();
+			
 			if (!cancelled) {
 				if (a_dt > 0.0f) {
 					updateLocalTask(a_dt);
 					updateParallelTasks(a_dt);
-					if (ourTaskComplete && updateChildTasks(a_dt)) {
+					if ((ourTaskComplete || alwaysRunChildren) && updateChildTasks(a_dt)) {
 						try { onFinishAllSlot(*this); } catch (std::exception &a_e) {
 							if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
 							onExceptionSlot(*this, a_e);
@@ -81,6 +88,17 @@ namespace MV {
 			}
 			return finished();
 		}
+		
+		Task& finish() {
+			forceCompleteFlag = true;
+			for(auto&& task : parallelTasks){
+				task.finish();
+			}
+			for(auto&& task : sequentialTasks){
+				task.finish();
+			}
+			return *this;
+		}
 
 		bool finished() {
 			return cancelled || ourTaskComplete && noChildrenBlockingCompletion();
@@ -89,17 +107,35 @@ namespace MV {
 		double elapsed() const{
 			return lastCalledInterval;
 		}
-
-		void forceComplete(){
-			forceCompleteFlag = true;
+		
+		Task& unblockChildren() {
+			alwaysRunChildren = true;
+			return *this;
+		}
+		
+		Task& blockChildren() {
+			alwaysRunChildren = false;
+			return *this;
 		}
 
-		void cancel() {
-			cancelled = true;
-			try { onCancelSlot(); } catch (std::exception &a_e) {
-				if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-				onExceptionSlot(*this, a_e);
+		Task& finishLocal(){
+			forceCompleteFlag = true;
+			return *this;
+		}
+
+		Task& cancel() {
+			cancelAllChildren();
+			if(!cancelled){
+				cancelled = true;
+				if(!ourTaskComplete){
+					ourTaskComplete = true;
+					try { onCancelSlot(); } catch (std::exception &a_e) {
+						if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+						onExceptionSlot(*this, a_e);
+					}
+				}
 			}
+			return *this;
 		}
 
 		bool forceCompleted() const{
@@ -108,6 +144,16 @@ namespace MV {
 
 		bool blocking() const{
 			return block;
+		}
+
+		Task& now(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
+			if(!sequentialTasks.empty()){
+				sequentialTasks[0].suspend();
+			}
+			
+			sequentialTasks.emplace_front(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+			onFinishAllSlot.unblock();
+			return *this;
 		}
 
 		Task& then(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
@@ -128,26 +174,46 @@ namespace MV {
 			return *this;
 		}
 
-		Task* get(const std::string &a_name, bool a_throwOnNotFound = true){
+		std::shared_ptr<Task> get(const std::string &a_name, bool a_throwOnNotFound = true){
 			auto foundInSequentials = std::find_if(sequentialTasks.begin(), sequentialTasks.end(), [&](const std::shared_ptr<Task> &a_task){
 				return a_task->taskName == a_name;
 			});
 			if(foundInSequentials != sequentialTasks.end()){
-				return &(**foundInSequentials);
+				return (*foundInSequentials);
 			}
+			for(auto&& taskList : temporarySequentialTasks){
+				foundInSequentials = std::find_if(taskList.begin(), taskList.end(), [&](const std::shared_ptr<Task> &a_task){
+					return a_task->taskName == a_name;
+				});
+				if(foundInSequentials != taskList.end()){
+					return (*foundInSequentials);
+				}
+			}
+
 			auto foundInParallels = std::find_if(parallelTasks.begin(), parallelTasks.end(), [&](const std::shared_ptr<Task> &a_task){
 				return a_task->taskName == a_name;
 			});
 			if(foundInParallels != parallelTasks.end()){
-				return &(**foundInParallels);
+				return (*foundInParallels);
 			}
+			for(auto&& taskList : temporaryParallelTasks){
+				foundInParallels = std::find_if(taskList.begin(), taskList.end(), [&](const std::shared_ptr<Task> &a_task){
+					return a_task->taskName == a_name;
+				});
+				if(foundInParallels != taskList.end()){
+					return (*foundInParallels);
+				}
+			}
+			
 			require<ResourceException>(!a_throwOnNotFound, "Failed to find: [", a_name, "] in task: [", taskName, "]");
-			return nullptr;
+			return std::shared_ptr<Task>();
 		}
 
 		SlotRegister<void(const Task&)> onStart;
 		SlotRegister<void(const Task&)> onFinish;
 		SlotRegister<void(const Task&)> onFinishAll;
+		SlotRegister<void(const Task&)> onSuspend;
+		SlotRegister<void(const Task&)> onResume;
 		SlotRegister<void()> onCancel;
 		SlotRegister<void(const Task&, std::exception &)> onException;
 	private:
@@ -209,19 +275,47 @@ namespace MV {
 				parallelTasks.insert(parallelTasks.end(), make_move_iterator(sequentialTasks.begin()), make_move_iterator(firstBlockingTask));
 				sequentialTasks.erase(sequentialTasks.begin(), firstBlockingTask);
 			}
-			if(!sequentialTasks.empty() && sequentialTasks.front()->update(a_dt)){
-				sequentialTasks.pop_front();
+			if(!sequentialTasks.empty()){
+				auto currentSequentialTask = sequentialTasks.begin();
+				try{
+					if((*currentSequentialTask)->update(a_dt)){
+						sequentialTasks.erase(currentSequentialTask);
+					}
+				} catch(std::exception &a_e) {
+					if (onExceptionSlot.cullDeadObservers() == 0) {
+						sequentialTasks.erase(currentSequentialTask); 
+						throw; 
+					}
+
+					onExceptionSlot(*this, a_e);
+					sequentialTasks.erase(currentSequentialTask);
+
+					return true;
+				}
 			}
 		}
 
 		void updateParallelTasks(double a_dt){
-			parallelTasks.erase(std::remove_if(parallelTasks.begin(), parallelTasks.end(), [&](const std::shared_ptr<Task> &a_task){
+			auto temporaryParellel = parallelTasks;
+			temporaryParallelTasks.push_back(temporaryParellel);
+			SCOPE_EXIT {temporaryParallelTasks.pop_back()};
+			parallelTasks.clear();
+
+			temporaryParallel.erase(std::remove_if(temporaryParallel.begin(), temporaryParallel.end(), [&](const std::shared_ptr<Task> &a_task){
 				try { return a_task->update(a_dt); } catch (std::exception &a_e) {
 					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
 					onExceptionSlot(*this, a_e);
 					return true;
 				}
-			}), parallelTasks.end());
+			}), temporaryParallel.end());
+
+			if(parallelTasks.empty()){
+				parallelTasks = temporaryParallel;
+			}else{
+				for(auto&& task : temporaryParallel){
+					parallelTasks.push_back(task);
+				}
+			}
 		}
 
 		bool noChildrenBlockingCompletion() const{
@@ -233,40 +327,71 @@ namespace MV {
 					return a_task->blockParentCompletion;
 				}) == sequentialTasks.end());
 		}
+		
+		boid cancelAllChildTasks() {
+			auto sequentialTasksToCancel = sequentialTasks;
+			temporarySequentialTasks.push_back(sequentialTasksToCancel);
+			SCOPE_EXIT {temporarySequentialTasks.pop_back()};
+			sequentialTasks.clear();
+			for(auto&& task = sequentialTasksToCancel.rbegin();task != sequentialTasksToCancel.rend();++task){
+				task->cancel();
+			}
+			auto parallelTasksToCancel = parallelTasks;
+			temporaryParallelTasks.push_back(parallelTasksToCancel);
+			SCOPE_EXIT {temporaryParallelTasks.pop_back()};
+			parallelTasks.clear();
+			for(auto&& task = parallelTasksToCancel.rbegin();task != parallelTasksToCancel.rend();++task){
+				task->cancel();
+			}
+		}
 
 		void finishOurTaskAndChildren() {
 			bool allFinished = finished();
 			if (!ourTaskComplete) {
 				ourTaskComplete = true;
-				try { onFinishSlot(*this); } catch (std::exception &a_e) {
-					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-					onExceptionSlot(*this, a_e);
+				if(totalTime == 0){
+					cancel();
+				} else {
+					try { onFinishSlot(*this); } catch (std::exception &a_e) {
+						if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+						onExceptionSlot(*this, a_e);
+					}
+					onFinishSlot.block();
 				}
 			}
 			finishAllChildTasks();
-			if (!allFinished) {
+			if (!allFinished && finished()) {
 				try { onFinishAllSlot(*this); } catch (std::exception &a_e) {
 					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
 					onExceptionSlot(*this, a_e);
 				}
+				onFinishAllSlot.block();
 			}
 		}
 
 		void finishAllChildTasks(){
-			for(std::shared_ptr<Task> &task : parallelTasks){
-				task->finishOurTaskAndChildren();
-			}
+			auto parallelTasksToFinish = parallelTasks;
+			temporaryParallelTasks.push_back(parallelTasksToFinish);
+			SCOPE_EXIT {temporaryParallelTasks.pop_back()};
 			parallelTasks.clear();
-			for(std::shared_ptr<Task> &task : sequentialTasks){
+			for(std::shared_ptr<Task> &task : parallelTasksToFinish){
 				task->finishOurTaskAndChildren();
 			}
+			auto sequentialTasksToFinish = sequentialTasks;
+			temporarySequentialTasks.push_back(sequentialTasksToFinish);
+			SCOPE_EXIT {temporarySequentialTasks.pop_back()};
 			sequentialTasks.clear();
+			for(std::shared_ptr<Task> &task : sequentialTasksToFinish){
+				task->finishOurTaskAndChildren();
+			}
 		}
 
 		bool cleanupChildTasks(){
 			if(noChildrenBlockingCompletion()){
 				finishAllChildTasks();
-				return true;
+				if(noChildrenBlockingCompletion()){
+					return true;
+				}
 			}
 			return false;
 		}
@@ -276,11 +401,34 @@ namespace MV {
 
 			return cleanupChildTasks();
 		}
+		
+		void unsuspend() {
+			if (suspended) {
+				suspended = false;
+				try { onResumeSlot(*this); } catch (std::exception &a_e) {
+					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+					onExceptionSlot(*this, a_e);
+				}
+			}
+		}
+
+		void suspend() {
+			if (!suspended && totalTime > 0) {
+				suspended = true;
+				try { onSuspendSlot(*this); } catch (std::exception &a_e) {
+					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+					onExceptionSlot(*this, a_e);
+				}
+			}
+		}
 
 		std::function<bool(const Task&, double)> task;
 
-		std::vector<std::shared_ptr<Task>> parallelTasks;
+		std::deque<std::shared_ptr<Task>> parallelTasks;
 		std::deque<std::shared_ptr<Task>> sequentialTasks;
+
+		std::vector<std::deque<std::shared_ptr<Task>> temporaryParallelTasks;
+		std::vector<std::deque<std::shared_ptr<Task>> temporarySequentialTasks;
 
 		bool forceCompleteFlag;
 		std::string taskName;
@@ -292,6 +440,7 @@ namespace MV {
 		bool ourTaskComplete;
 
 		bool blockParentCompletion;
+		bool alwaysRunChildren;
 	};
 
 	#define CREATE_HOOK_UP_TASK_ACTION(member) \

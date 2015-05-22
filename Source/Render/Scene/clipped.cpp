@@ -26,6 +26,7 @@ namespace MV {
 		std::shared_ptr<Clipped> Clipped::unblockClippedChildTaps() {
 			onLeftMouseDownHandle.reset();
 			onLeftMouseUpHandle.reset();
+			return std::static_pointer_cast<Clipped>(shared_from_this());
 		}
 
 		void Clipped::refreshTexture(bool a_forceRefreshEvenIfNotDirty /*= true*/) {

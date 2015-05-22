@@ -3,15 +3,19 @@
 #include "editorPanels.h"
 #include "editorFactories.h"
 
-Editor::Editor(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer, MV::TextLibrary* a_textLibrary):
+Editor::Editor(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer):
 	pool(a_pool),
 	renderer(a_renderer),
-	textLibrary(a_textLibrary),
+	textLibrary(*a_renderer),
 	scene(MV::Scene::Node::make(*renderer, "root")),
 	controls(MV::Scene::Node::make(*renderer)),
-	controlPanel(controls, scene, SharedResources(this, pool, &textures, textLibrary, &mouse)),
-	selectorPanel(scene, controls, SharedResources(this, pool, &textures, textLibrary, &mouse)),
+	controlPanel(controls, scene, SharedResources(this, pool, &textures, &textLibrary, &mouse)),
+	selectorPanel(scene, controls, SharedResources(this, pool, &textures, &textLibrary, &mouse)),
 	testNode(MV::Scene::Node::make(*renderer)){
+
+	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
+	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
+	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 
 	initializeWindow();
 	initializeControls();
@@ -74,16 +78,10 @@ Editor::Editor(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer, MV::TextLibrary* 
 
 //return true if we're still good to go
 bool Editor::update(double dt){
-	lastUpdateDelta = dt;
-	accumulatedTime += static_cast<float>(dt);
-	++accumulatedFrames;
-	if(accumulatedFrames > 60.0f){
-		accumulatedFrames /= 2.0f;
-		accumulatedTime /= 2.0f;
-	}
 	//testNode->translate(MV::Point<>(10.0, 10.0f) * static_cast<float>(dt));
 	//testNode->get("middleSquare")->get("twoDeep")->addRotation(MV::AxisAngles(0.0f, 0.0f, 45.0f) * static_cast<float>(dt))->translate(MV::Point<>(-10.0, -10.0f) * static_cast<float>(dt));
 	//fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
+	lastUpdateDelta = dt;
 	selectorPanel.update();
 	pool->run();
 	if (done) {
@@ -117,7 +115,7 @@ void Editor::initializeWindow(){
 
 	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
 	fps = controls->make("FPS")->position({960.0f - 50.0f, 0.0f})->
-		attach<MV::Scene::Text>(*textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->wrapping(MV::TextWrapMethod::NONE);
+		attach<MV::Scene::Text>(textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->wrapping(MV::TextWrapMethod::NONE);
 }
 
 void Editor::handleInput(){

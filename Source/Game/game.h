@@ -10,7 +10,7 @@
 
 class Game {
 public:
-	Game();
+	Game(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer);
 
 	//return true if we're still good to go
 	bool update(double dt);
@@ -18,11 +18,11 @@ public:
 	void render();
 
 	MV::ThreadPool* getPool() {
-		return &pool;
+		return pool;
 	}
 
 	MV::Draw2D* getRenderer() {
-		return &renderer;
+		return renderer;
 	}
 
 	MV::TextLibrary* getTextLibrary() {
@@ -33,12 +33,10 @@ private:
 	Game(const Game &) = delete;
 	Game& operator=(const Game &) = delete;
 
-	std::shared_ptr<MV::Scene::Node> initializeCatapultScene();
 	void initializeWindow();
-	std::shared_ptr<MV::Scene::Node> initializeTextScene();
 
-	MV::ThreadPool pool;
-	MV::Draw2D renderer;
+	MV::ThreadPool* pool;
+	MV::Draw2D* renderer;
 	MV::TextLibrary textLibrary;
 
 	MV::SharedTextures textures;

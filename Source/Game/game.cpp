@@ -5,8 +5,10 @@ void sdl_quit(void){
 	TTF_Quit();
 }
 
-Game::Game() :
-	textLibrary(renderer),
+Game::Game(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer) :
+	pool(a_pool),
+	renderer(a_renderer),
+	textLibrary(*a_renderer),
 	done(false){
 
 	initializeWindow();
@@ -20,13 +22,13 @@ void Game::initializeWindow(){
 	MV::Size<> worldSize(960, 640);
 	MV::Size<int> windowSize(960, 640);
 
-	renderer.window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
+	renderer->window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
 
-	if (!renderer.initialize(windowSize, worldSize)) {
+	if (!renderer->initialize(windowSize, worldSize)) {
 		exit(0);
 	}
-	renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
-	renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
+	renderer->loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
+	renderer->loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
 	atexit(sdl_quit);
 
 	AudioPlayer::instance()->initAudio();
@@ -38,9 +40,9 @@ void Game::initializeWindow(){
 
 	archive.add(
 		cereal::make_nvp("mouse", &mouse),
-		cereal::make_nvp("renderer", &renderer),
+		cereal::make_nvp("renderer", renderer),
 		cereal::make_nvp("textLibrary", &textLibrary),
-		cereal::make_nvp("pool", &pool)
+		cereal::make_nvp("pool", pool)
 	);
 
 	archive(cereal::make_nvp("scene", worldScene));
@@ -60,7 +62,7 @@ void Game::initializeWindow(){
 	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
 	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 
-	textures.assemblePacks("Assets/Atlases", &renderer);
+	textures.assemblePacks("Assets/Atlases", renderer);
 	textures.files("Assets/Map");
 }
 
@@ -68,6 +70,7 @@ void Game::initializeWindow(){
 
 bool Game::update(double dt) {
 	lastUpdateDelta = dt;
+	pool->run();
 	if (done) {
 		done = false;
 		return false;
@@ -78,7 +81,7 @@ bool Game::update(double dt) {
 void Game::handleInput() {
 	SDL_Event event;
 	while(SDL_PollEvent(&event)){
-		if(!renderer.handleEvent(event)){
+		if(!renderer->handleEvent(event)){
 			switch(event.type){
 			case SDL_QUIT:
 				done = true;
@@ -113,8 +116,8 @@ void Game::handleInput() {
 }
 
 void Game::render() {
-	renderer.clearScreen();
+	renderer->clearScreen();
 	worldScene->drawUpdate(static_cast<float>(lastUpdateDelta));
 	//testShape->draw();
-	renderer.updateScreen();
+	renderer->updateScreen();
 }

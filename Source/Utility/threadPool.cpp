@@ -1,4 +1,5 @@
 #include "threadPool.h"
+#include "log.hpp"
 
 namespace MV{
 	ThreadPool::ThreadTask::ThreadTask(const std::function<void()> &a_call):
@@ -67,7 +68,7 @@ namespace MV{
 		service(),
 		working(new asio_worker::element_type(service)) {
 
-		std::cout << "Info: Generating ThreadPool [" << totalThreads << "]" << std::endl;
+		log(INFO, "Info: Generating ThreadPool [", totalThreads, "]");
 
 		for(size_t i = 0; i < totalThreads; ++i) {
 			workers.emplace_back(new std::thread([this]{

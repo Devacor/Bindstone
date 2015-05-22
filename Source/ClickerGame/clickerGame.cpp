@@ -6,8 +6,10 @@ void sdl_quit_2(void) {
 	TTF_Quit();
 }
 
-ClickerGame::ClickerGame() :
-	textLibrary(renderer),
+ClickerGame::ClickerGame(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer) :
+	pool(a_pool),
+	renderer(a_renderer),
+	textLibrary(*a_renderer),
 	done(false) {
 
 	initializeWindow();
@@ -21,14 +23,11 @@ void ClickerGame::initializeWindow() {
 	MV::Size<> worldSize(375, 667);
 	MV::Size<int> windowSize(375, 667);
 
-	renderer.window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
+	renderer->window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
 
-	if (!renderer.initialize(windowSize, worldSize)) {
+	if (!renderer->initialize(windowSize, worldSize)) {
 		exit(0);
 	}
-	renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
-	renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
-	renderer.loadShader(MV::COLOR_PICKER_ID, "Assets/Shaders/default.vert", "Assets/Shaders/colorPicker.frag");
 	atexit(sdl_quit_2);
 
 	AudioPlayer::instance()->initAudio();
@@ -40,20 +39,19 @@ void ClickerGame::initializeWindow() {
 
 	archive.add(
 		cereal::make_nvp("mouse", &mouse),
-		cereal::make_nvp("renderer", &renderer),
+		cereal::make_nvp("renderer", renderer),
 		cereal::make_nvp("textLibrary", &textLibrary),
-		cereal::make_nvp("pool", &pool)
+		cereal::make_nvp("pool", pool)
 		);
 
 	archive(cereal::make_nvp("scene", worldScene));
 
+	textures.assemblePacks("Assets/Atlases", renderer);
+	textures.files("Assets/Map");
+
 	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
 	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
 	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
-
-	textures.assemblePacks("Assets/Atlases", &renderer);
-	textures.files("Assets/Map");
-
 
 	InitializeWorldScene();
 }
@@ -95,6 +93,7 @@ void ClickerGame::InitializeWorldScene() {
 
 bool ClickerGame::update(double dt) {
 	lastUpdateDelta = dt;
+	pool->run();
 	if (done) {
 		done = false;
 		return false;
@@ -105,7 +104,7 @@ bool ClickerGame::update(double dt) {
 void ClickerGame::handleInput() {
 	SDL_Event event;
 	while (SDL_PollEvent(&event)) {
-		if (!renderer.handleEvent(event)) {
+		if (!renderer->handleEvent(event)) {
 			switch (event.type) {
 			case SDL_QUIT:
 				done = true;
@@ -140,8 +139,8 @@ void ClickerGame::handleInput() {
 }
 
 void ClickerGame::render() {
-	renderer.clearScreen();
+	renderer->clearScreen();
 	worldScene->drawUpdate(static_cast<float>(lastUpdateDelta));
 	//testShape->draw();
-	renderer.updateScreen();
+	renderer->updateScreen();
 }

@@ -1,9 +1,9 @@
 #include "Game/gameEditor.h"
 #include "ClickerGame/clickerGame.h"
-#include "vld.h"
 #include "Utility/threadPool.h"
 
 #include "ArtificialIntelligence/pathfinding.h"
+#include "vld.h"
 
 bool isDone() {
 	SDL_Event event;
@@ -12,6 +12,7 @@ bool isDone() {
 			return true;
 		}
 	}
+	return false;
 }
 
 int main(int argc, char *argv[]){

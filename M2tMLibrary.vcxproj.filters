@@ -630,6 +630,7 @@
     <ClInclude Include="Source\Editor\editComponents.h">
       <Filter>Source Files\Editor</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Utility\log.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html">

@@ -41,6 +41,7 @@ namespace MV {
 			lastCalledInterval(0.0),
 			ourTaskComplete(false),
 			forceCompleteFlag(false),
+			suspended(false),
 			onStart(onStartSlot),
 			onFinishAll(onFinishAllSlot),
 			onFinish(onFinishSlot),
@@ -60,9 +61,9 @@ namespace MV {
 			return Task(a_name, a_task, a_blocking, a_blockParentCompletion);
 		}
 
-		public Task interval(double a_dt) {
+		Task& interval(double a_dt) {
 			minimumInterval = a_dt;
-			return this;
+			return *this;
 		}
 
 		std::string name() const{
@@ -70,21 +71,26 @@ namespace MV {
 		}
 
 		bool update(double a_dt){
-			unsuspend();
+			try {
+				unsuspend();
 			
-			if (!cancelled) {
-				if (a_dt > 0.0f) {
-					updateLocalTask(a_dt);
-					updateParallelTasks(a_dt);
-					if ((ourTaskComplete || alwaysRunChildren) && updateChildTasks(a_dt)) {
-						try { onFinishAllSlot(*this); } catch (std::exception &a_e) {
-							if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-							onExceptionSlot(*this, a_e);
+				if (!cancelled) {
+					if (a_dt > 0.0f) {
+						updateLocalTask(a_dt);
+						updateParallelTasks(a_dt);
+						if ((ourTaskComplete || alwaysRunChildren) && updateChildTasks(a_dt)) {
+							try { onFinishAllSlot(*this); } catch (std::exception &a_e) {
+								if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+								onExceptionSlot(*this, a_e);
+							}
+							onFinishAllSlot.block();
+							return true;
 						}
-						onFinishAllSlot.block();
-						return true;
 					}
 				}
+			} catch (std::exception &a_e) {
+				if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
+				onExceptionSlot(*this, a_e);
 			}
 			return finished();
 		}
@@ -92,10 +98,10 @@ namespace MV {
 		Task& finish() {
 			forceCompleteFlag = true;
 			for(auto&& task : parallelTasks){
-				task.finish();
+				task->finish();
 			}
 			for(auto&& task : sequentialTasks){
-				task.finish();
+				task->finish();
 			}
 			return *this;
 		}
@@ -148,7 +154,7 @@ namespace MV {
 
 		Task& now(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			if(!sequentialTasks.empty()){
-				sequentialTasks[0].suspend();
+				sequentialTasks[0]->suspend();
 			}
 			
 			sequentialTasks.emplace_front(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
@@ -231,24 +237,24 @@ namespace MV {
 				totalTime += a_dt * static_cast<int>(!forceCompleteFlag);
 
 				if (minimumInterval > 0) {
-					LocalTaskUpdateIntervals();
+					localTaskUpdateIntervals();
 				} else {
 					lastCalledInterval = totalTime;
-					LocalTaskUpdateStep(a_dt);
+					localTaskUpdateStep(a_dt);
 				}
 			}
 		}
 
-		void LocalTaskUpdateIntervals() {
+		void localTaskUpdateIntervals() {
 			int steps = (int)((totalTime - lastCalledInterval) / minimumInterval);
 			for (int i = 0; i < steps; ++i)
 			{
 				lastCalledInterval += minimumInterval;
-				LocalTaskUpdateStep(minimumInterval);
+				localTaskUpdateStep(minimumInterval);
 			}
 		}
 
-		void LocalTaskUpdateStep(double a_dt) {
+		void localTaskUpdateStep(double a_dt) {
 			if (!ourTaskComplete) {
 				try {
 					if (forceCompleteFlag || task(*this, a_dt)) {
@@ -289,16 +295,14 @@ namespace MV {
 
 					onExceptionSlot(*this, a_e);
 					sequentialTasks.erase(currentSequentialTask);
-
-					return true;
 				}
 			}
 		}
 
 		void updateParallelTasks(double a_dt){
-			auto temporaryParellel = parallelTasks;
-			temporaryParallelTasks.push_back(temporaryParellel);
-			SCOPE_EXIT {temporaryParallelTasks.pop_back()};
+			auto temporaryParallel = parallelTasks;
+			temporaryParallelTasks.push_back(temporaryParallel);
+			SCOPE_EXIT{ temporaryParallelTasks.pop_back(); };
 			parallelTasks.clear();
 
 			temporaryParallel.erase(std::remove_if(temporaryParallel.begin(), temporaryParallel.end(), [&](const std::shared_ptr<Task> &a_task){
@@ -328,20 +332,20 @@ namespace MV {
 				}) == sequentialTasks.end());
 		}
 		
-		boid cancelAllChildTasks() {
+		void cancelAllChildren() {
 			auto sequentialTasksToCancel = sequentialTasks;
 			temporarySequentialTasks.push_back(sequentialTasksToCancel);
-			SCOPE_EXIT {temporarySequentialTasks.pop_back()};
+			SCOPE_EXIT{ temporarySequentialTasks.pop_back(); };
 			sequentialTasks.clear();
 			for(auto&& task = sequentialTasksToCancel.rbegin();task != sequentialTasksToCancel.rend();++task){
-				task->cancel();
+				(*task)->cancel();
 			}
 			auto parallelTasksToCancel = parallelTasks;
 			temporaryParallelTasks.push_back(parallelTasksToCancel);
-			SCOPE_EXIT {temporaryParallelTasks.pop_back()};
+			SCOPE_EXIT{ temporaryParallelTasks.pop_back(); };
 			parallelTasks.clear();
 			for(auto&& task = parallelTasksToCancel.rbegin();task != parallelTasksToCancel.rend();++task){
-				task->cancel();
+				(*task)->cancel();
 			}
 		}
 
@@ -372,14 +376,14 @@ namespace MV {
 		void finishAllChildTasks(){
 			auto parallelTasksToFinish = parallelTasks;
 			temporaryParallelTasks.push_back(parallelTasksToFinish);
-			SCOPE_EXIT {temporaryParallelTasks.pop_back()};
+			SCOPE_EXIT{ temporaryParallelTasks.pop_back(); };
 			parallelTasks.clear();
 			for(std::shared_ptr<Task> &task : parallelTasksToFinish){
 				task->finishOurTaskAndChildren();
 			}
 			auto sequentialTasksToFinish = sequentialTasks;
 			temporarySequentialTasks.push_back(sequentialTasksToFinish);
-			SCOPE_EXIT {temporarySequentialTasks.pop_back()};
+			SCOPE_EXIT{ temporarySequentialTasks.pop_back(); };
 			sequentialTasks.clear();
 			for(std::shared_ptr<Task> &task : sequentialTasksToFinish){
 				task->finishOurTaskAndChildren();
@@ -427,8 +431,8 @@ namespace MV {
 		std::deque<std::shared_ptr<Task>> parallelTasks;
 		std::deque<std::shared_ptr<Task>> sequentialTasks;
 
-		std::vector<std::deque<std::shared_ptr<Task>> temporaryParallelTasks;
-		std::vector<std::deque<std::shared_ptr<Task>> temporarySequentialTasks;
+		std::vector<std::deque<std::shared_ptr<Task>>> temporaryParallelTasks;
+		std::vector<std::deque<std::shared_ptr<Task>>> temporarySequentialTasks;
 
 		bool forceCompleteFlag;
 		std::string taskName;
@@ -437,6 +441,7 @@ namespace MV {
 		double lastCalledInterval;
 
 		bool block;
+		bool suspended;
 		bool ourTaskComplete;
 
 		bool blockParentCompletion;

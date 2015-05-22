@@ -19,7 +19,7 @@
 class EditorControls;
 class Editor {
 public:
-	Editor(MV::ThreadPool* pool, MV::Draw2D* renderer, MV::TextLibrary* textLibrary);
+	Editor(MV::ThreadPool* pool, MV::Draw2D* renderer);
 
 	//return true if we're still good to go
 	bool update(double dt);
@@ -41,7 +41,7 @@ private:
 
 	MV::ThreadPool* pool;
 	MV::Draw2D* renderer;
-	MV::TextLibrary* textLibrary;
+	MV::TextLibrary textLibrary;
 
 	MV::SharedTextures textures;
 	MV::FrameSwapperRegister animationLibrary;
@@ -53,12 +53,9 @@ private:
 
 	MV::MouseState mouse;
 
-	double lastUpdateDelta = 0.0f;
-	double lastSecond = 0;
-	bool done = false;
+	double lastUpdateDelta = 0.0;
 
-	float accumulatedTime = 0.0f;
-	float accumulatedFrames = 0.0f;
+	bool done = false;
 
 	EditorControls controlPanel;
 	SceneGraphPanel selectorPanel;

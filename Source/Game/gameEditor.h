@@ -8,8 +8,13 @@
 class GameEditor {
 public:
 	GameEditor():
-		editor(game.getPool(), game.getRenderer(), game.getTextLibrary()),
-		limbo(MV::Scene::Node::make(*game.getRenderer())){
+		editor(&pool, &renderer),
+		game(&pool, &renderer),
+		limbo(MV::Scene::Node::make(renderer)){
+
+		renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
+		renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
+		renderer.loadShader(MV::COLOR_PICKER_ID, "Assets/Shaders/default.vert", "Assets/Shaders/colorPicker.frag");
 
 		limbo->make("PaletteTest")->position({ 200.0f, 400.0f })->
 			attach<MV::Scene::Palette>(mouse)->bounds(MV::size(256.0f, 256.0f));
@@ -40,8 +45,8 @@ private:
 		done = false;
 
 		while (!done) {
+			pool.run();
 			handleInput();
-			game.getPool()->run();
 			limbo->renderer().clearScreen();
 			limbo->drawUpdate(timer.delta("tick"));
 			limbo->renderer().updateScreen();
@@ -66,6 +71,16 @@ private:
 			game.handleInput();
 			game.render();
 			MV::systemSleep(0);
+		}
+	}
+
+	void updateFps(double a_dt) {
+		lastUpdateDelta = a_dt;
+		accumulatedTime += static_cast<float>(a_dt);
+		++accumulatedFrames;
+		if (accumulatedFrames > 60.0f) {
+			accumulatedFrames /= 2.0f;
+			accumulatedTime /= 2.0f;
 		}
 	}
 
@@ -108,12 +123,19 @@ private:
 	}
 
 	MV::Stopwatch timer;
+	MV::ThreadPool pool;
+	MV::Draw2D renderer;
 
 	bool done = false;
 	MV::MouseState mouse;
 	std::shared_ptr<MV::Scene::Node> limbo;
 
-	ClickerGame game;
+	double lastUpdateDelta = 0.0;
+
+	float accumulatedTime = 0.0f;
+	float accumulatedFrames = 0.0f;
+
+	Game game;
 	Editor editor;
 };
 

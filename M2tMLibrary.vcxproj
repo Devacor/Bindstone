@@ -21,6 +21,7 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{732BFA09-4C56-4F49-BE0E-1E4A2A129DA4}</ProjectGuid>
     <RootNamespace>M2tMLibrary</RootNamespace>
+    <TargetPlatformVersion>8.1</TargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -31,7 +32,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v120</PlatformToolset>
+    <PlatformToolset>v140_xp</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -43,7 +44,7 @@
     <ConfigurationType>Application</ConfigurationType>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>CTP_Nov2013</PlatformToolset>
+    <PlatformToolset>v140</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -69,9 +70,9 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include;$(SolutionDir)../external/boost_1_55_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/</IncludePath>
-    <LibraryPath>$(SolutionDir)../external/boost_1_55_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/;$(SolutionDir)../external/libs/;$(LibraryPath);$(SolutionDir)../external/cereal/include/</LibraryPath>
-    <SourcePath>$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/spine/spine-c/src/spine/</SourcePath>
+    <IncludePath>$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include;$(SolutionDir)../external/boost_1_58_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/</IncludePath>
+    <LibraryPath>$(SolutionDir)../external/boost_1_58_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/;$(SolutionDir)../external/libs/;$(LibraryPath);$(SolutionDir)../external/cereal/include/</LibraryPath>
+    <SourcePath>$(SolutionDir)../external/boost_1_58_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/spine/spine-c/src/spine/</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/;$(IncludePath)</IncludePath>
@@ -79,10 +80,11 @@
     <SourcePath>$(SolutionDir)../external/boost_1_49_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath)</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include;$(SolutionDir)../external/boost_1_55_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/</IncludePath>
-    <LibraryPath>$(SolutionDir)../external/boost_1_55_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/;$(SolutionDir)../external/libs/;$(LibraryPath);$(SolutionDir)../external/cereal/include/</LibraryPath>
-    <SourcePath>$(SolutionDir)../external/boost_1_55_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/spine/spine-c/src/spine/</SourcePath>
+    <IncludePath>$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/SDL\SDL-2.0.4-9583\include;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include;$(SolutionDir)../external/boost_1_58_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/</IncludePath>
+    <LibraryPath>$(SolutionDir)../external/boost_1_58_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL-2.0.4-9583/VisualC/x64/Release/;$(LibraryPath)</LibraryPath>
+    <SourcePath>$(SolutionDir)../external/boost_1_58_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/spine/spine-c/src/spine/</SourcePath>
     <RunCodeAnalysis>false</RunCodeAnalysis>
+    <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -109,16 +111,21 @@
       <Optimization>Disabled</Optimization>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501</AdditionalOptions>
+      <AdditionalIncludeDirectories>
+      </AdditionalIncludeDirectories>
+      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj</AdditionalOptions>
       <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
     </ClCompile>
     <Link>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>DebugFastLink</GenerateDebugInformation>
+      <AdditionalDependencies>glu32.lib;SDL2.lib;SDL2main.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
       <Profile>true</Profile>
-      <AdditionalLibraryDirectories>$(SolutionDir)../external/boost_1_55_0/lib/;$(SolutionDir)../external/libs/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>
+      </AdditionalLibraryDirectories>
+      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
+      <AdditionalOptions>/NODEFAULTLIB:library %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -146,23 +153,31 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <Optimization>Disabled</Optimization>
+      <Optimization>Full</Optimization>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>./;$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_55_0/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include/;$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>
+      </AdditionalIncludeDirectories>
       <EnablePREfast>false</EnablePREfast>
       <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501</AdditionalOptions>
       <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MinimalRebuild>false</MinimalRebuild>
+      <DisableLanguageExtensions>false</DisableLanguageExtensions>
+      <CompileAs>CompileAsCpp</CompileAs>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>opengl32.lib;glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;libboost_filesystem-vc140-mt-1_58.lib;libboost_system-vc140-mt-1_58.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
-      <AdditionalLibraryDirectories>$(SolutionDir)../external/boost_1_55_0/lib/;$(SolutionDir)../external/libs/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2-2.0.0/lib/x64/</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>
+      </AdditionalLibraryDirectories>
       <Profile>true</Profile>
+      <LinkStatus>true</LinkStatus>
+      <PreventDllBinding>true</PreventDllBinding>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -356,6 +371,7 @@
     <ClInclude Include="Source\Render\texturePacker.h" />
     <ClInclude Include="Source\Render\textures.h" />
     <ClInclude Include="Source\Utility\generalUtility.h" />
+    <ClInclude Include="Source\Utility\log.hpp" />
     <ClInclude Include="Source\Utility\messageHandler.hpp" />
     <ClInclude Include="Source\Utility\notification.h" />
     <ClInclude Include="Source\Utility\optionalCalls.hpp" />

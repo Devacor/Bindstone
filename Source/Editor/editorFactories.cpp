@@ -197,7 +197,7 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 				});
 				scrollBarComponent->onRelease.connect("drop", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable, const MV::Point<float> &a_velocity) {
 					if (!weakBoxContents.expired()) {
-						MV::Task* existing = weakBoxContents.lock()->task().get("movingSCROLL", false);
+						std::shared_ptr<MV::Task> existing = weakBoxContents.lock()->task().get("movingSCROLL", false);
 						if (existing) {
 							existing->cancel();
 						}
@@ -245,4 +245,6 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 
 std::shared_ptr<MV::Scene::Node> makeColorPicker(MV::Draw2D &a_renderer, MV::MouseState &a_mouse, const MV::Color &a_startColor) {
 	auto sliderNode = MV::Scene::Node::make(a_renderer, MV::guid("colorpicker_"));
+
+	return sliderNode;
 }

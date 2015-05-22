@@ -41,7 +41,7 @@ private:
 
 class ClickerGame {
 public:
-	ClickerGame();
+	ClickerGame(MV::ThreadPool* pool, MV::Draw2D* renderer);
 
 	//return true if we're still good to go
 	bool update(double dt);
@@ -49,11 +49,11 @@ public:
 	void render();
 
 	MV::ThreadPool* getPool() {
-		return &pool;
+		return pool;
 	}
 
 	MV::Draw2D* getRenderer() {
-		return &renderer;
+		return renderer;
 	}
 
 	MV::TextLibrary* getTextLibrary() {
@@ -66,12 +66,10 @@ private:
 
 	void InitializeWorldScene();
 
-	std::shared_ptr<MV::Scene::Node> initializeCatapultScene();
 	void initializeWindow();
-	std::shared_ptr<MV::Scene::Node> initializeTextScene();
 
-	MV::ThreadPool pool;
-	MV::Draw2D renderer;
+	MV::ThreadPool* pool;
+	MV::Draw2D* renderer;
 	MV::TextLibrary textLibrary;
 
 	MV::SharedTextures textures;

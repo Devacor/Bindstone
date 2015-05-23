@@ -1,6 +1,6 @@
 #include "editor.h"
 #include "editorControls.h"
-#include "editorPanels.h"
+#include "componentPanels.h"
 #include "editorFactories.h"
 
 Editor::Editor(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer):

@@ -213,7 +213,7 @@
     <ClCompile Include="Source\Audio\sound.cpp" />
     <ClCompile Include="Source\Editor\editorControls.cpp" />
     <ClCompile Include="Source\Editor\editorFactories.cpp" />
-    <ClCompile Include="Source\Editor\editorPanels.cpp" />
+    <ClCompile Include="Source\Editor\componentPanels.cpp" />
     <ClCompile Include="Source\Editor\editorSceneGraphPanel.cpp" />
     <ClCompile Include="Source\Editor\editComponents.cpp" />
     <ClCompile Include="Source\exampleCode.cpp" />
@@ -332,9 +332,10 @@
     <ClInclude Include="Source\Editor\editorControls.h" />
     <ClInclude Include="Source\Editor\editorDefines.h" />
     <ClInclude Include="Source\Editor\editorFactories.h" />
-    <ClInclude Include="Source\Editor\editorPanels.h" />
+    <ClInclude Include="Source\Editor\componentPanels.h" />
     <ClInclude Include="Source\Editor\editorSceneGraphPanel.h" />
     <ClInclude Include="Source\Editor\editComponents.h" />
+    <ClInclude Include="Source\Editor\texturePicker.h" />
     <ClInclude Include="Source\Game\building.h" />
     <ClInclude Include="Source\Game\gameEditor.h" />
     <ClInclude Include="Source\Render\boxaabb.h" />

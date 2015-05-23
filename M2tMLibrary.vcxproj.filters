@@ -194,9 +194,6 @@
     <ClCompile Include="Source\Editor\editorFactories.cpp">
       <Filter>Source Files\Editor</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Editor\editorPanels.cpp">
-      <Filter>Source Files\Editor</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Render\Scene\emitter.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
@@ -241,6 +238,9 @@
     </ClCompile>
     <ClCompile Include="Source\Render\Scene\palette.cpp" />
     <ClCompile Include="Source\Editor\editComponents.cpp">
+      <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Editor\componentPanels.cpp">
       <Filter>Source Files\Editor</Filter>
     </ClCompile>
   </ItemGroup>
@@ -566,9 +566,6 @@
     <ClInclude Include="Source\Editor\editorFactories.h">
       <Filter>Source Files\Editor</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Editor\editorPanels.h">
-      <Filter>Source Files\Editor</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Render\Scene\emitter.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
@@ -631,6 +628,12 @@
       <Filter>Source Files\Editor</Filter>
     </ClInclude>
     <ClInclude Include="Source\Utility\log.hpp" />
+    <ClInclude Include="Source\Editor\componentPanels.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Editor\texturePicker.h">
+      <Filter>Source Files\Editor</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html">

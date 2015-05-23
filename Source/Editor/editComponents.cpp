@@ -1,5 +1,5 @@
 #include "editComponents.h"
-#include "editorPanels.h"
+#include "componentPanels.h"
 
 long Selection::gid = 0;
 

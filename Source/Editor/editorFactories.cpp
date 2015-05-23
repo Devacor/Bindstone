@@ -1,6 +1,6 @@
 #include "editorFactories.h"
 #include "editorDefines.h"
-#include "editorPanels.h"
+#include "componentPanels.h"
 
 #include "Render/package.h"
 

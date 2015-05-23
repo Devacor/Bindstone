@@ -1,6 +1,7 @@
-#include "editorPanels.h"
+#include "componentPanels.h"
 #include "editorControls.h"
 #include "editorFactories.h"
+#include "texturePicker.h"
 #include "editor.h"
 
 EditorPanel::EditorPanel(EditorControls &a_panel):

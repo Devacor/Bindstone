@@ -4,7 +4,7 @@
 #include <memory>
 #include "editComponents.h"
 #include "editorDefines.h"
-#include "editorPanels.h"
+#include "componentPanels.h"
 #include "editorFactories.h"
 
 class SceneGraphPanel {

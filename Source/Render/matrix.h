@@ -103,6 +103,8 @@ namespace MV {
 
 	const Matrix operator/(const Matrix &a_left, const MatrixValue &a_right);
 
+	std::ostream& operator<<(std::ostream& os, const Matrix& a_matrix);
+
 	class TransformMatrix : public Matrix {
 	public:
 		TransformMatrix(const TransformMatrix &a_matrix):Matrix(a_matrix){}

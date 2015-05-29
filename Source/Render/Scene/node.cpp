@@ -1072,6 +1072,14 @@ namespace MV {
 				safeOnChange();
 			}
 		}
-
+		
+		std::ostream& operator<<(std::ostream& os, const std::shared_ptr<Node>& a_node) {
+			std::string spacing(a_node->parentIndexList().size(), ' ');
+			os << spacing << "|->(" << a_node->id() << ")[" << a_node->size() << "]: L:" << a_node->position() << " | W:" << a_node->worldPosition() << " | S:" << a_node->screenPosition() << "\n";
+			for (auto&& child : *a_node) {
+				os << child;
+			}
+			return os;
+		}
 	}
 }

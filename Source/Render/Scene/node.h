@@ -847,6 +847,8 @@ namespace MV {
 			bool inChildBoundsCalculation = false;
 		};
 
+		std::ostream& operator<<(std::ostream& os, const std::shared_ptr<Node>& a_node);
+
 	}
 }
 

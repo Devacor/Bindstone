@@ -27,6 +27,18 @@ namespace MV{
 		return result/=a_right;
 	}
 
+	std::ostream& operator<<(std::ostream& os, const Matrix& a_matrix) {
+		for (size_t y = 0; y < a_matrix.getSizeY(); ++y) {
+			os << "[";
+			for (size_t x = 0; x < a_matrix.getSizeX(); ++x) {
+				os << a_matrix[x][y] << (x != a_matrix.getSizeX() - 1 ? ", " : "]");
+			}
+			os << "\n";
+		}
+		os << std::endl;
+		return os;
+	}
+
 	Matrix::MatrixRowAccess::MatrixRowAccess( std::shared_ptr<std::vector<MatrixValue>> a_matrixArray, size_t a_x ) :
 		matrixArray(a_matrixArray),
 		sizeX(a_x),

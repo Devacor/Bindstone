@@ -767,7 +767,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::screenPosition(const Point<int> &a_newPosition) {
-			return translate(localFromScreen(a_newPosition));
+			return position(localFromScreen(a_newPosition));
 		}
 
 		std::shared_ptr<Node> Node::nodePosition(const std::shared_ptr<Node> &a_newPosition) {

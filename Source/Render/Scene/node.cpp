@@ -767,7 +767,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::screenPosition(const Point<int> &a_newPosition) {
-			return position(localFromScreen(a_newPosition));
+			return position((myParent != nullptr) ? parent()->localFromScreen(a_newPosition) : renderer().worldFromScreen(a_newPosition));
 		}
 
 		std::shared_ptr<Node> Node::nodePosition(const std::shared_ptr<Node> &a_newPosition) {
@@ -775,7 +775,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::worldPosition(const Point<> &a_newPosition) {
-			return position(localFromWorld(a_newPosition));
+			return position((myParent != nullptr) ? parent()->localFromWorld(a_newPosition) : a_newPosition);
 		}
 
 		std::shared_ptr<Node> Node::translate(const Point<> &a_newPosition) {

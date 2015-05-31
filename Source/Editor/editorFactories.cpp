@@ -236,7 +236,7 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 	boxHeader->show();
 
 	boxHeader->onDrag.connect("DragSignal", [](std::shared_ptr<MV::Scene::Clickable> a_boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
-		a_boxHeader->owner()->translate(MV::cast<MV::PointPrecision>(deltaPosition));
+		a_boxHeader->owner()->translate(a_boxHeader->owner()->renderer().worldFromScreen(deltaPosition));
 	});
 
 	return boxContents;

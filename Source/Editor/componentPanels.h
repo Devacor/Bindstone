@@ -7,10 +7,12 @@
 #include "Render/package.h"
 
 class EditorControls;
+class EditableNode;
 class EditableRectangle;
 class EditableEmitter;
 class EditableGrid;
 class TexturePicker;
+
 class EditorPanel {
 public:
 	EditorPanel(EditorControls &a_panel);
@@ -39,6 +41,21 @@ protected:
 	EditorControls &panel;
 	std::shared_ptr<TexturePicker> picker;
 	std::shared_ptr<MV::Scene::Text> activeTextbox;
+};
+
+class SelectedNodeEditorPanel : public EditorPanel {
+public:
+	SelectedNodeEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableNode> a_controls);
+
+	virtual void handleInput(SDL_Event &a_event) override;
+
+	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
+	virtual void onSceneZoom() override;
+private:
+
+	std::shared_ptr<EditableNode> controls;
+	std::shared_ptr<MV::Scene::Text> posY;
+	std::shared_ptr<MV::Scene::Text> posX;
 };
 
 class SelectedGridEditorPanel : public EditorPanel {

@@ -2,16 +2,17 @@
 #include "editor.h"
 
 void SceneGraphPanel::clickedChild(std::shared_ptr<MV::Scene::Node> a_child) {
-	if(a_child->component<MV::Scene::Sprite>(true, false)){
-		sharedResources.editor->panel().loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(a_child->component<MV::Scene::Sprite>(), root, sharedResources.mouse));
-	} else if(a_child->component<MV::Scene::Emitter>(true, false)){
-		auto emitter = a_child->component<MV::Scene::Emitter>();
-		auto editableEmitter = std::make_shared<EditableEmitter>(emitter, root, sharedResources.mouse);
-		editableEmitter->size(emitter->bounds().size());
-		sharedResources.editor->panel().loadPanel<SelectedEmitterEditorPanel>(editableEmitter);
-	} else if (a_child->component<MV::Scene::Grid>(true, false)) {
-		sharedResources.editor->panel().loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(a_child->component<MV::Scene::Grid>(), root, sharedResources.mouse));
-	}
+	sharedResources.editor->panel().loadPanel<SelectedNodeEditorPanel>(std::make_shared<EditableNode>(a_child, root, sharedResources.mouse));
+// 	if(a_child->component<MV::Scene::Sprite>(true, false)){
+// 		sharedResources.editor->panel().loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(a_child->component<MV::Scene::Sprite>(), root, sharedResources.mouse));
+// 	} else if(a_child->component<MV::Scene::Emitter>(true, false)){
+// 		auto emitter = a_child->component<MV::Scene::Emitter>();
+// 		auto editableEmitter = std::make_shared<EditableEmitter>(emitter, root, sharedResources.mouse);
+// 		editableEmitter->size(emitter->bounds().size());
+// 		sharedResources.editor->panel().loadPanel<SelectedEmitterEditorPanel>(editableEmitter);
+// 	} else if (a_child->component<MV::Scene::Grid>(true, false)) {
+// 		sharedResources.editor->panel().loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(a_child->component<MV::Scene::Grid>(), root, sharedResources.mouse));
+// 	}
 }
 
 void SceneGraphPanel::loadButtons(std::shared_ptr<MV::Scene::Node> a_grid, std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth /*= 0*/) {

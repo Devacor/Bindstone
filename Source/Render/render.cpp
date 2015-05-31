@@ -161,42 +161,45 @@ namespace MV {
 
 	static GLint viewport[4];
 
-	Point<int> ProjectionDetails::projectScreen(const Point<> &a_point, const TransformMatrix &a_modelview){
+	Point<> ProjectionDetails::projectScreenRaw(const Point<> &a_point, const TransformMatrix &a_modelview) {
 		Point<> result;
 
-		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*a_modelview.getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
+		if (MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*a_modelview.getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE) {
 			std::cerr << "gluProject failure!" << std::endl;
 		}
-		result.y=renderer.window().height()-result.y;
+		result.y = renderer.window().height() - result.y;
 		result.z = a_point.z;//restore original z since we're just 2d.
-		return cast<int>(result);
+		//std::cout << "project: " << a_point << result << "\n" << a_modelview << "_____________________" << std::endl;
+		return result;
+	}
+
+	Point<int> ProjectionDetails::projectScreen(const Point<> &a_point, const TransformMatrix &a_modelview){
+		return cast<int>(projectScreenRaw(a_point, a_modelview));
 	}
 
 	Point<> ProjectionDetails::projectWorld(const Point<> &a_point, const TransformMatrix &a_modelview){
-		Point<> result;
-
-		if(MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*a_modelview.getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
-			std::cerr << "gluProject failure!" << std::endl;
-		}
-		result.y/=renderer.window().height()/renderer.world().height();
-		result.x/=renderer.window().width()/renderer.world().width();
-		result.y=renderer.world().height()-result.y;
-		result.z = a_point.z;//restore original z since we're just 2d.
-		return result;
+		return renderer.worldFromScreenRaw(projectScreenRaw(a_point, a_modelview));
 	}
 
-	Point<> ProjectionDetails::unProjectScreen(const Point<int> &a_point, const TransformMatrix &a_modelview){
+	Point<> ProjectionDetails::unProjectScreenRaw(const Point<> &a_point, const TransformMatrix &a_modelview){
 		Point<> result;
 
-		if(MESA::gluUnProject(static_cast<PointPrecision>(a_point.x), static_cast<PointPrecision>(renderer.window().height() - a_point.y), 0, &(*a_modelview.getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
+		auto inputPoint = a_point;
+		inputPoint.y = renderer.window().height() - inputPoint.y;
+		if(MESA::gluUnProject(inputPoint.x, inputPoint.y, .5, &(*a_modelview.getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
 			std::cerr << "gluUnProject failure!" << std::endl;
 		}
 		result.z = static_cast<PointPrecision>(a_point.z);//restore original z since we're just 2d.
+		//std::cout << "unproj: " << inputPoint << result << "\n" << a_modelview << "_____________________" << std::endl;
 		return result;
 	}
 
+	Point<> ProjectionDetails::unProjectScreen(const Point<int> &a_point, const TransformMatrix &a_modelview) {
+		return unProjectScreenRaw(cast<PointPrecision>(a_point), a_modelview);
+	}
+
 	Point<> ProjectionDetails::unProjectWorld(const Point<> &a_point, const TransformMatrix &a_modelview){
-		return unProjectScreen(renderer.screenFromWorld(a_point), a_modelview);
+		return renderer.screenFromWorldRaw(unProjectScreenRaw(a_point, a_modelview));
 	}
 
 	void checkSDLError(int line)
@@ -392,8 +395,8 @@ namespace MV {
 		title = a_title;
 	}
 
-	void Window::resize(const Size<int> &a_size){
-		windowDifferenceFromLastResize = windowSize - a_size;
+	MV::Size<int> Window::resize(const Size<int> &a_size){
+		auto sizeDelta = windowSize - a_size;
 		windowSize = a_size;
 		updateAspectRatio();
 		if(initialized){
@@ -403,6 +406,7 @@ namespace MV {
 				lockUserResize();
 			}
 		}
+		return sizeDelta;
 	}
 
 	Window& Window::allowUserResize(bool a_maintainProportions, const Size<int> &a_minSize, const Size<int> &a_maxSize){
@@ -582,24 +586,25 @@ namespace MV {
 		}
 	}
 
-	bool Window::handleEvent(const SDL_Event &event){
-		switch(event.type){
-			case SDL_WINDOWEVENT:
-				switch(event.window.event){
-					case SDL_WINDOWEVENT_RESIZED:
-						Size<int> newSize(event.window.data1, event.window.data2);
-						MV::PointPrecision oldRatio = aspectRatio;
-						if(maintainProportions){
-							conformToAspectRatio(newSize.width, newSize.height);
-						}
-						resize(newSize);
-						if(maintainProportions){
-							aspectRatio = oldRatio; //just prevent resize from mucking with this.
-						}
-						return true;
-					break;
-				}
-			break;
+	bool Window::handleEvent(const SDL_Event &a_event, RenderWorld &a_world){
+		if(a_event.type == SDL_WINDOWEVENT && a_event.window.event == SDL_WINDOWEVENT_RESIZED){
+			std::cout << "Window Resized!" << std::endl;
+			auto worldScreenDelta = cast<PointPrecision>(windowSize) / a_world.size();
+			Size<int> newSize(a_event.window.data1, a_event.window.data2);
+			MV::PointPrecision oldRatio = aspectRatio;
+			if(maintainProportions){
+				conformToAspectRatio(newSize.width, newSize.height);
+			}
+			auto screenSizeDelta = resize(newSize);
+			if (sizeWorldWithWindow) {
+				auto worldSizeDelta = cast<PointPrecision>(screenSizeDelta) / worldScreenDelta;
+				std::cout << "Screen Resize: " << screenSizeDelta << " World Resize: " << worldSizeDelta << std::endl;
+				a_world.resize(a_world.size() - worldSizeDelta);
+			}
+			if(maintainProportions){
+				aspectRatio = oldRatio; //just prevent resize from mucking with this.
+			}
+			return true;
 		}
 		return false;
 	}
@@ -622,10 +627,6 @@ namespace MV {
 	Window& Window::resizeWorldWithWindow(bool a_sizeWorldWithWindow) {
 		sizeWorldWithWindow = a_sizeWorldWithWindow;
 		return *this;
-	}
-
-	Size<int> Window::resizeDelta() const {
-		return windowDifferenceFromLastResize;
 	}
 
 	/************************\
@@ -768,10 +769,7 @@ namespace MV {
 	}
 
 	bool Draw2D::handleEvent(const SDL_Event &event){
-		if(sdlWindow.handleEvent(event)){
-			if(sdlWindow.resizeWorldWithWindow()){
-				mvWorld.resize({mvWorld.width() - static_cast<PointPrecision>(sdlWindow.resizeDelta().width), mvWorld.height() - static_cast<PointPrecision>(sdlWindow.resizeDelta().height)});
-			}
+		if(sdlWindow.handleEvent(event, mvWorld)){
 			refreshWorldAndWindowSize();
 			return true;
 		}
@@ -807,16 +805,24 @@ namespace MV {
 		return projectIt.unProjectScreen(a_worldPoint, a_modelview);
 	}
 
-	Point<> Draw2D::worldFromScreen(const Point<int> &a_screenPoint) const{
+	Point<> Draw2D::worldFromScreenRaw(const Point<> &a_screenPoint) const {
 		PointPrecision widthRatio = window().width() / world().width();
 		PointPrecision heightRatio = window().height() / world().height();
-		return Point<>(static_cast<PointPrecision>(a_screenPoint.x) / widthRatio, static_cast<PointPrecision>(a_screenPoint.y) / heightRatio, static_cast<PointPrecision>(a_screenPoint.z));
+		return Point<>(a_screenPoint.x / widthRatio, a_screenPoint.y / heightRatio, a_screenPoint.z);
+	}
+
+	Point<> Draw2D::worldFromScreen(const Point<int> &a_screenPoint) const {
+		return worldFromScreenRaw(cast<PointPrecision>(a_screenPoint));
+	}
+
+	Point<> Draw2D::screenFromWorldRaw(const Point<> &a_worldPoint) const {
+		PointPrecision widthRatio = window().width() / world().width();
+		PointPrecision heightRatio = window().height() / world().height();
+		return Point<>(a_worldPoint.x * widthRatio, a_worldPoint.y * heightRatio, a_worldPoint.z);
 	}
 
 	Point<int> Draw2D::screenFromWorld(const Point<> &a_worldPoint) const{
-		PointPrecision widthRatio = window().width() / world().width();
-		PointPrecision heightRatio = window().height() / world().height();
-		return Point<int>(static_cast<int>(a_worldPoint.x*widthRatio), static_cast<int>(a_worldPoint.y*heightRatio), static_cast<int>(a_worldPoint.z));
+		return cast<int>(screenFromWorldRaw(a_worldPoint));
 	}
 
 	Color Draw2D::backgroundColor( Color a_newColor ){

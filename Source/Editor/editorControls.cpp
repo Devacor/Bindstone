@@ -10,7 +10,7 @@ void EditorControls::updateBoxHeader(MV::PointPrecision a_width) {
 			if(currentPanel){
 				currentPanel->cancelInput();
 			}
-			draggableBox->translate(MV::cast<MV::PointPrecision>(deltaPosition));
+			draggableBox->translate(draggableBox->renderer().worldFromScreen(deltaPosition));
 		});
 	} else{
 		boxHeader->bounds(MV::Size<>(a_width, 20.0f));

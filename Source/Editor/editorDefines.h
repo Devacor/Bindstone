@@ -5,7 +5,9 @@
 #include "Utility/package.h"
 #include "Interface/package.h"
 
-enum InterfaceColors {
+enum InterfaceColors : uint32_t {
+	POSITION_HANDLE_CENTER = 0x88FFFF00,
+	POSITION_HANDLE = 0xFFFFFF,
 	BUTTON_TOP_IDLE = 0x707070,
 	BUTTON_BOTTOM_IDLE = 0x636363,
 	BUTTON_TOP_ACTIVE = 0x3d3d3d,

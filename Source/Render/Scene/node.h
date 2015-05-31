@@ -513,10 +513,10 @@ namespace MV {
 				return translateTo;
 			}
 			Point<> worldPosition(){
-				return worldFromLocal(translateTo);
+				return worldFromLocal(Point<>());
 			}
 			Point<int> screenPosition(){
-				return screenFromLocal(translateTo);
+				return screenFromLocal(Point<>());
 			}
 
 			std::shared_ptr<Node> position(const Point<> &a_newPosition);

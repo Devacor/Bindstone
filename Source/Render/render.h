@@ -197,6 +197,24 @@ namespace MV {
 		Point<> unProjectWorld(const Point<> &a_point, const TransformMatrix &a_modelview);
 
 		const Draw2D &renderer;
+	private:
+		Point<> projectScreenRaw(const Point<> &a_point, const TransformMatrix &a_modelview);
+		Point<> unProjectScreenRaw(const Point<> &a_point, const TransformMatrix &a_modelview);
+	};
+
+	class RenderWorld {
+		friend Draw2D;
+	public:
+		void resize(const Size<> &a_size);
+
+		PointPrecision height() const;
+		PointPrecision width() const;
+		Size<> size() const;
+	private:
+		RenderWorld(Draw2D& a_renderer);
+		Size<> worldSize;
+
+		Draw2D &renderer;
 	};
 
 	class Window {
@@ -205,7 +223,7 @@ namespace MV {
 		~Window();
 		void setTitle(const std::string &a_title);
 
-		void resize(const Size<int> &a_size);
+		MV::Size<int> resize(const Size<int> &a_size);
 		Window& allowUserResize(bool a_maintainProportions = true, const Size<int> &a_minSize = Size<int>(1, 1), const Size<int> &a_maxSize = Size<int>(1000000, 1000000));
 		Window& lockUserResize();
 
@@ -222,9 +240,8 @@ namespace MV {
 		int height() const;
 		int width() const;
 		Size<int> size() const;
-		Size<int> resizeDelta() const;
 
-		bool handleEvent(const SDL_Event &event);
+		bool handleEvent(const SDL_Event &event, RenderWorld &a_world);
 	private:
 		Window(Draw2D &a_renderer);
 		bool initialize();
@@ -241,7 +258,6 @@ namespace MV {
 		bool maintainProportions;
 		bool sizeWorldWithWindow;
 		Size<int> windowSize;
-		Size<int> windowDifferenceFromLastResize;
 		PointPrecision aspectRatio;
 		uint32_t SDLflags;
 		std::string title;
@@ -252,21 +268,6 @@ namespace MV {
 		Size<int> maxSize;
 
 		SDL_Window *window;
-		Draw2D &renderer;
-	};
-
-	class RenderWorld {
-		friend Draw2D;
-	public:
-		void resize(const Size<> &a_size);
-
-		PointPrecision height() const;
-		PointPrecision width() const;
-		Size<> size() const;
-	private:
-		RenderWorld(Draw2D& a_renderer);
-		Size<> worldSize;
-
 		Draw2D &renderer;
 	};
 
@@ -372,8 +373,11 @@ namespace MV {
 		Point<> localFromWorld(const Point<> &a_worldPoint, const TransformMatrix &a_modelview) const;
 		Point<> localFromScreen(const Point<int> &a_screenPoint, const TransformMatrix &a_modelview) const;
 
+		Point<> screenFromWorldRaw(const Point<> &a_worldPoint) const;
 		Point<int> screenFromWorld(const Point<> &a_worldPoint) const;
+
 		Point<> worldFromScreen(const Point<int> &a_screenPoint) const;
+		Point<> worldFromScreenRaw(const Point<> &a_screenPoint) const;
 		
 		void summarizeDisplayMode() const;
 

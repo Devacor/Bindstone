@@ -23,13 +23,13 @@ namespace MV {
 		BoxAABB(const Point<T> &a_startPoint){ initialize(a_startPoint); }
 		BoxAABB(const Size<T> &a_startSize){ initialize(a_startSize); }
 		BoxAABB(const Point<T> &a_startPoint, const Point<T> &a_endPoint){ initialize(a_startPoint, a_endPoint); }
-		BoxAABB(const Point<T> &a_startPoint, const Size<T> &a_size){ initialize(a_startPoint, a_size); }
+		BoxAABB(const Point<T> &a_startPoint, const Size<T> &a_size, bool a_center = false){ initialize(a_startPoint, a_size); }
 
 		void initialize(const Point<T> &a_startPoint);
 		void initialize(const Size<T> &a_startPoint);
 		void initialize(const BoxAABB<T> &a_startBox);
 		void initialize(const Point<T> &a_startPoint, const Point<T> &a_endPoint);
-		void initialize(const Point<T> &a_startPoint, const Size<T> &a_endPoint);
+		void initialize(const Point<T> &a_startPoint, const Size<T> &a_endPoint, bool a_center = false);
 
 		std::vector<BoxAABB<T>> removeFromBounds(const BoxAABB<T> &a_comparePoint);
 
@@ -182,9 +182,14 @@ namespace MV {
 	}
 
 	template <typename T>
-	void BoxAABB<T>::initialize(const Point<T> &a_startPoint, const Size<T> &a_size){
+	void BoxAABB<T>::initialize(const Point<T> &a_startPoint, const Size<T> &a_size, bool a_center){
 		initialize(a_startPoint);
 		expandWith(a_startPoint + toPoint(a_size));
+		if (a_center) {
+			auto offset = toPoint<T>(a_size / static_cast<T>(2));
+			minPoint -= offset;
+			maxPoint -= offset;
+		}
 	}
 
 	template <typename T>

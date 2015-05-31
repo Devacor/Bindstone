@@ -22,6 +22,79 @@ void EditorPanel::handleInput(SDL_Event &a_event) {
 EditorPanel::~EditorPanel() {
 }
 
+SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableNode> a_controls) :
+	EditorPanel(a_panel),
+	controls(a_controls) {
+
+	auto node = panel.content();
+	auto grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
+		color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->
+		padding({ 2.0f, 2.0f })->owner();
+	auto buttonSize = MV::size(110.0f, 27.0f);
+	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
+	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		panel.loadPanel<DeselectedEditorPanel>();
+	});
+
+	auto deleteButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Delete", buttonSize, UTF_CHAR_STR("Delete"));
+	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		controls->elementToEdit->removeFromParent();
+		panel.loadPanel<DeselectedEditorPanel>();
+	});
+
+	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
+	text(MV::toWide(controls->elementToEdit->id()))->
+	onEnter.connect("rename", [&](std::shared_ptr<MV::Scene::Text> a_text) {
+		controls->elementToEdit->id(MV::toString(a_text->text()));
+		panel.resources().editor->sceneUpdated();
+	});
+
+	float textboxWidth = 52.0f;
+	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().x))));
+	posY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().y))));
+
+	if (controls) {
+		auto xClick = posX->owner()->component<MV::Scene::Clickable>();
+		xClick->onAccept.connect("updateX", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			controls->position({ posX->number(), posY->number() });
+		});
+		posX->onEnter.connect("updateX", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			controls->position({ posX->number(), posY->number() });
+		});
+		auto yClick = posY->owner()->component<MV::Scene::Clickable>();
+		yClick->onAccept.connect("updateY", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			controls->position({ posX->number(), posY->number() });
+		});
+		posY->onEnter.connect("updateY", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			controls->position({ posX->number(), posY->number() });
+		});
+
+		controls->onChange = [&](EditableNode *a_element) {
+			posX->number(static_cast<int>(std::lround(controls->position().x)));
+			posY->number(static_cast<int>(std::lround(controls->position().y)));
+		};
+	}
+	auto deselectLocalAABB = deselectButton->bounds();
+
+	panel.updateBoxHeader(grid->bounds().width());
+
+	SDL_StartTextInput();
+}
+
+void SelectedNodeEditorPanel::handleInput(SDL_Event &a_event) {
+	if (activeTextbox) {
+		activeTextbox->text(a_event);
+	}
+}
+
+void SelectedNodeEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
+	controls->resetHandles();
+}
+
+void SelectedNodeEditorPanel::onSceneZoom() {
+	controls->resetHandles();
+}
+
 SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableGrid> a_controls) :
 	EditorPanel(a_panel),
 	controls(a_controls) {
@@ -613,7 +686,14 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	//panel.updateBoxHeader(grid->component<MV::Scene::Grid>()->bounds().width());
 
 	createButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
-		panel.loadPanel<ChooseElementCreationType>();
+		//panel.loadPanel<ChooseElementCreationType>();
+		auto& renderer = panel.root()->renderer();
+		auto node = panel.root()->make(MV::guid("node"))->screenPosition(MV::toPoint(renderer.window().size() / 2));
+
+		auto editableNode = std::make_shared<EditableNode>(node, panel.editor(), panel.resources().mouse);
+		//panel.resources().editor->sceneUpdated();
+
+		panel.loadPanel<SelectedNodeEditorPanel>(editableNode);
 	});
 
 	saveButton->onAccept.connect("save", [&](std::shared_ptr<MV::Scene::Clickable>){

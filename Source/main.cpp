@@ -39,6 +39,17 @@ int main(int argc, char *argv[]){
 // 		std::cout << std::endl;
 // 	}
 
+	MV::Variant<int, std::string> test(std::string("hey"));
+	MV::visit(test,
+		[](int val) {std::cout << "INT: " << val; },
+		[](const std::string &val) {std::cout << "STRING: " << val; }
+	);
+	MV::Variant<int, std::string> test2(102);
+	MV::visit(test2,
+		[](int val) {std::cout << "INT: " << val; },
+		[](const std::string &val) {std::cout << "STRING: " << val; }
+	);
+
 	GameEditor menu;
 
 	menu.start();

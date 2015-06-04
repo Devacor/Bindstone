@@ -152,7 +152,7 @@ namespace MV {
 				bool allowChildrenToDraw = true;
 				auto stableComponentList = childComponents;
 				for (auto&& component : stableComponentList) {
-					component->update(a_delta);
+					component->updateImplementation(a_delta);
 					allowChildrenToDraw = component->draw() && allowChildrenToDraw;
 				}
 				auto stableChildNodes = childNodes;
@@ -810,7 +810,7 @@ namespace MV {
 			
 			int cloneCount = 0;
 			for (auto&& child : childNodes) {
-				if (cloneCount < 0 && child->nodeId == strippedId) {
+				if (cloneCount == 0 && child->nodeId == strippedId) {
 					cloneCount = 1;
 				} else {
 					std::smatch matches;
@@ -835,9 +835,10 @@ namespace MV {
 			} else if (myParent) {
 				newNodeId = myParent->getCloneId(nodeId);
 			}
-			std::shared_ptr<Node> result = Node::make(draw2d, nodeId);
+			std::shared_ptr<Node> result = Node::make(draw2d, newNodeId);
 
-			result->myParent = a_parent ? a_parent.get() : nullptr;
+			//myParent set later
+			result->myParent = nullptr;
 			result->allowDraw = allowDraw;
 			result->allowUpdate = allowUpdate;
 			result->translateTo = translateTo;
@@ -851,12 +852,12 @@ namespace MV {
 			result->localMatrixDirty = true;
 			result->worldMatrixDirty = true;
 
-			for (auto&& childNode : childNodes) {
-				result->childNodes.push_back(childNode->cloneInternal(result));
+			for (auto&& childComponent : childComponents) {
+				childComponent->clone(result);
 			}
 
-			for (auto&& childComponent : childComponents) {
-				result->childComponents.push_back(childComponent->clone(result).self());
+			for (auto&& childNode : childNodes) {
+				result->childNodes.push_back(childNode->cloneInternal(result));
 			}
 
 			recalculateAlpha();
@@ -864,6 +865,8 @@ namespace MV {
 
 			if (a_parent) {
 				a_parent->add(result);
+			} else if (myParent) {
+				myParent->add(result);
 			}
 
 			return result;
@@ -886,12 +889,12 @@ namespace MV {
 			result->localMatrixDirty = true;
 			result->worldMatrixDirty = true;
 
-			for (auto&& childNode : childNodes) {
-				result->childNodes.push_back(childNode->cloneInternal(result));
+			for (auto&& childComponent : childComponents) {
+				childComponent->clone(result);
 			}
 
-			for (auto&& childComponent : childComponents) {
-				result->childComponents.push_back(childComponent->clone(result).self());
+			for (auto&& childNode : childNodes) {
+				result->childNodes.push_back(childNode->cloneInternal(result));
 			}
 
 			return result;
@@ -1077,7 +1080,9 @@ namespace MV {
 			std::string spacing(a_node->parentIndexList().size(), ' ');
 			os << spacing << "|->(" << a_node->id() << ")[" << a_node->size() << "]: L:" << a_node->position() << " | W:" << a_node->worldPosition() << " | S:" << a_node->screenPosition() << "\n";
 			for (auto&& child : *a_node) {
-				os << child;
+				if (a_node->serializable()){
+					os << child;
+				}
 			}
 			return os;
 		}

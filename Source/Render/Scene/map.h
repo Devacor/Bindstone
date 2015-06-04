@@ -13,7 +13,7 @@ namespace MV {
 		public:
 			ComponentDerivedAccessors(PathMap)
 
-			virtual void update(double a_delta) override;
+			virtual void updateImplementation(double a_delta) override;
 
 			std::shared_ptr<PathMap> cellSize(const Size<> &a_size) {
 				cellDimensions = a_size;

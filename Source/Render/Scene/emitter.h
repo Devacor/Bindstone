@@ -140,7 +140,7 @@ namespace MV {
 			std::shared_ptr<Emitter> enable();
 			std::shared_ptr<Emitter> disable();
 
-			virtual void update(double a_dt) override;
+			virtual void updateImplementation(double a_dt) override;
 
 			~Emitter();
 

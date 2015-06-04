@@ -383,6 +383,7 @@
     <ClInclude Include="Source\Utility\stopwatch.h" />
     <ClInclude Include="Source\Utility\task.hpp" />
     <ClInclude Include="Source\Utility\threadPool.h" />
+    <ClInclude Include="Source\Utility\visitor.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html" />

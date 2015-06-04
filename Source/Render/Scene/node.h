@@ -27,6 +27,9 @@ MV::Scene::SafeComponent<ComponentType> clone(const std::shared_ptr<MV::Scene::N
 MV::Scene::SafeComponent<ComponentType> safe() { \
 	return MV::Scene::SafeComponent<ComponentType>(owner(), std::static_pointer_cast<ComponentType>(shared_from_this())); \
 } \
+std::string id() const { \
+	return MV::Scene::Component::id(); \
+} \
 std::shared_ptr<ComponentType> id(const std::string &a_id) { \
 	return std::static_pointer_cast<ComponentType>(MV::Scene::Component::id(a_id)); \
 }
@@ -94,16 +97,16 @@ namespace MV {
 				return wrappedComponent->owner();
 			}
 
+			template<typename NewType>
+			SafeComponent<NewType> cast() const {
+				return SafeComponent<NewType>(wrappedNode, std::static_pointer_cast<NewType>(wrappedComponent));
+			}
+
 			void reset() {
 				wrappedComponent.reset();
 				wrappedNode.reset();
 			}
-
-			Task& task() {
-				return rootTask;
-			}
 		private:
-			Task rootTask;
 			std::shared_ptr<const Node> wrappedNode;
 			std::shared_ptr<T> wrappedComponent;
 		};
@@ -116,7 +119,11 @@ namespace MV {
 			virtual ~Component() {}
 
 			virtual bool draw() { return true; }
-			virtual void update(double a_delta){}
+
+			void update(double a_delta) {
+				updateImplementation(a_delta);
+				rootTask.update(a_delta);
+			}
 
 			BoxAABB<> bounds() {
 				return boundsImplementation();
@@ -143,6 +150,10 @@ namespace MV {
 			std::shared_ptr<Component> id(const std::string &a_id) {
 				componentId = a_id;
 				return shared_from_this();
+			}
+
+			Task& task() {
+				return rootTask;
 			}
 
 		protected:
@@ -189,7 +200,10 @@ namespace MV {
 				construct->initialize();
 			}
 
+			virtual void updateImplementation(double a_delta) {}
+
 		private:
+			Task rootTask;
 			std::string componentId;
 			std::weak_ptr<Node> componentOwner;
 		};
@@ -414,33 +428,28 @@ namespace MV {
 				return SafeComponent<ComponentType>(std::shared_ptr<Node>(), std::shared_ptr<ComponentType>());
 			}
 
-			template<typename ComponentType>
-			std::vector<SafeComponent<ComponentType>> components(bool exactType = true) const {
+			template<typename ... ComponentType>
+			std::vector<MV::Variant<SafeComponent<ComponentType>...>> components(bool exactType = true) const {
 				std::lock_guard<std::recursive_mutex> guard(lock);
-				std::vector<std::shared_ptr<ComponentType>> matchingComponents;
+				std::vector<MV::Variant<SafeComponent<ComponentType>...>> results;
 				if (exactType) {
-					for (auto&& currentComponent : childComponents) {
-						if (typeid(currentComponent.get()) == typeid(ComponentType)) {
-							matchingComponents.push_back(SafeComponent<ComponentType>(shared_from_this(), std::static_pointer_cast<ComponentType>(currentComponent)));
-						}
+					for (auto&& item : childComponents) {
+						castAndAddIfExact<Variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
 					}
 				} else {
-					for (auto&& currentComponent : childComponents) {
-						auto castComponent = std::dynamic_pointer_cast<ComponentType>(currentComponent);
-						if (castComponent) {
-							matchingComponents.push_back(SafeComponent<ComponentType>(shared_from_this(), castComponent));
-						}
+					for (auto&& item : childComponents) {
+						castAndAddIfDerived<Variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
 					}
 				}
-				return matchingComponents;
+				return results;
 			}
 
-			template<typename ComponentType>
-			std::vector<SafeComponent<ComponentType>> componentsInChildren(bool includeComponentsInThis = false, bool exactType = true) const {
+			template<typename ... ComponentType>
+			std::vector<MV::Variant<SafeComponent<ComponentType>...>> componentsInChildren(bool includeComponentsInThis = false, bool exactType = true) const {
 				std::lock_guard<std::recursive_mutex> guard(lock);
-				std::vector<SafeComponent<ComponentType>> matchingComponents;
-				componentsInChildrenInternal(exactType, matchingComponents, includeComponentsInThis);
-				return matchingComponents;
+				std::vector<MV::Variant<SafeComponent<ComponentType>...>> results;
+				componentsInChildrenInternal<ComponentType...>(includeComponentsInThis, exactType, results);
+				return results;
 			}
 
 			std::shared_ptr<Node> add(const std::shared_ptr<Node> &a_child, bool a_overrideSortDepth = true);
@@ -644,6 +653,51 @@ namespace MV {
 		private:
 			Task rootTask;
 
+			template<typename ContainerObjectType>
+			void castAndAddIfExact(const std::shared_ptr<Component> &base, std::vector<ContainerObjectType> &container) const {
+				//base case do nothing
+			}
+
+			template<typename ContainerObjectType, typename T>
+			void castAndAddIfExact(const std::shared_ptr<Component> &base, std::vector<ContainerObjectType> &container) const {
+				if (typeid(*base) == typeid(T)) {
+					container.push_back(SafeComponent<T>(shared_from_this(), std::static_pointer_cast<T>(base)));
+				}
+			}
+
+			template<typename ContainerObjectType, typename T, typename T2, typename ...V>
+			void castAndAddIfExact(const std::shared_ptr<Component> &base, std::vector<ContainerObjectType> &container) const {
+				if (typeid(*base) == typeid(T)) {
+					container.push_back(SafeComponent<T>(shared_from_this(), std::static_pointer_cast<T>(base)));
+				}
+				else {
+					castAndAddIfExact<ContainerObjectType, T2, V...>(base, container);
+				}
+			}
+
+			template<typename ContainerObjectType>
+			void castAndAddIfDerived(const std::shared_ptr<Component> &base, std::vector<ContainerObjectType> &container) const {
+				//base case do nothing
+			}
+
+			template<typename ContainerObjectType, typename T>
+			void castAndAddIfDerived(const std::shared_ptr<Component> &base, std::vector<ContainerObjectType> &container) const {
+				auto result = std::dynamic_pointer_cast<T>(base);
+				if (result) {
+					container.push_back(SafeComponent<T>(shared_from_this(), result));
+				}
+			}
+
+			template<typename ContainerObjectType, typename T, typename T2, typename ...V>
+			void castAndAddIfDerived(const std::shared_ptr<Component> &base, std::vector<ContainerObjectType> &container) const {
+				auto result = std::dynamic_pointer_cast<T>(base);
+				if (result) {
+					container.push_back(SafeComponent<T>(shared_from_this(), result));
+				} else {
+					castAndAddIfExact<ContainerObjectType, T2, V...>(base, container);
+				}
+			}
+
 			void silenceInternal() {
 				onChildAddSlot.block();
 				onChildRemoveSlot.block();
@@ -698,27 +752,21 @@ namespace MV {
 				return childComponents.cend();
 			}
 
-			template<typename ComponentType>
-			void componentsInChildrenInternal(bool exactType, std::vector<SafeComponent<ComponentType>> &matchingComponents, bool includeThis) const {
-				if (includeThis) {
-					std::lock_guard<std::recursive_mutex> guard(lock);
+			template<typename ... ComponentType>
+			void componentsInChildrenInternal(bool includeComponentsInThis, bool exactType, std::vector<MV::Variant<SafeComponent<ComponentType>...>>& results) const {
+				if (includeComponentsInThis) {
 					if (exactType) {
-						for (auto&& currentComponent : childComponents) {
-							if (typeid(currentComponent.get()) == typeid(ComponentType)) {
-								matchingComponents.push_back(SafeComponent<ComponentType>(shared_from_this(), std::static_pointer_cast<ComponentType>(currentComponent)));
-							}
+						for (auto&& item : childComponents) {
+							castAndAddIfExact<Variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
 						}
 					} else {
-						for (auto&& currentComponent : childComponents) {
-							auto castComponent = std::dynamic_pointer_cast<ComponentType>(currentComponent);
-							if (castComponent) {
-								matchingComponents.push_back(SafeComponent<ComponentType>(shared_from_this(), castComponent));
-							}
+						for (auto&& item : childComponents) {
+							castAndAddIfDerived<Variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
 						}
 					}
 				}
-				for(auto&& currentChild : childNodes) {
-					currentChild->componentsInChildrenInternal(exactType, matchingComponents, true);
+				for (auto&& child : childNodes) {
+					child->componentsInChildrenInternal<ComponentType...>(true, exactType, results);
 				}
 			}
 

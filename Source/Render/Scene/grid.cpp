@@ -7,7 +7,7 @@ namespace MV {
 	namespace Scene {
 
 
-		void Grid::update(double a_delta) {
+		void Grid::updateImplementation(double a_delta) {
 			if (dirtyGrid) {
 				layoutCells();
 			}

@@ -64,7 +64,7 @@ namespace MV{
 			}
 		}
 
-		void Text::update(double a_dt) {
+		void Text::updateImplementation(double a_dt) {
 			if (displayCursor) {
 				accumulatedTime += a_dt;
 				if (accumulatedTime > BLINK_DURATION) {

@@ -294,16 +294,16 @@ void EditableRectangle::repositionHandles(bool a_fireOnChange, bool a_reposition
 }
 
 void EditableRectangle::position(MV::Point<> a_newPosition) {
-	elementToEdit->owner()->position(a_newPosition);
+	elementToEdit->bounds({ a_newPosition, elementToEdit->bounds().size() });
 	resetHandles();
 }
 
 MV::Point<> EditableRectangle::position() const {
-	return elementToEdit->owner()->position();
+	return elementToEdit->bounds().minPoint;
 }
 
 void EditableRectangle::size(MV::Size<> a_newSize){
-	elementToEdit->size(a_newSize);
+	elementToEdit->bounds({elementToEdit->bounds().minPoint, a_newSize});
 	resetHandles();
 }
 

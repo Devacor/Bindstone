@@ -110,7 +110,7 @@ namespace MV{
 
 			std::shared_ptr<Text> backspace();
 
-			virtual void update(double a_dt);
+			virtual void updateImplementation(double a_dt);
 
 			PointPrecision minimumLineHeight() const {
 				return formattedText.minimumLineHeight();

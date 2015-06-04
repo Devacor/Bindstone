@@ -75,7 +75,7 @@ public:
 
 	ComponentDerivedAccessors(Creature)
 
-	virtual void update(double a_delta) override {}
+	virtual void updateImplementation(double a_delta) override {}
 	virtual bool draw() override;
 
 	Creature::CombatAttributes combatAttributes() {
@@ -164,7 +164,7 @@ class Building : public MV::Scene::Component {
 public:
 	ComponentDerivedAccessors(Building)
 
-	virtual void update(double a_delta) override {};
+	virtual void updateImplementation(double a_delta) override {};
 
 protected:
 	Building(const std::weak_ptr<MV::Scene::Node> &a_owner) :

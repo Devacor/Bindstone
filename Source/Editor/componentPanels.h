@@ -102,8 +102,8 @@ private:
 	MV::Scale aspectRatio;
 
 	std::shared_ptr<EditableRectangle> controls;
-	std::shared_ptr<MV::Scene::Text> posY;
-	std::shared_ptr<MV::Scene::Text> posX;
+	std::shared_ptr<MV::Scene::Text> offsetY;
+	std::shared_ptr<MV::Scene::Text> offsetX;
 	std::shared_ptr<MV::Scene::Text> width;
 	std::shared_ptr<MV::Scene::Text> height;
 	std::shared_ptr<MV::Scene::Text> aspectX;

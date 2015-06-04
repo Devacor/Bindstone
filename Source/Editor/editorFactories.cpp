@@ -186,7 +186,10 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 						if (dragThreshold <= 0) {
 							auto buttons = a_clickable->owner()->componentsInChildren<MV::Scene::Clickable>(false, false);
 							for (auto&& button : buttons) {
-								button->cancelPress();
+								MV::visit(button,
+								[&](const MV::Scene::SafeComponent<MV::Scene::Clickable> &a_button) {
+									a_button->cancelPress();
+								});
 							}
 						}
 					} else {

@@ -218,7 +218,7 @@ namespace MV {
 			return std::static_pointer_cast<Emitter>(shared_from_this());
 		}
 
-		void Emitter::update(double a_dt) {
+		void Emitter::updateImplementation(double a_dt) {
 			bool falseValue = false;
 			accumulatedTimeDelta += a_dt;
 			if (updateInProgress.compare_exchange_strong(falseValue, true)) {

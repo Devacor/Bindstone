@@ -13,7 +13,7 @@ namespace MV {
 		public:
 			DrawableDerivedAccessors(Grid)
 
-			virtual void update(double a_delta) override;
+			virtual void updateImplementation(double a_delta) override;
 
 			std::shared_ptr<Grid> padding(const std::pair<Point<>, Point<>> &a_padding);
 			std::shared_ptr<Grid> padding(const Size<> &a_padding);

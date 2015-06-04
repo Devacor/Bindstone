@@ -11,5 +11,6 @@
 	#include "Utility/task.hpp"
 	#include "Utility/threadPool.h"
 	#include "Utility/optionalCalls.hpp"
+	#include "Utility/visitor.hpp"
 
 #endif

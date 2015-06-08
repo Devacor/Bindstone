@@ -72,6 +72,10 @@ namespace MV {
 		protected:
 			Drawable(const std::weak_ptr<Node> &a_owner);
 
+			virtual void onRemoved() {
+				notifyParentOfBoundsChange();
+			}
+
 			virtual BoxAABB<> boundsImplementation() {
 				return localBounds;
 			}

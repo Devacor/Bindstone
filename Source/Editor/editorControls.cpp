@@ -29,7 +29,15 @@ EditorControls::EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::s
 	rootScene(a_root),
 	currentSelection(a_editor, *sharedResources.mouse){
 	
-	draggableBox = editorScene->make("ContextMenu");
+	draggableBox = editorScene->make(MV::guid("ContextMenu"));
+}
+
+EditorControls::~EditorControls() {
+	currentPanel.reset();
+	if (draggableBox) {
+		draggableBox->removeFromParent();
+		draggableBox->clear();
+	}
 }
 
 std::shared_ptr<MV::Scene::Node> EditorControls::content() {
@@ -41,11 +49,17 @@ std::shared_ptr<MV::Scene::Node> EditorControls::content() {
 	}
 }
 
-void EditorControls::deleteScene() {
+void EditorControls::deleteFullScene() {
+	currentPanel.reset();
+	boxHeader.reset();
+	draggableBox->clear();
+}
+
+void EditorControls::deletePanelContents() {
 	currentPanel.reset();
 	auto boxHeaderOwner = (boxHeader) ? boxHeader->owner() : nullptr;
 	draggableBox->clear();
-	if(boxHeader){
+	if (boxHeader) {
 		draggableBox->add(boxHeader->owner());
 	}
 }

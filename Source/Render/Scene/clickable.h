@@ -138,6 +138,13 @@ namespace MV {
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
+		protected:
+			virtual void onOwnerDestroyed() {
+				onLeftMouseDownHandle.reset();
+				onLeftMouseUpHandle.reset();
+				onMouseMoveHandle.reset();
+			}
+
 		private:
 			MouseState::SignalType onLeftMouseDownHandle;
 			MouseState::SignalType onLeftMouseUpHandle;

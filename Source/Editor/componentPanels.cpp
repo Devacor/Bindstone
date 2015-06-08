@@ -6,7 +6,7 @@
 
 EditorPanel::EditorPanel(EditorControls &a_panel):
 	panel(a_panel) {
-	panel.deleteScene();
+	panel.deletePanelContents();
 }
 
 void EditorPanel::cancelInput() {
@@ -24,6 +24,7 @@ EditorPanel::~EditorPanel() {
 
 SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableNode> a_controls) :
 	EditorPanel(a_panel),
+	componentPanel(std::make_unique<EditorControls>(panel.editor(), panel.root(), panel.resources())),
 	controls(a_controls) {
 
 	auto node = panel.content();
@@ -90,20 +91,20 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 		MV::visit(component,
 		[&](const MV::Scene::SafeComponent<MV::Scene::Sprite> &a_sprite) {
 			auto button = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, MV::guid("EditSprite"), buttonSize, MV::toWide("S: " + a_sprite->id()));
-			button->onAccept.connect("click", [&,a_sprite](std::shared_ptr<MV::Scene::Clickable>) {
-				panel.loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(a_sprite, panel.content(), panel.resources().mouse));
+			button->onAccept.connect("click", [&, a_sprite, a_controls](std::shared_ptr<MV::Scene::Clickable>) {
+				componentPanel->loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(a_sprite, a_controls->controlContainer->parent()->make("EditableSprite"), panel.resources().mouse));
 			});
 		},
 		[&](const MV::Scene::SafeComponent<MV::Scene::Grid> &a_grid) {
 			auto button = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, MV::guid("EditGrid"), buttonSize, MV::toWide("G: " + a_grid->id()));
-			button->onAccept.connect("click", [&, a_grid](std::shared_ptr<MV::Scene::Clickable>) {
-				panel.loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(a_grid, panel.content(), panel.resources().mouse));
+			button->onAccept.connect("click", [&, a_grid, a_controls](std::shared_ptr<MV::Scene::Clickable>) {
+				componentPanel->loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(a_grid, a_controls->controlContainer->parent()->make("EditableGrid"), panel.resources().mouse));
 			});
 		},
 		[&](const MV::Scene::SafeComponent<MV::Scene::Emitter> &a_emitter) {
 			auto button = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, MV::guid("EditEmitter"), buttonSize, MV::toWide("E: " + a_emitter->id()));
-			button->onAccept.connect("click", [&, a_emitter](std::shared_ptr<MV::Scene::Clickable>) {
-				panel.loadPanel<SelectedEmitterEditorPanel>(std::make_shared<EditableEmitter>(a_emitter, panel.content(), panel.resources().mouse));
+			button->onAccept.connect("click", [&, a_emitter, a_controls](std::shared_ptr<MV::Scene::Clickable>) {
+				componentPanel->loadPanel<SelectedEmitterEditorPanel>(std::make_shared<EditableEmitter>(a_emitter, a_controls->controlContainer->parent()->make("EditableEmitter"), panel.resources().mouse));
 			});
 		});
  	}
@@ -117,14 +118,17 @@ void SelectedNodeEditorPanel::handleInput(SDL_Event &a_event) {
 	if (activeTextbox) {
 		activeTextbox->text(a_event);
 	}
+	componentPanel->handleInput(a_event);
 }
 
 void SelectedNodeEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
 	controls->resetHandles();
+	componentPanel->onSceneDrag(a_delta);
 }
 
 void SelectedNodeEditorPanel::onSceneZoom() {
 	controls->resetHandles();
+	componentPanel->onSceneZoom();
 }
 
 SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableGrid> a_controls) :
@@ -138,13 +142,13 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 	auto buttonSize = MV::size(110.0f, 27.0f);
 	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
-		panel.loadPanel<DeselectedEditorPanel>();
+		panel.deleteFullScene();
 	});
 
 	auto deleteButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Delete", buttonSize, UTF_CHAR_STR("Delete"));
 	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
-		controls->elementToEdit->owner()->removeFromParent();
-		panel.loadPanel<DeselectedEditorPanel>();
+		controls->elementToEdit->detach();
+		panel.deleteFullScene();
 	});
 
 	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
@@ -155,9 +159,6 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 	});
 
 	float textboxWidth = 52.0f;
-	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().x))));
-	posY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().y))));
-
 	width = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "width", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->gridWidth()))));
 	columns = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "columns", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(a_controls->elementToEdit->columns())));
 
@@ -168,21 +169,6 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 	marginsY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "marginsY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->margin().first.y))));
 
 	if (controls) {
-		auto xClick = posX->owner()->component<MV::Scene::Clickable>();
-		xClick->onAccept.connect("updateX", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
-			controls->position({ posX->number(), posY->number() });
-		});
-		posX->onEnter.connect("updateX", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
-			controls->position({ posX->number(), posY->number() });
-		});
-		auto yClick = posY->owner()->component<MV::Scene::Clickable>();
-		yClick->onAccept.connect("updateY", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
-			controls->position({ posX->number(), posY->number() });
-		});
-		posY->onEnter.connect("updateY", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
-			controls->position({ posX->number(), posY->number() });
-		});
-
 		auto paddingChange = [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
 			controls->elementToEdit->padding({ paddingX->number(), paddingX->number() });
 		};
@@ -213,11 +199,6 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 		columns->onEnter.connect("updateHeight", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
 			controls->elementToEdit->columns(static_cast<size_t>(columns->number()));
 		});
-
-		controls->onChange = [&](EditableGrid *a_element) {
-			posX->number(static_cast<int>(controls->position().x + .5f));
-			posY->number(static_cast<int>(controls->position().y + .5f));
-		};
 	}
 	auto deselectLocalAABB = deselectButton->bounds();
 
@@ -251,13 +232,13 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	auto buttonSize = MV::size(110.0f, 27.0f);
 	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>){
-		panel.loadPanel<DeselectedEditorPanel>();
+		panel.deleteFullScene();
 	});
 
 	auto deleteButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Delete", buttonSize, UTF_CHAR_STR("Delete"));
 	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
-		controls->elementToEdit->owner()->removeFromParent();
-		panel.loadPanel<DeselectedEditorPanel>();
+		controls->elementToEdit->detach();
+		panel.deleteFullScene();
 	});
 
 	OpenTexturePicker();
@@ -406,13 +387,13 @@ controls(a_controls) {
 	auto buttonSize = MV::size(226.0f, 27.0f);
 	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>){
-		panel.loadPanel<DeselectedEditorPanel>();
+		panel.deleteFullScene();
 	});
 
 	auto deleteButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Delete", buttonSize, UTF_CHAR_STR("Delete"));
 	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
-		controls->elementToEdit->owner()->removeFromParent();
-		panel.loadPanel<DeselectedEditorPanel>();
+		controls->elementToEdit->detach();
+		panel.deleteFullScene();
 	});
 
 	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
@@ -424,8 +405,8 @@ controls(a_controls) {
 
 	float textboxWidth = 52.0f;
 
-	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().x))));
-	posY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().y))));
+	offsetX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "offsetX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().x))));
+	offsetY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "offsetY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().y))));
 
 	width = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "width", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->size().width))));
 	height = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "height", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->size().height))));
@@ -635,19 +616,19 @@ controls(a_controls) {
 
 
 
-	auto xClick = posX->owner()->component<MV::Scene::Clickable>();
+	auto xClick = offsetX->owner()->component<MV::Scene::Clickable>();
 	xClick->onAccept.connect("updateX", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
-		controls->position({posX->number(), posY->number()});
+		controls->position({ offsetX->number(), offsetY->number()});
 	});
-	posX->onEnter.connect("updateX", [&](std::shared_ptr<MV::Scene::Text> a_clickable){
-		controls->position({posX->number(), posY->number()});
+	offsetX->onEnter.connect("updateX", [&](std::shared_ptr<MV::Scene::Text> a_clickable){
+		controls->position({ offsetX->number(), offsetY->number()});
 	});
-	auto yClick = posY->owner()->component<MV::Scene::Clickable>();
+	auto yClick = offsetY->owner()->component<MV::Scene::Clickable>();
 	yClick->onAccept.connect("updateY", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable){
-		controls->position({posX->number(), posY->number()});
+		controls->position({ offsetX->number(), offsetY->number()});
 	});
-	posY->onEnter.connect("updateY", [&](std::shared_ptr<MV::Scene::Text> a_clickable){
-		controls->position({posX->number(), posY->number()});
+	offsetY->onEnter.connect("updateY", [&](std::shared_ptr<MV::Scene::Text> a_clickable){
+		controls->position({ offsetX->number(), offsetY->number()});
 	});
 
 	auto widthClick = width->owner()->component<MV::Scene::Clickable>();
@@ -666,8 +647,8 @@ controls(a_controls) {
 	});
 
 	controls->onChange = [&](EditableEmitter *a_element) {
-		posX->number(static_cast<int>(std::lround(controls->position().x)));
-		posY->number(static_cast<int>(std::lround(controls->position().y)));
+		offsetX->number(static_cast<int>(std::lround(controls->position().x)));
+		offsetY->number(static_cast<int>(std::lround(controls->position().y)));
 
 		width->number(static_cast<int>(std::lround(controls->size().width)));
 		height->number(static_cast<int>(std::lround(controls->size().height)));

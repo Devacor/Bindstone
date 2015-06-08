@@ -76,6 +76,11 @@ namespace MV {
 			}
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
+
+			virtual void onOwnerDestroyed() {
+				onLeftMouseDownHandle.reset();
+				onLeftMouseUpHandle.reset();
+			}
 		private:
 			virtual bool preDraw();
 			virtual bool postDraw();

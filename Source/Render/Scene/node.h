@@ -143,6 +143,8 @@ namespace MV {
 				return SafeComponent<Component>(owner(), shared_from_this());
 			}
 
+			void detach();
+
 			std::string id() const {
 				return componentId;
 			}
@@ -160,6 +162,8 @@ namespace MV {
 			//owner death *can* occur before node death in cases where a button deletes itself.
 			//In known cases where callback order can cause this to occur it's best we have an explicit query.
 			bool ownerIsAlive() const;
+
+			virtual void onOwnerDestroyed() {}
 
 			Component(const std::weak_ptr<Node> &a_owner);
 
@@ -372,9 +376,9 @@ namespace MV {
 			template<typename ComponentType>
 			std::shared_ptr<Node> detach(std::shared_ptr<ComponentType> a_component) {
 				std::lock_guard<std::recursive_mutex> guard(lock);
-				a_component->onRemoved();
 				auto found = std::find(childComponents.begin(), childComponents.end(), a_component);
 				if (found != childComponents.end()) {
+					a_component->onRemoved();
 					childComponents.erase(found);
 				}
 				return shared_from_this();

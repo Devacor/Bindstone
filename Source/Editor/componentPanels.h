@@ -52,6 +52,7 @@ public:
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
 private:
+	std::unique_ptr<EditorControls> componentPanel;
 
 	std::shared_ptr<EditableNode> controls;
 	std::shared_ptr<MV::Scene::Text> posY;
@@ -127,8 +128,8 @@ private:
 	}
 
 	std::shared_ptr<EditableEmitter> controls;
-	std::shared_ptr<MV::Scene::Text> posY;
-	std::shared_ptr<MV::Scene::Text> posX;
+	std::shared_ptr<MV::Scene::Text> offsetX;
+	std::shared_ptr<MV::Scene::Text> offsetY;
 	std::shared_ptr<MV::Scene::Text> width;
 	std::shared_ptr<MV::Scene::Text> height;
 };

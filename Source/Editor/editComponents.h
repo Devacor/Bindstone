@@ -23,12 +23,11 @@ public:
 	std::function<void(EditableNode*)> onChange;
 
 	std::shared_ptr<MV::Scene::Node> elementToEdit;
+	std::shared_ptr<MV::Scene::Node> controlContainer;
 private:
 	MV::MouseState *mouse;
 
 	MV::Scene::SafeComponent<MV::Scene::Clickable> positionHandle;
-
-	std::shared_ptr<MV::Scene::Node> controlContainer;
 };
 
 class EditableGrid {
@@ -43,17 +42,16 @@ public:
 
 	void resetHandles();
 
-	void position(MV::Point<> a_newPosition);
-	MV::Point<> position() const;
-
 	std::function<void(EditableGrid*)> onChange;
 
 	MV::Scene::SafeComponent<MV::Scene::Grid> elementToEdit;
 private:
 
+	MV::Scene::Node::BasicSharedSignalType nodeMoved;
+
 	MV::MouseState *mouse;
 
-	MV::Scene::SafeComponent<MV::Scene::Clickable> positionHandle;
+	MV::Scene::SafeComponent<MV::Scene::Sprite> positionHandle;
 
 	std::shared_ptr<MV::Scene::Node> controlContainer;
 };
@@ -86,6 +84,8 @@ public:
 
 	MV::Scene::SafeComponent<MV::Scene::Sprite> elementToEdit;
 private:
+
+	MV::Scene::Node::BasicSharedSignalType nodeMoved;
 
 	MV::MouseState *mouse;
 
@@ -156,6 +156,8 @@ public:
 	std::function<void(EditableEmitter*)> onChange;
 	MV::Scene::SafeComponent<MV::Scene::Emitter> elementToEdit;
 private:
+
+	MV::Scene::Node::BasicSharedSignalType nodeMoved;
 
 	MV::MouseState *mouse;
 

@@ -132,12 +132,12 @@ void Editor::handleInput(){
 					done = true;
 					break;
 				case SDLK_UP:
-					std::cout << "SCENE:\n" << scene << "\nCONTROLS:\n" << controls << "\n______________" << std::endl;
+					std::cout << "SCENE:\n" << scene << "\n______________" << std::endl;
 					break;
 				case SDLK_LEFT:
 					break;
 				case SDLK_DOWN:
-
+					std::cout << "CONTROLS:\n" << controls << "\n______________" << std::endl;
 					break;
 				case SDLK_SPACE:
 

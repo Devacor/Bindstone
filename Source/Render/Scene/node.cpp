@@ -77,8 +77,15 @@ namespace MV {
 			return a_clone;
 		}
 
+		void Component::detach() {
+			owner()->detach(shared_from_this());
+		}
 
 		Node::~Node() {
+			for (auto &&component : childComponents) {
+				component->onOwnerDestroyed();
+			}
+
 			for(auto &&child : childNodes){
 				child->myParent = nullptr;
 			}

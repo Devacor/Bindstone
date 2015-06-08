@@ -10,7 +10,7 @@
 class EditorControls {
 public:
 	EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::shared_ptr<MV::Scene::Node> a_root, SharedResources a_sharedResources);
-
+	~EditorControls();
 	SharedResources resources() const{
 		return sharedResources;
 	}
@@ -49,7 +49,8 @@ public:
 
 	void handleInput(SDL_Event &a_event);
 
-	void deleteScene();
+	void deleteFullScene();
+	void deletePanelContents();
 
 	void updateBoxHeader(MV::PointPrecision a_width);
 

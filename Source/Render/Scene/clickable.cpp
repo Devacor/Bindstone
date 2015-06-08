@@ -151,7 +151,7 @@ namespace MV {
 		}
 
 		bool Clickable::mouseInBounds(const MouseState & a_state) {
-			if (owner()->active() && hitDetectionType != BoundsType::NONE) {
+			if (ownerIsAlive() && owner()->active() && hitDetectionType != BoundsType::NONE) {
 				BoxAABB<> hitBox;
 				if (hitDetectionType == BoundsType::LOCAL) {
 					hitBox = bounds();

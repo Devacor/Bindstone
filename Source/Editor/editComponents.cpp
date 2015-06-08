@@ -110,6 +110,10 @@ EditableGrid::EditableGrid(MV::Scene::SafeComponent<MV::Scene::Grid> a_elementTo
 	mouse(a_mouse) {
 
 	resetHandles();
+	
+	nodeMoved = elementToEdit->owner()->onTransformChange.connect([&](const std::shared_ptr<MV::Scene::Node> &a_this) {
+		resetHandles();
+	});
 }
 
 void EditableGrid::removeHandles() {
@@ -121,38 +125,18 @@ void EditableGrid::removeHandles() {
 
 void EditableGrid::resetHandles() {
 	removeHandles();
-	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->owner()->screenBounds(false));
+	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenBounds());
 
 	MV::Size<> currentDimensions = rectBox.size();
-	if (currentDimensions.area() < 25.0f) {
-		currentDimensions.width = 5.0f;
-		currentDimensions.height = 5.0f;
-	}
-
-	rectBox.maxPoint = rectBox.minPoint + toPoint(currentDimensions);
 
 	EditableGrid* self = this;
-	positionHandle = controlContainer->make(MV::guid("position"))->position(rectBox.minPoint)->attach<MV::Scene::Clickable>(*mouse);
-	positionHandle->size(currentDimensions)->show();
-	positionHandle->onDrag.connect("position", [&, self](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
-		handle->owner()->translate(handle->owner()->renderer().worldFromScreen(deltaPosition));
-		elementToEdit->owner()->nodePosition(handle->owner());
-		onChange(self);
-	});
-}
-
-void EditableGrid::position(MV::Point<> a_newPosition) {
-	elementToEdit->owner()->position(a_newPosition);
-	resetHandles();
-}
-
-MV::Point<> EditableGrid::position() const {
-	return elementToEdit->owner()->position();
+	positionHandle = controlContainer->make(MV::guid("position"))->position(rectBox.minPoint)->attach<MV::Scene::Sprite>();
+	positionHandle->size(currentDimensions)->color({0x22FFFFFF});
 }
 
 void EditableRectangle::resetHandles() {
 	removeHandles();
-	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->owner()->screenBounds(false));
+	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenBounds());
 
 	MV::Size<> currentDimensions = rectBox.size();
 	if(aspectSize.width != 0.0f && aspectSize.height != 0.0f){
@@ -172,7 +156,7 @@ void EditableRectangle::resetHandles() {
 	positionHandle->onDrag.connect("position", [&, self](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
 		auto castPosition = handle->owner()->renderer().worldFromScreen(deltaPosition);
 		handle->owner()->translate(castPosition);
-		elementToEdit->owner()->nodePosition(handle->owner());
+		elementToEdit->bounds({ elementToEdit->owner()->localFromWorld(handle->owner()->worldPosition()), elementToEdit->bounds().size() });
 		topLeftSizeHandle->owner()->translate(castPosition);
 		topRightSizeHandle->owner()->translate(castPosition);
 		bottomLeftSizeHandle->owner()->translate(castPosition);
@@ -180,26 +164,28 @@ void EditableRectangle::resetHandles() {
 		onChange(self);
 	});
 
-	topLeftSizeHandle = controlContainer->make(MV::guid("topLeft"))->attach<MV::Scene::Clickable>(*mouse)->bounds(MV::BoxAABB<>(rectBox.topLeftPoint(), rectBox.topLeftPoint() - (handleSize * MV::point(1.0f, 1.0f))));
-	topLeftSizeHandle->color({SIZE_HANDLES})->show();
+	topLeftSizeHandle = controlContainer->make(MV::guid("topLeft"))->position(rectBox.topLeftPoint() - handleSize)->attach<MV::Scene::Clickable>(*mouse);
+	topLeftSizeHandle->size(toSize(handleSize))->color({SIZE_HANDLES})->show();
 	topLeftSizeHandle->onDrag.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
-		auto castPosition = handle->owner()->renderer().worldFromScreen(deltaPosition);
-		handle->owner()->translate(castPosition);
-		topRightSizeHandle->owner()->position(MV::point(topRightSizeHandle->owner()->position().x, topLeftSizeHandle->owner()->position().y));
-		bottomLeftSizeHandle->owner()->position(MV::point(topLeftSizeHandle->owner()->position().x, bottomLeftSizeHandle->owner()->position().y));
+		auto worldDelta = handle->owner()->renderer().worldFromScreen(deltaPosition);
+		handle->owner()->translate(worldDelta);
+		topRightSizeHandle->owner()->translate(MV::point(0.0f, worldDelta.y));
+		bottomLeftSizeHandle->owner()->translate(MV::point(worldDelta.x, 0.0f));
 
 		repositionHandles();
 	});
+
 	topLeftSizeHandle->onRelease.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &){
 		resetHandles();
 	});
 
-	topRightSizeHandle = controlContainer->make(MV::guid("topRight"))->attach<MV::Scene::Clickable>(*mouse)->bounds(MV::BoxAABB<>(rectBox.topRightPoint(), rectBox.topRightPoint() + (handleSize * MV::point(1.0f, -1.0f))));
-	topRightSizeHandle->color({SIZE_HANDLES})->show();
+	topRightSizeHandle = controlContainer->make(MV::guid("topRight"))->position(rectBox.topRightPoint() - MV::point(0.0f, handleSize.y))->attach<MV::Scene::Clickable>(*mouse);
+	topRightSizeHandle->size(toSize(handleSize))->color({SIZE_HANDLES})->show();
 	topRightSizeHandle->onDrag.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
-		handle->owner()->translate(handle->owner()->renderer().worldFromScreen(deltaPosition));
-		topLeftSizeHandle->owner()->position(MV::point(topLeftSizeHandle->owner()->position().x, topRightSizeHandle->owner()->position().y));
-		bottomRightSizeHandle->owner()->position(MV::point(topRightSizeHandle->owner()->position().x, bottomRightSizeHandle->owner()->position().y));
+		auto worldDelta = handle->owner()->renderer().worldFromScreen(deltaPosition);
+		handle->owner()->translate(worldDelta);
+		topLeftSizeHandle->owner()->translate(MV::point(0.0f, worldDelta.y));
+		bottomRightSizeHandle->owner()->translate(MV::point(worldDelta.x, 0.0f));
 
 		repositionHandles();
 	});
@@ -207,12 +193,13 @@ void EditableRectangle::resetHandles() {
 		resetHandles();
 	});
 
-	bottomLeftSizeHandle = controlContainer->make(MV::guid("bottomLeft"))->attach<MV::Scene::Clickable>(*mouse)->bounds(MV::BoxAABB<>(rectBox.bottomLeftPoint(), rectBox.bottomLeftPoint() - (handleSize * MV::point(1.0f, -1.0f))));
-	bottomLeftSizeHandle->color({SIZE_HANDLES})->show();
+	bottomLeftSizeHandle = controlContainer->make(MV::guid("bottomLeft"))->position(rectBox.bottomLeftPoint() - MV::point(handleSize.x, 0.0f))->attach<MV::Scene::Clickable>(*mouse);
+	bottomLeftSizeHandle->size(toSize(handleSize))->color({SIZE_HANDLES})->show();
 	bottomLeftSizeHandle->onDrag.connect("bottomLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
-		handle->owner()->translate(handle->owner()->renderer().worldFromScreen(deltaPosition));
-		topLeftSizeHandle->owner()->position(MV::point(bottomLeftSizeHandle->owner()->position().x, topLeftSizeHandle->owner()->position().y));
-		bottomRightSizeHandle->owner()->position(MV::point(bottomRightSizeHandle->owner()->position().x, bottomLeftSizeHandle->owner()->position().y));
+		auto worldDelta = handle->owner()->renderer().worldFromScreen(deltaPosition);
+		handle->owner()->translate(worldDelta);
+		topLeftSizeHandle->owner()->translate(MV::point(worldDelta.x, 0.0f));
+		bottomRightSizeHandle->owner()->translate(MV::point(0.0f, worldDelta.y));
 
 		repositionHandles();
 	});
@@ -220,12 +207,13 @@ void EditableRectangle::resetHandles() {
 		resetHandles();
 	});
 
-	bottomRightSizeHandle = controlContainer->make(MV::guid("bottomRight"))->attach<MV::Scene::Clickable>(*mouse)->bounds(MV::BoxAABB<>(rectBox.bottomRightPoint(), rectBox.bottomRightPoint() + (handleSize * MV::point(1.0f, 1.0f))));
-	bottomRightSizeHandle->color({SIZE_HANDLES})->show();
+	bottomRightSizeHandle = controlContainer->make(MV::guid("bottomRight"))->position(rectBox.bottomRightPoint())->attach<MV::Scene::Clickable>(*mouse);
+	bottomRightSizeHandle->size(toSize(handleSize))->color({SIZE_HANDLES})->show();
 	bottomRightSizeHandle->onDrag.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
-		handle->owner()->translate(handle->owner()->renderer().worldFromScreen(deltaPosition));
-		topRightSizeHandle->owner()->position(MV::point(bottomRightSizeHandle->owner()->position().x, topRightSizeHandle->owner()->position().y));
-		bottomLeftSizeHandle->owner()->position(MV::point(bottomLeftSizeHandle->owner()->position().x, bottomRightSizeHandle->owner()->position().y));
+		auto worldDelta = handle->owner()->renderer().worldFromScreen(deltaPosition);
+		handle->owner()->translate(worldDelta);
+		topRightSizeHandle->owner()->translate(MV::point(worldDelta.x, 0.0f));
+		bottomLeftSizeHandle->owner()->translate(MV::point(0.0f, worldDelta.y));
 
 		repositionHandles();
 	});
@@ -241,6 +229,9 @@ EditableRectangle::EditableRectangle(MV::Scene::SafeComponent<MV::Scene::Sprite>
 	controlContainer(a_rootContainer->make("Editable")->depth(-100.0f)),
 	mouse(a_mouse) {
 	resetHandles();
+	nodeMoved = elementToEdit->owner()->onTransformChange.connect([&](const std::shared_ptr<MV::Scene::Node> &a_this){
+		resetHandles();
+	});
 }
 
 void EditableRectangle::removeHandles() {
@@ -259,11 +250,10 @@ void EditableRectangle::removeHandles() {
 }
 
 void EditableRectangle::repositionHandles(bool a_fireOnChange, bool a_repositionElement, bool a_resizeElement) {
-	auto box = MV::BoxAABB<int>(topLeftSizeHandle->screenBounds().bottomRightPoint(), bottomRightSizeHandle->screenBounds().topLeftPoint());
+	auto box = MV::BoxAABB<>(topLeftSizeHandle->worldBounds().bottomRightPoint(), bottomRightSizeHandle->worldBounds().topLeftPoint());
 
-	auto originalPosition = elementToEdit->owner()->position();
-	elementToEdit->owner()->position({});
-	auto corners = MV::round(elementToEdit->owner()->localFromScreen(box));
+	auto originalPosition = elementToEdit->bounds().minPoint;
+	auto corners = elementToEdit->owner()->localFromWorld(box);
 	MV::Size<> currentDimensions = corners.size();
 
 	if(aspectSize.width != 0.0f && aspectSize.height != 0.0f){
@@ -279,14 +269,14 @@ void EditableRectangle::repositionHandles(bool a_fireOnChange, bool a_reposition
 		elementToEdit->size(currentDimensions);
 	}
 	if (a_repositionElement) {
-		elementToEdit->owner()->position(corners.minPoint);
+		elementToEdit->bounds({ corners.minPoint, elementToEdit->bounds().size() });
 	} else {
-		elementToEdit->owner()->position(originalPosition);
+		elementToEdit->bounds({ originalPosition, elementToEdit->bounds().size() });
 	}
 
 	auto rectBox = MV::round(MV::cast<MV::PointPrecision>(elementToEdit->screenBounds()));
-	positionHandle->bounds(rectBox);
-	positionHandle->owner()->position({});
+	positionHandle->bounds({ MV::point(0.0f, 0.0f), rectBox.size() });
+	positionHandle->owner()->position(rectBox.minPoint);
 
 	if(a_fireOnChange){
 		onChange(this);
@@ -346,55 +336,60 @@ void EditableEmitter::resetHandles() {
 		onChange(self);
 	});
 
-	topLeftSizeHandle = controlContainer->make(MV::guid("topLeft"))->attach<MV::Scene::Clickable>(*mouse)->bounds(MV::BoxAABB<>(rectBox.topLeftPoint(), rectBox.topLeftPoint() - (handleSize * MV::point(1.0f, 1.0f))));
-	topLeftSizeHandle->color({SIZE_HANDLES})->show();
-	topLeftSizeHandle->onDrag.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
-		handle->owner()->translate(handle->owner()->renderer().worldFromScreen(deltaPosition));
-		topRightSizeHandle->owner()->position(MV::point(topRightSizeHandle->owner()->position().x, topLeftSizeHandle->owner()->position().y));
-		bottomLeftSizeHandle->owner()->position(MV::point(topLeftSizeHandle->owner()->position().x, bottomLeftSizeHandle->owner()->position().y));
+	topLeftSizeHandle = controlContainer->make(MV::guid("topLeft"))->position(rectBox.topLeftPoint() - handleSize)->attach<MV::Scene::Clickable>(*mouse);
+	topLeftSizeHandle->size(toSize(handleSize))->color({ SIZE_HANDLES })->show();
+	topLeftSizeHandle->onDrag.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
+		auto worldDelta = handle->owner()->renderer().worldFromScreen(deltaPosition);
+		handle->owner()->translate(worldDelta);
+		topRightSizeHandle->owner()->translate(MV::point(0.0f, worldDelta.y));
+		bottomLeftSizeHandle->owner()->translate(MV::point(worldDelta.x, 0.0f));
 
 		repositionHandles();
 	});
-	topLeftSizeHandle->onRelease.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &){
+
+	topLeftSizeHandle->onRelease.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &) {
 		resetHandles();
 	});
 
-	topRightSizeHandle = controlContainer->make(MV::guid("topRight"))->attach<MV::Scene::Clickable>(*mouse)->bounds(MV::BoxAABB<>(rectBox.topRightPoint(), rectBox.topRightPoint() + (handleSize * MV::point(1.0f, -1.0f))));
-	topRightSizeHandle->color({SIZE_HANDLES})->show();
-	topRightSizeHandle->onDrag.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
-		handle->owner()->translate(handle->owner()->renderer().worldFromScreen(deltaPosition));
-		topLeftSizeHandle->owner()->position(MV::point(topLeftSizeHandle->owner()->position().x, topRightSizeHandle->owner()->position().y));
-		bottomRightSizeHandle->owner()->position(MV::point(topRightSizeHandle->owner()->position().x, bottomRightSizeHandle->owner()->position().y));
+	topRightSizeHandle = controlContainer->make(MV::guid("topRight"))->position(rectBox.topRightPoint() - MV::point(0.0f, handleSize.y))->attach<MV::Scene::Clickable>(*mouse);
+	topRightSizeHandle->size(toSize(handleSize))->color({ SIZE_HANDLES })->show();
+	topRightSizeHandle->onDrag.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
+		auto worldDelta = handle->owner()->renderer().worldFromScreen(deltaPosition);
+		handle->owner()->translate(worldDelta);
+		topLeftSizeHandle->owner()->translate(MV::point(0.0f, worldDelta.y));
+		bottomRightSizeHandle->owner()->translate(MV::point(worldDelta.x, 0.0f));
 
 		repositionHandles();
 	});
-	topRightSizeHandle->onRelease.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &){
+	topRightSizeHandle->onRelease.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &) {
 		resetHandles();
 	});
 
-	bottomLeftSizeHandle = controlContainer->make(MV::guid("bottomLeft"))->attach<MV::Scene::Clickable>(*mouse)->bounds(MV::BoxAABB<>(rectBox.bottomLeftPoint(), rectBox.bottomLeftPoint() - (handleSize * MV::point(1.0f, -1.0f))));
-	bottomLeftSizeHandle->color({SIZE_HANDLES})->show();
-	bottomLeftSizeHandle->onDrag.connect("bottomLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
-		handle->owner()->translate(handle->owner()->renderer().worldFromScreen(deltaPosition));
-		topLeftSizeHandle->owner()->position(MV::point(bottomLeftSizeHandle->owner()->position().x, topLeftSizeHandle->owner()->position().y));
-		bottomRightSizeHandle->owner()->position(MV::point(bottomRightSizeHandle->owner()->position().x, bottomLeftSizeHandle->owner()->position().y));
+	bottomLeftSizeHandle = controlContainer->make(MV::guid("bottomLeft"))->position(rectBox.bottomLeftPoint() - MV::point(handleSize.x, 0.0f))->attach<MV::Scene::Clickable>(*mouse);
+	bottomLeftSizeHandle->size(toSize(handleSize))->color({ SIZE_HANDLES })->show();
+	bottomLeftSizeHandle->onDrag.connect("bottomLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
+		auto worldDelta = handle->owner()->renderer().worldFromScreen(deltaPosition);
+		handle->owner()->translate(worldDelta);
+		topLeftSizeHandle->owner()->translate(MV::point(worldDelta.x, 0.0f));
+		bottomRightSizeHandle->owner()->translate(MV::point(0.0f, worldDelta.y));
 
 		repositionHandles();
 	});
-	bottomLeftSizeHandle->onRelease.connect("bottomLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &){
+	bottomLeftSizeHandle->onRelease.connect("bottomLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &) {
 		resetHandles();
 	});
 
-	bottomRightSizeHandle = controlContainer->make(MV::guid("bottomRight"))->attach<MV::Scene::Clickable>(*mouse)->bounds(MV::BoxAABB<>(rectBox.bottomRightPoint(), rectBox.bottomRightPoint() + (handleSize * MV::point(1.0f, 1.0f))));
-	bottomRightSizeHandle->color({SIZE_HANDLES})->show();
-	bottomRightSizeHandle->onDrag.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
-		handle->owner()->translate(handle->owner()->renderer().worldFromScreen(deltaPosition));
-		topRightSizeHandle->owner()->position(MV::point(bottomRightSizeHandle->owner()->position().x, topRightSizeHandle->owner()->position().y));
-		bottomLeftSizeHandle->owner()->position(MV::point(bottomLeftSizeHandle->owner()->position().x, bottomRightSizeHandle->owner()->position().y));
+	bottomRightSizeHandle = controlContainer->make(MV::guid("bottomRight"))->position(rectBox.bottomRightPoint())->attach<MV::Scene::Clickable>(*mouse);
+	bottomRightSizeHandle->size(toSize(handleSize))->color({ SIZE_HANDLES })->show();
+	bottomRightSizeHandle->onDrag.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
+		auto worldDelta = handle->owner()->renderer().worldFromScreen(deltaPosition);
+		handle->owner()->translate(worldDelta);
+		topRightSizeHandle->owner()->translate(MV::point(worldDelta.x, 0.0f));
+		bottomLeftSizeHandle->owner()->translate(MV::point(0.0f, worldDelta.y));
 
 		repositionHandles();
 	});
-	bottomRightSizeHandle->onRelease.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &){
+	bottomRightSizeHandle->onRelease.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &) {
 		resetHandles();
 	});
 
@@ -406,6 +401,10 @@ EditableEmitter::EditableEmitter(MV::Scene::SafeComponent<MV::Scene::Emitter> a_
 	controlContainer(a_rootContainer->make("Editable")->depth(-100.0f)),
 	mouse(a_mouse) {
 	resetHandles();
+
+	nodeMoved = elementToEdit->owner()->onTransformChange.connect([&](const std::shared_ptr<MV::Scene::Node> &a_this) {
+		resetHandles();
+	});
 }
 
 void EditableEmitter::removeHandles() {
@@ -424,43 +423,46 @@ void EditableEmitter::removeHandles() {
 }
 
 void EditableEmitter::repositionHandles(bool a_fireOnChange, bool a_repositionElement, bool a_resizeElement) {
-	auto box = MV::boxaabb(topLeftSizeHandle->screenBounds().bottomRightPoint(), bottomRightSizeHandle->screenBounds().topLeftPoint());
+	auto box = MV::BoxAABB<>(topLeftSizeHandle->worldBounds().bottomRightPoint(), bottomRightSizeHandle->worldBounds().topLeftPoint());
 
-	auto originalPosition = elementToEdit->owner()->position();
-	elementToEdit->owner()->position({});
-	auto corners = elementToEdit->owner()->localFromScreen(box);
+	auto originalPosition = elementToEdit->bounds().minPoint;
+	auto corners = elementToEdit->owner()->localFromWorld(box);
+	MV::Size<> currentDimensions = corners.size();
 
 	if (a_resizeElement) {
-		elementToEdit->properties().minimumPosition = { 0.0f, 0.0f };
-		elementToEdit->properties().maximumPosition = MV::toPoint(corners.size());
+		elementToEdit->properties().minimumPosition = corners.minPoint;
+		elementToEdit->properties().maximumPosition = corners.maxPoint;
 	}
+	auto newSize = elementToEdit->properties().maximumPosition - elementToEdit->properties().minimumPosition;
 	if (a_repositionElement) {
-		elementToEdit->owner()->position(corners.minPoint);
-	} else {
-		elementToEdit->owner()->position(originalPosition);
+		elementToEdit->properties().minimumPosition = corners.minPoint;
+		elementToEdit->properties().maximumPosition = corners.minPoint + newSize;
+	}
+	else {
+		elementToEdit->properties().minimumPosition = originalPosition;
+		elementToEdit->properties().maximumPosition = originalPosition + newSize;
 	}
 
-	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenBounds());
-	positionHandle->bounds(rectBox);
-	positionHandle->owner()->position({});
+	auto rectBox = MV::round(MV::cast<MV::PointPrecision>(elementToEdit->screenBounds()));
+	positionHandle->bounds({ MV::point(0.0f, 0.0f), rectBox.size() });
+	positionHandle->owner()->position(rectBox.minPoint);
 
-	if(a_fireOnChange){
+	if (a_fireOnChange) {
 		onChange(this);
 	}
 }
 
 void EditableEmitter::position(MV::Point<> a_newPosition) {
-	elementToEdit->owner()->position(a_newPosition);
+	elementToEdit->properties().minimumPosition = a_newPosition;
 	resetHandles();
 }
 
 MV::Point<> EditableEmitter::position() const {
-	return elementToEdit->owner()->position();
+	return elementToEdit->properties().minimumPosition;
 }
 
 void EditableEmitter::size(MV::Size<> a_newSize){
-	elementToEdit->properties().minimumPosition = {0.0f, 0.0f};
-	elementToEdit->properties().maximumPosition = MV::toPoint(a_newSize);
+	elementToEdit->properties().maximumPosition = MV::toPoint(a_newSize) + elementToEdit->properties().minimumPosition;
 	resetHandles();
 }
 

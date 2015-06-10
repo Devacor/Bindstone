@@ -236,12 +236,14 @@
     <ClCompile Include="Source\ClickerGame\clickerGame.cpp">
       <Filter>Source Files\ClickerGame</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Render\Scene\palette.cpp" />
     <ClCompile Include="Source\Editor\editComponents.cpp">
       <Filter>Source Files\Editor</Filter>
     </ClCompile>
     <ClCompile Include="Source\Editor\componentPanels.cpp">
       <Filter>Source Files\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\Scene\palette.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -623,7 +625,6 @@
     <ClInclude Include="Source\ClickerGame\clickerGame.h">
       <Filter>Source Files\ClickerGame</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Render\Scene\palette.h" />
     <ClInclude Include="Source\Editor\editComponents.h">
       <Filter>Source Files\Editor</Filter>
     </ClInclude>
@@ -636,6 +637,9 @@
     </ClInclude>
     <ClInclude Include="Source\Utility\visitor.hpp">
       <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\palette.h">
+      <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

@@ -37,6 +37,13 @@ namespace MV {
 		A(a_Alpha) {
 	}
 
+	Color::Color(int a_Red, int a_Green, int a_Blue, int a_Alpha /*= 255*/) :
+		R(static_cast<float>(a_Red) / 255.0f),
+		G(static_cast<float>(a_Green) / 255.0f),
+		B(static_cast<float>(a_Blue) / 255.0f),
+		A(static_cast<float>(a_Alpha) / 255.0f) {
+	}
+
 	Color& Color::operator=( const Color& a_other ){
 		R = a_other.R; G = a_other.G; B = a_other.B; A = a_other.A;
 		return *this;
@@ -107,6 +114,74 @@ namespace MV {
 		G = a_Green;
 		B = a_Blue;
 		A = a_Alpha;
+		return *this;
+	}
+
+	Color::HSV Color::hsv() const {
+		return getHsv(HSV(0.0f, 0.0f, 0.0f, 1.0f));
+	}
+
+	Color::HSV Color::getHsv(HSV result) const {
+		float minimum = std::min(std::min(R, G), B);
+		float maximum = std::max(std::max(R, G), B);
+		float chroma = maximum - minimum;
+
+		//If Chroma is 0, then S is 0 by definition, and H is undefined but 0 by convention.
+		if (chroma != 0) {
+			if (R == maximum) {
+				result.H = (G - B) / chroma;
+
+				if (result.H < 0.0f) {
+					result.H += 6.0f;
+				}
+			} else if (G == maximum) {
+				result.H = ((B - R) / chroma) + 2.0f;
+			} else {
+				result.H = ((R - G) / chroma) + 4.0f;
+			}
+
+			result.H *= 60.0f;
+			result.S = chroma / maximum;
+		}
+
+		result.V = maximum;
+		result.A = A;
+
+		return result;
+	}
+
+	Color& Color::hsv(HSV a_hsv) {
+		float Chroma = a_hsv.S * a_hsv.V;
+		float hdash = a_hsv.H / 60.0f;
+		float x = Chroma * (1.0f - std::abs(std::remainder(hdash, 2.0f) - 1.0f));
+
+		if (hdash < 1.0f) {
+			R = Chroma;
+			G = x;
+		} else if (hdash < 2.0f) {
+			R = x;
+			G = Chroma;
+		} else if (hdash < 3.0f) {
+			G = Chroma;
+			B = x;
+		} else if (hdash < 4.0f) {
+			G = x;
+			B = Chroma;
+		} else if (hdash < 5.0f) {
+			R = x;
+			B = Chroma;
+		} else if (hdash <= 6.0f) {
+			R = Chroma;
+			B = x;
+		}
+
+		float minimum = a_hsv.V - Chroma;
+
+		R += minimum;
+		G += minimum;
+		B += minimum;
+		A = a_hsv.A;
+
 		return *this;
 	}
 

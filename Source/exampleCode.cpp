@@ -8,7 +8,7 @@ void CreateTextScene(std::shared_ptr<MV::Scene::Node> mainScene, MV::TextLibrary
 	textLibrary.loadFont("bluehighway2", "Assets/Fonts/bluehigh.ttf", 24);
 	textLibrary.loadFont("bluehighway3", "Assets/Fonts/bluehigh.ttf", 42);
 
-	mainScene->renderer().backgroundColor(MV::Color(0, 0, 0, 0));
+	mainScene->renderer().backgroundColor(MV::Color(0.0f, 0.0f, 0.0f, 0.0f));
 	mainScene->renderer().clearScreen();
 	mainScene->renderer().updateScreen();
 	//Add basic instructions

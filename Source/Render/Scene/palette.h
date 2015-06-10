@@ -136,6 +136,13 @@ namespace MV {
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
 			Color percentToSliderColor(PointPrecision a_percentPosition);
+		protected:
+			virtual void onOwnerDestroyed() {
+				onLeftMouseDownHandle.reset();
+				onLeftMouseUpHandle.reset();
+				onMouseMoveHandle.reset();
+			}
+
 		private:
 			void ApplyCurrentColorToPreviewBox();
 
@@ -157,7 +164,7 @@ namespace MV {
 			Color currentColor = {1.0f, 0.0f, 0.0f, 1.0f};
 
 			MV::MouseState::SignalType currentDragSignal;
-
+			MV::Color::HSV hsv;
 			static const std::vector<Color> colorBarList;
 		};
 

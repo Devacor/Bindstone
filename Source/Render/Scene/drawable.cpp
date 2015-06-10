@@ -22,7 +22,7 @@ namespace MV {
 			for (auto&& point : points) {
 				colorsToAverage.push_back(point);
 			}
-			return std::accumulate(colorsToAverage.begin(), colorsToAverage.end(), Color(0, 0, 0, 0)) / static_cast<PointPrecision>(colorsToAverage.size());
+			return std::accumulate(colorsToAverage.begin(), colorsToAverage.end(), Color(0.0f, 0.0f, 0.0f, 0.0f)) / static_cast<PointPrecision>(colorsToAverage.size());
 		}
 
 		std::shared_ptr<Drawable> Drawable::color(const Color &a_newColor) {

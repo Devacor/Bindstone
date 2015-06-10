@@ -17,7 +17,7 @@ void Selection::enable(){
 		mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, {10000}, [&](){
 			inSelection = true;
 			selection.initialize(mouse.position());
-			visibleSelection = scene->make("Selection_" + std::to_string(id))->position(scene->localFromScreen(selection.minPoint))->attach<MV::Scene::Sprite>()->color(MV::Color(1.0, 1.0, 0.0, .25))->safe();
+			visibleSelection = scene->make("Selection_" + std::to_string(id))->position(scene->localFromScreen(selection.minPoint))->attach<MV::Scene::Sprite>()->color(MV::Color(1.0f, 1.0f, 0.0f, .25f))->safe();
 			auto originalPosition = visibleSelection->owner()->localFromScreen(mouse.position());
 			onMouseMoveHandle = mouse.onMove.connect([&, originalPosition](MV::MouseState &mouse){
 				visibleSelection->bounds({originalPosition, visibleSelection->owner()->localFromScreen(mouse.position())});

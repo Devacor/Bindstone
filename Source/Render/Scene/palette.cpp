@@ -20,13 +20,15 @@ namespace MV {
 			Drawable(a_owner),
 			onColorChange(onColorChangeSlot),
 			onSwatchClicked(onSwatchClickedSlot),
-			ourMouse(a_mouse){
+			ourMouse(a_mouse),
+			hsv(360.0f, 0.0f, 0.0f, 1.0f){
 
 			shaderProgramId = MV::COLOR_PICKER_ID;
 
 			//14 for the color selector, 4 for the hue + saturation,
 			//4 for the alpha left, 4 for the alpha right, 4 for the preview.
-			points.resize(14 + 4 + 4 + 4 + 4);
+			//4 for the diamond selected, 3 for the arrow
+			points.resize(14 + 4 + 4 + 4 + 4 + 16 + 3);
 
 			for (int i = 0; i < colorBarList.size(); ++i) {
 				points[i * 2] = colorBarList[i];
@@ -59,7 +61,18 @@ namespace MV {
 			appendQuadVertexIndices(vertexIndices, 18);
 			appendQuadVertexIndices(vertexIndices, 22);
 			appendQuadVertexIndices(vertexIndices, 26);
-			innerColorAlphaSelectorNoNotification({181.0f / 255.0f, 185.0f / 255.0f, 191.0f / 255.0f}, {65.0f / 255.0f, 68.0f / 255.0f, 77.0f / 255.0f});
+
+
+			appendQuadVertexIndices(vertexIndices, 30);
+			appendQuadVertexIndices(vertexIndices, 34);
+			appendQuadVertexIndices(vertexIndices, 38);
+			appendQuadVertexIndices(vertexIndices, 42);
+
+			vertexIndices.push_back(46);
+			vertexIndices.push_back(47);
+			vertexIndices.push_back(48);
+
+			innerColorAlphaSelectorNoNotification({181, 185, 191}, {65, 68, 77});
 		}
 
 		void Palette::initialize() {
@@ -158,7 +171,7 @@ namespace MV {
 
 		void Palette::updateColorForPaletteState() {
 			auto currentAlpha = currentColor.A;
-			currentColor = mix(mix(topRightColor, Color(1, 1, 1), 1.0f - selectorCursorPercent.x), Color(0, 0, 0), selectorCursorPercent.y);
+			currentColor = mix(mix(topRightColor, Color(1.0f, 1.0f, 1.0f), 1.0f - selectorCursorPercent.x), Color(0.0f, 0.0f, 0.0f), selectorCursorPercent.y);
 			currentColor.A = currentAlpha;
 			color(currentColor);
 		}
@@ -177,7 +190,7 @@ namespace MV {
 		void Palette::acceptMainColorClick() {
 			auto updateMainColor = [&](MouseState& a_mouse){
 				selectorCursorPercent = owner()->screenFromLocal(currentMainColorBounds()).percent(a_mouse.position());
-				std::cout << "PERCENT: " << selectorCursorPercent << std::endl;
+				hsv.S = selectorCursorPercent.x;
 				updateColorForPaletteState();
 			};
 			updateMainColor(ourMouse);
@@ -188,6 +201,7 @@ namespace MV {
 			auto updateSideColor = [&](MouseState& a_mouse) {
 				auto percentPosition = owner()->screenFromLocal(currentSideColorBounds()).percent(a_mouse.position());
 				topRightColor = percentToSliderColor(percentPosition.y);
+				hsv.H = (1.0f - percentPosition.y) * 360.0f;
 				for (int i = 14; i < 18; ++i) {
 					points[i] = topRightColor;
 				}
@@ -313,9 +327,13 @@ namespace MV {
 			points[28] = a_bounds.bottomRightPoint();
 			points[29] = a_bounds.bottomRightPoint() - point(0.0f, alphaSelectorHeight);
 
-			ApplyCurrentColorToPreviewBox();
+			for (size_t i = 30; i <= 48; ++i) {
+				points[i].copyPosition(points[29]);
+			}
 
 			refreshBounds();
+
+			ApplyCurrentColorToPreviewBox();
 			return self;
 		}
 
@@ -333,6 +351,51 @@ namespace MV {
 			points[27] = currentColor;
 			points[28] = currentColor;
 			points[29] = currentColor;
+
+			hsv = currentColor.getHsv(hsv);
+			auto localBounds = bounds();
+			auto selectorPixelSize = Size<>(localBounds.width(), localBounds.height()) * selectorPercentSize;
+			auto selectorPixelPadding = Size<>(localBounds.width(), localBounds.height()) * selectorPercentPadding;
+			auto colorSelectorWidth = localBounds.width() - (selectorPixelSize.width + selectorPixelPadding.width);
+			auto alphaSelectorHeight = localBounds.height() - (selectorPixelSize.height + selectorPixelPadding.height);
+
+			points[46] = point(localBounds.maxPoint.x - colorSelectorWidth, localBounds.minPoint.y + ((1.0f - hsv.percentHue()) * selectorPixelSize.height));
+			points[47] = point(localBounds.maxPoint.x - colorSelectorWidth - selectorPixelPadding.width, (localBounds.minPoint.y + ((1.0f - hsv.percentHue()) * selectorPixelSize.height)) - selectorPixelPadding.width / 2.0f);
+			points[48] = point(localBounds.maxPoint.x - colorSelectorWidth - selectorPixelPadding.width, (localBounds.minPoint.y + ((1.0f - hsv.percentHue()) * selectorPixelSize.height)) + selectorPixelPadding.width / 2.0f);
+
+			auto colorLocation = point((hsv.S * selectorPixelSize.width) + localBounds.minPoint.x, ((1.0f - hsv.V) * selectorPixelSize.height) + localBounds.minPoint.y);
+			points[30] = point(colorLocation.x - 3, colorLocation.y);
+			points[31] = point(colorLocation.x, colorLocation.y - 3);
+			points[32] = point(colorLocation.x, colorLocation.y - 2);
+			points[33] = point(colorLocation.x - 2, colorLocation.y);
+
+			points[34] = point(colorLocation.x - 3, colorLocation.y);
+			points[35] = point(colorLocation.x, colorLocation.y + 3);
+			points[36] = point(colorLocation.x, colorLocation.y + 2);
+			points[37] = point(colorLocation.x - 2, colorLocation.y);
+
+			points[38] = point(colorLocation.x + 3, colorLocation.y);
+			points[39] = point(colorLocation.x, colorLocation.y - 3);
+			points[40] = point(colorLocation.x, colorLocation.y - 2);
+			points[41] = point(colorLocation.x + 2, colorLocation.y);
+
+			points[42] = point(colorLocation.x + 3, colorLocation.y);
+			points[43] = point(colorLocation.x, colorLocation.y + 3);
+			points[44] = point(colorLocation.x, colorLocation.y + 2);
+			points[45] = point(colorLocation.x + 2, colorLocation.y);
+
+			float greyColor = mixOut(0.0f, 1.0f, (hsv.V + (1.0f - hsv.S)) / 2.0f, 4.5f);
+			Color cursorColor(greyColor, greyColor, greyColor);
+			for (int i = 30; i <= 45; ++i) {
+				points[i].x = clamp(points[i].x, localBounds.minPoint.x, localBounds.maxPoint.x);
+				points[i].y = clamp(points[i].y, localBounds.minPoint.y, localBounds.maxPoint.y);
+				points[i] = cursorColor;
+			}
+
+			for (int i = 46; i <= 48; ++i) {
+				points[i].x = clamp(points[i].x, localBounds.minPoint.x, localBounds.maxPoint.x);
+				points[i].y = clamp(points[i].y, localBounds.minPoint.y, localBounds.maxPoint.y);
+			}
 		}
 	}
 }

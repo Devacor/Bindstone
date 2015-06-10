@@ -127,7 +127,7 @@ namespace MV {
 
 	FormattedState::FormattedState(const std::shared_ptr<FontDefinition> &a_font, const std::shared_ptr<FormattedState> &a_currentState) :
 		font(a_font),
-		color((a_currentState) ? a_currentState->color : Color(1, 1, 1)),
+		color((a_currentState) ? a_currentState->color : Color(1.0f, 1.0f, 1.0f)),
 		minimumLineHeight((a_currentState) ? a_currentState->minimumLineHeight : -1) {
 	}
 

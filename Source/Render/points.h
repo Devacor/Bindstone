@@ -44,8 +44,10 @@ namespace MV {
 		//Due to being unable to distinguish between 0x000000 and 0x00000000 we default the 00 bits in the alpha channel to 1.0.
 		//allowFullAlpha overrides this behavior so that if the alpha channel is 00 it is read as 00 instead as FF.
 		Color(uint32_t a_hex, bool a_allowFullAlpha = false);
+
 		Color(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0f);
-		
+		Color(int a_Red, int a_Green, int a_Blue, int a_Alpha = 255);
+
 		~Color(){}
 
 		Color& operator=(const Color& a_other);
@@ -76,6 +78,20 @@ namespace MV {
 		
 		Color& set(uint32_t a_hex, bool a_allowFullAlpha = false); //option to get back a Color&
 		Color& set(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0f);
+
+		struct HSV {
+			HSV(float a_Hue = 0.0f, float a_Saturation = 1.0f, float a_Value = 1.0f, float a_Alpha = 1.0f) :
+				H(a_Hue), S(a_Saturation), V(a_Value), A(a_Alpha) {
+			}
+			float percentHue() const {
+				return H / 360.0f;
+			}
+			float H, S, V, A;
+		};
+
+		HSV hsv() const;
+		HSV getHsv(HSV a_resultInput) const;
+		Color& hsv(HSV a_hsv);
 
 		float R, G, B, A;
 

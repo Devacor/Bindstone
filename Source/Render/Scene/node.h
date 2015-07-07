@@ -221,17 +221,17 @@ namespace MV {
 			typedef void BasicSignature(const std::shared_ptr<Node> &a_this);
 			typedef void ComponentSignature(const std::shared_ptr<Component> &a_this);
 
-			typedef Slot<BasicSignature>::WeakSignalType BasicWeakSignalType;
-			typedef Slot<BasicSignature>::SharedSignalType BasicSharedSignalType;
-			typedef Slot<BasicSignature>::SignalType BasicSignalType;
+			typedef Signal<BasicSignature>::WeakRecieverType BasicWeakSignalType;
+			typedef Signal<BasicSignature>::SharedRecieverType BasicSharedSignalType;
+			typedef Signal<BasicSignature>::RecieverType BasicSignalType;
 			
-			typedef Slot<ParentInteractionSignature>::WeakSignalType ParentInteractionWeakSignalType;
-			typedef Slot<ParentInteractionSignature>::SharedSignalType ParentInteractionSharedSignalType;
-			typedef Slot<ParentInteractionSignature>::SignalType ParentInteractionSignalType;
+			typedef Signal<ParentInteractionSignature>::WeakRecieverType ParentInteractionWeakSignalType;
+			typedef Signal<ParentInteractionSignature>::SharedRecieverType ParentInteractionSharedSignalType;
+			typedef Signal<ParentInteractionSignature>::RecieverType ParentInteractionSignalType;
 
-			typedef Slot<ComponentSignature>::WeakSignalType ComponentWeakSignalType;
-			typedef Slot<ComponentSignature>::SharedSignalType ComponentSharedSignalType;
-			typedef Slot<ComponentSignature>::SignalType ComponentSignalType;
+			typedef Signal<ComponentSignature>::WeakRecieverType ComponentWeakSignalType;
+			typedef Signal<ComponentSignature>::SharedRecieverType ComponentSharedSignalType;
+			typedef Signal<ComponentSignature>::RecieverType ComponentSignalType;
 
 			class Quiet {
 			public:
@@ -262,30 +262,32 @@ namespace MV {
 		private:
 			friend Quiet;
 
-			Slot<BasicSignature> onChildAddSlot;
-			Slot<ParentInteractionSignature> onChildRemoveSlot;
-			Slot<BasicSignature> onAddSlot;
-			Slot<BasicSignature> onRemoveSlot;
+			Signal<BasicSignature> onChildAddSignal;
+			Signal<ParentInteractionSignature> onChildRemoveSignal;
+			Signal<BasicSignature> onAddSignal;
+			Signal<BasicSignature> onRemoveSignal;
 
-			Slot<BasicSignature> onEnableSlot;
-			Slot<BasicSignature> onDisableSlot;
-			Slot<BasicSignature> onPauseSlot;
-			Slot<BasicSignature> onResumeSlot;
-			Slot<BasicSignature> onShowSlot;
-			Slot<BasicSignature> onHideSlot;
+			Signal<BasicSignature> onEnableSignal;
+			Signal<BasicSignature> onDisableSignal;
+			Signal<BasicSignature> onPauseSignal;
+			Signal<BasicSignature> onResumeSignal;
+			Signal<BasicSignature> onShowSignal;
+			Signal<BasicSignature> onHideSignal;
 
-			Slot<BasicSignature> onBoundsRequestSlot;
+			Signal<BasicSignature> onBoundsRequestSignal;
 
-			Slot<BasicSignature> onTransformChangeSlot;
-			Slot<BasicSignature> onLocalBoundsChangeSlot;
-			Slot<BasicSignature> onOrderChangeSlot;
-			Slot<BasicSignature> onAlphaChangeSlot;
+			Signal<BasicSignature> onTransformChangeSignal;
+			Signal<BasicSignature> onLocalBoundsChangeSignal;
+			Signal<BasicSignature> onOrderChangeSignal;
+			Signal<BasicSignature> onAlphaChangeSignal;
 			
-			Slot<ComponentSignature> onComponentUpdateSlot;
+			Signal<ComponentSignature> onAttachSignal;
+			Signal<ComponentSignature> onDetachSignal;
+			Signal<ComponentSignature> onComponentUpdateSignal;
 
-			Slot<BasicSignature> onChangeSlot;
+			Signal<BasicSignature> onChangeSignal;
 
-			Slot<BasicSignature>::SharedSignalType onParentAlphaChangeSignal;
+			Signal<BasicSignature>::SharedRecieverType onParentAlphaChangeSignal;
 
 			class ReSort {
 			public:
@@ -301,28 +303,30 @@ namespace MV {
 		public:
 			~Node();
 
-			SlotRegister<BasicSignature> onChildAdd;
-			SlotRegister<ParentInteractionSignature> onChildRemove;
-			SlotRegister<BasicSignature> onAdd;
-			SlotRegister<BasicSignature> onRemove;
+			SignalRegister<BasicSignature> onChildAdd;
+			SignalRegister<ParentInteractionSignature> onChildRemove;
+			SignalRegister<BasicSignature> onAdd;
+			SignalRegister<BasicSignature> onRemove;
 
-			SlotRegister<BasicSignature> onEnable;
-			SlotRegister<BasicSignature> onDisable;
-			SlotRegister<BasicSignature> onPause;
-			SlotRegister<BasicSignature> onResume;
-			SlotRegister<BasicSignature> onShow;
-			SlotRegister<BasicSignature> onHide;
+			SignalRegister<BasicSignature> onEnable;
+			SignalRegister<BasicSignature> onDisable;
+			SignalRegister<BasicSignature> onPause;
+			SignalRegister<BasicSignature> onResume;
+			SignalRegister<BasicSignature> onShow;
+			SignalRegister<BasicSignature> onHide;
 
-			SlotRegister<BasicSignature> onBoundsRequest;
+			SignalRegister<BasicSignature> onBoundsRequest;
 
-			SlotRegister<BasicSignature> onTransformChange;
-			SlotRegister<BasicSignature> onLocalBoundsChange;
-			SlotRegister<BasicSignature> onOrderChange;
-			SlotRegister<BasicSignature> onAlphaChange;
+			SignalRegister<BasicSignature> onTransformChange;
+			SignalRegister<BasicSignature> onLocalBoundsChange;
+			SignalRegister<BasicSignature> onOrderChange;
+			SignalRegister<BasicSignature> onAlphaChange;
 
-			SlotRegister<BasicSignature> onChange;
+			SignalRegister<BasicSignature> onChange;
 
-			SlotRegister<ComponentSignature> onComponentUpdate;
+			SignalRegister<ComponentSignature> onDetach;
+			SignalRegister<ComponentSignature> onAttach;
+			SignalRegister<ComponentSignature> onComponentUpdate;
 
 			void draw();
 			void drawChildren();
@@ -345,43 +349,63 @@ namespace MV {
 			std::shared_ptr<Node> makeOrGet(const std::string &a_id);
 
 			template<typename ComponentType>
+			SafeComponent<ComponentType> attach(std::shared_ptr<ComponentType> a_component) {
+				auto self = shared_from_this();
+				if (a_component->ownerIsAlive()) {
+					a_component->detach();
+				}
+				childComponents.push_back(a_component);
+				onAttachSignal(a_component);
+				return SafeComponent<ComponentType>(self, a_component);
+			}
+
+			template<typename ComponentType>
 			SafeComponent<ComponentType> attach() {
+				auto self = shared_from_this();
 				std::lock_guard<std::recursive_mutex> guard(lock);
-				auto newComponent = std::shared_ptr<ComponentType>(new ComponentType(shared_from_this()));
+				auto newComponent = std::shared_ptr<ComponentType>(new ComponentType(self));
 				childComponents.push_back(newComponent);
 				newComponent->initialize();
-				return SafeComponent<ComponentType>(shared_from_this(), newComponent);
+				onAttachSignal(newComponent);
+				return SafeComponent<ComponentType>(self, newComponent);
 			}
 
 			template<typename ComponentType, typename... Args>
 			SafeComponent<ComponentType> attach(Args&&... a_arguments){
+				auto self = shared_from_this();
 				std::lock_guard<std::recursive_mutex> guard(lock);
-				auto newComponent = std::shared_ptr<ComponentType>(new ComponentType(shared_from_this(), std::forward<Args>(a_arguments)...));
+				auto newComponent = std::shared_ptr<ComponentType>(new ComponentType(self, std::forward<Args>(a_arguments)...));
 				childComponents.push_back(newComponent);
 				newComponent->initialize();
-				return SafeComponent<ComponentType>(shared_from_this(), newComponent);
+				onAttachSignal(newComponent);
+				return SafeComponent<ComponentType>(self, newComponent);
 			}
 
 			template<typename ComponentType>
 			std::shared_ptr<Node> detach(bool a_exactType = true, bool a_throwIfNotFound = true) {
+				auto self = shared_from_this();
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
 				if (foundComponent != childComponents.end()) {
-					(*foundComponent)->onRemoved();
+					auto sharedComponent = (*foundComponent);
+					sharedComponent->onRemoved();
 					childComponents.erase(foundComponent);
+					onDetachSignal(sharedComponent);
 				}
-				return shared_from_this();
+				return self;
 			}
 
 			template<typename ComponentType>
 			std::shared_ptr<Node> detach(std::shared_ptr<ComponentType> a_component) {
+				auto self = shared_from_this();
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				auto found = std::find(childComponents.begin(), childComponents.end(), a_component);
 				if (found != childComponents.end()) {
 					a_component->onRemoved();
 					childComponents.erase(found);
+					onDetachSignal(a_component);
 				}
-				return shared_from_this();
+				return self;
 			}
 
 			template<typename ComponentType>
@@ -390,16 +414,19 @@ namespace MV {
 			}
 
 			std::shared_ptr<Node> detach(const std::string &a_componentId, bool a_throwIfNotFound = true) {
+				auto self = shared_from_this();
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				auto found = std::find_if(childComponents.begin(), childComponents.end(), [&](const std::shared_ptr<Component> &a_component) {
 					return a_component->id() == a_componentId;
 				});
 				if (found != childComponents.end()) {
+					auto foundComponent = *found;
 					childComponents.erase(found);
+					onDetachSignal(foundComponent);
 				} else if (a_throwIfNotFound) {
 					require<ResourceException>(false, "Component with id [", a_componentId, "] not found in node [", id(), "]");
 				}
-				return shared_from_this();
+				return self;
 			}
 
 			template<typename ComponentType>
@@ -408,8 +435,32 @@ namespace MV {
 				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
 				if (foundComponent != childComponents.end()) {
 					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
+				} else if (a_throwIfNotFound) {
+					require<ResourceException>(false, "Component with type [", typeid(ComponentType).name(), "] not found in node [", id(), "]");
 				}
-				return SafeComponent<ComponentType>(std::shared_ptr<Node>(), std::shared_ptr<ComponentType>());
+				return SafeComponent<ComponentType>(nullptr, nullptr);
+			}
+
+			template<typename ComponentType>
+			SafeComponent<ComponentType> componentInChildren(bool a_exactType = true, bool a_throwIfNotFound = true) const {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
+				if (foundComponent != childComponents.end()) {
+					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
+				} else if (!childNodes.empty()) {
+					for (auto&& childNode : childNodes) {
+						auto childComponent = componentInChildren<ComponentType>(a_exactType, false);
+						if (childComponent) {
+							return childComponent;
+						}
+					}
+				}
+				
+				if (a_throwIfNotFound) {
+					require<ResourceException>(false, "Component with type [", typeid(ComponentType).name(), "] not found in node [", id(), "]");
+				}
+
+				return SafeComponent<ComponentType>(nullptr, nullptr);
 			}
 
 			//stop the bool overload from stealing raw strings.
@@ -429,7 +480,36 @@ namespace MV {
 				} else if (a_throwIfNotFound) {
 					require<ResourceException>(false, "Component with id [", a_componentId, "] not found in node [", id(), "]");
 				}
-				return SafeComponent<ComponentType>(std::shared_ptr<Node>(), std::shared_ptr<ComponentType>());
+				return SafeComponent<ComponentType>(nullptr, nullptr);
+			}
+			
+			//stop the bool overload from stealing raw strings.
+			template<typename ComponentType>
+			SafeComponent<ComponentType> componentInChildren(const char *a_componentId, bool a_throwIfNotFound = true) const {
+				return componentInChildren<ComponentType>(std::string(a_componentId), a_throwIfNotFound);
+			}
+
+			template<typename ComponentType>
+			SafeComponent<ComponentType> componentInChildren(const std::string &a_componentId, bool a_throwIfNotFound = true) const {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				auto found = std::find_if(childComponents.cbegin(), childComponents.cend(), [&](const std::shared_ptr<Component> &a_component) {
+					return a_component->id() == a_componentId;
+				});
+				if (found != childComponents.cend()) {
+					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*found));
+				} else if (!childNodes.empty()) {
+					for (auto&& childNode : childNodes) {
+						auto childComponent = componentInChildren<ComponentType>(a_componentId, false);
+						if (childComponent) {
+							return childComponent;
+						}
+					}
+				}
+				
+				if (a_throwIfNotFound) {
+					require<ResourceException>(false, "Component with id [", a_componentId, "] not found in node [", id(), "]");
+				} 
+				return SafeComponent<ComponentType>(nullptr, nullptr);
 			}
 
 			template<typename ... ComponentType>
@@ -538,6 +618,8 @@ namespace MV {
 			std::shared_ptr<Node> screenPosition(const Point<int> &a_newPosition);
 			std::shared_ptr<Node> nodePosition(const std::shared_ptr<Node> &a_newPosition);
 
+			AxisAngles worldRotation() const;
+			std::shared_ptr<Node> worldRotation(const AxisAngles &a_newAngle);
 			AxisAngles rotation() const{
 				return rotateTo;
 			}
@@ -550,6 +632,7 @@ namespace MV {
 				return scaleTo;
 			}
 			Scale worldScale() const;
+			std::shared_ptr<Node> worldScale(const Scale &a_newScale);
 			std::shared_ptr<Node> scale(const Scale &a_newScale);
 			std::shared_ptr<Node> addScale(const Scale &a_incrementScale){
 				return scale(scaleTo + a_incrementScale);
@@ -703,28 +786,28 @@ namespace MV {
 			}
 
 			void silenceInternal() {
-				onChildAddSlot.block();
-				onChildRemoveSlot.block();
-				onAddSlot.block();
-				onRemoveSlot.block();
+				onChildAddSignal.block();
+				onChildRemoveSignal.block();
+				onAddSignal.block();
+				onRemoveSignal.block();
 
-				onEnableSlot.block();
-				onDisableSlot.block();
-				onPauseSlot.block();
-				onResumeSlot.block();
-				onShowSlot.block();
-				onHideSlot.block();
+				onEnableSignal.block();
+				onDisableSignal.block();
+				onPauseSignal.block();
+				onResumeSignal.block();
+				onShowSignal.block();
+				onHideSignal.block();
 
-				onBoundsRequestSlot.block();
+				onBoundsRequestSignal.block();
 
-				onTransformChangeSlot.block();
-				onLocalBoundsChangeSlot.block();
-				onOrderChangeSlot.block();
-				onAlphaChangeSlot.block();
+				onTransformChangeSignal.block();
+				onLocalBoundsChangeSignal.block();
+				onOrderChangeSignal.block();
+				onAlphaChangeSignal.block();
 
-				onComponentUpdateSlot.block();
+				onComponentUpdateSignal.block();
 
-				onChangeSlot.block();
+				onChangeSignal.block();
 			}
 
 			void unsilenceInternal(bool a_callBatched = true, bool a_callChanged = true);

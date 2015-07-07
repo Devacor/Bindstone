@@ -14,7 +14,11 @@ class EditableGrid;
 class TexturePicker;
 
 class EditorPanel {
+protected:
+	MV::Signal<void(const std::string &)> onNameChangeSignal;
+
 public:
+	MV::SignalRegister<void(const std::string &)> onNameChange;
 	EditorPanel(EditorControls &a_panel);
 	virtual ~EditorPanel();
 	virtual void cancelInput();
@@ -36,7 +40,7 @@ public:
 			activeTextbox->enableCursor();
 		}
 	}
-
+	
 protected:
 	EditorControls &panel;
 	std::shared_ptr<TexturePicker> picker;
@@ -51,17 +55,38 @@ public:
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
+
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateSpriteComponentButton(const MV::Scene::SafeComponent<MV::Scene::Sprite> & a_sprite);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateGridComponentButton(const MV::Scene::SafeComponent<MV::Scene::Grid> & a_grid);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateEmitterComponentButton(const MV::Scene::SafeComponent<MV::Scene::Emitter> & a_emitter);
 private:
+	void updateComponentEditButtons(bool a_attached);
+
+	MV::Size<> buttonSize;
+
 	std::unique_ptr<EditorControls> componentPanel;
 
 	std::shared_ptr<EditableNode> controls;
+	
 	std::shared_ptr<MV::Scene::Text> posY;
 	std::shared_ptr<MV::Scene::Text> posX;
+
+	std::shared_ptr<MV::Scene::Text> scaleX;
+	std::shared_ptr<MV::Scene::Text> scaleY;
+
+	std::shared_ptr<MV::Scene::Text> rotate;
+
+	std::shared_ptr<MV::Scene::Node> grid;
+
+	MV::Scene::Node::ComponentSharedSignalType attachSignal;
+	MV::Scene::Node::ComponentSharedSignalType detachSignal;
+
+	std::vector<std::shared_ptr<MV::Scene::Node>> componentEditButtons;
 };
 
 class SelectedGridEditorPanel : public EditorPanel {
 public:
-	SelectedGridEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableGrid> a_controls);
+	SelectedGridEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableGrid> a_controls, std::shared_ptr<MV::Scene::Button> a_text);
 
 	~SelectedGridEditorPanel() {
 	}
@@ -84,7 +109,7 @@ private:
 
 class SelectedRectangleEditorPanel : public EditorPanel {
 public:
-	SelectedRectangleEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableRectangle> a_controls);
+	SelectedRectangleEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableRectangle> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
 
 	~SelectedRectangleEditorPanel(){
 		clearTexturePicker();
@@ -113,7 +138,7 @@ private:
 
 class SelectedEmitterEditorPanel : public EditorPanel {
 public:
-	SelectedEmitterEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableEmitter> a_controls);
+	SelectedEmitterEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableEmitter> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
 	~SelectedEmitterEditorPanel(){
 	}
 
@@ -144,12 +169,16 @@ private:
 
 class ChooseElementCreationType : public EditorPanel {
 public:
-	ChooseElementCreationType(EditorControls &a_panel);
+	ChooseElementCreationType(EditorControls &a_panel, const std::shared_ptr<MV::Scene::Node> &a_node, SelectedNodeEditorPanel *a_editorPanel);
 private:
+	std::shared_ptr<MV::Scene::Node> nodeToAttachTo;
+	std::shared_ptr<MV::Scene::Button> associatedButton;
 	void createRectangle(const MV::BoxAABB<int> &a_selected);
 	void createEmitter(const MV::BoxAABB<int> &a_selected);
 	void createSpine(const MV::BoxAABB<int> &a_selected);
-	void createGrid(const MV::BoxAABB<int> &a_selected);
+	void createGrid();
+
+	SelectedNodeEditorPanel* editorPanel;
 };
 
 

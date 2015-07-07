@@ -13,12 +13,12 @@
 
 class ClickerPlayer {
 private:
-	MV::Slot<void(uint64_t)> onGoldChangeSlot;
+	MV::Signal<void(uint64_t)> onGoldChangeSignal;
 
 public:
-	MV::SlotRegister<void(uint64_t)> onGoldChange;
+	MV::SignalRegister<void(uint64_t)> onGoldChange;
 	ClickerPlayer():
-		onGoldChange(onGoldChangeSlot){
+		onGoldChange(onGoldChangeSignal){
 	}
 
 	void click() {
@@ -27,7 +27,7 @@ public:
 
 	void gold(uint64_t a_newGold) {
 		goldHeld = a_newGold;
-		onGoldChangeSlot(goldHeld);
+		onGoldChangeSignal(goldHeld);
 	}
 
 	uint64_t gold() const {

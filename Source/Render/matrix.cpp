@@ -1,6 +1,8 @@
 #include "matrix.h"
 #include "boost/lexical_cast.hpp"
 
+#define ALLOW_MATRIX_DEBUG 0
+
 namespace MV{
 	const Matrix operator-(const Matrix &a_left, const Matrix &a_right){
 		Matrix result = a_left;
@@ -320,39 +322,47 @@ namespace MV{
 	}
 
 	TransformMatrix& MatrixStack::push(){
+#if ALLOW_MATRIX_DEBUG != 0
 		if(!name.empty()){
 			std::cout << "Matrix: " << name << ".push()" << std::endl;
 		}
+#endif
 		stack.push_back(stack.back());
-		onChangedSlot();
+		onChangedSignal();
 		return stack.back();
 	}
 
 	TransformMatrix& MatrixStack::push( const TransformMatrix &matrix ){
+#if ALLOW_MATRIX_DEBUG != 0
 		if(!name.empty()){
 			std::cout << "Matrix: " << name << ".push(m)" << std::endl;
 		}
+#endif
 		stack.push_back(matrix);
-		onChangedSlot();
+		onChangedSignal();
 		return stack.back();
 	}
 
 	void MatrixStack::pop(){
+#if ALLOW_MATRIX_DEBUG != 0
 		if(!name.empty()){
 			std::cout << "Matrix: " << name << ".pop()" << std::endl;
 		}
+#endif
 		stack.pop_back();
 		if(stack.empty()){
 			push(TransformMatrix());
 		} else{
-			onChangedSlot();
+			onChangedSignal();
 		}
 	}
 
 	void MatrixStack::clear(){
+#if ALLOW_MATRIX_DEBUG != 0
 		if(!name.empty()){
 			std::cout << "Matrix: " << name << ".clear()" << std::endl;
 		}
+#endif
 		stack.clear();
 		push(TransformMatrix());
 	}

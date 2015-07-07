@@ -17,8 +17,11 @@ public:
 
 	void resetHandles();
 
-	void position(MV::Point<> a_newPosition);
+	void position(const MV::Point<> &a_newPosition);
 	MV::Point<> position() const;
+
+	void rotation(const MV::AxisAngles &a_rotate);
+	MV::AxisAngles rotation() const;
 
 	std::function<void(EditableNode*)> onChange;
 
@@ -28,6 +31,7 @@ private:
 	MV::MouseState *mouse;
 
 	MV::Scene::SafeComponent<MV::Scene::Clickable> positionHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> rotationHandle;
 };
 
 class EditableGrid {

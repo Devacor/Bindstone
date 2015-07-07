@@ -39,7 +39,7 @@ namespace MV{
 		MouseState();
 
 		typedef void CallbackSignature(MouseState&);
-		typedef std::shared_ptr<Signal<CallbackSignature>> SignalType;
+		typedef std::shared_ptr<Reciever<CallbackSignature>> SignalType;
 
 		void update();
 
@@ -61,47 +61,47 @@ namespace MV{
 		MV::Point<int> mousePosition;
 		MV::Point<int> oldMousePosition;
 
-		void updateButtonState(bool &oldState, bool newState, Slot<CallbackSignature> &onDown, Slot<CallbackSignature> &onUp, Slot<CallbackSignature> &onDownEnd, Slot<CallbackSignature> &onUpEnd);
+		void updateButtonState(bool &oldState, bool newState, Signal<CallbackSignature> &onDown, Signal<CallbackSignature> &onUp, Signal<CallbackSignature> &onDownEnd, Signal<CallbackSignature> &onUpEnd);
 
-		Slot<CallbackSignature> onLeftMouseDownSlot;
-		Slot<CallbackSignature> onLeftMouseUpSlot;
+		Signal<CallbackSignature> onLeftMouseDownSignal;
+		Signal<CallbackSignature> onLeftMouseUpSignal;
 
-		Slot<CallbackSignature> onLeftMouseDownEndSlot;
-		Slot<CallbackSignature> onLeftMouseUpEndSlot;
+		Signal<CallbackSignature> onLeftMouseDownEndSignal;
+		Signal<CallbackSignature> onLeftMouseUpEndSignal;
 
-		Slot<CallbackSignature> onRightMouseDownSlot;
-		Slot<CallbackSignature> onRightMouseUpSlot;
+		Signal<CallbackSignature> onRightMouseDownSignal;
+		Signal<CallbackSignature> onRightMouseUpSignal;
 
-		Slot<CallbackSignature> onRightMouseDownEndSlot;
-		Slot<CallbackSignature> onRightMouseUpEndSlot;
+		Signal<CallbackSignature> onRightMouseDownEndSignal;
+		Signal<CallbackSignature> onRightMouseUpEndSignal;
 
-		Slot<CallbackSignature> onMiddleMouseDownSlot;
-		Slot<CallbackSignature> onMiddleMouseUpSlot;
+		Signal<CallbackSignature> onMiddleMouseDownSignal;
+		Signal<CallbackSignature> onMiddleMouseUpSignal;
 
-		Slot<CallbackSignature> onMiddleMouseDownEndSlot;
-		Slot<CallbackSignature> onMiddleMouseUpEndSlot;
+		Signal<CallbackSignature> onMiddleMouseDownEndSignal;
+		Signal<CallbackSignature> onMiddleMouseUpEndSignal;
 
-		Slot<CallbackSignature> onMoveSlot;
+		Signal<CallbackSignature> onMoveSignal;
 	public:
-		SlotRegister<CallbackSignature> onLeftMouseDown;
-		SlotRegister<CallbackSignature> onLeftMouseUp;
+		SignalRegister<CallbackSignature> onLeftMouseDown;
+		SignalRegister<CallbackSignature> onLeftMouseUp;
 
-		SlotRegister<CallbackSignature> onLeftMouseDownEnd;
-		SlotRegister<CallbackSignature> onLeftMouseUpEnd;
+		SignalRegister<CallbackSignature> onLeftMouseDownEnd;
+		SignalRegister<CallbackSignature> onLeftMouseUpEnd;
 
-		SlotRegister<CallbackSignature> onRightMouseDown;
-		SlotRegister<CallbackSignature> onRightMouseUp;
+		SignalRegister<CallbackSignature> onRightMouseDown;
+		SignalRegister<CallbackSignature> onRightMouseUp;
 
-		SlotRegister<CallbackSignature> onRightMouseDownEnd;
-		SlotRegister<CallbackSignature> onRightMouseUpEnd;
+		SignalRegister<CallbackSignature> onRightMouseDownEnd;
+		SignalRegister<CallbackSignature> onRightMouseUpEnd;
 
-		SlotRegister<CallbackSignature> onMiddleMouseDown;
-		SlotRegister<CallbackSignature> onMiddleMouseUp;
+		SignalRegister<CallbackSignature> onMiddleMouseDown;
+		SignalRegister<CallbackSignature> onMiddleMouseUp;
 
-		SlotRegister<CallbackSignature> onMiddleMouseDownEnd;
-		SlotRegister<CallbackSignature> onMiddleMouseUpEnd;
+		SignalRegister<CallbackSignature> onMiddleMouseDownEnd;
+		SignalRegister<CallbackSignature> onMiddleMouseUpEnd;
 
-		SlotRegister<CallbackSignature> onMove;
+		SignalRegister<CallbackSignature> onMove;
 	};
 }
 

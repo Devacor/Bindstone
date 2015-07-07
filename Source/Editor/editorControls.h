@@ -64,6 +64,10 @@ public:
 		return currentSelection;
 	}
 
+	EditorPanel* activePanel() {
+		return currentPanel.get();
+	}
+
 private:
 	SharedResources sharedResources;
 

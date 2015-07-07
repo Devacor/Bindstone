@@ -33,6 +33,7 @@ namespace MV {
 		//returns the current time delta since it originally was started... OR starts the stopwatch
 		//and theoretically returns 0... though it might not if it takes a long time to start.
 		TimeType check();
+		TimeType check() const;
 		
 		//returns the current time delta since it originally was started, and pauses the stopwatch
 		//at that time

@@ -8,6 +8,17 @@ namespace MV {
 		return timerfunc(false);
 	}
 
+	Stopwatch::TimeType Stopwatch::check() const {
+		if (paused) {
+			return pausetime - prevtime + timeOffset;
+		} else if(started) {
+			return systemTime() - prevtime + timeOffset;
+		}
+		else {
+			return 0.0;
+		}
+	}
+
 	Stopwatch::TimeType Stopwatch::pause(){
 		pausetime = systemTime();
 		paused = true;

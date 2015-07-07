@@ -7,9 +7,9 @@ namespace MV {
 		location(a_location),
 		map(a_grid),
 		useCorners(a_useCorners),
-		onBlock(onBlockSlot),
-		onUnblock(onUnblockSlot),
-		onCostChange(onCostChangeSlot){
+		onBlock(onBlockSignal),
+		onUnblock(onUnblockSignal),
+		onCostChange(onCostChangeSignal){
 	}
 
 	float MapNode::baseCost() const {
@@ -20,7 +20,7 @@ namespace MV {
 		auto oldCost = travelCost;
 		travelCost = a_newCost;
 		if (oldCost != travelCost) {
-			onCostChangeSlot(map.shared_from_this(), location);
+			onCostChangeSignal(map.shared_from_this(), location);
 		}
 	}
 
@@ -31,7 +31,7 @@ namespace MV {
 	void MapNode::block() {
 		blockedSemaphore++;
 		if (blockedSemaphore == 1) {
-			onBlockSlot(map.shared_from_this(), location);
+			onBlockSignal(map.shared_from_this(), location);
 		}
 	}
 
@@ -39,7 +39,7 @@ namespace MV {
 		require<ResourceException>(blockedSemaphore > 0, "Error: Semaphore overextended in MapNode, something is unblocking excessively.");
 		blockedSemaphore--;
 		if (blockedSemaphore == 0) {
-			onBlockSlot(map.shared_from_this(), location);
+			onBlockSignal(map.shared_from_this(), location);
 		}
 	}
 
@@ -91,14 +91,14 @@ namespace MV {
 	void MapNode::addTemporaryCost(float a_newTemporaryCost) {
 		temporaryCost += a_newTemporaryCost;
 		if (a_newTemporaryCost != 0.0f) {
-			onCostChangeSlot(map.shared_from_this(), location);
+			onCostChangeSignal(map.shared_from_this(), location);
 		}
 	}
 
 	void MapNode::removeTemporaryCost(float a_newTemporaryCost) {
 		temporaryCost -= a_newTemporaryCost;
 		if (a_newTemporaryCost != 0.0f) {
-			onCostChangeSlot(map.shared_from_this(), location);
+			onCostChangeSignal(map.shared_from_this(), location);
 		}
 	}
 

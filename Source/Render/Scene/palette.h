@@ -11,15 +11,15 @@ namespace MV {
 			friend cereal::access;
 			friend Node;
 		public:
-			typedef void PaletteSlotSignture(std::shared_ptr<Palette>);
+			typedef void PaletteSignalSignture(std::shared_ptr<Palette>);
 
 		private:
-			Slot<PaletteSlotSignture> onColorChangeSlot;
-			Slot<PaletteSlotSignture> onSwatchClickedSlot;
+			Signal<PaletteSignalSignture> onColorChangeSignal;
+			Signal<PaletteSignalSignture> onSwatchClickedSignal;
 
 		public:
-			SlotRegister<PaletteSlotSignture> onColorChange;
-			SlotRegister<PaletteSlotSignture> onSwatchClicked;
+			SignalRegister<PaletteSignalSignture> onColorChange;
+			SignalRegister<PaletteSignalSignture> onSwatchClicked;
 
 			DrawableDerivedAccessorsNoColor(Palette)
 

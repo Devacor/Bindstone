@@ -30,21 +30,21 @@ namespace MV {
 		};
 
 		class AnimationTrack {
-			Slot<void(AnimationTrack &)> onStartSlot;
-			Slot<void(AnimationTrack &)> onEndSlot;
-			Slot<void(AnimationTrack &, int)> onCompleteSlot;
-			Slot<void(AnimationTrack &, const AnimationEventData &)> onEventSlot;
+			Signal<void(AnimationTrack &)> onStartSignal;
+			Signal<void(AnimationTrack &)> onEndSignal;
+			Signal<void(AnimationTrack &, int)> onCompleteSignal;
+			Signal<void(AnimationTrack &, const AnimationEventData &)> onEventSignal;
 
 			friend void spineTrackEntryCallback(spAnimationState* state, int trackIndex, spEventType type, spEvent* event, int loopCount);
 		public:
-			SlotRegister<void(AnimationTrack &)> onStart;
-			SlotRegister<void(AnimationTrack &)> onEnd;
-			SlotRegister<void(AnimationTrack &, int)> onComplete;
-			SlotRegister<void(AnimationTrack &, const AnimationEventData &)> onEvent;
+			SignalRegister<void(AnimationTrack &)> onStart;
+			SignalRegister<void(AnimationTrack &)> onEnd;
+			SignalRegister<void(AnimationTrack &, int)> onComplete;
+			SignalRegister<void(AnimationTrack &, const AnimationEventData &)> onEvent;
 
-			typedef Slot<void(AnimationTrack &)>::SharedSignalType BasicSignal;
-			typedef Slot<void(AnimationTrack &, int)>::SharedSignalType LoopSignal;
-			typedef Slot<void(AnimationTrack &, const AnimationEventData &)>::SharedSignalType EventSignal;
+			typedef Signal<void(AnimationTrack &)>::SharedRecieverType BasicSignal;
+			typedef Signal<void(AnimationTrack &, int)>::SharedRecieverType LoopSignal;
+			typedef Signal<void(AnimationTrack &, const AnimationEventData &)>::SharedRecieverType EventSignal;
 
 			std::map<std::string, BasicSignal> basicSignals;
 			std::map<std::string, LoopSignal> loopSignals;
@@ -54,10 +54,10 @@ namespace MV {
 				myTrackIndex(a_trackIndex),
 				animationState(a_animationState),
 				skeleton(a_skeleton),
-				onStart(onStartSlot),
-				onEnd(onEndSlot),
-				onComplete(onCompleteSlot),
-				onEvent(onEventSlot){
+				onStart(onStartSignal),
+				onEnd(onEndSignal),
+				onComplete(onCompleteSignal),
+				onEvent(onEventSignal){
 			}
 
 			int trackIndex() const{

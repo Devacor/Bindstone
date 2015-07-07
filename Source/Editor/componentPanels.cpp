@@ -5,7 +5,8 @@
 #include "editor.h"
 
 EditorPanel::EditorPanel(EditorControls &a_panel):
-	panel(a_panel) {
+	panel(a_panel),
+	onNameChange(onNameChangeSignal){
 	panel.deletePanelContents();
 }
 
@@ -25,10 +26,10 @@ EditorPanel::~EditorPanel() {
 SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableNode> a_controls) :
 	EditorPanel(a_panel),
 	componentPanel(std::make_unique<EditorControls>(panel.editor(), panel.root(), panel.resources())),
-	controls(a_controls) {
+	controls(a_controls){
 
 	auto node = panel.content();
-	auto grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
+	grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
 		color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->
 		padding({ 2.0f, 2.0f })->owner();
 	auto buttonSize = MV::size(110.0f, 27.0f);
@@ -37,7 +38,7 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 		text(MV::toWide(controls->elementToEdit->id()))->
 		onEnter.connect("rename", [&](std::shared_ptr<MV::Scene::Text> a_text) {
 		controls->elementToEdit->id(MV::toString(a_text->text()));
-		panel.resources().editor->sceneUpdated();
+		onNameChangeSignal(controls->elementToEdit->id());
 	});
 
 	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
@@ -59,9 +60,19 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 		panel.loadPanel<DeselectedEditorPanel>();
 	});
 
+	const MV::Size<> labelSize{ buttonSize.width, 20.0f };
+
+	makeLabel(grid, *panel.resources().textLibrary, "Position", labelSize, UTF_CHAR_STR("Position"));
 	float textboxWidth = 52.0f;
 	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().x))));
 	posY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->position().y))));
+
+	makeLabel(grid, *panel.resources().textLibrary, "Rotate", MV::size(textboxWidth, 27.0f), UTF_CHAR_STR("Rotate"));
+	rotate = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "rotate", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->rotation().z))));
+
+	makeLabel(grid, *panel.resources().textLibrary, "Scale", labelSize, UTF_CHAR_STR("Scale"));
+	scaleX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "scaleX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->scale().x))));
+	scaleY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "scaleY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->scale().y))));
 
 	if (controls) {
 		auto xClick = posX->owner()->component<MV::Scene::Clickable>();
@@ -78,40 +89,109 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 		posY->onEnter.connect("updateY", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
 			controls->position({ posX->number(), posY->number() });
 		});
+		auto rotateClick = posY->owner()->component<MV::Scene::Clickable>();
+		rotateClick->onAccept.connect("updateRotate", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			controls->rotation({ 0.0f, 0.0f, MV::wrap(0.0f, 360.0f, rotate->number())});
+		});
+		rotate->onEnter.connect("updateRotate", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			controls->elementToEdit->rotation({ 0.0f, 0.0f, rotate->number() });
+		});
+		auto xScaleClick = posX->owner()->component<MV::Scene::Clickable>();
+		xScaleClick->onAccept.connect("updateScaleX", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			controls->elementToEdit->scale({ scaleX->number(), scaleY->number() });
+		});
+		scaleX->onEnter.connect("updateScaleX", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			controls->elementToEdit->scale({ scaleX->number(), scaleY->number() });
+		});
+		auto yScaleClick = posY->owner()->component<MV::Scene::Clickable>();
+		yScaleClick->onAccept.connect("updateScaleY", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			controls->elementToEdit->scale({ scaleX->number(), scaleY->number() });
+		});
+		scaleY->onEnter.connect("updateScaleY", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			controls->elementToEdit->scale({ scaleX->number(), scaleY->number() });
+		});
 
 		controls->onChange = [&](EditableNode *a_element) {
 			posX->number(static_cast<int>(std::lround(controls->position().x)));
 			posY->number(static_cast<int>(std::lround(controls->position().y)));
+
+			rotate->number(static_cast<int>(std::lround(controls->rotation().z)));
 		};
 	}
 	
-	auto componentList = controls->elementToEdit->components<MV::Scene::Sprite, MV::Scene::Grid, MV::Scene::Emitter>(true);
+	auto attachComponentButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Attach", buttonSize, UTF_CHAR_STR("Attach"));
+	attachComponentButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) mutable {
+		componentPanel->loadPanel<ChooseElementCreationType>(controls->elementToEdit, this);
+	});
 	
- 	for (auto&& component : componentList) {
-		MV::visit(component,
-		[&](const MV::Scene::SafeComponent<MV::Scene::Sprite> &a_sprite) {
-			auto button = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, MV::guid("EditSprite"), buttonSize, MV::toWide("S: " + a_sprite->id()));
-			button->onAccept.connect("click", [&, a_sprite, a_controls](std::shared_ptr<MV::Scene::Clickable>) {
-				componentPanel->loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(a_sprite, a_controls->controlContainer->parent()->make("EditableSprite"), panel.resources().mouse));
-			});
-		},
-		[&](const MV::Scene::SafeComponent<MV::Scene::Grid> &a_grid) {
-			auto button = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, MV::guid("EditGrid"), buttonSize, MV::toWide("G: " + a_grid->id()));
-			button->onAccept.connect("click", [&, a_grid, a_controls](std::shared_ptr<MV::Scene::Clickable>) {
-				componentPanel->loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(a_grid, a_controls->controlContainer->parent()->make("EditableGrid"), panel.resources().mouse));
-			});
-		},
-		[&](const MV::Scene::SafeComponent<MV::Scene::Emitter> &a_emitter) {
-			auto button = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, MV::guid("EditEmitter"), buttonSize, MV::toWide("E: " + a_emitter->id()));
-			button->onAccept.connect("click", [&, a_emitter, a_controls](std::shared_ptr<MV::Scene::Clickable>) {
-				componentPanel->loadPanel<SelectedEmitterEditorPanel>(std::make_shared<EditableEmitter>(a_emitter, a_controls->controlContainer->parent()->make("EditableEmitter"), panel.resources().mouse));
-			});
-		});
- 	}
+	updateComponentEditButtons(false);
+
+	detachSignal = controls->elementToEdit->onDetach.connect([&](const std::shared_ptr<MV::Scene::Component> &a_component) {
+		updateComponentEditButtons(false);
+	});
 
 	panel.updateBoxHeader(grid->bounds().width());
 
 	SDL_StartTextInput();
+}
+
+void SelectedNodeEditorPanel::updateComponentEditButtons(bool a_attached) {
+	for (auto&& node : componentEditButtons) {
+		node->removeFromParent();
+	}
+	componentEditButtons.clear();
+	buttonSize = MV::size(110.0f, 27.0f);
+	auto componentList = controls->elementToEdit->components<MV::Scene::Sprite, MV::Scene::Grid, MV::Scene::Emitter>(true);
+	int count = 0;
+	for (auto&& component : componentList) {
+		++count;
+		MV::visit(component,
+		[&](const MV::Scene::SafeComponent<MV::Scene::Sprite> &a_sprite) {
+			CreateSpriteComponentButton(a_sprite);
+		},
+		[&](const MV::Scene::SafeComponent<MV::Scene::Grid> &a_grid) {
+			CreateGridComponentButton(a_grid);
+		},
+		[&](const MV::Scene::SafeComponent<MV::Scene::Emitter> &a_emitter) {
+			CreateEmitterComponentButton(a_emitter);
+		});
+	}
+}
+
+MV::Scene::SafeComponent<MV::Scene::Button> SelectedNodeEditorPanel::CreateSpriteComponentButton(const MV::Scene::SafeComponent<MV::Scene::Sprite> & a_sprite) {
+	auto button = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, MV::guid("EditSprite"), buttonSize, MV::toWide("S: " + a_sprite->id()));
+	button->onAccept.connect(MV::guid("click"), [&, a_sprite, button](std::shared_ptr<MV::Scene::Clickable>) {
+		componentPanel->loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(a_sprite, panel.editor()->make("EditableSprite"), panel.resources().mouse), button);
+		componentPanel->activePanel()->onNameChange.connect(MV::guid("NameChange"), [button](const std::string &a_newName) {
+			renameButton(button->safe(), MV::toWide("S: " + a_newName));
+		});
+	});
+	componentEditButtons.push_back(button->owner());
+	return button->safe();
+}
+
+MV::Scene::SafeComponent<MV::Scene::Button> SelectedNodeEditorPanel::CreateGridComponentButton(const MV::Scene::SafeComponent<MV::Scene::Grid> & a_grid) {
+	auto button = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, MV::guid("EditGrid"), buttonSize, MV::toWide("G: " + a_grid->id()));
+	button->onAccept.connect(MV::guid("click"), [&, a_grid, button](std::shared_ptr<MV::Scene::Clickable>) {
+		componentPanel->loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(a_grid, panel.editor()->make("EditableGrid"), panel.resources().mouse), button);
+		componentPanel->activePanel()->onNameChange.connect(MV::guid("NameChange"), [button](const std::string &a_newName) {
+			renameButton(button->safe(), MV::toWide("G: " + a_newName));
+		});
+	});
+	componentEditButtons.push_back(button->owner());
+	return button->safe();
+}
+
+MV::Scene::SafeComponent<MV::Scene::Button> SelectedNodeEditorPanel::CreateEmitterComponentButton(const MV::Scene::SafeComponent<MV::Scene::Emitter> & a_emitter) {
+	auto button = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, MV::guid("EditEmitter"), buttonSize, MV::toWide("E: " + a_emitter->id()));
+	button->onAccept.connect(MV::guid("click"), [&, a_emitter, button](std::shared_ptr<MV::Scene::Clickable>) {
+		componentPanel->loadPanel<SelectedEmitterEditorPanel>(std::make_shared<EditableEmitter>(a_emitter, panel.editor()->make("EditableEmitter"), panel.resources().mouse), button);
+		componentPanel->activePanel()->onNameChange.connect(MV::guid("NameChange"), [button](const std::string &a_newName) {
+			renameButton(button->safe(), MV::toWide("E: " + a_newName));
+		});
+	});
+	componentEditButtons.push_back(button->owner());
+	return button->safe();
 }
 
 void SelectedNodeEditorPanel::handleInput(SDL_Event &a_event) {
@@ -131,7 +211,7 @@ void SelectedNodeEditorPanel::onSceneZoom() {
 	componentPanel->onSceneZoom();
 }
 
-SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableGrid> a_controls) :
+SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableGrid> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton) :
 	EditorPanel(a_panel),
 	controls(a_controls) {
 
@@ -152,10 +232,11 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 	});
 
 	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
-		text(MV::toWide(controls->elementToEdit->owner()->id()))->
-		onEnter.connect("rename", [&](std::shared_ptr<MV::Scene::Text> a_text) {
-		controls->elementToEdit->owner()->id(MV::toString(a_text->text()));
-		panel.resources().editor->sceneUpdated();
+		text(MV::toWide(controls->elementToEdit->id()))->
+		onEnter.connect("rename", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
+		controls->elementToEdit->id(MV::toString(a_text->text()));
+		renameButton(a_associatedButton->safe(), MV::toWide("G: ") + a_text->text());
+		onNameChangeSignal(MV::toString(a_text->text()));
 	});
 
 	float textboxWidth = 52.0f;
@@ -221,7 +302,7 @@ void SelectedGridEditorPanel::onSceneZoom() {
 	controls->resetHandles();
 }
 
-SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableRectangle> a_controls):
+SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableRectangle> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton):
 	EditorPanel(a_panel),
 	controls(a_controls) {
 
@@ -244,10 +325,13 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	OpenTexturePicker();
 
 	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
-		text(MV::toWide(controls->elementToEdit->owner()->id()))->
-		onEnter.connect("rename", [&](std::shared_ptr<MV::Scene::Text> a_text){
-			controls->elementToEdit->owner()->id(MV::toString(a_text->text()));
-			panel.resources().editor->sceneUpdated();
+		text(MV::toWide(controls->elementToEdit->id()))->
+		onEnter.connect("rename", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text){
+			controls->elementToEdit->id(MV::toString(a_text->text()));
+			onNameChangeSignal(controls->elementToEdit->id());
+			if (a_associatedButton) {
+				renameButton(a_associatedButton->safe(), MV::toWide("S: ") + a_text->text());
+			}
 		});
 
 	float textboxWidth = 52.0f;
@@ -376,7 +460,7 @@ void SelectedRectangleEditorPanel::onSceneZoom() {
 	controls->resetHandles();
 }
 
-SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableEmitter> a_controls):
+SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableEmitter> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton):
 EditorPanel(a_panel),
 controls(a_controls) {
 
@@ -397,10 +481,11 @@ controls(a_controls) {
 	});
 
 	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
-		text(MV::toWide(controls->elementToEdit->owner()->id()))->
-		onEnter.connect("rename", [&](const std::shared_ptr<MV::Scene::Text> &a_text){
-			controls->elementToEdit->owner()->id(MV::toString(a_text->text()));
-			panel.resources().editor->sceneUpdated();
+		text(MV::toWide(controls->elementToEdit->id()))->
+		onEnter.connect("rename", [&, a_associatedButton](const std::shared_ptr<MV::Scene::Text> &a_text){
+			controls->elementToEdit->id(MV::toString(a_text->text()));
+			onNameChangeSignal(controls->elementToEdit->id());
+			renameButton(a_associatedButton->safe(), MV::toWide("E: ") + a_text->text());
 		});
 
 	float textboxWidth = 52.0f;
@@ -735,14 +820,16 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	});
 }
 
-ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel):
-	EditorPanel(a_panel) {
+ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel, const std::shared_ptr<MV::Scene::Node> &a_nodeToAttachTo, SelectedNodeEditorPanel *a_editorPanel):
+	EditorPanel(a_panel),
+	editorPanel(a_editorPanel),
+	nodeToAttachTo(a_nodeToAttachTo){
 
 	auto node = panel.content();
 	auto grid = node->make("grid")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
 		color({InterfaceColors::BOX_BACKGROUND})->margin({4.0f, 4.0f})->
 		padding({2.0f, 2.0f})->owner();
-	auto createRectangleButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Rectangle", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Rectangle"));
+	auto createRectangleButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Sprite", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Rectangle"));
 	auto createEmitterButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Emitter", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Emitter"));
 	auto createSpineButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Spine", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Spine"));
 	auto createGridButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Grid", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Grid"));
@@ -769,9 +856,7 @@ ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel):
 	});
 
 	createGridButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>) {
-		panel.selection().enable([&](const MV::BoxAABB<int> &a_selected) {
-			createGrid(a_selected);
-		});
+		createGrid();
 	});
 
 	cancel->onAccept.connect("select", [&](std::shared_ptr<MV::Scene::Clickable>){
@@ -781,49 +866,42 @@ ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel):
 
 void ChooseElementCreationType::createRectangle(const MV::BoxAABB<int> &a_selected) {
 	panel.selection().disable();
-	auto transformedSelection = panel.root()->localFromScreen(a_selected);
+	auto tmp = MV::Scene::Node::make(nodeToAttachTo->renderer());
+	auto newShape = nodeToAttachTo->attach<MV::Scene::Sprite>();
+	newShape->bounds(nodeToAttachTo->localFromScreen(a_selected))->color({ CREATED_DEFAULT })->shader(MV::DEFAULT_ID)->id(MV::guid("sprite"));
 
-	auto newShape = panel.root()->make(MV::guid("rectangle"))->position(transformedSelection.minPoint)->attach<MV::Scene::Sprite>();
-	newShape->size(transformedSelection.size())->color({ CREATED_DEFAULT })->shader(MV::DEFAULT_ID);
-
-	panel.resources().editor->sceneUpdated();
-
-	panel.loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(newShape, panel.editor(), panel.resources().mouse));
+	panel.loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(newShape, panel.editor(), panel.resources().mouse), editorPanel->CreateSpriteComponentButton(newShape).self());
 }
 
 void ChooseElementCreationType::createEmitter(const MV::BoxAABB<int> &a_selected) {
 	panel.selection().disable();
-	auto transformedSelection = panel.root()->localFromScreen(a_selected);
 
-	auto newEmitter = panel.root()->make(MV::guid("emitter"))->position(transformedSelection.minPoint)->attach<MV::Scene::Emitter>(*panel.resources().pool);
+	auto newEmitter = nodeToAttachTo->attach<MV::Scene::Emitter>(*panel.resources().pool);
+	newEmitter->id(MV::guid("emitter"));
+	auto transformedSelection = nodeToAttachTo->localFromScreen(a_selected);
+	newEmitter->properties().minimumPosition = transformedSelection.minPoint;
+	newEmitter->properties().maximumPosition = transformedSelection.maxPoint;
+
 	auto editableEmitter = std::make_shared<EditableEmitter>(newEmitter, panel.editor(), panel.resources().mouse);
-	editableEmitter->size(transformedSelection.size());
-
-	panel.resources().editor->sceneUpdated();
-
-	panel.loadPanel<SelectedEmitterEditorPanel>(editableEmitter);
+	panel.loadPanel<SelectedEmitterEditorPanel>(editableEmitter, editorPanel->CreateEmitterComponentButton(newEmitter).self());
 }
 
-void ChooseElementCreationType::createGrid(const MV::BoxAABB<int> &a_selected) {
+void ChooseElementCreationType::createGrid() {
 	panel.selection().disable();
-	auto transformedSelection = panel.root()->localFromScreen(a_selected);
+	auto newGrid = nodeToAttachTo->attach<MV::Scene::Grid>();
 
-	auto newShape = panel.root()->make(MV::guid("grid"))->position(transformedSelection.minPoint)->attach<MV::Scene::Grid>();
-
-	panel.resources().editor->sceneUpdated();
-
-	panel.loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(newShape, panel.editor(), panel.resources().mouse));
+	panel.loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(newGrid, panel.editor(), panel.resources().mouse), editorPanel->CreateGridComponentButton(newGrid).self());
 }
 
 void ChooseElementCreationType::createSpine(const MV::BoxAABB<int> &a_selected) {
 	panel.selection().disable();
-	auto transformedSelection = panel.root()->localFromScreen(a_selected);
 
-	auto newEmitter = panel.root()->make(MV::guid("spine"))->position(transformedSelection.minPoint)->attach<MV::Scene::Emitter>(*panel.resources().pool);
+	auto newEmitter = nodeToAttachTo->attach<MV::Scene::Emitter>(*panel.resources().pool);
+	newEmitter->id(MV::guid("spine"));
+	auto transformedSelection = nodeToAttachTo->localFromScreen(a_selected);
+	newEmitter->properties().minimumPosition = transformedSelection.minPoint;
+	newEmitter->properties().maximumPosition = transformedSelection.maxPoint;
+
 	auto editableEmitter = std::make_shared<EditableEmitter>(newEmitter, panel.editor(), panel.resources().mouse);
-	editableEmitter->size(transformedSelection.size());
-
-	panel.resources().editor->sceneUpdated();
-
-	panel.loadPanel<SelectedEmitterEditorPanel>(editableEmitter);
+	panel.loadPanel<SelectedEmitterEditorPanel>(editableEmitter, editorPanel->CreateEmitterComponentButton(newEmitter).self());
 }

@@ -1,5 +1,6 @@
 #include "editComponents.h"
 #include "componentPanels.h"
+#include "Utility/generalUtility.h"
 
 long Selection::gid = 0;
 
@@ -63,7 +64,7 @@ Selection::Selection(std::shared_ptr<MV::Scene::Node> a_scene, MV::MouseState &a
 
 EditableNode::EditableNode(std::shared_ptr<MV::Scene::Node> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse) :
 	elementToEdit(a_elementToEdit),
-	controlContainer(a_rootContainer->make("Editable")->depth(-90.0f)),
+	controlContainer(a_rootContainer->make("EditableNode")->depth(-90.0f)),
 	mouse(a_mouse) {
 
 	resetHandles();
@@ -92,9 +93,29 @@ void EditableNode::resetHandles() {
 		elementToEdit->nodePosition(handle->owner());
 		onChange(self);
 	});
+
+	rotationHandle = positionHandle->owner()->make("RotationControl")->serializable(false)->attach<MV::Scene::Clickable>(*mouse);
+	rotationHandle->size({ 5.0f, 5.0f }, {-5.0f,-5.0f})->show()->color({ ROTATION_HANDLE })->globalPriority(rotationHandle->globalPriority() + 90);
+	rotationHandle->onDrag.connect("rotation", [&, self](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
+		MV::PointPrecision angle = static_cast<float>(MV::angle(positionHandle->owner()->screenPosition(), handle->mouse().position()));
+		positionHandle->owner()->worldRotation({ 0.0f, 0.0f, angle - 45.0f });
+		elementToEdit->worldRotation(positionHandle->owner()->worldRotation());
+		onChange(self);
+	});
+
+	positionHandle->owner()->worldRotation(elementToEdit->worldRotation());
 }
 
-void EditableNode::position(MV::Point<> a_newPosition) {
+void EditableNode::rotation(const MV::AxisAngles &a_rotate) {
+	elementToEdit->rotation(a_rotate);
+	resetHandles();
+}
+
+MV::AxisAngles EditableNode::rotation() const {
+	return elementToEdit->rotation();
+}
+
+void EditableNode::position(const MV::Point<> &a_newPosition) {
 	elementToEdit->position(a_newPosition);
 	resetHandles();
 }
@@ -265,13 +286,14 @@ void EditableRectangle::repositionHandles(bool a_fireOnChange, bool a_reposition
 			currentDimensions.width = currentDimensions.height * aspectSize.width / aspectSize.height;
 		}
 	}
+
 	if (a_resizeElement) {
 		elementToEdit->size(currentDimensions);
 	}
 	if (a_repositionElement) {
-		elementToEdit->bounds({ corners.minPoint, elementToEdit->bounds().size() });
+		elementToEdit->bounds({ corners.minPoint, corners.size() });
 	} else {
-		elementToEdit->bounds({ originalPosition, elementToEdit->bounds().size() });
+		elementToEdit->bounds({ originalPosition, corners.size() });
 	}
 
 	auto rectBox = MV::round(MV::cast<MV::PointPrecision>(elementToEdit->screenBounds()));

@@ -60,7 +60,7 @@ namespace MV {
 				position += distance * timeScale;
 				position += gravityConstant * timeScale;
 
-				currentFrame = static_cast<int>(wrap(static_cast<float>(myTextures.size() * (change.animationFramesPerSecond / timeScale)), 0.0f, static_cast<float>(myTextures.size())));
+				currentFrame = static_cast<int>(wrap(0.0f, static_cast<float>(myTextures.size()), static_cast<float>(myTextures.size() * (change.animationFramesPerSecond / timeScale))));
 				return totalLifespan == change.maxLifespan;
 			}
 

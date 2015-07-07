@@ -4,19 +4,19 @@
 namespace MV{
 
 	MouseState::MouseState():
-		onLeftMouseDown(onLeftMouseDownSlot),
-		onLeftMouseUp(onLeftMouseUpSlot),
-		onMiddleMouseDown(onMiddleMouseDownSlot),
-		onMiddleMouseUp(onMiddleMouseUpSlot),
-		onRightMouseDown(onRightMouseDownSlot),
-		onRightMouseUp(onRightMouseUpSlot),
-		onLeftMouseDownEnd(onLeftMouseDownEndSlot),
-		onLeftMouseUpEnd(onLeftMouseUpEndSlot),
-		onMiddleMouseDownEnd(onMiddleMouseDownEndSlot),
-		onMiddleMouseUpEnd(onMiddleMouseUpEndSlot),
-		onRightMouseDownEnd(onRightMouseDownEndSlot),
-		onRightMouseUpEnd(onRightMouseUpEndSlot),
-		onMove(onMoveSlot){
+		onLeftMouseDown(onLeftMouseDownSignal),
+		onLeftMouseUp(onLeftMouseUpSignal),
+		onMiddleMouseDown(onMiddleMouseDownSignal),
+		onMiddleMouseUp(onMiddleMouseUpSignal),
+		onRightMouseDown(onRightMouseDownSignal),
+		onRightMouseUp(onRightMouseUpSignal),
+		onLeftMouseDownEnd(onLeftMouseDownEndSignal),
+		onLeftMouseUpEnd(onLeftMouseUpEndSignal),
+		onMiddleMouseDownEnd(onMiddleMouseDownEndSignal),
+		onMiddleMouseUpEnd(onMiddleMouseUpEndSignal),
+		onRightMouseDownEnd(onRightMouseDownEndSignal),
+		onRightMouseUpEnd(onRightMouseUpEndSignal),
+		onMove(onMoveSignal){
 	}
 
 	void MouseState::update() {
@@ -30,17 +30,17 @@ namespace MV{
 		if(newPosition != mousePosition){
 			oldMousePosition = mousePosition;
 			mousePosition = newPosition;
-			onMoveSlot(*this);
+			onMoveSignal(*this);
 		}
 
-		updateButtonState(left, newLeft, onLeftMouseDownSlot, onLeftMouseUpSlot, onLeftMouseDownEndSlot, onLeftMouseUpEndSlot);
-		updateButtonState(middle, newMiddle, onMiddleMouseDownSlot, onMiddleMouseUpSlot, onMiddleMouseDownEndSlot, onMiddleMouseUpEndSlot);
-		updateButtonState(right, newRight, onRightMouseDownSlot, onRightMouseUpSlot, onRightMouseDownEndSlot, onRightMouseUpEndSlot);
+		updateButtonState(left, newLeft, onLeftMouseDownSignal, onLeftMouseUpSignal, onLeftMouseDownEndSignal, onLeftMouseUpEndSignal);
+		updateButtonState(middle, newMiddle, onMiddleMouseDownSignal, onMiddleMouseUpSignal, onMiddleMouseDownEndSignal, onMiddleMouseUpEndSignal);
+		updateButtonState(right, newRight, onRightMouseDownSignal, onRightMouseUpSignal, onRightMouseDownEndSignal, onRightMouseUpEndSignal);
 
 		runExclusiveActions();
 	}
 
-	void MouseState::updateButtonState(bool &oldState, bool newState, Slot<CallbackSignature> &onDown, Slot<CallbackSignature> &onUp, Slot<CallbackSignature> &onDownEnd, Slot<CallbackSignature> &onUpEnd) {
+	void MouseState::updateButtonState(bool &oldState, bool newState, Signal<CallbackSignature> &onDown, Signal<CallbackSignature> &onUp, Signal<CallbackSignature> &onDownEnd, Signal<CallbackSignature> &onUpEnd) {
 		if(newState != oldState){
 			oldState = newState;
 			if(newState){

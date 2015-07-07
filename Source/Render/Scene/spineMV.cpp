@@ -353,13 +353,13 @@ namespace MV{
 		void AnimationTrack::onAnimationStateEvent(int a_trackIndex, spEventType type, spEvent* event, int loopCount) {
 			if(a_trackIndex == myTrackIndex){
 				if(type == SP_ANIMATION_START){
-					onStartSlot(*this);
+					onStartSignal(*this);
 				} else if(type == SP_ANIMATION_END){
-					onEndSlot(*this);
+					onEndSignal(*this);
 				} else if(type == SP_ANIMATION_COMPLETE){
-					onCompleteSlot(*this, loopCount);
+					onCompleteSignal(*this, loopCount);
 				} else if(type == SP_ANIMATION_EVENT){
-					onEventSlot(*this, AnimationEventData((event->data && event->data->name) ? event->data->name : "Anon", (event->stringValue)?event->stringValue:"", event->intValue, event->floatValue));
+					onEventSignal(*this, AnimationEventData((event->data && event->data->name) ? event->data->name : "Anon", (event->stringValue)?event->stringValue:"", event->intValue, event->floatValue));
 				}
 			}
 		}

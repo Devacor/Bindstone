@@ -98,7 +98,7 @@ namespace MV {
 		return std::max(std::min(val, upperBound), lowerBound);
 	}
 
-	static inline float percentOfRange(float a_value, float a_start, float a_end) {
+	static inline float percentOfRange(float a_start, float a_end, float a_value) {
 		if (a_start > a_end) {
 			std::swap(a_start, a_end);
 		}
@@ -114,19 +114,19 @@ namespace MV {
 	}
 
 	static inline float unmix(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
-		return mix(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
+		return mix(0.0f, 1.0f, percentOfRange(a_start, a_end, a_value), a_strength);
 	}
 
 	static inline float unmixIn(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
-		return mixIn(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
+		return mixIn(0.0f, 1.0f, percentOfRange(a_start, a_end, a_value), a_strength);
 	}
 
 	static inline float unmixOut(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
-		return mixOut(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
+		return mixOut(0.0f, 1.0f, percentOfRange(a_start, a_end, a_value), a_strength);
 	}
 
 	static inline float unmixInOut(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
-		return mixInOut(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
+		return mixInOut(0.0f, 1.0f, percentOfRange(a_start, a_end, a_value), a_strength);
 	}
 
 	//rounds num up to the next largest power of two (or the current value) and returns that value
@@ -166,9 +166,9 @@ namespace MV {
 	template <class Type>
 	double angle(const Type &x1, const Type &y1, const Type &x2, const Type &y2, AngleType returnAs = DEGREES){
 		if(returnAs == DEGREES){
-			return wrap(toDegrees(atan2(y2 -y1, x2 - x1)), static_cast<Type>(0.0), static_cast<Type>(360.0));
+			return wrap(static_cast<double>(toDegrees(atan2(y2 -y1, x2 - x1))), 0.0, 360.0);
 		}else{
-			return atan2(y2 - y1, x2 - x1);
+			return static_cast<double>(atan2(y2 - y1, x2 - x1));
 		}
 	}
 
@@ -216,15 +216,15 @@ namespace MV {
 		}
 	}
 
-	int wrap(int val, int lowerBound, int upperBound);
-	long wrap(long val, long lowerBound, long upperBound);
-	float wrap(float val, float lowerBound, float upperBound);
-	double wrap(double val, double lowerBound, double upperBound);
+	int wrap(int lowerBound, int upperBound, int val);
+	long wrap(long lowerBound, long upperBound, long val);
+	float wrap(float lowerBound, float upperBound, float val);
+	double wrap(double lowerBound, double upperBound, double val);
 
 	//returns the shortest distance between two numbers within a given bounding set of values.  If the closest value is the
 	//wraparound value and wrapDist is passed in then wrapDist is set to 1, if it is closer between the two numbers, wrapDist==0
 	template <class Type>
-	Type wrappingDistance(Type val, Type val2, Type lowerBound, Type upperBound, bool *wrapDist = nullptr){
+	Type wrappingDistance(Type lowerBound, Type upperBound, Type val, Type val2, bool *wrapDist = nullptr){
 		using std::swap;
 		if (lowerBound > upperBound) { swap(lowerBound, upperBound); }
 		if(val==val2){

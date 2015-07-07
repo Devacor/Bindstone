@@ -12,17 +12,17 @@ namespace MV {
 	template<typename MessageType>
 	struct MessageHandler : public virtual MessageHandlerBase {
 	private:
-		Slot<void(std::shared_ptr<MessageType>)> customHandleBeginSlot;
-		Slot<void(std::shared_ptr<MessageType>)> customHandleEndSlot;
+		Signal<void(std::shared_ptr<MessageType>)> customHandleBeginSignal;
+		Signal<void(std::shared_ptr<MessageType>)> customHandleEndSignal;
 
 	public:
 		MessageHandler():
-			customHandleBegin(customHandleBeginSlot),
-			customHandleEnd(customHandleEndSlot){
+			customHandleBegin(customHandleBeginSignal),
+			customHandleEnd(customHandleEndSignal){
 		}
 
-		SlotRegister<void(std::shared_ptr<MessageType>)> customHandleBegin;
-		SlotRegister<void(std::shared_ptr<MessageType>)> customHandleEnd;
+		SignalRegister<void(std::shared_ptr<MessageType>)> customHandleBegin;
+		SignalRegister<void(std::shared_ptr<MessageType>)> customHandleEnd;
 
 		virtual bool handleBegin(std::shared_ptr<MessageType>) = 0;
 		virtual void handleEnd(std::shared_ptr<MessageType>) = 0;
@@ -30,12 +30,12 @@ namespace MV {
 	private:
 		friend Message;
 		bool handleBeginInterface(std::shared_ptr<MessageType> a_self){
-			customHandleBeginSlot(a_self);
+			customHandleBeginSignal(a_self);
 			return handleBegin(a_self);
 		}
 
 		void handleEndInterface(std::shared_ptr<MessageType> a_self){
-			customHandleEndSlot(a_self);
+			customHandleEndSignal(a_self);
 			handleEnd(a_self);
 		}
 	};

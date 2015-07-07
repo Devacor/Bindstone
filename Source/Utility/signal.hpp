@@ -13,14 +13,14 @@
 namespace MV {
 
 	template <typename T>
-	class Signal {
+	class Reciever {
 	public:
 		typedef std::function<T> FunctionType;
-		typedef std::shared_ptr<Signal<T>> SharedType;
-		typedef std::weak_ptr<Signal<T>> WeakType;
+		typedef std::shared_ptr<Reciever<T>> SharedType;
+		typedef std::weak_ptr<Reciever<T>> WeakType;
 
-		static std::shared_ptr< Signal<T> > make(std::function<T> a_callback){
-			return std::shared_ptr< Signal<T> >(new Signal<T>(a_callback, ++uniqueId));
+		static std::shared_ptr< Reciever<T> > make(std::function<T> a_callback){
+			return std::shared_ptr< Reciever<T> >(new Reciever<T>(a_callback, ++uniqueId));
 		}
 
 		template <class ...Arg>
@@ -60,21 +60,21 @@ namespace MV {
 		}
 
 		//For sorting and comparison (removal/avoiding duplicates)
-		bool operator<(const Signal<T>& a_rhs){
+		bool operator<(const Reciever<T>& a_rhs){
 			return id < a_rhs.id;
 		}
-		bool operator>(const Signal<T>& a_rhs){
+		bool operator>(const Reciever<T>& a_rhs){
 			return id > a_rhs.id;
 		}
-		bool operator==(const Signal<T>& a_rhs){
+		bool operator==(const Reciever<T>& a_rhs){
 			return id == a_rhs.id;
 		}
-		bool operator!=(const Signal<T>& a_rhs){
+		bool operator!=(const Reciever<T>& a_rhs){
 			return id != a_rhs.id;
 		}
 
 	private:
-		Signal(std::function<T> a_callback, long long a_id):
+		Reciever(std::function<T> a_callback, long long a_id):
 			id(a_id),
 			callback(a_callback),
 			isBlocked(false){
@@ -86,28 +86,28 @@ namespace MV {
 	};
 
 	template <typename T>
-	long long Signal<T>::uniqueId = 0;
+	long long Reciever<T>::uniqueId = 0;
 
 	template <typename T>
-	class Slot {
+	class Signal {
 	public:
 		typedef std::function<T> FunctionType;
-		typedef Signal<T> SignalType;
-		typedef std::shared_ptr<Signal<T>> SharedSignalType;
-		typedef std::weak_ptr<Signal<T>> WeakSignalType;
+		typedef Reciever<T> RecieverType;
+		typedef std::shared_ptr<Reciever<T>> SharedRecieverType;
+		typedef std::weak_ptr<Reciever<T>> WeakRecieverType;
 
 		//No protection against duplicates.
-		std::shared_ptr<Signal<T>> connect(std::function<T> a_callback){
+		std::shared_ptr<Reciever<T>> connect(std::function<T> a_callback){
 			if(observerLimit == std::numeric_limits<size_t>::max() || cullDeadObservers() < observerLimit){
-				auto signal = Signal<T>::make(a_callback);
+				auto signal = Reciever<T>::make(a_callback);
 				observers.insert(signal);
 				return signal;
 			} else{
 				return nullptr;
 			}
 		}
-		//Duplicate Signals will not be added. If std::function ever becomes comparable this can all be much safer.
-		bool connect(std::shared_ptr<Signal<T>> a_value){
+		//Duplicate Recievers will not be added. If std::function ever becomes comparable this can all be much safer.
+		bool connect(std::shared_ptr<Reciever<T>> a_value){
 			if(observerLimit == std::numeric_limits<size_t>::max() || cullDeadObservers() < observerLimit){
 				observers.insert(a_value);
 				return true;
@@ -116,7 +116,7 @@ namespace MV {
 			}
 		}
 
-		void disconnect(std::shared_ptr<Signal<T>> a_value){
+		void disconnect(std::shared_ptr<Reciever<T>> a_value){
 			if(a_value){
 				if(!inCall){
 					observers.erase(a_value);
@@ -229,43 +229,43 @@ namespace MV {
 			return observers.size();
 		}
 	private:
-		std::set< std::weak_ptr< Signal<T> >, std::owner_less<std::weak_ptr<Signal<T>>> > observers;
+		std::set< std::weak_ptr< Reciever<T> >, std::owner_less<std::weak_ptr<Reciever<T>>> > observers;
 		size_t observerLimit = std::numeric_limits<size_t>::max();
 		bool inCall = false;
 		bool isBlocked = false;
 		std::function<T> blockedCallback;
-		std::vector< std::shared_ptr<Signal<T>> > disconnectQueue;
+		std::vector< std::shared_ptr<Reciever<T>> > disconnectQueue;
 		bool calledWhileBlocked = false;
 	};
 
-	//Can be used as a public SlotRegister member for connecting slots to a private Slot member.
+	//Can be used as a public SignalRegister member for connecting signals to a private Signal member.
 	//In this way you won't have to write forwarding connect/disconnect boilerplate for your classes.
 	template <typename T>
-	class SlotRegister {
+	class SignalRegister {
 	public:
 		typedef std::function<T> FunctionType;
-		typedef Signal<T> SignalType;
-		typedef std::shared_ptr<Signal<T>> SharedSignalType;
-		typedef std::weak_ptr<Signal<T>> WeakSignalType;
+		typedef Reciever<T> RecieverType;
+		typedef std::shared_ptr<Reciever<T>> SharedRecieverType;
+		typedef std::weak_ptr<Reciever<T>> WeakRecieverType;
 
-		SlotRegister(Slot<T> &a_slot) :
+		SignalRegister(Signal<T> &a_slot) :
 			slot(a_slot){
 		}
 
 		//no protection against duplicates
-		std::shared_ptr<Signal<T>> connect(std::function<T> a_callback){
+		std::shared_ptr<Reciever<T>> connect(std::function<T> a_callback){
 			return slot.connect(a_callback);
 		}
 		//duplicate shared_ptr's will not be added
-		bool connect(std::shared_ptr<Signal<T>> a_value){
+		bool connect(std::shared_ptr<Reciever<T>> a_value){
 			return slot.connect(a_value);
 		}
 
-		void disconnect(std::shared_ptr<Signal<T>> a_value){
+		void disconnect(std::shared_ptr<Reciever<T>> a_value){
 			slot.disconnect(a_value);
 		}
 
-		std::shared_ptr<Signal<T>> connect(const std::string &a_id, std::function<T> a_callback){
+		std::shared_ptr<Reciever<T>> connect(const std::string &a_id, std::function<T> a_callback){
 			return ownedConnections[a_id] = slot.connect(a_callback);
 		}
 
@@ -280,8 +280,8 @@ namespace MV {
 			return ownedConnections.find(a_id) != ownedConnections.end();
 		}
 	private:
-		std::map<std::string, SharedSignalType> ownedConnections;
-		Slot<T> &slot;
+		std::map<std::string, SharedRecieverType> ownedConnections;
+		Signal<T> &slot;
 	};
 
 }

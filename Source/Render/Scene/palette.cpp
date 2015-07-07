@@ -18,8 +18,8 @@ namespace MV {
 
 		Palette::Palette(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse) :
 			Drawable(a_owner),
-			onColorChange(onColorChangeSlot),
-			onSwatchClicked(onSwatchClickedSlot),
+			onColorChange(onColorChangeSignal),
+			onSwatchClicked(onSwatchClickedSignal),
 			ourMouse(a_mouse),
 			hsv(360.0f, 0.0f, 0.0f, 1.0f){
 
@@ -104,7 +104,7 @@ namespace MV {
 
 		void Palette::acceptSwatchClick() {
 			auto self = std::static_pointer_cast<Palette>(shared_from_this());
-			onSwatchClickedSlot(self);
+			onSwatchClickedSignal(self);
 		}
 
 		bool Palette::mouseOverMainColor(const MouseState& a_state) {
@@ -283,7 +283,7 @@ namespace MV {
 			points[23].x = middlePointX;
 
 			auto self = std::static_pointer_cast<Palette>(shared_from_this());
-			onColorChangeSlot(self);
+			onColorChangeSignal(self);
 			notifyParentOfComponentChange();
 			return self;
 		}

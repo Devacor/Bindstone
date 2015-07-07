@@ -24,8 +24,8 @@ namespace MV {
 				onMouseMoveHandle = nullptr;
 				isInPressEvent = false;
 				if (a_callCancelCallbacks) {
-					onCancelSlot(self);
-					onReleaseSlot(self, lastKnownVelocity);
+					onCancelSignal(self);
+					onReleaseSignal(self, lastKnownVelocity);
 				}
 			}
 		}
@@ -46,9 +46,9 @@ namespace MV {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = std::static_pointer_cast<Clickable>(shared_from_this());
 			if (a_type == BoundsType::NONE && hitDetectionType != BoundsType::NONE) {
-				onEnabledSlot(self);
+				onEnabledSignal(self);
 			} else if (hitDetectionType == BoundsType::NONE && a_type != BoundsType::NONE) {
-				onDisabledSlot(self);
+				onDisabledSignal(self);
 			}
 			hitDetectionType = a_type;
 			return self;
@@ -82,14 +82,14 @@ namespace MV {
 		Clickable::Clickable(const std::weak_ptr<Node>& a_owner, MouseState & a_mouse) :
 			Sprite(a_owner),
 			ourMouse(a_mouse),
-			onPress(onPressSlot),
-			onRelease(onReleaseSlot),
-			onCancel(onCancelSlot),
-			onAccept(onAcceptSlot),
-			onDrag(onDragSlot),
-			onDrop(onDropSlot),
-			onEnabled(onEnabledSlot),
-			onDisabled(onDisabledSlot) {
+			onPress(onPressSignal),
+			onRelease(onReleaseSignal),
+			onCancel(onCancelSignal),
+			onAccept(onAcceptSignal),
+			onDrag(onDragSignal),
+			onDrop(onDropSignal),
+			onEnabled(onEnabledSignal),
+			onDisabled(onDisabledSignal) {
 
 			shouldDraw = false;
 		}
@@ -117,14 +117,14 @@ namespace MV {
 
 				isInPressEvent = false;
 				if (inBounds) {
-					onAcceptSlot(protectFromDismissal);
+					onAcceptSignal(protectFromDismissal);
 				} else {
-					onCancelSlot(protectFromDismissal);
+					onCancelSignal(protectFromDismissal);
 				}
-				onReleaseSlot(protectFromDismissal, lastKnownVelocity);
+				onReleaseSignal(protectFromDismissal, lastKnownVelocity);
 			}
 			if (inBounds) {
-				onDropSlot(protectFromDismissal, lastKnownVelocity);
+				onDropSignal(protectFromDismissal, lastKnownVelocity);
 			}
 		}
 
@@ -132,7 +132,7 @@ namespace MV {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
 			isInPressEvent = true;
-			onPressSlot(protectFromDismissal);
+			onPressSignal(protectFromDismissal);
 
 			objectLocationBeforeDrag = owner()->position();
 			dragStartPosition = ourMouse.position();
@@ -143,9 +143,10 @@ namespace MV {
 				auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
 				auto dragDeltaPosition = a_mouseInner.position() - priorMousePosition;
 				auto dt = dragTimer.delta();
-				auto proviousLastVelocity = lastKnownVelocity;
+				lastDragDelta = dt;
+				auto previousLastVelocity = lastKnownVelocity;
 				lastKnownVelocity = (lastKnownVelocity + (cast<MV::PointPrecision>(dragDeltaPosition) * static_cast<MV::PointPrecision>(dt))) / 2.0f;
-				onDragSlot(protectFromDismissal, dragStartPosition, dragDeltaPosition);
+				onDragSignal(protectFromDismissal, dragStartPosition, dragDeltaPosition);
 				priorMousePosition = a_mouseInner.position();
 			});
 		}

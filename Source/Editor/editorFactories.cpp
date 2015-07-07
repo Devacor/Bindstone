@@ -32,6 +32,11 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 	return button;
 }
 
+void renameButton(const MV::Scene::SafeComponent<MV::Scene::Button> &a_button, const MV::UtfString &a_text) {
+	a_button->activeNode()->componentInChildren<MV::Scene::Text>()->text(a_text);
+	a_button->idleNode()->componentInChildren<MV::Scene::Text>()->text(a_text);
+}
+
 std::shared_ptr<MV::Scene::Button> makeSceneButton(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_text, const std::string &a_fontIdentifier /*= MV::DEFAULT_ID*/) {
 	static long buttonId = 0;
 	std::vector<MV::Color> boxActiveColors = { { InterfaceColors::BUTTON_TOP_ACTIVE },{ InterfaceColors::BUTTON_BOTTOM_ACTIVE },{ InterfaceColors::BUTTON_BOTTOM_ACTIVE },{ InterfaceColors::BUTTON_TOP_ACTIVE } };
@@ -177,13 +182,21 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 				indexList.insert(indexList.end(), appendPriority.begin(), appendPriority.end());
 				scrollBarComponent->overridePriority(indexList);
 				scrollBarComponent->color({ 1.0f, 1.0f, 1.0f, .5f });
-				scrollBarComponent->show();
+				//scrollBarComponent->show();
 				scrollBarComponent->bounds({ { 0.0f, headerSize }, MV::size(sizeOfNode.width, 500.0f) });
-				int dragThreshold = 10;
+				auto dragThreshold = std::make_shared<int>(4);
+				double maxDragTime = 1.0f;
+				auto isDragging = std::make_shared<bool>(false);
 				scrollBarComponent->onDrag.connect("scroll", [=, &a_mouse](std::shared_ptr<MV::Scene::Clickable> a_clickable, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) mutable {
-					if (dragThreshold > 0) {
-						dragThreshold -= std::abs(deltaPosition.y);
-						if (dragThreshold <= 0) {
+					if (!*isDragging && *dragThreshold > 0 && a_clickable->dragTime() < maxDragTime) {
+						std::shared_ptr<MV::Task> existing = weakBoxContents.lock()->task().get("movingSCROLL", false);
+						if (existing) {
+							existing->cancel();
+						}
+						*dragThreshold -= std::abs(deltaPosition.y);
+						if (*dragThreshold <= 0) {
+							*isDragging = true;
+							*dragThreshold = 4;
 							auto buttons = a_clickable->owner()->componentsInChildren<MV::Scene::Clickable>(false, false);
 							for (auto&& button : buttons) {
 								MV::visit(button,
@@ -192,14 +205,15 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 								});
 							}
 						}
-					} else {
+					}
+					if(*isDragging) {
 						auto boxLocation = weakBoxContents.lock()->position();
 						boxLocation.y = MV::clamp(boxLocation.y + deltaPosition.y, 20.0f, -(sizeOfNode.height - 540.0f));
 						weakBoxContents.lock()->position(boxLocation);
 					}
 				});
 				scrollBarComponent->onRelease.connect("drop", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable, const MV::Point<float> &a_velocity) {
-					if (!weakBoxContents.expired()) {
+					if (!weakBoxContents.expired() && *isDragging) {
 						std::shared_ptr<MV::Task> existing = weakBoxContents.lock()->task().get("movingSCROLL", false);
 						if (existing) {
 							existing->cancel();
@@ -221,6 +235,8 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 							return done;
 						});
 					}
+					*isDragging = false;
+					*dragThreshold = 4;
 				});
 			}
 		} else {

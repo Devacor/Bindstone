@@ -16,14 +16,14 @@ namespace MV {
 
 	class Task {
 	private:
-		Slot<void(const Task&)> onStartSlot;
-		Slot<void(const Task&)> onFinishSlot;
-		Slot<void(const Task&)> onFinishAllSlot;
-        Slot<void(const Task&)> onSuspendSlot;
-		Slot<void(const Task&)> onResumeSlot;
-		Slot<void()> onCancelSlot;
+		Signal<void(const Task&)> onStartSignal;
+		Signal<void(const Task&)> onFinishSignal;
+		Signal<void(const Task&)> onFinishAllSignal;
+        Signal<void(const Task&)> onSuspendSignal;
+		Signal<void(const Task&)> onResumeSignal;
+		Signal<void()> onCancelSignal;
 
-		Slot<void(const Task&, std::exception &)> onExceptionSlot;
+		Signal<void(const Task&, std::exception &)> onExceptionSignal;
 
 	public:
 		Task():
@@ -42,18 +42,18 @@ namespace MV {
 			ourTaskComplete(false),
 			forceCompleteFlag(false),
 			suspended(false),
-			onStart(onStartSlot),
-			onFinishAll(onFinishAllSlot),
-			onFinish(onFinishSlot),
-			onCancel(onCancelSlot),
-			onSuspend(onSuspendSlot),
-			onResume(onResumeSlot),
-			onException(onExceptionSlot){
+			onStart(onStartSignal),
+			onFinishAll(onFinishAllSignal),
+			onFinish(onFinishSignal),
+			onCancel(onCancelSignal),
+			onSuspend(onSuspendSignal),
+			onResume(onResumeSignal),
+			onException(onExceptionSignal){
 		}
 
 		~Task() {
 			if (!ourTaskComplete && !cancelled) {
-				onCancelSlot();
+				onCancelSignal();
 			}
 		}
 
@@ -79,18 +79,18 @@ namespace MV {
 						updateLocalTask(a_dt);
 						updateParallelTasks(a_dt);
 						if ((ourTaskComplete || alwaysRunChildren) && updateChildTasks(a_dt)) {
-							try { onFinishAllSlot(*this); } catch (std::exception &a_e) {
-								if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-								onExceptionSlot(*this, a_e);
+							try { onFinishAllSignal(*this); } catch (std::exception &a_e) {
+								if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
+								onExceptionSignal(*this, a_e);
 							}
-							onFinishAllSlot.block();
+							onFinishAllSignal.block();
 							return true;
 						}
 					}
 				}
 			} catch (std::exception &a_e) {
-				if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-				onExceptionSlot(*this, a_e);
+				if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
+				onExceptionSignal(*this, a_e);
 			}
 			return finished();
 		}
@@ -135,9 +135,9 @@ namespace MV {
 				cancelled = true;
 				if(!ourTaskComplete){
 					ourTaskComplete = true;
-					try { onCancelSlot(); } catch (std::exception &a_e) {
-						if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-						onExceptionSlot(*this, a_e);
+					try { onCancelSignal(); } catch (std::exception &a_e) {
+						if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
+						onExceptionSignal(*this, a_e);
 					}
 				}
 			}
@@ -158,25 +158,25 @@ namespace MV {
 			}
 			
 			sequentialTasks.emplace_front(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
-			onFinishAllSlot.unblock();
+			onFinishAllSignal.unblock();
 			return *this;
 		}
 
 		Task& then(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			sequentialTasks.emplace_back(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
-			onFinishAllSlot.unblock();
+			onFinishAllSignal.unblock();
 			return *this;
 		}
 
 		Task& thenAlso(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			sequentialTasks.emplace_back(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
-			onFinishAllSlot.unblock();
+			onFinishAllSignal.unblock();
 			return *this;
 		}
 
 		Task& also(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			parallelTasks.emplace_back(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
-			onFinishAllSlot.unblock();
+			onFinishAllSignal.unblock();
 			return *this;
 		}
 
@@ -215,13 +215,13 @@ namespace MV {
 			return std::shared_ptr<Task>();
 		}
 
-		SlotRegister<void(const Task&)> onStart;
-		SlotRegister<void(const Task&)> onFinish;
-		SlotRegister<void(const Task&)> onFinishAll;
-		SlotRegister<void(const Task&)> onSuspend;
-		SlotRegister<void(const Task&)> onResume;
-		SlotRegister<void()> onCancel;
-		SlotRegister<void(const Task&, std::exception &)> onException;
+		SignalRegister<void(const Task&)> onStart;
+		SignalRegister<void(const Task&)> onFinish;
+		SignalRegister<void(const Task&)> onFinishAll;
+		SignalRegister<void(const Task&)> onSuspend;
+		SignalRegister<void(const Task&)> onResume;
+		SignalRegister<void()> onCancel;
+		SignalRegister<void(const Task&, std::exception &)> onException;
 	private:
 		bool cancelled = false;
 
@@ -229,9 +229,9 @@ namespace MV {
 			if (!ourTaskComplete)
 			{
 				if (totalTime == 0.0f) {
-					try { onStartSlot(*this); } catch (std::exception &a_e) {
-						if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-						onExceptionSlot(*this, a_e);
+					try { onStartSignal(*this); } catch (std::exception &a_e) {
+						if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
+						onExceptionSignal(*this, a_e);
 					}
 				}
 				totalTime += a_dt * static_cast<int>(!forceCompleteFlag);
@@ -260,15 +260,15 @@ namespace MV {
 					if (forceCompleteFlag || task(*this, a_dt)) {
 						forceCompleteFlag = false;
 						ourTaskComplete = true;
-						try { onFinishSlot(*this); } catch (std::exception &a_e) {
-							if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-							onExceptionSlot(*this, a_e);
+						try { onFinishSignal(*this); } catch (std::exception &a_e) {
+							if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
+							onExceptionSignal(*this, a_e);
 						}
-						onFinishSlot.block();
+						onFinishSignal.block();
 					}
 				} catch (std::exception &a_e) {
-					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-					onExceptionSlot(*this, a_e);
+					if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
+					onExceptionSignal(*this, a_e);
 				}
 			}
 		}
@@ -288,12 +288,12 @@ namespace MV {
 						sequentialTasks.erase(currentSequentialTask);
 					}
 				} catch(std::exception &a_e) {
-					if (onExceptionSlot.cullDeadObservers() == 0) {
+					if (onExceptionSignal.cullDeadObservers() == 0) {
 						sequentialTasks.erase(currentSequentialTask); 
 						throw; 
 					}
 
-					onExceptionSlot(*this, a_e);
+					onExceptionSignal(*this, a_e);
 					sequentialTasks.erase(currentSequentialTask);
 				}
 			}
@@ -307,8 +307,8 @@ namespace MV {
 
 			temporaryParallel.erase(std::remove_if(temporaryParallel.begin(), temporaryParallel.end(), [&](const std::shared_ptr<Task> &a_task){
 				try { return a_task->update(a_dt); } catch (std::exception &a_e) {
-					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-					onExceptionSlot(*this, a_e);
+					if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
+					onExceptionSignal(*this, a_e);
 					return true;
 				}
 			}), temporaryParallel.end());
@@ -356,20 +356,20 @@ namespace MV {
 				if(totalTime == 0){
 					cancel();
 				} else {
-					try { onFinishSlot(*this); } catch (std::exception &a_e) {
-						if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-						onExceptionSlot(*this, a_e);
+					try { onFinishSignal(*this); } catch (std::exception &a_e) {
+						if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
+						onExceptionSignal(*this, a_e);
 					}
-					onFinishSlot.block();
+					onFinishSignal.block();
 				}
 			}
 			finishAllChildTasks();
 			if (!allFinished && finished()) {
-				try { onFinishAllSlot(*this); } catch (std::exception &a_e) {
-					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-					onExceptionSlot(*this, a_e);
+				try { onFinishAllSignal(*this); } catch (std::exception &a_e) {
+					if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
+					onExceptionSignal(*this, a_e);
 				}
-				onFinishAllSlot.block();
+				onFinishAllSignal.block();
 			}
 		}
 
@@ -409,9 +409,9 @@ namespace MV {
 		void unsuspend() {
 			if (suspended) {
 				suspended = false;
-				try { onResumeSlot(*this); } catch (std::exception &a_e) {
-					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-					onExceptionSlot(*this, a_e);
+				try { onResumeSignal(*this); } catch (std::exception &a_e) {
+					if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
+					onExceptionSignal(*this, a_e);
 				}
 			}
 		}
@@ -419,9 +419,9 @@ namespace MV {
 		void suspend() {
 			if (!suspended && totalTime > 0) {
 				suspended = true;
-				try { onSuspendSlot(*this); } catch (std::exception &a_e) {
-					if (onExceptionSlot.cullDeadObservers() == 0) { throw; }
-					onExceptionSlot(*this, a_e);
+				try { onSuspendSignal(*this); } catch (std::exception &a_e) {
+					if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
+					onExceptionSignal(*this, a_e);
 				}
 			}
 		}

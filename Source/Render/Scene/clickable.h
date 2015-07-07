@@ -32,39 +32,39 @@ namespace MV {
 			friend cereal::access;
 			friend Node;
 		public:
-			typedef void ButtonSlotSignature(std::shared_ptr<Clickable>);
-			typedef void DragSlotSignature(std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &deltaPosition);
-			typedef void DropSlotSignature(std::shared_ptr<Clickable>, const Point<MV::PointPrecision> &velocity);
+			typedef void ButtonSignalSignature(std::shared_ptr<Clickable>);
+			typedef void DragSignalSignature(std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &deltaPosition);
+			typedef void DropSignalSignature(std::shared_ptr<Clickable>, const Point<MV::PointPrecision> &velocity);
 
 			enum class BoundsType { NODE_CHILDREN, NODE, LOCAL, NONE };
 		private:
 
-			Slot<ButtonSlotSignature> onDisabledSlot;
-			Slot<ButtonSlotSignature> onEnabledSlot;
+			Signal<ButtonSignalSignature> onDisabledSignal;
+			Signal<ButtonSignalSignature> onEnabledSignal;
 
-			Slot<ButtonSlotSignature> onPressSlot;
-			Slot<DropSlotSignature> onReleaseSlot;
+			Signal<ButtonSignalSignature> onPressSignal;
+			Signal<DropSignalSignature> onReleaseSignal;
 
-			Slot<ButtonSlotSignature> onAcceptSlot;
-			Slot<ButtonSlotSignature> onCancelSlot;
+			Signal<ButtonSignalSignature> onAcceptSignal;
+			Signal<ButtonSignalSignature> onCancelSignal;
 
-			Slot<DragSlotSignature> onDragSlot;
-			Slot<DropSlotSignature> onDropSlot;
+			Signal<DragSignalSignature> onDragSignal;
+			Signal<DropSignalSignature> onDropSignal;
 
 		public:
 			SpriteDerivedAccessors(Clickable)
 
-			SlotRegister<ButtonSlotSignature> onEnabled;
-			SlotRegister<ButtonSlotSignature> onDisabled;
+			SignalRegister<ButtonSignalSignature> onEnabled;
+			SignalRegister<ButtonSignalSignature> onDisabled;
 
-			SlotRegister<ButtonSlotSignature> onPress;
-			SlotRegister<DropSlotSignature> onRelease;
+			SignalRegister<ButtonSignalSignature> onPress;
+			SignalRegister<DropSignalSignature> onRelease;
 
-			SlotRegister<ButtonSlotSignature> onAccept;
-			SlotRegister<ButtonSlotSignature> onCancel;
+			SignalRegister<ButtonSignalSignature> onAccept;
+			SignalRegister<ButtonSignalSignature> onCancel;
 
-			SlotRegister<DragSlotSignature> onDrag;
-			SlotRegister<DropSlotSignature> onDrop;
+			SignalRegister<DragSignalSignature> onDrag;
+			SignalRegister<DropSignalSignature> onDrop;
 
 			std::shared_ptr<Clickable> clickDetectionType(BoundsType a_type);
 
@@ -85,6 +85,14 @@ namespace MV {
 			bool enabled() const;
 
 			MouseState& mouse() const;
+
+			double dragDelta() const {
+				return lastDragDelta;
+			}
+
+			double dragTime() const {
+				return dragTimer.check();
+			}
 
 			size_t globalPriority() const;
 			std::shared_ptr<Clickable> globalPriority(size_t a_newPriority);
@@ -153,6 +161,7 @@ namespace MV {
 			Point<int> dragStartPosition;
 			Point<int> priorMousePosition;
 			Point<MV::PointPrecision> lastKnownVelocity;
+			double lastDragDelta = 0.0;
 			Point<> objectLocationBeforeDrag;
 
 			bool isInPressEvent = false;

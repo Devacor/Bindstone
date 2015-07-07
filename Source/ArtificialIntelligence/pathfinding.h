@@ -21,14 +21,14 @@ namespace MV {
 	public:
 		typedef void CallbackSignature(const std::shared_ptr<Map> &, const Point<int> &);
 	private:
-		Slot<CallbackSignature> onBlockSlot;
-		Slot<CallbackSignature> onUnblockSlot;
-		Slot<CallbackSignature> onCostChangeSlot;
+		Signal<CallbackSignature> onBlockSignal;
+		Signal<CallbackSignature> onUnblockSignal;
+		Signal<CallbackSignature> onCostChangeSignal;
 
 	public:
-		SlotRegister<CallbackSignature> onBlock;
-		SlotRegister<CallbackSignature> onUnblock;
-		SlotRegister<CallbackSignature> onCostChange;
+		SignalRegister<CallbackSignature> onBlock;
+		SignalRegister<CallbackSignature> onUnblock;
+		SignalRegister<CallbackSignature> onCostChange;
 
 		MapNode(Map& a_grid, const Point<int> &a_location, float a_cost, bool a_useCorners);
 

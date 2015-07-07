@@ -17,7 +17,7 @@ namespace MV {
 			dragPercent = std::min(std::max(a_newPercent, 0.0f), 1.0f);
 			auto self = std::static_pointer_cast<Slider>(shared_from_this());
 			if (a_notify && oldPercent != dragPercent) {
-				onPercentChangeSlot(self);
+				onPercentChangeSignal(self);
 			}
 			updateHandlePosition();
 			return self;
@@ -40,7 +40,7 @@ namespace MV {
 
 		Slider::Slider(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse) :
 			Clickable(a_owner, a_mouse),
-			onPercentChange(onPercentChangeSlot) {
+			onPercentChange(onPercentChangeSignal) {
 			shouldDraw = true;
 			}
 
@@ -56,7 +56,7 @@ namespace MV {
 			dragPercent = calculatePercentFromPosition(owner()->localFromScreen(mouse().position()));
 			auto self = std::static_pointer_cast<Slider>(shared_from_this()); //keep alive
 			if (dragPercent != oldPercent) {
-				onPercentChangeSlot(self);
+				onPercentChangeSignal(self);
 			}
 			updateHandlePosition();
 		}

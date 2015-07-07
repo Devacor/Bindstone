@@ -49,10 +49,10 @@ namespace MV {
 	class TextureDefinition : public std::enable_shared_from_this<TextureDefinition> {
 		friend cereal::access;
 	protected:
-		Slot<void(std::shared_ptr<TextureDefinition>)> onReloadAction;
+		Signal<void(std::shared_ptr<TextureDefinition>)> onReloadAction;
 	public:
-		SlotRegister<void(std::shared_ptr<TextureDefinition>)> onReload;
-		typedef Signal<void(std::shared_ptr<TextureDefinition>)> SignalType;
+		SignalRegister<void(std::shared_ptr<TextureDefinition>)> onReload;
+		typedef Reciever<void(std::shared_ptr<TextureDefinition>)> SignalType;
 
 		virtual ~TextureDefinition();
 		std::shared_ptr<TextureHandle> makeHandle();
@@ -218,10 +218,10 @@ namespace MV {
 	class TextureHandle : public std::enable_shared_from_this<TextureHandle> {
 		friend cereal::access;
 		friend TextureDefinition;
-		Slot<void(std::shared_ptr<TextureHandle>)> sizeChanges;
+		Signal<void(std::shared_ptr<TextureHandle>)> sizeChanges;
 	public:
 		virtual ~TextureHandle();
-		typedef Signal<void (std::shared_ptr<TextureHandle>)> SignalType;
+		typedef Reciever<void (std::shared_ptr<TextureHandle>)> SignalType;
 
 		std::shared_ptr<TextureHandle> bounds(const BoxAABB<int> &a_bounds);
 		BoxAABB<int> bounds() const;
@@ -239,7 +239,7 @@ namespace MV {
 
 		std::shared_ptr<TextureDefinition> texture() const;
 
-		SlotRegister<void(std::shared_ptr<TextureHandle>)> sizeObserver;
+		SignalRegister<void(std::shared_ptr<TextureHandle>)> sizeObserver;
 
 		std::string name() const;
 

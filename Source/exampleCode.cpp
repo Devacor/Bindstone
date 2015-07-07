@@ -81,7 +81,7 @@ void CreateDogFoxScene(std::shared_ptr<MV::Scene::Node> mainScene){
 void UpdateSky(std::shared_ptr<MV::Scene::Node> mainScene){
 	mainScene->get("SunAndMoon")->addRotation(MV::point(0.0f, 0.0f, -0.2f));
 	MV::Point<> position = mainScene->get("SunAndMoon")->rotation();
-	float distance = (float)abs(MV::wrap(position.z, 0.0f, 360.0f) - 180.0);
+	float distance = (float)abs(MV::wrap(0.0f, 360.0f, position.z) - 180.0);
 	float brightness = distance / 180.0f;
 	if(brightness < .1f){brightness = .1f;}
 

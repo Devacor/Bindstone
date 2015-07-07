@@ -9,11 +9,11 @@ namespace MV {
 			friend cereal::access;
 			friend Node;
 		public:
-			typedef void SliderSlotSignature(std::shared_ptr<Slider>);
+			typedef void SliderSignalSignature(std::shared_ptr<Slider>);
 		private:
-			Slot<SliderSlotSignature> onPercentChangeSlot;
+			Signal<SliderSignalSignature> onPercentChangeSignal;
 		public:
-			SlotRegister<SliderSlotSignature> onPercentChange;
+			SignalRegister<SliderSignalSignature> onPercentChange;
 
 			ClickableComponentDerivedAccessors(Slider)
 

@@ -247,7 +247,6 @@
     <ClCompile Include="Source\Render\texturePacker.cpp" />
     <ClCompile Include="Source\Render\textures.cpp" />
     <ClCompile Include="Source\Utility\generalUtility.cpp" />
-    <ClCompile Include="Source\Utility\notification.cpp" />
     <ClCompile Include="Source\Utility\stopwatch.cpp" />
     <ClCompile Include="Source\Utility\threadPool.cpp" />
   </ItemGroup>
@@ -374,7 +373,6 @@
     <ClInclude Include="Source\Utility\generalUtility.h" />
     <ClInclude Include="Source\Utility\log.hpp" />
     <ClInclude Include="Source\Utility\messageHandler.hpp" />
-    <ClInclude Include="Source\Utility\notification.h" />
     <ClInclude Include="Source\Utility\optionalCalls.hpp" />
     <ClInclude Include="Source\Utility\package.h" />
     <ClInclude Include="Source\Utility\require.hpp" />

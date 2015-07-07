@@ -11,7 +11,7 @@ namespace MV{
 		Text::Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const Size<> &a_size, const std::string &a_defaultFontIdentifier) :
 			Drawable(a_owner),
 			textLibrary(a_textLibrary),
-			onEnter(onEnterSlot),
+			onEnter(onEnterSignal),
 			fontIdentifier(a_defaultFontIdentifier),
 			formattedText(a_textLibrary, a_size.width, DEFAULT_ID),
 			boxSize(a_size) {
@@ -117,7 +117,7 @@ namespace MV{
 					}
 				} else if (event.key.keysym.sym == SDLK_RETURN) {
 					auto self = std::static_pointer_cast<Text>(shared_from_this());
-					onEnterSlot(self);
+					onEnterSignal(self);
 				}
 			}
 			return false;

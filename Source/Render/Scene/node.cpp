@@ -47,7 +47,7 @@ namespace MV {
 
 		void Component::notifyParentOfComponentChange() {
 			try {
-				owner()->onComponentUpdateSlot(shared_from_this());
+				owner()->onComponentUpdateSignal(shared_from_this());
 			} catch (PointerException &) {
 			}
 		}
@@ -213,8 +213,8 @@ namespace MV {
 				}
 				insertSorted(childNodes, a_child);
 				a_child->myParent = this;
-				a_child->onAddSlot(a_child);
-				onChildAddSlot(a_child);
+				a_child->onAddSignal(a_child);
+				onChildAddSignal(a_child);
 			}
 			return shared_from_this();
 		}
@@ -237,8 +237,8 @@ namespace MV {
 				auto self = shared_from_this();
 				auto child = *foundNode;
 				childNodes.erase(foundNode);
-				child->onRemoveSlot(child);
-				onChildRemoveSlot(self, child);
+				child->onRemoveSignal(child);
+				onChildRemoveSignal(self, child);
 				return child;
 			}
 			require<ResourceException>(!a_throw, "Failed to remove: [", a_id, "] from parent node: [", nodeId, "]");
@@ -254,8 +254,8 @@ namespace MV {
 				auto self = shared_from_this();
 				auto child = *foundNode;
 				childNodes.erase(foundNode);
-				child->onRemoveSlot(child);
-				onChildRemoveSlot(self, child);
+				child->onRemoveSignal(child);
+				onChildRemoveSignal(self, child);
 				return child;
 			}
 			require<ResourceException>(!a_throw, "Failed to remove: [", a_child->id(), "] from parent node: [", nodeId, "]");
@@ -268,8 +268,8 @@ namespace MV {
 			while(!childNodes.empty()){
 				auto childToRemove = *childNodes.begin();
 				childNodes.erase(childNodes.begin());
-				childToRemove->onRemoveSlot(childToRemove);
-				onChildRemoveSlot(self, childToRemove);
+				childToRemove->onRemoveSignal(childToRemove);
+				onChildRemoveSignal(self, childToRemove);
 			}
 			return self;
 		}
@@ -308,7 +308,7 @@ namespace MV {
 					ReSort sort(self);
 					nodeId = a_id;
 				}
-				onOrderChangeSlot(self);
+				onOrderChangeSignal(self);
 			}
 			return self;
 		}
@@ -321,7 +321,7 @@ namespace MV {
 					ReSort sort(self);
 					sortDepth = a_newDepth;
 				}
-				onOrderChangeSlot(self);
+				onOrderChangeSignal(self);
 			}
 			return self;
 		}
@@ -338,7 +338,7 @@ namespace MV {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			translateTo = a_newPosition;
 			auto self = shared_from_this();
-			onTransformChangeSlot(self);
+			onTransformChangeSignal(self);
 			return self;
 		}
 
@@ -346,7 +346,7 @@ namespace MV {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			rotateTo = a_newRotation;
 			auto self = shared_from_this();
-			onTransformChangeSlot(self);
+			onTransformChangeSignal(self);
 			return self;
 		}
 
@@ -354,7 +354,7 @@ namespace MV {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			scaleTo = a_newScale;
 			auto self = shared_from_this();
-			onTransformChangeSlot(self);
+			onTransformChangeSignal(self);
 			return self;
 		}
 
@@ -363,7 +363,7 @@ namespace MV {
 			nodeAlpha = a_alpha;
 			recalculateAlpha();
 			auto self = shared_from_this();
-			onAlphaChangeSlot(self);
+			onAlphaChangeSignal(self);
 			return self;
 		}
 
@@ -398,7 +398,7 @@ namespace MV {
 		}
 
 		BoxAABB<> Node::bounds(bool a_includeChildren /*= true*/) {
-			onBoundsRequestSlot(shared_from_this());
+			onBoundsRequestSignal(shared_from_this());
 			if(a_includeChildren){
 				if(!localBounds.empty() && !localChildBounds.empty()){
 					return BoxAABB<>(localChildBounds).expandWith(localBounds);
@@ -440,7 +440,7 @@ namespace MV {
 				}
 
 				if (localBounds != oldBounds) {
-					onLocalBoundsChangeSlot(self);
+					onLocalBoundsChangeSignal(self);
 				}
 			}
 		}
@@ -505,30 +505,32 @@ namespace MV {
 		Node::Node(Draw2D &a_draw2d, const std::string &a_id) :
 			draw2d(a_draw2d),
 			nodeId(a_id),
-			onEnable(onEnableSlot),
-			onDisable(onDisableSlot),
-			onShow(onShowSlot),
-			onHide(onHideSlot),
-			onBoundsRequest(onBoundsRequestSlot),
-			onPause(onPauseSlot),
-			onResume(onResumeSlot),
-			onChildAdd(onChildAddSlot),
-			onChildRemove(onChildRemoveSlot),
-			onAdd(onAddSlot),
-			onRemove(onRemoveSlot),
-			onTransformChange(onTransformChangeSlot),
-			onLocalBoundsChange(onLocalBoundsChangeSlot),
-			onOrderChange(onOrderChangeSlot),
-			onAlphaChange(onAlphaChangeSlot),
-			onChange(onChangeSlot),
-			onComponentUpdate(onComponentUpdateSlot){
+			onEnable(onEnableSignal),
+			onDisable(onDisableSignal),
+			onShow(onShowSignal),
+			onHide(onHideSignal),
+			onBoundsRequest(onBoundsRequestSignal),
+			onPause(onPauseSignal),
+			onResume(onResumeSignal),
+			onChildAdd(onChildAddSignal),
+			onChildRemove(onChildRemoveSignal),
+			onAdd(onAddSignal),
+			onRemove(onRemoveSignal),
+			onTransformChange(onTransformChangeSignal),
+			onLocalBoundsChange(onLocalBoundsChangeSignal),
+			onOrderChange(onOrderChangeSignal),
+			onAlphaChange(onAlphaChangeSignal),
+			onChange(onChangeSignal),
+			onComponentUpdate(onComponentUpdateSignal),
+			onAttach(onAttachSignal),
+			onDetach(onDetachSignal){
 
 			worldMatrixTransform.makeIdentity();
 			onAdd.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
-				onParentAlphaChangeSignal = myParent->onAlphaChangeSlot.connect([&](const std::shared_ptr<Node> &a_parent) {
+				onParentAlphaChangeSignal = myParent->onAlphaChangeSignal.connect([&](const std::shared_ptr<Node> &a_parent) {
 					recalculateAlpha();
 				});
-				onTransformChangeSlot(a_self);
+				onTransformChangeSignal(a_self);
 				recalculateAlpha();
 				safeOnChange();
 			});
@@ -539,7 +541,7 @@ namespace MV {
 				}
 
 				onParentAlphaChangeSignal = nullptr;
-				onTransformChangeSlot(a_self);
+				onTransformChangeSignal(a_self);
 				recalculateAlpha();
 				safeOnChange();
 			});
@@ -562,13 +564,13 @@ namespace MV {
 					auto owningNode = safeguard->owner();
 					owningNode->safeOnChange();
 				} catch (...) {
-					std::cerr << "Failed to call onChangeSlot from onComponentUpdate! Node went out of scope too soon." << std::endl;
+					std::cerr << "Failed to call onChangeSignal from onComponentUpdate! Node went out of scope too soon." << std::endl;
 				}
 			});
 
 			onChange.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
 				if (a_self->myParent) {
-					a_self->myParent->onChangeSlot(myParent->shared_from_this());
+					a_self->myParent->onChangeSignal(myParent->shared_from_this());
 				}
 			});
 		}
@@ -578,7 +580,7 @@ namespace MV {
 			if (!inOnChange) {
 				SCOPE_EXIT{ inOnChange = false; };
 				inOnChange = true;
-				onChangeSlot(safeguard);
+				onChangeSignal(safeguard);
 			}
 		}
 
@@ -605,15 +607,15 @@ namespace MV {
 			if (!allowDraw) {
 				changedState = true;
 				allowDraw = true;
-				onResumeSlot(self);
+				onResumeSignal(self);
 			}
 			if (!allowUpdate) {
 				changedState = true;
 				allowUpdate = true;
-				onShowSlot(self);
+				onShowSignal(self);
 			}
 			if (changedState) {
-				onEnableSlot(self);
+				onEnableSignal(self);
 			}
 			return self;
 		}
@@ -624,15 +626,15 @@ namespace MV {
 			if (allowDraw) {
 				changedState = true;
 				allowDraw = false;
-				onPauseSlot(self);
+				onPauseSignal(self);
 			}
 			if (allowUpdate) {
 				changedState = true;
 				allowUpdate = false;
-				onHideSlot(self);
+				onHideSignal(self);
 			}
 			if (changedState) {
-				onDisableSlot(self);
+				onDisableSignal(self);
 			}
 			return self;
 		}
@@ -641,9 +643,9 @@ namespace MV {
 			auto self = shared_from_this();
 			if (!allowUpdate) {
 				allowUpdate = true;
-				onResumeSlot(self);
+				onResumeSignal(self);
 				if (allowDraw == true) {
-					onEnableSlot(self);
+					onEnableSignal(self);
 				}
 			}
 			return self;
@@ -653,9 +655,9 @@ namespace MV {
 			auto self = shared_from_this();
 			if (allowUpdate) {
 				allowUpdate = false;
-				onPauseSlot(self);
+				onPauseSignal(self);
 				if (allowDraw == false) {
-					onDisableSlot(self);
+					onDisableSignal(self);
 				}
 			}
 			return self;
@@ -665,9 +667,9 @@ namespace MV {
 			auto self = shared_from_this();
 			if (!allowDraw) {
 				allowDraw = true;
-				onShowSlot(self);
+				onShowSignal(self);
 				if (allowUpdate == true) {
-					onEnableSlot(self);
+					onEnableSignal(self);
 				}
 			}
 			return self;
@@ -677,9 +679,9 @@ namespace MV {
 			auto self = shared_from_this();
 			if (allowDraw) {
 				allowDraw = false;
-				onHideSlot(self);
+				onHideSignal(self);
 				if (allowUpdate == false) {
-					onDisableSlot(self);
+					onDisableSignal(self);
 				}
 			}
 			return self;
@@ -789,6 +791,24 @@ namespace MV {
 			return position(position() + a_newPosition);
 		}
 
+		MV::AxisAngles Node::worldRotation() const {
+			auto accumulatedRotation = rotateTo;
+			const Node* current = this;
+			while (current = current->myParent) {
+				accumulatedRotation += current->rotateTo;
+			}
+			return accumulatedRotation;
+		}
+
+		std::shared_ptr<Node> Node::worldRotation(const AxisAngles &a_newAngle) {
+			auto accumulatedRotation = a_newAngle;
+			const Node* current = this;
+			while (current = current->myParent) {
+				accumulatedRotation -= current->rotateTo;
+			}
+			return rotation(accumulatedRotation);
+		}
+
 		MV::Scale Node::worldScale() const {
 			auto accumulatedScale = scaleTo;
 			const Node* current = this;
@@ -796,6 +816,15 @@ namespace MV {
 				accumulatedScale *= current->scaleTo;
 			}
 			return accumulatedScale;
+		}
+
+		std::shared_ptr<Node> Node::worldScale(const Scale &a_newScale) {
+			auto accumulatedScale = a_newScale;
+			const Node* current = this;
+			while (current = current->myParent) {
+				accumulatedScale /= current->scaleTo;
+			}
+			return scale(accumulatedScale);
 		}
 
 		void Node::markMatrixDirty(bool a_rootCall) {
@@ -922,10 +951,10 @@ namespace MV {
 		void Node::unsilenceInternal(bool a_callBatched /*= true*/, bool a_callChanged /*= true*/) {
 			const std::shared_ptr<Node> self = shared_from_this();
 			bool changed = false;
-			if (onChildAddSlot.unblock()) {
+			if (onChildAddSignal.unblock()) {
 				if (a_callBatched) {
 					try {
-						onChildAddSlot(self);
+						onChildAddSignal(self);
 					} catch (std::exception &e) {
 						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
 					}
@@ -933,86 +962,25 @@ namespace MV {
 				changed = true;
 			}
 
-			if (onChildRemoveSlot.unblock()) {
+			if (onChildRemoveSignal.unblock()) {
 				//TODO: call for each child removed
 				changed = true;
 			}
 
-			if (onAddSlot.unblock()) {
+			if (onAddSignal.unblock()) {
 				if (a_callBatched) {
 					try {
-						onAddSlot(self);
+						onAddSignal(self);
 					} catch (std::exception &e) {
 						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
 					}
 				}
 				changed = true;
 			}
-			if (onRemoveSlot.unblock()) {
+			if (onRemoveSignal.unblock()) {
 				if (a_callBatched) {
 					try {
-						onRemoveSlot(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-
-			if (onEnableSlot.unblock() && (allowUpdate && allowDraw)) {
-				if (a_callBatched) {
-					try {
-						onEnableSlot(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onDisableSlot.unblock() && (!allowDraw && !allowUpdate)) {
-				if (a_callBatched) {
-					try {
-						onDisableSlot(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onPauseSlot.unblock() && (!allowUpdate)) {
-				if (a_callBatched) {
-					try {
-						onPauseSlot(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onResumeSlot.unblock() && (allowUpdate)) {
-				if (a_callBatched) {
-					try {
-						onResumeSlot(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onShowSlot.unblock() && (allowDraw)) {
-				if (a_callBatched) {
-					try {
-						onShowSlot(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onHideSlot.unblock() && (!allowDraw)) {
-				if (a_callBatched) {
-					try {
-						onHideSlot(self);
+						onRemoveSignal(self);
 					} catch (std::exception &e) {
 						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
 					}
@@ -1020,10 +988,60 @@ namespace MV {
 				changed = true;
 			}
 
-			if (onBoundsRequestSlot.unblock()) {
+			if (onEnableSignal.unblock() && (allowUpdate && allowDraw)) {
 				if (a_callBatched) {
 					try {
-						onBoundsRequestSlot(self);
+						onEnableSignal(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onDisableSignal.unblock() && (!allowDraw && !allowUpdate)) {
+				if (a_callBatched) {
+					try {
+						onDisableSignal(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onPauseSignal.unblock() && (!allowUpdate)) {
+				if (a_callBatched) {
+					try {
+						onPauseSignal(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onResumeSignal.unblock() && (allowUpdate)) {
+				if (a_callBatched) {
+					try {
+						onResumeSignal(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onShowSignal.unblock() && (allowDraw)) {
+				if (a_callBatched) {
+					try {
+						onShowSignal(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onHideSignal.unblock() && (!allowDraw)) {
+				if (a_callBatched) {
+					try {
+						onHideSignal(self);
 					} catch (std::exception &e) {
 						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
 					}
@@ -1031,40 +1049,10 @@ namespace MV {
 				changed = true;
 			}
 
-			if (onTransformChangeSlot.unblock()) {
+			if (onBoundsRequestSignal.unblock()) {
 				if (a_callBatched) {
 					try {
-						onTransformChangeSlot(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onLocalBoundsChangeSlot.unblock()) {
-				if (a_callBatched) {
-					try {
-						onLocalBoundsChangeSlot(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onOrderChangeSlot.unblock()) {
-				if (a_callBatched) {
-					try {
-						onOrderChangeSlot(self);
-					} catch (std::exception &e) {
-						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
-					}
-				}
-				changed = true;
-			}
-			if (onAlphaChangeSlot.unblock()) {
-				if (a_callBatched) {
-					try {
-						onAlphaChangeSlot(self);
+						onBoundsRequestSignal(self);
 					} catch (std::exception &e) {
 						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
 					}
@@ -1072,12 +1060,53 @@ namespace MV {
 				changed = true;
 			}
 
-			if (onComponentUpdateSlot.unblock()) {
+			if (onTransformChangeSignal.unblock()) {
+				if (a_callBatched) {
+					try {
+						onTransformChangeSignal(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onLocalBoundsChangeSignal.unblock()) {
+				if (a_callBatched) {
+					try {
+						onLocalBoundsChangeSignal(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onOrderChangeSignal.unblock()) {
+				if (a_callBatched) {
+					try {
+						onOrderChangeSignal(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onAlphaChangeSignal.unblock()) {
+				if (a_callBatched) {
+					try {
+						onAlphaChangeSignal(self);
+					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+
+			if (onComponentUpdateSignal.unblock()) {
 				//TODO: call for each component updated
 				changed = true;
 			}
 
-			onChangeSlot.unblock();
+			onChangeSignal.unblock();
 			if (changed && a_callChanged) {
 				safeOnChange();
 			}

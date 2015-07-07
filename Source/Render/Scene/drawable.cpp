@@ -115,12 +115,12 @@ namespace MV {
 				glEnableVertexAttribArray(1);
 				glEnableVertexAttribArray(2);
 
-				auto positionOffset = static_cast<GLsizei>(offsetof(DrawPoint, x));
-				auto textureOffset = static_cast<GLsizei>(offsetof(DrawPoint, textureX));
-				auto colorOffset = static_cast<GLsizei>(offsetof(DrawPoint, R));
-				glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (void*)positionOffset); //Point
-				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (void*)textureOffset); //UV
-				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (void*)colorOffset); //Color
+				auto positionOffset = static_cast<size_t>(offsetof(DrawPoint, x));
+				auto textureOffset = static_cast<size_t>(offsetof(DrawPoint, textureX));
+				auto colorOffset = static_cast<size_t>(offsetof(DrawPoint, R));
+				glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)positionOffset); //Point
+				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
+				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
 
 				shaderProgram->set("texture", ourTexture);
 				shaderProgram->set("transformation", owner()->renderer().projectionMatrix().top() * owner()->worldTransform());

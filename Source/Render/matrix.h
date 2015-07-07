@@ -141,10 +141,10 @@ namespace MV {
 	};
 
 	class MatrixStack {
-		Slot<void()> onChangedSlot;
+		Signal<void()> onChangedSignal;
 	public:
 		MatrixStack(const std::string &a_name = ""):
-			onChanged(onChangedSlot),
+			onChanged(onChangedSignal),
 			name(a_name){
 			push(TransformMatrix());
 		}
@@ -156,7 +156,7 @@ namespace MV {
 		void pop();
 		void clear();
 
-		SlotRegister<void()> onChanged;
+		SignalRegister<void()> onChanged;
 	private:
 		std::vector<TransformMatrix> stack;
 		std::string name;

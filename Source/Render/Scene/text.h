@@ -12,14 +12,14 @@ namespace MV{
 			friend cereal::access;
 
 		public:
-			typedef void TextSlotSignature(std::shared_ptr<Text>);
+			typedef void TextSignalSignature(std::shared_ptr<Text>);
 
 		private:
 
-			Slot<TextSlotSignature> onEnterSlot;
+			Signal<TextSignalSignature> onEnterSignal;
 
 		public:
-			SlotRegister<TextSlotSignature> onEnter;
+			SignalRegister<TextSignalSignature> onEnter;
 
 			DrawableDerivedAccessors(Text)
 

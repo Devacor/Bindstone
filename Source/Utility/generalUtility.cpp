@@ -3,7 +3,6 @@
 #include <vector>
 #include <cmath>
 #include <map>
-#include <boost/lexical_cast.hpp>
 #include <algorithm>
 
 #ifdef __APPLE__

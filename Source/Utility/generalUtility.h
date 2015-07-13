@@ -155,7 +155,7 @@ namespace MV {
 		Type deltaX = x1-x2, deltaY = y1-y2;
 		if(deltaX<0){deltaX*=-1;}
 		if(deltaY<0){deltaY*=-1;}
-		return sqrt(((deltaX)*(deltaX)) + ((deltaY)*(deltaY)));
+		return sqrt(static_cast<double>(((deltaX)*(deltaX)) + ((deltaY)*(deltaY))));
 	}
 
 	template <class Type>

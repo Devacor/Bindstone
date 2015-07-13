@@ -125,6 +125,17 @@ namespace MV {
 		}
 	};
 
+	class LogicException : public Exception {
+	public:
+		explicit LogicException(const std::string& a_message) : Exception(a_message), std::runtime_error(a_message) {}
+		explicit LogicException(const char *a_message) : Exception(a_message), std::runtime_error(a_message) {}
+
+		virtual const char * what() const override {
+			prefixWhat("Logic Exception: ");
+			return combinedWhat.c_str();
+		}
+	};
+
 	template <typename ExceptionType, typename ConditionType, typename... Args>
 	inline void require(ConditionType&& a_condition, Args&&... a_args){
 		if(!a_condition){

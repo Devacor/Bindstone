@@ -42,18 +42,20 @@ public:
 		}
 	};
 
-	struct BuildingAttributes {
+	struct DescriptiveAttributes {
 		std::string id;
 
 		std::string name;
 		std::string icon;
 		std::string description;
+		std::string spine;
 
 		float spawn;
 		int count;
 		int cost;
 
 		int income;
+		float incomeMultiplier;
 
 		std::vector<std::string> unlocked;
 
@@ -82,7 +84,7 @@ public:
 		return actualCombatAttributes;
 	}
 
-	Creature::BuildingAttributes buildingAttributes() {
+	Creature::DescriptiveAttributes buildingAttributes() {
 		return actualBuildingAttributes;
 	}
 
@@ -126,7 +128,7 @@ protected:
 	std::string playerId;
 
 	CombatAttributes actualCombatAttributes;
-	BuildingAttributes actualBuildingAttributes;
+	DescriptiveAttributes actualBuildingAttributes;
 
 	std::unique_ptr<CreatureBehavior> ai;
 };
@@ -149,12 +151,17 @@ protected:
 		return creature.lock()->actualCombatAttributes;
 	}
 
-	Creature::BuildingAttributes& buildingAttributes() {
+	Creature::DescriptiveAttributes& buildingAttributes() {
 		return creature.lock()->actualBuildingAttributes;
 	}
 
 	std::weak_ptr<Creature> creature;
 	std::shared_ptr<MV::Scene::Node> visual;
+};
+
+class CreatureDictionary {
+public:
+	//MV::Scene::SafeComponent<Creature> spawn()
 };
 
 class Building : public MV::Scene::Component {
@@ -180,6 +187,10 @@ protected:
 		auto creatureClone = std::static_pointer_cast<Creature>(a_clone);
 		return a_clone;
 	}
+
+	void upgrade(int index = 0) {
+
+	}
 private:
 
 	template <class Archive>
@@ -194,13 +205,14 @@ private:
 	static void load_and_construct(Archive & archive, cereal::construct<Building> &construct) {
 		construct(std::shared_ptr<Node>());
 		archive(
-			//cereal::make_nvp("shouldDraw", construct->shouldDraw),
+			cereal::make_nvp("shouldDraw", construct->shouldDraw),
 			cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
 		);
 		construct->initialize();
 	}
 
-	std::vector<Creature> creatureTemplates;
+	std::shared_ptr<CreatureDictionary> spawner;
+	std::vector<std::vector<std::string>> templates;
 };
 
 #endif

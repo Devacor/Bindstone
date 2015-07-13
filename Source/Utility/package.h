@@ -3,6 +3,7 @@
 
 	#include "Utility/scopeGuard.hpp"
 	#include "Utility/require.hpp"
+	#include "Utility/expression.h"
 	#include "Utility/generalUtility.h"
 	#include "Utility/stopwatch.h"
 	#include "Utility/signal.hpp"

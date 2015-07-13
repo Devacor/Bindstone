@@ -42,7 +42,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
     <PlatformToolset>v140</PlatformToolset>
   </PropertyGroup>
@@ -84,7 +84,7 @@
     <LibraryPath>$(SolutionDir)../external/boost_1_58_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL-2.0.4-9583/VisualC/x64/Release/;$(LibraryPath)</LibraryPath>
     <SourcePath>$(SolutionDir)../external/boost_1_58_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/spine/spine-c/src/spine/</SourcePath>
     <RunCodeAnalysis>false</RunCodeAnalysis>
-    <LinkIncremental>false</LinkIncremental>
+    <LinkIncremental>true</LinkIncremental>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -160,7 +160,7 @@
       <AdditionalIncludeDirectories>
       </AdditionalIncludeDirectories>
       <EnablePREfast>false</EnablePREfast>
-      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501</AdditionalOptions>
+      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj</AdditionalOptions>
       <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <DisableLanguageExtensions>false</DisableLanguageExtensions>
@@ -169,14 +169,15 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>false</EnableCOMDATFolding>
+      <OptimizeReferences>false</OptimizeReferences>
       <AdditionalDependencies>opengl32.lib;glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;libboost_filesystem-vc140-mt-1_58.lib;libboost_system-vc140-mt-1_58.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
       <AdditionalLibraryDirectories>
       </AdditionalLibraryDirectories>
-      <Profile>true</Profile>
-      <LinkStatus>true</LinkStatus>
+      <Profile>false</Profile>
+      <LinkStatus>
+      </LinkStatus>
       <PreventDllBinding>true</PreventDllBinding>
     </Link>
   </ItemDefinitionGroup>
@@ -246,6 +247,7 @@
     <ClCompile Include="Source\Render\sharedTextures.cpp" />
     <ClCompile Include="Source\Render\texturePacker.cpp" />
     <ClCompile Include="Source\Render\textures.cpp" />
+    <ClCompile Include="Source\Utility\expression.cpp" />
     <ClCompile Include="Source\Utility\generalUtility.cpp" />
     <ClCompile Include="Source\Utility\stopwatch.cpp" />
     <ClCompile Include="Source\Utility\threadPool.cpp" />
@@ -300,6 +302,7 @@
     <ClInclude Include="..\external\cereal\include\cereal\types\unordered_set.hpp" />
     <ClInclude Include="..\external\cereal\include\cereal\types\utility.hpp" />
     <ClInclude Include="..\external\cereal\include\cereal\types\vector.hpp" />
+    <ClInclude Include="..\external\exprtk\exprtk.hpp" />
     <ClInclude Include="..\external\spine\spine-c\include\spine\Animation.h" />
     <ClInclude Include="..\external\spine\spine-c\include\spine\AnimationState.h" />
     <ClInclude Include="..\external\spine\spine-c\include\spine\AnimationStateData.h" />
@@ -370,6 +373,7 @@
     <ClInclude Include="Source\Render\sharedTextures.h" />
     <ClInclude Include="Source\Render\texturePacker.h" />
     <ClInclude Include="Source\Render\textures.h" />
+    <ClInclude Include="Source\Utility\expression.h" />
     <ClInclude Include="Source\Utility\generalUtility.h" />
     <ClInclude Include="Source\Utility\log.hpp" />
     <ClInclude Include="Source\Utility\messageHandler.hpp" />

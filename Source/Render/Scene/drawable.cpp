@@ -169,7 +169,6 @@ namespace MV {
 		}
 
 		void Drawable::initialize() {
-			Component::initialize();
 			if (ourTexture && !textureSizeSignal) {
 				textureSizeSignal = TextureHandle::SignalType::make([&](std::shared_ptr<MV::TextureHandle> a_handle) {
 					updateTextureCoordinates();

@@ -1,6 +1,7 @@
 #include "formattedText.h"
 #include "Render/Scene/package.h"
 #include <algorithm>
+#include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string.hpp>
 
 namespace MV {

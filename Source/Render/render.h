@@ -5,9 +5,9 @@
 
 #ifndef _RENDER_H_
 #define _RENDER_H_
-
-#define NOMINMAX 1
-
+#ifndef NOMINMAX
+	#define NOMINMAX 1
+#endif
 #if defined(WIN32) && !defined(GL_BGR)
 #define GL_BGR GL_BGR_EXT
 #endif

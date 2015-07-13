@@ -19,19 +19,25 @@ namespace MV {
 	class MapNode {
 		friend TemporaryCost;
 	public:
-		typedef void CallbackSignature(const std::shared_ptr<Map> &, const Point<int> &);
+		typedef void CallbackSignature(std::shared_ptr<Map>, const Point<int> &);
+		typedef SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
 	private:
 		Signal<CallbackSignature> onBlockSignal;
 		Signal<CallbackSignature> onUnblockSignal;
+		Signal<CallbackSignature> onStaticBlockSignal;
+		Signal<CallbackSignature> onStaticUnblockSignal;
 		Signal<CallbackSignature> onCostChangeSignal;
 
 	public:
 		SignalRegister<CallbackSignature> onBlock;
 		SignalRegister<CallbackSignature> onUnblock;
+		SignalRegister<CallbackSignature> onStaticBlock;
+		SignalRegister<CallbackSignature> onStaticUnblock;
 		SignalRegister<CallbackSignature> onCostChange;
 
 		MapNode(Map& a_grid, const Point<int> &a_location, float a_cost, bool a_useCorners);
-
+		MapNode(const MapNode &a_rhs);
+		MapNode& operator=(const MapNode &a_rhs) = delete;
 		float baseCost() const;
 		void baseCost(float a_newCost);
 
@@ -40,6 +46,10 @@ namespace MV {
 		void block();
 		void unblock();
 		bool blocked() const;
+
+		void staticBlock();
+		void staticUnblock();
+		bool staticallyBlocked() const;
 
 		Map& parent();
 		Point<int> position() const;
@@ -60,9 +70,10 @@ namespace MV {
 		void removeTemporaryCost(float a_newTemporaryCost);
 
 		void initializeEdge(size_t a_index, const Point<int> &a_offset) const;
-		void lazyInitialize() const;
 
-		bool cornerDetected(const Point<int> a_location);
+		bool edgeBlocked(const Point<int> &a_offset) const;
+
+		void lazyInitialize() const;
 
 		Map& map;
 
@@ -73,13 +84,11 @@ namespace MV {
 		Point<int> location;
 		float travelCost = 1.0f;
 		float temporaryCost = 0.0f;
+		bool staticBlocked = false;
 		int blockedSemaphore = 0;
 	};
 
-	class NavigationAgent;
-
 	class Map : public std::enable_shared_from_this<Map> {
-		friend NavigationAgent;
 	public:
 		static std::shared_ptr<Map> make(const Size<int> &a_size, bool a_useCorners = false) {
 			return std::shared_ptr<Map>(new Map(a_size, 1.0f, a_useCorners));
@@ -106,12 +115,20 @@ namespace MV {
 		}
 
 		bool blocked(Point<int> a_location) const {
-			bool cellInBounds = inBounds(a_location);
-			return (cellInBounds && squares[a_location.x][a_location.y].blocked()) || !cellInBounds;
+			return !inBounds(a_location) || squares[a_location.x][a_location.y].blocked();
+		}
+
+		bool staticallyBlocked(Point<int> a_location) const {
+			return !inBounds(a_location) || squares[a_location.x][a_location.y].staticallyBlocked();
+		}
+
+		bool corners() const {
+			return usingCorners;
 		}
 
 	private:
 		Map(const Size<int> &a_size, float a_defaultCost, bool a_useCorners) :
+			usingCorners(a_useCorners),
 			ourSize(a_size) {
 
 			squares.reserve(a_size.width);
@@ -119,24 +136,16 @@ namespace MV {
 				std::vector<MapNode> column;
 				column.reserve(a_size.height);
 				for (int y = 0; y < a_size.height; ++y) {
-					column.push_back({ *this,{ x, y }, a_defaultCost, a_useCorners });
+					column.emplace_back( *this, Point<int>( x, y ), a_defaultCost, a_useCorners );
 				}
 				squares.push_back(column);
 			}
 		}
 
-		void add(NavigationAgent* a_agent) {
-			agents.push_back(a_agent);
-		}
-
-		void remove(NavigationAgent* a_agent) {
-			agents.erase(std::find(agents.begin(), agents.end(), a_agent));
-		}
+		bool usingCorners;
 
 		std::vector<std::vector<MapNode>> squares;
 		Size<int> ourSize;
-
-		std::vector<NavigationAgent*> agents;
 	};
 
 	class TemporaryCost {
@@ -180,16 +189,15 @@ namespace MV {
 
 	class Path {
 	public:
-		Path(std::shared_ptr<Map> a_map, const Point<int>& a_start, const Point<int>& a_end) :
+		Path(std::shared_ptr<Map> a_map, const Point<int>& a_start, const Point<int>& a_end, PointPrecision a_distance = 0.0f) :
 			map(a_map),
 			startPosition(std::min(a_start.x, map->size().width), std::min(a_start.y, map->size().height)),
-			endPosition(std::min(a_end.x, map->size().width), std::min(a_end.y, map->size().height)) {
+			goalPosition(std::min(a_end.x, map->size().width), std::min(a_end.y, map->size().height)),
+			minimumDistance(a_distance){
 		}
 
 		std::vector<PathNode> path() {
-			if (isDirty) {
-				calculate();
-			}
+			calculate();
 			return pathNodes;
 		}
 
@@ -197,8 +205,18 @@ namespace MV {
 			return startPosition;
 		}
 
+		//Desired Target
+		Point<int> goal() const {
+			return goalPosition;
+		}
+
+		//End of Path
 		Point<int> end() const {
 			return endPosition;
+		}
+
+		bool complete() const {
+			return found;
 		}
 	private:
 		class PathCalculationNode {
@@ -258,10 +276,10 @@ namespace MV {
 			float initialCost;
 			bool isCorner;
 
-			PathCalculationNode* ourParent;
+			PathCalculationNode* ourParent = nullptr;
 
-			Path* path;
-			MapNode* mapCell;
+			Path* path = nullptr;
+			MapNode* mapCell = nullptr;
 		};
 
 		void calculate() {
@@ -269,42 +287,53 @@ namespace MV {
 			closed.clear();
 
 			insertIntoOpen(startPosition, 0.0f);
-			bool found = false;
+			found = false;
 			PathCalculationNode* currentNode = nullptr;
+			PathCalculationNode* bestNode = nullptr;
 			while (!open.empty()) {
 				closed.push_back(open.back());
 				currentNode = &closed.back();
 				open.pop_back();
 
-				if (currentNode->position() == endPosition) {
+				if (bestNode == nullptr || *currentNode < *bestNode) {
+					bestNode = currentNode;
+				}
+				auto nodeDistance = static_cast<PointPrecision>(distance(currentNode->position(), goalPosition));
+				if (currentNode->position() == goalPosition || nodeDistance < minimumDistance || equals(nodeDistance, minimumDistance)) {
 					found = true;
 					break; //success
 				}
-				if (!map->blocked(currentNode->position())) {
-					auto& mapNode = currentNode->mapNode();
-					for (size_t i = 0; i < mapNode.size(); ++i) {
-						if (mapNode[i] != nullptr) {
-							insertIntoOpen(mapNode[i]->position(), mapNode[i]->totalCost(), currentNode, i >= 4);
-						}
+
+				auto& mapNode = currentNode->mapNode();
+				for (size_t i = 0; i < mapNode.size(); ++i) {
+					if (mapNode[i] != nullptr && !mapNode[i]->blocked()) {
+						insertIntoOpen(mapNode[i]->position(), mapNode[i]->totalCost(), currentNode, i >= 4);
 					}
 				}
+
 			}
+			if (!found) {
+				currentNode = (bestNode == nullptr || (distance(goalPosition, startPosition) < distance(goalPosition, bestNode->position()))) ? nullptr : bestNode;
+			}
+			
+			endPosition = currentNode != nullptr ? currentNode->position() : startPosition;
 
 			pathNodes.clear();
 			while (currentNode) {
 				pathNodes.push_back({ currentNode->position(), currentNode->mapNode().baseCost() * (currentNode->corner() ? 1.4f : 1.0f) });
 				currentNode = currentNode->parent();
 			}
+			std::reverse(pathNodes.begin(), pathNodes.end());
 		}
 
 		void insertIntoOpen(const Point<int> &a_position, float a_startCost, PathCalculationNode* a_parent = nullptr, bool a_isCorner = false) {
 			if (!existsBetter(a_position, a_startCost)) {
-				insertReverseSorted(open, Path::PathCalculationNode(endPosition, map->get(a_position), (a_parent ? a_parent->estimatedTotalCost() : 0.0f) + (a_startCost * (a_isCorner ? 1.4f : 1.0f)), a_parent));
+				insertReverseSorted(open, Path::PathCalculationNode(goalPosition, map->get(a_position), (a_parent ? a_parent->estimatedTotalCost() : 0.0f) + (a_startCost * (a_isCorner ? 1.4f : 1.0f)), a_parent));
 			}
 		}
 
 		bool existsBetter(const Point<int> &a_position, float a_startCost) {
-			if (std::find_if(closed.cbegin(), closed.cend(), [&](const PathCalculationNode &a_node) {return a_node == a_position && a_node.costToArrive() < a_startCost; }) != closed.cend()) {
+			if (std::find_if(closed.cbegin(), closed.cend(), [&](const PathCalculationNode &a_node) {return a_node == a_position; }) != closed.cend()) {
 				return true;
 			}
 			auto foundOpen = std::find_if(open.cbegin(), open.cend(), [&](const PathCalculationNode &a_node) {return a_node == a_position; });
@@ -319,11 +348,14 @@ namespace MV {
 			return false;
 		}
 
-		bool isDirty = true;
+		bool found = false;
+
+		PointPrecision minimumDistance = 0;
 
 		std::shared_ptr<Map> map;
 
 		Point<int> startPosition;
+		Point<int> goalPosition;
 		Point<int> endPosition;
 
 		std::vector<PathNode> pathNodes;
@@ -334,42 +366,111 @@ namespace MV {
 
 	class NavigationAgent {
 	public:
-		NavigationAgent(std::shared_ptr<Map> a_map) :
-			map(a_map) {
-			map->add(this);
+		NavigationAgent(std::shared_ptr<Map> a_map, const Point<int> &a_newPosition = Point<int>()) :
+			map(a_map),
+			ourPosition(a_newPosition),
+			ourGoal(a_newPosition){
+			ourPosition = a_newPosition;
+			map->get(ourPosition).block();
 		}
 
 		~NavigationAgent() {
-			map->remove(this);
+			map->get(ourPosition).unblock();
 		}
 
 		Point<int> position() const {
 			return ourPosition;
 		}
 
+		std::vector<PathNode> path() {
+			if (dirtyPath) {
+				recalculate();
+			}
+			return calculatedPath;
+		}
+
 		void position(const Point<int> &a_newPosition) {
 			ourPosition = a_newPosition;
+			dirtyPath = true;
+		}
+
+		void goal(const Point<int> &a_newGoal, PointPrecision a_acceptableDistance = 0.0f) {
+			ourGoal = a_newGoal;
+			acceptableDistance = std::max(a_acceptableDistance, 0.0f);
+			dirtyPath = true;
+		}
+
+		Point<int> goal() const {
+			return ourGoal;
 		}
 
 		void update(double a_dt) {
-			ourPath = std::make_shared<Path>(map, ourPosition, ourGoal);
+			if (pathfinding())
+			{
+				if (dirtyPath) {
+					recalculate();
+				}
+				PointPrecision squaresToTravelWithRemainder = static_cast<PointPrecision>(a_dt) * ourSpeed + remainder;
+				PointPrecision squaresToTravel = std::floor(squaresToTravelWithRemainder);
+				remainder = squaresToTravelWithRemainder - squaresToTravel;
+
+				if (squaresToTravel > 0 && !calculatedPath.empty()) {
+					map->get(ourPosition).unblock();
+					ourPosition = calculatedPath[std::min(static_cast<size_t>(squaresToTravel), calculatedPath.size() - 1)].position();
+					
+					map->get(ourPosition).block();
+				}
+			}
 		}
 
-		float speed() const {
+		PointPrecision speed() const {
 			return ourSpeed;
 		}
 
-		void speed(float a_newSpeed) {
+		void speed(PointPrecision a_newSpeed) {
 			ourSpeed = a_newSpeed;
+			updateObservedNodes();
 		}
 		bool pathfinding() {
-			return ourPosition == ourGoal;
+			auto goalDistance = distance(ourPosition, ourGoal);
+			return goalDistance > acceptableDistance;
 		}
 	private:
+		void updateObservedNodes() {
+			recievers.clear();
+			costs.clear();
+			for (int i = 0; i < calculatedPath.size() && i < (ourSpeed*4.0f); ++i) {
+				costs.push_back(TemporaryCost(map, calculatedPath[i].position(), static_cast<PointPrecision>(i) / (ourSpeed*4.0f)));
+			}
+			for (auto&& node : calculatedPath) {
+				auto& mapNode = map->get(node.position());
+				auto reciever = mapNode.onBlock.connect([&](const std::shared_ptr<Map> &, const Point<int> &a_position) {
+					if (a_position != ourPosition) {
+						dirtyPath = true;
+					}
+				});
+				recievers.push_back(reciever);
+			}
+		}
+
+		void recalculate() {
+			map->get(ourPosition).unblock();
+			ourPath = std::make_shared<Path>(map, ourPosition, ourGoal, acceptableDistance);
+			calculatedPath = ourPath->path();
+			map->get(ourPosition).block();
+			updateObservedNodes();
+		}
+
+		bool dirtyPath = true;
 		Point<int> ourPosition;
 		Point<int> ourGoal;
-		float ourSpeed = 1.0f;
+		PointPrecision ourSpeed = 1.0f;
+		PointPrecision remainder = 0.0f;
 		std::shared_ptr<Map> map;
 		std::shared_ptr<Path> ourPath;
+		std::vector<PathNode> calculatedPath;
+		PointPrecision acceptableDistance = 0.0f;
+		std::vector<TemporaryCost> costs;
+		std::vector<MapNode::SharedRecieverType> recievers;
 	};
 }

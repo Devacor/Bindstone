@@ -3,13 +3,29 @@
 namespace MV {
 
 	MapNode::MapNode(Map& a_grid, const Point<int> &a_location, float a_cost, bool a_useCorners) :
+		initialized(false),
 		travelCost(a_cost),
 		location(a_location),
 		map(a_grid),
 		useCorners(a_useCorners),
 		onBlock(onBlockSignal),
 		onUnblock(onUnblockSignal),
+		onStaticBlock(onStaticBlockSignal),
+		onStaticUnblock(onStaticUnblockSignal),
 		onCostChange(onCostChangeSignal){
+	}
+
+	MapNode::MapNode(const MapNode &a_rhs) :
+		initialized(false),
+		travelCost(a_rhs.travelCost),
+		location(a_rhs.location),
+		map(a_rhs.map),
+		useCorners(a_rhs.useCorners),
+		onBlock(onBlockSignal),
+		onUnblock(onUnblockSignal),
+		onStaticBlock(onStaticBlockSignal),
+		onStaticUnblock(onStaticUnblockSignal),
+		onCostChange(onCostChangeSignal) {
 	}
 
 	float MapNode::baseCost() const {
@@ -39,12 +55,30 @@ namespace MV {
 		require<ResourceException>(blockedSemaphore > 0, "Error: Semaphore overextended in MapNode, something is unblocking excessively.");
 		blockedSemaphore--;
 		if (blockedSemaphore == 0) {
-			onBlockSignal(map.shared_from_this(), location);
+			onUnblockSignal(map.shared_from_this(), location);
 		}
 	}
 
 	bool MapNode::blocked() const {
-		return blockedSemaphore != 0;
+		return staticBlocked || blockedSemaphore != 0;
+	}
+
+	void MapNode::staticBlock() {
+		staticBlocked = true;
+		if (blockedSemaphore == 0) {
+			onBlockSignal(map.shared_from_this(), location);
+		}
+	}
+
+	void MapNode::staticUnblock() {
+		staticBlocked = false;
+		if (blockedSemaphore == 0) {
+			onUnblockSignal(map.shared_from_this(), location);
+		}
+	}
+
+	bool MapNode::staticallyBlocked() const {
+		return staticBlocked;
 	}
 
 	Map& MapNode::parent() {
@@ -103,26 +137,50 @@ namespace MV {
 	}
 
 	void MapNode::initializeEdge(size_t a_index, const Point<int> &a_offset) const {
-		if (!map.blocked({ location.x + a_offset.y, location.y }) && !map.blocked({ location.x, location.y + a_offset.y }) && !map.blocked({ location.x + a_offset.x, location.y + a_offset.y })) {
-			edges[a_index] = &map[location.x + a_offset.x][location.y + a_offset.y];
+		if (map.inBounds(location + a_offset)) {
+			auto& cell = map[location.x + a_offset.x][location.y + a_offset.y];
+
+			edges[a_index] = edgeBlocked(a_offset) ? &cell : nullptr;
+
+			cell.onBlock.connect(guid("Block"), [&, a_index, a_offset](std::shared_ptr<Map>, const Point<int> &) {
+				edges[a_index] = edgeBlocked(a_offset) ? &map.get(location + a_offset) : nullptr;
+			});
+			cell.onUnblock.connect(guid("Unblock"), [&, a_index, a_offset](std::shared_ptr<Map>, const Point<int> &) {
+				edges[a_index] = edgeBlocked(a_offset) ? &map.get(location + a_offset) : nullptr;
+			});
 		} else {
 			edges[a_index] = nullptr;
 		}
 	}
 
-	bool MapNode::cornerDetected(const Point<int> a_location) {
-		bool cellInBounds = map.inBounds(a_location);
-		return (cellInBounds && map[a_location.x - 1][a_location.y].blocked()) || !cellInBounds;
+	bool MapNode::edgeBlocked(const Point<int> &a_offset) const {
+		return !map.blocked({ location.x + a_offset.y, location.y }) && !map.blocked({ location.x, location.y + a_offset.y }) && !map.blocked({ location.x + a_offset.x, location.y + a_offset.y });
 	}
 
 	void MapNode::lazyInitialize() const {
 		if (!initialized) {
 			initialized = true;
 
-			edges[0] = !map.blocked({ location.x - 1, location.y }) ? &map[location.x - 1][location.y] : nullptr;
-			edges[1] = !map.blocked({ location.x, location.y - 1 }) ? &map[location.x][location.y - 1] : nullptr;
-			edges[2] = !map.blocked({ location.x + 1, location.y }) ? &map[location.x + 1][location.y] : nullptr;
-			edges[3] = !map.blocked({ location.x, location.y + 1 }) ? &map[location.x][location.y + 1] : nullptr;
+			std::vector<Point<int>> edgePoints = {
+				{ location.x - 1, location.y },
+				{ location.x, location.y - 1 },
+				{ location.x + 1, location.y },
+				{ location.x, location.y + 1 }
+			};
+
+			for (size_t i = 0; i < 4;++i) {
+				if (map.inBounds(edgePoints[i])) {
+					auto edgePoint = edgePoints[i];
+					auto& cell = map.get(edgePoints[i]);
+					edges[i] = !map.blocked(edgePoint) ? &cell : nullptr;
+					cell.onBlock.connect(guid("Block"), [&, i](std::shared_ptr<Map>, const Point<int> &){
+						edges[i] = nullptr;
+					});
+					cell.onUnblock.connect(guid("Unblock"), [&, i, edgePoint](std::shared_ptr<Map>, const Point<int> &) {
+						edges[i] = &map.get(edgePoint);
+					});
+				}
+			}
 
 			if (useCorners) {
 				initializeEdge(4, { -1, -1 });

@@ -219,7 +219,7 @@ namespace MV {
 		}
 
 		size_t cullDeadObservers(){
-			for(auto i = observers.begin(); i != observers.end();) {
+			for(auto i = observers.begin();!observers.empty() && i != observers.end();) {
 				if(i->expired()) {
 					observers.erase(i++);
 				} else{
@@ -250,6 +250,10 @@ namespace MV {
 
 		SignalRegister(Signal<T> &a_slot) :
 			slot(a_slot){
+		}
+
+		SignalRegister(SignalRegister<T> &a_rhs) :
+			slot(a_rhs.slot) {
 		}
 
 		//no protection against duplicates

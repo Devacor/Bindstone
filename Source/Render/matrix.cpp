@@ -1,5 +1,4 @@
 #include "matrix.h"
-#include "boost/lexical_cast.hpp"
 
 #define ALLOW_MATRIX_DEBUG 0
 

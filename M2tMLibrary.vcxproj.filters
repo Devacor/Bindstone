@@ -47,6 +47,9 @@
     <Filter Include="Source Files\ClickerGame">
       <UniqueIdentifier>{f873b108-74e4-4e3a-9e5e-0a0be7c1fe23}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Exprtk">
+      <UniqueIdentifier>{d16dd761-bb15-4a4b-9f6e-ae35af09da85}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Animation\frameSwapper.cpp">
@@ -241,6 +244,9 @@
     </ClCompile>
     <ClCompile Include="Source\Render\Scene\palette.cpp">
       <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Utility\expression.cpp">
+      <Filter>Source Files\Utility</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -634,6 +640,12 @@
     </ClInclude>
     <ClInclude Include="Source\Render\Scene\palette.h">
       <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\exprtk\exprtk.hpp">
+      <Filter>Exprtk</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\expression.h">
+      <Filter>Source Files\Utility</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

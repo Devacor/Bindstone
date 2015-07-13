@@ -5,7 +5,6 @@
 #include "Utility/package.h"
 #include <iostream>
 
-#include <boost/lexical_cast.hpp>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
@@ -45,7 +44,7 @@ namespace MV{
 			boost::property_tree::ptree outputStructure;
 			int i = 0;
 			std::for_each(frameList.begin(), frameList.end(), [&](const Frame &current){
-				outputStructure.add_child(boost::lexical_cast<std::string>(i++), current.save());
+				outputStructure.add_child(std::to_string(i++), current.save());
 			});
 			return outputStructure;
 		}

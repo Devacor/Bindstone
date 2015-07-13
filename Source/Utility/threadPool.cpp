@@ -1,7 +1,19 @@
 #include "threadPool.h"
 #include "log.hpp"
 
+#include "boost/asio.hpp"
+
 namespace MV{
+	struct ThreadPoolDetails {
+		ThreadPoolDetails() :
+			working(new asio_worker::element_type(service)) {
+		}
+
+		boost::asio::io_service service;
+		using asio_worker = std::unique_ptr<boost::asio::io_service::work>;
+		asio_worker working;
+	};
+
 	ThreadPool::ThreadTask::ThreadTask(const std::function<void()> &a_call):
 		call(a_call),
 		isRun(std::make_unique<std::atomic<bool>>(false)),
@@ -15,6 +27,17 @@ namespace MV{
 		isRun(std::make_unique<std::atomic<bool>>(false)),
 		isFinished(std::make_shared<std::atomic<bool>>(false)),
 		handled(false){
+	}
+
+	ThreadPool::ThreadTask::ThreadTask(ThreadTask&& a_rhs) :
+		groupCounter(std::move(a_rhs.groupCounter)),
+		onGroupFinish(std::move(a_rhs.onGroupFinish)),
+		isGroupFinished(std::move(a_rhs.isGroupFinished)),
+		isRun(std::move(a_rhs.isRun)),
+		isFinished(std::move(a_rhs.isFinished)),
+		handled(std::move(a_rhs.handled)),
+		call(std::move(a_rhs.call)),
+		onFinish(std::move(a_rhs.onFinish)){
 	}
 
 	bool ThreadPool::ThreadTask::finished() {
@@ -57,7 +80,7 @@ namespace MV{
 	}
 
 	ThreadPool::~ThreadPool() {
-		service.stop();
+		details->service.stop();
 		for(auto&& worker : workers){
 			worker->join();
 		}
@@ -65,14 +88,13 @@ namespace MV{
 
 	ThreadPool::ThreadPool(size_t a_threads):
 		totalThreads(a_threads < 2 ? 1 : a_threads - 1),
-		service(),
-		working(new asio_worker::element_type(service)) {
+		details(new ThreadPoolDetails()) {
 
 		log(INFO, "Info: Generating ThreadPool [", totalThreads, "]");
 
 		for(size_t i = 0; i < totalThreads; ++i) {
 			workers.emplace_back(new std::thread([this]{
-				service.run();
+				details->service.run();
 			}));
 		}
 	}
@@ -84,7 +106,7 @@ namespace MV{
 		auto thisTask = runningTasks.end();
 		--thisTask;
 
-		service.post([=](){(*thisTask)();});
+		details->service.post([=](){(*thisTask)();});
 
 		return{thisTask->isFinished};
 	}
@@ -98,7 +120,7 @@ namespace MV{
 		auto completed = std::make_shared<std::atomic<bool>>(false);
 		std::weak_ptr<std::atomic<bool>> weakCompleted = completed;
 
-		service.post([=](){(*thisTask)(); if(!weakCompleted.expired()){ *weakCompleted.lock() = true; }});
+		details->service.post([=](){(*thisTask)(); if(!weakCompleted.expired()){ *weakCompleted.lock() = true; }});
 
 		return{thisTask->isFinished};
 	}
@@ -115,7 +137,7 @@ namespace MV{
 			--thisTask;
 			thisTask->group(groupCounter, onGroupComplete, isGroupComplete, a_groupFinishWaitForFrame);
 
-			service.post([=](){(*thisTask)();});
+			details->service.post([=](){(*thisTask)();});
 		}
 		return {isGroupComplete};
 	}

@@ -9,10 +9,8 @@
 #include <list>
 #include <chrono>
 
-#include "boost/asio.hpp"
-
 namespace MV{
-
+	struct ThreadPoolDetails;
 	class TaskStatus {
 	public:
 		TaskStatus(){}
@@ -43,16 +41,7 @@ namespace MV{
 		public:
 			ThreadTask(const std::function<void()> &a_call);
 			ThreadTask(const std::function<void()> &a_call, const std::function<void()> &a_onFinish);
-			ThreadTask(ThreadTask&& a_rhs):
-				groupCounter(std::move(a_rhs.groupCounter)),
-				onGroupFinish(std::move(a_rhs.onGroupFinish)),
-				isGroupFinished(std::move(a_rhs.isGroupFinished)),
-				isRun(std::move(a_rhs.isRun)),
-				isFinished(std::move(a_rhs.isFinished)),
-				handled(std::move(a_rhs.handled)),
-				call(std::move(a_rhs.call)),
-				onFinish(std::move(a_rhs.onFinish)){
-			}
+			ThreadTask(ThreadTask&& a_rhs);
 
 			void operator()();
 
@@ -100,9 +89,7 @@ namespace MV{
 		}
 	private:
 		std::recursive_mutex lock;
-		boost::asio::io_service service;
-		using asio_worker = std::unique_ptr<boost::asio::io_service::work>;
-		asio_worker working;
+		ThreadPoolDetails* details;
 		size_t totalThreads;
 		std::list<ThreadTask> runningTasks;
 		std::vector<std::unique_ptr<std::thread>> workers;

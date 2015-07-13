@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <boost/lexical_cast.hpp>
 
 #include "cereal/cereal.hpp"
 #include "cereal/access.hpp"
@@ -136,7 +135,9 @@ namespace MV {
 			std::shared_ptr<Node> owner() const;
 
 			SafeComponent<Component> clone(const std::shared_ptr<Node> &a_parent) {
-				return SafeComponent<Component>(a_parent, cloneImplementation(a_parent));
+				auto result = SafeComponent<Component>(a_parent, cloneImplementation(a_parent));
+				result->componentId = componentId;
+				return result;
 			}
 
 			SafeComponent<Component> safe() {

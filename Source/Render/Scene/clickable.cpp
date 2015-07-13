@@ -95,6 +95,7 @@ namespace MV {
 		}
 
 		void Clickable::initialize() {
+			Sprite::initialize();
 			onLeftMouseDownHandle = ourMouse.onLeftMouseDown.connect([&](MouseState& a_mouse) {
 				if (mouseInBounds(a_mouse)) {
 					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority.empty() ? owner()->parentIndexList(globalClickPriority) : overrideClickPriority), [&]() {

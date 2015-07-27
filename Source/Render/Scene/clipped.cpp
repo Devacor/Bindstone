@@ -37,14 +37,14 @@ namespace MV {
 				bool emptyCapturedBounds = capturedBounds.empty();
 				auto pointAABB = emptyCapturedBounds ? bounds() : capturedBounds;
 				pointAABB += capturedOffset;
-				auto textureSize = cast<int>(pointAABB.size());
+				auto textureSize = round<int>(pointAABB.size());
 				if (!clippedTexture || clippedTexture->size() != textureSize) {
 					clippedTexture = DynamicTextureDefinition::make("", textureSize, { 0.0f, 0.0f, 0.0f, 0.0f });
 				}
 
 				texture(clippedTexture->makeHandle(textureSize));
 				{
-					auto framebuffer = owner()->renderer().makeFramebuffer(cast<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId())->start();
+					auto framebuffer = owner()->renderer().makeFramebuffer(round<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId())->start();
 
 					SCOPE_EXIT{ owner()->renderer().defaultBlendFunction(); };
 

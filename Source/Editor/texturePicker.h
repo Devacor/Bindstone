@@ -97,7 +97,7 @@ private:
 			button->onAccept.connect("Accept", [&, handle](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				setter(handle, false);
 			});
-			button->owner()->make("icon")->attach<MV::Scene::Sprite>()->bounds({ MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), cellSize) })->texture(handle);
+			button->owner()->make("icon")->attach<MV::Scene::Sprite>()->bounds({ MV::fitAspect(MV::round<MV::PointPrecision>(handle->bounds().size()), cellSize) })->texture(handle);
 		}
 	}
 

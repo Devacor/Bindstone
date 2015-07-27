@@ -174,7 +174,7 @@ namespace MV {
 	}
 
 	Point<int> ProjectionDetails::projectScreen(const Point<> &a_point, const TransformMatrix &a_modelview){
-		return cast<int>(projectScreenRaw(a_point, a_modelview));
+		return round<int>(projectScreenRaw(a_point, a_modelview));
 	}
 
 	Point<> ProjectionDetails::projectWorld(const Point<> &a_point, const TransformMatrix &a_modelview){
@@ -822,7 +822,7 @@ namespace MV {
 	}
 
 	Point<int> Draw2D::screenFromWorld(const Point<> &a_worldPoint) const{
-		return cast<int>(screenFromWorldRaw(a_worldPoint));
+		return round<int>(screenFromWorldRaw(a_worldPoint));
 	}
 
 	Color Draw2D::backgroundColor( Color a_newColor ){

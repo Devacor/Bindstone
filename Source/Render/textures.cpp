@@ -448,7 +448,7 @@ namespace MV {
 	}
 
 	void TextureHandle::updateIntegralBounds(){
-		handleRegion = cast<int>(handlePercent * toScale(textureDefinition->size()));
+		handleRegion = round<int>(handlePercent * toScale(textureDefinition->size()));
 	}
 
 	std::shared_ptr<TextureHandle> TextureHandle::flipX( bool a_flip ) {

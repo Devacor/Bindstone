@@ -125,7 +125,21 @@ namespace MV {
 		return wc;
 	}
 
-	std::string toString(const UtfString& ws){
+	float distance(const float &x1, const float &y1, const float &x2, const float &y2) {
+		float deltaX = x1 - x2, deltaY = y1 - y2;
+		if (deltaX < 0) { deltaX *= -1; }
+		if (deltaY < 0) { deltaY *= -1; }
+		return sqrt(((deltaX)*(deltaX)) + ((deltaY)*(deltaY)));
+	}
+
+	double distance(const double &x1, const double &y1, const double &x2, const double &y2) {
+		double deltaX = x1 - x2, deltaY = y1 - y2;
+		if (deltaX < 0) { deltaX *= -1; }
+		if (deltaY < 0) { deltaY *= -1; }
+		return sqrt(((deltaX)*(deltaX)) + ((deltaY)*(deltaY)));
+	}
+
+	std::string toString(const UtfString& ws) {
 		std::string s;
 		std::for_each(ws.begin(), ws.end(), [&](const UtfChar &wc){
 			s+=toString(wc);

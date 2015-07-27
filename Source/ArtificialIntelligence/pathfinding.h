@@ -158,11 +158,22 @@ namespace MV {
 			map->get(position).addTemporaryCost(temporaryCost);
 		}
 
+		TemporaryCost(TemporaryCost &&a_rhs):
+			temporaryCost(std::move(a_rhs.temporaryCost)),
+			position(std::move(a_rhs.position)),
+			map(std::move(a_rhs.map)){
+			
+			a_rhs.temporaryCost = 0;
+		}
+
 		~TemporaryCost() {
-			map->get(position).removeTemporaryCost(temporaryCost);
+			if (temporaryCost != 0) {
+				map->get(position).removeTemporaryCost(temporaryCost);
+			}
 		}
 
 	private:
+		TemporaryCost(const TemporaryCost &) = delete;
 		std::shared_ptr<Map> map;
 		Point<int> position;
 		float temporaryCost;
@@ -189,11 +200,12 @@ namespace MV {
 
 	class Path {
 	public:
-		Path(std::shared_ptr<Map> a_map, const Point<int>& a_start, const Point<int>& a_end, PointPrecision a_distance = 0.0f) :
+		Path(std::shared_ptr<Map> a_map, const Point<int>& a_start, const Point<int>& a_end, PointPrecision a_distance = 0.0f, int64_t a_maxSearchNodes = -1) :
 			map(a_map),
 			startPosition(std::min(a_start.x, map->size().width), std::min(a_start.y, map->size().height)),
 			goalPosition(std::min(a_end.x, map->size().width), std::min(a_end.y, map->size().height)),
-			minimumDistance(a_distance){
+			minimumDistance(a_distance),
+			maxSearchNodes(a_maxSearchNodes) {
 		}
 
 		std::vector<PathNode> path() {
@@ -290,15 +302,18 @@ namespace MV {
 			found = false;
 			PathCalculationNode* currentNode = nullptr;
 			PathCalculationNode* bestNode = nullptr;
-			while (!open.empty()) {
+			PointPrecision bestDistance = -1;
+			int64_t totalSearched = 0;
+			while (!open.empty() && ((maxSearchNodes > 0 && totalSearched++ < maxSearchNodes) || maxSearchNodes <= 0)) {
 				closed.push_back(open.back());
 				currentNode = &closed.back();
 				open.pop_back();
 
-				if (bestNode == nullptr || *currentNode < *bestNode) {
+				auto nodeDistance = static_cast<PointPrecision>(distance(currentNode->position(), goalPosition));
+				if (bestNode == nullptr || nodeDistance < bestDistance) {
+					bestDistance = nodeDistance;
 					bestNode = currentNode;
 				}
-				auto nodeDistance = static_cast<PointPrecision>(distance(currentNode->position(), goalPosition));
 				if (currentNode->position() == goalPosition || nodeDistance < minimumDistance || equals(nodeDistance, minimumDistance)) {
 					found = true;
 					break; //success
@@ -350,6 +365,8 @@ namespace MV {
 
 		bool found = false;
 
+		int64_t maxSearchNodes = -1;
+
 		PointPrecision minimumDistance = 0;
 
 		std::shared_ptr<Map> map;
@@ -366,19 +383,15 @@ namespace MV {
 
 	class NavigationAgent {
 	public:
-		NavigationAgent(std::shared_ptr<Map> a_map, const Point<int> &a_newPosition = Point<int>()) :
-			map(a_map),
-			ourPosition(a_newPosition),
-			ourGoal(a_newPosition){
-			ourPosition = a_newPosition;
-			map->get(ourPosition).block();
+		static std::shared_ptr<NavigationAgent> make(std::shared_ptr<Map> a_map, const Point<int> &a_newPosition = Point<int>()){
+			return std::shared_ptr<NavigationAgent>(new NavigationAgent(a_map, a_newPosition));
 		}
 
 		~NavigationAgent() {
-			map->get(ourPosition).unblock();
+			map->get(cast<int>(ourPosition)).unblock();
 		}
 
-		Point<int> position() const {
+		Point<PointPrecision> position() const {
 			return ourPosition;
 		}
 
@@ -390,14 +403,16 @@ namespace MV {
 		}
 
 		void position(const Point<int> &a_newPosition) {
-			ourPosition = a_newPosition;
-			dirtyPath = true;
+			map->get(cast<int>(ourPosition)).unblock();
+			ourPosition = cast<PointPrecision>(a_newPosition) + point(.5f, .5f);
+			map->get(cast<int>(ourPosition)).block();
+			markDirty();
 		}
 
 		void goal(const Point<int> &a_newGoal, PointPrecision a_acceptableDistance = 0.0f) {
 			ourGoal = a_newGoal;
 			acceptableDistance = std::max(a_acceptableDistance, 0.0f);
-			dirtyPath = true;
+			markDirty();
 		}
 
 		Point<int> goal() const {
@@ -407,18 +422,35 @@ namespace MV {
 		void update(double a_dt) {
 			if (pathfinding())
 			{
-				if (dirtyPath) {
+				if (dirtyPath || calculatedPath.empty()) {
 					recalculate();
 				}
-				PointPrecision squaresToTravelWithRemainder = static_cast<PointPrecision>(a_dt) * ourSpeed + remainder;
-				PointPrecision squaresToTravel = std::floor(squaresToTravelWithRemainder);
-				remainder = squaresToTravelWithRemainder - squaresToTravel;
-
-				if (squaresToTravel > 0 && !calculatedPath.empty()) {
-					map->get(ourPosition).unblock();
-					ourPosition = calculatedPath[std::min(static_cast<size_t>(squaresToTravel), calculatedPath.size() - 1)].position();
+				if (!calculatedPath.empty() && currentPathIndex < calculatedPath.size()){
+					auto direction = (ourPosition - cast<PointPrecision>(calculatedPath[currentPathIndex].position())).normalized();
 					
-					map->get(ourPosition).block();
+					activeUpdate = true;
+					SCOPE_EXIT{ activeUpdate = false; };
+
+					PointPrecision totalDistanceToTravel = static_cast<PointPrecision>(a_dt) * ourSpeed;
+					bool movedThisFrame = false;
+					while (pathfinding() && totalDistanceToTravel > 0.0f && currentPathIndex < calculatedPath.size()) {
+						auto previousGridSquare = cast<int>(ourPosition);
+						auto desiredPosition = cast<PointPrecision>(calculatedPath[currentPathIndex].position()) + point(.5f, .5f);
+						PointPrecision distanceToNextNode = static_cast<PointPrecision>(distance(ourPosition, desiredPosition));
+						PointPrecision maxDistance = std::min(totalDistanceToTravel, distanceToNextNode);
+						map->get(cast<int>(ourPosition)).unblock();
+						ourPosition += (desiredPosition - ourPosition).normalized() * maxDistance;
+						ourPosition.z = 0;
+						map->get(cast<int>(ourPosition)).block();
+						if (cast<int>(ourPosition) != previousGridSquare || equals(maxDistance, 0.0f)) {
+							++currentPathIndex;
+							movedThisFrame = true;
+						}
+						totalDistanceToTravel -= maxDistance;
+					}
+					if (movedThisFrame) {
+						updateObservedNodes();
+					}
 				}
 			}
 		}
@@ -432,20 +464,35 @@ namespace MV {
 			updateObservedNodes();
 		}
 		bool pathfinding() {
-			auto goalDistance = distance(ourPosition, ourGoal);
-			return goalDistance > acceptableDistance;
+			auto goalDistance = static_cast<PointPrecision>(distance(ourPosition, cast<PointPrecision>(ourGoal) + point(.5f, .5f)));
+			return goalDistance > acceptableDistance && !equals(goalDistance, acceptableDistance);
 		}
 	private:
+		NavigationAgent(std::shared_ptr<Map> a_map, const Point<int> &a_newPosition = Point<int>()) :
+			map(a_map),
+			ourPosition(cast<PointPrecision>(a_newPosition)),
+			ourGoal(a_newPosition) {
+			map->get(cast<int>(ourPosition)).block();
+		}
+		NavigationAgent(const NavigationAgent &) = delete;
+		NavigationAgent& operator=(const NavigationAgent&a_rhs) = delete;
+
+		void markDirty() {
+			costs.clear();
+			recievers.clear();
+			dirtyPath = true;
+		}
+
 		void updateObservedNodes() {
 			recievers.clear();
 			costs.clear();
 			for (int i = 0; i < calculatedPath.size() && i < (ourSpeed*4.0f); ++i) {
-				costs.push_back(TemporaryCost(map, calculatedPath[i].position(), static_cast<PointPrecision>(i) / (ourSpeed*4.0f)));
+				costs.push_back(TemporaryCost(map, calculatedPath[i].position(), (ourSpeed*4.0f) - static_cast<PointPrecision>(i)));
 			}
 			for (auto&& node : calculatedPath) {
 				auto& mapNode = map->get(node.position());
 				auto reciever = mapNode.onBlock.connect([&](const std::shared_ptr<Map> &, const Point<int> &a_position) {
-					if (a_position != ourPosition) {
+					if (a_position != cast<int>(ourPosition) && !activeUpdate) {
 						dirtyPath = true;
 					}
 				});
@@ -454,23 +501,27 @@ namespace MV {
 		}
 
 		void recalculate() {
-			map->get(ourPosition).unblock();
-			ourPath = std::make_shared<Path>(map, ourPosition, ourGoal, acceptableDistance);
+			recievers.clear();
+			costs.clear();
+			currentPathIndex = 0;
+			ourPath = std::make_shared<Path>(map, cast<int>(ourPosition), ourGoal, acceptableDistance, maxNodesToSearch);
 			calculatedPath = ourPath->path();
-			map->get(ourPosition).block();
 			updateObservedNodes();
 		}
 
 		bool dirtyPath = true;
-		Point<int> ourPosition;
+		Point<PointPrecision> ourPosition;
 		Point<int> ourGoal;
+		const int64_t maxNodesToSearch = 100;
 		PointPrecision ourSpeed = 1.0f;
 		PointPrecision remainder = 0.0f;
+		size_t currentPathIndex = 0;
 		std::shared_ptr<Map> map;
 		std::shared_ptr<Path> ourPath;
 		std::vector<PathNode> calculatedPath;
 		PointPrecision acceptableDistance = 0.0f;
 		std::vector<TemporaryCost> costs;
 		std::vector<MapNode::SharedRecieverType> recievers;
+		bool activeUpdate = false;
 	};
 }

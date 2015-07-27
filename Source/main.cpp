@@ -23,37 +23,41 @@ int main(int argc, char *argv[]){
 	}
 
 
-	MV::NavigationAgent agent(world, MV::Point<int>(2, 2)), agent2(world, MV::Point<int>(2, 2)), agent3(world, MV::Point<int>(2, 2));
-	agent.goal(MV::Point<int>(17, 17), 3);
-	agent2.goal(MV::Point<int>(17, 17));
-	agent3.goal(MV::Point<int>(17, 17), 1);
-	agent3.speed(2.0f);
+	std::vector<std::shared_ptr<MV::NavigationAgent>> agents{ MV::NavigationAgent::make(world, MV::Point<int>(2, 2)),
+		MV::NavigationAgent::make(world, MV::Point<int>(2, 2)) };
+	agents[0]->goal(MV::Point<int>(17, 17), 0);
+	agents[1]->goal(MV::Point<int>(17, 17), 0);
 	MV::Stopwatch timer;
-	while (agent.pathfinding() || agent2.pathfinding()) {
+	while (std::find_if(agents.begin(), agents.end(), [](auto&& agent) {
+		return agent->pathfinding();
+	}) != agents.end()) {
 		while (timer.frame(.5f)) {
-			agent.update(1);
-			agent2.update(1);
-			agent3.update(1);
-			auto pathNodes = agent.path();
-			auto pathNoeds2 = agent2.path();
-			pathNodes.insert(pathNodes.end(), pathNoeds2.begin(), pathNoeds2.end());
-
+			for (auto&& agent : agents) {
+				agent->update(1.0f);
+			}
+			std::vector<MV::PathNode> pathNodes;
 			for (int x = 0; x < world->size().width; ++x) {
 				for (int y = 0; y < world->size().height; ++y) {
-					if (MV::point(x, y) == agent.position()) {
-						std::cout << "1";
-					} else if (MV::point(x, y) == agent2.position()) {
-						std::cout << "2";
+					bool wasAgent = false;
+					for (int i = 0; i < agents.size(); ++i) {
+						auto pathNodes2 = agents[i]->path();
+						pathNodes.insert(pathNodes.end(), pathNodes2.begin(), pathNodes2.end());
+						if (MV::point(x, y) == MV::cast<int>(agents[i]->position())) {
+							std::cout << (i + 1);
+							wasAgent = true;
+							break;
+						}
 					}
-					else if (MV::point(x, y) == agent3.position()) {
-						std::cout << "3";
-					}
-					else if (world->blocked({ x, y })) {
-						std::cout << "O";
-					} else if (std::find_if(pathNodes.begin(), pathNodes.end(), [&](const MV::PathNode &a_node) {return a_node.position().x == x && a_node.position().y == y; }) != pathNodes.end()) {
-						std::cout << "*";
-					} else {
-						std::cout << "-";
+					if (!wasAgent) {
+						if (world->blocked({ x, y })) {
+							std::cout << "O";
+						}
+						else if (std::find_if(pathNodes.begin(), pathNodes.end(), [&](const MV::PathNode &a_node) {return a_node.position().x == x && a_node.position().y == y; }) != pathNodes.end()) {
+							std::cout << "*";
+						}
+						else {
+							std::cout << "-";
+						}
 					}
 				}
 				std::cout << std::endl;

@@ -29,7 +29,7 @@ namespace MV {
 		Task(bool a_infinite = false, bool a_blocking = true, bool a_blockParentCompletion = true):
 			Task("root", [a_infinite](const Task&, double){return !a_infinite;}, a_blocking, a_blockParentCompletion){
 			if (a_infinite){
-				unblockChildTasks();
+				unblockChildren();
 			}
 		}
 
@@ -53,7 +53,8 @@ namespace MV {
 			onCancel(onCancelSignal),
 			onSuspend(onSuspendSignal),
 			onResume(onResumeSignal),
-			onException(onExceptionSignal){
+			onException(onExceptionSignal),
+			mostRecentCreated(nullptr){
 		}
 
 		~Task() {
@@ -64,6 +65,10 @@ namespace MV {
 
 		static Task make(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blocking = true, bool a_blockParentCompletion = true){
 			return Task(a_name, a_task, a_blocking, a_blockParentCompletion);
+		}
+
+		std::shared_ptr<Task> last() {
+			return mostRecentCreated;
 		}
 
 		Task& interval(double a_dt) {
@@ -162,6 +167,7 @@ namespace MV {
 			}
 			
 			sequentialTasks.emplace_front(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+			mostRecentCreated = sequentialTasks.front();
 			onFinishAllSignal.unblock();
 			return *this;
 		}
@@ -173,6 +179,7 @@ namespace MV {
 		Task& then(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			sequentialTasks.emplace_back(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
 			onFinishAllSignal.unblock();
+			mostRecentCreated = sequentialTasks.back();
 			return *this;
 		}
 		
@@ -183,13 +190,14 @@ namespace MV {
 		Task& thenAlso(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			sequentialTasks.emplace_back(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
 			onFinishAllSignal.unblock();
+			mostRecentCreated = sequentialTasks.back();
 			return *this;
 		}
 
-		Task& thenAlso(String a_name, bool a_infinite = false, bool a_blockParentCompletion = true) {
+		Task& thenAlso(const std::string &a_name, bool a_infinite = false, bool a_blockParentCompletion = true) {
 			thenAlso(a_name, [a_infinite](const Task&, double){return !a_infinite;}, a_blockParentCompletion);
 			if (a_infinite) {
-				last().unblockChildTasks();
+				last()->unblockChildren();
 			}
 			return *this;
 		}
@@ -197,13 +205,14 @@ namespace MV {
 		Task& also(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			parallelTasks.emplace_back(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
 			onFinishAllSignal.unblock();
+			mostRecentCreated = parallelTasks.back();
 			return *this;
 		}
 		
-		Task& also(String a_name, bool a_infinite = false, bool a_blockParentCompletion = true) {
+		Task& also(const std::string &a_name, bool a_infinite = false, bool a_blockParentCompletion = true) {
 			also(a_name, [a_infinite](const Task&, double){return !a_infinite;}, a_blockParentCompletion);
 			if (a_infinite) {
-				last().unblockChildTasks();
+				last()->unblockChildren();
 			}
 			return *this;
 		}
@@ -261,15 +270,15 @@ namespace MV {
 			}
 		}
 		
-		private void totalUpdateStep(double a_dt){
+		void totalUpdateStep(double a_dt){
 			try {
 				if (!cancelled) {
 					if (a_dt > 0.0) {
 						updateLocalTask(a_dt);
 						updateParallelTasks(a_dt);
 						if ((ourTaskComplete || alwaysRunChildren) && updateChildTasks(a_dt)) {
-							onFinishAllSlot(*this);
-							onFinishAllSlot.block();
+							onFinishAllSignal(*this);
+							onFinishAllSignal.block();
 						}
 					}
 				}
@@ -368,7 +377,9 @@ namespace MV {
 			if(parallelTasks.empty()){
 				parallelTasks = temporaryParallel;
 			}else{
-				for(auto&& task : temporaryParallel){
+				auto accumulatedTasks = parallelTasks;
+				parallelTasks = temporaryParallel;
+				for(auto&& task : accumulatedTasks){
 					parallelTasks.push_back(task);
 				}
 			}
@@ -500,6 +511,8 @@ namespace MV {
 
 		bool blockParentCompletion;
 		bool alwaysRunChildren;
+
+		std::shared_ptr<Task> mostRecentCreated;
 	};
 
 	#define CREATE_HOOK_UP_TASK_ACTION(member) \

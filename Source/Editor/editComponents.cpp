@@ -146,7 +146,7 @@ void EditableGrid::removeHandles() {
 
 void EditableGrid::resetHandles() {
 	removeHandles();
-	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenBounds());
+	auto rectBox = MV::round<MV::PointPrecision>(elementToEdit->screenBounds());
 
 	MV::Size<> currentDimensions = rectBox.size();
 
@@ -157,7 +157,7 @@ void EditableGrid::resetHandles() {
 
 void EditableRectangle::resetHandles() {
 	removeHandles();
-	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenBounds());
+	auto rectBox = MV::round<MV::PointPrecision>(elementToEdit->screenBounds());
 
 	MV::Size<> currentDimensions = rectBox.size();
 	if(aspectSize.width != 0.0f && aspectSize.height != 0.0f){
@@ -296,7 +296,7 @@ void EditableRectangle::repositionHandles(bool a_fireOnChange, bool a_reposition
 		elementToEdit->bounds({ originalPosition, corners.size() });
 	}
 
-	auto rectBox = MV::round(MV::cast<MV::PointPrecision>(elementToEdit->screenBounds()));
+	auto rectBox = MV::round<MV::PointPrecision>(MV::round<MV::PointPrecision>(elementToEdit->screenBounds()));
 	positionHandle->bounds({ MV::point(0.0f, 0.0f), rectBox.size() });
 	positionHandle->owner()->position(rectBox.minPoint);
 
@@ -342,7 +342,7 @@ void EditableRectangle::aspect(MV::Size<> a_newAspect) {
 
 void EditableEmitter::resetHandles() {
 	removeHandles();
-	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenBounds());
+	auto rectBox = MV::round<MV::PointPrecision>(elementToEdit->screenBounds());
 
 	auto handleSize = MV::point(8.0f, 8.0f);
 	EditableEmitter* self = this;
@@ -465,7 +465,7 @@ void EditableEmitter::repositionHandles(bool a_fireOnChange, bool a_repositionEl
 		elementToEdit->properties().maximumPosition = originalPosition + newSize;
 	}
 
-	auto rectBox = MV::round(MV::cast<MV::PointPrecision>(elementToEdit->screenBounds()));
+	auto rectBox = MV::cast<MV::PointPrecision>(elementToEdit->screenBounds());
 	positionHandle->bounds({ MV::point(0.0f, 0.0f), rectBox.size() });
 	positionHandle->owner()->position(rectBox.minPoint);
 

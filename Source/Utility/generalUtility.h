@@ -150,18 +150,9 @@ namespace MV {
 		return static_cast<Type>(val*(PIE / 180.0));
 	}
 
-	template <class Type>
-	double distance(const Type &x1, const Type &y1, const Type &x2, const Type &y2){
-		Type deltaX = x1-x2, deltaY = y1-y2;
-		if(deltaX<0){deltaX*=-1;}
-		if(deltaY<0){deltaY*=-1;}
-		return sqrt(static_cast<double>(((deltaX)*(deltaX)) + ((deltaY)*(deltaY))));
-	}
+	double distance(const double &x1, const double &y1, const double &x2, const double &y2);
 
-	template <class Type>
-	double distance(const Type &a_lhs, const Type &a_rhs) {
-		return distance(a_lhs.x, a_lhs.y, a_rhs.x, a_rhs.y);
-	}
+	float distance(const float &x1, const float &y1, const float &x2, const float &y2);
 
 	template <class Type>
 	double angle(const Type &x1, const Type &y1, const Type &x2, const Type &y2, AngleType returnAs = DEGREES){
@@ -170,11 +161,6 @@ namespace MV {
 		}else{
 			return static_cast<double>(atan2(y2 - y1, x2 - x1));
 		}
-	}
-
-	template <class Type>
-	double angle(const Type &a_lhs, const Type &a_rhs, AngleType returnAs = DEGREES) {
-		return angle(a_lhs.x, a_lhs.y, a_rhs.x, a_rhs.y, returnAs);
 	}
 
 	template <class Type>

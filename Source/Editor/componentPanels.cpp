@@ -355,7 +355,7 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 				auto size = controls->texture()->bounds().size();
 				aspectX->number(size.width);
 				aspectY->number(size.height);
-				controls->aspect(MV::cast<MV::PointPrecision>(size));
+				controls->aspect(MV::round<MV::PointPrecision>(size));
 			}
 		});
 
@@ -365,7 +365,7 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 				auto size = controls->texture()->bounds().size();
 				width->number(size.width);
 				height->number(size.width);
-				controls->size(MV::cast<MV::PointPrecision>(size));
+				controls->size(MV::round<MV::PointPrecision>(size));
 			}
 		});
 

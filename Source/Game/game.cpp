@@ -50,7 +50,7 @@ void Game::initializeWindow(){
 	mouse.onLeftMouseDown.connect("initDrag", [&](MV::MouseState& a_mouse) {
 		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
 			auto signature = mouse.onMove.connect("inDrag", [&](MV::MouseState& a_mouse2) {
-				worldScene->translate(MV::cast<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
+				worldScene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
 			});
 			mouse.onLeftMouseUp.connect("cancelDrag", [=](MV::MouseState& a_mouse2) {
 				a_mouse2.onMove.disconnect(signature);

@@ -208,6 +208,16 @@ namespace MV {
 			archive(CEREAL_NVP(x), CEREAL_NVP(y), CEREAL_NVP(z));
 		}
 
+		Point<PointPrecision> normalized() const {
+			PointPrecision length = magnitude();
+			if (length == 0) { length = 1; }
+			return Point<PointPrecision>(static_cast<PointPrecision>(x) / length, static_cast<PointPrecision>(y) / length, static_cast<PointPrecision>(z) / length);
+		}
+
+		PointPrecision magnitude() const {
+			return sqrt(static_cast<PointPrecision>((x * x) + (y * y) + (z * z)));
+		}
+
 		T x, y, z;
 	};
 
@@ -338,11 +348,6 @@ namespace MV {
 	\**************************/
 
 	template <class T>
-	Point<T> round(const Point<T>& a_point) {
-		return{ std::round(a_point.x), std::round(a_point.y), std::round(a_point.z) };
-	}
-
-	template <class T>
 	Size<T> toSize(const Point<T>& a_point){
 		return Size<T>{a_point.x, a_point.y, a_point.z};
 	}
@@ -432,10 +437,6 @@ namespace MV {
 	/************************\
 	| -------Size IMP------- |
 	\************************/
-	template <class T>
-	Size<T> round(const Size<T>& a_size) {
-		return{ std::round(a_size.width), std::round(a_size.height), std::round(a_size.depth) };
-	}
 
 	template <typename T>
 	Size<T> fitAspect(Size<T> a_toConstrain, Size<T> a_maximum){
@@ -449,18 +450,13 @@ namespace MV {
 	}
 
 	template <class Target, class Origin>
-	inline Size<Target> cast(const Size<Origin> &a_size){
-		return Size<Target>(static_cast<Target>(a_size.width), static_cast<Target>(a_size.height), static_cast<Target>(a_size.depth));
+	inline Size<Target> cast(const Size<Origin> &a_point) {
+		return Size<Target>{static_cast<Target>(a_point.width), static_cast<Target>(a_point.height), static_cast<Target>(a_point.depth)};
 	}
 
-	template <>
-	inline Size<int> cast(const Size<float> &a_size){
-		return Size<int>{static_cast<int>(std::round(a_size.width)), static_cast<int>(std::round(a_size.height)), static_cast<int>(std::round(a_size.depth))};
-	}
-
-	template <>
-	inline Size<int> cast(const Size<double> &a_size){
-		return Size<int>{static_cast<int>(std::round(a_size.width)), static_cast<int>(std::round(a_size.height)), static_cast<int>(std::round(a_size.depth))};
+	template <class Target, class Origin>
+	inline Size<Target> round(const Size<Origin> &a_size){
+		return Size<Target>(static_cast<Target>(std::round(a_size.width)), static_cast<Target>(std::round(a_size.height)), static_cast<Target>(std::round(a_size.depth)));
 	}
 
 	template <class T>
@@ -649,18 +645,13 @@ namespace MV {
 	}
 
 	template <class Target, class Origin>
-	inline Point<Target> cast(const Point<Origin> &a_point){
+	inline Point<Target> round(const Point<Origin> &a_point){
+		return Point<Target>{static_cast<Target>(std::round(a_point.x)), static_cast<Target>(std::round(a_point.y)), static_cast<Target>(std::round(a_point.z))};
+	}
+
+	template <class Target, class Origin>
+	inline Point<Target> cast(const Point<Origin> &a_point) {
 		return Point<Target>{static_cast<Target>(a_point.x), static_cast<Target>(a_point.y), static_cast<Target>(a_point.z)};
-	}
-
-	template <>
-	inline Point<int> cast(const Point<float> &a_point){
-		return Point<int>{static_cast<int>(std::round(a_point.x)), static_cast<int>(std::round(a_point.y)), static_cast<int>(std::round(a_point.z))};
-	}
-
-	template <>
-	inline Point<int> cast(const Point<double> &a_point){
-		return Point<int>{static_cast<int>(std::round(a_point.x)), static_cast<int>(std::round(a_point.y)), static_cast<int>(std::round(a_point.z))};
 	}
 
 	template <class T>
@@ -842,6 +833,16 @@ namespace MV {
 	std::istream& operator>>(std::istream& is, Point<T> &a_point){
 		is >> a_point.x >> a_point.y >> a_point.z;
 		return is;
+	}
+
+	template<typename T>
+	PointPrecision distance(const Point<T> &a_lhs, const Point<T> &a_rhs) {
+		return (a_lhs - a_rhs).magnitude();
+	}
+
+	template <typename T>
+	PointPrecision angle(const Point<T> &a_lhs, const Point<T> &a_rhs, AngleType returnAs = DEGREES) {
+		return static_cast<PointPrecision>(angle(a_lhs.x, a_lhs.y, a_rhs.x, a_rhs.y, returnAs));
 	}
 }
 #endif

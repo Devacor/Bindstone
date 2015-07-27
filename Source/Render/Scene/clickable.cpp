@@ -146,7 +146,7 @@ namespace MV {
 				auto dt = dragTimer.delta();
 				lastDragDelta = dt;
 				auto previousLastVelocity = lastKnownVelocity;
-				lastKnownVelocity = (lastKnownVelocity + (cast<MV::PointPrecision>(dragDeltaPosition) * static_cast<MV::PointPrecision>(dt))) / 2.0f;
+				lastKnownVelocity = (lastKnownVelocity + (round<MV::PointPrecision>(dragDeltaPosition) * static_cast<MV::PointPrecision>(dt))) / 2.0f;
 				onDragSignal(protectFromDismissal, dragStartPosition, dragDeltaPosition);
 				priorMousePosition = a_mouseInner.position();
 			});

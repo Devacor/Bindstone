@@ -1,4 +1,5 @@
 #include "pathfinding.h"
+#include "cereal/archives/json.hpp"
 
 namespace MV {
 
@@ -6,7 +7,7 @@ namespace MV {
 		initialized(false),
 		travelCost(a_cost),
 		location(a_location),
-		map(a_grid),
+		map(&a_grid),
 		useCorners(a_useCorners),
 		onBlock(onBlockSignal),
 		onUnblock(onUnblockSignal),
@@ -28,6 +29,17 @@ namespace MV {
 		onCostChange(onCostChangeSignal) {
 	}
 
+	MapNode::MapNode() :
+		initialized(false),
+		map(nullptr),
+		useCorners(false),
+		onBlock(onBlockSignal),
+		onUnblock(onUnblockSignal),
+		onStaticBlock(onStaticBlockSignal),
+		onStaticUnblock(onStaticUnblockSignal),
+		onCostChange(onCostChangeSignal) {
+	}
+
 	float MapNode::baseCost() const {
 		return travelCost;
 	}
@@ -36,7 +48,7 @@ namespace MV {
 		auto oldCost = travelCost;
 		travelCost = a_newCost;
 		if (oldCost != travelCost) {
-			onCostChangeSignal(map.shared_from_this(), location);
+			onCostChangeSignal(map->shared_from_this(), location);
 		}
 	}
 
@@ -45,44 +57,47 @@ namespace MV {
 	}
 
 	void MapNode::block() {
+		bool wasBlocked = blocked();
 		blockedSemaphore++;
-		if (blockedSemaphore == 1) {
-			onBlockSignal(map.shared_from_this(), location);
+		if (!wasBlocked) {
+			onBlockSignal(map->shared_from_this(), location);
 		}
 	}
 
 	void MapNode::unblock() {
-		require<ResourceException>(blockedSemaphore > 0, "Error: Semaphore overextended in MapNode, something is unblocking excessively.");
+		require<ResourceException>(blockedSemaphore > 0, "Error: Block Semaphore overextended in MapNode, something is unblocking excessively.");
 		blockedSemaphore--;
-		if (blockedSemaphore == 0) {
-			onUnblockSignal(map.shared_from_this(), location);
+		if (!blocked()) {
+			onUnblockSignal(map->shared_from_this(), location);
 		}
 	}
 
 	bool MapNode::blocked() const {
-		return staticBlocked || blockedSemaphore != 0;
+		return staticBlockedSemaphore != 0 || blockedSemaphore != 0;
 	}
 
 	void MapNode::staticBlock() {
-		staticBlocked = true;
-		if (blockedSemaphore == 0) {
-			onBlockSignal(map.shared_from_this(), location);
+		bool wasBlocked = blocked();
+		++staticBlockedSemaphore;
+		if (!wasBlocked) {
+			onBlockSignal(map->shared_from_this(), location);
 		}
 	}
 
 	void MapNode::staticUnblock() {
-		staticBlocked = false;
-		if (blockedSemaphore == 0) {
-			onUnblockSignal(map.shared_from_this(), location);
+		require<ResourceException>(staticBlockedSemaphore > 0, "Error: Static Block Semaphore overextended in MapNode, something is unblocking excessively.");
+		--staticBlockedSemaphore;
+		if (!blocked()) {
+			onUnblockSignal(map->shared_from_this(), location);
 		}
 	}
 
 	bool MapNode::staticallyBlocked() const {
-		return staticBlocked;
+		return staticBlockedSemaphore != 0;
 	}
 
 	Map& MapNode::parent() {
-		return map;
+		return *map;
 	}
 
 	Point<int> MapNode::position() const {
@@ -125,28 +140,29 @@ namespace MV {
 	void MapNode::addTemporaryCost(float a_newTemporaryCost) {
 		temporaryCost += a_newTemporaryCost;
 		if (a_newTemporaryCost != 0.0f) {
-			onCostChangeSignal(map.shared_from_this(), location);
+			onCostChangeSignal(map->shared_from_this() , location);
 		}
 	}
 
 	void MapNode::removeTemporaryCost(float a_newTemporaryCost) {
 		temporaryCost -= a_newTemporaryCost;
 		if (a_newTemporaryCost != 0.0f) {
-			onCostChangeSignal(map.shared_from_this(), location);
+			onCostChangeSignal(map->shared_from_this(), location);
 		}
 	}
 
 	void MapNode::initializeEdge(size_t a_index, const Point<int> &a_offset) const {
-		if (map.inBounds(location + a_offset)) {
-			auto& cell = map[location.x + a_offset.x][location.y + a_offset.y];
+		auto& mapRef = *map;
+		if (mapRef.inBounds(location + a_offset)) {
+			auto& cell = mapRef[location.x + a_offset.x][location.y + a_offset.y];
 
 			edges[a_index] = edgeBlocked(a_offset) ? &cell : nullptr;
 
 			cell.onBlock.connect(guid("Block"), [&, a_index, a_offset](std::shared_ptr<Map>, const Point<int> &) {
-				edges[a_index] = edgeBlocked(a_offset) ? &map.get(location + a_offset) : nullptr;
+				edges[a_index] = edgeBlocked(a_offset) ? &mapRef.get(location + a_offset) : nullptr;
 			});
 			cell.onUnblock.connect(guid("Unblock"), [&, a_index, a_offset](std::shared_ptr<Map>, const Point<int> &) {
-				edges[a_index] = edgeBlocked(a_offset) ? &map.get(location + a_offset) : nullptr;
+				edges[a_index] = edgeBlocked(a_offset) ? &mapRef.get(location + a_offset) : nullptr;
 			});
 		} else {
 			edges[a_index] = nullptr;
@@ -154,11 +170,13 @@ namespace MV {
 	}
 
 	bool MapNode::edgeBlocked(const Point<int> &a_offset) const {
-		return !map.blocked({ location.x + a_offset.y, location.y }) && !map.blocked({ location.x, location.y + a_offset.y }) && !map.blocked({ location.x + a_offset.x, location.y + a_offset.y });
+		auto& mapRef = *map;
+		return !mapRef.blocked({ location.x + a_offset.y, location.y }) && !mapRef.blocked({ location.x, location.y + a_offset.y }) && !mapRef.blocked({ location.x + a_offset.x, location.y + a_offset.y });
 	}
 
 	void MapNode::lazyInitialize() const {
 		if (!initialized) {
+			auto& mapRef = *map;
 			initialized = true;
 
 			std::vector<Point<int>> edgePoints = {
@@ -169,15 +187,15 @@ namespace MV {
 			};
 
 			for (size_t i = 0; i < 4;++i) {
-				if (map.inBounds(edgePoints[i])) {
+				if (mapRef.inBounds(edgePoints[i])) {
 					auto edgePoint = edgePoints[i];
-					auto& cell = map.get(edgePoints[i]);
-					edges[i] = !map.blocked(edgePoint) ? &cell : nullptr;
+					auto& cell = mapRef.get(edgePoints[i]);
+					edges[i] = !mapRef.blocked(edgePoint) ? &cell : nullptr;
 					cell.onBlock.connect(guid("Block"), [&, i](std::shared_ptr<Map>, const Point<int> &){
 						edges[i] = nullptr;
 					});
 					cell.onUnblock.connect(guid("Unblock"), [&, i, edgePoint](std::shared_ptr<Map>, const Point<int> &) {
-						edges[i] = &map.get(edgePoint);
+						edges[i] = &mapRef.get(edgePoint);
 					});
 				}
 			}

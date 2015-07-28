@@ -18,6 +18,7 @@ namespace MV {
 	class TemporaryCost;
 	class MapNode {
 		friend TemporaryCost;
+		friend cereal::access;
 	public:
 		typedef void CallbackSignature(std::shared_ptr<Map>, const Point<int> &);
 		typedef SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
@@ -38,6 +39,8 @@ namespace MV {
 		MapNode(Map& a_grid, const Point<int> &a_location, float a_cost, bool a_useCorners);
 		MapNode(const MapNode &a_rhs);
 		MapNode& operator=(const MapNode &a_rhs) = delete;
+
+		MapNode();
 		float baseCost() const;
 		void baseCost(float a_newCost);
 
@@ -66,6 +69,33 @@ namespace MV {
 		bool operator==(const MapNode &a_rhs) const;
 
 	private:
+
+		template <class Archive>
+		void save(Archive & archive) const {
+			std::weak_ptr<Map> weakMap;
+			weakMap = map->shared_from_this();
+			archive(
+				CEREAL_NVP(location),
+				CEREAL_NVP(useCorners),
+				CEREAL_NVP(travelCost),
+				CEREAL_NVP(staticBlockedSemaphore),
+				cereal::make_nvp("map", weakMap)
+			);
+		}
+
+		template <class Archive>
+		void load(Archive & archive) {
+			std::weak_ptr<Map> weakMap;
+			archive(
+				CEREAL_NVP(location),
+				CEREAL_NVP(useCorners),
+				CEREAL_NVP(travelCost),
+				CEREAL_NVP(staticBlockedSemaphore),
+				cereal::make_nvp("map", weakMap)
+			);
+			map = weakMap.lock().get();
+		}
+
 		void addTemporaryCost(float a_newTemporaryCost);
 		void removeTemporaryCost(float a_newTemporaryCost);
 
@@ -75,7 +105,7 @@ namespace MV {
 
 		void lazyInitialize() const;
 
-		Map& map;
+		Map* map;
 
 		mutable bool initialized = false;
 		mutable std::array<MapNode*, 8> edges;
@@ -84,11 +114,12 @@ namespace MV {
 		Point<int> location;
 		float travelCost = 1.0f;
 		float temporaryCost = 0.0f;
-		bool staticBlocked = false;
+		int staticBlockedSemaphore = 0;
 		int blockedSemaphore = 0;
 	};
 
 	class Map : public std::enable_shared_from_this<Map> {
+		friend cereal::access;
 	public:
 		static std::shared_ptr<Map> make(const Size<int> &a_size, bool a_useCorners = false) {
 			return std::shared_ptr<Map>(new Map(a_size, 1.0f, a_useCorners));
@@ -126,6 +157,7 @@ namespace MV {
 			return usingCorners;
 		}
 
+		Map() {}
 	private:
 		Map(const Size<int> &a_size, float a_defaultCost, bool a_useCorners) :
 			usingCorners(a_useCorners),
@@ -140,6 +172,15 @@ namespace MV {
 				}
 				squares.push_back(column);
 			}
+		}
+
+		template <class Archive>
+		void serialize(Archive & archive) {
+			archive(
+				CEREAL_NVP(usingCorners),
+				CEREAL_NVP(squares),
+				CEREAL_NVP(ourSize)
+			);
 		}
 
 		bool usingCorners;
@@ -382,6 +423,7 @@ namespace MV {
 	};
 
 	class NavigationAgent {
+		friend cereal::access;
 	public:
 		static std::shared_ptr<NavigationAgent> make(std::shared_ptr<Map> a_map, const Point<int> &a_newPosition = Point<int>()){
 			return std::shared_ptr<NavigationAgent>(new NavigationAgent(a_map, a_newPosition));
@@ -420,8 +462,7 @@ namespace MV {
 		}
 
 		void update(double a_dt) {
-			if (pathfinding())
-			{
+			if (pathfinding()){
 				if (dirtyPath || calculatedPath.empty()) {
 					recalculate();
 				}
@@ -467,6 +508,7 @@ namespace MV {
 			auto goalDistance = static_cast<PointPrecision>(distance(ourPosition, cast<PointPrecision>(ourGoal) + point(.5f, .5f)));
 			return goalDistance > acceptableDistance && !equals(goalDistance, acceptableDistance);
 		}
+		NavigationAgent() {}
 	private:
 		NavigationAgent(std::shared_ptr<Map> a_map, const Point<int> &a_newPosition = Point<int>()) :
 			map(a_map),
@@ -476,6 +518,21 @@ namespace MV {
 		}
 		NavigationAgent(const NavigationAgent &) = delete;
 		NavigationAgent& operator=(const NavigationAgent&a_rhs) = delete;
+
+		
+
+		template <class Archive>
+		void serialize(Archive & archive) {
+			archive(
+				CEREAL_NVP(ourPosition),
+				CEREAL_NVP(ourGoal),
+				CEREAL_NVP(ourSpeed),
+				CEREAL_NVP(acceptableDistance),
+				CEREAL_NVP(map)
+			);
+
+			map->get(cast<int>(ourPosition)).block();
+		}
 
 		void markDirty() {
 			costs.clear();
@@ -509,19 +566,20 @@ namespace MV {
 			updateObservedNodes();
 		}
 
-		bool dirtyPath = true;
+		std::shared_ptr<Map> map;
 		Point<PointPrecision> ourPosition;
 		Point<int> ourGoal;
-		const int64_t maxNodesToSearch = 100;
 		PointPrecision ourSpeed = 1.0f;
-		PointPrecision remainder = 0.0f;
-		size_t currentPathIndex = 0;
-		std::shared_ptr<Map> map;
-		std::shared_ptr<Path> ourPath;
-		std::vector<PathNode> calculatedPath;
 		PointPrecision acceptableDistance = 0.0f;
+
+		bool dirtyPath = true;
+		const int64_t maxNodesToSearch = 100;
+		bool activeUpdate = false;
 		std::vector<TemporaryCost> costs;
 		std::vector<MapNode::SharedRecieverType> recievers;
-		bool activeUpdate = false;
+
+		size_t currentPathIndex = 0;
+		std::shared_ptr<Path> ourPath;
+		std::vector<PathNode> calculatedPath;
 	};
 }

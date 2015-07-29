@@ -22,16 +22,9 @@ namespace MV {
 				return cellDimensions;
 			}
 
-			std::shared_ptr<PathMap> size(const Size<int> &a_gridSize, bool a_useCorners = true) {
-				map = Map::make(a_gridSize, a_useCorners);
-				return std::static_pointer_cast<PathMap>(shared_from_this());
-			}
-
 			Size<int> size() const {
 				return map->size();
 			}
-
-
 
 		protected:
 			PathMap(const std::weak_ptr<Node> &a_owner, const Size<int> &a_gridSize, bool a_useCorners = true):
@@ -51,7 +44,7 @@ namespace MV {
 			template <class Archive>
 			void serialize(Archive & archive) {
 				archive(
-					//cereal::make_nvp("map", map),
+					cereal::make_nvp("map", map),
 					cereal::make_nvp("cellDimensions", cellDimensions),
 					cereal::make_nvp("Component", cereal::base_class<Drawable>(this))
 				);
@@ -61,7 +54,7 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<PathMap> &construct) {
 				construct(std::shared_ptr<Node>());
 				archive(
-					//cereal::make_nvp("map", map),
+					cereal::make_nvp("map", map),
 					cereal::make_nvp("cellDimensions", cellDimensions),
 					cereal::make_nvp("Component", cereal::base_class<Drawable>(construct.ptr()))
 				);

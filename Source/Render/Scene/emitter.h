@@ -140,12 +140,12 @@ namespace MV {
 			std::shared_ptr<Emitter> enable();
 			std::shared_ptr<Emitter> disable();
 
-			virtual void updateImplementation(double a_dt) override;
-
 			~Emitter();
 
 		protected:
 			Emitter(const std::weak_ptr<Node> &a_owner, ThreadPool &a_pool);
+
+			virtual void updateImplementation(double a_dt) override;
 
 			template <class Archive>
 			void serialize(Archive & archive) {

@@ -50,6 +50,13 @@ namespace MV {
 		return a_string;
 	}
 
+	template<typename T>
+	std::string to_string(const T &a_type) {
+		std::stringstream stream;
+		stream << a_type;
+		return stream.str();
+	}
+
 	template<class Tuple, std::size_t N>
 	struct TupleStringHelper {
 		static void to_string_combiner(const Tuple& t, std::stringstream &a_stream){

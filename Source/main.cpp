@@ -89,6 +89,21 @@ int main(int argc, char *argv[]){
 
 	std::cout << "\n\n\n______________" << "HOLYFUCK" << "________________\n\n\n" << std::endl;
 
+	for (int i = 0; i < 2; ++i) {
+		agents[i]->onStart.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
+			std::cout << (i+1) << ": START" << std::endl;
+		});
+		agents[i]->onStop.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
+			std::cout << (i + 1) << ": STOP" << std::endl;
+		});
+		agents[i]->onBlocked.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
+			std::cout << (i + 1) << ": BLOCKED" << std::endl;
+		});
+		agents[i]->onArrive.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
+			std::cout << (i + 1) << ": ARRIVED" << std::endl;
+		});
+	}
+
 	while (std::find_if(agents.begin(), agents.end(), [](auto&& agent) {
 		return agent->pathfinding();
 	}) != agents.end()) {

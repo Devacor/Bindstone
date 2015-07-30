@@ -13,8 +13,6 @@ namespace MV {
 		public:
 			DrawableDerivedAccessors(Grid)
 
-			virtual void updateImplementation(double a_delta) override;
-
 			std::shared_ptr<Grid> padding(const std::pair<Point<>, Point<>> &a_padding);
 			std::shared_ptr<Grid> padding(const Size<> &a_padding);
 			std::pair<Point<>, Point<>> padding() const;
@@ -45,6 +43,8 @@ namespace MV {
 
 		protected:
 			Grid(const std::weak_ptr<Node> &a_owner);
+
+			virtual void updateImplementation(double a_delta) override;
 
 			template <class Archive>
 			void serialize(Archive & archive) {

@@ -43,6 +43,7 @@ namespace MV {
 			return (maxPoint - minPoint).y;
 		}
 
+		void clear() { minPoint.clear(); maxPoint.clear(); }
 		bool empty() const{ return minPoint == maxPoint; }
 		bool flatWidth() const{ return equals(minPoint.x, maxPoint.x); }
 		bool flatHeight() const{ return equals(minPoint.y, maxPoint.y); }

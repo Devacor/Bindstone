@@ -21,6 +21,7 @@ namespace MV {
 		travelCost(a_rhs.travelCost),
 		location(a_rhs.location),
 		map(a_rhs.map),
+		staticBlockedSemaphore(a_rhs.staticBlockedSemaphore),
 		useCorners(a_rhs.useCorners),
 		onBlock(onBlockSignal),
 		onUnblock(onUnblockSignal),
@@ -38,6 +39,21 @@ namespace MV {
 		onStaticBlock(onStaticBlockSignal),
 		onStaticUnblock(onStaticUnblockSignal),
 		onCostChange(onCostChangeSignal) {
+	}
+
+	MapNode& MapNode::operator=(const MapNode &a_rhs) {
+		initialized = false;
+		travelCost = a_rhs.travelCost;
+		location = a_rhs.location;
+		map = a_rhs.map;
+		staticBlockedSemaphore = a_rhs.staticBlockedSemaphore;
+		useCorners = a_rhs.useCorners;
+		for (auto&& edge : edges) {
+			edge = nullptr;
+		}
+		blockedSemaphore = 0;
+		temporaryCost = 0;
+		return *this;
 	}
 
 	float MapNode::baseCost() const {

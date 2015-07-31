@@ -1,3 +1,6 @@
+#ifndef _MV_PATHFINDING_H_
+#define _MV_PATHFINDING_H_
+
 #include <iostream>
 #include <string>
 #include <regex>
@@ -121,6 +124,21 @@ namespace MV {
 	class Map : public std::enable_shared_from_this<Map> {
 		friend cereal::access;
 	public:
+		typedef void CallbackSignature(std::shared_ptr<Map>, const Point<int> &);
+		typedef SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
+	private:
+		Signal<CallbackSignature> onBlockSignal;
+		Signal<CallbackSignature> onUnblockSignal;
+		Signal<CallbackSignature> onStaticBlockSignal;
+		Signal<CallbackSignature> onStaticUnblockSignal;
+		Signal<CallbackSignature> onCostChangeSignal;
+	public:
+		SignalRegister<CallbackSignature> onBlock;
+		SignalRegister<CallbackSignature> onUnblock;
+		SignalRegister<CallbackSignature> onStaticBlock;
+		SignalRegister<CallbackSignature> onStaticUnblock;
+		SignalRegister<CallbackSignature> onCostChange;
+
 		static std::shared_ptr<Map> make(const Size<int> &a_size, bool a_useCorners = false) {
 			return std::shared_ptr<Map>(new Map(a_size, 1.0f, a_useCorners));
 		}
@@ -129,29 +147,26 @@ namespace MV {
 			return std::shared_ptr<Map>(new Map(a_size, a_defaultCost, a_useCorners));
 		}
 
-		std::shared_ptr<Map> clone() const {
-			auto result = std::shared_ptr<Map>(new Map());
-			result->squares = squares;
-			result->usingCorners = usingCorners;
-			result->ourSize = ourSize;
-			return result;
-		}
+		void resize(const Size<int> &a_size, float a_defaultCost = 1.0f);
 
-		std::vector<MapNode>& operator[](int a_x) {
+		std::shared_ptr<Map> clone() const;
+
+		inline std::vector<MapNode>& operator[](int a_x) {
 			return squares[a_x];
 		}
 
-		MapNode& get(const Point<int> &a_location) {
+		inline MapNode& get(const Point<int> &a_location) {
 			require<ResourceException>(inBounds(a_location), "Failed to retrieve grid location from map: ", a_location);
 			return squares[a_location.x][a_location.y];
 		}
 
 		bool inBounds(Point<int> a_location) const {
+			auto ourSize = size();
 			return !squares.empty() && (a_location.x >= 0 && a_location.y >= 0) && (a_location.x < ourSize.width && a_location.y < ourSize.height);
 		}
 
 		Size<int> size() const {
-			return ourSize;
+			return Size<int>(static_cast<int>(squares.size()), static_cast<int>((squares.empty() ? 0 : squares[0].size())));
 		}
 
 		bool blocked(Point<int> a_location) const {
@@ -166,36 +181,24 @@ namespace MV {
 			return usingCorners;
 		}
 
-		Map() {}
+		Map();
 	private:
-		Map(const Size<int> &a_size, float a_defaultCost, bool a_useCorners) :
-			usingCorners(a_useCorners),
-			ourSize(a_size) {
+		Map(const Size<int> &a_size, float a_defaultCost, bool a_useCorners);
 
-			squares.reserve(a_size.width);
-			for (int x = 0; x < a_size.width; ++x) {
-				std::vector<MapNode> column;
-				column.reserve(a_size.height);
-				for (int y = 0; y < a_size.height; ++y) {
-					column.emplace_back( *this, Point<int>( x, y ), a_defaultCost, a_useCorners );
-				}
-				squares.push_back(std::move(column));
-			}
-		}
+		void hookUpObservation();
 
 		template <class Archive>
 		void serialize(Archive & archive) {
 			archive(
 				CEREAL_NVP(usingCorners),
-				CEREAL_NVP(squares),
-				CEREAL_NVP(ourSize)
+				CEREAL_NVP(squares)
 			);
+			hookUpObservation();
 		}
 
 		bool usingCorners;
 
 		std::vector<std::vector<MapNode>> squares;
-		Size<int> ourSize;
 	};
 
 	class TemporaryCost {
@@ -344,74 +347,11 @@ namespace MV {
 			MapNode* mapCell = nullptr;
 		};
 
-		void calculate() {
-			open.clear();
-			closed.clear();
+		void calculate();
 
-			insertIntoOpen(startPosition, 0.0f);
-			found = false;
-			PathCalculationNode* currentNode = nullptr;
-			PathCalculationNode* bestNode = nullptr;
-			PointPrecision bestDistance = -1;
-			int64_t totalSearched = 0;
-			while (!open.empty() && ((maxSearchNodes > 0 && totalSearched++ < maxSearchNodes) || maxSearchNodes <= 0)) {
-				closed.push_back(open.back());
-				currentNode = &closed.back();
-				open.pop_back();
+		void insertIntoOpen(const Point<int> &a_position, float a_startCost, PathCalculationNode* a_parent = nullptr, bool a_isCorner = false);
 
-				auto nodeDistance = static_cast<PointPrecision>(distance(currentNode->position(), goalPosition));
-				if (bestNode == nullptr || nodeDistance < bestDistance) {
-					bestDistance = nodeDistance;
-					bestNode = currentNode;
-				}
-				if (currentNode->position() == goalPosition || nodeDistance < minimumDistance || equals(nodeDistance, minimumDistance)) {
-					found = true;
-					break; //success
-				}
-
-				auto& mapNode = currentNode->mapNode();
-				for (size_t i = 0; i < mapNode.size(); ++i) {
-					if (mapNode[i] != nullptr && !mapNode[i]->blocked()) {
-						insertIntoOpen(mapNode[i]->position(), mapNode[i]->totalCost(), currentNode, i >= 4);
-					}
-				}
-
-			}
-			if (!found) {
-				currentNode = (bestNode == nullptr || (distance(goalPosition, startPosition) < distance(goalPosition, bestNode->position()))) ? nullptr : bestNode;
-			}
-			
-			endPosition = currentNode != nullptr ? currentNode->position() : startPosition;
-
-			pathNodes.clear();
-			while (currentNode) {
-				pathNodes.push_back({ currentNode->position(), currentNode->mapNode().baseCost() * (currentNode->corner() ? 1.4f : 1.0f) });
-				currentNode = currentNode->parent();
-			}
-			std::reverse(pathNodes.begin(), pathNodes.end());
-		}
-
-		void insertIntoOpen(const Point<int> &a_position, float a_startCost, PathCalculationNode* a_parent = nullptr, bool a_isCorner = false) {
-			if (!existsBetter(a_position, a_startCost)) {
-				insertReverseSorted(open, Path::PathCalculationNode(goalPosition, map->get(a_position), (a_parent ? a_parent->estimatedTotalCost() : 0.0f) + (a_startCost * (a_isCorner ? 1.4f : 1.0f)), a_parent));
-			}
-		}
-
-		bool existsBetter(const Point<int> &a_position, float a_startCost) {
-			if (std::find_if(closed.cbegin(), closed.cend(), [&](const PathCalculationNode &a_node) {return a_node == a_position; }) != closed.cend()) {
-				return true;
-			}
-			auto foundOpen = std::find_if(open.cbegin(), open.cend(), [&](const PathCalculationNode &a_node) {return a_node == a_position; });
-			if (foundOpen != open.cend()) {
-				if (foundOpen->costToArrive() > a_startCost) {
-					open.erase(foundOpen);
-					return false;
-				} else {
-					return true;
-				}
-			}
-			return false;
-		}
+		bool existsBetter(const Point<int> &a_position, float a_startCost);
 
 		bool found = false;
 
@@ -677,3 +617,5 @@ namespace MV {
 		std::vector<PathNode> calculatedPath;
 	};
 }
+
+#endif

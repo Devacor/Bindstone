@@ -230,9 +230,6 @@
     <ClCompile Include="Source\ArtificialIntelligence\pathfinding.cpp">
       <Filter>Source Files\ArtificialIntelligence</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Render\Scene\map.cpp">
-      <Filter>Source Files\Render\Scene</Filter>
-    </ClCompile>
     <ClCompile Include="Source\ClickerGame\clickerGame.cpp">
       <Filter>Source Files\ClickerGame</Filter>
     </ClCompile>
@@ -247,6 +244,9 @@
     </ClCompile>
     <ClCompile Include="Source\Utility\expression.cpp">
       <Filter>Source Files\Utility</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\Scene\path.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -598,9 +598,6 @@
     <ClInclude Include="Source\Editor\editorSceneGraphPanel.h">
       <Filter>Source Files\Editor</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Network\package.h">
-      <Filter>Source Files\Render\Scene</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Render\Scene\drawable.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
@@ -615,9 +612,6 @@
     </ClInclude>
     <ClInclude Include="Source\ArtificialIntelligence\pathfinding.h">
       <Filter>Source Files\ArtificialIntelligence</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Render\Scene\map.h">
-      <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
     <ClInclude Include="Source\Game\gameEditor.h">
       <Filter>Source Files\Game</Filter>
@@ -646,6 +640,12 @@
     </ClInclude>
     <ClInclude Include="Source\Utility\expression.h">
       <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\path.h">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Network\package.h">
+      <Filter>Source Files\Network</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

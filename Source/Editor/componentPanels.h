@@ -11,6 +11,7 @@ class EditableNode;
 class EditableRectangle;
 class EditableEmitter;
 class EditableGrid;
+class EditablePathMap;
 class TexturePicker;
 
 class EditorPanel {
@@ -59,6 +60,7 @@ public:
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateSpriteComponentButton(const MV::Scene::SafeComponent<MV::Scene::Sprite> & a_sprite);
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateGridComponentButton(const MV::Scene::SafeComponent<MV::Scene::Grid> & a_grid);
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateEmitterComponentButton(const MV::Scene::SafeComponent<MV::Scene::Emitter> & a_emitter);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreatePathMapComponentButton(const MV::Scene::SafeComponent<MV::Scene::PathMap> & a_pathMap);
 private:
 	void updateComponentEditButtons(bool a_attached);
 
@@ -159,6 +161,27 @@ private:
 	std::shared_ptr<MV::Scene::Text> height;
 };
 
+class SelectedPathMapEditorPanel : public EditorPanel {
+public:
+	SelectedPathMapEditorPanel(EditorControls &a_panel, std::shared_ptr<EditablePathMap> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
+	~SelectedPathMapEditorPanel() {
+	}
+
+	virtual void handleInput(SDL_Event &a_event) override;
+
+	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
+	virtual void onSceneZoom() override;
+private:
+
+	std::shared_ptr<EditablePathMap> controls;
+	std::shared_ptr<MV::Scene::Text> posY;
+	std::shared_ptr<MV::Scene::Text> posX;
+	std::shared_ptr<MV::Scene::Text> cellsX;
+	std::shared_ptr<MV::Scene::Text> cellsY;
+	std::shared_ptr<MV::Scene::Text> width;
+	std::shared_ptr<MV::Scene::Text> height;
+};
+
 class DeselectedEditorPanel : public EditorPanel {
 public:
 	DeselectedEditorPanel(EditorControls &a_panel);
@@ -176,6 +199,7 @@ private:
 	void createRectangle(const MV::BoxAABB<int> &a_selected);
 	void createEmitter(const MV::BoxAABB<int> &a_selected);
 	void createSpine(const MV::BoxAABB<int> &a_selected);
+	void createPathMap(const MV::BoxAABB<int> &a_selected);
 	void createGrid();
 
 	SelectedNodeEditorPanel* editorPanel;

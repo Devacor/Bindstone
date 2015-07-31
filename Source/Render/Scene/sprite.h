@@ -77,7 +77,6 @@ namespace MV {
 				appendQuadVertexIndices(vertexIndices, 0);
 			}
 
-
 			template <class Archive>
 			void serialize(Archive & archive) {
 				archive(

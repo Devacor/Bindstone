@@ -231,7 +231,7 @@
     <ClCompile Include="Source\Render\Scene\clipped.cpp" />
     <ClCompile Include="Source\Render\Scene\emitter.cpp" />
     <ClCompile Include="Source\Render\Scene\grid.cpp" />
-    <ClCompile Include="Source\Render\Scene\map.cpp" />
+    <ClCompile Include="Source\Render\Scene\path.cpp" />
     <ClCompile Include="Source\Render\Scene\node.cpp" />
     <ClCompile Include="Source\Render\matrix.cpp" />
     <ClCompile Include="Source\Render\points.cpp" />
@@ -356,7 +356,7 @@
     <ClInclude Include="Source\Network\network.h" />
     <ClInclude Include="Source\Network\package.h" />
     <ClInclude Include="Source\Render\Scene\clipped.h" />
-    <ClInclude Include="Source\Render\Scene\map.h" />
+    <ClInclude Include="Source\Render\Scene\path.h" />
     <ClInclude Include="Source\Render\Scene\package.h" />
     <ClInclude Include="Source\Render\Scene\node.h" />
     <ClInclude Include="Source\Render\matrix.h" />

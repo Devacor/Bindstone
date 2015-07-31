@@ -175,4 +175,44 @@ private:
 	std::shared_ptr<MV::Scene::Node> controlContainer;
 };
 
+class EditablePathMap {
+public:
+	EditablePathMap(MV::Scene::SafeComponent<MV::Scene::PathMap> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+
+	~EditablePathMap() {
+		elementToEdit->hide();
+		controlContainer->removeFromParent();
+		removeHandles();
+	}
+
+	void removeHandles();
+
+	void resetHandles();
+
+	void position(MV::Point<> a_newPosition);
+	MV::Point<> position() const;
+
+	void size(MV::Size<> a_newSize);
+	MV::Size<> size();
+
+	void repositionHandles(bool a_fireOnChange = true, bool a_repositionElement = true, bool a_resizeElement = true);
+
+	std::function<void(EditablePathMap*)> onChange;
+	MV::Scene::SafeComponent<MV::Scene::PathMap> elementToEdit;
+private:
+	MV::Point<int> lastGridPosition{ -1, -1 };
+	MV::Scene::Node::BasicSharedSignalType nodeMoved;
+
+	MV::MouseState *mouse;
+
+	MV::Scene::SafeComponent<MV::Scene::Clickable> topLeftSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> topRightSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> bottomLeftSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> bottomRightSizeHandle;
+
+	MV::Scene::SafeComponent<MV::Scene::Clickable> positionHandle;
+
+	std::shared_ptr<MV::Scene::Node> controlContainer;
+};
+
 #endif

@@ -64,9 +64,30 @@ void Game::initializeWindow(){
 
 	textures.assemblePacks("Assets/Atlases", renderer);
 	textures.files("Assets/Map");
+
+	pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
+
+	for (int i = 1; i < 9; ++i) {
+		auto treeButton = worldScene->get("left_" + std::to_string(i))->attach<MV::Scene::Clickable>(mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
+		treeButton->onAccept.connect("TappedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
+			spawnCreature(a_self->worldBounds().bottomRightPoint());
+		});
+	}
 }
 
-
+void Game::spawnCreature(const MV::Point<> &a_position) {
+	auto voidTexture = textures.pack("VoidGuy")->handle(0);
+	auto creatureNode = pathMap->owner()->make(MV::guid("Creature_"));
+	creatureNode->attach<MV::Scene::Sprite>()->texture(voidTexture)->size(MV::cast<MV::PointPrecision>(voidTexture->bounds().size()));
+	creatureNode->attach<MV::Scene::PathAgent>(pathMap.self(), pathMap->gridFromLocal(pathMap->owner()->localFromWorld(a_position)))->
+		gridSpeed(4.0f)->
+		gridGoal(pathMap->gridFromLocal(pathMap->owner()->localFromWorld(worldScene->get("RightWell")->worldFromLocal(MV::Point<>()))));
+	std::weak_ptr<MV::Scene::Node> weakCreatureNode{ creatureNode };
+	creatureNode->task().also("UpdateZOrder", [=](const MV::Task &a_self, double a_dt) {
+		weakCreatureNode.lock()->depth(weakCreatureNode.lock()->position().y);
+		return false;
+	});
+}
 
 bool Game::update(double dt) {
 	lastUpdateDelta = dt;
@@ -109,6 +130,9 @@ void Game::handleInput() {
 					break;
 				}
 				break;
+			case SDL_MOUSEWHEEL:
+				handleScroll(event.wheel.y);
+				break;
 			}
 		}
 	}
@@ -120,4 +144,13 @@ void Game::render() {
 	worldScene->drawUpdate(static_cast<float>(lastUpdateDelta));
 	//testShape->draw();
 	renderer->updateScreen();
+}
+
+void Game::handleScroll(int a_amount) {
+	auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount);
+	if (worldScene->scale().x + screenScale.x > .2f) {
+		auto originalScreenPosition = worldScene->localFromScreen(mouse.position()) * (MV::toPoint(screenScale));
+		worldScene->addScale(screenScale);
+		worldScene->translate(originalScreenPosition * -1.0f);
+	}
 }

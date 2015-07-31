@@ -142,8 +142,32 @@ namespace MV{
 		}
 	}
 
-	std::shared_ptr<TextureHandle> TexturePack::handle(const std::string & a_id)
-	{
+
+	std::shared_ptr<TextureHandle> TexturePack::handle(size_t a_index) {
+		if (a_index > shapes.size()) {
+			std::cerr << "Failed to find handle index: " << a_index << std::endl;
+			return fullHandle();
+		}
+
+		auto& foundShape = shapes[a_index];
+
+		auto sharedPackedTexture = getOrMakeTexture();
+		if (dirty || !sharedPackedTexture || !sharedPackedTexture->loaded()) {
+			dirty = false;
+			sharedPackedTexture->resize(contentExtent);
+			auto handle = sharedPackedTexture->makeHandle(foundShape.bounds);
+
+			auto scene = makeScene();
+			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, sharedPackedTexture->textureId(), background)->start();
+			scene->draw();
+
+			return handle;
+		} else {
+			return sharedPackedTexture->makeHandle(foundShape.bounds);
+		}
+	}
+
+	std::shared_ptr<TextureHandle> TexturePack::handle(const std::string & a_id){
 		auto foundShape = std::find_if(shapes.begin(), shapes.end(), [&](ShapeDefinition& a_shape){
 			return a_shape.id == a_id;
 		});

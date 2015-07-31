@@ -526,7 +526,7 @@ namespace MV {
 
 		void update(double a_dt) {
 			if (pathfinding()){
-				if (dirtyPath || calculatedPath.empty()) {
+				if (dirtyPath || calculatedPath.empty() || (calculatedPath.size() > 1 && currentPathIndex == calculatedPath.size())) {
 					recalculate();
 				}
 				if (calculatedPath.size() == 1 && calculatedPath[0].position() != cast<int>(ourGoal)) {
@@ -657,6 +657,7 @@ namespace MV {
 			ourPath = std::make_shared<Path>(map, cast<int>(ourPosition), cast<int>(ourGoal), acceptableDistance, maxNodesToSearch);
 			calculatedPath = ourPath->path();
 			updateObservedNodes();
+			dirtyPath = false;
 		}
 
 		std::shared_ptr<Map> map;

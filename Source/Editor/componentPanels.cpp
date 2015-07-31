@@ -141,7 +141,7 @@ void SelectedNodeEditorPanel::updateComponentEditButtons(bool a_attached) {
 	}
 	componentEditButtons.clear();
 	buttonSize = MV::size(110.0f, 27.0f);
-	auto componentList = controls->elementToEdit->components<MV::Scene::Sprite, MV::Scene::Grid, MV::Scene::Emitter>(true);
+	auto componentList = controls->elementToEdit->components<MV::Scene::Sprite, MV::Scene::Grid, MV::Scene::Emitter, MV::Scene::PathMap>(true);
 	int count = 0;
 	for (auto&& component : componentList) {
 		++count;
@@ -154,6 +154,9 @@ void SelectedNodeEditorPanel::updateComponentEditButtons(bool a_attached) {
 		},
 		[&](const MV::Scene::SafeComponent<MV::Scene::Emitter> &a_emitter) {
 			CreateEmitterComponentButton(a_emitter);
+		},
+		[&](const MV::Scene::SafeComponent<MV::Scene::PathMap> &a_pathMap) {
+			CreatePathMapComponentButton(a_pathMap);
 		});
 	}
 }
@@ -176,6 +179,18 @@ MV::Scene::SafeComponent<MV::Scene::Button> SelectedNodeEditorPanel::CreateGridC
 		componentPanel->loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(a_grid, panel.editor()->make("EditableGrid"), panel.resources().mouse), button);
 		componentPanel->activePanel()->onNameChange.connect(MV::guid("NameChange"), [button](const std::string &a_newName) {
 			renameButton(button->safe(), MV::toWide("G: " + a_newName));
+		});
+	});
+	componentEditButtons.push_back(button->owner());
+	return button->safe();
+}
+
+MV::Scene::SafeComponent<MV::Scene::Button> SelectedNodeEditorPanel::CreatePathMapComponentButton(const MV::Scene::SafeComponent<MV::Scene::PathMap> & a_pathMap) {
+	auto button = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, MV::guid("EditPathMap"), buttonSize, MV::toWide("P: " + a_pathMap->id()));
+	button->onAccept.connect(MV::guid("click"), [&, a_pathMap, button](std::shared_ptr<MV::Scene::Clickable>) {
+		componentPanel->loadPanel<SelectedPathMapEditorPanel>(std::make_shared<EditablePathMap>(a_pathMap, panel.editor()->make("EditablePathMap"), panel.resources().mouse), button);
+		componentPanel->activePanel()->onNameChange.connect(MV::guid("NameChange"), [button](const std::string &a_newName) {
+			renameButton(button->safe(), MV::toWide("P: " + a_newName));
 		});
 	});
 	componentEditButtons.push_back(button->owner());
@@ -769,6 +784,123 @@ void SelectedEmitterEditorPanel::onSceneZoom() {
 	controls->resetHandles();
 }
 
+
+SelectedPathMapEditorPanel::SelectedPathMapEditorPanel(EditorControls &a_panel, std::shared_ptr<EditablePathMap> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton) :
+	EditorPanel(a_panel),
+	controls(a_controls) {
+
+	auto node = panel.content();
+	auto grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
+		color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->
+		padding({ 2.0f, 2.0f })->owner();
+	auto buttonSize = MV::size(110.0f, 27.0f);
+	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
+	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		panel.deleteFullScene();
+	});
+
+	auto deleteButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Delete", buttonSize, UTF_CHAR_STR("Delete"));
+	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		controls->elementToEdit->detach();
+		panel.deleteFullScene();
+	});
+
+	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
+		text(MV::toWide(controls->elementToEdit->id()))->
+		onEnter.connect("rename", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
+		controls->elementToEdit->id(MV::toString(a_text->text()));
+		renameButton(a_associatedButton->safe(), MV::toWide("G: ") + a_text->text());
+		onNameChangeSignal(MV::toString(a_text->text()));
+	});
+
+	auto controlBounds = a_controls->elementToEdit->bounds();
+
+	float textboxWidth = 52.0f;
+	width = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "width", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(controlBounds.width()))));
+	height = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "height", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(controlBounds.height()))));
+
+	posX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(controlBounds.minPoint.x))));
+	posY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(controlBounds.minPoint.y))));
+
+	cellsX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "cellsX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(a_controls->elementToEdit->gridSize().width)));
+	cellsY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "cellsY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(a_controls->elementToEdit->gridSize().height)));
+
+	if (controls) {
+		auto xClick = posX->owner()->component<MV::Scene::Clickable>();
+		xClick->onAccept.connect("updateX", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			controls->position({ posX->number(), posY->number() });
+		});
+		posX->onEnter.connect("updateX", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			controls->position({ posX->number(), posY->number() });
+		});
+		auto yClick = posY->owner()->component<MV::Scene::Clickable>();
+		yClick->onAccept.connect("updateY", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			controls->position({ posX->number(), posY->number() });
+		});
+		posY->onEnter.connect("updateY", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			controls->position({ posX->number(), posY->number() });
+		});
+
+		auto widthClick = width->owner()->component<MV::Scene::Clickable>();
+		widthClick->onAccept.connect("updateWidth", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			controls->size({ width->number(), height->number() });
+		});
+		width->onEnter.connect("updateWidth", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			controls->size({ width->number(), height->number() });
+		});
+		auto heightClick = width->owner()->component<MV::Scene::Clickable>();
+		heightClick->onAccept.connect("updateHeight", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			controls->size({ width->number(), height->number() });
+		});
+		height->onEnter.connect("updateHeight", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			controls->size({ width->number(), height->number() });
+		});
+
+		auto cellsClickX = cellsX->owner()->component<MV::Scene::Clickable>();
+		cellsClickX->onAccept.connect("updateCellsX", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			controls->elementToEdit->resizeGrid({static_cast<int>(cellsX->number()), static_cast<int>(cellsY->number())});
+		});
+		cellsX->onEnter.connect("updateCellsX", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			controls->elementToEdit->resizeGrid({ static_cast<int>(cellsX->number()), static_cast<int>(cellsY->number()) });
+		});
+
+		auto cellsClickY = cellsY->owner()->component<MV::Scene::Clickable>();
+		cellsClickY->onAccept.connect("updateCellsY", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			controls->elementToEdit->resizeGrid({ static_cast<int>(cellsX->number()), static_cast<int>(cellsY->number()) });
+		});
+		cellsY->onEnter.connect("updateCellsY", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			controls->elementToEdit->resizeGrid({ static_cast<int>(cellsX->number()), static_cast<int>(cellsY->number()) });
+		});
+
+		controls->onChange = [&](EditablePathMap *a_element) {
+			posX->number(static_cast<int>(std::lround(controls->position().x)));
+			posY->number(static_cast<int>(std::lround(controls->position().y)));
+
+			width->number(static_cast<int>(std::lround(controls->size().width)));
+			height->number(static_cast<int>(std::lround(controls->size().height)));
+		};
+	}
+	auto deselectLocalAABB = deselectButton->bounds();
+
+	panel.updateBoxHeader(grid->bounds().width());
+
+	SDL_StartTextInput();
+}
+
+void SelectedPathMapEditorPanel::handleInput(SDL_Event &a_event) {
+	if (activeTextbox) {
+		activeTextbox->text(a_event);
+	}
+}
+
+void SelectedPathMapEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
+	controls->resetHandles();
+}
+
+void SelectedPathMapEditorPanel::onSceneZoom() {
+	controls->resetHandles();
+}
+
 DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	EditorPanel(a_panel) {
 	auto node = panel.content();
@@ -833,6 +965,7 @@ ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel, co
 	auto createEmitterButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Emitter", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Emitter"));
 	auto createSpineButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Spine", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Spine"));
 	auto createGridButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Grid", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Grid"));
+	auto createPathMapButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "PathMap", MV::size(110.0f, 27.0f), UTF_CHAR_STR("PathMap"));
 	auto cancel = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Cancel", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Cancel"));
 
 	panel.updateBoxHeader(grid->bounds().width());
@@ -859,6 +992,12 @@ ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel, co
 		createGrid();
 	});
 
+	createPathMapButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		panel.selection().enable([&](const MV::BoxAABB<int> &a_selected) {
+			createPathMap(a_selected);
+		});
+	});
+
 	cancel->onAccept.connect("select", [&](std::shared_ptr<MV::Scene::Clickable>){
 		panel.loadPanel<DeselectedEditorPanel>();
 	});
@@ -871,6 +1010,16 @@ void ChooseElementCreationType::createRectangle(const MV::BoxAABB<int> &a_select
 	newShape->bounds(nodeToAttachTo->localFromScreen(a_selected))->color({ CREATED_DEFAULT })->shader(MV::DEFAULT_ID)->id(MV::guid("sprite"));
 
 	panel.loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(newShape, panel.editor(), panel.resources().mouse), editorPanel->CreateSpriteComponentButton(newShape).self());
+}
+
+void ChooseElementCreationType::createPathMap(const MV::BoxAABB<int> &a_selected) {
+	panel.selection().disable();
+	auto tmp = MV::Scene::Node::make(nodeToAttachTo->renderer());
+	auto localBounds = nodeToAttachTo->localFromScreen(a_selected);
+	auto newShape = nodeToAttachTo->attach<MV::Scene::PathMap>(MV::Size<>(10.0f, 10.0f), MV::Size<int>(std::max(static_cast<int>(localBounds.size().width / 10.0f), 1), std::max(static_cast<int>(localBounds.size().height / 10.0f), 1)));
+	newShape->show();
+	newShape->bounds(localBounds);
+	panel.loadPanel<SelectedPathMapEditorPanel>(std::make_shared<EditablePathMap>(newShape, panel.editor(), panel.resources().mouse), editorPanel->CreatePathMapComponentButton(newShape).self());
 }
 
 void ChooseElementCreationType::createEmitter(const MV::BoxAABB<int> &a_selected) {

@@ -37,6 +37,7 @@ namespace MV {
 
 		std::shared_ptr<TextureHandle> fullHandle();
 
+		std::shared_ptr<TextureHandle> handle(size_t a_index);
 		std::shared_ptr<TextureHandle> handle(const std::string &a_id);
 		std::vector<std::string> handleIds() const;
 

@@ -34,6 +34,9 @@ private:
 	Game& operator=(const Game &) = delete;
 
 	void initializeWindow();
+	void spawnCreature(const MV::Point<> &a_position);
+
+	void handleScroll(int a_amount);
 
 	MV::ThreadPool* pool;
 	MV::Draw2D* renderer;
@@ -42,6 +45,8 @@ private:
 	MV::SharedTextures textures;
 	
 	std::shared_ptr<MV::Scene::Node> worldScene;
+
+	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
 	
 	bool done;
 	MV::MouseState mouse;

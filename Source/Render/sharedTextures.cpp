@@ -23,11 +23,11 @@ namespace MV {
 		}
 	}
 
-	std::shared_ptr<FileTextureDefinition> SharedTextures::file(const std::string &a_filename, bool a_repeat) {
-		std::string identifier = fileId(a_filename, a_repeat);
+	std::shared_ptr<FileTextureDefinition> SharedTextures::file(const std::string &a_filename, bool a_repeat, bool a_pixel) {
+		std::string identifier = fileId(a_filename, a_repeat, a_pixel);
 		auto foundDefinition = fileDefinitions.find(identifier);
 		if(foundDefinition == fileDefinitions.end()){
-			std::shared_ptr<FileTextureDefinition> newDefinition = FileTextureDefinition::make(a_filename, true, a_repeat);
+			std::shared_ptr<FileTextureDefinition> newDefinition = FileTextureDefinition::make(a_filename, true, a_repeat, a_pixel);
 			fileDefinitions[identifier] = newDefinition;
 			return newDefinition;
 		} else{
@@ -35,13 +35,13 @@ namespace MV {
 		}
 	}
 
-	void SharedTextures::files(const std::string &a_rootDirectory, bool a_repeat) {
+	void SharedTextures::files(const std::string &a_rootDirectory, bool a_repeat, bool a_pixel) {
 		std::vector<std::string> validExtensions{ ".jpg", ".png", ".bmp", ".tga", ".gif" };
 		path directory(a_rootDirectory);
 		if (exists(directory)) {
 			for (auto&& imagePath = directory_iterator(directory); imagePath != directory_iterator(); ++imagePath) {
 				if (exists(*imagePath) && is_regular_file(*imagePath)) {
-					file(imagePath->path().string(), a_repeat);
+					file(imagePath->path().string(), a_repeat, a_pixel);
 				}
 			}
 		}

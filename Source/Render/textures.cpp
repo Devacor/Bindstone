@@ -102,7 +102,7 @@ namespace MV {
 		return a_img;
 	}
 
-	bool loadTextureFromFile(const std::string &a_file, GLuint &a_imageLoaded, Size<int> &a_size, Size<int> &a_originalSize, bool a_powerTwo, bool a_repeat) {
+	bool loadTextureFromFile(const std::string &a_file, GLuint &a_imageLoaded, Size<int> &a_size, Size<int> &a_originalSize, bool a_powerTwo, bool a_repeat, bool a_pixel) {
 		std::cout << "Loading: " << a_file << std::endl;
 		SDL_Surface *img = IMG_Load(a_file.c_str());
 		if (!img) {
@@ -110,13 +110,13 @@ namespace MV {
 			return false;
 		}
 
-		bool result = loadTextureFromSurface(img, a_imageLoaded, a_size, a_originalSize, a_powerTwo, a_repeat);
+		bool result = loadTextureFromSurface(img, a_imageLoaded, a_size, a_originalSize, a_powerTwo, a_repeat, a_pixel);
 
 		return result;
 	}
 
 	//Load an opengl texture
-	bool loadTextureFromSurface(SDL_Surface *a_img, GLuint &a_imageLoaded, Size<int> &a_size, Size<int> &a_originalSize, bool a_powerTwo, bool a_repeat) {
+	bool loadTextureFromSurface(SDL_Surface *a_img, GLuint &a_imageLoaded, Size<int> &a_size, Size<int> &a_originalSize, bool a_powerTwo, bool a_repeat, bool a_pixel) {
 		a_originalSize.width = a_img->w;
 		a_originalSize.height = a_img->h;
 		if (a_powerTwo) {
@@ -138,8 +138,8 @@ namespace MV {
 		TextureUnloader::increment(a_imageLoaded);
 		glBindTexture(GL_TEXTURE_2D, a_imageLoaded);
 
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (a_pixel) ? GL_NEAREST : GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (a_pixel) ? GL_NEAREST : GL_LINEAR);
 
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (a_repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (a_repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
@@ -297,7 +297,7 @@ namespace MV {
 					powerTwo = foundShared->second->powerTwo;
 					justLoaded = true;
 				} else {
-					loadTextureFromFile(textureName, texture, textureSize, desiredSize, powerTwo, repeat);
+					loadTextureFromFile(textureName, texture, textureSize, desiredSize, powerTwo, repeat, pixel);
 					foundShared->second->texture = texture;
 					TextureUnloader::increment(texture);
 					foundShared->second->textureSize = textureSize;
@@ -306,11 +306,11 @@ namespace MV {
 					foundShared->second->onReloadAction(foundShared->second);
 				}
 			}else{
-				loadTextureFromFile(textureName, texture, textureSize, desiredSize, powerTwo, repeat);
+				loadTextureFromFile(textureName, texture, textureSize, desiredSize, powerTwo, repeat, pixel);
 				textures->fileDefinitions[textureId] = std::static_pointer_cast<FileTextureDefinition>(shared_from_this());
 			}
 		} else {
-			loadTextureFromFile(textureName, texture, textureSize, desiredSize, powerTwo, repeat);
+			loadTextureFromFile(textureName, texture, textureSize, desiredSize, powerTwo, repeat, pixel);
 		}
 	}
 
@@ -358,7 +358,7 @@ namespace MV {
 		generatedSurfaceSize = Size<int>(newSurface->w, newSurface->h);
 
 		//loads and frees
-		loadTextureFromSurface(newSurface, texture, textureSize, desiredSize, true, false);
+		loadTextureFromSurface(newSurface, texture, textureSize, desiredSize, true, false, false);
 	}
 
 	Size<int> SurfaceTextureDefinition::surfaceSize() const {

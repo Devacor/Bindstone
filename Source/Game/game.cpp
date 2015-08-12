@@ -81,7 +81,18 @@ void Game::spawnCreature(const MV::Point<> &a_position) {
 	creatureNode->attach<MV::Scene::Sprite>()->texture(voidTexture)->size(MV::cast<MV::PointPrecision>(voidTexture->bounds().size()));
 	creatureNode->attach<MV::Scene::PathAgent>(pathMap.self(), pathMap->gridFromLocal(pathMap->owner()->localFromWorld(a_position)))->
 		gridSpeed(4.0f)->
-		gridGoal(pathMap->gridFromLocal(pathMap->owner()->localFromWorld(worldScene->get("RightWell")->worldFromLocal(MV::Point<>()))));
+		gridGoal(pathMap->gridFromLocal(pathMap->owner()->localFromWorld(worldScene->get("RightWell")->worldFromLocal(MV::Point<>()))))->
+		onArrive.connect("!", [](std::shared_ptr<MV::Scene::PathAgent> a_self){
+			std::weak_ptr<MV::Scene::Node> self = a_self->owner();
+			a_self->owner()->task().then("Countdown", [=](const MV::Task& a_task, double a_dt) mutable {
+				if (a_task.elapsed() > 4.0f) {
+					self.lock()->removeFromParent();
+					return true;
+				}
+				return false;
+			});
+		});
+	
 	std::weak_ptr<MV::Scene::Node> weakCreatureNode{ creatureNode };
 	creatureNode->task().also("UpdateZOrder", [=](const MV::Task &a_self, double a_dt) {
 		weakCreatureNode.lock()->depth(weakCreatureNode.lock()->position().y);

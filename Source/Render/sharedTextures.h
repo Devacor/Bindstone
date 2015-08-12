@@ -27,11 +27,11 @@ namespace MV {
 		friend FileTextureDefinition;
 	public:
 		std::shared_ptr<TexturePack> pack(const std::string &a_name, Draw2D* a_renderer = nullptr);
-		std::shared_ptr<FileTextureDefinition> file(const std::string &a_filename, bool a_repeat = false);
+		std::shared_ptr<FileTextureDefinition> file(const std::string &a_filename, bool a_repeat = false, bool a_pixel = false);
 		std::shared_ptr<DynamicTextureDefinition> dynamic(const std::string &a_identifier, const Size<int> &a_size);
 		std::shared_ptr<SurfaceTextureDefinition> surface(const std::string &a_identifier, std::function<SDL_Surface*()> a_surfaceGenerator);
 
-		void files(const std::string &a_rootDirectory, bool a_repeat = false);
+		void files(const std::string &a_rootDirectory, bool a_repeat = false, bool a_pixel = false);
 
 		std::vector<std::pair<std::string, bool>> fileIds() const;
 		std::vector<std::string> packIds() const;
@@ -52,8 +52,8 @@ namespace MV {
 			return defaultHandle;
 		}
 
-		static std::string fileId(const std::string &a_filename, bool a_repeat) {
-			return a_filename + (a_repeat ? "1" : "0");
+		static std::string fileId(const std::string &a_filename, bool a_repeat, bool a_pixel = false) {
+			return a_filename + (a_repeat ? "1" : "0") + (a_pixel ? "1" : "");
 		}
 	private:
 		std::map<std::string, std::shared_ptr<TexturePack>> texturePacks;

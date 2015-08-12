@@ -57,7 +57,7 @@ namespace MV{
 		out << "			var c = document.getElementById(\"myCanvas\");\n";
 		out << "			var ctx = c.getContext(\"2d\");\n\n";
 		for(auto&& shape : shapes){
-			Color tmp(static_cast<float>(randomNumber(0, 200)), static_cast<float>(randomNumber(0, 200)), static_cast<float>(randomNumber(0, 200)), .25f);
+			Color tmp(static_cast<float>(randomInteger(0, 200)), static_cast<float>(randomInteger(0, 200)), static_cast<float>(randomInteger(0, 200)), .25f);
 			//Color tmp(0.0f, 0.0f, 0.0f, .25f);
 			out << "			ctx.fillStyle=\"rgba" << tmp << "\";\n";
 			out << "			ctx.fillRect(" << shape.bounds << ");\n";

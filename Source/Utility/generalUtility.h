@@ -292,12 +292,8 @@ namespace MV {
 			generator.seed(static_cast<unsigned long>(a_seed));
 		}
 
-		int number(int a_min, int a_max){
-			return std::uniform_int_distribution<int>{a_min, a_max}(generator);
-		}
-
-		size_t number(size_t a_min, size_t a_max){
-			return std::uniform_int_distribution<size_t>{a_min, a_max}(generator);
+		int64_t integer(int64_t a_min, int64_t a_max){
+			return std::uniform_int_distribution<int64_t>{a_min, a_max}(generator);
 		}
 
 		double number(double a_min, double a_max){
@@ -314,13 +310,12 @@ namespace MV {
 		static Random* instance;
 		friend double randomNumber(double, double);
 		friend float randomNumber(float, float);
-		friend int randomNumber(int, int);
-		friend size_t randomNumber(size_t, size_t);
+		friend int64_t randomInteger(int64_t, int64_t);
 	};
 
 	double randomNumber(double a_min, double a_max);
 	float randomNumber(float a_min, float a_max);
-	int randomNumber(int a_min, int a_max);
+	int64_t randomInteger(int64_t a_min, int64_t a_max);
 
 	//Generic constructor for automatic type deduction: MV::make<std::pair>(1, 2); and so on (instead of std::pair<int>(1, 2);)
 	template <template <typename...> class TemplateClass, typename... Args>

@@ -129,7 +129,7 @@ namespace MV {
 			void repositionDebugDrawPoints();
 
 			template <class Archive>
-			void serialize(Archive & archive) {
+			void serialize(Archive & a_archive) {
 				std::vector<DrawPoint> tmpPoints{bounds().minPoint, bounds().maxPoint};
 				std::vector<GLuint> tmpVertexIndices;
 
@@ -141,7 +141,7 @@ namespace MV {
 					std::swap(vertexIndices, tmpVertexIndices);
 				};
 
-				archive(
+				a_archive(
 					cereal::make_nvp("map", map),
 					cereal::make_nvp("offset", topLeftOffset),
 					cereal::make_nvp("cellDimensions", cellDimensions),
@@ -150,15 +150,15 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<PathMap> &construct) {
-				construct(std::shared_ptr<Node>(), Size<int>());
-				archive(
-					cereal::make_nvp("map", construct->map),
-					cereal::make_nvp("offset", construct->topLeftOffset),
-					cereal::make_nvp("cellDimensions", construct->cellDimensions),
-					cereal::make_nvp("Component", cereal::base_class<Drawable>(construct.ptr()))
+			static void load_and_construct(Archive & a_archive, cereal::construct<PathMap> &a_construct) {
+				a_construct(std::shared_ptr<Node>(), Size<int>());
+				a_archive(
+					cereal::make_nvp("map", a_construct->map),
+					cereal::make_nvp("offset", a_construct->topLeftOffset),
+					cereal::make_nvp("cellDimensions", a_construct->cellDimensions),
+					cereal::make_nvp("Component", cereal::base_class<Drawable>(a_construct.ptr()))
 				);
-				construct->initialize();
+				a_construct->initialize();
 			}
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
@@ -187,6 +187,20 @@ namespace MV {
 			friend Node;
 			friend cereal::access;
 		public:
+			typedef void CallbackSignature(std::shared_ptr<PathAgent>);
+			typedef SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
+		private:
+			Signal<CallbackSignature> onArriveSignal;
+			Signal<CallbackSignature> onBlockedSignal;
+			Signal<CallbackSignature> onStopSignal;
+			Signal<CallbackSignature> onStartSignal;
+
+		public:
+			SignalRegister<CallbackSignature> onArrive;
+			SignalRegister<CallbackSignature> onBlocked;
+			SignalRegister<CallbackSignature> onStop;
+			SignalRegister<CallbackSignature> onStart;
+
 			ComponentDerivedAccessors(PathMap)
 
 			Point<PointPrecision> gridPosition() const {
@@ -237,17 +251,29 @@ namespace MV {
 			PathAgent(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<PathMap> &a_map, const Point<> &a_gridPosition) :
 				Component(a_owner),
 				map(a_map),
-				agent(NavigationAgent::make(a_map->map, a_gridPosition)) {
+				agent(NavigationAgent::make(a_map->map, a_gridPosition)),
+				onArrive(onArriveSignal),
+				onBlocked(onBlockedSignal),
+				onStop(onStopSignal),
+				onStart(onStartSignal){
 			}
 
 			PathAgent(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<PathMap> &a_map, const Point<int> &a_gridPosition) :
 				Component(a_owner),
 				map(a_map),
-				agent(NavigationAgent::make(a_map->map, a_gridPosition)) {
+				agent(NavigationAgent::make(a_map->map, a_gridPosition)),
+				onArrive(onArriveSignal),
+				onBlocked(onBlockedSignal),
+				onStop(onStopSignal),
+				onStart(onStartSignal) {
 			}
 
 			virtual void updateImplementation(double a_dt) override {
 				agent->update(a_dt);
+				applyAgentPositionToOwner();
+			}
+
+			void applyAgentPositionToOwner() {
 				auto ourOwner = owner();
 				if (ourOwner->parent() == map->owner()) {
 					ourOwner->position(map->localFromGrid(agent->position()));
@@ -257,8 +283,8 @@ namespace MV {
 			}
 
 			template <class Archive>
-			void serialize(Archive & archive) {
-				archive(
+			void serialize(Archive & a_archive) {
+				a_archive(
 					cereal::make_nvp("map", map),
 					cereal::make_nvp("agent", agent),
 					cereal::make_nvp("Component", cereal::base_class<Component>(this))
@@ -266,14 +292,30 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<PathAgent> &construct) {
-				construct(std::shared_ptr<Node>());
-				archive(
-					cereal::make_nvp("map", construct->map),
-					cereal::make_nvp("agent", construct->agent),
-					cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
+			static void load_and_construct(Archive & a_archive, cereal::construct<PathAgent> &a_construct) {
+				a_construct(std::shared_ptr<Node>());
+				a_archive(
+					cereal::make_nvp("map", a_construct->map),
+					cereal::make_nvp("agent", a_construct->agent),
+					cereal::make_nvp("Component", cereal::base_class<Component>(a_construct.ptr()))
 				);
-				construct->initialize();
+				a_construct->initialize();
+			}
+
+			virtual void initialize() override {
+				applyAgentPositionToOwner();
+				agentPassthroughSignals.push_back(agent->onArrive.connect([&](std::shared_ptr<NavigationAgent>){
+					onArriveSignal(std::static_pointer_cast<PathAgent>(shared_from_this()));
+				}));
+				agentPassthroughSignals.push_back(agent->onBlocked.connect([&](std::shared_ptr<NavigationAgent>) {
+					onBlockedSignal(std::static_pointer_cast<PathAgent>(shared_from_this()));
+				}));
+				agentPassthroughSignals.push_back(agent->onStop.connect([&](std::shared_ptr<NavigationAgent>) {
+					onStopSignal(std::static_pointer_cast<PathAgent>(shared_from_this()));
+				}));
+				agentPassthroughSignals.push_back(agent->onStart.connect([&](std::shared_ptr<NavigationAgent>) {
+					onStartSignal(std::static_pointer_cast<PathAgent>(shared_from_this()));
+				}));
 			}
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
@@ -292,12 +334,20 @@ namespace MV {
 			PathAgent(const std::weak_ptr<Node> &a_owner) :
 				Component(a_owner),
 				map(nullptr),
-				agent(nullptr) {
+				agent(nullptr),
+				onArrive(onArriveSignal),
+				onBlocked(onBlockedSignal),
+				onStop(onStopSignal),
+				onStart(onStartSignal) {
 			}
+			std::vector<NavigationAgent::SharedRecieverType> agentPassthroughSignals;
 			std::shared_ptr<PathMap> map;
 			std::shared_ptr<NavigationAgent> agent;
 		};
 	}
 }
+
+CEREAL_CLASS_VERSION(MV::Scene::PathAgent, 1);
+CEREAL_CLASS_VERSION(MV::Scene::PathMap, 1);
 
 #endif

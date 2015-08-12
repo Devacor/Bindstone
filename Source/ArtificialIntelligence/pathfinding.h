@@ -470,6 +470,7 @@ namespace MV {
 					recalculate();
 				}
 				if (calculatedPath.size() == 1 && calculatedPath[0].position() != cast<int>(ourGoal)) {
+					dirtyPath = true;
 					onBlockedSignal(shared_from_this());
 				} else {
 					if (!calculatedPath.empty() && currentPathIndex < calculatedPath.size()) {

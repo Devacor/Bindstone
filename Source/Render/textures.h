@@ -32,8 +32,8 @@ namespace MV {
 
 	//These methods are all destructive to the original surface.  Do not rely on SDL_Surface being viable after calling.
 	SDL_Surface* convertToPowerOfTwoSurface(SDL_Surface *a_img);
-	bool loadTextureFromFile(const std::string &file, GLuint &imageLoaded, Size<int> &size, Size<int> &originalSize, bool powerTwo, bool repeat);
-	bool loadTextureFromSurface(SDL_Surface *img, GLuint &imageLoaded, Size<int> &size, Size<int> &originalSize, bool powerTwo, bool repeat);
+	bool loadTextureFromFile(const std::string &file, GLuint &imageLoaded, Size<int> &size, Size<int> &originalSize, bool powerTwo, bool repeat, bool pixel);
+	bool loadTextureFromSurface(SDL_Surface *img, GLuint &imageLoaded, Size<int> &size, Size<int> &originalSize, bool powerTwo, bool repeat, bool pixel);
 
 	class TextureUnloader {
 	public:
@@ -101,17 +101,18 @@ namespace MV {
 	class FileTextureDefinition : public TextureDefinition {
 		friend cereal::access;
 	public:
-		static std::shared_ptr<FileTextureDefinition> make(const std::string &a_filename, bool a_powerTwo = true, bool a_repeat = false){
-			return std::shared_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_powerTwo, a_repeat));
+		static std::shared_ptr<FileTextureDefinition> make(const std::string &a_filename, bool a_powerTwo = true, bool a_repeat = false, bool a_pixel = false){
+			return std::shared_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_powerTwo, a_repeat, a_pixel));
 		}
-		static std::unique_ptr<FileTextureDefinition> makeUnmanaged(const std::string &a_filename, bool a_powerTwo = true, bool a_repeat = false){
-			return std::unique_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_powerTwo, a_repeat, false));
+		static std::unique_ptr<FileTextureDefinition> makeUnmanaged(const std::string &a_filename, bool a_powerTwo = true, bool a_repeat = false, bool a_pixel = false){
+			return std::unique_ptr<FileTextureDefinition>(new FileTextureDefinition(a_filename, a_powerTwo, a_repeat, a_pixel, false));
 		}
 
 	protected:
-		FileTextureDefinition(const std::string &a_filename, bool a_powerTwo, bool a_repeat, bool a_isShared = true):
+		FileTextureDefinition(const std::string &a_filename, bool a_powerTwo, bool a_repeat, bool a_pixel, bool a_isShared = true):
 			TextureDefinition(a_filename, a_isShared),
 			repeat(a_repeat),
+			pixel(a_pixel),
 			powerTwo(a_powerTwo){
 		}
 
@@ -120,17 +121,18 @@ namespace MV {
 
 		template <class Archive>
 		void serialize(Archive & archive){
-			archive(CEREAL_NVP(powerTwo), CEREAL_NVP(repeat), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
+			archive(CEREAL_NVP(powerTwo), CEREAL_NVP(repeat), CEREAL_NVP(pixel), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
 		}
 
 		template <class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<FileTextureDefinition> &construct){
 			bool repeat = false;
+			bool pixel = false;
 			bool powerTwo = true;
 
-			archive(cereal::make_nvp("powerTwo", powerTwo), cereal::make_nvp("repeat", repeat));
+			archive(cereal::make_nvp("powerTwo", powerTwo), cereal::make_nvp("repeat", repeat), cereal::make_nvp("pixel", pixel));
 
-			construct("", powerTwo, repeat);
+			construct("", powerTwo, repeat, pixel);
 			archive.extract(cereal::make_nvp("texture", construct->textures));
 			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
 		}
@@ -138,6 +140,7 @@ namespace MV {
 		SharedTextures *textures = nullptr;
 		bool powerTwo;
 		bool repeat;
+		bool pixel;
 	};
 
 	class DynamicTextureDefinition : public TextureDefinition {

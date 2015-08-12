@@ -200,19 +200,11 @@ namespace MV {
 		return Random::instance->number(a_min, a_max);
 	}
 
-	int randomNumber(int a_min, int a_max) {
+	int64_t randomInteger(int64_t a_min, int64_t a_max) {
 		if(!Random::instance){
 			Random::instance = new Random();
 		}
 		return Random::instance->number(a_min, a_max);
 	}
-
-	size_t randomNumber(size_t a_min, size_t a_max) {
-		if(!Random::instance){
-			Random::instance = new Random();
-		}
-		return Random::instance->number(a_min, a_max);
-	}
-
 
 }

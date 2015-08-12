@@ -1,8 +1,9 @@
 #ifndef _MV_GAME_EDITOR_H_
 #define _MV_GAME_EDITOR_H_
 
-#include "game/game.h"
+#include "Game/game.h"
 #include "ClickerGame/clickerGame.h"
+#include "DiggerGame/diggerGame.h"
 #include "editor/editor.h"
 
 class GameEditor {
@@ -135,7 +136,7 @@ private:
 	float accumulatedTime = 0.0f;
 	float accumulatedFrames = 0.0f;
 
-	Game game;
+	DiggerGame game;
 	Editor editor;
 };
 

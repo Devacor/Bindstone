@@ -3,6 +3,7 @@
 
 #include "drawable.h"
 #include "cereal/types/utility.hpp"
+#include <vector>
 
 namespace MV {
 	namespace Scene {
@@ -37,6 +38,9 @@ namespace MV {
 			size_t columns() const {
 				return cellColumns;
 			}
+
+			std::shared_ptr<Node> nodeFromGrid(const Point<int> &a_coordinate, bool a_throwOnFail = true);
+			std::shared_ptr<Node> nodeFromLocal(const Point<> &a_coordinate, bool a_throwOnFail = true);
 
 			//unlikely you'll need to call this directly
 			void layoutCells();
@@ -104,6 +108,10 @@ namespace MV {
 			void observeOwner(const std::shared_ptr<Node>& a_node);
 			void observeChildNode(const std::shared_ptr<Node>& a_node);
 
+			std::shared_ptr<Node> gridTileForYIndexAndPosition(int yIndex, const Point<> &a_coordinate, bool a_throwOnFail);
+
+			int gridYIndexForCoordinate(const Point<> &a_coordinate, bool a_throwOnFail);
+
 			std::list<Node::BasicSharedSignalType> basicSignals;
 			std::list<Node::ParentInteractionSharedSignalType> parentInteractionSignals;
 
@@ -117,8 +125,12 @@ namespace MV {
 			bool allowDirty = true;
 			bool dirtyGrid;
 			bool includeChildrenInChildSize = true;
+
+			std::vector<std::vector<std::weak_ptr<MV::Scene::Node>>> tiles;
 		};
 	}
 }
+
+CEREAL_CLASS_VERSION(MV::Scene::Grid, 1)
 
 #endif

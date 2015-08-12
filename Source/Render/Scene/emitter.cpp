@@ -84,7 +84,7 @@ namespace MV {
 					updateParticlesOnMultipleThreads(a_dt);
 				}, false);
 			} else if (particlesToSpawn > 0) {
-				auto randomOffset = randomNumber(static_cast<size_t>(0), emitterThreads);
+				auto randomOffset = randomInteger(0, emitterThreads);
 				for (size_t count = 0; count < particlesToSpawn; ++count) {
 					spawnParticle((count + randomOffset) % emitterThreads);
 				}

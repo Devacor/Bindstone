@@ -6,7 +6,6 @@ CEREAL_REGISTER_TYPE(MV::Scene::Grid);
 namespace MV {
 	namespace Scene {
 
-
 		void Grid::updateImplementation(double a_delta) {
 			if (dirtyGrid) {
 				layoutCells();
@@ -55,10 +54,35 @@ namespace MV {
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
+		std::shared_ptr<Node> Grid::nodeFromGrid(const Point<int> &a_coordinate, bool a_throwOnFail /*= true*/) {
+			if (dirtyGrid) {
+				layoutCells();
+			}
+			if (a_coordinate.y >= 0 && tiles.size() < a_coordinate.y) {
+				if (a_coordinate.x >= 0 && tiles[a_coordinate.y].size() < a_coordinate.x) {
+					auto result = tiles[a_coordinate.y][a_coordinate.x];
+					if (!result.expired()) {
+						return result.lock();
+					}
+				}
+			}
+			require<RangeException>(!a_throwOnFail, "Failed to load coordinate from grid at: ", a_coordinate, " It is either expired or out of range.");
+			return nullptr;
+		}
+
+		std::shared_ptr<Node> Grid::nodeFromLocal(const Point<> &a_coordinate, bool a_throwOnFail /*= true*/) {
+			if (dirtyGrid) {
+				layoutCells();
+			}
+			auto tile = gridTileForYIndexAndPosition(gridYIndexForCoordinate(a_coordinate, a_throwOnFail), a_coordinate, a_throwOnFail);
+			return tile;
+		}
+
 		void Grid::layoutCells() {
 			allowDirty = false;
 			SCOPE_EXIT{ allowDirty = true; };
 			dirtyGrid = false;
+			
 			if (cellDimensions.width > 0.0f || cellDimensions.height > 0.0f) {
 				layoutCellSize();
 			} else {
@@ -101,6 +125,8 @@ namespace MV {
 			BoxAABB<> calculatedBounds(size(getContentWidth() - margins.second.x, cellDimensions.height + margins.first.y));
 			Point<> cellPosition = margins.first;
 			size_t index = 0;
+			tiles.clear();
+			tiles.push_back({});
 
 			PointPrecision lineHeight = 0.0f;
 			for (auto&& node : *owner()) {
@@ -128,6 +154,7 @@ namespace MV {
 				nextPosition = a_cellPosition;
 				nextPosition.translate(a_cellSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
 				a_lineHeight = a_cellSize.height;
+				tiles.push_back({});
 			} else if(a_lineHeight < a_cellSize.height) {
 				a_lineHeight = a_cellSize.height;
 			}
@@ -135,6 +162,7 @@ namespace MV {
 			a_node->position(a_cellPosition);
 			a_calculatedBounds.expandWith(a_cellPosition + toPoint(a_cellSize));
 
+			tiles[tiles.size() - 1].push_back(a_node);
 			return nextPosition;
 		}
 
@@ -143,6 +171,8 @@ namespace MV {
 			BoxAABB<> calculatedBounds(size(getContentWidth() - margins.second.x, cellDimensions.height + margins.first.y));
 			Point<> cellPosition = margins.first;
 			size_t index = 0;
+			tiles.clear();
+			tiles.push_back({});
 
 			PointPrecision maxHeightInLine = 0.0f;
 
@@ -208,6 +238,48 @@ namespace MV {
 					childSignals.erase(found);
 				}
 			}));
+		}
+
+		std::shared_ptr<Node> Grid::gridTileForYIndexAndPosition(int yIndex, const Point<> &a_coordinate, bool a_throwOnFail) {
+			if (yIndex >= 0) {
+				bool foundLessX = false;
+				for (int x = 0; x < tiles[yIndex].size(); ++x) {
+					if (!tiles[yIndex][x].expired()) {
+						auto tile = tiles[yIndex][x].lock();
+						if (equals(tile->position().x, a_coordinate.x)) {
+							return tile;
+						} else if (tile->position().x < a_coordinate.x) {
+							foundLessX = true;
+						} else if (foundLessX && tile->position().x > a_coordinate.x) {
+							return tile;
+						} else if (tile->position().x > a_coordinate.x) {
+							break;
+						}
+					}
+				}
+			}
+			require<RangeException>(!a_throwOnFail, "Failed to load a grid position at: ", a_coordinate, " x is out of range, but y was okay");
+			return nullptr;
+		}
+
+		int Grid::gridYIndexForCoordinate(const Point<> &a_coordinate, bool a_throwOnFail) {
+			bool foundLessY = false;
+			for (int y = 0; y < tiles.size(); ++y) {
+				if (!tiles[y].empty() && !tiles[y][0].expired()) {
+					auto tile = tiles[y][0].lock();
+					if (equals(tile->position().y, a_coordinate.y)) {
+						return y;
+					} else if (tile->position().y < a_coordinate.y) {
+						foundLessY = true;
+					} else if (foundLessY && tile->position().y > a_coordinate.y) {
+						return y;
+					} else if (tile->position().y > a_coordinate.y) {
+						break;
+					}
+				}
+			}
+			require<RangeException>(!a_throwOnFail, "Failed to load a grid position at: ", a_coordinate, " y is out of range");
+			return -1;
 		}
 
 		BoxAABB<> Grid::boundsImplementation() {

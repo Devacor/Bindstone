@@ -231,6 +231,7 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 	controls(a_controls) {
 
 	auto node = panel.content();
+
 	auto grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
 		color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->
 		padding({ 2.0f, 2.0f })->owner();
@@ -255,12 +256,15 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 	});
 
 	float textboxWidth = 52.0f;
+	makeLabel(grid, *panel.resources().textLibrary, "Width/Columns", buttonSize, UTF_CHAR_STR("Width|Column"));
 	width = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "width", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->gridWidth()))));
 	columns = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "columns", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(a_controls->elementToEdit->columns())));
 
+	makeLabel(grid, *panel.resources().textLibrary, "Padding", buttonSize, UTF_CHAR_STR("Padding X|Y"));
 	paddingX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "paddingX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->padding().first.x))));
 	paddingY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "paddingY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->padding().first.y))));
 
+	makeLabel(grid, *panel.resources().textLibrary, "Margins", buttonSize, UTF_CHAR_STR("Margins X|Y"));
 	marginsX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "marginsX", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->margin().first.x))));
 	marginsY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "marginsY", MV::size(textboxWidth, 27.0f), MV::toWide(std::to_string(std::lround(a_controls->elementToEdit->margin().first.y))));
 

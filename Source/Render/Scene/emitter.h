@@ -149,6 +149,17 @@ namespace MV {
 
 			template <class Archive>
 			void serialize(Archive & archive) {
+				std::vector<DrawPoint> tmpPoints{ bounds().minPoint, bounds().maxPoint };
+				std::vector<GLuint> tmpVertexIndices;
+
+				std::swap(points, tmpPoints);
+				std::swap(vertexIndices, tmpVertexIndices);
+
+				SCOPE_EXIT{
+					std::swap(points, tmpPoints);
+					std::swap(vertexIndices, tmpVertexIndices);
+				};
+
 				archive(
 					CEREAL_NVP(spawnProperties),
 					CEREAL_NVP(spawnParticles),

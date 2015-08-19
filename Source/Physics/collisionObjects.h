@@ -233,7 +233,7 @@ namespace MV {
 			PointPrecision interpolateDrawAngle(PointPrecision a_percentOfStep) {
 				if (currentAngle == previousAngle) { return currentAngle; }
 				bool wrapped;
-				double rotation = wrappingDistance(currentAngle, previousAngle, 0.0f, 360.0f, &wrapped);
+				PointPrecision rotation = wrappingDistance(currentAngle, previousAngle, 0.0f, 360.0f, &wrapped);
 				if (wrapped) {
 					if (previousAngle > currentAngle) {
 						rotation = previousAngle + ((rotation)* a_percentOfStep);
@@ -249,7 +249,7 @@ namespace MV {
 						rotation = previousAngle + ((rotation)* a_percentOfStep);
 					}
 				}
-				return wrap(rotation, 0.0, 360.0);
+				return wrap(rotation, 0.0f, 360.0f);
 			}
 
 			void deleteCollisionObject(Collider* a_collisionWith) {
@@ -259,7 +259,7 @@ namespace MV {
 
 			void applyShapeDefinition(b2FixtureDef &a_applyTo, const b2FixtureDef &a_applicator) {
 				a_applyTo.isSensor = a_applicator.isSensor;
-				a_applyTo.density = (objectType == NORMAL) ? a_applicator.density : 0.0f;
+				a_applyTo.density = body().isDynamic() ? a_applicator.density : 0.0f;
 				a_applyTo.restitution = a_applicator.restitution;
 				a_applyTo.filter = a_applicator.filter;
 				a_applyTo.userData = ((void *)this);
@@ -316,11 +316,6 @@ namespace MV {
 
 		class Environment : public Component {
 		public:
-
-			Point<> scenePositionFromPhysics(const Point<> &a_scaledBoxPoint) {
-				
-			}
-
 			template<typename CollisionObjectType>
 			std::shared_ptr<CollisionObjectType> makeCollisionObject(std::shared_ptr<DrawShape> a_drawShape, const b2BodyDef &a_collisionAttributes = b2BodyDef(), Collider::ObjectType a_objectType = Collider::NORMAL) {
 				auto thisShared = shared_from_this();

@@ -103,10 +103,19 @@ namespace MV {
 
 		class Collider : public Drawable {
 			friend CollisionBodyAttributes;
+			
+			Signal<void(std::shared_ptr<Collider>)> onCollisionStartSignal;
+			Signal<void(std::shared_ptr<Collider>)> onCollisionEndSignal;
+			Signal<void(std::shared_ptr<Collider>)> onContactStartSignal;
+			Signal<void(std::shared_ptr<Collider>)> onContactEndSignal;
 		public:
+			SignalRegister<void(std::shared_ptr<Collider>)> onCollisionStart;
+			SignalRegister<void(std::shared_ptr<Collider>)> onCollisionEnd;
+			SignalRegister<void(std::shared_ptr<Collider>)> onContactStart;
+			SignalRegister<void(std::shared_ptr<Collider>)> onContactEnd;
+
 			DrawableDerivedAccessors(Collider);
 
-			Collider(std::shared_ptr<Environment> a_world, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes());
 			virtual ~Collider();
 
 			CollisionBodyAttributes& body() {
@@ -123,7 +132,6 @@ namespace MV {
 					} else {
 						currentAngle = owner()->worldRotation().z;
 					}
-					newPhysicsFrameStartedHook();
 				}
 				auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
 				double z = currentLocation.z;
@@ -131,7 +139,6 @@ namespace MV {
 				interpolatedPoint.z = z; //fix the z so it isn't scaled or modified;
 				double interpolatedAngle = interpolateDrawAngle(percentOfStep);
 				applyScenePositionUpdate(interpolatedPoint, interpolatedAngle);
-				updateHook();
 			}
 
 			void setDefaultShapeDefinition(const b2FixtureDef &a_shapeAttributes) {
@@ -195,7 +202,7 @@ namespace MV {
 
 			struct ContactInformation {
 				ContactInformation() :count(0) {}
-				b2Vec2 normal;
+				std::vector<b2Vec2> normal;
 				unsigned int count;
 			};
 			typedef std::map<Collider*, ContactInformation> ContactMap;
@@ -203,15 +210,26 @@ namespace MV {
 			b2Body *physicsBody;
 
 			std::shared_ptr<Environment> world;
-
-			virtual void newPhysicsFrameStartedHook() {}
-			virtual void updateHook() {}
 		private:
+			Collider(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes());
+
 			template <class Archive>
 			void serialize(Archive & archive) {
+				collisionAttributes.syncronize();
 				archive(
+					cereal::make_nvp("collisionAttributes", collisionAttributes),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
+			}
+
+			template <class Archive>
+			static void load_and_construct(Archive & archive, cereal::construct<Collider> &construct) {
+				construct(std::shared_ptr<Node>());
+				archive(
+					cereal::make_nvp("collisionAttributes", construct->collisionAttributes),
+					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
+				);
+				construct->initialize();
 			}
 
 			void initializeDefaultFixtureDefinition() {
@@ -259,7 +277,7 @@ namespace MV {
 
 			void applyShapeDefinition(b2FixtureDef &a_applyTo, const b2FixtureDef &a_applicator) {
 				a_applyTo.isSensor = a_applicator.isSensor;
-				a_applyTo.density = (objectType == NORMAL) ? a_applicator.density : 0.0f;
+				a_applyTo.density = collisionAttributes.isDynamic() ? a_applicator.density : 0.0f;
 				a_applyTo.restitution = a_applicator.restitution;
 				a_applyTo.filter = a_applicator.filter;
 				a_applyTo.userData = ((void *)this);
@@ -293,23 +311,23 @@ namespace MV {
 				fixtureBObject->removeCollision(fixtureAObject);
 			}
 			virtual void PreSolve(b2Contact* contact, const b2Manifold* oldManifold) {
-				int multiply = 0;
-				if (static_cast<Collider*>(contact->GetFixtureA()->GetUserData())->getType() == Collider::PLATFORM) {
-					b2WorldManifold worldManifold;
-					contact->GetWorldManifold(&worldManifold);
-
-					if ((worldManifold.normal.y) > 0.5f) {
-						contact->SetEnabled(false);
-					}
-				}
-				else if (static_cast<Collider*>(contact->GetFixtureB()->GetUserData())->getType() == Collider::PLATFORM) {
-					b2WorldManifold worldManifold;
-					contact->GetWorldManifold(&worldManifold);
-
-					if ((worldManifold.normal.y) < -0.5f) {
-						contact->SetEnabled(false);
-					}
-				}
+// 				int multiply = 0;
+// 				if (static_cast<Collider*>(contact->GetFixtureA()->GetUserData())->getType() == Collider::PLATFORM) {
+// 					b2WorldManifold worldManifold;
+// 					contact->GetWorldManifold(&worldManifold);
+// 
+// 					if ((worldManifold.normal.y) > 0.5f) {
+// 						contact->SetEnabled(false);
+// 					}
+// 				}
+// 				else if (static_cast<Collider*>(contact->GetFixtureB()->GetUserData())->getType() == Collider::PLATFORM) {
+// 					b2WorldManifold worldManifold;
+// 					contact->GetWorldManifold(&worldManifold);
+// 
+// 					if ((worldManifold.normal.y) < -0.5f) {
+// 						contact->SetEnabled(false);
+// 					}
+// 				}
 			}
 			virtual void PostSolve(b2Contact* contact, const b2Manifold* oldManifold) {}
 		};

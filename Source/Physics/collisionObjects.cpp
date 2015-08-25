@@ -7,10 +7,15 @@ namespace MV {
 			return Point<>(static_cast<PointPrecision>(a_box2DPoint.x) * CollisionScale, static_cast<PointPrecision>(a_box2DPoint.y), a_z);
 		}
 
-		Collider::Collider(std::shared_ptr<Environment> a_world, CollisionBodyAttributes a_collisionAttributes)
-			:world(a_world)
-		{
-			Point sceneLocation = previousLocation = currentLocation = a_drawShape->getRelativeLocation();
+		Collider::Collider(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes):
+			Drawable(a_owner),
+			world(a_world),
+			collisionAttributes(a_collisionAttributes),
+			onCollisionStart(onCollisionStartSignal),
+			onCollisionEnd(onCollisionEndSignal),
+			onContactStart(onContactStartSignal),
+			onContactEnd(onContactEndSignal) {
+
 			a_collisionAttributes.position = castToPhysics(sceneLocation);
 			previousAngle = currentAngle = a_collisionAttributes.angle = static_cast<float32>(a_drawShape->getRotation().z);
 			physicsBody = world->createBody(a_collisionAttributes);

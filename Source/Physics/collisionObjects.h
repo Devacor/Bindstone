@@ -24,6 +24,11 @@ namespace MV {
 			return b2Vec2(static_cast<float32>(a_M2RendPoint.x) / CollisionScale, static_cast<float32>(a_M2RendPoint.y) / CollisionScale);
 		}
 
+		template<typename T>
+		b2Vec2 castToPhysics(Size<T> a_M2RendPoint) {
+			return b2Vec2(static_cast<float32>(a_M2RendPoint.width) / CollisionScale, static_cast<float32>(a_M2RendPoint.height) / CollisionScale);
+		}
+
 		class Environment;
 
 		class Collider;
@@ -101,6 +106,90 @@ namespace MV {
 			b2BodyDef details;
 		};
 
+		enum CollisionLayers {
+			ALL_LAYERS = 0x0000,
+			LAYER_1 = 0x0001,
+			LAYER_2 = 0x0002,
+			LAYER_3 = 0x0004,
+			LAYER_4 = 0x0008,
+			LAYER_5 = 0x0010,
+			LAYER_6 = 0x0020,
+			LAYER_7 = 0x0040,
+			LAYER_8 = 0x0080,
+			LAYER_9 = 0x0100,
+			LAYER_10 = 0x0200,
+			LAYER_11 = 0x0400,
+			LAYER_12 = 0x0800,
+			LAYER_13 = 0x1000,
+			LAYER_14 = 0x2000,
+			LAYER_15 = 0x4000,
+			LAYER_16 = 0x8000
+		};
+
+		class CollisionPartAttributes {
+			friend Collider;
+		public:
+			CollisionPartAttributes() {
+				details.restitution = .05f;
+				details.friction = .3f;
+				details.density = 1.0f;
+				details.isSensor = false;
+			}
+
+			//Very basic built in filtering based on flags.
+			//example: filter(LAYER_1, LAYER_2 | LAYER_3 | LAYER_4)
+			CollisionPartAttributes& filter(int16_t a_category, int16_t a_categoriesWeCanHit) {
+				details.filter.categoryBits = a_category;
+				details.filter.maskBits = a_categoriesWeCanHit;
+				return *this;
+			}
+
+			CollisionPartAttributes& filterCategory(int16_t a_category) {
+				details.filter.categoryBits = a_category;
+				return *this;
+			}
+
+			CollisionPartAttributes& collideWithFilterCategory(int16_t a_newCategory) {
+				details.filter.maskBits |= a_newCategory;
+				return *this;
+			}
+
+			CollisionPartAttributes& density(PointPrecision a_density) {
+				details.density = a_density;
+				return *this;
+			}
+
+			CollisionPartAttributes& sensor(bool a_isSensor) {
+				details.isSensor = a_isSensor;
+				return *this;
+			}
+
+			CollisionPartAttributes& friction(PointPrecision a_friction) {
+				details.friction = a_friction;
+				return *this;
+			}
+
+			CollisionPartAttributes& restitution(PointPrecision a_restitution) {
+				details.restitution = a_restitution;
+				return *this;
+			}
+
+			template <class Archive>
+			void serialize(Archive & archive) {
+				archive(
+					cereal::make_nvp("restitution", details.restitution),
+					cereal::make_nvp("friction", details.friction),
+					cereal::make_nvp("density", details.density),
+					cereal::make_nvp("sensor", details.isSensor),
+					cereal::make_nvp("filterCategory", details.filter.categoryBits),
+					cereal::make_nvp("filterInteractions", details.filter.maskBits)
+				);
+			}
+		private:
+			
+			b2FixtureDef details;
+		};
+
 		class Collider : public Drawable {
 			friend CollisionBodyAttributes;
 			
@@ -124,9 +213,9 @@ namespace MV {
 
 			void update(double a_dt) {
 				if (world->updatedThisFrame()) {
-					previousLocation = currentLocation;
+					previousPosition = currentPosition;
 					previousAngle = currentAngle;
-					currentLocation = cast(physicsBody->GetPosition(), owner()->position().z);
+					currentPosition = cast(physicsBody->GetPosition(), owner()->position().z);
 					if (useBodyAngle) {
 						currentAngle = toDegrees(physicsBody->GetAngle());
 					} else {
@@ -134,43 +223,15 @@ namespace MV {
 					}
 				}
 				auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
-				double z = currentLocation.z;
-				Point<> interpolatedPoint = previousLocation + ((currentLocation - previousLocation) * percentOfStep);
+				double z = currentPosition.z;
+				Point<> interpolatedPoint = previousPosition + ((currentPosition - previousPosition) * percentOfStep);
 				interpolatedPoint.z = z; //fix the z so it isn't scaled or modified;
 				double interpolatedAngle = interpolateDrawAngle(percentOfStep);
 				applyScenePositionUpdate(interpolatedPoint, interpolatedAngle);
 			}
 
-			void setDefaultShapeDefinition(const b2FixtureDef &a_shapeAttributes) {
-				defaultFixtureDefinition = a_shapeAttributes;
-			}
-
-			void attachBoxShape(double a_width, double a_height, const Point<> &a_location = Point<>(), double a_rotation = 0.0, b2FixtureDef *a_shapeAttributes = nullptr) {
-				if (a_shapeAttributes == nullptr) { a_shapeAttributes = getDefaultFixtureDefinition(); }
-				b2Vec2 centerPoint = castToPhysics(a_location);
-				a_width = (a_width / CollisionScale) / 2.0;
-				a_height = (a_height / CollisionScale) / 2.0;
-
-				b2PolygonShape shape;
-				shape.SetAsBox(static_cast<float32>(a_width), static_cast<float32>(a_height), centerPoint, static_cast<float32>(toRadians(a_rotation)));
-
-				b2FixtureDef shapeDef;
-				shapeDef.shape = &shape;
-				applyShapeDefinition(shapeDef, *a_shapeAttributes);
-				physicsBody->CreateFixture(&shapeDef);
-			}
-
-			void attachCircleShape(double a_diameter, const Point<> &a_location = Point<>(), b2FixtureDef *a_shapeAttributes = nullptr) {
-				if (a_shapeAttributes == nullptr) { a_shapeAttributes = getDefaultFixtureDefinition(); }
-				b2CircleShape shape;
-				shape.m_radius = static_cast<float32>((a_diameter / CollisionScale) / 2.0);
-				shape.m_p = castToPhysics(a_location);
-
-				b2FixtureDef shapeDef;
-				shapeDef.shape = &shape;
-				applyShapeDefinition(shapeDef, *a_shapeAttributes);
-				physicsBody->CreateFixture(&shapeDef);
-			}
+			void attach(const Size<> &a_size, const Point<> &a_position = Point<>(), PointPrecision a_rotation = 0.0f, CollisionPartAttributes a_attributes = CollisionPartAttributes());
+			void attach(PointPrecision a_diameter, const Point<> &a_position = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 
 			void addCollision(Collider* a_collisionWith, const b2Vec2 &a_normal) {
 				contacts[a_collisionWith].normal = a_normal;
@@ -200,6 +261,8 @@ namespace MV {
 
 			b2FixtureDef defaultFixtureDefinition;
 
+			virtual void initialize() override;
+
 			struct ContactInformation {
 				ContactInformation() :count(0) {}
 				std::vector<b2Vec2> normal;
@@ -211,6 +274,27 @@ namespace MV {
 
 			std::shared_ptr<Environment> world;
 		private:
+			struct FixtureParameters {
+				bool isCircle = true;
+				Size<> size; //Rect
+				PointPrecision rotation = 0.0f; //Rect
+				PointPrecision diameter = 0.0f; //Circle
+				Point<> position;
+				CollisionPartAttributes attributes;
+
+				template <class Archive>
+				void serialize(Archive & archive) {
+					archive(
+						cereal::make_nvp("circle", isCircle),
+						cereal::make_nvp("size", size),
+						cereal::make_nvp("rotation", rotation),
+						cereal::make_nvp("diameter", diameter),
+						cereal::make_nvp("position", position),
+						cereal::make_nvp("attributes", attributes)
+					);
+				}
+			};
+
 			Collider(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes());
 
 			template <class Archive>
@@ -218,6 +302,7 @@ namespace MV {
 				collisionAttributes.syncronize();
 				archive(
 					cereal::make_nvp("collisionAttributes", collisionAttributes),
+					cereal::make_nvp("collisionParts", collisionParts),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
@@ -227,16 +312,17 @@ namespace MV {
 				construct(std::shared_ptr<Node>());
 				archive(
 					cereal::make_nvp("collisionAttributes", construct->collisionAttributes),
+					cereal::make_nvp("collisionParts", construct->collisionParts),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
 				construct->initialize();
-			}
-
-			void initializeDefaultFixtureDefinition() {
-				defaultFixtureDefinition.restitution = .3f;
-				defaultFixtureDefinition.friction = .3f;
-				defaultFixtureDefinition.density = 1.0f;
-				defaultFixtureDefinition.isSensor = false;
+				for (auto&& attribute : construct->collisionParts) {
+					if (attribute.isCircle) {
+						construct->attach(attribute.diameter, attribute.position, attribute.attributes);
+					} else {
+						construct->attach(attribute.size, attribute.position, attribute.rotation, attribute.attributes);
+					}
+				}
 			}
 
 			b2FixtureDef* getDefaultFixtureDefinition() {
@@ -275,18 +361,11 @@ namespace MV {
 				endCollision(a_collisionWith, true);
 			}
 
-			void applyShapeDefinition(b2FixtureDef &a_applyTo, const b2FixtureDef &a_applicator) {
-				a_applyTo.isSensor = a_applicator.isSensor;
-				a_applyTo.density = body().isDynamic() ? a_applicator.density : 0.0f;
-				a_applyTo.restitution = a_applicator.restitution;
-				a_applyTo.filter = a_applicator.filter;
-				a_applyTo.userData = ((void *)this);
-			}
-
 			CollisionBodyAttributes collisionAttributes;
+			std::vector<FixtureParameters> collisionParts;
 
-			Point<> currentLocation;
-			Point<> previousLocation;
+			Point<> currentPosition;
+			Point<> previousPosition;
 			PointPrecision currentAngle;
 			PointPrecision previousAngle;
 			bool useBodyAngle;

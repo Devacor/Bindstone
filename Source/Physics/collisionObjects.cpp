@@ -16,26 +16,62 @@ namespace MV {
 			onContactStart(onContactStartSignal),
 			onContactEnd(onContactEndSignal) {
 
-			a_collisionAttributes.position = castToPhysics(sceneLocation);
-			previousAngle = currentAngle = a_collisionAttributes.angle = static_cast<float32>(a_drawShape->getRotation().z);
-			physicsBody = world->createBody(a_collisionAttributes);
+		}
 
-			if (a_objectType == NORMAL) {
-				physicsBody->SetType(b2_dynamicBody);
-			}
-			else {
-				physicsBody->SetType(b2_staticBody);
-			}
+		void Collider::initialize() {
+			Drawable.initialize();
+			physicsBody = world->createBody(collisionAttributes.details);
 			physicsBody->SetUserData((void *)this);
-			initializeDefaultFixtureDefinition();
+			currentAngle = previousAngle = owner()->worldRotation().z;
+			currentPosition = previousPosition = world->owner()->worldFromLocal(body().position());
 		}
 
 		Collider::~Collider() {
+			physicsBody->SetUserData(nullptr);
 			std::for_each(contacts.begin(), contacts.end(), [&](ContactMap::value_type contact) {
 				contact.first->deleteCollisionObject(this);
 			});
 		}
 
+
+		void Collider::attach(const Size<> &a_size, const Point<> &a_position /*= Point<>()*/, PointPrecision a_rotation /*= 0.0f*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
+			b2Vec2 centerPoint = castToPhysics(a_position);
+			auto shapeSize = castToPhysics(a_size / 2.0f); //using half width and half height
+
+			b2PolygonShape shape;
+			shape.SetAsBox(static_cast<float32>(shapeSize.x), static_cast<float32>(shapeSize.y), centerPoint, static_cast<float32>(toRadians(a_rotation)));
+
+			a_attributes.details.shape = &shape;
+			a_attributes.details.userData = ((void *)this);
+			physicsBody->CreateFixture(&a_attributes.details);
+
+			FixtureParameters paramsToStore;
+			paramsToStore.isCircle = false;
+			paramsToStore.size = a_size;
+			paramsToStore.rotation = a_rotation;
+			paramsToStore.position = a_position;
+			paramsToStore.attributes = a_attributes;
+
+			collisionParts.push_back(paramsToStore);
+		}
+
+		void Collider::attach(PointPrecision a_diameter, const Point<> &a_position /*= Point<>()*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
+			b2CircleShape shape;
+			shape.m_radius = static_cast<float32>((a_diameter / CollisionScale) / 2.0);
+			shape.m_p = castToPhysics(a_position);
+
+			a_attributes.details.shape = &shape;
+			a_attributes.details.userData = ((void *)this);
+			physicsBody->CreateFixture(&a_attributes.details);
+
+			FixtureParameters paramsToStore;
+			paramsToStore.isCircle = true;
+			paramsToStore.diameter = a_diameter;
+			paramsToStore.position = a_position;
+			paramsToStore.attributes = a_attributes;
+
+			collisionParts.push_back(paramsToStore);
+		}
 
 		CollisionBodyAttributes::CollisionBodyAttributes() {
 		}
@@ -100,8 +136,8 @@ namespace MV {
 			if (!parent.expired()) {
 				auto lockedParent = parent.lock();
 				lockedParent->physicsBody->SetTransform(details.position, lockedParent->physicsBody->GetAngle());
-				lockedParent->currentLocation = cast(details.position, lockedParent->owner()->position().z);
-				lockedParent->previousLocation = lockedParent->currentLocation;
+				lockedParent->currentPosition = cast(details.position, lockedParent->owner()->position().z);
+				lockedParent->previousLocation = lockedParent->currentPosition;
 			}
 			return *this;
 		}
@@ -165,8 +201,8 @@ namespace MV {
 			if (!parent.expired()) {
 				auto lockedParent = parent.lock();
 				lockedParent->physicsBody->SetTransform(details.position, details.angle);
-				lockedParent->currentLocation = cast(details.position, lockedParent->owner()->position().z);
-				lockedParent->previousLocation = lockedParent->currentLocation;
+				lockedParent->currentPosition = cast(details.position, lockedParent->owner()->position().z);
+				lockedParent->previousLocation = lockedParent->currentPosition;
 				lockedParent->currentAngle = details.angle;
 				lockedParent->previousAngle = details.angle;
 			}

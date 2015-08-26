@@ -7,6 +7,9 @@
 #include <list>
 #include <map>
 
+//Box2D failed on this, they have equality but not inequality.
+bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs);
+
 namespace MV {
 	namespace Scene {
 		//Scales units down by 100 when dealing with collisions.  This way if we work in pixels 100 pixels is 1 unit.
@@ -149,7 +152,7 @@ namespace MV {
 				return *this;
 			}
 
-			CollisionPartAttributes& collideWithFilterCategory(int16_t a_newCategory) {
+			CollisionPartAttributes& addCollidableCategory(int16_t a_newCategory) {
 				details.filter.maskBits |= a_newCategory;
 				return *this;
 			}
@@ -191,17 +194,21 @@ namespace MV {
 		};
 
 		class Collider : public Drawable {
+			friend cereal::access;
 			friend CollisionBodyAttributes;
 			
-			Signal<void(std::shared_ptr<Collider>)> onCollisionStartSignal;
-			Signal<void(std::shared_ptr<Collider>)> onCollisionEndSignal;
-			Signal<void(std::shared_ptr<Collider>)> onContactStartSignal;
-			Signal<void(std::shared_ptr<Collider>)> onContactEndSignal;
+			Signal<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onCollisionStartSignal;
+			Signal<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onCollisionEndSignal;
+			Signal<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onContactStartSignal;
+			Signal<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onContactEndSignal;
+			Signal<void(std::shared_ptr<Collider>, Collider*)> onCollisionKilledSignal;
 		public:
-			SignalRegister<void(std::shared_ptr<Collider>)> onCollisionStart;
-			SignalRegister<void(std::shared_ptr<Collider>)> onCollisionEnd;
-			SignalRegister<void(std::shared_ptr<Collider>)> onContactStart;
-			SignalRegister<void(std::shared_ptr<Collider>)> onContactEnd;
+			SignalRegister<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onCollisionStart;
+			SignalRegister<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onCollisionEnd;
+			SignalRegister<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onContactStart;
+			SignalRegister<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onContactEnd;
+			SignalRegister<void(std::shared_ptr<Collider>, Collider*)> onCollisionKilled;
+			
 
 			DrawableDerivedAccessors(Collider);
 
@@ -211,36 +218,22 @@ namespace MV {
 				return collisionAttributes;
 			}
 
-			void update(double a_dt) {
-				if (world->updatedThisFrame()) {
-					previousPosition = currentPosition;
-					previousAngle = currentAngle;
-					currentPosition = cast(physicsBody->GetPosition(), owner()->position().z);
-					if (useBodyAngle) {
-						currentAngle = toDegrees(physicsBody->GetAngle());
-					} else {
-						currentAngle = owner()->worldRotation().z;
-					}
-				}
-				auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
-				double z = currentPosition.z;
-				Point<> interpolatedPoint = previousPosition + ((currentPosition - previousPosition) * percentOfStep);
-				interpolatedPoint.z = z; //fix the z so it isn't scaled or modified;
-				double interpolatedAngle = interpolateDrawAngle(percentOfStep);
-				applyScenePositionUpdate(interpolatedPoint, interpolatedAngle);
-			}
+			void update(double a_dt);
+
+			void updateInterpolatedPositionAndApply();
+			void updatePhysicsPosition();
 
 			void attach(const Size<> &a_size, const Point<> &a_position = Point<>(), PointPrecision a_rotation = 0.0f, CollisionPartAttributes a_attributes = CollisionPartAttributes());
 			void attach(PointPrecision a_diameter, const Point<> &a_position = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 
-			void addCollision(Collider* a_collisionWith, const b2Vec2 &a_normal) {
-				contacts[a_collisionWith].normal = a_normal;
+			void addCollision(Collider* a_collisionWith, b2Contact* a_contact, const b2Vec2 &a_normal) {
+				contacts[a_collisionWith].active. = a_normal;
 				if (++contacts[a_collisionWith].count == 1) {
 					startCollision(a_collisionWith, a_normal);
 				}
 			}
 
-			void removeCollision(Collider* a_collisionWith) {
+			void removeCollision(Collider* a_collisionWith, b2Contact* a_contact) {
 				if (--contacts[a_collisionWith].count <= 0) {
 					contacts.erase(a_collisionWith);
 					endCollision(a_collisionWith, false);
@@ -255,24 +248,18 @@ namespace MV {
 				useBodyAngle = false;
 			}
 		protected:
-			//derived collision response should happen here.
-			virtual void startCollision(Collider* a_collisionWith, const b2Vec2 &a_normal) {};
-			virtual void endCollision(Collider* a_collisionWith, bool a_objectDestroyed) {};
-
 			b2FixtureDef defaultFixtureDefinition;
 
 			virtual void initialize() override;
 
 			struct ContactInformation {
-				ContactInformation() :count(0) {}
-				std::vector<b2Vec2> normal;
-				unsigned int count;
+				std::vector<std::pair<b2Contact*, b2Vec2>> normals;
 			};
 			typedef std::map<Collider*, ContactInformation> ContactMap;
 			ContactMap contacts;
 			b2Body *physicsBody;
 
-			std::shared_ptr<Environment> world;
+			SafeComponent<Environment> world;
 		private:
 			struct FixtureParameters {
 				bool isCircle = true;
@@ -296,11 +283,14 @@ namespace MV {
 			};
 
 			Collider(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes());
+			Collider(const std::weak_ptr<Node> &a_owner, const SafeComponent<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes());
 
 			template <class Archive>
 			void serialize(Archive & archive) {
 				collisionAttributes.syncronize();
 				archive(
+					cereal::make_nvp("world", world),
+					cereal::make_nvp("useBodyAngle", useBodyAngle),
 					cereal::make_nvp("collisionAttributes", collisionAttributes),
 					cereal::make_nvp("collisionParts", collisionParts),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
@@ -311,6 +301,8 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<Collider> &construct) {
 				construct(std::shared_ptr<Node>());
 				archive(
+					cereal::make_nvp("world", construct->world),
+					cereal::make_nvp("useBodyAngle", construct->useBodyAngle),
 					cereal::make_nvp("collisionAttributes", construct->collisionAttributes),
 					cereal::make_nvp("collisionParts", construct->collisionParts),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
@@ -358,7 +350,7 @@ namespace MV {
 
 			void deleteCollisionObject(Collider* a_collisionWith) {
 				contacts.erase(a_collisionWith);
-				endCollision(a_collisionWith, true);
+				onCollisionKilledSignal(shared_from_this(), a_collisionWith);
 			}
 
 			CollisionBodyAttributes collisionAttributes;
@@ -368,6 +360,8 @@ namespace MV {
 			Point<> previousPosition;
 			PointPrecision currentAngle;
 			PointPrecision previousAngle;
+			b2Vec2 currentPhysicsPosition;
+			float32 currentPhysicsAngle;
 			bool useBodyAngle;
 		};
 
@@ -378,16 +372,16 @@ namespace MV {
 				Collider *fixtureBObject = static_cast<Collider*>(contact->GetFixtureB()->GetUserData());
 				b2WorldManifold worldManifold;
 				contact->GetWorldManifold(&worldManifold);
-				fixtureAObject->addCollision(fixtureBObject, worldManifold.normal);
-				fixtureBObject->addCollision(fixtureAObject, -worldManifold.normal);
+				fixtureAObject->addCollision(fixtureBObject, contact, worldManifold.normal);
+				fixtureBObject->addCollision(fixtureAObject, contact, -worldManifold.normal);
 			}
 			virtual void EndContact(b2Contact* contact) {
 				Collider *fixtureAObject = static_cast<Collider*>(contact->GetFixtureA()->GetUserData());
 				Collider *fixtureBObject = static_cast<Collider*>(contact->GetFixtureB()->GetUserData());
 				b2WorldManifold worldManifold;
 				contact->GetWorldManifold(&worldManifold);
-				fixtureAObject->removeCollision(fixtureBObject);
-				fixtureBObject->removeCollision(fixtureAObject);
+				fixtureAObject->removeCollision(fixtureBObject, contact);
+				fixtureBObject->removeCollision(fixtureAObject, contact);
 			}
 			virtual void PreSolve(b2Contact* contact, const b2Manifold* oldManifold) {
 // 				int multiply = 0;

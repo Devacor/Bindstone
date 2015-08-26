@@ -1,6 +1,10 @@
 #include "collisionObjects.h"
 #include "Utility/generalUtility.h"
 
+bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs) {
+	return !(a_lhs == a_rhs);
+}
+
 namespace MV {
 	namespace Scene {
 		Point<> cast(b2Vec2 a_box2DPoint, PointPrecision a_z) {
@@ -8,6 +12,17 @@ namespace MV {
 		}
 
 		Collider::Collider(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes):
+			Drawable(a_owner),
+			world(a_world->safe()),
+			collisionAttributes(a_collisionAttributes),
+			onCollisionStart(onCollisionStartSignal),
+			onCollisionEnd(onCollisionEndSignal),
+			onContactStart(onContactStartSignal),
+			onContactEnd(onContactEndSignal) {
+
+		}
+
+		Collider::Collider(const std::weak_ptr<Node> &a_owner, const SafeComponent<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes) :
 			Drawable(a_owner),
 			world(a_world),
 			collisionAttributes(a_collisionAttributes),
@@ -33,6 +48,36 @@ namespace MV {
 			});
 		}
 
+		void Collider::update(double a_dt) {
+			updatePhysicsPosition();
+
+			updateInterpolatedPositionAndApply();
+		}
+
+		void Collider::updateInterpolatedPositionAndApply() {
+			auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
+			double z = currentPosition.z;
+			Point<> interpolatedPoint = previousPosition + ((currentPosition - previousPosition) * percentOfStep);
+			interpolatedPoint.z = z; //fix the z so it isn't scaled or modified;
+			double interpolatedAngle = interpolateDrawAngle(percentOfStep);
+			applyScenePositionUpdate(interpolatedPoint, interpolatedAngle);
+		}
+
+		void Collider::updatePhysicsPosition() {
+			if (physicsBody->GetPosition() != currentPhysicsPosition) {
+				previousPosition = currentPosition;
+				previousAngle = currentAngle;
+				currentPhysicsPosition = physicsBody->GetPosition();
+				currentPosition = cast(currentPhysicsPosition, owner()->position().z);
+			}
+			if (useBodyAngle && physicsBody->GetAngle() != currentPhysicsAngle) {
+				currentPhysicsAngle = physicsBody->GetAngle();
+				currentAngle = toDegrees(physicsBody->GetAngle());
+			}
+			else if (!useBodyAngle) {
+				currentAngle = owner()->worldRotation().z;
+			}
+		}
 
 		void Collider::attach(const Size<> &a_size, const Point<> &a_position /*= Point<>()*/, PointPrecision a_rotation /*= 0.0f*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
 			b2Vec2 centerPoint = castToPhysics(a_position);

@@ -227,8 +227,8 @@ namespace MV {
 			void attach(PointPrecision a_diameter, const Point<> &a_position = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 
 			void addCollision(Collider* a_collisionWith, b2Contact* a_contact, const b2Vec2 &a_normal) {
-				contacts[a_collisionWith].active. = a_normal;
-				if (++contacts[a_collisionWith].count == 1) {
+				contacts[a_collisionWith].normals[a_contact] = a_normal;
+				if (++contacts[a_collisionWith].normals.size() == 1) {
 					startCollision(a_collisionWith, a_normal);
 				}
 			}
@@ -253,7 +253,7 @@ namespace MV {
 			virtual void initialize() override;
 
 			struct ContactInformation {
-				std::vector<std::pair<b2Contact*, b2Vec2>> normals;
+				std::map<b2Contact*, b2Vec2> normals;
 			};
 			typedef std::map<Collider*, ContactInformation> ContactMap;
 			ContactMap contacts;

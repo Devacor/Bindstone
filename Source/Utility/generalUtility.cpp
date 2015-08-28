@@ -204,7 +204,7 @@ namespace MV {
 		if(!Random::instance){
 			Random::instance = new Random();
 		}
-		return Random::instance->number(a_min, a_max);
+		return Random::instance->integer(a_min, a_max);
 	}
 
 }

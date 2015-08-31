@@ -86,7 +86,7 @@ void DiggerGame::handleInput() {
 					done = true;
 					break;
 				case SDLK_UP:
-					//world->thing->body().impulse({ 0.0f, -10000.0f });
+					world->thing->body().impulse({ 0.0f, -10000.0f });
 					//testBox->translateScrollPosition(MV::Point<>(0, -2));
 					break;
 				case SDLK_LEFT:
@@ -108,15 +108,15 @@ void DiggerGame::handleInput() {
 			}
 		}
 	}
-// 	const Uint8 *state = SDL_GetKeyboardState(NULL);
-// 	if (state[SDL_SCANCODE_RIGHT]) {
-// 		auto currentVelocity = world->thing->body().velocity();
-// 		world->thing->body().velocity({300.0f, currentVelocity.y});
-// 	}
-// 	if (state[SDL_SCANCODE_LEFT]) {
-// 		auto currentVelocity = world->thing->body().velocity();
-// 		world->thing->body().velocity({ -300.0f, currentVelocity.y });
-// 	}
+	const Uint8 *state = SDL_GetKeyboardState(NULL);
+	if (state[SDL_SCANCODE_RIGHT]) {
+		auto currentVelocity = world->thing->body().velocity();
+		world->thing->body().velocity({300.0f, currentVelocity.y});
+	}
+	if (state[SDL_SCANCODE_LEFT]) {
+		auto currentVelocity = world->thing->body().velocity();
+		world->thing->body().velocity({ -300.0f, currentVelocity.y });
+	}
 	mouse.update();
 }
 

@@ -115,40 +115,46 @@ public:
 		loadTextures();
 
 		auto physicsWorld = a_node->make("world")->attach<MV::Scene::Environment>();
-		physicsWorld->owner()->make("ground")->position({ 100.0f, 300.0f })->attach<MV::Scene::Sprite>()->size({ 100.0f, 100.0f }, true)->color({1.0f, 1.0f, 1.0f, .5f})->owner()->
-			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeStatic())->attach({100.0f, 100.0f});
+		physicsWorld->owner()->make("ground")->position({ 100.0f, 300.0f })->attach<MV::Scene::Sprite>()->size({ 500.0f, 100.0f }, true)->color({1.0f, 1.0f, 1.0f, .5f})->owner()->
+			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeStatic())->attach({500.0f, 100.0f});
 		thing = physicsWorld->owner()->make("thing")->position({ 100.0f, 0.0f })->attach<MV::Scene::Sprite>()->size({ 50.0f, 50.0f }, true)->color({ 0.0f, 0.0f, 1.0f, .5f })->owner()->
 			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic());
+		physicsWorld->owner()->make("thing1")->position({ 160.0f, 50.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
+			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f });
+		physicsWorld->owner()->make("thing2")->position({ 150.0f, 30.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
+			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f });
+		physicsWorld->owner()->make("thing3")->position({ 140.0f, 10.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
+			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f });
 		thing->attach({ 50.0f, 50.0f });
-
-		const int worldWidth = 20;
-		background->columns(worldWidth)->hide();
-		environment->columns(worldWidth)->hide();
-		foreground->columns(worldWidth)->hide();
-
-		environment->owner()->attach<MV::Scene::Environment>();
-		auto player = environment->owner()->make("Player")->position({ 0.0f, 0.0f });
-		player->attach<MV::Scene::Sprite>()->bounds({ {0, 0}, tileSize })->texture(ground->randomBreakable());
-		player->attach<MV::Scene::Collider>()->attach(tileSize, (toPoint(tileSize) / 2.0f) * -1.0f);
-
-		for (int i = 0; i < worldWidth * 3; ++i) {
-			pushTile(false, nullptr, ground->sky());
-		}
-		std::vector<int> breakableCoordinates{worldWidth / 2 - 1, worldWidth / 2, worldWidth / 2 + 1};
-
-		for (int i = 0; i < worldWidth; ++i) {
-			pushTile(false, nullptr, ground->sky(), ground->randomGrass());
-		}
-
-		for (int i = 0; i < worldWidth; ++i) {
-			pushTile(true, std::find(breakableCoordinates.begin(), breakableCoordinates.end(), i) != breakableCoordinates.end() ? ground->randomBreakable() : ground->randomStandard(), nullptr);
-		}
-
-		for (auto&& tileSet : tileSets) {
-			for (int i = 0; i < worldWidth * 10; ++i) {
-				pushTile(true, tileSet.randomStandard(), nullptr);
-			}
-		}
+// 
+// 		const int worldWidth = 20;
+// 		background->columns(worldWidth)->hide();
+// 		environment->columns(worldWidth)->hide();
+// 		foreground->columns(worldWidth)->hide();
+// 
+// 		environment->owner()->attach<MV::Scene::Environment>();
+// 		auto player = environment->owner()->make("Player")->position({ 0.0f, 0.0f });
+// 		player->attach<MV::Scene::Sprite>()->bounds({ {0, 0}, tileSize })->texture(ground->randomBreakable());
+// 		player->attach<MV::Scene::Collider>()->attach(tileSize, (toPoint(tileSize) / 2.0f) * -1.0f);
+// 
+// 		for (int i = 0; i < worldWidth * 3; ++i) {
+// 			pushTile(false, nullptr, ground->sky());
+// 		}
+// 		std::vector<int> breakableCoordinates{worldWidth / 2 - 1, worldWidth / 2, worldWidth / 2 + 1};
+// 
+// 		for (int i = 0; i < worldWidth; ++i) {
+// 			pushTile(false, nullptr, ground->sky(), ground->randomGrass());
+// 		}
+// 
+// 		for (int i = 0; i < worldWidth; ++i) {
+// 			pushTile(true, std::find(breakableCoordinates.begin(), breakableCoordinates.end(), i) != breakableCoordinates.end() ? ground->randomBreakable() : ground->randomStandard(), nullptr);
+// 		}
+// 
+// 		for (auto&& tileSet : tileSets) {
+// 			for (int i = 0; i < worldWidth * 10; ++i) {
+// 				pushTile(true, tileSet.randomStandard(), nullptr);
+// 			}
+// 		}
 	}
 
 	void pushTile(bool a_collidable, const std::shared_ptr<MV::TextureHandle> &a_environment, const std::shared_ptr<MV::TextureHandle> &a_background, const std::shared_ptr<MV::TextureHandle> &a_foreground = nullptr) {

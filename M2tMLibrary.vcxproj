@@ -273,7 +273,7 @@
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">./;./Source</AdditionalIncludeDirectories>
     </ClCompile>
     <ClCompile Include="Source\Network\network.cpp" />
-    <ClCompile Include="Source\Physics\collisionObjects.cpp" />
+    <ClCompile Include="Source\Physics\collider.cpp" />
     <ClCompile Include="Source\Render\boxaabb.cpp" />
     <ClCompile Include="Source\Render\Scene\button.cpp" />
     <ClCompile Include="Source\Render\Scene\clipped.cpp" />
@@ -440,10 +440,9 @@
     <ClInclude Include="Source\Editor\texturePicker.h" />
     <ClInclude Include="Source\Game\building.h" />
     <ClInclude Include="Source\Game\gameEditor.h" />
-    <ClInclude Include="Source\Physics\collisionObjects.h" />
+    <ClInclude Include="Source\Physics\collider.h" />
     <ClInclude Include="Source\Physics\package.h" />
     <ClInclude Include="Source\Render\boxaabb.h" />
-    <ClInclude Include="Source\Render\Scene\collider.h" />
     <ClInclude Include="Source\Render\Scene\emitter.h" />
     <ClInclude Include="Source\Render\Scene\grid.h" />
     <ClInclude Include="Source\Render\Scene\drawable.h" />

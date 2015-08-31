@@ -45,6 +45,13 @@ namespace MV {
 			//unlikely you'll need to call this directly
 			void layoutCells();
 
+			void makeManual() {
+				manualReposition = true;
+			}
+			void repositionAutomatic() {
+				manualReposition = false;
+			}
+
 		protected:
 			Grid(const std::weak_ptr<Node> &a_owner);
 
@@ -62,6 +69,7 @@ namespace MV {
 					CEREAL_NVP(margins),
 					CEREAL_NVP(cellColumns),
 					CEREAL_NVP(includeChildrenInChildSize),
+					CEREAL_NVP(manualReposition),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
@@ -125,6 +133,7 @@ namespace MV {
 			bool allowDirty = true;
 			bool dirtyGrid;
 			bool includeChildrenInChildSize = true;
+			bool manualReposition = false;
 
 			std::vector<std::vector<std::weak_ptr<MV::Scene::Node>>> tiles;
 		};

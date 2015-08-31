@@ -57,7 +57,7 @@ void DiggerGame::initializeWindow() {
 }
 void DiggerGame::InitializeWorldScene() {
 	worldScene = MV::Scene::Node::make(*renderer);
-	worldScene->scale(4.0f);
+	worldScene->scale(1.0f);
 	world = std::make_shared<DiggerWorld>(worldScene, textures);
 
 }
@@ -86,6 +86,7 @@ void DiggerGame::handleInput() {
 					done = true;
 					break;
 				case SDLK_UP:
+					//world->thing->body().impulse({ 0.0f, -10000.0f });
 					//testBox->translateScrollPosition(MV::Point<>(0, -2));
 					break;
 				case SDLK_LEFT:
@@ -96,6 +97,7 @@ void DiggerGame::handleInput() {
 					//renderer.window().windowedMode().bordered();
 					break;
 				case SDLK_SPACE:
+					//world->thing->body().impulse({ 0.0f, -10000.0f });
 					//renderer.window().allowUserResize();
 					break;
 				case SDLK_RIGHT:
@@ -106,6 +108,15 @@ void DiggerGame::handleInput() {
 			}
 		}
 	}
+// 	const Uint8 *state = SDL_GetKeyboardState(NULL);
+// 	if (state[SDL_SCANCODE_RIGHT]) {
+// 		auto currentVelocity = world->thing->body().velocity();
+// 		world->thing->body().velocity({300.0f, currentVelocity.y});
+// 	}
+// 	if (state[SDL_SCANCODE_LEFT]) {
+// 		auto currentVelocity = world->thing->body().velocity();
+// 		world->thing->body().velocity({ -300.0f, currentVelocity.y });
+// 	}
 	mouse.update();
 }
 

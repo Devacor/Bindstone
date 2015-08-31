@@ -12,11 +12,11 @@ bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs);
 
 namespace MV {
 	namespace Scene {
-		//Scales units down by 100 when dealing with collisions.  This way if we work in pixels 100 pixels is 1 unit.
+		//Scales units down by 100 when dealing with collisions.  This way if we work in pixels 10 pixels is 1 unit.
 		//Box2D is tuned to deal with ranges 10 to .1 ideally, so this provides a good working scale from display size
 		//to world simulation size.  Be aware when dealing with raw response data that it needs to be scaled up by this
 		//value to translate properly.
-		const PointPrecision CollisionScale = 100.0;
+		const PointPrecision CollisionScale = 10.0;
 		//This is the time step at which Box2D updates.
 		const Stopwatch::TimeType PhysicsTimeStep = 1.0 / 60.0;
 
@@ -72,8 +72,11 @@ namespace MV {
 			CollisionBodyAttributes& enableRotation();
 
 			CollisionBodyAttributes& velocity(const Point<> &a_velocity);
+			Point<> velocity() const;
 
 			CollisionBodyAttributes& angularVelocity(PointPrecision a_value);
+			PointPrecision angularVelocity() const;
+
 			CollisionBodyAttributes& movementDamping(PointPrecision a_value);
 			CollisionBodyAttributes& angularDamping(PointPrecision a_value);
 
@@ -133,7 +136,7 @@ namespace MV {
 			friend Collider;
 		public:
 			CollisionPartAttributes() {
-				details.restitution = .05f;
+				details.restitution = 0.0f;
 				details.friction = .3f;
 				details.density = 1.0f;
 				details.isSensor = false;
@@ -193,22 +196,26 @@ namespace MV {
 			b2FixtureDef details;
 		};
 
+		class ContactListener;
 		class Collider : public Drawable {
+			friend Node;
 			friend cereal::access;
 			friend CollisionBodyAttributes;
+			friend ContactListener;
 			
 			Signal<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onCollisionStartSignal;
 			Signal<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onCollisionEndSignal;
-			Signal<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onContactStartSignal;
-			Signal<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onContactEndSignal;
+			Signal<void(size_t, std::shared_ptr<Collider>, std::shared_ptr<Collider>, Point<>)> onContactStartSignal;
+			Signal<void(size_t, std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onContactEndSignal;
 			Signal<void(std::shared_ptr<Collider>, Collider*)> onCollisionKilledSignal;
+			Signal<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>, Point<>, bool&)> onShouldCollideSignal;
 		public:
 			SignalRegister<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onCollisionStart;
 			SignalRegister<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onCollisionEnd;
-			SignalRegister<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onContactStart;
-			SignalRegister<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onContactEnd;
+			SignalRegister<void(size_t, std::shared_ptr<Collider>, std::shared_ptr<Collider>, Point<>)> onContactStart;
+			SignalRegister<void(size_t, std::shared_ptr<Collider>, std::shared_ptr<Collider>)> onContactEnd;
 			SignalRegister<void(std::shared_ptr<Collider>, Collider*)> onCollisionKilled;
-			
+			SignalRegister<void(std::shared_ptr<Collider>, std::shared_ptr<Collider>, Point<>, bool&)> onShouldCollide;
 
 			DrawableDerivedAccessors(Collider);
 
@@ -218,33 +225,34 @@ namespace MV {
 				return collisionAttributes;
 			}
 
-			void update(double a_dt);
-
-			void updateInterpolatedPositionAndApply();
-			void updatePhysicsPosition();
-
-			void attach(const Size<> &a_size, const Point<> &a_position = Point<>(), PointPrecision a_rotation = 0.0f, CollisionPartAttributes a_attributes = CollisionPartAttributes());
-			void attach(PointPrecision a_diameter, const Point<> &a_position = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
+			std::shared_ptr<Collider> attach(const Size<> &a_size, const Point<> &a_position = Point<>(), PointPrecision a_rotation = 0.0f, CollisionPartAttributes a_attributes = CollisionPartAttributes());
+			std::shared_ptr<Collider> attach(PointPrecision a_diameter, const Point<> &a_position = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 
 			void addCollision(Collider* a_collisionWith, b2Contact* a_contact, const b2Vec2 &a_normal) {
 				contacts[a_collisionWith].normals[a_contact] = a_normal;
-				if (++contacts[a_collisionWith].normals.size() == 1) {
-					startCollision(a_collisionWith, a_normal);
+				if (contacts[a_collisionWith].normals.size() == 1) {
+					onCollisionStartSignal(std::static_pointer_cast<Collider>(shared_from_this()), std::static_pointer_cast<Collider>(a_collisionWith->shared_from_this()));
 				}
+				onContactStartSignal(reinterpret_cast<size_t>(a_contact), std::static_pointer_cast<Collider>(shared_from_this()), std::static_pointer_cast<Collider>(a_collisionWith->shared_from_this()), Point<>(a_normal.x, a_normal.y));
 			}
 
 			void removeCollision(Collider* a_collisionWith, b2Contact* a_contact) {
-				if (--contacts[a_collisionWith].count <= 0) {
-					contacts.erase(a_collisionWith);
-					endCollision(a_collisionWith, false);
+				auto foundCollision = contacts.find(a_collisionWith);
+				if (foundCollision != contacts.end()) {
+					foundCollision->second.normals.erase(a_contact);
+					if (foundCollision->second.normals.empty()) {
+						contacts.erase(foundCollision);
+						onCollisionEndSignal(std::static_pointer_cast<Collider>(shared_from_this()), std::static_pointer_cast<Collider>(a_collisionWith->shared_from_this()));
+					}
 				}
+				onContactEndSignal(reinterpret_cast<size_t>(a_contact), std::static_pointer_cast<Collider>(shared_from_this()), std::static_pointer_cast<Collider>(a_collisionWith->shared_from_this()));
 			}
 
 			//lock or unlock the drawing angle to the physical body
-			void applyPhysicsAngle() {
+			std::shared_ptr<Collider> applyPhysicsAngle() {
 				useBodyAngle = true;
 			}
-			void ignorePhysicsAngle() {
+			std::shared_ptr<Collider> ignorePhysicsAngle() {
 				useBodyAngle = false;
 			}
 		protected:
@@ -282,8 +290,13 @@ namespace MV {
 				}
 			};
 
-			Collider(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes());
-			Collider(const std::weak_ptr<Node> &a_owner, const SafeComponent<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes());
+			Collider(const std::weak_ptr<Node> &a_owner, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes(), bool a_maintainOwnerPosition = true);
+			Collider(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes(), bool a_maintainOwnerPosition = true);
+			Collider(const std::weak_ptr<Node> &a_owner, const SafeComponent<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes(), bool a_maintainOwnerPosition = true);
+
+			void updateInterpolatedPositionAndApply();
+			void updatePhysicsPosition();
+			virtual void updateImplementation(double a_dt) override;
 
 			template <class Archive>
 			void serialize(Archive & archive) {
@@ -321,10 +334,7 @@ namespace MV {
 				return &defaultFixtureDefinition;
 			}
 
-			void applyScenePositionUpdate(Point<> a_location, double a_angle) {
-				owner()->worldPosition(world->owner()->worldFromLocal(a_location));
-				owner()->worldRotation(Point<>(0.0f, 0.0f, static_cast<PointPrecision>(a_angle)));
-			}
+			void applyScenePositionUpdate(Point<> a_location, double a_angle);
 
 			PointPrecision interpolateDrawAngle(PointPrecision a_percentOfStep) {
 				if (currentAngle == previousAngle) { return currentAngle; }
@@ -350,7 +360,7 @@ namespace MV {
 
 			void deleteCollisionObject(Collider* a_collisionWith) {
 				contacts.erase(a_collisionWith);
-				onCollisionKilledSignal(shared_from_this(), a_collisionWith);
+				onCollisionKilledSignal(std::static_pointer_cast<Collider>(shared_from_this()), a_collisionWith);
 			}
 
 			CollisionBodyAttributes collisionAttributes;
@@ -362,7 +372,7 @@ namespace MV {
 			PointPrecision previousAngle;
 			b2Vec2 currentPhysicsPosition;
 			float32 currentPhysicsAngle;
-			bool useBodyAngle;
+			bool useBodyAngle = true;
 		};
 
 		class ContactListener : public b2ContactListener {
@@ -375,6 +385,7 @@ namespace MV {
 				fixtureAObject->addCollision(fixtureBObject, contact, worldManifold.normal);
 				fixtureBObject->addCollision(fixtureAObject, contact, -worldManifold.normal);
 			}
+
 			virtual void EndContact(b2Contact* contact) {
 				Collider *fixtureAObject = static_cast<Collider*>(contact->GetFixtureA()->GetUserData());
 				Collider *fixtureBObject = static_cast<Collider*>(contact->GetFixtureB()->GetUserData());
@@ -383,41 +394,30 @@ namespace MV {
 				fixtureAObject->removeCollision(fixtureBObject, contact);
 				fixtureBObject->removeCollision(fixtureAObject, contact);
 			}
+
 			virtual void PreSolve(b2Contact* contact, const b2Manifold* oldManifold) {
-// 				int multiply = 0;
-// 				if (static_cast<Collider*>(contact->GetFixtureA()->GetUserData())->getType() == Collider::PLATFORM) {
-// 					b2WorldManifold worldManifold;
-// 					contact->GetWorldManifold(&worldManifold);
-// 
-// 					if ((worldManifold.normal.y) > 0.5f) {
-// 						contact->SetEnabled(false);
-// 					}
-// 				}
-// 				else if (static_cast<Collider*>(contact->GetFixtureB()->GetUserData())->getType() == Collider::PLATFORM) {
-// 					b2WorldManifold worldManifold;
-// 					contact->GetWorldManifold(&worldManifold);
-// 
-// 					if ((worldManifold.normal.y) < -0.5f) {
-// 						contact->SetEnabled(false);
-// 					}
-// 				}
+				auto sharedA = std::static_pointer_cast<Collider>(static_cast<Collider*>(contact->GetFixtureA()->GetUserData())->shared_from_this());
+				auto sharedB = std::static_pointer_cast<Collider>(static_cast<Collider*>(contact->GetFixtureA()->GetUserData())->shared_from_this());
+
+				b2WorldManifold worldManifold;
+				contact->GetWorldManifold(&worldManifold);
+				bool shouldCollide = true;
+
+				sharedA->onShouldCollideSignal(sharedA, sharedB, Point<>(worldManifold.normal.x, worldManifold.normal.y), shouldCollide);
+				sharedB->onShouldCollideSignal(sharedB, sharedA, Point<>(worldManifold.normal.x, worldManifold.normal.y) * -1.0f, shouldCollide);
+
+				contact->SetEnabled(shouldCollide);
 			}
+
 			virtual void PostSolve(b2Contact* contact, const b2Manifold* oldManifold) {}
 		};
 
 		class Environment : public Component {
-		public:
-			template<typename CollisionObjectType>
-			std::shared_ptr<CollisionObjectType> makeCollisionObject(std::shared_ptr<DrawShape> a_drawShape, const b2BodyDef &a_collisionAttributes = b2BodyDef(), Collider::ObjectType a_objectType = Collider::NORMAL) {
-				auto thisShared = shared_from_this();
-				auto newObject = std::make_shared<CollisionObjectType>(thisShared, a_drawShape, a_collisionAttributes, a_objectType);
-				collisionObjects.push_back(newObject);
-				return newObject;
-			}
+			friend Node;
+			friend cereal::access;
 
-			b2Body* createBody(const b2BodyDef& a_bodyDef = b2BodyDef()) {
-				return world.CreateBody(&a_bodyDef);
-			}
+		public:
+			ComponentDerivedAccessors(Environment)
 
 			double percentOfStep() const {
 				return accumulatedDelta / PhysicsTimeStep;
@@ -427,26 +427,55 @@ namespace MV {
 				return steppedThisUpdate;
 			}
 
-			void update(double a_dt) {
+			b2Body* createBody(const b2BodyDef& a_bodyDef = b2BodyDef()) {
+				return world.CreateBody(&a_bodyDef);
+			}
+		private:
+			Environment(const std::weak_ptr<Node> &a_owner, const Point<> &a_gravity = Point<>(0.0f, 1000.0f)) :
+				Component(a_owner),
+				world(castToPhysics(a_gravity)){
+
+				world.SetGravity(castToPhysics(a_gravity));
+				world.SetContactListener(&listener);
+			}
+
+			template <class Archive>
+			void serialize(Archive & archive) {
+				collisionAttributes.syncronize();
+				archive(
+					cereal::make_nvp("gravityX", world.GetGravity().x),
+					cereal::make_nvp("gravityY", world.GetGravity().y),
+					cereal::make_nvp("Component", cereal::base_class<Component>(this))
+				);
+			}
+
+			template <class Archive>
+			static void load_and_construct(Archive & archive, cereal::construct<Environment> &construct) {
+				b2Vec2 loadedGravity;
+				archive(
+					cereal::make_nvp("gravityX", loadedGravity.x),
+					cereal::make_nvp("gravityY", loadedGravity.y)
+				);
+
+				construct(std::shared_ptr<Node>(), cast(loadedGravity));
+				
+				archive(
+					cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
+				);
+				construct->initialize();
+			}
+
+			virtual void updateImplementation(double a_dt) override {
 				steppedThisUpdate = false;
 				accumulatedDelta += a_dt;
+				accumulatedDelta = std::min(accumulatedDelta, PhysicsTimeStep * 10.0f);
 				while (accumulatedDelta > PhysicsTimeStep) {
 					world.Step(float32(PhysicsTimeStep), Box2dVelocityIterations, Box2dPositionIterations);
 					accumulatedDelta -= PhysicsTimeStep;
 					steppedThisUpdate = true;
 				}
 			}
-		private:
 
-			Environment(const std::weak_ptr<Node> &a_owner, const Point<> &a_gravity = Point<>(0.0f, -10.0f)) :
-				Component(a_owner){
-				world.SetGravity(castToPhysics(a_gravity));
-				world.SetContactListener(&listener);
-			}
-
-			typedef std::vector<std::shared_ptr<Collider>> CollisionObjectList;
-			CollisionObjectList collisionObjects;
-			Stopwatch timer;
 			ContactListener listener;
 			b2World world;
 

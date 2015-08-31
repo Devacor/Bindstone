@@ -260,9 +260,6 @@
     <ClCompile Include="Source\DiggerGame\diggerGame.cpp">
       <Filter>Source Files\DiggerGame</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Physics\collisionObjects.cpp">
-      <Filter>Source Files\Physics</Filter>
-    </ClCompile>
     <ClCompile Include="..\external\Box2D\Collision\b2BroadPhase.cpp">
       <Filter>Box2D</Filter>
     </ClCompile>
@@ -400,6 +397,9 @@
     </ClCompile>
     <ClCompile Include="..\external\Box2D\Rope\b2Rope.cpp">
       <Filter>Box2D</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Physics\collider.cpp">
+      <Filter>Source Files\Physics</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -815,13 +815,7 @@
     <ClInclude Include="..\external\cereal\include\cereal\cereal.hpp">
       <Filter>Cereal</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Render\Scene\collider.h">
-      <Filter>Source Files\Render\Scene</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Physics\package.h">
-      <Filter>Source Files\Physics</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Physics\collisionObjects.h">
       <Filter>Source Files\Physics</Filter>
     </ClInclude>
     <ClInclude Include="..\external\Box2D\Box2D.h">
@@ -964,6 +958,9 @@
     </ClInclude>
     <ClInclude Include="..\external\Box2D\Rope\b2Rope.h">
       <Filter>Box2D</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Physics\collider.h">
+      <Filter>Source Files\Physics</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

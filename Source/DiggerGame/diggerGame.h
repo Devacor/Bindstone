@@ -7,6 +7,7 @@
 #include "Animation/package.h"
 #include "Network/package.h"
 #include "Interface/package.h"
+#include "Physics/package.h"
 #include <string>
 #include <ctime>
 #include <stdint.h>
@@ -103,6 +104,8 @@ private:
 
 class DiggerWorld {
 public:
+	MV::Scene::SafeComponent<MV::Scene::Collider> thing;
+
 	DiggerWorld(const std::shared_ptr<MV::Scene::Node> &a_node, MV::SharedTextures &a_sharedTextures) :
 		background(a_node->make("Background")->attach<MV::Scene::Grid>()),
 		environment(a_node->make("Environment")->attach<MV::Scene::Grid>()),
@@ -111,36 +114,49 @@ public:
 
 		loadTextures();
 
+		auto physicsWorld = a_node->make("world")->attach<MV::Scene::Environment>();
+		physicsWorld->owner()->make("ground")->position({ 100.0f, 300.0f })->attach<MV::Scene::Sprite>()->size({ 100.0f, 100.0f }, true)->color({1.0f, 1.0f, 1.0f, .5f})->owner()->
+			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeStatic())->attach({100.0f, 100.0f});
+		thing = physicsWorld->owner()->make("thing")->position({ 100.0f, 0.0f })->attach<MV::Scene::Sprite>()->size({ 50.0f, 50.0f }, true)->color({ 0.0f, 0.0f, 1.0f, .5f })->owner()->
+			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic());
+		thing->attach({ 50.0f, 50.0f });
+
 		const int worldWidth = 20;
 		background->columns(worldWidth)->hide();
 		environment->columns(worldWidth)->hide();
 		foreground->columns(worldWidth)->hide();
 
+		environment->owner()->attach<MV::Scene::Environment>();
+		auto player = environment->owner()->make("Player")->position({ 0.0f, 0.0f });
+		player->attach<MV::Scene::Sprite>()->bounds({ {0, 0}, tileSize })->texture(ground->randomBreakable());
+		player->attach<MV::Scene::Collider>()->attach(tileSize, (toPoint(tileSize) / 2.0f) * -1.0f);
+
 		for (int i = 0; i < worldWidth * 3; ++i) {
-			pushTile(nullptr, ground->sky());
+			pushTile(false, nullptr, ground->sky());
 		}
 		std::vector<int> breakableCoordinates{worldWidth / 2 - 1, worldWidth / 2, worldWidth / 2 + 1};
 
 		for (int i = 0; i < worldWidth; ++i) {
-			pushTile(nullptr, ground->sky(), ground->randomGrass());
+			pushTile(false, nullptr, ground->sky(), ground->randomGrass());
 		}
 
 		for (int i = 0; i < worldWidth; ++i) {
-			pushTile(std::find(breakableCoordinates.begin(), breakableCoordinates.end(), i) != breakableCoordinates.end() ? ground->randomBreakable() : ground->randomStandard(), nullptr);
+			pushTile(true, std::find(breakableCoordinates.begin(), breakableCoordinates.end(), i) != breakableCoordinates.end() ? ground->randomBreakable() : ground->randomStandard(), nullptr);
 		}
 
 		for (auto&& tileSet : tileSets) {
 			for (int i = 0; i < worldWidth * 10; ++i) {
-				pushTile(tileSet.randomStandard(), nullptr);
+				pushTile(true, tileSet.randomStandard(), nullptr);
 			}
 		}
 	}
 
-	void pushTile(const std::shared_ptr<MV::TextureHandle> &a_environment, const std::shared_ptr<MV::TextureHandle> &a_background, const std::shared_ptr<MV::TextureHandle> &a_foreground = nullptr) {
+	void pushTile(bool a_collidable, const std::shared_ptr<MV::TextureHandle> &a_environment, const std::shared_ptr<MV::TextureHandle> &a_background, const std::shared_ptr<MV::TextureHandle> &a_foreground = nullptr) {
+		std::shared_ptr<MV::Scene::Node> worldTile;
 		if (a_environment) {
-			environment->owner()->make()->attach<MV::Scene::Sprite>()->bounds({ { 0, 0 }, tileSize })->texture(a_environment);
+			worldTile = environment->owner()->make()->attach<MV::Scene::Sprite>()->bounds({ { 0, 0 }, tileSize })->texture(a_environment)->owner();
 		} else {
-			environment->owner()->make()->attach<MV::Scene::Sprite>()->bounds({ { 0, 0 }, tileSize })->color({ 0, 0, 0, 0 });
+			worldTile = environment->owner()->make()->attach<MV::Scene::Sprite>()->bounds({ { 0, 0 }, tileSize })->color({ 0, 0, 0, 0 })->owner();
 		}
 		if (a_background) {
 			background->owner()->make()->attach<MV::Scene::Sprite>()->bounds({ { 0, 0 }, tileSize })->texture(a_background);
@@ -151,6 +167,10 @@ public:
 			foreground->owner()->make()->attach<MV::Scene::Sprite>()->bounds({ { 0, 0 }, tileSize })->texture(a_foreground);
 		} else {
 			foreground->owner()->make()->attach<MV::Scene::Sprite>()->bounds({ { 0, 0 }, tileSize })->color({ 0, 0, 0, 0 });
+		}
+
+		if (a_collidable) {
+			worldTile->attach<MV::Scene::Collider>(MV::Scene::CollisionBodyAttributes().makeStatic())->attach(tileSize, (toPoint(tileSize) / 2.0f) * -1.0f);
 		}
 	}
 

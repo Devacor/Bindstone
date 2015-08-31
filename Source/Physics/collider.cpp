@@ -1,4 +1,4 @@
-#include "collisionObjects.h"
+#include "collider.h"
 #include "Utility/generalUtility.h"
 
 bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs) {
@@ -8,37 +8,69 @@ bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs) {
 namespace MV {
 	namespace Scene {
 		Point<> cast(b2Vec2 a_box2DPoint, PointPrecision a_z) {
-			return Point<>(static_cast<PointPrecision>(a_box2DPoint.x) * CollisionScale, static_cast<PointPrecision>(a_box2DPoint.y), a_z);
+			return Point<>(static_cast<PointPrecision>(a_box2DPoint.x) * CollisionScale, static_cast<PointPrecision>(a_box2DPoint.y) * CollisionScale, a_z);
 		}
 
-		Collider::Collider(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes):
+		Collider::Collider(const std::weak_ptr<Node> &a_owner, CollisionBodyAttributes a_collisionAttributes, bool a_maintainOwnerPosition):
+			Drawable(a_owner),
+			world(a_owner.lock()->componentInParents<Environment>()),
+			collisionAttributes(a_collisionAttributes),
+			onCollisionStart(onCollisionStartSignal),
+			onCollisionEnd(onCollisionEndSignal),
+			onContactStart(onContactStartSignal),
+			onContactEnd(onContactEndSignal),
+			onCollisionKilled(onCollisionKilledSignal),
+			onShouldCollide(onShouldCollideSignal){
+
+			if (a_maintainOwnerPosition) {
+				collisionAttributes.details.position = castToPhysics(world->owner()->localFromWorld(owner()->worldPosition()));
+			}
+		}
+
+		Collider::Collider(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes, bool a_maintainOwnerPosition):
 			Drawable(a_owner),
 			world(a_world->safe()),
 			collisionAttributes(a_collisionAttributes),
 			onCollisionStart(onCollisionStartSignal),
 			onCollisionEnd(onCollisionEndSignal),
 			onContactStart(onContactStartSignal),
-			onContactEnd(onContactEndSignal) {
+			onContactEnd(onContactEndSignal),
+			onCollisionKilled(onCollisionKilledSignal),
+			onShouldCollide(onShouldCollideSignal) {
 
+			if (a_maintainOwnerPosition) {
+				collisionAttributes.details.position = castToPhysics(world->owner()->localFromWorld(owner()->worldPosition()));
+			}
 		}
 
-		Collider::Collider(const std::weak_ptr<Node> &a_owner, const SafeComponent<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes) :
+		Collider::Collider(const std::weak_ptr<Node> &a_owner, const SafeComponent<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes, bool a_maintainOwnerPosition) :
 			Drawable(a_owner),
 			world(a_world),
 			collisionAttributes(a_collisionAttributes),
 			onCollisionStart(onCollisionStartSignal),
 			onCollisionEnd(onCollisionEndSignal),
 			onContactStart(onContactStartSignal),
-			onContactEnd(onContactEndSignal) {
+			onContactEnd(onContactEndSignal),
+			onCollisionKilled(onCollisionKilledSignal),
+			onShouldCollide(onShouldCollideSignal) {
 
+			if (a_maintainOwnerPosition) {
+				collisionAttributes.details.position = castToPhysics(world->owner()->localFromWorld(owner()->worldPosition()));
+			}
+		}
+
+		void Collider::applyScenePositionUpdate(Point<> a_location, double a_angle) {
+			owner()->position(a_location);
+			owner()->worldRotation(Point<>(0.0f, 0.0f, static_cast<PointPrecision>(a_angle)));
 		}
 
 		void Collider::initialize() {
-			Drawable.initialize();
+			Drawable::initialize();
+			collisionAttributes.parent = std::static_pointer_cast<Collider>(shared_from_this());
 			physicsBody = world->createBody(collisionAttributes.details);
 			physicsBody->SetUserData((void *)this);
 			currentAngle = previousAngle = owner()->worldRotation().z;
-			currentPosition = previousPosition = world->owner()->worldFromLocal(body().position());
+			currentPosition = previousPosition = owner()->localFromWorld(world->owner()->worldFromLocal(body().position()));
 		}
 
 		Collider::~Collider() {
@@ -48,7 +80,7 @@ namespace MV {
 			});
 		}
 
-		void Collider::update(double a_dt) {
+		void Collider::updateImplementation(double a_dt) {
 			updatePhysicsPosition();
 
 			updateInterpolatedPositionAndApply();
@@ -56,30 +88,34 @@ namespace MV {
 
 		void Collider::updateInterpolatedPositionAndApply() {
 			auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
-			double z = currentPosition.z;
-			Point<> interpolatedPoint = previousPosition + ((currentPosition - previousPosition) * percentOfStep);
+			PointPrecision z = currentPosition.z;
+			Point<> interpolatedPoint = mix(previousPosition, currentPosition, percentOfStep);
 			interpolatedPoint.z = z; //fix the z so it isn't scaled or modified;
 			double interpolatedAngle = interpolateDrawAngle(percentOfStep);
-			applyScenePositionUpdate(interpolatedPoint, interpolatedAngle);
+			applyScenePositionUpdate(interpolatedPoint, currentAngle);
 		}
 
 		void Collider::updatePhysicsPosition() {
-			if (physicsBody->GetPosition() != currentPhysicsPosition) {
+			if (world->updatedThisFrame())
+			{
 				previousPosition = currentPosition;
 				previousAngle = currentAngle;
 				currentPhysicsPosition = physicsBody->GetPosition();
 				currentPosition = cast(currentPhysicsPosition, owner()->position().z);
-			}
-			if (useBodyAngle && physicsBody->GetAngle() != currentPhysicsAngle) {
-				currentPhysicsAngle = physicsBody->GetAngle();
-				currentAngle = toDegrees(physicsBody->GetAngle());
-			}
-			else if (!useBodyAngle) {
-				currentAngle = owner()->worldRotation().z;
+
+				if (useBodyAngle) {
+					currentPhysicsAngle = physicsBody->GetAngle();
+					currentAngle = toDegrees(physicsBody->GetAngle());
+				} else if (!useBodyAngle) {
+					currentAngle = owner()->worldRotation().z;
+				} else {
+					currentPhysicsAngle = physicsBody->GetAngle();
+					currentAngle = toDegrees(physicsBody->GetAngle());
+				}
 			}
 		}
 
-		void Collider::attach(const Size<> &a_size, const Point<> &a_position /*= Point<>()*/, PointPrecision a_rotation /*= 0.0f*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
+		std::shared_ptr<Collider> Collider::attach(const Size<> &a_size, const Point<> &a_position /*= Point<>()*/, PointPrecision a_rotation /*= 0.0f*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
 			b2Vec2 centerPoint = castToPhysics(a_position);
 			auto shapeSize = castToPhysics(a_size / 2.0f); //using half width and half height
 
@@ -98,9 +134,10 @@ namespace MV {
 			paramsToStore.attributes = a_attributes;
 
 			collisionParts.push_back(paramsToStore);
+			return std::static_pointer_cast<Collider>(shared_from_this());
 		}
 
-		void Collider::attach(PointPrecision a_diameter, const Point<> &a_position /*= Point<>()*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
+		std::shared_ptr<Collider> Collider::attach(PointPrecision a_diameter, const Point<> &a_position /*= Point<>()*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
 			b2CircleShape shape;
 			shape.m_radius = static_cast<float32>((a_diameter / CollisionScale) / 2.0);
 			shape.m_p = castToPhysics(a_position);
@@ -116,6 +153,7 @@ namespace MV {
 			paramsToStore.attributes = a_attributes;
 
 			collisionParts.push_back(paramsToStore);
+			return std::static_pointer_cast<Collider>(shared_from_this());
 		}
 
 		CollisionBodyAttributes::CollisionBodyAttributes() {
@@ -128,6 +166,7 @@ namespace MV {
 				parent.lock()->physicsBody->SetLinearVelocity(details.linearVelocity);
 				parent.lock()->physicsBody->SetAngularVelocity(details.angularVelocity);
 			}
+			return *this;
 		}
 
 		bool CollisionBodyAttributes::isStatic() const {
@@ -182,7 +221,7 @@ namespace MV {
 				auto lockedParent = parent.lock();
 				lockedParent->physicsBody->SetTransform(details.position, lockedParent->physicsBody->GetAngle());
 				lockedParent->currentPosition = cast(details.position, lockedParent->owner()->position().z);
-				lockedParent->previousLocation = lockedParent->currentPosition;
+				lockedParent->previousPosition = lockedParent->currentPosition;
 			}
 			return *this;
 		}
@@ -247,7 +286,7 @@ namespace MV {
 				auto lockedParent = parent.lock();
 				lockedParent->physicsBody->SetTransform(details.position, details.angle);
 				lockedParent->currentPosition = cast(details.position, lockedParent->owner()->position().z);
-				lockedParent->previousLocation = lockedParent->currentPosition;
+				lockedParent->previousPosition = lockedParent->currentPosition;
 				lockedParent->currentAngle = details.angle;
 				lockedParent->previousAngle = details.angle;
 			}
@@ -264,7 +303,8 @@ namespace MV {
 
 		Point<> CollisionBodyAttributes::position() const {
 			if (!parent.expired()) {
-				return cast(parent.lock()->physicsBody->GetPosition(), parent.lock()->owner()->position().z);
+				auto pysicsPosition = parent.lock()->physicsBody->GetPosition();
+				return cast(pysicsPosition, parent.lock()->owner()->position().z);
 			} else {
 				return cast(details.position);
 			}
@@ -302,12 +342,26 @@ namespace MV {
 			return *this;
 		}
 
+		Point<> CollisionBodyAttributes::velocity() const {
+			if (!parent.expired()) {
+				parent.lock()->physicsBody->GetLinearVelocity();
+			}
+			return cast(details.linearVelocity);
+		}
+
 		CollisionBodyAttributes& CollisionBodyAttributes::angularVelocity(PointPrecision a_value) {
 			details.angularVelocity = a_value;
 			if (!parent.expired()) {
 				parent.lock()->physicsBody->SetAngularVelocity(details.angularVelocity);
 			}
 			return *this;
+		}
+
+		PointPrecision CollisionBodyAttributes::angularVelocity() const {
+			if (!parent.expired()) {
+				parent.lock()->physicsBody->GetAngularVelocity();
+			}
+			return details.angularVelocity;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::movementDamping(PointPrecision a_value) {

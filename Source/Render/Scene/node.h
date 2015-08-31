@@ -436,8 +436,25 @@ namespace MV {
 				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
 				if (foundComponent != childComponents.end()) {
 					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
-				} else if (a_throwIfNotFound) {
-					require<ResourceException>(false, "Component with type [", typeid(ComponentType).name(), "] not found in node [", id(), "]");
+				}
+				return SafeComponent<ComponentType>(nullptr, nullptr);
+			}
+
+			template<typename ComponentType>
+			SafeComponent<ComponentType> componentInParents(bool a_exactType = true, bool a_throwIfNotFound = true) const {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, false);
+				if (foundComponent != childComponents.end()) {
+					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
+				} else if (myParent) {
+					auto parentComponent = myParent->componentInParents<ComponentType>(a_exactType, false);
+					if (parentComponent) {
+						return parentComponent;
+					}
+				}
+				
+				if (a_throwIfNotFound) {
+					require<ResourceException>(false, "Component with type [", typeid(ComponentType).name(), "] not found in node (or parents of node) [", id(), "]");
 				}
 				return SafeComponent<ComponentType>(nullptr, nullptr);
 			}
@@ -445,12 +462,12 @@ namespace MV {
 			template<typename ComponentType>
 			SafeComponent<ComponentType> componentInChildren(bool a_exactType = true, bool a_throwIfNotFound = true) const {
 				std::lock_guard<std::recursive_mutex> guard(lock);
-				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
+				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, false);
 				if (foundComponent != childComponents.end()) {
 					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
 				} else if (!childNodes.empty()) {
 					for (auto&& childNode : childNodes) {
-						auto childComponent = componentInChildren<ComponentType>(a_exactType, false);
+						auto childComponent = childNode->componentInChildren<ComponentType>(a_exactType, false);
 						if (childComponent) {
 							return childComponent;
 						}
@@ -458,7 +475,7 @@ namespace MV {
 				}
 				
 				if (a_throwIfNotFound) {
-					require<ResourceException>(false, "Component with type [", typeid(ComponentType).name(), "] not found in node [", id(), "]");
+					require<ResourceException>(false, "Component with type [", typeid(ComponentType).name(), "] not found in node (or children of node) [", id(), "]");
 				}
 
 				return SafeComponent<ComponentType>(nullptr, nullptr);

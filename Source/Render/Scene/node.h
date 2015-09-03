@@ -105,6 +105,7 @@ namespace MV {
 				wrappedComponent.reset();
 				wrappedNode.reset();
 			}
+
 		private:
 			std::shared_ptr<const Node> wrappedNode;
 			std::shared_ptr<T> wrappedComponent;

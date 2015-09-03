@@ -1,5 +1,9 @@
 #include "collider.h"
 #include "Utility/generalUtility.h"
+#include "cereal/archives/json.hpp"
+
+CEREAL_REGISTER_TYPE(MV::Scene::Collider);
+CEREAL_REGISTER_TYPE(MV::Scene::Environment);
 
 bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs) {
 	return !(a_lhs == a_rhs);
@@ -12,8 +16,8 @@ namespace MV {
 		}
 
 		Collider::Collider(const std::weak_ptr<Node> &a_owner, CollisionBodyAttributes a_collisionAttributes, bool a_maintainOwnerPosition):
-			Drawable(a_owner),
-			world(a_owner.lock()->componentInParents<Environment>()),
+			Component(a_owner),
+			world(a_owner.lock()->componentInParents<Environment>().self()),
 			collisionAttributes(a_collisionAttributes),
 			onCollisionStart(onCollisionStartSignal),
 			onCollisionEnd(onCollisionEndSignal),
@@ -28,23 +32,7 @@ namespace MV {
 		}
 
 		Collider::Collider(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes, bool a_maintainOwnerPosition):
-			Drawable(a_owner),
-			world(a_world->safe()),
-			collisionAttributes(a_collisionAttributes),
-			onCollisionStart(onCollisionStartSignal),
-			onCollisionEnd(onCollisionEndSignal),
-			onContactStart(onContactStartSignal),
-			onContactEnd(onContactEndSignal),
-			onCollisionKilled(onCollisionKilledSignal),
-			onShouldCollide(onShouldCollideSignal) {
-
-			if (a_maintainOwnerPosition) {
-				collisionAttributes.details.position = castToPhysics(world->owner()->localFromWorld(owner()->worldPosition()));
-			}
-		}
-
-		Collider::Collider(const std::weak_ptr<Node> &a_owner, const SafeComponent<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes, bool a_maintainOwnerPosition) :
-			Drawable(a_owner),
+			Component(a_owner),
 			world(a_world),
 			collisionAttributes(a_collisionAttributes),
 			onCollisionStart(onCollisionStartSignal),
@@ -59,18 +47,53 @@ namespace MV {
 			}
 		}
 
+		Collider::Collider(const std::weak_ptr<Node> &a_owner, const SafeComponent<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes, bool a_maintainOwnerPosition) :
+			Component(a_owner),
+			world(a_world.self()),
+			collisionAttributes(a_collisionAttributes),
+			onCollisionStart(onCollisionStartSignal),
+			onCollisionEnd(onCollisionEndSignal),
+			onContactStart(onContactStartSignal),
+			onContactEnd(onContactEndSignal),
+			onCollisionKilled(onCollisionKilledSignal),
+			onShouldCollide(onShouldCollideSignal) {
+
+			if (a_maintainOwnerPosition) {
+				collisionAttributes.details.position = castToPhysics(world->owner()->localFromWorld(owner()->worldPosition()));
+			}
+		}
+
+		std::shared_ptr<Component> Collider::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+			Component::cloneHelper(a_clone);
+			auto colliderClone = std::static_pointer_cast<Collider>(a_clone);
+			colliderClone->collisionParts = collisionParts;
+			for (auto&& attribute : colliderClone->collisionParts) {
+				if (attribute.isCircle) {
+					colliderClone->attach(attribute.diameter, attribute.position, attribute.attributes);
+				} else {
+					colliderClone->attach(attribute.size, attribute.position, attribute.rotation, attribute.attributes);
+				}
+			}
+			return a_clone;
+		}
+
 		void Collider::applyScenePositionUpdate(Point<> a_location, double a_angle) {
 			owner()->position(a_location);
 			owner()->worldRotation(Point<>(0.0f, 0.0f, static_cast<PointPrecision>(a_angle)));
 		}
 
 		void Collider::initialize() {
-			Drawable::initialize();
-			collisionAttributes.parent = std::static_pointer_cast<Collider>(shared_from_this());
+			Component::initialize();
 			physicsBody = world->createBody(collisionAttributes.details);
 			physicsBody->SetUserData((void *)this);
-			currentAngle = previousAngle = owner()->worldRotation().z;
-			currentPosition = previousPosition = owner()->localFromWorld(world->owner()->worldFromLocal(body().position()));
+			if (collisionAttributes.parent.expired()) {
+				collisionAttributes.parent = std::static_pointer_cast<Collider>(shared_from_this());
+				currentPosition = previousPosition = owner()->localFromWorld(world->owner()->worldFromLocal(body().position()));
+				currentAngle = previousAngle = owner()->worldRotation().z;
+			} else {
+				previousPosition = currentPosition;
+				previousAngle = currentAngle;
+			}
 		}
 
 		Collider::~Collider() {
@@ -116,6 +139,11 @@ namespace MV {
 		}
 
 		std::shared_ptr<Collider> Collider::attach(const Size<> &a_size, const Point<> &a_position /*= Point<>()*/, PointPrecision a_rotation /*= 0.0f*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
+			attachInternal(a_size, a_position, a_rotation, a_attributes);
+			return std::static_pointer_cast<Collider>(shared_from_this());
+		}
+
+		void Collider::attachInternal(const Size<> &a_size, const Point<> &a_position /*= Point<>()*/, PointPrecision a_rotation /*= 0.0f*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
 			b2Vec2 centerPoint = castToPhysics(a_position);
 			auto shapeSize = castToPhysics(a_size / 2.0f); //using half width and half height
 
@@ -134,10 +162,14 @@ namespace MV {
 			paramsToStore.attributes = a_attributes;
 
 			collisionParts.push_back(paramsToStore);
-			return std::static_pointer_cast<Collider>(shared_from_this());
 		}
 
 		std::shared_ptr<Collider> Collider::attach(PointPrecision a_diameter, const Point<> &a_position /*= Point<>()*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
+			attachInternal(a_diameter, a_position, a_attributes);
+			return std::static_pointer_cast<Collider>(shared_from_this());
+		}
+
+		void Collider::attachInternal(PointPrecision a_diameter, const Point<> &a_position /*= Point<>()*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
 			b2CircleShape shape;
 			shape.m_radius = static_cast<float32>((a_diameter / CollisionScale) / 2.0);
 			shape.m_p = castToPhysics(a_position);
@@ -153,7 +185,6 @@ namespace MV {
 			paramsToStore.attributes = a_attributes;
 
 			collisionParts.push_back(paramsToStore);
-			return std::static_pointer_cast<Collider>(shared_from_this());
 		}
 
 		CollisionBodyAttributes::CollisionBodyAttributes() {
@@ -412,6 +443,44 @@ namespace MV {
 				details.active = body->IsActive();
 				details.gravityScale = body->GetGravityScale();
 			}
+		}
+
+		std::shared_ptr<Component> Environment::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+			Component::cloneHelper(a_clone);
+			auto colliderClone = std::static_pointer_cast<Environment>(a_clone);
+			return a_clone;
+		}
+
+		void ContactListener::BeginContact(b2Contact* contact) {
+			Collider *fixtureAObject = static_cast<Collider*>(contact->GetFixtureA()->GetUserData());
+			Collider *fixtureBObject = static_cast<Collider*>(contact->GetFixtureB()->GetUserData());
+			b2WorldManifold worldManifold;
+			contact->GetWorldManifold(&worldManifold);
+			fixtureAObject->addCollision(fixtureBObject, contact, worldManifold.normal);
+			fixtureBObject->addCollision(fixtureAObject, contact, -worldManifold.normal);
+		}
+
+		void ContactListener::EndContact(b2Contact* contact) {
+			Collider *fixtureAObject = static_cast<Collider*>(contact->GetFixtureA()->GetUserData());
+			Collider *fixtureBObject = static_cast<Collider*>(contact->GetFixtureB()->GetUserData());
+			b2WorldManifold worldManifold;
+			contact->GetWorldManifold(&worldManifold);
+			fixtureAObject->removeCollision(fixtureBObject, contact);
+			fixtureBObject->removeCollision(fixtureAObject, contact);
+		}
+
+		void ContactListener::PreSolve(b2Contact* contact, const b2Manifold* oldManifold) {
+			auto sharedA = std::static_pointer_cast<Collider>(static_cast<Collider*>(contact->GetFixtureA()->GetUserData())->shared_from_this());
+			auto sharedB = std::static_pointer_cast<Collider>(static_cast<Collider*>(contact->GetFixtureA()->GetUserData())->shared_from_this());
+
+			b2WorldManifold worldManifold;
+			contact->GetWorldManifold(&worldManifold);
+			bool shouldCollide = true;
+
+			sharedA->onShouldCollideSignal(sharedA, sharedB, Point<>(worldManifold.normal.x, worldManifold.normal.y), shouldCollide);
+			sharedB->onShouldCollideSignal(sharedB, sharedA, Point<>(worldManifold.normal.x, worldManifold.normal.y) * -1.0f, shouldCollide);
+
+			contact->SetEnabled(shouldCollide);
 		}
 
 	}

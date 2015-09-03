@@ -81,28 +81,30 @@ void DiggerGame::handleInput() {
 				done = true;
 				break;
 			case SDL_KEYDOWN:
-				switch (event.key.keysym.sym) {
-				case SDLK_ESCAPE:
+				if (event.key.keysym.sym == SDLK_ESCAPE) {
 					done = true;
-					break;
-				case SDLK_UP:
+				} else if (event.key.keysym.sym == SDLK_UP) {
 					world->thing->body().impulse({ 0.0f, -10000.0f });
-					//testBox->translateScrollPosition(MV::Point<>(0, -2));
-					break;
-				case SDLK_LEFT:
-					//testBox->translateScrollPosition(MV::Point<>(-2, 0));
-					break;
-				case SDLK_DOWN:
-					//testBox->translateScrollPosition(MV::Point<>(0, 2));
-					//renderer.window().windowedMode().bordered();
-					break;
-				case SDLK_SPACE:
+				} else if (event.key.keysym.sym == SDLK_DOWN) {
+					std::ofstream outstream("digger.scene");
+					cereal::JSONOutputArchive outarchive(outstream);
+					outarchive(cereal::make_nvp("scene", worldScene));
+				} else if (event.key.keysym.sym == SDLK_SPACE) {
+					
 					//world->thing->body().impulse({ 0.0f, -10000.0f });
 					//renderer.window().allowUserResize();
-					break;
-				case SDLK_RIGHT:
-					//testBox->translateScrollPosition(MV::Point<>(2, 0));
-					break;
+					std::ifstream stream("digger.scene");
+
+					cereal::JSONInputArchive archive(stream);
+					archive.add(
+						cereal::make_nvp("mouse", &mouse),
+						cereal::make_nvp("renderer", renderer),
+						cereal::make_nvp("textLibrary", &textLibrary),
+						cereal::make_nvp("pool", pool)
+						);
+
+					archive(cereal::make_nvp("scene", worldScene));
+					world->thing = worldScene->get("thing")->component<MV::Scene::Collider>();
 				}
 				break;
 			}

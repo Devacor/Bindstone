@@ -57,7 +57,7 @@ void DiggerGame::initializeWindow() {
 }
 void DiggerGame::InitializeWorldScene() {
 	worldScene = MV::Scene::Node::make(*renderer);
-	worldScene->scale(1.0f);
+	worldScene->scale(4.0f);
 	world = std::make_shared<DiggerWorld>(worldScene, textures);
 
 }
@@ -84,7 +84,7 @@ void DiggerGame::handleInput() {
 				if (event.key.keysym.sym == SDLK_ESCAPE) {
 					done = true;
 				} else if (event.key.keysym.sym == SDLK_UP) {
-					world->thing->body().impulse({ 0.0f, -10000.0f });
+					world->thing->body().impulse({ 0.0f, -500.0f });
 				} else if (event.key.keysym.sym == SDLK_DOWN) {
 					std::ofstream outstream("digger.scene");
 					cereal::JSONOutputArchive outarchive(outstream);

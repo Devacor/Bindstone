@@ -42,10 +42,10 @@ namespace MV {
 			std::shared_ptr<Node> nodeFromGrid(const Point<int> &a_coordinate, bool a_throwOnFail = true);
 			std::shared_ptr<Node> nodeFromLocal(const Point<> &a_coordinate, bool a_throwOnFail = true);
 
-			//unlikely you'll need to call this directly
+			//unlikely you'll need to call this directly unless set to manual reposition
 			void layoutCells();
 
-			void makeManual() {
+			void repositionManual() {
 				manualReposition = true;
 			}
 			void repositionAutomatic() {
@@ -84,6 +84,7 @@ namespace MV {
 					cereal::make_nvp("margins", construct->margins),
 					cereal::make_nvp("cellColumns", construct->cellColumns),
 					cereal::make_nvp("includeChildrenInChildSize", construct->includeChildrenInChildSize),
+					cereal::make_nvp("manualReposition", construct->manualReposition),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
 				construct->dirtyGrid = false;

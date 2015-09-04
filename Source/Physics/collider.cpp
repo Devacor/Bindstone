@@ -104,9 +104,10 @@ namespace MV {
 		}
 
 		void Collider::updateImplementation(double a_dt) {
-			updatePhysicsPosition();
-
-			updateInterpolatedPositionAndApply();
+			if (!body().isStatic()) {
+				updatePhysicsPosition();
+				updateInterpolatedPositionAndApply();
+			}
 		}
 
 		void Collider::updateInterpolatedPositionAndApply() {
@@ -253,6 +254,7 @@ namespace MV {
 				lockedParent->physicsBody->SetTransform(details.position, lockedParent->physicsBody->GetAngle());
 				lockedParent->currentPosition = cast(details.position, lockedParent->owner()->position().z);
 				lockedParent->previousPosition = lockedParent->currentPosition;
+				lockedParent->updateInterpolatedPositionAndApply();
 			}
 			return *this;
 		}
@@ -306,6 +308,7 @@ namespace MV {
 				lockedParent->physicsBody->SetTransform(lockedParent->physicsBody->GetPosition(), details.angle);
 				lockedParent->currentAngle = details.angle;
 				lockedParent->previousAngle = details.angle;
+				lockedParent->updateInterpolatedPositionAndApply();
 			}
 			return *this;
 		}
@@ -320,6 +323,7 @@ namespace MV {
 				lockedParent->previousPosition = lockedParent->currentPosition;
 				lockedParent->currentAngle = details.angle;
 				lockedParent->previousAngle = details.angle;
+				lockedParent->updateInterpolatedPositionAndApply();
 			}
 			return *this;
 		}

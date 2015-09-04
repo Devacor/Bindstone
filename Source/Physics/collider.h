@@ -16,9 +16,9 @@ namespace MV {
 		//Box2D is tuned to deal with ranges 10 to .1 ideally, so this provides a good working scale from display size
 		//to world simulation size.  Be aware when dealing with raw response data that it needs to be scaled up by this
 		//value to translate properly.
-		const PointPrecision CollisionScale = 10.0;
+		const PointPrecision CollisionScale = 50.0;
 		//This is the time step at which Box2D updates.
-		const Stopwatch::TimeType PhysicsTimeStep = 1.0 / 60.0;
+		const Stopwatch::TimeType PhysicsTimeStep = 1.0 / 30.0;
 
 		Point<> cast(b2Vec2 a_box2DPoint, PointPrecision a_z = 0.0f);
 

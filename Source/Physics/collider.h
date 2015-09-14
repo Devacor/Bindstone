@@ -12,13 +12,10 @@ bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs);
 
 namespace MV {
 	namespace Scene {
-		//Scales units down by 100 when dealing with collisions.  This way if we work in pixels 10 pixels is 1 unit.
-		//Box2D is tuned to deal with ranges 10 to .1 ideally, so this provides a good working scale from display size
-		//to world simulation size.  Be aware when dealing with raw response data that it needs to be scaled up by this
-		//value to translate properly.
+		//Scales units down by 50 when dealing with collisions.
 		const PointPrecision CollisionScale = 50.0;
 		//This is the time step at which Box2D updates.
-		const Stopwatch::TimeType PhysicsTimeStep = 1.0 / 30.0;
+		const Stopwatch::TimeType PhysicsTimeStep = 1.0 / 60.0;
 
 		Point<> cast(b2Vec2 a_box2DPoint, PointPrecision a_z = 0.0f);
 
@@ -32,7 +29,30 @@ namespace MV {
 			return b2Vec2(static_cast<float32>(a_M2RendPoint.width) / CollisionScale, static_cast<float32>(a_M2RendPoint.height) / CollisionScale);
 		}
 
+		class Collider;
 		class ContactListener : public b2ContactListener {
+			struct ContactDetails {
+				ContactDetails(size_t a_contactId, b2Fixture* a_A, b2Fixture* a_B) :
+					contactId(a_contactId),
+					A(a_A),
+					B(a_B),
+					beginContact(false) {
+				}
+
+				ContactDetails(size_t a_contactId, b2Fixture* a_A, b2Fixture* a_B, b2Vec2 a_normal):
+					contactId(a_contactId),
+					A(a_A),
+					B(a_B),
+					normal(a_normal),
+					beginContact(true) {
+				}
+				size_t contactId;
+				b2Fixture* A;
+				b2Fixture* B;
+				b2Vec2 normal;
+				bool beginContact;
+			};
+
 		public:
 			virtual void BeginContact(b2Contact* contact);
 
@@ -41,6 +61,11 @@ namespace MV {
 			virtual void PreSolve(b2Contact* contact, const b2Manifold* oldManifold);
 
 			virtual void PostSolve(b2Contact* contact, const b2Manifold* oldManifold) {}
+
+			void RunQueuedCallbacks();
+
+		private:
+			std::queue<ContactDetails> contactCallbacks;
 		};
 
 		class Environment : public Component {
@@ -50,7 +75,7 @@ namespace MV {
 		public:
 			ComponentDerivedAccessors(Environment)
 
-				double percentOfStep() const {
+			double percentOfStep() const {
 				return accumulatedDelta / PhysicsTimeStep;
 			}
 
@@ -60,6 +85,10 @@ namespace MV {
 
 			b2Body* createBody(const b2BodyDef& a_bodyDef = b2BodyDef()) {
 				return world.CreateBody(&a_bodyDef);
+			}
+
+			void destroyBody(b2Body* a_body) {
+				world.DestroyBody(a_body);
 			}
 		protected:
 			template <class Archive>
@@ -108,6 +137,7 @@ namespace MV {
 				accumulatedDelta = std::min(accumulatedDelta, PhysicsTimeStep * 10.0f);
 				while (accumulatedDelta > PhysicsTimeStep) {
 					world.Step(float32(PhysicsTimeStep), Box2dVelocityIterations, Box2dPositionIterations);
+					listener.RunQueuedCallbacks();
 					accumulatedDelta -= PhysicsTimeStep;
 					steppedThisUpdate = true;
 				}
@@ -124,7 +154,6 @@ namespace MV {
 			static const int Box2dPositionIterations = 4;
 		};
 
-		class Collider;
 		class CollisionBodyAttributes {
 			friend Collider;
 		public:
@@ -200,6 +229,26 @@ namespace MV {
 
 			std::weak_ptr<Collider> parent;
 			b2BodyDef details;
+		};
+
+		class RotationJointAttributes {
+		public:
+			RotationJointAttributes(b2BodyDef *a_lhs, b2BodyDef *a_rhs) {
+				jointDef.Initialize(a_lhs, a_rhs, );
+			}
+
+			RotationJointAttributes() {
+				jointDef.maxMotorTorque = 1000000.0f / CollisionScale;
+			}
+
+			RotationJointAttributes& motorTorque() {
+				jointDef.enableMotor = true;
+				
+			}
+
+		private:
+			 
+			b2RevoluteJointDef jointDef;
 		};
 
 		enum CollisionLayers {
@@ -317,33 +366,71 @@ namespace MV {
 
 			std::shared_ptr<Collider> attach(const Size<> &a_size, const Point<> &a_position = Point<>(), PointPrecision a_rotation = 0.0f, CollisionPartAttributes a_attributes = CollisionPartAttributes());
 			std::shared_ptr<Collider> attach(PointPrecision a_diameter, const Point<> &a_position = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
+			std::shared_ptr<Collider> attach(const std::vector<Point<>> &a_points, const Point<> &a_offset = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 
-			void addCollision(Collider* a_collisionWith, b2Contact* a_contact, const b2Vec2 &a_normal) {
-				contacts[a_collisionWith].normals[a_contact] = a_normal;
+			std::shared_ptr<Collider> rotationJoint(const std::shared_ptr<Collider> &a_other, const Point<> &a_offset = Point<>()) {
+				b2RevoluteJointDef jointDef;
+				jointDef.bodyA = physicsBody;
+				jointDef.bodyB = a_other->physicsBody;
+				jointDef.collideConnected = false;
+				jointDef.
+			}
+
+			void addCollision(Collider* a_collisionWith, size_t a_contactId, const b2Vec2 &a_normal) {
+				contacts[a_collisionWith].normals[a_contactId] = a_normal;
 				if (contacts[a_collisionWith].normals.size() == 1) {
 					onCollisionStartSignal(std::static_pointer_cast<Collider>(shared_from_this()), std::static_pointer_cast<Collider>(a_collisionWith->shared_from_this()));
 				}
-				onContactStartSignal(reinterpret_cast<size_t>(a_contact), std::static_pointer_cast<Collider>(shared_from_this()), std::static_pointer_cast<Collider>(a_collisionWith->shared_from_this()), Point<>(a_normal.x, a_normal.y));
+				onContactStartSignal(a_contactId, std::static_pointer_cast<Collider>(shared_from_this()), std::static_pointer_cast<Collider>(a_collisionWith->shared_from_this()), Point<>(a_normal.x, a_normal.y));
 			}
 
-			void removeCollision(Collider* a_collisionWith, b2Contact* a_contact) {
+			void removeCollision(Collider* a_collisionWith, size_t a_contactId) {
 				auto foundCollision = contacts.find(a_collisionWith);
 				if (foundCollision != contacts.end()) {
-					foundCollision->second.normals.erase(a_contact);
+					foundCollision->second.normals.erase(a_contactId);
 					if (foundCollision->second.normals.empty()) {
 						contacts.erase(foundCollision);
 						onCollisionEndSignal(std::static_pointer_cast<Collider>(shared_from_this()), std::static_pointer_cast<Collider>(a_collisionWith->shared_from_this()));
 					}
 				}
-				onContactEndSignal(reinterpret_cast<size_t>(a_contact), std::static_pointer_cast<Collider>(shared_from_this()), std::static_pointer_cast<Collider>(a_collisionWith->shared_from_this()));
+				onContactEndSignal(a_contactId, std::static_pointer_cast<Collider>(shared_from_this()), std::static_pointer_cast<Collider>(a_collisionWith->shared_from_this()));
 			}
 
 			//lock or unlock the drawing angle to the physical body
-			std::shared_ptr<Collider> applyPhysicsAngle() {
-				useBodyAngle = true;
+			std::shared_ptr<Collider> observePhysicsAngle(bool a_newValue) {
+				useBodyAngle = a_newValue;
+				if (a_newValue == true) {
+					auto colliders = owner()->components<Collider>();
+					for (auto&& collider : colliders) {
+						visit(collider, [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
+							if (a_collider.self().get() != this) {
+								a_collider->observePhysicsAngle(false);
+							}
+						});
+					}
+				}
+				return std::static_pointer_cast<Collider>(shared_from_this());
 			}
-			std::shared_ptr<Collider> ignorePhysicsAngle() {
-				useBodyAngle = false;
+			bool observePhysicsAngle() const {
+				return useBodyAngle;
+			}
+
+			std::shared_ptr<Collider> observePhysicsPosition(bool a_newValue) {
+				useBodyPosition = a_newValue;
+				if (a_newValue == true) {
+					auto colliders = owner()->components<Collider>();
+					for (auto&& collider : colliders) {
+						visit(collider, [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
+							if (a_collider.self().get() != this) {
+								a_collider->observePhysicsPosition(false);
+							}
+						});
+					}
+				}
+				return std::static_pointer_cast<Collider>(shared_from_this());
+			}
+			bool observePhysicsPosition() const {
+				return useBodyPosition;
 			}
 		protected:
 			b2FixtureDef defaultFixtureDefinition;
@@ -351,7 +438,7 @@ namespace MV {
 			virtual void initialize() override;
 
 			struct ContactInformation {
-				std::map<b2Contact*, b2Vec2> normals;
+				std::map<size_t, b2Vec2> normals;
 			};
 			typedef std::map<Collider*, ContactInformation> ContactMap;
 			ContactMap contacts;
@@ -361,7 +448,7 @@ namespace MV {
 
 			void attachInternal(const Size<> &a_size, const Point<> &a_position = Point<>(), PointPrecision a_rotation = 0.0f, CollisionPartAttributes a_attributes = CollisionPartAttributes());
 			void attachInternal(PointPrecision a_diameter, const Point<> &a_position = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
-
+			void attachInternal(const std::vector<Point<>> &a_points, const Point<> &a_offset = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 
 			template <class Archive>
 			void serialize(Archive & archive) {
@@ -373,6 +460,7 @@ namespace MV {
  					cereal::make_nvp("collisionParts", collisionParts),
 					cereal::make_nvp("currentPosition", currentPosition),
 					cereal::make_nvp("currentAngle", currentAngle),
+					cereal::make_nvp("useBodyPosition", useBodyPosition),
 					cereal::make_nvp("Component", cereal::base_class<Component>(this))
 				);
 			}
@@ -391,14 +479,17 @@ namespace MV {
  					cereal::make_nvp("collisionParts", construct->collisionParts),
 					cereal::make_nvp("currentPosition", construct->currentPosition),
 					cereal::make_nvp("currentAngle", construct->currentAngle),
+					cereal::make_nvp("useBodyPosition", construct->useBodyPosition),
 					cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
 				);
 				construct->initialize();
 				for (auto&& attribute : construct->collisionParts) {
-					if (attribute.isCircle) {
-						construct->attachInternal(attribute.diameter, attribute.position, attribute.attributes);
-					} else {
-						construct->attachInternal(attribute.size, attribute.position, attribute.rotation, attribute.attributes);
+					if (attribute.shapeType == FixtureParameters::CIRCLE) {
+						construct->attach(attribute.diameter, attribute.position, attribute.attributes);
+					} else if (attribute.shapeType == FixtureParameters::RECTANGLE) {
+						construct->attach(attribute.size, attribute.position, attribute.rotation, attribute.attributes);
+					} else if (attribute.shapeType == FixtureParameters::POLYGON) {
+						construct->attach(attribute.points, attribute.position, attribute.attributes);
 					}
 				}
 			}
@@ -411,18 +502,21 @@ namespace MV {
 
 		private:
 			struct FixtureParameters {
-				bool isCircle = true;
+				enum ShapeType {CIRCLE, RECTANGLE, POLYGON};
+				int shapeType;
 				Size<> size; //Rect
 				PointPrecision rotation = 0.0f; //Rect
 				PointPrecision diameter = 0.0f; //Circle
 				Point<> position;
+				std::vector<Point<>> points;
 				CollisionPartAttributes attributes;
 
 				template <class Archive>
 				void serialize(Archive & archive) {
 					archive(
-						cereal::make_nvp("circle", isCircle),
+						cereal::make_nvp("type", shapeType),
 						cereal::make_nvp("size", size),
+						cereal::make_nvp("points", points),
 						cereal::make_nvp("rotation", rotation),
 						cereal::make_nvp("diameter", diameter),
 						cereal::make_nvp("position", position),
@@ -482,6 +576,7 @@ namespace MV {
 			b2Vec2 currentPhysicsPosition;
 			float32 currentPhysicsAngle;
 			bool useBodyAngle = true;
+			bool useBodyPosition = true;
 		};
 	}
 }

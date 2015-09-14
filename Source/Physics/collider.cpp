@@ -68,10 +68,12 @@ namespace MV {
 			auto colliderClone = std::static_pointer_cast<Collider>(a_clone);
 			colliderClone->collisionParts = collisionParts;
 			for (auto&& attribute : colliderClone->collisionParts) {
-				if (attribute.isCircle) {
+				if (attribute.shapeType == FixtureParameters::CIRCLE) {
 					colliderClone->attach(attribute.diameter, attribute.position, attribute.attributes);
-				} else {
+				} else if(attribute.shapeType == FixtureParameters::RECTANGLE) {
 					colliderClone->attach(attribute.size, attribute.position, attribute.rotation, attribute.attributes);
+				} else if (attribute.shapeType == FixtureParameters::POLYGON) {
+					colliderClone->attach(attribute.points, attribute.position, attribute.attributes);
 				}
 			}
 			return a_clone;
@@ -84,6 +86,21 @@ namespace MV {
 
 		void Collider::initialize() {
 			Component::initialize();
+
+			auto colliders = owner()->components<Collider>();
+			for (auto&& collider : colliders) {
+				visit(collider, [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
+					if (a_collider.self().get() != this) {
+						if (a_collider->observePhysicsAngle()) {
+							useBodyAngle = false;
+						}
+						if (a_collider->observePhysicsPosition()) {
+							useBodyPosition = false;
+						}
+					}
+				});
+			}
+
 			physicsBody = world->createBody(collisionAttributes.details);
 			physicsBody->SetUserData((void *)this);
 			if (collisionAttributes.parent.expired()) {
@@ -101,6 +118,7 @@ namespace MV {
 			std::for_each(contacts.begin(), contacts.end(), [&](ContactMap::value_type contact) {
 				contact.first->deleteCollisionObject(this);
 			});
+			world->destroyBody(physicsBody);
 		}
 
 		void Collider::updateImplementation(double a_dt) {
@@ -112,29 +130,43 @@ namespace MV {
 
 		void Collider::updateInterpolatedPositionAndApply() {
 			auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
-			PointPrecision z = currentPosition.z;
-			Point<> interpolatedPoint = mix(previousPosition, currentPosition, percentOfStep);
-			interpolatedPoint.z = z; //fix the z so it isn't scaled or modified;
-			double interpolatedAngle = interpolateDrawAngle(percentOfStep);
-			applyScenePositionUpdate(interpolatedPoint, currentAngle);
+			if (useBodyPosition && useBodyAngle) {
+				auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
+				PointPrecision z = currentPosition.z;
+				Point<> interpolatedPoint = mix(previousPosition, currentPosition, percentOfStep);
+				interpolatedPoint.z = z; //fix the z so it isn't scaled or modified;
+				double interpolatedAngle = interpolateDrawAngle(percentOfStep);
+				
+				applyScenePositionUpdate(interpolatedPoint, currentAngle);
+			} else if (useBodyPosition) {
+				auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
+				PointPrecision z = currentPosition.z;
+				Point<> interpolatedPoint = mix(previousPosition, currentPosition, percentOfStep);
+				interpolatedPoint.z = z; //fix the z so it isn't scaled or modified;
+
+				owner()->position(interpolatedPoint);
+			} else if (useBodyAngle) {
+				double interpolatedAngle = interpolateDrawAngle(percentOfStep);
+				owner()->worldRotation(Point<>(0.0f, 0.0f, static_cast<PointPrecision>(interpolatedAngle)));
+			}
 		}
 
 		void Collider::updatePhysicsPosition() {
-			if (world->updatedThisFrame())
-			{
+			if (world->updatedThisFrame()){
 				previousPosition = currentPosition;
 				previousAngle = currentAngle;
 				currentPhysicsPosition = physicsBody->GetPosition();
-				currentPosition = cast(currentPhysicsPosition, owner()->position().z);
+				if (useBodyPosition) {
+					currentPosition = cast(currentPhysicsPosition, owner()->position().z);
+				} else {
+					currentPosition = owner()->position();
+				}
 
+				currentPhysicsAngle = physicsBody->GetAngle();
 				if (useBodyAngle) {
-					currentPhysicsAngle = physicsBody->GetAngle();
 					currentAngle = toDegrees(physicsBody->GetAngle());
 				} else if (!useBodyAngle) {
 					currentAngle = owner()->worldRotation().z;
-				} else {
-					currentPhysicsAngle = physicsBody->GetAngle();
-					currentAngle = toDegrees(physicsBody->GetAngle());
 				}
 			}
 		}
@@ -156,7 +188,7 @@ namespace MV {
 			physicsBody->CreateFixture(&a_attributes.details);
 
 			FixtureParameters paramsToStore;
-			paramsToStore.isCircle = false;
+			paramsToStore.shapeType = FixtureParameters::RECTANGLE;
 			paramsToStore.size = a_size;
 			paramsToStore.rotation = a_rotation;
 			paramsToStore.position = a_position;
@@ -180,9 +212,35 @@ namespace MV {
 			physicsBody->CreateFixture(&a_attributes.details);
 
 			FixtureParameters paramsToStore;
-			paramsToStore.isCircle = true;
+			paramsToStore.shapeType = FixtureParameters::CIRCLE;
 			paramsToStore.diameter = a_diameter;
 			paramsToStore.position = a_position;
+			paramsToStore.attributes = a_attributes;
+
+			collisionParts.push_back(paramsToStore);
+		}
+
+		std::shared_ptr<Collider> Collider::attach(const std::vector<Point<>> &a_points, const Point<> &a_offset /*= Point<>()*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
+			attachInternal(a_points, a_offset, a_attributes);
+			return std::static_pointer_cast<Collider>(shared_from_this());
+		}
+
+		void Collider::attachInternal(const std::vector<Point<>> &a_points, const Point<> &a_offset /*= Point<>()*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
+			std::vector<b2Vec2> convertedPoints(a_points.size());
+			std::transform(a_points.begin(), a_points.end(), convertedPoints.begin(), [&](const Point<> &a_point) {return castToPhysics((a_point + a_offset)); });
+
+			b2PolygonShape shape;
+			shape.Set(&(convertedPoints[0]), convertedPoints.size());
+
+			a_attributes.details.shape = &shape;
+			a_attributes.details.userData = ((void *)this);
+
+			physicsBody->CreateFixture(&a_attributes.details);
+
+			FixtureParameters paramsToStore;
+			paramsToStore.shapeType = FixtureParameters::POLYGON;
+			paramsToStore.points = a_points;
+			paramsToStore.position = a_offset;
 			paramsToStore.attributes = a_attributes;
 
 			collisionParts.push_back(paramsToStore);
@@ -455,22 +513,33 @@ namespace MV {
 			return a_clone;
 		}
 
-		void ContactListener::BeginContact(b2Contact* contact) {
-			Collider *fixtureAObject = static_cast<Collider*>(contact->GetFixtureA()->GetUserData());
-			Collider *fixtureBObject = static_cast<Collider*>(contact->GetFixtureB()->GetUserData());
-			b2WorldManifold worldManifold;
-			contact->GetWorldManifold(&worldManifold);
-			fixtureAObject->addCollision(fixtureBObject, contact, worldManifold.normal);
-			fixtureBObject->addCollision(fixtureAObject, contact, -worldManifold.normal);
+		void ContactListener::RunQueuedCallbacks() {
+			while (!contactCallbacks.empty()) {
+				auto contact = contactCallbacks.front();
+				contactCallbacks.pop();
+
+				Collider *fixtureAObject = static_cast<Collider*>(contact.A->GetUserData());
+				Collider *fixtureBObject = static_cast<Collider*>(contact.B->GetUserData());
+				if (fixtureAObject && fixtureBObject) {
+					if (contact.beginContact) {
+						fixtureAObject->addCollision(fixtureBObject, contact.contactId, contact.normal);
+						fixtureBObject->addCollision(fixtureAObject, contact.contactId, -contact.normal);
+					} else {
+						fixtureAObject->removeCollision(fixtureBObject, contact.contactId);
+						fixtureBObject->removeCollision(fixtureAObject, contact.contactId);
+					}
+				}
+			}
 		}
 
-		void ContactListener::EndContact(b2Contact* contact) {
-			Collider *fixtureAObject = static_cast<Collider*>(contact->GetFixtureA()->GetUserData());
-			Collider *fixtureBObject = static_cast<Collider*>(contact->GetFixtureB()->GetUserData());
+		void ContactListener::BeginContact(b2Contact* a_contact) {
 			b2WorldManifold worldManifold;
-			contact->GetWorldManifold(&worldManifold);
-			fixtureAObject->removeCollision(fixtureBObject, contact);
-			fixtureBObject->removeCollision(fixtureAObject, contact);
+			a_contact->GetWorldManifold(&worldManifold);
+			contactCallbacks.push(ContactDetails(reinterpret_cast<size_t>(a_contact), a_contact->GetFixtureA(), a_contact->GetFixtureB(), worldManifold.normal));
+		}
+
+		void ContactListener::EndContact(b2Contact* a_contact) {
+			contactCallbacks.push(ContactDetails(reinterpret_cast<size_t>(a_contact), a_contact->GetFixtureA(), a_contact->GetFixtureB()));
 		}
 
 		void ContactListener::PreSolve(b2Contact* contact, const b2Manifold* oldManifold) {

@@ -156,7 +156,7 @@ namespace MV {
 					disconnectQueue.clear();
 				};
 
-				for (auto i = observers.begin(); i != observers.end();) {
+				for (auto i = observers.begin(); !observers.empty() && i != observers.end();) {
 					if (i->expired()) {
 						observers.erase(i++);
 					} else {

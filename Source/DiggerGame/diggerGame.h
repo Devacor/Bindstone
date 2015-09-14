@@ -106,11 +106,12 @@ class DiggerWorld {
 public:
 	MV::Scene::SafeComponent<MV::Scene::Collider> thing;
 
-	DiggerWorld(const std::shared_ptr<MV::Scene::Node> &a_node, MV::SharedTextures &a_sharedTextures) :
+	DiggerWorld(const std::shared_ptr<MV::Scene::Node> &a_node, MV::SharedTextures &a_sharedTextures, MV::MouseState &a_mouse) :
 		background(a_node->make("Background")->attach<MV::Scene::Grid>()),
 		environment(a_node->make("Environment")->attach<MV::Scene::Grid>()),
 		foreground(a_node->make("Foreground")->attach<MV::Scene::Grid>()),
 		physicsWorld(a_node->make("Physics")->attach<MV::Scene::Environment>()),
+		mouse(a_mouse),
 		sharedTextures(a_sharedTextures){
 
 		environment->repositionManual();
@@ -139,7 +140,7 @@ public:
 
 		for (auto&& tileSet : tileSets) {
 			for (int i = 0; i < worldWidth * 10; ++i) {
-				pushTile(false, tileSet.randomStandard(), nullptr);
+				pushTile(true, tileSet.randomStandard(), nullptr);
 			}
 		}
 		environment->layoutCells();
@@ -147,22 +148,23 @@ public:
 		foreground->layoutCells();
 
 		thing = physicsWorld->owner()->make("thing")->position({ 100.0f, 0.0f })->attach<MV::Scene::Sprite>()->size({ 50.0f, 50.0f }, true)->color({ 0.0f, 0.0f, 1.0f, .5f })->owner()->
-			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic().disableRotation());
+			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic().angularDamping(100.0f));
 		physicsWorld->owner()->make("thing1")->position({ 160.0f, 50.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
 			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f });
 		physicsWorld->owner()->make("thing2")->position({ 150.0f, 30.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
 			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f });
 		physicsWorld->owner()->make("thing3")->position({ 140.0f, 10.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
 			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f });
-		thing->attach({ 50.0f, 50.0f }, MV::Point<>(), 0.0f, MV::Scene::CollisionPartAttributes().friction(6.0f));
+		thing->attach(50.0f, MV::Point<>(), MV::Scene::CollisionPartAttributes().friction(6.0f));
+		//thing->ignorePhysicsAngle();
 	}
 
 	void pushTile(bool a_collidable, const std::shared_ptr<MV::TextureHandle> &a_environment, const std::shared_ptr<MV::TextureHandle> &a_background, const std::shared_ptr<MV::TextureHandle> &a_foreground = nullptr) {
 		std::shared_ptr<MV::Scene::Node> worldTile;
 		if (a_environment) {
-			worldTile = environment->owner()->make()->attach<MV::Scene::Sprite>()->bounds({ { 0, 0 }, tileSize })->texture(a_environment)->owner();
+			worldTile = environment->owner()->make()->attach<MV::Scene::Clickable>(mouse)->bounds({ { 0, 0 }, tileSize })->show()->texture(a_environment)->owner();
 		} else {
-			worldTile = environment->owner()->make()->attach<MV::Scene::Sprite>()->bounds({ { 0, 0 }, tileSize })->color({ 0, 0, 0, 0 })->owner();
+			worldTile = environment->owner()->make()->attach<MV::Scene::Clickable>(mouse)->bounds({ { 0, 0 }, tileSize })->show()->color({ 0, 0, 0, 0 })->owner();
 		}
 		if (a_background) {
 			background->owner()->make()->attach<MV::Scene::Sprite>()->bounds({ { 0, 0 }, tileSize })->texture(a_background);
@@ -177,6 +179,10 @@ public:
 
 		if (a_collidable) {
 			worldTile->attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeStatic())->attach(tileSize, (toPoint(tileSize) / 2.0f));
+			worldTile->component<MV::Scene::Clickable>()->onAccept.connect("clicky", [](std::shared_ptr<MV::Scene::Clickable> a_self) {
+				a_self->color({ 0, 0, 0, 0 })->clearTexture();
+				a_self->owner()->detach<MV::Scene::Collider>(true, false);
+			});
 		}
 	}
 
@@ -199,6 +205,8 @@ private:
 	MV::Scene::SafeComponent<MV::Scene::Environment> physicsWorld;
 
 	const MV::Size<> tileSize { 32, 32 };
+
+	MV::MouseState &mouse;
 };
 
 class DiggerGame {

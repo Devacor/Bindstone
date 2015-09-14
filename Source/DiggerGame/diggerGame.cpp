@@ -58,12 +58,13 @@ void DiggerGame::initializeWindow() {
 void DiggerGame::InitializeWorldScene() {
 	worldScene = MV::Scene::Node::make(*renderer);
 	worldScene->scale(4.0f);
-	world = std::make_shared<DiggerWorld>(worldScene, textures);
+	world = std::make_shared<DiggerWorld>(worldScene, textures, mouse);
 
 }
 
 bool DiggerGame::update(double dt) {
 	lastUpdateDelta = dt;
+	
 	pool->run();
 	if (done) {
 		done = false;

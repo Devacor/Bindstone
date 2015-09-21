@@ -44,6 +44,9 @@ namespace MV {
 		
 		//Stop the timer and return the final time between the start (or the first check) and stop calls.
 		TimeType stop();
+
+		//Stop and restart, return the final time between start and reset, or the last reset.
+		TimeType reset();
 		
 		//Checks the time between calls.
 		TimeType delta(bool a_resetDelta = true);

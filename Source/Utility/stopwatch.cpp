@@ -45,6 +45,12 @@ namespace MV {
 			return systemTime()-prevtime + timeOffset;
 		}
 	}
+
+	Stopwatch::TimeType Stopwatch::reset() {
+		auto result = stop();
+		start();
+		return result;
+	}
 	
 	Stopwatch::TimeType Stopwatch::systemTime() const{
 		return static_cast<double>(SDL_GetPerformanceCounter()) / static_cast<double>(SDL_GetPerformanceFrequency());

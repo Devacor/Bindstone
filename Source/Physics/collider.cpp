@@ -24,7 +24,8 @@ namespace MV {
 			onContactStart(onContactStartSignal),
 			onContactEnd(onContactEndSignal),
 			onCollisionKilled(onCollisionKilledSignal),
-			onShouldCollide(onShouldCollideSignal){
+			onShouldCollide(onShouldCollideSignal),
+			onContactKilled(onContactKilledSignal){
 
 			if (a_maintainOwnerPosition) {
 				collisionAttributes.details.position = castToPhysics(world->owner()->localFromWorld(owner()->worldPosition()));
@@ -40,7 +41,8 @@ namespace MV {
 			onContactStart(onContactStartSignal),
 			onContactEnd(onContactEndSignal),
 			onCollisionKilled(onCollisionKilledSignal),
-			onShouldCollide(onShouldCollideSignal) {
+			onShouldCollide(onShouldCollideSignal),
+			onContactKilled(onContactKilledSignal){
 
 			if (a_maintainOwnerPosition) {
 				collisionAttributes.details.position = castToPhysics(world->owner()->localFromWorld(owner()->worldPosition()));
@@ -56,7 +58,8 @@ namespace MV {
 			onContactStart(onContactStartSignal),
 			onContactEnd(onContactEndSignal),
 			onCollisionKilled(onCollisionKilledSignal),
-			onShouldCollide(onShouldCollideSignal) {
+			onShouldCollide(onShouldCollideSignal),
+			onContactKilled(onContactKilledSignal) {
 
 			if (a_maintainOwnerPosition) {
 				collisionAttributes.details.position = castToPhysics(world->owner()->localFromWorld(owner()->worldPosition()));
@@ -86,24 +89,24 @@ namespace MV {
 
 		void Collider::initialize() {
 			Component::initialize();
-
-			auto colliders = owner()->components<Collider>();
-			for (auto&& collider : colliders) {
-				visit(collider, [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
-					if (a_collider.self().get() != this) {
-						if (a_collider->observePhysicsAngle()) {
-							useBodyAngle = false;
+			if (!loadedFromJson) {
+				auto colliders = owner()->components<Collider>();
+				for (auto&& collider : colliders) {
+					visit(collider, [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
+						if (a_collider.self().get() != this) {
+							if (a_collider->observePhysicsAngle()) {
+								useBodyAngle = false;
+							}
+							if (a_collider->observePhysicsPosition()) {
+								useBodyPosition = false;
+							}
 						}
-						if (a_collider->observePhysicsPosition()) {
-							useBodyPosition = false;
-						}
-					}
-				});
+					});
+				}
 			}
-
 			physicsBody = world->createBody(collisionAttributes.details);
 			physicsBody->SetUserData((void *)this);
-			if (collisionAttributes.parent.expired()) {
+			if (!loadedFromJson && collisionAttributes.parent.expired()) {
 				collisionAttributes.parent = std::static_pointer_cast<Collider>(shared_from_this());
 				currentPosition = previousPosition = owner()->localFromWorld(world->owner()->worldFromLocal(body().position()));
 				currentAngle = previousAngle = owner()->worldRotation().z;
@@ -114,10 +117,17 @@ namespace MV {
 		}
 
 		Collider::~Collider() {
-			physicsBody->SetUserData(nullptr);
+			std::vector<Collider*> contactListToDestroy;
 			std::for_each(contacts.begin(), contacts.end(), [&](ContactMap::value_type contact) {
-				contact.first->deleteCollisionObject(this);
+				contactListToDestroy.push_back(contact.first);
 			});
+			for (auto&& contact : contactListToDestroy) {
+				contact->deleteCollisionObject(this);
+			}
+			std::for_each(rotationJoints.begin(), rotationJoints.end(), [&](const std::shared_ptr<RotationJointAttributes> &joint) {
+				joint->destroy();
+			});
+			physicsBody->SetUserData(nullptr);
 			world->destroyBody(physicsBody);
 		}
 
@@ -185,7 +195,7 @@ namespace MV {
 
 			a_attributes.details.shape = &shape;
 			a_attributes.details.userData = ((void *)this);
-			physicsBody->CreateFixture(&a_attributes.details);
+			fixtureMap[physicsBody->CreateFixture(&a_attributes.details)] = a_attributes;
 
 			FixtureParameters paramsToStore;
 			paramsToStore.shapeType = FixtureParameters::RECTANGLE;
@@ -204,12 +214,13 @@ namespace MV {
 
 		void Collider::attachInternal(PointPrecision a_diameter, const Point<> &a_position /*= Point<>()*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
 			b2CircleShape shape;
-			shape.m_radius = static_cast<float32>((a_diameter / CollisionScale) / 2.0);
+			shape.m_radius = (a_diameter / 2.0f) / CollisionScale;
 			shape.m_p = castToPhysics(a_position);
 
 			a_attributes.details.shape = &shape;
 			a_attributes.details.userData = ((void *)this);
-			physicsBody->CreateFixture(&a_attributes.details);
+
+			fixtureMap[physicsBody->CreateFixture(&a_attributes.details)] = a_attributes;
 
 			FixtureParameters paramsToStore;
 			paramsToStore.shapeType = FixtureParameters::CIRCLE;
@@ -230,12 +241,12 @@ namespace MV {
 			std::transform(a_points.begin(), a_points.end(), convertedPoints.begin(), [&](const Point<> &a_point) {return castToPhysics((a_point + a_offset)); });
 
 			b2PolygonShape shape;
-			shape.Set(&(convertedPoints[0]), convertedPoints.size());
+			shape.Set(&(convertedPoints[0]), static_cast<int32_t>(convertedPoints.size()));
 
 			a_attributes.details.shape = &shape;
 			a_attributes.details.userData = ((void *)this);
 
-			physicsBody->CreateFixture(&a_attributes.details);
+			fixtureMap[physicsBody->CreateFixture(&a_attributes.details)] = a_attributes;
 
 			FixtureParameters paramsToStore;
 			paramsToStore.shapeType = FixtureParameters::POLYGON;
@@ -521,12 +532,16 @@ namespace MV {
 				Collider *fixtureAObject = static_cast<Collider*>(contact.A->GetUserData());
 				Collider *fixtureBObject = static_cast<Collider*>(contact.B->GetUserData());
 				if (fixtureAObject && fixtureBObject) {
+					auto attributesAIt = fixtureAObject->fixtureMap.find(contact.A);
+					auto attributesBIt = fixtureBObject->fixtureMap.find(contact.B);
+					CollisionPartAttributes* attributesA = (attributesAIt != fixtureAObject->fixtureMap.end()) ? &(attributesAIt->second)  : nullptr;
+					CollisionPartAttributes* attributesB = (attributesBIt != fixtureBObject->fixtureMap.end()) ? &(attributesBIt->second) : nullptr;
 					if (contact.beginContact) {
-						fixtureAObject->addCollision(fixtureBObject, contact.contactId, contact.normal);
-						fixtureBObject->addCollision(fixtureAObject, contact.contactId, -contact.normal);
+						fixtureAObject->addCollision(fixtureBObject, attributesA, attributesB, contact.contactId, contact.normal);
+						fixtureBObject->addCollision(fixtureAObject, attributesB, attributesA, contact.contactId, -contact.normal);
 					} else {
-						fixtureAObject->removeCollision(fixtureBObject, contact.contactId);
-						fixtureBObject->removeCollision(fixtureAObject, contact.contactId);
+						fixtureAObject->removeCollision(fixtureBObject, attributesA, attributesB, contact.contactId);
+						fixtureBObject->removeCollision(fixtureAObject, attributesB, attributesA, contact.contactId);
 					}
 				}
 			}
@@ -543,17 +558,78 @@ namespace MV {
 		}
 
 		void ContactListener::PreSolve(b2Contact* contact, const b2Manifold* oldManifold) {
-			auto sharedA = std::static_pointer_cast<Collider>(static_cast<Collider*>(contact->GetFixtureA()->GetUserData())->shared_from_this());
-			auto sharedB = std::static_pointer_cast<Collider>(static_cast<Collider*>(contact->GetFixtureA()->GetUserData())->shared_from_this());
+			Collider* contactA = static_cast<Collider*>(contact->GetFixtureA()->GetUserData());
+			Collider* contactB = static_cast<Collider*>(contact->GetFixtureB()->GetUserData());
 
 			b2WorldManifold worldManifold;
 			contact->GetWorldManifold(&worldManifold);
 			bool shouldCollide = true;
 
-			sharedA->onShouldCollideSignal(sharedA, sharedB, Point<>(worldManifold.normal.x, worldManifold.normal.y), shouldCollide);
-			sharedB->onShouldCollideSignal(sharedB, sharedA, Point<>(worldManifold.normal.x, worldManifold.normal.y) * -1.0f, shouldCollide);
+			auto attributesAIt = contactA->fixtureMap.find(contact->GetFixtureA());
+			auto attributesBIt = contactB->fixtureMap.find(contact->GetFixtureB());
+			CollisionPartAttributes* attributesA = (attributesAIt != contactA->fixtureMap.end()) ? &(attributesAIt->second) : nullptr;
+			CollisionPartAttributes* attributesB = (attributesBIt != contactB->fixtureMap.end()) ? &(attributesBIt->second) : nullptr;
+
+			contactA->onShouldCollideSignal(CollisionParameters(attributesA, contactA, attributesB, contactB), Point<>(worldManifold.normal.x, worldManifold.normal.y), shouldCollide);
+			contactB->onShouldCollideSignal(CollisionParameters(attributesB, contactB, attributesA, contactA), Point<>(worldManifold.normal.x, worldManifold.normal.y) * -1.0f, shouldCollide);
 
 			contact->SetEnabled(shouldCollide);
+		}
+
+		void RotationJointAttributes::initialize(const std::shared_ptr<Collider> &a_lhs, const std::shared_ptr<Collider> &a_rhs, Point<> a_offset) {
+			A = a_lhs;
+			B = a_rhs;
+
+			offset = a_offset;
+			jointDef.Initialize(a_lhs->physicsBody, a_rhs->physicsBody, castToPhysics(a_lhs->world->owner()->localFromWorld(a_lhs->owner()->worldFromLocal(a_offset))));
+			joint = a_lhs->world->createJoint<b2RevoluteJoint>(jointDef);
+			joint->SetUserData(a_lhs->world->getWorld());
+		}
+
+		void RotationJointAttributes::loadedCollider(Collider* a_loaded) {
+			if (++loadCount == 2) {
+				Collider *loadedA = nullptr;
+				Collider *loadedB = nullptr;
+				b2World* world = nullptr;
+				if (!A.expired() && firstLoaded == A.lock().get()) {
+					loadedA = firstLoaded;
+					loadedB = a_loaded;
+					world = firstLoaded->world->getWorld();
+				} else {
+					loadedA = a_loaded;
+					loadedB = firstLoaded;
+					world = a_loaded->world->getWorld();
+				}
+				jointDef.Initialize(loadedA->physicsBody, loadedB->physicsBody, castToPhysics(worldPosition));
+				joint = static_cast<b2RevoluteJoint*>(world->CreateJoint(&jointDef));
+				joint->SetUserData(world);
+			} else {
+				firstLoaded = a_loaded;
+			}
+		}
+
+		void RotationJointAttributes::destroy() {
+			if (!B.expired()) {
+				auto lockedB = B.lock();
+				lockedB->rotationJoints.erase(std::remove_if(lockedB->rotationJoints.begin(), lockedB->rotationJoints.end(), [&](const std::shared_ptr<RotationJointAttributes> &a_object) { return a_object.get() == this; }), lockedB->rotationJoints.end());
+			}
+			if (!A.expired()) {
+				auto lockedA = A.lock();
+				lockedA->rotationJoints.erase(std::remove_if(lockedA->rotationJoints.begin(), lockedA->rotationJoints.end(), [&](const std::shared_ptr<RotationJointAttributes> &a_object) { return a_object.get() == this; }), lockedA->rotationJoints.end());
+			}
+			if (joint) {
+				b2World* world = reinterpret_cast<b2World*>(joint->GetUserData());
+				world->DestroyJoint(joint);
+				joint = nullptr;
+			}
+		}
+
+		SafeComponent<Collider> CollisionParameters::safeColliderA() const {
+			return colliderA->safe();
+		}
+
+		SafeComponent<Collider> CollisionParameters::safeColliderB() const {
+			return colliderB->safe();
 		}
 
 	}

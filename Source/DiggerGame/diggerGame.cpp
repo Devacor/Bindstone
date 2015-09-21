@@ -54,12 +54,28 @@ void DiggerGame::initializeWindow() {
 	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 
 	InitializeWorldScene();
+
+
 }
 void DiggerGame::InitializeWorldScene() {
 	worldScene = MV::Scene::Node::make(*renderer);
 	worldScene->scale(4.0f);
 	world = std::make_shared<DiggerWorld>(worldScene, textures, mouse);
-
+	world->thing->onCollisionStart.connect("land", [&](MV::Scene::CollisionParameters a_parameters) {
+		if (a_parameters.fixtureA->id() == "foot") {
+			grounded++;
+		}
+	});
+	world->thing->onCollisionEnd.connect("jump", [&](MV::Scene::CollisionParameters a_parameters) {
+		if (a_parameters.fixtureA->id() == "foot") {
+			grounded--;
+		}
+	});
+	world->thing->onCollisionKilled.connect("jump", [&](bool a_usDying, MV::Scene::CollisionParameters a_parameters) {
+		if (!a_usDying && a_parameters.fixtureA->id() == "foot") {
+			grounded--;
+		}
+	});
 }
 
 bool DiggerGame::update(double dt) {
@@ -85,7 +101,10 @@ void DiggerGame::handleInput() {
 				if (event.key.keysym.sym == SDLK_ESCAPE) {
 					done = true;
 				} else if (event.key.keysym.sym == SDLK_UP) {
-					world->thing->body().impulse({ 0.0f, -500.0f });
+					if (grounded > 0 && jumpTimer.check() > .2f ) {
+						jumpTimer.reset();
+						world->thing->body().impulse({ 0.0f, -180.0f });
+					}
 				} else if (event.key.keysym.sym == SDLK_DOWN) {
 					std::ofstream outstream("digger.scene");
 					cereal::JSONOutputArchive outarchive(outstream);
@@ -113,12 +132,18 @@ void DiggerGame::handleInput() {
 	}
 	const Uint8 *state = SDL_GetKeyboardState(NULL);
 	if (state[SDL_SCANCODE_RIGHT]) {
-		auto currentVelocity = world->thing->body().velocity();
-		world->thing->body().velocity({300.0f, currentVelocity.y});
+		world->thing->body().force({ 100.0f, 0.0f });
 	}
 	if (state[SDL_SCANCODE_LEFT]) {
-		auto currentVelocity = world->thing->body().velocity();
-		world->thing->body().velocity({ -300.0f, currentVelocity.y });
+		world->thing->body().force({ -100.0f, 0.0f });
+	}
+
+	if (state[SDL_SCANCODE_RIGHT] && !state[SDL_SCANCODE_LEFT]) {
+		world->thing->rotationJoint()->speed(-15.0f);
+	} else if (state[SDL_SCANCODE_LEFT] && !state[SDL_SCANCODE_RIGHT]) {
+		world->thing->rotationJoint()->speed(15.0f);
+	} else {
+		world->thing->rotationJoint()->speed(0.0f);
 	}
 	mouse.update();
 }

@@ -141,6 +141,10 @@ namespace MV {
 				return result;
 			}
 
+			SafeComponent<Component const> safe() const {
+				return SafeComponent<Component const>(owner(), shared_from_this());
+			}
+
 			SafeComponent<Component> safe() {
 				return SafeComponent<Component>(owner(), shared_from_this());
 			}

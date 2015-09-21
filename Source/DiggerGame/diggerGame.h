@@ -147,15 +147,23 @@ public:
 		background->layoutCells();
 		foreground->layoutCells();
 
-		thing = physicsWorld->owner()->make("thing")->position({ 100.0f, 0.0f })->attach<MV::Scene::Sprite>()->size({ 50.0f, 50.0f }, true)->color({ 0.0f, 0.0f, 1.0f, .5f })->owner()->
-			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic().angularDamping(100.0f));
-		physicsWorld->owner()->make("thing1")->position({ 160.0f, 50.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
+		thing = physicsWorld->owner()->make("thing")->position({ 100.0f, 0.0f })->attach<MV::Scene::Sprite>()->size({ 25.0f, 25.0f }, true)->color({ 0.0f, 0.0f, 1.0f, .9f })->owner()->
+			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic().angularDamping(45.0f));
+		physicsWorld->owner()->make("thing1")->position({ 100.0f, -50.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
 			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f });
 		physicsWorld->owner()->make("thing2")->position({ 150.0f, 30.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
 			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f });
 		physicsWorld->owner()->make("thing3")->position({ 140.0f, 10.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
 			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f });
-		thing->attach(50.0f, MV::Point<>(), MV::Scene::CollisionPartAttributes().friction(6.0f));
+		
+		thing->attach(25.0f, MV::Point<>(), MV::Scene::CollisionPartAttributes().id("foot").friction(20.0f));
+
+		auto topBody = physicsWorld->owner()->make("thingBody")->position({ 100.0f, -12.0f })->attach<MV::Scene::Sprite>()->size({ 25.0f, 38.0f }, true)->color({ 0.0f, 1.0f, 0.0f, .6f })->owner()->
+			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic().disableRotation());
+		topBody->attach({ { -12.6f, -19.0f }, { 12.6f, -19.0f}, {12.6f, 19.0f}, {4.0f, 23.0f}, {-4.0f, 23.0f}, {-12.6f, 19.0f} }, MV::Point<>(), MV::Scene::CollisionPartAttributes().friction(0.0f));
+
+		motor = thing->rotationJoint(topBody.self(), MV::Scene::RotationJointAttributes().torque(10000.0f));
+
 		//thing->ignorePhysicsAngle();
 	}
 
@@ -195,6 +203,8 @@ private:
 
 	std::shared_ptr<GroundTileSet> ground;
 	std::vector<DiggerTileSet> tileSets;
+
+	std::shared_ptr<MV::Scene::RotationJointAttributes> motor;
 
 	MV::SharedTextures &sharedTextures;
 
@@ -250,6 +260,9 @@ private:
 	MV::MouseState mouse;
 
 	double lastUpdateDelta;
+
+	int grounded = 0;
+	MV::Stopwatch jumpTimer;
 
 	DiggerPlayer player;
 	std::shared_ptr<DiggerWorld> world;

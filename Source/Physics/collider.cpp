@@ -448,7 +448,7 @@ namespace MV {
 
 		Point<> CollisionBodyAttributes::velocity() const {
 			if (!parent.expired()) {
-				parent.lock()->physicsBody->GetLinearVelocity();
+				return cast(parent.lock()->physicsBody->GetLinearVelocity());
 			}
 			return cast(details.linearVelocity);
 		}
@@ -463,7 +463,7 @@ namespace MV {
 
 		PointPrecision CollisionBodyAttributes::angularVelocity() const {
 			if (!parent.expired()) {
-				parent.lock()->physicsBody->GetAngularVelocity();
+				return parent.lock()->physicsBody->GetAngularVelocity();
 			}
 			return details.angularVelocity;
 		}

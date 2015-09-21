@@ -100,11 +100,6 @@ void DiggerGame::handleInput() {
 			case SDL_KEYDOWN:
 				if (event.key.keysym.sym == SDLK_ESCAPE) {
 					done = true;
-				} else if (event.key.keysym.sym == SDLK_UP) {
-					if (grounded > 0 && jumpTimer.check() > .2f ) {
-						jumpTimer.reset();
-						world->thing->body().impulse({ 0.0f, -180.0f });
-					}
 				} else if (event.key.keysym.sym == SDLK_DOWN) {
 					std::ofstream outstream("digger.scene");
 					cereal::JSONOutputArchive outarchive(outstream);
@@ -132,16 +127,25 @@ void DiggerGame::handleInput() {
 	}
 	const Uint8 *state = SDL_GetKeyboardState(NULL);
 	if (state[SDL_SCANCODE_RIGHT]) {
-		world->thing->body().force({ 100.0f, 0.0f });
+		if (grounded == 0) {
+			world->thing->body().velocity({ 150.0f, world->thing->body().velocity().y });
+		}
 	}
 	if (state[SDL_SCANCODE_LEFT]) {
-		world->thing->body().force({ -100.0f, 0.0f });
+		if (grounded == 0) {
+			world->thing->body().velocity({ -150.0f, world->thing->body().velocity().y });
+		}
 	}
-
+	if (state[SDL_SCANCODE_UP]) {
+		if (grounded > 0 && jumpTimer.check() > .2f) {
+			jumpTimer.reset();
+			world->thing->body().impulse({ 0.0f, -200.0f });
+		}
+	}
 	if (state[SDL_SCANCODE_RIGHT] && !state[SDL_SCANCODE_LEFT]) {
-		world->thing->rotationJoint()->speed(-15.0f);
+		world->thing->rotationJoint()->speed(-10.0f);
 	} else if (state[SDL_SCANCODE_LEFT] && !state[SDL_SCANCODE_RIGHT]) {
-		world->thing->rotationJoint()->speed(15.0f);
+		world->thing->rotationJoint()->speed(10.0f);
 	} else {
 		world->thing->rotationJoint()->speed(0.0f);
 	}

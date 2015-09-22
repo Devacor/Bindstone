@@ -147,20 +147,20 @@ public:
 		background->layoutCells();
 		foreground->layoutCells();
 
-		thing = physicsWorld->owner()->make("thing")->position({ 100.0f, 0.0f })->attach<MV::Scene::Sprite>()->size({ 25.0f, 25.0f }, true)->color({ 0.0f, 0.0f, 1.0f, .9f })->owner()->
+		thing = physicsWorld->owner()->make("thing")->position({ 100.0f, 3.0f })->attach<MV::Scene::Sprite>()->size({ 23.0f, 23.0f }, true)->color({ 0.0f, 0.0f, 1.0f, .9f })->owner()->
 			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic().angularDamping(55.0f));
 		physicsWorld->owner()->make("thing1")->position({ 100.0f, -50.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
-			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f });
+			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f })->id("thing1");
 		physicsWorld->owner()->make("thing2")->position({ 150.0f, 30.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
-			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f });
+			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f })->id("thing2");
 		physicsWorld->owner()->make("thing3")->position({ 140.0f, 10.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
-			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f });
+			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f })->id("thing3");
 		
-		thing->attach(24.0f, MV::Point<>(), MV::Scene::CollisionPartAttributes().id("foot").friction(15.0f));
+		thing->attach(22.0f, MV::Point<>(), MV::Scene::CollisionPartAttributes().id("foot").friction(15.0f));
 
 		auto topBody = physicsWorld->owner()->make("thingBody")->position({ 100.0f, -12.0f })->attach<MV::Scene::Sprite>()->size({ 25.0f, 38.0f }, true)->color({ 0.0f, 1.0f, 0.0f, .6f })->owner()->
 			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic().disableRotation());
-		topBody->attach({ { -12.6f, -19.0f }, { 12.6f, -19.0f}, {12.6f, 19.0f}, {4.0f, 23.0f}, {-4.0f, 23.0f}, {-12.6f, 19.0f} }, MV::Point<>(), MV::Scene::CollisionPartAttributes().friction(0.0f));
+		topBody->attach({ { -12.6f, -19.0f }, { 12.6f, -19.0f}, {12.6f, 18.0f}, {4.0f, 20.0f}, {-4.0f, 20.0f}, {-12.6f, 18.0f} }, MV::Point<>(), MV::Scene::CollisionPartAttributes().friction(0.0f));
 
 		motor = thing->rotationJoint(topBody.self(), MV::Scene::RotationJointAttributes().torque(10000.0f));
 
@@ -168,6 +168,7 @@ public:
 	}
 
 	void pushTile(bool a_collidable, const std::shared_ptr<MV::TextureHandle> &a_environment, const std::shared_ptr<MV::TextureHandle> &a_background, const std::shared_ptr<MV::TextureHandle> &a_foreground = nullptr) {
+		static int tileCounter = 0;
 		std::shared_ptr<MV::Scene::Node> worldTile;
 		if (a_environment) {
 			worldTile = environment->owner()->make()->attach<MV::Scene::Clickable>(mouse)->bounds({ { 0, 0 }, tileSize })->show()->texture(a_environment)->owner();
@@ -186,11 +187,12 @@ public:
 		}
 
 		if (a_collidable) {
-			worldTile->attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeStatic())->attach(tileSize, (toPoint(tileSize) / 2.0f));
+			worldTile->attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeStatic())->id("T:"+std::to_string(tileCounter))->attach(tileSize, (toPoint(tileSize) / 2.0f))->id("T:"+std::to_string(tileCounter));
 			worldTile->component<MV::Scene::Clickable>()->onAccept.connect("clicky", [](std::shared_ptr<MV::Scene::Clickable> a_self) {
 				a_self->color({ 0, 0, 0, 0 })->clearTexture();
 				a_self->owner()->detach<MV::Scene::Collider>(true, false);
 			});
+			tileCounter++;
 		}
 	}
 

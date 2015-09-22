@@ -127,6 +127,9 @@ namespace MV {
 			std::for_each(rotationJoints.begin(), rotationJoints.end(), [&](const std::shared_ptr<RotationJointAttributes> &joint) {
 				joint->destroy();
 			});
+			for (auto&& fixture : fixtureMap) {
+				fixture.first->SetUserData(nullptr);
+			}
 			physicsBody->SetUserData(nullptr);
 			world->destroyBody(physicsBody);
 		}

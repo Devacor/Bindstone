@@ -439,19 +439,19 @@ namespace MV {
 			
 			Signal<void(CollisionParameters)> onCollisionStartSignal;
 			Signal<void(CollisionParameters)> onCollisionEndSignal;
-			Signal<void(size_t, CollisionParameters, Point<>)> onContactStartSignal;
+			Signal<void(size_t, CollisionParameters, const Point<> &)> onContactStartSignal;
 			Signal<void(size_t, CollisionParameters)> onContactEndSignal;
 			Signal<void(bool, CollisionParameters)> onCollisionKilledSignal; //first param true if A is destroyed otherwise B
 			Signal<void(bool, size_t, CollisionParameters)> onContactKilledSignal; //first param true if A is destroyed otherwise B
-			Signal<void(CollisionParameters, Point<>, bool&)> onShouldCollideSignal;
+			Signal<void(CollisionParameters, const Point<> &, bool&)> onShouldCollideSignal;
 		public:
 			SignalRegister<void(CollisionParameters)> onCollisionStart;
 			SignalRegister<void(CollisionParameters)> onCollisionEnd;
-			SignalRegister<void(size_t, CollisionParameters, Point<>)> onContactStart;
+			SignalRegister<void(size_t, CollisionParameters, const Point<> &)> onContactStart;
 			SignalRegister<void(size_t, CollisionParameters)> onContactEnd;
 			SignalRegister<void(bool, CollisionParameters)> onCollisionKilled; //first param true if A is destroyed otherwise B
 			SignalRegister<void(bool, size_t, CollisionParameters)> onContactKilled; //first param true if A is destroyed otherwise B
-			SignalRegister<void(CollisionParameters, Point<>, bool&)> onShouldCollide;
+			SignalRegister<void(CollisionParameters, const Point<> &, bool&)> onShouldCollide;
 
 			ComponentDerivedAccessors(Collider);
 

@@ -61,17 +61,17 @@ void DiggerGame::InitializeWorldScene() {
 	worldScene = MV::Scene::Node::make(*renderer);
 	worldScene->scale(4.0f);
 	world = std::make_shared<DiggerWorld>(worldScene, textures, mouse);
-	world->thing->onCollisionStart.connect("land", [&](MV::Scene::CollisionParameters a_parameters) {
+	world->thing->onContactStart.connect("land", [&](size_t a_id, MV::Scene::CollisionParameters a_parameters, const MV::Point<> &a_normal) {
 		if (a_parameters.fixtureA->id() == "foot") {
 			grounded++;
 		}
 	});
-	world->thing->onCollisionEnd.connect("jump", [&](MV::Scene::CollisionParameters a_parameters) {
+	world->thing->onContactEnd.connect("jump", [&](size_t a_id, MV::Scene::CollisionParameters a_parameters) {
 		if (a_parameters.fixtureA->id() == "foot") {
 			grounded--;
 		}
 	});
-	world->thing->onCollisionKilled.connect("jump", [&](bool a_usDying, MV::Scene::CollisionParameters a_parameters) {
+	world->thing->onContactKilled.connect("jump", [&](bool a_usDying, size_t a_id, MV::Scene::CollisionParameters a_parameters) {
 		if (!a_usDying && a_parameters.fixtureA->id() == "foot") {
 			grounded--;
 		}

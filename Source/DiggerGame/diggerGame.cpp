@@ -155,6 +155,6 @@ void DiggerGame::handleInput() {
 void DiggerGame::render() {
 	renderer->clearScreen();
 	worldScene->drawUpdate(static_cast<float>(lastUpdateDelta));
-	//testShape->draw();
+	worldScene->worldPosition((world->thing->interpolatedPhysicsPosition() * -4.0f) + MV::Point<>(250.0f, 300.0f));
 	renderer->updateScreen();
 }

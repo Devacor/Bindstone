@@ -976,6 +976,8 @@ namespace MV {
 
 			std::string nodeId;
 
+			bool onChangeCallNeeded = false;
+
 			Scale scaleTo;
 			Point<> translateTo;
 			AxisAngles rotateTo;

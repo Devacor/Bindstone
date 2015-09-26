@@ -108,7 +108,7 @@ namespace MV {
 			physicsBody->SetUserData((void *)this);
 			if (!loadedFromJson && collisionAttributes.parent.expired()) {
 				collisionAttributes.parent = std::static_pointer_cast<Collider>(shared_from_this());
-				currentPosition = previousPosition = owner()->localFromWorld(world->owner()->worldFromLocal(body().position()));
+				currentPosition = previousPosition = body().position();
 				currentAngle = previousAngle = owner()->worldRotation().z;
 			} else {
 				previousPosition = currentPosition;
@@ -145,17 +145,13 @@ namespace MV {
 			auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
 			if (useBodyPosition && useBodyAngle) {
 				auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
-				PointPrecision z = currentPosition.z;
-				Point<> interpolatedPoint = mix(previousPosition, currentPosition, percentOfStep);
-				interpolatedPoint.z = z; //fix the z so it isn't scaled or modified;
+				Point<> interpolatedPoint = interpolatedLocalPosition(percentOfStep);
 				double interpolatedAngle = interpolateDrawAngle(percentOfStep);
 				
 				applyScenePositionUpdate(interpolatedPoint, currentAngle);
 			} else if (useBodyPosition) {
 				auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
-				PointPrecision z = currentPosition.z;
-				Point<> interpolatedPoint = mix(previousPosition, currentPosition, percentOfStep);
-				interpolatedPoint.z = z; //fix the z so it isn't scaled or modified;
+				Point<> interpolatedPoint = interpolatedLocalPosition(percentOfStep);
 
 				owner()->position(interpolatedPoint);
 			} else if (useBodyAngle) {
@@ -167,20 +163,10 @@ namespace MV {
 		void Collider::updatePhysicsPosition() {
 			if (world->updatedThisFrame()){
 				previousPosition = currentPosition;
-				previousAngle = currentAngle;
-				currentPhysicsPosition = physicsBody->GetPosition();
-				if (useBodyPosition) {
-					currentPosition = cast(currentPhysicsPosition, owner()->position().z);
-				} else {
-					currentPosition = owner()->position();
-				}
+				currentPosition = body().position();
 
-				currentPhysicsAngle = physicsBody->GetAngle();
-				if (useBodyAngle) {
-					currentAngle = toDegrees(physicsBody->GetAngle());
-				} else if (!useBodyAngle) {
-					currentAngle = owner()->worldRotation().z;
-				}
+				previousAngle = currentAngle;
+				currentAngle = toDegrees(physicsBody->GetAngle());
 			}
 		}
 
@@ -324,8 +310,7 @@ namespace MV {
 			if (!parent.expired()) {
 				auto lockedParent = parent.lock();
 				lockedParent->physicsBody->SetTransform(details.position, lockedParent->physicsBody->GetAngle());
-				lockedParent->currentPosition = cast(details.position, lockedParent->owner()->position().z);
-				lockedParent->previousPosition = lockedParent->currentPosition;
+				lockedParent->previousPosition = lockedParent->currentPosition = cast(details.position, lockedParent->owner()->position().z);
 				lockedParent->updateInterpolatedPositionAndApply();
 			}
 			return *this;
@@ -378,8 +363,7 @@ namespace MV {
 			if (!parent.expired()) {
 				auto lockedParent = parent.lock();
 				lockedParent->physicsBody->SetTransform(lockedParent->physicsBody->GetPosition(), details.angle);
-				lockedParent->currentAngle = details.angle;
-				lockedParent->previousAngle = details.angle;
+				lockedParent->previousAngle = lockedParent->currentAngle = details.angle;
 				lockedParent->updateInterpolatedPositionAndApply();
 			}
 			return *this;
@@ -391,10 +375,8 @@ namespace MV {
 			if (!parent.expired()) {
 				auto lockedParent = parent.lock();
 				lockedParent->physicsBody->SetTransform(details.position, details.angle);
-				lockedParent->currentPosition = cast(details.position, lockedParent->owner()->position().z);
-				lockedParent->previousPosition = lockedParent->currentPosition;
-				lockedParent->currentAngle = details.angle;
-				lockedParent->previousAngle = details.angle;
+				lockedParent->previousPosition = lockedParent->currentPosition = cast(details.position, lockedParent->owner()->position().z);
+				lockedParent->previousAngle = lockedParent->currentAngle = details.angle;
 				lockedParent->updateInterpolatedPositionAndApply();
 			}
 			return *this;

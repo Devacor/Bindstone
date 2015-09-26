@@ -482,6 +482,16 @@ namespace MV {
 				}
 			}
 
+			Point<> interpolatedLocalPosition() {
+				auto percentOfWorldStep = static_cast<PointPrecision>(world->percentOfStep());
+				return owner()->localFromWorld(world->owner()->worldFromLocal(mix(previousPosition, currentPosition, percentOfWorldStep)));
+			}
+
+			Point<> interpolatedPhysicsPosition() {
+				auto percentOfWorldStep = static_cast<PointPrecision>(world->percentOfStep());
+				return mix(previousPosition, currentPosition, percentOfWorldStep);
+			}
+
 			void addCollision(Collider* a_collisionWith, CollisionPartAttributes *a_ourFixture, CollisionPartAttributes *a_theirFixture, size_t a_contactId, const b2Vec2 &a_normal) {
 				auto& fixtureContact = contacts[a_collisionWith].fixtureContacts[a_contactId];
 				fixtureContact.normal = a_normal;
@@ -651,6 +661,11 @@ namespace MV {
 			Collider(const std::weak_ptr<Node> &a_owner, const SafeComponent<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes(), bool a_maintainOwnerPosition = true);
 
 			void updateInterpolatedPositionAndApply();
+
+			Point<> interpolatedLocalPosition(PointPrecision a_percentOfStep) {
+				return owner()->parent()->localFromWorld(world->owner()->worldFromLocal(mix(previousPosition, currentPosition, a_percentOfStep)));
+			}
+
 			void updatePhysicsPosition();
 			virtual void updateImplementation(double a_dt) override;
 
@@ -708,12 +723,12 @@ namespace MV {
 
 			std::vector<std::shared_ptr<RotationJointAttributes>> rotationJoints;
 
-			Point<> currentPosition;
-			Point<> previousPosition;
 			PointPrecision currentAngle;
 			PointPrecision previousAngle;
-			b2Vec2 currentPhysicsPosition;
-			float32 currentPhysicsAngle;
+
+			Point<> currentPosition; //cast but not moved to local from world
+			Point<> previousPosition;
+
 			bool useBodyAngle = true;
 			bool useBodyPosition = true;
 			bool loadedFromJson = false;

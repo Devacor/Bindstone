@@ -140,6 +140,10 @@ namespace MV {
 		}
 
 		void Node::update(double a_delta) {
+			if (onChangeCallNeeded) {
+				onChangeCallNeeded = false;
+				onChangeSignal(shared_from_this());
+			}
 			if (allowUpdate) {
 				auto stableComponentList = childComponents;
 				for (auto&& component : stableComponentList) {
@@ -417,7 +421,7 @@ namespace MV {
 
 		void Node::recalculateLocalBounds() {
 			std::lock_guard<std::recursive_mutex> guard(lock);
-			if (!inBoundsCalculation) {
+			//if (!inBoundsCalculation) {
 				auto self = shared_from_this();
 				inBoundsCalculation = true;
 				SCOPE_EXIT{ inBoundsCalculation = false; };
@@ -442,12 +446,12 @@ namespace MV {
 				if (localBounds != oldBounds) {
 					onLocalBoundsChangeSignal(self);
 				}
-			}
+			//}
 		}
 
 		void Node::recalculateChildBounds() {
 			std::lock_guard<std::recursive_mutex> guard(lock);
-			if (!inChildBoundsCalculation) {
+			//if (!inChildBoundsCalculation) {
 				inChildBoundsCalculation = true;
 				SCOPE_EXIT{ inChildBoundsCalculation = false; };
 				if (!childNodes.empty()) {
@@ -464,7 +468,7 @@ namespace MV {
 				if (myParent) {
 					myParent->recalculateChildBounds();
 				}
-			}
+			//}
 		}
 
 		void Node::recalculateMatrix() {
@@ -484,6 +488,10 @@ namespace MV {
 				if (scaleTo != 1.0f) {
 					localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
 				}
+
+				if (myParent) {
+					myParent->recalculateChildBounds();
+				}
 			}
 
 			if (eitherMatrixUpdated) {
@@ -494,10 +502,6 @@ namespace MV {
 				} else {
 					worldMatrixTransform = localMatrixTransform;
 					parentAccumulatedAlpha = nodeAlpha;
-				}
-
-				if (myParent) {
-					myParent->recalculateChildBounds();
 				}
 			}
 		}
@@ -581,6 +585,8 @@ namespace MV {
 				SCOPE_EXIT{ inOnChange = false; };
 				inOnChange = true;
 				onChangeSignal(safeguard);
+			} else {
+				onChangeCallNeeded = true;
 			}
 		}
 

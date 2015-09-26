@@ -147,7 +147,7 @@ public:
 		background->layoutCells();
 		foreground->layoutCells();
 
-		thing = physicsWorld->owner()->make("thing")->position({ 100.0f, 3.0f })->attach<MV::Scene::Sprite>()->size({ 23.0f, 23.0f }, true)->color({ 0.0f, 0.0f, 1.0f, .9f })->owner()->
+		thing = physicsWorld->owner()->make("thing")->position({ 100.0f, 5.0f })->attach<MV::Scene::Sprite>()->size({ 20.0f, 20.0f }, true)->color({ 0.0f, 0.0f, 1.0f, .9f })->owner()->
 			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic().angularDamping(55.0f));
 		physicsWorld->owner()->make("thing1")->position({ 100.0f, -50.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
 			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f })->id("thing1");
@@ -156,11 +156,11 @@ public:
 		physicsWorld->owner()->make("thing3")->position({ 140.0f, 10.0f })->attach<MV::Scene::Sprite>()->size({ 10.0f, 10.0f }, true)->color({ 0.0f, 1.0f, 1.0f, .5f })->owner()->
 			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic())->attach({ 10.0f, 10.0f })->id("thing3");
 		
-		thing->attach(22.0f, MV::Point<>(), MV::Scene::CollisionPartAttributes().id("foot").friction(15.0f));
+		thing->attach(20.0f, MV::Point<>(), MV::Scene::CollisionPartAttributes().id("foot").friction(15.0f).restitution(0));
 
 		auto topBody = physicsWorld->owner()->make("thingBody")->position({ 100.0f, -12.0f })->attach<MV::Scene::Sprite>()->size({ 25.0f, 38.0f }, true)->color({ 0.0f, 1.0f, 0.0f, .6f })->owner()->
 			attach<MV::Scene::Collider>(physicsWorld, MV::Scene::CollisionBodyAttributes().makeDynamic().disableRotation());
-		topBody->attach({ { -12.6f, -19.0f }, { 12.6f, -19.0f}, {12.6f, 18.0f}, {4.0f, 20.0f}, {-4.0f, 20.0f}, {-12.6f, 18.0f} }, MV::Point<>(), MV::Scene::CollisionPartAttributes().friction(0.0f));
+		topBody->attach({ { -12.2f, -19.0f }, { 12.2f, -19.0f}, {12.6f, 18.0f}, {4.0f, 20.0f}, {-4.0f, 20.0f}, {-12.6f, 18.0f} }, MV::Point<>(), MV::Scene::CollisionPartAttributes().friction(0.0f).restitution(0));
 
 		motor = thing->rotationJoint(topBody.self(), MV::Scene::RotationJointAttributes().torque(10000.0f));
 

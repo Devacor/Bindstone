@@ -744,12 +744,17 @@ namespace MV {
 		glEnable(GL_BLEND);
 		
 		glDisable(GL_CULL_FACE);
+
+		glDisable(GL_POLYGON_SMOOTH);
+		glDisable(GL_LINE_SMOOTH);
 		
 		//glDisable (GL_ALPHA_TEST);
 
 		glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
 		glHint(GL_FRAGMENT_SHADER_DERIVATIVE_HINT, GL_NICEST);
-		
+		glHint(GL_TEXTURE_COMPRESSION_HINT, GL_NICEST);
+		glHint(GL_POLYGON_SMOOTH_HINT, GL_NICEST);
+
 		defaultBlendFunction();
 		setBlendEquation(GL_FUNC_ADD, GL_FUNC_ADD);
 

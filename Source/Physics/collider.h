@@ -482,14 +482,17 @@ namespace MV {
 				}
 			}
 
-			Point<> interpolatedLocalPosition() {
-				auto percentOfWorldStep = static_cast<PointPrecision>(world->percentOfStep());
-				return owner()->localFromWorld(world->owner()->worldFromLocal(mix(previousPosition, currentPosition, percentOfWorldStep)));
-			}
-
-			Point<> interpolatedPhysicsPosition() {
+			Point<> physicsPosition() const {
 				auto percentOfWorldStep = static_cast<PointPrecision>(world->percentOfStep());
 				return mix(previousPosition, currentPosition, percentOfWorldStep);
+			}
+
+			Point<> physicsWorldPosition() const {
+				return world->owner()->worldFromLocal(physicsPosition());
+			}
+
+			Point<> physicsLocalPosition() const {
+				return owner()->parent()->localFromWorld(physicsWorldPosition());
 			}
 
 			void addCollision(Collider* a_collisionWith, CollisionPartAttributes *a_ourFixture, CollisionPartAttributes *a_theirFixture, size_t a_contactId, const b2Vec2 &a_normal) {
@@ -661,10 +664,6 @@ namespace MV {
 			Collider(const std::weak_ptr<Node> &a_owner, const SafeComponent<Environment> &a_world, CollisionBodyAttributes a_collisionAttributes = CollisionBodyAttributes(), bool a_maintainOwnerPosition = true);
 
 			void updateInterpolatedPositionAndApply();
-
-			Point<> interpolatedLocalPosition(PointPrecision a_percentOfStep) {
-				return owner()->parent()->localFromWorld(world->owner()->worldFromLocal(mix(previousPosition, currentPosition, a_percentOfStep)));
-			}
 
 			void updatePhysicsPosition();
 			virtual void updateImplementation(double a_dt) override;

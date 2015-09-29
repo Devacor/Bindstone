@@ -128,10 +128,10 @@ public:
 		for (int i = 0; i < worldWidth * 3; ++i) {
 			pushTile(false, nullptr, ground->sky());
 		}
-		std::vector<int> breakableCoordinates{worldWidth / 2 - 1, worldWidth / 2, worldWidth / 2 + 1};
 
+		std::vector<int> breakableCoordinates{ worldWidth / 2 - 1, worldWidth / 2, worldWidth / 2 + 1 };
 		for (int i = 0; i < worldWidth; ++i) {
-			pushTile(false, nullptr, ground->sky(), ground->randomGrass());
+			pushTile(false, nullptr, ground->sky(), std::find(breakableCoordinates.begin(), breakableCoordinates.end(), i) != breakableCoordinates.end() ? nullptr : ground->randomGrass());
 		}
 
 		for (int i = 0; i < worldWidth; ++i) {
@@ -249,6 +249,8 @@ private:
 	void InitializeWorldScene();
 
 	void initializeWindow();
+
+	void handleScroll(int a_amount);
 
 	MV::ThreadPool* pool;
 	MV::Draw2D* renderer;

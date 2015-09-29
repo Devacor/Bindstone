@@ -4,6 +4,7 @@
 #include <cmath>
 #include <SDL_image.h>
 #include "Utility/generalUtility.h"
+#include "Render/points.h"
 #include "sharedTextures.h"
 
 #ifndef GL_BGR
@@ -145,7 +146,7 @@ namespace MV {
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (a_repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
 
 		glTexImage2D(GL_TEXTURE_2D, 0, getInternalTextureFormat(a_img), a_img->w, a_img->h, 0, textureFormat, GL_UNSIGNED_BYTE, a_img->pixels);
-
+		
 		a_size.width = a_img->w;
 		a_size.height = a_img->h;
 
@@ -434,6 +435,8 @@ namespace MV {
 
 	void TextureHandle::updatePercentBoundsNoSignal() {
 		handlePercent = cast<PointPrecision>(handleRegion) / toScale(textureDefinition->size());
+		handlePercent.minPoint += point(.25f, .25f) / toScale(textureDefinition->size());
+		handlePercent.maxPoint -= point(.25f, .25f) / toScale(textureDefinition->size());
 		if (flipX()) {
 			std::swap(handlePercent.maxPoint.x, handlePercent.minPoint.x);
 		}

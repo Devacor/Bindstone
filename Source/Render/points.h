@@ -776,7 +776,18 @@ namespace MV {
 	}
 
 	template <class T>
+	Point<T> operator*(const Point<T>& a_left, const Scale& a_right) {
+		Point<T> tmpPoint = a_left;
+		return tmpPoint *= a_right;
+	}
+
+	template <class T>
 	const Point<T> operator/(Point<T> a_left, const Point<T>& a_right){
+		return a_left /= a_right;
+	}
+
+	template <class T>
+	const Point<T> operator/(Point<T> a_left, const Scale& a_right) {
 		return a_left /= a_right;
 	}
 

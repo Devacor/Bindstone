@@ -145,13 +145,13 @@ namespace MV {
 			auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
 			if (useBodyPosition && useBodyAngle) {
 				auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
-				Point<> interpolatedPoint = interpolatedLocalPosition(percentOfStep);
+				Point<> interpolatedPoint = physicsLocalPosition();
 				double interpolatedAngle = interpolateDrawAngle(percentOfStep);
 				
 				applyScenePositionUpdate(interpolatedPoint, currentAngle);
 			} else if (useBodyPosition) {
 				auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
-				Point<> interpolatedPoint = interpolatedLocalPosition(percentOfStep);
+				Point<> interpolatedPoint = physicsLocalPosition();
 
 				owner()->position(interpolatedPoint);
 			} else if (useBodyAngle) {

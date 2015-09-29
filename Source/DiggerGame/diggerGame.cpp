@@ -21,8 +21,8 @@ void DiggerGame::initializeWindow() {
 	srand(static_cast<unsigned int>(time(0)));
 	//RENDERER SETUP:::::::::::::::::::::::::::::::::
 	//iphone 6 resolution
-	MV::Size<> worldSize(375, 667);
-	MV::Size<int> windowSize(375, 667);
+	MV::Size<> worldSize(667, 375);
+	MV::Size<int> windowSize(667, 375);
 
 	renderer->window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
 
@@ -59,10 +59,11 @@ void DiggerGame::initializeWindow() {
 }
 void DiggerGame::InitializeWorldScene() {
 	worldScene = MV::Scene::Node::make(*renderer);
-	worldScene->scale(4.0f);
+	worldScene->scale(1.0f);
 	world = std::make_shared<DiggerWorld>(worldScene, textures, mouse);
 	world->thing->onContactStart.connect("land", [&](size_t a_id, MV::Scene::CollisionParameters a_parameters, const MV::Point<> &a_normal) {
 		if (a_parameters.fixtureA->id() == "foot") {
+			world->thing->body().velocity({ world->thing->body().velocity().x, 0.0f });
 			grounded++;
 		}
 	});
@@ -96,6 +97,9 @@ void DiggerGame::handleInput() {
 			switch (event.type) {
 			case SDL_QUIT:
 				done = true;
+				break;
+			case SDL_MOUSEWHEEL:
+				handleScroll(event.wheel.y);
 				break;
 			case SDL_KEYDOWN:
 				if (event.key.keysym.sym == SDLK_ESCAPE) {
@@ -139,6 +143,7 @@ void DiggerGame::handleInput() {
 	if (state[SDL_SCANCODE_UP]) {
 		if (grounded > 0 && jumpTimer.check() > .2f) {
 			jumpTimer.reset();
+			world->thing->body().velocity({ world->thing->body().velocity().x, 0.0f });
 			world->thing->body().impulse({ 0.0f, -190.0f });
 		}
 	}
@@ -152,9 +157,18 @@ void DiggerGame::handleInput() {
 	mouse.update();
 }
 
+void DiggerGame::handleScroll(int a_amount) {
+	auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount);
+	if (worldScene->scale().x + screenScale.x > .2f) {
+		worldScene->addScale(screenScale);
+	}
+}
+
 void DiggerGame::render() {
+	worldScene->worldPosition({ 0.0f, 0.0f });
+	worldScene->worldPosition((world->thing->physicsWorldPosition() - ((MV::toPoint(renderer->world().size() / 2.0f) - MV::point(12.0f, 24.0f)))) * -1.0f);
+
 	renderer->clearScreen();
 	worldScene->drawUpdate(static_cast<float>(lastUpdateDelta));
-	worldScene->worldPosition((world->thing->interpolatedPhysicsPosition() * -4.0f) + MV::Point<>(250.0f, 300.0f));
 	renderer->updateScreen();
 }

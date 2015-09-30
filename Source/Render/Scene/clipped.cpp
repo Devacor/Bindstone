@@ -7,28 +7,6 @@ CEREAL_REGISTER_TYPE(MV::Scene::Clipped);
 namespace MV {
 	namespace Scene {
 
-		std::shared_ptr<Clipped> Clipped::blockClippedChildTaps(MouseState& a_mouse, int a_globalClickPriority) {
-// 			auto clickBlocker = [&, a_globalClickPriority](MouseState& a_mouse) {
-// 				auto parentNode = owner();
-// 				if (!parentNode->screenFromLocal(bounds()).contains(a_mouse.position())) {
-// 					std::vector<size_t> priority;
-// 					priority.push_back(a_globalClickPriority);
-// 					a_mouse.queueExclusiveAction({ true, priority, [&]() {
-// 						std::cout << "Clipped node ate a tap!" << std::endl;
-// 					}, []() {}, owner()->id() });
-// 				}
-// 			};
-// 			onLeftMouseDownHandle = a_mouse.onLeftMouseDown.connect(clickBlocker);
-// 			onLeftMouseUpHandle = a_mouse.onLeftMouseUp.connect(clickBlocker);
-			return std::static_pointer_cast<Clipped>(shared_from_this());
-		}
-
-		std::shared_ptr<Clipped> Clipped::unblockClippedChildTaps() {
-			onLeftMouseDownHandle.reset();
-			onLeftMouseUpHandle.reset();
-			return std::static_pointer_cast<Clipped>(shared_from_this());
-		}
-
 		void Clipped::refreshTexture(bool a_forceRefreshEvenIfNotDirty /*= true*/) {
 			if (a_forceRefreshEvenIfNotDirty || dirtyTexture) {
 				auto originalShaderId = shader();
@@ -84,8 +62,8 @@ namespace MV {
 			return std::static_pointer_cast<Clipped>(shared_from_this());
 		}
 
-		BoxAABB<> Clipped::captureBounds() const {
-			return capturedBounds;
+		BoxAABB<> Clipped::captureBounds() {
+			return capturedBounds.empty() ? bounds() : capturedBounds;
 		}
 
 		std::shared_ptr<Clipped> MV::Scene::Clipped::clearCaptureOffset() {

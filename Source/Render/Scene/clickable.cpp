@@ -1,4 +1,5 @@
 #include "clickable.h"
+#include "clipped.h"
 #include "cereal/archives/json.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Clickable);
@@ -162,7 +163,13 @@ namespace MV {
 				}else if (hitDetectionType == BoundsType::NODE_CHILDREN) {
 					hitBox = owner()->bounds(true);
 				}
-
+				auto foundClippedParent = owner()->componentInParents<Clipped>(false, false);
+				if (foundClippedParent) {
+					auto screenBounds = foundClippedParent->owner()->screenFromLocal(foundClippedParent->bounds());
+					if (!screenBounds.contains(a_state.position())) {
+						return false;
+					}
+				}
 				return owner()->screenFromLocal(hitBox).contains(a_state.position());
 			} else {
 				return false;

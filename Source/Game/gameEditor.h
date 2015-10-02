@@ -136,7 +136,7 @@ private:
 	float accumulatedTime = 0.0f;
 	float accumulatedFrames = 0.0f;
 
-	DiggerGame game;
+	Game game;
 	Editor editor;
 };
 

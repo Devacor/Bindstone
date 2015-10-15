@@ -487,6 +487,9 @@ namespace MV {
 							}
 						}
 						while (pathfinding() && totalDistanceToTravel > 0.0f) {
+							if (dirtyPath || calculatedPath.empty() || (calculatedPath.size() > 1 && currentPathIndex == calculatedPath.size())) {
+								recalculate();
+							}
 							auto previousGridSquare = cast<int>(ourPosition);
 							auto desiredPosition = desiredPositionFromCalculatedPathIndex(currentPathIndex);
 							PointPrecision distanceToNextNode = static_cast<PointPrecision>(distance(ourPosition, desiredPosition));

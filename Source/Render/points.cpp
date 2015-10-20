@@ -150,6 +150,9 @@ namespace MV {
 		return result;
 	}
 
+	Color& Color::set(HSV a_hsv) {
+		return hsv(a_hsv);
+	}
 	Color& Color::hsv(HSV a_hsv) {
 		float Chroma = a_hsv.S * a_hsv.V;
 		float hdash = a_hsv.H / 60.0f;

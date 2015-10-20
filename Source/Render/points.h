@@ -38,6 +38,17 @@ namespace MV {
 		}
 
 		PointPrecision textureX, textureY;
+
+		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+			a_script.add(chaiscript::user_type<TexturePoint>(), "TexturePoint");
+			a_script.add(chaiscript::constructor<TexturePoint()>(), "TexturePoint");
+			a_script.add(chaiscript::constructor<TexturePoint(PointPrecision, PointPrecision)>(), "TexturePoint");
+			a_script.add(chaiscript::fun(&TexturePoint::textureX), "textureX");
+			a_script.add(chaiscript::fun(&TexturePoint::textureY), "textureY");
+			a_script.add(chaiscript::fun(&TexturePoint::operator==), "==");
+			a_script.add(chaiscript::fun(&TexturePoint::operator!=), "!=");
+			return a_script;
+		}
 	};
 
 	class Color{
@@ -64,9 +75,9 @@ namespace MV {
 		Color& operator/=(const Color& a_other);
 
 		template<typename T>
-		Color& operator*=(T a_other);
+		Color& operator*=(const T &a_other);
 		template<typename T>
-		Color& operator/=(T a_other);
+		Color& operator/=(const T &a_other);
 
 		template <class Archive>
 		void serialize(Archive & archive){
@@ -77,9 +88,6 @@ namespace MV {
 
 		uint32_t hex() const;
 		Color& hex(uint32_t a_hex, bool a_allowFullAlpha = false); //to maintain parity with the hex get.
-		
-		Color& set(uint32_t a_hex, bool a_allowFullAlpha = false); //option to get back a Color&
-		Color& set(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0f);
 
 		struct HSV {
 			HSV(float a_Hue = 0.0f, float a_Saturation = 1.0f, float a_Value = 1.0f, float a_Alpha = 1.0f) :
@@ -95,9 +103,57 @@ namespace MV {
 		HSV getHsv(HSV a_resultInput) const;
 		Color& hsv(HSV a_hsv);
 
+		Color& set(uint32_t a_hex, bool a_allowFullAlpha = false); //option to get back a Color&
+		Color& set(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0f);
+		Color& set(HSV a_hsv);
+
 		float R, G, B, A;
 
 		void normalize();
+
+		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+			a_script.add(chaiscript::user_type<HSV>(), "HSV");
+			a_script.add(chaiscript::constructor<HSV(float, float, float, float)>(), "HSV");
+			a_script.add(chaiscript::fun(&HSV::H), "H");
+			a_script.add(chaiscript::fun(&HSV::S), "S");
+			a_script.add(chaiscript::fun(&HSV::V), "V");
+			a_script.add(chaiscript::fun(&HSV::A), "A");
+			a_script.add(chaiscript::fun(&HSV::percentHue), "percentHue");
+
+			a_script.add(chaiscript::user_type<Color>(), "Color");
+			a_script.add(chaiscript::constructor<Color()>(), "Color");
+			a_script.add(chaiscript::constructor<Color(uint32_t, bool)>(), "Color");
+			a_script.add(chaiscript::constructor<Color(float, float, float, float)>(), "Color");
+			a_script.add(chaiscript::constructor<Color(int, int, int, int)>(), "Color");
+			a_script.add(chaiscript::fun(&Color::R), "R");
+			a_script.add(chaiscript::fun(&Color::G), "G");
+			a_script.add(chaiscript::fun(&Color::B), "B");
+			a_script.add(chaiscript::fun(&Color::A), "A");
+			a_script.add(chaiscript::fun(&Color::normalize), "normalize");
+
+			a_script.add(chaiscript::fun(&Color::operator==), "==");
+			a_script.add(chaiscript::fun(&Color::operator!=), "!=");
+			
+			a_script.add(chaiscript::fun(&Color::operator+=), "+=");
+			a_script.add(chaiscript::fun(&Color::operator-=), "-=");
+
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(const Color&)>(&Color::operator*=)), "*=");
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(const T &)>(&Color::operator*=)), "*=");
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(const Color&)>(&Color::operator/=)), "/=");
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(const T &)>(&Color::operator/=)), "/=");
+
+			a_script.add(chaiscript::fun(&Color::getHsv), "getHsv");
+			a_script.add(chaiscript::fun(static_cast<HSV (Color::*)() const>(&Color::hsv)), "hsv");
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(HSV)>(&Color::hsv)), "hsv");
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(HSV)>(&Color::set)), "set");
+
+			a_script.add(chaiscript::fun(static_cast<uint32_t (Color::*)() const>(&Color::hex)), "hex");
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(uint32_t, bool)>(&Color::hex)), "hex");
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(uint32_t, bool)>(&Color::set)), "set");
+
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(float, float, float, float)>(&Color::set)), "set");
+			return a_script;
+		}
 	private:
 		float validColorRange(float a_color){
 			if(a_color > 1.0f){a_color = 1.0f;}
@@ -155,54 +211,7 @@ namespace MV {
 			archive(CEREAL_NVP(width), CEREAL_NVP(height), CEREAL_NVP(depth));
 		}
 
-		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix = "") {
-			a_script.add(chaiscript::user_type<Size<T>>(), "Size" + a_postfix);
-			a_script.add(chaiscript::constructor<Size<T>()>(), "Size" + a_postfix);
-			a_script.add(chaiscript::constructor<Size<T>(T, T, T)>(), "Size" + a_postfix);
-			a_script.add(chaiscript::fun(&Size<T>::area), "area");
-			a_script.add(chaiscript::fun(&Size<T>::contains), "contains");
-			a_script.add(chaiscript::fun(&Size<T>::operator>), ">");
-			a_script.add(chaiscript::fun(&Size<T>::operator<), "<");
-			a_script.add(chaiscript::fun(&Size<T>::width), "width");
-			a_script.add(chaiscript::fun(&Size<T>::height), "height");
-			a_script.add(chaiscript::fun(&Size<T>::depth), "depth");
-			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(T, T, T)>(&Size<T>::set)), "set");
-			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(T, T)>(&Size<T>::set)), "set");
-
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator+=)), "+=");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator+=)), "+=");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator-=)), "-=");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator-=)), "-=");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator*=)), "*=");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Scale &)>(&Size<T>::operator*=)), "*=");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator*=)), "*=");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator/=)), "/=");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Scale &)>(&Size<T>::operator/=)), "/=");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator/=)), "/=");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator+(const Size<T> &, const Size<T> &)>(&operator+)), "+");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator+(Size<T>, const T &)>(&operator+)), "+");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator+(const T &, const Size<T> &)>(&operator+)), "+");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator-(const Size<T> &, const Size<T> &)>(&operator-)), "-");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator-(Size<T>, const T &)>(&operator-)), "-");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator-(const T &, const Size<T> &)>(&operator-)), "-");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator*(const Size<T> &, const Size<T> &)>(&operator*)), "*");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator*(Size<T>, const Scale &)>(&operator*)), "*");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator*(Size<T>, const T &)>(&operator*)), "*");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator*(const T &, const Size<T> &)>(&operator*)), "*");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator/(const Size<T> &, const Size<T> &)>(&operator/)), "/");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator/(Size<T>, const Scale &)>(&operator/)), "/");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator/(Size<T>, const T &)>(&operator/)), "/");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T> operator/(const T &, const Size<T> &)>(&operator/)), "/");
-
-			return a_script;
-		}
+		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix = "");
 
 		T width, height;
 		T depth; //may be ignored for most 2d concepts
@@ -801,11 +810,6 @@ namespace MV {
 	}
 
 	template <class T>
-	bool operator==(const Point<T>& a_left, const Point<T>& a_right){
-		return equals(a_left.x, a_right.x) && equals(a_left.y, a_right.y) && equals(a_left.z, a_right.z);
-	}
-
-	template <class T>
 	bool operator!=(const Point<T>& a_left, const Point<T>& a_right){
 		return !(a_left == a_right);
 	}
@@ -909,8 +913,8 @@ namespace MV {
 		return static_cast<PointPrecision>(angle(a_lhs.x, a_lhs.y, a_rhs.x, a_rhs.y, returnAs));
 	}
 
-	template <class T /*= PointPrecision*/>
-	chaiscript::ChaiScript& Point<T>::hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix /*= ""*/) {
+	template <class T>
+	chaiscript::ChaiScript& Point<T>::hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix) {
 		a_script.add(chaiscript::user_type<Point<T>>(), "Point" + a_postfix);
 		a_script.add(chaiscript::constructor<Point<T>()>(), "Point" + a_postfix);
 		a_script.add(chaiscript::constructor<Point<T>(T, T, T)>(), "Point" + a_postfix);
@@ -919,7 +923,8 @@ namespace MV {
 		a_script.add(chaiscript::fun(&Point<T>::normalized), "normalized");
 		a_script.add(chaiscript::fun(&Point<T>::magnitude), "magnitude");
 		a_script.add(chaiscript::fun(&Point<T>::clear), "clear");
-		//a_script.add(chaiscript::fun(static_cast<PointPrecision (*)(const Point<T> &, const Point<T> &, AngleType)>(&angle)), "angle");
+		a_script.add(chaiscript::fun(static_cast<PointPrecision (*)(const Point<T> &, const Point<T> &, AngleType)>(&angle<T>)), "angle");
+		a_script.add(chaiscript::fun(static_cast<PointPrecision (*)(const Point<T> &, const Point<T> &)>(&distance<T>)), "distance");
 		a_script.add(chaiscript::fun(static_cast<Point<T>&(Point<T>::*)(T, T, T)>(&Point<T>::locate)), "locate");
 		a_script.add(chaiscript::fun(static_cast<Point<T>&(Point<T>::*)(T, T)>(&Point<T>::locate)), "locate");
 		a_script.add(chaiscript::fun(static_cast<Point<T>&(Point<T>::*)(T, T, T)>(&Point<T>::translate)), "translate");
@@ -948,27 +953,78 @@ namespace MV {
 		a_script.add(chaiscript::fun(static_cast<bool(Point<T>::*)(const Point<T> &) const>(&Point<T>::operator<)), "<");
 		a_script.add(chaiscript::fun(static_cast<bool(Point<T>::*)(const Point<T> &) const>(&Point<T>::operator>)), ">");
 
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Point<T> &)>(&operator+)), "+");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const T &)>(&operator+)), "+");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const T &, const Point<T> &)>(&operator+)), "+");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Point<T> &)>(&operator+<T>)), "+");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const T &)>(&operator+<T>)), "+");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const T &, const Point<T> &)>(&operator+<T>)), "+");
 
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Point<T> &)>(&operator-)), "-");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const T &)>(&operator-)), "-");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const T &, const Point<T> &)>(&operator-)), "-");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Point<T> &)>(&operator-<T>)), "-");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const T &)>(&operator-<T>)), "-");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const T &, const Point<T> &)>(&operator-<T>)), "-");
 
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Point<T> &)>(&operator*)), "*");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const Scale &)>(&operator*)), "*");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const T &)>(&operator*)), "*");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const T &, const Point<T> &)>(&operator*)), "*");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Point<T> &)>(&operator*<T>)), "*");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const Scale &)>(&operator*<T>)), "*");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const T &)>(&operator*<T>)), "*");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const T &, const Point<T> &)>(&operator*<T>)), "*");
 
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Point<T> &)>(&operator/)), "/");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const Scale &)>(&operator/)), "/");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const T &)>(&operator/)), "/");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const T &, const Point<T> &)>(&operator/)), "/");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Point<T> &)>(&operator/<T>)), "/");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const Scale &)>(&operator/<T>)), "/");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const T &)>(&operator/<T>)), "/");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const T &, const Point<T> &)>(&operator/<T>)), "/");
 
 		return a_script;
 	}
 
+	template <class T>
+	chaiscript::ChaiScript& Size<T>::hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix){
+		a_script.add(chaiscript::user_type<Size<T>>(), "Size" + a_postfix);
+		a_script.add(chaiscript::constructor<Size<T>()>(), "Size" + a_postfix);
+		a_script.add(chaiscript::constructor<Size<T>(T, T, T)>(), "Size" + a_postfix);
+		a_script.add(chaiscript::fun(&Size<T>::area), "area");
+		a_script.add(chaiscript::fun(&Size<T>::contains), "contains");
+		a_script.add(chaiscript::fun(&Size<T>::operator>), ">");
+		a_script.add(chaiscript::fun(&Size<T>::operator<), "<");
+		a_script.add(chaiscript::fun(&Size<T>::width), "width");
+		a_script.add(chaiscript::fun(&Size<T>::height), "height");
+		a_script.add(chaiscript::fun(&Size<T>::depth), "depth");
+		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(T, T, T)>(&Size<T>::set)), "set");
+		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(T, T)>(&Size<T>::set)), "set");
 
+		a_script.add(chaiscript::fun(static_cast<bool (*)(const Size<T> &, const Size<T> &)>(&operator==<T>)), "==");
+		a_script.add(chaiscript::fun(static_cast<bool(*)(const Size<T> &, const Size<T> &)>(&operator!=<T>)), "!=");
+
+		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator+=)), "+=");
+		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator+=)), "+=");
+
+		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator-=)), "-=");
+		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator-=)), "-=");
+
+		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator*=)), "*=");
+		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Scale &)>(&Size<T>::operator*=)), "*=");
+		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator*=)), "*=");
+
+		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator/=)), "/=");
+		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Scale &)>(&Size<T>::operator/=)), "/=");
+		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator/=)), "/=");
+
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const Size<T> &, const Size<T> &)>(&operator+<T>)), "+");
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const T &)>(&operator+<T>)), "+");
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const T &, const Size<T> &)>(&operator+<T>)), "+");
+
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const Size<T> &, const Size<T> &)>(&operator-<T>)), "-");
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const T &)>(&operator-<T>)), "-");
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const T &, const Size<T> &)>(&operator-<T>)), "-");
+
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const Size<T> &, const Size<T> &)>(&operator*<T>)), "*");
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const Scale &)>(&operator*<T>)), "*");
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const T &)>(&operator*<T>)), "*");
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const T &, const Size<T> &)>(&operator*<T>)), "*");
+
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const Size<T> &, const Size<T> &)>(&operator/<T>)), "/");
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const Scale &)>(&operator/<T>)), "/");
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const T &)>(&operator/<T>)), "/");
+		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const T &, const Size<T> &)>(&operator/<T>)), "/");
+
+		return a_script;
+	}
 }
 #endif

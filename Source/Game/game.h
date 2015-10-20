@@ -7,6 +7,8 @@
 #include "Interface/package.h"
 #include <string>
 #include <ctime>
+#include "chaiscript/chaiscript.hpp"
+#include "chaiscript/chaiscript_stdlib.hpp"
 
 class Game {
 public:
@@ -47,7 +49,8 @@ private:
 	std::shared_ptr<MV::Scene::Node> worldScene;
 
 	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
-	
+	chaiscript::ChaiScript script;
+
 	bool done;
 	MV::MouseState mouse;
 

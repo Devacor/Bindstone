@@ -495,5 +495,4 @@ namespace MV {
 		R = a_other.R; G = a_other.G; B = a_other.B;
 		Color::normalize();
 	}
-
 }

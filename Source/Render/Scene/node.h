@@ -33,6 +33,10 @@ std::shared_ptr<ComponentType> id(const std::string &a_id) { \
 	return std::static_pointer_cast<ComponentType>(MV::Scene::Component::id(a_id)); \
 }
 
+namespace chaiscript {
+	class ChaiScript;
+}
+
 namespace MV {
 
 	namespace Scene {
@@ -615,7 +619,7 @@ namespace MV {
 				return nodeId;
 			}
 
-			std::shared_ptr<Node> id(const std::string a_id);
+			std::shared_ptr<Node> id(const std::string &a_id);
 
 			std::shared_ptr<Node> normalizeDepth();
 
@@ -760,6 +764,9 @@ namespace MV {
 			Task& task() {
 				return rootTask;
 			}
+
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
+
 		private:
 			Task rootTask;
 
@@ -1008,7 +1015,6 @@ namespace MV {
 		};
 
 		std::ostream& operator<<(std::ostream& os, const std::shared_ptr<Node>& a_node);
-
 	}
 }
 

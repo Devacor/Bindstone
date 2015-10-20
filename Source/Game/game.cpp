@@ -9,10 +9,11 @@ Game::Game(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer) :
 	pool(a_pool),
 	renderer(a_renderer),
 	textLibrary(*a_renderer),
-	done(false){
-
+	done(false),
+	script(chaiscript::Std_Lib::library()){
+	MV::Point<MV::PointPrecision>::hook(MV::Point<int>::hook(MV::Scene::Node::hook(script), "i"), "");
 	initializeWindow();
-
+	script.add_global(chaiscript::Boxed_Value(worldScene), "worldScene");
 }
 
 void Game::initializeWindow(){
@@ -101,6 +102,8 @@ void Game::spawnCreature(const MV::Point<> &a_position) {
 }
 
 bool Game::update(double dt) {
+	script.eval("worldScene.translate(Point(1.0, 0.0, 0.0))");
+
 	lastUpdateDelta = dt;
 	pool->run();
 	if (done) {

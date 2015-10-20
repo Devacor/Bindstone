@@ -159,26 +159,6 @@ int main(int argc, char *argv[]){
 // 	}
 // 
 // 	return 0;
-
-	MV::Expression expression("(x + 5) * functest()",
-	{ {"x", 5.0f} });
-
-	expression.function("functest", std::function<MV::PointPrecision()>([]() {
-		return 2.0f;
-	}));
-
-	std::cout << "Expression Result: " << expression.evaluate() << std::endl;
-
-	expression["y"] = 20.0f;
-
-	std::cout << "Expression Result: " << expression.evaluate("(x + 5) * functest() + y") << std::endl;
-	
-	expression["x"] = 15.0f;
-
-	expression["x"] = 20.0f;
-
-	std::cout << "Expression Result: " << expression.evaluate() << std::endl;
-
 	GameEditor menu;
 
 	menu.start();

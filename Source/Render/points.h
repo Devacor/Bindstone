@@ -172,14 +172,16 @@ namespace MV {
 		Size():width(0), height(0), depth(0){}
 		Size(T a_width, T a_height, T a_depth = 0):width(a_width),height(a_height),depth(a_depth){}
 
-		void set(T a_width, T a_height){
+		Size<T>& set(T a_width, T a_height){
 			width = a_width;
 			height = a_height;
+			return *this;
 		}
 
-		void set(T a_width, T a_height, T a_depth){
+		Size<T>& set(T a_width, T a_height, T a_depth){
 			set(a_width, a_height);
 			depth = a_depth;
+			return *this;
 		}
 
 		bool contains(const Size<T>& a_other, bool a_useDepth = false) const{
@@ -226,6 +228,18 @@ namespace MV {
 		Point(T a_xPos, T a_yPos, T a_zPos = 0):x(a_xPos),y(a_yPos),z(a_zPos){}
 
 		void clear();
+
+		Point<T>& set(T a_xPos, T a_yPos) {
+			x = a_xPos;
+			y = a_yPos;
+			return *this;
+		}
+		Point<T>& set(T a_xPos, T a_yPos, T a_zPos) {
+			x = a_xPos;
+			y = a_yPos;
+			z = a_zPos;
+			return *this;
+		}
 
 		Point<T>& scale(T a_amount);
 		Point<T>& locate(T a_xPos, T a_yPos, T a_zPos);
@@ -557,7 +571,7 @@ namespace MV {
 
 	template <class T>
 	Size<T>& MV::Size<T>::operator-=(const T& a_other){
-		width -= a_other.width; height -= a_other.height; depth -= a_other.depth;
+		width -= a_other; height -= a_other; depth -= a_other;
 		return *this;
 	}
 
@@ -577,9 +591,9 @@ namespace MV {
 
 	template <class T>
 	Size<T>& MV::Size<T>::operator/=(const Scale& a_other){
-		width = static_cast<T>(static_cast<PointPrecision>(width) / (a_other.x == 0) ? 1 : a_other.x);
-		height = static_cast<T>(static_cast<PointPrecision>(height) / (a_other.y == 0) ? 1 : a_other.y);
-		depth = static_cast<T>(static_cast<PointPrecision>(depth) / (a_other.z == 0) ? 1 : a_other.z);
+		width = static_cast<T>(static_cast<PointPrecision>(width) / (a_other.x == 0 ? 1.0f : a_other.x));
+		height = static_cast<T>(static_cast<PointPrecision>(height) / (a_other.y == 0 ? 1.0f : a_other.y));
+		depth = static_cast<T>(static_cast<PointPrecision>(depth) / (a_other.z == 0 ? 1.0f : a_other.z));
 		return *this;
 	}
 
@@ -594,12 +608,12 @@ namespace MV {
 	}
 
 	template <class T>
-	const bool operator==(const Size<T>& a_left, const Size<T>& a_right){
+	bool operator==(const Size<T>& a_left, const Size<T>& a_right){
 		return equals(a_left.width, a_right.width) && equals(a_left.height, a_right.height) && equals(a_left.depth, a_right.depth);
 	}
 
 	template <class T>
-	const bool operator!=(const Size<T>& a_left, const Size<T>& a_right){
+	bool operator!=(const Size<T>& a_left, const Size<T>& a_right){
 		return !(a_left == a_right);
 	}
 
@@ -926,6 +940,8 @@ namespace MV {
 		a_script.add(chaiscript::user_type<Point<T>>(), "Point" + a_postfix);
 		a_script.add(chaiscript::constructor<Point<T>()>(), "Point" + a_postfix);
 		a_script.add(chaiscript::constructor<Point<T>(T, T, T)>(), "Point" + a_postfix);
+		a_script.add(chaiscript::fun(static_cast<Point<T>&(Point<T>::*)(T, T, T)>(&Point<T>::set)), "set");
+		a_script.add(chaiscript::fun(static_cast<Point<T>&(Point<T>::*)(T, T)>(&Point<T>::set)), "set");
 		a_script.add(chaiscript::fun(&Point<T>::scale), "scale");
 		a_script.add(chaiscript::fun(&Point<T>::atOrigin), "atOrigin");
 		a_script.add(chaiscript::fun(&Point<T>::normalized), "normalized");
@@ -1012,21 +1028,21 @@ namespace MV {
 		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Scale &)>(&Size<T>::operator/=)), "/=");
 		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator/=)), "/=");
 
-// 		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const Size<T> &, const Size<T> &)>(&operator+<T>)), "+");
-// 		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const T &)>(&operator+<T>)), "+");
-// 		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const T &, const Size<T> &)>(&operator+<T>)), "+");
-// 
-// 		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const Size<T> &, const Size<T> &)>(&operator-<T>)), "-");
-// 		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const T &)>(&operator-<T>)), "-");
-// 		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const T &, const Size<T> &)>(&operator-<T>)), "-");
-//
-// 		a_script.add(chaiscript::fun<Size<T>(const Size<T> &)>([](const Size<T> &v) { return *v; }), "*");
-// 		a_script.add(chaiscript::fun<Size<T>(const Size<T> &)>([](const T &v) { return *v; }), "*");
-// 		a_script.add(chaiscript::fun<Size<T>(const Size<T> &)>([](const Scale &v) { return *v; }), "*");
-// 
-// 		a_script.add(chaiscript::fun<Size<T>(const Size<T> &)>([](const Size<T> &v) { return / v; }), "/");
-// 		a_script.add(chaiscript::fun<Size<T>(const Size<T> &)>([](const T &v) { return / v; }), "/");
-// 		a_script.add(chaiscript::fun<Size<T>(const Size<T> &)>([](const Scale &v) { return / v; }), "/");
+		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Size<T> &)>(MV::operator+<T>)), "+");
+		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const T &)>(MV::operator+<T>)), "+");
+		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const T &, const Size<T> &)>(MV::operator+<T>)), "+");
+
+		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Size<T> &)>(MV::operator-<T>)), "-");
+		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const T &)>(MV::operator-<T>)), "-");
+		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const T &, const Size<T> &)>(MV::operator-<T>)), "-");
+
+		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Size<T> &)>(MV::operator*<T>)), "*");
+		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const T &)>(MV::operator*<T>)), "*");
+		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Scale &)>(MV::operator*<T>)), "*");
+
+		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Size<T> &)>(MV::operator/<T>)), "/");
+		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const T &)>(MV::operator/<T>)), "/");
+		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Scale &)>(MV::operator/<T>)), "/");
 
 		return a_script;
 	}

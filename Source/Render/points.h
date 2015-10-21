@@ -75,9 +75,9 @@ namespace MV {
 		Color& operator/=(const Color& a_other);
 
 		template<typename T>
-		Color& operator*=(const T &a_other);
+		Color& operator*=(T a_other);
 		template<typename T>
-		Color& operator/=(const T &a_other);
+		Color& operator/=(T a_other);
 
 		template <class Archive>
 		void serialize(Archive & archive){
@@ -138,9 +138,11 @@ namespace MV {
 			a_script.add(chaiscript::fun(&Color::operator-=), "-=");
 
 			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(const Color&)>(&Color::operator*=)), "*=");
-			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(const T &)>(&Color::operator*=)), "*=");
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(float)>(&Color::operator*=<float>)), "*=");
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(double)>(&Color::operator*=<double>)), "*=");
 			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(const Color&)>(&Color::operator/=)), "/=");
-			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(const T &)>(&Color::operator/=)), "/=");
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(float)>(&Color::operator/=<float>)), "/=");
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(double)>(&Color::operator/=<double>)), "/=");
 
 			a_script.add(chaiscript::fun(&Color::getHsv), "getHsv");
 			a_script.add(chaiscript::fun(static_cast<HSV (Color::*)() const>(&Color::hsv)), "hsv");
@@ -839,33 +841,39 @@ namespace MV {
 	}
 
 	template <class T>
-	const Point<T> operator/(Point<T> a_left, const Point<T>& a_right){
-		return a_left /= a_right;
+	Point<T> operator/(const Point<T> &a_left, const Point<T>& a_right){
+		auto result = a_left;
+		return result /= a_right;
 	}
 
 	template <class T>
-	const Point<T> operator/(Point<T> a_left, const Scale& a_right) {
-		return a_left /= a_right;
+	Point<T> operator/(const Point<T> &a_left, const Scale& a_right) {
+		auto result = a_left;
+		return result /= a_right;
 	}
 
 	template <class T>
-	Point<T> operator+(Point<T> a_left, const T& a_right){
-		return a_left+=a_right;
+	Point<T> operator+(const Point<T> &a_left, const T& a_right){
+		auto result = a_left;
+		return result +=Point<T>(a_right, a_right, a_right);
 	}
 
 	template <class T>
-	Point<T> operator-(Point<T> a_left, const T& a_right){
-		return a_left-=a_right;
+	Point<T> operator-(const Point<T> &a_left, const T& a_right){
+		auto result = a_left;
+		return result-=Point<T>(a_right, a_right, a_right);
 	}
 
 	template <class T>
-	Point<T> operator*(Point<T> a_left, const T& a_right){
-		return a_left*=a_right;
+	Point<T> operator*(const Point<T> &a_left, const T& a_right){
+		auto result = a_left;
+		return result *=Point<T>(a_right, a_right, a_right);
 	}
 
 	template <class T>
-	const Point<T> operator/(Point<T> a_left, const T& a_right){
-		return a_left/=a_right;
+	Point<T> operator/(const Point<T> &a_left, const T& a_right){
+		auto result = a_left;
+		return result/=Point<T>(a_right, a_right, a_right);
 	}
 
 	template <class T>
@@ -923,8 +931,8 @@ namespace MV {
 		a_script.add(chaiscript::fun(&Point<T>::normalized), "normalized");
 		a_script.add(chaiscript::fun(&Point<T>::magnitude), "magnitude");
 		a_script.add(chaiscript::fun(&Point<T>::clear), "clear");
-		a_script.add(chaiscript::fun(static_cast<PointPrecision (*)(const Point<T> &, const Point<T> &, AngleType)>(&angle<T>)), "angle");
-		a_script.add(chaiscript::fun(static_cast<PointPrecision (*)(const Point<T> &, const Point<T> &)>(&distance<T>)), "distance");
+		a_script.add(chaiscript::fun(static_cast<PointPrecision (*)(const Point<T> &, const Point<T> &, AngleType)>(&MV::angle<T>)), "angle");
+		a_script.add(chaiscript::fun(static_cast<PointPrecision (*)(const Point<T> &, const Point<T> &)>(&MV::distance<T>)), "distance");
 		a_script.add(chaiscript::fun(static_cast<Point<T>&(Point<T>::*)(T, T, T)>(&Point<T>::locate)), "locate");
 		a_script.add(chaiscript::fun(static_cast<Point<T>&(Point<T>::*)(T, T)>(&Point<T>::locate)), "locate");
 		a_script.add(chaiscript::fun(static_cast<Point<T>&(Point<T>::*)(T, T, T)>(&Point<T>::translate)), "translate");
@@ -953,23 +961,21 @@ namespace MV {
 		a_script.add(chaiscript::fun(static_cast<bool(Point<T>::*)(const Point<T> &) const>(&Point<T>::operator<)), "<");
 		a_script.add(chaiscript::fun(static_cast<bool(Point<T>::*)(const Point<T> &) const>(&Point<T>::operator>)), ">");
 
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Point<T> &)>(&operator+<T>)), "+");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const T &)>(&operator+<T>)), "+");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const T &, const Point<T> &)>(&operator+<T>)), "+");
+		a_script.add(chaiscript::fun(static_cast<Point<T>(*)(const Point<T> &, const Point<T> &)>(MV::operator+<T>)), "+");
+		a_script.add(chaiscript::fun(static_cast<Point<T>(*)(const Point<T> &, const T &)>(MV::operator+<T>)), "+");
+		a_script.add(chaiscript::fun(static_cast<Point<T>(*)(const T &, const Point<T> &)>(MV::operator+<T>)), "+");
 
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Point<T> &)>(&operator-<T>)), "-");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const T &)>(&operator-<T>)), "-");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const T &, const Point<T> &)>(&operator-<T>)), "-");
+		a_script.add(chaiscript::fun(static_cast<Point<T>(*)(const Point<T> &, const Point<T> &)>(MV::operator-<T>)), "-");
+		a_script.add(chaiscript::fun(static_cast<Point<T>(*)(const Point<T> &, const T &)>(MV::operator-<T>)), "-");
+		a_script.add(chaiscript::fun(static_cast<Point<T>(*)(const T &, const Point<T> &)>(MV::operator-<T>)), "-");
 
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Point<T> &)>(&operator*<T>)), "*");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const Scale &)>(&operator*<T>)), "*");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const T &)>(&operator*<T>)), "*");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const T &, const Point<T> &)>(&operator*<T>)), "*");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Point<T> &)>(MV::operator*<T>)), "*");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const T &)>(MV::operator*<T>)), "*");
+		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Scale &)>(MV::operator*<T>)), "*");
 
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const Point<T> &, const Point<T> &)>(&operator/<T>)), "/");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const Scale &)>(&operator/<T>)), "/");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(Point<T>, const T &)>(&operator/<T>)), "/");
-		a_script.add(chaiscript::fun(static_cast<Point<T> (*)(const T &, const Point<T> &)>(&operator/<T>)), "/");
+		a_script.add(chaiscript::fun(static_cast<Point<T>(*)(const Point<T> &, const Point<T> &)>(MV::operator/<T>)), "/");
+		a_script.add(chaiscript::fun(static_cast<Point<T>(*)(const Point<T> &, const T &)>(MV::operator/<T>)), "/");
+		a_script.add(chaiscript::fun(static_cast<Point<T>(*)(const Point<T> &, const Scale &)>(MV::operator/<T>)), "/");
 
 		return a_script;
 	}
@@ -1006,23 +1012,21 @@ namespace MV {
 		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Scale &)>(&Size<T>::operator/=)), "/=");
 		a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator/=)), "/=");
 
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const Size<T> &, const Size<T> &)>(&operator+<T>)), "+");
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const T &)>(&operator+<T>)), "+");
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const T &, const Size<T> &)>(&operator+<T>)), "+");
-
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const Size<T> &, const Size<T> &)>(&operator-<T>)), "-");
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const T &)>(&operator-<T>)), "-");
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const T &, const Size<T> &)>(&operator-<T>)), "-");
-
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const Size<T> &, const Size<T> &)>(&operator*<T>)), "*");
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const Scale &)>(&operator*<T>)), "*");
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const T &)>(&operator*<T>)), "*");
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const T &, const Size<T> &)>(&operator*<T>)), "*");
-
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const Size<T> &, const Size<T> &)>(&operator/<T>)), "/");
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const Scale &)>(&operator/<T>)), "/");
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const T &)>(&operator/<T>)), "/");
-		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const T &, const Size<T> &)>(&operator/<T>)), "/");
+// 		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const Size<T> &, const Size<T> &)>(&operator+<T>)), "+");
+// 		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const T &)>(&operator+<T>)), "+");
+// 		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const T &, const Size<T> &)>(&operator+<T>)), "+");
+// 
+// 		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const Size<T> &, const Size<T> &)>(&operator-<T>)), "-");
+// 		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(Size<T>, const T &)>(&operator-<T>)), "-");
+// 		a_script.add(chaiscript::fun(static_cast<Size<T> (*)(const T &, const Size<T> &)>(&operator-<T>)), "-");
+//
+// 		a_script.add(chaiscript::fun<Size<T>(const Size<T> &)>([](const Size<T> &v) { return *v; }), "*");
+// 		a_script.add(chaiscript::fun<Size<T>(const Size<T> &)>([](const T &v) { return *v; }), "*");
+// 		a_script.add(chaiscript::fun<Size<T>(const Size<T> &)>([](const Scale &v) { return *v; }), "*");
+// 
+// 		a_script.add(chaiscript::fun<Size<T>(const Size<T> &)>([](const Size<T> &v) { return / v; }), "/");
+// 		a_script.add(chaiscript::fun<Size<T>(const Size<T> &)>([](const T &v) { return / v; }), "/");
+// 		a_script.add(chaiscript::fun<Size<T>(const Size<T> &)>([](const Scale &v) { return / v; }), "/");
 
 		return a_script;
 	}

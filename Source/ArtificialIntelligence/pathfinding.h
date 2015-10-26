@@ -68,8 +68,10 @@ namespace MV {
 		std::array<MapNode*, 8>::iterator end();
 		std::array<MapNode*, 8>::const_iterator cend() const;
 
-		MapNode* operator[](size_t a_size);
+		MapNode* operator[](size_t a_index);
 		bool operator==(const MapNode &a_rhs) const;
+
+		MapNode* unfilteredEdge(size_t a_index);
 
 	private:
 
@@ -112,6 +114,7 @@ namespace MV {
 
 		mutable bool initialized = false;
 		mutable std::array<MapNode*, 8> edges;
+		mutable std::array<MapNode*, 8> allEdges;
 
 		bool useCorners;
 		Point<int> location;
@@ -397,9 +400,7 @@ namespace MV {
 			return std::shared_ptr<NavigationAgent>(new NavigationAgent(a_map, a_newPosition));
 		}
 
-		~NavigationAgent() {
-			map->get(cast<int>(ourPosition)).unblock();
-		}
+		~NavigationAgent();
 
 		std::shared_ptr<NavigationAgent> clone(const std::shared_ptr<Map> &a_map = nullptr) const {
 			auto result = NavigationAgent::make(a_map == nullptr ? map : a_map, ourPosition);
@@ -468,6 +469,12 @@ namespace MV {
 
 		bool AttemptToRecalculate();
 
+		void RegisterAsBlockedIfNeeded();
+
+		bool blocked() {
+			return calculatedPath.size() == 1 && calculatedPath[0].position() != cast<int>(ourGoal);
+		}
+
 		PointPrecision speed() const {
 			return ourSpeed;
 		}
@@ -513,6 +520,10 @@ namespace MV {
 
 		template <class Archive>
 		void serialize(Archive & archive) {
+			if (map) {
+				map->get(cast<int>(ourPosition)).unblock();
+			}
+
 			archive(
 				CEREAL_NVP(ourPosition),
 				CEREAL_NVP(ourGoal),
@@ -525,21 +536,26 @@ namespace MV {
 		}
 
 		void markDirty() {
-			costs.clear();
-			recievers.clear();
+			if (!observingForUnblock) {
+				costs.clear();
+				recievers.clear();
+			}
 			dirtyPath = true;
 		}
 
 		void updateObservedNodes();
 
 		void recalculate() {
-			recievers.clear();
-			costs.clear();
-			currentPathIndex = 0;
-			ourPath = std::make_shared<Path>(map, cast<int>(ourPosition), cast<int>(ourGoal), acceptableDistance, maxNodesToSearch);
-			calculatedPath = ourPath->path();
-			updateObservedNodes();
-			dirtyPath = false;
+			if (!observingForUnblock) {
+				recievers.clear();
+				costs.clear();
+				currentPathIndex = 0;
+				ourPath = std::make_shared<Path>(map, cast<int>(ourPosition), cast<int>(ourGoal), acceptableDistance, maxNodesToSearch);
+				calculatedPath = ourPath->path();
+				updateObservedNodes();
+				dirtyPath = false;
+				RegisterAsBlockedIfNeeded();
+			}
 		}
 
 		std::shared_ptr<Map> map;
@@ -555,6 +571,9 @@ namespace MV {
 		std::vector<MapNode::SharedRecieverType> recievers;
 
 		size_t currentPathIndex = 0;
+
+		bool observingForUnblock = false;
+
 		std::shared_ptr<Path> ourPath;
 		std::vector<PathNode> calculatedPath;
 	};

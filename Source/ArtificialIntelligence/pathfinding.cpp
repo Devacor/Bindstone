@@ -389,4 +389,72 @@ namespace MV {
 		return false;
 	}
 
+	void NavigationAgent::update(double a_dt) {
+		if (pathfinding() && (AttemptToRecalculate() && !calculatedPath.empty() && currentPathIndex < calculatedPath.size())) {
+			auto direction = (ourPosition - desiredPositionFromCalculatedPathIndex(currentPathIndex)).normalized();
+
+			activeUpdate = true;
+			SCOPE_EXIT{ activeUpdate = false; };
+			auto originalPathIndex = currentPathIndex;
+			PointPrecision totalDistanceToTravel = static_cast<PointPrecision>(a_dt) * ourSpeed;
+
+			if (currentPathIndex < calculatedPath.size() - 1) {
+				if (cast<int>(ourPosition) == calculatedPath[currentPathIndex].position()) {
+					++currentPathIndex;
+				}
+			}
+			while (pathfinding() && totalDistanceToTravel > 0.0f) {
+				auto previousGridSquare = cast<int>(ourPosition);
+				auto desiredPosition = desiredPositionFromCalculatedPathIndex(currentPathIndex);
+				PointPrecision distanceToNextNode = static_cast<PointPrecision>(distance(ourPosition, desiredPosition));
+				PointPrecision maxDistance = std::min(totalDistanceToTravel, distanceToNextNode);
+				map->get(cast<int>(ourPosition)).unblock();
+				ourPosition += (desiredPosition - ourPosition).normalized() * maxDistance;
+				ourPosition.z = 0;
+				map->get(cast<int>(ourPosition)).block();
+				totalDistanceToTravel -= maxDistance;
+				if (totalDistanceToTravel > 0.0f && currentPathIndex < calculatedPath.size()) {
+					++currentPathIndex;
+				}
+				if (!AttemptToRecalculate()) { break; }
+			}
+			if (originalPathIndex != currentPathIndex) {
+				updateObservedNodes();
+			}
+
+			if (!pathfinding()) {
+				onArriveSignal(shared_from_this());
+			}
+		}
+	}
+
+	bool NavigationAgent::AttemptToRecalculate() {
+		if (dirtyPath || calculatedPath.empty() || (calculatedPath.size() > 1 && currentPathIndex == calculatedPath.size())) {
+			recalculate();
+		}
+		if (calculatedPath.size() == 1 && calculatedPath[0].position() != cast<int>(ourGoal)) {
+			markDirty();
+			onBlockedSignal(shared_from_this());
+		}
+		return !dirtyPath;
+	}
+
+	void NavigationAgent::updateObservedNodes() {
+		recievers.clear();
+		costs.clear();
+		for (auto i = currentPathIndex; i < calculatedPath.size(); ++i) {
+			auto temporaryCostAmount = (ourSpeed*4.0f) - (i - currentPathIndex);
+			if (temporaryCostAmount > 0) {
+				costs.push_back(TemporaryCost(map, calculatedPath[i].position(), temporaryCostAmount));
+			}
+			auto& mapNode = map->get(calculatedPath[i].position());
+			auto reciever = mapNode.onBlock.connect([&](const std::shared_ptr<Map> &, const Point<int> &a_position) {
+				if (a_position != cast<int>(ourPosition) && !activeUpdate) {
+					markDirty();
+				}
+			});
+			recievers.push_back(reciever);
+		}
+	}
+
 }

@@ -413,8 +413,8 @@ namespace MV {
 			return ourPosition;
 		}
 
-		std::vector<PathNode> path() {
-			if (dirtyPath) {
+		std::vector<PathNode> path(bool a_allowRecalculate = true) {
+			if (dirtyPath && a_allowRecalculate) {
 				recalculate();
 			}
 			return calculatedPath;
@@ -464,56 +464,9 @@ namespace MV {
 			return ourGoal;
 		}
 
-		void update(double a_dt) {
-			if (pathfinding()){
-				if (dirtyPath || calculatedPath.empty() || (calculatedPath.size() > 1 && currentPathIndex == calculatedPath.size())) {
-					recalculate();
-				}
-				if (calculatedPath.size() == 1 && calculatedPath[0].position() != cast<int>(ourGoal)) {
-					dirtyPath = true;
-					onBlockedSignal(shared_from_this());
-				} else {
-					if (!calculatedPath.empty() && currentPathIndex < calculatedPath.size()) {
-						auto direction = (ourPosition - desiredPositionFromCalculatedPathIndex(currentPathIndex)).normalized();
+		void update(double a_dt);
 
-						activeUpdate = true;
-						SCOPE_EXIT{ activeUpdate = false; };
-
-						PointPrecision totalDistanceToTravel = static_cast<PointPrecision>(a_dt) * ourSpeed;
-						bool movedThisFrame = false;
-						if (currentPathIndex < calculatedPath.size() - 1) {
-							if (cast<int>(ourPosition) == calculatedPath[currentPathIndex].position()) {
-								currentPathIndex++;
-							}
-						}
-						while (pathfinding() && totalDistanceToTravel > 0.0f) {
-							if (dirtyPath || calculatedPath.empty() || (calculatedPath.size() > 1 && currentPathIndex == calculatedPath.size())) {
-								recalculate();
-							}
-							auto previousGridSquare = cast<int>(ourPosition);
-							auto desiredPosition = desiredPositionFromCalculatedPathIndex(currentPathIndex);
-							PointPrecision distanceToNextNode = static_cast<PointPrecision>(distance(ourPosition, desiredPosition));
-							PointPrecision maxDistance = std::min(totalDistanceToTravel, distanceToNextNode);
-							map->get(cast<int>(ourPosition)).unblock();
-							ourPosition += (desiredPosition - ourPosition).normalized() * maxDistance;
-							ourPosition.z = 0;
-							map->get(cast<int>(ourPosition)).block();
-							totalDistanceToTravel -= maxDistance;
-							if (totalDistanceToTravel > 0.0f && currentPathIndex < calculatedPath.size()) {
-								++currentPathIndex;
-								movedThisFrame = true;
-							}
-						}
-						if (movedThisFrame) {
-							updateObservedNodes();
-						}
-					}
-					if (!pathfinding()) {
-						onArriveSignal(shared_from_this());
-					}
-				}
-			}
-		}
+		bool AttemptToRecalculate();
 
 		PointPrecision speed() const {
 			return ourSpeed;
@@ -577,22 +530,7 @@ namespace MV {
 			dirtyPath = true;
 		}
 
-		void updateObservedNodes() {
-			recievers.clear();
-			costs.clear();
-			for (int i = 0; i < calculatedPath.size() && i < (ourSpeed*4.0f); ++i) {
-				costs.push_back(TemporaryCost(map, calculatedPath[i].position(), (ourSpeed*4.0f) - static_cast<PointPrecision>(i)));
-			}
-			for (auto&& node : calculatedPath) {
-				auto& mapNode = map->get(node.position());
-				auto reciever = mapNode.onBlock.connect([&](const std::shared_ptr<Map> &, const Point<int> &a_position) {
-					if (a_position != cast<int>(ourPosition) && !activeUpdate) {
-						dirtyPath = true;
-					}
-				});
-				recievers.push_back(reciever);
-			}
-		}
+		void updateObservedNodes();
 
 		void recalculate() {
 			recievers.clear();

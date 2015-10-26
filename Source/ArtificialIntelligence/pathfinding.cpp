@@ -152,14 +152,9 @@ namespace MV {
 		return edges.cend() - (useCorners ? 4 : 0);
 	}
 
-	MapNode* MapNode::operator[](size_t a_index) {
+	MapNode* MapNode::operator[](size_t a_size) {
 		lazyInitialize();
-		return edges[a_index];
-	}
-
-	MapNode* MapNode::unfilteredEdge(size_t a_index) {
-		lazyInitialize();
-		return allEdges[a_index];
+		return edges[a_size];
 	}
 
 	bool MapNode::operator==(const MapNode &a_rhs) const {
@@ -186,7 +181,6 @@ namespace MV {
 			auto& cell = mapRef[location.x + a_offset.x][location.y + a_offset.y];
 
 			edges[a_index] = edgeBlocked(a_offset) ? &cell : nullptr;
-			allEdges[a_index] = &mapRef.get(location + a_offset);
 
 			cell.onBlock.connect(guid("Block"), [&, a_index, a_offset](std::shared_ptr<Map>, const Point<int> &) {
 				edges[a_index] = edgeBlocked(a_offset) ? &mapRef.get(location + a_offset) : nullptr;
@@ -196,7 +190,6 @@ namespace MV {
 			});
 		} else {
 			edges[a_index] = nullptr;
-			allEdges[a_index] = nullptr;
 		}
 	}
 
@@ -211,28 +204,34 @@ namespace MV {
 			initialized = true;
 
 			std::vector<Point<int>> edgePoints = {
-				{ -1, 0 },
-				{ 0, -1 },
-				{ 1, 0 },
-				{ 0, 1 },
-				{-1, -1},
-				{1, 1},
-				{-1, 1},
-				{1, -1}
+				{ location.x - 1, location.y },
+				{ location.x, location.y - 1 },
+				{ location.x + 1, location.y },
+				{ location.x, location.y + 1 }
 			};
 
 			for (size_t i = 0; i < 4;++i) {
-				initializeEdge(i, edgePoints[i]);
+				if (mapRef.inBounds(edgePoints[i])) {
+					auto edgePoint = edgePoints[i];
+					auto& cell = mapRef.get(edgePoints[i]);
+					edges[i] = !mapRef.blocked(edgePoint) ? &cell : nullptr;
+					cell.onBlock.connect(guid("Block"), [&, i](std::shared_ptr<Map>, const Point<int> &){
+						edges[i] = nullptr;
+					});
+					cell.onUnblock.connect(guid("Unblock"), [&, i, edgePoint](std::shared_ptr<Map>, const Point<int> &) {
+						edges[i] = &mapRef.get(edgePoint);
+					});
+				}
 			}
 
 			if (useCorners) {
-				for (size_t i = 4; i < 8; ++i) {
-					initializeEdge(i, edgePoints[i]);
-				}
+				initializeEdge(4, { -1, -1 });
+				initializeEdge(5, { 1, 1 });
+				initializeEdge(6, { -1, 1 });
+				initializeEdge(7, { 1, -1 });
 			} else {
 				for (int i = 4; i < 8; ++i) {
 					edges[i] = nullptr;
-					allEdges[i] = nullptr;
 				}
 			}
 		}
@@ -391,7 +390,7 @@ namespace MV {
 	}
 
 	void NavigationAgent::update(double a_dt) {
-		if (!observingForUnblock && pathfinding() && (AttemptToRecalculate() && !calculatedPath.empty() && currentPathIndex < calculatedPath.size())) {
+		if (pathfinding() && (AttemptToRecalculate() && !calculatedPath.empty() && currentPathIndex < calculatedPath.size())) {
 			auto direction = (ourPosition - desiredPositionFromCalculatedPathIndex(currentPathIndex)).normalized();
 
 			activeUpdate = true;
@@ -430,62 +429,32 @@ namespace MV {
 	}
 
 	bool NavigationAgent::AttemptToRecalculate() {
-		if (!observingForUnblock) {
-			if (dirtyPath || calculatedPath.empty() || (calculatedPath.size() > 1 && currentPathIndex == calculatedPath.size())) {
-				recalculate();
-			} else {
-				RegisterAsBlockedIfNeeded();
-			}
-			return !dirtyPath;
+		if (dirtyPath || calculatedPath.empty() || (calculatedPath.size() > 1 && currentPathIndex == calculatedPath.size())) {
+			recalculate();
 		}
-		return false;
+		if (calculatedPath.size() == 1 && calculatedPath[0].position() != cast<int>(ourGoal)) {
+			markDirty();
+			onBlockedSignal(shared_from_this());
+		}
+		return !dirtyPath;
 	}
 
 	void NavigationAgent::updateObservedNodes() {
-		if (!observingForUnblock) {
-			recievers.clear();
-			costs.clear();
-			for (auto i = currentPathIndex; i < calculatedPath.size(); ++i) {
-				auto temporaryCostAmount = (ourSpeed*4.0f) - (i - currentPathIndex);
-				if (temporaryCostAmount > 0) {
-					costs.push_back(TemporaryCost(map, calculatedPath[i].position(), temporaryCostAmount));
-				}
-				auto& mapNode = map->get(calculatedPath[i].position());
-				auto reciever = mapNode.onBlock.connect([&](const std::shared_ptr<Map> &, const Point<int> &a_position) {
-					if (a_position != cast<int>(ourPosition) && !activeUpdate) {
-						markDirty();
-					}
-				});
-				recievers.push_back(reciever);
+		recievers.clear();
+		costs.clear();
+		for (auto i = currentPathIndex; i < calculatedPath.size(); ++i) {
+			auto temporaryCostAmount = (ourSpeed*4.0f) - (i - currentPathIndex);
+			if (temporaryCostAmount > 0) {
+				costs.push_back(TemporaryCost(map, calculatedPath[i].position(), temporaryCostAmount));
 			}
-		}
-	}
-
-	void NavigationAgent::RegisterAsBlockedIfNeeded() {
-		if (!observingForUnblock) {
-			if (blocked()) {
-				markDirty();
-				observingForUnblock = true;
-				auto& ourNode = map->get(cast<int>(ourPosition));
-				recievers.clear();
-				for (size_t i = 0; i < ourNode.size(); ++i) {
-					if (ourNode.unfilteredEdge(i)) {
-						auto reciever = ourNode.unfilteredEdge(i)->onUnblock.connect([&](const std::shared_ptr<Map> &, const Point<int> &a_position) {
-							observingForUnblock = false;
-							markDirty();
-						});
-						recievers.push_back(reciever);
-					}
+			auto& mapNode = map->get(calculatedPath[i].position());
+			auto reciever = mapNode.onBlock.connect([&](const std::shared_ptr<Map> &, const Point<int> &a_position) {
+				if (a_position != cast<int>(ourPosition) && !activeUpdate) {
+					markDirty();
 				}
-				onBlockedSignal(shared_from_this());
-			} else {
-				observingForUnblock = false;
-			}
+			});
+			recievers.push_back(reciever);
 		}
-	}
-
-	NavigationAgent::~NavigationAgent() {
-		map->get(cast<int>(ourPosition)).unblock();
 	}
 
 }

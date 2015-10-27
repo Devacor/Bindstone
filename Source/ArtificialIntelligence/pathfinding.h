@@ -510,7 +510,6 @@ namespace MV {
 			}
 		}
 		
-
 		template <class Archive>
 		void serialize(Archive & archive) {
 			archive(
@@ -557,6 +556,57 @@ namespace MV {
 		size_t currentPathIndex = 0;
 		std::shared_ptr<Path> ourPath;
 		std::vector<PathNode> calculatedPath;
+
+		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix) {
+			a_script.
+// 			a_script.add(chaiscript::user_type<Size<T>>(), "Size" + a_postfix);
+// 			a_script.add(chaiscript::constructor<Size<T>()>(), "Size" + a_postfix);
+// 			a_script.add(chaiscript::constructor<Size<T>(T, T, T)>(), "Size" + a_postfix);
+// 			a_script.add(chaiscript::fun(&Size<T>::area), "area");
+// 			a_script.add(chaiscript::fun(&Size<T>::contains), "contains");
+// 			a_script.add(chaiscript::fun(&Size<T>::operator>), ">");
+// 			a_script.add(chaiscript::fun(&Size<T>::operator<), "<");
+// 			a_script.add(chaiscript::fun(&Size<T>::width), "width");
+// 			a_script.add(chaiscript::fun(&Size<T>::height), "height");
+// 			a_script.add(chaiscript::fun(&Size<T>::depth), "depth");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(T, T, T)>(&Size<T>::set)), "set");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(T, T)>(&Size<T>::set)), "set");
+// 
+// 			a_script.add(chaiscript::fun(static_cast<bool(*)(const Size<T> &, const Size<T> &)>(&operator==<T>)), "==");
+// 			a_script.add(chaiscript::fun(static_cast<bool(*)(const Size<T> &, const Size<T> &)>(&operator!=<T>)), "!=");
+// 
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator+=)), "+=");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator+=)), "+=");
+// 
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator-=)), "-=");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator-=)), "-=");
+// 
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator*=)), "*=");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Scale &)>(&Size<T>::operator*=)), "*=");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator*=)), "*=");
+// 
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator/=)), "/=");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Scale &)>(&Size<T>::operator/=)), "/=");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator/=)), "/=");
+// 
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Size<T> &)>(MV::operator+<T>)), "+");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const T &)>(MV::operator+<T>)), "+");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const T &, const Size<T> &)>(MV::operator+<T>)), "+");
+// 
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Size<T> &)>(MV::operator-<T>)), "-");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const T &)>(MV::operator-<T>)), "-");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const T &, const Size<T> &)>(MV::operator-<T>)), "-");
+// 
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Size<T> &)>(MV::operator*<T>)), "*");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const T &)>(MV::operator*<T>)), "*");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Scale &)>(MV::operator*<T>)), "*");
+// 
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Size<T> &)>(MV::operator/<T>)), "/");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const T &)>(MV::operator/<T>)), "/");
+// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Scale &)>(MV::operator/<T>)), "/");
+
+			return a_script;
+		}
 	};
 }
 

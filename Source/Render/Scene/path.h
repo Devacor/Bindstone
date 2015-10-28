@@ -88,6 +88,35 @@ namespace MV {
 			BoxAABB<> bounds() {
 				return boundsImplementation();
 			}
+
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix) {
+				a_script.add(chaiscript::user_type<PathMap>(), "PathMap");
+				a_script.add(chaiscript::base_class<Drawable, PathMap>());
+
+				a_script.add(chaiscript::fun([](Node &a_self, const Size<int> &a_gridSize, bool a_useCorners) { return a_self.attach<PathMap>(a_gridSize, a_useCorners); }), "attachPathMap");
+
+				a_script.add(chaiscript::fun(&PathMap::inBounds), "inBounds");
+				a_script.add(chaiscript::fun(&PathMap::traverseCorners), "traverseCorners");
+				a_script.add(chaiscript::fun(&PathMap::resizeGrid), "resizeGrid");
+				a_script.add(chaiscript::fun(&PathMap::gridSize), "gridSize");
+				a_script.add(chaiscript::fun(&PathMap::blocked), "blocked");
+				a_script.add(chaiscript::fun(&PathMap::staticallyBlocked), "staticallyBlocked");
+
+				a_script.add(chaiscript::fun(static_cast<Size<>(PathMap::*)() const>(&PathMap::cellSize)), "cellSize");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathMap>(PathMap::*)(const Size<> &)>(&PathMap::cellSize)), "cellSize");
+
+				a_script.add(chaiscript::fun(static_cast<MapNode&(PathMap::*)(const Point<int> &)>(&PathMap::nodeFromGrid)), "nodeFromGrid");
+				a_script.add(chaiscript::fun(static_cast<MapNode&(PathMap::*)(const Point<> &)>(&PathMap::nodeFromGrid)), "nodeFromGrid");
+
+				a_script.add(chaiscript::fun(static_cast<MapNode&(PathMap::*)(const Point<> &)>(&PathMap::nodeFromLocal)), "nodeFromLocal");
+
+				a_script.add(chaiscript::fun(static_cast<Point<>(PathMap::*)(const Point<> &)>(&PathMap::gridFromLocal)), "gridFromLocal");
+
+				a_script.add(chaiscript::fun(static_cast<Point<>(PathMap::*)(const Point<> &)>(&PathMap::localFromGrid)), "localFromGrid");
+				a_script.add(chaiscript::fun(static_cast<Point<>(PathMap::*)(const Point<int> &)>(&PathMap::localFromGrid)), "localFromGrid");
+
+				return a_script;
+			}
 		protected:
 			PathMap(const std::weak_ptr<Node> &a_owner, const Size<int> &a_gridSize, bool a_useCorners = true) :
 				PathMap(a_owner, Size<>(1.0f, 1.0f), a_gridSize, a_useCorners) {
@@ -245,6 +274,27 @@ namespace MV {
 			}
 			bool pathfinding() const {
 				return agent->pathfinding();
+			}
+
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix) {
+				a_script.add(chaiscript::user_type<PathAgent>(), "PathAgent");
+				a_script.add(chaiscript::base_class<Component, PathAgent>());
+
+				a_script.add(chaiscript::fun(&PathAgent::pathfinding), "pathfinding");
+				a_script.add(chaiscript::fun(&PathAgent::path), "path");
+
+				a_script.add(chaiscript::fun(static_cast<PointPrecision (PathAgent::*)() const>(&PathAgent::gridSpeed)), "gridSpeed");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent> (PathAgent::*)(PointPrecision)>(&PathAgent::gridSpeed)), "gridSpeed");
+
+				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::gridGoal)), "gridGoal");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&, PointPrecision)>(&PathAgent::gridGoal)), "gridGoal");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&, PointPrecision)>(&PathAgent::gridGoal)), "gridGoal");
+
+				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::gridPosition)), "gridPosition");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::gridPosition)), "gridPosition");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&)>(&PathAgent::gridPosition)), "gridPosition");
+
+				return a_script;
 			}
 
 		protected:

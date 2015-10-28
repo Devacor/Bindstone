@@ -15,6 +15,8 @@
 #include "Utility/signal.hpp"
 #include "Render/points.h"
 
+#include "chaiscript/chaiscript.hpp"
+
 namespace MV {
 
 	class Map;
@@ -246,6 +248,14 @@ namespace MV {
 		float cost() const {
 			return ourCost;
 		}
+
+		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix) {
+			a_script.add(chaiscript::user_type<PathNode>(), "PathNode");
+			a_script.add(chaiscript::constructor<PathNode(const Point<int> &, float)>(), "PathNode");
+			a_script.add(chaiscript::fun(&PathNode::position), "position");
+			a_script.add(chaiscript::fun(&PathNode::cost), "cost");
+			return a_script;
+		}
 	private:
 		Point<int> ourPosition;
 		float ourCost;
@@ -420,19 +430,22 @@ namespace MV {
 			return calculatedPath;
 		}
 
-		void stop() {
+		std::shared_ptr<NavigationAgent> stop() {
+			auto self = shared_from_this();
 			bool wasMoving = pathfinding();
 			ourGoal = ourPosition;
 			if (wasMoving) {
 				onStopSignal(shared_from_this());
 			}
+			return self;
 		}
 
-		void position(const Point<int> &a_newPosition) {
-			position(cast<PointPrecision>(a_newPosition) + point(.5f, .5f));
+		std::shared_ptr<NavigationAgent> position(const Point<int> &a_newPosition) {
+			return position(cast<PointPrecision>(a_newPosition) + point(.5f, .5f));
 		}
 
-		void position(const Point<> &a_newPosition) {
+		std::shared_ptr<NavigationAgent> position(const Point<> &a_newPosition) {
+			auto self = shared_from_this();
 			bool wasMoving = pathfinding();
 			map->get(cast<int>(ourPosition)).unblock();
 			ourPosition = a_newPosition;
@@ -442,13 +455,15 @@ namespace MV {
 			if (wasMoving) {
 				onArriveSignal(shared_from_this());
 			}
+			return self;
 		}
 
-		void goal(const Point<int> &a_newGoal, PointPrecision a_acceptableDistance = 0.0f) {
-			goal(cast<PointPrecision>(a_newGoal) + point(.5f, .5f), a_acceptableDistance);
+		std::shared_ptr<NavigationAgent> goal(const Point<int> &a_newGoal, PointPrecision a_acceptableDistance = 0.0f) {
+			return goal(cast<PointPrecision>(a_newGoal) + point(.5f, .5f), a_acceptableDistance);
 		}
 
-		void goal(const Point<> &a_newGoal, PointPrecision a_acceptableDistance = 0.0f) {
+		std::shared_ptr<NavigationAgent> goal(const Point<> &a_newGoal, PointPrecision a_acceptableDistance = 0.0f) {
+			auto self = shared_from_this();
 			bool wasMoving = pathfinding();
 			ourGoal = a_newGoal;
 			acceptableDistance = std::max(a_acceptableDistance, 0.0f);
@@ -458,6 +473,7 @@ namespace MV {
 			} else if (!wasMoving && pathfinding()) {
 				onStartSignal(shared_from_this());
 			}
+			return self;
 		}
 
 		Point<PointPrecision> goal() const {
@@ -472,9 +488,11 @@ namespace MV {
 			return ourSpeed;
 		}
 
-		void speed(PointPrecision a_newSpeed) {
+		std::shared_ptr<NavigationAgent> speed(PointPrecision a_newSpeed) {
+			auto self = shared_from_this();
 			ourSpeed = a_newSpeed;
 			updateObservedNodes();
+			return self;
 		}
 		bool pathfinding() const {
 			auto goalDistance = static_cast<PointPrecision>(distance(ourPosition, ourGoal));
@@ -534,9 +552,9 @@ namespace MV {
 		void recalculate() {
 			recievers.clear();
 			costs.clear();
-			currentPathIndex = 0;
 			ourPath = std::make_shared<Path>(map, cast<int>(ourPosition), cast<int>(ourGoal), acceptableDistance, maxNodesToSearch);
 			calculatedPath = ourPath->path();
+			currentPathIndex = !calculatedPath.empty() && cast<int>(ourPosition) == calculatedPath[0].position() ? 1 : 0;
 			updateObservedNodes();
 			dirtyPath = false;
 		}
@@ -558,52 +576,20 @@ namespace MV {
 		std::vector<PathNode> calculatedPath;
 
 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix) {
-			a_script.
-// 			a_script.add(chaiscript::user_type<Size<T>>(), "Size" + a_postfix);
-// 			a_script.add(chaiscript::constructor<Size<T>()>(), "Size" + a_postfix);
-// 			a_script.add(chaiscript::constructor<Size<T>(T, T, T)>(), "Size" + a_postfix);
-// 			a_script.add(chaiscript::fun(&Size<T>::area), "area");
-// 			a_script.add(chaiscript::fun(&Size<T>::contains), "contains");
-// 			a_script.add(chaiscript::fun(&Size<T>::operator>), ">");
-// 			a_script.add(chaiscript::fun(&Size<T>::operator<), "<");
-// 			a_script.add(chaiscript::fun(&Size<T>::width), "width");
-// 			a_script.add(chaiscript::fun(&Size<T>::height), "height");
-// 			a_script.add(chaiscript::fun(&Size<T>::depth), "depth");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(T, T, T)>(&Size<T>::set)), "set");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(T, T)>(&Size<T>::set)), "set");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<bool(*)(const Size<T> &, const Size<T> &)>(&operator==<T>)), "==");
-// 			a_script.add(chaiscript::fun(static_cast<bool(*)(const Size<T> &, const Size<T> &)>(&operator!=<T>)), "!=");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator+=)), "+=");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator+=)), "+=");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator-=)), "-=");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator-=)), "-=");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator*=)), "*=");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Scale &)>(&Size<T>::operator*=)), "*=");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator*=)), "*=");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Size<T> &)>(&Size<T>::operator/=)), "/=");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const Scale &)>(&Size<T>::operator/=)), "/=");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>&(Size<T>::*)(const T&)>(&Size<T>::operator/=)), "/=");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Size<T> &)>(MV::operator+<T>)), "+");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const T &)>(MV::operator+<T>)), "+");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const T &, const Size<T> &)>(MV::operator+<T>)), "+");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Size<T> &)>(MV::operator-<T>)), "-");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const T &)>(MV::operator-<T>)), "-");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const T &, const Size<T> &)>(MV::operator-<T>)), "-");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Size<T> &)>(MV::operator*<T>)), "*");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const T &)>(MV::operator*<T>)), "*");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Scale &)>(MV::operator*<T>)), "*");
-// 
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Size<T> &)>(MV::operator/<T>)), "/");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const T &)>(MV::operator/<T>)), "/");
-// 			a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Scale &)>(MV::operator/<T>)), "/");
+			a_script.add(chaiscript::user_type<NavigationAgent>(), "NavigationAgent");
+			a_script.add(chaiscript::fun(&NavigationAgent::pathfinding), "pathfinding");
+			a_script.add(chaiscript::fun(&NavigationAgent::stop), "stop");
+			a_script.add(chaiscript::fun(&NavigationAgent::path), "path");
+			a_script.add(chaiscript::fun(static_cast<PointPrecision(NavigationAgent::*)()const>(&NavigationAgent::speed)), "speed");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<NavigationAgent>(NavigationAgent::*)(PointPrecision)>(&NavigationAgent::speed)), "speed");
+
+			a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(NavigationAgent::*)()const>(&NavigationAgent::goal)), "goal");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<NavigationAgent>(NavigationAgent::*)(const Point<> &, PointPrecision)>(&NavigationAgent::goal)), "goal");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<NavigationAgent>(NavigationAgent::*)(const Point<int> &, PointPrecision)>(&NavigationAgent::goal)), "goal");
+
+			a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(NavigationAgent::*)()const>(&NavigationAgent::position)), "position");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<NavigationAgent>(NavigationAgent::*)(const Point<> &)>(&NavigationAgent::position)), "position");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<NavigationAgent>(NavigationAgent::*)(const Point<int> &)>(&NavigationAgent::position)), "position");
 
 			return a_script;
 		}

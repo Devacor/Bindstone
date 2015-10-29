@@ -68,6 +68,22 @@ namespace MV {
 			template<typename PointAssign>
 			std::shared_ptr<Sprite> corners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight);
 
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+				a_script.add(chaiscript::user_type<Sprite>(), "Sprite");
+				a_script.add(chaiscript::base_class<Drawable, Sprite>());
+
+				a_script.add(chaiscript::fun([](Node &a_self) { return a_self.attach<Sprite>(); }), "attachSprite");
+
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const BoxAABB<> &)>(&Sprite::bounds)), "bounds");
+
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Size<> &, const Point<> &)>(&Sprite::size)), "size");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Size<> &, bool)>(&Sprite::size)), "size");
+
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Point<> &, const Point<> &, const Point<> &, const Point<> &)>(&Sprite::corners<Point<>>)), "corners");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Color &, const Color &, const Color &, const Color &)>(&Sprite::corners<Color>)), "corners");
+
+				return a_script;
+			}
 		protected:
 			Sprite(const std::weak_ptr<Node> &a_owner) :
 				Drawable(a_owner) {

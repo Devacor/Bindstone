@@ -69,6 +69,27 @@ namespace MV {
 			std::shared_ptr<Drawable> texture(std::shared_ptr<TextureHandle> a_texture);
 			std::shared_ptr<Drawable> clearTexture();
 
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+				a_script.add(chaiscript::user_type<Drawable>(), "Drawable");
+				a_script.add(chaiscript::base_class<Component, Drawable>());
+
+				a_script.add(chaiscript::fun(&Drawable::visible), "visible");
+				a_script.add(chaiscript::fun(&Drawable::hide), "hide");
+				a_script.add(chaiscript::fun(&Drawable::show), "show");
+
+				a_script.add(chaiscript::fun(static_cast<Color(Drawable::*)() const>(&Drawable::color)), "color");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(const Color &)>(&Drawable::color)), "color");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(const std::vector<Color> &)>(&Drawable::colors)), "colors");
+
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(Drawable::*)() const>(&Drawable::texture)), "texture");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(std::shared_ptr<TextureHandle>)>(&Drawable::texture)), "texture");
+				a_script.add(chaiscript::fun(&Drawable::clearTexture), "clearTexture");
+
+				a_script.add(chaiscript::fun(static_cast<std::string(Drawable::*)() const>(&Drawable::shader)), "shader");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(const std::string &)>(&Drawable::shader)), "shader");
+
+				return a_script;
+			}
 		protected:
 			Drawable(const std::weak_ptr<Node> &a_owner);
 

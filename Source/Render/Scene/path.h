@@ -89,11 +89,12 @@ namespace MV {
 				return boundsImplementation();
 			}
 
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix) {
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 				a_script.add(chaiscript::user_type<PathMap>(), "PathMap");
 				a_script.add(chaiscript::base_class<Drawable, PathMap>());
 
 				a_script.add(chaiscript::fun([](Node &a_self, const Size<int> &a_gridSize, bool a_useCorners) { return a_self.attach<PathMap>(a_gridSize, a_useCorners); }), "attachPathMap");
+				a_script.add(chaiscript::fun([](Node &a_self, const Size<> &a_size, const Size<int> &a_gridSize, bool a_useCorners) { return a_self.attach<PathMap>(a_size, a_gridSize, a_useCorners); }), "attachPathMap");
 
 				a_script.add(chaiscript::fun(&PathMap::inBounds), "inBounds");
 				a_script.add(chaiscript::fun(&PathMap::traverseCorners), "traverseCorners");
@@ -276,9 +277,12 @@ namespace MV {
 				return agent->pathfinding();
 			}
 
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix) {
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 				a_script.add(chaiscript::user_type<PathAgent>(), "PathAgent");
 				a_script.add(chaiscript::base_class<Component, PathAgent>());
+
+				a_script.add(chaiscript::fun([](Node &a_self, const std::shared_ptr<PathMap> &a_map, const Point<> &a_gridPosition) { return a_self.attach<PathAgent>(a_map, a_gridPosition); }), "attachPathAgent");
+				a_script.add(chaiscript::fun([](Node &a_self, const std::shared_ptr<PathMap> &a_map, const Point<int> &a_gridPosition) { return a_self.attach<PathAgent>(a_map, a_gridPosition); }), "attachPathAgent");
 
 				a_script.add(chaiscript::fun(&PathAgent::pathfinding), "pathfinding");
 				a_script.add(chaiscript::fun(&PathAgent::path), "path");

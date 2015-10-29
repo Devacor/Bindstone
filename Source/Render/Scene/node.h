@@ -168,6 +168,23 @@ namespace MV {
 				return rootTask;
 			}
 
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+				a_script.add(chaiscript::user_type<Component>(), "Component");
+
+				a_script.add(chaiscript::fun(&Component::detach), "detach");
+				a_script.add(chaiscript::fun(&Component::clone), "clone");
+				a_script.add(chaiscript::fun(&Component::owner), "owner");
+
+				a_script.add(chaiscript::fun(static_cast<std::string(Component::*)() const>(&Component::id)), "id");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Component>(Component::*)(const std::string &)>(&Component::id)), "id");
+
+				a_script.add(chaiscript::fun(static_cast<BoxAABB<>(Component::*)()>(&Component::bounds)), "bounds");
+				a_script.add(chaiscript::fun(static_cast<BoxAABB<int>(Component::*)()>(&Component::screenBounds)), "screenBounds");
+				a_script.add(chaiscript::fun(static_cast<BoxAABB<>(Component::*)()>(&Component::worldBounds)), "worldBounds");
+
+				return a_script;
+			}
+
 		protected:
 			//owner death *can* occur before node death in cases where a button deletes itself.
 			//In known cases where callback order can cause this to occur it's best we have an explicit query.

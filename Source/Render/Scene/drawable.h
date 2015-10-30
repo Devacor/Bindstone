@@ -88,6 +88,9 @@ namespace MV {
 				a_script.add(chaiscript::fun(static_cast<std::string(Drawable::*)() const>(&Drawable::shader)), "shader");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(const std::string &)>(&Drawable::shader)), "shader");
 
+				a_script.add(chaiscript::type_conversion<SafeComponent<Drawable>, std::shared_ptr<Drawable>>([](const SafeComponent<Drawable> &a_item) { return a_item.self(); }));
+				a_script.add(chaiscript::type_conversion<SafeComponent<Drawable>, std::shared_ptr<Component>>([](const SafeComponent<Drawable> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
+
 				return a_script;
 			}
 		protected:

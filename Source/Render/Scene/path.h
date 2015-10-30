@@ -116,6 +116,10 @@ namespace MV {
 				a_script.add(chaiscript::fun(static_cast<Point<>(PathMap::*)(const Point<> &)>(&PathMap::localFromGrid)), "localFromGrid");
 				a_script.add(chaiscript::fun(static_cast<Point<>(PathMap::*)(const Point<int> &)>(&PathMap::localFromGrid)), "localFromGrid");
 
+				a_script.add(chaiscript::type_conversion<SafeComponent<PathMap>, std::shared_ptr<PathMap>>([](const SafeComponent<PathMap> &a_item) { return a_item.self(); }));
+				a_script.add(chaiscript::type_conversion<SafeComponent<PathMap>, std::shared_ptr<Drawable>>([](const SafeComponent<PathMap> &a_item) { return std::static_pointer_cast<Drawable>(a_item.self()); }));
+				a_script.add(chaiscript::type_conversion<SafeComponent<PathMap>, std::shared_ptr<Component>>([](const SafeComponent<PathMap> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
+
 				return a_script;
 			}
 		protected:
@@ -297,6 +301,9 @@ namespace MV {
 				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::gridPosition)), "gridPosition");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::gridPosition)), "gridPosition");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&)>(&PathAgent::gridPosition)), "gridPosition");
+				
+				a_script.add(chaiscript::type_conversion<SafeComponent<PathAgent>, std::shared_ptr<PathAgent>>([](const SafeComponent<PathAgent> &a_item) { return a_item.self(); }));
+				a_script.add(chaiscript::type_conversion<SafeComponent<PathAgent>, std::shared_ptr<Component>>([](const SafeComponent<PathAgent> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
 
 				return a_script;
 			}

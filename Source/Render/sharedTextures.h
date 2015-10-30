@@ -55,6 +55,24 @@ namespace MV {
 		static std::string fileId(const std::string &a_filename, bool a_repeat, bool a_pixel = false) {
 			return a_filename + (a_repeat ? "1" : "0") + (a_pixel ? "1" : "");
 		}
+
+		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+			a_script.add(chaiscript::user_type<SharedTextures>(), "SharedTextures");
+
+			a_script.add(chaiscript::fun(&SharedTextures::assemblePacks), "assemblePacks");
+			a_script.add(chaiscript::fun(&SharedTextures::assemblePack), "assemblePack");
+			a_script.add(chaiscript::fun(&SharedTextures::white), "white");
+			a_script.add(chaiscript::fun(&SharedTextures::pack), "pack");
+			a_script.add(chaiscript::fun(&SharedTextures::file), "file");
+			a_script.add(chaiscript::fun(&SharedTextures::dynamic), "dynamic");
+			a_script.add(chaiscript::fun(&SharedTextures::surface), "surface");
+			a_script.add(chaiscript::fun(&SharedTextures::files), "files");
+			a_script.add(chaiscript::fun(&SharedTextures::fileId), "fileId");
+			a_script.add(chaiscript::fun(&SharedTextures::fileIds), "fileIds");
+			a_script.add(chaiscript::fun(&SharedTextures::packIds), "packIds");
+
+			return a_script;
+		}
 	private:
 		std::map<std::string, std::shared_ptr<TexturePack>> texturePacks;
 		std::map<std::string, std::shared_ptr<FileTextureDefinition>> fileDefinitions;

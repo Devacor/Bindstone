@@ -249,7 +249,7 @@ namespace MV {
 			return ourCost;
 		}
 
-		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix) {
+		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 			a_script.add(chaiscript::user_type<PathNode>(), "PathNode");
 			a_script.add(chaiscript::constructor<PathNode(const Point<int> &, float)>(), "PathNode");
 			a_script.add(chaiscript::fun(&PathNode::position), "position");
@@ -574,8 +574,8 @@ namespace MV {
 		size_t currentPathIndex = 0;
 		std::shared_ptr<Path> ourPath;
 		std::vector<PathNode> calculatedPath;
-
-		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix) {
+	public:
+		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 			a_script.add(chaiscript::user_type<NavigationAgent>(), "NavigationAgent");
 			a_script.add(chaiscript::fun(&NavigationAgent::pathfinding), "pathfinding");
 			a_script.add(chaiscript::fun(&NavigationAgent::stop), "stop");

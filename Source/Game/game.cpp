@@ -11,10 +11,27 @@ Game::Game(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer) :
 	textLibrary(*a_renderer),
 	done(false),
 	script(chaiscript::Std_Lib::library()){
-	MV::TexturePoint::hook(MV::Color::hook(MV::Size<MV::PointPrecision>::hook(MV::Size<int>::hook(MV::Point<MV::PointPrecision>::hook(MV::Point<int>::hook(MV::Scene::Node::hook(script), "i"), ""), "i"), "")));
+	MV::TexturePoint::hook(script);
+	MV::Color::hook(script);
+	MV::Size<MV::PointPrecision>::hook(script);
+	MV::Size<int>::hook(script, "i");
+	MV::Point<MV::PointPrecision>::hook(script);
+	MV::Point<int>::hook(script, "i"); 
+	MV::BoxAABB<MV::PointPrecision>::hook(script);
+	MV::BoxAABB<int>::hook(script, "i");
 
+	MV::PathNode::hook(script);
+	MV::NavigationAgent::hook(script);
+
+	MV::Scene::Node::hook(script);
+	MV::Scene::Component::hook(script);
+	MV::Scene::Drawable::hook(script);
+	MV::Scene::Sprite::hook(script);
+	MV::Scene::Text::hook(script);
+	MV::Scene::PathMap::hook(script);
+	MV::Scene::PathAgent::hook(script);
 	initializeWindow();
-	script.add_global(chaiscript::Boxed_Value(worldScene), "worldScene");
+	script.add_global(chaiscript::var(worldScene), "worldScene");
 }
 
 void Game::initializeWindow(){
@@ -94,16 +111,23 @@ void Game::spawnCreature(const MV::Point<> &a_position) {
 				return false;
 			});
 		});
-	
+	script.add_global(chaiscript::var(voidTexture), "voidTexture");
 	std::weak_ptr<MV::Scene::Node> weakCreatureNode{ creatureNode };
 	creatureNode->task().also("UpdateZOrder", [=](const MV::Task &a_self, double a_dt) {
 		weakCreatureNode.lock()->depth(weakCreatureNode.lock()->position().y);
 		return false;
 	});
+
+ 	script.eval(R"(
+ 		auto newNode = worldScene.make()
+ 		newNode.position(Point(10, 10, 10))
+ 		auto sprite = newNode.attachSprite()
+ 		sprite.size(Size(128, 128))
+ 		sprite.texture(voidTexture)
+ 	)");
 }
 
 bool Game::update(double dt) {
-	script.eval("worldScene.translate(Point(1.0, 0.0, 0.0))");
 
 	lastUpdateDelta = dt;
 	pool->run();

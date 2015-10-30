@@ -182,6 +182,8 @@ namespace MV {
 				a_script.add(chaiscript::fun(static_cast<BoxAABB<int>(Component::*)()>(&Component::screenBounds)), "screenBounds");
 				a_script.add(chaiscript::fun(static_cast<BoxAABB<>(Component::*)()>(&Component::worldBounds)), "worldBounds");
 
+				a_script.add(chaiscript::type_conversion<SafeComponent<Component>, std::shared_ptr<Component>>([](const SafeComponent<Component> &a_item) { return a_item.self(); }));
+
 				return a_script;
 			}
 

@@ -61,8 +61,12 @@ namespace MV {
 				return bounds({ topLeft, bottomRight });
 			}
 
-			std::shared_ptr<Sprite> size(const Size<> &a_size, bool a_center = false) {
+			std::shared_ptr<Sprite> size(const Size<> &a_size, bool a_center) {
 				return size(a_size, (a_center) ? point(a_size.width / 2.0f, a_size.height / 2.0f) : point(0.0f, 0.0f));
+			}
+
+			std::shared_ptr<Sprite> size(const Size<> &a_size) {
+				return size(a_size, point(0.0f, 0.0f));
 			}
 
 			template<typename PointAssign>
@@ -80,6 +84,7 @@ namespace MV {
 
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Size<> &, const Point<> &)>(&Sprite::size)), "size");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Size<> &, bool)>(&Sprite::size)), "size");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Size<> &)>(&Sprite::size)), "size");
 
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Point<> &, const Point<> &, const Point<> &, const Point<> &)>(&Sprite::corners<Point<>>)), "corners");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Color &, const Color &, const Color &, const Color &)>(&Sprite::corners<Color>)), "corners");

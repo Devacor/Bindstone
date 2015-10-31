@@ -105,6 +105,7 @@ namespace MV {
 
 		Color& set(uint32_t a_hex, bool a_allowFullAlpha = false); //option to get back a Color&
 		Color& set(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0f);
+		Color& set(int a_Red, int a_Green, int a_Blue, int a_Alpha = 255);
 		Color& set(HSV a_hsv);
 
 		float R, G, B, A;
@@ -114,6 +115,10 @@ namespace MV {
 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 			a_script.add(chaiscript::user_type<HSV>(), "HSV");
 			a_script.add(chaiscript::constructor<HSV(float, float, float, float)>(), "HSV");
+			a_script.add(chaiscript::constructor<HSV(float, float, float)>(), "HSV");
+			a_script.add(chaiscript::constructor<HSV(float, float)>(), "HSV");
+			a_script.add(chaiscript::constructor<HSV(float)>(), "HSV");
+			a_script.add(chaiscript::constructor<HSV()>(), "HSV");
 			a_script.add(chaiscript::fun(&HSV::H), "H");
 			a_script.add(chaiscript::fun(&HSV::S), "S");
 			a_script.add(chaiscript::fun(&HSV::V), "V");
@@ -125,6 +130,9 @@ namespace MV {
 			a_script.add(chaiscript::constructor<Color(uint32_t, bool)>(), "Color");
 			a_script.add(chaiscript::constructor<Color(float, float, float, float)>(), "Color");
 			a_script.add(chaiscript::constructor<Color(int, int, int, int)>(), "Color");
+			a_script.add(chaiscript::constructor<Color(float, float, float)>(), "Color");
+			a_script.add(chaiscript::constructor<Color(int, int, int)>(), "Color");
+			a_script.add(chaiscript::constructor<Color(uint32_t)>(), "Color");
 			a_script.add(chaiscript::fun(&Color::R), "R");
 			a_script.add(chaiscript::fun(&Color::G), "G");
 			a_script.add(chaiscript::fun(&Color::B), "B");
@@ -151,9 +159,15 @@ namespace MV {
 
 			a_script.add(chaiscript::fun(static_cast<uint32_t (Color::*)() const>(&Color::hex)), "hex");
 			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(uint32_t, bool)>(&Color::hex)), "hex");
+			a_script.add(chaiscript::fun([](Color& a_self, uint32_t a_color) {return a_self.hex(a_color); }), "hex");
 			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(uint32_t, bool)>(&Color::set)), "set");
 
 			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(float, float, float, float)>(&Color::set)), "set");
+			a_script.add(chaiscript::fun([](Color & a_self, float a_R, float a_G, float a_B) {return a_self.set(a_R, a_G, a_B); }), "set");
+
+			a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(int, int, int, int)>(&Color::set)), "set");
+			a_script.add(chaiscript::fun([](Color & a_self, int a_R, int a_G, int a_B) {return a_self.set(a_R, a_G, a_B); }), "set");
+
 			return a_script;
 		}
 	private:
@@ -940,6 +954,7 @@ namespace MV {
 		a_script.add(chaiscript::user_type<Point<T>>(), "Point" + a_postfix);
 		a_script.add(chaiscript::constructor<Point<T>()>(), "Point" + a_postfix);
 		a_script.add(chaiscript::constructor<Point<T>(T, T, T)>(), "Point" + a_postfix);
+		a_script.add(chaiscript::constructor<Point<T>(T, T)>(), "Point" + a_postfix);
 		a_script.add(chaiscript::fun(static_cast<Point<T>&(Point<T>::*)(T, T, T)>(&Point<T>::set)), "set");
 		a_script.add(chaiscript::fun(static_cast<Point<T>&(Point<T>::*)(T, T)>(&Point<T>::set)), "set");
 		a_script.add(chaiscript::fun(&Point<T>::scale), "scale");
@@ -1001,8 +1016,14 @@ namespace MV {
 		a_script.add(chaiscript::user_type<Size<T>>(), "Size" + a_postfix);
 		a_script.add(chaiscript::constructor<Size<T>()>(), "Size" + a_postfix);
 		a_script.add(chaiscript::constructor<Size<T>(T, T, T)>(), "Size" + a_postfix);
-		a_script.add(chaiscript::fun(&Size<T>::area), "area");
-		a_script.add(chaiscript::fun(&Size<T>::contains), "contains");
+		a_script.add(chaiscript::constructor<Size<T>(T, T)>(), "Size" + a_postfix);
+
+		a_script.add(chaiscript::fun([](Size<T> & a_self, const Size<T> &a_other, bool a_useDepth) {return a_self.contains(a_other, a_useDepth); }), "contains");
+		a_script.add(chaiscript::fun([](Size<T> & a_self, const Size<T> &a_other) {return a_self.contains(a_other, false); }), "contains");
+
+		a_script.add(chaiscript::fun([](Size<T> & a_self, bool a_useDepth) {return a_self.area(a_useDepth); }), "area");
+		a_script.add(chaiscript::fun([](Size<T> & a_self) {return a_self.area(false); }), "contains");
+
 		a_script.add(chaiscript::fun(&Size<T>::operator>), ">");
 		a_script.add(chaiscript::fun(&Size<T>::operator<), "<");
 		a_script.add(chaiscript::fun(&Size<T>::width), "width");

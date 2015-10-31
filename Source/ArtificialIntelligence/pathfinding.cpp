@@ -14,6 +14,7 @@ namespace MV {
 		onStaticBlock(onStaticBlockSignal),
 		onStaticUnblock(onStaticUnblockSignal),
 		onCostChange(onCostChangeSignal){
+		edges.fill(nullptr);
 	}
 
 	MapNode::MapNode(const MapNode &a_rhs) :
@@ -28,6 +29,7 @@ namespace MV {
 		onStaticBlock(onStaticBlockSignal),
 		onStaticUnblock(onStaticUnblockSignal),
 		onCostChange(onCostChangeSignal) {
+		edges.fill(nullptr);
 	}
 
 	MapNode::MapNode() :
@@ -39,6 +41,7 @@ namespace MV {
 		onStaticBlock(onStaticBlockSignal),
 		onStaticUnblock(onStaticUnblockSignal),
 		onCostChange(onCostChangeSignal) {
+		edges.fill(nullptr);
 	}
 
 	MapNode& MapNode::operator=(const MapNode &a_rhs) {
@@ -48,9 +51,7 @@ namespace MV {
 		map = a_rhs.map;
 		staticBlockedSemaphore = a_rhs.staticBlockedSemaphore;
 		useCorners = a_rhs.useCorners;
-		for (auto&& edge : edges) {
-			edge = nullptr;
-		}
+		edges.fill(nullptr);
 		blockedSemaphore = 0;
 		temporaryCost = 0;
 		return *this;
@@ -175,18 +176,16 @@ namespace MV {
 		}
 	}
 
-	void MapNode::initializeEdge(size_t a_index, const Point<int> &a_offset) const {
+	void MapNode::initializeEdge(size_t a_index, const Point<int> &a_location) const {
 		auto& mapRef = *map;
-		if (mapRef.inBounds(location + a_offset)) {
-			auto& cell = mapRef[location.x + a_offset.x][location.y + a_offset.y];
-
-			edges[a_index] = edgeBlocked(a_offset) ? &cell : nullptr;
-
-			cell.onBlock.connect(guid("Block"), [&, a_index, a_offset](std::shared_ptr<Map>, const Point<int> &) {
-				edges[a_index] = edgeBlocked(a_offset) ? &mapRef.get(location + a_offset) : nullptr;
+		if (mapRef.inBounds(a_location)) {
+			auto& cell = mapRef.get(a_location);
+			edges[a_index] = !mapRef.blocked(a_location) ? &cell : nullptr;
+			cell.onBlock.connect(guid("Block"), [&, a_index](std::shared_ptr<Map>, const Point<int> &) {
+				edges[a_index] = nullptr;
 			});
-			cell.onUnblock.connect(guid("Unblock"), [&, a_index, a_offset](std::shared_ptr<Map>, const Point<int> &) {
-				edges[a_index] = edgeBlocked(a_offset) ? &mapRef.get(location + a_offset) : nullptr;
+			cell.onUnblock.connect(guid("Unblock"), [&, a_index, a_location](std::shared_ptr<Map>, const Point<int> &) {
+				edges[a_index] = &(map->get(a_location));
 			});
 		} else {
 			edges[a_index] = nullptr;
@@ -207,32 +206,15 @@ namespace MV {
 				{ location.x - 1, location.y },
 				{ location.x, location.y - 1 },
 				{ location.x + 1, location.y },
-				{ location.x, location.y + 1 }
+				{ location.x, location.y + 1 },
+				{ location.x - 1, location.y - 1 },
+				{ location.x + 1, location.y + 1 },
+				{ location.x - 1, location.y + 1 },
+				{ location.x + 1, location.y - 1 }
 			};
 
-			for (size_t i = 0; i < 4;++i) {
-				if (mapRef.inBounds(edgePoints[i])) {
-					auto edgePoint = edgePoints[i];
-					auto& cell = mapRef.get(edgePoints[i]);
-					edges[i] = !mapRef.blocked(edgePoint) ? &cell : nullptr;
-					cell.onBlock.connect(guid("Block"), [&, i](std::shared_ptr<Map>, const Point<int> &){
-						edges[i] = nullptr;
-					});
-					cell.onUnblock.connect(guid("Unblock"), [&, i, edgePoint](std::shared_ptr<Map>, const Point<int> &) {
-						edges[i] = &mapRef.get(edgePoint);
-					});
-				}
-			}
-
-			if (useCorners) {
-				initializeEdge(4, { -1, -1 });
-				initializeEdge(5, { 1, 1 });
-				initializeEdge(6, { -1, 1 });
-				initializeEdge(7, { 1, -1 });
-			} else {
-				for (int i = 4; i < 8; ++i) {
-					edges[i] = nullptr;
-				}
+			for (size_t i = 0; i < (useCorners ? 8 : 4);++i) {
+				initializeEdge(i, edgePoints[i]);
 			}
 		}
 	}

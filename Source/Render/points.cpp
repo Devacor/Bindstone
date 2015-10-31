@@ -117,6 +117,14 @@ namespace MV {
 		return *this;
 	}
 
+	Color& Color::set(int a_Red, int a_Green, int a_Blue, int a_Alpha) {
+		R = static_cast<float>(a_Red) / 255.0f;
+		G = static_cast<float>(a_Green) / 255.0f;
+		B = static_cast<float>(a_Blue) / 255.0f;
+		A = static_cast<float>(a_Alpha) / 255.0f;
+		return *this;
+	}
+
 	Color::HSV Color::hsv() const {
 		return getHsv(HSV(0.0f, 0.0f, 0.0f, 1.0f));
 	}

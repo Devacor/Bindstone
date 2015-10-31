@@ -46,6 +46,27 @@ namespace MV {
 		}
 
 		void consolidate(const std::string &a_fileName);
+
+		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+			a_script.add(chaiscript::user_type<TexturePack>(), "TexturePack");
+
+			a_script.add(chaiscript::fun(&TexturePack::print), "print");
+			a_script.add(chaiscript::fun(&TexturePack::makeScene), "makeScene");
+			a_script.add(chaiscript::fun(&TexturePack::maximumBounds), "maximumBounds");
+			a_script.add(chaiscript::fun(&TexturePack::contentBounds), "contentBounds");
+
+			a_script.add(chaiscript::fun(&TexturePack::consolidate), "consolidate");
+			a_script.add(chaiscript::fun(&TexturePack::fullHandle), "fullHandle");
+			a_script.add(chaiscript::fun(&TexturePack::contentHandle), "contentHandle");
+			a_script.add(chaiscript::fun(&TexturePack::texture), "texture");
+
+			a_script.add(chaiscript::fun(&TexturePack::handleIds), "handleIds");
+
+			a_script.add(chaiscript::fun([](TexturePack & a_self, size_t a_index) {return a_self.handle(a_index); }), "handle");
+			a_script.add(chaiscript::fun([](TexturePack & a_self, const std::string &a_id) {return a_self.handle(a_id); }), "handle");
+
+			return a_script;
+		}
 	private:
 		TexturePack(MV::Draw2D* a_renderer, const Color &a_color = Color(0.0f, 0.0f, 0.0f, 0.0f), const Size<int> &a_maximumExtent = Size<int>(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()));
 		struct ShapeDefinition {

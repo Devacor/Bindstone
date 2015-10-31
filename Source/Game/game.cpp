@@ -20,6 +20,12 @@ Game::Game(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer) :
 	MV::BoxAABB<MV::PointPrecision>::hook(script);
 	MV::BoxAABB<int>::hook(script, "i");
 
+	MV::TexturePack::hook(script);
+	MV::TextureDefinition::hook(script);
+	MV::FileTextureDefinition::hook(script);
+	MV::TextureHandle::hook(script);
+	MV::SharedTextures::hook(script);
+
 	MV::PathNode::hook(script);
 	MV::NavigationAgent::hook(script);
 
@@ -30,8 +36,10 @@ Game::Game(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer) :
 	MV::Scene::Text::hook(script);
 	MV::Scene::PathMap::hook(script);
 	MV::Scene::PathAgent::hook(script);
+
 	initializeWindow();
 	script.add_global(chaiscript::var(worldScene), "worldScene");
+	script.add_global(chaiscript::var(textures), "textures");
 }
 
 void Game::initializeWindow(){
@@ -111,20 +119,21 @@ void Game::spawnCreature(const MV::Point<> &a_position) {
 				return false;
 			});
 		});
-	script.add_global(chaiscript::var(voidTexture), "voidTexture");
 	std::weak_ptr<MV::Scene::Node> weakCreatureNode{ creatureNode };
 	creatureNode->task().also("UpdateZOrder", [=](const MV::Task &a_self, double a_dt) {
 		weakCreatureNode.lock()->depth(weakCreatureNode.lock()->position().y);
 		return false;
 	});
 
- 	script.eval(R"(
- 		auto newNode = worldScene.make()
- 		newNode.position(Point(10, 10, 10))
- 		auto sprite = newNode.attachSprite()
- 		sprite.size(Size(128, 128))
- 		sprite.texture(voidTexture)
- 	)");
+//  	script.eval(R"(
+// 		{
+//  			auto newNode = worldScene.make()
+//  			newNode.position(Point(10, 10, 10))
+//  			auto spriteDude = newNode.attachSprite()
+//  			spriteDude.size(Size(128, 128))
+// 			spriteDude.texture(textures.pack("VoidGuy").handle(0))
+// 		}
+//  	)");
 }
 
 bool Game::update(double dt) {

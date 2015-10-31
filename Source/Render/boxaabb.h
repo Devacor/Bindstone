@@ -393,6 +393,7 @@ namespace MV {
 		a_script.add(chaiscript::constructor<BoxAABB<T>(const Size<T> &)>(), "BoxAABB" + a_postfix);
 		a_script.add(chaiscript::constructor<BoxAABB<T>(const Point<T> &, const Point<T> &)>(), "BoxAABB" + a_postfix);
 		a_script.add(chaiscript::constructor<BoxAABB<T>(const Point<T> &, const Size<T> &, bool)>(), "BoxAABB" + a_postfix);
+		a_script.add(chaiscript::constructor<BoxAABB<T>(const Point<T> &, const Size<T> &)>(), "BoxAABB" + a_postfix);
 
 		a_script.add(chaiscript::fun(&BoxAABB<T>::removeFromBounds), "removeFromBounds");
 		a_script.add(chaiscript::fun(&BoxAABB<T>::width), "width");

@@ -62,7 +62,6 @@ namespace MV {
 			a_script.add(chaiscript::fun(&SharedTextures::assemblePacks), "assemblePacks");
 			a_script.add(chaiscript::fun(&SharedTextures::assemblePack), "assemblePack");
 			a_script.add(chaiscript::fun(&SharedTextures::white), "white");
-			a_script.add(chaiscript::fun(&SharedTextures::pack), "pack");
 			a_script.add(chaiscript::fun(&SharedTextures::file), "file");
 			a_script.add(chaiscript::fun(&SharedTextures::dynamic), "dynamic");
 			a_script.add(chaiscript::fun(&SharedTextures::surface), "surface");
@@ -70,6 +69,9 @@ namespace MV {
 			a_script.add(chaiscript::fun(&SharedTextures::fileId), "fileId");
 			a_script.add(chaiscript::fun(&SharedTextures::fileIds), "fileIds");
 			a_script.add(chaiscript::fun(&SharedTextures::packIds), "packIds");
+
+			a_script.add(chaiscript::fun([](SharedTextures & a_self, const std::string &a_name, Draw2D* a_renderer) {return a_self.pack(a_name, a_renderer); }), "pack");
+			a_script.add(chaiscript::fun([](SharedTextures & a_self, const std::string &a_name) {return a_self.pack(a_name); }), "pack");
 
 			return a_script;
 		}

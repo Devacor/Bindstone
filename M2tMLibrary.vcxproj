@@ -270,6 +270,7 @@
     <ClCompile Include="Source\exampleCode.cpp" />
     <ClCompile Include="Source\Game\building.cpp" />
     <ClCompile Include="Source\Game\game.cpp" />
+    <ClCompile Include="Source\Game\wallet.cpp" />
     <ClCompile Include="Source\Interface\mouse.cpp" />
     <ClCompile Include="Source\main.cpp">
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">./;./Source</AdditionalIncludeDirectories>
@@ -443,6 +444,8 @@
     <ClInclude Include="Source\Editor\texturePicker.h" />
     <ClInclude Include="Source\Game\building.h" />
     <ClInclude Include="Source\Game\gameEditor.h" />
+    <ClInclude Include="Source\Game\player.h" />
+    <ClInclude Include="Source\Game\wallet.h" />
     <ClInclude Include="Source\Physics\collider.h" />
     <ClInclude Include="Source\Physics\package.h" />
     <ClInclude Include="Source\Render\boxaabb.h" />

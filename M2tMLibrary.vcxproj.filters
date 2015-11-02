@@ -401,6 +401,9 @@
     <ClCompile Include="Source\Physics\collider.cpp">
       <Filter>Source Files\Physics</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Game\wallet.cpp">
+      <Filter>Source Files\Game</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -961,6 +964,12 @@
     </ClInclude>
     <ClInclude Include="Source\Physics\collider.h">
       <Filter>Source Files\Physics</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\wallet.h">
+      <Filter>Source Files\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\player.h">
+      <Filter>Source Files\Game</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

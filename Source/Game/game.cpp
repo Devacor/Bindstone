@@ -26,6 +26,8 @@ Game::Game(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer) :
 	MV::TextureHandle::hook(script);
 	MV::SharedTextures::hook(script);
 
+	Wallet::hook(script);
+
 	MV::PathNode::hook(script);
 	MV::NavigationAgent::hook(script);
 
@@ -126,13 +128,13 @@ void Game::spawnCreature(const MV::Point<> &a_position) {
 	});
 
 //  	script.eval(R"(
-// 		{
+// 			{
 //  			auto newNode = worldScene.make()
 //  			newNode.position(Point(10, 10, 10))
 //  			auto spriteDude = newNode.attachSprite()
 //  			spriteDude.size(Size(128, 128))
-// 			spriteDude.texture(textures.pack("VoidGuy").handle(0))
-// 		}
+//				spriteDude.texture(textures.pack("VoidGuy").handle(0))
+// 			}
 //  	)");
 }
 

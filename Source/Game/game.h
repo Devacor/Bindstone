@@ -5,10 +5,42 @@
 #include "Animation/package.h"
 #include "Network/package.h"
 #include "Interface/package.h"
+#include "Game/building.h"
 #include <string>
 #include <ctime>
 #include "chaiscript/chaiscript.hpp"
 #include "chaiscript/chaiscript_stdlib.hpp"
+
+class GamePlayer {
+public:
+	GamePlayer(const std::shared_ptr<Player> &a_player):
+		player(a_player){
+	}
+
+private:
+	std::vector<std::shared_ptr<Building>> buildings;
+	int health;
+	std::vector<std::shared_ptr<Creature>> creatures;
+	std::vector<Gem> gems;
+
+	std::shared_ptr<Player> player;
+};
+
+class LocalData {
+public:
+	std::shared_ptr<Player> player() const {
+		return localPlayer;
+	}
+
+	BuildingData& building(const std::string &a_id) const {
+		
+	}
+private:
+	std::shared_ptr<Player> localPlayer;
+	std::vector<BuildingData> buildings;
+};
+
+
 
 class Game {
 public:

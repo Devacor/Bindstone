@@ -240,24 +240,24 @@ namespace MV {
 
 		//Corners
 		if(a_compareBox.contains(topLeftPoint())){
-			return{
-				{{point(a_compareBox.maxPoint.x, minPoint.y), maxPoint}},
-				{{point(minPoint.x, a_compareBox.maxPoint.y), maxPoint}},
+			return {
+				{point(a_compareBox.maxPoint.x, minPoint.y), maxPoint},
+				{point(minPoint.x, a_compareBox.maxPoint.y), maxPoint},
 			};
 		} else if(a_compareBox.contains(topRightPoint())){
-			return{
-				{{minPoint, point(a_compareBox.minPoint.x, maxPoint.y)}},
-				{{point(minPoint.x, a_compareBox.maxPoint.y), maxPoint}},
+			return {
+				{minPoint, point(a_compareBox.minPoint.x, maxPoint.y)},
+				{point(minPoint.x, a_compareBox.maxPoint.y), maxPoint},
 			};
 		} else if(a_compareBox.contains(bottomRightPoint())){
-			return{
-				{{minPoint, point(maxPoint.x, a_compareBox.minPoint.y)}},
-				{{minPoint, point(a_compareBox.minPoint.x, maxPoint.y)}},
+			return {
+				{minPoint, point(maxPoint.x, a_compareBox.minPoint.y)},
+				{minPoint, point(a_compareBox.minPoint.x, maxPoint.y)},
 			};
 		} else if(a_compareBox.contains(bottomLeftPoint())){
-			return{
-				{{minPoint, point(maxPoint.x, a_compareBox.minPoint.y)}},
-				{{point(a_compareBox.maxPoint.x, minPoint.y), maxPoint}},
+			return {
+				{minPoint, point(maxPoint.x, a_compareBox.minPoint.y)},
+				{point(a_compareBox.maxPoint.x, minPoint.y), maxPoint},
 			};
 		}
 

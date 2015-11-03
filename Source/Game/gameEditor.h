@@ -5,33 +5,34 @@
 #include "ClickerGame/clickerGame.h"
 #include "DiggerGame/diggerGame.h"
 #include "editor/editor.h"
+#include "Game/managers.h"
 
 class GameEditor {
 public:
 	GameEditor():
-		editor(&pool, &renderer),
-		game(&pool, &renderer),
-		limbo(MV::Scene::Node::make(renderer)){
+		editor(managers),
+		game(managers),
+		limbo(MV::Scene::Node::make(managers.renderer)){
 
-		renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
-		renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
-		renderer.loadShader(MV::COLOR_PICKER_ID, "Assets/Shaders/default.vert", "Assets/Shaders/colorPicker.frag");
+		managers.renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
+		managers.renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
+		managers.renderer.loadShader(MV::COLOR_PICKER_ID, "Assets/Shaders/default.vert", "Assets/Shaders/colorPicker.frag");
 
 		limbo->make("PaletteTest")->position({ 200.0f, 400.0f })->
-			attach<MV::Scene::Palette>(mouse)->bounds(MV::size(256.0f, 256.0f));
+			attach<MV::Scene::Palette>(managers.mouse)->bounds(MV::size(256.0f, 256.0f));
 
-		auto grid = limbo->make("Grid")->position({ (static_cast<float>(game.getRenderer()->window().width()) - 100.0f) / 2.0f, 200.0f })->
+		auto grid = limbo->make("Grid")->position({ (static_cast<float>(game.getManager().renderer.window().width()) - 100.0f) / 2.0f, 200.0f })->
 			attach<MV::Scene::Grid>()->columns(1)->padding({ 2.0f, 2.0f })->margin({ 4.0f, 4.0f })->color({ BOX_BACKGROUND })->owner();
 
-		auto editorButton = makeButton(grid, *game.getTextLibrary(), mouse, "Editor", { 100.0f, 20.0f }, UTF_CHAR_STR("Editor"));
+		auto editorButton = makeButton(grid, game.getManager().textLibrary, managers.mouse, "Editor", { 100.0f, 20.0f }, UTF_CHAR_STR("Editor"));
 		editorButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
 			runEditor();
 		});
-		auto gameButton = makeButton(grid, *game.getTextLibrary(), mouse, "Game", { 100.0f, 20.0f }, UTF_CHAR_STR("Game"));
+		auto gameButton = makeButton(grid, game.getManager().textLibrary, managers.mouse, "Game", { 100.0f, 20.0f }, UTF_CHAR_STR("Game"));
 		gameButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
 			runGame();
 		});
-		auto quitButton = makeButton(grid, *game.getTextLibrary(), mouse, "Quit", { 100.0f, 20.0f }, UTF_CHAR_STR("Quit"));
+		auto quitButton = makeButton(grid, game.getManager().textLibrary, managers.mouse, "Quit", { 100.0f, 20.0f }, UTF_CHAR_STR("Quit"));
 		quitButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
 			done = true;
 		});
@@ -42,23 +43,23 @@ public:
 	}
 private:
 	void runLimbo() {
-		timer.start();
+		managers.timer.start();
 		done = false;
 
 		while (!done) {
-			pool.run();
+			managers.pool.run();
 			handleInput();
 			limbo->renderer().clearScreen();
-			limbo->drawUpdate(timer.delta("tick"));
+			limbo->drawUpdate(managers.timer.delta("tick"));
 			limbo->renderer().updateScreen();
 			MV::systemSleep(0);
 		}
 	}
 
 	void runEditor() {
-		timer.start();
-		timer.delta("tick");
-		while (editor.update(timer.delta("tick"))) {
+		managers.timer.start();
+		managers.timer.delta("tick");
+		while (editor.update(managers.timer.delta("tick"))) {
 			editor.handleInput();
 			editor.render();
 			MV::systemSleep(0);
@@ -66,9 +67,9 @@ private:
 	}
 
 	void runGame() {
-		timer.start();
-		timer.delta("tick");
-		while (game.update(timer.delta("tick"))) {
+		managers.timer.start();
+		managers.timer.delta("tick");
+		while (game.update(managers.timer.delta("tick"))) {
 			game.handleInput();
 			game.render();
 			MV::systemSleep(0);
@@ -88,7 +89,7 @@ private:
 	void handleInput() {
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
-			if (!game.getRenderer()->handleEvent(event)) {
+			if (!game.getManager().renderer.handleEvent(event)) {
 				switch (event.type) {
 				case SDL_QUIT:
 					done = true;
@@ -120,15 +121,12 @@ private:
 				}
 			}
 		}
-		mouse.update();
+		managers.mouse.update();
 	}
-
-	MV::Stopwatch timer;
-	MV::ThreadPool pool;
-	MV::Draw2D renderer;
+	
+	Managers managers;
 
 	bool done = false;
-	MV::MouseState mouse;
 	std::shared_ptr<MV::Scene::Node> limbo;
 
 	double lastUpdateDelta = 0.0;

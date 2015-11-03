@@ -276,7 +276,7 @@ namespace MV {
 		void disconnect(const std::string &a_id){
 			auto connectionToRemove = ownedConnections.find(a_id);
 			if (connectionToRemove != ownedConnections.end()) {
-				slot.disconnect(*connectionToRemove);
+				slot.disconnect(connectionToRemove->second);
 			}
 		}
 

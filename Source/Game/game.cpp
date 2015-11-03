@@ -202,8 +202,10 @@ GameInstance::GameInstance(Managers& a_managers, const std::shared_ptr<Player> &
 			auto signature = managers.mouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse2) {
 				worldScene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
 			});
-			managers.mouse.onLeftMouseUp.connect(MV::guid("cancelDrag"), [=](MV::MouseState& a_mouse2) {
+			auto cancelId = MV::guid("cancelDrag");
+			managers.mouse.onLeftMouseUp.connect(cancelId, [=](MV::MouseState& a_mouse2) {
 				a_mouse2.onMove.disconnect(signature);
+				a_mouse2.onLeftMouseUp.disconnect(cancelId);
 			});
 		}, []() {}, "MapDrag"));
 	});

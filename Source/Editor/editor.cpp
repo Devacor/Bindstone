@@ -3,19 +3,17 @@
 #include "componentPanels.h"
 #include "editorFactories.h"
 
-Editor::Editor(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer):
-	pool(a_pool),
-	renderer(a_renderer),
-	textLibrary(*a_renderer),
-	scene(MV::Scene::Node::make(*renderer, "root")),
-	controls(MV::Scene::Node::make(*renderer)),
-	controlPanel(controls, scene, SharedResources(this, pool, &textures, &textLibrary, &mouse)),
-	selectorPanel(scene, controls, SharedResources(this, pool, &textures, &textLibrary, &mouse)),
-	testNode(MV::Scene::Node::make(*renderer)){
+Editor::Editor(Managers &a_managers):
+	managers(a_managers),
+	scene(MV::Scene::Node::make(a_managers.renderer, "root")),
+	controls(MV::Scene::Node::make(a_managers.renderer)),
+	controlPanel(controls, scene, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &a_managers.mouse)),
+	selectorPanel(scene, controls, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &a_managers.mouse)),
+	testNode(MV::Scene::Node::make(a_managers.renderer)){
 
-	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
-	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
-	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+	managers.textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
+	managers.textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
+	managers.textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 
 	initializeWindow();
 	initializeControls();
@@ -83,7 +81,7 @@ bool Editor::update(double dt){
 	//fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
 	lastUpdateDelta = dt;
 	selectorPanel.update();
-	pool->run();
+	managers.pool.run();
 	if (done) {
 		done = false;
 		return false;
@@ -96,32 +94,32 @@ void Editor::sceneUpdated(){
 }
 
 void Editor::initializeWindow(){
-	mouse.update();
+	managers.mouse.update();
 	
-	mouse.onLeftMouseDown.connect("initDrag", [&](MV::MouseState& a_mouse){
+	managers.mouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse){
 		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, {10}, [&](){
-			auto signature = mouse.onMove.connect("inDrag", [&](MV::MouseState& a_mouse2){
+			auto signature = managers.mouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse2){
 				scene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
 				controlPanel.onSceneDrag(a_mouse2.position() - a_mouse2.oldPosition());
 			});
-			mouse.onLeftMouseUp.connect("cancelDrag", [=](MV::MouseState& a_mouse2){
+			managers.mouse.onLeftMouseUp.connect(MV::guid("cancelDrag"), [=](MV::MouseState& a_mouse2){
 				a_mouse2.onMove.disconnect(signature);
 			});
 		}, [](){}, "ControlPanelDrag"));
 	});
 
-	textures.assemblePacks("Assets/Atlases", renderer);
-	textures.files("Assets/Map");
+	managers.textures.assemblePacks("Assets/Atlases", &managers.renderer);
+	managers.textures.files("Assets/Map");
 
 	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
 	fps = controls->make("FPS")->position({960.0f - 50.0f, 0.0f})->
-		attach<MV::Scene::Text>(textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->wrapping(MV::TextWrapMethod::NONE);
+		attach<MV::Scene::Text>(managers.textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->wrapping(MV::TextWrapMethod::NONE);
 }
 
 void Editor::handleInput(){
 	SDL_Event event;
 	while(SDL_PollEvent(&event)){
-		if(!renderer->handleEvent(event)){
+		if(!managers.renderer.handleEvent(event)){
 			switch(event.type){
 			case SDL_QUIT:
 				done = true;
@@ -154,12 +152,12 @@ void Editor::handleInput(){
 			}
 		}
 	}
-	mouse.update();
+	managers.mouse.update();
 	controlPanel.handleInput(event);
 }
 
 void Editor::render(){
-	renderer->clearScreen();
+	managers.renderer.clearScreen();
 	
 	if(controlPanel.root() != scene){
 		scene = controlPanel.root();
@@ -168,7 +166,7 @@ void Editor::render(){
 	}
 	scene->drawUpdate(lastUpdateDelta);
 	controls->drawUpdate(lastUpdateDelta);
-	renderer->updateScreen();
+	managers.renderer.updateScreen();
 }
 
 void Editor::initializeControls(){
@@ -178,7 +176,7 @@ void Editor::initializeControls(){
 void Editor::handleScroll(int a_amount) {
 	auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount);
 	if (scene->scale().x + screenScale.x > .05f) {
-		auto originalScreenPosition = scene->localFromScreen(mouse.position()) * (MV::toPoint(screenScale));
+		auto originalScreenPosition = scene->localFromScreen(managers.mouse.position()) * (MV::toPoint(screenScale));
 		scene->addScale(screenScale);
 		scene->translate(originalScreenPosition * -1.0f);
 		controlPanel.onSceneZoom();

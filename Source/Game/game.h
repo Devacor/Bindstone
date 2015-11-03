@@ -1,30 +1,10 @@
 #include <SDL.h>
-#include "Utility/package.h"
-#include "Render/package.h"
-#include "Audio/package.h"
-#include "Animation/package.h"
-#include "Network/package.h"
-#include "Interface/package.h"
+#include "Game/managers.h"
 #include "Game/building.h"
 #include <string>
 #include <ctime>
 #include "chaiscript/chaiscript.hpp"
 #include "chaiscript/chaiscript_stdlib.hpp"
-
-class GamePlayer {
-public:
-	GamePlayer(const std::shared_ptr<Player> &a_player):
-		player(a_player){
-	}
-
-private:
-	std::vector<std::shared_ptr<Building>> buildings;
-	int health;
-	std::vector<std::shared_ptr<Creature>> creatures;
-	std::vector<Gem> gems;
-
-	std::shared_ptr<Player> player;
-};
 
 class LocalData {
 public:
@@ -40,27 +20,59 @@ private:
 	std::vector<BuildingData> buildings;
 };
 
+struct Constants {
+	int startHealth = 20;
+};
 
+class Team {
+public:
+	Team(const std::shared_ptr<Player> &a_player, const Constants& a_constants) :
+		player(a_player),
+		health(a_constants.startHealth) {
+	}
+
+
+private:
+	std::vector<std::shared_ptr<Building>> buildings;
+	int health;
+	std::vector<std::shared_ptr<Creature>> creatures;
+	std::vector<Gem> gems;
+
+	std::shared_ptr<Player> player;
+};
+
+class GameInstance {
+public:
+	GameInstance(Managers &a_managers, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants);
+
+	bool update(double dt);
+
+	bool handleEvent(const SDL_Event &a_event);
+private:
+	void handleScroll(int a_amount);
+
+	Managers &managers;
+
+	std::shared_ptr<MV::Scene::Node> worldScene;
+	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
+
+	Team left;
+	Team right;
+
+	chaiscript::ChaiScript script;
+};
 
 class Game {
 public:
-	Game(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer);
+	Game(Managers &a_managers);
 
 	//return true if we're still good to go
 	bool update(double dt);
 	void handleInput();
 	void render();
 
-	MV::ThreadPool* getPool() {
-		return pool;
-	}
-
-	MV::Draw2D* getRenderer() {
-		return renderer;
-	}
-
-	MV::TextLibrary* getTextLibrary() {
-		return &textLibrary;
+	Managers& getManager() {
+		return managers;
 	}
 
 private:
@@ -70,21 +82,11 @@ private:
 	void initializeWindow();
 	void spawnCreature(const MV::Point<> &a_position);
 
-	void handleScroll(int a_amount);
+	Managers &managers;
 
-	MV::ThreadPool* pool;
-	MV::Draw2D* renderer;
-	MV::TextLibrary textLibrary;
-
-	MV::SharedTextures textures;
-	
-	std::shared_ptr<MV::Scene::Node> worldScene;
-
-	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
-	chaiscript::ChaiScript script;
+	std::unique_ptr<GameInstance> instance;
 
 	bool done;
-	MV::MouseState mouse;
 
 	double lastUpdateDelta;
 

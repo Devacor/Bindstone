@@ -971,6 +971,9 @@
     <ClInclude Include="Source\Game\player.h">
       <Filter>Source Files\Game</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Game\managers.h">
+      <Filter>Source Files\Game</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html">

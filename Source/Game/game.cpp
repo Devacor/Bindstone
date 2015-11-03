@@ -5,43 +5,11 @@ void sdl_quit(void){
 	TTF_Quit();
 }
 
-Game::Game(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer) :
-	pool(a_pool),
-	renderer(a_renderer),
-	textLibrary(*a_renderer),
-	done(false),
-	script(chaiscript::Std_Lib::library()){
-	MV::TexturePoint::hook(script);
-	MV::Color::hook(script);
-	MV::Size<MV::PointPrecision>::hook(script);
-	MV::Size<int>::hook(script, "i");
-	MV::Point<MV::PointPrecision>::hook(script);
-	MV::Point<int>::hook(script, "i"); 
-	MV::BoxAABB<MV::PointPrecision>::hook(script);
-	MV::BoxAABB<int>::hook(script, "i");
-
-	MV::TexturePack::hook(script);
-	MV::TextureDefinition::hook(script);
-	MV::FileTextureDefinition::hook(script);
-	MV::TextureHandle::hook(script);
-	MV::SharedTextures::hook(script);
-
-	Wallet::hook(script);
-
-	MV::PathNode::hook(script);
-	MV::NavigationAgent::hook(script);
-
-	MV::Scene::Node::hook(script);
-	MV::Scene::Component::hook(script);
-	MV::Scene::Drawable::hook(script);
-	MV::Scene::Sprite::hook(script);
-	MV::Scene::Text::hook(script);
-	MV::Scene::PathMap::hook(script);
-	MV::Scene::PathAgent::hook(script);
+Game::Game(Managers& a_managers) :
+	managers(a_managers),
+	done(false){
 
 	initializeWindow();
-	script.add_global(chaiscript::var(worldScene), "worldScene");
-	script.add_global(chaiscript::var(textures), "textures");
 }
 
 void Game::initializeWindow(){
@@ -51,61 +19,37 @@ void Game::initializeWindow(){
 	MV::Size<> worldSize(960, 640);
 	MV::Size<int> windowSize(960, 640);
 
-	renderer->window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
+	managers.renderer.window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
 
-	if (!renderer->initialize(windowSize, worldSize)) {
+	if (!managers.renderer.initialize(windowSize, worldSize)) {
 		exit(0);
 	}
-	renderer->loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
-	renderer->loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
+	managers.renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
+	managers.renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
 	atexit(sdl_quit);
 
 	AudioPlayer::instance()->initAudio();
-	mouse.update();
+	managers.mouse.update();
 
-	std::ifstream stream("map.scene");
+	managers.textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
+	managers.textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
+	managers.textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 
-	cereal::JSONInputArchive archive(stream);
+	managers.textures.assemblePacks("Assets/Atlases", &managers.renderer);
+	managers.textures.files("Assets/Map");
 
-	archive.add(
-		cereal::make_nvp("mouse", &mouse),
-		cereal::make_nvp("renderer", renderer),
-		cereal::make_nvp("textLibrary", &textLibrary),
-		cereal::make_nvp("pool", pool)
-	);
-
-	archive(cereal::make_nvp("scene", worldScene));
-
-	mouse.onLeftMouseDown.connect("initDrag", [&](MV::MouseState& a_mouse) {
-		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
-			auto signature = mouse.onMove.connect("inDrag", [&](MV::MouseState& a_mouse2) {
-				worldScene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
-			});
-			mouse.onLeftMouseUp.connect("cancelDrag", [=](MV::MouseState& a_mouse2) {
-				a_mouse2.onMove.disconnect(signature);
-			});
-		}, []() {}, "MapDrag"));
-	});
-
-	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
-	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
-	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
-
-	textures.assemblePacks("Assets/Atlases", renderer);
-	textures.files("Assets/Map");
-
-	pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
-
-	for (int i = 1; i < 9; ++i) {
-		auto treeButton = worldScene->get("left_" + std::to_string(i))->attach<MV::Scene::Clickable>(mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
-		treeButton->onAccept.connect("TappedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
-			spawnCreature(a_self->worldBounds().bottomRightPoint());
-		});
-	}
+	instance = std::make_unique<GameInstance>(managers, std::make_shared<Player>(), std::make_shared<Player>(), Constants());
+// 	for (int i = 1; i < 9; ++i) {
+// 		auto treeButton = worldScene->get("left_" + std::to_string(i))->attach<MV::Scene::Clickable>(managers.mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
+// 		treeButton->onAccept.connect("TappedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
+// 			spawnCreature(a_self->worldBounds().bottomRightPoint());
+// 		});
+// 	}
 }
 
 void Game::spawnCreature(const MV::Point<> &a_position) {
-	auto voidTexture = textures.pack("VoidGuy")->handle(0);
+	/*
+	auto voidTexture = managers.textures.pack("VoidGuy")->handle(0);
 	auto creatureNode = pathMap->owner()->make(MV::guid("Creature_"));
 	creatureNode->attach<MV::Scene::Sprite>()->texture(voidTexture)->size(MV::cast<MV::PointPrecision>(voidTexture->bounds().size()));
 	creatureNode->attach<MV::Scene::PathAgent>(pathMap.self(), pathMap->gridFromLocal(pathMap->owner()->localFromWorld(a_position)))->
@@ -126,7 +70,7 @@ void Game::spawnCreature(const MV::Point<> &a_position) {
 		weakCreatureNode.lock()->depth(weakCreatureNode.lock()->position().y);
 		return false;
 	});
-
+	*/
 //  	script.eval(R"(
 // 			{
 //  			auto newNode = worldScene.make()
@@ -139,20 +83,23 @@ void Game::spawnCreature(const MV::Point<> &a_position) {
 }
 
 bool Game::update(double dt) {
-
 	lastUpdateDelta = dt;
-	pool->run();
+	managers.pool.run();
+	if (!done && instance) {
+		done = instance->update(dt);
+	}
 	if (done) {
 		done = false;
 		return false;
 	}
+	handleInput();
 	return true;
 }
 
 void Game::handleInput() {
 	SDL_Event event;
 	while(SDL_PollEvent(&event)){
-		if(!renderer->handleEvent(event)){
+		if(!managers.renderer.handleEvent(event) && (!instance || (instance && !instance->handleEvent(event)))){
 			switch(event.type){
 			case SDL_QUIT:
 				done = true;
@@ -180,27 +127,103 @@ void Game::handleInput() {
 					break;
 				}
 				break;
-			case SDL_MOUSEWHEEL:
-				handleScroll(event.wheel.y);
-				break;
 			}
 		}
 	}
-	mouse.update();
+	managers.mouse.update();
 }
 
 void Game::render() {
-	renderer->clearScreen();
-	worldScene->drawUpdate(static_cast<float>(lastUpdateDelta));
-	//testShape->draw();
-	renderer->updateScreen();
+	managers.renderer.clearScreen();
+	if (instance) {
+		instance->update(lastUpdateDelta);
+	}
+	managers.renderer.updateScreen();
 }
 
-void Game::handleScroll(int a_amount) {
+void GameInstance::handleScroll(int a_amount) {
 	auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount);
 	if (worldScene->scale().x + screenScale.x > .2f) {
-		auto originalScreenPosition = worldScene->localFromScreen(mouse.position()) * (MV::toPoint(screenScale));
+		auto originalScreenPosition = worldScene->localFromScreen(managers.mouse.position()) * (MV::toPoint(screenScale));
 		worldScene->addScale(screenScale);
 		worldScene->translate(originalScreenPosition * -1.0f);
 	}
+}
+
+GameInstance::GameInstance(Managers& a_managers, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants) :
+	managers(a_managers),
+	left(a_leftPlayer, a_constants),
+	right(a_rightPlayer, a_constants),
+	script(chaiscript::Std_Lib::library()) {
+
+	MV::TexturePoint::hook(script);
+	MV::Color::hook(script);
+	MV::Size<MV::PointPrecision>::hook(script);
+	MV::Size<int>::hook(script, "i");
+	MV::Point<MV::PointPrecision>::hook(script);
+	MV::Point<int>::hook(script, "i");
+	MV::BoxAABB<MV::PointPrecision>::hook(script);
+	MV::BoxAABB<int>::hook(script, "i");
+
+	MV::TexturePack::hook(script);
+	MV::TextureDefinition::hook(script);
+	MV::FileTextureDefinition::hook(script);
+	MV::TextureHandle::hook(script);
+	MV::SharedTextures::hook(script);
+
+	Wallet::hook(script);
+
+	MV::PathNode::hook(script);
+	MV::NavigationAgent::hook(script);
+
+	MV::Scene::Node::hook(script);
+	MV::Scene::Component::hook(script);
+	MV::Scene::Drawable::hook(script);
+	MV::Scene::Sprite::hook(script);
+	MV::Scene::Text::hook(script);
+	MV::Scene::PathMap::hook(script);
+	MV::Scene::PathAgent::hook(script);
+
+	std::ifstream stream("map.scene");
+
+	cereal::JSONInputArchive archive(stream);
+
+	archive.add(
+		cereal::make_nvp("mouse", &managers.mouse),
+		cereal::make_nvp("renderer", &managers.renderer),
+		cereal::make_nvp("textLibrary", &managers.textLibrary),
+		cereal::make_nvp("pool", &managers.pool)
+		);
+
+	archive(cereal::make_nvp("scene", worldScene));
+
+	managers.mouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse) {
+		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
+			auto signature = managers.mouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse2) {
+				worldScene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
+			});
+			managers.mouse.onLeftMouseUp.connect(MV::guid("cancelDrag"), [=](MV::MouseState& a_mouse2) {
+				a_mouse2.onMove.disconnect(signature);
+			});
+		}, []() {}, "MapDrag"));
+	});
+	for (int i = 1; i < 9; ++i) {
+		auto treeButton = worldScene->get("left_" + std::to_string(i))->attach<MV::Scene::Clickable>(managers.mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
+		treeButton->onAccept.connect("TappedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
+			//spawnCreature(a_self->worldBounds().bottomRightPoint());
+		});
+	}
+	pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
+}
+
+bool GameInstance::update(double a_dt) {
+	worldScene->drawUpdate(static_cast<float>(a_dt));
+	return false;
+}
+
+bool GameInstance::handleEvent(const SDL_Event &a_event) {
+	if (a_event.type == SDL_MOUSEWHEEL) {
+		handleScroll(a_event.wheel.y);
+	}
+	return false;
 }

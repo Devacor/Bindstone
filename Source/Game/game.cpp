@@ -29,7 +29,7 @@ void Game::initializeWindow(){
 	atexit(sdl_quit);
 
 	AudioPlayer::instance()->initAudio();
-	managers.mouse.update();
+	mouse.update();
 
 	managers.textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
 	managers.textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
@@ -38,13 +38,7 @@ void Game::initializeWindow(){
 	managers.textures.assemblePacks("Assets/Atlases", &managers.renderer);
 	managers.textures.files("Assets/Map");
 
-	instance = std::make_unique<GameInstance>(managers, std::make_shared<Player>(), std::make_shared<Player>(), Constants());
-// 	for (int i = 1; i < 9; ++i) {
-// 		auto treeButton = worldScene->get("left_" + std::to_string(i))->attach<MV::Scene::Clickable>(managers.mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
-// 		treeButton->onAccept.connect("TappedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
-// 			spawnCreature(a_self->worldBounds().bottomRightPoint());
-// 		});
-// 	}
+	instance = std::make_unique<GameInstance>(managers, mouse, std::make_shared<Player>(), std::make_shared<Player>(), Constants());
 }
 
 void Game::spawnCreature(const MV::Point<> &a_position) {
@@ -85,14 +79,10 @@ void Game::spawnCreature(const MV::Point<> &a_position) {
 bool Game::update(double dt) {
 	lastUpdateDelta = dt;
 	managers.pool.run();
-	if (!done && instance) {
-		done = instance->update(dt);
-	}
 	if (done) {
 		done = false;
 		return false;
 	}
-	handleInput();
 	return true;
 }
 
@@ -130,13 +120,13 @@ void Game::handleInput() {
 			}
 		}
 	}
-	managers.mouse.update();
+	mouse.update();
 }
 
 void Game::render() {
 	managers.renderer.clearScreen();
 	if (instance) {
-		instance->update(lastUpdateDelta);
+		done = instance->update(lastUpdateDelta);
 	}
 	managers.renderer.updateScreen();
 }
@@ -144,18 +134,71 @@ void Game::render() {
 void GameInstance::handleScroll(int a_amount) {
 	auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount);
 	if (worldScene->scale().x + screenScale.x > .2f) {
-		auto originalScreenPosition = worldScene->localFromScreen(managers.mouse.position()) * (MV::toPoint(screenScale));
+		auto originalScreenPosition = worldScene->localFromScreen(mouse.position()) * (MV::toPoint(screenScale));
 		worldScene->addScale(screenScale);
 		worldScene->translate(originalScreenPosition * -1.0f);
 	}
 }
 
-GameInstance::GameInstance(Managers& a_managers, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants) :
+GameInstance::GameInstance(Managers& a_managers, MV::MouseState& a_mouse, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants) :
 	managers(a_managers),
+	mouse(a_mouse),
 	left(a_leftPlayer, a_constants),
 	right(a_rightPlayer, a_constants),
 	script(chaiscript::Std_Lib::library()) {
 
+	BuildingData building;
+	building.game.name = "Tree of Life Foundation";
+	building.game.description = "";
+	building.game.asset = "elemental_base";
+	building.game.icon = "";
+	building.game.cost = 0;
+
+	building.game.upgrades.push_back(std::make_unique<BuildTree>());
+	
+	building.game.upgrades[0]->name = "Tree of Life";
+	building.game.upgrades[0]->description = "Begin production of life elementals.";
+	building.game.upgrades[0]->asset = "life0";
+	building.game.upgrades[0]->icon = "life0";
+	building.game.upgrades[0]->cost = 75;
+	building.game.upgrades[0]->wave.spawnDelay = 3;
+	building.game.upgrades[0]->wave.creatures = { {"basicLifeElemental", 10.0f} };
+
+	building.game.upgrades[0]->upgrades.push_back(std::make_unique<BuildTree>());
+	building.game.upgrades[0]->upgrades.push_back(std::make_unique<BuildTree>());
+
+	building.game.upgrades[0]->upgrades[0]->name = "Tree of Eternal Life";
+	building.game.upgrades[0]->upgrades[0]->description = "Begin production of greater life elementals.";
+	building.game.upgrades[0]->upgrades[0]->asset = "life1";
+	building.game.upgrades[0]->upgrades[0]->icon = "life1";
+	building.game.upgrades[0]->upgrades[0]->cost = 250;
+	building.game.upgrades[0]->upgrades[0]->wave.spawnDelay = 5;
+	building.game.upgrades[0]->upgrades[0]->wave.creatures = { { "greaterLifeElemental", 10.0f } };
+
+	building.game.upgrades[0]->upgrades[1]->name = "Tree of Overwhelming Life";
+	building.game.upgrades[0]->upgrades[1]->description = "Begin production of suspended life elementals.";
+	building.game.upgrades[0]->upgrades[1]->asset = "life2";
+	building.game.upgrades[0]->upgrades[1]->icon = "life2";
+	building.game.upgrades[0]->upgrades[1]->cost = 250;
+	building.game.upgrades[0]->upgrades[1]->wave.spawnDelay = 5;
+	building.game.upgrades[0]->upgrades[1]->wave.creatures = { { "suspendedLifeElemental", 10.0f } };
+
+	building.id = "life";
+	building.name = "Tree of Life";
+	building.description = "From the roots of this mighty tree springs life eternal.";
+	building.icon = "life";
+	building.costs.push_back(Wallet({0, 10000, 0}));
+	building.costs.push_back(Wallet({ 0, 0, 475 }));
+	building.costs.push_back(Wallet({ 0, 6000, 325 }));
+
+	{
+		std::vector<BuildingData> buildings;
+		buildings.push_back(building);
+		std::ofstream outstream("tree.data");
+		cereal::JSONOutputArchive archive(outstream);
+
+		archive(cereal::make_nvp("buildings", buildings));
+	}
 	MV::TexturePoint::hook(script);
 	MV::Color::hook(script);
 	MV::Size<MV::PointPrecision>::hook(script);
@@ -189,28 +232,29 @@ GameInstance::GameInstance(Managers& a_managers, const std::shared_ptr<Player> &
 	cereal::JSONInputArchive archive(stream);
 
 	archive.add(
-		cereal::make_nvp("mouse", &managers.mouse),
+		cereal::make_nvp("mouse", &mouse),
 		cereal::make_nvp("renderer", &managers.renderer),
 		cereal::make_nvp("textLibrary", &managers.textLibrary),
 		cereal::make_nvp("pool", &managers.pool)
-		);
+	);
 
 	archive(cereal::make_nvp("scene", worldScene));
 
-	managers.mouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse) {
+	mouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse) {
 		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
-			auto signature = managers.mouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse2) {
+			auto signature = mouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse2) {
 				worldScene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
 			});
 			auto cancelId = MV::guid("cancelDrag");
-			managers.mouse.onLeftMouseUp.connect(cancelId, [=](MV::MouseState& a_mouse2) {
+			mouse.onLeftMouseUp.connect(cancelId, [=](MV::MouseState& a_mouse2) {
 				a_mouse2.onMove.disconnect(signature);
 				a_mouse2.onLeftMouseUp.disconnect(cancelId);
 			});
 		}, []() {}, "MapDrag"));
 	});
 	for (int i = 1; i < 9; ++i) {
-		auto treeButton = worldScene->get("left_" + std::to_string(i))->attach<MV::Scene::Clickable>(managers.mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
+		auto buildingNode = worldScene->get("left_" + std::to_string(i));
+		auto treeButton = buildingNode->attach<MV::Scene::Clickable>(mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
 		treeButton->onAccept.connect("TappedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
 			//spawnCreature(a_self->worldBounds().bottomRightPoint());
 		});

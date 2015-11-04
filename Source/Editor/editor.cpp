@@ -7,8 +7,8 @@ Editor::Editor(Managers &a_managers):
 	managers(a_managers),
 	scene(MV::Scene::Node::make(a_managers.renderer, "root")),
 	controls(MV::Scene::Node::make(a_managers.renderer)),
-	controlPanel(controls, scene, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &a_managers.mouse)),
-	selectorPanel(scene, controls, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &a_managers.mouse)),
+	controlPanel(controls, scene, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &mouse)),
+	selectorPanel(scene, controls, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &mouse)),
 	testNode(MV::Scene::Node::make(a_managers.renderer)){
 
 	initializeWindow();
@@ -90,16 +90,16 @@ void Editor::sceneUpdated(){
 }
 
 void Editor::initializeWindow(){
-	managers.mouse.update();
+	mouse.update();
 	
-	managers.mouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse){
+	mouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse){
 		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, {10}, [&](){
-			auto signature = managers.mouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse2){
+			auto signature = mouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse2){
 				scene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
 				controlPanel.onSceneDrag(a_mouse2.position() - a_mouse2.oldPosition());
 			});
 			auto cancelId = MV::guid("cancelDrag");
-			managers.mouse.onLeftMouseUp.connect(cancelId, [=](MV::MouseState& a_mouse2){
+			mouse.onLeftMouseUp.connect(cancelId, [=](MV::MouseState& a_mouse2){
 				a_mouse2.onMove.disconnect(signature);
 				a_mouse2.onLeftMouseUp.disconnect(cancelId);
 			});
@@ -150,7 +150,7 @@ void Editor::handleInput(){
 			}
 		}
 	}
-	managers.mouse.update();
+	mouse.update();
 	controlPanel.handleInput(event);
 }
 
@@ -174,7 +174,7 @@ void Editor::initializeControls(){
 void Editor::handleScroll(int a_amount) {
 	auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount);
 	if (scene->scale().x + screenScale.x > .05f) {
-		auto originalScreenPosition = scene->localFromScreen(managers.mouse.position()) * (MV::toPoint(screenScale));
+		auto originalScreenPosition = scene->localFromScreen(mouse.position()) * (MV::toPoint(screenScale));
 		scene->addScale(screenScale);
 		scene->translate(originalScreenPosition * -1.0f);
 		controlPanel.onSceneZoom();

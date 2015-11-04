@@ -15,7 +15,6 @@ struct Managers {
 	MV::Stopwatch timer;
 	MV::ThreadPool pool;
 	MV::Draw2D renderer;
-	MV::MouseState mouse;
 	MV::TextLibrary textLibrary;
 	MV::SharedTextures textures;
 };

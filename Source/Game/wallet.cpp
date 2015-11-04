@@ -7,6 +7,33 @@ Wallet::Wallet() :
 	onChangeCurrency(onChangeCurrencySignal) {
 }
 
+Wallet::Wallet(const std::array<int64_t, 3> &a_initialValues) :
+	onChange(onChangeSignal),
+	onChangeCurrency(onChangeCurrencySignal),
+	values(a_initialValues.begin(), a_initialValues.end()) {
+}
+
+Wallet::Wallet(const Wallet& a_rhs) : Wallet() {
+	values = a_rhs.values;
+	names = a_rhs.names;
+}
+
+Wallet& Wallet::operator=(const Wallet& a_rhs) {
+	auto oldValues = values;
+	values = a_rhs.values;
+	bool changed = false;
+	for (size_t i = 0; i < TOTAL; ++i) {
+		if (oldValues[i] != values[i]) {
+			changed = true;
+			onChangeCurrencySignal(*this, static_cast<CurrencyType>(i), values[i] - oldValues[i]);
+		}
+	}
+	if (changed) {
+		onChangeSignal(*this);
+	}
+	return *this;
+}
+
 Wallet& Wallet::value(CurrencyType a_type, int64_t a_newValue) {
 	MV::require<MV::RangeException>(a_newValue >= 0, "Negative amount supplied to value: ", a_newValue);
 	auto difference = a_newValue - values[static_cast<int>(a_type)];

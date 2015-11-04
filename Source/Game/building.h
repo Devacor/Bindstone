@@ -52,8 +52,8 @@ struct CreatureStats {
 };
 
 struct WaveData {
-	double spawnDelay;
-	std::vector<std::pair<CreatureStats, double>> creatures;
+	double spawnDelay = 0.0;
+	std::vector<std::pair<std::string, double>> creatures;
 
 	template <class Archive>
 	void serialize(Archive & archive) {
@@ -72,9 +72,22 @@ struct BuildTree {
 	std::string name;
 	std::string description;
 
-	int64_t cost;
+	int64_t cost = 0;
 
-	std::vector<std::shared_ptr<BuildTree>> path;
+	std::vector<std::unique_ptr<BuildTree>> upgrades;
+
+	BuildTree(){}
+	BuildTree(const BuildTree& a_rhs) {
+		wave = a_rhs.wave;
+		icon = a_rhs.icon;
+		asset = a_rhs.asset;
+		name = a_rhs.name;
+		description = a_rhs.description;
+		cost = a_rhs.cost;
+		for (auto&& upgrade : a_rhs.upgrades) {
+			upgrades.emplace_back(std::make_unique<BuildTree>(*upgrade));
+		}
+	}
 
 	template <class Archive>
 	void serialize(Archive & archive) {
@@ -85,16 +98,16 @@ struct BuildTree {
 			CEREAL_NVP(icon),
 			CEREAL_NVP(asset),
 			CEREAL_NVP(wave),
-			CEREAL_NVP(path)
+			CEREAL_NVP(upgrades)
 		);
 	}
 };
 
 struct BuildingData {
-	std::vector<Wallet> storeCosts;
+	std::vector<Wallet> costs;
 	std::string icon;
 
-	BuildTree upgrades;
+	BuildTree game;
 
 	std::string id;
 
@@ -108,12 +121,13 @@ struct BuildingData {
 			CEREAL_NVP(icon), 
 			CEREAL_NVP(name),
 			CEREAL_NVP(description),
-			CEREAL_NVP(storeCosts)
+			CEREAL_NVP(costs),
+			CEREAL_NVP(game)
 		);
 	}
 };
 
-class BuildingIndex {
+class BuildingCatalogue {
 public:
 	template <class Archive>
 	void serialize(Archive & archive) {
@@ -141,6 +155,12 @@ public:
 protected:
 	Building(const std::weak_ptr<MV::Scene::Node> &a_owner) :
 		Component(a_owner) {
+		if (!a_owner.expired()) {
+			auto spawnObject = a_owner.lock()->get("spawn", false);
+			if (spawnObject) {
+				spawnPoint = spawnObject->position();
+			}
+		}
 	}
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
@@ -175,6 +195,7 @@ private:
 		construct->initialize();
 	}
 
+	MV::Point<> spawnPoint;
 };
 
 class Creature : public MV::Scene::Component {

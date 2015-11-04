@@ -19,6 +19,10 @@ public:
 	MV::SignalRegister<void(Wallet&, CurrencyType, int64_t)> onChangeCurrency;
 
 	Wallet();
+	Wallet(const std::array<int64_t, TOTAL> &a_initialValues);
+	Wallet(const Wallet& a_rhs);;
+
+	Wallet& operator=(const Wallet& a_rhs);
 
 	std::string name(CurrencyType a_type) const {
 		return names[static_cast<int>(a_type)];
@@ -50,7 +54,7 @@ public:
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 private:
 	std::vector<int64_t> values = { 0, 0, 0 };
-	std::vector<std::string> names = { "Gold", "Sweat", "Blood" };
+	std::array<std::string, TOTAL> names = { "Gold", "Sweat", "Blood" };
 };
 
 

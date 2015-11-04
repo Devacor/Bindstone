@@ -19,20 +19,20 @@ public:
 		managers.renderer.loadShader(MV::COLOR_PICKER_ID, "Assets/Shaders/default.vert", "Assets/Shaders/colorPicker.frag");
 
 		limbo->make("PaletteTest")->position({ 200.0f, 400.0f })->
-			attach<MV::Scene::Palette>(managers.mouse)->bounds(MV::size(256.0f, 256.0f));
+			attach<MV::Scene::Palette>(mouse)->bounds(MV::size(256.0f, 256.0f));
 
 		auto grid = limbo->make("Grid")->position({ (static_cast<float>(game.getManager().renderer.window().width()) - 100.0f) / 2.0f, 200.0f })->
 			attach<MV::Scene::Grid>()->columns(1)->padding({ 2.0f, 2.0f })->margin({ 4.0f, 4.0f })->color({ BOX_BACKGROUND })->owner();
 
-		auto editorButton = makeButton(grid, game.getManager().textLibrary, managers.mouse, "Editor", { 100.0f, 20.0f }, UTF_CHAR_STR("Editor"));
+		auto editorButton = makeButton(grid, game.getManager().textLibrary, mouse, "Editor", { 100.0f, 20.0f }, UTF_CHAR_STR("Editor"));
 		editorButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
 			runEditor();
 		});
-		auto gameButton = makeButton(grid, game.getManager().textLibrary, managers.mouse, "Game", { 100.0f, 20.0f }, UTF_CHAR_STR("Game"));
+		auto gameButton = makeButton(grid, game.getManager().textLibrary, mouse, "Game", { 100.0f, 20.0f }, UTF_CHAR_STR("Game"));
 		gameButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
 			runGame();
 		});
-		auto quitButton = makeButton(grid, game.getManager().textLibrary, managers.mouse, "Quit", { 100.0f, 20.0f }, UTF_CHAR_STR("Quit"));
+		auto quitButton = makeButton(grid, game.getManager().textLibrary, mouse, "Quit", { 100.0f, 20.0f }, UTF_CHAR_STR("Quit"));
 		quitButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
 			done = true;
 		});
@@ -121,10 +121,11 @@ private:
 				}
 			}
 		}
-		managers.mouse.update();
+		mouse.update();
 	}
 	
 	Managers managers;
+	MV::MouseState mouse;
 
 	bool done = false;
 	std::shared_ptr<MV::Scene::Node> limbo;

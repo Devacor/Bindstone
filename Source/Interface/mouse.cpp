@@ -17,6 +17,7 @@ namespace MV{
 		onRightMouseDownEnd(onRightMouseDownEndSignal),
 		onRightMouseUpEnd(onRightMouseUpEndSignal),
 		onMove(onMoveSignal){
+		update();
 	}
 
 	void MouseState::update() {

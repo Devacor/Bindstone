@@ -30,6 +30,10 @@ public:
 		return managers;
 	}
 
+	MV::MouseState& getMouse() {
+		return mouse;
+	}
+
 private:
 	Editor(const Editor &) = delete;
 	Editor& operator=(const Editor &) = delete;
@@ -39,6 +43,8 @@ private:
 	void handleScroll(int a_amount);
 
 	Managers& managers;
+
+	MV::MouseState mouse;
 
 	MV::FrameSwapperRegister animationLibrary;
 

@@ -43,7 +43,7 @@ private:
 
 class GameInstance {
 public:
-	GameInstance(Managers &a_managers, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants);
+	GameInstance(Managers &a_managers, MV::MouseState& a_mouse, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants);
 
 	bool update(double dt);
 
@@ -52,6 +52,7 @@ private:
 	void handleScroll(int a_amount);
 
 	Managers &managers;
+	MV::MouseState& mouse;
 
 	std::shared_ptr<MV::Scene::Node> worldScene;
 	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
@@ -75,6 +76,10 @@ public:
 		return managers;
 	}
 
+	MV::MouseState& getMouse() {
+		return mouse;
+	}
+
 private:
 	Game(const Game &) = delete;
 	Game& operator=(const Game &) = delete;
@@ -89,6 +94,8 @@ private:
 	bool done;
 
 	double lastUpdateDelta;
+
+	MV::MouseState mouse;
 
 	//MV::Scene::Clickable::Signals armInputHandles;
 };

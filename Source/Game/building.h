@@ -127,15 +127,37 @@ struct BuildingData {
 	}
 };
 
-class BuildingCatalogue {
+class BuildingCatalog {
+	friend cereal::access;
 public:
+	BuildingCatalog(const std::string &a_filename) {
+		std::ifstream instream(a_filename);
+		cereal::JSONInputArchive archive(instream);
+
+		archive(cereal::make_nvp("buildings", buildingList));
+	}
+
+	BuildingData instance(const std::string &a_id) const {
+		for (auto&& building : buildingList) {
+			if (building.id == a_id) {
+				return building;
+			}
+		}
+		MV::require<MV::ResourceException>(false, "Failed to locate building: ", a_id);
+		return BuildingData();
+	}
+
+private:
+	BuildingCatalog() {
+	}
+
 	template <class Archive>
 	void serialize(Archive & archive) {
 		archive(
 			cereal::make_nvp("buildings", buildingList)
 		);
 	}
-private:
+
 	std::vector<BuildingData> buildingList;
 };
 

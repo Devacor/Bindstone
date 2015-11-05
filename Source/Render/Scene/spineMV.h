@@ -2,6 +2,7 @@
 #define _MV_SPINE_MV_
 
 #include "Render/Scene/node.h"
+#include "Render/Scene/drawable.h"
 #include "spine/AnimationState.h"
 
 struct spSlot;
@@ -18,10 +19,10 @@ namespace MV {
 		
 		struct AnimationEventData {
 			AnimationEventData(const std::string &a_name, const std::string & a_stringValue, int a_intValue, float a_floatValue):
-			name(a_name),
-			stringValue(a_stringValue),
-			intValue(a_intValue),
-			floatValue(a_floatValue){
+				name(a_name),
+				stringValue(a_stringValue),
+				intValue(a_intValue),
+				floatValue(a_floatValue){
 			}
 			std::string name;
 			std::string stringValue;
@@ -87,21 +88,21 @@ namespace MV {
 			spAnimationState *animationState;
 			spSkeleton *skeleton;
 		};
-		/*
-		class Spine : public Node{
+		
+		class Spine : public Drawable{
 			friend cereal::access;
 			friend Node;
 			friend void spineAnimationCallback(spAnimationState* state, int trackIndex, spEventType type, spEvent* event, int loopCount);
 
-			Slot<void(std::shared_ptr<Spine>, int)> onStartSlot;
-			Slot<void(std::shared_ptr<Spine>, int)> onEndSlot;
-			Slot<void(std::shared_ptr<Spine>, int, int)> onCompleteSlot;
-			Slot<void(std::shared_ptr<Spine>, int, const AnimationEventData &)> onEventSlot;
+			Signal<void(std::shared_ptr<Spine>, int)> onStartSignal;
+			Signal<void(std::shared_ptr<Spine>, int)> onEndSignal;
+			Signal<void(std::shared_ptr<Spine>, int, int)> onCompleteSignal;
+			Signal<void(std::shared_ptr<Spine>, int, const AnimationEventData &)> onEventSignal;
 		public:
-			SlotRegister<void(std::shared_ptr<Spine>, int)> onStart;
-			SlotRegister<void(std::shared_ptr<Spine>, int)> onEnd;
-			SlotRegister<void(std::shared_ptr<Spine>, int, int)> onComplete;
-			SlotRegister<void(std::shared_ptr<Spine>, int, const AnimationEventData &)> onEvent;
+			SignalRegister<void(std::shared_ptr<Spine>, int)> onStart;
+			SignalRegister<void(std::shared_ptr<Spine>, int)> onEnd;
+			SignalRegister<void(std::shared_ptr<Spine>, int, int)> onComplete;
+			SignalRegister<void(std::shared_ptr<Spine>, int, const AnimationEventData &)> onEvent;
 
 			struct FileBundle {
 				FileBundle(const std::string &a_skeletonFile, const std::string &a_atlasFile, float a_loadScale = 1.0f);
@@ -117,16 +118,9 @@ namespace MV {
 				void serialize(Archive & archive);
 			};
 
-
-			SCENE_MAKE_FACTORY_METHODS(Spine)
-
-			static std::shared_ptr<Spine> make(Draw2D* a_renderer, const FileBundle &a_fileBundle);
+			DrawableDerivedAccessors(Spine)
 
 			virtual ~Spine();
-
-			void update(double a_delta);
-			void disableAutoUpdate();
-			void enableAutoUpdate();
 
 			std::shared_ptr<Spine> timeScale(double a_timeScale);
 			double timeScale() const;
@@ -138,21 +132,20 @@ namespace MV {
 			std::shared_ptr<Spine> animate(const std::string &a_animationName, bool a_loop = true);
 			std::shared_ptr<Spine> queueAnimation(const std::string &a_animationName, bool a_loop = true, double a_delay = 0.0);
 		protected:
-			Spine(Draw2D *a_renderer, const FileBundle &a_fileBundle);
+			Spine(const std::weak_ptr<Node> &a_owner, const FileBundle &a_fileBundle);
 
-			virtual void drawImplementation();
+			virtual void defaultDrawImplementation() override;
+			virtual void updateImplementation(double a_delta) override;
 
 		private:
 			//called from spineAnimationCallback
 			void onAnimationStateEvent(int trackIndex, spEventType type, spEvent* event, int loopCount);
 
-			void conditionalUpdate();
-
 			template <class Archive>
 			void serialize(Archive & archive){
 				archive(
 					cereal::make_nvp("fileBundle", fileBundle),
-					cereal::make_nvp("node", cereal::base_class<Node>(this))
+					cereal::make_nvp("Spine", cereal::base_class<Drawable>(this))
 				);
 			}
 
@@ -166,11 +159,12 @@ namespace MV {
 					cereal::make_nvp("renderer", renderer)
 				);
 				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Spine node.");
-				construct(renderer, fileBundle);
-				archive(cereal::make_nvp("node", cereal::base_class<Node>(construct.ptr())));
+				construct(std::shared_ptr<Node>(), fileBundle);
+				archive(cereal::make_nvp("Spine", cereal::base_class<Drawable>(construct.ptr())));
+				construct->initialize();
 			}
 
-			bool skeletonRenderStateChangedSinceLastIteration(bool a_previousBlendingWasAdditive, bool a_currentAdditiveBlending, FileTextureDefinition * a_previousTexture, FileTextureDefinition * a_texture);
+			bool skeletonRenderStateChangedSinceLastIteration(spBlendMode a_previousBlending, spBlendMode a_currentBlending, FileTextureDefinition * a_previousTexture, FileTextureDefinition * a_texture);
 
 			size_t renderSkeletonBatch(size_t lastRenderedIndex, GLuint a_textureId);
 
@@ -203,7 +197,7 @@ namespace MV {
 				CEREAL_NVP(atlasFile),
 				CEREAL_NVP(loadScale)
 			);
-		}*/
+		}
 
 	}
 }

@@ -21,6 +21,9 @@ public:
 		limbo->make("PaletteTest")->position({ 200.0f, 400.0f })->
 			attach<MV::Scene::Palette>(mouse)->bounds(MV::size(256.0f, 256.0f));
 
+		limbo->make("SpineTest")->position({ 400.0f, 600.0f })->
+			attach<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Example/spineboy.json", "Assets/Spine/Example/spineboy.atlas"))->animate("run");
+
 		auto grid = limbo->make("Grid")->position({ (static_cast<float>(game.getManager().renderer.window().width()) - 100.0f) / 2.0f, 200.0f })->
 			attach<MV::Scene::Grid>()->columns(1)->padding({ 2.0f, 2.0f })->margin({ 4.0f, 4.0f })->color({ BOX_BACKGROUND })->owner();
 

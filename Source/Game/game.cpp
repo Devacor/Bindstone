@@ -9,11 +9,16 @@ Game::Game(Managers& a_managers) :
 	managers(a_managers),
 	done(false){
 
+	MV::initializeFilesystem();
+	initializeData();
 	initializeWindow();
 }
 
+void Game::initializeData() {
+	catalogs.buildings = std::make_unique<BuildingCatalog>("buildings.json");
+}
+
 void Game::initializeWindow(){
-	MV::initializeFilesystem();
 	srand(static_cast<unsigned int>(time(0)));
 	//RENDERER SETUP:::::::::::::::::::::::::::::::::
 	MV::Size<> worldSize(960, 640);
@@ -38,7 +43,7 @@ void Game::initializeWindow(){
 	managers.textures.assemblePacks("Assets/Atlases", &managers.renderer);
 	managers.textures.files("Assets/Map");
 
-	instance = std::make_unique<GameInstance>(managers, mouse, std::make_shared<Player>(), std::make_shared<Player>(), Constants());
+	instance = std::make_unique<GameInstance>(managers, catalogs, mouse, std::make_shared<Player>(), std::make_shared<Player>(), Constants());
 }
 
 void Game::spawnCreature(const MV::Point<> &a_position) {
@@ -126,7 +131,7 @@ void Game::handleInput() {
 void Game::render() {
 	managers.renderer.clearScreen();
 	if (instance) {
-		done = instance->update(lastUpdateDelta);
+		instance->update(lastUpdateDelta);
 	}
 	managers.renderer.updateScreen();
 }
@@ -140,65 +145,14 @@ void GameInstance::handleScroll(int a_amount) {
 	}
 }
 
-GameInstance::GameInstance(Managers& a_managers, MV::MouseState& a_mouse, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants) :
+GameInstance::GameInstance(Managers& a_managers, Catalogs& a_catalogs, MV::MouseState& a_mouse, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants) :
 	managers(a_managers),
+	catalogs(a_catalogs),
 	mouse(a_mouse),
 	left(a_leftPlayer, a_constants),
 	right(a_rightPlayer, a_constants),
 	script(chaiscript::Std_Lib::library()) {
 
-	BuildingData building;
-	building.game.name = "Tree of Life Foundation";
-	building.game.description = "";
-	building.game.asset = "elemental_base";
-	building.game.icon = "";
-	building.game.cost = 0;
-
-	building.game.upgrades.push_back(std::make_unique<BuildTree>());
-	
-	building.game.upgrades[0]->name = "Tree of Life";
-	building.game.upgrades[0]->description = "Begin production of life elementals.";
-	building.game.upgrades[0]->asset = "life0";
-	building.game.upgrades[0]->icon = "life0";
-	building.game.upgrades[0]->cost = 75;
-	building.game.upgrades[0]->wave.spawnDelay = 3;
-	building.game.upgrades[0]->wave.creatures = { {"basicLifeElemental", 10.0f} };
-
-	building.game.upgrades[0]->upgrades.push_back(std::make_unique<BuildTree>());
-	building.game.upgrades[0]->upgrades.push_back(std::make_unique<BuildTree>());
-
-	building.game.upgrades[0]->upgrades[0]->name = "Tree of Eternal Life";
-	building.game.upgrades[0]->upgrades[0]->description = "Begin production of greater life elementals.";
-	building.game.upgrades[0]->upgrades[0]->asset = "life1";
-	building.game.upgrades[0]->upgrades[0]->icon = "life1";
-	building.game.upgrades[0]->upgrades[0]->cost = 250;
-	building.game.upgrades[0]->upgrades[0]->wave.spawnDelay = 5;
-	building.game.upgrades[0]->upgrades[0]->wave.creatures = { { "greaterLifeElemental", 10.0f } };
-
-	building.game.upgrades[0]->upgrades[1]->name = "Tree of Overwhelming Life";
-	building.game.upgrades[0]->upgrades[1]->description = "Begin production of suspended life elementals.";
-	building.game.upgrades[0]->upgrades[1]->asset = "life2";
-	building.game.upgrades[0]->upgrades[1]->icon = "life2";
-	building.game.upgrades[0]->upgrades[1]->cost = 250;
-	building.game.upgrades[0]->upgrades[1]->wave.spawnDelay = 5;
-	building.game.upgrades[0]->upgrades[1]->wave.creatures = { { "suspendedLifeElemental", 10.0f } };
-
-	building.id = "life";
-	building.name = "Tree of Life";
-	building.description = "From the roots of this mighty tree springs life eternal.";
-	building.icon = "life";
-	building.costs.push_back(Wallet({0, 10000, 0}));
-	building.costs.push_back(Wallet({ 0, 0, 475 }));
-	building.costs.push_back(Wallet({ 0, 6000, 325 }));
-
-	{
-		std::vector<BuildingData> buildings;
-		buildings.push_back(building);
-		std::ofstream outstream("tree.data");
-		cereal::JSONOutputArchive archive(outstream);
-
-		archive(cereal::make_nvp("buildings", buildings));
-	}
 	MV::TexturePoint::hook(script);
 	MV::Color::hook(script);
 	MV::Size<MV::PointPrecision>::hook(script);

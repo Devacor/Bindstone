@@ -153,8 +153,13 @@ namespace MV{
 			track(defaultTrack).animate(a_animationName, a_loop);
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
-		std::shared_ptr<Spine> Spine::queueAnimation(const std::string &a_animationName, bool a_loop, double a_delay){
-			track(defaultTrack).queueAnimation(a_animationName, a_loop, a_delay);
+		std::shared_ptr<Spine> Spine::queueAnimation(const std::string &a_animationName, double a_delay, bool a_loop){
+			track(defaultTrack).queueAnimation(a_animationName, a_delay, a_loop);
+			return std::static_pointer_cast<Spine>(shared_from_this());
+		}
+
+		std::shared_ptr<Spine> Spine::queueAnimation(const std::string &a_animationName, bool a_loop) {
+			track(defaultTrack).queueAnimation(a_animationName, a_loop);
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
 
@@ -370,7 +375,11 @@ namespace MV{
 			return *this;
 		}
 
-		AnimationTrack& AnimationTrack::queueAnimation(const std::string &a_animationName, bool a_loop, double a_delay){
+		AnimationTrack& AnimationTrack::queueAnimation(const std::string &a_animationName, bool a_loop) {
+			return queueAnimation(a_animationName, 0.0f, a_loop);
+		}
+
+		AnimationTrack& AnimationTrack::queueAnimation(const std::string &a_animationName, double a_delay, bool a_loop){
 			spAnimation* animation = spSkeletonData_findAnimation(skeleton->data, a_animationName.c_str());
 			if(animation){
 				auto* entry = spAnimationState_addAnimation(animationState, myTrackIndex, animation, a_loop, static_cast<float>(a_delay));

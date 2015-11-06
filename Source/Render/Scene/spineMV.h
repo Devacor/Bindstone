@@ -66,7 +66,8 @@ namespace MV {
 			}
 
 			AnimationTrack& animate(const std::string &a_animationName, bool a_loop = true);
-			AnimationTrack& queueAnimation(const std::string &a_animationName, bool a_loop = true, double a_delay = 0.0);
+			AnimationTrack& queueAnimation(const std::string &a_animationName, double a_delay, bool a_loop = true);
+			AnimationTrack& queueAnimation(const std::string &a_animationName, bool a_loop = true);
 
 			std::string name() const;
 			double duration() const;
@@ -130,7 +131,8 @@ namespace MV {
 			AnimationTrack& track(int a_index);
 
 			std::shared_ptr<Spine> animate(const std::string &a_animationName, bool a_loop = true);
-			std::shared_ptr<Spine> queueAnimation(const std::string &a_animationName, bool a_loop = true, double a_delay = 0.0);
+			std::shared_ptr<Spine> queueAnimation(const std::string &a_animationName, double a_delay, bool a_loop = true);
+			std::shared_ptr<Spine> queueAnimation(const std::string &a_animationName, bool a_loop = true);
 		protected:
 			Spine(const std::weak_ptr<Node> &a_owner, const FileBundle &a_fileBundle);
 

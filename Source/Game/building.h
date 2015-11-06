@@ -175,7 +175,7 @@ public:
 	virtual void updateImplementation(double a_delta) override {};
 
 protected:
-	Building(const std::weak_ptr<MV::Scene::Node> &a_owner) :
+	Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const BuildingData &a_data) :
 		Component(a_owner) {
 		if (!a_owner.expired()) {
 			auto spawnObject = a_owner.lock()->get("spawn", false);
@@ -196,14 +196,14 @@ protected:
 	}
 
 	void upgrade(int index = 0) {
-
+		
 	}
 private:
 
 	template <class Archive>
 	void serialize(Archive & archive) {
 		archive(
-			//CEREAL_NVP(shouldDraw),
+			CEREAL_NVP(data),
 			cereal::make_nvp("Component", cereal::base_class<Component>(this))
 			);
 	}
@@ -212,11 +212,12 @@ private:
 	static void load_and_construct(Archive & archive, cereal::construct<Building> &construct) {
 		construct(std::shared_ptr<Node>());
 		archive(
+			cereal::make_nvp("data", data),
 			cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
 			);
 		construct->initialize();
 	}
-
+	BuildingData data;
 	MV::Point<> spawnPoint;
 };
 
@@ -244,9 +245,6 @@ protected:
 		return a_clone;
 	}
 
-	void upgrade(int index = 0) {
-
-	}
 private:
 
 	template <class Archive>

@@ -6,45 +6,6 @@
 #include "chaiscript/chaiscript.hpp"
 #include "chaiscript/chaiscript_stdlib.hpp"
 
-struct Catalogs {
-	std::unique_ptr<BuildingCatalog> buildings;
-};
-
-class LocalData {
-public:
-	std::shared_ptr<Player> player() const {
-		return localPlayer;
-	}
-
-	BuildingData& building(const std::string &a_id) const {
-		
-	}
-private:
-	std::shared_ptr<Player> localPlayer;
-	std::vector<BuildingData> buildings;
-};
-
-struct Constants {
-	int startHealth = 20;
-};
-
-class Team {
-public:
-	Team(const std::shared_ptr<Player> &a_player, const Constants& a_constants) :
-		player(a_player),
-		health(a_constants.startHealth) {
-	}
-
-
-private:
-	std::vector<std::shared_ptr<Building>> buildings;
-	int health;
-	std::vector<std::shared_ptr<Creature>> creatures;
-	std::vector<Gem> gems;
-
-	std::shared_ptr<Player> player;
-};
-
 class GameInstance {
 public:
 	GameInstance(Managers &a_managers, Catalogs &a_catalogs, MV::MouseState& a_mouse, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants);

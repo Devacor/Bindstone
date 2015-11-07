@@ -1,6 +1,12 @@
 #ifndef __MV_GAMESTATE_H__
 #define __MV_GAMESTATE_H__
 
+#include <memory>
+#include <vector>
+
+struct BuildingData;
+class BuildingCatalog;
+class Player;
 struct Catalogs {
 	std::unique_ptr<BuildingCatalog> buildings;
 };

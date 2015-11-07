@@ -3,7 +3,6 @@
 
 #include "Render/package.h"
 #include "Game/wallet.h"
-#include "Game/player.h"
 #include "chaiscript/chaiscript.hpp"
 #include <string>
 
@@ -127,6 +126,7 @@ struct BuildingData {
 	}
 };
 
+
 class BuildingCatalog {
 	friend cereal::access;
 public:
@@ -186,7 +186,7 @@ protected:
 	}
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
-		return cloneHelper(a_parent->attach<Building>().self());
+		return cloneHelper(a_parent->attach<Building>(data).self());
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
@@ -236,7 +236,7 @@ protected:
 	}
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
-		return cloneHelper(a_parent->attach<Building>().self());
+		return cloneHelper(a_parent->attach<Creature>().self());
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {

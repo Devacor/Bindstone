@@ -5,6 +5,7 @@
 #include <string>
 #include "Game/wallet.h"
 #include "cereal/cereal.hpp"
+#include "Game/building.h"
 
 namespace chaiscript { class ChaiScript; }
 
@@ -50,12 +51,10 @@ class PlayerInGame {
 
 };
 
+struct Constants;
 class Team {
 public:
-	Team(const std::shared_ptr<Player> &a_player, const Constants& a_constants) :
-		player(a_player),
-		health(a_constants.startHealth) {
-	}
+	Team(const std::shared_ptr<Player> &a_player, const Constants& a_constants);
 
 
 private:

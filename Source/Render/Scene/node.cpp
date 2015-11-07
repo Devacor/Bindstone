@@ -141,10 +141,7 @@ namespace MV {
 		}
 
 		void Node::update(double a_delta) {
-			if (onChangeCallNeeded) {
-				onChangeCallNeeded = false;
-				onChangeSignal(shared_from_this());
-			}
+			allowChangeCallNeeded = true;
 			if (allowUpdate) {
 				auto stableComponentList = childComponents;
 				for (auto&& component : stableComponentList) {
@@ -156,11 +153,18 @@ namespace MV {
 				}
 				rootTask.update(a_delta);
 			}
+			if (onChangeCallNeeded) {
+				onChangeCallNeeded = false;
+				allowChangeCallNeeded = false;
+				onChangeSignal(shared_from_this());
+			}
 		}
 
 		void Node::drawUpdate(double a_delta) {
 			auto selfReference = shared_from_this(); //keep us alive no matter the update step
+
 			if (allowDraw && allowUpdate) {
+				allowChangeCallNeeded = true;
 				bool allowChildrenToDraw = true;
 				auto stableComponentList = childComponents;
 				for (auto&& component : stableComponentList) {
@@ -178,6 +182,11 @@ namespace MV {
 					}
 				}
 				rootTask.update(a_delta);
+				if (onChangeCallNeeded) {
+					onChangeCallNeeded = false;
+					allowChangeCallNeeded = false;
+					onChangeSignal(shared_from_this());
+				}
 			} else if (allowDraw) {
 				selfReference->draw();
 			} else if (allowUpdate) {
@@ -586,7 +595,7 @@ namespace MV {
 				SCOPE_EXIT{ inOnChange = false; };
 				inOnChange = true;
 				onChangeSignal(safeguard);
-			} else {
+			} else if (allowChangeCallNeeded) {
 				onChangeCallNeeded = true;
 			}
 		}
@@ -846,20 +855,19 @@ namespace MV {
 		}
 
 		std::string Node::getCloneId(const std::string &a_original) const {
-			std::regex clonePattern("(.+) (\\(clone ([0-9]*)\\))");
+			std::regex clonePattern("(.+)_([0-9]+)$");
 			std::smatch originalMatches;
 			std::regex_match(a_original, originalMatches, clonePattern);
 			std::string strippedId = (originalMatches.size() > 2) ? originalMatches[1] : a_original;
-			
-			int cloneCount = 0;
-			for (auto&& child : childNodes) {
-				if (cloneCount == 0 && child->nodeId == strippedId) {
-					cloneCount = 1;
-				} else {
-					std::smatch matches;
-					std::regex_match(child->nodeId, matches, clonePattern);
-					if (matches.size() > 3 && matches[1] == strippedId) {
-						cloneCount = std::max(cloneCount, std::stoi(matches[3]) + 1);
+			int cloneCount = (originalMatches.size() > 2) ? std::stoi(originalMatches[2]) + 1 : 0;
+
+			bool done = false;
+			while (!done) {
+				done = true;
+				for (auto&& child : childNodes) {
+					if (child->nodeId == strippedId + "_" + std::to_string(cloneCount)) {
+						++cloneCount;
+						done = false;
 					}
 				}
 			}
@@ -867,7 +875,7 @@ namespace MV {
 			if (cloneCount == 0) {
 				return strippedId;
 			} else {
-				return strippedId + " (clone " + std::to_string(cloneCount) + ")";
+				return strippedId + "_" + std::to_string(cloneCount);
 			}
 		}
 

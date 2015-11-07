@@ -1,6 +1,9 @@
 #include <SDL.h>
 #include "Game/managers.h"
+#include "Game/player.h"
 #include "Game/building.h"
+#include "Game/state.h"
+
 #include <string>
 #include <ctime>
 #include "chaiscript/chaiscript.hpp"

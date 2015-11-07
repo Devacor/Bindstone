@@ -207,13 +207,13 @@ GameInstance::GameInstance(Managers& a_managers, Catalogs& a_catalogs, MV::Mouse
 		}, []() {}, "MapDrag"));
 	});
 	for (int i = 1; i < 9; ++i) {
-		auto buildingNode = worldScene->get("left_" + std::to_string(i));
-		auto treeButton = buildingNode->attach<MV::Scene::Clickable>(mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
-		treeButton->onAccept.connect("TappedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
-			//spawnCreature(a_self->worldBounds().bottomRightPoint());
-		});
+// 		auto buildingNode = worldScene->get("left_" + std::to_string(i));
+// 		auto treeButton = buildingNode->attach<MV::Scene::Clickable>(mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
+// 		treeButton->onAccept.connect("TappedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
+// 			//spawnCreature(a_self->worldBounds().bottomRightPoint());
+// 		});
 	}
-	pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
+	//pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
 }
 
 bool GameInstance::update(double a_dt) {

@@ -1003,6 +1003,7 @@ namespace MV {
 			std::string nodeId;
 
 			bool onChangeCallNeeded = false;
+			bool allowChangeCallNeeded = true;
 
 			Scale scaleTo;
 			Point<> translateTo;

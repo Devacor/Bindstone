@@ -272,6 +272,8 @@
     <ClCompile Include="Source\exampleCode.cpp" />
     <ClCompile Include="Source\Game\building.cpp" />
     <ClCompile Include="Source\Game\game.cpp" />
+    <ClCompile Include="Source\Game\player.cpp" />
+    <ClCompile Include="Source\Game\state.cpp" />
     <ClCompile Include="Source\Game\wallet.cpp" />
     <ClCompile Include="Source\Interface\mouse.cpp" />
     <ClCompile Include="Source\main.cpp">
@@ -450,6 +452,7 @@
     <ClInclude Include="Source\Game\gameEditor.h" />
     <ClInclude Include="Source\Game\managers.h" />
     <ClInclude Include="Source\Game\player.h" />
+    <ClInclude Include="Source\Game\state.h" />
     <ClInclude Include="Source\Game\wallet.h" />
     <ClInclude Include="Source\Physics\collider.h" />
     <ClInclude Include="Source\Physics\package.h" />

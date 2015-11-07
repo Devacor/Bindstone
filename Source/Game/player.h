@@ -44,4 +44,27 @@ class Player {
 	}
 };
 
+class PlayerInGame {
+	std::shared_ptr<Player> player;
+	std::vector<std::shared_ptr<Building>> buildings;
+
+};
+
+class Team {
+public:
+	Team(const std::shared_ptr<Player> &a_player, const Constants& a_constants) :
+		player(a_player),
+		health(a_constants.startHealth) {
+	}
+
+
+private:
+	std::vector<std::shared_ptr<Building>> buildings;
+	int health;
+	std::vector<std::shared_ptr<Creature>> creatures;
+	std::vector<Gem> gems;
+
+	std::shared_ptr<Player> player;
+};
+
 #endif

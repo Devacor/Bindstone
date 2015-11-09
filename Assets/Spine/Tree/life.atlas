@@ -1,0 +1,61 @@
+
+life.png
+size: 1024,1024
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+Assets/Leaves1
+  rotate: false
+  xy: 691, 725
+  size: 125, 281
+  orig: 125, 281
+  offset: 0, 0
+  index: -1
+Assets/Leaves2
+  rotate: true
+  xy: 691, 524
+  size: 73, 267
+  orig: 73, 267
+  offset: 0, 0
+  index: -1
+Assets/Leaves3
+  rotate: true
+  xy: 691, 599
+  size: 124, 297
+  orig: 124, 297
+  offset: 0, 0
+  index: -1
+Assets/ground
+  rotate: false
+  xy: 2, 499
+  size: 687, 507
+  orig: 687, 507
+  offset: 0, 0
+  index: -1
+Assets/trunk
+  rotate: true
+  xy: 2, 2
+  size: 495, 635
+  orig: 495, 635
+  offset: 0, 0
+  index: -1
+Assets/trunkback
+  rotate: false
+  xy: 639, 40
+  size: 187, 457
+  orig: 187, 457
+  offset: 0, 0
+  index: -1
+
+skeleton2.png
+size: 1024,1024
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+Assets/BackgroundLeaves
+  rotate: false
+  xy: 2, 2
+  size: 613, 619
+  orig: 613, 619
+  offset: 0, 0
+  index: -1

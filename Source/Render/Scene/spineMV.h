@@ -5,6 +5,8 @@
 #include "Render/Scene/drawable.h"
 #include "spine/AnimationState.h"
 
+#include <cereal/types/set.hpp>
+
 struct spSlot;
 struct spSkeleton;
 struct spAnimationState;
@@ -123,6 +125,10 @@ namespace MV {
 
 			virtual ~Spine();
 
+			std::shared_ptr<Spine> bindNodeToSlot(const std::string &a_slotId, const std::string &a_nodeId);
+			std::shared_ptr<Spine> unbindSlot(const std::string &a_slotId);
+			std::shared_ptr<Spine> unbindNodeInSlot(const std::string &a_slotId, const std::string &a_nodeId);
+
 			std::shared_ptr<Spine> timeScale(double a_timeScale);
 			double timeScale() const;
 
@@ -137,16 +143,22 @@ namespace MV {
 			Spine(const std::weak_ptr<Node> &a_owner, const FileBundle &a_fileBundle);
 
 			virtual void defaultDrawImplementation() override;
-			virtual void updateImplementation(double a_delta) override;
 
+			void applySpineBlendMode(spBlendMode previousBlending);
+
+			virtual void updateImplementation(double a_delta) override;
 		private:
 			//called from spineAnimationCallback
 			void onAnimationStateEvent(int trackIndex, spEventType type, spEvent* event, int loopCount);
+
+			virtual bool preDraw();
+			virtual bool postDraw();
 
 			template <class Archive>
 			void serialize(Archive & archive){
 				archive(
 					cereal::make_nvp("fileBundle", fileBundle),
+					cereal::make_nvp("slotsToNodes", slotsToNodes),
 					cereal::make_nvp("Spine", cereal::base_class<Drawable>(this))
 				);
 			}
@@ -162,16 +174,18 @@ namespace MV {
 				);
 				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Spine node.");
 				construct(std::shared_ptr<Node>(), fileBundle);
-				archive(cereal::make_nvp("Spine", cereal::base_class<Drawable>(construct.ptr())));
+				archive(
+					cereal::make_nvp("slotsToNodes", construct->slotsToNodes),
+					cereal::make_nvp("Spine", cereal::base_class<Drawable>(construct.ptr())));
 				construct->initialize();
 			}
 
 			bool skeletonRenderStateChangedSinceLastIteration(spBlendMode a_previousBlending, spBlendMode a_currentBlending, FileTextureDefinition * a_previousTexture, FileTextureDefinition * a_texture);
 
-			size_t renderSkeletonBatch(size_t lastRenderedIndex, GLuint a_textureId);
+			size_t renderSkeletonBatch(size_t lastRenderedIndex, GLuint a_textureId, spBlendMode a_blendMode);
 
 			FileTextureDefinition * loadSpineSlotIntoPoints(spSlot* slot);
-
+			FileTextureDefinition *getSpineTextureFromSlot(spSlot* slot) const;
 
 			FileBundle fileBundle;
 
@@ -189,6 +203,7 @@ namespace MV {
 
 			int defaultTrack = 0;
 			std::map<int, AnimationTrack> tracks;
+			std::map<std::string, std::set<std::string>> slotsToNodes;
 		};
 
 

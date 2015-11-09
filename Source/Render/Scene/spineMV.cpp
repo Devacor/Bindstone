@@ -45,37 +45,37 @@ char* _spUtil_readFile(const char* path, int* length){
 CEREAL_REGISTER_TYPE(MV::Scene::Spine);
 
 namespace MV{
-	namespace Scene{
+	namespace Scene {
 
 		void spineAnimationCallback(spAnimationState* a_state, int a_trackIndex, spEventType a_type, spEvent* a_event, int a_loopCount) {
-			if(a_state && a_state->rendererObject){
+			if (a_state && a_state->rendererObject) {
 				static_cast<Spine*>(a_state->rendererObject)->onAnimationStateEvent(a_trackIndex, a_type, a_event, a_loopCount);
 			}
 		}
 
 		void spineTrackEntryCallback(spAnimationState* a_state, int a_trackIndex, spEventType a_type, spEvent* a_event, int a_loopCount) {
-			if(a_state && a_state->rendererObject){
+			if (a_state && a_state->rendererObject) {
 				auto *spine = static_cast<Spine*>(a_state->rendererObject);
-				if(spine){
+				if (spine) {
 					spine->track(a_trackIndex).onAnimationStateEvent(a_trackIndex, a_type, a_event, a_loopCount);
 				}
 			}
 		}
 
 		template <typename T>
-		FileTextureDefinition* getSpineTexture(T* attachment){
+		FileTextureDefinition* getSpineTexture(T* attachment) {
 			spAtlasRegion* atlasRegion = (attachment && attachment->rendererObject) ? static_cast<spAtlasRegion*>(attachment->rendererObject) : nullptr;
 			return (atlasRegion && atlasRegion->page && atlasRegion->page->rendererObject) ? static_cast<FileTextureDefinition*>(atlasRegion->page->rendererObject) : nullptr;
 		}
 
-		Spine::Spine(const std::weak_ptr<Node> &a_owner, const FileBundle &a_fileBundle):
+		Spine::Spine(const std::weak_ptr<Node> &a_owner, const FileBundle &a_fileBundle) :
 			Drawable(a_owner),
 			fileBundle(a_fileBundle),
 			autoUpdate(true),
 			onStart(onStartSignal),
 			onEnd(onEndSignal),
 			onComplete(onCompleteSignal),
-			onEvent(onEventSignal){
+			onEvent(onEventSignal) {
 
 			atlas = spAtlas_createFromFile(fileBundle.atlasFile.c_str(), 0);
 			require<ResourceException>(atlas, "Error reading atlas file:", fileBundle.atlasFile);
@@ -83,9 +83,10 @@ namespace MV{
 			spSkeletonJson* json = spSkeletonJson_create(atlas);
 			json->scale = fileBundle.loadScale;
 			spSkeletonData* skeletonData = spSkeletonJson_readSkeletonDataFile(json, fileBundle.skeletonFile.c_str());
-			if(!skeletonData && json->error){
-				require<ResourceException>(false , json->error);
-			} else if(!skeletonData){
+			if (!skeletonData && json->error) {
+				require<ResourceException>(false, json->error);
+			}
+			else if (!skeletonData) {
 				require<ResourceException>(false, "Error reading skeleton data file: ", fileBundle.skeletonFile);
 			}
 
@@ -102,7 +103,7 @@ namespace MV{
 			spBone_setYDown(true);
 			spineWorldVertices = new float[SPINE_MESH_VERTEX_COUNT_MAX]();
 			updateImplementation(0.0f);
-			
+
 			for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
 				spSlot* slot = skeleton->drawOrder[i];
 				if (!slot->attachment) continue;
@@ -111,27 +112,27 @@ namespace MV{
 		}
 
 		Spine::~Spine() {
-			if(atlas){
+			if (atlas) {
 				spAtlas_dispose(atlas);
 			}
-			if(skeleton){
-				if(skeleton->data){
+			if (skeleton) {
+				if (skeleton->data) {
 					spSkeletonData_dispose(skeleton->data);
 				}
 				spSkeleton_dispose(skeleton);
 			}
-			if(animationState){
+			if (animationState) {
 				spAnimationState_dispose(animationState);
 			}
-			if(spineWorldVertices){
+			if (spineWorldVertices) {
 				delete[] spineWorldVertices;
 			}
 		}
 
 		void Spine::updateImplementation(double a_delta) {
-			if(skeleton){
+			if (skeleton) {
 				spSkeleton_update(skeleton, static_cast<float>(a_delta));
-				if(animationState){
+				if (animationState) {
 					spAnimationState_update(animationState, static_cast<float>(a_delta));
 					spAnimationState_apply(animationState, skeleton);
 				}
@@ -139,21 +140,22 @@ namespace MV{
 			}
 		}
 
-		AnimationTrack& Spine::track(int a_index){
+		AnimationTrack& Spine::track(int a_index) {
 			defaultTrack = a_index;
 			auto found = tracks.find(a_index);
-			if(found != tracks.end()){
+			if (found != tracks.end()) {
 				return found->second;
-			} else{
+			}
+			else {
 				return tracks.emplace(a_index, AnimationTrack(a_index, animationState, skeleton)).first->second;
 			}
 		}
 
-		std::shared_ptr<Spine> Spine::animate(const std::string &a_animationName, bool a_loop){
+		std::shared_ptr<Spine> Spine::animate(const std::string &a_animationName, bool a_loop) {
 			track(defaultTrack).animate(a_animationName, a_loop);
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
-		std::shared_ptr<Spine> Spine::queueAnimation(const std::string &a_animationName, double a_delay, bool a_loop){
+		std::shared_ptr<Spine> Spine::queueAnimation(const std::string &a_animationName, double a_delay, bool a_loop) {
 			track(defaultTrack).queueAnimation(a_animationName, a_delay, a_loop);
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
@@ -163,15 +165,32 @@ namespace MV{
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
 
-		std::shared_ptr<Spine> Spine::crossfade(const std::string &a_fromAnimation, const std::string &a_toAnimation, double a_duration){
-			if(animationState){
+		std::shared_ptr<Spine> Spine::crossfade(const std::string &a_fromAnimation, const std::string &a_toAnimation, double a_duration) {
+			if (animationState) {
 				spAnimationStateData_setMixByName(animationState->data, a_fromAnimation.c_str(), a_toAnimation.c_str(), static_cast<float>(a_duration));
 			}
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
 
+		std::shared_ptr<Spine> Spine::bindNodeToSlot(const std::string &a_slotId, const std::string &a_nodeId) {
+			slotsToNodes[a_slotId].insert(a_nodeId);
+			return std::static_pointer_cast<Spine>(shared_from_this());
+		}
+		std::shared_ptr<Spine> Spine::unbindSlot(const std::string &a_slotId) {
+			slotsToNodes.erase(a_slotId);
+			return std::static_pointer_cast<Spine>(shared_from_this());
+		}
+		std::shared_ptr<Spine> Spine::unbindNodeInSlot(const std::string &a_slotId, const std::string &a_nodeId) {
+			auto& slotToNodeBinding = slotsToNodes[a_slotId];
+			if (slotToNodeBinding.size() == 1 || slotToNodeBinding.empty()) {
+				slotsToNodes.erase(a_slotId);
+			} else {
+				slotToNodeBinding.erase(a_nodeId);
+			}
+			return std::static_pointer_cast<Spine>(shared_from_this());
+		}
+
 		void Spine::defaultDrawImplementation(){
-			shaderProgram->use();
 			if(bufferId == 0){
 				glGenBuffers(1, &bufferId);
 			}
@@ -183,41 +202,79 @@ namespace MV{
 			FileTextureDefinition *previousTexture = nullptr;
 			spBlendMode previousBlending = SP_BLEND_MODE_NORMAL;
 			size_t lastRenderedIndex = 0;
+			std::vector<std::string> renderedChildren;
+			bool firstSlotTexture = true;
 			for(int i = 0, n = skeleton->slotsCount; i < n; i++) {
 				spSlot* slot = skeleton->drawOrder[i];
-				if(!slot->attachment) continue;
-				FileTextureDefinition *texture = loadSpineSlotIntoPoints(slot);
+				if (slot->attachment) {
+					FileTextureDefinition *texture = getSpineTextureFromSlot(slot);
+					if (firstSlotTexture) {
+						firstSlotTexture = false;
+						previousTexture = texture;
+						previousBlending = slot->data->blendMode;
+					}
 
-				if(slot->data->blendMode == SP_BLEND_MODE_ADDITIVE) {
-					SCOPE_EXIT{ owner()->renderer().defaultBlendFunction(); };
-					owner()->renderer().setBlendFunction(GL_SRC_ALPHA, GL_ONE);
-				} else if (slot->data->blendMode == SP_BLEND_MODE_MULTIPLY) {
-					SCOPE_EXIT{ owner()->renderer().defaultBlendFunction(); };
-					owner()->renderer().setBlendFunction(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
-				} else if (slot->data->blendMode == SP_BLEND_MODE_SCREEN) {
-					SCOPE_EXIT{ owner()->renderer().defaultBlendFunction(); };
-					owner()->renderer().setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
-				}
+					if (skeletonRenderStateChangedSinceLastIteration(previousBlending, slot->data->blendMode, previousTexture, texture)) {
+						lastRenderedIndex = renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0, previousBlending);
+					}
 
-				if(skeletonRenderStateChangedSinceLastIteration(previousBlending, slot->data->blendMode, previousTexture, texture)){
-					lastRenderedIndex = renderSkeletonBatch(lastRenderedIndex, (texture && texture->loaded()) ? texture->textureId() : 0);
+					loadSpineSlotIntoPoints(slot);
+					previousTexture = texture;
+					previousBlending = slot->data->blendMode;
 				}
-				previousTexture = texture;
-				previousBlending = slot->data->blendMode;
+				auto nodesToRender = slotsToNodes.find(slot->data->name);
+				if (nodesToRender != slotsToNodes.end()) {
+					bool interrupted = false;
+					for (auto&& nodeToRender : nodesToRender->second) {
+						auto node = owner()->get(nodeToRender, false);
+						if (node) {
+							if (!interrupted) {
+								interrupted = true;
+								lastRenderedIndex = renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0, previousBlending);
+							}
+							node->silence()->
+								position({ slot->bone->worldX, slot->bone->worldY })->
+								rotation({0.0f, 0.0f, slot->bone->worldRotation})->
+								scale({ slot->bone->scaleX, slot->bone->scaleY });
+							node->draw();
+							renderedChildren.push_back(node->id());
+						}
+					}
+				}
 			}
 
 			if(lastRenderedIndex != vertexIndices.size()){
-				renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0);
+				renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0, previousBlending);
 			}
 
-			glUseProgram(0);
+			for (auto&& node : *owner()) {
+				if (std::find(renderedChildren.begin(), renderedChildren.end(), node->id()) == renderedChildren.end()) {
+					node->draw();
+				}
+			}
 		}
 
-		size_t Spine::renderSkeletonBatch(size_t a_lastRenderedIndex, GLuint a_textureId) {
+		void Spine::applySpineBlendMode(spBlendMode a_spineBlendMode) {
+			if (a_spineBlendMode == SP_BLEND_MODE_ADDITIVE) {
+				owner()->renderer().setBlendFunction(GL_SRC_ALPHA, GL_ONE);
+			}
+			else if (a_spineBlendMode == SP_BLEND_MODE_MULTIPLY) {
+				owner()->renderer().setBlendFunction(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
+			}
+			else if (a_spineBlendMode == SP_BLEND_MODE_SCREEN) {
+				owner()->renderer().setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
+			}
+		}
+
+		size_t Spine::renderSkeletonBatch(size_t a_lastRenderedIndex, GLuint a_textureId, spBlendMode a_blendMode) {
 			auto structSize = static_cast<GLsizei>(sizeof(points[0]));
 			auto bufferSizeToRender = (points.size()) * structSize;
 
 			if(bufferSizeToRender > 0){
+				shaderProgram->use();
+				SCOPE_EXIT{ glUseProgram(0); };
+				SCOPE_EXIT{ owner()->renderer().defaultBlendFunction(); };
+				applySpineBlendMode(a_blendMode);
 				glBufferData(GL_ARRAY_BUFFER, bufferSizeToRender, &(points[0]), GL_STATIC_DRAW);
 
 				glEnableVertexAttribArray(0);
@@ -249,7 +306,23 @@ namespace MV{
 		bool Spine::skeletonRenderStateChangedSinceLastIteration(spBlendMode a_previousBlending, spBlendMode a_currentBlending, FileTextureDefinition * a_previousTexture, FileTextureDefinition * a_texture) {
 			return !points.empty() &&
 				(a_previousBlending != a_currentBlending) ||
-				(a_previousTexture != nullptr && a_previousTexture != a_texture);
+				(a_previousTexture != a_texture);
+		}
+
+		FileTextureDefinition * Spine::getSpineTextureFromSlot(spSlot* slot) const {
+			if (slot->attachment->type == SP_ATTACHMENT_REGION) {
+				spRegionAttachment* attachment = reinterpret_cast<spRegionAttachment*>(slot->attachment);
+				return getSpineTexture(attachment);
+			}
+			else if (slot->attachment->type == SP_ATTACHMENT_MESH) {
+				spMeshAttachment* attachment = reinterpret_cast<spMeshAttachment*>(slot->attachment);
+				return getSpineTexture(attachment);
+			}
+			else if (slot->attachment->type == SP_ATTACHMENT_SKINNED_MESH) {
+				spSkinnedMeshAttachment* attachment = reinterpret_cast<spSkinnedMeshAttachment*>(slot->attachment);
+				return getSpineTexture(attachment);
+			}
+			return nullptr;
 		}
 
 		FileTextureDefinition * Spine::loadSpineSlotIntoPoints(spSlot* slot) {
@@ -345,6 +418,14 @@ namespace MV{
 			} else if(type == SP_ANIMATION_EVENT){
 				onEventSignal(std::static_pointer_cast<Spine>(shared_from_this()), a_trackIndex, AnimationEventData((event->data && event->data->name) ? event->data->name : "Anon", (event->stringValue) ? event->stringValue : "", event->intValue, event->floatValue));
 			}
+		}
+
+		bool Spine::preDraw() {
+			return shouldDraw;
+		}
+
+		bool Spine::postDraw() {
+			return !shouldDraw;
 		}
 
 		void AnimationTrack::onAnimationStateEvent(int a_trackIndex, spEventType type, spEvent* event, int loopCount) {

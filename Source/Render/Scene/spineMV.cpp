@@ -172,7 +172,7 @@ namespace MV{
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
 
-		std::shared_ptr<Spine> Spine::bindNodeToSlot(const std::string &a_slotId, const std::string &a_nodeId) {
+		std::shared_ptr<Spine> Spine::bindNode(const std::string &a_slotId, const std::string &a_nodeId) {
 			slotsToNodes[a_slotId].insert(a_nodeId);
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
@@ -180,7 +180,7 @@ namespace MV{
 			slotsToNodes.erase(a_slotId);
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
-		std::shared_ptr<Spine> Spine::unbindNodeInSlot(const std::string &a_slotId, const std::string &a_nodeId) {
+		std::shared_ptr<Spine> Spine::unbindNode(const std::string &a_slotId, const std::string &a_nodeId) {
 			auto& slotToNodeBinding = slotsToNodes[a_slotId];
 			if (slotToNodeBinding.size() == 1 || slotToNodeBinding.empty()) {
 				slotsToNodes.erase(a_slotId);

@@ -139,6 +139,21 @@ namespace MV {
 		return sqrt(((deltaX)*(deltaX)) + ((deltaY)*(deltaY)));
 	}
 
+	std::string fileNameFromPath(std::string a_path, bool a_includeExtension /*= false*/) {
+		const size_t last_slash_idx = a_path.find_last_of("\\/");
+		if (last_slash_idx != std::string::npos) {
+			a_path.erase(0, last_slash_idx + 1);
+		}
+
+		if (!a_includeExtension) {
+			const size_t period_idx = a_path.rfind('.');
+			if (period_idx != std::string::npos) {
+				a_path.erase(period_idx);
+			}
+		}
+		return a_path;
+	}
+
 	std::string toString(const UtfString& ws) {
 		std::string s;
 		std::for_each(ws.begin(), ws.end(), [&](const UtfChar &wc){

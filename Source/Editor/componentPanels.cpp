@@ -931,27 +931,19 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	});
 
 	saveButton->onAccept.connect("save", [&](std::shared_ptr<MV::Scene::Clickable>){
-		std::ofstream stream(fileName->text());
-		cereal::JSONOutputArchive archive(stream);
-		archive(cereal::make_nvp("scene", panel.root()));
+		panel.root()->save(MV::toString(fileName->text()));
 	});
 
 	loadButton->onAccept.connect("load", [&](std::shared_ptr<MV::Scene::Clickable>){
-		std::ifstream stream(fileName->text());
-
-		cereal::JSONInputArchive archive(stream);
-
-		archive.add(
-			cereal::make_nvp("mouse", panel.resources().mouse),
-			cereal::make_nvp("renderer", &panel.root()->renderer()),
-			cereal::make_nvp("textLibrary", panel.resources().textLibrary),
-			cereal::make_nvp("pool", panel.resources().pool),
-			cereal::make_nvp("texture", panel.resources().textures)
-		);
-
-		std::shared_ptr<MV::Scene::Node> newRoot;
-		archive(cereal::make_nvp("scene", newRoot));
-
+		auto newRoot = MV::Scene::Node::load(MV::toString(fileName->text()), [&](cereal::JSONInputArchive& archive) {
+			archive.add(
+				cereal::make_nvp("mouse", panel.resources().mouse),
+				cereal::make_nvp("renderer", &panel.root()->renderer()),
+				cereal::make_nvp("textLibrary", panel.resources().textLibrary),
+				cereal::make_nvp("pool", panel.resources().pool),
+				cereal::make_nvp("texture", panel.resources().textures)
+				);
+		});
 		panel.root(newRoot);
 	});
 }

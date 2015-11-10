@@ -19,9 +19,15 @@ public:
 		managers.renderer.loadShader(MV::COLOR_PICKER_ID, "Assets/Shaders/default.vert", "Assets/Shaders/colorPicker.frag");
 
 		auto spineTestNode = limbo->make("SpineTest")->position({ 400.0f, 600.0f })->
-			attach<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Tree/life.json", "Assets/Spine/Tree/life.atlas", 0.5f))->shader(MV::DEFAULT_ID)->animate("idle")->bindNodeToSlot("effects", "PaletteTest")->owner();
-		spineTestNode->make("PaletteTest")->position({ -50.0f, -100.0f })->
-			attach<MV::Scene::Palette>(mouse)->bounds(MV::size(256.0f, 256.0f));
+			attach<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Tree/life.json", "Assets/Spine/Tree/life.atlas", 0.5f))->shader(MV::DEFAULT_ID)->animate("idle")->bindNode("effects", "tree_particle")->bindNode("effects", "simple")->owner();
+// 		spineTestNode->make("PaletteTest")->position({ -50.0f, -100.0f })->
+// 			attach<MV::Scene::Palette>(mouse)->bounds(MV::size(256.0f, 256.0f));
+		auto populateArchive = [&](cereal::JSONInputArchive& archive) {
+			archive.add(cereal::make_nvp("renderer", &managers.renderer));
+			archive.add(cereal::make_nvp("pool", &managers.pool));
+		};
+		spineTestNode->loadChild("simple.scene", populateArchive);
+		spineTestNode->loadChild("tree_particle.scene", populateArchive);
 
 		auto grid = limbo->make("Grid")->position({ (static_cast<float>(game.getManager().renderer.window().width()) - 100.0f) / 2.0f, 200.0f })->
 			attach<MV::Scene::Grid>()->columns(1)->padding({ 2.0f, 2.0f })->margin({ 4.0f, 4.0f })->color({ BOX_BACKGROUND })->owner();

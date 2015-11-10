@@ -371,6 +371,12 @@ namespace MV {
 
 			static std::shared_ptr<Node> make(Draw2D& a_draw2d, const std::string &a_id);
 			static std::shared_ptr<Node> make(Draw2D& a_draw2d);
+			static std::shared_ptr<Node> load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder = std::function<void(cereal::JSONInputArchive &)>());
+
+			std::shared_ptr<Node> save(const std::string &a_filename, bool a_renameNodeToFile = true);
+			std::shared_ptr<Node> save(const std::string &a_filename, const std::string &a_overrideId);
+			std::shared_ptr<Node> make(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder);
+			std::shared_ptr<Node> loadChild(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder = std::function<void(cereal::JSONInputArchive &)>());
 
 			std::shared_ptr<Node> make(const std::string &a_id);
 			std::shared_ptr<Node> make();

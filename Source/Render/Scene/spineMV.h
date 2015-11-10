@@ -125,9 +125,9 @@ namespace MV {
 
 			virtual ~Spine();
 
-			std::shared_ptr<Spine> bindNodeToSlot(const std::string &a_slotId, const std::string &a_nodeId);
+			std::shared_ptr<Spine> bindNode(const std::string &a_slotId, const std::string &a_nodeId);
 			std::shared_ptr<Spine> unbindSlot(const std::string &a_slotId);
-			std::shared_ptr<Spine> unbindNodeInSlot(const std::string &a_slotId, const std::string &a_nodeId);
+			std::shared_ptr<Spine> unbindNode(const std::string &a_slotId, const std::string &a_nodeId);
 
 			std::shared_ptr<Spine> timeScale(double a_timeScale);
 			double timeScale() const;
@@ -159,24 +159,20 @@ namespace MV {
 				archive(
 					cereal::make_nvp("fileBundle", fileBundle),
 					cereal::make_nvp("slotsToNodes", slotsToNodes),
-					cereal::make_nvp("Spine", cereal::base_class<Drawable>(this))
+					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Spine> &construct){
-				Draw2D *renderer = nullptr;
 				FileBundle fileBundle;
 				archive(
 					cereal::make_nvp("fileBundle", fileBundle)
-				).extract(
-					cereal::make_nvp("renderer", renderer)
 				);
-				require<PointerException>(renderer != nullptr, "Error: Failed to load a renderer for Spine node.");
 				construct(std::shared_ptr<Node>(), fileBundle);
 				archive(
 					cereal::make_nvp("slotsToNodes", construct->slotsToNodes),
-					cereal::make_nvp("Spine", cereal::base_class<Drawable>(construct.ptr())));
+					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr())));
 				construct->initialize();
 			}
 

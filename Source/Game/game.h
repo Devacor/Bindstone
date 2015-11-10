@@ -13,6 +13,8 @@ class GameInstance {
 public:
 	GameInstance(Managers &a_managers, Catalogs &a_catalogs, MV::MouseState& a_mouse, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants);
 
+	void nodeLoadBinder(cereal::JSONInputArchive &a_archive);
+
 	bool update(double dt);
 
 	bool handleEvent(const SDL_Event &a_event);

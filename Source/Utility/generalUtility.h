@@ -154,6 +154,8 @@ namespace MV {
 
 	float distance(const float &x1, const float &y1, const float &x2, const float &y2);
 
+	std::string fileNameFromPath(std::string a_path, bool a_includeExtension = false);
+
 	template <class Type>
 	double angle(const Type &x1, const Type &y1, const Type &x2, const Type &y2, AngleType returnAs = DEGREES){
 		if(returnAs == DEGREES){

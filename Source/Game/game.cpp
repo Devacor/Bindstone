@@ -1,4 +1,5 @@
 #include "game.h"
+#include <functional>
 
 void sdl_quit(void){
 	SDL_Quit();
@@ -181,18 +182,7 @@ GameInstance::GameInstance(Managers& a_managers, Catalogs& a_catalogs, MV::Mouse
 	MV::Scene::PathMap::hook(script);
 	MV::Scene::PathAgent::hook(script);
 
-	std::ifstream stream("map.scene");
-
-	cereal::JSONInputArchive archive(stream);
-
-	archive.add(
-		cereal::make_nvp("mouse", &mouse),
-		cereal::make_nvp("renderer", &managers.renderer),
-		cereal::make_nvp("textLibrary", &managers.textLibrary),
-		cereal::make_nvp("pool", &managers.pool)
-	);
-
-	archive(cereal::make_nvp("scene", worldScene));
+	worldScene = MV::Scene::Node::load("map.scene", std::bind(&GameInstance::nodeLoadBinder, this, std::placeholders::_1));
 
 	mouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse) {
 		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
@@ -216,6 +206,15 @@ GameInstance::GameInstance(Managers& a_managers, Catalogs& a_catalogs, MV::Mouse
 		});
 	}
 	//pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
+}
+
+void GameInstance::nodeLoadBinder(cereal::JSONInputArchive &a_archive) {
+	a_archive.add(
+		cereal::make_nvp("mouse", &mouse),
+		cereal::make_nvp("renderer", &managers.renderer),
+		cereal::make_nvp("textLibrary", &managers.textLibrary),
+		cereal::make_nvp("pool", &managers.pool)
+	);
 }
 
 bool GameInstance::update(double a_dt) {

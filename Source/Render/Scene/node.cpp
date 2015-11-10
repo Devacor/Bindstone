@@ -202,6 +202,46 @@ namespace MV {
 			return make(a_draw2d, guid("root_"));
 		}
 
+		std::shared_ptr<Node> Node::load(const std::string &a_filename, const std::function<void (cereal::JSONInputArchive &)> a_binder) {
+			std::ifstream stream(a_filename);
+			cereal::JSONInputArchive archive(stream);
+			if (a_binder) {
+				a_binder(archive);
+			}
+			std::shared_ptr<Node> result;
+			archive(result);
+			return result;
+		}
+
+		std::shared_ptr<Node> Node::save(const std::string &a_filename, bool a_renameNodeToFile) {
+			return save(a_filename, a_renameNodeToFile ? fileNameFromPath(a_filename) : nodeId);
+		}
+
+		std::shared_ptr<Node> Node::save(const std::string &a_filename, const std::string &a_newId) {
+			std::ofstream stream(a_filename);
+			cereal::JSONOutputArchive archive(stream);
+
+			std::string oldId = nodeId;
+			SCOPE_EXIT{ nodeId = oldId; };
+			nodeId = a_newId;
+
+			auto self = shared_from_this();
+			archive(self);
+			return self;
+		}
+
+		std::shared_ptr<Node> Node::make(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder) {
+			return loadChild(a_filename, a_binder);
+		}
+
+		std::shared_ptr<Node> Node::loadChild(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			auto toAdd = Node::load(a_filename, a_binder);
+			remove(toAdd->id(), false);
+			add(toAdd);
+			return toAdd;
+		}
+
 		std::shared_ptr<Node> Node::make(const std::string &a_id) {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto toAdd = Node::make(draw2d, a_id);

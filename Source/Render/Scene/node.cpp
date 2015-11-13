@@ -900,21 +900,25 @@ namespace MV {
 			std::regex_match(a_original, originalMatches, clonePattern);
 			std::string strippedId = (originalMatches.size() > 2) ? originalMatches[1] : a_original;
 			int cloneCount = (originalMatches.size() > 2) ? std::stoi(originalMatches[2]) + 1 : 0;
-
+			bool hasPlainStrippedId = false;
 			bool done = false;
 			while (!done) {
 				done = true;
 				for (auto&& child : childNodes) {
+					hasPlainStrippedId = hasPlainStrippedId || (child->nodeId == strippedId);
+
 					if (child->nodeId == strippedId + "_" + std::to_string(cloneCount)) {
 						++cloneCount;
 						done = false;
+						break;
 					}
 				}
 			}
 
-			if (cloneCount == 0) {
+			if (!hasPlainStrippedId && cloneCount == 0) {
 				return strippedId;
-			} else {
+			}
+			else {
 				return strippedId + "_" + std::to_string(cloneCount);
 			}
 		}

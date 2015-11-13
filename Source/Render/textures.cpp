@@ -522,7 +522,6 @@ namespace MV {
 	void TextureUnloader::increment(GLuint a_id) {
 		MV::require<MV::ResourceException>(a_id != 0, "Null texture attempted to increment in TextureUnloader!");
 		std::lock_guard<std::mutex> guard(lock);
-		std::cout << "++" << a_id << " == " << (handles[a_id] + 1) << std::endl;
 		handles[a_id]++;
 	}
 
@@ -530,7 +529,6 @@ namespace MV {
 		MV::require<MV::ResourceException>(a_id != 0, "Null texture attempted to decrement in TextureUnloader!");
 		std::lock_guard<std::mutex> guard(lock);
 		auto handleCount = --handles[a_id];
-		std::cout << "--" << a_id << " == " << (handles[a_id]) << std::endl;
 		MV::require<MV::ResourceException>(handleCount >= 0, "TextureUnloader: Handle underflow for GLuint id: ", a_id);
 		if (handleCount == 0) {
 			glDeleteTextures(1, &a_id);

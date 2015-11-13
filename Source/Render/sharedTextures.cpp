@@ -129,9 +129,4 @@ namespace MV {
 
 		return newPack;
 	}
-
-	std::shared_ptr<DynamicTextureDefinition> SharedTextures::defaultTexture = nullptr;
-	std::shared_ptr<TextureHandle> SharedTextures::defaultHandle = nullptr;
-
-
 }

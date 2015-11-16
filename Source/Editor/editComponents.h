@@ -60,6 +60,32 @@ private:
 	std::shared_ptr<MV::Scene::Node> controlContainer;
 };
 
+class EditableSpine {
+public:
+	EditableSpine(MV::Scene::SafeComponent<MV::Scene::Spine> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+
+	~EditableSpine() {
+		controlContainer->removeFromParent();
+	}
+
+	void removeHandles();
+
+	void resetHandles();
+
+	std::function<void(EditableSpine*)> onChange;
+
+	MV::Scene::SafeComponent<MV::Scene::Spine> elementToEdit;
+private:
+
+	MV::Scene::Node::BasicSharedSignalType nodeMoved;
+
+	MV::MouseState *mouse;
+
+	MV::Scene::SafeComponent<MV::Scene::Sprite> positionHandle;
+
+	std::shared_ptr<MV::Scene::Node> controlContainer;
+};
+
 class EditableRectangle {
 public:
 	EditableRectangle(MV::Scene::SafeComponent<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);

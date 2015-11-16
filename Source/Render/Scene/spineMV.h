@@ -128,6 +128,11 @@ namespace MV {
 			std::shared_ptr<Spine> bindNode(const std::string &a_slotId, const std::string &a_nodeId);
 			std::shared_ptr<Spine> unbindSlot(const std::string &a_slotId);
 			std::shared_ptr<Spine> unbindNode(const std::string &a_slotId, const std::string &a_nodeId);
+			std::shared_ptr<Spine> unbindAll();
+
+			std::map<std::string, std::set<std::string>> boundSlots() const {
+				return slotsToNodes;
+			}
 
 			std::shared_ptr<Spine> timeScale(double a_timeScale);
 			double timeScale() const;
@@ -139,14 +144,25 @@ namespace MV {
 			std::shared_ptr<Spine> animate(const std::string &a_animationName, bool a_loop = true);
 			std::shared_ptr<Spine> queueAnimation(const std::string &a_animationName, double a_delay, bool a_loop = true);
 			std::shared_ptr<Spine> queueAnimation(const std::string &a_animationName, bool a_loop = true);
+
+			std::shared_ptr<Spine> load(const FileBundle &a_fileBundle);
+			std::shared_ptr<Spine> unload();
+			bool loaded() const;
+
+			FileBundle bundle() const {
+				return fileBundle;
+			}
 		protected:
 			Spine(const std::weak_ptr<Node> &a_owner, const FileBundle &a_fileBundle);
+			Spine(const std::weak_ptr<Node> &a_owner);
+			void loadImplementation(const FileBundle &a_fileBundle);
 
 			virtual void defaultDrawImplementation() override;
 
 			void applySpineBlendMode(spBlendMode previousBlending);
 
 			virtual void updateImplementation(double a_delta) override;
+			void unloadImplementation();
 		private:
 			//called from spineAnimationCallback
 			void onAnimationStateEvent(int trackIndex, spEventType type, spEvent* event, int loopCount);
@@ -176,6 +192,12 @@ namespace MV {
 				construct->initialize();
 			}
 
+			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
+				return cloneHelper(a_parent->attach<Spine>(fileBundle).self());
+			}
+
+			std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
+
 			bool skeletonRenderStateChangedSinceLastIteration(spBlendMode a_previousBlending, spBlendMode a_currentBlending, FileTextureDefinition * a_previousTexture, FileTextureDefinition * a_texture);
 
 			size_t renderSkeletonBatch(size_t lastRenderedIndex, GLuint a_textureId, spBlendMode a_blendMode);
@@ -195,7 +217,6 @@ namespace MV {
 			static const int MAX_UPDATES = 10;
 			static const double TIME_BETWEEN_UPDATES;
 			bool autoUpdate;
-			Stopwatch timer;
 
 			int defaultTrack = 0;
 			std::map<int, AnimationTrack> tracks;

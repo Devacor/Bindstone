@@ -156,6 +156,8 @@ namespace MV {
 
 	std::string fileNameFromPath(std::string a_path, bool a_includeExtension = false);
 
+	bool fileExists(const std::string& name);
+
 	template <class Type>
 	double angle(const Type &x1, const Type &y1, const Type &x2, const Type &y2, AngleType returnAs = DEGREES){
 		if(returnAs == DEGREES){

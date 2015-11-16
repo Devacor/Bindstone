@@ -155,6 +155,37 @@ void EditableGrid::resetHandles() {
 	positionHandle->size(currentDimensions)->color({0x22FFFFFF});
 }
 
+
+EditableSpine::EditableSpine(MV::Scene::SafeComponent<MV::Scene::Spine> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse) :
+	elementToEdit(a_elementToEdit),
+	controlContainer(a_rootContainer->make("Editable")->depth(-100.0f)),
+	mouse(a_mouse) {
+
+	resetHandles();
+
+	nodeMoved = elementToEdit->owner()->onTransformChange.connect([&](const std::shared_ptr<MV::Scene::Node> &a_this) {
+		resetHandles();
+	});
+}
+
+void EditableSpine::removeHandles() {
+	if (positionHandle) {
+		controlContainer->remove(positionHandle->owner());
+	}
+	positionHandle.reset();
+}
+
+void EditableSpine::resetHandles() {
+	removeHandles();
+	auto rectBox = MV::round<MV::PointPrecision>(elementToEdit->screenBounds());
+
+	auto currentDimensions = MV::Size<>(std::max(rectBox.size().width, 5.0f), std::max(rectBox.size().height, 5.0f));
+
+	EditableSpine* self = this;
+	positionHandle = controlContainer->make(MV::guid("position"))->position(rectBox.minPoint)->attach<MV::Scene::Sprite>();
+	positionHandle->size(currentDimensions)->color({ 0x11FFFFFF });
+}
+
 void EditableRectangle::resetHandles() {
 	removeHandles();
 	auto rectBox = MV::round<MV::PointPrecision>(elementToEdit->screenBounds());

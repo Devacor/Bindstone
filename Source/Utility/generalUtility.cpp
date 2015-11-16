@@ -154,6 +154,16 @@ namespace MV {
 		return a_path;
 	}
 
+	bool fileExists(const std::string& name) {
+		if (FILE *file = fopen(name.c_str(), "r")) {
+			fclose(file);
+			return true;
+		}
+		else {
+			return false;
+		}
+	}
+
 	std::string toString(const UtfString& ws) {
 		std::string s;
 		std::for_each(ws.begin(), ws.end(), [&](const UtfChar &wc){

@@ -12,6 +12,7 @@ class EditableRectangle;
 class EditableEmitter;
 class EditableGrid;
 class EditablePathMap;
+class EditableSpine;
 class TexturePicker;
 
 class EditorPanel {
@@ -59,6 +60,7 @@ public:
 
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateSpriteComponentButton(const MV::Scene::SafeComponent<MV::Scene::Sprite> & a_sprite);
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateGridComponentButton(const MV::Scene::SafeComponent<MV::Scene::Grid> & a_grid);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateSpineComponentButton(const MV::Scene::SafeComponent<MV::Scene::Spine> & a_grid);
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateEmitterComponentButton(const MV::Scene::SafeComponent<MV::Scene::Emitter> & a_emitter);
 	MV::Scene::SafeComponent<MV::Scene::Button> CreatePathMapComponentButton(const MV::Scene::SafeComponent<MV::Scene::PathMap> & a_pathMap);
 private:
@@ -161,6 +163,31 @@ private:
 	std::shared_ptr<MV::Scene::Text> height;
 };
 
+class SelectedSpineEditorPanel : public EditorPanel {
+public:
+	SelectedSpineEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableSpine> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
+	~SelectedSpineEditorPanel() {
+	}
+
+	virtual void handleInput(SDL_Event &a_event) override;
+
+	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
+	virtual void onSceneZoom() override;
+private:
+	void handleMakeButton(std::shared_ptr<MV::Scene::Node> a_grid, const std::string &a_socket = "", const std::string &a_node = "");
+	void clearTexturePicker() {
+		picker = nullptr;
+	}
+
+	std::shared_ptr<EditableSpine> controls;
+	std::shared_ptr<MV::Scene::Text> assetJson;
+	std::shared_ptr<MV::Scene::Text> assetAtlas;
+	std::shared_ptr<MV::Scene::Text> scale;
+
+	std::vector<std::shared_ptr<MV::Scene::Text>> linkedSockets;
+	std::vector<std::shared_ptr<MV::Scene::Text>> linkedNodes;
+};
+
 class SelectedPathMapEditorPanel : public EditorPanel {
 public:
 	SelectedPathMapEditorPanel(EditorControls &a_panel, std::shared_ptr<EditablePathMap> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
@@ -198,7 +225,7 @@ private:
 	std::shared_ptr<MV::Scene::Button> associatedButton;
 	void createRectangle(const MV::BoxAABB<int> &a_selected);
 	void createEmitter(const MV::BoxAABB<int> &a_selected);
-	void createSpine(const MV::BoxAABB<int> &a_selected);
+	void createSpine();
 	void createPathMap(const MV::BoxAABB<int> &a_selected);
 	void createGrid();
 

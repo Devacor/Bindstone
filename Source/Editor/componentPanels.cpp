@@ -46,6 +46,25 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 		panel.loadPanel<DeselectedEditorPanel>();
 	});
 
+	auto saveButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Save", buttonSize, UTF_CHAR_STR("Save"));
+	saveButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		controls->elementToEdit->save("Assets/Prefabs/" + controls->elementToEdit->id() + ".prefab");
+	});
+
+	auto loadButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Load", buttonSize, UTF_CHAR_STR("Load"));
+	loadButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		controls->elementToEdit->make("Assets/Prefabs/" + controls->elementToEdit->id() + ".prefab", [&](cereal::JSONInputArchive& archive) {
+			archive.add(
+				cereal::make_nvp("mouse", panel.resources().mouse),
+				cereal::make_nvp("renderer", &panel.root()->renderer()),
+				cereal::make_nvp("textLibrary", panel.resources().textLibrary),
+				cereal::make_nvp("pool", panel.resources().pool),
+				cereal::make_nvp("texture", panel.resources().textures)
+				);
+		});
+		panel.resources().editor->sceneUpdated();
+	});
+
 	auto copyButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Copy", buttonSize, UTF_CHAR_STR("Copy"));
 	copyButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		controls->elementToEdit->clone();
@@ -141,7 +160,7 @@ void SelectedNodeEditorPanel::updateComponentEditButtons(bool a_attached) {
 	}
 	componentEditButtons.clear();
 	buttonSize = MV::size(110.0f, 27.0f);
-	auto componentList = controls->elementToEdit->components<MV::Scene::Sprite, MV::Scene::Grid, MV::Scene::Emitter, MV::Scene::PathMap>(true);
+	auto componentList = controls->elementToEdit->components<MV::Scene::Sprite, MV::Scene::Grid, MV::Scene::Emitter, MV::Scene::Spine, MV::Scene::PathMap>(true);
 	int count = 0;
 	for (auto&& component : componentList) {
 		++count;
@@ -154,6 +173,9 @@ void SelectedNodeEditorPanel::updateComponentEditButtons(bool a_attached) {
 		},
 		[&](const MV::Scene::SafeComponent<MV::Scene::Emitter> &a_emitter) {
 			CreateEmitterComponentButton(a_emitter);
+		},
+		[&](const MV::Scene::SafeComponent<MV::Scene::Spine> &a_spine) {
+			CreateSpineComponentButton(a_spine);
 		},
 		[&](const MV::Scene::SafeComponent<MV::Scene::PathMap> &a_pathMap) {
 			CreatePathMapComponentButton(a_pathMap);
@@ -201,6 +223,18 @@ MV::Scene::SafeComponent<MV::Scene::Button> SelectedNodeEditorPanel::CreateEmitt
 	auto button = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, MV::guid("EditEmitter"), buttonSize, MV::toWide("E: " + a_emitter->id()));
 	button->onAccept.connect(MV::guid("click"), [&, a_emitter, button](std::shared_ptr<MV::Scene::Clickable>) {
 		componentPanel->loadPanel<SelectedEmitterEditorPanel>(std::make_shared<EditableEmitter>(a_emitter, panel.editor()->make("EditableEmitter"), panel.resources().mouse), button);
+		componentPanel->activePanel()->onNameChange.connect(MV::guid("NameChange"), [button](const std::string &a_newName) {
+			renameButton(button->safe(), MV::toWide("E: " + a_newName));
+		});
+	});
+	componentEditButtons.push_back(button->owner());
+	return button->safe();
+}
+
+MV::Scene::SafeComponent<MV::Scene::Button> SelectedNodeEditorPanel::CreateSpineComponentButton(const MV::Scene::SafeComponent<MV::Scene::Spine> & a_spine) {
+	auto button = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, MV::guid("EditSpine"), buttonSize, MV::toWide("E: " + a_spine->id()));
+	button->onAccept.connect(MV::guid("click"), [&, a_spine, button](std::shared_ptr<MV::Scene::Clickable>) {
+		componentPanel->loadPanel<SelectedSpineEditorPanel>(std::make_shared<EditableSpine>(a_spine, panel.editor()->make("EditableSpine"), panel.resources().mouse), button);
 		componentPanel->activePanel()->onNameChange.connect(MV::guid("NameChange"), [button](const std::string &a_newName) {
 			renameButton(button->safe(), MV::toWide("E: " + a_newName));
 		});
@@ -318,6 +352,138 @@ void SelectedGridEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
 }
 
 void SelectedGridEditorPanel::onSceneZoom() {
+	controls->resetHandles();
+}
+
+SelectedSpineEditorPanel::SelectedSpineEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableSpine> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton) :
+	EditorPanel(a_panel),
+	controls(a_controls) {
+
+	auto node = panel.content();
+
+	auto grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
+		color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->
+		padding({ 2.0f, 2.0f })->owner();
+	auto buttonSize = MV::size(110.0f, 27.0f);
+	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
+	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		panel.deleteFullScene();
+	});
+
+	auto deleteButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Delete", buttonSize, UTF_CHAR_STR("Delete"));
+	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		controls->elementToEdit->detach();
+		panel.deleteFullScene();
+	});
+
+	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
+		text(MV::toWide(controls->elementToEdit->id()))->
+		onEnter.connect("rename", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
+		controls->elementToEdit->id(MV::toString(a_text->text()));
+		renameButton(a_associatedButton->safe(), MV::toWide("G: ") + a_text->text());
+		onNameChangeSignal(MV::toString(a_text->text()));
+	});
+
+	float textboxWidth = 52.0f;
+	makeLabel(grid, *panel.resources().textLibrary, "Json", buttonSize, UTF_CHAR_STR("Json"));
+	assetJson = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "json", buttonSize, MV::toWide(a_controls->elementToEdit->bundle().skeletonFile));
+	makeLabel(grid, *panel.resources().textLibrary, "Atlas", buttonSize, UTF_CHAR_STR("Atlas"));
+	assetAtlas = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "atlas", buttonSize, MV::toWide(a_controls->elementToEdit->bundle().atlasFile));
+	
+	makeLabel(grid, *panel.resources().textLibrary, "Scale", buttonSize, UTF_CHAR_STR("Scale"));
+	scale = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "scale", buttonSize, MV::toWide(std::to_string(a_controls->elementToEdit->bundle().loadScale)));
+
+	auto addAttachment = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Add", buttonSize, UTF_CHAR_STR("Add Binding"));
+	std::weak_ptr<MV::Scene::Node> weakGrid = grid;
+	addAttachment->onAccept.connect("click", [&, weakGrid](std::shared_ptr<MV::Scene::Clickable>) { handleMakeButton(weakGrid.lock()); });
+
+	auto clearAttachments = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Clear", buttonSize, UTF_CHAR_STR("Clear Bindings"));
+	clearAttachments->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		controls->elementToEdit->unbindAll();
+		for (auto&& socket : linkedSockets) {
+			socket->owner()->removeFromParent();
+		}
+		for (auto&& node : linkedNodes) {
+			node->owner()->removeFromParent();
+		}
+		linkedSockets.clear();
+		linkedNodes.clear();
+	});
+
+	if (controls) {
+		auto bundleChange = [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			if (MV::fileExists(MV::toString(assetJson->text())) && MV::fileExists(MV::toString(assetAtlas->text()))) {
+				try { controls->elementToEdit->load({ MV::toString(assetJson->text()), MV::toString(assetAtlas->text()), scale->number() }); }
+				catch (...) {}
+			}
+		};
+		auto bundleChangeClick = [&](std::shared_ptr<MV::Scene::Clickable>) {
+			if (MV::fileExists(MV::toString(assetJson->text())) && MV::fileExists(MV::toString(assetAtlas->text()))) {
+				try { controls->elementToEdit->load({ MV::toString(assetJson->text()), MV::toString(assetAtlas->text()), scale->number() }); }
+				catch (...) {}
+			}
+		};
+		assetJson->onEnter.connect("json", bundleChange);
+		assetJson->owner()->component<MV::Scene::Clickable>()->onAccept.connect("json", bundleChangeClick);
+		assetAtlas->onEnter.connect("atlas", bundleChange);
+		assetAtlas->owner()->component<MV::Scene::Clickable>()->onAccept.connect("json", bundleChangeClick);
+		scale->onEnter.connect("atlas", bundleChange);
+		scale->owner()->component<MV::Scene::Clickable>()->onAccept.connect("json", bundleChangeClick);
+
+	}
+
+	for (auto&& slotKV : controls->elementToEdit->boundSlots()) {
+		for (auto&& node : slotKV.second) {
+			handleMakeButton(grid, slotKV.first, node);
+		}
+	}
+
+	auto deselectLocalAABB = deselectButton->bounds();
+
+	panel.updateBoxHeader(grid->bounds().width());
+
+	SDL_StartTextInput();
+}
+
+void SelectedSpineEditorPanel::handleMakeButton(std::shared_ptr<MV::Scene::Node> a_grid, const std::string &a_socket, const std::string &a_node) {
+	if (controls) {
+		float textboxWidth = 52.0f;
+		auto socketText = makeInputField(this, *panel.resources().mouse, a_grid, *panel.resources().textLibrary, MV::guid("json"), MV::size(textboxWidth, 27.0f), MV::toWide(a_socket));
+		auto nodeText = makeInputField(this, *panel.resources().mouse, a_grid, *panel.resources().textLibrary, MV::guid("atlas"), MV::size(textboxWidth, 27.0f), MV::toWide(a_node));
+		linkedSockets.push_back(socketText);
+		linkedNodes.push_back(nodeText);
+
+		auto nodeConnectionChange = [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			controls->elementToEdit->unbindAll();
+			for (size_t i = 0; i < linkedSockets.size(); ++i) {
+				controls->elementToEdit->bindNode(MV::toString(linkedSockets[i]->text()), MV::toString(linkedNodes[i]->text()));
+			}
+		};
+		auto nodeConnectionChangeClick = [&](std::shared_ptr<MV::Scene::Clickable>) {
+			controls->elementToEdit->unbindAll();
+			for (size_t i = 0; i < linkedSockets.size(); ++i) {
+				controls->elementToEdit->bindNode(MV::toString(linkedSockets[i]->text()), MV::toString(linkedNodes[i]->text()));
+			}
+		};
+
+		socketText->onEnter.connect("changeNode", nodeConnectionChange);
+		socketText->owner()->component<MV::Scene::Clickable>()->onAccept.connect("changeNode", nodeConnectionChangeClick);
+		nodeText->onEnter.connect("changeNode", nodeConnectionChange);
+		nodeText->owner()->component<MV::Scene::Clickable>()->onAccept.connect("changeNode", nodeConnectionChangeClick);
+	}
+}
+
+void SelectedSpineEditorPanel::handleInput(SDL_Event &a_event) {
+	if (activeTextbox) {
+		activeTextbox->text(a_event);
+	}
+}
+
+void SelectedSpineEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
+	controls->resetHandles();
+}
+
+void SelectedSpineEditorPanel::onSceneZoom() {
 	controls->resetHandles();
 }
 
@@ -973,9 +1139,7 @@ ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel, co
 	});
 
 	createSpineButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
-		panel.selection().enable([&](const MV::BoxAABB<int> &a_selected){
-			createSpine(a_selected);
-		});
+		createSpine();
 	});
 
 	createEmitterButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
@@ -1022,7 +1186,7 @@ void ChooseElementCreationType::createEmitter(const MV::BoxAABB<int> &a_selected
 	panel.selection().disable();
 
 	auto newEmitter = nodeToAttachTo->attach<MV::Scene::Emitter>(*panel.resources().pool);
-	newEmitter->id(MV::guid("emitter"));
+	newEmitter->id(MV::guid("emitter"))->shader(MV::DEFAULT_ID);
 	auto transformedSelection = nodeToAttachTo->localFromScreen(a_selected);
 	newEmitter->properties().minimumPosition = transformedSelection.minPoint;
 	newEmitter->properties().maximumPosition = transformedSelection.maxPoint;
@@ -1038,15 +1202,11 @@ void ChooseElementCreationType::createGrid() {
 	panel.loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(newGrid, panel.editor(), panel.resources().mouse), editorPanel->CreateGridComponentButton(newGrid).self());
 }
 
-void ChooseElementCreationType::createSpine(const MV::BoxAABB<int> &a_selected) {
+void ChooseElementCreationType::createSpine() {
 	panel.selection().disable();
 
-	auto newEmitter = nodeToAttachTo->attach<MV::Scene::Emitter>(*panel.resources().pool);
-	newEmitter->id(MV::guid("spine"));
-	auto transformedSelection = nodeToAttachTo->localFromScreen(a_selected);
-	newEmitter->properties().minimumPosition = transformedSelection.minPoint;
-	newEmitter->properties().maximumPosition = transformedSelection.maxPoint;
+	auto newSpine = nodeToAttachTo->attach<MV::Scene::Spine>()->shader(MV::DEFAULT_ID)->safe();
+	newSpine->id(MV::guid("spine"));
 
-	auto editableEmitter = std::make_shared<EditableEmitter>(newEmitter, panel.editor(), panel.resources().mouse);
-	panel.loadPanel<SelectedEmitterEditorPanel>(editableEmitter, editorPanel->CreateEmitterComponentButton(newEmitter).self());
+	panel.loadPanel<SelectedSpineEditorPanel>(std::make_shared<EditableSpine>(newSpine, panel.editor(), panel.resources().mouse), editorPanel->CreateSpineComponentButton(newSpine).self());
 }

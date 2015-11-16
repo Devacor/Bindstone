@@ -70,67 +70,84 @@ namespace MV{
 
 		Spine::Spine(const std::weak_ptr<Node> &a_owner, const FileBundle &a_fileBundle) :
 			Drawable(a_owner),
-			fileBundle(a_fileBundle),
 			autoUpdate(true),
 			onStart(onStartSignal),
 			onEnd(onEndSignal),
 			onComplete(onCompleteSignal),
 			onEvent(onEventSignal) {
 
-			atlas = spAtlas_createFromFile(fileBundle.atlasFile.c_str(), 0);
-			require<ResourceException>(atlas, "Error reading atlas file:", fileBundle.atlasFile);
+			loadImplementation(a_fileBundle);
+		}
 
-			spSkeletonJson* json = spSkeletonJson_create(atlas);
-			json->scale = fileBundle.loadScale;
-			spSkeletonData* skeletonData = spSkeletonJson_readSkeletonDataFile(json, fileBundle.skeletonFile.c_str());
-			if (!skeletonData && json->error) {
-				require<ResourceException>(false, json->error);
-			}
-			else if (!skeletonData) {
-				require<ResourceException>(false, "Error reading skeleton data file: ", fileBundle.skeletonFile);
-			}
+		Spine::Spine(const std::weak_ptr<Node> &a_owner) :
+			Drawable(a_owner),
+			autoUpdate(true),
+			onStart(onStartSignal),
+			onEnd(onEndSignal),
+			onComplete(onCompleteSignal),
+			onEvent(onEventSignal) {
+		}
 
-			spSkeletonJson_dispose(json);
+		std::shared_ptr<Spine> Spine::load(const FileBundle &a_fileBundle) {
+			loadImplementation(a_fileBundle);
+			return std::static_pointer_cast<Spine>(shared_from_this());
+		}
 
-			skeleton = spSkeleton_create(skeletonData);
-			require<ResourceException>(skeleton && skeleton->bones && skeleton->bones[0], fileBundle.skeletonFile, " has no bones!");
-			rootBone = skeleton->bones[0];
+		std::shared_ptr<Spine> Spine::unload() {
+			unloadImplementation();
+			return std::static_pointer_cast<Spine>(shared_from_this());
+		}
 
-			animationState = spAnimationState_create(spAnimationStateData_create(skeleton->data));
-			animationState->rendererObject = this;
-			animationState->listener = spineAnimationCallback;
+		bool Spine::loaded() const {
+			return skeleton != nullptr;
+		}
 
-			spBone_setYDown(true);
-			spineWorldVertices = new float[SPINE_MESH_VERTEX_COUNT_MAX]();
-			updateImplementation(0.0f);
+		void Spine::loadImplementation(const FileBundle &a_fileBundle) {
+			unloadImplementation();
+			if (a_fileBundle.skeletonFile != "") {
+				atlas = spAtlas_createFromFile(a_fileBundle.atlasFile.c_str(), 0);
+				require<ResourceException>(atlas, "Error reading atlas file:", a_fileBundle.atlasFile);
 
-			for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
-				spSlot* slot = skeleton->drawOrder[i];
-				if (!slot->attachment) continue;
-				FileTextureDefinition *texture = loadSpineSlotIntoPoints(slot);
+				spSkeletonJson* json = spSkeletonJson_create(atlas);
+				json->scale = a_fileBundle.loadScale;
+				spSkeletonData* skeletonData = spSkeletonJson_readSkeletonDataFile(json, a_fileBundle.skeletonFile.c_str());
+				if (!skeletonData && json->error) {
+					require<ResourceException>(false, json->error);
+				}
+				else if (!skeletonData) {
+					require<ResourceException>(false, "Error reading skeleton data file: ", a_fileBundle.skeletonFile);
+				}
+
+				spSkeletonJson_dispose(json);
+
+				skeleton = spSkeleton_create(skeletonData);
+				require<ResourceException>(skeleton && skeleton->bones && skeleton->bones[0], a_fileBundle.skeletonFile, " has no bones!");
+				rootBone = skeleton->bones[0];
+
+				animationState = spAnimationState_create(spAnimationStateData_create(skeleton->data));
+				animationState->rendererObject = this;
+				animationState->listener = spineAnimationCallback;
+
+				spBone_setYDown(true);
+				spineWorldVertices = new float[SPINE_MESH_VERTEX_COUNT_MAX]();
+				updateImplementation(0.0f);
+
+				for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
+					spSlot* slot = skeleton->drawOrder[i];
+					if (!slot->attachment) continue;
+					FileTextureDefinition *texture = loadSpineSlotIntoPoints(slot);
+				}
+
+				fileBundle = a_fileBundle;
 			}
 		}
 
 		Spine::~Spine() {
-			if (atlas) {
-				spAtlas_dispose(atlas);
-			}
-			if (skeleton) {
-				if (skeleton->data) {
-					spSkeletonData_dispose(skeleton->data);
-				}
-				spSkeleton_dispose(skeleton);
-			}
-			if (animationState) {
-				spAnimationState_dispose(animationState);
-			}
-			if (spineWorldVertices) {
-				delete[] spineWorldVertices;
-			}
+			unloadImplementation();
 		}
 
 		void Spine::updateImplementation(double a_delta) {
-			if (skeleton) {
+			if (loaded()) {
 				spSkeleton_update(skeleton, static_cast<float>(a_delta));
 				if (animationState) {
 					spAnimationState_update(animationState, static_cast<float>(a_delta));
@@ -140,13 +157,38 @@ namespace MV{
 			}
 		}
 
+		void Spine::unloadImplementation() {
+			if (loaded()) {
+				tracks.clear();
+				slotsToNodes.clear();
+				points.clear();
+				vertexIndices.clear();
+				fileBundle = FileBundle();
+				if (atlas) {
+					spAtlas_dispose(atlas);
+				}
+				if (skeleton) {
+					if (skeleton->data) {
+						spSkeletonData_dispose(skeleton->data);
+					}
+					spSkeleton_dispose(skeleton);
+				}
+				if (animationState) {
+					spAnimationState_dispose(animationState);
+				}
+				if (spineWorldVertices) {
+					delete[] spineWorldVertices;
+				}
+			}
+		}
+
 		AnimationTrack& Spine::track(int a_index) {
+			require<ResourceException>(loaded(), "Spine asset not loaded, cannot call track.");
 			defaultTrack = a_index;
 			auto found = tracks.find(a_index);
 			if (found != tracks.end()) {
 				return found->second;
-			}
-			else {
+			} else {
 				return tracks.emplace(a_index, AnimationTrack(a_index, animationState, skeleton)).first->second;
 			}
 		}
@@ -190,66 +232,74 @@ namespace MV{
 			return std::static_pointer_cast<Spine>(shared_from_this());
 		}
 
+		std::shared_ptr<Spine> Spine::unbindAll() {
+			slotsToNodes.clear();
+			return std::static_pointer_cast<Spine>(shared_from_this());
+		}
+
 		void Spine::defaultDrawImplementation(){
-			if(bufferId == 0){
-				glGenBuffers(1, &bufferId);
-			}
+			if (loaded()) {
+				if (bufferId == 0) {
+					glGenBuffers(1, &bufferId);
+				}
 
-			glBindBuffer(GL_ARRAY_BUFFER, bufferId);
+				glBindBuffer(GL_ARRAY_BUFFER, bufferId);
 
-			points.clear();
-			vertexIndices.clear();
-			FileTextureDefinition *previousTexture = nullptr;
-			spBlendMode previousBlending = SP_BLEND_MODE_NORMAL;
-			size_t lastRenderedIndex = 0;
-			std::vector<std::string> renderedChildren;
-			bool firstSlotTexture = true;
-			for(int i = 0, n = skeleton->slotsCount; i < n; i++) {
-				spSlot* slot = skeleton->drawOrder[i];
-				if (slot->attachment) {
-					FileTextureDefinition *texture = getSpineTextureFromSlot(slot);
-					if (firstSlotTexture) {
-						firstSlotTexture = false;
+				points.clear();
+				vertexIndices.clear();
+				
+				FileTextureDefinition *previousTexture = nullptr;
+				spBlendMode previousBlending = SP_BLEND_MODE_NORMAL;
+				size_t lastRenderedIndex = 0;
+				std::vector<std::string> renderedChildren;
+				bool firstSlotTexture = true;
+				for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
+					spSlot* slot = skeleton->drawOrder[i];
+					if (slot->attachment) {
+						FileTextureDefinition *texture = getSpineTextureFromSlot(slot);
+						if (firstSlotTexture) {
+							firstSlotTexture = false;
+							previousTexture = texture;
+							previousBlending = slot->data->blendMode;
+						}
+
+						if (skeletonRenderStateChangedSinceLastIteration(previousBlending, slot->data->blendMode, previousTexture, texture)) {
+							lastRenderedIndex = renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0, previousBlending);
+						}
+
+						loadSpineSlotIntoPoints(slot);
 						previousTexture = texture;
 						previousBlending = slot->data->blendMode;
 					}
-
-					if (skeletonRenderStateChangedSinceLastIteration(previousBlending, slot->data->blendMode, previousTexture, texture)) {
-						lastRenderedIndex = renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0, previousBlending);
-					}
-
-					loadSpineSlotIntoPoints(slot);
-					previousTexture = texture;
-					previousBlending = slot->data->blendMode;
-				}
-				auto nodesToRender = slotsToNodes.find(slot->data->name);
-				if (nodesToRender != slotsToNodes.end()) {
-					bool interrupted = false;
-					for (auto&& nodeToRender : nodesToRender->second) {
-						auto node = owner()->get(nodeToRender, false);
-						if (node) {
-							if (!interrupted) {
-								interrupted = true;
-								lastRenderedIndex = renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0, previousBlending);
+					auto nodesToRender = slotsToNodes.find(slot->data->name);
+					if (nodesToRender != slotsToNodes.end()) {
+						bool interrupted = false;
+						for (auto&& nodeToRender : nodesToRender->second) {
+							auto node = owner()->get(nodeToRender, false);
+							if (node) {
+								if (!interrupted) {
+									interrupted = true;
+									lastRenderedIndex = renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0, previousBlending);
+								}
+								node->silence()->
+									position({ slot->bone->worldX, slot->bone->worldY })->
+									rotation({ 0.0f, 0.0f, slot->bone->worldRotation })->
+									scale({ slot->bone->scaleX, slot->bone->scaleY });
+								node->draw();
+								renderedChildren.push_back(node->id());
 							}
-							node->silence()->
-								position({ slot->bone->worldX, slot->bone->worldY })->
-								rotation({0.0f, 0.0f, slot->bone->worldRotation})->
-								scale({ slot->bone->scaleX, slot->bone->scaleY });
-							node->draw();
-							renderedChildren.push_back(node->id());
 						}
 					}
 				}
-			}
 
-			if(lastRenderedIndex != vertexIndices.size()){
-				renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0, previousBlending);
-			}
+				if (lastRenderedIndex != vertexIndices.size()) {
+					renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0, previousBlending);
+				}
 
-			for (auto&& node : *owner()) {
-				if (std::find(renderedChildren.begin(), renderedChildren.end(), node->id()) == renderedChildren.end()) {
-					node->draw();
+				for (auto&& node : *owner()) {
+					if (std::find(renderedChildren.begin(), renderedChildren.end(), node->id()) == renderedChildren.end()) {
+						node->draw();
+					}
 				}
 			}
 		}
@@ -301,6 +351,13 @@ namespace MV{
 				return vertexIndices.size();
 			}
 			return a_lastRenderedIndex;
+		}
+
+		std::shared_ptr<Component> Spine::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+			Drawable::cloneHelper(a_clone);
+			auto spineClone = std::static_pointer_cast<Spine>(a_clone);
+			spineClone->slotsToNodes = slotsToNodes;
+			return a_clone;
 		}
 
 		bool Spine::skeletonRenderStateChangedSinceLastIteration(spBlendMode a_previousBlending, spBlendMode a_currentBlending, FileTextureDefinition * a_previousTexture, FileTextureDefinition * a_texture) {
@@ -443,6 +500,7 @@ namespace MV{
 		}
 
 		AnimationTrack& AnimationTrack::animate(const std::string &a_animationName, bool a_loop){
+			require<ResourceException>(skeleton, "Spine asset not loaded, cannot call animate.");
 			spAnimation* animation = spSkeletonData_findAnimation(skeleton->data, a_animationName.c_str());
 			if(animation){
 				auto* entry = spAnimationState_setAnimation(animationState, myTrackIndex, animation, a_loop);
@@ -461,6 +519,7 @@ namespace MV{
 		}
 
 		AnimationTrack& AnimationTrack::queueAnimation(const std::string &a_animationName, double a_delay, bool a_loop){
+			require<ResourceException>(skeleton, "Spine asset not loaded, cannot call queueAnimation.");
 			spAnimation* animation = spSkeletonData_findAnimation(skeleton->data, a_animationName.c_str());
 			if(animation){
 				auto* entry = spAnimationState_addAnimation(animationState, myTrackIndex, animation, a_loop, static_cast<float>(a_delay));
@@ -475,11 +534,13 @@ namespace MV{
 		}
 
 		AnimationTrack& AnimationTrack::stop(){
+			require<ResourceException>(animationState, "Spine asset not loaded, cannot call stop.");
 			spAnimationState_clearTrack(animationState, myTrackIndex);
 			return *this;
 		}
 
 		AnimationTrack& AnimationTrack::time(double a_newTime){
+			require<ResourceException>(animationState, "Spine asset not loaded, cannot call time.");
 			spAnimationState_getCurrent(animationState, myTrackIndex)->time = static_cast<float>(a_newTime);
 			return *this;
 		}
@@ -488,6 +549,7 @@ namespace MV{
 		}
 
 		AnimationTrack& AnimationTrack::crossfade(double a_newTime){
+			require<ResourceException>(animationState, "Spine asset not loaded, cannot call crossfade.");
 			auto *trackState = spAnimationState_getCurrent(animationState, myTrackIndex);
 			trackState->mixDuration = static_cast<float>(a_newTime);
 			trackState->mix = equals(a_newTime, 0.0) ? 1.0f : 0.0f;
@@ -495,23 +557,28 @@ namespace MV{
 			return *this;
 		}
 		double AnimationTrack::crossfade() const{
+			require<ResourceException>(animationState, "Spine asset not loaded, cannot call crossfade.");
 			return static_cast<double>(spAnimationState_getCurrent(animationState, myTrackIndex)->mixDuration);
 		}
 
 		AnimationTrack& AnimationTrack::timeScale(double a_newTime){
+			require<ResourceException>(animationState, "Spine asset not loaded, cannot call timescale.");
 			spAnimationState_getCurrent(animationState, myTrackIndex)->timeScale = static_cast<float>(a_newTime);
 			return *this;
 		}
 		double AnimationTrack::timeScale() const{
+			require<ResourceException>(animationState, "Spine asset not loaded, cannot call timescale.");
 			return static_cast<double>(spAnimationState_getCurrent(animationState, myTrackIndex)->timeScale);
 		}
 
 		std::string AnimationTrack::name() const {
+			require<ResourceException>(animationState, "Spine asset not loaded, cannot call name.");
 			auto *currentTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
 			return (currentTrack && currentTrack->animation && currentTrack->animation->name) ? currentTrack->animation->name : "NULL";
 		}
 
 		double AnimationTrack::duration() const {
+			require<ResourceException>(animationState, "Spine asset not loaded, cannot call duration.");
 			auto *currentTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
 			return (currentTrack && currentTrack->animation && currentTrack->animation->duration) ? currentTrack->animation->duration : 0.0f;
 		}

@@ -34,11 +34,18 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 		padding({ 2.0f, 2.0f })->owner();
 	auto buttonSize = MV::size(110.0f, 27.0f);
 
-	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
-		text(MV::toWide(controls->elementToEdit->id()))->
-		onEnter.connect("rename", [&](std::shared_ptr<MV::Scene::Text> a_text) {
+	auto nameField = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
+		text(MV::toWide(controls->elementToEdit->id()));
+
+	nameField->onEnter.connect("rename", [&](std::shared_ptr<MV::Scene::Text> a_text) {
 		controls->elementToEdit->id(MV::toString(a_text->text()));
 		onNameChangeSignal(controls->elementToEdit->id());
+		panel.resources().editor->sceneUpdated();
+	});
+	nameField->owner()->component<MV::Scene::Clickable>()->onAccept.connect("rename", [&](std::shared_ptr<MV::Scene::Clickable> a_textClickable){
+		controls->elementToEdit->id(MV::toString(a_textClickable->owner()->component<MV::Scene::Text>()->text()));
+		onNameChangeSignal(controls->elementToEdit->id());
+		panel.resources().editor->sceneUpdated();
 	});
 
 	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
@@ -53,7 +60,7 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 
 	auto loadButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Load", buttonSize, UTF_CHAR_STR("Load"));
 	loadButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
-		controls->elementToEdit->make("Assets/Prefabs/" + controls->elementToEdit->id() + ".prefab", [&](cereal::JSONInputArchive& archive) {
+		auto newNode = controls->elementToEdit->parent()->make("Assets/Prefabs/" + controls->elementToEdit->id() + ".prefab", [&](cereal::JSONInputArchive& archive) {
 			archive.add(
 				cereal::make_nvp("mouse", panel.resources().mouse),
 				cereal::make_nvp("renderer", &panel.root()->renderer()),
@@ -62,6 +69,10 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 				cereal::make_nvp("texture", panel.resources().textures)
 				);
 		});
+
+		auto editableNode = std::make_shared<EditableNode>(newNode, panel.editor(), panel.resources().mouse);
+
+		panel.loadPanel<SelectedNodeEditorPanel>(editableNode);
 		panel.resources().editor->sceneUpdated();
 	});
 
@@ -70,6 +81,16 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 		controls->elementToEdit->clone();
 		panel.resources().editor->sceneUpdated();
 		panel.loadPanel<DeselectedEditorPanel>();
+	});
+
+	auto childCreateButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Create", buttonSize, UTF_CHAR_STR("Create"));
+	childCreateButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		auto newNode = controls->elementToEdit->make();
+
+		auto editableNode = std::make_shared<EditableNode>(newNode, panel.editor(), panel.resources().mouse);
+
+		panel.loadPanel<SelectedNodeEditorPanel>(editableNode);
+		panel.resources().editor->sceneUpdated();
 	});
 
 	auto deleteButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Delete", buttonSize, UTF_CHAR_STR("Delete"));

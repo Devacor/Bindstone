@@ -149,7 +149,7 @@ namespace MV {
 
 			template <class Archive>
 			void serialize(Archive & archive) {
-				std::vector<DrawPoint> tmpPoints{ bounds().minPoint, bounds().maxPoint };
+				std::vector<DrawPoint> tmpPoints{ };
 				std::vector<GLuint> tmpVertexIndices;
 
 				std::swap(points, tmpPoints);

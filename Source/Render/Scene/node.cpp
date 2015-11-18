@@ -204,6 +204,7 @@ namespace MV {
 
 		std::shared_ptr<Node> Node::load(const std::string &a_filename, const std::function<void (cereal::JSONInputArchive &)> a_binder) {
 			std::ifstream stream(a_filename);
+			require<ResourceException>(stream, "File not found for Node::load: ", a_filename);
 			cereal::JSONInputArchive archive(stream);
 			if (a_binder) {
 				a_binder(archive);
@@ -222,8 +223,10 @@ namespace MV {
 			cereal::JSONOutputArchive archive(stream);
 
 			std::string oldId = nodeId;
-			SCOPE_EXIT{ nodeId = oldId; };
+			auto oldParent = myParent;
+			SCOPE_EXIT{ nodeId = oldId; myParent = oldParent; };
 			nodeId = a_newId;
+			myParent = nullptr;
 
 			auto self = shared_from_this();
 			archive(self);

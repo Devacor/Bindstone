@@ -10,8 +10,8 @@
 class GameEditor {
 public:
 	GameEditor():
-		editor(managers),
 		game(managers),
+		editor(managers),
 		limbo(MV::Scene::Node::make(managers.renderer)){
 
 		managers.renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");

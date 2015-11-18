@@ -196,13 +196,38 @@ GameInstance::GameInstance(Managers& a_managers, Catalogs& a_catalogs, MV::Mouse
 			});
 		}, []() {}, "MapDrag"));
 	});
-	auto leftBuildings = worldScene->get("left_buildings");
-	auto rightBuildings = worldScene->get("right_buildings");
+
 	for (int i = 0; i < 8; ++i) {
-		auto buildingNode = worldScene->get("left_" + std::to_string(i));
-		auto treeButton = buildingNode->attach<MV::Scene::Clickable>(mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
-		treeButton->onAccept.connect("TappedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
+		auto leftNode = worldScene->get("left_" + std::to_string(i));
+		auto rightNode = worldScene->get("right_" + std::to_string(i));
+
+		auto newNode = leftNode->make("Assets/Prefabs/life_0.prefab", [&](cereal::JSONInputArchive& archive) {
+			archive.add(
+				cereal::make_nvp("mouse", &mouse),
+				cereal::make_nvp("renderer", &managers.renderer),
+				cereal::make_nvp("textLibrary", &managers.textLibrary),
+				cereal::make_nvp("pool", &managers.pool),
+				cereal::make_nvp("texture", &managers.textures)
+			);
+		});
+		newNode->component<MV::Scene::Spine>()->animate("idle");
+
+		auto newNode2 = rightNode->make("Assets/Prefabs/life_0.prefab", [&](cereal::JSONInputArchive& archive) {
+			archive.add(
+				cereal::make_nvp("mouse", &mouse),
+				cereal::make_nvp("renderer", &managers.renderer),
+				cereal::make_nvp("textLibrary", &managers.textLibrary),
+				cereal::make_nvp("pool", &managers.pool),
+				cereal::make_nvp("texture", &managers.textures)
+				);
+		});
+		newNode2->scale({ -1.0f, 1.0f, 1.0f });
+		newNode2->component<MV::Scene::Spine>()->animate("idle");
+
+		auto treeButton = leftNode->attach<MV::Scene::Clickable>(mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE_CHILDREN)->show()->color({0xFFFFFFFF});
+		treeButton->onAccept.connect("TappedBuilding", [=](std::shared_ptr<MV::Scene::Clickable> a_self) {
 			//spawnCreature(a_self->worldBounds().bottomRightPoint());
+			std::cout << "Left Building: " << i << std::endl;
 		});
 	}
 	//pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();

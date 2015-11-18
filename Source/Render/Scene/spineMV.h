@@ -172,6 +172,17 @@ namespace MV {
 
 			template <class Archive>
 			void serialize(Archive & archive){
+				std::vector<DrawPoint> tmpPoints{};
+				std::vector<GLuint> tmpVertexIndices;
+
+				std::swap(points, tmpPoints);
+				std::swap(vertexIndices, tmpVertexIndices);
+
+				SCOPE_EXIT{
+					std::swap(points, tmpPoints);
+					std::swap(vertexIndices, tmpVertexIndices);
+				};
+
 				archive(
 					cereal::make_nvp("fileBundle", fileBundle),
 					cereal::make_nvp("slotsToNodes", slotsToNodes),

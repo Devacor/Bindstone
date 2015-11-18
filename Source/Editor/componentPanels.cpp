@@ -60,20 +60,22 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 
 	auto loadButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Load", buttonSize, UTF_CHAR_STR("Load"));
 	loadButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
-		auto newNode = controls->elementToEdit->parent()->make("Assets/Prefabs/" + controls->elementToEdit->id() + ".prefab", [&](cereal::JSONInputArchive& archive) {
-			archive.add(
-				cereal::make_nvp("mouse", panel.resources().mouse),
-				cereal::make_nvp("renderer", &panel.root()->renderer()),
-				cereal::make_nvp("textLibrary", panel.resources().textLibrary),
-				cereal::make_nvp("pool", panel.resources().pool),
-				cereal::make_nvp("texture", panel.resources().textures)
-				);
-		});
+		if (MV::fileExists("Assets/Prefabs/" + controls->elementToEdit->id() + ".prefab")) {
+			auto newNode = controls->elementToEdit->parent()->make("Assets/Prefabs/" + controls->elementToEdit->id() + ".prefab", [&](cereal::JSONInputArchive& archive) {
+				archive.add(
+					cereal::make_nvp("mouse", panel.resources().mouse),
+					cereal::make_nvp("renderer", &panel.root()->renderer()),
+					cereal::make_nvp("textLibrary", panel.resources().textLibrary),
+					cereal::make_nvp("pool", panel.resources().pool),
+					cereal::make_nvp("texture", panel.resources().textures)
+					);
+			});
 
-		auto editableNode = std::make_shared<EditableNode>(newNode, panel.editor(), panel.resources().mouse);
+			auto editableNode = std::make_shared<EditableNode>(newNode, panel.editor(), panel.resources().mouse);
 
-		panel.loadPanel<SelectedNodeEditorPanel>(editableNode);
-		panel.resources().editor->sceneUpdated();
+			panel.loadPanel<SelectedNodeEditorPanel>(editableNode);
+			panel.resources().editor->sceneUpdated();
+		}
 	});
 
 	auto copyButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Copy", buttonSize, UTF_CHAR_STR("Copy"));

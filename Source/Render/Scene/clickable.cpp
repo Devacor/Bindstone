@@ -163,6 +163,13 @@ namespace MV {
 				}else if (hitDetectionType == BoundsType::NODE_CHILDREN) {
 					hitBox = owner()->bounds(true);
 				}
+
+				points[0] = hitBox.minPoint;
+				points[1].x = hitBox.minPoint.x;	points[1].y = hitBox.maxPoint.y;	points[1].z = (hitBox.maxPoint.z + hitBox.minPoint.z) / 2.0f;
+				points[2] = hitBox.maxPoint;
+				points[3].x = hitBox.maxPoint.x;	points[3].y = hitBox.minPoint.y;	points[3].z = points[1].z;
+
+				localBounds = hitBox;
 				auto foundClippedParent = owner()->componentInParents<Clipped>(false, false);
 				if (foundClippedParent) {
 					auto screenBounds = foundClippedParent->owner()->screenFromLocal(foundClippedParent->bounds());

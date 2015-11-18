@@ -7,19 +7,31 @@
 #include <fstream>
 #include <string>
 
+std::map<std::string, std::pair<MV::FileTextureDefinition*, size_t>> SHARED_SPINE_TEXTURES;
+std::mutex SHARED_SPINE_TEXTURES_MUTEX;
+
 //these implementations are required for spine!
 void _spAtlasPage_createTexture(spAtlasPage* self, const char* path){
-	auto texture = MV::FileTextureDefinition::makeUnmanaged(path);
-	texture->load();
-	self->width = texture->size().width;
-	self->height = texture->size().height;
-	self->rendererObject = texture.release();
+	std::lock_guard<std::mutex> guard(SHARED_SPINE_TEXTURES_MUTEX);
+	std::pair<MV::FileTextureDefinition*, size_t>& texturePair = SHARED_SPINE_TEXTURES[path];
+	if (texturePair.second == 0) {
+		texturePair.first = MV::FileTextureDefinition::makeUnmanaged(path).release();
+		texturePair.first->load();
+	}
+	++texturePair.second;
+	self->width = texturePair.first->size().width;
+	self->height = texturePair.first->size().height;
+	self->rendererObject = texturePair.first;
 }
 
 void _spAtlasPage_disposeTexture(spAtlasPage* self){
-	auto texture = static_cast<MV::FileTextureDefinition*>(self->rendererObject);
-	texture->unload();
-	delete texture;
+	std::lock_guard<std::mutex> guard(SHARED_SPINE_TEXTURES_MUTEX);
+	auto* texture = static_cast<MV::FileTextureDefinition*>(self->rendererObject);
+	std::pair<MV::FileTextureDefinition*, size_t>& texturePair = SHARED_SPINE_TEXTURES[texture->name()];
+	if (--texturePair.second == 0) {
+		SCOPE_EXIT{ delete texturePair.first; };
+		texturePair.first->unload();
+	}
 }
 
 char* _spUtil_readFile(const char* path, int* length){

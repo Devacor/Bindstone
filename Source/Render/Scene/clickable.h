@@ -36,7 +36,7 @@ namespace MV {
 			typedef void DragSignalSignature(std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &deltaPosition);
 			typedef void DropSignalSignature(std::shared_ptr<Clickable>, const Point<MV::PointPrecision> &velocity);
 
-			enum class BoundsType { NODE_CHILDREN, NODE, LOCAL, NONE };
+			enum class BoundsType { LOCAL, NODE, CHILDREN, NODE_CHILDREN, NONE };
 		private:
 
 			Signal<ButtonSignalSignature> onDisabledSignal;

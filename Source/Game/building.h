@@ -6,17 +6,9 @@
 #include "chaiscript/chaiscript.hpp"
 #include <string>
 
-struct MissileData {
-	std::string launchAsset;
-	std::string asset;
-	std::string landAsset;
-
-	float range;
-	float damage;
-	float speed;
-};
-
 struct CreatureStats {
+	std::string id;
+
 	std::string name;
 	std::string description;
 
@@ -32,9 +24,12 @@ struct CreatureStats {
 	float strength;
 	float ability;
 
+	std::string script;
+
 	template <class Archive>
 	void serialize(Archive & archive) {
 		archive(
+			CEREAL_NVP(id),
 			CEREAL_NVP(name),
 			CEREAL_NVP(description),
 			CEREAL_NVP(icon),
@@ -45,7 +40,8 @@ struct CreatureStats {
 			CEREAL_NVP(defense),
 			CEREAL_NVP(resistance),
 			CEREAL_NVP(strength),
-			CEREAL_NVP(ability)
+			CEREAL_NVP(ability),
+			CEREAL_NVP(script)
 		);
 	}
 };
@@ -70,6 +66,8 @@ struct BuildTree {
 
 	std::string name;
 	std::string description;
+
+	std::string script;
 
 	int64_t cost = 0;
 
@@ -97,7 +95,8 @@ struct BuildTree {
 			CEREAL_NVP(icon),
 			CEREAL_NVP(asset),
 			CEREAL_NVP(wave),
-			CEREAL_NVP(upgrades)
+			CEREAL_NVP(upgrades),
+			CEREAL_NVP(script)
 		);
 	}
 };
@@ -125,7 +124,6 @@ struct BuildingData {
 		);
 	}
 };
-
 
 class BuildingCatalog {
 	friend cereal::access;

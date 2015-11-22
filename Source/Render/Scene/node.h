@@ -739,7 +739,8 @@ namespace MV {
 
 			std::vector<size_t> parentIndexList(size_t a_globalPriority = 0, size_t a_modifyLastPriority = 0);
 
-			BoxAABB<> bounds(bool a_includeChildren = true);
+			BoxAABB<> bounds(bool a_includeChildren = true); //our node's local bounds + optionally included childBounds;
+			BoxAABB<> childBounds(); //only child bounds
 
 			BoxAABB<> worldBounds(bool a_includeChildren = true){
 				return worldFromLocal(bounds(a_includeChildren));

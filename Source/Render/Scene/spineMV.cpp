@@ -80,15 +80,18 @@ namespace MV{
 			return (atlasRegion && atlasRegion->page && atlasRegion->page->rendererObject) ? static_cast<FileTextureDefinition*>(atlasRegion->page->rendererObject) : nullptr;
 		}
 
+		void Spine::initialize() {
+			loadImplementation(fileBundle, false);
+		}
+
 		Spine::Spine(const std::weak_ptr<Node> &a_owner, const FileBundle &a_fileBundle) :
 			Drawable(a_owner),
 			autoUpdate(true),
+			fileBundle(a_fileBundle),
 			onStart(onStartSignal),
 			onEnd(onEndSignal),
 			onComplete(onCompleteSignal),
 			onEvent(onEventSignal) {
-
-			loadImplementation(a_fileBundle);
 		}
 
 		Spine::Spine(const std::weak_ptr<Node> &a_owner) :
@@ -114,7 +117,7 @@ namespace MV{
 			return skeleton != nullptr;
 		}
 
-		void Spine::loadImplementation(const FileBundle &a_fileBundle) {
+		void Spine::loadImplementation(const FileBundle &a_fileBundle, bool a_refreshBounds) {
 			unloadImplementation();
 			if (a_fileBundle.skeletonFile != "") {
 				atlas = spAtlas_createFromFile(a_fileBundle.atlasFile.c_str(), 0);
@@ -151,6 +154,9 @@ namespace MV{
 				}
 
 				fileBundle = a_fileBundle;
+				if (a_refreshBounds) {
+					refreshBounds();
+				}
 			}
 		}
 
@@ -191,6 +197,28 @@ namespace MV{
 				if (spineWorldVertices) {
 					delete[] spineWorldVertices;
 				}
+
+				refreshBounds();
+			}
+		}
+
+		BoxAABB<> Spine::boundsImplementation() {
+			if (loaded()) {
+				if (points.empty()) {
+					points.clear();
+					vertexIndices.clear();
+
+					for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
+						spSlot* slot = skeleton->drawOrder[i];
+						if (slot->attachment) {
+							loadSpineSlotIntoPoints(slot);
+						}
+					}
+				}
+				refreshBounds();
+				return localBounds;
+			} else {
+				return {};
 			}
 		}
 
@@ -313,6 +341,8 @@ namespace MV{
 						node->draw();
 					}
 				}
+
+				refreshBounds();
 			}
 		}
 

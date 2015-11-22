@@ -27,6 +27,26 @@ namespace MV {
 
 			float animationFramesPerSecond = 10.0f;
 
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+				a_script.add(chaiscript::user_type<ParticleChangeValues>(), "ParticleChangeValues");
+
+				a_script.add(chaiscript::fun(&ParticleChangeValues::directionalChange), "directionalChange");
+				a_script.add(chaiscript::fun(&ParticleChangeValues::rotationalChange), "rotationalChange");
+
+				a_script.add(chaiscript::fun(&ParticleChangeValues::beginSpeed), "beginSpeed");
+				a_script.add(chaiscript::fun(&ParticleChangeValues::endSpeed), "endSpeed");
+
+				a_script.add(chaiscript::fun(&ParticleChangeValues::beginColor), "beginColor");
+				a_script.add(chaiscript::fun(&ParticleChangeValues::endColor), "endColor");
+
+				a_script.add(chaiscript::fun(&ParticleChangeValues::maxLifespan), "maxLifespan");
+
+				a_script.add(chaiscript::fun(&ParticleChangeValues::gravityMagnitude), "gravityMagnitude");
+				a_script.add(chaiscript::fun(&ParticleChangeValues::gravityDirection), "gravityDirection");
+
+				return a_script;
+			}
+
 			template <class Archive>
 			void serialize(Archive & archive) {
 				archive(CEREAL_NVP(directionalChange), CEREAL_NVP(rotationalChange),
@@ -96,17 +116,40 @@ namespace MV {
 			float minimumSpawnRate = 0.0f;
 			float maximumSpawnRate = 1.0f;
 
-			Point<> maximumPosition;
 			Point<> minimumPosition;
+			Point<> maximumPosition;
 
-			AxisAngles maximumDirection;
 			AxisAngles minimumDirection;
+			AxisAngles maximumDirection;
 
-			AxisAngles maximumRotation;
 			AxisAngles minimumRotation;
+			AxisAngles maximumRotation;
 
 			ParticleChangeValues minimum;
 			ParticleChangeValues maximum;
+
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+				a_script.add(chaiscript::user_type<EmitterSpawnProperties>(), "EmitterSpawnProperties");
+
+				a_script.add(chaiscript::fun(&EmitterSpawnProperties::maximumParticles), "maximumParticles");
+
+				a_script.add(chaiscript::fun(&EmitterSpawnProperties::minimumSpawnRate), "minimumSpawnRate");
+				a_script.add(chaiscript::fun(&EmitterSpawnProperties::maximumSpawnRate), "maximumSpawnRate");
+
+				a_script.add(chaiscript::fun(&EmitterSpawnProperties::minimumPosition), "minimumPosition");
+				a_script.add(chaiscript::fun(&EmitterSpawnProperties::maximumPosition), "maximumPosition");
+
+				a_script.add(chaiscript::fun(&EmitterSpawnProperties::minimumDirection), "minimumDirection");
+				a_script.add(chaiscript::fun(&EmitterSpawnProperties::maximumDirection), "maximumDirection");
+
+				a_script.add(chaiscript::fun(&EmitterSpawnProperties::minimumRotation), "minimumRotation");
+				a_script.add(chaiscript::fun(&EmitterSpawnProperties::maximumRotation), "maximumRotation");
+
+				a_script.add(chaiscript::fun(&EmitterSpawnProperties::minimum), "minimum");
+				a_script.add(chaiscript::fun(&EmitterSpawnProperties::maximum), "maximum");
+
+				return a_script;
+			}
 
 			template <class Archive>
 			void serialize(Archive & archive) {
@@ -131,7 +174,6 @@ namespace MV {
 			std::shared_ptr<Emitter> properties(const EmitterSpawnProperties &a_emitterProperties);
 
 			const EmitterSpawnProperties& properties() const;
-
 			EmitterSpawnProperties& properties();
 
 			bool enabled() const;
@@ -141,6 +183,31 @@ namespace MV {
 			std::shared_ptr<Emitter> disable();
 
 			~Emitter();
+
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, ThreadPool &a_pool) {
+				a_script.add(chaiscript::user_type<Emitter>(), "Emitter");
+				a_script.add(chaiscript::base_class<Drawable, Emitter>());
+
+				a_script.add(chaiscript::fun([&](Node &a_self) {
+					return a_self.attach<Emitter>(a_pool);
+				}), "attachEmitter");
+
+				a_script.add(chaiscript::fun(&Emitter::enabled), "enabled");
+				a_script.add(chaiscript::fun(&Emitter::disabled), "disabled");
+
+				a_script.add(chaiscript::fun(&Emitter::enable), "enable");
+				a_script.add(chaiscript::fun(&Emitter::disable), "disable");
+
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Emitter>(Emitter::*)(const EmitterSpawnProperties &a_emitterProperties)>(&Emitter::properties)), "properties");
+				a_script.add(chaiscript::fun(static_cast<EmitterSpawnProperties&(Emitter::*)()>(&Emitter::properties)), "properties");
+				a_script.add(chaiscript::fun(static_cast<const EmitterSpawnProperties&(Emitter::*)() const>(&Emitter::properties)), "properties");
+
+				a_script.add(chaiscript::type_conversion<SafeComponent<Emitter>, std::shared_ptr<Emitter>>([](const SafeComponent<Emitter> &a_item) { return a_item.self(); }));
+				a_script.add(chaiscript::type_conversion<SafeComponent<Emitter>, std::shared_ptr<Drawable>>([](const SafeComponent<Emitter> &a_item) { return std::static_pointer_cast<Drawable>(a_item.self()); }));
+				a_script.add(chaiscript::type_conversion<SafeComponent<Emitter>, std::shared_ptr<Emitter>>([](const SafeComponent<Emitter> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
+
+				return a_script;
+			}
 
 		protected:
 			Emitter(const std::weak_ptr<Node> &a_owner, ThreadPool &a_pool);
@@ -188,7 +255,7 @@ namespace MV {
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
 		private:
-			virtual BoxAABB<> boundsImplementation();
+			virtual BoxAABB<> boundsImplementation() override;
 
 			Point<> randomMix(const Point<> &a_rhs, const Point<> &a_lhs);
 

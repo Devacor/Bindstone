@@ -6,7 +6,6 @@ CEREAL_REGISTER_TYPE(MV::Scene::Drawable);
 namespace MV {
 	namespace Scene {
 
-
 		bool Drawable::draw() {
 			bool allowChildrenToDraw = true;
 			lazyInitializeShader();

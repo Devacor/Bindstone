@@ -12,6 +12,7 @@
 #include <ctime>
 #include <stdint.h>
 #include <memory>
+#include "Game/managers.h"
 
 class DiggerPlayer {
 private:
@@ -223,23 +224,15 @@ private:
 
 class DiggerGame {
 public:
-	DiggerGame(MV::ThreadPool* pool, MV::Draw2D* renderer);
+	DiggerGame(Managers &a_managers);
 
 	//return true if we're still good to go
 	bool update(double dt);
 	void handleInput();
 	void render();
 
-	MV::ThreadPool* getPool() {
-		return pool;
-	}
-
-	MV::Draw2D* getRenderer() {
-		return renderer;
-	}
-
-	MV::TextLibrary* getTextLibrary() {
-		return &textLibrary;
+	Managers& getManager() {
+		return managers;
 	}
 
 private:
@@ -252,11 +245,7 @@ private:
 
 	void handleScroll(int a_amount);
 
-	MV::ThreadPool* pool;
-	MV::Draw2D* renderer;
-	MV::TextLibrary textLibrary;
-
-	MV::SharedTextures textures;
+	Managers& managers;
 
 	std::shared_ptr<MV::Scene::Node> worldScene;
 

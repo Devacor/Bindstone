@@ -153,9 +153,11 @@ namespace MV {
 				return fileBundle;
 			}
 		protected:
+			virtual void initialize() override;
+
 			Spine(const std::weak_ptr<Node> &a_owner, const FileBundle &a_fileBundle);
 			Spine(const std::weak_ptr<Node> &a_owner);
-			void loadImplementation(const FileBundle &a_fileBundle);
+			void loadImplementation(const FileBundle &a_fileBundle, bool a_refreshBounds = true);
 
 			virtual void defaultDrawImplementation() override;
 
@@ -164,6 +166,8 @@ namespace MV {
 			virtual void updateImplementation(double a_delta) override;
 			void unloadImplementation();
 		private:
+			virtual BoxAABB<> boundsImplementation() override;
+
 			//called from spineAnimationCallback
 			void onAnimationStateEvent(int trackIndex, spEventType type, spEvent* event, int loopCount);
 

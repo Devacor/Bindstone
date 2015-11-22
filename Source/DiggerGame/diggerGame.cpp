@@ -6,10 +6,8 @@ void sdl_quit_3(void) {
 	TTF_Quit();
 }
 
-DiggerGame::DiggerGame(MV::ThreadPool* a_pool, MV::Draw2D* a_renderer) :
-	pool(a_pool),
-	renderer(a_renderer),
-	textLibrary(*a_renderer),
+DiggerGame::DiggerGame(Managers &a_managers) :
+	managers(a_managers),
 	done(false) {
 
 	initializeWindow();
@@ -24,13 +22,13 @@ void DiggerGame::initializeWindow() {
 	MV::Size<> worldSize(667, 375);
 	MV::Size<int> windowSize(667, 375);
 
-	renderer->window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
+	managers.renderer.window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
 
-	if (!renderer->initialize(windowSize, worldSize)) {
+	if (!managers.renderer.initialize(windowSize, worldSize)) {
 		exit(0);
 	}
-	renderer->loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
-	renderer->loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
+	managers.renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
+	managers.renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
 	atexit(sdl_quit_3);
 
 	AudioPlayer::instance()->initAudio();
@@ -49,18 +47,18 @@ void DiggerGame::initializeWindow() {
 // 
 // 	archive(cereal::make_nvp("scene", worldScene));
 
-	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
-	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
-	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+	managers.textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
+	managers.textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
+	managers.textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 
 	InitializeWorldScene();
 
 
 }
 void DiggerGame::InitializeWorldScene() {
-	worldScene = MV::Scene::Node::make(*renderer);
+	worldScene = MV::Scene::Node::make(managers.renderer);
 	worldScene->scale(1.0f);
-	world = std::make_shared<DiggerWorld>(worldScene, textures, mouse);
+	world = std::make_shared<DiggerWorld>(worldScene, managers.textures, mouse);
 	world->thing->onContactStart.connect("land", [&](size_t a_id, MV::Scene::CollisionParameters a_parameters, const MV::Point<> &a_normal) {
 		if (a_parameters.fixtureA->id() == "foot") {
 			world->thing->body().velocity({ world->thing->body().velocity().x, 0.0f });
@@ -82,7 +80,7 @@ void DiggerGame::InitializeWorldScene() {
 bool DiggerGame::update(double dt) {
 	lastUpdateDelta = dt;
 	
-	pool->run();
+	managers.pool.run();
 	if (done) {
 		done = false;
 		return false;
@@ -93,7 +91,7 @@ bool DiggerGame::update(double dt) {
 void DiggerGame::handleInput() {
 	SDL_Event event;
 	while (SDL_PollEvent(&event)) {
-		if (!renderer->handleEvent(event)) {
+		if (!managers.renderer.handleEvent(event)) {
 			switch (event.type) {
 			case SDL_QUIT:
 				done = true;
@@ -117,9 +115,9 @@ void DiggerGame::handleInput() {
 					cereal::JSONInputArchive archive(stream);
 					archive.add(
 						cereal::make_nvp("mouse", &mouse),
-						cereal::make_nvp("renderer", renderer),
-						cereal::make_nvp("textLibrary", &textLibrary),
-						cereal::make_nvp("pool", pool)
+						cereal::make_nvp("renderer", &managers.renderer),
+						cereal::make_nvp("textLibrary", &managers.textLibrary),
+						cereal::make_nvp("pool", &managers.pool)
 						);
 
 					archive(cereal::make_nvp("scene", worldScene));
@@ -166,9 +164,9 @@ void DiggerGame::handleScroll(int a_amount) {
 
 void DiggerGame::render() {
 	worldScene->worldPosition({ 0.0f, 0.0f });
-	worldScene->worldPosition((world->thing->physicsWorldPosition() - ((MV::toPoint(renderer->world().size() / 2.0f) - MV::point(12.0f, 24.0f)))) * -1.0f);
+	worldScene->worldPosition((world->thing->physicsWorldPosition() - ((MV::toPoint(managers.renderer.world().size() / 2.0f) - MV::point(12.0f, 24.0f)))) * -1.0f);
 
-	renderer->clearScreen();
+	managers.renderer.clearScreen();
 	worldScene->drawUpdate(static_cast<float>(lastUpdateDelta));
-	renderer->updateScreen();
+	managers.renderer.updateScreen();
 }

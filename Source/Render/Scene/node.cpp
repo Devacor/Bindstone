@@ -466,6 +466,10 @@ namespace MV {
 			return localBounds;
 		}
 
+		BoxAABB<> Node::childBounds() {
+			return localChildBounds;
+		}
+
 		std::shared_ptr<Node> Node::parent(const std::shared_ptr<Node> &a_parent) {
 			auto self = shared_from_this();
 			a_parent->add(self);

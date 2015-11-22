@@ -223,8 +223,8 @@ GameInstance::GameInstance(Managers& a_managers, Catalogs& a_catalogs, MV::Mouse
 		});
 		newNode2->scale({ -1.0f, 1.0f, 1.0f });
 		newNode2->component<MV::Scene::Spine>()->animate("idle");
-
-		auto treeButton = leftNode->attach<MV::Scene::Clickable>(mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE_CHILDREN)->show()->color({0xFFFFFFFF});
+		auto spineBounds = newNode->component<MV::Scene::Spine>()->bounds();
+		auto treeButton = leftNode->attach<MV::Scene::Clickable>(mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::CHILDREN)->show()->color({0xFFFFFFFF});
 		treeButton->onAccept.connect("TappedBuilding", [=](std::shared_ptr<MV::Scene::Clickable> a_self) {
 			//spawnCreature(a_self->worldBounds().bottomRightPoint());
 			std::cout << "Left Building: " << i << std::endl;

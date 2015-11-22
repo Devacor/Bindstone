@@ -59,7 +59,7 @@ namespace MV {
 
 		void Emitter::spawnParticlesOnMultipleThreads(double a_dt) {
 			timeSinceLastParticle.store(timeSinceLastParticle.load() + a_dt);
-			size_t particlesToSpawn = static_cast<size_t>(timeSinceLastParticle.load() / nextSpawnDelta);
+			size_t particlesToSpawn = nextSpawnDelta <= 0 ? 0 : static_cast<size_t>(timeSinceLastParticle.load() / nextSpawnDelta);
 			size_t totalParticles = std::min(std::accumulate(threadData.begin(), threadData.end(), static_cast<size_t>(0), [](size_t a_total, ThreadData& a_group) {return a_group.particles.size() + a_total; }), static_cast<size_t>(spawnProperties.maximumParticles));
 
 			particlesToSpawn = std::min(particlesToSpawn + totalParticles, static_cast<size_t>(spawnProperties.maximumParticles)) - totalParticles;
@@ -196,7 +196,7 @@ namespace MV {
 		}
 
 		EmitterSpawnProperties & Emitter::properties() {
-			nextSpawnDelta = 0.0f;
+			nextSpawnDelta = 0.0f; //zero this out since we return a reference to the properties and may need to re-evaluate our nextSpawnDelta.
 			return spawnProperties;
 		}
 

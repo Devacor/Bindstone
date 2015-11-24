@@ -101,16 +101,32 @@ struct BuildTree {
 	}
 };
 
-struct BuildingData {
+struct SkinData {
+	std::string id;
 	std::vector<Wallet> costs;
+
+	template <class Archive>
+	void serialize(Archive & archive) {
+		archive(
+			CEREAL_NVP(id),
+			CEREAL_NVP(costs)
+		);
+	}
+};
+
+struct BuildingData {
+	std::string id;
+
 	std::string icon;
 
 	BuildTree game;
 
-	std::string id;
-
 	std::string name;
 	std::string description;
+
+	std::vector<Wallet> costs;
+
+	std::vector<SkinData> skins;
 
 	template <class Archive>
 	void serialize(Archive & archive) {
@@ -120,7 +136,8 @@ struct BuildingData {
 			CEREAL_NVP(name),
 			CEREAL_NVP(description),
 			CEREAL_NVP(costs),
-			CEREAL_NVP(game)
+			CEREAL_NVP(game),
+			CEREAL_NVP(skins)
 		);
 	}
 };
@@ -135,7 +152,7 @@ public:
 		archive(cereal::make_nvp("buildings", buildingList));
 	}
 
-	BuildingData instance(const std::string &a_id) const {
+	BuildingData data(const std::string &a_id) const {
 		for (auto&& building : buildingList) {
 			if (building.id == a_id) {
 				return building;

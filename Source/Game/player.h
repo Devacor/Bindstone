@@ -9,15 +9,15 @@
 
 namespace chaiscript { class ChaiScript; }
 
-struct AssetCollection {
-	std::map<std::string, std::string> buildings;
-	std::map<std::string, int> gems;
+struct LoadoutCollection {
+	std::vector<std::string> buildings;
+	std::vector<std::string> skins;
 
 	template <class Archive>
 	void serialize(Archive & archive) {
 		archive(
 			CEREAL_NVP(buildings),
-			CEREAL_NVP(gems)
+			CEREAL_NVP(skins)
 		);
 	}
 };
@@ -29,8 +29,8 @@ class Player {
 
 	Wallet wallet;
 
-	AssetCollection unlocked;
-	AssetCollection loadout;
+	std::map<std::string, std::vector<std::string>> unlocked;
+	LoadoutCollection loadout;
 
 	template <class Archive>
 	void serialize(Archive & archive) {

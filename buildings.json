@@ -5,6 +5,7 @@
             "icon": "life",
             "name": "Tree of Life",
             "description": "From the roots of this mighty tree springs life eternal.",
+            "skins": {},
             "costs": [
                 {
                     "values": [

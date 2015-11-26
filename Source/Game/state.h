@@ -7,26 +7,40 @@
 struct BuildingData;
 class BuildingCatalog;
 class Player;
-struct Catalogs {
-	std::unique_ptr<BuildingCatalog> buildings;
+class Managers;
+
+struct Constants {
+	int startHealth = 20;
 };
 
 class LocalData {
 public:
+	LocalData(Managers& a_managers):
+		allManagers(a_managers){
+	}
+
 	std::shared_ptr<Player> player() const {
 		return localPlayer;
 	}
 
-	BuildingData& building(const std::string &a_id) const {
+	bool isLocal(const std::shared_ptr<Player> &a_other) const;
 
+	BuildingCatalog& buildings() {
+		return *(buildingCatalog.get());
+	}
+
+	Constants& constants() {
+		return metadataConstants;
+	}
+
+	Managers& managers() {
+		return allManagers;
 	}
 private:
 	std::shared_ptr<Player> localPlayer;
-	std::vector<BuildingData> buildings;
-};
-
-struct Constants {
-	int startHealth = 20;
+	std::unique_ptr<BuildingCatalog> buildingCatalog;
+	Constants metadataConstants;
+	Managers& allManagers;
 };
 
 #endif

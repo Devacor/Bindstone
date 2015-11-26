@@ -9,9 +9,15 @@
 #include "chaiscript/chaiscript.hpp"
 #include "chaiscript/chaiscript_stdlib.hpp"
 
+struct GameData {
+	std::shared_ptr<Player> localPlayer;
+	Catalogs catalogs;
+	Constants data;
+};
+
 class GameInstance {
 public:
-	GameInstance(Managers &a_managers, Catalogs &a_catalogs, MV::MouseState& a_mouse, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants);
+	GameInstance(GameData &a_game, MV::MouseState& a_mouse, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants);
 
 	void nodeLoadBinder(cereal::JSONInputArchive &a_archive);
 
@@ -51,6 +57,9 @@ public:
 		return mouse;
 	}
 
+	GameData& getData() {
+		return data;
+	}
 private:
 	Game(const Game &) = delete;
 	Game& operator=(const Game &) = delete;
@@ -60,7 +69,7 @@ private:
 	void spawnCreature(const MV::Point<> &a_position);
 
 	Managers &managers;
-	Catalogs catalogs;
+	GameData data;
 	std::unique_ptr<GameInstance> instance;
 
 	bool done;
@@ -68,7 +77,6 @@ private:
 	double lastUpdateDelta;
 
 	MV::MouseState mouse;
-
 	//MV::Scene::Clickable::Signals armInputHandles;
 };
 

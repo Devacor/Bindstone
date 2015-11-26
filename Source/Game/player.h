@@ -22,7 +22,7 @@ struct LoadoutCollection {
 	}
 };
 
-class Player {
+struct Player {
 	std::string name;
 	std::string email;
 	std::string passwordHash;
@@ -45,25 +45,25 @@ class Player {
 	}
 };
 
-class PlayerInGame {
-	std::shared_ptr<Player> player;
-	std::vector<std::shared_ptr<Building>> buildings;
+enum TeamSide {LEFT, RIGHT};
 
-};
+inline std::string sideToString(TeamSide a_side) { return (a_side == LEFT) ? "left" : "right"; }
 
 struct Constants;
 class Team {
 public:
-	Team(const std::shared_ptr<Player> &a_player, const Constants& a_constants);
-
+	Team(const std::shared_ptr<Player> &a_player, LocalData& a_data, std::shared_ptr<MV::Scene::Node> a_gameBoard, TeamSide a_side);
 
 private:
-	std::vector<std::shared_ptr<Building>> buildings;
-	int health;
-	std::vector<std::shared_ptr<Creature>> creatures;
-	std::vector<Gem> gems;
+	std::shared_ptr<MV::Scene::Node> gameBoard;
+	std::vector<MV::Scene::SafeComponent<Building>> buildings;
+	std::vector<MV::Scene::SafeComponent<Creature>> creatures;
+
+	LocalData& data;
+	MouseState& mouse;
 
 	std::shared_ptr<Player> player;
+	int health;
+	TeamSide side;
 };
-
 #endif

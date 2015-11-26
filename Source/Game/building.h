@@ -46,28 +46,37 @@ struct CreatureStats {
 	}
 };
 
+struct WaveCreature {
+	std::string id;
+	double delay;
+	template <class Archive>
+	void serialize(Archive & archive) {
+		archive(
+			CEREAL_NVP(delay),
+			CEREAL_NVP(id)
+		);
+	}
+};
+
 struct WaveData {
-	double spawnDelay = 0.0;
-	std::vector<std::pair<std::string, double>> creatures;
+	int iterations;
+	std::vector<WaveCreature> creatures;
 
 	template <class Archive>
 	void serialize(Archive & archive) {
 		archive(
-			CEREAL_NVP(spawnDelay),
+			CEREAL_NVP(iterations),
 			CEREAL_NVP(creatures)
 		);
 	}
 };
 
 struct BuildTree {
-	WaveData wave;
-	std::string icon;
-	std::string asset;
+	std::vector<WaveData> waves;
+	std::string id;
 
 	std::string name;
 	std::string description;
-
-	std::string script;
 
 	int64_t cost = 0;
 
@@ -75,9 +84,8 @@ struct BuildTree {
 
 	BuildTree(){}
 	BuildTree(const BuildTree& a_rhs) {
-		wave = a_rhs.wave;
-		icon = a_rhs.icon;
-		asset = a_rhs.asset;
+		waves = a_rhs.waves;
+		id = a_rhs.id;
 		name = a_rhs.name;
 		description = a_rhs.description;
 		cost = a_rhs.cost;
@@ -89,26 +97,26 @@ struct BuildTree {
 	template <class Archive>
 	void serialize(Archive & archive) {
 		archive(
+			CEREAL_NVP(id),
 			CEREAL_NVP(name),
 			CEREAL_NVP(description),
 			CEREAL_NVP(cost),
-			CEREAL_NVP(icon),
-			CEREAL_NVP(asset),
-			CEREAL_NVP(wave),
-			CEREAL_NVP(upgrades),
-			CEREAL_NVP(script)
+			CEREAL_NVP(waves),
+			CEREAL_NVP(upgrades)
 		);
 	}
 };
 
 struct SkinData {
 	std::string id;
+	std::string name;
 	std::vector<Wallet> costs;
 
 	template <class Archive>
 	void serialize(Archive & archive) {
 		archive(
 			CEREAL_NVP(id),
+			CEREAL_NVP(name),
 			CEREAL_NVP(costs)
 		);
 	}
@@ -117,27 +125,24 @@ struct SkinData {
 struct BuildingData {
 	std::string id;
 
-	std::string icon;
-
 	BuildTree game;
 
 	std::string name;
 	std::string description;
 
-	std::vector<Wallet> costs;
-
 	std::vector<SkinData> skins;
+
+	std::vector<Wallet> costs;
 
 	template <class Archive>
 	void serialize(Archive & archive) {
 		archive(
 			CEREAL_NVP(id),
-			CEREAL_NVP(icon), 
 			CEREAL_NVP(name),
 			CEREAL_NVP(description),
+			CEREAL_NVP(skins),
 			CEREAL_NVP(costs),
-			CEREAL_NVP(game),
-			CEREAL_NVP(skins)
+			CEREAL_NVP(game)
 		);
 	}
 };

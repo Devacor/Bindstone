@@ -2,84 +2,73 @@
     "buildings": [
         {
             "id": "life",
-            "icon": "life",
             "name": "Tree of Life",
             "description": "From the roots of this mighty tree springs life eternal.",
-            "skins": {},
+            "skins": [
+                {"id": "vibrant", "name": "Vibrant Tree Of Life", "costs": [{"values":[0,0,325]}]}
+            ],
             "costs": [
-                {
-                    "values": [
-                        0,
-                        10000,
-                        0
-                    ]
-                },
-                {
-                    "values": [
-                        0,
-                        0,
-                        475
-                    ]
-                },
-                {
-                    "values": [
-                        0,
-                        6000,
-                        325
-                    ]
-                }
+                {"values": [0,10000,0]},
+                {"values": [0,0,475]},
+                {"values": [0,6000,325]}
             ],
             "game": {
+                "id": "none",
                 "name": "Tree of Life Foundation",
                 "description": "",
                 "cost": 0,
-                "icon": "",
-                "asset": "life_0",
-                "wave": {
-                    "spawnDelay": 0,
-                    "creatures": []
-                },
-                "script": "",
+                "waves": [],
                 "upgrades": [
                     {
                         "ptr_wrapper": {
                             "valid": 1,
                             "data": {
+                                "id": "basic",
                                 "name": "Tree of Life",
                                 "description": "Begin production of life elementals.",
                                 "cost": 75,
-                                "icon": "life0",
-                                "asset": "life0",
-                                "wave": {
-                                    "spawnDelay": 3,
+                                "waves": [{
+                                    "iterations": 3,
                                     "creatures": [
                                         {
-                                            "first": "basicLifeElemental",
-                                            "second": 10
+                                            "delay": 10,
+                                            "id": "basicLifeElemental"
                                         }
                                     ]
-                                },
-                                "script": "",
+                                }],
                                 "upgrades": [
                                     {
                                         "ptr_wrapper": {
                                             "valid": 1,
                                             "data": {
+                                                "id": "eternal",
                                                 "name": "Tree of Eternal Life",
                                                 "description": "Begin production of greater life elementals.",
                                                 "cost": 250,
-                                                "icon": "life1",
-                                                "asset": "life1",
-                                                "wave": {
-                                                    "spawnDelay": 5,
-                                                    "creatures": [
-                                                        {
-                                                            "first": "greaterLifeElemental",
-                                                            "second": 10
-                                                        }
-                                                    ]
-                                                },
-                                                "script": "",
+                                                "waves": [
+                                                    {
+                                                        "iterations": 4,
+                                                        "creatures": [
+                                                            {
+                                                                "delay": 10,
+                                                                "id": "greaterLifeElemental"
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "iterations": 1,
+                                                        "creatures": [
+                                                            {
+                                                                "delay": 9.75,
+                                                                "id": "greaterLifeElemental"
+                                                            },
+                                                            {
+                                                                "delay": 0.25,
+                                                                "id": "greaterLifeElemental"
+                                                            }
+                                                        ]
+                                                    }
+                                                ],
                                                 "upgrades": []
                                             }
                                         }
@@ -88,21 +77,19 @@
                                         "ptr_wrapper": {
                                             "valid": 1,
                                             "data": {
+                                                "id": "overwhelming",
                                                 "name": "Tree of Overwhelming Life",
                                                 "description": "Begin production of suspended life elementals.",
                                                 "cost": 250,
-                                                "icon": "life2",
-                                                "asset": "life2",
-                                                "wave": {
-                                                    "spawnDelay": 5,
+                                                "waves": [{
+                                                    "iterations": 1,
                                                     "creatures": [
                                                         {
-                                                            "first": "suspendedLifeElemental",
-                                                            "second": 10
+                                                            "id": "suspendedLifeElemental",
+                                                            "delay": 10
                                                         }
                                                     ]
-                                                },
-                                                "script": "",
+                                                }],
                                                 "upgrades": []
                                             }
                                         }

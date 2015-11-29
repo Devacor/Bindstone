@@ -272,6 +272,7 @@
     <ClCompile Include="Source\exampleCode.cpp" />
     <ClCompile Include="Source\Game\building.cpp" />
     <ClCompile Include="Source\Game\game.cpp" />
+    <ClCompile Include="Source\Game\Instance\gameInstance.cpp" />
     <ClCompile Include="Source\Game\player.cpp" />
     <ClCompile Include="Source\Game\state.cpp" />
     <ClCompile Include="Source\Game\wallet.cpp" />
@@ -303,6 +304,7 @@
     <ClCompile Include="Source\Render\sharedTextures.cpp" />
     <ClCompile Include="Source\Render\texturePacker.cpp" />
     <ClCompile Include="Source\Render\textures.cpp" />
+    <ClCompile Include="Source\Utility\chaiscriptStdLib.cpp" />
     <ClCompile Include="Source\Utility\expression.cpp" />
     <ClCompile Include="Source\Utility\generalUtility.cpp" />
     <ClCompile Include="Source\Utility\stopwatch.cpp" />
@@ -450,6 +452,7 @@
     <ClInclude Include="Source\Editor\texturePicker.h" />
     <ClInclude Include="Source\Game\building.h" />
     <ClInclude Include="Source\Game\gameEditor.h" />
+    <ClInclude Include="Source\Game\Instance\gameInstance.h" />
     <ClInclude Include="Source\Game\managers.h" />
     <ClInclude Include="Source\Game\player.h" />
     <ClInclude Include="Source\Game\state.h" />
@@ -489,6 +492,7 @@
     <ClInclude Include="Source\Render\sharedTextures.h" />
     <ClInclude Include="Source\Render\texturePacker.h" />
     <ClInclude Include="Source\Render\textures.h" />
+    <ClInclude Include="Source\Utility\chaiscriptStdLib.h" />
     <ClInclude Include="Source\Utility\expression.h" />
     <ClInclude Include="Source\Utility\generalUtility.h" />
     <ClInclude Include="Source\Utility\log.hpp" />

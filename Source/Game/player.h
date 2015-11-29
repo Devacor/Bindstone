@@ -6,8 +6,10 @@
 #include "Game/wallet.h"
 #include "cereal/cereal.hpp"
 #include "Game/building.h"
+#include "Game/state.h"
 
 namespace chaiscript { class ChaiScript; }
+namespace MV { class MouseState; }
 
 struct LoadoutCollection {
 	std::vector<std::string> buildings;
@@ -45,25 +47,4 @@ struct Player {
 	}
 };
 
-enum TeamSide {LEFT, RIGHT};
-
-inline std::string sideToString(TeamSide a_side) { return (a_side == LEFT) ? "left" : "right"; }
-
-struct Constants;
-class Team {
-public:
-	Team(const std::shared_ptr<Player> &a_player, LocalData& a_data, std::shared_ptr<MV::Scene::Node> a_gameBoard, TeamSide a_side);
-
-private:
-	std::shared_ptr<MV::Scene::Node> gameBoard;
-	std::vector<MV::Scene::SafeComponent<Building>> buildings;
-	std::vector<MV::Scene::SafeComponent<Creature>> creatures;
-
-	LocalData& data;
-	MouseState& mouse;
-
-	std::shared_ptr<Player> player;
-	int health;
-	TeamSide side;
-};
 #endif

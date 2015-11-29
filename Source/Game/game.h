@@ -3,42 +3,12 @@
 #include "Game/player.h"
 #include "Game/building.h"
 #include "Game/state.h"
+#include "Game/Instance/gameInstance.h"
 
 #include <string>
 #include <ctime>
+
 #include "chaiscript/chaiscript.hpp"
-#include "chaiscript/chaiscript_stdlib.hpp"
-
-struct GameData {
-	std::shared_ptr<Player> localPlayer;
-	Catalogs catalogs;
-	Constants data;
-};
-
-class GameInstance {
-public:
-	GameInstance(GameData &a_game, MV::MouseState& a_mouse, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants);
-
-	void nodeLoadBinder(cereal::JSONInputArchive &a_archive);
-
-	bool update(double dt);
-
-	bool handleEvent(const SDL_Event &a_event);
-private:
-	void handleScroll(int a_amount);
-
-	Managers &managers;
-	Catalogs &catalogs;
-	MV::MouseState& mouse;
-
-	std::shared_ptr<MV::Scene::Node> worldScene;
-	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
-
-	Team left;
-	Team right;
-
-	chaiscript::ChaiScript script;
-};
 
 class Game {
 public:
@@ -50,15 +20,15 @@ public:
 	void render();
 
 	Managers& getManager() {
-		return managers;
+		return data.managers();
 	}
 
 	MV::MouseState& getMouse() {
 		return mouse;
 	}
 
-	GameData& getData() {
-		return data;
+	GameInstance& getInstance() {
+		return *instance;
 	}
 private:
 	Game(const Game &) = delete;
@@ -68,8 +38,7 @@ private:
 	void initializeWindow();
 	void spawnCreature(const MV::Point<> &a_position);
 
-	Managers &managers;
-	GameData data;
+	LocalData data;
 	std::unique_ptr<GameInstance> instance;
 
 	bool done;

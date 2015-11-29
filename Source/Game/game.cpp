@@ -7,7 +7,7 @@ void sdl_quit(void){
 }
 
 Game::Game(Managers& a_managers) :
-	managers(a_managers),
+	data(a_managers),
 	done(false){
 
 	MV::initializeFilesystem();
@@ -16,7 +16,7 @@ Game::Game(Managers& a_managers) :
 }
 
 void Game::initializeData() {
-	catalogs.buildings = std::make_unique<BuildingCatalog>("buildings.json");
+	
 }
 
 void Game::initializeWindow(){
@@ -25,26 +25,26 @@ void Game::initializeWindow(){
 	MV::Size<> worldSize(960, 640);
 	MV::Size<int> windowSize(960, 640);
 
-	managers.renderer.window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
+	data.managers().renderer.window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
 
-	if (!managers.renderer.initialize(windowSize, worldSize)) {
+	if (!data.managers().renderer.initialize(windowSize, worldSize)) {
 		exit(0);
 	}
-	managers.renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
-	managers.renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
+	data.managers().renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
+	data.managers().renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
 	atexit(sdl_quit);
 
 	AudioPlayer::instance()->initAudio();
 	mouse.update();
 
-	managers.textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
-	managers.textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
-	managers.textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+	data.managers().textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
+	data.managers().textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
+	data.managers().textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 
-	managers.textures.assemblePacks("Assets/Atlases", &managers.renderer);
-	managers.textures.files("Assets/Map");
-
-	instance = std::make_unique<GameInstance>(managers, catalogs, mouse, std::make_shared<Player>(), std::make_shared<Player>(), Constants());
+	data.managers().textures.assemblePacks("Assets/Atlases", &data.managers().renderer);
+	data.managers().textures.files("Assets/Map");
+	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::MouseState& a_mouse, LocalData& a_data)
+	instance = std::make_unique<GameInstance>(data.player(), std::make_shared<Player>(), mouse, data);
 }
 
 void Game::spawnCreature(const MV::Point<> &a_position) {
@@ -84,7 +84,7 @@ void Game::spawnCreature(const MV::Point<> &a_position) {
 
 bool Game::update(double dt) {
 	lastUpdateDelta = dt;
-	managers.pool.run();
+	data.managers().pool.run();
 	if (done) {
 		done = false;
 		return false;
@@ -95,7 +95,7 @@ bool Game::update(double dt) {
 void Game::handleInput() {
 	SDL_Event event;
 	while(SDL_PollEvent(&event)){
-		if(!managers.renderer.handleEvent(event) && (!instance || (instance && !instance->handleEvent(event)))){
+		if(!data.managers().renderer.handleEvent(event) && (!instance || (instance && !instance->handleEvent(event)))){
 			switch(event.type){
 			case SDL_QUIT:
 				done = true;
@@ -130,126 +130,9 @@ void Game::handleInput() {
 }
 
 void Game::render() {
-	managers.renderer.clearScreen();
+	data.managers().renderer.clearScreen();
 	if (instance) {
 		instance->update(lastUpdateDelta);
 	}
-	managers.renderer.updateScreen();
-}
-
-void GameInstance::handleScroll(int a_amount) {
-	auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount);
-	if (worldScene->scale().x + screenScale.x > .2f) {
-		auto originalScreenPosition = worldScene->localFromScreen(mouse.position()) * (MV::toPoint(screenScale));
-		worldScene->addScale(screenScale);
-		worldScene->translate(originalScreenPosition * -1.0f);
-	}
-}
-
-GameInstance::GameInstance(Managers& a_managers, Catalogs& a_catalogs, MV::MouseState& a_mouse, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const Constants& a_constants) :
-	managers(a_managers),
-	catalogs(a_catalogs),
-	mouse(a_mouse),
-	left(a_leftPlayer, a_constants),
-	right(a_rightPlayer, a_constants),
-	script(chaiscript::Std_Lib::library()) {
-
-	MV::TexturePoint::hook(script);
-	MV::Color::hook(script);
-	MV::Size<MV::PointPrecision>::hook(script);
-	MV::Size<int>::hook(script, "i");
-	MV::Point<MV::PointPrecision>::hook(script);
-	MV::Point<int>::hook(script, "i");
-	MV::BoxAABB<MV::PointPrecision>::hook(script);
-	MV::BoxAABB<int>::hook(script, "i");
-
-	MV::TexturePack::hook(script);
-	MV::TextureDefinition::hook(script);
-	MV::FileTextureDefinition::hook(script);
-	MV::TextureHandle::hook(script);
-	MV::SharedTextures::hook(script);
-
-	Wallet::hook(script);
-
-	MV::PathNode::hook(script);
-	MV::NavigationAgent::hook(script);
-
-	MV::Scene::Node::hook(script);
-	MV::Scene::Component::hook(script);
-	MV::Scene::Drawable::hook(script);
-	MV::Scene::Sprite::hook(script);
-	MV::Scene::Text::hook(script);
-	MV::Scene::PathMap::hook(script);
-	MV::Scene::PathAgent::hook(script);
-
-	worldScene = MV::Scene::Node::load("map.scene", std::bind(&GameInstance::nodeLoadBinder, this, std::placeholders::_1));
-
-	mouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse) {
-		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
-			auto signature = mouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse2) {
-				worldScene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
-			});
-			auto cancelId = MV::guid("cancelDrag");
-			mouse.onLeftMouseUp.connect(cancelId, [=](MV::MouseState& a_mouse2) {
-				a_mouse2.onMove.disconnect(signature);
-				a_mouse2.onLeftMouseUp.disconnect(cancelId);
-			});
-		}, []() {}, "MapDrag"));
-	});
-
-	for (int i = 0; i < 8; ++i) {
-		auto leftNode = worldScene->get("left_" + std::to_string(i));
-		auto rightNode = worldScene->get("right_" + std::to_string(i));
-
-		auto newNode = leftNode->make("Assets/Prefabs/life_0.prefab", [&](cereal::JSONInputArchive& archive) {
-			archive.add(
-				cereal::make_nvp("mouse", &mouse),
-				cereal::make_nvp("renderer", &managers.renderer),
-				cereal::make_nvp("textLibrary", &managers.textLibrary),
-				cereal::make_nvp("pool", &managers.pool),
-				cereal::make_nvp("texture", &managers.textures)
-			);
-		});
-		newNode->component<MV::Scene::Spine>()->animate("idle");
-
-		auto newNode2 = rightNode->make("Assets/Prefabs/life_0.prefab", [&](cereal::JSONInputArchive& archive) {
-			archive.add(
-				cereal::make_nvp("mouse", &mouse),
-				cereal::make_nvp("renderer", &managers.renderer),
-				cereal::make_nvp("textLibrary", &managers.textLibrary),
-				cereal::make_nvp("pool", &managers.pool),
-				cereal::make_nvp("texture", &managers.textures)
-				);
-		});
-		newNode2->scale({ -1.0f, 1.0f, 1.0f });
-		newNode2->component<MV::Scene::Spine>()->animate("idle");
-		auto spineBounds = newNode->component<MV::Scene::Spine>()->bounds();
-		auto treeButton = leftNode->attach<MV::Scene::Clickable>(mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::CHILDREN)->show()->color({0xFFFFFFFF});
-		treeButton->onAccept.connect("TappedBuilding", [=](std::shared_ptr<MV::Scene::Clickable> a_self) {
-			//spawnCreature(a_self->worldBounds().bottomRightPoint());
-			std::cout << "Left Building: " << i << std::endl;
-		});
-	}
-	//pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
-}
-
-void GameInstance::nodeLoadBinder(cereal::JSONInputArchive &a_archive) {
-	a_archive.add(
-		cereal::make_nvp("mouse", &mouse),
-		cereal::make_nvp("renderer", &managers.renderer),
-		cereal::make_nvp("textLibrary", &managers.textLibrary),
-		cereal::make_nvp("pool", &managers.pool)
-	);
-}
-
-bool GameInstance::update(double a_dt) {
-	worldScene->drawUpdate(static_cast<float>(a_dt));
-	return false;
-}
-
-bool GameInstance::handleEvent(const SDL_Event &a_event) {
-	if (a_event.type == SDL_MOUSEWHEEL) {
-		handleScroll(a_event.wheel.y);
-	}
-	return false;
+	data.managers().renderer.updateScreen();
 }

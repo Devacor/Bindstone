@@ -12,5 +12,6 @@
 	#include "Utility/threadPool.h"
 	#include "Utility/optionalCalls.hpp"
 	#include "Utility/visitor.hpp"
+	#include "Utility/chaiscriptStdLib.h"
 
 #endif

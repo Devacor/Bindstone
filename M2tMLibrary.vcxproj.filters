@@ -59,6 +59,9 @@
     <Filter Include="Box2D">
       <UniqueIdentifier>{13e6336e-0b3e-4a8e-a7ce-2e6f2a25f84f}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Game\Instance">
+      <UniqueIdentifier>{f11a9f40-3356-4fb3-9b98-fe7892bc842e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Animation\frameSwapper.cpp">
@@ -415,6 +418,12 @@
     </ClCompile>
     <ClCompile Include="Source\Game\player.cpp">
       <Filter>Source Files\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Game\Instance\gameInstance.cpp">
+      <Filter>Source Files\Game\Instance</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Utility\chaiscriptStdLib.cpp">
+      <Filter>Source Files\Utility</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -994,6 +1003,12 @@
     </ClInclude>
     <ClInclude Include="Source\Game\state.h">
       <Filter>Source Files\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Instance\gameInstance.h">
+      <Filter>Source Files\Game\Instance</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\chaiscriptStdLib.h">
+      <Filter>Source Files\Utility</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

@@ -3,11 +3,11 @@
 
 #include <memory>
 #include <vector>
+#include "Game/managers.h"
 
 struct BuildingData;
 class BuildingCatalog;
-class Player;
-class Managers;
+struct Player;
 
 struct Constants {
 	int startHealth = 20;
@@ -17,6 +17,7 @@ class LocalData {
 public:
 	LocalData(Managers& a_managers):
 		allManagers(a_managers){
+		buildingCatalog = std::make_unique<BuildingCatalog>("buildings.json");
 	}
 
 	std::shared_ptr<Player> player() const {

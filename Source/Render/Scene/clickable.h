@@ -54,16 +54,24 @@ namespace MV {
 		public:
 			SpriteDerivedAccessors(Clickable)
 
+			//void (std::shared_ptr<Clickable>)
 			SignalRegister<ButtonSignalSignature> onEnabled;
+			//void (std::shared_ptr<Clickable>)
 			SignalRegister<ButtonSignalSignature> onDisabled;
 
+			//void (std::shared_ptr<Clickable>)
 			SignalRegister<ButtonSignalSignature> onPress;
+			//void (std::shared_ptr<Clickable>, const Point<MV::PointPrecision> &velocity)
 			SignalRegister<DropSignalSignature> onRelease;
 
+			//void (std::shared_ptr<Clickable>)
 			SignalRegister<ButtonSignalSignature> onAccept;
+			//void (std::shared_ptr<Clickable>)
 			SignalRegister<ButtonSignalSignature> onCancel;
 
+			//void (std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &deltaPosition)
 			SignalRegister<DragSignalSignature> onDrag;
+			//void (std::shared_ptr<Clickable>, const Point<MV::PointPrecision> &velocity)
 			SignalRegister<DropSignalSignature> onDrop;
 
 			std::shared_ptr<Clickable> clickDetectionType(BoundsType a_type);

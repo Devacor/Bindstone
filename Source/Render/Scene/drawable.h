@@ -93,6 +93,18 @@ namespace MV {
 
 				return a_script;
 			}
+
+			const DrawPoint point(size_t a_index) const {
+				return points[a_index];
+			}
+
+			DrawPoint& point(size_t a_index) {
+				return points[a_index];
+			}
+
+			size_t pointSize() const {
+				return points.size();
+			}
 		protected:
 			Drawable(const std::weak_ptr<Node> &a_owner);
 

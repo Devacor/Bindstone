@@ -532,6 +532,10 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 
 	OpenTexturePicker();
 
+	makeColorButton(grid, panel.content(), *panel.resources().textLibrary, *panel.resources().mouse, buttonSize, controls->elementToEdit->color(), [&](const MV::Color &a_color) {
+		controls->elementToEdit->color(a_color);
+	});
+
 	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
 		text(MV::toWide(controls->elementToEdit->id()))->
 		onEnter.connect("rename", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text){

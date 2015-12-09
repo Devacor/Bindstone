@@ -62,11 +62,11 @@ namespace MV {
 			}
 
 			std::shared_ptr<Sprite> size(const Size<> &a_size, bool a_center) {
-				return size(a_size, (a_center) ? point(a_size.width / 2.0f, a_size.height / 2.0f) : point(0.0f, 0.0f));
+				return size(a_size, (a_center) ? MV::point(a_size.width / 2.0f, a_size.height / 2.0f) : MV::point(0.0f, 0.0f));
 			}
 
 			std::shared_ptr<Sprite> size(const Size<> &a_size) {
-				return size(a_size, point(0.0f, 0.0f));
+				return size(a_size, MV::point(0.0f, 0.0f));
 			}
 
 			template<typename PointAssign>

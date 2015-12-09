@@ -40,9 +40,12 @@ public:
 private:
 	void handleScroll(int a_amount);
 
+	void hook();
+
 	LocalData& data;
 	MV::MouseState &mouse;
 	std::shared_ptr<MV::Scene::Node> scene;
+	std::shared_ptr<MV::Scene::Node> buildingDialog;
 
 	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
 

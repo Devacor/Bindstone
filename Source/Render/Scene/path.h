@@ -54,7 +54,7 @@ namespace MV {
 			}
 
 			Point<> localFromGrid(const Point<int> &a_location) {
-				return ((cast<PointPrecision>(a_location) + point(0.5f, 0.5f)) * toPoint(cellDimensions)) + topLeftOffset;
+				return ((cast<PointPrecision>(a_location) + MV::point(0.5f, 0.5f)) * toPoint(cellDimensions)) + topLeftOffset;
 			}
 
 			Point<> localFromGrid(const Point<> &a_location) {

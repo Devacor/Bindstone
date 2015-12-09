@@ -24,7 +24,7 @@ namespace MV {
 				for (int y = 0; y < map->size().height; ++y) {
 					int index = (x * map->size().height) + y;
 					for (int i = 0; i < 4; ++i) {
-						points[(index * 4) + i] = point(x * cellDimensions.width, y * cellDimensions.height) + cornerOffsets[i] + topLeftOffset;
+						points[(index * 4) + i] = MV::point(x * cellDimensions.width, y * cellDimensions.height) + cornerOffsets[i] + topLeftOffset;
 						points[(index * 4) + i] = (*map)[x][y].staticallyBlocked() ? staticBlockedDebugTile : alternatingDebugTiles[(x + y) % 2];
 					}
 				}

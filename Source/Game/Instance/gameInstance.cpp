@@ -50,33 +50,7 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 	right(a_rightPlayer, RIGHT, *this),
 	script(MV::create_chaiscript_stdlib()) {
 
-	MV::TexturePoint::hook(script);
-	MV::Color::hook(script);
-	MV::Size<MV::PointPrecision>::hook(script);
-	MV::Size<int>::hook(script, "i");
-	MV::Point<MV::PointPrecision>::hook(script);
-	MV::Point<int>::hook(script, "i");
-	MV::BoxAABB<MV::PointPrecision>::hook(script);
-	MV::BoxAABB<int>::hook(script, "i");
-
-	MV::TexturePack::hook(script);
-	MV::TextureDefinition::hook(script);
-	MV::FileTextureDefinition::hook(script);
-	MV::TextureHandle::hook(script);
-	MV::SharedTextures::hook(script);
-
-	Wallet::hook(script);
-
-	MV::PathNode::hook(script);
-	MV::NavigationAgent::hook(script);
-
-	MV::Scene::Node::hook(script);
-	MV::Scene::Component::hook(script);
-	MV::Scene::Drawable::hook(script);
-	MV::Scene::Sprite::hook(script);
-	MV::Scene::Text::hook(script);
-	MV::Scene::PathMap::hook(script);
-	MV::Scene::PathAgent::hook(script);
+	hook();
 
 	mouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse) {
 		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
@@ -109,6 +83,37 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 		});
 	}
 	//pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
+}
+
+void GameInstance::hook() {
+	MV::TexturePoint::hook(script);
+	MV::Color::hook(script);
+	MV::Size<MV::PointPrecision>::hook(script);
+	MV::Size<int>::hook(script, "i");
+	MV::Point<MV::PointPrecision>::hook(script);
+	MV::Point<int>::hook(script, "i");
+	MV::BoxAABB<MV::PointPrecision>::hook(script);
+	MV::BoxAABB<int>::hook(script, "i");
+
+	MV::TexturePack::hook(script);
+	MV::TextureDefinition::hook(script);
+	MV::FileTextureDefinition::hook(script);
+	MV::TextureHandle::hook(script);
+	MV::SharedTextures::hook(script);
+
+	Wallet::hook(script);
+
+	MV::PathNode::hook(script);
+	MV::NavigationAgent::hook(script);
+
+	MV::Scene::Node::hook(script);
+	MV::Scene::Component::hook(script);
+	MV::Scene::Drawable::hook(script);
+	MV::Scene::Sprite::hook(script);
+	MV::Scene::Text::hook(script);
+	MV::Scene::PathMap::hook(script);
+	MV::Scene::PathAgent::hook(script);
+	MV::Scene::Emitter::hook(script, data.managers().pool);
 }
 
 void GameInstance::nodeLoadBinder(cereal::JSONInputArchive &a_archive) {

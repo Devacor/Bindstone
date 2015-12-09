@@ -32,6 +32,61 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 	return button;
 }
 
+void applyColorToColorButton(std::shared_ptr<MV::Scene::Button> a_button, const MV::Color& a_color) {
+	std::vector<MV::Color> boxIdleColors = { a_color, a_color / 2.0f, a_color / 2.0f, a_color };
+	std::vector<MV::Color> boxActiveColors = { a_color / 2.0f, a_color / 4.0f, a_color / 4.0f, a_color / 2.0f };
+
+	for (size_t i = 0; i < 4; ++i) {
+		boxActiveColors[i].A = a_color.A;
+		boxIdleColors[i].A = a_color.A;
+	}
+
+	a_button->idleNode()->component<MV::Scene::Sprite>()->colors(boxIdleColors);
+	a_button->activeNode()->component<MV::Scene::Sprite>()->colors(boxActiveColors);
+}
+
+std::shared_ptr<MV::Scene::Button> makeColorButton(const std::shared_ptr<MV::Scene::Node> &a_parent, std::shared_ptr<MV::Scene::Node> a_colorPaletteParent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void (const MV::Color& a_newColor)> a_callback) {
+	auto buttonId = MV::guid("color_button");
+	auto button = a_parent->make(buttonId)->attach<MV::Scene::Button>(a_mouse)->size(a_size);
+
+	auto activeScene = button->owner()->make("active")->attach<MV::Scene::Sprite>()->size(a_size)->owner();
+	auto idleScene = button->owner()->make("idle")->attach<MV::Scene::Sprite>()->size(a_size)->owner();
+
+	auto activeBox = activeScene->attach<MV::Scene::Text>(a_library, a_size, MV::DEFAULT_ID);
+	activeBox->justification(MV::TextJustification::CENTER);
+	activeBox->wrapping(MV::TextWrapMethod::HARD)->minimumLineHeight(a_size.height)->text(UTF_CHAR_STR("Color"));
+
+	auto idleBox = idleScene->attach<MV::Scene::Text>(a_library, a_size, MV::DEFAULT_ID);
+	idleBox->justification(MV::TextJustification::CENTER);
+	idleBox->wrapping(MV::TextWrapMethod::HARD)->minimumLineHeight(a_size.height)->text(UTF_CHAR_STR("Color"));
+
+	button->activeNode(activeScene);
+	button->idleNode(idleScene);
+
+	applyColorToColorButton(button, a_color);
+
+	std::weak_ptr<MV::Scene::Button> weakButton = button;
+	button->onAccept.connect("OpenPicker", [weakButton, buttonId, a_color, a_colorPaletteParent, a_callback](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+		auto pickerNode = a_colorPaletteParent->makeOrGet(buttonId + "_picker");
+		pickerNode->position({200.0f, 0.0f});
+		auto pickerComponent = pickerNode->component<MV::Scene::Palette>(true, false);
+		if (!pickerComponent) {
+			pickerComponent = pickerNode->attach<MV::Scene::Palette>(a_clickable->mouse())->bounds(MV::size(256.0f, 256.0f));
+		}
+
+		pickerComponent->color(weakButton.lock()->idleNode()->component<MV::Scene::Sprite>()->point(0).color());
+		pickerComponent->onColorChange.connect("change", [weakButton, a_color, a_callback](std::shared_ptr<MV::Scene::Palette> a_palette) {
+			applyColorToColorButton(weakButton.lock(), a_palette->color());
+			a_callback(a_palette->color());
+		});
+		pickerComponent->onSwatchClicked.connect("close", [](std::shared_ptr<MV::Scene::Palette> a_palette) {
+			a_palette->owner()->removeFromParent();
+		});
+	});
+
+	return button;
+}
+
 void renameButton(const MV::Scene::SafeComponent<MV::Scene::Button> &a_button, const MV::UtfString &a_text) {
 	a_button->activeNode()->componentInChildren<MV::Scene::Text>()->text(a_text);
 	a_button->idleNode()->componentInChildren<MV::Scene::Text>()->text(a_text);

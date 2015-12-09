@@ -93,7 +93,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Clipped> Clipped::captureSize(const Size<> &a_size, bool a_center /*= false*/) {
-			return captureSize(a_size, (a_center) ? point(a_size.width / 2.0f, a_size.height / 2.0f) : point(0.0f, 0.0f));
+			return captureSize(a_size, (a_center) ? MV::point(a_size.width / 2.0f, a_size.height / 2.0f) : MV::point(0.0f, 0.0f));
 		}
 
 		std::shared_ptr<Clipped> Clipped::bounds(const BoxAABB<> &a_bounds) {

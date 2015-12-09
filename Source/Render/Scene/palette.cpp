@@ -146,8 +146,8 @@ namespace MV {
 			auto fullBounds = bounds();
 			auto mainColorSize = bounds().size() * (selectorPercentSize + selectorPercentPadding);
 			return {
-				point(fullBounds.minPoint.x, fullBounds.minPoint.y + mainColorSize.height),
-				point(fullBounds.minPoint.x + mainColorSize.width, fullBounds.maxPoint.y)
+				MV::point(fullBounds.minPoint.x, fullBounds.minPoint.y + mainColorSize.height),
+				MV::point(fullBounds.minPoint.x + mainColorSize.width, fullBounds.maxPoint.y)
 			};
 		}
 
@@ -155,8 +155,8 @@ namespace MV {
 			auto fullBounds = bounds();
 			auto mainColorSize = bounds().size() * (selectorPercentSize + selectorPercentPadding);
 			return {
-				point(fullBounds.minPoint.x + mainColorSize.width, fullBounds.minPoint.y),
-				point(fullBounds.maxPoint.x, fullBounds.minPoint.y + mainColorSize.height)
+				MV::point(fullBounds.minPoint.x + mainColorSize.width, fullBounds.minPoint.y),
+				MV::point(fullBounds.maxPoint.x, fullBounds.minPoint.y + mainColorSize.height)
 			};
 		}
 
@@ -164,8 +164,8 @@ namespace MV {
 			auto fullBounds = bounds();
 			auto mainColorSize = bounds().size() * (selectorPercentSize + selectorPercentPadding);
 			return{
-				point(fullBounds.minPoint.x + mainColorSize.width, fullBounds.minPoint.y + mainColorSize.height),
-				point(fullBounds.maxPoint.x, fullBounds.maxPoint.y)
+				MV::point(fullBounds.minPoint.x + mainColorSize.width, fullBounds.minPoint.y + mainColorSize.height),
+				MV::point(fullBounds.maxPoint.x, fullBounds.maxPoint.y)
 			};
 		}
 
@@ -202,9 +202,6 @@ namespace MV {
 				auto percentPosition = owner()->screenFromLocal(currentSideColorBounds()).percent(a_mouse.position());
 				topRightColor = percentToSliderColor(percentPosition.y);
 				hsv.H = (1.0f - percentPosition.y) * 360.0f;
-				for (int i = 14; i < 18; ++i) {
-					points[i] = topRightColor;
-				}
 				updateColorForPaletteState();
 			};
 			updateSideColor(ourMouse);
@@ -272,6 +269,7 @@ namespace MV {
 
 		std::shared_ptr<Palette> Palette::color(const MV::Color &a_newColor) {
 			currentColor = a_newColor;
+			hsv = currentColor.getHsv(hsv);
 			ApplyCurrentColorToPreviewBox();
 			
 			auto middlePointX = currentColor.A * (points[25].x - points[19].x);
@@ -301,31 +299,31 @@ namespace MV {
 			for (int i = 0; i < colorBarList.size(); ++i) {
 				PointPrecision currentHeight = a_bounds.minPoint.y + segmentHeight * static_cast<PointPrecision>(i);
 
-				points[i * 2] = point(a_bounds.maxPoint.x - colorSelectorWidth, currentHeight);
-				points[i * 2 + 1] = point(a_bounds.maxPoint.x, currentHeight);
+				points[i * 2] = MV::point(a_bounds.maxPoint.x - colorSelectorWidth, currentHeight);
+				points[i * 2 + 1] = MV::point(a_bounds.maxPoint.x, currentHeight);
 			}
 
 			points[14] = a_bounds.topLeftPoint();
-			points[15] = a_bounds.topLeftPoint() + point(0.0f, selectorPixelSize.height);
+			points[15] = a_bounds.topLeftPoint() + MV::point(0.0f, selectorPixelSize.height);
 			points[16] = a_bounds.topLeftPoint() + toPoint(selectorPixelSize);
-			points[17] = a_bounds.topLeftPoint() + point(selectorPixelSize.width, 0.0f);
+			points[17] = a_bounds.topLeftPoint() + MV::point(selectorPixelSize.width, 0.0f);
 
 			auto clippedOffRightX = colorSelectorWidth + selectorPixelPadding.width;
 			auto middlePointX = currentColor.A * (a_bounds.width() - clippedOffRightX);
-			points[18] = a_bounds.bottomLeftPoint() - point(0.0f, alphaSelectorHeight);
+			points[18] = a_bounds.bottomLeftPoint() - MV::point(0.0f, alphaSelectorHeight);
 			points[19] = a_bounds.bottomLeftPoint();
-			points[20] = a_bounds.bottomLeftPoint() + point(middlePointX, 0.0f);
-			points[21] = a_bounds.bottomLeftPoint() + point(middlePointX, -alphaSelectorHeight);
+			points[20] = a_bounds.bottomLeftPoint() + MV::point(middlePointX, 0.0f);
+			points[21] = a_bounds.bottomLeftPoint() + MV::point(middlePointX, -alphaSelectorHeight);
 
 			points[22] = points[21].point();
 			points[23] = points[20].point();
-			points[24] = a_bounds.bottomRightPoint() - point(clippedOffRightX, 0.0f);
-			points[25] = a_bounds.bottomRightPoint() - point(clippedOffRightX, alphaSelectorHeight);
+			points[24] = a_bounds.bottomRightPoint() - MV::point(clippedOffRightX, 0.0f);
+			points[25] = a_bounds.bottomRightPoint() - MV::point(clippedOffRightX, alphaSelectorHeight);
 
-			points[26] = a_bounds.bottomRightPoint() - point(colorSelectorWidth, alphaSelectorHeight);
-			points[27] = a_bounds.bottomRightPoint() - point(colorSelectorWidth, 0.0f);
+			points[26] = a_bounds.bottomRightPoint() - MV::point(colorSelectorWidth, alphaSelectorHeight);
+			points[27] = a_bounds.bottomRightPoint() - MV::point(colorSelectorWidth, 0.0f);
 			points[28] = a_bounds.bottomRightPoint();
-			points[29] = a_bounds.bottomRightPoint() - point(0.0f, alphaSelectorHeight);
+			points[29] = a_bounds.bottomRightPoint() - MV::point(0.0f, alphaSelectorHeight);
 
 			for (size_t i = 30; i <= 48; ++i) {
 				points[i].copyPosition(points[29]);
@@ -347,42 +345,44 @@ namespace MV {
 		}
 
 		void Palette::ApplyCurrentColorToPreviewBox() {
-			points[26] = currentColor;
-			points[27] = currentColor;
-			points[28] = currentColor;
-			points[29] = currentColor;
+			for (int i = 26; i < 30; ++i) {
+				points[i] = currentColor;
+			}
 
-			hsv = currentColor.getHsv(hsv);
+			for (int i = 14; i < 18; ++i) {
+				points[i] = currentColor;
+			}
+
 			auto localBounds = bounds();
 			auto selectorPixelSize = Size<>(localBounds.width(), localBounds.height()) * selectorPercentSize;
 			auto selectorPixelPadding = Size<>(localBounds.width(), localBounds.height()) * selectorPercentPadding;
 			auto colorSelectorWidth = localBounds.width() - (selectorPixelSize.width + selectorPixelPadding.width);
 			auto alphaSelectorHeight = localBounds.height() - (selectorPixelSize.height + selectorPixelPadding.height);
 
-			points[46] = point(localBounds.maxPoint.x - colorSelectorWidth, localBounds.minPoint.y + ((1.0f - hsv.percentHue()) * selectorPixelSize.height));
-			points[47] = point(localBounds.maxPoint.x - colorSelectorWidth - selectorPixelPadding.width, (localBounds.minPoint.y + ((1.0f - hsv.percentHue()) * selectorPixelSize.height)) - selectorPixelPadding.width / 2.0f);
-			points[48] = point(localBounds.maxPoint.x - colorSelectorWidth - selectorPixelPadding.width, (localBounds.minPoint.y + ((1.0f - hsv.percentHue()) * selectorPixelSize.height)) + selectorPixelPadding.width / 2.0f);
+			points[46] = MV::point(localBounds.maxPoint.x - colorSelectorWidth, localBounds.minPoint.y + ((1.0f - hsv.percentHue()) * selectorPixelSize.height));
+			points[47] = MV::point(localBounds.maxPoint.x - colorSelectorWidth - selectorPixelPadding.width, (localBounds.minPoint.y + ((1.0f - hsv.percentHue()) * selectorPixelSize.height)) - selectorPixelPadding.width / 2.0f);
+			points[48] = MV::point(localBounds.maxPoint.x - colorSelectorWidth - selectorPixelPadding.width, (localBounds.minPoint.y + ((1.0f - hsv.percentHue()) * selectorPixelSize.height)) + selectorPixelPadding.width / 2.0f);
 
-			auto colorLocation = point((hsv.S * selectorPixelSize.width) + localBounds.minPoint.x, ((1.0f - hsv.V) * selectorPixelSize.height) + localBounds.minPoint.y);
-			points[30] = point(colorLocation.x - 3, colorLocation.y);
-			points[31] = point(colorLocation.x, colorLocation.y - 3);
-			points[32] = point(colorLocation.x, colorLocation.y - 2);
-			points[33] = point(colorLocation.x - 2, colorLocation.y);
+			auto colorLocation = MV::point((hsv.S * selectorPixelSize.width) + localBounds.minPoint.x, ((1.0f - hsv.V) * selectorPixelSize.height) + localBounds.minPoint.y);
+			points[30] = MV::point(colorLocation.x - 3, colorLocation.y);
+			points[31] = MV::point(colorLocation.x, colorLocation.y - 3);
+			points[32] = MV::point(colorLocation.x, colorLocation.y - 2);
+			points[33] = MV::point(colorLocation.x - 2, colorLocation.y);
 
-			points[34] = point(colorLocation.x - 3, colorLocation.y);
-			points[35] = point(colorLocation.x, colorLocation.y + 3);
-			points[36] = point(colorLocation.x, colorLocation.y + 2);
-			points[37] = point(colorLocation.x - 2, colorLocation.y);
+			points[34] = MV::point(colorLocation.x - 3, colorLocation.y);
+			points[35] = MV::point(colorLocation.x, colorLocation.y + 3);
+			points[36] = MV::point(colorLocation.x, colorLocation.y + 2);
+			points[37] = MV::point(colorLocation.x - 2, colorLocation.y);
 
-			points[38] = point(colorLocation.x + 3, colorLocation.y);
-			points[39] = point(colorLocation.x, colorLocation.y - 3);
-			points[40] = point(colorLocation.x, colorLocation.y - 2);
-			points[41] = point(colorLocation.x + 2, colorLocation.y);
+			points[38] = MV::point(colorLocation.x + 3, colorLocation.y);
+			points[39] = MV::point(colorLocation.x, colorLocation.y - 3);
+			points[40] = MV::point(colorLocation.x, colorLocation.y - 2);
+			points[41] = MV::point(colorLocation.x + 2, colorLocation.y);
 
-			points[42] = point(colorLocation.x + 3, colorLocation.y);
-			points[43] = point(colorLocation.x, colorLocation.y + 3);
-			points[44] = point(colorLocation.x, colorLocation.y + 2);
-			points[45] = point(colorLocation.x + 2, colorLocation.y);
+			points[42] = MV::point(colorLocation.x + 3, colorLocation.y);
+			points[43] = MV::point(colorLocation.x, colorLocation.y + 3);
+			points[44] = MV::point(colorLocation.x, colorLocation.y + 2);
+			points[45] = MV::point(colorLocation.x + 2, colorLocation.y);
 
 			float greyColor = mixOut(0.0f, 1.0f, (hsv.V + (1.0f - hsv.S)) / 2.0f, 4.5f);
 			Color cursorColor(greyColor, greyColor, greyColor);

@@ -18,7 +18,9 @@ namespace MV {
 			Signal<PaletteSignalSignture> onSwatchClickedSignal;
 
 		public:
+			//void (std::shared_ptr<Palette>)
 			SignalRegister<PaletteSignalSignture> onColorChange;
+			//void (std::shared_ptr<Palette>)
 			SignalRegister<PaletteSignalSignture> onSwatchClicked;
 
 			DrawableDerivedAccessorsNoColor(Palette)
@@ -58,7 +60,7 @@ namespace MV {
 			}
 
 			std::shared_ptr<Palette> size(const Size<> &a_size, bool a_center = false) {
-				return size(a_size, (a_center) ? point(a_size.width / 2.0f, a_size.height / 2.0f) : point(0.0f, 0.0f));
+				return size(a_size, (a_center) ? MV::point(a_size.width / 2.0f, a_size.height / 2.0f) : MV::point(0.0f, 0.0f));
 			}
 
 			size_t globalPriority() const;

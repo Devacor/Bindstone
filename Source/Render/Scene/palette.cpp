@@ -173,7 +173,7 @@ namespace MV {
 			auto currentAlpha = currentColor.A;
 			currentColor = mix(mix(topRightColor, Color(1.0f, 1.0f, 1.0f), 1.0f - selectorCursorPercent.x), Color(0.0f, 0.0f, 0.0f), selectorCursorPercent.y);
 			currentColor.A = currentAlpha;
-			color(currentColor);
+			colorInternal(currentColor);
 		}
 
 		Color Palette::percentToSliderColor(PointPrecision a_percentPosition) {
@@ -201,7 +201,7 @@ namespace MV {
 			auto updateSideColor = [&](MouseState& a_mouse) {
 				auto percentPosition = owner()->screenFromLocal(currentSideColorBounds()).percent(a_mouse.position());
 				topRightColor = percentToSliderColor(percentPosition.y);
-				hsv.H = (1.0f - percentPosition.y) * 360.0f;
+				hsv.invertedPercentHue(percentPosition.y);
 				updateColorForPaletteState();
 			};
 			updateSideColor(ourMouse);
@@ -268,6 +268,28 @@ namespace MV {
 		}
 
 		std::shared_ptr<Palette> Palette::color(const MV::Color &a_newColor) {
+			currentColor = a_newColor;
+			hsv = currentColor.getHsv(hsv);
+			topRightColor = percentToSliderColor(hsv.invertedPercentHue());
+			selectorCursorPercent.x = hsv.S;
+			selectorCursorPercent.y = 1.0f - hsv.V;
+			ApplyCurrentColorToPreviewBox();
+
+			auto middlePointX = currentColor.A * (points[25].x - points[19].x);
+
+			points[20].x = middlePointX;
+			points[21].x = middlePointX;
+
+			points[22].x = middlePointX;
+			points[23].x = middlePointX;
+
+			auto self = std::static_pointer_cast<Palette>(shared_from_this());
+			onColorChangeSignal(self);
+			notifyParentOfComponentChange();
+			return self;
+		}
+
+		std::shared_ptr<Palette> Palette::colorInternal(const MV::Color &a_newColor) {
 			currentColor = a_newColor;
 			hsv = currentColor.getHsv(hsv);
 			ApplyCurrentColorToPreviewBox();
@@ -348,11 +370,9 @@ namespace MV {
 			for (int i = 26; i < 30; ++i) {
 				points[i] = currentColor;
 			}
-
 			for (int i = 14; i < 18; ++i) {
-				points[i] = currentColor;
+				points[i] = topRightColor;
 			}
-
 			auto localBounds = bounds();
 			auto selectorPixelSize = Size<>(localBounds.width(), localBounds.height()) * selectorPercentSize;
 			auto selectorPixelPadding = Size<>(localBounds.width(), localBounds.height()) * selectorPercentPadding;

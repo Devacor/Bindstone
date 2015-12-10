@@ -96,6 +96,17 @@ namespace MV {
 			float percentHue() const {
 				return H / 360.0f;
 			}
+			float invertedPercentHue() const {
+				return (360.0f - H) / 360.0f;
+			}
+			float percentHue(float a_percent) {
+				H = a_percent * 360.0f;
+				return H;
+			}
+			float invertedPercentHue(float a_percent) {
+				H = (1.0f - a_percent) * 360.0f;
+				return H;
+			}
 			float H, S, V, A;
 		};
 
@@ -123,7 +134,10 @@ namespace MV {
 			a_script.add(chaiscript::fun(&HSV::S), "S");
 			a_script.add(chaiscript::fun(&HSV::V), "V");
 			a_script.add(chaiscript::fun(&HSV::A), "A");
-			a_script.add(chaiscript::fun(&HSV::percentHue), "percentHue");
+			a_script.add(chaiscript::fun(static_cast<float(HSV::*)() const>(&HSV::percentHue)), "percentHue");
+			a_script.add(chaiscript::fun(static_cast<float(HSV::*)(float)>(&HSV::percentHue)), "percentHue");
+			a_script.add(chaiscript::fun(static_cast<float(HSV::*)() const>(&HSV::invertedPercentHue)), "invertedPercentHue");
+			a_script.add(chaiscript::fun(static_cast<float(HSV::*)(float)>(&HSV::invertedPercentHue)), "invertedPercentHue");
 
 			a_script.add(chaiscript::user_type<Color>(), "Color");
 			a_script.add(chaiscript::constructor<Color()>(), "Color");

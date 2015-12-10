@@ -28,6 +28,7 @@ namespace MV {
 			MouseState& mouse() const;
 
 			std::shared_ptr<Palette> color(const MV::Color &a_newColor);
+
 			MV::Color color() const {
 				return currentColor;
 			}
@@ -89,6 +90,8 @@ namespace MV {
 			BoxAABB<> currentAlphaBounds();
 			BoxAABB<> currentMainColorBounds();
 			BoxAABB<> currentSwatchBounds();
+
+			std::shared_ptr<Palette> colorInternal(const MV::Color &a_newColor);
 
 			void acceptMainColorClick();
 

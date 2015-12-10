@@ -45,30 +45,36 @@ void applyColorToColorButton(std::shared_ptr<MV::Scene::Button> a_button, const 
 	a_button->activeNode()->component<MV::Scene::Sprite>()->colors(boxActiveColors);
 }
 
-std::shared_ptr<MV::Scene::Button> makeColorButton(const std::shared_ptr<MV::Scene::Node> &a_parent, std::shared_ptr<MV::Scene::Node> a_colorPaletteParent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void (const MV::Color& a_newColor)> a_callback) {
+std::shared_ptr<MV::Scene::Button> makeColorButton(const std::shared_ptr<MV::Scene::Node> &a_parent, std::shared_ptr<MV::Scene::Node> a_colorPaletteParent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void (const MV::Color& a_newColor)> a_callback, const MV::UtfString &a_text) {
+	auto button = makeColorButton(a_parent->renderer(), a_colorPaletteParent, a_library, a_mouse, a_size, a_color, a_callback, a_text);
+	a_parent->add(button.owner());
+	return button.self();
+}
+
+MV::Scene::SafeComponent<MV::Scene::Button> makeColorButton(MV::Draw2D &a_renderer, std::shared_ptr<MV::Scene::Node> a_colorPaletteParent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void(const MV::Color& a_newColor)> a_callback, const MV::UtfString &a_text) {
 	auto buttonId = MV::guid("color_button");
-	auto button = a_parent->make(buttonId)->attach<MV::Scene::Button>(a_mouse)->size(a_size);
+	auto button = MV::Scene::Node::make(a_renderer, buttonId)->attach<MV::Scene::Button>(a_mouse)->size(a_size)->safe();
 
 	auto activeScene = button->owner()->make("active")->attach<MV::Scene::Sprite>()->size(a_size)->owner();
 	auto idleScene = button->owner()->make("idle")->attach<MV::Scene::Sprite>()->size(a_size)->owner();
 
 	auto activeBox = activeScene->attach<MV::Scene::Text>(a_library, a_size, MV::DEFAULT_ID);
 	activeBox->justification(MV::TextJustification::CENTER);
-	activeBox->wrapping(MV::TextWrapMethod::HARD)->minimumLineHeight(a_size.height)->text(UTF_CHAR_STR("Color"));
+	activeBox->wrapping(MV::TextWrapMethod::HARD)->minimumLineHeight(a_size.height)->text(a_text);
 
 	auto idleBox = idleScene->attach<MV::Scene::Text>(a_library, a_size, MV::DEFAULT_ID);
 	idleBox->justification(MV::TextJustification::CENTER);
-	idleBox->wrapping(MV::TextWrapMethod::HARD)->minimumLineHeight(a_size.height)->text(UTF_CHAR_STR("Color"));
+	idleBox->wrapping(MV::TextWrapMethod::HARD)->minimumLineHeight(a_size.height)->text(a_text);
 
 	button->activeNode(activeScene);
 	button->idleNode(idleScene);
 
-	applyColorToColorButton(button, a_color);
+	applyColorToColorButton(button.self(), a_color);
 
-	std::weak_ptr<MV::Scene::Button> weakButton = button;
-	button->onAccept.connect("OpenPicker", [weakButton, buttonId, a_color, a_colorPaletteParent, a_callback](std::shared_ptr<MV::Scene::Clickable> a_clickable){
+	std::weak_ptr<MV::Scene::Button> weakButton = button.self();
+	button->onAccept.connect("OpenPicker", [weakButton, buttonId, a_color, a_colorPaletteParent, a_callback](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 		auto pickerNode = a_colorPaletteParent->makeOrGet(buttonId + "_picker");
-		pickerNode->position({200.0f, 0.0f});
+		pickerNode->position({ 200.0f, 0.0f });
 		auto pickerComponent = pickerNode->component<MV::Scene::Palette>(true, false);
 		if (!pickerComponent) {
 			pickerComponent = pickerNode->attach<MV::Scene::Palette>(a_clickable->mouse())->bounds(MV::size(256.0f, 256.0f));

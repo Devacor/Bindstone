@@ -824,6 +824,21 @@ controls(a_controls) {
 	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().minimum.rotationalChange.z));
 	grid->add(maximumRotationChange);
 
+	auto minStartColor = makeColorButton(node->renderer(), panel.content(), *panel.resources().textLibrary, *panel.resources().mouse, buttonSize, controls->elementToEdit->color(), [&](const MV::Color &a_color) {
+		controls->elementToEdit->properties().minimum.beginColor = a_color;
+	}, UTF_CHAR_STR("Min Start"));
+	auto minEndColor = makeColorButton(node->renderer(), panel.content(), *panel.resources().textLibrary, *panel.resources().mouse, buttonSize, controls->elementToEdit->color(), [&](const MV::Color &a_color) {
+		controls->elementToEdit->color(a_color);
+	}, UTF_CHAR_STR("Min End"));
+
+	auto maxStartColor = makeColorButton(node->renderer(), panel.content(), *panel.resources().textLibrary, *panel.resources().mouse, buttonSize, controls->elementToEdit->color(), [&](const MV::Color &a_color) {
+		controls->elementToEdit->color(a_color);
+	}, UTF_CHAR_STR("Max Start"));
+	auto maxEndColor = makeColorButton(node->renderer(), panel.content(), *panel.resources().textLibrary, *panel.resources().mouse, buttonSize, controls->elementToEdit->color(), [&](const MV::Color &a_color) {
+		controls->elementToEdit->color(a_color);
+	}, UTF_CHAR_STR("Max End"));
+
+	/*
 	auto maximumREndMax = makeSlider(node->renderer(), *panel.resources().mouse, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.endColor.R = a_slider->percent();
 	}, controls->elementToEdit->properties().maximum.endColor.R);
@@ -910,7 +925,7 @@ controls(a_controls) {
 	grid->add(maximumGEndMax);
 	grid->add(maximumBEndMax);
 	grid->add(maximumAEndMax);
-
+	*/
 
 
 	auto xClick = offsetX->owner()->component<MV::Scene::Clickable>();

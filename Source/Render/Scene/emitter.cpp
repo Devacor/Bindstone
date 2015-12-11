@@ -32,7 +32,8 @@ namespace MV {
 			particle.change.rotationalChange = randomMix(spawnProperties.minimum.rotationalChange, spawnProperties.maximum.rotationalChange);
 
 			particle.direction = randomMix(spawnProperties.minimumDirection, spawnProperties.maximumDirection);
-			particle.change.directionalChange = randomMix(spawnProperties.minimum.directionalChange, spawnProperties.maximum.directionalChange);
+			particle.change.rateOfChange = randomMix(spawnProperties.minimum.rateOfChange, spawnProperties.maximum.rateOfChange);
+			particle.change.directionalChange(randomMix(spawnProperties.minimum.directionalChange(), spawnProperties.maximum.directionalChange()));
 
 			particle.change.beginSpeed = mix(spawnProperties.minimum.beginSpeed, spawnProperties.maximum.beginSpeed, randomNumber(0.0f, 1.0f));
 			particle.change.endSpeed = mix(spawnProperties.minimum.endSpeed, spawnProperties.maximum.endSpeed, randomNumber(0.0f, 1.0f));
@@ -50,7 +51,7 @@ namespace MV {
 			particle.setGravity(
 				mix(spawnProperties.minimum.gravityMagnitude, spawnProperties.maximum.gravityMagnitude, randomNumber(0.0f, 1.0f)),
 				randomMix(spawnProperties.minimum.gravityDirection, spawnProperties.maximum.gravityDirection)
-				);
+			);
 
 			particle.update(0.0f);
 

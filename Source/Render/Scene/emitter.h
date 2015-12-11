@@ -8,7 +8,30 @@ namespace MV {
 	namespace Scene {
 
 		struct ParticleChangeValues {
-			AxisAngles directionalChange;
+		private:
+			AxisAngles directionalChangeTemplate;
+			AxisAngles directionalChangeCurrent;
+		public:
+			AxisAngles rateOfChange;
+
+			AxisAngles directionalChange(const AxisAngles &a_newDirectionalChange) {
+				directionalChangeTemplate = a_newDirectionalChange;
+				directionalChangeCurrent = a_newDirectionalChange;
+				return directionalChangeCurrent;
+			}
+
+			AxisAngles currentDirectionalChange(const AxisAngles &a_newDirectionalChange) {
+				directionalChangeCurrent = a_newDirectionalChange;
+				return directionalChangeCurrent;
+			}
+
+			AxisAngles directionalChange() const {
+				return directionalChangeTemplate;
+			}
+			AxisAngles currentDirectionalChange() const {
+				return directionalChangeCurrent;
+			}
+
 			AxisAngles rotationalChange;
 
 			float beginSpeed = 0.0f;
@@ -30,7 +53,8 @@ namespace MV {
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 				a_script.add(chaiscript::user_type<ParticleChangeValues>(), "ParticleChangeValues");
 
-				a_script.add(chaiscript::fun(&ParticleChangeValues::directionalChange), "directionalChange");
+				a_script.add(chaiscript::fun(&ParticleChangeValues::rateOfChange), "rateOfChange");
+				a_script.add(chaiscript::fun(&ParticleChangeValues::directionalChangeTemplate), "directionalChange");
 				a_script.add(chaiscript::fun(&ParticleChangeValues::rotationalChange), "rotationalChange");
 
 				a_script.add(chaiscript::fun(&ParticleChangeValues::beginSpeed), "beginSpeed");
@@ -48,8 +72,8 @@ namespace MV {
 			}
 
 			template <class Archive>
-			void serialize(Archive & archive) {
-				archive(CEREAL_NVP(directionalChange), CEREAL_NVP(rotationalChange),
+			void save(Archive & archive) const {
+				archive(CEREAL_NVP(rateOfChange), cereal::make_nvp("directionalChange", directionalChangeTemplate), CEREAL_NVP(rotationalChange),
 					CEREAL_NVP(beginSpeed), CEREAL_NVP(endSpeed),
 					CEREAL_NVP(beginScale), CEREAL_NVP(endScale),
 					CEREAL_NVP(beginColor), CEREAL_NVP(endColor),
@@ -57,6 +81,19 @@ namespace MV {
 					CEREAL_NVP(gravityMagnitude), CEREAL_NVP(gravityDirection),
 					CEREAL_NVP(animationFramesPerSecond)
 				);
+			}
+
+			template <class Archive>
+			void load(Archive & archive) {
+				archive(CEREAL_NVP(rateOfChange), cereal::make_nvp("directionalChange", directionalChangeTemplate), CEREAL_NVP(rotationalChange),
+					CEREAL_NVP(beginSpeed), CEREAL_NVP(endSpeed),
+					CEREAL_NVP(beginScale), CEREAL_NVP(endScale),
+					CEREAL_NVP(beginColor), CEREAL_NVP(endColor),
+					CEREAL_NVP(maxLifespan),
+					CEREAL_NVP(gravityMagnitude), CEREAL_NVP(gravityDirection),
+					CEREAL_NVP(animationFramesPerSecond)
+				);
+				directionalChangeCurrent = directionalChangeTemplate;
 			}
 		};
 
@@ -67,8 +104,8 @@ namespace MV {
 				totalLifespan = std::min(totalLifespan + timeScale, change.maxLifespan);
 
 				float mixValue = totalLifespan / change.maxLifespan;
-
-				direction += change.directionalChange * timeScale;
+				
+				direction += change.currentDirectionalChange(change.currentDirectionalChange() + (change.rateOfChange * timeScale)) * timeScale;
 				rotation += change.rotationalChange * timeScale;
 
 				speed = mix(change.beginSpeed, change.endSpeed, mixValue);

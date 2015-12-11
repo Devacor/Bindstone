@@ -31,13 +31,13 @@
                 "nodeAlpha": 1,
                 "localBounds": {
                     "minPoint": {
-                        "x": 0,
-                        "y": 0,
+                        "x": -137.81373596191406,
+                        "y": -248.24969482421875,
                         "z": 0
                     },
                     "maxPoint": {
-                        "x": 0,
-                        "y": 0,
+                        "x": 123.56625366210938,
+                        "y": 68.40374755859375,
                         "z": 0
                     }
                 },
@@ -151,6 +151,11 @@
                                                         "z": 360
                                                     },
                                                     "minimum": {
+                                                        "rateOfChange": {
+                                                            "x": 0,
+                                                            "y": 0,
+                                                            "z": 0
+                                                        },
                                                         "directionalChange": {
                                                             "x": 0,
                                                             "y": 0,
@@ -195,6 +200,11 @@
                                                         "animationFramesPerSecond": 10
                                                     },
                                                     "maximum": {
+                                                        "rateOfChange": {
+                                                            "x": 0,
+                                                            "y": 0,
+                                                            "z": 0
+                                                        },
                                                         "directionalChange": {
                                                             "x": 0,
                                                             "y": 0,
@@ -373,6 +383,11 @@
                                                         "z": 0
                                                     },
                                                     "minimum": {
+                                                        "rateOfChange": {
+                                                            "x": 0,
+                                                            "y": 0,
+                                                            "z": 0
+                                                        },
                                                         "directionalChange": {
                                                             "x": 0,
                                                             "y": 0,
@@ -417,6 +432,11 @@
                                                         "animationFramesPerSecond": 10
                                                     },
                                                     "maximum": {
+                                                        "rateOfChange": {
+                                                            "x": 0,
+                                                            "y": 0,
+                                                            "z": 0
+                                                        },
                                                         "directionalChange": {
                                                             "x": 0,
                                                             "y": 0,
@@ -724,8 +744,8 @@
                                                                                                             "depth": 0
                                                                                                         },
                                                                                                         "contentSize": {
-                                                                                                            "width": 128,
-                                                                                                            "height": 128,
+                                                                                                            "width": 64,
+                                                                                                            "height": 64,
                                                                                                             "depth": 0
                                                                                                         },
                                                                                                         "handles": []
@@ -1015,13 +1035,13 @@
                                     "vertexIndices": [],
                                     "localBounds": {
                                         "minPoint": {
-                                            "x": 0,
-                                            "y": 0,
+                                            "x": -137.81373596191406,
+                                            "y": -248.24969482421875,
                                             "z": 0
                                         },
                                         "maxPoint": {
-                                            "x": 0,
-                                            "y": 0,
+                                            "x": 123.56625366210938,
+                                            "y": 68.40374755859375,
                                             "z": 0
                                         }
                                     },

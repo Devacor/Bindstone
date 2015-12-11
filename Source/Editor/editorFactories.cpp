@@ -45,13 +45,13 @@ void applyColorToColorButton(std::shared_ptr<MV::Scene::Button> a_button, const 
 	a_button->activeNode()->component<MV::Scene::Sprite>()->colors(boxActiveColors);
 }
 
-std::shared_ptr<MV::Scene::Button> makeColorButton(const std::shared_ptr<MV::Scene::Node> &a_parent, std::shared_ptr<MV::Scene::Node> a_colorPaletteParent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void (const MV::Color& a_newColor)> a_callback, const MV::UtfString &a_text) {
+std::shared_ptr<MV::Scene::Button> makeColorButton(const std::shared_ptr<MV::Scene::Node> &a_parent, std::weak_ptr<MV::Scene::Node> a_colorPaletteParent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void (const MV::Color& a_newColor)> a_callback, const MV::UtfString &a_text) {
 	auto button = makeColorButton(a_parent->renderer(), a_colorPaletteParent, a_library, a_mouse, a_size, a_color, a_callback, a_text);
 	a_parent->add(button.owner());
 	return button.self();
 }
 
-MV::Scene::SafeComponent<MV::Scene::Button> makeColorButton(MV::Draw2D &a_renderer, std::shared_ptr<MV::Scene::Node> a_colorPaletteParent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void(const MV::Color& a_newColor)> a_callback, const MV::UtfString &a_text) {
+MV::Scene::SafeComponent<MV::Scene::Button> makeColorButton(MV::Draw2D &a_renderer, std::weak_ptr<MV::Scene::Node> a_colorPaletteParent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void(const MV::Color& a_newColor)> a_callback, const MV::UtfString &a_text) {
 	auto buttonId = MV::guid("color_button");
 	auto button = MV::Scene::Node::make(a_renderer, buttonId)->attach<MV::Scene::Button>(a_mouse)->size(a_size)->safe();
 
@@ -73,7 +73,7 @@ MV::Scene::SafeComponent<MV::Scene::Button> makeColorButton(MV::Draw2D &a_render
 
 	std::weak_ptr<MV::Scene::Button> weakButton = button.self();
 	button->onAccept.connect("OpenPicker", [weakButton, buttonId, a_color, a_colorPaletteParent, a_callback](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
-		auto pickerNode = a_colorPaletteParent->makeOrGet(buttonId + "_picker");
+		auto pickerNode = a_colorPaletteParent.lock()->makeOrGet(buttonId + "_picker");
 		pickerNode->position({ 200.0f, 0.0f });
 		auto pickerComponent = pickerNode->component<MV::Scene::Palette>(true, false);
 		if (!pickerComponent) {
@@ -175,48 +175,6 @@ std::shared_ptr<MV::Scene::Node> makeSlider(MV::Draw2D &a_renderer, MV::MouseSta
 	slider->percent(a_startPercent);
 	return sliderNode;
 }
-
-// std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::Size<> a_boxSize, MV::MouseState &a_mouse) {
-// 	auto box = a_parent->make(a_id);
-// 
-// 	float headerSize = 20.0f;
-// 	auto boxContents = box->make("contents")->position({ 0.0f, headerSize });
-// 	std::weak_ptr<MV::Scene::Node> weakBoxContents = boxContents;
-// 
-// 	auto clippedView = box->attach<MV::Scene::Clipped>();
-// 	box->onLocalBoundsChange.connect("boundsChange", [a_boxSize, &a_mouse, weakBoxContents](const std::shared_ptr<MV::Scene::Node> &a_self){
-// 		auto clippedView = a_self->component<MV::Scene::Clipped>();
-// 		auto selfSize = a_self->bounds().size();
-// 		if (selfSize.height > 500.0f) {
-// 			auto scrollbarNode = a_self->makeOrGet("scrollbar")->position({a_boxSize.width, 0.0f});
-// 			auto scrollBarComponent = a_self->component<MV::Scene::Slider>(true, false);
-// 			if (!scrollBarComponent) {
-// 				scrollBarComponent = a_self->attach<MV::Scene::Slider>(a_mouse)->bounds(MV::size(10.0f, 500.0f));
-// 				std::weak_ptr<MV::Scene::Clipped> weakClippedView = clippedView;
-// 				scrollBarComponent->onPercentChange.connect("scroll", [weakBoxContents, weakClippedView](std::shared_ptr<MV::Scene::Slider> a_slider){
-// 					float totalSize = weakBoxContents.lock()->bounds().size().height;
-// 					weakClippedView.lock()->captureOffset({0.0f, a_slider->percent() * (totalSize - 500.0f) });
-// 				});
-// 			}
-// 		} else {
-// 			auto scrollbarNode = a_self->get("scrollbar", false);
-// 			if (scrollbarNode) {
-// 				scrollbarNode->removeFromParent();
-// 			}
-// 		}
-// 		clippedView->bounds(selfSize);
-// 		selfSize.height = std::min(selfSize.height, 500.0f);
-// 		clippedView->captureBounds(selfSize);
-// 	});
-// 
-// 	auto boxHeader = box->attach<MV::Scene::Clickable>(a_mouse)->size({ a_boxSize.width, headerSize })->color({ BOX_HEADER })->show();
-// 
-// 	boxHeader->onDrag.connect("DragSignal", [](std::shared_ptr<MV::Scene::Clickable> a_boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
-// 		a_boxHeader->owner()->translate(MV::cast<MV::PointPrecision>(deltaPosition));
-// 	});
-// 
-// 	return boxContents;
-// }
 
 std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::Size<> a_boxSize, MV::MouseState &a_mouse) {
 	auto box = a_parent->make(a_id);

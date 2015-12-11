@@ -52,6 +52,7 @@ protected:
 class SelectedNodeEditorPanel : public EditorPanel {
 public:
 	SelectedNodeEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableNode> a_controls);
+	~SelectedNodeEditorPanel();
 
 	virtual void handleInput(SDL_Event &a_event) override;
 
@@ -115,9 +116,7 @@ class SelectedRectangleEditorPanel : public EditorPanel {
 public:
 	SelectedRectangleEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableRectangle> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
 
-	~SelectedRectangleEditorPanel(){
-		clearTexturePicker();
-	}
+	~SelectedRectangleEditorPanel();
 
 	virtual void handleInput(SDL_Event &a_event) override;
 
@@ -144,6 +143,7 @@ class SelectedEmitterEditorPanel : public EditorPanel {
 public:
 	SelectedEmitterEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableEmitter> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
 	~SelectedEmitterEditorPanel(){
+		std::cout << "deadPanel" << std::endl;
 	}
 
 	virtual void handleInput(SDL_Event &a_event) override;

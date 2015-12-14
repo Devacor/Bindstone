@@ -10,7 +10,7 @@ void colorTopAndBottom(const std::shared_ptr<MV::Scene::Sprite> &a_rect, const M
 
 std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_text, const std::string &a_fontIdentifier /*= MV::DEFAULT_ID*/) {
 	static long buttonId = 0;
-	auto button = a_parent->make(MV::toString(a_text) + std::to_string(buttonId++))->attach<MV::Scene::Button>(a_mouse)->size(a_size);	
+	auto button = a_parent->make(MV::to_string(a_text) + std::to_string(buttonId++))->attach<MV::Scene::Button>(a_mouse)->size(a_size);	
 	std::vector<MV::Color> boxActiveColors = { { InterfaceColors::BUTTON_TOP_ACTIVE },{ InterfaceColors::BUTTON_BOTTOM_ACTIVE },{ InterfaceColors::BUTTON_BOTTOM_ACTIVE },{ InterfaceColors::BUTTON_TOP_ACTIVE } };
 	std::vector<MV::Color> boxIdleColors = { { InterfaceColors::BUTTON_TOP_IDLE },{ InterfaceColors::BUTTON_BOTTOM_IDLE },{ InterfaceColors::BUTTON_BOTTOM_IDLE },{ InterfaceColors::BUTTON_TOP_IDLE } };
 

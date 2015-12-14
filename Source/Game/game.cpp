@@ -44,7 +44,20 @@ void Game::initializeWindow(){
 	data.managers().textures.assemblePacks("Assets/Atlases", &data.managers().renderer);
 	data.managers().textures.files("Assets/Map");
 	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::MouseState& a_mouse, LocalData& a_data)
-	instance = std::make_unique<GameInstance>(data.player(), std::make_shared<Player>(), mouse, data);
+	auto localPlayer = std::make_shared<Player>();
+	localPlayer->name = "Dervacor";
+	localPlayer->loadout.buildings = {"life", "life", "life", "life", "life", "life", "life", "life"};
+	localPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
+
+	localPlayer->wallet.add(Wallet::CurrencyType::SOFT, 1000);
+	auto enemyPlayer = std::make_shared<Player>();
+	enemyPlayer->name = "Jai";
+	enemyPlayer->loadout.buildings = { "life", "life", "life", "life", "life", "life", "life", "life" };
+	enemyPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
+
+	data.player(localPlayer);
+
+	instance = std::make_unique<GameInstance>(data.player(), enemyPlayer, mouse, data);
 }
 
 void Game::spawnCreature(const MV::Point<> &a_position) {

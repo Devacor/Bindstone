@@ -273,6 +273,7 @@
     <ClCompile Include="Source\Game\building.cpp" />
     <ClCompile Include="Source\Game\game.cpp" />
     <ClCompile Include="Source\Game\Instance\gameInstance.cpp" />
+    <ClCompile Include="Source\Game\Interface\guiFactories.cpp" />
     <ClCompile Include="Source\Game\player.cpp" />
     <ClCompile Include="Source\Game\state.cpp" />
     <ClCompile Include="Source\Game\wallet.cpp" />
@@ -453,6 +454,7 @@
     <ClInclude Include="Source\Game\building.h" />
     <ClInclude Include="Source\Game\gameEditor.h" />
     <ClInclude Include="Source\Game\Instance\gameInstance.h" />
+    <ClInclude Include="Source\Game\Interface\guiFactories.h" />
     <ClInclude Include="Source\Game\managers.h" />
     <ClInclude Include="Source\Game\player.h" />
     <ClInclude Include="Source\Game\state.h" />

@@ -11,6 +11,7 @@ inline std::string sideToString(TeamSide a_side) { return (a_side == LEFT) ? "le
 
 struct Constants;
 class GameInstance;
+class Building;
 
 class Team {
 public:
@@ -37,13 +38,21 @@ public:
 	bool update(double dt);
 
 	bool handleEvent(const SDL_Event &a_event);
+
+	LocalData& data() {
+		return localData;
+	}
+
+	MV::MouseState& mouse() {
+		return ourMouse;
+	}
 private:
 	void handleScroll(int a_amount);
 
 	void hook();
 
-	LocalData& data;
-	MV::MouseState &mouse;
+	LocalData& localData;
+	MV::MouseState &ourMouse;
 	std::shared_ptr<MV::Scene::Node> scene;
 	std::shared_ptr<MV::Scene::Node> buildingDialog;
 

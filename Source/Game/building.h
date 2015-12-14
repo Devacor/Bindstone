@@ -3,8 +3,14 @@
 
 #include "Render/package.h"
 #include "Game/wallet.h"
+#include "Game/Interface/guiFactories.h"
 #include "chaiscript/chaiscript.hpp"
+#include "Utility/signal.hpp"
 #include <string>
+#include <memory>
+
+class GameInstance;
+struct Player;
 
 struct CreatureStats {
 	std::string id;
@@ -123,9 +129,61 @@ struct SkinData {
 };
 
 struct BuildingData {
+private:
+	MV::Signal<void(BuildingData*)> onUpgradedSignal;
+
+public:
+	MV::SignalRegister<void (BuildingData*)> onUpgraded;
+
+	BuildingData() :
+		onUpgraded(onUpgradedSignal) {
+	}
+
+	BuildingData(const BuildingData &a_other) :
+		onUpgraded(onUpgradedSignal),
+		id(a_other.id),
+		game(a_other.game),
+		buildTreeIndices(a_other.buildTreeIndices),
+		name(a_other.name),
+		description(a_other.description),
+		skins(a_other.skins),
+		costs(a_other.costs){
+	}
+
+	BuildingData(BuildingData &&a_other) :
+		onUpgraded(onUpgradedSignal),
+		onUpgradedSignal(std::move(a_other.onUpgradedSignal)),
+		id(std::move(a_other.id)),
+		game(std::move(a_other.game)),
+		buildTreeIndices(std::move(a_other.buildTreeIndices)),
+		name(std::move(a_other.name)),
+		description(std::move(a_other.description)),
+		skins(std::move(a_other.skins)),
+		costs(std::move(a_other.costs)) {
+		a_other.onUpgradedSignal = MV::Signal<void(BuildingData*)>();
+	}
+
 	std::string id;
 
 	BuildTree game;
+	std::vector<size_t> buildTreeIndices;
+
+	BuildTree* current() {
+		BuildTree* currentBuildTree = &game;
+		for (auto& index : buildTreeIndices) {
+			currentBuildTree = currentBuildTree->upgrades[index].get();
+		}
+		return currentBuildTree;
+	}
+
+	void upgrade(size_t a_index) {
+		buildTreeIndices.push_back(a_index);
+		onUpgradedSignal(this);
+	}
+
+	std::string skinAssetPath(const std::string &a_skinId) {
+		return "Assets/Prefabs/Buildings/" + id + "/" + (a_skinId.empty() ? id : a_skinId) + ".prefab";
+	}
 
 	std::string name;
 	std::string description;
@@ -142,7 +200,22 @@ struct BuildingData {
 			CEREAL_NVP(description),
 			CEREAL_NVP(skins),
 			CEREAL_NVP(costs),
+			CEREAL_NVP(buildTreeIndices),
 			CEREAL_NVP(game)
+		);
+	}
+
+	template <class Archive>
+	static void load_and_construct(Archive & archive, cereal::construct<BuildingData> &construct) {
+		construct();
+		archive(
+			cereal::make_nvp("id", construct->id),
+			cereal::make_nvp("name", construct->name),
+			cereal::make_nvp("description", construct->description),
+			cereal::make_nvp("skins", construct->skins),
+			cereal::make_nvp("costs", construct->costs),
+			cereal::make_nvp("buildTreeIndices", construct->buildTreeIndices),
+			cereal::make_nvp("game", construct->game)
 		);
 	}
 };
@@ -194,19 +267,15 @@ public:
 
 	virtual void updateImplementation(double a_delta) override {};
 
-protected:
-	Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const BuildingData &a_data) :
-		Component(a_owner) {
-		if (!a_owner.expired()) {
-			auto spawnObject = a_owner.lock()->get("spawn", false);
-			if (spawnObject) {
-				spawnPoint = spawnObject->position();
-			}
-		}
+	BuildingData& data() {
+		return buildingData;
 	}
 
+protected:
+	Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const BuildingData &a_data, const std::string &a_skin, int a_slot, const std::shared_ptr<Player> &a_player, GameInstance& a_instance);
+
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
-		return cloneHelper(a_parent->attach<Building>(data).self());
+		return cloneHelper(a_parent->attach<Building>(data(), skin, slot, owningPlayer, gameInstance).self());
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
@@ -220,25 +289,31 @@ protected:
 	}
 private:
 
+	virtual void initialize() override;
+
 	template <class Archive>
 	void serialize(Archive & archive) {
 		archive(
 			CEREAL_NVP(data),
 			cereal::make_nvp("Component", cereal::base_class<Component>(this))
-			);
+		);
 	}
 
 	template <class Archive>
 	static void load_and_construct(Archive & archive, cereal::construct<Building> &construct) {
 		construct(std::shared_ptr<Node>());
 		archive(
-			cereal::make_nvp("data", data),
+			cereal::make_nvp("data", buildingData),
 			cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
 			);
 		construct->initialize();
 	}
-	BuildingData data;
+	BuildingData buildingData;
+	std::string skin;
+	int slot;
 	MV::Point<> spawnPoint;
+	std::shared_ptr<Player> owningPlayer;
+	GameInstance& gameInstance;
 };
 
 class Creature : public MV::Scene::Component {

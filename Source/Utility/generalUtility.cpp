@@ -125,6 +125,20 @@ namespace MV {
 		return wc;
 	}
 
+	std::string to_string(UtfChar wc) {
+		return toString(wc);
+	}
+	UtfChar to_wide(char c) {
+		return toWide(c);
+	}
+
+	std::string to_string(const UtfString& ws) {
+		return toString(ws);
+	}
+	UtfString to_wide(const std::string& s) {
+		return toWide(s);
+	}
+
 	float distance(const float &x1, const float &y1, const float &x2, const float &y2) {
 		float deltaX = x1 - x2, deltaY = y1 - y2;
 		if (deltaX < 0) { deltaX *= -1; }

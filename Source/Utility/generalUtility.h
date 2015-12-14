@@ -134,8 +134,14 @@ namespace MV {
 	std::string toString(UtfChar wc);
 	UtfChar toWide(char c);
 
+	std::string to_string(UtfChar wc);
+	UtfChar to_wide(char c);
+
 	std::string toString(const UtfString& ws);
 	UtfString toWide(const std::string& s);
+
+	std::string to_string(const UtfString& ws);
+	UtfString to_wide(const std::string& s);
 
 	template <class Type>
 	Type toDegrees(const Type &val){

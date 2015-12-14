@@ -15,10 +15,12 @@ namespace MV {
 			DrawableDerivedAccessors(Grid)
 
 			std::shared_ptr<Grid> padding(const std::pair<Point<>, Point<>> &a_padding);
+			std::shared_ptr<Grid> padding(const Point<> &a_topLeft, const Point<> &a_botRight);
 			std::shared_ptr<Grid> padding(const Size<> &a_padding);
 			std::pair<Point<>, Point<>> padding() const;
 
 			std::shared_ptr<Grid> margin(const std::pair<Point<>, Point<>> &a_margin);
+			std::shared_ptr<Grid> margin(const Point<> &a_topLeft, const Point<> &a_botRight);
 			std::shared_ptr<Grid> margin(const Size<> &a_margin);
 			std::pair<Point<>, Point<>> margin() const {
 				return margins;

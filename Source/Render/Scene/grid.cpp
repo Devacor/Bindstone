@@ -17,6 +17,10 @@ namespace MV {
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
+		std::shared_ptr<Grid> Grid::padding(const Point<> &a_topLeft, const Point<> &a_botRight) {
+			return padding(std::pair<Point<>, Point<>>(a_topLeft, a_botRight));
+		}
+
 		std::shared_ptr<Grid> Grid::padding(const Size<> &a_padding) {
 			cellPadding.first = toPoint(a_padding);
 			cellPadding.second = toPoint(a_padding);
@@ -30,6 +34,10 @@ namespace MV {
 		std::shared_ptr<Grid> Grid::margin(const std::pair<Point<>, Point<>> &a_margin) {
 			margins = a_margin;
 			return std::static_pointer_cast<Grid>(shared_from_this());
+		}
+
+		std::shared_ptr<Grid> Grid::margin(const Point<> &a_topLeft, const Point<> &a_botRight) {
+			return margin(std::pair<Point<>, Point<>>(a_topLeft, a_botRight));
 		}
 
 		std::shared_ptr<Grid> Grid::margin(const Size<> &a_margin) {

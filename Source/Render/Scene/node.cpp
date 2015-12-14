@@ -349,12 +349,29 @@ namespace MV {
 			}
 			for(auto&& child : childNodes){
 				auto found = child->get(a_id, false);
-				if(found != nullptr){
+				if(found){
 					return found;
 				}
 			}
 			require<ResourceException>(!a_throw, "Failed to get: [", a_id, "] from parent node: [", nodeId, "]");
 			return nullptr;
+		}
+
+		bool Node::has(const std::string &a_id) const {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child) {
+				return a_child->id() == a_id;
+			});
+			if (foundNode != childNodes.end()) {
+				return true;
+			}
+			for (auto&& child : childNodes) {
+				auto found = child->has(a_id);
+				if (found) {
+					return found;
+				}
+			}
+			return false;
 		}
 
 		std::shared_ptr<Node> Node::id(const std::string &a_id) {

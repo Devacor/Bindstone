@@ -18,6 +18,7 @@
                 "name": "Tree of Life Foundation",
                 "description": "",
                 "cost": 0,
+                "income": 0,
                 "waves": [],
                 "upgrades": [
                     {
@@ -28,6 +29,7 @@
                                 "name": "Tree of Life",
                                 "description": "Begin production of life elementals.",
                                 "cost": 75,
+                                "income": 30,
                                 "waves": [{
                                     "iterations": 1,
                                     "creatures": [
@@ -46,6 +48,7 @@
                                                 "name": "Tree of Eternal Life",
                                                 "description": "Begin production of greater life elementals.",
                                                 "cost": 250,
+                                                "income": 60,
                                                 "waves": [
                                                     {
                                                         "iterations": 4,
@@ -82,6 +85,7 @@
                                                 "name": "Tree of Overwhelming Life",
                                                 "description": "Begin production of suspended life elementals.",
                                                 "cost": 250,
+                                                "income": 60,
                                                 "waves": [{
                                                     "iterations": 1,
                                                     "creatures": [

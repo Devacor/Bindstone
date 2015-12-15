@@ -46,6 +46,13 @@ public:
 	MV::MouseState& mouse() {
 		return ourMouse;
 	}
+
+	std::shared_ptr<MV::Scene::Node> scene() {
+		return worldScene;
+	}
+
+	void moveCamera(MV::Point<> a_startPosition, MV::Scale a_scale);
+	void moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale);
 private:
 	void handleScroll(int a_amount);
 
@@ -53,8 +60,7 @@ private:
 
 	LocalData& localData;
 	MV::MouseState &ourMouse;
-	std::shared_ptr<MV::Scene::Node> scene;
-	std::shared_ptr<MV::Scene::Node> buildingDialog;
+	std::shared_ptr<MV::Scene::Node> worldScene;
 
 	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
 
@@ -62,6 +68,8 @@ private:
 
 	Team left;
 	Team right;
+
+	MV::Task cameraAction;
 };
 
 #endif

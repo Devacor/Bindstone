@@ -10,7 +10,7 @@ Team::Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_ga
 
 	auto sideString = sideToString(side);
 	for (int i = 0; i < 8; ++i) {
-		auto buildingNode = game.scene->get(sideString + "_" + std::to_string(i));
+		auto buildingNode = game.worldScene->get(sideString + "_" + std::to_string(i));
 
 		buildingNode->attach<Building>(game.data().buildings().data(a_player->loadout.buildings[i]), a_player->loadout.skins[i], i, a_player, game);
 // 		auto newNode = buildingNode->make("Assets/Prefabs/life_0.prefab", [&](cereal::JSONInputArchive& archive) {
@@ -38,16 +38,18 @@ Team::Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_ga
 }
 
 void GameInstance::handleScroll(int a_amount) {
-	auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount);
-	if (scene->scale().x + screenScale.x > .2f) {
-		auto originalScreenPosition = scene->localFromScreen(ourMouse.position()) * (MV::toPoint(screenScale));
-		scene->addScale(screenScale);
-		scene->translate(originalScreenPosition * -1.0f);
+	if (cameraAction.finished()) {
+		auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount);
+		if (worldScene->scale().x + screenScale.x > .2f) {
+			auto originalScreenPosition = worldScene->localFromScreen(ourMouse.position()) * (MV::toPoint(screenScale));
+			worldScene->addScale(screenScale);
+			worldScene->translate(originalScreenPosition * -1.0f);
+		}
 	}
 }
 
 GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, LocalData& a_data) :
-	scene(MV::Scene::Node::load("map.scene", std::bind(&GameInstance::nodeLoadBinder, this, std::placeholders::_1))),
+	worldScene(MV::Scene::Node::load("map.scene", std::bind(&GameInstance::nodeLoadBinder, this, std::placeholders::_1))),
 	ourMouse(a_mouse),
 	localData(a_data),
 	left(a_leftPlayer, LEFT, *this),
@@ -57,16 +59,18 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 	hook();
 
 	ourMouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse) {
-		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
-			auto signature = ourMouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse2) {
-				scene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
-			});
-			auto cancelId = MV::guid("cancelDrag");
-			ourMouse.onLeftMouseUp.connect(cancelId, [=](MV::MouseState& a_mouse2) {
-				a_mouse2.onMove.disconnect(signature);
-				a_mouse2.onLeftMouseUp.disconnect(cancelId);
-			});
-		}, []() {}, "MapDrag"));
+		if (cameraAction.finished()) {
+			a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
+				auto signature = ourMouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse2) {
+					worldScene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
+				});
+				auto cancelId = MV::guid("cancelDrag");
+				ourMouse.onLeftMouseUp.connect(cancelId, [=](MV::MouseState& a_mouse2) {
+					a_mouse2.onMove.disconnect(signature);
+					a_mouse2.onLeftMouseUp.disconnect(cancelId);
+				});
+			}, []() {}, "MapDrag"));
+		}
 	});
 // 
 // 	for (int i = 0; i < 8; ++i) {
@@ -131,7 +135,8 @@ void GameInstance::nodeLoadBinder(cereal::JSONInputArchive &a_archive) {
 }
 
 bool GameInstance::update(double a_dt) {
-	scene->drawUpdate(static_cast<float>(a_dt));
+	worldScene->drawUpdate(static_cast<float>(a_dt));
+	cameraAction.update(a_dt);
 	return false;
 }
 
@@ -141,3 +146,21 @@ bool GameInstance::handleEvent(const SDL_Event &a_event) {
 	}
 	return false;
 }
+
+void GameInstance::moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale) {
+	moveCamera(((worldScene->worldPosition() - a_targetNode->worldPosition()) / a_targetNode->worldScale()) + MV::toPoint(localData.managers().renderer.world().size() / 2.0f), a_scale);
+}
+
+void GameInstance::moveCamera(MV::Point<> endPosition, MV::Scale endScale) {
+	auto startPosition = worldScene->position();
+	auto startScale = worldScene->scale();
+	cameraAction.finish();
+	cameraAction.then("zoomAndPan", [&, startPosition, endPosition, startScale, endScale](MV::Task &a_self, double a_dt) {
+		auto percent = std::min(static_cast<MV::PointPrecision>(a_self.elapsed() / 0.5f), 1.0f);
+		worldScene->position(MV::mix(startPosition, endPosition, percent, 2.0f));
+		worldScene->scale(MV::mix(startScale, endScale, percent, 2.0f));
+		return percent == 1.0f;
+	});
+}
+
+

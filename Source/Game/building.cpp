@@ -8,7 +8,7 @@ Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const Building
 	skin(a_skin),
 	slot(a_slot),
 	owningPlayer(a_player),
-	gameInstance(a_instance) {
+	gameInstance(a_instance){
 
 	if (!a_owner.expired()) {
 		auto spawnObject = a_owner.lock()->get("spawn", false);
@@ -37,23 +37,34 @@ void Building::initialize() {
 		//auto treeSprite = newNode->attach<MV::Scene::Sprite>()->bounds(newNode->bounds())->color({ 0x77FFFFFF });
 		auto nodeBounds = newNode->bounds();
 		buildingButton->onAccept.connect("TappedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
-			auto dialog = a_self->owner()->make("dialog");
+			gameInstance.moveCamera(a_self->owner(), 1.0f);
+			auto modal = gameInstance.scene()->make("modal")->nodePosition(a_self->owner());
+			modal->attach<MV::Scene::Clickable>(gameInstance.mouse())->clickDetectionType(MV::Scene::Clickable::BoundsType::LOCAL)->bounds({ MV::point(-10000.0f, -10000.0f), MV::point(10000.0f, 10000.0f) })->onAccept.connect("dismiss", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
+				gameInstance.scene()->get("modal")->removeFromParent();
+			});
 
-			dialog->attach<MV::Scene::Grid>()->margin(MV::point(4.0f, 4.0f), MV::point(2.0f, 2.0f))->padding(MV::point(0.0f, 0.0f), MV::point(2.0f, 2.0f))->color(0x77659f23);
+			auto dialog = modal->make("dialog")->attach<MV::Scene::Grid>()->
+				margin(MV::size(4.0f, 4.0f))->
+				padding(MV::point(0.0f, 0.0f), MV::point(2.0f, 2.0f))->
+				color(0xCC659f23)->owner();
 
 			for (size_t i = 0; i < buildingData.current()->upgrades.size();++i) {
 				auto&& upgrade = buildingData.current()->upgrades[i];
-				auto upgradeButton = button(dialog, gameInstance.data().managers().textLibrary, gameInstance.mouse(), MV::size(128.0f, 20.0f), MV::toWide(upgrade->name + ": " + MV::to_string(upgrade->cost)));
+				auto upgradeButton = button(dialog, gameInstance.data().managers().textLibrary, gameInstance.mouse(), MV::size(200.0f, 20.0f), MV::toWide(upgrade->name + ": " + MV::to_string(upgrade->cost)));
 				auto* upgradePointer = upgrade.get();
-				upgradeButton->onAccept.connect("tryToBuy", [&, i](std::shared_ptr<MV::Scene::Clickable> a_self){
+				upgradeButton->onAccept.connect("tryToBuy", [&, i, upgradePointer](std::shared_ptr<MV::Scene::Clickable> a_self){
 					if (owningPlayer->wallet.remove(Wallet::CurrencyType::SOFT, upgradePointer->cost)) {
 						buildingData.upgrade(i);
 					}
-					a_self->owner()->parent()->removeFromParent();
+					gameInstance.scene()->get("modal")->removeFromParent();
 				});
 			}
 			auto dialogBounds = dialog->bounds().size();
 			dialog->translate({ -(dialogBounds.width / 2), 50.0f });
 		});
 	}
+}
+
+void Building::updateImplementation(double a_dt) {
+
 }

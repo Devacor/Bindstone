@@ -85,6 +85,7 @@ struct BuildTree {
 	std::string description;
 
 	int64_t cost = 0;
+	int64_t income = 0;
 
 	std::vector<std::unique_ptr<BuildTree>> upgrades;
 
@@ -107,6 +108,7 @@ struct BuildTree {
 			CEREAL_NVP(name),
 			CEREAL_NVP(description),
 			CEREAL_NVP(cost),
+			CEREAL_NVP(income),
 			CEREAL_NVP(waves),
 			CEREAL_NVP(upgrades)
 		);
@@ -284,9 +286,7 @@ protected:
 		return a_clone;
 	}
 
-	void upgrade(int index = 0) {
-		
-	}
+	virtual void updateImplementation(double a_dt) override;
 private:
 
 	virtual void initialize() override;
@@ -308,8 +308,10 @@ private:
 			);
 		construct->initialize();
 	}
+
 	BuildingData buildingData;
 	std::string skin;
+	double countdown = 0;
 	int slot;
 	MV::Point<> spawnPoint;
 	std::shared_ptr<Player> owningPlayer;

@@ -16,24 +16,24 @@ namespace MV {
 
 	class Task {
 	private:
-		Signal<void(const Task&)> onStartSignal;
-		Signal<void(const Task&)> onFinishSignal;
-		Signal<void(const Task&)> onFinishAllSignal;
-		Signal<void(const Task&)> onSuspendSignal;
-		Signal<void(const Task&)> onResumeSignal;
+		Signal<void(Task&)> onStartSignal;
+		Signal<void(Task&)> onFinishSignal;
+		Signal<void(Task&)> onFinishAllSignal;
+		Signal<void(Task&)> onSuspendSignal;
+		Signal<void(Task&)> onResumeSignal;
 		Signal<void()> onCancelSignal;
 
-		Signal<void(const Task&, std::exception &)> onExceptionSignal;
+		Signal<void(Task&, std::exception &)> onExceptionSignal;
 
 	public:
 		Task(bool a_infinite = false, bool a_blocking = true, bool a_blockParentCompletion = true):
-			Task("root", [a_infinite](const Task&, double){return !a_infinite;}, a_blocking, a_blockParentCompletion){
+			Task("root", [a_infinite](Task&, double){return !a_infinite;}, a_blocking, a_blockParentCompletion){
 			if (a_infinite){
 				unblockChildren();
 			}
 		}
 
-		Task(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blocking = true, bool a_blockParentCompletion = true):
+		Task(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blocking = true, bool a_blockParentCompletion = true):
 			taskName(a_name),
 			task(a_task),
 			block(a_blocking),
@@ -63,7 +63,7 @@ namespace MV {
 			}
 		}
 
-		static Task make(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blocking = true, bool a_blockParentCompletion = true){
+		static Task make(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blocking = true, bool a_blockParentCompletion = true){
 			return Task(a_name, a_task, a_blocking, a_blockParentCompletion);
 		}
 
@@ -161,7 +161,7 @@ namespace MV {
 			return block;
 		}
 
-		Task& now(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
+		Task& now(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			if(!sequentialTasks.empty()){
 				sequentialTasks[0]->suspend();
 			}
@@ -173,10 +173,10 @@ namespace MV {
 		}
 		
 		Task& now(const std::string &a_name, bool a_blockParentCompletion = true){
-			return now(a_name, [](const Task&, double){return true;}, a_blockParentCompletion);
+			return now(a_name, [](Task&, double){return true;}, a_blockParentCompletion);
 		}
 
-		Task& then(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
+		Task& then(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			sequentialTasks.emplace_back(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
 			onFinishAllSignal.unblock();
 			mostRecentCreated = sequentialTasks.back();
@@ -184,10 +184,10 @@ namespace MV {
 		}
 		
 		Task& then(const std::string &a_name, bool a_blockParentCompletion = true){
-			return then(a_name, [](const Task&, double){return true;}, a_blockParentCompletion);
+			return then(a_name, [](Task&, double){return true;}, a_blockParentCompletion);
 		}
 
-		Task& thenAlso(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
+		Task& thenAlso(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			sequentialTasks.emplace_back(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
 			onFinishAllSignal.unblock();
 			mostRecentCreated = sequentialTasks.back();
@@ -195,14 +195,14 @@ namespace MV {
 		}
 
 		Task& thenAlso(const std::string &a_name, bool a_infinite = false, bool a_blockParentCompletion = true) {
-			thenAlso(a_name, [a_infinite](const Task&, double){return !a_infinite;}, a_blockParentCompletion);
+			thenAlso(a_name, [a_infinite](Task&, double){return !a_infinite;}, a_blockParentCompletion);
 			if (a_infinite) {
 				last()->unblockChildren();
 			}
 			return *this;
 		}
 
-		Task& also(const std::string &a_name, std::function<bool(const Task&, double)> a_task, bool a_blockParentCompletion = true) {
+		Task& also(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			parallelTasks.emplace_back(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
 			onFinishAllSignal.unblock();
 			mostRecentCreated = parallelTasks.back();
@@ -210,7 +210,7 @@ namespace MV {
 		}
 		
 		Task& also(const std::string &a_name, bool a_infinite = false, bool a_blockParentCompletion = true) {
-			also(a_name, [a_infinite](const Task&, double){return !a_infinite;}, a_blockParentCompletion);
+			also(a_name, [a_infinite](Task&, double){return !a_infinite;}, a_blockParentCompletion);
 			if (a_infinite) {
 				last()->unblockChildren();
 			}
@@ -252,13 +252,13 @@ namespace MV {
 			return std::shared_ptr<Task>();
 		}
 
-		SignalRegister<void(const Task&)> onStart;
-		SignalRegister<void(const Task&)> onFinish;
-		SignalRegister<void(const Task&)> onFinishAll;
-		SignalRegister<void(const Task&)> onSuspend;
-		SignalRegister<void(const Task&)> onResume;
+		SignalRegister<void(Task&)> onStart;
+		SignalRegister<void(Task&)> onFinish;
+		SignalRegister<void(Task&)> onFinishAll;
+		SignalRegister<void(Task&)> onSuspend;
+		SignalRegister<void(Task&)> onResume;
 		SignalRegister<void()> onCancel;
-		SignalRegister<void(const Task&, std::exception &)> onException;
+		SignalRegister<void(Task&, std::exception &)> onException;
 	private:
 		bool cancelled = false;
 
@@ -489,7 +489,7 @@ namespace MV {
 			}
 		}
 
-		std::function<bool(const Task&, double)> task;
+		std::function<bool(Task&, double)> task;
 
 		std::deque<std::shared_ptr<Task>> parallelTasks;
 		std::deque<std::shared_ptr<Task>> sequentialTasks;
@@ -516,11 +516,11 @@ namespace MV {
 	};
 
 	#define CREATE_HOOK_UP_TASK_ACTION(member) \
-	CREATE_HAS_MEMBER(member, (const Task&))\
+	CREATE_HAS_MEMBER(member, (Task&))\
 	template <typename T, bool b>\
 	struct HookUpTaskAction_##member { \
 		static void apply(Task &a_root, const std::shared_ptr<T> &a_action) {\
-			a_root.member.connect(#member , [=](const Task& a_self){\
+			a_root.member.connect(#member , [=](Task& a_self){\
 				a_action->member(a_self);\
 			});\
 		}\
@@ -542,7 +542,7 @@ namespace MV {
 	template <typename T>
 	Task& ParallelTask(const std::string &a_id, Task &a_root, const T &a_action, bool a_blockParentCompletion = true){
 		std::shared_ptr<T> sharedAction = std::make_shared<T>(a_action);
-		a_root.also(a_id, [=](const Task& a_task, double a_dt){return sharedAction->update(a_task, a_dt); }, a_blockParentCompletion);
+		a_root.also(a_id, [=](Task& a_task, double a_dt){return sharedAction->update(a_task, a_dt); }, a_blockParentCompletion);
 		auto& task = a_root.get(a_id);
 		HookUpTaskAction_onStart<T, has_onStart<T>::value>::apply(task, sharedAction);
 		HookUpTaskAction_onFinish<T, has_onFinish<T>::value>::apply(task, sharedAction);
@@ -558,7 +558,7 @@ namespace MV {
 	template <typename T>
 	Task& SequentialTask(const std::string &a_id, Task &a_root, const T &a_action, bool a_blockParentCompletion = true){
 		std::shared_ptr<T> sharedAction = std::make_shared<T>(a_action);
-		a_root.then(a_id, [=](const Task& a_task, double a_dt){return sharedAction->update(a_task, a_dt); }, a_blockParentCompletion);
+		a_root.then(a_id, [=](Task& a_task, double a_dt){return sharedAction->update(a_task, a_dt); }, a_blockParentCompletion);
 		auto& task = a_root.get(a_id);
 		HookUpTaskAction_onStart<T, has_onStart<T>::value>::apply(task, sharedAction);
 		HookUpTaskAction_onFinish<T, has_onFinish<T>::value>::apply(task, sharedAction);
@@ -574,7 +574,7 @@ namespace MV {
 	template <typename T>
 	Task& SequentialNonBlockingTask(const std::string &a_id, Task &a_root, const T &a_action, bool a_blockParentCompletion = true){
 		std::shared_ptr<T> sharedAction = std::make_shared<T>(a_action);
-		a_root.thenAlso(a_id, [=](const Task& a_task, double a_dt){return sharedAction->update(a_task, a_dt); }, a_blockParentCompletion);
+		a_root.thenAlso(a_id, [=](Task& a_task, double a_dt){return sharedAction->update(a_task, a_dt); }, a_blockParentCompletion);
 		auto& task = a_root.get(a_id);
 		HookUpTaskAction_onStart<T, has_onStart<T>::value>::apply(task, sharedAction);
 		HookUpTaskAction_onFinish<T, has_onFinish<T>::value>::apply(task, sharedAction);

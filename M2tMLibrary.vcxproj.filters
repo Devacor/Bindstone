@@ -431,6 +431,9 @@
     <ClCompile Include="Source\Game\Interface\guiFactories.cpp">
       <Filter>Source Files\Game\Interface</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Network\url.cpp">
+      <Filter>Source Files\Network</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -1018,6 +1021,12 @@
     </ClInclude>
     <ClInclude Include="Source\Game\Interface\guiFactories.h">
       <Filter>Source Files\Game\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Network\url.h">
+      <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Network\download.h">
+      <Filter>Source Files\Network</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

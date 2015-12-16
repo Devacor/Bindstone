@@ -8,7 +8,8 @@ Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const Building
 	skin(a_skin),
 	slot(a_slot),
 	owningPlayer(a_player),
-	gameInstance(a_instance){
+	gameInstance(a_instance),
+	onUpgraded(onUpgradedSignal){
 
 	if (!a_owner.expired()) {
 		auto spawnObject = a_owner.lock()->get("spawn", false);
@@ -19,7 +20,7 @@ Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const Building
 }
 
 void Building::initialize() {
-	auto newNode = owner()->make(buildingData.skinAssetPath(skin), [&](cereal::JSONInputArchive& archive) {
+	auto newNode = owner()->make(assetPath(), [&](cereal::JSONInputArchive& archive) {
 		archive.add(
 			cereal::make_nvp("mouse", &gameInstance.mouse()),
 			cereal::make_nvp("renderer", &gameInstance.data().managers().renderer),
@@ -48,13 +49,13 @@ void Building::initialize() {
 				padding(MV::point(0.0f, 0.0f), MV::point(2.0f, 2.0f))->
 				color(0xCC659f23)->owner();
 
-			for (size_t i = 0; i < buildingData.current()->upgrades.size();++i) {
-				auto&& upgrade = buildingData.current()->upgrades[i];
-				auto upgradeButton = button(dialog, gameInstance.data().managers().textLibrary, gameInstance.mouse(), MV::size(200.0f, 20.0f), MV::toWide(upgrade->name + ": " + MV::to_string(upgrade->cost)));
-				auto* upgradePointer = upgrade.get();
+			for (size_t i = 0; i < current()->upgrades.size();++i) {
+				auto&& currentUpgrade = current()->upgrades[i];
+				auto upgradeButton = button(dialog, gameInstance.data().managers().textLibrary, gameInstance.mouse(), MV::size(256.0f, 20.0f), MV::toWide(currentUpgrade->name + ": " + MV::to_string(currentUpgrade->cost)));
+				auto* upgradePointer = currentUpgrade.get();
 				upgradeButton->onAccept.connect("tryToBuy", [&, i, upgradePointer](std::shared_ptr<MV::Scene::Clickable> a_self){
 					if (owningPlayer->wallet.remove(Wallet::CurrencyType::SOFT, upgradePointer->cost)) {
-						buildingData.upgrade(i);
+						upgrade(i);
 					}
 					gameInstance.scene()->get("modal")->removeFromParent();
 				});

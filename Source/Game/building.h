@@ -12,25 +12,21 @@
 class GameInstance;
 struct Player;
 
-struct CreatureStats {
+struct CreatureData {
 	std::string id;
 
 	std::string name;
 	std::string description;
 
-	std::string icon;
-	std::string asset;
+	float moveSpeed;
+	float actionSpeed;
+	float castSpeed;
 
-	float speed;
-
-	int maxHealth;
 	int health;
 	float defense;
-	float resistance;
+	float will;
 	float strength;
 	float ability;
-
-	std::string script;
 
 	template <class Archive>
 	void serialize(Archive & archive) {
@@ -38,18 +34,50 @@ struct CreatureStats {
 			CEREAL_NVP(id),
 			CEREAL_NVP(name),
 			CEREAL_NVP(description),
-			CEREAL_NVP(icon),
-			CEREAL_NVP(asset),
-			CEREAL_NVP(speed),
-			CEREAL_NVP(maxHealth),
+			CEREAL_NVP(moveSpeed),
+			CEREAL_NVP(actionSpeed),
+			CEREAL_NVP(castSpeed),
 			CEREAL_NVP(health),
 			CEREAL_NVP(defense),
-			CEREAL_NVP(resistance),
+			CEREAL_NVP(will),
 			CEREAL_NVP(strength),
-			CEREAL_NVP(ability),
-			CEREAL_NVP(script)
+			CEREAL_NVP(ability)
 		);
 	}
+};
+
+
+class CreatureCatalog {
+	friend cereal::access;
+public:
+	CreatureCatalog(const std::string &a_filename) {
+		std::ifstream instream(a_filename);
+		cereal::JSONInputArchive archive(instream);
+
+		archive(cereal::make_nvp("creatures", creatureList));
+	}
+
+	CreatureData data(const std::string &a_id) const {
+		for (auto&& creature : creatureList) {
+			if (creature.id == a_id) {
+				return creature;
+			}
+		}
+		MV::require<MV::ResourceException>(false, "Failed to locate creature: ", a_id);
+		return CreatureData();
+	}
+private:
+	CreatureCatalog() {
+	}
+
+	template <class Archive>
+	void serialize(Archive & archive) {
+		archive(
+			cereal::make_nvp("creatures", creatureList)
+		);
+	}
+
+	std::vector<CreatureData> creatureList;
 };
 
 struct WaveCreature {
@@ -131,61 +159,9 @@ struct SkinData {
 };
 
 struct BuildingData {
-private:
-	MV::Signal<void(BuildingData*)> onUpgradedSignal;
-
-public:
-	MV::SignalRegister<void (BuildingData*)> onUpgraded;
-
-	BuildingData() :
-		onUpgraded(onUpgradedSignal) {
-	}
-
-	BuildingData(const BuildingData &a_other) :
-		onUpgraded(onUpgradedSignal),
-		id(a_other.id),
-		game(a_other.game),
-		buildTreeIndices(a_other.buildTreeIndices),
-		name(a_other.name),
-		description(a_other.description),
-		skins(a_other.skins),
-		costs(a_other.costs){
-	}
-
-	BuildingData(BuildingData &&a_other) :
-		onUpgraded(onUpgradedSignal),
-		onUpgradedSignal(std::move(a_other.onUpgradedSignal)),
-		id(std::move(a_other.id)),
-		game(std::move(a_other.game)),
-		buildTreeIndices(std::move(a_other.buildTreeIndices)),
-		name(std::move(a_other.name)),
-		description(std::move(a_other.description)),
-		skins(std::move(a_other.skins)),
-		costs(std::move(a_other.costs)) {
-		a_other.onUpgradedSignal = MV::Signal<void(BuildingData*)>();
-	}
-
 	std::string id;
 
 	BuildTree game;
-	std::vector<size_t> buildTreeIndices;
-
-	BuildTree* current() {
-		BuildTree* currentBuildTree = &game;
-		for (auto& index : buildTreeIndices) {
-			currentBuildTree = currentBuildTree->upgrades[index].get();
-		}
-		return currentBuildTree;
-	}
-
-	void upgrade(size_t a_index) {
-		buildTreeIndices.push_back(a_index);
-		onUpgradedSignal(this);
-	}
-
-	std::string skinAssetPath(const std::string &a_skinId) {
-		return "Assets/Prefabs/Buildings/" + id + "/" + (a_skinId.empty() ? id : a_skinId) + ".prefab";
-	}
 
 	std::string name;
 	std::string description;
@@ -202,22 +178,7 @@ public:
 			CEREAL_NVP(description),
 			CEREAL_NVP(skins),
 			CEREAL_NVP(costs),
-			CEREAL_NVP(buildTreeIndices),
 			CEREAL_NVP(game)
-		);
-	}
-
-	template <class Archive>
-	static void load_and_construct(Archive & archive, cereal::construct<BuildingData> &construct) {
-		construct();
-		archive(
-			cereal::make_nvp("id", construct->id),
-			cereal::make_nvp("name", construct->name),
-			cereal::make_nvp("description", construct->description),
-			cereal::make_nvp("skins", construct->skins),
-			cereal::make_nvp("costs", construct->costs),
-			cereal::make_nvp("buildTreeIndices", construct->buildTreeIndices),
-			cereal::make_nvp("game", construct->game)
 		);
 	}
 };
@@ -241,7 +202,6 @@ public:
 		MV::require<MV::ResourceException>(false, "Failed to locate building: ", a_id);
 		return BuildingData();
 	}
-
 private:
 	BuildingCatalog() {
 	}
@@ -263,19 +223,36 @@ class Gem {
 class Building : public MV::Scene::Component {
 	friend MV::Scene::Node;
 	friend cereal::access;
+	MV::Signal<void(std::shared_ptr<Building>)> onUpgradedSignal;
 
 public:
+	MV::SignalRegister<void(std::shared_ptr<Building>)> onUpgraded;
+
 	ComponentDerivedAccessors(Building)
 
-	BuildingData& data() {
-		return buildingData;
+	std::vector<size_t> buildTreeIndices;
+
+	BuildTree* current() {
+		BuildTree* currentBuildTree = &buildingData.game;
+		for (auto& index : buildTreeIndices) {
+			currentBuildTree = currentBuildTree->upgrades[index].get();
+		}
+		return currentBuildTree;
 	}
 
+	void upgrade(size_t a_index) {
+		buildTreeIndices.push_back(a_index);
+		onUpgradedSignal(std::static_pointer_cast<Building>(shared_from_this()));
+	}
+
+	std::string assetPath() const {
+		return "Assets/Prefabs/Buildings/" + buildingData.id + "/" + (skin.empty() ? buildingData.id : skin) + ".prefab";
+	}
 protected:
 	Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const BuildingData &a_data, const std::string &a_skin, int a_slot, const std::shared_ptr<Player> &a_player, GameInstance& a_instance);
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
-		return cloneHelper(a_parent->attach<Building>(data(), skin, slot, owningPlayer, gameInstance).self());
+		return cloneHelper(a_parent->attach<Building>(buildingData, skin, slot, owningPlayer, gameInstance).self());
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
@@ -286,7 +263,6 @@ protected:
 
 	virtual void updateImplementation(double a_dt) override;
 private:
-
 	virtual void initialize() override;
 
 	template <class Archive>
@@ -323,15 +299,14 @@ class Creature : public MV::Scene::Component {
 public:
 	ComponentDerivedAccessors(Creature)
 
-	virtual void updateImplementation(double a_delta) override {};
-
 protected:
-	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner) :
-		Component(a_owner) {
+	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats) :
+		Component(a_owner),
+		ourStats(a_stats) {
 	}
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
-		return cloneHelper(a_parent->attach<Creature>().self());
+		return cloneHelper(a_parent->attach<Creature>(ourStats).self());
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
@@ -359,6 +334,11 @@ private:
 		construct->initialize();
 	}
 
+	virtual void updateImplementation(double a_delta) override {
+	};
+
+
+	CreatureData ourStats;
 };
 
 #endif

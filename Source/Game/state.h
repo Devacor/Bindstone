@@ -6,7 +6,9 @@
 #include "Game/managers.h"
 
 struct BuildingData;
+struct CreatureData;
 class BuildingCatalog;
+class CreatureCatalog;
 struct Player;
 
 struct Constants {
@@ -18,6 +20,7 @@ public:
 	LocalData(Managers& a_managers):
 		allManagers(a_managers){
 		buildingCatalog = std::make_unique<BuildingCatalog>("buildings.json");
+		creatureCatalog = std::make_unique<CreatureCatalog>("creatures.json");
 	}
 
 	std::shared_ptr<Player> player() const {
@@ -34,6 +37,10 @@ public:
 		return *(buildingCatalog.get());
 	}
 
+	CreatureCatalog& creatures() {
+		return *(creatureCatalog.get());
+	}
+
 	Constants& constants() {
 		return metadataConstants;
 	}
@@ -44,6 +51,7 @@ public:
 private:
 	std::shared_ptr<Player> localPlayer;
 	std::unique_ptr<BuildingCatalog> buildingCatalog;
+	std::unique_ptr<CreatureCatalog> creatureCatalog;
 	Constants metadataConstants;
 	Managers& allManagers;
 };

@@ -283,6 +283,7 @@
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">./;./Source</AdditionalIncludeDirectories>
     </ClCompile>
     <ClCompile Include="Source\Network\network.cpp" />
+    <ClCompile Include="Source\Network\url.cpp" />
     <ClCompile Include="Source\Physics\collider.cpp" />
     <ClCompile Include="Source\Render\boxaabb.cpp" />
     <ClCompile Include="Source\Render\Scene\button.cpp" />
@@ -459,6 +460,8 @@
     <ClInclude Include="Source\Game\player.h" />
     <ClInclude Include="Source\Game\state.h" />
     <ClInclude Include="Source\Game\wallet.h" />
+    <ClInclude Include="Source\Network\download.h" />
+    <ClInclude Include="Source\Network\url.h" />
     <ClInclude Include="Source\Physics\collider.h" />
     <ClInclude Include="Source\Physics\package.h" />
     <ClInclude Include="Source\Render\boxaabb.h" />

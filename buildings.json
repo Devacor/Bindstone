@@ -12,7 +12,6 @@
                 {"values": [0,0,475]},
                 {"values": [0,6000,325]}
             ],
-            "buildTreeIndices": [],
             "game": {
                 "id": "none",
                 "name": "Tree of Life Foundation",

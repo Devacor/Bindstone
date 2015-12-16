@@ -1,0 +1,17 @@
+{
+    "creatures": [
+        {
+            "id": "basicLifeElemental",
+            "name": "Life Elemental",
+            "description": "Life elementals are gentle folk",
+            "moveSpeed": 0.15000000596046448,
+            "actionSpeed": 0.25,
+            "castSpeed": 1,
+            "health": 0,
+            "defense": 0,
+            "will": 0,
+            "strength": 100,
+            "ability": 100
+        }
+    ]
+}

@@ -267,8 +267,6 @@ class Building : public MV::Scene::Component {
 public:
 	ComponentDerivedAccessors(Building)
 
-	virtual void updateImplementation(double a_delta) override {};
-
 	BuildingData& data() {
 		return buildingData;
 	}

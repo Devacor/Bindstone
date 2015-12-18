@@ -172,8 +172,7 @@ namespace MV {
 		if (FILE *file = fopen(name.c_str(), "r")) {
 			fclose(file);
 			return true;
-		}
-		else {
+		} else {
 			return false;
 		}
 	}

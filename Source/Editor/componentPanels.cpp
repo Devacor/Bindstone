@@ -812,7 +812,7 @@ controls(a_controls) {
 		controls->elementToEdit->properties().maximum.beginScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		maximumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().maximum.beginScale.x));
-	makeSlider(*panel.resources().mouse, grid, [&, maximumEndSize, startSize](std::shared_ptr<MV::Scene::Slider> a_slider){
+	makeSlider(*panel.resources().mouse, grid, [&, minimumEndSize, startSize](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		startSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
 		minimumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());

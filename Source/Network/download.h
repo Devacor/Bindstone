@@ -264,11 +264,14 @@ namespace MV {
 
 	inline std::string DownloadString(const MV::Url& a_url) {
 		std::stringstream result;
-		DownloadRequest(a_url, result);
-		return result.str();
+		if (DownloadRequest(a_url, result).header().success) {
+			return result.str();
+		} else {
+			return "";
+		}
 	}
 
-	inline bool DownloadFile(const MV::Url& a_url, const std::string &a_path) {
+	inline HttpHeader DownloadFile(const MV::Url& a_url, const std::string &a_path) {
 		HttpHeader header;
 		{
 			std::ofstream outFile(a_path, std::ofstream::out | std::ofstream::binary);
@@ -278,7 +281,7 @@ namespace MV {
 		if (!header.success) {
 			std::remove(a_path.c_str());
 		}
-		return header.success;
+		return header;
 	}
 }
 #endif

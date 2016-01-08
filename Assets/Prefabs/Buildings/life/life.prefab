@@ -3,7 +3,7 @@
         "ptr_wrapper": {
             "id": 2147483649,
             "data": {
-                "nodeId": "life_0",
+                "nodeId": "life",
                 "isRootNode": true,
                 "parent": {
                     "ptr_wrapper": {
@@ -27,7 +27,7 @@
                     "y": 1,
                     "z": 1
                 },
-                "sortDepth": 0,
+                "sortDepth": 1,
                 "nodeAlpha": 1,
                 "localBounds": {
                     "minPoint": {

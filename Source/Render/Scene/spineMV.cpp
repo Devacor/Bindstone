@@ -198,6 +198,9 @@ namespace MV{
 					delete[] spineWorldVertices;
 				}
 
+				skeleton = nullptr;
+				atlas = nullptr;
+
 				refreshBounds();
 			}
 		}

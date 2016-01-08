@@ -51,6 +51,10 @@ public:
 		return worldScene;
 	}
 
+	chaiscript::ChaiScript& script() {
+		return scriptEngine;
+	}
+
 	void moveCamera(MV::Point<> a_startPosition, MV::Scale a_scale);
 	void moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale);
 private:
@@ -64,7 +68,7 @@ private:
 
 	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
 
-	chaiscript::ChaiScript script;
+	chaiscript::ChaiScript scriptEngine;
 
 	Team left;
 	Team right;

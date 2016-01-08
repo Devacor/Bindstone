@@ -186,12 +186,12 @@
                                                                         "z": 0
                                                                     },
                                                                     "minimumDirection": {
-                                                                        "x": 0,
+                                                                        "x": 55,
                                                                         "y": 0,
                                                                         "z": 0
                                                                     },
                                                                     "maximumDirection": {
-                                                                        "x": 0,
+                                                                        "x": 55,
                                                                         "y": 0,
                                                                         "z": 720
                                                                     },
@@ -567,8 +567,8 @@
                                                                                                                             "depth": 0
                                                                                                                         },
                                                                                                                         "contentSize": {
-                                                                                                                            "width": 128,
-                                                                                                                            "height": 128,
+                                                                                                                            "width": 64,
+                                                                                                                            "height": 64,
                                                                                                                             "depth": 0
                                                                                                                         },
                                                                                                                         "handles": []
@@ -671,12 +671,12 @@
                                                         "z": 0
                                                     },
                                                     "minimumDirection": {
-                                                        "x": 0,
+                                                        "x": 55,
                                                         "y": 0,
                                                         "z": 0
                                                     },
                                                     "maximumDirection": {
-                                                        "x": 0,
+                                                        "x": 55,
                                                         "y": 0,
                                                         "z": 720
                                                     },

@@ -187,17 +187,12 @@ namespace MV {
 			aY = toRadians(aY); aX = toRadians(aX); aZ = toRadians(aZ);
 		}
 
-		Type tmpy = y;
-		y = (y * cos(aX)) - (z * sin(aX));
-		z = (tmpy * sin(aX)) + (z * cos(aX));
-
-		Type tmpx = x;
-		x = (z * sin(aY)) + (x * cos(aY));
-		z = (z * cos(aY)) - (tmpx * sin(aY));
-
-		tmpx = x;
-		x = (y * sin(aZ)) + (x * cos(aZ));
-		y = (y * cos(aZ)) - (tmpx * sin(aZ));
+		MatrixStack rotate;
+		rotate.top().rotateX(aX).rotateY(aY).rotateZ(aZ);
+		rotate.push().translate(x, y, z);
+		x = rotate.top().getX();
+		y = rotate.top().getY();
+		z = rotate.top().getZ();
 	}
 
 	template <class Type>

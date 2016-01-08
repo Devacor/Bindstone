@@ -80,6 +80,8 @@ private:
 	std::shared_ptr<MV::Scene::Text> scaleY;
 
 	std::shared_ptr<MV::Scene::Text> rotate;
+	std::shared_ptr<MV::Scene::Text> rotateX;
+	std::shared_ptr<MV::Scene::Text> rotateY;
 
 	std::shared_ptr<MV::Scene::Node> grid;
 

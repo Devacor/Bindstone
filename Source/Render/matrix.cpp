@@ -254,10 +254,12 @@ namespace MV{
 		//0	sin	cos
 		TransformMatrix rotation;
 		rotation.makeIdentity();
-		rotation.access(1, 1) = cos(a_radian);
-		rotation.access(2, 1) = -(sin(a_radian));
-		rotation.access(1, 2) = sin(a_radian);
-		rotation.access(2, 2) = cos(a_radian);
+		auto cosRad = cos(a_radian);
+		auto sinRad = sin(a_radian);
+		rotation.access(1, 1) = cosRad;
+		rotation.access(2, 1) = -sinRad;
+		rotation.access(1, 2) = sinRad;
+		rotation.access(2, 2) = cosRad;
 		*this *= rotation;
 		return *this;
 	}
@@ -268,10 +270,12 @@ namespace MV{
 		//-sin	0  cos
 		TransformMatrix rotation;
 		rotation.makeIdentity();
-		rotation.access(0, 0) = cos(a_radian);
-		rotation.access(2, 0) = sin(a_radian);
-		rotation.access(0, 2) = -(sin(a_radian));
-		rotation.access(2, 2) = cos(a_radian);
+		auto cosRad = cos(a_radian);
+		auto sinRad = sin(a_radian);
+		rotation.access(0, 0) = cosRad;
+		rotation.access(2, 0) = sinRad;
+		rotation.access(0, 2) = -sinRad;
+		rotation.access(2, 2) = cosRad;
 		*this *= rotation;
 		return *this;
 	}
@@ -282,10 +286,12 @@ namespace MV{
 		//0		0	  1
 		TransformMatrix rotation;
 		rotation.makeIdentity();
-		rotation.access(0, 0) = cos(a_radian);
-		rotation.access(1, 0) = -(sin(a_radian));
-		rotation.access(0, 1) = sin(a_radian);
-		rotation.access(1, 1) = cos(a_radian);
+		auto cosRad = cos(a_radian);
+		auto sinRad = sin(a_radian);
+		rotation.access(0, 0) = cosRad;
+		rotation.access(1, 0) = -sinRad;
+		rotation.access(0, 1) = sinRad;
+		rotation.access(1, 1) = cosRad;
 		*this *= rotation;
 		return *this;
 	}

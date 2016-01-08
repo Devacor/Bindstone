@@ -50,6 +50,10 @@ public:
 	std::shared_ptr<MV::Scene::Node> scene() {
 		return worldScene;
 	}
+	
+	MV::Scene::SafeComponent<MV::Scene::PathMap> path() {
+		return pathMap;
+	}
 
 	chaiscript::ChaiScript& script() {
 		return scriptEngine;

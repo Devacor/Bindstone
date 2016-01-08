@@ -28,6 +28,27 @@ struct CreatureData {
 	float strength;
 	float ability;
 
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+		a_script.add(chaiscript::user_type<CreatureData>(), "CreatureData");
+
+		a_script.add(chaiscript::fun(&CreatureData::id), "id");
+		a_script.add(chaiscript::fun(&CreatureData::name), "name");
+
+		a_script.add(chaiscript::fun(&CreatureData::description), "description");
+
+		a_script.add(chaiscript::fun(&CreatureData::moveSpeed), "moveSpeed");
+		a_script.add(chaiscript::fun(&CreatureData::actionSpeed), "actionSpeed");
+		a_script.add(chaiscript::fun(&CreatureData::castSpeed), "castSpeed");
+
+		a_script.add(chaiscript::fun(&CreatureData::health), "health");
+		a_script.add(chaiscript::fun(&CreatureData::defense), "defense");
+		a_script.add(chaiscript::fun(&CreatureData::will), "will");
+		a_script.add(chaiscript::fun(&CreatureData::strength), "strength");
+		a_script.add(chaiscript::fun(&CreatureData::ability), "ability");
+
+		return a_script;
+	}
+
 	template <class Archive>
 	void serialize(Archive & archive) {
 		archive(
@@ -233,18 +254,11 @@ public:
 
 	std::vector<size_t> buildTreeIndices;
 
-	BuildTree* current() {
-		BuildTree* currentBuildTree = &buildingData.game;
-		for (auto& index : buildTreeIndices) {
-			currentBuildTree = currentBuildTree->upgrades[index].get();
-		}
-		return currentBuildTree;
-	}
+	const BuildTree* current() const;
 
-	void upgrade(size_t a_index) {
-		buildTreeIndices.push_back(a_index);
-		onUpgradedSignal(std::static_pointer_cast<Building>(shared_from_this()));
-	}
+	bool waveHasCreatures(size_t a_waveIndex = 0, size_t a_creatureIndex = 0) const;
+
+	void upgrade(size_t a_index);
 
 	std::string assetPath() const {
 		return "Assets/Prefabs/Buildings/" + buildingData.id + "/" + (skin.empty() ? buildingData.id : skin) + ".prefab";
@@ -254,9 +268,9 @@ public:
 		a_script.add(chaiscript::user_type<Building>(), "Building");
 		a_script.add(chaiscript::base_class<Component, Building>());
 
-		a_script.add(chaiscript::fun([&](MV::Scene::Node &a_self, const BuildingData &a_data, const std::string &a_skin, int a_slot, const std::shared_ptr<Player> &a_player) {
-			return a_self.attach<Building>(a_data, a_skin, a_slot, a_player, gameInstance);
-		}), "attachBuilding");
+// 		a_script.add(chaiscript::fun([&](MV::Scene::Node &a_self, const BuildingData &a_data, const std::string &a_skin, int a_slot, const std::shared_ptr<Player> &a_player) {
+// 			return a_self.attach<Building>(a_data, a_skin, a_slot, a_player, gameInstance);
+// 		}), "attachBuilding");
 
 		a_script.add(chaiscript::fun(&Building::current), "current");
 		a_script.add(chaiscript::fun(&Building::upgrade), "upgrade");
@@ -289,6 +303,10 @@ protected:
 	virtual void updateImplementation(double a_dt) override;
 private:
 	virtual void initialize() override;
+	void incrementCreatureIndex();
+
+	const WaveCreature& currentCreature();
+	void spawnCurrentCreature();
 
 	template <class Archive>
 	void serialize(Archive & archive) {
@@ -321,13 +339,17 @@ private:
 		construct(std::shared_ptr<Node>(), buildingData, skin, slot, player, *gameInstance);
 		archive(
 			cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
-			);
+		);
 		construct->initialize();
 	}
 
 	BuildingData buildingData;
 	std::string skin;
+
 	double countdown = 0;
+	size_t waveIndex = 0;
+	size_t creatureIndex = 0;
+
 	int slot;
 	MV::Point<> spawnPoint;
 	std::shared_ptr<Player> owningPlayer;
@@ -342,11 +364,8 @@ public:
 	ComponentDerivedAccessors(Creature)
 
 protected:
-	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats, GameInstance& a_gameInstance) :
-		Component(a_owner),
-		ourStats(a_stats),
-		gameInstance(a_gameInstance){
-	}
+	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, GameInstance& a_gameInstance);
+	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats, GameInstance& a_gameInstance);
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
 		return cloneHelper(a_parent->attach<Creature>(ourStats, gameInstance).self());

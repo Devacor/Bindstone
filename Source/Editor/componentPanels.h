@@ -182,6 +182,7 @@ private:
 	std::shared_ptr<EditableSpine> controls;
 	std::shared_ptr<MV::Scene::Text> assetJson;
 	std::shared_ptr<MV::Scene::Text> assetAtlas;
+	std::shared_ptr<MV::Scene::Text> animationPreview;
 	std::shared_ptr<MV::Scene::Text> scale;
 
 	std::vector<std::shared_ptr<MV::Scene::Text>> linkedSockets;

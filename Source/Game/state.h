@@ -31,6 +31,10 @@ public:
 		localPlayer = a_localPlayer;
 	}
 
+	std::shared_ptr<Player> player(const std::string &a_id) {
+		return localPlayer; // replace this later with a lookup/download and likely a callback!
+	}
+
 	bool isLocal(const std::shared_ptr<Player> &a_other) const;
 
 	BuildingCatalog& buildings() {

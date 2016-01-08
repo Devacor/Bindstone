@@ -54,7 +54,7 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 	localData(a_data),
 	left(a_leftPlayer, LEFT, *this),
 	right(a_rightPlayer, RIGHT, *this),
-	script(MV::create_chaiscript_stdlib()) {
+	scriptEngine(MV::create_chaiscript_stdlib()) {
 
 	hook();
 
@@ -94,34 +94,34 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 }
 
 void GameInstance::hook() {
-	MV::TexturePoint::hook(script);
-	MV::Color::hook(script);
-	MV::Size<MV::PointPrecision>::hook(script);
-	MV::Size<int>::hook(script, "i");
-	MV::Point<MV::PointPrecision>::hook(script);
-	MV::Point<int>::hook(script, "i");
-	MV::BoxAABB<MV::PointPrecision>::hook(script);
-	MV::BoxAABB<int>::hook(script, "i");
+	MV::TexturePoint::hook(scriptEngine);
+	MV::Color::hook(scriptEngine);
+	MV::Size<MV::PointPrecision>::hook(scriptEngine);
+	MV::Size<int>::hook(scriptEngine, "i");
+	MV::Point<MV::PointPrecision>::hook(scriptEngine);
+	MV::Point<int>::hook(scriptEngine, "i");
+	MV::BoxAABB<MV::PointPrecision>::hook(scriptEngine);
+	MV::BoxAABB<int>::hook(scriptEngine, "i");
 
-	MV::TexturePack::hook(script);
-	MV::TextureDefinition::hook(script);
-	MV::FileTextureDefinition::hook(script);
-	MV::TextureHandle::hook(script);
-	MV::SharedTextures::hook(script);
+	MV::TexturePack::hook(scriptEngine);
+	MV::TextureDefinition::hook(scriptEngine);
+	MV::FileTextureDefinition::hook(scriptEngine);
+	MV::TextureHandle::hook(scriptEngine);
+	MV::SharedTextures::hook(scriptEngine);
 
-	Wallet::hook(script);
+	Wallet::hook(scriptEngine);
 
-	MV::PathNode::hook(script);
-	MV::NavigationAgent::hook(script);
+	MV::PathNode::hook(scriptEngine);
+	MV::NavigationAgent::hook(scriptEngine);
 
-	MV::Scene::Node::hook(script);
-	MV::Scene::Component::hook(script);
-	MV::Scene::Drawable::hook(script);
-	MV::Scene::Sprite::hook(script);
-	MV::Scene::Text::hook(script);
-	MV::Scene::PathMap::hook(script);
-	MV::Scene::PathAgent::hook(script);
-	MV::Scene::Emitter::hook(script, localData.managers().pool);
+	MV::Scene::Node::hook(scriptEngine);
+	MV::Scene::Component::hook(scriptEngine);
+	MV::Scene::Drawable::hook(scriptEngine);
+	MV::Scene::Sprite::hook(scriptEngine);
+	MV::Scene::Text::hook(scriptEngine);
+	MV::Scene::PathMap::hook(scriptEngine);
+	MV::Scene::PathAgent::hook(scriptEngine);
+	MV::Scene::Emitter::hook(scriptEngine, localData.managers().pool);
 }
 
 void GameInstance::nodeLoadBinder(cereal::JSONInputArchive &a_archive) {

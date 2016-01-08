@@ -63,6 +63,7 @@ public:
 				return creature;
 			}
 		}
+
 		MV::require<MV::ResourceException>(false, "Failed to locate creature: ", a_id);
 		return CreatureData();
 	}
@@ -248,6 +249,30 @@ public:
 	std::string assetPath() const {
 		return "Assets/Prefabs/Buildings/" + buildingData.id + "/" + (skin.empty() ? buildingData.id : skin) + ".prefab";
 	}
+
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance) {
+		a_script.add(chaiscript::user_type<Building>(), "Building");
+		a_script.add(chaiscript::base_class<Component, Building>());
+
+		a_script.add(chaiscript::fun([&](MV::Scene::Node &a_self, const BuildingData &a_data, const std::string &a_skin, int a_slot, const std::shared_ptr<Player> &a_player) {
+			return a_self.attach<Building>(a_data, a_skin, a_slot, a_player, gameInstance);
+		}), "attachBuilding");
+
+		a_script.add(chaiscript::fun(&Building::current), "current");
+		a_script.add(chaiscript::fun(&Building::upgrade), "upgrade");
+
+		a_script.add(chaiscript::fun(&Building::buildingData), "data");
+		a_script.add(chaiscript::fun(&Building::skin), "skin");
+		a_script.add(chaiscript::fun(&Building::slot), "slot");
+		a_script.add(chaiscript::fun(&Building::owningPlayer), "player");
+
+		a_script.add(chaiscript::fun(&Building::assetPath), "assetPath");
+
+		a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Building>, std::shared_ptr<Building>>([](const MV::Scene::SafeComponent<Building> &a_item) { return a_item.self(); }));
+		a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Building>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<Building> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
+
+		return a_script;
+	}
 protected:
 	Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const BuildingData &a_data, const std::string &a_skin, int a_slot, const std::shared_ptr<Player> &a_player, GameInstance& a_instance);
 
@@ -268,16 +293,33 @@ private:
 	template <class Archive>
 	void serialize(Archive & archive) {
 		archive(
-			CEREAL_NVP(data),
+			cereal::make_nvp("data", buildingData),
+			cereal::make_nvp("skin", skin),
+			cereal::make_nvp("slot", slot),
+			cereal::make_nvp("player", owningPlayer->id)
 			cereal::make_nvp("Component", cereal::base_class<Component>(this))
 		);
 	}
 
 	template <class Archive>
 	static void load_and_construct(Archive & archive, cereal::construct<Building> &construct) {
-		construct(std::shared_ptr<Node>());
+		std::string skin;
+		BuildingData buildingData;
+		int slot;
+		std::string playerId;
+
 		archive(
 			cereal::make_nvp("data", buildingData),
+			cereal::make_nvp("skin", skin),
+			cereal::make_nvp("slot", slot),
+			cereal::make_nvp("player", playerId)
+		);
+		GameInstance *gameInstance = nullptr;
+		archive.extract(cereal::make_nvp("game", gameInstance));
+		MV::require<PointerException>(gameInstance != nullptr, "Null gameInstance in Building::load_and_construct.");
+		gameInstance->data().player()
+		construct(std::shared_ptr<Node>(), buildingData, skin, slot, player, *gameInstance);
+		archive(
 			cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
 			);
 		construct->initialize();
@@ -300,19 +342,24 @@ public:
 	ComponentDerivedAccessors(Creature)
 
 protected:
-	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats) :
+	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats, GameInstance& a_gameInstance) :
 		Component(a_owner),
-		ourStats(a_stats) {
+		ourStats(a_stats),
+		gameInstance(a_gameInstance){
 	}
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
-		return cloneHelper(a_parent->attach<Creature>(ourStats).self());
+		return cloneHelper(a_parent->attach<Creature>(ourStats, gameInstance).self());
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
 		Component::cloneHelper(a_clone);
 		auto creatureClone = std::static_pointer_cast<Creature>(a_clone);
 		return a_clone;
+	}
+
+	std::string assetPath() const {
+		return "Assets/Prefabs/Creatures/" + ourStats.id + "/" + (skin.empty() ? ourStats.id : skin) + ".prefab";
 	}
 
 private:
@@ -339,6 +386,9 @@ private:
 
 
 	CreatureData ourStats;
+	std::string skin;
+	std::shared_ptr<Player> owningPlayer;
+	GameInstance& gameInstance;
 };
 
 #endif

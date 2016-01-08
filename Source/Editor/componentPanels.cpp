@@ -420,6 +420,9 @@ SelectedSpineEditorPanel::SelectedSpineEditorPanel(EditorControls &a_panel, std:
 	makeLabel(grid, *panel.resources().textLibrary, "Scale", buttonSize, UTF_CHAR_STR("Scale"));
 	scale = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "scale", buttonSize, MV::toWide(std::to_string(a_controls->elementToEdit->bundle().loadScale)));
 
+	makeLabel(grid, *panel.resources().textLibrary, "Animation", buttonSize, UTF_CHAR_STR("Animation"));
+	animationPreview = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "preview", buttonSize, UTF_CHAR_STR(""));
+
 	auto addAttachment = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Add", buttonSize, UTF_CHAR_STR("Add Binding"));
 	std::weak_ptr<MV::Scene::Node> weakGrid = grid;
 	addAttachment->onAccept.connect("click", [&, weakGrid](std::shared_ptr<MV::Scene::Clickable>) { handleMakeButton(weakGrid.lock()); });
@@ -450,6 +453,16 @@ SelectedSpineEditorPanel::SelectedSpineEditorPanel(EditorControls &a_panel, std:
 				catch (...) {}
 			}
 		};
+
+
+
+		animationPreview->onEnter.connect("animate", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+			controls->elementToEdit->animate(MV::to_string(animationPreview->text()));
+		});
+		animationPreview->owner()->component<MV::Scene::Clickable>()->onAccept.connect("animate", [&](std::shared_ptr<MV::Scene::Clickable>) {
+			controls->elementToEdit->animate(MV::to_string(animationPreview->text()));
+		});
+
 		assetJson->onEnter.connect("json", bundleChange);
 		assetJson->owner()->component<MV::Scene::Clickable>()->onAccept.connect("json", bundleChangeClick);
 		assetAtlas->onEnter.connect("atlas", bundleChange);

@@ -34,7 +34,7 @@
                                     "creatures": [
                                         {
                                             "delay": 10,
-                                            "id": "basicLifeElemental"
+                                            "id": "voidElemental"
                                         }
                                     ]
                                 }],
@@ -54,7 +54,7 @@
                                                         "creatures": [
                                                             {
                                                                 "delay": 10,
-                                                                "id": "greaterLifeElemental"
+                                                                "id": "voidElemental"
                                                             }
                                                         ]
                                                     },
@@ -63,11 +63,11 @@
                                                         "creatures": [
                                                             {
                                                                 "delay": 9.75,
-                                                                "id": "greaterLifeElemental"
+                                                                "id": "voidElemental"
                                                             },
                                                             {
                                                                 "delay": 0.25,
-                                                                "id": "greaterLifeElemental"
+                                                                "id": "voidElemental"
                                                             }
                                                         ]
                                                     }
@@ -89,7 +89,7 @@
                                                     "iterations": 1,
                                                     "creatures": [
                                                         {
-                                                            "id": "suspendedLifeElemental",
+                                                            "id": "voidElemental",
                                                             "delay": 10
                                                         }
                                                     ]

@@ -66,6 +66,65 @@ void Building::initialize() {
 	}
 }
 
-void Building::updateImplementation(double a_dt) {
+void Building::spawnCurrentCreature() {
+	auto creatureNode = gameInstance.path().owner()->make(MV::guid(currentCreature().id));
+	creatureNode->attach<Creature>(currentCreature().id, gameInstance);
+}
 
+void Building::incrementCreatureIndex() {
+	++creatureIndex;
+	if (creatureIndex >= current()->waves[waveIndex].creatures.size()) {
+		creatureIndex = 0;
+		++waveIndex;
+		if (waveIndex >= current()->waves.size()) {
+			waveIndex = 0;
+		}
+	}
+}
+
+void Building::updateImplementation(double a_dt) {
+	countdown -= a_dt;
+	if (countdown <= 0 && waveHasCreatures(waveIndex)) {
+		spawnCurrentCreature();
+		incrementCreatureIndex();
+		countdown = countdown + currentCreature().delay;
+	}
+}
+
+bool Building::waveHasCreatures(size_t a_waveIndex /*= 0*/, size_t a_creatureIndex /*= 0*/) const {
+	auto* currentUpgrade = current();
+	return (currentUpgrade->waves.size() > a_waveIndex && currentUpgrade->waves[a_waveIndex].creatures.size() > a_creatureIndex);
+}
+
+void Building::upgrade(size_t a_index) {
+	buildTreeIndices.push_back(a_index);
+	onUpgradedSignal(std::static_pointer_cast<Building>(shared_from_this()));
+
+	waveIndex = 0;
+	creatureIndex = 0;
+	countdown = waveHasCreatures() ? 0 : current()->waves[0].creatures[0].delay;
+}
+
+const BuildTree* Building::current() const {
+	const BuildTree* currentBuildTree = &buildingData.game;
+	for (auto& index : buildTreeIndices) {
+		currentBuildTree = currentBuildTree->upgrades[index].get();
+	}
+	return currentBuildTree;
+}
+
+const WaveCreature& Building::currentCreature() {
+	return current()->waves[waveIndex].creatures[creatureIndex];
+}
+
+Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, GameInstance& a_gameInstance) :
+	Component(a_owner),
+	ourStats(a_gameInstance.data().creatures().data(a_id)),
+	gameInstance(a_gameInstance) {
+}
+
+Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats, GameInstance& a_gameInstance) :
+	Component(a_owner),
+	ourStats(a_stats),
+	gameInstance(a_gameInstance) {
 }

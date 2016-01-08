@@ -36,9 +36,8 @@ namespace MV {
 
 
 		void Component::notifyParentOfBoundsChange() {
-			try{
+			if (ownerIsAlive()) {
 				owner()->recalculateLocalBounds();
-			} catch (PointerException &) {
 			}
 		}
 

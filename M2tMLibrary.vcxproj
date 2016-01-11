@@ -125,7 +125,7 @@
       <GenerateDebugInformation>DebugFastLink</GenerateDebugInformation>
       <AdditionalDependencies>opengl32.lib;glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;libboost_filesystem-vc140-mt-1_58.lib;libboost_system-vc140-mt-1_58.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
-      <Profile>false</Profile>
+      <Profile>true</Profile>
       <AdditionalLibraryDirectories>
       </AdditionalLibraryDirectories>
       <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
@@ -178,7 +178,7 @@
       <SubSystem>Console</SubSystem>
       <AdditionalLibraryDirectories>
       </AdditionalLibraryDirectories>
-      <Profile>false</Profile>
+      <Profile>true</Profile>
       <LinkStatus>
       </LinkStatus>
       <PreventDllBinding>true</PreventDllBinding>

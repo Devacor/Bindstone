@@ -248,54 +248,6 @@ namespace MV{
 		return *this;
 	}
 
-	TransformMatrix& TransformMatrix::rotateX( MatrixValue a_radian ){
-		//1	0	  0
-		//0	cos	-sin
-		//0	sin	cos
-		TransformMatrix rotation;
-		rotation.makeIdentity();
-		auto cosRad = cos(a_radian);
-		auto sinRad = sin(a_radian);
-		rotation.access(1, 1) = cosRad;
-		rotation.access(2, 1) = -sinRad;
-		rotation.access(1, 2) = sinRad;
-		rotation.access(2, 2) = cosRad;
-		*this *= rotation;
-		return *this;
-	}
-
-	TransformMatrix& TransformMatrix::rotateY( MatrixValue a_radian ){
-		//cos	 0  sin
-		//0		1  0
-		//-sin	0  cos
-		TransformMatrix rotation;
-		rotation.makeIdentity();
-		auto cosRad = cos(a_radian);
-		auto sinRad = sin(a_radian);
-		rotation.access(0, 0) = cosRad;
-		rotation.access(2, 0) = sinRad;
-		rotation.access(0, 2) = -sinRad;
-		rotation.access(2, 2) = cosRad;
-		*this *= rotation;
-		return *this;
-	}
-
-	TransformMatrix& TransformMatrix::rotateZ( MatrixValue a_radian ){
-		//cos	 -sin  0
-		//sin	 cos	0
-		//0		0	  1
-		TransformMatrix rotation;
-		rotation.makeIdentity();
-		auto cosRad = cos(a_radian);
-		auto sinRad = sin(a_radian);
-		rotation.access(0, 0) = cosRad;
-		rotation.access(1, 0) = -sinRad;
-		rotation.access(0, 1) = sinRad;
-		rotation.access(1, 1) = cosRad;
-		*this *= rotation;
-		return *this;
-	}
-
 	TransformMatrix& TransformMatrix::translate( MatrixValue a_x, MatrixValue a_y, MatrixValue a_z /*= 0.0*/ ){
 		TransformMatrix translation;
 		translation.makeIdentity();

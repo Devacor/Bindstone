@@ -132,9 +132,54 @@ namespace MV {
 		TransformMatrix& makeIdentity();
 		TransformMatrix& makeOrtho(MatrixValue a_left, MatrixValue a_right, MatrixValue a_bottom, MatrixValue a_top, MatrixValue a_near, MatrixValue a_far);
 
-		TransformMatrix& rotateX(MatrixValue a_radian);
-		TransformMatrix& rotateY(MatrixValue a_radian);
-		TransformMatrix& rotateZ(MatrixValue a_radian);
+		TransformMatrix& rotateXSupplyCosSin(MatrixValue a_cosRad, MatrixValue a_sinRad) {
+			//1	0	0
+			//0	cos	-sin
+			//0	sin	cos
+			TransformMatrix rotation;
+			rotation.access(1, 1) = a_cosRad;
+			rotation.access(2, 1) = -a_sinRad;
+			rotation.access(1, 2) = a_sinRad;
+			rotation.access(2, 2) = a_cosRad;
+			*this *= rotation;
+			return *this;
+		}
+		TransformMatrix& rotateYSupplyCosSin(MatrixValue a_cosRad, MatrixValue a_sinRad) {
+			//cos	0  sin
+			//0		1  0
+			//-sin	0  cos
+			TransformMatrix rotation;
+			rotation.access(0, 0) = a_cosRad;
+			rotation.access(2, 0) = a_sinRad;
+			rotation.access(0, 2) = -a_sinRad;
+			rotation.access(2, 2) = a_cosRad;
+			*this *= rotation;
+			return *this;
+		}
+		TransformMatrix& rotateZSupplyCosSin(MatrixValue a_cosRad, MatrixValue a_sinRad) {
+			//cos	 -sin  0
+			//sin	 cos	0
+			//0		0	  1
+			TransformMatrix rotation;
+			rotation.access(0, 0) = a_cosRad;
+			rotation.access(1, 0) = -a_sinRad;
+			rotation.access(0, 1) = a_sinRad;
+			rotation.access(1, 1) = a_cosRad;
+			*this *= rotation;
+			return *this;
+		}
+
+		TransformMatrix& rotateX(MatrixValue a_radian) {
+			return (a_radian != 0.0f) ? rotateXSupplyCosSin(cos(a_radian), sin(a_radian)) : *this;
+		}
+
+		TransformMatrix& rotateY(MatrixValue a_radian) {
+			return (a_radian != 0.0f) ? rotateYSupplyCosSin(cos(a_radian), sin(a_radian)) : *this;
+		}
+
+		TransformMatrix& rotateZ(MatrixValue a_radian) {
+			return (a_radian != 0.0f) ? rotateZSupplyCosSin(cos(a_radian), sin(a_radian)) : *this;
+		}
 
 		TransformMatrix& translate(MatrixValue a_x, MatrixValue a_y, MatrixValue a_z = 0.0);
 		TransformMatrix& scale(MatrixValue a_x, MatrixValue a_y, MatrixValue a_z = 1.0);

@@ -27,7 +27,7 @@
                     "y": 1,
                     "z": 1
                 },
-                "sortDepth": 0,
+                "sortDepth": 1,
                 "nodeAlpha": 1,
                 "localBounds": {
                     "minPoint": {
@@ -173,8 +173,8 @@
                                                             "data": {
                                                                 "spawnProperties": {
                                                                     "maximumParticles": 4294967295,
-                                                                    "minimumSpawnRate": 0.022904913872480392,
-                                                                    "maximumSpawnRate": 0.022904913872480392,
+                                                                    "minimumSpawnRate": 0.074668489396572113,
+                                                                    "maximumSpawnRate": 0.074668489396572113,
                                                                     "minimumPosition": {
                                                                         "x": 6.6409921646118164,
                                                                         "y": -5.351250171661377,
@@ -658,8 +658,8 @@
                                             "data": {
                                                 "spawnProperties": {
                                                     "maximumParticles": 4294967295,
-                                                    "minimumSpawnRate": 0.0031696481164544821,
-                                                    "maximumSpawnRate": 0.0031696481164544821,
+                                                    "minimumSpawnRate": 0.0075131487101316452,
+                                                    "maximumSpawnRate": 0.0075131487101316452,
                                                     "minimumPosition": {
                                                         "x": -4.583099365234375,
                                                         "y": -7.847900390625,

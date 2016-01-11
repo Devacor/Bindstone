@@ -1,7 +1,7 @@
 {
     "creatures": [
         {
-            "id": "lifeElemental",
+            "id": "voidElemental",
             "name": "Life Elemental",
             "description": "Life elementals are gentle folk",
             "moveSpeed": 0.15,

@@ -90,7 +90,7 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 // 			std::cout << "Left Building: " << i << std::endl;
 // 		});
 // 	}
-	//pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
+	pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
 }
 
 void GameInstance::hook() {

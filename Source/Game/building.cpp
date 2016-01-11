@@ -1,6 +1,7 @@
 #include "building.h"
 #include "Game/Instance/gameInstance.h"
 #include "Game/player.h"
+#include "Utility/generalUtility.h"
 
 Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const BuildingData &a_data, const std::string &a_skin, int a_slot, const std::shared_ptr<Player> &a_player, GameInstance& a_instance) :
 	Component(a_owner),
@@ -68,7 +69,8 @@ void Building::initialize() {
 
 void Building::spawnCurrentCreature() {
 	auto creatureNode = gameInstance.path().owner()->make(MV::guid(currentCreature().id));
-	creatureNode->attach<Creature>(currentCreature().id, gameInstance);
+	creatureNode->worldPosition(owner()->worldFromLocal(spawnPoint));
+	creatureNode->attach<Creature>(currentCreature().id, skin, owningPlayer, gameInstance);
 }
 
 void Building::incrementCreatureIndex() {
@@ -117,14 +119,100 @@ const WaveCreature& Building::currentCreature() {
 	return current()->waves[waveIndex].creatures[creatureIndex];
 }
 
-Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, GameInstance& a_gameInstance) :
+Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance) :
 	Component(a_owner),
-	ourStats(a_gameInstance.data().creatures().data(a_id)),
+	statTemplate(a_gameInstance.data().creatures().data(a_id)),
+	skin(a_skin),
+	owningPlayer(a_player),
 	gameInstance(a_gameInstance) {
 }
 
-Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats, GameInstance& a_gameInstance) :
+Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance) :
 	Component(a_owner),
-	ourStats(a_stats),
+	statTemplate(a_stats),
+	skin(a_skin),
+	owningPlayer(a_player),
 	gameInstance(a_gameInstance) {
+}
+
+std::string Creature::assetPath() const {
+	return "Assets/Prefabs/Creatures/" + statTemplate.id + "/" + (skin.empty() ? statTemplate.id : skin) + ".prefab";
+}
+
+void Creature::initialize() {
+	auto newNode = owner()->make(assetPath(), [&](cereal::JSONInputArchive& archive) {
+		archive.add(
+			cereal::make_nvp("mouse", &gameInstance.mouse()),
+			cereal::make_nvp("renderer", &gameInstance.data().managers().renderer),
+			cereal::make_nvp("textLibrary", &gameInstance.data().managers().textLibrary),
+			cereal::make_nvp("pool", &gameInstance.data().managers().pool),
+			cereal::make_nvp("texture", &gameInstance.data().managers().textures)
+			);
+	});
+	newNode->componentInChildren<MV::Scene::Spine>()->animate("run");
+	newNode->attach<MV::Scene::PathAgent>(gameInstance.path().self(), gameInstance.path()->gridFromLocal(gameInstance.path()->owner()->localFromWorld(owner()->worldPosition())))->
+		gridSpeed(4.0f)->
+		gridGoal(gameInstance.path()->gridFromLocal(gameInstance.path()->owner()->localFromWorld(gameInstance.scene()->get("RightGoal")->worldFromLocal(MV::Point<>()))))->
+		onArrive.connect("!", [](std::shared_ptr<MV::Scene::PathAgent> a_self) {
+			std::weak_ptr<MV::Scene::Node> self = a_self->owner();
+			a_self->owner()->task().then("Countdown", [=](const MV::Task& a_task, double a_dt) mutable {
+				if (a_task.elapsed() > 1.0f) {
+					self.lock()->removeFromParent();
+					return true;
+				}
+				return false;
+			});
+		});
+
+	owner()->task().also("UpdateZOrder", [=](const MV::Task &a_self, double a_dt) {
+		owner()->depth(owner()->position().y);
+		return false;
+	});
+	/* 
+	auto voidTexture = managers.textures.pack("VoidGuy")->handle(0);
+	auto creatureNode = pathMap->owner()->make(MV::guid("Creature_"));
+	creatureNode->attach<MV::Scene::Sprite>()->texture(voidTexture)->size(MV::cast<MV::PointPrecision>(voidTexture->bounds().size()));
+	creatureNode->attach<MV::Scene::PathAgent>(pathMap.self(), pathMap->gridFromLocal(pathMap->owner()->localFromWorld(a_position)))->
+	gridSpeed(4.0f)->
+	gridGoal(pathMap->gridFromLocal(pathMap->owner()->localFromWorld(worldScene->get("RightWell")->worldFromLocal(MV::Point<>()))))->
+	onArrive.connect("!", [](std::shared_ptr<MV::Scene::PathAgent> a_self){
+	std::weak_ptr<MV::Scene::Node> self = a_self->owner();
+	a_self->owner()->task().then("Countdown", [=](const MV::Task& a_task, double a_dt) mutable {
+	if (a_task.elapsed() > 4.0f) {
+	self.lock()->removeFromParent();
+	return true;
+	}
+	return false;
+	});
+	});
+	std::weak_ptr<MV::Scene::Node> weakCreatureNode{ creatureNode };
+	creatureNode->task().also("UpdateZOrder", [=](const MV::Task &a_self, double a_dt) {
+	weakCreatureNode.lock()->depth(weakCreatureNode.lock()->position().y);
+	return false;
+	});
+	*/
+	//  	script.eval(R"(
+	// 			{
+	//  			auto newNode = worldScene.make()
+	//  			newNode.position(Point(10, 10, 10))
+	//  			auto spriteDude = newNode.attachSprite()
+	//  			spriteDude.size(Size(128, 128))
+	// 				spriteDude.texture(textures.pack("VoidGuy").handle(0))
+	// 			}
+	//  	)");
+}
+
+void Creature::updateImplementation(double a_delta) {
+	auto state = gameInstance.script().get_state();
+	SCOPE_EXIT{ gameInstance.script().set_state(state); };
+	gameInstance.script().set_locals({ {
+		
+		} 
+	});
+
+	gameInstance.script().eval(statTemplate.script());
+}
+
+void CreatureData::loadScript() const {
+	scriptContents = MV::fileContents("Assets/Scripts/Creatures/" + id + ".script");
 }

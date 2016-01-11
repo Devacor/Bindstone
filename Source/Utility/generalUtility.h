@@ -159,7 +159,9 @@ namespace MV {
 
 	std::string fileNameFromPath(std::string a_path, bool a_includeExtension = false);
 
-	bool fileExists(const std::string& name);
+	bool fileExists(const std::string& a_name);
+
+	std::string fileContents(const std::string& a_path);
 
 	template <class Type>
 	double angle(const Type &x1, const Type &y1, const Type &x2, const Type &y2, AngleType returnAs = DEGREES){
@@ -176,8 +178,10 @@ namespace MV {
 			angle = toRadians(angle);
 		}
 		Type tmpX, tmpY;
-		tmpX = Type((x * cos(angle)) - (y * sin(angle)));
-		tmpY = Type((y * cos(angle)) + (x * sin(angle)));
+		auto c = cos(angle);
+		auto s = sin(angle);
+		tmpX = Type((x * c) - (y * s));
+		tmpY = Type((y * c) + (x * s));
 		x = tmpX; y = tmpY;
 	}
 
@@ -187,12 +191,12 @@ namespace MV {
 			aY = toRadians(aY); aX = toRadians(aX); aZ = toRadians(aZ);
 		}
 
-		MatrixStack rotate;
-		rotate.top().rotateX(aX).rotateY(aY).rotateZ(aZ);
-		rotate.push().translate(x, y, z);
-		x = rotate.top().getX();
-		y = rotate.top().getY();
-		z = rotate.top().getZ();
+		TransformMatrix rotate;
+		rotate.rotateX(aX).rotateY(aY).rotateZ(aZ);
+		rotate.translate(x, y, z);
+		x = rotate.getX();
+		y = rotate.getY();
+		z = rotate.getZ();
 	}
 
 	template <class Type>

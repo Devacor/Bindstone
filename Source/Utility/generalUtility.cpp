@@ -4,6 +4,7 @@
 #include <cmath>
 #include <map>
 #include <algorithm>
+#include <fstream>
 
 #ifdef __APPLE__
 	#include "CoreFoundation/CoreFoundation.h"
@@ -175,6 +176,11 @@ namespace MV {
 		} else {
 			return false;
 		}
+	}
+
+	std::string fileContents(const std::string& a_path) {
+		std::ifstream stream(a_path);
+		return stream ? std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>()) : "";
 	}
 
 	std::string toString(const UtfString& ws) {

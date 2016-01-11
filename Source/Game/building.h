@@ -8,6 +8,7 @@
 #include "Utility/signal.hpp"
 #include <string>
 #include <memory>
+#include "ArtificialIntelligence/pathfinding.h"
 
 class GameInstance;
 struct Player;
@@ -50,7 +51,7 @@ struct CreatureData {
 	}
 
 	template <class Archive>
-	void serialize(Archive & archive) {
+	void save(Archive & archive) const {
 		archive(
 			CEREAL_NVP(id),
 			CEREAL_NVP(name),
@@ -65,6 +66,36 @@ struct CreatureData {
 			CEREAL_NVP(ability)
 		);
 	}
+
+	template <class Archive>
+	void load(Archive & archive) {
+		archive(
+			CEREAL_NVP(id),
+			CEREAL_NVP(name),
+			CEREAL_NVP(description),
+			CEREAL_NVP(moveSpeed),
+			CEREAL_NVP(actionSpeed),
+			CEREAL_NVP(castSpeed),
+			CEREAL_NVP(health),
+			CEREAL_NVP(defense),
+			CEREAL_NVP(will),
+			CEREAL_NVP(strength),
+			CEREAL_NVP(ability)
+		);
+
+		loadScript();
+	}
+
+	const std::string& script() const {
+		if (scriptContents == "NIL") {
+			loadScript();
+		}
+		return scriptContents;
+	}
+private:
+	void loadScript() const;
+
+	mutable std::string scriptContents = "NIL";
 };
 
 
@@ -78,7 +109,7 @@ public:
 		archive(cereal::make_nvp("creatures", creatureList));
 	}
 
-	CreatureData data(const std::string &a_id) const {
+	const CreatureData& data(const std::string &a_id) const {
 		for (auto&& creature : creatureList) {
 			if (creature.id == a_id) {
 				return creature;
@@ -86,7 +117,7 @@ public:
 		}
 
 		MV::require<MV::ResourceException>(false, "Failed to locate creature: ", a_id);
-		return CreatureData();
+		return nullResult; //avoid warnings/errors
 	}
 private:
 	CreatureCatalog() {
@@ -98,7 +129,7 @@ private:
 			cereal::make_nvp("creatures", creatureList)
 		);
 	}
-
+	CreatureData nullResult;
 	std::vector<CreatureData> creatureList;
 };
 
@@ -364,11 +395,13 @@ public:
 	ComponentDerivedAccessors(Creature)
 
 protected:
-	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, GameInstance& a_gameInstance);
-	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats, GameInstance& a_gameInstance);
+	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance);
+	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance);
+
+	virtual void initialize() override;
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
-		return cloneHelper(a_parent->attach<Creature>(ourStats, gameInstance).self());
+		return cloneHelper(a_parent->attach<Creature>(statTemplate, skin, owningPlayer, gameInstance).self());
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
@@ -377,10 +410,7 @@ protected:
 		return a_clone;
 	}
 
-	std::string assetPath() const {
-		return "Assets/Prefabs/Creatures/" + ourStats.id + "/" + (skin.empty() ? ourStats.id : skin) + ".prefab";
-	}
-
+	std::string assetPath() const;
 private:
 
 	template <class Archive>
@@ -400,14 +430,16 @@ private:
 		construct->initialize();
 	}
 
-	virtual void updateImplementation(double a_delta) override {
-	};
+	virtual void updateImplementation(double a_delta) override;;
 
 
-	CreatureData ourStats;
+	const CreatureData& statTemplate;
 	std::string skin;
+
 	std::shared_ptr<Player> owningPlayer;
 	GameInstance& gameInstance;
+
+	std::shared_ptr<MV::Scene::PathAgent> agent;
 };
 
 #endif

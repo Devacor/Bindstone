@@ -9,6 +9,7 @@
 #include <string>
 #include <map>
 #include "Utility/scopeGuard.hpp"
+#include "chaiscript/chaiscript.hpp"
 
 namespace MV {
 
@@ -73,6 +74,17 @@ namespace MV {
 			return id != a_rhs.id;
 		}
 
+		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+			if(!scriptHookedUp[&a_script]){
+				scriptHookedUp[&a_script] = true;
+
+				a_script.add(chaiscript::fun(&Reciever<T>::block), "block");
+				a_script.add(chaiscript::fun(&Reciever<T>::blocked), "blocked");
+				a_script.add(chaiscript::fun(&Reciever::unblock), "unblock");
+			}
+			return a_script;
+		}
+
 	private:
 		Reciever(std::function<T> a_callback, long long a_id):
 			id(a_id),
@@ -83,6 +95,8 @@ namespace MV {
 		std::function< T > callback;
 		long long id;
 		static long long uniqueId;
+
+		static std::map<chaiscript::ChaiScript*, bool> scriptHookedUp;
 	};
 
 	template <typename T>
@@ -199,7 +213,7 @@ namespace MV {
 					}
 				}
 			}
-			
+
 			if (isBlocked){
 				calledWhileBlocked = true;
 				if (blockedCallback) {
@@ -284,24 +298,30 @@ namespace MV {
 			return ownedConnections.find(a_id) != ownedConnections.end();
 		}
 
-// 		chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-// 			a_script.add(chaiscript::fun([](SignalRegister<T> &a_self) {
-// 				return a_self.statTemplate;
-// 			}), "connect");
-// 			a_script.add(chaiscript::fun(&SignalRegister<T>::skin), "skin");
-// 			a_script.add(chaiscript::fun(&Creature::agent), "agent");
-// 			a_script.add(chaiscript::fun(&Creature::owningPlayer), "player");
-// 
-// 			a_script.add(chaiscript::fun(&Creature::assetPath), "assetPath");
-// 
-// 			a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Creature>, std::shared_ptr<Creature>>([](const MV::Scene::SafeComponent<Creature> &a_item) { return a_item.self(); }));
-// 			a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Creature>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<Creature> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
-// 
-// 			return a_script;
-// 		}
+		std::shared_ptr<Reciever<T>> connection(const std::string &a_id){
+			return ownedConnections[a_id];
+		}
+
+ 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+			if(!scriptHookedUp[&a_script]){
+				scriptHookedUp[&a_script] = true;
+
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Reciever<T>>(SignalRegister<T>::*)(const std::string &, std::function<T>)>(&SignalRegister<T>::connect)), "connect");
+				a_script.add(chaiscript::fun(static_cast<void(SignalRegister<T>::*)(const std::string &)>(&SignalRegister<T>::disconnect)), "disconnect");
+				a_script.add(chaiscript::fun(static_cast<void(SignalRegister<T>::*)(std::shared_ptr<Reciever<T>>)>(&SignalRegister<T>::disconnect)), "disconnect");
+	 			a_script.add(chaiscript::fun(&SignalRegister<T>::connection), "connection");
+	 			a_script.add(chaiscript::fun(&SignalRegister<T>::connected), "connected");
+			}
+
+			Reciever<T>.hook(a_script);
+
+ 			return a_script;
+ 		}
 	private:
 		std::map<std::string, SharedRecieverType> ownedConnections;
 		Signal<T> &slot;
+
+		static std::map<chaiscript::ChaiScript*, bool> scriptHookedUp;
 	};
 
 }

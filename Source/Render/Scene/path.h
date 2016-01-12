@@ -301,7 +301,13 @@ namespace MV {
 				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::gridPosition)), "gridPosition");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::gridPosition)), "gridPosition");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&)>(&PathAgent::gridPosition)), "gridPosition");
-				
+
+				SignalRegister<CallbackSignature>.hook(a_script);
+				a_script.add(chaiscript::fun(&PathAgent::onArrive), "onArrive");
+				a_script.add(chaiscript::fun(&PathAgent::onBlocked), "onBlocked");
+				a_script.add(chaiscript::fun(&PathAgent::onStop), "onStop");
+				a_script.add(chaiscript::fun(&PathAgent::onStart), "onStart");
+
 				a_script.add(chaiscript::type_conversion<SafeComponent<PathAgent>, std::shared_ptr<PathAgent>>([](const SafeComponent<PathAgent> &a_item) { return a_item.self(); }));
 				a_script.add(chaiscript::type_conversion<SafeComponent<PathAgent>, std::shared_ptr<Component>>([](const SafeComponent<PathAgent> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
 

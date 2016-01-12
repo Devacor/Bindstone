@@ -7,16 +7,21 @@
 
 enum TeamSide { LEFT, RIGHT };
 
+inline TeamSide operator!(TeamSide a_side) { return (a_side == LEFT) ? RIGHT : LEFT; }
+
 inline std::string sideToString(TeamSide a_side) { return (a_side == LEFT) ? "left" : "right"; }
+
 
 struct Constants;
 class GameInstance;
 class Building;
 
 class Team {
+	friend GameInstance;
 public:
 	Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_game);
 
+	MV::Point<> goal() const { return goalPosition; }
 private:
 	std::vector<MV::Scene::SafeComponent<Building>> buildings;
 	std::vector<MV::Scene::SafeComponent<Creature>> creatures;
@@ -26,12 +31,16 @@ private:
 	std::shared_ptr<Player> player;
 	int health;
 	TeamSide side;
+
+	MV::Point<> goalPosition;
 };
 
 class GameInstance {
 	friend Team;
 public:
 	GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, LocalData& a_data);
+
+	void beginMapDrag();
 
 	void nodeLoadBinder(cereal::JSONInputArchive &a_archive);
 
@@ -47,16 +56,20 @@ public:
 		return ourMouse;
 	}
 
-	std::shared_ptr<MV::Scene::Node> scene() {
+	std::shared_ptr<MV::Scene::Node> scene() const {
 		return worldScene;
 	}
 	
-	MV::Scene::SafeComponent<MV::Scene::PathMap> path() {
+	MV::Scene::SafeComponent<MV::Scene::PathMap> path() const {
 		return pathMap;
 	}
 
 	chaiscript::ChaiScript& script() {
 		return scriptEngine;
+	}
+
+	Team& teamForPlayer(const std::shared_ptr<Player> &a_player) {
+		return left.player == a_player ? left : right;
 	}
 
 	void moveCamera(MV::Point<> a_startPosition, MV::Scale a_scale);

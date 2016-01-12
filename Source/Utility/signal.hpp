@@ -283,6 +283,22 @@ namespace MV {
 		bool connected(const std::string &a_id) {
 			return ownedConnections.find(a_id) != ownedConnections.end();
 		}
+
+// 		chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+// 			a_script.add(chaiscript::fun([](SignalRegister<T> &a_self) {
+// 				return a_self.statTemplate;
+// 			}), "connect");
+// 			a_script.add(chaiscript::fun(&SignalRegister<T>::skin), "skin");
+// 			a_script.add(chaiscript::fun(&Creature::agent), "agent");
+// 			a_script.add(chaiscript::fun(&Creature::owningPlayer), "player");
+// 
+// 			a_script.add(chaiscript::fun(&Creature::assetPath), "assetPath");
+// 
+// 			a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Creature>, std::shared_ptr<Creature>>([](const MV::Scene::SafeComponent<Creature> &a_item) { return a_item.self(); }));
+// 			a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Creature>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<Creature> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
+// 
+// 			return a_script;
+// 		}
 	private:
 		std::map<std::string, SharedRecieverType> ownedConnections;
 		Signal<T> &slot;

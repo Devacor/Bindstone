@@ -299,10 +299,6 @@ public:
 		a_script.add(chaiscript::user_type<Building>(), "Building");
 		a_script.add(chaiscript::base_class<Component, Building>());
 
-// 		a_script.add(chaiscript::fun([&](MV::Scene::Node &a_self, const BuildingData &a_data, const std::string &a_skin, int a_slot, const std::shared_ptr<Player> &a_player) {
-// 			return a_self.attach<Building>(a_data, a_skin, a_slot, a_player, gameInstance);
-// 		}), "attachBuilding");
-
 		a_script.add(chaiscript::fun(&Building::current), "current");
 		a_script.add(chaiscript::fun(&Building::upgrade), "upgrade");
 
@@ -334,6 +330,9 @@ protected:
 	virtual void updateImplementation(double a_dt) override;
 private:
 	virtual void initialize() override;
+
+	void initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &a_newNode);
+
 	void incrementCreatureIndex();
 
 	const WaveCreature& currentCreature();
@@ -394,6 +393,26 @@ class Creature : public MV::Scene::Component {
 public:
 	ComponentDerivedAccessors(Creature)
 
+	std::string assetPath() const;
+
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance) {
+		a_script.add(chaiscript::user_type<Creature>(), "Creature");
+		a_script.add(chaiscript::base_class<Component, Creature>());
+
+		a_script.add(chaiscript::fun([](Creature &a_self) {
+			return a_self.statTemplate;
+		}), "stats");
+		a_script.add(chaiscript::fun(&Creature::skin), "skin");
+		a_script.add(chaiscript::fun(&Creature::agent), "agent");
+		a_script.add(chaiscript::fun(&Creature::owningPlayer), "player");
+
+		a_script.add(chaiscript::fun(&Creature::assetPath), "assetPath");
+
+		a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Creature>, std::shared_ptr<Creature>>([](const MV::Scene::SafeComponent<Creature> &a_item) { return a_item.self(); }));
+		a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Creature>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<Creature> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
+
+		return a_script;
+	}
 protected:
 	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance);
 	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance);
@@ -409,8 +428,6 @@ protected:
 		auto creatureClone = std::static_pointer_cast<Creature>(a_clone);
 		return a_clone;
 	}
-
-	std::string assetPath() const;
 private:
 
 	template <class Archive>
@@ -435,6 +452,8 @@ private:
 
 	const CreatureData& statTemplate;
 	std::string skin;
+
+	int health;
 
 	std::shared_ptr<Player> owningPlayer;
 	GameInstance& gameInstance;

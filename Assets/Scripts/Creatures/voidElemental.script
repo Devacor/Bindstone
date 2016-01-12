@@ -1,0 +1,2 @@
+auto goal = Point(30, 300);
+self.agent.gridGoal(goal, 0);

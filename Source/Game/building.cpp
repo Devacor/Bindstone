@@ -32,39 +32,7 @@ void Building::initialize() {
 	});
 	newNode->component<MV::Scene::Spine>()->animate("idle");
 
-	if (gameInstance.data().isLocal(owningPlayer)) {
-		auto spineBounds = newNode->component<MV::Scene::Spine>()->bounds();
-		std::cout << "BOUNDS: " << spineBounds << std::endl;
-		auto buildingButton = newNode->attach<MV::Scene::Clickable>(gameInstance.mouse())->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
-		//auto treeSprite = newNode->attach<MV::Scene::Sprite>()->bounds(newNode->bounds())->color({ 0x77FFFFFF });
-		auto nodeBounds = newNode->bounds();
-		buildingButton->onAccept.connect("TappedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
-			gameInstance.moveCamera(a_self->owner(), 1.0f);
-			auto modal = gameInstance.scene()->make("modal")->nodePosition(a_self->owner());
-			modal->attach<MV::Scene::Clickable>(gameInstance.mouse())->clickDetectionType(MV::Scene::Clickable::BoundsType::LOCAL)->bounds({ MV::point(-10000.0f, -10000.0f), MV::point(10000.0f, 10000.0f) })->onAccept.connect("dismiss", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
-				gameInstance.scene()->get("modal")->removeFromParent();
-			});
-
-			auto dialog = modal->make("dialog")->attach<MV::Scene::Grid>()->
-				margin(MV::size(4.0f, 4.0f))->
-				padding(MV::point(0.0f, 0.0f), MV::point(2.0f, 2.0f))->
-				color(0xCC659f23)->owner();
-
-			for (size_t i = 0; i < current()->upgrades.size();++i) {
-				auto&& currentUpgrade = current()->upgrades[i];
-				auto upgradeButton = button(dialog, gameInstance.data().managers().textLibrary, gameInstance.mouse(), MV::size(256.0f, 20.0f), MV::toWide(currentUpgrade->name + ": " + MV::to_string(currentUpgrade->cost)));
-				auto* upgradePointer = currentUpgrade.get();
-				upgradeButton->onAccept.connect("tryToBuy", [&, i, upgradePointer](std::shared_ptr<MV::Scene::Clickable> a_self){
-					if (owningPlayer->wallet.remove(Wallet::CurrencyType::SOFT, upgradePointer->cost)) {
-						upgrade(i);
-					}
-					gameInstance.scene()->get("modal")->removeFromParent();
-				});
-			}
-			auto dialogBounds = dialog->bounds().size();
-			dialog->translate({ -(dialogBounds.width / 2), 50.0f });
-		});
-	}
+	initializeBuildingButton(newNode);
 }
 
 void Building::spawnCurrentCreature() {
@@ -119,6 +87,47 @@ const WaveCreature& Building::currentCreature() {
 	return current()->waves[waveIndex].creatures[creatureIndex];
 }
 
+void Building::initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &a_newNode) {
+	if (gameInstance.data().isLocal(owningPlayer)) {
+		auto spineBounds = a_newNode->component<MV::Scene::Spine>()->bounds();
+		auto buildingButton = a_newNode->attach<MV::Scene::Clickable>(gameInstance.mouse())->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
+		//auto treeSprite = a_newNode->attach<MV::Scene::Sprite>()->bounds(newNode->bounds())->color({ 0x77FFFFFF });
+		auto nodeBounds = a_newNode->bounds();
+		buildingButton->onDrag.connect("TappedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self, const MV::Point<int> &, const MV::Point<int> &) {
+			if (a_self->totalDragDistance() > 8.0f) {
+				a_self->cancelPress(false);
+				gameInstance.beginMapDrag();
+			}
+		});
+		buildingButton->onAccept.connect("AcceptedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
+			gameInstance.moveCamera(a_self->owner(), 1.0f);
+			auto modal = gameInstance.scene()->make("modal")->nodePosition(a_self->owner());
+			modal->attach<MV::Scene::Clickable>(gameInstance.mouse())->clickDetectionType(MV::Scene::Clickable::BoundsType::LOCAL)->bounds({ MV::point(-10000.0f, -10000.0f), MV::point(10000.0f, 10000.0f) })->onAccept.connect("dismiss", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
+				gameInstance.scene()->get("modal")->removeFromParent();
+			});
+
+			auto dialog = modal->make("dialog")->attach<MV::Scene::Grid>()->
+				margin(MV::size(4.0f, 4.0f))->
+				padding(MV::point(0.0f, 0.0f), MV::point(2.0f, 2.0f))->
+				color(0xCC659f23)->owner();
+
+			for (size_t i = 0; i < current()->upgrades.size(); ++i) {
+				auto&& currentUpgrade = current()->upgrades[i];
+				auto upgradeButton = button(dialog, gameInstance.data().managers().textLibrary, gameInstance.mouse(), MV::size(256.0f, 20.0f), MV::toWide(currentUpgrade->name + ": " + MV::to_string(currentUpgrade->cost)));
+				auto* upgradePointer = currentUpgrade.get();
+				upgradeButton->onAccept.connect("tryToBuy", [&, i, upgradePointer](std::shared_ptr<MV::Scene::Clickable> a_self) {
+					if (owningPlayer->wallet.remove(Wallet::CurrencyType::SOFT, upgradePointer->cost)) {
+						upgrade(i);
+					}
+					gameInstance.scene()->get("modal")->removeFromParent();
+				});
+			}
+			auto dialogBounds = dialog->bounds().size();
+			dialog->translate({ -(dialogBounds.width / 2), 50.0f });
+		});
+}
+}
+
 Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance) :
 	Component(a_owner),
 	statTemplate(a_gameInstance.data().creatures().data(a_id)),
@@ -150,17 +159,15 @@ void Creature::initialize() {
 			);
 	});
 	newNode->componentInChildren<MV::Scene::Spine>()->animate("run");
-	newNode->attach<MV::Scene::PathAgent>(gameInstance.path().self(), gameInstance.path()->gridFromLocal(gameInstance.path()->owner()->localFromWorld(owner()->worldPosition())))->
+	agent = newNode->attach<MV::Scene::PathAgent>(gameInstance.path().self(), gameInstance.path()->gridFromLocal(gameInstance.path()->owner()->localFromWorld(owner()->worldPosition())))->
 		gridSpeed(4.0f)->
-		gridGoal(gameInstance.path()->gridFromLocal(gameInstance.path()->owner()->localFromWorld(gameInstance.scene()->get("RightGoal")->worldFromLocal(MV::Point<>()))))->
-		onArrive.connect("!", [](std::shared_ptr<MV::Scene::PathAgent> a_self) {
+		gridGoal(gameInstance.teamForPlayer(owningPlayer).goal(), 2.0f);
+
+	agent->onArrive.connect("!", [](std::shared_ptr<MV::Scene::PathAgent> a_self) {
 			std::weak_ptr<MV::Scene::Node> self = a_self->owner();
 			a_self->owner()->task().then("Countdown", [=](const MV::Task& a_task, double a_dt) mutable {
-				if (a_task.elapsed() > 1.0f) {
-					self.lock()->removeFromParent();
-					return true;
-				}
-				return false;
+				a_self->owner()->removeFromParent();
+				return true;
 			});
 		});
 
@@ -205,10 +212,12 @@ void Creature::initialize() {
 void Creature::updateImplementation(double a_delta) {
 	auto state = gameInstance.script().get_state();
 	SCOPE_EXIT{ gameInstance.script().set_state(state); };
-	gameInstance.script().set_locals({ {
-		
-		} 
-	});
+
+	auto localVariables = std::map<std::string, chaiscript::Boxed_Value>{
+		{"self", chaiscript::Boxed_Value(this)}
+	};
+
+	gameInstance.script().set_locals(localVariables);
 
 	gameInstance.script().eval(statTemplate.script());
 }

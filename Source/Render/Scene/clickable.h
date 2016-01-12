@@ -98,6 +98,10 @@ namespace MV {
 				return lastDragDelta;
 			}
 
+			PointPrecision totalDragDistance() const {
+				return accumulatedDragDistance;
+			}
+
 			double dragTime() const {
 				return dragTimer.check();
 			}
@@ -110,6 +114,9 @@ namespace MV {
 				overrideClickPriority = a_newPriority;
 				return std::static_pointer_cast<Clickable>(shared_from_this());
 			}
+
+			bool mouseInBounds(const MouseState& a_state);
+			bool mouseInBounds() { return mouseInBounds(ourMouse); }
 		protected:
 			Clickable(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
 
@@ -118,8 +125,6 @@ namespace MV {
 			virtual void acceptDownClick();
 
 			virtual void acceptUpClick();
-
-			bool mouseInBounds(const MouseState& a_state);
 
 			template <class Archive>
 			void serialize(Archive & archive) {
@@ -170,6 +175,7 @@ namespace MV {
 			Point<int> priorMousePosition;
 			Point<MV::PointPrecision> lastKnownVelocity;
 			double lastDragDelta = 0.0;
+			PointPrecision accumulatedDragDistance = 0.0f;
 			Point<> objectLocationBeforeDrag;
 
 			bool isInPressEvent = false;

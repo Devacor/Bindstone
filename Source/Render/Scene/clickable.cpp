@@ -141,11 +141,13 @@ namespace MV {
 			priorMousePosition = dragStartPosition;
 			lastKnownVelocity.clear();
 			dragTimer.start();
+			accumulatedDragDistance = 0.0f;
 			onMouseMoveHandle = ourMouse.onMove.connect([&](MouseState& a_mouseInner) {
 				auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
 				auto dragDeltaPosition = a_mouseInner.position() - priorMousePosition;
 				auto dt = dragTimer.delta();
 				lastDragDelta = dt;
+				accumulatedDragDistance += dragDeltaPosition.magnitude();
 				auto previousLastVelocity = lastKnownVelocity;
 				lastKnownVelocity = (lastKnownVelocity + (round<MV::PointPrecision>(dragDeltaPosition) * static_cast<MV::PointPrecision>(dt))) / 2.0f;
 				onDragSignal(protectFromDismissal, dragStartPosition, dragDeltaPosition);

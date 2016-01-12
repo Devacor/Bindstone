@@ -56,41 +56,31 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 	right(a_rightPlayer, RIGHT, *this),
 	scriptEngine(MV::create_chaiscript_stdlib()) {
 
-	hook();
+	pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
+
+	right.goalPosition = path()->gridFromLocal(path()->owner()->localFromWorld(scene()->get(sideToString(LEFT) + "Goal")->worldFromLocal(MV::Point<>())));
+	left.goalPosition = path()->gridFromLocal(path()->owner()->localFromWorld(scene()->get(sideToString(RIGHT) + "Goal")->worldFromLocal(MV::Point<>())));
 
 	ourMouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse) {
-		if (cameraAction.finished()) {
-			a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
-				auto signature = ourMouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse2) {
-					worldScene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
-				});
-				auto cancelId = MV::guid("cancelDrag");
-				ourMouse.onLeftMouseUp.connect(cancelId, [=](MV::MouseState& a_mouse2) {
-					a_mouse2.onMove.disconnect(signature);
-					a_mouse2.onLeftMouseUp.disconnect(cancelId);
-				});
-			}, []() {}, "MapDrag"));
-		}
+		beginMapDrag();
 	});
-// 
-// 	for (int i = 0; i < 8; ++i) {
-// 		auto leftNode = scene->get("left_" + std::to_string(i));
-// 		auto rightNode = scene->get("right_" + std::to_string(i));
-// 
-// 		auto newNode = leftNode->make("Assets/Prefabs/Buildings/life/life.prefab", std::bind(&GameInstance::nodeLoadBinder, this, std::placeholders::_1));
-// 		newNode->component<MV::Scene::Spine>()->animate("idle");
-// 
-// 		auto newNode2 = rightNode->make("Assets/Prefabs/Buildings/life/life.prefab", std::bind(&GameInstance::nodeLoadBinder, this, std::placeholders::_1));
-// 		newNode2->scale({ -1.0f, 1.0f, 1.0f });
-// 		newNode2->component<MV::Scene::Spine>()->animate("idle");
-// 		auto spineBounds = newNode->component<MV::Scene::Spine>()->bounds();
-// 		auto treeButton = leftNode->attach<MV::Scene::Clickable>(ourMouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::CHILDREN)->show()->color({ 0xFFFFFFFF });
-// 		treeButton->onAccept.connect("TappedBuilding", [=](std::shared_ptr<MV::Scene::Clickable> a_self) {
-// 			//spawnCreature(a_self->worldBounds().bottomRightPoint());
-// 			std::cout << "Left Building: " << i << std::endl;
-// 		});
-// 	}
-	pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
+
+	hook();
+}
+
+void GameInstance::beginMapDrag() {
+	if (cameraAction.finished()) {
+		ourMouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
+			auto signature = ourMouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse) {
+				worldScene->translate(MV::round<MV::PointPrecision>(a_mouse.position() - a_mouse.oldPosition()));
+			});
+			auto cancelId = MV::guid("cancelDrag");
+			ourMouse.onLeftMouseUp.connect(cancelId, [=](MV::MouseState& a_mouse2) {
+				a_mouse2.onMove.disconnect(signature);
+				a_mouse2.onLeftMouseUp.disconnect(cancelId);
+			});
+		}, []() {}, "MapDrag"));
+	}
 }
 
 void GameInstance::hook() {
@@ -122,6 +112,9 @@ void GameInstance::hook() {
 	MV::Scene::PathMap::hook(scriptEngine);
 	MV::Scene::PathAgent::hook(scriptEngine);
 	MV::Scene::Emitter::hook(scriptEngine, localData.managers().pool);
+
+	Building::hook(scriptEngine, *this);
+	Creature::hook(scriptEngine, *this);
 }
 
 void GameInstance::nodeLoadBinder(cereal::JSONInputArchive &a_archive) {

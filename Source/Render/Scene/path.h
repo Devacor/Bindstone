@@ -302,7 +302,7 @@ namespace MV {
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::gridPosition)), "gridPosition");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&)>(&PathAgent::gridPosition)), "gridPosition");
 
-				SignalRegister<CallbackSignature>.hook(a_script);
+				MV::SignalRegister<CallbackSignature>::hook(a_script);
 				a_script.add(chaiscript::fun(&PathAgent::onArrive), "onArrive");
 				a_script.add(chaiscript::fun(&PathAgent::onBlocked), "onBlocked");
 				a_script.add(chaiscript::fun(&PathAgent::onStop), "onStop");

@@ -1,2 +1,6 @@
-auto goal = Point(30, 300);
+auto goal = Point(30, 50);
 self.agent.gridGoal(goal, 0);
+self.agent.onArrive.connect("!", fun(x){print("made it!");});
+self.agent.onBlocked.connect("!", fun(x){print("blocked!");});
+self.agent.onStart.connect("!", fun(x){print("started!");});
+self.agent.onStop.connect("!", fun(x){print("stopped!");});

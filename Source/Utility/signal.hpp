@@ -75,8 +75,8 @@ namespace MV {
 		}
 
 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-			if(!scriptHookedUp[&a_script]){
-				scriptHookedUp[&a_script] = true;
+			if (!scriptHookedUp[reinterpret_cast<size_t>(&a_script)]) {
+				scriptHookedUp[reinterpret_cast<size_t>(&a_script)] = true;
 
 				a_script.add(chaiscript::fun(&Reciever<T>::block), "block");
 				a_script.add(chaiscript::fun(&Reciever<T>::blocked), "blocked");
@@ -96,8 +96,11 @@ namespace MV {
 		long long id;
 		static long long uniqueId;
 
-		static std::map<chaiscript::ChaiScript*, bool> scriptHookedUp;
+		static std::map<size_t, bool> scriptHookedUp;
 	};
+
+	template <typename T>
+	std::map<size_t, bool> Reciever<T>::scriptHookedUp = std::map<size_t, bool>();
 
 	template <typename T>
 	long long Reciever<T>::uniqueId = 0;
@@ -302,28 +305,30 @@ namespace MV {
 			return ownedConnections[a_id];
 		}
 
- 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-			if(!scriptHookedUp[&a_script]){
-				scriptHookedUp[&a_script] = true;
+		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+			if (!scriptHookedUp[reinterpret_cast<size_t>(&a_script)]) {
+				scriptHookedUp[reinterpret_cast<size_t>(&a_script)] = true;
 
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Reciever<T>>(SignalRegister<T>::*)(const std::string &, std::function<T>)>(&SignalRegister<T>::connect)), "connect");
 				a_script.add(chaiscript::fun(static_cast<void(SignalRegister<T>::*)(const std::string &)>(&SignalRegister<T>::disconnect)), "disconnect");
 				a_script.add(chaiscript::fun(static_cast<void(SignalRegister<T>::*)(std::shared_ptr<Reciever<T>>)>(&SignalRegister<T>::disconnect)), "disconnect");
-	 			a_script.add(chaiscript::fun(&SignalRegister<T>::connection), "connection");
-	 			a_script.add(chaiscript::fun(&SignalRegister<T>::connected), "connected");
+				a_script.add(chaiscript::fun(&SignalRegister<T>::connection), "connection");
+				a_script.add(chaiscript::fun(&SignalRegister<T>::connected), "connected");
 			}
 
-			Reciever<T>.hook(a_script);
+			Reciever<T>::hook(a_script);
 
- 			return a_script;
- 		}
+			return a_script;
+		}
 	private:
 		std::map<std::string, SharedRecieverType> ownedConnections;
 		Signal<T> &slot;
 
-		static std::map<chaiscript::ChaiScript*, bool> scriptHookedUp;
+		static std::map<size_t, bool> scriptHookedUp;
 	};
 
+	template <typename T>
+	std::map<size_t, bool> SignalRegister<T>::scriptHookedUp = std::map<size_t, bool>();
 }
 
 #endif

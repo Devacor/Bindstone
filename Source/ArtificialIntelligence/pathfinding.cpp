@@ -13,7 +13,8 @@ namespace MV {
 		onUnblock(onUnblockSignal),
 		onStaticBlock(onStaticBlockSignal),
 		onStaticUnblock(onStaticUnblockSignal),
-		onCostChange(onCostChangeSignal){
+		onCostChange(onCostChangeSignal),
+		onClearanceChange(onClearanceChangeSignal){
 		edges.fill(nullptr);
 	}
 
@@ -28,7 +29,8 @@ namespace MV {
 		onUnblock(onUnblockSignal),
 		onStaticBlock(onStaticBlockSignal),
 		onStaticUnblock(onStaticUnblockSignal),
-		onCostChange(onCostChangeSignal) {
+		onCostChange(onCostChangeSignal),
+		onClearanceChange(onClearanceChangeSignal) {
 		edges.fill(nullptr);
 	}
 
@@ -40,7 +42,8 @@ namespace MV {
 		onUnblock(onUnblockSignal),
 		onStaticBlock(onStaticBlockSignal),
 		onStaticUnblock(onStaticUnblockSignal),
-		onCostChange(onCostChangeSignal) {
+		onCostChange(onCostChangeSignal),
+		onClearanceChange(onClearanceChangeSignal) {
 		edges.fill(nullptr);
 	}
 
@@ -221,33 +224,54 @@ namespace MV {
 		}
 	}
 
-	void MapNode::calculateClearance(){
+	void MapNode::calculateClearance() const{
 		int oldClearance = clearanceAmount;
+		clearanceRecievers.clear();
 		performClearanceIncrementAndObservation();
-		if (oldClearance != clearanceAmount) { onClearanceChanged(map, location); }
+		registerCalculateClearanceCallbacks();
+		if (oldClearance != clearanceAmount) { onClearanceChangeSignal(map->shared_from_this(), location); }
 	}
 
-	void MapNode::performClearanceIncrementAndObservation(){
-		clearanceAmount = 1;
+	void MapNode::registerCalculateClearanceCallbacks() const {
 		clearanceRecievers.clear();
+		for (int y = 0; y < clearanceAmount; ++y) {
+			for (int x = 0; x < clearanceAmount; ++x) {
+				auto reciever = (*map)[location.x + x][location.y + y].onBlock.connect([&](std::shared_ptr<Map>, const Point<int> &) {
+					calculateClearance();
+				});
+				clearanceRecievers.push_back(reciever);
+			}
+		}
+		std::cout << std::endl;
+	}
+
+	void MapNode::registerUnblockCalculateClearanceCallback(int x, int y) const {
+		if (map->inBounds(Point<int>(x, y))) {
+			std::cout << "R:" << x << ", " << y << "\t";
+			auto reciever = (*map)[x][y].onUnblock.connect([&](std::shared_ptr<Map>, const Point<int> &) {
+				calculateClearance();
+			});
+			clearanceRecievers.push_back(reciever);
+		}
+	}
+
+	void MapNode::performClearanceIncrementAndObservation() const {
+		clearanceAmount = 1;
 		while (true){
 			for (int y = clearanceAmount; y < clearanceAmount + 1; ++y) {
 				for (int x = 0; x < clearanceAmount + 1; ++x) {
-					if (clearanceAmount > MAXIMUM_CLEARANCE ||
-						!map.inBounds(new Point<int>(location.x + x, location.y + y)) || map[location.x + x, location.y + y].blocked() ||
-						!map.inBounds(new Point<int>(location.x + y, location.y + x)) || map[location.x + y, location.y + x].blocked()){
+					if (clearanceAmount >= MAXIMUM_CLEARANCE || offsetBlocked(x, y) || offsetBlocked(y, x)) {
 						return;
 					}
-				}
-				for (size_t x = 0; x < clearanceAmount + 1; ++x){
-					clearanceRecievers.push_back(map[location.x + x][location.y + y].onBlock.connect([&](std::shared_ptr<Map>, const Point<int> &){
-						calculateClearance();
-					}));
 				}
 			}
 
 			++clearanceAmount;
 		}
+	}
+
+	bool MapNode::offsetBlocked(int x, int y) const {
+		return !map->inBounds(Point<int>(location.x + x, location.y + y)) || (*map)[location.x + x][location.y + y].blocked();
 	}
 
 	void Map::resize(const Size<int> &a_size, float a_defaultCost /*= 1.0f*/) {
@@ -342,6 +366,7 @@ namespace MV {
 		PathCalculationNode* bestNode = nullptr;
 		PointPrecision bestDistance = -1;
 		int64_t totalSearched = 0;
+
 		while (!open.empty() && ((maxSearchNodes > 0 && totalSearched++ < maxSearchNodes) || maxSearchNodes <= 0)) {
 			closed.push_back(open.back());
 			currentNode = &closed.back();
@@ -359,9 +384,10 @@ namespace MV {
 
 			auto& mapNode = currentNode->mapNode();
 			for (size_t i = 0; i < mapNode.size(); ++i) {
-				auto& candidateForOpenList = mapNode[i];
-				if (candidateForOpenList != nullptr && !candidateForOpenList->blocked() && candidateForOpenList.clearance() >= unitSize) {
-					insertIntoOpen(mapNode[i]->position(), mapNode[i]->totalCost(), currentNode, i >= 4);
+				if (mapNode[i] != nullptr) {
+					if (!mapNode[i]->blocked() && mapNode[i]->clearance() >= unitSize) {
+						insertIntoOpen(mapNode[i]->position(), mapNode[i]->totalCost(), currentNode, i >= 4);
+					}
 				}
 			}
 
@@ -423,10 +449,10 @@ namespace MV {
 				auto desiredPosition = desiredPositionFromCalculatedPathIndex(currentPathIndex);
 				PointPrecision distanceToNextNode = static_cast<PointPrecision>(distance(ourPosition, desiredPosition));
 				PointPrecision maxDistance = std::min(totalDistanceToTravel, distanceToNextNode);
-				map->get(cast<int>(ourPosition)).unblock();
+				unblockMap();
 				ourPosition += (desiredPosition - ourPosition).normalized() * maxDistance;
 				ourPosition.z = 0;
-				map->get(cast<int>(ourPosition)).block();
+				blockMap();
 				totalDistanceToTravel -= maxDistance;
 				if (totalDistanceToTravel > 0.0f && currentPathIndex < calculatedPath.size()) {
 					++currentPathIndex;
@@ -438,6 +464,7 @@ namespace MV {
 			}
 
 			if (!pathfinding()) {
+				recievers.clear();
 				onArriveSignal(shared_from_this());
 			}
 		}
@@ -463,12 +490,23 @@ namespace MV {
 				costs.push_back(TemporaryCost(map, calculatedPath[i].position(), temporaryCostAmount));
 			}
 			auto& mapNode = map->get(calculatedPath[i].position());
-			auto reciever = mapNode.onBlock.connect([&](const std::shared_ptr<Map> &, const Point<int> &a_position) {
-				if (a_position != cast<int>(ourPosition) && !activeUpdate) {
-					markDirty();
-				}
-			});
-			recievers.push_back(reciever);
+
+			{
+				auto reciever = mapNode.onBlock.connect([&](std::shared_ptr<Map>, const Point<int> &a_position) {
+					if (!activeUpdate && !overlaps(a_position)) {
+						markDirty();
+					}
+				});
+				recievers.push_back(reciever);
+			}
+			{
+				auto reciever = mapNode.onClearanceChange.connect([&](std::shared_ptr<Map>, const Point<int> &a_position) {
+					if (!activeUpdate && size() <= map->get(a_position).clearance() && !overlaps(a_position)) {
+						markDirty();
+					}
+				});
+				recievers.push_back(reciever);
+			}
 		}
 	}
 

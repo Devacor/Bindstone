@@ -216,6 +216,37 @@ namespace MV {
 			for (size_t i = 0; i < (useCorners ? 8 : 4);++i) {
 				initializeEdge(i, edgePoints[i]);
 			}
+
+			calculateClearance();
+		}
+	}
+
+	void MapNode::calculateClearance(){
+		int oldClearance = clearanceAmount;
+		performClearanceIncrementAndObservation();
+		if (oldClearance != clearanceAmount) { onClearanceChanged(map, location); }
+	}
+
+	void MapNode::performClearanceIncrementAndObservation(){
+		clearanceAmount = 1;
+		clearanceRecievers.clear();
+		while (true){
+			for (int y = clearanceAmount; y < clearanceAmount + 1; ++y) {
+				for (int x = 0; x < clearanceAmount + 1; ++x) {
+					if (clearanceAmount > MAXIMUM_CLEARANCE ||
+						!map.inBounds(new Point<int>(location.x + x, location.y + y)) || map[location.x + x, location.y + y].blocked() ||
+						!map.inBounds(new Point<int>(location.x + y, location.y + x)) || map[location.x + y, location.y + x].blocked()){
+						return;
+					}
+				}
+				for (size_t x = 0; x < clearanceAmount + 1; ++x){
+					clearanceRecievers.push_back(map[location.x + x][location.y + y].onBlock.connect([&](std::shared_ptr<Map>, const Point<int> &){
+						calculateClearance();
+					}));
+				}
+			}
+
+			++clearanceAmount;
 		}
 	}
 
@@ -328,12 +359,14 @@ namespace MV {
 
 			auto& mapNode = currentNode->mapNode();
 			for (size_t i = 0; i < mapNode.size(); ++i) {
-				if (mapNode[i] != nullptr && !mapNode[i]->blocked()) {
+				auto& candidateForOpenList = mapNode[i];
+				if (candidateForOpenList != nullptr && !candidateForOpenList->blocked() && candidateForOpenList.clearance() >= unitSize) {
 					insertIntoOpen(mapNode[i]->position(), mapNode[i]->totalCost(), currentNode, i >= 4);
 				}
 			}
 
 		}
+
 		if (!found) {
 			currentNode = (bestNode == nullptr || (distance(goalPosition, startPosition) < distance(goalPosition, bestNode->position()))) ? nullptr : bestNode;
 		}

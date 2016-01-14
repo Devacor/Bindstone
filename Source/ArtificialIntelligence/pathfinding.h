@@ -33,6 +33,7 @@ namespace MV {
 		Signal<CallbackSignature> onStaticBlockSignal;
 		Signal<CallbackSignature> onStaticUnblockSignal;
 		Signal<CallbackSignature> onCostChangeSignal;
+		Signal<CallbackSignature> onClearanceChangeSignal;
 
 	public:
 		SignalRegister<CallbackSignature> onBlock;
@@ -40,6 +41,7 @@ namespace MV {
 		SignalRegister<CallbackSignature> onStaticBlock;
 		SignalRegister<CallbackSignature> onStaticUnblock;
 		SignalRegister<CallbackSignature> onCostChange;
+		SignalRegister<CallbackSignature> onClearanceChange;
 
 		MapNode(Map& a_grid, const Point<int> &a_location, float a_cost, bool a_useCorners);
 		MapNode(const MapNode &a_rhs);
@@ -58,6 +60,11 @@ namespace MV {
 		void staticBlock();
 		void staticUnblock();
 		bool staticallyBlocked() const;
+
+		int clearance() {
+			lazyInitialize();
+			return clearanceAmount;
+		}
 
 		Map& parent();
 		Point<int> position() const;
@@ -101,6 +108,9 @@ namespace MV {
 			map = weakMap.lock().get();
 		}
 
+		void calculateClearance();
+		void performClearanceIncrementAndObservation();
+
 		void addTemporaryCost(float a_newTemporaryCost);
 		void removeTemporaryCost(float a_newTemporaryCost);
 
@@ -115,12 +125,17 @@ namespace MV {
 		mutable bool initialized = false;
 		mutable std::array<MapNode*, 8> edges;
 
+		std::vector<MapNode::SharedRecieverType> clearanceRecievers;
+
 		bool useCorners;
 		Point<int> location;
 		float travelCost = 1.0f;
 		float temporaryCost = 0.0f;
 		int staticBlockedSemaphore = 0;
+		int clearanceAmount = 0;
 		int blockedSemaphore = 0;
+
+		const int MAXIMUM_CLEARANCE = 8;
 	};
 
 	class Map : public std::enable_shared_from_this<Map> {
@@ -217,7 +232,7 @@ namespace MV {
 			temporaryCost(std::move(a_rhs.temporaryCost)),
 			position(std::move(a_rhs.position)),
 			map(std::move(a_rhs.map)){
-			
+
 			a_rhs.temporaryCost = 0;
 		}
 
@@ -399,12 +414,20 @@ namespace MV {
 		SignalRegister<CallbackSignature> onStart;
 
 
-		static std::shared_ptr<NavigationAgent> make(const std::shared_ptr<Map> &a_map, const Point<int> &a_newPosition = Point<int>()){
-			return std::shared_ptr<NavigationAgent>(new NavigationAgent(a_map, a_newPosition));
+		static std::shared_ptr<NavigationAgent> make(const std::shared_ptr<Map> &a_map, const Point<int> &a_newPosition = Point<int>(), bool a_offsetCenterByHalf = true){
+			return std::shared_ptr<NavigationAgent>(new NavigationAgent(a_map, 1, a_newPosition, a_offsetCenterByHalf));
 		}
 
-		static std::shared_ptr<NavigationAgent> make(const std::shared_ptr<Map> &a_map, const Point<> &a_newPosition) {
-			return std::shared_ptr<NavigationAgent>(new NavigationAgent(a_map, a_newPosition));
+		static std::shared_ptr<NavigationAgent> make(const std::shared_ptr<Map> &a_map, const Point<> &a_newPosition, bool a_offsetCenterByHalf = true) {
+			return std::shared_ptr<NavigationAgent>(new NavigationAgent(a_map, 1, a_newPosition, a_offsetCenterByHalf));
+		}
+
+		static std::shared_ptr<NavigationAgent> make(const std::shared_ptr<Map> &a_map, int a_unitSize, const Point<int> &a_newPosition = Point<int>(), bool a_offsetCenterByHalf = true){
+			return std::shared_ptr<NavigationAgent>(new NavigationAgent(a_map, a_unitSize, a_newPosition, a_offsetCenterByHalf));
+		}
+
+		static std::shared_ptr<NavigationAgent> make(const std::shared_ptr<Map> &a_map, int a_unitSize, const Point<> &a_newPosition, bool a_offsetCenterByHalf = true) {
+			return std::shared_ptr<NavigationAgent>(new NavigationAgent(a_map, a_unitSize, a_newPosition, a_offsetCenterByHalf));
 		}
 
 		~NavigationAgent() {
@@ -416,6 +439,7 @@ namespace MV {
 			result->ourGoal = ourGoal;
 			result->ourSpeed = ourSpeed;
 			result->acceptableDistance = acceptableDistance;
+			result->unitSize = unitSize;
 			return result;
 		}
 
@@ -441,15 +465,15 @@ namespace MV {
 		}
 
 		std::shared_ptr<NavigationAgent> position(const Point<int> &a_newPosition) {
-			return position(cast<PointPrecision>(a_newPosition) + point(.5f, .5f));
+			return position(cast<PointPrecision>(a_newPosition));
 		}
 
 		std::shared_ptr<NavigationAgent> position(const Point<> &a_newPosition) {
 			auto self = shared_from_this();
 			bool wasMoving = pathfinding();
 			map->get(cast<int>(ourPosition)).unblock();
-			ourPosition = a_newPosition;
-			ourGoal = a_newPosition;
+			ourPosition = a_newPosition + centerOffset;
+			ourGoal = a_newPosition + centerOffset;
 			map->get(cast<int>(ourPosition)).block();
 			markDirty();
 			if (wasMoving) {
@@ -459,13 +483,13 @@ namespace MV {
 		}
 
 		std::shared_ptr<NavigationAgent> goal(const Point<int> &a_newGoal, PointPrecision a_acceptableDistance = 0.0f) {
-			return goal(cast<PointPrecision>(a_newGoal) + point(.5f, .5f), a_acceptableDistance);
+			return goal(cast<PointPrecision>(a_newGoal), a_acceptableDistance);
 		}
 
 		std::shared_ptr<NavigationAgent> goal(const Point<> &a_newGoal, PointPrecision a_acceptableDistance = 0.0f) {
 			auto self = shared_from_this();
 			bool wasMoving = pathfinding();
-			ourGoal = a_newGoal;
+			ourGoal = a_newGoal + centerOffset;
 			acceptableDistance = std::max(a_acceptableDistance, 0.0f);
 			markDirty();
 			if (wasMoving && !pathfinding()) {
@@ -483,6 +507,16 @@ namespace MV {
 		void update(double a_dt);
 
 		bool AttemptToRecalculate();
+
+		int size() const {
+			return unitSize;
+		}
+
+		bool overlaps(Point<int> a_position) const {
+			var topLeft = Point<int>.cast(position());
+			return (a_position.x > topLeft.x) && (a_position.x < topLeft.x + size()) ||
+				(a_position.y > topLeft.y) && (a_position.y < topLeft.y + size());
+		}
 
 		PointPrecision speed() const {
 			return ourSpeed;
@@ -504,13 +538,15 @@ namespace MV {
 			onStart(onStartSignal),
 			onBlocked(onBlockedSignal){}
 	private:
-		NavigationAgent(std::shared_ptr<Map> a_map, const Point<int> &a_newPosition) :
-			NavigationAgent(a_map, cast<PointPrecision>(a_newPosition) + point(.5f, .5f)){
+		NavigationAgent(std::shared_ptr<Map> a_map, int a_unitSize, const Point<int> &a_newPosition, bool a_offsetCenterByHalf) :
+			NavigationAgent(a_map, a_unitSize, cast<PointPrecision>(a_newPosition), a_offsetCenterByHalf)){
 		}
-		NavigationAgent(std::shared_ptr<Map> a_map, const Point<> &a_newPosition = Point<>()) :
+		NavigationAgent(std::shared_ptr<Map> a_map, int a_unitSize, const Point<> &a_newPosition, bool a_offsetCenterByHalf) :
 			map(a_map),
-			ourPosition(a_newPosition),
-			ourGoal(a_newPosition),
+			centerOffset(a_offsetCenterByHalf ? point(.5f, .5f) : point(0.0f, 0.0f)),
+			ourPosition(a_newPosition + centerOffset),
+			ourGoal(a_newPosition + centerOffset),
+			unitSize(a_unitSize),
 			onArrive(onArriveSignal),
 			onStop(onStopSignal),
 			onStart(onStartSignal),
@@ -527,7 +563,7 @@ namespace MV {
 				return cast<PointPrecision>(calculatedPath[index].position()) + point(.5f, .5f);
 			}
 		}
-		
+
 		template <class Archive>
 		void serialize(Archive & archive) {
 			archive(
@@ -535,6 +571,7 @@ namespace MV {
 				CEREAL_NVP(ourGoal),
 				CEREAL_NVP(ourSpeed),
 				CEREAL_NVP(acceptableDistance),
+				CEREAL_NVP(unitSize),
 				CEREAL_NVP(map)
 			);
 
@@ -560,6 +597,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Map> map;
+		Point<PointPrecision> centerOffset;
 		Point<PointPrecision> ourPosition;
 		Point<PointPrecision> ourGoal;
 		PointPrecision ourSpeed = 1.0f;
@@ -568,6 +606,9 @@ namespace MV {
 		bool dirtyPath = true;
 		const int64_t maxNodesToSearch = 100;
 		bool activeUpdate = false;
+
+		int unitSize = 1;
+
 		std::vector<TemporaryCost> costs;
 		std::vector<MapNode::SharedRecieverType> recievers;
 

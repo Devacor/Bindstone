@@ -255,12 +255,20 @@ namespace MV {
 				return std::static_pointer_cast<PathAgent>(shared_from_this());
 			}
 
-			std::shared_ptr<PathAgent> gridGoal(const Point<int> &a_newGoal, PointPrecision a_acceptableDistance = 0.0f) {
+			std::shared_ptr<PathAgent> gridGoal(const Point<int> &a_newGoal) {
+				return gridGoal(a_newGoal, 0.0f);
+			}
+
+			std::shared_ptr<PathAgent> gridGoal(const Point<int> &a_newGoal, PointPrecision a_acceptableDistance) {
 				agent->goal(a_newGoal, a_acceptableDistance);
 				return std::static_pointer_cast<PathAgent>(shared_from_this());
 			}
 
-			std::shared_ptr<PathAgent> gridGoal(const Point<> &a_newGoal, PointPrecision a_acceptableDistance = 0.0f) {
+			std::shared_ptr<PathAgent> gridGoal(const Point<> &a_newGoal) {
+				return gridGoal(a_newGoal, 0.0f);
+			}
+
+			std::shared_ptr<PathAgent> gridGoal(const Point<> &a_newGoal, PointPrecision a_acceptableDistance) {
 				agent->goal(a_newGoal, a_acceptableDistance);
 				return std::static_pointer_cast<PathAgent>(shared_from_this());
 			}
@@ -288,6 +296,9 @@ namespace MV {
 				a_script.add(chaiscript::fun([](Node &a_self, const std::shared_ptr<PathMap> &a_map, const Point<> &a_gridPosition) { return a_self.attach<PathAgent>(a_map, a_gridPosition); }), "attachPathAgent");
 				a_script.add(chaiscript::fun([](Node &a_self, const std::shared_ptr<PathMap> &a_map, const Point<int> &a_gridPosition) { return a_self.attach<PathAgent>(a_map, a_gridPosition); }), "attachPathAgent");
 
+				a_script.add(chaiscript::fun([](Node &a_self, const std::shared_ptr<PathMap> &a_map, const Point<> &a_gridPosition, int a_unitSize) { return a_self.attach<PathAgent>(a_map, a_gridPosition, a_unitSize); }), "attachPathAgent");
+				a_script.add(chaiscript::fun([](Node &a_self, const std::shared_ptr<PathMap> &a_map, const Point<int> &a_gridPosition, int a_unitSize) { return a_self.attach<PathAgent>(a_map, a_gridPosition, a_unitSize); }), "attachPathAgent");
+
 				a_script.add(chaiscript::fun(&PathAgent::pathfinding), "pathfinding");
 				a_script.add(chaiscript::fun(&PathAgent::path), "path");
 
@@ -297,6 +308,8 @@ namespace MV {
 				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::gridGoal)), "gridGoal");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&, PointPrecision)>(&PathAgent::gridGoal)), "gridGoal");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&, PointPrecision)>(&PathAgent::gridGoal)), "gridGoal");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::gridGoal)), "gridGoal");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&)>(&PathAgent::gridGoal)), "gridGoal");
 
 				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::gridPosition)), "gridPosition");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::gridPosition)), "gridPosition");
@@ -315,20 +328,20 @@ namespace MV {
 			}
 
 		protected:
-			PathAgent(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<PathMap> &a_map, const Point<> &a_gridPosition) :
+			PathAgent(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<PathMap> &a_map, const Point<> &a_gridPosition, int a_unitSize = 1) :
 				Component(a_owner),
 				map(a_map),
-				agent(NavigationAgent::make(a_map->map, a_gridPosition)),
+				agent(NavigationAgent::make(a_map->map, a_gridPosition, a_unitSize)),
 				onArrive(onArriveSignal),
 				onBlocked(onBlockedSignal),
 				onStop(onStopSignal),
 				onStart(onStartSignal){
 			}
 
-			PathAgent(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<PathMap> &a_map, const Point<int> &a_gridPosition) :
+			PathAgent(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<PathMap> &a_map, const Point<int> &a_gridPosition, int a_unitSize = 1) :
 				Component(a_owner),
 				map(a_map),
-				agent(NavigationAgent::make(a_map->map, a_gridPosition)),
+				agent(NavigationAgent::make(a_map->map, a_gridPosition, a_unitSize)),
 				onArrive(onArriveSignal),
 				onBlocked(onBlockedSignal),
 				onStop(onStopSignal),

@@ -63,10 +63,6 @@ namespace MV {
 			}
 		}
 
-		static Task make(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blocking = true, bool a_blockParentCompletion = true){
-			return Task(a_name, a_task, a_blocking, a_blockParentCompletion);
-		}
-
 		std::shared_ptr<Task> last() {
 			return mostRecentCreated;
 		}
@@ -88,7 +84,7 @@ namespace MV {
 					if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
 					onExceptionSignal(*this, a_e);
 				}
-				
+
 				totalTime += a_dt;
 				if (deltaInterval > 0) {
 					totalUpdateIntervals();
@@ -99,15 +95,10 @@ namespace MV {
 			}
 			return finished();
 		}
-		
+
 		Task& finish() {
-			forceCompleteFlag = true;
-			for(auto&& task : parallelTasks){
-				task->finish();
-			}
-			for(auto&& task : sequentialTasks){
-				task->finish();
-			}
+			finishNoUpdate();
+			update(0);
 			return *this;
 		}
 
@@ -122,12 +113,12 @@ namespace MV {
 		double elapsed() const {
 			return lastCalledInterval;
 		}
-		
+
 		Task& unblockChildren() {
 			alwaysRunChildren = true;
 			return *this;
 		}
-		
+
 		Task& blockChildren() {
 			alwaysRunChildren = false;
 			return *this;
@@ -135,6 +126,7 @@ namespace MV {
 
 		Task& finishLocal(){
 			forceCompleteFlag = true;
+			update(0);
 			return *this;
 		}
 
@@ -153,10 +145,6 @@ namespace MV {
 			return *this;
 		}
 
-		bool forceCompleted() const{
-			return forceCompleteFlag;
-		}
-
 		bool blocking() const{
 			return block;
 		}
@@ -165,13 +153,13 @@ namespace MV {
 			if(!sequentialTasks.empty()){
 				sequentialTasks[0]->suspend();
 			}
-			
+
 			sequentialTasks.emplace_front(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
 			mostRecentCreated = sequentialTasks.front();
 			onFinishAllSignal.unblock();
 			return *this;
 		}
-		
+
 		Task& now(const std::string &a_name, bool a_blockParentCompletion = true){
 			return now(a_name, [](Task&, double){return true;}, a_blockParentCompletion);
 		}
@@ -182,7 +170,7 @@ namespace MV {
 			mostRecentCreated = sequentialTasks.back();
 			return *this;
 		}
-		
+
 		Task& then(const std::string &a_name, bool a_blockParentCompletion = true){
 			return then(a_name, [](Task&, double){return true;}, a_blockParentCompletion);
 		}
@@ -208,7 +196,7 @@ namespace MV {
 			mostRecentCreated = parallelTasks.back();
 			return *this;
 		}
-		
+
 		Task& also(const std::string &a_name, bool a_infinite = false, bool a_blockParentCompletion = true) {
 			also(a_name, [a_infinite](Task&, double){return !a_infinite;}, a_blockParentCompletion);
 			if (a_infinite) {
@@ -247,7 +235,7 @@ namespace MV {
 					return (*foundInParallels);
 				}
 			}
-			
+
 			require<ResourceException>(!a_throwOnNotFound, "Failed to find: [", a_name, "] in task: [", taskName, "]");
 			return std::shared_ptr<Task>();
 		}
@@ -259,8 +247,73 @@ namespace MV {
 		SignalRegister<void(Task&)> onResume;
 		SignalRegister<void()> onCancel;
 		SignalRegister<void(Task&, std::exception &)> onException;
+
+
+		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+			a_script.add(chaiscript::user_type<Task>(), "Task");
+
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion) { return a_self.now(a_name, a_task, a_blockParentCompletion); }), "now");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task) { return a_self.now(a_name, a_task); }), "now");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, bool a_blockParentCompletion) { return a_self.now(a_name, a_blockParentCompletion); }), "now");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name) { return a_self.now(a_name); }), "now");
+
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion) { return a_self.then(a_name, a_task, a_blockParentCompletion); }), "then");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task) { return a_self.then(a_name, a_task); }), "then");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, bool a_blockParentCompletion) { return a_self.then(a_name, a_blockParentCompletion); }), "then");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name) { return a_self.then(a_name); }), "then");
+
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion) { return a_self.thenAlso(a_name, a_task, a_blockParentCompletion); }), "thenAlso");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task) { return a_self.thenAlso(a_name, a_task); }), "thenAlso");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, bool a_infinite, bool a_blockParentCompletion) { return a_self.thenAlso(a_name, a_infinite, a_blockParentCompletion); }), "thenAlso");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, bool a_infinite) { return a_self.thenAlso(a_name, a_infinite); }), "thenAlso");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name) { return a_self.thenAlso(a_name); }), "thenAlso");
+
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion) { return a_self.also(a_name, a_task, a_blockParentCompletion); }), "also");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task) { return a_self.also(a_name, a_task); }), "also");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, bool a_infinite, bool a_blockParentCompletion) { return a_self.also(a_name, a_infinite, a_blockParentCompletion); }), "also");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, bool a_infinite) { return a_self.also(a_name, a_infinite); }), "also");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name) { return a_self.also(a_name); }), "also");
+
+			a_script.add(chaiscript::fun(&Task::update), "update");
+
+			a_script.add(chaiscript::fun(&Task::last), "last");
+			a_script.add(chaiscript::fun(&Task::interval), "interval");
+			a_script.add(chaiscript::fun(&Task::blocking), "blocking");
+			a_script.add(chaiscript::fun(&Task::name), "name");
+			a_script.add(chaiscript::fun(&Task::finish), "finish");
+			a_script.add(chaiscript::fun(&Task::finished), "finished");
+			a_script.add(chaiscript::fun(&Task::finish), "cancel");
+			a_script.add(chaiscript::fun(&Task::localElapsed), "localElapsed");
+			a_script.add(chaiscript::fun(&Task::elapsed), "elapsed");
+			a_script.add(chaiscript::fun(&Task::unblockChildren), "unblockChildren");
+			a_script.add(chaiscript::fun(&Task::blockChildren), "blockChildren");
+			a_script.add(chaiscript::fun(&Task::get), "get");
+			
+			MV::SignalRegister<void(Task&)>::hook(a_script);
+			MV::SignalRegister<void()>::hook(a_script);
+			MV::SignalRegister<void(Task&, std::exception &)>::hook(a_script);
+			a_script.add(chaiscript::fun(&Task::onStart), "onStart");
+			a_script.add(chaiscript::fun(&Task::onFinish), "onFinish");
+			a_script.add(chaiscript::fun(&Task::onFinishAll), "onFinishAll");
+			a_script.add(chaiscript::fun(&Task::onSuspend), "onSuspend");
+			a_script.add(chaiscript::fun(&Task::onResume), "onResume");
+			a_script.add(chaiscript::fun(&Task::onCancel), "onCancel");
+			a_script.add(chaiscript::fun(&Task::onException), "onException");
+
+			return a_script;
+		}
 	private:
 		bool cancelled = false;
+
+		void finishNoUpdate() {
+			forceCompleteFlag = true;
+			for(auto&& task : parallelTasks){
+				task->finishNoUpdate();
+			}
+			for(auto&& task : sequentialTasks){
+				task->finishNoUpdate();
+			}
+		}
 
 		void totalUpdateIntervals() {
 			size_t steps = static_cast<size_t>((totalTime - lastCalledInterval) / deltaInterval);
@@ -269,7 +322,7 @@ namespace MV {
 				totalUpdateStep(deltaInterval);
 			}
 		}
-		
+
 		void totalUpdateStep(double a_dt){
 			try {
 				if (!cancelled) {
@@ -350,8 +403,8 @@ namespace MV {
 					}
 				} catch(std::exception &a_e) {
 					if (onExceptionSignal.cullDeadObservers() == 0) {
-						sequentialTasks.erase(currentSequentialTask); 
-						throw; 
+						sequentialTasks.erase(currentSequentialTask);
+						throw;
 					}
 
 					onExceptionSignal(*this, a_e);
@@ -386,7 +439,7 @@ namespace MV {
 		}
 
 		bool noChildrenBlockingCompletion() const{
-			return 
+			return
 				(std::find_if(parallelTasks.cbegin(), parallelTasks.cend(), [](const std::shared_ptr<Task> &a_task){
 					return a_task->blockParentCompletion;
 				}) == parallelTasks.end()) &&
@@ -394,7 +447,7 @@ namespace MV {
 					return a_task->blockParentCompletion;
 				}) == sequentialTasks.end());
 		}
-		
+
 		void cancelAllChildren() {
 			auto sequentialTasksToCancel = sequentialTasks;
 			temporarySequentialTasks.push_back(sequentialTasksToCancel);
@@ -468,7 +521,7 @@ namespace MV {
 
 			return cleanupChildTasks();
 		}
-		
+
 		void unsuspend() {
 			if (suspended) {
 				suspended = false;

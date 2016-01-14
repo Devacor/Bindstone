@@ -81,6 +81,7 @@ namespace MV {
 		blockedSemaphore++;
 		if (!wasBlocked) {
 			onBlockSignal(map->shared_from_this(), location);
+			if(blocked()){clearanceAmount = 0; onClearanceChangeSignal(map->shared_from_this(), location);}
 		}
 	}
 
@@ -89,6 +90,7 @@ namespace MV {
 		blockedSemaphore--;
 		if (!blocked()) {
 			onUnblockSignal(map->shared_from_this(), location);
+			if(!blocked()){calculateClearance();}
 		}
 	}
 
@@ -100,11 +102,12 @@ namespace MV {
 		bool wasBlocked = blocked();
 		++staticBlockedSemaphore;
 		auto mapShared = map->shared_from_this();
-		if (!wasBlocked) {
-			onBlockSignal(mapShared, location);
-		}
 		if (staticBlockedSemaphore == 1) {
 			onStaticBlockSignal(mapShared, location);
+		}
+		if (!wasBlocked) {
+			onBlockSignal(mapShared, location);
+			if(blocked()){clearanceAmount = 0; onClearanceChangeSignal(map->shared_from_this(), location);}
 		}
 	}
 
@@ -112,11 +115,12 @@ namespace MV {
 		require<ResourceException>(staticBlockedSemaphore > 0, "Error: Static Block Semaphore overextended in MapNode, something is unblocking excessively.");
 		--staticBlockedSemaphore;
 		auto mapShared = map->shared_from_this();
-		if (!blocked()) {
-			onUnblockSignal(mapShared, location);
-		}
 		if (staticBlockedSemaphore == 0) {
 			onStaticUnblockSignal(mapShared, location);
+		}
+		if (!blocked()) {
+			onUnblockSignal(mapShared, location);
+			if(!blocked()){calculateClearance();}
 		}
 	}
 
@@ -221,41 +225,17 @@ namespace MV {
 			}
 
 			calculateClearance();
+			registerCalculateClearanceCallbacks();
 		}
 	}
 
 	void MapNode::calculateClearance() const{
 		int oldClearance = clearanceAmount;
-		clearanceRecievers.clear();
-		performClearanceIncrementAndObservation();
-		registerCalculateClearanceCallbacks();
+		performClearanceIncrement();
 		if (oldClearance != clearanceAmount) { onClearanceChangeSignal(map->shared_from_this(), location); }
 	}
 
-	void MapNode::registerCalculateClearanceCallbacks() const {
-		clearanceRecievers.clear();
-		for (int y = 0; y < clearanceAmount; ++y) {
-			for (int x = 0; x < clearanceAmount; ++x) {
-				auto reciever = (*map)[location.x + x][location.y + y].onBlock.connect([&](std::shared_ptr<Map>, const Point<int> &) {
-					calculateClearance();
-				});
-				clearanceRecievers.push_back(reciever);
-			}
-		}
-		std::cout << std::endl;
-	}
-
-	void MapNode::registerUnblockCalculateClearanceCallback(int x, int y) const {
-		if (map->inBounds(Point<int>(x, y))) {
-			std::cout << "R:" << x << ", " << y << "\t";
-			auto reciever = (*map)[x][y].onUnblock.connect([&](std::shared_ptr<Map>, const Point<int> &) {
-				calculateClearance();
-			});
-			clearanceRecievers.push_back(reciever);
-		}
-	}
-
-	void MapNode::performClearanceIncrementAndObservation() const {
+	void MapNode::performClearanceIncrement() const {
 		clearanceAmount = 1;
 		while (true){
 			for (int y = clearanceAmount; y < clearanceAmount + 1; ++y) {
@@ -267,6 +247,25 @@ namespace MV {
 			}
 
 			++clearanceAmount;
+		}
+	}
+
+	void MapNode::registerCalculateClearanceCallbacks() const {
+		clearanceRecievers.clear();
+		std::vector<Point<int>> locations {{0, 1}, {1, 1}, {1, 0}};
+		transform(locations.begin(), locations.end(), locations.begin(), [&](const Point<int> &a_item){return a_item + location;});
+
+		for(auto&& offsetLocation : locations){
+			if(map->inBounds(offsetLocation)){
+				auto reciever = map->get(offsetLocation)->onClearanceChange.connect([&](std::shared_ptr<Map> a_map, const Point<int> &a_location) {
+					if(!blocked()){
+						int oldClearance = clearanceAmount;
+						clearanceAmount = std::min(map->get(a_location)->clearanceAmount + 1, MAXIMUM_CLEARANCE);
+						if (oldClearance != clearanceAmount) { onClearanceChangeSignal(a_map, location); }
+					}
+				});
+				clearanceRecievers.push_back(reciever);
+			}
 		}
 	}
 

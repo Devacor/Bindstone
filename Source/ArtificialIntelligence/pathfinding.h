@@ -112,9 +112,7 @@ namespace MV {
 
 		void registerCalculateClearanceCallbacks() const;
 
-		void registerUnblockCalculateClearanceCallback(int j, int y) const;
-
-		void performClearanceIncrementAndObservation() const;
+		void performClearanceIncrement() const;
 
 		bool offsetBlocked(int x, int y) const;
 

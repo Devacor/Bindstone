@@ -395,24 +395,7 @@ public:
 
 	std::string assetPath() const;
 
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance) {
-		a_script.add(chaiscript::user_type<Creature>(), "Creature");
-		a_script.add(chaiscript::base_class<Component, Creature>());
-
-		a_script.add(chaiscript::fun([](Creature &a_self) {
-			return a_self.statTemplate;
-		}), "stats");
-		a_script.add(chaiscript::fun(&Creature::skin), "skin");
-		a_script.add(chaiscript::fun(&Creature::agent), "agent");
-		a_script.add(chaiscript::fun(&Creature::owningPlayer), "player");
-
-		a_script.add(chaiscript::fun(&Creature::assetPath), "assetPath");
-
-		a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Creature>, std::shared_ptr<Creature>>([](const MV::Scene::SafeComponent<Creature> &a_item) { return a_item.self(); }));
-		a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Creature>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<Creature> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
-
-		return a_script;
-	}
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
 protected:
 	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance);
 	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance);
@@ -449,6 +432,9 @@ private:
 
 	virtual void updateImplementation(double a_delta) override;;
 
+	std::function<void(std::shared_ptr<Creature>)> scriptSpawn;
+	std::function<void(std::shared_ptr<Creature>,double)> scriptUpdate;
+	std::function<void(std::shared_ptr<Creature>)> scriptDeath;
 
 	const CreatureData& statTemplate;
 	std::string skin;

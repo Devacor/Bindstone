@@ -32,5 +32,22 @@ namespace MV {
 			refreshBounds();
 		}
 
+		void PathAgent::initialize() {
+			applyAgentPositionToOwner();
+			agentPassthroughSignals.push_back(agent->onArrive.connect([&](std::shared_ptr<NavigationAgent>) {
+				onArriveSignal(std::static_pointer_cast<PathAgent>(shared_from_this()));
+			}));
+			agentPassthroughSignals.push_back(agent->onBlocked.connect([&](std::shared_ptr<NavigationAgent>) {
+				auto self = std::static_pointer_cast<PathAgent>(shared_from_this());
+				onBlockedSignal(self);
+			}));
+			agentPassthroughSignals.push_back(agent->onStop.connect([&](std::shared_ptr<NavigationAgent>) {
+				onStopSignal(std::static_pointer_cast<PathAgent>(shared_from_this()));
+			}));
+			agentPassthroughSignals.push_back(agent->onStart.connect([&](std::shared_ptr<NavigationAgent>) {
+				onStartSignal(std::static_pointer_cast<PathAgent>(shared_from_this()));
+			}));
+		}
+
 	}
 }

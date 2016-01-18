@@ -947,6 +947,14 @@ namespace MV {
 		os << "(" << a_point.x << ", " << a_point.y << ", " << a_point.z << ")";
 		return os;
 	}
+
+	template <class T>
+	std::string to_string(const MV::Point<T> &a_point) {
+		std::stringstream out;
+		out << a_point;
+		return out.str();
+	}
+
 	template <class T>
 	std::istream& operator>>(std::istream& is, Point<T> &a_point){
 		is >> a_point.x >> a_point.y >> a_point.z;
@@ -1022,6 +1030,9 @@ namespace MV {
 		a_script.add(chaiscript::fun(static_cast<Point<T>(*)(const Point<T> &, const T &)>(MV::operator/<T>)), "/");
 		a_script.add(chaiscript::fun(static_cast<Point<T>(*)(const Point<T> &, const Scale &)>(MV::operator/<T>)), "/");
 
+		a_script.add(chaiscript::fun([](const Point<T> &a_point) {return to_string(a_point); }), "to_string");
+		a_script.add(chaiscript::fun([](const Point<T> &a_point) {return to_string(a_point); }), "toString");
+
 		return a_script;
 	}
 
@@ -1078,6 +1089,9 @@ namespace MV {
 		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Size<T> &)>(MV::operator/<T>)), "/");
 		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const T &)>(MV::operator/<T>)), "/");
 		a_script.add(chaiscript::fun(static_cast<Size<T>(*)(const Size<T> &, const Scale &)>(MV::operator/<T>)), "/");
+
+		a_script.add(chaiscript::fun([](const Size<T> &a_size) {return to_string(a_size); }), "to_string");
+		a_script.add(chaiscript::fun([](const Size<T> &a_size) {return to_string(a_size); }), "toString");
 
 		return a_script;
 	}

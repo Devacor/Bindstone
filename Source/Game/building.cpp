@@ -159,22 +159,23 @@ void Creature::initialize() {
 			);
 	});
 	newNode->componentInChildren<MV::Scene::Spine>()->animate("run");
-	agent = newNode->attach<MV::Scene::PathAgent>(gameInstance.path().self(), gameInstance.path()->gridFromLocal(gameInstance.path()->owner()->localFromWorld(owner()->worldPosition())))->
-		gridSpeed(4.0f)->
-		gridGoal(gameInstance.teamForPlayer(owningPlayer).goal(), 2.0f);
-
-	agent->onArrive.connect("!", [](std::shared_ptr<MV::Scene::PathAgent> a_self) {
-			std::weak_ptr<MV::Scene::Node> self = a_self->owner();
-			a_self->owner()->task().then("Countdown", [=](const MV::Task& a_task, double a_dt) mutable {
-				a_self->owner()->removeFromParent();
-				return true;
-			});
-		});
-
+	agent = newNode->attach<MV::Scene::PathAgent>(gameInstance.path().self(), gameInstance.path()->gridFromLocal(gameInstance.path()->owner()->localFromWorld(owner()->worldPosition())), 3)->
+		gridSpeed(statTemplate.moveSpeed);
 	owner()->task().also("UpdateZOrder", [=](const MV::Task &a_self, double a_dt) {
 		owner()->depth(owner()->position().y);
 		return false;
 	});
+
+	{
+		auto localVariables = std::map<std::string, chaiscript::Boxed_Value>{
+			{ "self", chaiscript::Boxed_Value(this) }
+		};
+		auto resetLocals = gameInstance.script().get_locals();
+		gameInstance.script().set_locals(localVariables);
+		SCOPE_EXIT{ gameInstance.script().set_locals(resetLocals); };
+		gameInstance.script().eval(statTemplate.script());
+	}
+	if (scriptSpawn) { scriptSpawn(std::static_pointer_cast<Creature>(shared_from_this())); }
 	/* 
 	auto voidTexture = managers.textures.pack("VoidGuy")->handle(0);
 	auto creatureNode = pathMap->owner()->make(MV::guid("Creature_"));
@@ -210,16 +211,34 @@ void Creature::initialize() {
 }
 
 void Creature::updateImplementation(double a_delta) {
-	auto state = gameInstance.script().get_state();
-	SCOPE_EXIT{ gameInstance.script().set_state(state); };
+	auto self = std::static_pointer_cast<Creature>(shared_from_this());
+	if (scriptUpdate) { scriptUpdate(self, a_delta); }
+}
 
-	auto localVariables = std::map<std::string, chaiscript::Boxed_Value>{
-		{"self", chaiscript::Boxed_Value(this)}
-	};
+chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance) {
+	a_script.add(chaiscript::user_type<Creature>(), "Creature");
+	a_script.add(chaiscript::base_class<Component, Creature>());
 
-	gameInstance.script().set_locals(localVariables);
+	a_script.add(chaiscript::fun(&Creature::scriptSpawn), "spawn");
+	a_script.add(chaiscript::fun(&Creature::scriptUpdate), "update");
+	a_script.add(chaiscript::fun(&Creature::scriptDeath), "death");
 
-	gameInstance.script().eval(statTemplate.script());
+	a_script.add(chaiscript::fun([](Creature &a_self) {
+		return a_self.statTemplate;
+	}), "stats");
+	a_script.add(chaiscript::fun(&Creature::skin), "skin");
+	a_script.add(chaiscript::fun(&Creature::agent), "agent");
+	a_script.add(chaiscript::fun(&Creature::owningPlayer), "player");;
+
+	a_script.add(chaiscript::fun(&Creature::assetPath), "assetPath");
+	a_script.add(chaiscript::fun([](Creature &a_self) {
+		return &a_self.gameInstance;
+	}), "gameInstance");
+
+	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Creature>, std::shared_ptr<Creature>>([](const MV::Scene::SafeComponent<Creature> &a_item) { return a_item.self(); }));
+	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Creature>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<Creature> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
+
+	return a_script;
 }
 
 void CreatureData::loadScript() const {

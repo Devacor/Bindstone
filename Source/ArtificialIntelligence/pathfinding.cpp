@@ -82,6 +82,7 @@ namespace MV {
 		if (!wasBlocked) {
 			onBlockSignal(map->shared_from_this(), location);
 			if(blocked()){clearanceAmount = 0; onClearanceChangeSignal(map->shared_from_this(), location);}
+			else { calculateClearance(); }
 		}
 	}
 
@@ -90,7 +91,7 @@ namespace MV {
 		blockedSemaphore--;
 		if (!blocked()) {
 			onUnblockSignal(map->shared_from_this(), location);
-			if(!blocked()){calculateClearance();}
+			calculateClearance();
 		}
 	}
 
@@ -107,7 +108,8 @@ namespace MV {
 		}
 		if (!wasBlocked) {
 			onBlockSignal(mapShared, location);
-			if(blocked()){clearanceAmount = 0; onClearanceChangeSignal(map->shared_from_this(), location);}
+			if (blocked()) { clearanceAmount = 0; onClearanceChangeSignal(map->shared_from_this(), location); }
+			else { calculateClearance(); }
 		}
 	}
 
@@ -120,7 +122,7 @@ namespace MV {
 		}
 		if (!blocked()) {
 			onUnblockSignal(mapShared, location);
-			if(!blocked()){calculateClearance();}
+			calculateClearance();
 		}
 	}
 
@@ -236,6 +238,7 @@ namespace MV {
 	}
 
 	void MapNode::performClearanceIncrement() const {
+		if (blocked()) { clearanceAmount = 0; return; }
 		clearanceAmount = 1;
 		while (true){
 			for (int y = clearanceAmount; y < clearanceAmount + 1; ++y) {
@@ -257,10 +260,29 @@ namespace MV {
 
 		for(auto&& offsetLocation : locations){
 			if(map->inBounds(offsetLocation)){
-				auto reciever = map->get(offsetLocation)->onClearanceChange.connect([&](std::shared_ptr<Map> a_map, const Point<int> &a_location) {
+				auto reciever = map->get(offsetLocation).onClearanceChange.connect([&, locations](std::shared_ptr<Map> a_map, const Point<int> &a_location) {
+					int oldClearance = clearanceAmount;
 					if(!blocked()){
-						int oldClearance = clearanceAmount;
-						clearanceAmount = std::min(map->get(a_location)->clearanceAmount + 1, MAXIMUM_CLEARANCE);
+						bool initialized = false;
+						int smallestClearance = 0;
+						for (auto i = 0; i < locations.size();++i) {
+							if (map->inBounds(locations[i])) {
+								auto clearanceCheck = std::min(map->get(locations[i]).clearanceAmount + 1, MAXIMUM_CLEARANCE);
+								if (!initialized) {
+									initialized = true;
+									smallestClearance = clearanceCheck;
+								} else {
+									smallestClearance = std::min(smallestClearance, clearanceCheck);
+								}
+							} else {
+								smallestClearance = 1;
+								break;
+							}
+						}
+						clearanceAmount = smallestClearance;
+						if (oldClearance != clearanceAmount) { onClearanceChangeSignal(a_map, location); }
+					} else {
+						clearanceAmount = 0;
 						if (oldClearance != clearanceAmount) { onClearanceChangeSignal(a_map, location); }
 					}
 				});
@@ -430,7 +452,7 @@ namespace MV {
 	}
 
 	void NavigationAgent::update(double a_dt) {
-		if (pathfinding() && (AttemptToRecalculate() && !calculatedPath.empty() && currentPathIndex < calculatedPath.size())) {
+		if (pathfinding() && (attemptToRecalculate() && !calculatedPath.empty() && currentPathIndex < calculatedPath.size())) {
 			auto direction = (ourPosition - desiredPositionFromCalculatedPathIndex(currentPathIndex)).normalized();
 
 			activeUpdate = true;
@@ -456,7 +478,7 @@ namespace MV {
 				if (totalDistanceToTravel > 0.0f && currentPathIndex < calculatedPath.size()) {
 					++currentPathIndex;
 				}
-				if (!AttemptToRecalculate()) { break; }
+				if (!attemptToRecalculate()) { break; }
 			}
 			if (originalPathIndex != currentPathIndex) {
 				updateObservedNodes();
@@ -469,7 +491,7 @@ namespace MV {
 		}
 	}
 
-	bool NavigationAgent::AttemptToRecalculate() {
+	bool NavigationAgent::attemptToRecalculate() {
 		if (dirtyPath || calculatedPath.empty() || (calculatedPath.size() > 1 && currentPathIndex == calculatedPath.size())) {
 			recalculate();
 		}

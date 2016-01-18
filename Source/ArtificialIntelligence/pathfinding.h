@@ -500,14 +500,17 @@ namespace MV {
 
 		std::shared_ptr<NavigationAgent> goal(const Point<> &a_newGoal, PointPrecision a_acceptableDistance) {
 			auto self = shared_from_this();
-			bool wasMoving = pathfinding();
-			ourGoal = a_newGoal + centerOffset;
-			acceptableDistance = std::max(a_acceptableDistance, 0.0f);
-			markDirty();
-			if (wasMoving && !pathfinding()) {
-				onStopSignal(shared_from_this());
-			} else if (!wasMoving && pathfinding()) {
-				onStartSignal(shared_from_this());
+			auto potentialNewGoal = a_newGoal + centerOffset;
+			if (ourGoal != potentialNewGoal) {
+				ourGoal = potentialNewGoal;
+				bool wasMoving = pathfinding();
+				acceptableDistance = std::max(a_acceptableDistance, 0.0f);
+				markDirty();
+				if (wasMoving && !pathfinding()) {
+					onStopSignal(shared_from_this());
+				} else if (!wasMoving && pathfinding()) {
+					onStartSignal(shared_from_this());
+				}
 			}
 			return self;
 		}
@@ -517,8 +520,6 @@ namespace MV {
 		}
 
 		void update(double a_dt);
-
-		bool AttemptToRecalculate();
 
 		int size() const {
 			return unitSize;
@@ -550,6 +551,8 @@ namespace MV {
 			onStart(onStartSignal),
 			onBlocked(onBlockedSignal){}
 	private:
+		bool attemptToRecalculate();
+
 		NavigationAgent(std::shared_ptr<Map> a_map, const Point<int> &a_newPosition, int a_unitSize, bool a_offsetCenterByHalf) :
 			NavigationAgent(a_map, cast<PointPrecision>(a_newPosition), a_unitSize, a_offsetCenterByHalf){
 		}
@@ -601,20 +604,12 @@ namespace MV {
 		void recalculate() {
 			recievers.clear();
 			costs.clear();
+
 			unblockMap();
-
-			std::cout << std::endl;
-			for (int y = 0; y < map->size().height; ++y) {
-				for (int x = 0; x < map->size().width; ++x) {
-					std::cout << (*map)[x][y].clearance();
-				}
-				std::cout << std::endl;
-			}
-			std::cout << std::endl;
-
 			ourPath = std::make_shared<Path>(map, cast<int>(ourPosition), cast<int>(ourGoal), acceptableDistance, unitSize, maxNodesToSearch);
 			calculatedPath = ourPath->path();
 			blockMap();
+			
 			currentPathIndex = !calculatedPath.empty() && cast<int>(ourPosition) == calculatedPath[0].position() ? 1 : 0;
 			updateObservedNodes();
 			dirtyPath = false;

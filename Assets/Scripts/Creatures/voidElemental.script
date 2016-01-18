@@ -1,6 +1,12 @@
-auto goal = Point(30, 50);
-self.agent.gridGoal(goal, 0);
-self.agent.onArrive.connect("!", fun(x){print("made it!");});
-self.agent.onBlocked.connect("!", fun(x){print("blocked!");});
-self.agent.onStart.connect("!", fun(x){print("started!");});
-self.agent.onStop.connect("!", fun(x){print("stopped!");});
+self.spawn = fun(self){
+	auto goal = Point(30, 50);
+	self.agent.onArrive.connect("!", fun(x){print("made it!");});
+	self.agent.onBlocked.connect("!", fun[goal](pathAgent){
+		goal.x+=10;
+		pathAgent.gridGoal(goal, 0);
+		print(to_string(goal));
+	});
+	self.agent.onStart.connect("!", fun(x){print("started!");});
+	self.agent.onStop.connect("!", fun(x){print("stopped!");});
+	self.agent.gridGoal(goal, 0);
+};

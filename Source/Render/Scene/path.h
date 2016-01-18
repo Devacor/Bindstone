@@ -61,6 +61,14 @@ namespace MV {
 				return (a_location * toPoint(cellDimensions)) + topLeftOffset;
 			}
 
+			PointPrecision localFromGrid(PointPrecision a_gridSize) {
+				return ((cellDimensions.width + cellDimensions.height) / 2.0f) * a_gridSize;
+			}
+
+			PointPrecision gridFromLocal(PointPrecision a_localSize) {
+				return a_localSize / ((cellDimensions.width + cellDimensions.height) / 2.0f);
+			}
+
 			bool inBounds(Point<int> a_location) const {
 				return map->inBounds(a_location);
 			}
@@ -241,6 +249,16 @@ namespace MV {
 				return agent->position();
 			}
 
+			Point<PointPrecision> localPosition() const {
+				auto ourOwner = owner();
+				if (ourOwner->parent() == map->owner()) {
+					return map->localFromGrid(agent->position());
+				}
+				else {
+					return ourOwner->localFromWorld(map->owner()->worldFromLocal(map->localFromGrid(agent->position())));
+				}
+			}
+
 			std::vector<PathNode> path() {
 				return agent->path();
 			}
@@ -252,6 +270,11 @@ namespace MV {
 
 			std::shared_ptr<PathAgent> gridPosition(const Point<> &a_newPosition) {
 				agent->position(a_newPosition);
+				return std::static_pointer_cast<PathAgent>(shared_from_this());
+			}
+
+			std::shared_ptr<PathAgent> localPosition(const Point<> &a_newPosition) {
+				agent->position(map->gridFromLocal(a_newPosition));
 				return std::static_pointer_cast<PathAgent>(shared_from_this());
 			}
 
@@ -273,20 +296,57 @@ namespace MV {
 				return std::static_pointer_cast<PathAgent>(shared_from_this());
 			}
 
+			std::shared_ptr<PathAgent> localGoal(const Point<> &a_newGoal) {
+				return gridGoal(map->gridFromLocal(a_newGoal));
+			}
+
+			std::shared_ptr<PathAgent> localGoal(const Point<> &a_newGoal, PointPrecision a_acceptableDistance) {
+				return gridGoal(map->gridFromLocal(a_newGoal), map->gridFromLocal(a_acceptableDistance));
+			}
+
 			Point<PointPrecision> gridGoal() const {
 				return agent->goal();
+			}
+
+			Point<PointPrecision> localGoal() const {
+				return map->localFromGrid(gridGoal());
 			}
 
 			PointPrecision gridSpeed() const {
 				return agent->speed();
 			}
 
+			PointPrecision localSpeed() const {
+				return map->localFromGrid(gridSpeed());
+			}
+
 			std::shared_ptr<PathAgent> gridSpeed(PointPrecision a_newSpeed) {
 				agent->speed(a_newSpeed);
 				return std::static_pointer_cast<PathAgent>(shared_from_this());
 			}
+			std::shared_ptr<PathAgent> localSpeed(PointPrecision a_newSpeed) {
+				return gridSpeed(map->localFromGrid(a_newSpeed));
+			}
+
 			bool pathfinding() const {
 				return agent->pathfinding();
+			}
+
+			std::shared_ptr<PathAgent> stop() {
+				agent->stop();
+				return std::static_pointer_cast<PathAgent>(shared_from_this());
+			}
+
+			int gridSize() const {
+				return agent->size();
+			}
+
+			bool gridOverlaps(Point<int> a_position) const {
+				return agent->overlaps(a_position);
+			}
+
+			bool localOverlaps(Point<> a_position) const {
+				return agent->overlaps(cast<int>(map->gridFromLocal(a_position)));
 			}
 
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
@@ -302,8 +362,15 @@ namespace MV {
 				a_script.add(chaiscript::fun(&PathAgent::pathfinding), "pathfinding");
 				a_script.add(chaiscript::fun(&PathAgent::path), "path");
 
+				a_script.add(chaiscript::fun(&PathAgent::stop), "stop");
+				a_script.add(chaiscript::fun(&PathAgent::gridOverlaps), "gridOverlaps");
+				a_script.add(chaiscript::fun(&PathAgent::localOverlaps), "localOverlaps");
+
 				a_script.add(chaiscript::fun(static_cast<PointPrecision (PathAgent::*)() const>(&PathAgent::gridSpeed)), "gridSpeed");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent> (PathAgent::*)(PointPrecision)>(&PathAgent::gridSpeed)), "gridSpeed");
+				
+				a_script.add(chaiscript::fun(static_cast<PointPrecision(PathAgent::*)() const>(&PathAgent::localSpeed)), "localSpeed");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(PointPrecision)>(&PathAgent::localSpeed)), "localSpeed");
 
 				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::gridGoal)), "gridGoal");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&, PointPrecision)>(&PathAgent::gridGoal)), "gridGoal");
@@ -311,9 +378,16 @@ namespace MV {
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::gridGoal)), "gridGoal");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&)>(&PathAgent::gridGoal)), "gridGoal");
 
+				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::localGoal)), "localGoal");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&, PointPrecision)>(&PathAgent::localGoal)), "localGoal");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::localGoal)), "localGoal");
+
 				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::gridPosition)), "gridPosition");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::gridPosition)), "gridPosition");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&)>(&PathAgent::gridPosition)), "gridPosition");
+
+				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::localPosition)), "localPosition");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::localPosition)), "localPosition");
 
 				MV::SignalRegister<CallbackSignature>::hook(a_script);
 				a_script.add(chaiscript::fun(&PathAgent::onArrive), "onArrive");
@@ -382,21 +456,7 @@ namespace MV {
 				a_construct->initialize();
 			}
 
-			virtual void initialize() override {
-				applyAgentPositionToOwner();
-				agentPassthroughSignals.push_back(agent->onArrive.connect([&](std::shared_ptr<NavigationAgent>){
-					onArriveSignal(std::static_pointer_cast<PathAgent>(shared_from_this()));
-				}));
-				agentPassthroughSignals.push_back(agent->onBlocked.connect([&](std::shared_ptr<NavigationAgent>) {
-					onBlockedSignal(std::static_pointer_cast<PathAgent>(shared_from_this()));
-				}));
-				agentPassthroughSignals.push_back(agent->onStop.connect([&](std::shared_ptr<NavigationAgent>) {
-					onStopSignal(std::static_pointer_cast<PathAgent>(shared_from_this()));
-				}));
-				agentPassthroughSignals.push_back(agent->onStart.connect([&](std::shared_ptr<NavigationAgent>) {
-					onStartSignal(std::static_pointer_cast<PathAgent>(shared_from_this()));
-				}));
-			}
+			virtual void initialize() override;
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
 				return cloneHelper(a_parent->attach<PathAgent>(map, agent->position()).self());

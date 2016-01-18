@@ -4,7 +4,7 @@
             "id": "voidElemental",
             "name": "Life Elemental",
             "description": "Life elementals are gentle folk",
-            "moveSpeed": 0.15,
+            "moveSpeed": 4.0,
             "actionSpeed": 0.25,
             "castSpeed": 1,
             "health": 0,

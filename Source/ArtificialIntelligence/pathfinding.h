@@ -80,6 +80,7 @@ namespace MV {
 		MapNode* operator[](size_t a_size);
 		bool operator==(const MapNode &a_rhs) const;
 
+		static const int MAXIMUM_CLEARANCE = 8;
 	private:
 
 		template <class Archive>
@@ -139,8 +140,6 @@ namespace MV {
 		float temporaryCost = 0.0f;
 		int staticBlockedSemaphore = 0;
 		int blockedSemaphore = 0;
-
-		const int MAXIMUM_CLEARANCE = 8;
 	};
 
 	class Map : public std::enable_shared_from_this<Map> {
@@ -154,12 +153,14 @@ namespace MV {
 		Signal<CallbackSignature> onStaticBlockSignal;
 		Signal<CallbackSignature> onStaticUnblockSignal;
 		Signal<CallbackSignature> onCostChangeSignal;
+		Signal<CallbackSignature> onClearanceChangeSignal;
 	public:
 		SignalRegister<CallbackSignature> onBlock;
 		SignalRegister<CallbackSignature> onUnblock;
 		SignalRegister<CallbackSignature> onStaticBlock;
 		SignalRegister<CallbackSignature> onStaticUnblock;
 		SignalRegister<CallbackSignature> onCostChange;
+		SignalRegister<CallbackSignature> onClearanceChange;
 
 		static std::shared_ptr<Map> make(const Size<int> &a_size, bool a_useCorners = false) {
 			return std::shared_ptr<Map>(new Map(a_size, 1.0f, a_useCorners));

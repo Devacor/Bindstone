@@ -226,10 +226,15 @@ namespace MV {
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, ThreadPool &a_pool) {
 				a_script.add(chaiscript::user_type<Emitter>(), "Emitter");
 				a_script.add(chaiscript::base_class<Drawable, Emitter>());
+				a_script.add(chaiscript::base_class<Component, Emitter>());
 
 				a_script.add(chaiscript::fun([&](Node &a_self) {
 					return a_self.attach<Emitter>(a_pool);
 				}), "attachEmitter");
+
+				a_script.add(chaiscript::fun([](Node &a_self) {
+					return a_self.componentInChildren<Emitter>();
+				}), "emitterComponent");
 
 				a_script.add(chaiscript::fun(&Emitter::enabled), "enabled");
 				a_script.add(chaiscript::fun(&Emitter::disabled), "disabled");

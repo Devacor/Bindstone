@@ -13,6 +13,16 @@ struct Player;
 
 struct Constants {
 	int startHealth = 20;
+
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+		a_script.add(chaiscript::user_type<Constants>(), "Constants");
+
+		a_script.add(chaiscript::fun([](Constants &a_self) {
+			return a_self.startHealth;
+		}), "startHealth");
+
+		return a_script;
+	}
 };
 
 class LocalData {
@@ -51,6 +61,24 @@ public:
 
 	Managers& managers() {
 		return allManagers;
+	}
+
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+		a_script.add(chaiscript::user_type<LocalData>(), "LocalData");
+
+		Constants::hook(a_script);
+
+		a_script.add(chaiscript::fun([](LocalData &a_self) {
+			return a_self.buildingCatalog.get();
+		}), "buildings");
+		a_script.add(chaiscript::fun([](LocalData &a_self) {
+			return a_self.creatureCatalog.get();
+		}), "creatures");
+		a_script.add(chaiscript::fun([](LocalData &a_self) {
+			return a_self.metadataConstants;
+		}), "constants");
+
+		return a_script;
 	}
 private:
 	std::shared_ptr<Player> localPlayer;

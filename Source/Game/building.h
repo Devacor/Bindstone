@@ -389,8 +389,31 @@ private:
 class Creature : public MV::Scene::Component {
 	friend MV::Scene::Node;
 	friend cereal::access;
-
 public:
+	typedef void CallbackSignature(std::shared_ptr<Creature>);
+	typedef MV::SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
+
+private:
+	MV::Signal<CallbackSignature> onArriveSignal;
+	MV::Signal<CallbackSignature> onBlockedSignal;
+	MV::Signal<CallbackSignature> onStopSignal;
+	MV::Signal<CallbackSignature> onStartSignal;
+
+	MV::Signal<CallbackSignature> onStatusSignal;
+	MV::Signal<void (std::shared_ptr<Creature>, int)> onHealthChangeSignal;
+	MV::Signal<CallbackSignature> onDeathSignal;
+	MV::Signal<CallbackSignature> onFallSignal;
+public:
+	MV::SignalRegister<CallbackSignature> onArrive;
+	MV::SignalRegister<CallbackSignature> onBlocked;
+	MV::SignalRegister<CallbackSignature> onStop;
+	MV::SignalRegister<CallbackSignature> onStart;
+
+	MV::SignalRegister<CallbackSignature> onStatus;
+	MV::SignalRegister<void(std::shared_ptr<Creature>, int)> onHealthChange;
+	MV::SignalRegister<CallbackSignature> onDeath;
+	MV::SignalRegister<CallbackSignature> onFall;
+
 	ComponentDerivedAccessors(Creature)
 
 	std::string assetPath() const;

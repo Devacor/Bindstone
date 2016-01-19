@@ -31,6 +31,9 @@ std::string id() const { \
 } \
 std::shared_ptr<ComponentType> id(const std::string &a_id) { \
 	return std::static_pointer_cast<ComponentType>(MV::Scene::Component::id(a_id)); \
+} \
+std::shared_ptr<ComponentType> serializable(bool a_allow) { \
+	return std::static_pointer_cast<ComponentType>(MV::Scene::Component::serializable(a_allow)); \
 }
 
 namespace chaiscript {
@@ -168,8 +171,15 @@ namespace MV {
 				return rootTask;
 			}
 
+			std::shared_ptr<Component> serializable(bool a_serializable) {
+				allowSerialize = false;
+				return shared_from_this();
+			}
+
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 				a_script.add(chaiscript::user_type<Component>(), "Component");
+
+				a_script.add(chaiscript::fun(&Component::task), "task");
 
 				a_script.add(chaiscript::fun(&Component::detach), "detach");
 				a_script.add(chaiscript::fun(&Component::clone), "clone");
@@ -236,6 +246,8 @@ namespace MV {
 			virtual void updateImplementation(double a_delta) {}
 
 		private:
+			bool allowSerialize = true;
+
 			Task rootTask;
 			std::string componentId;
 			std::weak_ptr<Node> componentOwner;
@@ -945,6 +957,11 @@ namespace MV {
 					return a_child->allowSerialize;
 				});
 				std::weak_ptr<Node> weakParent;
+				std::vector<std::shared_ptr<Component>> filteredChildComponents;
+				std::copy_if(childComponents.begin(), childComponents.end(), std::back_inserter(filteredChildComponents), [](const auto &a_child) {
+					return a_child->allowSerialize;
+				});
+
 				if (myParent) {
 					weakParent = myParent->shared_from_this();
 				}
@@ -962,10 +979,13 @@ namespace MV {
 					CEREAL_NVP(localBounds),
 					CEREAL_NVP(localChildBounds),
 					cereal::make_nvp("childNodes", filteredChildren),
-					CEREAL_NVP(childComponents)
+					cereal::make_nvp("childComponents", filteredChildComponents)
 				);
 				if (childNodes.empty() && !filteredChildren.empty()) {
 					childNodes = filteredChildren;
+				}
+				if (childComponents.empty() && !filteredChildComponents.empty()) {
+					childComponents = filteredChildComponents;
 				}
 			}
 

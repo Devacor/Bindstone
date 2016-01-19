@@ -330,7 +330,8 @@ namespace MV {
 		onUnblock(onUnblockSignal),
 		onStaticBlock(onStaticBlockSignal),
 		onStaticUnblock(onStaticUnblockSignal),
-		onCostChange(onCostChangeSignal) {
+		onCostChange(onCostChangeSignal),
+		onClearanceChange(onClearanceChangeSignal) {
 	}
 
 	Map::Map(const Size<int> &a_size, float a_defaultCost, bool a_useCorners) :
@@ -339,6 +340,7 @@ namespace MV {
 		onStaticBlock(onStaticBlockSignal),
 		onStaticUnblock(onStaticUnblockSignal),
 		onCostChange(onCostChangeSignal),
+		onClearanceChange(onClearanceChangeSignal),
 		usingCorners(a_useCorners) {
 
 		squares.reserve(a_size.width);
@@ -372,6 +374,9 @@ namespace MV {
 				});
 				square.onCostChange.connect("__PARENT", [&](std::shared_ptr<Map> a_self, const Point<int> &a_position) {
 					onCostChangeSignal(a_self, a_position);
+				});
+				square.onClearanceChange.connect("__PARENT", [&](std::shared_ptr<Map> a_self, const Point<int> &a_position) {
+					onClearanceChangeSignal(a_self, a_position);
 				});
 			}
 		}

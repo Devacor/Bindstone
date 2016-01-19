@@ -22,6 +22,32 @@ public:
 	Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_game);
 
 	MV::Point<> goal() const { return goalPosition; }
+
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+		a_script.add(chaiscript::user_type<Team>(), "Team");
+
+		a_script.add(chaiscript::fun([](Team &a_self) {
+			return &a_self.game;
+		}), "game");
+
+		a_script.add(chaiscript::fun([](Team &a_self) {
+			return a_self.goalPosition;
+		}), "goal");
+
+		a_script.add(chaiscript::fun([](Team &a_self) {
+			return a_self.health;
+		}), "health");
+
+		a_script.add(chaiscript::fun([](Team &a_self) {
+			return a_self.buildings;
+		}), "buildings");
+
+		a_script.add(chaiscript::fun([](Team &a_self) {
+			return a_self.creatures;
+		}), "creatures");
+
+		return a_script;
+	}
 private:
 	std::vector<MV::Scene::SafeComponent<Building>> buildings;
 	std::vector<MV::Scene::SafeComponent<Creature>> creatures;
@@ -70,6 +96,10 @@ public:
 
 	Team& teamForPlayer(const std::shared_ptr<Player> &a_player) {
 		return left.player == a_player ? left : right;
+	}
+
+	Team& teamAgainstPlayer(const std::shared_ptr<Player> &a_player) {
+		return left.player == a_player ? right : left;
 	}
 
 	void moveCamera(MV::Point<> a_startPosition, MV::Scale a_scale);

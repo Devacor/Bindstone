@@ -122,6 +122,7 @@ namespace MV{
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 				a_script.add(chaiscript::user_type<Text>(), "Text");
 				a_script.add(chaiscript::base_class<Drawable, Text>());
+				a_script.add(chaiscript::base_class<Component, Text>());
 
 				a_script.add(chaiscript::fun([](Node &a_self, TextLibrary& a_textLibrary, const Size<> &a_size, const std::string &a_defaultFontIdentifier) { return a_self.attach<Text>(a_textLibrary, a_size, a_defaultFontIdentifier); }), "attachText");
 				a_script.add(chaiscript::fun([](Node &a_self, TextLibrary& a_textLibrary) { return a_self.attach<Text>(a_textLibrary); }), "attachText");

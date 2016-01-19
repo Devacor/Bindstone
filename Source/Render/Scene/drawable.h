@@ -3,19 +3,28 @@
 
 #include "node.h"
 
-#define DrawableDerivedAccessorsNoColor(ComponentType) \
-	ComponentDerivedAccessors(ComponentType) \
-	std::shared_ptr<ComponentType> shader(const std::string &a_shaderProgramId) { \
-		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::shader(a_shaderProgramId)); \
-	} \
-	std::shared_ptr<ComponentType> texture(std::shared_ptr<MV::TextureHandle> a_texture) { \
-		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::texture(a_texture)); \
-	} \
+#define DrawableDerivedAccessorsShowHide(ComponentType) \
 	std::shared_ptr<ComponentType> show() { \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::show()); \
 	} \
 	std::shared_ptr<ComponentType> hide() { \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::hide()); \
+	}
+
+#define DrawableDerivedAccessorsColor(ComponentType) \
+	std::shared_ptr<ComponentType> color(const MV::Color &a_newColor) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::color(a_newColor)); \
+	}\
+	MV::Color color() const { \
+		return MV::Scene::Drawable::color(); \
+	}
+
+#define DrawableDerivedAccessorsShader(ComponentType) \
+	std::shared_ptr<ComponentType> shader(const std::string &a_shaderProgramId) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::shader(a_shaderProgramId)); \
+	} \
+	std::shared_ptr<ComponentType> texture(std::shared_ptr<MV::TextureHandle> a_texture) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::texture(a_texture)); \
 	} \
 	std::shared_ptr<MV::TextureHandle> texture() const{ \
 		return ourTexture; \
@@ -24,14 +33,19 @@
 		return shaderProgramId; \
 	}
 
+#define DrawableDerivedAccessorsNoColor(ComponentType) \
+	ComponentDerivedAccessors(ComponentType) \
+	DrawableDerivedAccessorsShowHide(ComponentType) \
+	DrawableDerivedAccessorsShader(ComponentType)
+
+#define DrawableDerivedAccessorsNoShowHide(ComponentType) \
+	ComponentDerivedAccessors(ComponentType) \
+	DrawableDerivedAccessorsColor(ComponentType) \
+	DrawableDerivedAccessorsShader(ComponentType)
+
 #define DrawableDerivedAccessors(ComponentType) \
 	DrawableDerivedAccessorsNoColor(ComponentType) \
-	std::shared_ptr<ComponentType> color(const MV::Color &a_newColor) { \
-		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::color(a_newColor)); \
-	}\
-	MV::Color color() const { \
-		return MV::Scene::Drawable::color(); \
-	}
+	DrawableDerivedAccessorsColor(ComponentType)
 
 namespace MV {
 	namespace Scene {

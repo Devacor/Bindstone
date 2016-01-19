@@ -100,6 +100,10 @@ void GameInstance::hook() {
 	MV::SharedTextures::hook(scriptEngine);
 
 	Wallet::hook(scriptEngine);
+	Player::hook(scriptEngine);
+	Team::hook(scriptEngine);
+	MV::Task::hook(scriptEngine);
+	LocalData::hook(scriptEngine);
 
 	MV::PathNode::hook(scriptEngine);
 	MV::NavigationAgent::hook(scriptEngine);
@@ -108,6 +112,7 @@ void GameInstance::hook() {
 	MV::Scene::Component::hook(scriptEngine);
 	MV::Scene::Drawable::hook(scriptEngine);
 	MV::Scene::Sprite::hook(scriptEngine);
+	MV::Scene::Spine::hook(scriptEngine);
 	MV::Scene::Text::hook(scriptEngine);
 	MV::Scene::PathMap::hook(scriptEngine);
 	MV::Scene::PathAgent::hook(scriptEngine);
@@ -115,6 +120,8 @@ void GameInstance::hook() {
 
 	Building::hook(scriptEngine, *this);
 	Creature::hook(scriptEngine, *this);
+
+
 }
 
 void GameInstance::nodeLoadBinder(cereal::JSONInputArchive &a_archive) {

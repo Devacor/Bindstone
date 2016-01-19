@@ -128,12 +128,30 @@ void Building::initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &
 }
 }
 
+// MV::SignalRegister<CallbackSignature> onArrive;
+// MV::SignalRegister<CallbackSignature> onBlocked;
+// MV::SignalRegister<CallbackSignature> onStop;
+// MV::SignalRegister<CallbackSignature> onStart;
+// 
+// MV::SignalRegister<CallbackSignature> onStatus;
+// MV::SignalRegister<CallbackSignature> onHealthChange;
+// MV::SignalRegister<CallbackSignature> onKilled;
+// MV::SignalRegister<CallbackSignature> onFall;
+
 Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance) :
 	Component(a_owner),
 	statTemplate(a_gameInstance.data().creatures().data(a_id)),
 	skin(a_skin),
 	owningPlayer(a_player),
-	gameInstance(a_gameInstance) {
+	gameInstance(a_gameInstance),
+	onArrive(onArriveSignal),
+	onBlocked(onBlockedSignal),
+	onStop(onStopSignal),
+	onStart(onStartSignal),
+	onStatus(onStatusSignal),
+	onDeath(onDeathSignal),
+	onFall(onFallSignal),
+	onHealthChange(onHealthChangeSignal){
 }
 
 Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance) :
@@ -141,7 +159,15 @@ Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const Creature
 	statTemplate(a_stats),
 	skin(a_skin),
 	owningPlayer(a_player),
-	gameInstance(a_gameInstance) {
+	gameInstance(a_gameInstance),
+	onArrive(onArriveSignal),
+	onBlocked(onBlockedSignal),
+	onStop(onStopSignal),
+	onStart(onStartSignal),
+	onStatus(onStatusSignal),
+	onDeath(onDeathSignal),
+	onFall(onFallSignal),
+	onHealthChange(onHealthChangeSignal) {
 }
 
 std::string Creature::assetPath() const {
@@ -158,12 +184,27 @@ void Creature::initialize() {
 			cereal::make_nvp("texture", &gameInstance.data().managers().textures)
 			);
 	});
+	newNode->serializable(false);
 	newNode->componentInChildren<MV::Scene::Spine>()->animate("run");
 	agent = newNode->attach<MV::Scene::PathAgent>(gameInstance.path().self(), gameInstance.path()->gridFromLocal(gameInstance.path()->owner()->localFromWorld(owner()->worldPosition())), 3)->
 		gridSpeed(statTemplate.moveSpeed);
-	owner()->task().also("UpdateZOrder", [=](const MV::Task &a_self, double a_dt) {
-		owner()->depth(owner()->position().y);
+
+	task().also("UpdateZOrder", [&](const MV::Task &a_self, double a_dt) {
+		owner()->depth(agent->gridPosition().y);
 		return false;
+	});
+
+	agent->onStart.connect("_PARENT", [&](std::shared_ptr<MV::Scene::PathAgent>) {
+		onStartSignal(std::static_pointer_cast<Creature>(shared_from_this()));
+	});
+	agent->onStop.connect("_PARENT", [&](std::shared_ptr<MV::Scene::PathAgent>) {
+		onStopSignal(std::static_pointer_cast<Creature>(shared_from_this()));
+	});
+	agent->onArrive.connect("_PARENT", [&](std::shared_ptr<MV::Scene::PathAgent>) {
+		onArriveSignal(std::static_pointer_cast<Creature>(shared_from_this()));
+	});
+	agent->onBlocked.connect("_PARENT", [&](std::shared_ptr<MV::Scene::PathAgent>) {
+		onBlockedSignal(std::static_pointer_cast<Creature>(shared_from_this()));
 	});
 
 	{
@@ -219,6 +260,18 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 	a_script.add(chaiscript::user_type<Creature>(), "Creature");
 	a_script.add(chaiscript::base_class<Component, Creature>());
 
+	MV::SignalRegister<CallbackSignature>::hook(a_script);
+	MV::SignalRegister<void(std::shared_ptr<Creature>, int)>::hook(a_script);
+	a_script.add(chaiscript::fun(&Creature::onArrive), "onArrive");
+	a_script.add(chaiscript::fun(&Creature::onBlocked), "onBlocked");
+	a_script.add(chaiscript::fun(&Creature::onStop), "onStop");
+	a_script.add(chaiscript::fun(&Creature::onStart), "onStart");
+
+	a_script.add(chaiscript::fun(&Creature::onStatus), "onStatus");
+	a_script.add(chaiscript::fun(&Creature::onHealthChange), "onHealthChange");
+	a_script.add(chaiscript::fun(&Creature::onDeath), "onDeath");
+	a_script.add(chaiscript::fun(&Creature::onFall), "onFall");
+
 	a_script.add(chaiscript::fun(&Creature::scriptSpawn), "spawn");
 	a_script.add(chaiscript::fun(&Creature::scriptUpdate), "update");
 	a_script.add(chaiscript::fun(&Creature::scriptDeath), "death");
@@ -228,12 +281,20 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 	}), "stats");
 	a_script.add(chaiscript::fun(&Creature::skin), "skin");
 	a_script.add(chaiscript::fun(&Creature::agent), "agent");
-	a_script.add(chaiscript::fun(&Creature::owningPlayer), "player");;
+	a_script.add(chaiscript::fun(&Creature::owningPlayer), "player");
 
 	a_script.add(chaiscript::fun(&Creature::assetPath), "assetPath");
 	a_script.add(chaiscript::fun([](Creature &a_self) {
 		return &a_self.gameInstance;
 	}), "gameInstance");
+
+	a_script.add(chaiscript::fun([](Creature &a_self) {
+		return a_self.gameInstance.teamForPlayer(a_self.owningPlayer);
+	}), "ourTeam");
+
+	a_script.add(chaiscript::fun([](Creature &a_self) {
+		return a_self.gameInstance.teamAgainstPlayer(a_self.owningPlayer);
+	}), "enemyTeam");
 
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Creature>, std::shared_ptr<Creature>>([](const MV::Scene::SafeComponent<Creature> &a_item) { return a_item.self(); }));
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Creature>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<Creature> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));

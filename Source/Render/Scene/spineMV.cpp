@@ -117,6 +117,89 @@ namespace MV{
 			return skeleton != nullptr;
 		}
 
+		chaiscript::ChaiScript& Spine::hook(chaiscript::ChaiScript &a_script) {
+			a_script.add(chaiscript::user_type<Spine>(), "Spine");
+			a_script.add(chaiscript::base_class<Drawable, Spine>());
+			a_script.add(chaiscript::base_class<Component, Spine>());
+
+			a_script.add(chaiscript::fun([](Node &a_self, const FileBundle &a_fileBundle) {
+				return a_self.attach<Spine>(a_fileBundle);
+			}), "attachSpine");
+			a_script.add(chaiscript::fun([](Node &a_self) {
+				return a_self.attach<Spine>();
+			}), "attachSpine");
+
+			a_script.add(chaiscript::fun([](Node &a_self) {
+				return a_self.componentInChildren<Spine>();
+			}), "spineComponent");
+
+			FileBundle::hook(a_script);
+			AnimationTrack::hook(a_script);
+
+			a_script.add(chaiscript::fun([](Spine &a_self) {
+				return a_self.track();
+			}), "track");
+			a_script.add(chaiscript::fun([](Spine &a_self, int a_index) {
+				return a_self.track(a_index);
+			}), "track");
+			a_script.add(chaiscript::fun([](Spine &a_self) {
+				return a_self.currentTrack();
+			}), "currentTrack");
+
+			a_script.add(chaiscript::fun([](Spine &a_self, const std::string &a_animationName) {
+				return a_self.animate(a_animationName);
+			}), "animate");
+			a_script.add(chaiscript::fun([](Spine &a_self, const std::string &a_animationName, bool a_loop) {
+				return a_self.animate(a_animationName, a_loop);
+			}), "animate");
+			a_script.add(chaiscript::fun([](Spine &a_self, const std::string &a_animationName) {
+				return a_self.queueAnimation(a_animationName);
+			}), "queueAnimation");
+			a_script.add(chaiscript::fun([](Spine &a_self, const std::string &a_animationName, double a_delay) {
+				return a_self.queueAnimation(a_animationName, a_delay);
+			}), "queueAnimation");
+			a_script.add(chaiscript::fun([](Spine &a_self, const std::string &a_animationName, bool a_loop) {
+				return a_self.queueAnimation(a_animationName, a_loop);
+			}), "queueAnimation");
+			a_script.add(chaiscript::fun([](Spine &a_self, const std::string &a_animationName, double a_delay, bool a_loop) {
+				return a_self.queueAnimation(a_animationName, a_delay, a_loop);
+			}), "queueAnimation");
+
+			a_script.add(chaiscript::fun([](Spine &a_self) {
+				return a_self.timeScale();
+			}), "timeScale");
+			a_script.add(chaiscript::fun([](Spine &a_self, double a_scale) {
+				return a_self.timeScale(a_scale);
+			}), "timeScale");
+
+			a_script.add(chaiscript::fun(&Spine::load), "load");
+			a_script.add(chaiscript::fun(&Spine::unload), "unload");
+			a_script.add(chaiscript::fun(&Spine::loaded), "loaded");
+
+			a_script.add(chaiscript::fun(&Spine::crossfade), "crossfade");
+
+			a_script.add(chaiscript::fun(&Spine::bundle), "bundle");
+
+			a_script.add(chaiscript::fun(&Spine::bindNode), "bindNode");
+			a_script.add(chaiscript::fun(&Spine::unbindSlot), "unbindSlot");
+			a_script.add(chaiscript::fun(&Spine::unbindNode), "unbindNode");
+			a_script.add(chaiscript::fun(&Spine::unbindAll), "unbindAll");
+
+			SignalRegister<void(std::shared_ptr<Spine>, int)>::hook(a_script);
+			SignalRegister<void(std::shared_ptr<Spine>, int, int)>::hook(a_script);
+			SignalRegister<void(std::shared_ptr<Spine>, int, const AnimationEventData &)>::hook(a_script);
+			a_script.add(chaiscript::fun(&Spine::onStart), "onStart");
+			a_script.add(chaiscript::fun(&Spine::onEnd), "onEnd");
+			a_script.add(chaiscript::fun(&Spine::onComplete), "onComplete");
+			a_script.add(chaiscript::fun(&Spine::onEvent), "onEvent");
+
+			a_script.add(chaiscript::type_conversion<SafeComponent<Spine>, std::shared_ptr<Spine>>([](const SafeComponent<Spine> &a_item) { return a_item.self(); }));
+			a_script.add(chaiscript::type_conversion<SafeComponent<Spine>, std::shared_ptr<Drawable>>([](const SafeComponent<Spine> &a_item) { return std::static_pointer_cast<Drawable>(a_item.self()); }));
+			a_script.add(chaiscript::type_conversion<SafeComponent<Spine>, std::shared_ptr<Component>>([](const SafeComponent<Spine> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
+
+			return a_script;
+		}
+
 		void Spine::loadImplementation(const FileBundle &a_fileBundle, bool a_refreshBounds) {
 			unloadImplementation();
 			if (a_fileBundle.skeletonFile != "") {
@@ -228,11 +311,16 @@ namespace MV{
 		AnimationTrack& Spine::track(int a_index) {
 			require<ResourceException>(loaded(), "Spine asset not loaded, cannot call track.");
 			defaultTrack = a_index;
-			auto found = tracks.find(a_index);
+			return track();
+		}
+
+		AnimationTrack& Spine::track() {
+			require<ResourceException>(loaded(), "Spine asset not loaded, cannot call track.");
+			auto found = tracks.find(defaultTrack);
 			if (found != tracks.end()) {
 				return found->second;
 			} else {
-				return tracks.emplace(a_index, AnimationTrack(a_index, animationState, skeleton)).first->second;
+				return tracks.emplace(defaultTrack, AnimationTrack(defaultTrack, animationState, skeleton)).first->second;
 			}
 		}
 
@@ -511,14 +599,15 @@ namespace MV{
 
 		//log("%d event: %s, %s: %d, %f, %s", trackIndex, animationName, event->data->name, event->intValue, event->floatValue, event->stringValue);
 		void Spine::onAnimationStateEvent(int a_trackIndex, spEventType type, spEvent* event, int loopCount) {
+			auto self = std::static_pointer_cast<Spine>(shared_from_this());
 			if(type == SP_ANIMATION_START){
-				onStartSignal(std::static_pointer_cast<Spine>(shared_from_this()), a_trackIndex);
+				onStartSignal(self, a_trackIndex);
 			} else if(type == SP_ANIMATION_END){
-				onEndSignal(std::static_pointer_cast<Spine>(shared_from_this()), a_trackIndex);
+				onEndSignal(self, a_trackIndex);
 			} else if(type == SP_ANIMATION_COMPLETE){
-				onCompleteSignal(std::static_pointer_cast<Spine>(shared_from_this()), a_trackIndex, loopCount);
+				onCompleteSignal(self, a_trackIndex, loopCount);
 			} else if(type == SP_ANIMATION_EVENT){
-				onEventSignal(std::static_pointer_cast<Spine>(shared_from_this()), a_trackIndex, AnimationEventData((event->data && event->data->name) ? event->data->name : "Anon", (event->stringValue) ? event->stringValue : "", event->intValue, event->floatValue));
+				onEventSignal(self, a_trackIndex, AnimationEventData((event->data && event->data->name) ? event->data->name : "Anon", (event->stringValue) ? event->stringValue : "", event->intValue, event->floatValue));
 			}
 		}
 
@@ -614,6 +703,68 @@ namespace MV{
 		double AnimationTrack::timeScale() const{
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call timescale.");
 			return static_cast<double>(spAnimationState_getCurrent(animationState, myTrackIndex)->timeScale);
+		}
+
+		chaiscript::ChaiScript& AnimationTrack::hook(chaiscript::ChaiScript &a_script) {
+			a_script.add(chaiscript::user_type<AnimationTrack>(), "AnimationTrack");
+
+			a_script.add(chaiscript::fun([](AnimationTrack &a_self) {
+				return a_self.time();
+			}), "time");
+			a_script.add(chaiscript::fun([](AnimationTrack &a_self, double a_dt) {
+				return a_self.time(a_dt);
+			}), "time");
+
+			a_script.add(chaiscript::fun([](AnimationTrack &a_self) {
+				return a_self.crossfade();
+			}), "crossfade");
+			a_script.add(chaiscript::fun([](AnimationTrack &a_self, double a_dt) {
+				return a_self.crossfade(a_dt);
+			}), "crossfade");
+
+			a_script.add(chaiscript::fun([](AnimationTrack &a_self) {
+				return a_self.timeScale();
+			}), "timeScale");
+			a_script.add(chaiscript::fun([](AnimationTrack &a_self, double a_dt) {
+				return a_self.timeScale(a_dt);
+			}), "timeScale");
+
+			a_script.add(chaiscript::fun([](AnimationTrack &a_self, const std::string &a_animationName) {
+				return a_self.animate(a_animationName);
+			}), "animate");
+			a_script.add(chaiscript::fun([](AnimationTrack &a_self, const std::string &a_animationName, bool a_loop) {
+				return a_self.animate(a_animationName, a_loop);
+			}), "animate");
+
+			a_script.add(chaiscript::fun([](AnimationTrack &a_self, const std::string &a_animationName) {
+				return a_self.queueAnimation(a_animationName);
+			}), "queueAnimation");
+			a_script.add(chaiscript::fun([](AnimationTrack &a_self, const std::string &a_animationName, bool a_loop) {
+				return a_self.queueAnimation(a_animationName, a_loop);
+			}), "queueAnimation");
+
+			a_script.add(chaiscript::fun([](AnimationTrack &a_self, const std::string &a_animationName, double a_delay) {
+				return a_self.queueAnimation(a_animationName, a_delay);
+			}), "queueAnimation");
+			a_script.add(chaiscript::fun([](AnimationTrack &a_self, const std::string &a_animationName, double a_delay, bool a_loop) {
+				return a_self.queueAnimation(a_animationName, a_delay, a_loop);
+			}), "queueAnimation");
+
+			a_script.add(chaiscript::fun(&AnimationTrack::name), "name");
+			a_script.add(chaiscript::fun(&AnimationTrack::trackIndex), "trackIndex");
+			a_script.add(chaiscript::fun(&AnimationTrack::duration), "duration");
+
+			a_script.add(chaiscript::fun(&AnimationTrack::stop), "stop");
+
+			SignalRegister<void(AnimationTrack &)>::hook(a_script);
+			SignalRegister<void(AnimationTrack &, int)>::hook(a_script);
+			SignalRegister<void(AnimationTrack &, const AnimationEventData &)>::hook(a_script);
+			a_script.add(chaiscript::fun(&AnimationTrack::onStart), "onStart");
+			a_script.add(chaiscript::fun(&AnimationTrack::onEnd), "onEnd");
+			a_script.add(chaiscript::fun(&AnimationTrack::onComplete), "onComplete");
+			a_script.add(chaiscript::fun(&AnimationTrack::onEvent), "onEvent");
+
+			return a_script;
 		}
 
 		std::string AnimationTrack::name() const {

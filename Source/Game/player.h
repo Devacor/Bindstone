@@ -46,6 +46,8 @@ struct Player {
 			CEREAL_NVP(loadout)
 		);
 	}
+
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 };
 
 #endif

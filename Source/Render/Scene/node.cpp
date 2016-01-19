@@ -1201,6 +1201,7 @@ namespace MV {
 			a_script.add(chaiscript::fun(&Node::makeOrGet), "makeOrGet");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const std::string &, bool)>(&Node::remove)), "remove");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const std::shared_ptr<Node> &, bool)>(&Node::remove)), "remove");
+			a_script.add(chaiscript::fun(&Node::removeFromParent), "removeFromParent");
 			a_script.add(chaiscript::fun(&Node::clear), "clear");
 			a_script.add(chaiscript::fun(&Node::root), "root");
 			a_script.add(chaiscript::fun(&Node::get), "get");
@@ -1209,6 +1210,7 @@ namespace MV {
 			a_script.add(chaiscript::fun(&Node::operator[]), "[]");
 			a_script.add(chaiscript::fun(&Node::size), "size");
 			a_script.add(chaiscript::fun(&Node::empty), "empty");
+			a_script.add(chaiscript::fun(&Node::task), "task");
 			a_script.add(chaiscript::fun(static_cast<std::string (Node::*)() const>(&Node::id)), "id");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node> (Node::*)(const std::string &)>(&Node::id)), "id");
 			a_script.add(chaiscript::fun(static_cast<PointPrecision(Node::*)() const>(&Node::depth)), "depth");

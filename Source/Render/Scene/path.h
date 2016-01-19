@@ -13,7 +13,19 @@ namespace MV {
 			friend cereal::access;
 
 		public:
-			DrawableDerivedAccessors(PathMap)
+			DrawableDerivedAccessorsNoShowHide(PathMap)
+
+
+			std::shared_ptr<PathMap> show() {
+				auto self = std::static_pointer_cast<PathMap>(MV::Scene::Drawable::show());
+				updateDebugViewSignals();
+				return self;
+			}
+			std::shared_ptr<PathMap> hide() {
+				auto self = std::static_pointer_cast<PathMap>(MV::Scene::Drawable::hide());
+				updateDebugViewSignals();
+				return self;
+			}
 
 			std::shared_ptr<PathMap> resizeGrid(const Size<int> &a_size) {
 				map->resize(a_size);
@@ -100,6 +112,7 @@ namespace MV {
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 				a_script.add(chaiscript::user_type<PathMap>(), "PathMap");
 				a_script.add(chaiscript::base_class<Drawable, PathMap>());
+				a_script.add(chaiscript::base_class<Component, PathMap>());
 
 				a_script.add(chaiscript::fun([](Node &a_self, const Size<int> &a_gridSize, bool a_useCorners) { return a_self.attach<PathMap>(a_gridSize, a_useCorners); }), "attachPathMap");
 				a_script.add(chaiscript::fun([](Node &a_self, const Size<> &a_size, const Size<int> &a_gridSize, bool a_useCorners) { return a_self.attach<PathMap>(a_size, a_gridSize, a_useCorners); }), "attachPathMap");
@@ -151,22 +164,14 @@ namespace MV {
 
 			virtual void initialize() override {
 				Drawable::initialize();
-				map->onStaticBlock.connect("_PARENT", [&](std::shared_ptr<Map> a_self, const Point<int> &a_position) {
-					int index = (a_position.x * map->size().height) + a_position.y;
-					for (int i = 0; i < 4; ++i) {
-						points[(index * 4) + i] = staticBlockedDebugTile;
-					}
-				});
 
-				map->onStaticUnblock.connect("_PARENT", [&](std::shared_ptr<Map> a_self, const Point<int> &a_position) {
-					int index = (a_position.x * map->size().height) + a_position.y;
-					for (int i = 0; i < 4; ++i) {
-						points[(index * 4) + i] = alternatingDebugTiles[(a_position.x + a_position.y) % 2];
-					}
-				});
+				updateDebugViewSignals();
+
 				resizeNumberOfDebugDrawPoints();
 				repositionDebugDrawPoints();
 			}
+
+			void updateDebugViewSignals();
 
 			void repositionDebugDrawPoints();
 
@@ -216,8 +221,11 @@ namespace MV {
 			}
 
 		private:
+			static Color alternatingDebugTilesWithClearance(int a_x, int a_y, int a_clearance);
+
 			static const std::vector<Color> alternatingDebugTiles;
 			static const Color staticBlockedDebugTile;
+			static const Color regularBlockedDebugTile;
 
 			std::shared_ptr<Map> map;
 			MV::Point<> topLeftOffset;

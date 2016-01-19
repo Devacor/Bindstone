@@ -83,6 +83,8 @@ namespace MV {
 
 			AnimationTrack& timeScale(double a_newTime);
 			double timeScale() const;
+
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 		private:
 			//called from spineTrackEntryCallback
 			void onAnimationStateEvent(int a_trackIndex, spEventType type, spEvent* event, int loopCount);
@@ -115,6 +117,16 @@ namespace MV {
 				std::string skeletonFile;
 				std::string atlasFile;
 				float loadScale;
+
+				static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+					a_script.add(chaiscript::user_type<FileBundle>(), "FileBundle");
+
+					a_script.add(chaiscript::fun(&FileBundle::skeletonFile), "skeletonFile");
+					a_script.add(chaiscript::fun(&FileBundle::atlasFile), "atlasFile");
+					a_script.add(chaiscript::fun(&FileBundle::loadScale), "loadScale");
+
+					return a_script;
+				}
 			private:
 				friend cereal::access;
 				template <class Archive>
@@ -140,6 +152,10 @@ namespace MV {
 			std::shared_ptr<Spine> crossfade(const std::string &a_fromAnimation, const std::string &a_toAnimation, double a_duration);
 
 			AnimationTrack& track(int a_index);
+			AnimationTrack& track();
+			int currentTrack() const {
+				return defaultTrack;
+			}
 
 			std::shared_ptr<Spine> animate(const std::string &a_animationName, bool a_loop = true);
 			std::shared_ptr<Spine> queueAnimation(const std::string &a_animationName, double a_delay, bool a_loop = true);
@@ -152,6 +168,8 @@ namespace MV {
 			FileBundle bundle() const {
 				return fileBundle;
 			}
+
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 		protected:
 			virtual void initialize() override;
 

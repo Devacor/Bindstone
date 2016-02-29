@@ -357,6 +357,20 @@ namespace MV {
 				return agent->overlaps(cast<int>(map->gridFromLocal(a_position)));
 			}
 
+			std::shared_ptr<PathAgent> disableFootprint() {
+				agent->disableFootprint();
+				return std::static_pointer_cast<PathAgent>(shared_from_this());
+			}
+
+			std::shared_ptr<PathAgent> enableFootprint() {
+				agent->enableFootprint();
+				return std::static_pointer_cast<PathAgent>(shared_from_this());
+			}
+
+			bool hasFootprint() const {
+				return !agent->hasFootprint();
+			}
+
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 				a_script.add(chaiscript::user_type<PathAgent>(), "PathAgent");
 				a_script.add(chaiscript::base_class<Component, PathAgent>());
@@ -373,6 +387,10 @@ namespace MV {
 				a_script.add(chaiscript::fun(&PathAgent::stop), "stop");
 				a_script.add(chaiscript::fun(&PathAgent::gridOverlaps), "gridOverlaps");
 				a_script.add(chaiscript::fun(&PathAgent::localOverlaps), "localOverlaps");
+
+				a_script.add(chaiscript::fun(&PathAgent::hasFootprint), "hasFootprint");
+				a_script.add(chaiscript::fun(&PathAgent::disableFootprint), "disableFootprint");
+				a_script.add(chaiscript::fun(&PathAgent::enableFootprint), "enableFootprint");
 
 				a_script.add(chaiscript::fun(static_cast<PointPrecision (PathAgent::*)() const>(&PathAgent::gridSpeed)), "gridSpeed");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent> (PathAgent::*)(PointPrecision)>(&PathAgent::gridSpeed)), "gridSpeed");

@@ -47,6 +47,10 @@ struct Player {
 		);
 	}
 
+	bool operator==(const Player& a_rhs) const {
+		return id == a_rhs.id;
+	}
+
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 };
 

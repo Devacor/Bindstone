@@ -49,12 +49,12 @@ void Game::initializeWindow(){
 	localPlayer->loadout.buildings = {"life", "life", "life", "life", "life", "life", "life", "life"};
 	localPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
 
-	localPlayer->wallet.add(Wallet::CurrencyType::SOFT, 1000);
+	localPlayer->wallet.add(Wallet::CurrencyType::SOFT, 5000);
 	auto enemyPlayer = std::make_shared<Player>();
 	enemyPlayer->name = "Jai";
 	enemyPlayer->loadout.buildings = { "life", "life", "life", "life", "life", "life", "life", "life" };
 	enemyPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
-
+	
 	data.player(localPlayer);
 
 	instance = std::make_unique<GameInstance>(data.player(), enemyPlayer, mouse, data);

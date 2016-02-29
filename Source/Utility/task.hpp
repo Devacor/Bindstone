@@ -40,6 +40,7 @@ namespace MV {
 			blockParentCompletion(a_blockParentCompletion),
 			alwaysRunChildren(false),
 			totalTime(0.0),
+			totalLocalTime(0.0),
 			localDeltaInterval(0.0),
 			lastCalledLocalInterval(0.0),
 			deltaInterval(0.0),
@@ -67,8 +68,15 @@ namespace MV {
 			return mostRecentCreated;
 		}
 
-		Task& interval(double a_dt) {
+		Task& localInterval(double a_dt, size_t a_maxUpdates = 0) {
 			localDeltaInterval = a_dt;
+			maxUpdates = a_maxUpdates;
+			return *this;
+		}
+
+		Task& interval(double a_dt, size_t a_maxUpdates = 0) {
+			deltaInterval = a_dt;
+			maxUpdates = a_maxUpdates;
 			return *this;
 		}
 
@@ -156,7 +164,7 @@ namespace MV {
 
 			sequentialTasks.emplace_front(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
 			mostRecentCreated = sequentialTasks.front();
-			onFinishAllSignal.unblock();
+			resetFinishState();
 			return *this;
 		}
 
@@ -166,7 +174,7 @@ namespace MV {
 
 		Task& then(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			sequentialTasks.emplace_back(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
-			onFinishAllSignal.unblock();
+			resetFinishState();
 			mostRecentCreated = sequentialTasks.back();
 			return *this;
 		}
@@ -177,7 +185,7 @@ namespace MV {
 
 		Task& thenAlso(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			sequentialTasks.emplace_back(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
-			onFinishAllSignal.unblock();
+			resetFinishState();
 			mostRecentCreated = sequentialTasks.back();
 			return *this;
 		}
@@ -192,7 +200,7 @@ namespace MV {
 
 		Task& also(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion = true) {
 			parallelTasks.emplace_back(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
-			onFinishAllSignal.unblock();
+			resetFinishState();
 			mostRecentCreated = parallelTasks.back();
 			return *this;
 		}
@@ -305,6 +313,16 @@ namespace MV {
 	private:
 		bool cancelled = false;
 
+		void resetFinishState() {
+			if (ourTaskComplete)
+			{
+				totalLocalTime = 0.0f;
+			}
+			onFinishAllSignal.unblock();
+			onFinishSignal.unblock();
+			cancelled = false;
+		}
+
 		void finishNoUpdate() {
 			forceCompleteFlag = true;
 			for(auto&& task : parallelTasks){
@@ -317,7 +335,7 @@ namespace MV {
 
 		void totalUpdateIntervals() {
 			size_t steps = static_cast<size_t>((totalTime - lastCalledInterval) / deltaInterval);
-			for (size_t i = 0; i < steps && !suspended && !finished(); ++i) {
+			for (size_t i = 0; i < steps && !suspended && !finished() && (maxUpdates == 0 || i < maxUpdates); ++i) {
 				lastCalledInterval += deltaInterval;
 				totalUpdateStep(deltaInterval);
 			}
@@ -342,8 +360,8 @@ namespace MV {
 		}
 
 		void localTaskUpdateIntervals() {
-			size_t steps = static_cast<size_t>((totalTime - lastCalledLocalInterval) / localDeltaInterval);
-			for (size_t i = 0; i < steps; ++i) {
+			size_t steps = static_cast<size_t>((totalLocalTime - lastCalledLocalInterval) / localDeltaInterval);
+			for (size_t i = 0; i < steps && !suspended && !cancelled && !ourTaskComplete && (maxUpdates == 0 || i < maxUpdates); ++i) {
 				lastCalledLocalInterval += localDeltaInterval;
 				localTaskUpdateStep(localDeltaInterval);
 			}
@@ -351,18 +369,18 @@ namespace MV {
 
 		void updateLocalTask(double a_dt){
 			if (!ourTaskComplete) {
-				if (totalTime == 0.0f) {
+				if (totalLocalTime == 0.0f) {
 					try { onStartSignal(*this); } catch (std::exception &a_e) {
 						if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
 						onExceptionSignal(*this, a_e);
 					}
 				}
-				totalTime += a_dt * static_cast<int>(!forceCompleteFlag);
+				totalLocalTime += a_dt * static_cast<int>(!forceCompleteFlag);
 
 				if (localDeltaInterval > 0) {
 					localTaskUpdateIntervals();
 				} else {
-					lastCalledLocalInterval = totalTime;
+					lastCalledLocalInterval = totalLocalTime;
 					localTaskUpdateStep(a_dt);
 				}
 			}
@@ -469,7 +487,7 @@ namespace MV {
 			bool allFinished = finished();
 			if (!ourTaskComplete) {
 				ourTaskComplete = true;
-				if(totalTime == 0){
+				if(totalLocalTime == 0){
 					cancel();
 				} else {
 					try { onFinishSignal(*this); } catch (std::exception &a_e) {
@@ -533,7 +551,7 @@ namespace MV {
 		}
 
 		void suspend() {
-			if (!suspended && totalTime > 0) {
+			if (!suspended && totalLocalTime > 0) {
 				suspended = true;
 				try { onSuspendSignal(*this); } catch (std::exception &a_e) {
 					if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
@@ -553,10 +571,13 @@ namespace MV {
 		bool forceCompleteFlag;
 		std::string taskName;
 		double totalTime;
+		double totalLocalTime;
 		double deltaInterval;
 		double localDeltaInterval;
 		double lastCalledInterval;
 		double lastCalledLocalInterval;
+
+		size_t maxUpdates = 0;
 
 		bool block;
 		bool suspended;

@@ -21,7 +21,10 @@ class Team {
 public:
 	Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_game);
 
-	MV::Point<> goal() const { return goalPosition; }
+	MV::Point<> ourWell() const { return ourWellPosition; }
+	MV::Point<> enemyWell() const { return enemyWellPosition; }
+
+	MV::Scale scale() const { return side == TeamSide::LEFT ? MV::Scale(1, 1) : MV::Scale(-1, 1); }
 
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 		a_script.add(chaiscript::user_type<Team>(), "Team");
@@ -31,8 +34,12 @@ public:
 		}), "game");
 
 		a_script.add(chaiscript::fun([](Team &a_self) {
-			return a_self.goalPosition;
-		}), "goal");
+			return a_self.enemyWellPosition;
+		}), "enemyWell");
+
+		a_script.add(chaiscript::fun([](Team &a_self) {
+			return a_self.ourWellPosition;
+		}), "ourWell");
 
 		a_script.add(chaiscript::fun([](Team &a_self) {
 			return a_self.health;
@@ -58,7 +65,8 @@ private:
 	int health;
 	TeamSide side;
 
-	MV::Point<> goalPosition;
+	MV::Point<> ourWellPosition;
+	MV::Point<> enemyWellPosition;
 };
 
 class GameInstance {
@@ -120,6 +128,7 @@ private:
 	Team left;
 	Team right;
 
+	MV::Task worldTimestep;
 	MV::Task cameraAction;
 };
 

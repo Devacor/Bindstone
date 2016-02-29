@@ -448,6 +448,26 @@ namespace MV {
 			return result;
 		}
 
+		std::shared_ptr<NavigationAgent> disableFootprint() {
+			if (!footprintDisabled) {
+				unblockMap();
+				footprintDisabled = true;
+			}
+			return shared_from_this();
+		}
+
+		std::shared_ptr<NavigationAgent> enableFootprint() {
+			if (footprintDisabled) {
+				footprintDisabled = false;
+				blockMap();
+			}
+			return shared_from_this();
+		}
+
+		bool hasFootprint() const {
+			return !footprintDisabled;
+		}
+
 		Point<PointPrecision> position() const {
 			return ourPosition;
 		}
@@ -588,7 +608,8 @@ namespace MV {
 				CEREAL_NVP(ourSpeed),
 				CEREAL_NVP(acceptableDistance),
 				CEREAL_NVP(unitSize),
-				CEREAL_NVP(map)
+				CEREAL_NVP(map),
+				CEREAL_NVP(footprintDisabled)
 			);
 
 			blockMap();
@@ -617,19 +638,23 @@ namespace MV {
 		}
 
 		void blockMap(){
-			auto topLeft = cast<int>(position());
-			for (int x = topLeft.x; x < topLeft.x + size() && x < map->size().width; ++x) {
-				for (int y = topLeft.y; y < topLeft.y + size() && y < map->size().height; ++y) {
-					(*map)[x][y].block();
+			if (!footprintDisabled) {
+				auto topLeft = cast<int>(position());
+				for (int x = topLeft.x; x < topLeft.x + size() && x < map->size().width; ++x) {
+					for (int y = topLeft.y; y < topLeft.y + size() && y < map->size().height; ++y) {
+						(*map)[x][y].block();
+					}
 				}
 			}
 		}
 
 		void unblockMap() {
-			auto topLeft = cast<int>(position());
-			for (int x = topLeft.x; x < topLeft.x + size() && x < map->size().width; ++x) {
-				for (int y = topLeft.y; y < topLeft.y + size() && y < map->size().height; ++y) {
-					(*map)[x][y].unblock();
+			if (!footprintDisabled) {
+				auto topLeft = cast<int>(position());
+				for (int x = topLeft.x; x < topLeft.x + size() && x < map->size().width; ++x) {
+					for (int y = topLeft.y; y < topLeft.y + size() && y < map->size().height; ++y) {
+						(*map)[x][y].unblock();
+					}
 				}
 			}
 		}
@@ -645,6 +670,8 @@ namespace MV {
 		const int64_t maxNodesToSearch = 200;
 		bool activeUpdate = false;
 
+		bool footprintDisabled = false;
+
 		int unitSize = 1;
 
 		std::vector<TemporaryCost> costs;
@@ -659,6 +686,9 @@ namespace MV {
 			a_script.add(chaiscript::fun(&NavigationAgent::pathfinding), "pathfinding");
 			a_script.add(chaiscript::fun(&NavigationAgent::stop), "stop");
 			a_script.add(chaiscript::fun(&NavigationAgent::path), "path");
+			a_script.add(chaiscript::fun(&NavigationAgent::hasFootprint), "hasFootprint");
+			a_script.add(chaiscript::fun(&NavigationAgent::disableFootprint), "disableFootprint");
+			a_script.add(chaiscript::fun(&NavigationAgent::enableFootprint), "enableFootprint");
 			a_script.add(chaiscript::fun(static_cast<PointPrecision(NavigationAgent::*)()const>(&NavigationAgent::speed)), "speed");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<NavigationAgent>(NavigationAgent::*)(PointPrecision)>(&NavigationAgent::speed)), "speed");
 

@@ -31,7 +31,7 @@ void Building::initialize() {
 			);
 	});
 	newNode->component<MV::Scene::Spine>()->animate("idle");
-
+	owner()->scale(owner()->scale() * gameInstance.teamForPlayer(owningPlayer).scale());
 	initializeBuildingButton(newNode);
 }
 
@@ -125,7 +125,7 @@ void Building::initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &
 			auto dialogBounds = dialog->bounds().size();
 			dialog->translate({ -(dialogBounds.width / 2), 50.0f });
 		});
-}
+	}
 }
 
 // MV::SignalRegister<CallbackSignature> onArrive;
@@ -206,17 +206,11 @@ void Creature::initialize() {
 	agent->onBlocked.connect("_PARENT", [&](std::shared_ptr<MV::Scene::PathAgent>) {
 		onBlockedSignal(std::static_pointer_cast<Creature>(shared_from_this()));
 	});
+	
+	auto self = std::static_pointer_cast<Creature>(shared_from_this());
+	statTemplate.script(gameInstance.script()).spawn(self);
 
-	{
-		auto localVariables = std::map<std::string, chaiscript::Boxed_Value>{
-			{ "self", chaiscript::Boxed_Value(this) }
-		};
-		auto resetLocals = gameInstance.script().get_locals();
-		gameInstance.script().set_locals(localVariables);
-		SCOPE_EXIT{ gameInstance.script().set_locals(resetLocals); };
-		gameInstance.script().eval(statTemplate.script());
-	}
-	if (scriptSpawn) { scriptSpawn(std::static_pointer_cast<Creature>(shared_from_this())); }
+	owner()->scale(owner()->scale() * gameInstance.teamForPlayer(owningPlayer).scale());
 	/* 
 	auto voidTexture = managers.textures.pack("VoidGuy")->handle(0);
 	auto creatureNode = pathMap->owner()->make(MV::guid("Creature_"));
@@ -253,10 +247,11 @@ void Creature::initialize() {
 
 void Creature::updateImplementation(double a_delta) {
 	auto self = std::static_pointer_cast<Creature>(shared_from_this());
-	if (scriptUpdate) { scriptUpdate(self, a_delta); }
+	statTemplate.script(gameInstance.script()).update(self, a_delta);
 }
 
 chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance) {
+	CreatureData::hook(a_script);
 	a_script.add(chaiscript::user_type<Creature>(), "Creature");
 	a_script.add(chaiscript::base_class<Component, Creature>());
 
@@ -272,10 +267,6 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 	a_script.add(chaiscript::fun(&Creature::onDeath), "onDeath");
 	a_script.add(chaiscript::fun(&Creature::onFall), "onFall");
 
-	a_script.add(chaiscript::fun(&Creature::scriptSpawn), "spawn");
-	a_script.add(chaiscript::fun(&Creature::scriptUpdate), "update");
-	a_script.add(chaiscript::fun(&Creature::scriptDeath), "death");
-
 	a_script.add(chaiscript::fun([](Creature &a_self) {
 		return a_self.statTemplate;
 	}), "stats");
@@ -290,7 +281,7 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 
 	a_script.add(chaiscript::fun([](Creature &a_self) {
 		return a_self.gameInstance.teamForPlayer(a_self.owningPlayer);
-	}), "ourTeam");
+	}), "team");
 
 	a_script.add(chaiscript::fun([](Creature &a_self) {
 		return a_self.gameInstance.teamAgainstPlayer(a_self.owningPlayer);
@@ -302,6 +293,18 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 	return a_script;
 }
 
-void CreatureData::loadScript() const {
-	scriptContents = MV::fileContents("Assets/Scripts/Creatures/" + id + ".script");
+CreatureScriptMethods& CreatureScriptMethods::loadScript(chaiscript::ChaiScript &a_script, const std::string &a_id) {
+	if (scriptContents == "NIL") {
+		scriptContents = MV::fileContents("Assets/Scripts/Creatures/" + a_id + ".script");
+		if (!scriptContents.empty()) {
+			auto localVariables = std::map<std::string, chaiscript::Boxed_Value>{
+				{ "self", chaiscript::Boxed_Value(this) }
+			};
+			auto resetLocals = a_script.get_locals();
+			a_script.set_locals(localVariables);
+			SCOPE_EXIT{ a_script.set_locals(resetLocals); };
+			a_script.eval(scriptContents);
+		}
+	}
+	return *this;
 }

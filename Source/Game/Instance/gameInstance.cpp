@@ -12,7 +12,7 @@ Team::Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_ga
 	for (int i = 0; i < 8; ++i) {
 		auto buildingNode = game.worldScene->get(sideString + "_" + std::to_string(i));
 
-		buildingNode->attach<Building>(game.data().buildings().data(a_player->loadout.buildings[i]), a_player->loadout.skins[i], i, a_player, game);
+		buildings.push_back(buildingNode->attach<Building>(game.data().buildings().data(a_player->loadout.buildings[i]), a_player->loadout.skins[i], i, a_player, game));
 // 		auto newNode = buildingNode->make("Assets/Prefabs/life_0.prefab", [&](cereal::JSONInputArchive& archive) {
 // 			archive.add(
 // 				cereal::make_nvp("mouse", &game.mouse),
@@ -58,14 +58,24 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 
 	pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
 
-	right.goalPosition = path()->gridFromLocal(path()->owner()->localFromWorld(scene()->get(sideToString(LEFT) + "Goal")->worldFromLocal(MV::Point<>())));
-	left.goalPosition = path()->gridFromLocal(path()->owner()->localFromWorld(scene()->get(sideToString(RIGHT) + "Goal")->worldFromLocal(MV::Point<>())));
+	right.enemyWellPosition = path()->gridFromLocal(path()->owner()->localFromWorld(scene()->get(sideToString(LEFT) + "Goal")->worldFromLocal(MV::Point<>())));
+	left.enemyWellPosition = path()->gridFromLocal(path()->owner()->localFromWorld(scene()->get(sideToString(RIGHT) + "Goal")->worldFromLocal(MV::Point<>())));
+
+	right.ourWellPosition = left.enemyWellPosition;
+	left.ourWellPosition = right.enemyWellPosition;
 
 	ourMouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse) {
 		beginMapDrag();
 	});
 
+	right.buildings[0]->upgrade(0);
+
 	hook();
+
+	worldTimestep.then("update", [&](MV::Task& a_self, double a_dt) {
+		worldScene->update(static_cast<float>(a_dt));
+		return false;
+	}).last()->interval(1.0 / 60.0, 15);
 }
 
 void GameInstance::beginMapDrag() {
@@ -135,8 +145,9 @@ void GameInstance::nodeLoadBinder(cereal::JSONInputArchive &a_archive) {
 }
 
 bool GameInstance::update(double a_dt) {
-	worldScene->drawUpdate(static_cast<float>(a_dt));
+	worldTimestep.update(a_dt);
 	cameraAction.update(a_dt);
+	worldScene->draw();
 	return false;
 }
 

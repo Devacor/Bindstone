@@ -12,6 +12,41 @@
 
 class GameInstance;
 struct Player;
+struct CreatureData;
+class Creature;
+
+struct CreatureScriptMethods {
+	friend CreatureData;
+
+	void spawn(std::shared_ptr<Creature> a_creature) const {
+		if (scriptSpawn) { scriptSpawn(a_creature); }
+	}
+
+	void update(std::shared_ptr<Creature> a_creature, double a_dt) const {
+		if (scriptUpdate) { scriptUpdate(a_creature, a_dt); }
+	}
+
+	void death(std::shared_ptr<Creature> a_creature) const {
+		if (scriptDeath) { scriptDeath(a_creature); }
+	}
+
+	static chaiscript::ChaiScript& CreatureScriptMethods::hook(chaiscript::ChaiScript &a_script) {
+		a_script.add(chaiscript::user_type<CreatureScriptMethods>(), "CreatureScriptMethods");
+
+		a_script.add(chaiscript::fun(&CreatureScriptMethods::scriptSpawn), "spawn");
+		a_script.add(chaiscript::fun(&CreatureScriptMethods::scriptUpdate), "update");
+		a_script.add(chaiscript::fun(&CreatureScriptMethods::scriptDeath), "death");
+		return a_script;
+	}
+
+	CreatureScriptMethods& loadScript(chaiscript::ChaiScript &a_script, const std::string &a_id);
+private:
+	std::function<void(std::shared_ptr<Creature>)> scriptSpawn;
+	std::function<void(std::shared_ptr<Creature>, double)> scriptUpdate;
+	std::function<void(std::shared_ptr<Creature>)> scriptDeath;
+
+	std::string scriptContents = "NIL";
+};
 
 struct CreatureData {
 	std::string id;
@@ -30,6 +65,8 @@ struct CreatureData {
 	float ability;
 
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+		CreatureScriptMethods::hook(a_script);
+
 		a_script.add(chaiscript::user_type<CreatureData>(), "CreatureData");
 
 		a_script.add(chaiscript::fun(&CreatureData::id), "id");
@@ -82,20 +119,14 @@ struct CreatureData {
 			CEREAL_NVP(strength),
 			CEREAL_NVP(ability)
 		);
-
-		loadScript();
 	}
 
-	const std::string& script() const {
-		if (scriptContents == "NIL") {
-			loadScript();
-		}
-		return scriptContents;
+	CreatureScriptMethods& script(chaiscript::ChaiScript &a_script) const {
+		return scriptMethods.loadScript(a_script, id);
 	}
+
 private:
-	void loadScript() const;
-
-	mutable std::string scriptContents = "NIL";
+	mutable CreatureScriptMethods scriptMethods;
 };
 
 
@@ -454,10 +485,6 @@ private:
 	}
 
 	virtual void updateImplementation(double a_delta) override;;
-
-	std::function<void(std::shared_ptr<Creature>)> scriptSpawn;
-	std::function<void(std::shared_ptr<Creature>,double)> scriptUpdate;
-	std::function<void(std::shared_ptr<Creature>)> scriptDeath;
 
 	const CreatureData& statTemplate;
 	std::string skin;

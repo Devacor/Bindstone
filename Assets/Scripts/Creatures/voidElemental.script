@@ -1,13 +1,13 @@
 self.spawn = fun(self){
-	auto goal = Point(30, 50);
 	self.onArrive.connect("!", fun(self){
 		print("made it!");
 		auto spine = self.owner().spineComponent();
+		self.agent().disableFootprint();
 		spine.animate("die", false);
 		spine.onEnd.connect("!", fun(spine, index){
 			spine.owner().parent().parent().removeFromParent();
 		});
 	});
 	self.agent.gridSpeed(10);
-	self.agent.gridGoal(self.enemyTeam.goal, 0);
+	self.agent.gridGoal(self.team.enemyWell, 0);
 };

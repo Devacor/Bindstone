@@ -470,6 +470,17 @@ namespace MV {
 			return list;
 		}
 
+		std::vector<std::shared_ptr<MV::Scene::Node>> Node::parents() {
+			std::vector<std::shared_ptr<MV::Scene::Node>> list;
+			Node* current = this;
+			while (current) {
+				current = current->myParent;
+				if (current) {
+					list.push_back(current->shared_from_this());
+				}
+			}
+		}
+
 		BoxAABB<> Node::bounds(bool a_includeChildren /*= true*/) {
 			onBoundsRequestSignal(shared_from_this());
 			if(a_includeChildren){

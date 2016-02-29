@@ -76,6 +76,7 @@ namespace MV {
 		}
 
 		void Palette::initialize() {
+			Drawable::initialize();
 			onLeftMouseDownHandle = ourMouse.onLeftMouseDown.connect([&](MouseState& a_mouse) {
 				if (mouseOverMainColor(a_mouse)) {
 					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority.empty() ? owner()->parentIndexList(globalClickPriority) : overrideClickPriority), [&]() {

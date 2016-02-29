@@ -27,7 +27,7 @@
                     "y": 1,
                     "z": 1
                 },
-                "sortDepth": 1,
+                "sortDepth": 0,
                 "nodeAlpha": 1,
                 "localBounds": {
                     "minPoint": {
@@ -250,6 +250,11 @@
                                                     }
                                                 },
                                                 "spawnParticles": true,
+                                                "relativeNodePosition": {
+                                                    "ptr_wrapper": {
+                                                        "id": 0
+                                                    }
+                                                },
                                                 "Drawable": {
                                                     "shouldDraw": true,
                                                     "ourTexture": {
@@ -482,6 +487,11 @@
                                                     }
                                                 },
                                                 "spawnParticles": true,
+                                                "relativeNodePosition": {
+                                                    "ptr_wrapper": {
+                                                        "id": 0
+                                                    }
+                                                },
                                                 "Drawable": {
                                                     "shouldDraw": true,
                                                     "ourTexture": {

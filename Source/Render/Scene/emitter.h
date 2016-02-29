@@ -210,6 +210,10 @@ namespace MV {
 		public:
 			DrawableDerivedAccessors(Emitter)
 
+			std::shared_ptr<Emitter> relativeEmission(std::weak_ptr<MV::Scene::Node> a_newRelativePosition);
+			std::weak_ptr<MV::Scene::Node> relativeEmission() const;
+			std::shared_ptr<Emitter> removeRelativeEmission();
+
 			std::shared_ptr<Emitter> properties(const EmitterSpawnProperties &a_emitterProperties);
 
 			const EmitterSpawnProperties& properties() const;
@@ -276,6 +280,7 @@ namespace MV {
 				archive(
 					CEREAL_NVP(spawnProperties),
 					CEREAL_NVP(spawnParticles),
+					CEREAL_NVP(relativeNodePosition),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
@@ -289,6 +294,7 @@ namespace MV {
 				archive(
 					cereal::make_nvp("spawnProperties", construct->spawnProperties),
 					cereal::make_nvp("spawnParticles", construct->spawnParticles),
+					cereal::make_nvp("relativeNodePosition", construct->relativeNodePosition),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
 				construct->initialize();
@@ -330,12 +336,18 @@ namespace MV {
 				std::vector<Particle> particles;
 				std::vector<DrawPoint> points;
 				std::vector<GLuint> vertexIndices;
+				MV::Point<> particleOffset;
 			};
 			std::vector<DrawPoint> pointBuffer;
 			std::vector<GLuint> vertexIndexBuffer;
 
 			std::vector<ThreadData> threadData;
 
+			MV::Point<> previousRelativePosition;
+
+			std::weak_ptr<MV::Scene::Node> relativeNodePosition;
+
+			bool firstUpdate = true;
 			bool spawnParticles = true;
 			static const double MAX_TIME_STEP;
 			static const int MAX_PARTICLES_PER_FRAME = 2500;

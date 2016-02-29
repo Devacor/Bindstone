@@ -114,7 +114,7 @@ namespace MV {
 				);
 			}
 
-			virtual void initialize();
+			virtual void initialize() override;
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Palette> &construct) {

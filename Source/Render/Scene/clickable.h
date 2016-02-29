@@ -120,7 +120,7 @@ namespace MV {
 		protected:
 			Clickable(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
 
-			virtual void initialize();
+			virtual void initialize() override;
 
 			virtual void acceptDownClick();
 

@@ -751,6 +751,7 @@ namespace MV {
 			size_t myIndex() const;
 
 			std::vector<size_t> parentIndexList(size_t a_globalPriority = 0, size_t a_modifyLastPriority = 0);
+			std::vector<std::shared_ptr<MV::Scene::Node>> parents();
 
 			BoxAABB<> bounds(bool a_includeChildren = true); //our node's local bounds + optionally included childBounds;
 			BoxAABB<> childBounds(); //only child bounds

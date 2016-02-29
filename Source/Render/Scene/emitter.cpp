@@ -131,6 +131,8 @@ namespace MV {
 			}
 			for (auto &&particle : threadData[a_groupIndex].particles) {
 				BoxAABB<> bounds(toPoint(particle.scale / 2.0f), toPoint(particle.scale / -2.0f));
+				
+				particle.position += threadData[a_groupIndex].particleOffset;
 
 				appendQuadVertexIndices(threadData[a_groupIndex].vertexIndices, static_cast<GLuint>(threadData[a_groupIndex].points.size()));
 				
@@ -186,6 +188,20 @@ namespace MV {
 			updateInProgress.store(false);
 		}
 
+		std::weak_ptr<MV::Scene::Node> Emitter::relativeEmission() const {
+			return relativeNodePosition;
+		}
+
+		std::shared_ptr<Emitter> Emitter::relativeEmission(std::weak_ptr<MV::Scene::Node> a_newRelativePosition) {
+			relativeNodePosition = a_newRelativePosition;
+			return std::static_pointer_cast<Emitter>(shared_from_this());
+		}
+
+		std::shared_ptr<Emitter> Emitter::removeRelativeEmission() {
+			relativeNodePosition = std::weak_ptr<MV::Scene::Node>();
+			return std::static_pointer_cast<Emitter>(shared_from_this());
+		}
+
 		std::shared_ptr<Emitter> Emitter::properties(const EmitterSpawnProperties & a_emitterProperties) {
 			spawnProperties = a_emitterProperties;
 			nextSpawnDelta = randomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
@@ -222,7 +238,18 @@ namespace MV {
 		void Emitter::updateImplementation(double a_dt) {
 			bool falseValue = false;
 			accumulatedTimeDelta += a_dt;
+
 			if (updateInProgress.compare_exchange_strong(falseValue, true)) {
+				MV::Point<> worldDelta;
+				if (!relativeNodePosition.expired()) {
+					auto nextRelativePosition = owner()->localFromWorld(relativeNodePosition.lock()->worldPosition());
+					if (firstUpdate) { previousRelativePosition = nextRelativePosition; firstUpdate = false; }
+					worldDelta = (nextRelativePosition - previousRelativePosition);
+					previousRelativePosition = nextRelativePosition;
+				}
+				for (auto&& data : threadData) {
+					data.particleOffset = worldDelta;
+				}
 				pool.task([&]() {
 					double dt = std::min(accumulatedTimeDelta, MAX_TIME_STEP);
 					accumulatedTimeDelta = 0.0;

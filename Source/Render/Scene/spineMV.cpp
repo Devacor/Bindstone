@@ -81,6 +81,7 @@ namespace MV{
 		}
 
 		void Spine::initialize() {
+			Drawable::initialize();
 			loadImplementation(fileBundle, false);
 		}
 

@@ -210,9 +210,11 @@ namespace MV {
 		public:
 			DrawableDerivedAccessors(Emitter)
 
-			std::shared_ptr<Emitter> relativeEmission(std::weak_ptr<MV::Scene::Node> a_newRelativePosition);
+			std::shared_ptr<Emitter> relativeEmission(std::shared_ptr<MV::Scene::Node> a_newRelativePosition);
 			std::weak_ptr<MV::Scene::Node> relativeEmission() const;
 			std::shared_ptr<Emitter> removeRelativeEmission();
+
+			std::shared_ptr<Emitter> makeRelativeToParent(int a_count);
 
 			std::shared_ptr<Emitter> properties(const EmitterSpawnProperties &a_emitterProperties);
 
@@ -264,6 +266,8 @@ namespace MV {
 
 			virtual void updateImplementation(double a_dt) override;
 
+			virtual void defaultDrawImplementation() override;
+
 			template <class Archive>
 			void serialize(Archive & archive) {
 				std::vector<DrawPoint> tmpPoints{ };
@@ -280,7 +284,8 @@ namespace MV {
 				archive(
 					CEREAL_NVP(spawnProperties),
 					CEREAL_NVP(spawnParticles),
-					CEREAL_NVP(relativeNodePosition),
+					CEREAL_NVP(relativeParentCount),
+					cereal::make_nvp("relativeNodePosition", (relativeParentCount >= 0 ? std::weak_ptr<MV::Scene::Node>() : relativeNodePosition)),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
@@ -294,6 +299,7 @@ namespace MV {
 				archive(
 					cereal::make_nvp("spawnProperties", construct->spawnProperties),
 					cereal::make_nvp("spawnParticles", construct->spawnParticles),
+					cereal::make_nvp("relativeParentCount", construct->relativeParentCount),
 					cereal::make_nvp("relativeNodePosition", construct->relativeNodePosition),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
@@ -343,9 +349,9 @@ namespace MV {
 
 			std::vector<ThreadData> threadData;
 
-			MV::Point<> previousRelativePosition;
-
 			std::weak_ptr<MV::Scene::Node> relativeNodePosition;
+
+			int relativeParentCount = -1;
 
 			bool firstUpdate = true;
 			bool spawnParticles = true;

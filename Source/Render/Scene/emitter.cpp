@@ -27,7 +27,7 @@ namespace MV {
 		void Emitter::spawnParticle(size_t a_groupIndex) {
 			Particle particle;
 
-			particle.position = randomMix(spawnProperties.minimumPosition, spawnProperties.maximumPosition);
+			particle.position = randomMix(spawnProperties.minimumPosition, spawnProperties.maximumPosition) - threadData[a_groupIndex].particleOffset;
 			particle.rotation = randomMix(spawnProperties.minimumRotation, spawnProperties.maximumRotation);
 			particle.change.rotationalChange = randomMix(spawnProperties.minimum.rotationalChange, spawnProperties.maximum.rotationalChange);
 
@@ -65,15 +65,13 @@ namespace MV {
 
 			particlesToSpawn = std::min(particlesToSpawn + totalParticles, static_cast<size_t>(spawnProperties.maximumParticles)) - totalParticles;
 
-			double maxTime = .001;
+			double maxParticlesPerFramePerThread = 500;
 
 			if (particlesToSpawn >= emitterThreads) {
 				ThreadPool::TaskList spawnTasks;
 				for (size_t currentThread = 0; currentThread < emitterThreads; ++currentThread) {
 					spawnTasks.emplace_back([=]() {
-						MV::Stopwatch timer;
-						timer.start();
-						for (size_t count = 0; timer.check() < maxTime && count < particlesToSpawn / emitterThreads; ++count) {
+						for (size_t count = 0; count < maxParticlesPerFramePerThread && (count < particlesToSpawn / emitterThreads); ++count) {
 							spawnParticle(currentThread);
 						}
 					});
@@ -132,7 +130,7 @@ namespace MV {
 			for (auto &&particle : threadData[a_groupIndex].particles) {
 				BoxAABB<> bounds(toPoint(particle.scale / 2.0f), toPoint(particle.scale / -2.0f));
 				
-				particle.position += threadData[a_groupIndex].particleOffset;
+				//particle.position += threadData[a_groupIndex].particleOffset;
 
 				appendQuadVertexIndices(threadData[a_groupIndex].vertexIndices, static_cast<GLuint>(threadData[a_groupIndex].points.size()));
 				
@@ -192,13 +190,40 @@ namespace MV {
 			return relativeNodePosition;
 		}
 
-		std::shared_ptr<Emitter> Emitter::relativeEmission(std::weak_ptr<MV::Scene::Node> a_newRelativePosition) {
+		std::shared_ptr<Emitter> Emitter::relativeEmission(std::shared_ptr<MV::Scene::Node> a_newRelativePosition) {
 			relativeNodePosition = a_newRelativePosition;
+			auto current = owner()->parent();
+			int count = 0;
+			while (current && current != a_newRelativePosition) {
+				current = current->parent();
+				++count;
+			}
+			if (current != a_newRelativePosition) {
+				count = -1;
+			}
+			relativeParentCount = count;
 			return std::static_pointer_cast<Emitter>(shared_from_this());
 		}
 
 		std::shared_ptr<Emitter> Emitter::removeRelativeEmission() {
+			relativeParentCount = -1;
 			relativeNodePosition = std::weak_ptr<MV::Scene::Node>();
+			return std::static_pointer_cast<Emitter>(shared_from_this());
+		}
+
+		std::shared_ptr<Emitter> Emitter::makeRelativeToParent(int a_count) {
+			relativeParentCount = 0;
+			auto current = owner()->parent();
+			while (a_count != 0 && current) {
+				current = current->parent();
+				--a_count;
+				++relativeParentCount;
+			}
+			if (current) {
+				relativeNodePosition = current;
+			} else {
+				relativeParentCount = -1;
+			}
 			return std::static_pointer_cast<Emitter>(shared_from_this());
 		}
 
@@ -238,17 +263,16 @@ namespace MV {
 		void Emitter::updateImplementation(double a_dt) {
 			bool falseValue = false;
 			accumulatedTimeDelta += a_dt;
-
+			if (relativeNodePosition.expired() && relativeParentCount >= 0) {
+				makeRelativeToParent(relativeParentCount);
+			}
 			if (updateInProgress.compare_exchange_strong(falseValue, true)) {
-				MV::Point<> worldDelta;
+				MV::Point<> particleOffset;
 				if (!relativeNodePosition.expired()) {
-					auto nextRelativePosition = owner()->localFromWorld(relativeNodePosition.lock()->worldPosition());
-					if (firstUpdate) { previousRelativePosition = nextRelativePosition; firstUpdate = false; }
-					worldDelta = (nextRelativePosition - previousRelativePosition);
-					previousRelativePosition = nextRelativePosition;
+					particleOffset = owner()->localFromWorld(relativeNodePosition.lock()->worldPosition());
 				}
 				for (auto&& data : threadData) {
-					data.particleOffset = worldDelta;
+					data.particleOffset = particleOffset;
 				}
 				pool.task([&]() {
 					double dt = std::min(accumulatedTimeDelta, MAX_TIME_STEP);
@@ -308,6 +332,44 @@ namespace MV {
 			} catch (::cereal::RapidJSONException &a_exception) {
 				std::cerr << "Failed to load emitter: " << a_exception.what() << std::endl;
 				return{};
+			}
+		}
+
+		void Emitter::defaultDrawImplementation() {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			if (!vertexIndices.empty()) {
+				require<ResourceException>(shaderProgram, "No shader program for Drawable!");
+				shaderProgram->use();
+
+				if (bufferId == 0) {
+					glGenBuffers(1, &bufferId);
+				}
+
+				glBindBuffer(GL_ARRAY_BUFFER, bufferId);
+				auto structSize = static_cast<GLsizei>(sizeof(points[0]));
+				glBufferData(GL_ARRAY_BUFFER, points.size() * structSize, &(points[0]), GL_STATIC_DRAW);
+
+				glEnableVertexAttribArray(0);
+				glEnableVertexAttribArray(1);
+				glEnableVertexAttribArray(2);
+
+				auto positionOffset = static_cast<size_t>(offsetof(DrawPoint, x));
+				auto textureOffset = static_cast<size_t>(offsetof(DrawPoint, textureX));
+				auto colorOffset = static_cast<size_t>(offsetof(DrawPoint, R));
+				glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)positionOffset); //Point
+				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
+				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
+
+				shaderProgram->set("texture", ourTexture);
+				auto emitterSpace = relativeNodePosition.expired() ? owner() : relativeNodePosition.lock();
+				shaderProgram->set("transformation", emitterSpace->renderer().projectionMatrix().top() * emitterSpace->worldTransform());
+
+				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices.size()), GL_UNSIGNED_INT, &vertexIndices[0]);
+
+				glDisableVertexAttribArray(0);
+				glDisableVertexAttribArray(1);
+				glDisableVertexAttribArray(2);
+				glUseProgram(0);
 			}
 		}
 

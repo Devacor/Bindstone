@@ -310,6 +310,7 @@
                                                                         "id": 0
                                                                     }
                                                                 },
+                                                                "relativeParentCount": -1,
                                                                 "Drawable": {
                                                                     "shouldDraw": true,
                                                                     "ourTexture": {
@@ -800,6 +801,7 @@
                                                         "id": 0
                                                     }
                                                 },
+                                                "relativeParentCount": -1,
                                                 "Drawable": {
                                                     "shouldDraw": true,
                                                     "ourTexture": {

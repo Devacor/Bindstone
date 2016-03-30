@@ -447,7 +447,7 @@ namespace MV {
 				onStop(onStopSignal),
 				onStart(onStartSignal) {
 			}
-
+			
 			virtual void updateImplementation(double a_dt) override {
 				agent->update(a_dt);
 				applyAgentPositionToOwner();

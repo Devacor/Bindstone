@@ -706,6 +706,17 @@ namespace MV{
 			return static_cast<double>(spAnimationState_getCurrent(animationState, myTrackIndex)->timeScale);
 		}
 
+		chaiscript::ChaiScript& AnimationEventData::hook(chaiscript::ChaiScript &a_script) {
+			a_script.add(chaiscript::user_type<AnimationTrack>(), "AnimationEventData");
+
+			a_script.add(chaiscript::fun(&AnimationEventData::name), "name");
+			a_script.add(chaiscript::fun(&AnimationEventData::name), "stringValue");
+			a_script.add(chaiscript::fun(&AnimationEventData::name), "intValue");
+			a_script.add(chaiscript::fun(&AnimationEventData::name), "floatValue");
+
+			return a_script;
+		}
+
 		chaiscript::ChaiScript& AnimationTrack::hook(chaiscript::ChaiScript &a_script) {
 			a_script.add(chaiscript::user_type<AnimationTrack>(), "AnimationTrack");
 
@@ -764,6 +775,8 @@ namespace MV{
 			a_script.add(chaiscript::fun(&AnimationTrack::onEnd), "onEnd");
 			a_script.add(chaiscript::fun(&AnimationTrack::onComplete), "onComplete");
 			a_script.add(chaiscript::fun(&AnimationTrack::onEvent), "onEvent");
+
+			AnimationEventData::hook(a_script);
 
 			return a_script;
 		}

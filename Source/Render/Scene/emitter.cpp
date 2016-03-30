@@ -212,17 +212,15 @@ namespace MV {
 		}
 
 		std::shared_ptr<Emitter> Emitter::makeRelativeToParent(int a_count) {
-			relativeParentCount = 0;
-			auto current = owner()->parent();
-			while (a_count != 0 && current) {
-				current = current->parent();
+			relativeParentCount = a_count;
+			relativeNodePosition.reset();
+			if (a_count > 0) {
+				relativeNodePosition = owner()->parent();
 				--a_count;
-				++relativeParentCount;
-			}
-			if (current) {
-				relativeNodePosition = current;
-			} else {
-				relativeParentCount = -1;
+				while (a_count > 0 && relativeNodePosition.lock()->parent()) {
+					relativeNodePosition = relativeNodePosition.lock()->parent();
+					--a_count;
+				}
 			}
 			return std::static_pointer_cast<Emitter>(shared_from_this());
 		}

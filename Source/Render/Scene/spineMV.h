@@ -26,6 +26,9 @@ namespace MV {
 				intValue(a_intValue),
 				floatValue(a_floatValue){
 			}
+
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
+
 			std::string name;
 			std::string stringValue;
 			int intValue;

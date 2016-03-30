@@ -53,11 +53,24 @@ public:
 			return a_self.creatures;
 		}), "creatures");
 
+		a_script.add(chaiscript::fun([](Team &a_self, const MV::Point<> &a_location, float a_radius) {
+			return a_self.creaturesInRange(a_location, a_radius);
+		}), "creaturesInRange");
+
+		a_script.add(chaiscript::fun([](Team &a_self) {
+			std::vector<int> testVector = { 1, 2, 3, 4, 5 };
+			return testVector;
+		}), "vectorSizeTest");
+
 		return a_script;
 	}
+
+	std::vector<std::shared_ptr<Creature>> creaturesInRange(const MV::Point<> &a_location, float a_radius);
+
+	void spawn(std::shared_ptr<Creature> &a_registerCreature);
 private:
-	std::vector<MV::Scene::SafeComponent<Building>> buildings;
-	std::vector<MV::Scene::SafeComponent<Creature>> creatures;
+	std::vector<std::shared_ptr<Building>> buildings;
+	std::vector<std::shared_ptr<Creature>> creatures;
 
 	GameInstance& game;
 
@@ -69,6 +82,7 @@ private:
 	MV::Point<> enemyWellPosition;
 };
 
+class Missile;
 class GameInstance {
 	friend Team;
 public:
@@ -88,6 +102,10 @@ public:
 
 	MV::MouseState& mouse() {
 		return ourMouse;
+	}
+
+	std::shared_ptr<MV::Scene::Node> missileContainer() const {
+		return pathMap->owner();
 	}
 
 	std::shared_ptr<MV::Scene::Node> scene() const {
@@ -112,7 +130,12 @@ public:
 
 	void moveCamera(MV::Point<> a_startPosition, MV::Scale a_scale);
 	void moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale);
+
+	void spawnMissile(std::shared_ptr<Creature> a_source, std::shared_ptr<Creature> a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive);
+
+	void removeMissile(Missile* a_toRemove);
 private:
+	void removeExpiredMissiles();
 	void handleScroll(int a_amount);
 
 	void hook();
@@ -125,11 +148,92 @@ private:
 
 	chaiscript::ChaiScript scriptEngine;
 
+	std::vector<std::unique_ptr<Missile>> missiles;
+	std::vector<Missile*> expiredMissiles;
+
 	Team left;
 	Team right;
 
 	MV::Task worldTimestep;
 	MV::Task cameraAction;
+};
+
+class Missile {
+public:
+	Missile(GameInstance &a_gameInstance, std::shared_ptr<Creature> a_source, std::shared_ptr<Creature> a_target, std::string a_prefab, float a_speed, std::function<void (Missile&)> a_onArrive):
+		gameInstance(a_gameInstance),
+		speed(a_speed),
+		sourceCreature(a_source),
+		targetCreature(a_target),
+		groundLocation(a_target->owner()->position()),
+		onArrive(a_onArrive){
+
+		sourceDeathWatcher = sourceCreature->onDeath.connect([&](std::shared_ptr<Creature> a_self){
+			sourceCreature.reset();
+			sourceDeathWatcher.reset();
+		});
+
+		targetDeathWatcher = targetCreature->onDeath.connect([&](std::shared_ptr<Creature> a_self){
+			targetCreature.reset();
+			targetDeathWatcher.reset();
+		});
+
+		missile = gameInstance.missileContainer()->make("Assets/Prefabs/Missiles/" + a_prefab + ".prefab", [&](cereal::JSONInputArchive& archive) {
+			archive.add(
+				cereal::make_nvp("mouse", &gameInstance.mouse()),
+				cereal::make_nvp("renderer", &gameInstance.data().managers().renderer),
+				cereal::make_nvp("textLibrary", &gameInstance.data().managers().textLibrary),
+				cereal::make_nvp("pool", &gameInstance.data().managers().pool),
+				cereal::make_nvp("texture", &gameInstance.data().managers().textures)
+			);
+		}, gameInstance.missileContainer()->getUniqueId("missile"));
+		missile->position(a_source->owner()->position());
+		missile->serializable(false);
+	}
+
+	std::shared_ptr<Creature> source() {
+		return sourceCreature;
+	}
+
+	std::shared_ptr<Creature> target() {
+		return targetCreature;
+	}
+
+
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+		a_script.add(chaiscript::user_type<Missile>(), "Missile");
+
+		a_script.add(chaiscript::fun(&Missile::source), "source");
+		a_script.add(chaiscript::fun(&Missile::target), "target");
+
+		return a_script;
+	}
+
+	void update(double a_dt) {
+		if(targetCreature && targetCreature->alive()){
+			groundLocation = targetCreature->owner()->position();
+		}
+		auto nextMissileLocation = MV::moveToward(missile->position(), groundLocation, speed * static_cast<float>(a_dt));
+		if (nextMissileLocation != groundLocation) {
+			missile->position(nextMissileLocation);
+		} else {
+			if (onArrive) { onArrive(*this); }
+			gameInstance.removeMissile(this);
+			missile->removeFromParent();
+		}
+	}
+private:
+	std::shared_ptr<MV::Scene::Node> missile;
+	std::shared_ptr<Creature> sourceCreature;
+	std::shared_ptr<Creature> targetCreature;
+	MV::Point<> groundLocation;
+	float speed;
+
+	std::function<void(Missile&)> onArrive;
+	GameInstance &gameInstance;
+
+	Creature::SharedRecieverType targetDeathWatcher;
+	Creature::SharedRecieverType sourceDeathWatcher;
 };
 
 #endif

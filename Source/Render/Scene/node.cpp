@@ -201,7 +201,7 @@ namespace MV {
 			return make(a_draw2d, guid("root_"));
 		}
 
-		std::shared_ptr<Node> Node::load(const std::string &a_filename, const std::function<void (cereal::JSONInputArchive &)> a_binder) {
+		std::shared_ptr<Node> Node::load(const std::string &a_filename, const std::function<void (cereal::JSONInputArchive &)> a_binder, const std::string &a_newNodeId) {
 			std::ifstream stream(a_filename);
 			require<ResourceException>(stream, "File not found for Node::load: ", a_filename);
 			cereal::JSONInputArchive archive(stream);
@@ -210,6 +210,9 @@ namespace MV {
 			}
 			std::shared_ptr<Node> result;
 			archive(result);
+			if (!a_newNodeId.empty()) {
+				result->id(a_newNodeId);
+			}
 			return result;
 		}
 
@@ -232,13 +235,13 @@ namespace MV {
 			return self;
 		}
 
-		std::shared_ptr<Node> Node::make(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder) {
-			return loadChild(a_filename, a_binder);
+		std::shared_ptr<Node> Node::make(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_newNodeId) {
+			return loadChild(a_filename, a_binder, a_newNodeId);
 		}
 
-		std::shared_ptr<Node> Node::loadChild(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder) {
+		std::shared_ptr<Node> Node::loadChild(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_newNodeId) {
 			std::lock_guard<std::recursive_mutex> guard(lock);
-			auto toAdd = Node::load(a_filename, a_binder);
+			auto toAdd = Node::load(a_filename, a_binder, a_newNodeId);
 			remove(toAdd->id(), false);
 			add(toAdd);
 			return toAdd;
@@ -479,6 +482,7 @@ namespace MV {
 					list.push_back(current->shared_from_this());
 				}
 			}
+			return list;
 		}
 
 		BoxAABB<> Node::bounds(bool a_includeChildren /*= true*/) {
@@ -928,7 +932,7 @@ namespace MV {
 			}
 		}
 
-		std::string Node::getCloneId(const std::string &a_original) const {
+		std::string Node::getUniqueId(const std::string &a_original) const {
 			std::regex clonePattern("(.+)_([0-9]+)$");
 			std::smatch originalMatches;
 			std::regex_match(a_original, originalMatches, clonePattern);
@@ -960,9 +964,9 @@ namespace MV {
 		std::shared_ptr<Node> Node::clone(const std::shared_ptr<Node> &a_parent) {
 			std::string newNodeId = nodeId;
 			if (a_parent) {
-				newNodeId = a_parent->getCloneId(nodeId);
+				newNodeId = a_parent->getUniqueId(nodeId);
 			} else if (myParent) {
-				newNodeId = myParent->getCloneId(nodeId);
+				newNodeId = myParent->getUniqueId(nodeId);
 			}
 			std::shared_ptr<Node> result = Node::make(draw2d, newNodeId);
 

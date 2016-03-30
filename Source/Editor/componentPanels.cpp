@@ -833,7 +833,7 @@ controls(a_controls) {
 	auto maximumDirectionChangeTilt = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider) {
 		controls->elementToEdit->properties().maximum.directionalChange({ MV::mix(-720.0f, 720.0f, a_slider->percent()), controls->elementToEdit->properties().maximum.directionalChange().y, controls->elementToEdit->properties().maximum.directionalChange().z });
 	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().maximum.directionalChange().x));
-	makeSlider(*panel.resources().mouse, grid, [&, maximumDirectionChange](std::shared_ptr<MV::Scene::Slider> a_slider) {
+	makeSlider(*panel.resources().mouse, grid, [&, maximumDirectionChangeTilt](std::shared_ptr<MV::Scene::Slider> a_slider) {
 		controls->elementToEdit->properties().minimum.directionalChange({ MV::mix(-720.0f, 720.0f, a_slider->percent()), controls->elementToEdit->properties().minimum.directionalChange().y, controls->elementToEdit->properties().minimum.directionalChange().z });
 		maximumDirectionChangeTilt->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().minimum.directionalChange().x));
@@ -844,7 +844,7 @@ controls(a_controls) {
 	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().maximum.directionalChange().y));
 	makeSlider(*panel.resources().mouse, grid, [&, maximumDirectionChangeRoll](std::shared_ptr<MV::Scene::Slider> a_slider) {
 		controls->elementToEdit->properties().minimum.directionalChange({ controls->elementToEdit->properties().minimum.directionalChange().x, MV::mix(-720.0f, 720.0f, a_slider->percent()), controls->elementToEdit->properties().minimum.directionalChange().z });
-		maximumDirectionChange->component<MV::Scene::Slider>()->percent(a_slider->percent());
+		maximumDirectionChangeRoll->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().minimum.directionalChange().y));
 	grid->add(maximumDirectionChangeRoll);
 

@@ -357,5 +357,28 @@ namespace MV {
 			std::cout << stream.str();
 		}
 	};
+
+	template<typename T>
+	class InstanceCounter {
+	public:
+		InstanceCounter() {
+			++internalActiveCount; 
+			++internalTotalCount;
+		}
+		InstanceCounter(const InstanceCounter&) {
+			++internalActiveCount; 
+			++internalTotalCount;
+		}
+		~InstanceCounter() { --internalActiveCount; }
+
+		static size_t activeInstanceCount() { return internalActiveCount; }
+		static size_t totalInstanceCount() { return internalTotalCount; }
+	private:
+		static size_t internalActiveCount;
+		static size_t internalTotalCount;
+	};
+
+	template<typename T> size_t InstanceCounter<T>::internalActiveCount = 0;
+	template<typename T> size_t InstanceCounter<T>::internalTotalCount = 0;
 }
 #endif

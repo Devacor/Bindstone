@@ -2,6 +2,7 @@
 #include "Game/managers.h"
 #include "Game/player.h"
 #include "Game/building.h"
+#include "Game/creature.h"
 #include "Game/state.h"
 #include "Game/Instance/gameInstance.h"
 

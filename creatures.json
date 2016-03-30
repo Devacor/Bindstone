@@ -7,7 +7,7 @@
             "moveSpeed": 4.0,
             "actionSpeed": 0.25,
             "castSpeed": 1,
-            "health": 0,
+            "health": 10,
             "defense": 0,
             "will": 0,
             "strength": 100,

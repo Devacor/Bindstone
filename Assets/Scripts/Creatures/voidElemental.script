@@ -1,13 +1,66 @@
-self.spawn = fun(self){
-	self.onArrive.connect("!", fun(self){
-		print("made it!");
-		auto spine = self.owner().spineComponent();
-		self.agent().disableFootprint();
-		spine.animate("die", false);
-		spine.onEnd.connect("!", fun(spine, index){
-			spine.owner().parent().parent().removeFromParent();
+class VoidElementalCombat {
+	def VoidElementalCombat(){
+		this.retargetTimer = 0.0;
+	}
+
+	def update(self, dt){
+		if(!self.variables["attacking"]){
+			if(!this.tryToFindAndAttackTarget(self, dt)){
+				this.applyDefaultTarget(self);
+			}
+		}
+	}
+
+	def tryToFindAndAttackTarget(self, dt){
+		this.retargetTimer = 0;
+		var targets = self.enemiesInRange(50);
+		if(!targets.empty()){
+			var target = targets[0];
+			self.targeting().target(target, 10, fun[target](targeting){
+				targeting.self().variables["attacking"] = true;
+				auto spine = targeting.self().owner().spineComponent();
+				spine.animate("attack", false);
+				spine.onEvent.connect("launch", fun[target, targeting](spine, index, eventData){
+					if(eventData.name == "launch"){
+						targeting.self().game().spawnMissile(targeting.self(), target, "missile", 500, fun(missile){
+							if(!missile.target().is_var_null()){
+								missile.target().changeHealth(-5);
+							}
+						});
+						target.reset();
+					}
+				});
+				spine.onEnd.connect("unlock", fun[targeting](spine, index){
+					if(spine.track(index).name() == "attack"){
+						targeting.self().variables["attacking"] = false;
+					}
+				});
+			});
+			return true;
+		}
+		return false;
+	}
+
+	def applyDefaultTarget(self){
+		self.targeting.target(self.team.enemyWell, fun(targeting){
+			print(to_string(targeting.self().variables["id"]) + " made it!");
+			targeting.self().fall();
 		});
-	});
+	}
+
+	var activeTarget;
+	var retargetTimer;
+	var attacking;
+}
+
+self.spawn = fun(self){
+	self.variables["id"] = self.totalInstanceCount();
+	self.variables["attacking"] = false;
+	self.variables["combat"] = VoidElementalCombat();
 	self.agent.gridSpeed(10);
-	self.agent.gridGoal(self.team.enemyWell, 0);
+	self.variables["combat"].applyDefaultTarget(self);
+};
+
+self.update = fun(self, dt){
+	self.variables["combat"].update(self, dt);
 };

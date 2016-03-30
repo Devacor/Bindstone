@@ -277,6 +277,10 @@ namespace MV {
 
 		bool atOrigin() const{ return equals<T>(x, 0) && equals<T>(y, 0) && equals<T>(z, 0); }
 
+		Point<T> ignoreZ() const {
+			return Point<T>(x, y);
+		}
+
 		Point<T>& operator+=(const Point<T>& a_other);
 		Point<T>& operator-=(const Point<T>& a_other);
 		Point<T>& operator*=(const Point<T>& a_other);
@@ -994,6 +998,8 @@ namespace MV {
 		a_script.add(chaiscript::fun(&Point<T>::y), "y");
 		a_script.add(chaiscript::fun(&Point<T>::z), "z");
 
+		a_script.add(chaiscript::fun(&Point<T>::ignoreZ), "ignoreZ");
+
 		a_script.add(chaiscript::fun(&Point<T>::operator+=), "+=");
 		a_script.add(chaiscript::fun(&Point<T>::operator-=), "-=");
 
@@ -1094,6 +1100,14 @@ namespace MV {
 		a_script.add(chaiscript::fun([](const Size<T> &a_size) {return to_string(a_size); }), "toString");
 
 		return a_script;
+	}
+
+	static inline Point<> moveToward(const Point<> &a_start, const Point<> &a_goal, PointPrecision magnitude) {
+		auto delta = a_goal - a_start;
+		if (magnitude >= delta.magnitude()) {
+			return a_goal;
+		}
+		return a_start + (delta.normalized() * magnitude);
 	}
 }
 #endif

@@ -399,6 +399,7 @@ namespace MV {
 						onFinishSignal.block();
 					}
 				} catch (std::exception &a_e) {
+					std::cerr << a_e.what() << std::endl;
 					if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
 					onExceptionSignal(*this, a_e);
 				}

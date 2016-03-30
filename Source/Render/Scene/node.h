@@ -377,18 +377,20 @@ namespace MV {
 			void draw(const TransformMatrix &a_overrideParentMatrix);
 			void drawChildren(const TransformMatrix &a_overrideParentMatrix);
 
+			std::string getUniqueId(const std::string &original) const;
+
 			Quiet silence() {
 				return Quiet(shared_from_this());
 			}
 
 			static std::shared_ptr<Node> make(Draw2D& a_draw2d, const std::string &a_id);
 			static std::shared_ptr<Node> make(Draw2D& a_draw2d);
-			static std::shared_ptr<Node> load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder = std::function<void(cereal::JSONInputArchive &)>());
+			static std::shared_ptr<Node> load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder = std::function<void(cereal::JSONInputArchive &)>(), const std::string &a_overrideId = "");
 
 			std::shared_ptr<Node> save(const std::string &a_filename, bool a_renameNodeToFile = true);
 			std::shared_ptr<Node> save(const std::string &a_filename, const std::string &a_overrideId);
-			std::shared_ptr<Node> make(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder);
-			std::shared_ptr<Node> loadChild(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder = std::function<void(cereal::JSONInputArchive &)>());
+			std::shared_ptr<Node> make(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_overrideId = "");
+			std::shared_ptr<Node> loadChild(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder = std::function<void(cereal::JSONInputArchive &)>(), const std::string &a_overrideId = "");
 
 			std::shared_ptr<Node> make(const std::string &a_id);
 			std::shared_ptr<Node> make();
@@ -932,7 +934,6 @@ namespace MV {
 			Node(const Node& a_rhs) = delete;
 			Node& operator=(const Node& a_rhs) = delete;
 
-			std::string getCloneId(const std::string &original) const;
 			std::shared_ptr<Node> cloneInternal(const std::shared_ptr<Node> &a_parent);
 
 			bool allowSerialize = true;

@@ -527,8 +527,8 @@ namespace MV {
 				bool wasMoving = pathfinding();
 				acceptableDistance = std::max(a_acceptableDistance, 0.0f);
 				markDirty();
-				if (wasMoving && !pathfinding()) {
-					onStopSignal(shared_from_this());
+				if (!pathfinding()) {
+					onArriveSignal(shared_from_this());
 				} else if (!wasMoving && pathfinding()) {
 					onStartSignal(shared_from_this());
 				}

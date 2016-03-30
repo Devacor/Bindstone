@@ -1,5 +1,6 @@
 #include "Game/Instance/gameInstance.h"
 #include "Game/building.h"
+#include "Game/creature.h"
 #include <iostream>
 
 Team::Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_game) :
@@ -12,7 +13,7 @@ Team::Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_ga
 	for (int i = 0; i < 8; ++i) {
 		auto buildingNode = game.worldScene->get(sideString + "_" + std::to_string(i));
 
-		buildings.push_back(buildingNode->attach<Building>(game.data().buildings().data(a_player->loadout.buildings[i]), a_player->loadout.skins[i], i, a_player, game));
+		buildings.push_back(buildingNode->attach<Building>(game.data().buildings().data(a_player->loadout.buildings[i]), a_player->loadout.skins[i], i, a_player, game).self());
 // 		auto newNode = buildingNode->make("Assets/Prefabs/life_0.prefab", [&](cereal::JSONInputArchive& archive) {
 // 			archive.add(
 // 				cereal::make_nvp("mouse", &game.mouse),
@@ -34,6 +35,26 @@ Team::Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_ga
 // 				dialog->translate({ 0.0f, (i > 3) ? a_self->owner()->bounds().size().height + 100.0f : dialog->bounds().size().height - 100.0f });
 // 			});
 // 		}
+	}
+}
+
+std::vector<std::shared_ptr<Creature>> Team::creaturesInRange(const MV::Point<> &a_location, float a_radius) {
+	std::vector<std::shared_ptr<Creature>> result;
+	std::copy_if(creatures.begin(), creatures.end(), std::back_inserter(result), [&](std::shared_ptr<Creature> &a_creature) {
+		return a_creature->alive() && MV::distance(a_location, a_creature->agent()->gridPosition()) <= a_radius;
+	});
+	std::sort(result.begin(), result.end(), [&](std::shared_ptr<Creature> &a_lhs, std::shared_ptr<Creature> &a_rhs) {
+		return MV::distance(a_location, a_lhs->agent()->gridPosition()) < MV::distance(a_location, a_rhs->agent()->gridPosition());
+	});
+	return result;
+}
+
+void Team::spawn(std::shared_ptr<Creature> &a_registerCreature) {
+	if (a_registerCreature->alive()) {
+		creatures.push_back(a_registerCreature);
+		a_registerCreature->onDeath.connect("_RemoveFromTeam", [&](std::shared_ptr<Creature> a_creature) {
+			creatures.erase(std::remove(creatures.begin(), creatures.end(), a_creature), creatures.end());
+		});
 	}
 }
 
@@ -75,7 +96,7 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 	worldTimestep.then("update", [&](MV::Task& a_self, double a_dt) {
 		worldScene->update(static_cast<float>(a_dt));
 		return false;
-	}).last()->interval(1.0 / 60.0, 15);
+	}).last()->interval(1.0 / 30, 15);
 }
 
 void GameInstance::beginMapDrag() {
@@ -130,8 +151,17 @@ void GameInstance::hook() {
 
 	Building::hook(scriptEngine, *this);
 	Creature::hook(scriptEngine, *this);
+	Missile::hook(scriptEngine);
 
+	scriptEngine.add(chaiscript::user_type<GameInstance>(), "GameInstance");
+	scriptEngine.add(chaiscript::fun([](GameInstance& a_self, std::shared_ptr<Creature> a_source, std::shared_ptr<Creature> a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive) { 
+		a_self.spawnMissile(a_source, a_target, a_prefab, a_speed, a_onArrive);
+	}), "spawnMissile");
 
+	scriptEngine.add(chaiscript::fun([](int a_from) {return MV::to_string(a_from); }), "to_string");
+	scriptEngine.add(chaiscript::fun([](size_t a_from) {return MV::to_string(a_from); }), "to_string");
+	scriptEngine.add(chaiscript::fun([](float a_from) {return MV::to_string(a_from); }), "to_string");
+	scriptEngine.add(chaiscript::fun([](double a_from) {return MV::to_string(a_from); }), "to_string");
 }
 
 void GameInstance::nodeLoadBinder(cereal::JSONInputArchive &a_archive) {
@@ -145,6 +175,10 @@ void GameInstance::nodeLoadBinder(cereal::JSONInputArchive &a_archive) {
 }
 
 bool GameInstance::update(double a_dt) {
+	for (auto&& missile : missiles) {
+		missile->update(a_dt);
+	}
+	removeExpiredMissiles();
 	worldTimestep.update(a_dt);
 	cameraAction.update(a_dt);
 	worldScene->draw();
@@ -174,4 +208,17 @@ void GameInstance::moveCamera(MV::Point<> endPosition, MV::Scale endScale) {
 	});
 }
 
+void GameInstance::spawnMissile(std::shared_ptr<Creature> a_source, std::shared_ptr<Creature> a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive) {
+	missiles.push_back(std::make_unique<Missile>(*this, a_source, a_target, a_prefab, a_speed, a_onArrive));
+}
 
+void GameInstance::removeMissile(Missile* a_toRemove) {
+	expiredMissiles.push_back(a_toRemove);
+}
+
+void GameInstance::removeExpiredMissiles() {
+	missiles.erase(std::remove_if(missiles.begin(), missiles.end(), [&](std::unique_ptr<Missile> &a_missile){
+		return std::find_if(expiredMissiles.begin(), expiredMissiles.end(), [&](Missile* a_compareWith) {return a_missile.get() == a_compareWith; }) != expiredMissiles.end();
+	}), missiles.end());
+	expiredMissiles.clear();
+}

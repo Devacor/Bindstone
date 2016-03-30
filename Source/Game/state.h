@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <vector>
+#include "creature.h"
 #include "Game/managers.h"
 
 struct BuildingData;

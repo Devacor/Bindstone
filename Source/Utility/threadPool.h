@@ -89,7 +89,7 @@ namespace MV{
 		}
 	private:
 		std::recursive_mutex lock;
-		ThreadPoolDetails* details;
+		std::unique_ptr<ThreadPoolDetails> details;
 		size_t totalThreads;
 		std::list<ThreadTask> runningTasks;
 		std::vector<std::unique_ptr<std::thread>> workers;

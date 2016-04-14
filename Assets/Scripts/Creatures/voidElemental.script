@@ -1,6 +1,5 @@
 class VoidElementalCombat {
 	def VoidElementalCombat(){
-		this.retargetTimer = 0.0;
 	}
 
 	def update(self, dt){
@@ -12,7 +11,6 @@ class VoidElementalCombat {
 	}
 
 	def tryToFindAndAttackTarget(self, dt){
-		this.retargetTimer = 0;
 		var targets = self.enemiesInRange(50);
 		if(!targets.empty()){
 			var target = targets[0];
@@ -22,7 +20,7 @@ class VoidElementalCombat {
 				spine.animate("attack", false);
 				spine.onEvent.connect("launch", fun[target, targeting](spine, index, eventData){
 					if(eventData.name == "launch"){
-						targeting.self().game().spawnMissile(targeting.self(), target, "missile", 500, fun(missile){
+						targeting.self().game().spawnMissile(targeting.self(), target, "missile", 300, fun(missile){
 							if(!missile.target().is_var_null()){
 								missile.target().changeHealth(-5);
 							}
@@ -49,7 +47,6 @@ class VoidElementalCombat {
 	}
 
 	var activeTarget;
-	var retargetTimer;
 	var attacking;
 }
 

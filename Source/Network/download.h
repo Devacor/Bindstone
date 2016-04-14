@@ -7,43 +7,11 @@
 #include <ostream>
 #include <fstream>
 #include "Network/url.h"
+#include "Utility/generalUtility.h"
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
 
 namespace MV {
-	inline std::istream& getline_platform_agnostic(std::istream& is, std::string& t)
-	{
-		t.clear();
-
-		// The characters in the stream are read one-by-one using a std::streambuf.
-		// That is faster than reading them one-by-one using the std::istream.
-		// Code that uses streambuf this way must be guarded by a sentry object.
-		// The sentry object performs various tasks,
-		// such as thread synchronization and updating the stream state.
-
-		std::istream::sentry se(is, true);
-		std::streambuf* sb = is.rdbuf();
-
-		for (;;) {
-			int c = sb->sbumpc();
-			switch (c) {
-			case '\n':
-				return is;
-			case '\r':
-				if (sb->sgetc() == '\n')
-					sb->sbumpc();
-				return is;
-			case EOF:
-				// Also handle the case when the last line has no line ending
-				if (t.empty())
-					is.setstate(std::ios::eofbit);
-				return is;
-			default:
-				t += (char)c;
-			}
-		}
-	}
-
 	struct HttpHeader {
 		std::string version;
 		int status = 0;
@@ -70,8 +38,7 @@ namespace MV {
 			response_stream >> status_code;
 			try {
 				status = std::stoi(status_code);
-			}
-			catch (...) {
+			} catch (...) {
 				status = 0;
 			}
 			std::cout << status_code << std::endl;
@@ -94,8 +61,7 @@ namespace MV {
 	};
 
 
-	inline std::ostream& operator<<(std::ostream& os, const HttpHeader& obj)
-	{
+	inline std::ostream& operator<<(std::ostream& os, const HttpHeader& obj) {
 		os << "\\/______HTTP_HEADER______\\/\nVersion [" << obj.version << "] Status [" << obj.status << "] Message [" << obj.message << "]\n";
 		os << "||-----------------------||\n";
 		for (auto&& kvp : obj.values) {
@@ -108,8 +74,7 @@ namespace MV {
 		os << "/\\_______________________/\\" << std::endl;
 		return os;
 	}
-	inline std::istream& operator>>(std::istream& a_is, HttpHeader& a_obj)
-	{
+	inline std::istream& operator>>(std::istream& a_is, HttpHeader& a_obj) {
 		a_obj.read(a_is);
 		return a_is;
 	}
@@ -124,8 +89,7 @@ namespace MV {
 			try {
 				initiateRequest(a_url);
 				ioService.run();
-			}
-			catch (...) {
+			} catch (...) {
 				headerData.success = false;
 				headerData.errorMessage = "Exception thrown to top level.";
 				std::cerr << headerData.errorMessage << std::endl;
@@ -161,8 +125,7 @@ namespace MV {
 				// will be tried until we successfully establish a connection.
 				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
 				socket.async_connect(endpoint, boost::bind(&DownloadRequest::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
-			}
-			else {
+			} else {
 				headerData.success = false;
 				headerData.errorMessage = "Download Resolve Failure: " + err.message();
 				std::cerr << headerData.errorMessage << std::endl;
@@ -174,14 +137,12 @@ namespace MV {
 			if (!err) {
 				// The connection was successful. Send the request.
 				boost::asio::async_write(socket, *request, boost::bind(&DownloadRequest::handleWriteRequest, this, boost::asio::placeholders::error));
-			}
-			else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
+			} else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
 				// The connection failed. Try the next endpoint in the list.
 				socket.close();
 				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
 				socket.async_connect(endpoint, boost::bind(&DownloadRequest::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
-			}
-			else {
+			} else {
 				headerData.success = false;
 				headerData.errorMessage = "Download Connection Failure: " + err.message();
 				std::cerr << headerData.errorMessage << std::endl;
@@ -192,8 +153,7 @@ namespace MV {
 		{
 			if (!err) {
 				boost::asio::async_read_until(socket, *response, "\r\n\r\n", boost::bind(&DownloadRequest::handleReadHeaders, this, boost::asio::placeholders::error));
-			}
-			else {
+			} else {
 				headerData.success = false;
 				headerData.errorMessage = "Download Write Failure: " + err.message();
 				std::cerr << headerData.errorMessage << std::endl;

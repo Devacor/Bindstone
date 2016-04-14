@@ -6,12 +6,11 @@
 namespace MV{
 	struct ThreadPoolDetails {
 		ThreadPoolDetails() :
-			working(new asio_worker::element_type(service)) {
+			working(std::make_unique<boost::asio::io_service::work>(service)) {
 		}
 
 		boost::asio::io_service service;
-		using asio_worker = std::unique_ptr<boost::asio::io_service::work>;
-		asio_worker working;
+		std::unique_ptr<boost::asio::io_service::work> working;
 	};
 
 	ThreadPool::ThreadTask::ThreadTask(const std::function<void()> &a_call):
@@ -88,7 +87,7 @@ namespace MV{
 
 	ThreadPool::ThreadPool(size_t a_threads):
 		totalThreads(a_threads < 2 ? 1 : a_threads - 1),
-		details(new ThreadPoolDetails()) {
+		details(std::make_unique<ThreadPoolDetails>()) {
 
 		log(INFO, "Info: Generating ThreadPool [", totalThreads, "]");
 
@@ -102,7 +101,7 @@ namespace MV{
 	TaskStatus ThreadPool::task(const std::function<void()> &a_task) {
 		std::lock_guard<std::recursive_mutex> guard(lock);
 
-		runningTasks.push_back({a_task});
+		runningTasks.emplace_back(a_task);
 		auto thisTask = runningTasks.end();
 		--thisTask;
 
@@ -117,10 +116,8 @@ namespace MV{
 		runningTasks.emplace_back(a_task, a_onComplete);
 		auto thisTask = runningTasks.end();
 		--thisTask;
-		auto completed = std::make_shared<std::atomic<bool>>(false);
-		std::weak_ptr<std::atomic<bool>> weakCompleted = completed;
 
-		details->service.post([=](){(*thisTask)(); if(!weakCompleted.expired()){ *weakCompleted.lock() = true; }});
+		details->service.post([=](){(*thisTask)();});
 
 		return{thisTask->isFinished};
 	}

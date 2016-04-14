@@ -64,28 +64,38 @@ namespace MV {
 	};
 
 	template<typename T>
-	T mix(const T &a_start, const T &a_end, float a_percent, float a_strength = 1.0f) {
-		return T{pow(a_percent, a_strength) * (a_end - a_start) + a_start};
+	T mixIn(T start, T end, float percent, float strength = 1.0f) {
+		return pow(percent, strength)*(end - start) + start;
 	}
 
 	template<typename T>
-	T mixIn(const T &a_start, const T &a_end, float a_percent, float a_strength = 1.0f) {
-		return T{pow(a_percent, a_strength) * (a_end - a_start) + a_start};
+	T mix(T start, T end, float percent, float strength = 1.0f) {
+		return mixIn(start, end, percent, strength);
 	}
 
 	template<typename T>
-	T mixOut(const T &a_start, const T &a_end, float a_percent, float a_strength = 1.0f) {
-		return T{(1.0f - pow(a_percent, a_strength)) * (a_end - a_start) + a_start};
+	T mixOut(T start, T end, float percent, float strength = 1.0f) {
+		return (1.0f - pow(1.0f - percent, strength)) * (end - start) + start;
 	}
 
 	template<typename T>
-	T mixInOut(const T &a_start, const T &a_end, float a_percent, float a_strength = 1.0f) {
-		auto halfRange = ((a_end - a_start) / 2.0f);
-		if(a_percent < .5f){
-			return T{pow(a_percent * 2.0f, a_strength) * halfRange + a_start};
-		} else{
-			return T{a_end - ((1.0f - pow((a_percent - .5f) * 2.0f, a_strength)) * halfRange)};
+	T mixInOut(T start, T end, float percent, float strength = 1.0f) {
+		auto halfRange = (end - start) / 2.0f;
+		if (percent < .5f)
+		{
+			return mixIn(start, halfRange, percent*2.0f, strength);
 		}
+		return mixOut(halfRange, end, (percent - .5f) * 2.0f, strength);
+	}
+
+	template<typename T>
+	T mixOutIn(T start, T end, float percent, float strength = 1.0f) {
+		auto halfRange = (end - start) / 2.0f;
+		if (percent < .5f)
+		{
+			return mixOut(start, halfRange, percent * 2.0f, strength);
+		}
+		return mixIn(halfRange, end, (percent - .5f) * 2.0f, strength);
 	}
 
 	template <typename T>
@@ -95,7 +105,7 @@ namespace MV {
 		return std::max(std::min(val, upperBound), lowerBound);
 	}
 
-	static inline float percentOfRange(float a_start, float a_end, float a_value) {
+	static inline float percentOfRange(float a_value, float a_start, float a_end) {
 		if (a_start > a_end) {
 			std::swap(a_start, a_end);
 		}
@@ -111,19 +121,23 @@ namespace MV {
 	}
 
 	static inline float unmix(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
-		return mix(0.0f, 1.0f, percentOfRange(a_start, a_end, a_value), a_strength);
+		return mix(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
 	}
 
 	static inline float unmixIn(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
-		return mixIn(0.0f, 1.0f, percentOfRange(a_start, a_end, a_value), a_strength);
+		return mixIn(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
 	}
 
 	static inline float unmixOut(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
-		return mixOut(0.0f, 1.0f, percentOfRange(a_start, a_end, a_value), a_strength);
+		return mixOut(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
 	}
 
 	static inline float unmixInOut(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
-		return mixInOut(0.0f, 1.0f, percentOfRange(a_start, a_end, a_value), a_strength);
+		return mixInOut(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
+	}
+
+	static inline float unmixOutIn(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
+		return mixInOut(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
 	}
 
 	//rounds num up to the next largest power of two (or the current value) and returns that value
@@ -380,5 +394,37 @@ namespace MV {
 
 	template<typename T> size_t InstanceCounter<T>::internalActiveCount = 0;
 	template<typename T> size_t InstanceCounter<T>::internalTotalCount = 0;
+
+	inline std::istream& getline_platform_agnostic(std::istream& is, std::string& t) {
+		t.clear();
+
+		// The characters in the stream are read one-by-one using a std::streambuf.
+		// That is faster than reading them one-by-one using the std::istream.
+		// Code that uses streambuf this way must be guarded by a sentry object.
+		// The sentry object performs various tasks,
+		// such as thread synchronization and updating the stream state.
+
+		std::istream::sentry se(is, true);
+		std::streambuf* sb = is.rdbuf();
+
+		for (;;) {
+			int c = sb->sbumpc();
+			switch (c) {
+			case '\n':
+				return is;
+			case '\r':
+				if (sb->sgetc() == '\n')
+					sb->sbumpc();
+				return is;
+			case EOF:
+				// Also handle the case when the last line has no line ending
+				if (t.empty())
+					is.setstate(std::ios::eofbit);
+				return is;
+			default:
+				t += (char)c;
+			}
+		}
+	}
 }
 #endif

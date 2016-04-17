@@ -44,6 +44,27 @@ public:
 		quitButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
 			done = true;
 		});
+
+		auto serverButton = makeButton(grid, game.getManager().textLibrary, mouse, "Server", { 100.0f, 20.0f }, UTF_CHAR_STR("Server"));
+		serverButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
+			server = std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325), [](const std::string &a_message, MV::Connection *a_connection) {
+				std::cout << "SERVER GOT MESSAGE: " << a_message << std::endl;
+			});
+		});
+
+		auto clientButton = makeButton(grid, game.getManager().textLibrary, mouse, "Client", { 100.0f, 20.0f }, UTF_CHAR_STR("Client"));
+		clientButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
+			client = MV::Client::make(MV::Url{ "http://96.229.120.252:22325" }, [](const std::string &a_message) {
+				std::cout << "GOT MESSAGE: [" << a_message << "]" << std::endl;
+			}, [](const std::string &a_dcreason) {
+				std::cout << "Disconnected!" << std::endl;
+			});
+		});
+
+		auto sendButton = makeButton(grid, game.getManager().textLibrary, mouse, "Send", { 100.0f, 20.0f }, UTF_CHAR_STR("Send"));
+		sendButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
+			server->send("Hello Worl!");
+		});
 	}
 
 	void start() {
@@ -60,6 +81,8 @@ private:
 			limbo->renderer().clearScreen();
 			limbo->drawUpdate(managers.timer.delta("tick"));
 			limbo->renderer().updateScreen();
+			if (server) { server->update(); }
+			if (client) { client->update(); }
 			MV::systemSleep(0);
 		}
 	}
@@ -145,6 +168,9 @@ private:
 
 	Game game;
 	Editor editor;
+
+	std::shared_ptr<MV::Server> server;
+	std::shared_ptr<MV::Client> client;
 };
 
 #endif

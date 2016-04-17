@@ -118,8 +118,7 @@ namespace MV {
 			resolver.async_resolve(query, boost::bind(&DownloadRequest::handleResolve, this, boost::asio::placeholders::error, boost::asio::placeholders::iterator));
 		}
 
-		void handleResolve(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator)
-		{
+		void handleResolve(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
 			if (!err) {
 				// Attempt a connection to the first endpoint in the list. Each endpoint
 				// will be tried until we successfully establish a connection.
@@ -132,8 +131,7 @@ namespace MV {
 			}
 		}
 
-		void handleConnect(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator)
-		{
+		void handleConnect(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
 			if (!err) {
 				// The connection was successful. Send the request.
 				boost::asio::async_write(socket, *request, boost::bind(&DownloadRequest::handleWriteRequest, this, boost::asio::placeholders::error));
@@ -149,8 +147,7 @@ namespace MV {
 			}
 		}
 
-		void handleWriteRequest(const boost::system::error_code& err)
-		{
+		void handleWriteRequest(const boost::system::error_code& err) {
 			if (!err) {
 				boost::asio::async_read_until(socket, *response, "\r\n\r\n", boost::bind(&DownloadRequest::handleReadHeaders, this, boost::asio::placeholders::error));
 			} else {
@@ -160,10 +157,8 @@ namespace MV {
 			}
 		}
 
-		void handleReadHeaders(const boost::system::error_code& err)
-		{
-			if (!err)
-			{
+		void handleReadHeaders(const boost::system::error_code& err) {
+			if (!err) {
 				responseStream = std::make_unique<std::istream>(&(*response));
 
 				headerData.read(*responseStream);
@@ -172,8 +167,7 @@ namespace MV {
 				if (headerData.status >= 300 && headerData.status < 400 && headerData.bounces.size() < 32 && headerData.values.find("location") != headerData.values.end()) {
 					headerData.bounces.push_back(currentUrl.toString());
 					initiateRequest(headerData.values["location"]);
-				}
-				else {
+				} else {
 					if (response->size() > 0) {
 						readResponseToStream();
 					}
@@ -188,14 +182,12 @@ namespace MV {
 		}
 
 
-		void handleReadContent(const boost::system::error_code& err)
-		{
+		void handleReadContent(const boost::system::error_code& err) {
 			if (!err) {
 				readResponseToStream();
 
 				boost::asio::async_read(socket, *response, boost::asio::transfer_at_least(1), boost::bind(&DownloadRequest::handleReadContent, this, boost::asio::placeholders::error));
-			}
-			else if (err != boost::asio::error::eof) {
+			} else if (err != boost::asio::error::eof) {
 				headerData.success = false;
 				headerData.errorMessage = "Download Read Content Failure: " + err.message();
 				std::cerr << headerData.errorMessage << std::endl;

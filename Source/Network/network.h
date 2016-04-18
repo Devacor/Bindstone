@@ -38,6 +38,8 @@ namespace MV {
 
 		std::string headerAndContent() const;
 
+		uint32_t headerAndContentSize() const;
+
 		boost::asio::streambuf buffer;
 		char headerBuffer[4];
 

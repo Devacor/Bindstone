@@ -89,7 +89,7 @@ namespace MV {
 		ioService.post([=] {
 			auto self = shared_from_this();
 			auto message = std::make_shared<NetworkMessage>(a_content);
-			boost::asio::async_write(*socket, boost::asio::buffer(message->headerAndContent(), message->content.size()), [self, message](boost::system::error_code a_err, size_t a_amount) {
+			boost::asio::async_write(*socket, boost::asio::buffer(message->headerAndContent(), message->headerAndContentSize()), [self, message](boost::system::error_code a_err, size_t a_amount) {
 				if (a_err) {
 					self->HandleError(a_err, "write");
 				}
@@ -138,7 +138,7 @@ namespace MV {
 		ioService.post([=] {
 			auto self = shared_from_this();
 			auto message = std::make_shared<NetworkMessage>(a_content);
-			boost::asio::async_write(*socket, boost::asio::buffer(message->headerAndContent(), message->content.size()), [self, message](boost::system::error_code a_err, size_t a_amount) {
+			boost::asio::async_write(*socket, boost::asio::buffer(message->headerAndContent(), message->headerAndContentSize()), [self, message](boost::system::error_code a_err, size_t a_amount) {
 				if (a_err) {
 					self->HandleError(a_err, "write");
 				}
@@ -183,13 +183,11 @@ namespace MV {
 	}
 
 	uint32_t NetworkMessage::sizeFromHeaderBuffer() {
-		//return *reinterpret_cast<uint32_t*>(headerBuffer);
-		return 11;
+		return *reinterpret_cast<uint32_t*>(headerBuffer);
 	}
 
 	void NetworkMessage::readHeaderFromBuffer() {
-		//content.resize(sizeFromHeaderBuffer());
-		content.resize(11);
+		content.resize(sizeFromHeaderBuffer());
 	}
 
 	void NetworkMessage::readContentFromBuffer() {
@@ -210,11 +208,15 @@ namespace MV {
 		uint32_t contentSize = static_cast<uint32_t>(content.size());
 		char* headerChar = reinterpret_cast<char *>(&contentSize);
 		std::stringstream result;
-		for (int i = 0; i < 4; ++i, ++headerChar) {
-			result << headerBuffer[i];
+		for (int i = 0; i < 4; ++i) {
+			result << *(headerChar++);
 		}
 		result << content;
 		return result.str();
+	}
+
+	uint32_t NetworkMessage::headerAndContentSize() const {
+		return 4 + static_cast<uint32_t>(content.size());
 	}
 
 }

@@ -1,5 +1,7 @@
 #include "button.h"
+
 #include "cereal/archives/json.hpp"
+#include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Button);
 

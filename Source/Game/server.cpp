@@ -40,10 +40,9 @@ void Game::initializeWindow(){
 	data.managers().textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
 	data.managers().textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
 	data.managers().textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
-	if (!data.managers().renderer.headless()) {
-		data.managers().textures.assemblePacks("Assets/Atlases", &data.managers().renderer);
-		data.managers().textures.files("Assets/Map");
-	}
+
+	data.managers().textures.assemblePacks("Assets/Atlases", &data.managers().renderer);
+	data.managers().textures.files("Assets/Map");
 	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::MouseState& a_mouse, LocalData& a_data)
 	localPlayer = std::make_shared<Player>();
 	localPlayer->name = "Dervacor";

@@ -86,7 +86,11 @@ class Missile;
 class GameInstance {
 	friend Team;
 public:
-	GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, LocalData& a_data);
+	GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data);
+
+	GameData& data() {
+		return gameData;
+	}
 
 	void beginMapDrag();
 
@@ -95,10 +99,6 @@ public:
 	bool update(double dt);
 
 	bool handleEvent(const SDL_Event &a_event);
-
-	LocalData& data() {
-		return localData;
-	}
 
 	MV::MouseState& mouse() {
 		return ourMouse;
@@ -134,13 +134,18 @@ public:
 	void spawnMissile(std::shared_ptr<Creature> a_source, std::shared_ptr<Creature> a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive);
 
 	void removeMissile(Missile* a_toRemove);
+
+	virtual bool canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const {
+		return true;
+	}
 private:
 	void removeExpiredMissiles();
 	void handleScroll(int a_amount);
 
 	void hook();
 
-	LocalData& localData;
+	GameData& gameData;
+
 	MV::MouseState &ourMouse;
 	std::shared_ptr<MV::Scene::Node> worldScene;
 
@@ -156,6 +161,31 @@ private:
 
 	MV::Task worldTimestep;
 	MV::Task cameraAction;
+};
+
+class ClientGameInstance : public GameInstance {
+public:
+	ClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data, const std::shared_ptr<Player> &a_localPlayer):
+		GameInstance(a_leftPlayer, a_rightPlayer, a_mouse, a_data),
+		localPlayer(a_localPlayer){
+	}
+
+	virtual bool canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const override {
+		return a_player == localPlayer;
+	}
+private:
+	std::shared_ptr<Player> localPlayer;
+	std::shared_ptr<MV::Client> client;
+};
+
+class ServerGameInstance : public GameInstance {
+public:
+	ServerGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data) :
+		GameInstance(a_leftPlayer, a_rightPlayer, a_mouse, a_data){
+	}
+
+private:
+	std::shared_ptr<MV::Server> server;
 };
 
 class Missile {

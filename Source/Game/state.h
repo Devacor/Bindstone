@@ -26,27 +26,13 @@ struct Constants {
 	}
 };
 
-class LocalData {
+class GameData {
 public:
-	LocalData(Managers& a_managers):
-		allManagers(a_managers){
+	GameData(Managers& a_managers) :
+		allManagers(a_managers) {
 		buildingCatalog = std::make_unique<BuildingCatalog>("buildings.json");
 		creatureCatalog = std::make_unique<CreatureCatalog>("creatures.json");
 	}
-
-	std::shared_ptr<Player> player() const {
-		return localPlayer;
-	}
-
-	void player(std::shared_ptr<Player> a_localPlayer) {
-		localPlayer = a_localPlayer;
-	}
-
-	std::shared_ptr<Player> player(const std::string &a_id) {
-		return localPlayer; // replace this later with a lookup/download and likely a callback!
-	}
-
-	bool isLocal(const std::shared_ptr<Player> &a_other) const;
 
 	BuildingCatalog& buildings() {
 		return *(buildingCatalog.get());
@@ -65,28 +51,28 @@ public:
 	}
 
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-		a_script.add(chaiscript::user_type<LocalData>(), "LocalData");
+		a_script.add(chaiscript::user_type<GameData>(), "GameData");
 
 		Constants::hook(a_script);
 
-		a_script.add(chaiscript::fun([](LocalData &a_self) {
+		a_script.add(chaiscript::fun([](GameData &a_self) {
 			return a_self.buildingCatalog.get();
 		}), "buildings");
-		a_script.add(chaiscript::fun([](LocalData &a_self) {
+		a_script.add(chaiscript::fun([](GameData &a_self) {
 			return a_self.creatureCatalog.get();
 		}), "creatures");
-		a_script.add(chaiscript::fun([](LocalData &a_self) {
+		a_script.add(chaiscript::fun([](GameData &a_self) {
 			return a_self.metadataConstants;
 		}), "constants");
 
 		return a_script;
 	}
 private:
-	std::shared_ptr<Player> localPlayer;
 	std::unique_ptr<BuildingCatalog> buildingCatalog;
 	std::unique_ptr<CreatureCatalog> creatureCatalog;
 	Constants metadataConstants;
 	Managers& allManagers;
 };
+
 
 #endif

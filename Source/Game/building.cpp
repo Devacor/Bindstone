@@ -91,7 +91,7 @@ const WaveCreature& Building::currentCreature() {
 }
 
 void Building::initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &a_newNode) {
-	if (gameInstance.data().isLocal(owningPlayer)) {
+	if (gameInstance.canUpgradeBuildingFor(owningPlayer)) {
 		auto spineBounds = a_newNode->component<MV::Scene::Spine>()->bounds();
 		auto buildingButton = a_newNode->attach<MV::Scene::Clickable>(gameInstance.mouse())->clickDetectionType(MV::Scene::Clickable::BoundsType::NODE);
 		//auto treeSprite = a_newNode->attach<MV::Scene::Sprite>()->bounds(newNode->bounds())->color({ 0x77FFFFFF });
@@ -103,7 +103,7 @@ void Building::initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &
 			}
 		});
 		buildingButton->onAccept.connect("AcceptedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
-			gameInstance.moveCamera(a_self->owner(), 1.0f);
+			//gameInstance.moveCamera(a_self->owner(), 1.0f);
 			auto modal = gameInstance.scene()->make("modal")->nodePosition(a_self->owner());
 			modal->attach<MV::Scene::Clickable>(gameInstance.mouse())->clickDetectionType(MV::Scene::Clickable::BoundsType::LOCAL)->bounds({ MV::point(-10000.0f, -10000.0f), MV::point(10000.0f, 10000.0f) })->onAccept.connect("dismiss", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
 				gameInstance.scene()->get("modal")->removeFromParent();

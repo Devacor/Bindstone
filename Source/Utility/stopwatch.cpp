@@ -52,7 +52,7 @@ namespace MV {
 		return result;
 	}
 	
-	Stopwatch::TimeType Stopwatch::systemTime() const{
+	Stopwatch::TimeType Stopwatch::systemTime(){
 		return static_cast<double>(SDL_GetPerformanceCounter()) / static_cast<double>(SDL_GetPerformanceFrequency());
 	}
 

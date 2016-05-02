@@ -71,7 +71,7 @@ namespace MV {
 		bool isStarted(){return started;}
 		bool isPaused(){return paused;}
 		
-		TimeType systemTime() const;
+		static TimeType systemTime();
 	private:
 		TimeType timerfunc(bool reset);
 		TimeType prevtime;

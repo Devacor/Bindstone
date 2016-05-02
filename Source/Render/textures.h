@@ -18,7 +18,6 @@
 #include "cereal/types/string.hpp"
 #include "cereal/types/base_class.hpp"
 
-#include "cereal/archives/json.hpp"
 #include "cereal/types/polymorphic.hpp"
 
 #include "chaiscript/chaiscript.hpp"

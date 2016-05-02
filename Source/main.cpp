@@ -5,6 +5,8 @@
 #include "ArtificialIntelligence/pathfinding.h"
 #include "vld.h"
 
+#include <memory>
+
 bool isDone() {
 	SDL_Event event;
 	while (SDL_PollEvent(&event)) {
@@ -15,7 +17,37 @@ bool isDone() {
 	return false;
 }
 
+struct SharedFromThisPlease : public std::enable_shared_from_this<SharedFromThisPlease> {
+	virtual ~SharedFromThisPlease(){}
+
+	template <class Archive>
+	void serialize(Archive & archive) {}
+
+	template <class Archive>
+	static void load_and_construct(Archive & archive, cereal::construct<SharedFromThisPlease> &construct) {
+		construct();
+		auto selfReference = construct->shared_from_this();
+	}
+};
+
+#include "cereal/archives/json.hpp"
+
 int main(int argc, char *argv[]){
+	{
+		std::stringstream stream;
+
+		{
+			cereal::JSONOutputArchive archive(stream);
+			archive(std::make_shared<SharedFromThisPlease>());
+		}
+
+		std::shared_ptr<SharedFromThisPlease> loadedResult;
+		{
+			cereal::JSONInputArchive archive(stream);
+			archive(loadedResult);
+		}
+	}
+
 // 	auto world = MV::Map::make({ 20, 20 }, false);
 // 
 // 	for (int i = 0; i < 20; ++i) {
@@ -89,23 +121,9 @@ int main(int argc, char *argv[]){
 // 	std::cout << "YO" << std::endl;
 // 	return 0;
 
-	MV::NetworkMessage a("12345"), b("123456789"), c("The quick brown dog jumped over the lazy fucking mother asshole of a fox."), 
-		d("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed eget massa accumsan, faucibus sapien sit amet, venenatis mi. Etiam laoreet massa a mauris laoreet dapibus. In hac habitasse platea dictumst. Lorem ipsum dolor sit amet, consectetur adipiscing elit. In hac habitasse platea dictumst. Praesent vitae magna et leo convallis ullamcorper id nec velit. Aenean libero felis, pharetra vel augue ut, sagittis posuere mauris. Morbi nisi mauris, elementum vel egestas in, pharetra id nunc. Maecenas feugiat augue nec nisi lobortis gravida non consequat tellus. Proin eget sem sed arcu imperdiet aliquam vitae id eros. Vivamus blandit tortor vitae nunc elementum, id porttitor tellus rhoncus.Ut ac pulvinar purus.Maecenas porta commodo mi vel consequat.Donec varius ligula sodales, cursus ligula id, mattis tortor.Fusce vitae faucibus ipsum, quis commodo sem.Cras fringilla accumsan eros, in blandit ligula auctor mattis.Maecenas iaculis quam ut pharetra volutpat.Sed posuere augue eu neque lacinia fringilla.");
-
-	a.pushSizeToHeaderBuffer();
-	b.pushSizeToHeaderBuffer();
-	c.pushSizeToHeaderBuffer();
-	d.pushSizeToHeaderBuffer();
-
-	std::cout << a.content.size() << ", " << a.sizeFromHeaderBuffer() << std::endl;
-	std::cout << b.content.size() << ", " << b.sizeFromHeaderBuffer() << std::endl;
-	std::cout << c.content.size() << ", " << c.sizeFromHeaderBuffer() << std::endl;
-	std::cout << d.content.size() << ", " << d.sizeFromHeaderBuffer() << std::endl;
-	std::cout << "_________" << std::endl;
-
 	GameEditor menu;
 
 	menu.start();
-
+	
 	return 0;
 }

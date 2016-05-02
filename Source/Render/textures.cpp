@@ -11,6 +11,9 @@
 	#define GL_BGR 0x80E0
 #endif
 
+#include "cereal/archives/json.hpp"
+#include "cereal/archives/portable_binary.hpp"
+
 CEREAL_REGISTER_TYPE(MV::TextureDefinition);
 CEREAL_REGISTER_TYPE(MV::FileTextureDefinition);
 CEREAL_REGISTER_TYPE(MV::DynamicTextureDefinition);
@@ -135,18 +138,20 @@ namespace MV {
 			return false;
 		}
 
-		glGenTextures(1, &a_imageLoaded);		// Generate texture ID
-		TextureUnloader::increment(a_imageLoaded);
-		glBindTexture(GL_TEXTURE_2D, a_imageLoaded);
+		if (!RUNNING_IN_HEADLESS) {
+			glGenTextures(1, &a_imageLoaded);		// Generate texture ID
+			TextureUnloader::increment(a_imageLoaded);
+			glBindTexture(GL_TEXTURE_2D, a_imageLoaded);
 
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (a_pixel) ? GL_NEAREST : GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (a_pixel) ? GL_NEAREST : GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (a_pixel) ? GL_NEAREST : GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (a_pixel) ? GL_NEAREST : GL_LINEAR);
 
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (a_repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (a_repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (a_repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (a_repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
 
-		glTexImage2D(GL_TEXTURE_2D, 0, getInternalTextureFormat(a_img), a_img->w, a_img->h, 0, textureFormat, GL_UNSIGNED_BYTE, a_img->pixels);
-		
+			glTexImage2D(GL_TEXTURE_2D, 0, getInternalTextureFormat(a_img), a_img->w, a_img->h, 0, textureFormat, GL_UNSIGNED_BYTE, a_img->pixels);
+		}
+
 		a_size.width = a_img->w;
 		a_size.height = a_img->h;
 
@@ -323,6 +328,7 @@ namespace MV {
 		textureSize.width = roundUpPowerOfTwo(textureSize.width);
 		textureSize.height = roundUpPowerOfTwo(textureSize.height);
 
+		if (RUNNING_IN_HEADLESS) { return; }
 		unsigned int* data;						// Stored Data
 		unsigned int imageSize = (textureSize.width * textureSize.height) * 4 * sizeof(unsigned int);
 		// Create Storage Space For Texture Data (128x128x4)

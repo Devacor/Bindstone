@@ -1,6 +1,8 @@
 #include "clipped.h"
 #include <memory>
+
 #include "cereal/archives/json.hpp"
+#include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Clipped);
 
@@ -8,6 +10,8 @@ namespace MV {
 	namespace Scene {
 
 		void Clipped::refreshTexture(bool a_forceRefreshEvenIfNotDirty /*= true*/) {
+			if (owner()->renderer().headless()) { return; }
+
 			if (a_forceRefreshEvenIfNotDirty || dirtyTexture) {
 				auto originalShaderId = shader();
 				SCOPE_EXIT{ dirtyTexture = false;  shader(originalShaderId); };

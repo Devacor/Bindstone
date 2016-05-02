@@ -2,7 +2,12 @@
 
 #include "Scene/sprite.h"
 
+
+#include "cereal/archives/json.hpp"
+#include "cereal/archives/portable_binary.hpp"
+
 CEREAL_REGISTER_TYPE(MV::PackedTextureDefinition);
+
 
 namespace MV{
 	bool TexturePack::add(const std::string &a_id, const std::shared_ptr<TextureDefinition> &a_shape, PointPrecision a_scale) {
@@ -220,6 +225,14 @@ namespace MV{
 
 	void TexturePack::reloadedPackedTextureChild() {
 		if(!packedTexture.expired() && packedTexture.lock()->loaded()){
+			auto scene = makeScene();
+			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, packedTexture.lock()->textureId(), background)->start();
+			scene->draw();
+		}
+	}
+
+	void TexturePack::initializeAfterLoad() {
+		if (!packedTexture.expired() && packedTexture.lock()->loaded()) {
 			auto scene = makeScene();
 			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, packedTexture.lock()->textureId(), background)->start();
 			scene->draw();

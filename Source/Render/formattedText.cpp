@@ -14,7 +14,9 @@ namespace MV {
 		std::shared_ptr<CharacterDefinition> &character = cachedGlyphs[renderChar];
 		if(!character){
 			character = CharacterDefinition::make(
-				SurfaceTextureDefinition::make(toString(renderChar), [=](){
+				SurfaceTextureDefinition::make(toString(renderChar), [=]() -> SDL_Surface* {
+					if (textLibrary->renderer().headless()) { return nullptr; }
+
 					Uint16 text[] = {static_cast<Uint16>(renderChar), '\0'};
 					return TTF_RenderUNICODE_Blended(font, text, {255, 255, 255, 255});
 				}),

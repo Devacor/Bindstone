@@ -14,27 +14,6 @@ Team::Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_ga
 		auto buildingNode = game.worldScene->get(sideString + "_" + std::to_string(i));
 
 		buildings.push_back(buildingNode->attach<Building>(game.data().buildings().data(a_player->loadout.buildings[i]), a_player->loadout.skins[i], i, a_player, game).self());
-// 		auto newNode = buildingNode->make("Assets/Prefabs/life_0.prefab", [&](cereal::JSONInputArchive& archive) {
-// 			archive.add(
-// 				cereal::make_nvp("mouse", &game.mouse),
-// 				cereal::make_nvp("renderer", &game.data().managers().renderer),
-// 				cereal::make_nvp("textLibrary", &game.data().managers().textLibrary),
-// 				cereal::make_nvp("pool", &game.data().managers().pool),
-// 				cereal::make_nvp("texture", &game.data().managers().textures)
-// 				);
-// 		});
-// 		newNode->component<MV::Scene::Spine>()->animate("idle");
-// 
-// 		if (game.data().isLocal(player)) {
-// 			auto spineBounds = newNode->component<MV::Scene::Spine>()->bounds();
-// 			auto treeButton = newNode->attach<MV::Scene::Clickable>(game.mouse)->clickDetectionType(MV::Scene::Clickable::BoundsType::CHILDREN)->show()->color({ 0xFFFFFFFF });
-// 			treeButton->onAccept.connect("TappedBuilding", [=](std::shared_ptr<MV::Scene::Clickable> a_self) {
-// 				auto dialog = a_self->owner()->make("dialog");
-// 
-// 				dialog->attach<MV::Scene::Grid>()->margin(MV::point(4.0f, 4.0f), MV::point(2.0f, 2.0f))->padding(MV::point(0.0f, 0.0f), MV::point(2.0f, 2.0f));
-// 				dialog->translate({ 0.0f, (i > 3) ? a_self->owner()->bounds().size().height + 100.0f : dialog->bounds().size().height - 100.0f });
-// 			});
-// 		}
 	}
 }
 
@@ -69,10 +48,10 @@ void GameInstance::handleScroll(int a_amount) {
 	}
 }
 
-GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, LocalData& a_data) :
+GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data) :
 	worldScene(MV::Scene::Node::load("map.scene", std::bind(&GameInstance::nodeLoadBinder, this, std::placeholders::_1))),
 	ourMouse(a_mouse),
-	localData(a_data),
+	gameData(a_data),
 	left(a_leftPlayer, LEFT, *this),
 	right(a_rightPlayer, RIGHT, *this),
 	scriptEngine(MV::create_chaiscript_stdlib()) {
@@ -88,8 +67,6 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 	ourMouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse) {
 		beginMapDrag();
 	});
-
-	right.buildings[0]->upgrade(0);
 
 	hook();
 
@@ -134,7 +111,7 @@ void GameInstance::hook() {
 	Player::hook(scriptEngine);
 	Team::hook(scriptEngine);
 	MV::Task::hook(scriptEngine);
-	LocalData::hook(scriptEngine);
+	GameData::hook(scriptEngine);
 
 	MV::PathNode::hook(scriptEngine);
 	MV::NavigationAgent::hook(scriptEngine);
@@ -147,7 +124,7 @@ void GameInstance::hook() {
 	MV::Scene::Text::hook(scriptEngine);
 	MV::Scene::PathMap::hook(scriptEngine);
 	MV::Scene::PathAgent::hook(scriptEngine);
-	MV::Scene::Emitter::hook(scriptEngine, localData.managers().pool);
+	MV::Scene::Emitter::hook(scriptEngine, gameData.managers().pool);
 
 	Building::hook(scriptEngine, *this);
 	Creature::hook(scriptEngine, *this);
@@ -167,10 +144,10 @@ void GameInstance::hook() {
 void GameInstance::nodeLoadBinder(cereal::JSONInputArchive &a_archive) {
 	a_archive.add(
 		cereal::make_nvp("mouse", &ourMouse),
-		cereal::make_nvp("renderer", &localData.managers().renderer),
-		cereal::make_nvp("textLibrary", &localData.managers().textLibrary),
-		cereal::make_nvp("pool", &localData.managers().pool),
-		cereal::make_nvp("texture", &localData.managers().textures)
+		cereal::make_nvp("renderer", &gameData.managers().renderer),
+		cereal::make_nvp("textLibrary", &gameData.managers().textLibrary),
+		cereal::make_nvp("pool", &gameData.managers().pool),
+		cereal::make_nvp("texture", &gameData.managers().textures)
 	);
 }
 
@@ -193,7 +170,7 @@ bool GameInstance::handleEvent(const SDL_Event &a_event) {
 }
 
 void GameInstance::moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale) {
-	moveCamera(((worldScene->worldPosition() - a_targetNode->worldPosition()) / a_targetNode->worldScale()) + MV::toPoint(localData.managers().renderer.world().size() / 2.0f), a_scale);
+	moveCamera(((worldScene->worldPosition() - a_targetNode->worldPosition()) / a_targetNode->worldScale()) + MV::toPoint(gameData.managers().renderer.world().size() / 2.0f), a_scale);
 }
 
 void GameInstance::moveCamera(MV::Point<> endPosition, MV::Scale endScale) {

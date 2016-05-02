@@ -7,6 +7,12 @@
 #include <fstream>
 #include <string>
 
+#include "cereal/archives/json.hpp"
+#include "cereal/archives/portable_binary.hpp"
+
+CEREAL_REGISTER_TYPE(MV::Scene::Spine);
+
+
 std::map<std::string, std::pair<MV::FileTextureDefinition*, size_t>> SHARED_SPINE_TEXTURES;
 std::mutex SHARED_SPINE_TEXTURES_MUTEX;
 
@@ -53,8 +59,6 @@ char* _spUtil_readFile(const char* path, int* length){
 
 	return nullptr;
 }
-
-CEREAL_REGISTER_TYPE(MV::Scene::Spine);
 
 namespace MV{
 	namespace Scene {
@@ -370,6 +374,8 @@ namespace MV{
 		}
 
 		void Spine::defaultDrawImplementation(){
+			if (owner()->renderer().headless()) { return; }
+
 			if (loaded()) {
 				if (bufferId == 0) {
 					glGenBuffers(1, &bufferId);
@@ -416,7 +422,7 @@ namespace MV{
 								node->silence()->
 									position({ slot->bone->worldX, slot->bone->worldY })->
 									rotation({ 0.0f, 0.0f, slot->bone->worldRotation })->
-									scale({ slot->bone->scaleX, slot->bone->scaleY });
+									scale({ slot->bone->worldScaleX, slot->bone->worldScaleY });
 								node->draw();
 								renderedChildren.push_back(node->id());
 							}

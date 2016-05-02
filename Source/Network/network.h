@@ -41,41 +41,53 @@ namespace MV {
 		uint32_t headerAndContentSize() const;
 
 		boost::asio::streambuf buffer;
-		char headerBuffer[4];
+		uint8_t headerBuffer[4];
 
 		std::string content;
 	};
 
 	class Client : public std::enable_shared_from_this<Client> {
 	public:
-		static std::shared_ptr<Client> make(const MV::Url& a_url, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail) {
-			auto self = std::shared_ptr<Client>(new Client(a_url, a_onMessageGet, a_onConnectionFail));
+		static const int EXPECTED_TIMESTEPS = 5;
+
+		static std::shared_ptr<Client> make(const MV::Url& a_url, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail, const std::function<void()> &a_onInitialized = std::function<void ()>()) {
+			auto self = std::shared_ptr<Client>(new Client(a_url, a_onMessageGet, a_onConnectionFail, a_onInitialized));
 			self->initialize();
 			return self;
 		}
 
 		~Client() {
-			if (socket) {
-				socket->close();
-			}
+			socket.reset();
 			ioService.stop();
-			worker->join();
+			if (worker && worker->joinable()) {
+				worker->detach(); //getting errors if we join for some reason? :<
+			}
 		}
 
 		void send(const std::string &a_content);
 
 		void update();
 
+		bool initialized() const{
+			return remainingTimeDeltas <= 0;
+		}
+
+		double clientServerTime() const {
+			return clientServerTimeValue;
+		}
+
 	private:
-		Client(const MV::Url& a_url, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail) :
+		Client(const MV::Url& a_url, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail, const std::function<void()> &a_onInitialized) :
 			url(a_url),
 			resolver(ioService),
 			onMessageGet(a_onMessageGet),
 			onConnectionFail(a_onConnectionFail),
+			onInitialized(a_onInitialized),
 			work(std::make_unique<boost::asio::io_service::work>(ioService)) {
 		}
 
 		void initialize();
+		void tryInitializeCallback();
 
 		void initiateConnection();
 
@@ -83,9 +95,13 @@ namespace MV {
 
 		void initiateRead();
 
+		void appendClientServerTime(std::shared_ptr<NetworkMessage> message);
+
 		void HandleError(const boost::system::error_code &a_err, const std::string &a_section) {
-			socket->close();
-			socket.reset();
+			if (socket) {
+				socket->close();
+				socket.reset();
+			}
 			failMessage = "[" + a_section + "] ERROR: " + a_err.message();
 			std::cerr << failMessage << std::endl;
 		}
@@ -105,8 +121,15 @@ namespace MV {
 		std::string failMessage;
 		std::function<void(const std::string &)> onConnectionFail;
 
+		std::function<void()> onInitialized;
+
 		std::unique_ptr<std::thread> worker;
 		std::unique_ptr<boost::asio::io_service::work> work;
+
+		std::vector<double> serverTimeDeltas;
+		bool hasBeenInitialized = false;
+		int remainingTimeDeltas = EXPECTED_TIMESTEPS;
+		double clientServerTimeValue = 0.0;
 	};
 
 	class Server;
@@ -120,26 +143,26 @@ namespace MV {
 		}
 
 		~Connection() {
-			socket->close();
+			socket.reset();
 		}
 
 		void send(const std::string &a_content);
 
 		void initiateRead();
 		void update();
+		void sendTimeStamp();
 	private:
 		std::mutex lock;
 
-		void HandleError(const boost::system::error_code &a_err, const std::string &a_section) {
-			socket->close();
-			std::cerr << "[" << a_section << "] ERROR: " << a_err.message() << std::endl;
-		}
+		void HandleError(const boost::system::error_code &a_err, const std::string &a_section);
 
 		Server& server;
 		boost::asio::io_service& ioService;
 
 		std::shared_ptr<boost::asio::ip::tcp::socket> socket;
 		std::vector<std::shared_ptr<NetworkMessage>> inbox;
+
+		int timeRequestsRemaining = Client::EXPECTED_TIMESTEPS;
 	};
 
 	class Server {
@@ -149,7 +172,7 @@ namespace MV {
 
 		~Server() {
 			ioService.stop();
-			worker->join();
+			if (worker && worker->joinable()) { worker->join(); }
 		}
 
 		void disconnect(Connection* a_connection) {
@@ -158,6 +181,7 @@ namespace MV {
 		}
 
 		void send(const std::string &a_message);
+		void sendExcept(const std::string &a_message, Connection* a_connectionToSkip);
 		void update();
 	private:
 		void acceptClients();
@@ -172,6 +196,8 @@ namespace MV {
 		std::unique_ptr<boost::asio::io_service::work> work;
 
 		std::function<void(const std::string &, Connection*)> onMessageGet;
+
+		uint32_t randomSeed;
 	};
 
 };

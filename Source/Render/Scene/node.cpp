@@ -3,7 +3,9 @@
 #include <numeric>
 #include <regex>
 #include "chaiscript/chaiscript.hpp"
+
 #include "cereal/archives/json.hpp"
+#include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Component);
 
@@ -201,10 +203,25 @@ namespace MV {
 			return make(a_draw2d, guid("root_"));
 		}
 
-		std::shared_ptr<Node> Node::load(const std::string &a_filename, const std::function<void (cereal::JSONInputArchive &)> a_binder, const std::string &a_newNodeId) {
+		std::shared_ptr<Node> Node::load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_newNodeId) {
 			std::ifstream stream(a_filename);
 			require<ResourceException>(stream, "File not found for Node::load: ", a_filename);
 			cereal::JSONInputArchive archive(stream);
+			if (a_binder) {
+				a_binder(archive);
+			}
+			std::shared_ptr<Node> result;
+			archive(result);
+			if (!a_newNodeId.empty()) {
+				result->id(a_newNodeId);
+			}
+			return result;
+		}
+
+		std::shared_ptr<Node> Node::loadBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_newNodeId) {
+			std::ifstream stream(a_filename);
+			require<ResourceException>(stream, "File not found for Node::load: ", a_filename);
+			cereal::PortableBinaryInputArchive archive(stream);
 			if (a_binder) {
 				a_binder(archive);
 			}
@@ -222,7 +239,6 @@ namespace MV {
 
 		std::shared_ptr<Node> Node::save(const std::string &a_filename, const std::string &a_newId) {
 			std::ofstream stream(a_filename);
-			cereal::JSONOutputArchive archive(stream);
 
 			std::string oldId = nodeId;
 			auto oldParent = myParent;
@@ -231,7 +247,31 @@ namespace MV {
 			myParent = nullptr;
 
 			auto self = shared_from_this();
-			archive(self);
+			{
+				cereal::JSONOutputArchive archive(stream);
+				archive(self);
+			}
+			return self;
+		}
+
+		std::shared_ptr<Node> Node::saveBinary(const std::string &a_filename, bool a_renameNodeToFile) {
+			return save(a_filename, a_renameNodeToFile ? fileNameFromPath(a_filename) : nodeId);
+		}
+
+		std::shared_ptr<Node> Node::saveBinary(const std::string &a_filename, const std::string &a_newId) {
+			std::ofstream stream(a_filename);
+
+			std::string oldId = nodeId;
+			auto oldParent = myParent;
+			SCOPE_EXIT{ nodeId = oldId; myParent = oldParent; };
+			nodeId = a_newId;
+			myParent = nullptr;
+
+			auto self = shared_from_this();
+			{
+				cereal::PortableBinaryOutputArchive archive(stream);
+				archive(self);
+			}
 			return self;
 		}
 
@@ -242,6 +282,14 @@ namespace MV {
 		std::shared_ptr<Node> Node::loadChild(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_newNodeId) {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto toAdd = Node::load(a_filename, a_binder, a_newNodeId);
+			remove(toAdd->id(), false);
+			add(toAdd);
+			return toAdd;
+		}
+
+		std::shared_ptr<Node> Node::loadChildBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_newNodeId) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
+			auto toAdd = Node::loadBinary(a_filename, a_binder, a_newNodeId);
 			remove(toAdd->id(), false);
 			add(toAdd);
 			return toAdd;

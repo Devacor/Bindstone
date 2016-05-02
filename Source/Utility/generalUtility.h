@@ -32,6 +32,27 @@ namespace MV {
 
 	void systemSleep(int time);
 
+	inline bool isLittleEndian() {
+		static std::int32_t test = 1;
+		return *reinterpret_cast<std::int8_t*>(&test) == 1;
+	}
+
+	template <std::size_t DataSize>
+	std::uint8_t* swapBytes(std::uint8_t * data) {
+		for (std::size_t i = 0, end = DataSize / 2; i < end; ++i) {
+			std::swap(data[i], data[DataSize - i - 1]);
+		}
+		return data;
+	}
+
+	template <std::size_t DataSize>
+	std::uint8_t* swapBytesForNetwork(std::uint8_t * data) {
+		if (isLittleEndian()) {
+			swapBytes<DataSize>(data);
+		}
+		return data;
+	}
+
 	template< typename T >
 	typename std::vector<std::shared_ptr<T>>::iterator insertSorted(std::vector<std::shared_ptr<T>> & a_vec, const std::shared_ptr<T>& a_item){
 		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::shared_ptr<T>& a_lhs, const std::shared_ptr<T> &a_rhs){return *a_lhs < *a_rhs; }), a_item);
@@ -426,5 +447,35 @@ namespace MV {
 			}
 		}
 	}
+
+	//Primarily meant to queue actions for post construction in cereal
+	class QueuedActionWrapper {
+	public:
+		QueuedActionWrapper(){}
+		QueuedActionWrapper(std::function<void(std::exception &e)> a_onException):onException(a_onException){}
+
+		~QueuedActionWrapper() {
+			execute();
+		}
+
+		void execute() {
+			for (auto&& action : actions) {
+				try {
+					action();
+				} catch (std::exception &e) {
+					onException(e);
+				}
+			}
+			actions.clear();
+		}
+
+		QueuedActionWrapper& then(std::function<void()> a_action) {
+			actions.push_back(a_action);
+		}
+
+	private:
+		std::function<void(std::exception &e)> onException;
+		std::vector<std::function<void()>> actions;
+	};
 }
 #endif

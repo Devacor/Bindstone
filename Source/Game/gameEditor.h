@@ -18,8 +18,7 @@ public:
 		managers.renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
 		managers.renderer.loadShader(MV::COLOR_PICKER_ID, "Assets/Shaders/default.vert", "Assets/Shaders/colorPicker.frag");
 
-		auto spineTestNode = limbo->make("SpineTest")->position({ 400.0f, 600.0f })->
-			attach<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Tree/life.json", "Assets/Spine/Tree/life.atlas", 0.5f))->shader(MV::DEFAULT_ID)->animate("idle")->bindNode("effects", "tree_particle")->bindNode("effects", "simple")->owner();
+		//auto spineTestNode = limbo->make("SpineTest")->position({ 400.0f, 600.0f })->attach<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Tree/life.json", "Assets/Spine/Tree/life.atlas", 0.5f))->shader(MV::DEFAULT_ID)->animate("idle")->bindNode("effects", "tree_particle")->bindNode("effects", "simple")->owner();
 // 		spineTestNode->make("PaletteTest")->position({ -50.0f, -100.0f })->
 // 			attach<MV::Scene::Palette>(mouse)->bounds(MV::size(256.0f, 256.0f));
 // 		auto populateArchive = [&](cereal::JSONInputArchive& archive) {
@@ -58,12 +57,18 @@ public:
 				std::cout << "GOT MESSAGE: [" << a_message << "]" << std::endl;
 			}, [](const std::string &a_dcreason) {
 				std::cout << "Disconnected!" << std::endl;
-			});
+			}, [=] { client->send("UUUUNG"); });
+			//client->send("UUUUH!");
 		});
 
 		auto sendButton = makeButton(grid, game.getManager().textLibrary, mouse, "Send", { 100.0f, 20.0f }, UTF_CHAR_STR("Send"));
 		sendButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
-			server->send("Hello Worl!");
+			if (server) {
+				server->send("Server to client message!");
+			}
+			if (client) {
+				client->send("Client to server message!");
+			}
 		});
 	}
 

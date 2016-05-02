@@ -40,6 +40,11 @@ namespace chaiscript {
 	class ChaiScript;
 }
 
+namespace cereal {
+	class PortableBinaryInputArchive;
+	class JSONInputArchive;
+}
+
 namespace MV {
 
 	namespace Scene {
@@ -385,12 +390,19 @@ namespace MV {
 
 			static std::shared_ptr<Node> make(Draw2D& a_draw2d, const std::string &a_id);
 			static std::shared_ptr<Node> make(Draw2D& a_draw2d);
-			static std::shared_ptr<Node> load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder = std::function<void(cereal::JSONInputArchive &)>(), const std::string &a_overrideId = "");
+			static std::shared_ptr<Node> load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_overrideId = "");
+			static std::shared_ptr<Node> loadBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_overrideId = "");
 
 			std::shared_ptr<Node> save(const std::string &a_filename, bool a_renameNodeToFile = true);
 			std::shared_ptr<Node> save(const std::string &a_filename, const std::string &a_overrideId);
+
+			std::shared_ptr<Node> saveBinary(const std::string &a_filename, bool a_renameNodeToFile = true);
+			std::shared_ptr<Node> saveBinary(const std::string &a_filename, const std::string &a_overrideId);
+
 			std::shared_ptr<Node> make(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_overrideId = "");
-			std::shared_ptr<Node> loadChild(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder = std::function<void(cereal::JSONInputArchive &)>(), const std::string &a_overrideId = "");
+			std::shared_ptr<Node> loadChild(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_overrideId = "");
+			
+			std::shared_ptr<Node> loadChildBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_overrideId = "");
 
 			std::shared_ptr<Node> make(const std::string &a_id);
 			std::shared_ptr<Node> make();

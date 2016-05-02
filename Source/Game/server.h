@@ -69,6 +69,9 @@ public:
 		return mouse;
 	}
 
+	GameInstance& getInstance() {
+		return *instance;
+	}
 private:
 	Server(const Server &) = delete;
 	Server& operator=(const Server &) = delete;

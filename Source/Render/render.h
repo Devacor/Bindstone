@@ -66,6 +66,8 @@ namespace MV {
 	}
 	class Draw2D;
 
+	extern bool RUNNING_IN_HEADLESS;
+
 	extern const std::string DEFAULT_ID;
 	extern const std::string PREMULTIPLY_ID;
 	extern const std::string COLOR_PICKER_ID;
@@ -84,7 +86,7 @@ namespace MV {
 
 	class glExtensionBlendMode{
 	public:
-		glExtensionBlendMode();
+		glExtensionBlendMode(Draw2D *a_renderer);
 		bool blendModeExtensionEnabled(){return initialized;}
 		void setBlendFunction(GLenum a_sfactorRGB, GLenum a_dfactorRGB, GLenum a_sfactorAlpha, GLenum a_dfactorAlpha);
 		void setBlendFunction(GLenum a_sfactorRGB, GLenum a_dfactorRGB);
@@ -93,6 +95,7 @@ namespace MV {
 		void loadExtensionBlendMode(char *a_extensionsList);
 	private:
 		bool initialized;
+		Draw2D *renderer;
 	};
 
 	class glExtensionFramebufferObject;
@@ -170,19 +173,11 @@ namespace MV {
 		public glExtensionFramebufferObject
 	{
 	public:
-		glExtensions(Draw2D *a_renderer):
-			glExtensionFramebufferObject(a_renderer){
-		}
+		glExtensions(Draw2D *a_renderer);
 	protected:
-		void initializeExtensions(){
-			char* extensionsList = (char*) glGetString(GL_EXTENSIONS);
-			if(!extensionsList){
-				std::cerr << "ERROR: Could not load extensions list from glGetString(GL_EXTENSIONS)" << std::endl;
-			}else{
-				loadExtensionBlendMode(extensionsList);
-				loadExtensionFramebufferObject(extensionsList);
-			}
-		}
+		void initializeExtensions();
+	private:
+		Draw2D* renderer;
 	};
 
 	class Draw2D;
@@ -275,28 +270,31 @@ namespace MV {
 	class TextureHandle;
 	class Shader {
 	public:
-		Shader(const std::string &a_stringId, GLuint a_id):
+		Shader(const std::string &a_stringId, GLuint a_id, bool a_headless):
 			stringId(a_stringId),
-			programId(a_id){
-			if(!glIsProgram(a_id)){
-				std::cerr << "GL Program Id IS NOT A PROGRAM: " << a_id << std::endl;
-			} else{
-				int total = -1;
-				glGetProgramiv(programId, GL_ACTIVE_UNIFORMS, &total);
-				std::cout << "Shader Id: " << programId << std::endl;
-				for(int i = 0; i < total; ++i)  {
-					int name_len = -1, num = -1;
-					GLenum type = GL_ZERO;
-					char name[256];
-					glGetActiveUniform(programId, GLuint(i), sizeof(name)-1, &name_len, &num, &type, name);
-					name[name_len] = 0;
-					GLuint location = glGetUniformLocation(programId, name);
-					std::cout << "Shader Uniform: [" << name << "] = " << location << std::endl;
-					variables[name] = location;
-				}
-				std::cout << "_" << std::endl;
-			}
+			programId(a_id),
+			headless(a_headless){
 
+			if (!headless) {
+				if (!glIsProgram(a_id)) {
+					std::cerr << "GL Program Id IS NOT A PROGRAM: " << a_id << std::endl;
+				} else {
+					int total = -1;
+					glGetProgramiv(programId, GL_ACTIVE_UNIFORMS, &total);
+					std::cout << "Shader Id: " << programId << std::endl;
+					for (int i = 0; i < total; ++i) {
+						int name_len = -1, num = -1;
+						GLenum type = GL_ZERO;
+						char name[256];
+						glGetActiveUniform(programId, GLuint(i), sizeof(name) - 1, &name_len, &num, &type, name);
+						name[name_len] = 0;
+						GLuint location = glGetUniformLocation(programId, name);
+						std::cout << "Shader Uniform: [" << name << "] = " << location << std::endl;
+						variables[name] = location;
+					}
+					std::cout << "_" << std::endl;
+				}
+			}
 		}
 
 		std::string id() const{
@@ -304,7 +302,9 @@ namespace MV {
 		}
 
 		void use(){
-			glUseProgram(programId);
+			if (!headless) {
+				glUseProgram(programId);
+			}
 		}
 
 		void set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_texture, GLuint a_textureBindIndex = 0);
@@ -331,6 +331,7 @@ namespace MV {
 		std::string stringId;
 		GLuint programId;
 		std::map<std::string, GLuint> variables;
+		bool headless;
 	};
 
 	//If attempting to make multiple instances of Draw2D bear in mind it modifies global state in the
@@ -354,6 +355,13 @@ namespace MV {
 
 		const MatrixStack& projectionMatrix() const{
 			return contextProjectionMatrix;
+		}
+
+		Draw2D& makeHeadless() {
+			require<ResourceException>(!initialized, "Renderer: Failed to make headless because we're already initialized!");
+			isHeadless = true;
+			RUNNING_IN_HEADLESS = true;
+			return *this;
 		}
 
 		//call for every event to handle window actions correctly
@@ -393,6 +401,10 @@ namespace MV {
 		Shader* defaultShader(GLuint a_newId);
 		Shader* defaultShader(const std::string &a_id);
 
+		bool headless() const {
+			return isHeadless;
+		}
+
 		//void registerShader(std::shared_ptr<Scene::Node> a_node);
 
 		void checkGlError(std::string a_location = "[not supplied location]"){
@@ -422,6 +434,8 @@ namespace MV {
 
 		std::map<std::string, Shader> shaders;
 		Shader* defaultShaderPtr = nullptr;
+
+		bool isHeadless = false;
 
 		static bool firstInitializationSDL;
 		static bool firstInitializationOpenGL;

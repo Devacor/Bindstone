@@ -122,12 +122,10 @@ namespace MV {
 				cereal::make_nvp("maximumExtent", construct->maximumExtent), cereal::make_nvp("contentExtent", construct->contentExtent),
 				cereal::make_nvp("containers", construct->containers), cereal::make_nvp("consolidatedTexture", construct->consolidatedTexture));
 
-			if(!construct->packedTexture.expired() && construct->packedTexture.lock()->loaded()){
-				auto scene = construct->makeScene();
-				auto framebuffer = renderer->makeFramebuffer({}, construct->contentExtent, construct->packedTexture.lock()->textureId(), construct->background)->start();
-				scene->draw();
-			}
+			construct->initializeAfterLoad();
 		}
+
+		void initializeAfterLoad();
 	};
 
 	class PackedTextureDefinition : public DynamicTextureDefinition {

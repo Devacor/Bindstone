@@ -1,5 +1,8 @@
 #include "emitter.h"
 
+#include "cereal/archives/json.hpp"
+#include "cereal/archives/portable_binary.hpp"
+
 CEREAL_REGISTER_TYPE(MV::Scene::Emitter);
 
 namespace MV {
@@ -130,8 +133,6 @@ namespace MV {
 			for (auto &&particle : threadData[a_groupIndex].particles) {
 				BoxAABB<> bounds(toPoint(particle.scale / 2.0f), toPoint(particle.scale / -2.0f));
 				
-				//particle.position += threadData[a_groupIndex].particleOffset;
-
 				appendQuadVertexIndices(threadData[a_groupIndex].vertexIndices, static_cast<GLuint>(threadData[a_groupIndex].points.size()));
 				
 				for (size_t i = 0; i < 4; ++i) {
@@ -259,6 +260,8 @@ namespace MV {
 		}
 
 		void Emitter::updateImplementation(double a_dt) {
+			if (owner()->renderer().headless()) { return; }
+
 			bool falseValue = false;
 			accumulatedTimeDelta += a_dt;
 			if (relativeNodePosition.expired() && relativeParentCount >= 0) {
@@ -334,6 +337,8 @@ namespace MV {
 		}
 
 		void Emitter::defaultDrawImplementation() {
+			if (owner()->renderer().headless()) { return; }
+
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			if (!vertexIndices.empty()) {
 				require<ResourceException>(shaderProgram, "No shader program for Drawable!");

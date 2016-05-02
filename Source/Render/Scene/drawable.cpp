@@ -1,5 +1,7 @@
 #include "drawable.h"
+
 #include "cereal/archives/json.hpp"
+#include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Drawable);
 
@@ -97,6 +99,8 @@ namespace MV {
 		}
 
 		void Drawable::defaultDrawImplementation() {
+			if (owner()->renderer().headless()) { return; }
+
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			if (!vertexIndices.empty()) {
 				require<ResourceException>(shaderProgram, "No shader program for Drawable!");

@@ -171,7 +171,7 @@ namespace MV{
 			}
 
 			template <class Archive>
-			void serialize(Archive & archive) {
+			void serialize(Archive & archive, std::uint32_t const version) {
 				archive(
 					CEREAL_NVP(boxSize),
 					CEREAL_NVP(contentScrollPosition),
@@ -184,7 +184,7 @@ namespace MV{
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Text> &construct) {
+			static void load_and_construct(Archive & archive, cereal::construct<Text> &construct, std::uint32_t const version) {
 				TextLibrary *library = nullptr;
 				archive.extract(cereal::make_nvp("library", library));
 				MV::require<PointerException>(library != nullptr, "Null TextLibrary in Text::load_and_construct.");

@@ -170,15 +170,9 @@ namespace MV {
 	public:
 		Server(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<void (const std::string &, Connection*)> a_onMessageGet);
 
-		~Server() {
-			ioService.stop();
-			if (worker && worker->joinable()) { worker->join(); }
-		}
+		~Server();
 
-		void disconnect(Connection* a_connection) {
-			std::lock_guard<std::mutex> guard(lock);
-			connections.erase(std::remove_if(connections.begin(), connections.end(), [&](auto &c) {return c.get() == a_connection; }), connections.end());
-		}
+		void disconnect(Connection* a_connection);
 
 		void send(const std::string &a_message);
 		void sendExcept(const std::string &a_message, Connection* a_connectionToSkip);

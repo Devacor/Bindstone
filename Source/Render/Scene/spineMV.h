@@ -133,7 +133,7 @@ namespace MV {
 			private:
 				friend cereal::access;
 				template <class Archive>
-				void serialize(Archive & archive);
+				void serialize(Archive & archive, std::uint32_t const version);
 			};
 
 			DrawableDerivedAccessors(Spine)
@@ -196,7 +196,7 @@ namespace MV {
 			virtual bool postDraw();
 
 			template <class Archive>
-			void serialize(Archive & archive){
+			void serialize(Archive & archive, std::uint32_t const version){
 				std::vector<DrawPoint> tmpPoints{};
 				std::vector<GLuint> tmpVertexIndices;
 
@@ -261,7 +261,7 @@ namespace MV {
 
 
 		template <class Archive>
-		void Spine::FileBundle::serialize(Archive & archive) {
+		void Spine::FileBundle::serialize(Archive & archive, std::uint32_t const version) {
 			archive(
 				CEREAL_NVP(skeletonFile),
 				CEREAL_NVP(atlasFile),

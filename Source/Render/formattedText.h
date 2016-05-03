@@ -158,14 +158,14 @@ namespace MV {
 		std::shared_ptr<FontDefinition> fontDefinition(const std::string &a_identifier) const;
 	private:
 		template <class Archive>
-		void serialize(Archive & archive){
+		void serialize(Archive & archive, std::uint32_t const version){
 			archive(
 				CEREAL_NVP(loadedFonts)
 			);
 		}
 
 		template <class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<TextLibrary> &construct){
+		static void load_and_construct(Archive & archive, cereal::construct<TextLibrary> &construct, std::uint32_t const version){
 			Draw2D *renderer = nullptr;
 			archive.extract(
 				cereal::make_nvp("renderer", renderer)

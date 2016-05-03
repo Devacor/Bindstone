@@ -211,7 +211,7 @@ namespace MV {
 		void hookUpObservation();
 
 		template <class Archive>
-		void serialize(Archive & archive) {
+		void serialize(Archive & archive, std::uint32_t const version) {
 			archive(
 				CEREAL_NVP(usingCorners),
 				CEREAL_NVP(squares)
@@ -601,7 +601,7 @@ namespace MV {
 		}
 
 		template <class Archive>
-		void serialize(Archive & archive) {
+		void serialize(Archive & archive, std::uint32_t const version) {
 			archive(
 				CEREAL_NVP(ourPosition),
 				CEREAL_NVP(ourGoal),

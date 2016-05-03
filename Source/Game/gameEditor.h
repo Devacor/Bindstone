@@ -46,6 +46,7 @@ public:
 
 		auto serverButton = makeButton(grid, game.getManager().textLibrary, mouse, "Server", { 100.0f, 20.0f }, UTF_CHAR_STR("Server"));
 		serverButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
+			std::cout << "serving" << std::endl;
 			server = std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325), [](const std::string &a_message, MV::Connection *a_connection) {
 				std::cout << "SERVER GOT MESSAGE: " << a_message << std::endl;
 			});
@@ -53,7 +54,7 @@ public:
 
 		auto clientButton = makeButton(grid, game.getManager().textLibrary, mouse, "Client", { 100.0f, 20.0f }, UTF_CHAR_STR("Client"));
 		clientButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
-			client = MV::Client::make(MV::Url{ "http://96.229.120.252:22325" }, [](const std::string &a_message) {
+			client = MV::Client::make(MV::Url{ "http://54.218.22.3:22325" }, [](const std::string &a_message) {
 				std::cout << "GOT MESSAGE: [" << a_message << "]" << std::endl;
 			}, [](const std::string &a_dcreason) {
 				std::cout << "Disconnected!" << std::endl;
@@ -70,6 +71,10 @@ public:
 				client->send("Client to server message!");
 			}
 		});
+
+		if (MV::RUNNING_IN_HEADLESS) {
+			serverButton->press();
+		}
 	}
 
 	void start() {

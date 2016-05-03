@@ -84,10 +84,10 @@ namespace MV {
 			}
 		}
 
-		void Button::acceptUpClick() {
+		void Button::acceptUpClick(bool a_ignoreBounds) {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = shared_from_this();
-			Clickable::acceptUpClick();
+			Clickable::acceptUpClick(a_ignoreBounds);
 			if (clickDetectionType() != Clickable::BoundsType::NONE && ownerIsAlive()) {
 				setCurrentView(idleView);
 			}

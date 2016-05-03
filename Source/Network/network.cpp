@@ -80,7 +80,9 @@ namespace MV {
 	void Client::update() {
 		if (!failMessage.empty()) {
 			failMessage.clear();
-			onConnectionFail(failMessage);
+			if (onConnectionFail) {
+				onConnectionFail(failMessage);
+			}
 			onConnectionFail = std::function<void(const std::string &)>();
 			onMessageGet = std::function<void(const std::string &)>();
 			onInitialized = std::function<void()>();
@@ -158,6 +160,17 @@ namespace MV {
 
 		acceptClients();
 		worker = std::make_unique<std::thread>([this] { ioService.run(); });
+	}
+
+	Server::~Server() {
+		std::cout << "Server Disconnected" << std::endl;
+		ioService.stop();
+		if (worker && worker->joinable()) { worker->join(); }
+	}
+
+	void Server::disconnect(Connection* a_connection) {
+		std::lock_guard<std::mutex> guard(lock);
+		connections.erase(std::remove_if(connections.begin(), connections.end(), [&](auto &c) {return c.get() == a_connection; }), connections.end());
 	}
 
 	void Server::send(const std::string &a_message) {

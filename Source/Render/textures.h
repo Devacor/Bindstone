@@ -107,7 +107,7 @@ namespace MV {
 
 	private:
 		template <class Archive>
-		void serialize(Archive & archive){
+		void serialize(Archive & archive, std::uint32_t const version){
 			archive(cereal::make_nvp("name", textureName), cereal::make_nvp("size", textureSize), cereal::make_nvp("contentSize", desiredSize), CEREAL_NVP(handles));
 			if(!handles.empty() && !texture){
 				reloadImplementation();
@@ -149,12 +149,12 @@ namespace MV {
 		virtual void reloadImplementation();
 
 		template <class Archive>
-		void serialize(Archive & archive){
+		void serialize(Archive & archive, std::uint32_t const version){
 			archive(CEREAL_NVP(powerTwo), CEREAL_NVP(repeat), CEREAL_NVP(pixel), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
 		}
 
 		template <class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<FileTextureDefinition> &construct){
+		static void load_and_construct(Archive & archive, cereal::construct<FileTextureDefinition> &construct, std::uint32_t const version){
 			bool repeat = false;
 			bool pixel = false;
 			bool powerTwo = true;
@@ -200,12 +200,12 @@ namespace MV {
 
 	private:
 		template <class Archive>
-		void serialize(Archive & archive){
+		void serialize(Archive & archive, std::uint32_t const version){
 			archive(CEREAL_NVP(backgroundColor), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
 		}
 
 		template <class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<DynamicTextureDefinition> &construct){
+		static void load_and_construct(Archive & archive, cereal::construct<DynamicTextureDefinition> &construct, std::uint32_t const version){
 			construct("", Size<int>(), Color());
 			Color backgroundColor;
 			archive(cereal::make_nvp("backgroundColor", backgroundColor), cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
@@ -250,13 +250,13 @@ namespace MV {
 
 	private:
 		template <class Archive>
-		void serialize(Archive & archive){
+		void serialize(Archive & archive, std::uint32_t const version){
 			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(this)));
 			//Must manually call setSurfaceGenerator; We can assume whatever owns this texture definition knows how to reconstitute it.
 		}
 
 		template <class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<SurfaceTextureDefinition> &construct){
+		static void load_and_construct(Archive & archive, cereal::construct<SurfaceTextureDefinition> &construct, std::uint32_t const version){
 			construct("", std::function<SDL_Surface*()>());
 			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
 		}
@@ -323,7 +323,7 @@ namespace MV {
 		TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const BoxAABB<int> &a_bounds = BoxAABB<int>(point(-1, -1)));
 
 		template <class Archive>
-		void serialize(Archive & archive){
+		void serialize(Archive & archive, std::uint32_t const version){
 			archive(CEREAL_NVP(handleRegion), CEREAL_NVP(handlePercent),
 				CEREAL_NVP(resizeToParent),
 				cereal::make_nvp("flipX", flipTextureX),
@@ -333,7 +333,7 @@ namespace MV {
 		}
 
 		template <class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<TextureHandle> &construct){
+		static void load_and_construct(Archive & archive, cereal::construct<TextureHandle> &construct, std::uint32_t const version){
 			std::shared_ptr<TextureDefinition> textureDefinition;
 			archive(CEREAL_NVP(textureDefinition));
 			construct(textureDefinition);

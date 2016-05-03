@@ -102,7 +102,7 @@ namespace MV {
 			void acceptSwatchClick();
 
 			template <class Archive>
-			void serialize(Archive & archive) {
+			void serialize(Archive & archive, std::uint32_t const version) {
 				archive(
 					cereal::make_nvp("color", currentColor),
 					cereal::make_nvp("selectorPercentSize", selectorPercentSize),
@@ -117,7 +117,7 @@ namespace MV {
 			virtual void initialize() override;
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Palette> &construct) {
+			static void load_and_construct(Archive & archive, cereal::construct<Palette> &construct, std::uint32_t const version) {
 				MouseState *mouse = nullptr;
 				archive.extract(cereal::make_nvp("mouse", mouse));
 				MV::require<PointerException>(mouse != nullptr, "Null mouse in Button::load_and_construct.");

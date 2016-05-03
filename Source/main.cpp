@@ -17,17 +17,25 @@ bool isDone() {
 	return false;
 }
 
-struct SharedFromThisPlease : public std::enable_shared_from_this<SharedFromThisPlease> {
-	virtual ~SharedFromThisPlease(){}
+struct TestClass {
 
 	template <class Archive>
-	void serialize(Archive & archive) {}
-
-	template <class Archive>
-	static void load_and_construct(Archive & archive, cereal::construct<SharedFromThisPlease> &construct) {
-		construct();
-		auto selfReference = construct->shared_from_this();
+	void serialize(Archive & archive) {
+		archive(CEREAL_NVP(test));
 	}
+
+	int test;
+};
+
+struct TestClassVersioned {
+	
+	template <class Archive>
+	void serialize(Archive & archive, std::uint32_t const version) {
+		archive(CEREAL_NVP(test));
+		std::cout << "VERSION: " << version << std::endl;
+	}
+
+	int test;
 };
 
 #include "cereal/archives/json.hpp"
@@ -38,13 +46,14 @@ int main(int argc, char *argv[]){
 
 		{
 			cereal::JSONOutputArchive archive(stream);
-			archive(std::make_shared<SharedFromThisPlease>());
+			TestClass test;
+			archive(CEREAL_NVP(test));
 		}
 
-		std::shared_ptr<SharedFromThisPlease> loadedResult;
 		{
+			TestClassVersioned test;
 			cereal::JSONInputArchive archive(stream);
-			archive(loadedResult);
+			archive(CEREAL_NVP(test));
 		}
 	}
 

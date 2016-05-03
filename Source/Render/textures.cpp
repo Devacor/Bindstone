@@ -172,7 +172,7 @@ namespace MV {
 	}
 
 	void TextureDefinition::load() {
-		if (!loaded()) {
+		if (!loaded() && !RUNNING_IN_HEADLESS) {
 			reloadImplementation();
 			if (isShared) {
 				onReloadAction(shared_from_this());
@@ -268,6 +268,8 @@ namespace MV {
 	}
 
 	void TextureDefinition::save(const std::string &a_fileName) {
+		if (RUNNING_IN_HEADLESS) { return; }
+
 		if (!loaded()) {
 			load();
 			saveLoadedTexture(a_fileName, texture);
@@ -278,6 +280,8 @@ namespace MV {
 	}
 
 	void TextureDefinition::reload() {
+		if (RUNNING_IN_HEADLESS) { return; }
+
 		if (loaded()) {
 			cleanupOpenglTexture();
 			load();

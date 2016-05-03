@@ -176,7 +176,7 @@ namespace MV {
 			void repositionDebugDrawPoints();
 
 			template <class Archive>
-			void serialize(Archive & a_archive) {
+			void serialize(Archive & a_archive, std::uint32_t const version) {
 				std::vector<DrawPoint> tmpPoints{bounds().minPoint, bounds().maxPoint};
 				std::vector<GLuint> tmpVertexIndices;
 
@@ -197,7 +197,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & a_archive, cereal::construct<PathMap> &a_construct) {
+			static void load_and_construct(Archive & a_archive, cereal::construct<PathMap> &a_construct, std::uint32_t const version) {
 				a_construct(std::shared_ptr<Node>(), Size<int>());
 				a_archive(
 					cereal::make_nvp("map", a_construct->map),
@@ -463,7 +463,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			void serialize(Archive & a_archive) {
+			void serialize(Archive & a_archive, std::uint32_t const version) {
 				a_archive(
 					cereal::make_nvp("map", map),
 					cereal::make_nvp("agent", agent),
@@ -472,7 +472,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & a_archive, cereal::construct<PathAgent> &a_construct) {
+			static void load_and_construct(Archive & a_archive, cereal::construct<PathAgent> &a_construct, std::uint32_t const version) {
 				a_construct(std::shared_ptr<Node>());
 				a_archive(
 					cereal::make_nvp("map", a_construct->map),

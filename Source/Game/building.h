@@ -19,7 +19,7 @@ struct WaveCreature {
 	std::string id;
 	double delay;
 	template <class Archive>
-	void serialize(Archive & archive) {
+	void serialize(Archive & archive, std::uint32_t const version) {
 		archive(
 			CEREAL_NVP(delay),
 			CEREAL_NVP(id)
@@ -32,7 +32,7 @@ struct WaveData {
 	std::vector<WaveCreature> creatures;
 
 	template <class Archive>
-	void serialize(Archive & archive) {
+	void serialize(Archive & archive, std::uint32_t const version) {
 		archive(
 			CEREAL_NVP(iterations),
 			CEREAL_NVP(creatures)
@@ -65,7 +65,7 @@ struct BuildTree {
 	}
 
 	template <class Archive>
-	void serialize(Archive & archive) {
+	void serialize(Archive & archive, std::uint32_t const version) {
 		archive(
 			CEREAL_NVP(id),
 			CEREAL_NVP(name),
@@ -84,7 +84,7 @@ struct SkinData {
 	std::vector<Wallet> costs;
 
 	template <class Archive>
-	void serialize(Archive & archive) {
+	void serialize(Archive & archive, std::uint32_t const version) {
 		archive(
 			CEREAL_NVP(id),
 			CEREAL_NVP(name),
@@ -106,7 +106,7 @@ struct BuildingData {
 	std::vector<Wallet> costs;
 
 	template <class Archive>
-	void serialize(Archive & archive) {
+	void serialize(Archive & archive, std::uint32_t const version) {
 		archive(
 			CEREAL_NVP(id),
 			CEREAL_NVP(name),
@@ -142,7 +142,7 @@ private:
 	}
 
 	template <class Archive>
-	void serialize(Archive & archive) {
+	void serialize(Archive & archive, std::uint32_t const version) {
 		archive(
 			cereal::make_nvp("buildings", buildingList)
 		);
@@ -221,7 +221,7 @@ private:
 	void spawnCurrentCreature();
 
 	template <class Archive>
-	void serialize(Archive & archive) {
+	void serialize(Archive & archive, std::uint32_t const version) {
 		archive(
 			cereal::make_nvp("data", buildingData),
 			cereal::make_nvp("skin", skin),
@@ -232,7 +232,7 @@ private:
 	}
 
 	template <class Archive>
-	static void load_and_construct(Archive & archive, cereal::construct<Building> &construct) {
+	static void load_and_construct(Archive & archive, cereal::construct<Building> &construct, std::uint32_t const version) {
 		std::string skin;
 		BuildingData buildingData;
 		int slot;

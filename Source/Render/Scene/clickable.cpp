@@ -112,10 +112,10 @@ namespace MV {
 			});
 		}
 
-		void Clickable::acceptUpClick() {
+		void Clickable::acceptUpClick(bool a_ignoreBounds) {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
-			bool inBounds = mouseInBounds(ourMouse);
+			bool inBounds = a_ignoreBounds || mouseInBounds(ourMouse);
 			if (inPressEvent()) {
 				onMouseMoveHandle = nullptr;
 
@@ -181,6 +181,12 @@ namespace MV {
 			} else {
 				return false;
 			}
+		}
+
+		void Clickable::press() {
+			auto self = shared_from_this();
+			acceptDownClick();
+			acceptUpClick(true);
 		}
 
 		std::shared_ptr<Component> Clickable::cloneHelper(const std::shared_ptr<Component> &a_clone) {

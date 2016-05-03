@@ -60,7 +60,7 @@ namespace MV {
 			virtual void updateImplementation(double a_delta) override;
 
 			template <class Archive>
-			void serialize(Archive & archive) {
+			void serialize(Archive & archive, std::uint32_t const version) {
 				if (dirtyGrid) {
 					layoutCells();
 				}

@@ -45,7 +45,7 @@ namespace MV {
 			Clipped(const std::weak_ptr<Node> &a_owner);
 
 			template <class Archive>
-			void serialize(Archive & archive) {
+			void serialize(Archive & archive, std::uint32_t const version) {
 				archive(
 					CEREAL_NVP(refreshShaderId),
 					CEREAL_NVP(capturedBounds),
@@ -55,7 +55,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Clipped> &construct) {
+			static void load_and_construct(Archive & archive, cereal::construct<Clipped> &construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
 				archive(
 					cereal::make_nvp("refreshShaderId", construct->refreshShaderId),

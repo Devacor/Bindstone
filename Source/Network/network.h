@@ -133,13 +133,32 @@ namespace MV {
 	};
 
 	class Server;
+	class Connection;
+
+	//derive from this in your own code.
+	class ConnectionStateBase {
+	public:
+		ConnectionStateBase(Connection* a_connection) :
+			connection(a_connection) {
+		}
+
+		virtual void connect() { }
+		virtual void disconnect() { }
+		virtual void message(const std::string& a_message) { }
+
+		virtual void update(double a_dt) { }
+	protected:
+		Connection *connection;
+	};
 
 	class Connection : public std::enable_shared_from_this<Connection> {
 	public:
-		Connection(Server& a_server, const std::shared_ptr<boost::asio::ip::tcp::socket> &a_socket, boost::asio::io_service& a_ioService) :
+		Connection(Server& a_server, const std::shared_ptr<boost::asio::ip::tcp::socket> &a_socket, boost::asio::io_service& a_ioService, std::function<std::unique_ptr<ConnectionStateBase> (Connection*)> a_connectionStateFactory) :
 			server(a_server),
 			socket(a_socket),
 			ioService(a_ioService){
+
+			state = a_connectionStateFactory(this);
 		}
 
 		~Connection() {
@@ -149,7 +168,7 @@ namespace MV {
 		void send(const std::string &a_content);
 
 		void initiateRead();
-		void update();
+		void update(double a_dt);
 		void sendTimeStamp();
 	private:
 		std::mutex lock;
@@ -162,13 +181,15 @@ namespace MV {
 		std::shared_ptr<boost::asio::ip::tcp::socket> socket;
 		std::vector<std::shared_ptr<NetworkMessage>> inbox;
 
+		std::unique_ptr<ConnectionStateBase> state;
+
 		int timeRequestsRemaining = Client::EXPECTED_TIMESTEPS;
 	};
 
 	class Server {
 		friend Connection;
 	public:
-		Server(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<void (const std::string &, Connection*)> a_onMessageGet);
+		Server(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase> (Connection*)> a_connectionStateFactory);
 
 		~Server();
 
@@ -176,7 +197,7 @@ namespace MV {
 
 		void send(const std::string &a_message);
 		void sendExcept(const std::string &a_message, Connection* a_connectionToSkip);
-		void update();
+		void update(double a_dt);
 	private:
 		void acceptClients();
 
@@ -184,12 +205,13 @@ namespace MV {
 
 		boost::asio::io_service ioService;
  		boost::asio::ip::tcp::acceptor acceptor;
+
 		std::vector<std::shared_ptr<Connection>> connections;
 
 		std::unique_ptr<std::thread> worker;
 		std::unique_ptr<boost::asio::io_service::work> work;
 
-		std::function<void(const std::string &, Connection*)> onMessageGet;
+		std::function<std::unique_ptr<ConnectionStateBase> (Connection*)> connectionStateFactory;
 
 		uint32_t randomSeed;
 	};

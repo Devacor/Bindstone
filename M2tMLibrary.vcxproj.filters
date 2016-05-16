@@ -65,6 +65,9 @@
     <Filter Include="Source Files\Game\Interface">
       <UniqueIdentifier>{1041d271-4bba-4703-86d1-688bee82cd20}</UniqueIdentifier>
     </Filter>
+    <Filter Include="pqxx">
+      <UniqueIdentifier>{795cca5b-4931-4dd8-a382-72e00e2cedac}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Animation\frameSwapper.cpp">
@@ -436,6 +439,84 @@
     </ClCompile>
     <ClCompile Include="Source\Game\creature.cpp">
       <Filter>Source Files\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\binarystring.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\connection.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\connection_base.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\cursor.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\dbtransaction.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\errorhandler.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\except.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\field.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\largeobject.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\nontransaction.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\notification.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\notify-listen.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\pipeline.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\prepared_statement.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\result.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\robusttransaction.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\statement_parameters.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\strconv.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\subtransaction.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\tablereader.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\tablestream.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\tablewriter.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\transaction.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\transaction_base.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\tuple.cxx">
+      <Filter>pqxx</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\util.cxx">
+      <Filter>pqxx</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -1033,6 +1114,10 @@
     </ClInclude>
     <ClInclude Include="Source\Game\creature.h">
       <Filter>Source Files\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="lobbyServer.h" />
+    <ClInclude Include="Source\Network\email.h">
+      <Filter>Source Files\Network</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

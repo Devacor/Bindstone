@@ -1,5 +1,6 @@
 #include "network.h"
 #include "Utility/stopwatch.h"
+#include "Utility/scopeGuard.hpp"
 
 #include "cereal/cereal.hpp"
 #include "cereal/archives/portable_binary.hpp"
@@ -118,13 +119,11 @@ namespace MV {
 	void Client::appendClientServerTime(std::shared_ptr<NetworkMessage> message) {
 		auto currentTime = Stopwatch::systemTime();
 		serverTimeDeltas.back() = (currentTime - serverTimeDeltas.back()) / 2.0;
-		std::cout << "Latency: " << serverTimeDeltas.back() << std::endl;
 		{
 			std::stringstream messageStream(message->content);
 			cereal::PortableBinaryInputArchive input(messageStream);
 			double serverTimeStamp;
 			input(serverTimeStamp);
-			std::cout << "Server Time: " << serverTimeStamp << std::endl;
 			serverTimeDeltas.back() = (serverTimeStamp - currentTime) + serverTimeDeltas.back();
 		}
 		--remainingTimeDeltas;
@@ -134,7 +133,6 @@ namespace MV {
 		} else {
 			std::sort(serverTimeDeltas.begin(), serverTimeDeltas.end());
 			clientServerTimeValue = serverTimeDeltas[serverTimeDeltas.size() / 2];
-			std::cout << "Client Server Time: " << clientServerTimeValue << std::endl;
 		}
 	}
 
@@ -144,18 +142,16 @@ namespace MV {
 			if (onInitialized) {
 				try {
 					onInitialized();
-					onInitialized = std::function<void()>();
 				} catch (std::exception &e) {
 					std::cerr << "Exception caught in network initialization call: " << e.what() << std::endl;
-					onInitialized = std::function<void()>();
 				}
 			}
 		}
 	}
 
-	Server::Server(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<void(const std::string &, Connection*)> a_recieveMessage) :
+	Server::Server(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase>(Connection*)> a_connectionStateFactory) :
 		acceptor(ioService, a_endpoint),
-		onMessageGet(a_recieveMessage),
+		connectionStateFactory(a_connectionStateFactory),
 		work(std::make_unique<boost::asio::io_service::work>(ioService)) {
 
 		acceptClients();
@@ -163,14 +159,14 @@ namespace MV {
 	}
 
 	Server::~Server() {
-		std::cout << "Server Disconnected" << std::endl;
+		std::cout << "Server Died" << std::endl;
 		ioService.stop();
 		if (worker && worker->joinable()) { worker->join(); }
 	}
 
 	void Server::disconnect(Connection* a_connection) {
 		std::lock_guard<std::mutex> guard(lock);
-		connections.erase(std::remove_if(connections.begin(), connections.end(), [&](auto &c) {return c.get() == a_connection; }), connections.end());
+		SCOPE_EXIT{ connections.erase(std::remove_if(connections.begin(), connections.end(), [&](auto &c) {return c.get() == a_connection; }), connections.end()); };
 	}
 
 	void Server::send(const std::string &a_message) {
@@ -191,7 +187,7 @@ namespace MV {
 		auto socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
 		acceptor.async_accept(*socket, [this, socket](boost::system::error_code ec) {
 			if (!ec) {
-				auto connection = std::make_shared<Connection>(*this, socket, ioService);
+				auto connection = std::make_shared<Connection>(*this, socket, ioService, connectionStateFactory);
 
 				std::lock_guard<std::mutex> guard(lock);
 				connections.push_back(connection);
@@ -210,15 +206,17 @@ namespace MV {
 		{
 			cereal::PortableBinaryOutputArchive output(message);
 			double serverTime = Stopwatch::systemTime();
-			std::cout << "OUTBOUND SERVER: " << serverTime << std::endl;
 			output(serverTime);
 		}
 		send(message.str());
+		if (timeRequestsRemaining == 0) {
+			state->connect();
+		}
 	}
 
-	void Server::update() {
+	void Server::update(double a_dt) {
 		for (auto&& connection : connections) {
-			connection->update();
+			connection->update(a_dt);
 		}
 	}
 
@@ -262,23 +260,28 @@ namespace MV {
 		});
 	}
 
-	void Connection::update() {
+	void Connection::update(double a_dt) {
 		std::lock_guard<std::mutex> guard(lock);
+		auto self = shared_from_this();
 		for (auto&& message : inbox) {
 			try {
-				server.onMessageGet(message->content, this);
+				state->message(message->content);
 			} catch (std::exception &e) {
 				std::cerr << "Caught an exception in Connection::update: " << e.what() << std::endl;
-				server.disconnect(this);
+				state->disconnect();
+				inbox.clear();
+				return;
 			}
 		}
 		inbox.clear();
+		state->update(a_dt);
 	}
 
 	void Connection::HandleError(const boost::system::error_code &a_err, const std::string &a_section) {
 		socket->close();
 		std::cerr << "[" << a_section << "] ERROR: " << a_err.message() << std::endl;
-		server.disconnect(this);
+		state->disconnect();
+		inbox.clear();
 	}
 
 	uint32_t NetworkMessage::sizeFromHeaderBuffer() {

@@ -70,9 +70,9 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include;$(SolutionDir)../external/ChaiScript-5.8.1/include;$(SolutionDir)../external/boost_1_58_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/</IncludePath>
-    <LibraryPath>$(SolutionDir)../external/boost_1_58_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL-2.0.4-9583/VisualC/x64/Release/;$(LibraryPath)</LibraryPath>
-    <SourcePath>$(SolutionDir)../external/boost_1_58_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/spine/spine-c/src/spine/</SourcePath>
+    <IncludePath>$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\compiler\VisualStudio2010\;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\libpq\9.0\;$(SolutionDir)../external\openssl\include\;$(SolutionDir)../external/libpqxx-4.0.1/include/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include;$(SolutionDir)../external/ChaiScript-5.8.1/include;$(SolutionDir)../external/boost_1_58_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;C:\Program Files\PostgreSQL\9.5\include\</IncludePath>
+    <LibraryPath>$(SolutionDir)../external/boost_1_58_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL-2.0.4-9583/VisualC/x64/Release/;C:\Program Files\PostgreSQL\9.5\lib\;$(SolutionDir)../external\openssl\lib\;$(LibraryPath)</LibraryPath>
+    <SourcePath>$(SolutionDir)../external/boost_1_58_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/libpqxx-4.0.1/src/;$(SolutionDir)../external/spine/spine-c/src/spine/;C:\Program Files\PostgreSQL\9.5\lib\</SourcePath>
     <LibraryWPath>$(WindowsSDK_MetadataPath);</LibraryWPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -81,9 +81,9 @@
     <SourcePath>$(SolutionDir)../external/boost_1_49_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath)</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external/SDL\SDL-2.0.4-9583\include;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include;$(SolutionDir)../external/ChaiScript-5.8.1/include;$(SolutionDir)../external/boost_1_58_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/</IncludePath>
-    <LibraryPath>$(SolutionDir)../external/boost_1_58_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL-2.0.4-9583/VisualC/x64/Release/;$(LibraryPath)</LibraryPath>
-    <SourcePath>$(SolutionDir)../external/boost_1_58_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/spine/spine-c/src/spine/</SourcePath>
+    <IncludePath>$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\compiler\VisualStudio2010\;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\libpq\9.0\;$(SolutionDir)../external\openssl\include\;$(SolutionDir)../external/libpqxx-4.0.1/include/;$(SolutionDir)../external/SDL\SDL-2.0.4-9583\include;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include;$(SolutionDir)../external/ChaiScript-5.8.1/include;$(SolutionDir)../external/boost_1_58_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;C:\Program Files\PostgreSQL\9.5\include\</IncludePath>
+    <LibraryPath>$(SolutionDir)../external/boost_1_58_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL-2.0.4-9583/VisualC/x64/Release/;C:\Program Files\PostgreSQL\9.5\lib\;$(SolutionDir)../external\openssl\lib\;$(LibraryPath)</LibraryPath>
+    <SourcePath>$(SolutionDir)../external/boost_1_58_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/libpqxx-4.0.1/src/;$(SolutionDir)../external/spine/spine-c/src/spine/;C:\Program Files\PostgreSQL\9.5\lib\</SourcePath>
     <RunCodeAnalysis>false</RunCodeAnalysis>
     <LinkIncremental>true</LinkIncremental>
   </PropertyGroup>
@@ -114,7 +114,7 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <AdditionalIncludeDirectories>
       </AdditionalIncludeDirectories>
-      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj</AdditionalOptions>
+      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj -OPENSSL_NO_SSL2</AdditionalOptions>
       <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <CompileAs>CompileAsCpp</CompileAs>
@@ -123,7 +123,7 @@
     </ClCompile>
     <Link>
       <GenerateDebugInformation>DebugFastLink</GenerateDebugInformation>
-      <AdditionalDependencies>opengl32.lib;glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;libboost_filesystem-vc140-mt-1_58.lib;libboost_system-vc140-mt-1_58.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>opengl32.lib;glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;libboost_filesystem-vc140-mt-1_58.lib;libboost_system-vc140-mt-1_58.lib;libpq.lib;ssleay32.lib;libeay32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
       <Profile>true</Profile>
       <AdditionalLibraryDirectories>
@@ -163,7 +163,7 @@
       <AdditionalIncludeDirectories>
       </AdditionalIncludeDirectories>
       <EnablePREfast>false</EnablePREfast>
-      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj</AdditionalOptions>
+      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj -OPENSSL_NO_SSL2</AdditionalOptions>
       <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <DisableLanguageExtensions>false</DisableLanguageExtensions>
@@ -174,7 +174,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>false</EnableCOMDATFolding>
       <OptimizeReferences>false</OptimizeReferences>
-      <AdditionalDependencies>opengl32.lib;glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;libboost_filesystem-vc140-mt-1_58.lib;libboost_system-vc140-mt-1_58.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>opengl32.lib;glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;libboost_filesystem-vc140-mt-1_58.lib;libboost_system-vc140-mt-1_58.lib;libpq.lib;ssleay32.lib;libeay32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
       <AdditionalLibraryDirectories>
       </AdditionalLibraryDirectories>
@@ -232,6 +232,32 @@
     <ClCompile Include="..\external\Box2D\Dynamics\Joints\b2WheelJoint.cpp" />
     <ClCompile Include="..\external\Box2D\Rope\b2Rope.cpp" />
     <ClCompile Include="..\external\gl3w\src\gl3w.c" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\binarystring.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\connection.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\connection_base.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\cursor.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\dbtransaction.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\errorhandler.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\except.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\field.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\largeobject.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\nontransaction.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\notification.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\notify-listen.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\pipeline.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\prepared_statement.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\result.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\robusttransaction.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\statement_parameters.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\strconv.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\subtransaction.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\tablereader.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\tablestream.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\tablewriter.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\transaction.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\transaction_base.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\tuple.cxx" />
+    <ClCompile Include="..\external\libpqxx-4.0.1\src\util.cxx" />
     <ClCompile Include="..\external\spine\Animation.c" />
     <ClCompile Include="..\external\spine\AnimationState.c" />
     <ClCompile Include="..\external\spine\AnimationStateData.c" />
@@ -442,6 +468,7 @@
     <ClInclude Include="..\external\spine\Slot.h" />
     <ClInclude Include="..\external\spine\SlotData.h" />
     <ClInclude Include="..\external\spine\spine.h" />
+    <ClInclude Include="lobbyServer.h" />
     <ClInclude Include="Source\ArtificialIntelligence\pathfinding.h" />
     <ClInclude Include="Source\ClickerGame\clickerGame.h" />
     <ClInclude Include="Source\DiggerGame\diggerGame.h" />
@@ -463,6 +490,7 @@
     <ClInclude Include="Source\Game\state.h" />
     <ClInclude Include="Source\Game\wallet.h" />
     <ClInclude Include="Source\Network\download.h" />
+    <ClInclude Include="Source\Network\email.h" />
     <ClInclude Include="Source\Network\url.h" />
     <ClInclude Include="Source\Physics\collider.h" />
     <ClInclude Include="Source\Physics\package.h" />

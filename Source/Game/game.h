@@ -1,3 +1,6 @@
+#ifndef _GAME_MV_H_
+#define _GAME_MV_H_
+
 #include <SDL.h>
 #include "Game/managers.h"
 #include "Game/player.h"
@@ -52,39 +55,6 @@ private:
 	//MV::Scene::Clickable::Signals armInputHandles;
 };
 
-class Server {
-public:
-	Server(Managers &a_managers);
-
-	//return true if we're still good to go
-	bool update(double dt);
-	void handleInput();
-	void render();
-
-	Managers& getManager() {
-		return data.managers();
-	}
-
-	MV::MouseState& getMouse() {
-		return mouse;
-	}
-
-private:
-	Server(const Server &) = delete;
-	Server& operator=(const Server &) = delete;
-
-	void initializeData();
-	void initializeWindow();
-	void spawnCreature(const MV::Point<> &a_position);
-
-	GameData data;
-	std::vector<std::unique_ptr<ServerGameInstance>> instance;
-
-	bool done;
-
-	double lastUpdateDelta;
-
-	MV::MouseState mouse;
-};
-
 void sdl_quit(void);
+
+#endif

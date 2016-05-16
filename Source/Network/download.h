@@ -6,6 +6,7 @@
 #include <istream>
 #include <ostream>
 #include <fstream>
+#include <algorithm>
 #include "Network/url.h"
 #include "Utility/generalUtility.h"
 #include <boost/asio.hpp>
@@ -53,7 +54,7 @@ namespace MV {
 				if (index != std::string::npos && index > 0) {
 					auto key = header.substr(0, index);
 					auto value = (index + 2 >= header.size()) ? "" : header.substr(index + 2);
-					std::transform(key.begin(), key.end(), key.begin(), std::tolower);
+					std::transform(key.begin(), key.end(), key.begin(), [](char c) {return std::tolower(c); });
 					values[key] = value;
 				}
 			}

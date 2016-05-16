@@ -51,6 +51,14 @@ void Game::initializeWindow(){
 	localPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
 
 	localPlayer->wallet.add(Wallet::CurrencyType::SOFT, 5000);
+
+
+	{
+		std::ofstream stream("playerExample.json");
+		cereal::JSONOutputArchive archive(stream);
+		archive(localPlayer);
+	}
+
 	auto enemyPlayer = std::make_shared<Player>();
 	enemyPlayer->name = "Jai";
 	enemyPlayer->loadout.buildings = { "life", "life", "life", "life", "life", "life", "life", "life" };

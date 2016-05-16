@@ -7,6 +7,18 @@
 #include "editor/editor.h"
 #include "Game/managers.h"
 
+class BasicConnectionState : public MV::ConnectionStateBase {
+public:
+	BasicConnectionState(MV::Connection *a_connection) :
+		MV::ConnectionStateBase(a_connection) {
+	}
+
+	virtual void message(const std::string &a_message) {
+		std::cout << "Got Message: " << a_message << std::endl;
+		connection->send("GOT: " + a_message);
+	}
+};
+
 class GameEditor {
 public:
 	GameEditor():
@@ -47,15 +59,18 @@ public:
 		auto serverButton = makeButton(grid, game.getManager().textLibrary, mouse, "Server", { 100.0f, 20.0f }, UTF_CHAR_STR("Server"));
 		serverButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
 			std::cout << "serving" << std::endl;
-			server = std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325), [](const std::string &a_message, MV::Connection *a_connection) {
-				std::cout << "SERVER GOT MESSAGE: " << a_message << std::endl;
+			server = std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325), [](MV::Connection *a_connection) {
+				return std::make_unique<BasicConnectionState>(a_connection);
 			});
 		});
 
 		auto clientButton = makeButton(grid, game.getManager().textLibrary, mouse, "Client", { 100.0f, 20.0f }, UTF_CHAR_STR("Client"));
 		clientButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
-			client = MV::Client::make(MV::Url{ "http://54.218.22.3:22325" }, [](const std::string &a_message) {
+			client = MV::Client::make(MV::Url{ "http://ec2-54-218-22-3.us-west-2.compute.amazonaws.com:22325" }, [=](const std::string &a_message) {
+			//client = MV::Client::make(MV::Url{ "http://96.229.120.252:22325" }, [=](const std::string &a_message) {
+				static int i = 0;
 				std::cout << "GOT MESSAGE: [" << a_message << "]" << std::endl;
+				client->send(std::to_string(++i));
 			}, [](const std::string &a_dcreason) {
 				std::cout << "Disconnected!" << std::endl;
 			}, [=] { client->send("UUUUNG"); });
@@ -89,9 +104,10 @@ private:
 			managers.pool.run();
 			handleInput();
 			limbo->renderer().clearScreen();
-			limbo->drawUpdate(managers.timer.delta("tick"));
+			auto tick = managers.timer.delta("tick");
+			limbo->drawUpdate(tick);
 			limbo->renderer().updateScreen();
-			if (server) { server->update(); }
+			if (server) { server->update(tick); }
 			if (client) { client->update(); }
 			MV::systemSleep(0);
 		}

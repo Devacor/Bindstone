@@ -40,96 +40,63 @@ struct TestClassVersioned {
 
 #include "cereal/archives/json.hpp"
 
-int main(int argc, char *argv[]){
+int main(int, char *[]){
+
+// 	pqxx::connection c("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=5432 dbname=bindstone user=m2tm password=Tinker123");
+// 	pqxx::work txn(c);
+// 
+// 
+// 	txn.exec(
+// 		"CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;"
+// 		"CREATE TABLE Instances ("
+// 		"	Id SERIAL primary key,"
+// 		"	Available boolean			default false,"
+// 		"	Host text						default '',"
+// 		"	Port integer				default 0,"
+// 		"	PlayerLeft	int				default 0,"
+// 		"	PlayerRight	int				default 0,"
+// 		"	LastUpdate timestamp without time zone default (now() at time zone 'utc'),"
+// 		"	Result JSON"
+// 		");");
+// 	txn.commit();
+
+// 	pqxx::result r = txn.exec(
+// 		"SELECT state "
+// 		"FROM players "
+// 		"WHERE email = " + txn.quote("maxmike@gmail.com"));
+// 
+// 	if (r.size() != 1)
+// 	{
+// 		std::cerr
+// 			<< "Expected 1 player with email " << txn.quote("maxmike@gmail.com") << ", "
+// 			<< "but found " << r.size() << std::endl;
+// 		return 1;
+// 	}
+// 
+// 	std::string status = r[0][0].c_str();
+// 	std::cout << "Updating employee #" << status << std::endl;
+
+
+	/*
+	pqxx::result r = txn.exec(
+		"select column_name, data_type, character_maximum_length"
+		"from INFORMATION_SCHEMA.COLUMNS where table_name = Players");
+
+	txn.commit();
+
+
+	if (r.size() != 1)
 	{
-		std::stringstream stream;
-
-		{
-			cereal::JSONOutputArchive archive(stream);
-			TestClass test;
-			archive(CEREAL_NVP(test));
-		}
-
-		{
-			TestClassVersioned test;
-			cereal::JSONInputArchive archive(stream);
-			archive(CEREAL_NVP(test));
-		}
+		std::cerr
+			<< "Expected 1 employee with name " << argv[1] << ", "
+			<< "but found " << r.size() << std::endl;
+		return 1;
 	}
+	*/
 
-// 	auto world = MV::Map::make({ 20, 20 }, false);
-// 
-// 	for (int i = 0; i < 20; ++i) {
-// 		world->get({ 8, i }).staticBlock();
-// 	}
-// 
-// 	world->get({ 8, 6 }).staticUnblock();
-// 	world->get({ 8, 7 }).staticUnblock();
-// 
-// 
-// 	std::vector<std::shared_ptr<MV::NavigationAgent>> agents{ 
-// 		MV::NavigationAgent::make(world, MV::Point<int>(2, 2), 2),
-// 		MV::NavigationAgent::make(world, MV::Point<int>(0, 2), 2),
-// 		MV::NavigationAgent::make(world, MV::Point<int>(2, 0), 2),
-// 		MV::NavigationAgent::make(world, MV::Point<int>(0, 0), 2) };
-// 	MV::Stopwatch timer;
-// 
-// 	for (int i = 0; i < agents.size(); ++i) {
-// 		agents[i]->onStart.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
-// 			std::cout << (i + 1) << ": START" << std::endl;
-// 		});
-// 		agents[i]->onStop.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
-// 			std::cout << (i + 1) << ": STOP" << std::endl;
-// 		});
-// 		agents[i]->onBlocked.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
-// 			std::cout << (i + 1) << ": BLOCKED" << std::endl;
-// 		});
-// 		agents[i]->onArrive.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
-// 			std::cout << (i + 1) << ": ARRIVED" << std::endl;
-// 		});
-// 		agents[i]->goal(MV::Point<int>(10, 17), 0);
-// 	}
-// 
-// 
-// 	int i = 0;
-// 
-// 	while (std::find_if(agents.begin(), agents.end(), [](auto&& agent) {
-// 		return agent->pathfinding();
-// 	}) != agents.end() ) {
-// 		char a;
-// 		while (true) {
-// 			for (auto&& agent : agents) {
-// 				agent->update(1.0f);
-// 			}
-// 			std::vector<MV::PathNode> pathNodes;
-// 			for (int y = 0; y < world->size().height; ++y) {
-// 				for (int x = 0; x < world->size().width; ++x) {
-// 					bool wasAgent = false;
-// 					for (int i = 0; i < agents.size(); ++i) {
-// 						if (agents[i]->overlaps({ x, y })) {
-// 							std::cout << "[" << (char)(i + 65) << "]";
-// 							wasAgent = true;
-// 							break;
-// 						}
-// 					}
-// 					if (!wasAgent) {
-// 						if (world->blocked({ x, y })) {
-// 							std::cout << " " << "X" << " ";
-// 						} else {
-// 							std::cout << " " << world->get({ x, y }).clearance() << " ";
-// 						}
-// 					}
-// 				}
-// 				std::cout << std::endl;
-// 			}
-// 			std::cout << "\n\n\n" << std::endl;
-// 			++i;
-// 			std::cin >> a;
-// 		}
-// 	}
-// 	std::cout << "YO" << std::endl;
-// 	return 0;
-
+	auto emailer = MV::Email::make("jackaldurante@gmail.com", "maxmike@gmail.com");
+	emailer->send("Test Title", "This is a test, hopefully this made it! http://mutedvision.net");
+	
 	GameEditor menu;
 
 	menu.start();

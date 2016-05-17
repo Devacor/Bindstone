@@ -49,22 +49,45 @@ namespace MV {
 
 	class Email : public std::enable_shared_from_this<Email> {
 	public:
-		static std::shared_ptr<Email> make(const std::string& a_from, const std::string &a_to) {
-			return std::shared_ptr<Email>(new Email(a_from, a_to));
+		struct Credentials {
+			Credentials(const std::string &a_name, const std::string &a_password) :
+				name(a_name),
+				password(a_password) {
+			}
+
+			std::string name;
+			std::string password;
+		};
+
+		struct Addresses {
+			Addresses(const std::string &a_from, const std::string &a_to) :
+				from(a_from),
+				to(a_to) {
+			}
+
+			Addresses(const std::string &a_fromName, const std::string &a_from, const std::string &a_toName, const std::string &a_to) :
+				from(a_from),
+				fromName(a_fromName),
+				to(a_to),
+				toName(a_toName){
+			}
+
+			std::string from;
+			std::string fromName;
+			std::string to;
+			std::string toName;
+		};
+
+		static std::shared_ptr<Email> make(const std::string &a_host, const std::string &a_port, const Credentials &a_credentials, const Addresses &a_addresses) {
+			auto result = std::shared_ptr<Email>(new Email(a_host, a_port, a_credentials, a_addresses));
+			return result;
 		}
 
 		void send(const std::string &a_title, const std::string &a_message) {
 			try {
-				auto toDomain = domainFromEmail(to);
-				if (!toDomain.empty()) {
-					storeMessageString(a_title, a_message);
-					initiateRequest(toDomain);
-					ioService.run();
-				} else {
-					success = false;
-					errorMessage = "Malformed email address!";
-					std::cerr << errorMessage << std::endl;
-				}
+				storeMessageString(a_title, a_message);
+				initiateConnection();
+				ioService.run();
 			} catch (...) {
 				success = false;
 				errorMessage = "Exception thrown to top level.";
@@ -74,19 +97,21 @@ namespace MV {
 
 
 	private:
-		Email(const std::string& a_from, const std::string &a_to) :
+		Email(const std::string& a_host, const std::string &a_port, const Credentials &a_credentials, const Addresses &a_addresses) :
 			resolver(ioService),
-			from(a_from),
-			to(a_to),
 			tlsContext(ioService, boost::asio::ssl::context::tlsv1_client),
+			credentials(a_credentials),
+			addresses(a_addresses),
+			host(a_host),
+			port(a_port),
 			socket(ioService, tlsContext){
 		}
 
 		void storeMessageString(const std::string &a_title, const std::string &a_message) {
 			std::stringstream output;
 			output << "Subject: " << a_title << "\r\n";
-			output << "From: " << from << "\r\n";
-			output << "To: " << to << "\r\n";
+			output << "From: <" << addresses.from << ">\r\n";
+			output << "To: " << addresses.to << "\r\n";
 			output << "\r\n";
 			output << a_message;
 			output << "\r\n" << "." << "\r\n";
@@ -101,12 +126,12 @@ namespace MV {
 			return "";
 		}
 
-		void initiateRequest(const std::string& a_domain) {
+		void initiateConnection() {
 			request = std::make_unique<boost::asio::streambuf>();
 			response = std::make_unique<boost::asio::streambuf>();
 			using boost::asio::ip::tcp;
 
-			tcp::resolver::query query("email-smtp.us-west-2.amazonaws.com", "587");
+			tcp::resolver::query query(host, port);
 			resolver.async_resolve(query, boost::bind(&Email::handleResolve, this, boost::asio::placeholders::error, boost::asio::placeholders::iterator));
 		}
 
@@ -141,30 +166,20 @@ namespace MV {
 		void smtpHandshake() {
 			listenForMessageUnsecure([=] {
 				if (activeResponse.status == 220) {
-					sendInternalUnsecure("EHLO " + domainFromEmail(from) + "\r\n", [=] { listenForMessageUnsecure([=] {
+					sendInternalUnsecure("EHLO " + domainFromEmail(addresses.from) + "\r\n", [=] { listenForMessageUnsecure([=] {
 						if (activeResponse.status == 250) {
 							sendInternalUnsecure("STARTTLS\r\n", [=] { listenForMessageUnsecure([=] {
 								if (activeResponse.status == 220) {
 									socket.handshake(boost::asio::ssl::stream_base::client);
-									sendInternal("EHLO " + domainFromEmail(from) + "\r\n", [=] {
+									sendInternal("EHLO " + domainFromEmail(addresses.from) + "\r\n", [=] {
 										if (activeResponse.status == 250) {
 											sendInternal("AUTH LOGIN\r\n", [=] {
 												if (activeResponse.status == 334) {
-													sendInternal(cereal::base64::encode("AKIAIVINRAMKWEVUT6UQ")+ "\r\n", [=] {
+													sendInternal(cereal::base64::encode(credentials.name)+ "\r\n", [=] {
 														if (activeResponse.status == 334) {
-															sendInternal(cereal::base64::encode("AiUjj1lS/k3g9r0REJ1eCoy/xeYZgLXmB8Nrep36pUVw") + "\r\n", [=] {
+															sendInternal(cereal::base64::encode(credentials.password) + "\r\n", [=] {
 																if (activeResponse.status == 235) {
-																	sendInternal("MAIL FROM:<" + from + ">\r\n", [=] {
-																		if (activeResponse.status == 250) {
-																			sendInternal("RCPT TO:<" + to + ">\r\n", [=] {
-																				if (activeResponse.status == 500) {
-																					std::cerr << "Bad address." << std::endl;
-																				} else if (activeResponse.status == 250 || activeResponse.status == 251) {
-																					sendMessageAndCloseConnection();
-																				}
-																			});
-																		}
-																	});
+																	sendMessageAndQuit();
 																}
 															});
 														}
@@ -181,12 +196,22 @@ namespace MV {
 			});
 		}
 
-		void sendMessageAndCloseConnection() {
-			sendInternal("DATA\r\n", [=] {
-				if (activeResponse.status == 354) {
-					sendInternal(message, [=] {
-						if (activeResponse.status == 250) {
-							sendInternal("QUIT\r\n");
+		void sendMessageAndQuit() {
+			sendInternal("MAIL FROM:<" + addresses.from + ">\r\n", [=] {
+				if (activeResponse.status == 250) {
+					sendInternal("RCPT TO:<" + addresses.to + ">\r\n", [=] {
+						if (activeResponse.status == 500) {
+							std::cerr << "Bad address." << std::endl;
+						} else if (activeResponse.status == 250 || activeResponse.status == 251) {
+							sendInternal("DATA\r\n", [=] {
+								if (activeResponse.status == 354) {
+									sendInternal(message, [=] {
+										if (activeResponse.status == 250) {
+											sendInternal("QUIT\r\n");
+										}
+									});
+								}
+							});
 						}
 					});
 				}
@@ -268,10 +293,13 @@ namespace MV {
 
 		SmtpResponse activeResponse;
 
-		std::string from;
-		std::string to;
-
+		Addresses addresses;
 		std::string message;
+
+		Credentials credentials;
+		
+		std::string host;
+		std::string port;
 	};
 
 }

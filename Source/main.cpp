@@ -94,8 +94,9 @@ int main(int, char *[]){
 	}
 	*/
 
-	auto emailer = MV::Email::make("jackaldurante@gmail.com", "maxmike@gmail.com");
-	emailer->send("Test Title", "This is a test, hopefully this made it! http://mutedvision.net");
+
+	auto emailer = MV::Email::make("email-smtp.us-west-2.amazonaws.com", "587", { "AKIAIVINRAMKWEVUT6UQ", "AiUjj1lS/k3g9r0REJ1eCoy/xeYZgLXmB8Nrep36pUVw" }, {"jackaldurante@gmail.com", "maxmike@gmail.com"});
+	emailer->send("Testing new Interface", "Does this work too?");
 	
 	GameEditor menu;
 

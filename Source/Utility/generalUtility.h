@@ -12,6 +12,7 @@
 #include <random>
 #include <array>
 #include <type_traits>
+#include <mutex>
 
 #include "Utility/require.hpp"
 #include <boost/uuid/uuid.hpp>
@@ -449,16 +450,17 @@ namespace MV {
 	}
 
 	//Primarily meant to queue actions for post construction in cereal
-	class QueuedActionWrapper {
+	class CallbackQueue {
 	public:
-		QueuedActionWrapper(){}
-		QueuedActionWrapper(std::function<void(std::exception &e)> a_onException):onException(a_onException){}
+		CallbackQueue(){}
+		CallbackQueue(std::function<void(std::exception &e)> a_onException):onException(a_onException){}
 
-		~QueuedActionWrapper() {
+		~CallbackQueue() {
 			execute();
 		}
 
 		void execute() {
+			std::lock_guard<std::mutex> guard(lock);
 			for (auto&& action : actions) {
 				try {
 					action();
@@ -469,13 +471,39 @@ namespace MV {
 			actions.clear();
 		}
 
-		QueuedActionWrapper& then(std::function<void()> a_action) {
+		CallbackQueue& then(std::function<void()> a_action) {
+			std::lock_guard<std::mutex> guard(lock);
 			actions.push_back(a_action);
+			return *this;
 		}
 
 	private:
+		std::mutex lock;
 		std::function<void(std::exception &e)> onException;
 		std::vector<std::function<void()>> actions;
+	};
+
+	class MainThreadCallback {
+	public:
+		MainThreadCallback(std::shared_ptr<CallbackQueue> a_queue = std::shared_ptr<CallbackQueue>(), std::function<void()> a_callback = std::function<void()>()) :
+			queue(a_queue),
+			boundCallback(a_callback){
+		}
+
+		void operator()(std::function<void()> a_callback) {
+			if (queue) {
+				queue->then(a_callback);
+			}
+		}
+
+		void operator()() {
+			if (queue && boundCallback) {
+				queue->then(boundCallback);
+			}
+		}
+	private:
+		std::shared_ptr<CallbackQueue> queue;
+		std::function<void()> boundCallback;
 	};
 }
 #endif

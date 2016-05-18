@@ -80,21 +80,19 @@ namespace MV {
 		return a_is;
 	}
 
-	class DownloadRequest {
+	class DownloadRequest : public std::enable_shared_from_this<DownloadRequest> {
 	public:
-		DownloadRequest(const MV::Url& a_url, std::ostream &a_streamOutput) :
-			streamOutput(a_streamOutput),
-			resolver(ioService),
-			socket(ioService) {
+		static std::shared_ptr<DownloadRequest> make(const MV::Url& a_url, std::ostream &a_streamOutput) {
+			auto result = std::shared_ptr<DownloadRequest>(new DownloadRequest(a_streamOutput));
+			result->perform(a_url);
+			return result;
+		}
 
-			try {
-				initiateRequest(a_url);
-				ioService.run();
-			} catch (...) {
-				headerData.success = false;
-				headerData.errorMessage = "Exception thrown to top level.";
-				std::cerr << headerData.errorMessage << std::endl;
-			}
+		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<boost::asio::io_service> &a_ioService, const MV::Url& a_url, std::ostream &a_streamOutput) {
+			auto result = std::shared_ptr<DownloadRequest>(new DownloadRequest(a_streamOutput));
+			result->ioService = a_ioService;
+			result->perform(a_url);
+			return result;
 		}
 
 		HttpHeader& header() {
@@ -102,8 +100,39 @@ namespace MV {
 		}
 
 	private:
+		DownloadRequest(std::ostream &a_streamOutput) :
+			streamOutput(a_streamOutput) {
+		}
+
+		void perform(const MV::Url& a_url) {
+			try {
+				bool needToCallRun = initializeSocket();
+				initiateRequest(a_url);
+				if (needToCallRun) {
+					ioService->run();
+				}
+			} catch (...) {
+				headerData.success = false;
+				headerData.errorMessage = "Exception thrown to top level.";
+				std::cerr << headerData.errorMessage << std::endl;
+			}
+		}
+
+		bool initializeSocket() {
+			bool created = false;
+			if (!ioService) {
+				ioService = std::make_shared<boost::asio::io_service>();
+				created = true;
+			}
+
+			resolver = std::make_unique<boost::asio::ip::tcp::resolver>(*ioService);
+			socket = std::make_unique<boost::asio::ip::tcp::socket>(*ioService);
+
+			return created;
+		}
+
 		void initiateRequest(const MV::Url& a_url) {
-			socket.close();
+			socket->close();
 			currentUrl = a_url;
 			request = std::make_unique<boost::asio::streambuf>();
 			response = std::make_unique<boost::asio::streambuf>();
@@ -116,7 +145,7 @@ namespace MV {
 			requestStream << "Connection: close\r\n\r\n";
 
 			tcp::resolver::query query(a_url.host(), "http");
-			resolver.async_resolve(query, boost::bind(&DownloadRequest::handleResolve, this, boost::asio::placeholders::error, boost::asio::placeholders::iterator));
+			resolver->async_resolve(query, boost::bind(&DownloadRequest::handleResolve, this, boost::asio::placeholders::error, boost::asio::placeholders::iterator));
 		}
 
 		void handleResolve(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
@@ -124,7 +153,7 @@ namespace MV {
 				// Attempt a connection to the first endpoint in the list. Each endpoint
 				// will be tried until we successfully establish a connection.
 				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-				socket.async_connect(endpoint, boost::bind(&DownloadRequest::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
+				socket->async_connect(endpoint, boost::bind(&DownloadRequest::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
 			} else {
 				headerData.success = false;
 				headerData.errorMessage = "Download Resolve Failure: " + err.message();
@@ -135,12 +164,12 @@ namespace MV {
 		void handleConnect(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
 			if (!err) {
 				// The connection was successful. Send the request.
-				boost::asio::async_write(socket, *request, boost::bind(&DownloadRequest::handleWriteRequest, this, boost::asio::placeholders::error));
+				boost::asio::async_write(*socket, *request, boost::bind(&DownloadRequest::handleWriteRequest, this, boost::asio::placeholders::error));
 			} else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
 				// The connection failed. Try the next endpoint in the list.
-				socket.close();
+				socket->close();
 				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-				socket.async_connect(endpoint, boost::bind(&DownloadRequest::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
+				socket->async_connect(endpoint, boost::bind(&DownloadRequest::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
 			} else {
 				headerData.success = false;
 				headerData.errorMessage = "Download Connection Failure: " + err.message();
@@ -150,7 +179,7 @@ namespace MV {
 
 		void handleWriteRequest(const boost::system::error_code& err) {
 			if (!err) {
-				boost::asio::async_read_until(socket, *response, "\r\n\r\n", boost::bind(&DownloadRequest::handleReadHeaders, this, boost::asio::placeholders::error));
+				boost::asio::async_read_until(*socket, *response, "\r\n\r\n", boost::bind(&DownloadRequest::handleReadHeaders, this, boost::asio::placeholders::error));
 			} else {
 				headerData.success = false;
 				headerData.errorMessage = "Download Write Failure: " + err.message();
@@ -172,7 +201,7 @@ namespace MV {
 					if (response->size() > 0) {
 						readResponseToStream();
 					}
-					boost::asio::async_read(socket, *response, boost::asio::transfer_at_least(1), boost::bind(&DownloadRequest::handleReadContent, this, boost::asio::placeholders::error));
+					boost::asio::async_read(*socket, *response, boost::asio::transfer_at_least(1), boost::bind(&DownloadRequest::handleReadContent, this, boost::asio::placeholders::error));
 				}
 			}
 			else {
@@ -187,7 +216,7 @@ namespace MV {
 			if (!err) {
 				readResponseToStream();
 
-				boost::asio::async_read(socket, *response, boost::asio::transfer_at_least(1), boost::bind(&DownloadRequest::handleReadContent, this, boost::asio::placeholders::error));
+				boost::asio::async_read(*socket, *response, boost::asio::transfer_at_least(1), boost::bind(&DownloadRequest::handleReadContent, this, boost::asio::placeholders::error));
 			} else if (err != boost::asio::error::eof) {
 				headerData.success = false;
 				headerData.errorMessage = "Download Read Content Failure: " + err.message();
@@ -199,9 +228,9 @@ namespace MV {
 			streamOutput << &(*response);
 		}
 
-		boost::asio::io_service ioService;
-		boost::asio::ip::tcp::resolver resolver;
-		boost::asio::ip::tcp::socket socket;
+		std::shared_ptr<boost::asio::io_service> ioService;
+		std::unique_ptr<boost::asio::ip::tcp::resolver> resolver;
+		std::unique_ptr<boost::asio::ip::tcp::socket> socket;
 
 		std::unique_ptr<std::istream> responseStream;
 
@@ -217,7 +246,7 @@ namespace MV {
 
 	inline std::string DownloadString(const MV::Url& a_url) {
 		std::stringstream result;
-		if (DownloadRequest(a_url, result).header().success) {
+		if (DownloadRequest::make(a_url, result)->header().success) {
 			return result.str();
 		} else {
 			return "";
@@ -228,8 +257,8 @@ namespace MV {
 		HttpHeader header;
 		{
 			std::ofstream outFile(a_path, std::ofstream::out | std::ofstream::binary);
-			DownloadRequest request(a_url, outFile);
-			header = request.header();
+			auto request = DownloadRequest::make(a_url, outFile);
+			header = request->header();
 		}
 		if (!header.success) {
 			std::remove(a_path.c_str());

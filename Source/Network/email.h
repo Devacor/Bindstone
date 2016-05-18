@@ -60,9 +60,13 @@ namespace MV {
 		};
 
 		struct Addresses {
+			Addresses(){}
+
 			Addresses(const std::string &a_from, const std::string &a_to) :
 				from(a_from),
 				to(a_to) {
+
+				sanitize();
 			}
 
 			Addresses(const std::string &a_fromName, const std::string &a_from, const std::string &a_toName, const std::string &a_to) :
@@ -70,48 +74,101 @@ namespace MV {
 				fromName(a_fromName),
 				to(a_to),
 				toName(a_toName){
+
+				sanitize();
 			}
 
 			std::string from;
 			std::string fromName;
 			std::string to;
 			std::string toName;
+
+		private:
+			void sanitize() {
+				from = strip(from);
+				to = strip(to);
+				fromName = strip(fromName);
+				toName = strip(toName);
+			}
+
+			std::string strip(std::string a_original) {
+				a_original.erase(std::remove_if(a_original.begin(), a_original.end(), [](char c) {return c == '\n' || c == '\r' || c == '\0' || c == '<' || c == '>' || c == '"'; }), a_original.end());
+				return a_original;
+			}
 		};
 
-		static std::shared_ptr<Email> make(const std::string &a_host, const std::string &a_port, const Credentials &a_credentials, const Addresses &a_addresses) {
-			auto result = std::shared_ptr<Email>(new Email(a_host, a_port, a_credentials, a_addresses));
+		static std::shared_ptr<Email> make(const std::string &a_host, const std::string &a_port, const Credentials &a_credentials) {
+			auto result = std::shared_ptr<Email>(new Email(a_host, a_port, a_credentials));
 			return result;
 		}
 
-		void send(const std::string &a_title, const std::string &a_message) {
+		static std::shared_ptr<Email> make(const std::shared_ptr<boost::asio::io_service> &a_suppliedService, const std::string &a_host, const std::string &a_port, const Credentials &a_credentials, MainThreadCallback a_onFinish = MainThreadCallback()) {
+			auto result = std::shared_ptr<Email>(new Email(a_host, a_port, a_credentials));
+			result->onFinish = a_onFinish;
+			result->ioService = a_suppliedService;
+			return result;
+		}
+
+		void send(const Addresses &a_addresses, const std::string &a_title, const std::string &a_message) {
+			addresses = a_addresses;
 			try {
+				bool needToCallRun = initializeSocket();
 				storeMessageString(a_title, a_message);
 				initiateConnection();
-				ioService.run();
+				if (needToCallRun) {
+					ioService->run();
+				}
 			} catch (...) {
-				success = false;
-				errorMessage = "Exception thrown to top level.";
-				std::cerr << errorMessage << std::endl;
+				alertFailure();
 			}
 		}
 
+		int failed() {
+			std::lock_guard<std::mutex> guard(lock);
+			return done && !success;
+		}
+
+		SmtpResponse lastResponse() {
+			return activeResponse;
+		}
+
+		bool succeeded() {
+			std::lock_guard<std::mutex> guard(lock);
+			return done && success;
+		}
+
+		bool complete() {
+			std::lock_guard<std::mutex> guard(lock);
+			return done;
+		}
 
 	private:
-		Email(const std::string& a_host, const std::string &a_port, const Credentials &a_credentials, const Addresses &a_addresses) :
-			resolver(ioService),
-			tlsContext(ioService, boost::asio::ssl::context::tlsv1_client),
+		Email(const std::string& a_host, const std::string &a_port, const Credentials &a_credentials) :
 			credentials(a_credentials),
-			addresses(a_addresses),
 			host(a_host),
-			port(a_port),
-			socket(ioService, tlsContext){
+			port(a_port){
+		}
+
+		//returns true if we own our own ioService created
+		bool initializeSocket() {
+			bool created = false;
+			if (!ioService) {
+				ioService = std::make_shared<boost::asio::io_service>();
+				created = true;
+			}
+
+			resolver = std::make_unique<boost::asio::ip::tcp::resolver>(*ioService);
+			tlsContext = std::make_unique<boost::asio::ssl::context>(*ioService, boost::asio::ssl::context::tlsv1_client);
+			socket = std::make_unique<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>(*ioService, *tlsContext);
+
+			return created;
 		}
 
 		void storeMessageString(const std::string &a_title, const std::string &a_message) {
 			std::stringstream output;
 			output << "Subject: " << a_title << "\r\n";
-			output << "From: <" << addresses.from << ">\r\n";
-			output << "To: " << addresses.to << "\r\n";
+			output << "From: " << (addresses.fromName.empty() ? "" : ("\"" + addresses.fromName + "\"")) << " <" << addresses.from << ">\r\n";
+			output << "To: " << (addresses.toName.empty() ? "" : ("\"" + addresses.toName + "\"")) << " <" << addresses.to << ">\r\n";
 			output << "\r\n";
 			output << a_message;
 			output << "\r\n" << "." << "\r\n";
@@ -132,7 +189,7 @@ namespace MV {
 			using boost::asio::ip::tcp;
 
 			tcp::resolver::query query(host, port);
-			resolver.async_resolve(query, boost::bind(&Email::handleResolve, this, boost::asio::placeholders::error, boost::asio::placeholders::iterator));
+			resolver->async_resolve(query, boost::bind(&Email::handleResolve, this, boost::asio::placeholders::error, boost::asio::placeholders::iterator));
 		}
 
 		void handleResolve(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
@@ -140,11 +197,10 @@ namespace MV {
 				// Attempt a connection to the first endpoint in the list. Each endpoint
 				// will be tried until we successfully establish a connection.
 				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-				socket.lowest_layer().async_connect(endpoint, boost::bind(&Email::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
+				socket->lowest_layer().async_connect(endpoint, boost::bind(&Email::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
 			} else {
-				success = false;
-				errorMessage = "Download Resolve Failure: " + err.message();
-				std::cerr << errorMessage << std::endl;
+				activeResponse.message = err.message();
+				alertFailure();
 			}
 		}
 
@@ -153,143 +209,153 @@ namespace MV {
 				smtpHandshake();
 			} else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
 				// The connection failed. Try the next endpoint in the list.
-				socket.lowest_layer().close();
+				socket->lowest_layer().close();
 				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-				socket.lowest_layer().async_connect(endpoint, boost::bind(&Email::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
+				socket->lowest_layer().async_connect(endpoint, boost::bind(&Email::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
 			} else {
-				success = false;
-				errorMessage = "Download Connection Failure: " + err.message();
-				std::cerr << errorMessage << std::endl;
+				activeResponse.message = err.message();
+				alertFailure();
 			}
 		}
 
 		void smtpHandshake() {
-			listenForMessageUnsecure([=] {
-				if (activeResponse.status == 220) {
-					sendInternalUnsecure("EHLO " + domainFromEmail(addresses.from) + "\r\n", [=] { listenForMessageUnsecure([=] {
-						if (activeResponse.status == 250) {
-							sendInternalUnsecure("STARTTLS\r\n", [=] { listenForMessageUnsecure([=] {
-								if (activeResponse.status == 220) {
-									socket.handshake(boost::asio::ssl::stream_base::client);
-									sendInternal("EHLO " + domainFromEmail(addresses.from) + "\r\n", [=] {
-										if (activeResponse.status == 250) {
-											sendInternal("AUTH LOGIN\r\n", [=] {
-												if (activeResponse.status == 334) {
-													sendInternal(cereal::base64::encode(credentials.name)+ "\r\n", [=] {
-														if (activeResponse.status == 334) {
-															sendInternal(cereal::base64::encode(credentials.password) + "\r\n", [=] {
-																if (activeResponse.status == 235) {
-																	sendMessageAndQuit();
-																}
-															});
-														}
-													});
-												} else { std::cerr << "ERROR: 4" << std::endl; }
-											});
-										} else { std::cerr << "ERROR: 3" << std::endl; }
-									});
-								} else { std::cerr << "ERROR: 2" << std::endl; }
-							}); });
-						} else { std::cerr << "ERROR: 1" << std::endl; }
-					}); });
-				} else { std::cerr << "ERROR: 0" << std::endl; }
+			listenForMessageUnsecure({220}, [=] {
+				sendInternalUnsecure("EHLO " + domainFromEmail(addresses.from) + "\r\n", {250}, [=] {
+					sendInternalUnsecure("STARTTLS\r\n", { 220 }, [=] {
+						socket->async_handshake(boost::asio::ssl::stream_base::client, [=](const boost::system::error_code& a_err) {
+							if (!a_err) {
+								secureLogin();
+							}
+						});
+					});
+				});
+			});
+		}
+
+		void secureLogin() {
+			sendInternal("EHLO " + domainFromEmail(addresses.from) + "\r\n", {250}, [=] {
+				sendInternal("AUTH LOGIN\r\n", { 334 }, [=] {
+					sendInternal(cereal::base64::encode(credentials.name) + "\r\n", { 334 }, [=] {
+						sendInternal(cereal::base64::encode(credentials.password) + "\r\n", { 235 }, [=] {
+							sendMessageAndQuit();
+						});
+					});
+				});
 			});
 		}
 
 		void sendMessageAndQuit() {
-			sendInternal("MAIL FROM:<" + addresses.from + ">\r\n", [=] {
-				if (activeResponse.status == 250) {
-					sendInternal("RCPT TO:<" + addresses.to + ">\r\n", [=] {
-						if (activeResponse.status == 500) {
-							std::cerr << "Bad address." << std::endl;
-						} else if (activeResponse.status == 250 || activeResponse.status == 251) {
-							sendInternal("DATA\r\n", [=] {
-								if (activeResponse.status == 354) {
-									sendInternal(message, [=] {
-										if (activeResponse.status == 250) {
-											sendInternal("QUIT\r\n");
-										}
-									});
-								}
-							});
-						}
+			sendInternal("MAIL FROM:<" + addresses.from + ">\r\n", {250}, [=] {
+				sendInternal("RCPT TO:<" + addresses.to + ">\r\n", {250, 251}, [=] {
+					sendInternal("DATA\r\n", {354}, [=] {
+						sendInternal(message, { 250 }, [=] {
+							std::lock_guard<std::mutex> guard(lock);
+							success = true;
+							done = true;
+							onFinish();
+							sendInternal("QUIT\r\n");
+						});
 					});
-				}
+				});
 			});
 		}
 
-		void listenForMessage(std::function<void ()> a_callback) {
+		void listenForMessage(std::vector<int> a_validResponses, std::function<void ()> a_callback) {
 			auto self = shared_from_this();
-			boost::asio::async_read_until(socket, *response, "\r\n", [&, self, a_callback](const boost::system::error_code& a_err, size_t a_amount) {
+			boost::asio::async_read_until(*socket, *response, "\r\n", [&, self, a_callback](const boost::system::error_code& a_err, size_t a_amount) {
 				if (!a_err) {
 					responseStream = std::make_unique<std::istream>(&(*response));
 					activeResponse.read(*responseStream);
-					a_callback();
+					if (std::find(a_validResponses.begin(), a_validResponses.end(), activeResponse.status) != a_validResponses.end()) {
+						a_callback();
+					} else if(!a_validResponses.empty()) {
+						alertFailure();
+					}
+				} else {
+					activeResponse.message = a_err.message();
+					alertFailure();
 				}
 			});
 		}
 
-		void sendInternal(const std::string &a_content, std::function<void()> a_callback = std::function<void()>()) {
-			ioService.post([=] {
+		void alertFailure() {
+			std::lock_guard<std::mutex> guard(lock);
+			success = false;
+			done = true;
+			onFinish();
+		}
+
+		void sendInternal(const std::string &a_content, std::vector<int> a_validResponses = std::vector<int>(), std::function<void()> a_callback = std::function<void()>()) {
+			ioService->post([=] {
 				auto self = shared_from_this();
 				
-				boost::asio::async_write(socket, boost::asio::buffer(a_content, a_content.size()), [&,self,a_callback](boost::system::error_code a_err, size_t a_amount) {
-					if (a_err) {
-						success = false;
-						errorMessage = "Email Connection Failure: " + a_err.message();
-						std::cerr << errorMessage << std::endl;
-					} else {
+				boost::asio::async_write(*socket, boost::asio::buffer(a_content, a_content.size()), [&,self,a_callback](boost::system::error_code a_err, size_t a_amount) {
+					if (!a_err) {
 						if (a_callback) {
-							listenForMessage(a_callback);
+							listenForMessage(a_validResponses, a_callback);
 						}
+					} else {
+						activeResponse.message = a_err.message();
+						alertFailure();
 					}
 				});
 			});
 		}
 
-		void listenForMessageUnsecure(std::function<void()> a_callback) {
+		void listenForMessageUnsecure(std::vector<int> a_validResponses, std::function<void()> a_callback) {
 			auto self = shared_from_this();
-			boost::asio::async_read_until(socket.next_layer(), *response, "\r\n", [&, self, a_callback](const boost::system::error_code& a_err, size_t a_amount) {
+			boost::asio::async_read_until(socket->next_layer(), *response, "\r\n", [&, self, a_callback](const boost::system::error_code& a_err, size_t a_amount) {
 				if (!a_err) {
 					responseStream = std::make_unique<std::istream>(&(*response));
 					activeResponse.read(*responseStream);
-					a_callback();
+					if (std::find(a_validResponses.begin(), a_validResponses.end(), activeResponse.status) != a_validResponses.end()) {
+						a_callback();
+					} else if (!a_validResponses.empty()) {
+						alertFailure();
+					}
+				} else {
+					activeResponse.message = a_err.message();
+					alertFailure();
 				}
 			});
 		}
 
-		void sendInternalUnsecure(const std::string &a_content, std::function<void()> a_callback = std::function<void()>()) {
-			ioService.post([=] {
+		void sendInternalUnsecure(const std::string &a_content, std::vector<int> a_validResponses = std::vector<int>(), std::function<void()> a_callback = std::function<void()>()) {
+			ioService->post([=] {
 				auto self = shared_from_this();
 
-				boost::asio::async_write(socket.next_layer(), boost::asio::buffer(a_content, a_content.size()), [&, self, a_callback](boost::system::error_code a_err, size_t a_amount) {
-					if (a_err) {
-						success = false;
-						errorMessage = "Email Connection Failure: " + a_err.message();
-						std::cerr << errorMessage << std::endl;
-					} else {
+				boost::asio::async_write(socket->next_layer(), boost::asio::buffer(a_content, a_content.size()), [&, self, a_callback](boost::system::error_code a_err, size_t a_amount) {
+					if (!a_err) {
 						if (a_callback) {
-							a_callback();
+							listenForMessageUnsecure(a_validResponses, a_callback);
 						}
+					} else {
+						activeResponse.message = a_err.message();
+						alertFailure();
 					}
 				});
 			});
 		}
 
-		boost::asio::io_service ioService;
-		boost::asio::ip::tcp::resolver resolver;
+		std::shared_ptr<boost::asio::io_service> ioService;
+		std::unique_ptr<boost::asio::ip::tcp::resolver> resolver;
 		//boost::asio::ip::tcp::socket socket;
 
-		boost::asio::ssl::context tlsContext;
-		boost::asio::ssl::stream<boost::asio::ip::tcp::socket> socket;
+		std::unique_ptr<boost::asio::ssl::context> tlsContext;
+		std::unique_ptr<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>> socket;
 
 		std::unique_ptr<std::istream> responseStream;
 
 		std::unique_ptr<boost::asio::streambuf> request;
 		std::unique_ptr<boost::asio::streambuf> response;
 
+		std::mutex lock;
+
 		bool success = false;
+		bool done = false;
 		std::string errorMessage;
+
+
 
 		SmtpResponse activeResponse;
 
@@ -300,6 +366,8 @@ namespace MV {
 		
 		std::string host;
 		std::string port;
+
+		MainThreadCallback onFinish;
 	};
 
 }

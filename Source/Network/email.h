@@ -189,7 +189,7 @@ namespace MV {
 			using boost::asio::ip::tcp;
 
 			tcp::resolver::query query(host, port);
-			resolver->async_resolve(query, boost::bind(&Email::handleResolve, this, boost::asio::placeholders::error, boost::asio::placeholders::iterator));
+			resolver->async_resolve(query, boost::bind(&Email::handleResolve, shared_from_this(), boost::asio::placeholders::error, boost::asio::placeholders::iterator));
 		}
 
 		void handleResolve(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
@@ -197,7 +197,7 @@ namespace MV {
 				// Attempt a connection to the first endpoint in the list. Each endpoint
 				// will be tried until we successfully establish a connection.
 				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-				socket->lowest_layer().async_connect(endpoint, boost::bind(&Email::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
+				socket->lowest_layer().async_connect(endpoint, boost::bind(&Email::handleConnect, shared_from_this(), boost::asio::placeholders::error, ++endpoint_iterator));
 			} else {
 				activeResponse.message = err.message();
 				alertFailure();
@@ -211,7 +211,7 @@ namespace MV {
 				// The connection failed. Try the next endpoint in the list.
 				socket->lowest_layer().close();
 				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-				socket->lowest_layer().async_connect(endpoint, boost::bind(&Email::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
+				socket->lowest_layer().async_connect(endpoint, boost::bind(&Email::handleConnect, shared_from_this(), boost::asio::placeholders::error, ++endpoint_iterator));
 			} else {
 				activeResponse.message = err.message();
 				alertFailure();
@@ -219,10 +219,11 @@ namespace MV {
 		}
 
 		void smtpHandshake() {
-			listenForMessageUnsecure({220}, [=] {
-				sendInternalUnsecure("EHLO " + domainFromEmail(addresses.from) + "\r\n", {250}, [=] {
-					sendInternalUnsecure("STARTTLS\r\n", { 220 }, [=] {
-						socket->async_handshake(boost::asio::ssl::stream_base::client, [=](const boost::system::error_code& a_err) {
+			auto self = shared_from_this();
+			listenForMessageUnsecure({220}, [this, self] {
+				sendInternalUnsecure("EHLO " + domainFromEmail(addresses.from) + "\r\n", {250}, [this, self] {
+					sendInternalUnsecure("STARTTLS\r\n", { 220 }, [this, self] {
+						socket->async_handshake(boost::asio::ssl::stream_base::client, [this, self](const boost::system::error_code& a_err) {
 							if (!a_err) {
 								secureLogin();
 							}
@@ -233,10 +234,11 @@ namespace MV {
 		}
 
 		void secureLogin() {
-			sendInternal("EHLO " + domainFromEmail(addresses.from) + "\r\n", {250}, [=] {
-				sendInternal("AUTH LOGIN\r\n", { 334 }, [=] {
-					sendInternal(cereal::base64::encode(credentials.name) + "\r\n", { 334 }, [=] {
-						sendInternal(cereal::base64::encode(credentials.password) + "\r\n", { 235 }, [=] {
+			auto self = shared_from_this();
+			sendInternal("EHLO " + domainFromEmail(addresses.from) + "\r\n", {250}, [this, self] {
+				sendInternal("AUTH LOGIN\r\n", { 334 }, [this, self] {
+					sendInternal(cereal::base64::encode(credentials.name) + "\r\n", { 334 }, [this, self] {
+						sendInternal(cereal::base64::encode(credentials.password) + "\r\n", { 235 }, [this, self] {
 							sendMessageAndQuit();
 						});
 					});
@@ -245,10 +247,11 @@ namespace MV {
 		}
 
 		void sendMessageAndQuit() {
-			sendInternal("MAIL FROM:<" + addresses.from + ">\r\n", {250}, [=] {
-				sendInternal("RCPT TO:<" + addresses.to + ">\r\n", {250, 251}, [=] {
-					sendInternal("DATA\r\n", {354}, [=] {
-						sendInternal(message, { 250 }, [=] {
+			auto self = shared_from_this();
+			sendInternal("MAIL FROM:<" + addresses.from + ">\r\n", {250}, [this, self] {
+				sendInternal("RCPT TO:<" + addresses.to + ">\r\n", {250, 251}, [this, self] {
+					sendInternal("DATA\r\n", {354}, [this, self] {
+						sendInternal(message, { 250 }, [this, self] {
 							std::lock_guard<std::mutex> guard(lock);
 							success = true;
 							done = true;
@@ -262,7 +265,7 @@ namespace MV {
 
 		void listenForMessage(std::vector<int> a_validResponses, std::function<void ()> a_callback) {
 			auto self = shared_from_this();
-			boost::asio::async_read_until(*socket, *response, "\r\n", [&, self, a_callback](const boost::system::error_code& a_err, size_t a_amount) {
+			boost::asio::async_read_until(*socket, *response, "\r\n", [this, a_validResponses, self, a_callback](const boost::system::error_code& a_err, size_t a_amount) {
 				if (!a_err) {
 					responseStream = std::make_unique<std::istream>(&(*response));
 					activeResponse.read(*responseStream);
@@ -289,7 +292,7 @@ namespace MV {
 			ioService->post([=] {
 				auto self = shared_from_this();
 				
-				boost::asio::async_write(*socket, boost::asio::buffer(a_content, a_content.size()), [&,self,a_callback](boost::system::error_code a_err, size_t a_amount) {
+				boost::asio::async_write(*socket, boost::asio::buffer(a_content, a_content.size()), [this,a_validResponses,self,a_callback](boost::system::error_code a_err, size_t a_amount) {
 					if (!a_err) {
 						if (a_callback) {
 							listenForMessage(a_validResponses, a_callback);
@@ -304,7 +307,7 @@ namespace MV {
 
 		void listenForMessageUnsecure(std::vector<int> a_validResponses, std::function<void()> a_callback) {
 			auto self = shared_from_this();
-			boost::asio::async_read_until(socket->next_layer(), *response, "\r\n", [&, self, a_callback](const boost::system::error_code& a_err, size_t a_amount) {
+			boost::asio::async_read_until(socket->next_layer(), *response, "\r\n", [this, self, a_validResponses, a_callback](const boost::system::error_code& a_err, size_t a_amount) {
 				if (!a_err) {
 					responseStream = std::make_unique<std::istream>(&(*response));
 					activeResponse.read(*responseStream);
@@ -324,7 +327,7 @@ namespace MV {
 			ioService->post([=] {
 				auto self = shared_from_this();
 
-				boost::asio::async_write(socket->next_layer(), boost::asio::buffer(a_content, a_content.size()), [&, self, a_callback](boost::system::error_code a_err, size_t a_amount) {
+				boost::asio::async_write(socket->next_layer(), boost::asio::buffer(a_content, a_content.size()), [this, a_validResponses, self, a_callback](boost::system::error_code a_err, size_t a_amount) {
 					if (!a_err) {
 						if (a_callback) {
 							listenForMessageUnsecure(a_validResponses, a_callback);

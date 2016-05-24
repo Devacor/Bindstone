@@ -276,7 +276,6 @@ namespace MV {
 		decode(path, _path, _flags);
 	}
 
-
 	void Url::rawQuery(const std::string& query) {
 		_query = query;
 	}

@@ -518,6 +518,7 @@
     <ClCompile Include="..\external\libpqxx-4.0.1\src\util.cxx">
       <Filter>pqxx</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Network\download.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">

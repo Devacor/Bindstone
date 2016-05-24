@@ -13,6 +13,7 @@
 #include <array>
 #include <type_traits>
 #include <mutex>
+#include <cctype>
 
 #include "Utility/require.hpp"
 #include <boost/uuid/uuid.hpp>
@@ -178,6 +179,11 @@ namespace MV {
 
 	std::string to_string(const UtfString& ws);
 	UtfString to_wide(const std::string& s);
+
+	inline std::string toLower(std::string s) {
+		std::transform(s.begin(), s.end(), s.begin(), std::tolower);
+		return s;
+	}
 
 	template <class Type>
 	Type toDegrees(const Type &val){

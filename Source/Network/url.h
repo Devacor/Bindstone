@@ -369,6 +369,18 @@ namespace MV {
 		u1.swap(u2);
 	}
 
+	inline std::ostream& operator<<(std::ostream& os, const Url& obj) {
+		os << obj.toString();
+		return os;
+	}
+
+	inline std::istream& operator>>(std::istream& a_is, Url& a_obj) {
+		std::string urlString;
+		a_is >> urlString;
+		a_obj = Url(urlString);
+		return a_is;
+	}
+
 } // end namespace MV
 
   /*

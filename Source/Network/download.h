@@ -24,6 +24,8 @@ namespace MV {
 		bool success = false;
 		std::string errorMessage;
 
+		size_t contentLength;
+
 		HttpHeader() {
 		}
 
@@ -31,34 +33,7 @@ namespace MV {
 			read(response_stream);
 		}
 
-		void read(std::istream& response_stream) {
-			values.clear();
-
-			response_stream >> version;
-			std::string status_code;
-			response_stream >> status_code;
-			try {
-				status = std::stoi(status_code);
-			} catch (...) {
-				status = 0;
-			}
-			std::cout << status_code << std::endl;
-
-			getline_platform_agnostic(response_stream, message);
-
-			if (!message.empty() && message[0] == ' ') { message = message.substr(1); }
-
-			std::string header;
-			while (getline_platform_agnostic(response_stream, header) && !header.empty()) {
-				auto index = header.find_first_of(':');
-				if (index != std::string::npos && index > 0) {
-					auto key = header.substr(0, index);
-					auto value = (index + 2 >= header.size()) ? "" : header.substr(index + 2);
-					std::transform(key.begin(), key.end(), key.begin(), [](char c) {return std::tolower(c); });
-					values[key] = value;
-				}
-			}
-		}
+		void read(std::istream& response_stream);
 	};
 
 
@@ -82,14 +57,16 @@ namespace MV {
 
 	class DownloadRequest : public std::enable_shared_from_this<DownloadRequest> {
 	public:
-		static std::shared_ptr<DownloadRequest> make(const MV::Url& a_url, std::ostream &a_streamOutput) {
+		static std::shared_ptr<DownloadRequest> make(const MV::Url& a_url, const std::shared_ptr<std::ostream> &a_streamOutput) {
 			auto result = std::shared_ptr<DownloadRequest>(new DownloadRequest(a_streamOutput));
 			result->perform(a_url);
 			return result;
 		}
 
-		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<boost::asio::io_service> &a_ioService, const MV::Url& a_url, std::ostream &a_streamOutput) {
+		//onComplete is called on success or error at the end of the download.
+		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<boost::asio::io_service> &a_ioService, const MV::Url& a_url, const std::shared_ptr<std::ostream> &a_streamOutput, std::function<void (std::shared_ptr<DownloadRequest>)> a_onComplete) {
 			auto result = std::shared_ptr<DownloadRequest>(new DownloadRequest(a_streamOutput));
+			result->onComplete = a_onComplete;
 			result->ioService = a_ioService;
 			result->perform(a_url);
 			return result;
@@ -99,133 +76,33 @@ namespace MV {
 			return headerData;
 		}
 
+		MV::Url finalUrl() {
+			return currentUrl;
+		}
+
+		MV::Url inputUrl() {
+			return originalUrl;
+		}
+
 	private:
-		DownloadRequest(std::ostream &a_streamOutput) :
+		DownloadRequest(const std::shared_ptr<std::ostream> &a_streamOutput) :
 			streamOutput(a_streamOutput) {
 		}
 
-		void perform(const MV::Url& a_url) {
-			try {
-				bool needToCallRun = initializeSocket();
-				initiateRequest(a_url);
-				if (needToCallRun) {
-					ioService->run();
-				}
-			} catch (...) {
-				headerData.success = false;
-				headerData.errorMessage = "Exception thrown to top level.";
-				std::cerr << headerData.errorMessage << std::endl;
-			}
-		}
+		void perform(const MV::Url& a_url);
 
-		bool initializeSocket() {
-			bool created = false;
-			if (!ioService) {
-				ioService = std::make_shared<boost::asio::io_service>();
-				created = true;
-			}
+		bool initializeSocket();
 
-			resolver = std::make_unique<boost::asio::ip::tcp::resolver>(*ioService);
-			socket = std::make_unique<boost::asio::ip::tcp::socket>(*ioService);
+		void initiateRequest(const MV::Url& a_url);
 
-			return created;
-		}
-
-		void initiateRequest(const MV::Url& a_url) {
-			socket->close();
-			currentUrl = a_url;
-			request = std::make_unique<boost::asio::streambuf>();
-			response = std::make_unique<boost::asio::streambuf>();
-			using boost::asio::ip::tcp;
-
-			std::ostream requestStream(&(*request));
-			requestStream << "GET " << a_url.pathAndQuery() << " HTTP/1.1\r\n";
-			requestStream << "Host: " << a_url.host() << "\r\n";
-			requestStream << "Accept: */*\r\n";
-			requestStream << "Connection: close\r\n\r\n";
-
-			tcp::resolver::query query(a_url.host(), "http");
-			resolver->async_resolve(query, boost::bind(&DownloadRequest::handleResolve, this, boost::asio::placeholders::error, boost::asio::placeholders::iterator));
-		}
-
-		void handleResolve(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
-			if (!err) {
-				// Attempt a connection to the first endpoint in the list. Each endpoint
-				// will be tried until we successfully establish a connection.
-				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-				socket->async_connect(endpoint, boost::bind(&DownloadRequest::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
-			} else {
-				headerData.success = false;
-				headerData.errorMessage = "Download Resolve Failure: " + err.message();
-				std::cerr << headerData.errorMessage << std::endl;
-			}
-		}
-
-		void handleConnect(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
-			if (!err) {
-				// The connection was successful. Send the request.
-				boost::asio::async_write(*socket, *request, boost::bind(&DownloadRequest::handleWriteRequest, this, boost::asio::placeholders::error));
-			} else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
-				// The connection failed. Try the next endpoint in the list.
-				socket->close();
-				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-				socket->async_connect(endpoint, boost::bind(&DownloadRequest::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
-			} else {
-				headerData.success = false;
-				headerData.errorMessage = "Download Connection Failure: " + err.message();
-				std::cerr << headerData.errorMessage << std::endl;
-			}
-		}
-
-		void handleWriteRequest(const boost::system::error_code& err) {
-			if (!err) {
-				boost::asio::async_read_until(*socket, *response, "\r\n\r\n", boost::bind(&DownloadRequest::handleReadHeaders, this, boost::asio::placeholders::error));
-			} else {
-				headerData.success = false;
-				headerData.errorMessage = "Download Write Failure: " + err.message();
-				std::cerr << headerData.errorMessage << std::endl;
-			}
-		}
-
-		void handleReadHeaders(const boost::system::error_code& err) {
-			if (!err) {
-				responseStream = std::make_unique<std::istream>(&(*response));
-
-				headerData.read(*responseStream);
-				headerData.success = true;
-				headerData.errorMessage = "";
-				if (headerData.status >= 300 && headerData.status < 400 && headerData.bounces.size() < 32 && headerData.values.find("location") != headerData.values.end()) {
-					headerData.bounces.push_back(currentUrl.toString());
-					initiateRequest(headerData.values["location"]);
-				} else {
-					if (response->size() > 0) {
-						readResponseToStream();
-					}
-					boost::asio::async_read(*socket, *response, boost::asio::transfer_at_least(1), boost::bind(&DownloadRequest::handleReadContent, this, boost::asio::placeholders::error));
-				}
-			}
-			else {
-				headerData.success = false;
-				headerData.errorMessage = "Download Read Header Failure: " + err.message();
-				std::cerr << headerData.errorMessage << std::endl;
-			}
-		}
-
-
-		void handleReadContent(const boost::system::error_code& err) {
-			if (!err) {
-				readResponseToStream();
-
-				boost::asio::async_read(*socket, *response, boost::asio::transfer_at_least(1), boost::bind(&DownloadRequest::handleReadContent, this, boost::asio::placeholders::error));
-			} else if (err != boost::asio::error::eof) {
-				headerData.success = false;
-				headerData.errorMessage = "Download Read Content Failure: " + err.message();
-				std::cerr << headerData.errorMessage << std::endl;
-			}
-		}
+		void handleResolve(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator);
+		void handleConnect(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator);
+		void handleWriteRequest(const boost::system::error_code& err);
+		void handleReadHeaders(const boost::system::error_code& err);
+		void handleReadContent(const boost::system::error_code& err);
 
 		void readResponseToStream() {
-			streamOutput << &(*response);
+			(*streamOutput) << &(*response);
 		}
 
 		std::shared_ptr<boost::asio::io_service> ioService;
@@ -237,33 +114,22 @@ namespace MV {
 		std::unique_ptr<boost::asio::streambuf> request;
 		std::unique_ptr<boost::asio::streambuf> response;
 
-		std::ostream &streamOutput;
+		std::shared_ptr<std::ostream> streamOutput;
 
 		HttpHeader headerData;
 
 		MV::Url currentUrl;
+		MV::Url originalUrl;
+
+		std::function<void(std::shared_ptr<DownloadRequest>)> onComplete;
 	};
 
-	inline std::string DownloadString(const MV::Url& a_url) {
-		std::stringstream result;
-		if (DownloadRequest::make(a_url, result)->header().success) {
-			return result.str();
-		} else {
-			return "";
-		}
-	}
+	std::string DownloadString(const MV::Url& a_url);
 
-	inline HttpHeader DownloadFile(const MV::Url& a_url, const std::string &a_path) {
-		HttpHeader header;
-		{
-			std::ofstream outFile(a_path, std::ofstream::out | std::ofstream::binary);
-			auto request = DownloadRequest::make(a_url, outFile);
-			header = request->header();
-		}
-		if (!header.success) {
-			std::remove(a_path.c_str());
-		}
-		return header;
-	}
+	HttpHeader DownloadFile(const MV::Url& a_url, const std::string &a_path);
+	void DownloadFile(const std::shared_ptr<boost::asio::io_service> &a_ioService, const MV::Url& a_url, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete = std::function<void(std::shared_ptr<DownloadRequest>)>());
+
+	void DownloadFiles(const std::vector<MV::Url>& a_url, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete = std::function<void(std::shared_ptr<DownloadRequest>)>());
+	void DownloadFiles(const std::shared_ptr<boost::asio::io_service> &a_ioService, const std::vector<MV::Url>& a_url, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete = std::function<void(std::shared_ptr<DownloadRequest>)>(), std::function<void()> a_onAllComplete = std::function<void()>());
 }
 #endif

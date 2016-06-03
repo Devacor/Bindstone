@@ -1,5 +1,5 @@
-#ifndef __MV_LOG_H__
-#define __MV_LOG_H__
+#ifndef _MV_LOG_H_
+#define _MV_LOG_H_
 
 #include <string>
 #include <iostream>
@@ -15,12 +15,14 @@ namespace MV {
 		LogLevel level;
 	};
 
-	LogData logFilter;
+	extern LogData logFilter;
 
 	template <typename... Args>
 	inline void log(LogLevel a_level, Args&&... a_args) {
-		if (a_level >= logFilter.level) {
+		if (a_level >= logFilter.level && a_level != ERROR) {
 			std::cout << MV::to_string(std::make_tuple(std::forward<Args>(a_args)...)) << std::endl;
+		} else if(a_level >= logFilter.level) {
+			std::cerr << MV::to_string(std::make_tuple(std::forward<Args>(a_args)...)) << std::endl;
 		}
 	}
 }

@@ -1,6 +1,7 @@
 #ifndef __MV_UTILITY_PACKAGE__
 #define __MV_UTILITY_PACKAGE__
 
+	#include "Utility/log.h"
 	#include "Utility/scopeGuard.hpp"
 	#include "Utility/require.hpp"
 	#include "Utility/expression.h"
@@ -13,5 +14,7 @@
 	#include "Utility/optionalCalls.hpp"
 	#include "Utility/visitor.hpp"
 	#include "Utility/chaiscriptStdLib.h"
+	#include "Utility/sha512.h"
+	#include "Utility/cerealUtility.h"
 
 #endif

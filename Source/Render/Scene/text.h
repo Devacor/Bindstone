@@ -240,8 +240,8 @@ namespace MV{
 			Point<> contentScrollPosition;
 
 			TextLibrary& textLibrary;
-			TextJustification textJustification = LEFT;
-			TextWrapMethod wrapMethod = SOFT;
+			TextJustification textJustification = TextJustification::LEFT;
+			TextWrapMethod wrapMethod = TextWrapMethod::SOFT;
 
 			FormattedText formattedText;
 

@@ -6,18 +6,7 @@
 #include "DiggerGame/diggerGame.h"
 #include "editor/editor.h"
 #include "Game/managers.h"
-
-class BasicConnectionState : public MV::ConnectionStateBase {
-public:
-	BasicConnectionState(MV::Connection *a_connection) :
-		MV::ConnectionStateBase(a_connection) {
-	}
-
-	virtual void message(const std::string &a_message) {
-		std::cout << "Got Message: " << a_message << std::endl;
-		connection->send("GOT: " + a_message);
-	}
-};
+#include "Game/Server/lobbyServer.h"
 
 class GameEditor {
 public:
@@ -44,44 +33,39 @@ public:
 			attach<MV::Scene::Grid>()->columns(1)->padding({ 2.0f, 2.0f })->margin({ 4.0f, 4.0f })->color({ BOX_BACKGROUND })->owner();
 
 		auto editorButton = makeButton(grid, game.getManager().textLibrary, mouse, "Editor", { 100.0f, 20.0f }, UTF_CHAR_STR("Editor"));
-		editorButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
+		editorButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 			runEditor();
 		});
 		auto gameButton = makeButton(grid, game.getManager().textLibrary, mouse, "Game", { 100.0f, 20.0f }, UTF_CHAR_STR("Game"));
-		gameButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
+		gameButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 			runGame();
 		});
 		auto quitButton = makeButton(grid, game.getManager().textLibrary, mouse, "Quit", { 100.0f, 20.0f }, UTF_CHAR_STR("Quit"));
-		quitButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
+		quitButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 			done = true;
 		});
 
 		auto serverButton = makeButton(grid, game.getManager().textLibrary, mouse, "Server", { 100.0f, 20.0f }, UTF_CHAR_STR("Server"));
-		serverButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
+		serverButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 			std::cout << "serving" << std::endl;
-			server = std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325), [](MV::Connection *a_connection) {
-				return std::make_unique<BasicConnectionState>(a_connection);
-			});
+			server = std::make_shared<LobbyServer>(managers);
 		});
 
 		auto clientButton = makeButton(grid, game.getManager().textLibrary, mouse, "Client", { 100.0f, 20.0f }, UTF_CHAR_STR("Client"));
-		clientButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
+		clientButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 			client = MV::Client::make(MV::Url{ "http://ec2-54-218-22-3.us-west-2.compute.amazonaws.com:22325" }, [=](const std::string &a_message) {
 			//client = MV::Client::make(MV::Url{ "http://96.229.120.252:22325" }, [=](const std::string &a_message) {
 				static int i = 0;
 				std::cout << "GOT MESSAGE: [" << a_message << "]" << std::endl;
 				client->send(std::to_string(++i));
 			}, [](const std::string &a_dcreason) {
-				std::cout << "Disconnected!" << std::endl;
+				std::cout << "Disconnected: " << a_dcreason << std::endl;
 			}, [=] { client->send("UUUUNG"); });
 			//client->send("UUUUH!");
 		});
 
 		auto sendButton = makeButton(grid, game.getManager().textLibrary, mouse, "Send", { 100.0f, 20.0f }, UTF_CHAR_STR("Send"));
-		sendButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>& a_clickable) {
-			if (server) {
-				server->send("Server to client message!");
-			}
+		sendButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 			if (client) {
 				client->send("Client to server message!");
 			}
@@ -195,7 +179,7 @@ private:
 	Game game;
 	Editor editor;
 
-	std::shared_ptr<MV::Server> server;
+	std::shared_ptr<LobbyServer> server;
 	std::shared_ptr<MV::Client> client;
 };
 

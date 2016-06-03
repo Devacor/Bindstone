@@ -364,6 +364,8 @@ namespace MV {
 	double randomNumber(double a_min, double a_max);
 	float randomNumber(float a_min, float a_max);
 	int64_t randomInteger(int64_t a_min, int64_t a_max);
+	std::string randomString(std::string a_charset, size_t a_length);
+	std::string randomString(size_t a_length);
 
 	//Generic constructor for automatic type deduction: MV::make<std::pair>(1, 2); and so on (instead of std::pair<int>(1, 2);)
 	template <template <typename...> class TemplateClass, typename... Args>

@@ -139,7 +139,7 @@ namespace MV {
 	class ConnectionStateBase {
 	public:
 		ConnectionStateBase(Connection* a_connection) :
-			connection(a_connection) {
+			ourConnection(a_connection) {
 		}
 
 		virtual void connect() { }
@@ -147,8 +147,10 @@ namespace MV {
 		virtual void message(const std::string& a_message) { }
 
 		virtual void update(double a_dt) { }
+
+		Connection* connection() { return ourConnection; }
 	protected:
-		Connection *connection;
+		Connection *ourConnection;
 	};
 
 	class Connection : public std::enable_shared_from_this<Connection> {

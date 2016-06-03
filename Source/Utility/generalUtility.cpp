@@ -89,7 +89,7 @@ namespace MV {
 		static std::map<std::string, int64_t> counters;
 		return a_baseName+'_'+std::to_string(counters[a_baseName]++);
 	}
-	
+
 	int roundUpPowerOfTwo(int num){
 		if(num<1){return 0;}
 		//make sure num isn't already a power of two
@@ -249,6 +249,20 @@ namespace MV {
 			Random::instance = new Random();
 		}
 		return Random::instance->integer(a_min, a_max);
+	}
+
+	std::string randomString(std::string a_charset, size_t a_length) {
+		if (a_length == 0 || a_charset.empty()) { return ""; }
+
+		std::string result;
+		while (a_length--) {
+			result += a_charset[randomInteger(0, a_charset.size())];
+		}
+		return result;
+	}
+
+	std::string randomString(size_t a_length) {
+		return randomString("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_", a_length);
 	}
 
 }

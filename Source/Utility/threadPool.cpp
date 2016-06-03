@@ -1,15 +1,16 @@
 #include "threadPool.h"
-#include "log.hpp"
+#include "log.h"
 
 #include "boost/asio.hpp"
 
 namespace MV{
 	struct ThreadPoolDetails {
 		ThreadPoolDetails() :
+			service(std::make_shared<boost::asio::io_service>()),
 			working(std::make_unique<boost::asio::io_service::work>(service)) {
 		}
 
-		boost::asio::io_service service;
+		std::shared_ptr<boost::asio::io_service> service;
 		std::unique_ptr<boost::asio::io_service::work> working;
 	};
 
@@ -79,7 +80,7 @@ namespace MV{
 	}
 
 	ThreadPool::~ThreadPool() {
-		details->service.stop();
+		details->service->stop();
 		for(auto&& worker : workers){
 			worker->join();
 		}
@@ -93,7 +94,7 @@ namespace MV{
 
 		for(size_t i = 0; i < totalThreads; ++i) {
 			workers.emplace_back(new std::thread([this]{
-				details->service.run();
+				details->service->run();
 			}));
 		}
 	}
@@ -105,7 +106,7 @@ namespace MV{
 		auto thisTask = runningTasks.end();
 		--thisTask;
 
-		details->service.post([=](){(*thisTask)();});
+		details->service->post([=](){(*thisTask)();});
 
 		return{thisTask->isFinished};
 	}
@@ -117,7 +118,7 @@ namespace MV{
 		auto thisTask = runningTasks.end();
 		--thisTask;
 
-		details->service.post([=](){(*thisTask)();});
+		details->service->post([=](){(*thisTask)();});
 
 		return{thisTask->isFinished};
 	}
@@ -134,7 +135,7 @@ namespace MV{
 			--thisTask;
 			thisTask->group(groupCounter, onGroupComplete, isGroupComplete, a_groupFinishWaitForFrame);
 
-			details->service.post([=](){(*thisTask)();});
+			details->service->post([=](){(*thisTask)();});
 		}
 		return {isGroupComplete};
 	}
@@ -150,7 +151,11 @@ namespace MV{
 	}
 
 
-	ThreadPool::TaskDefinition::TaskDefinition(const std::function<void()> &a_task):
+	std::shared_ptr<boost::asio::io_service> ThreadPool::service() const {
+		return details->service;
+	}
+
+	ThreadPool::TaskDefinition::TaskDefinition(const std::function<void()> &a_task) :
 		task(a_task) {
 	}
 

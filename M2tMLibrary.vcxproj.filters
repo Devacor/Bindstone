@@ -68,6 +68,9 @@
     <Filter Include="pqxx">
       <UniqueIdentifier>{795cca5b-4931-4dd8-a382-72e00e2cedac}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Game\Server">
+      <UniqueIdentifier>{4988f8a3-c401-48d3-a3f5-48e932198ab4}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Animation\frameSwapper.cpp">
@@ -518,7 +521,15 @@
     <ClCompile Include="..\external\libpqxx-4.0.1\src\util.cxx">
       <Filter>pqxx</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Network\download.cpp" />
+    <ClCompile Include="Source\Utility\sha512.cpp">
+      <Filter>Source Files\Utility</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Network\download.cpp">
+      <Filter>Source Files\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Utility\log.cpp">
+      <Filter>Source Files\Utility</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -671,7 +682,6 @@
     <ClInclude Include="Source\Editor\editComponents.h">
       <Filter>Source Files\Editor</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Utility\log.hpp" />
     <ClInclude Include="Source\Editor\componentPanels.h">
       <Filter>Source Files\Editor</Filter>
     </ClInclude>
@@ -1116,9 +1126,20 @@
     <ClInclude Include="Source\Game\creature.h">
       <Filter>Source Files\Game</Filter>
     </ClInclude>
-    <ClInclude Include="lobbyServer.h" />
     <ClInclude Include="Source\Network\email.h">
       <Filter>Source Files\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\sha512.h">
+      <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\cerealUtility.h">
+      <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Server\lobbyServer.h">
+      <Filter>Source Files\Game\Server</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\log.h">
+      <Filter>Source Files\Utility</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

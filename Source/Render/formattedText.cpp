@@ -379,9 +379,9 @@ namespace MV {
 	void FormattedLine::applyAlignment(){
 		float width = lineWidth();
 		float offset = 0;
-		if(text.justification() == CENTER){
+		if(text.justification() == TextJustification::CENTER){
 			offset = (text.width() - width) / 2.0f;
-		}else if(text.justification() == RIGHT){
+		}else if(text.justification() == TextJustification::RIGHT){
 			offset = text.width() - width;
 		}
 		for(size_t index = 0; index < characters.size(); ++index){
@@ -415,7 +415,7 @@ namespace MV {
 			if(!exceeded && lineIndex+1 < text.lines.size()){
 				MV::PointPrecision widthRemaining = text.width() - lineWidth();
 				insert(characters.size(), text.lines[lineIndex + 1]->removeLeadingCharactersForWidth(widthRemaining));
-			}else if(text.justification() != LEFT){
+			}else if(text.justification() != TextJustification::LEFT){
 				applyAlignment();
 			}
 		}
@@ -446,7 +446,7 @@ namespace MV {
 
 	std::vector<std::shared_ptr<FormattedCharacter>> FormattedLine::removeLeadingCharactersForWidth(float a_width) {
 		std::vector<std::shared_ptr<FormattedCharacter>> result;
-		if(text.textWrapping == NONE){
+		if(text.textWrapping == TextWrapMethod::NONE){
 			return result;
 		}
 
@@ -455,7 +455,7 @@ namespace MV {
 			a_width -= characters[i]->characterSize().width;
 		}
 
-		if(text.textWrapping == SOFT && !result.empty()){
+		if(text.textWrapping == TextWrapMethod::SOFT && !result.empty()){
 			size_t i = result.size() - 1;
 			auto foundSoftBreak = std::find_if(result.begin(), result.end(), [&](std::shared_ptr<FormattedCharacter> a_element){
 				return a_element->isSoftBreakCharacter();

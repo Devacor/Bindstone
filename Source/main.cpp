@@ -98,22 +98,6 @@ int main(int, char *[]){
 	//auto emailer = MV::Email::make("email-smtp.us-west-2.amazonaws.com", "587", { "AKIAIVINRAMKWEVUT6UQ", "AiUjj1lS/k3g9r0REJ1eCoy/xeYZgLXmB8Nrep36pUVw" });
 	//emailer->send({ "jai", "jackaldurante@gmail.com", "Derv", "maxmike@gmail.com" }, "Testing new Interface", "Does this work too?");
 	
-	std::cout << "start";
-
-	std::vector<MV::Url> downloadList{
-		{"http://mutedvision.net/index.html"},
-		{"http://m2tm.net/namco.JPG"},
-		{"http://m2tm.net/art/badderv.jpg"},
-		{"http://m2tm.net/art/adventure.jpg"},
-		{"http://m2tm.net/art/fly.jpg" }
-	};
-
-	MV::DownloadFiles(downloadList, "./tempfiles/", [](std::shared_ptr<MV::DownloadRequest> a_request) {
-		std::cout << "Request Done: " << a_request->inputUrl().toString() << " : " << a_request->header().status << std::endl;
-	});
-
-	std::cout << "done";
-
 	GameEditor menu;
 
 	menu.start();

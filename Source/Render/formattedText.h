@@ -116,13 +116,13 @@ namespace MV {
 		std::shared_ptr<FontDefinition> fontDefinition;
 	};
 
-	enum TextWrapMethod{
+	enum class TextWrapMethod{
 		NONE,
 		HARD,
 		SOFT
 	};
 
-	enum TextJustification{
+	enum class TextJustification{
 		LEFT,
 		CENTER,
 		RIGHT
@@ -284,7 +284,7 @@ namespace MV {
 	class FormattedText{
 		friend FormattedLine;
 	public:
-		FormattedText(TextLibrary &a_library, PointPrecision a_width, const std::string &a_defaultStateIdentifier, TextWrapMethod a_wrapping = SOFT, TextJustification a_justification = LEFT);
+		FormattedText(TextLibrary &a_library, PointPrecision a_width, const std::string &a_defaultStateIdentifier, TextWrapMethod a_wrapping = TextWrapMethod::SOFT, TextJustification a_justification = TextJustification::LEFT);
 
 		PointPrecision width(PointPrecision a_width);
 		PointPrecision width() const;

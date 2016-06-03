@@ -9,6 +9,8 @@
 #include <list>
 #include <chrono>
 
+namespace boost { namespace asio { class io_service; } }
+
 namespace MV{
 	struct ThreadPoolDetails;
 	class TaskStatus {
@@ -87,6 +89,8 @@ namespace MV{
 		size_t threads() const{
 			return totalThreads;
 		}
+
+		std::shared_ptr<boost::asio::io_service> service() const;
 	private:
 		std::recursive_mutex lock;
 		std::unique_ptr<ThreadPoolDetails> details;

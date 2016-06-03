@@ -5,8 +5,6 @@
 #include "Render/Scene/drawable.h"
 #include "spine/AnimationState.h"
 
-#include <cereal/types/set.hpp>
-
 struct spSlot;
 struct spSkeleton;
 struct spAnimationState;

@@ -302,6 +302,7 @@
     <ClCompile Include="Source\Game\Instance\gameInstance.cpp" />
     <ClCompile Include="Source\Game\Interface\guiFactories.cpp" />
     <ClCompile Include="Source\Game\player.cpp" />
+    <ClCompile Include="Source\Game\Server\lobbyServer.cpp" />
     <ClCompile Include="Source\Game\state.cpp" />
     <ClCompile Include="Source\Game\wallet.cpp" />
     <ClCompile Include="Source\Interface\mouse.cpp" />
@@ -535,7 +536,6 @@
     <ClInclude Include="Source\Utility\expression.h" />
     <ClInclude Include="Source\Utility\generalUtility.h" />
     <ClInclude Include="Source\Utility\log.h" />
-    <ClInclude Include="Source\Utility\messageHandler.hpp" />
     <ClInclude Include="Source\Utility\optionalCalls.hpp" />
     <ClInclude Include="Source\Utility\package.h" />
     <ClInclude Include="Source\Utility\require.hpp" />

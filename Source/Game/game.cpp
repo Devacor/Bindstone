@@ -25,7 +25,8 @@ void Game::initializeWindow(){
 	MV::Size<> worldSize(960, 640);
 	MV::Size<int> windowSize(960, 640);
 
-	data.managers().renderer.window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
+	data.managers().renderer.//makeHeadless().
+		window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
 
 	if (!data.managers().renderer.initialize(windowSize, worldSize)) {
 		exit(0);
@@ -34,7 +35,7 @@ void Game::initializeWindow(){
 	data.managers().renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
 	atexit(sdl_quit);
 
-	AudioPlayer::instance()->initAudio();
+	MV::AudioPlayer::instance()->initAudio();
 	mouse.update();
 
 	data.managers().textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);

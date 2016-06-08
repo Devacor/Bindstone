@@ -8,7 +8,6 @@
 	#include "Utility/generalUtility.h"
 	#include "Utility/stopwatch.h"
 	#include "Utility/signal.hpp"
-	#include "Utility/messageHandler.hpp"
 	#include "Utility/task.hpp"
 	#include "Utility/threadPool.h"
 	#include "Utility/optionalCalls.hpp"

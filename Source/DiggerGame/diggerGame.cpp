@@ -31,7 +31,7 @@ void DiggerGame::initializeWindow() {
 	managers.renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
 	atexit(sdl_quit_3);
 
-	AudioPlayer::instance()->initAudio();
+	MV::AudioPlayer::instance()->initAudio();
 	mouse.update();
 
 // 	std::ifstream stream("clicker.scene");

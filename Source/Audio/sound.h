@@ -19,214 +19,216 @@
 #include <vector>
 #include <algorithm>
 
-class SoundInstance {
-public:
-	SoundInstance();
-	~SoundInstance();
-	void setHandle(const std::string &soundName);
-	std::string getHandle();
+namespace MV {
+	class SoundInstance {
+	public:
+		SoundInstance();
+		~SoundInstance();
+		void setHandle(const std::string &soundName);
+		std::string getHandle();
 
-	void play();
-	void stop();
+		void play();
+		void stop();
 
-	void pause();
-	void resume();
+		void pause();
+		void resume();
 
-	void setPosition(int angle, float distance);
+		void setPosition(int angle, float distance);
 
-	bool isPlaying();
+		bool isPlaying();
 
-	void donePlaying();
-private:
-	int currentAngle;
-	float currentDistance;
-	int currentChannel;
-	std::string name;
-};
+		void donePlaying();
+	private:
+		int currentAngle;
+		float currentDistance;
+		int currentChannel;
+		std::string name;
+	};
 
-class MusicIdentity{
-public:
-	std::string fileName;
-	Mix_Music * musicHandle;
-};
+	class MusicIdentity {
+	public:
+		std::string fileName;
+		Mix_Music * musicHandle;
+	};
 
-class SoundIdentity{
-public:
-	std::string fileName;
-	Mix_Chunk * soundHandle;
-};
+	class SoundIdentity {
+	public:
+		std::string fileName;
+		Mix_Chunk * soundHandle;
+	};
 
-void AudioMusicHook();
-void AudioSoundHook(int channel);
+	void AudioMusicHook();
+	void AudioSoundHook(int channel);
 
-enum PlayListType{MUSIC_PLAYLIST, SOUND_PLAYLIST};
+	enum PlayListType { MUSIC_PLAYLIST, SOUND_PLAYLIST };
 
-class AudioPlayList{
-public:
-	AudioPlayList();
-	~AudioPlayList();
+	class AudioPlayList {
+	public:
+		AudioPlayList();
+		~AudioPlayList();
 
-	void beginPlaying();
+		void beginPlaying();
 
-	void shuffleSounds(bool doShuffle){shuffle = doShuffle;}
-	void loopSounds(bool doLoop){loop = doLoop;}
-	void continuousPlay(bool doPlay){play = doPlay;}
+		void shuffleSounds(bool doShuffle) { shuffle = doShuffle; }
+		void loopSounds(bool doLoop) { loop = doLoop; }
+		void continuousPlay(bool doPlay) { play = doPlay; }
 
-	bool advancePlayList();
-	void performShuffle();
-	void resetPlayHead();
+		bool advancePlayList();
+		void performShuffle();
+		void resetPlayHead();
 
-	bool isShuffling(){return shuffle;}
-	bool isLooping(){return loop;}
-	bool isPlaying(){if(!play){currentChannel = -1;}return play;}
+		bool isShuffling() { return shuffle; }
+		bool isLooping() { return loop; }
+		bool isPlaying() { if (!play) { currentChannel = -1; }return play; }
 
-	void addSoundFront(const std::string &songName);
-	void addSoundBack(const std::string &songName);
-	void removeSound(const std::string &songName);
+		void addSoundFront(const std::string &songName);
+		void addSoundBack(const std::string &songName);
+		void removeSound(const std::string &songName);
 
-	bool endOfList();
-	std::string getCurrentSound();
+		bool endOfList();
+		std::string getCurrentSound();
 
-	bool isEmpty(){return songLineup.empty();}
+		bool isEmpty() { return songLineup.empty(); }
 
-	void clearSounds();
+		void clearSounds();
 
-	void setPlayListType(PlayListType newType);
+		void setPlayListType(PlayListType newType);
 
-	void setPosition(int degreeAngle, float distancePercent);
-	void updatePosition();
-	void removePosition();
-	void pause();
-	void resume();
-private:
-	std::list<std::string> songLineup;
-	std::list<std::string>::iterator currentSong;
-	bool shuffle, loop, play;
-	int currentChannel;
-	int currentAngle;
-	float currentDistance;
-	PlayListType type;
-	bool called;
-};
+		void setPosition(int degreeAngle, float distancePercent);
+		void updatePosition();
+		void removePosition();
+		void pause();
+		void resume();
+	private:
+		std::list<std::string> songLineup;
+		std::list<std::string>::iterator currentSong;
+		bool shuffle, loop, play;
+		int currentChannel;
+		int currentAngle;
+		float currentDistance;
+		PlayListType type;
+		bool called;
+	};
 
-class AudioPlayer{
-public:
-	~AudioPlayer();
-	static AudioPlayer* instance();
+	class AudioPlayer {
+	public:
+		~AudioPlayer();
+		static AudioPlayer* instance();
 
-	bool initAudio();
-	void copyMusicToPlayList(AudioPlayList& playList);
+		bool initAudio();
+		void copyMusicToPlayList(AudioPlayList& playList);
 
-	bool loadMusic(const std::string &fileName, const std::string &identifier);
-	bool playMusic(const std::string &identifier, int loop = 0);
-	bool loadSound(const std::string &fileName, const std::string &identifier);
+		bool loadMusic(const std::string &fileName, const std::string &identifier);
+		bool playMusic(const std::string &identifier, int loop = 0);
+		bool loadSound(const std::string &fileName, const std::string &identifier);
 
-	//If channel is specified apply to that channel, else apply to all future sounds played.
-	//distancePercent is a number from 0.0 to 1.0
-	void setPosition(int degreeAngle, float distancePercent, int channel = -1);
-	void removePosition(int channel = -1);
+		//If channel is specified apply to that channel, else apply to all future sounds played.
+		//distancePercent is a number from 0.0 to 1.0
+		void setPosition(int degreeAngle, float distancePercent, int channel = -1);
+		void removePosition(int channel = -1);
 
-	bool playSound(const std::string &identifier, int channel = -1, int loop = 0, int ticks = -1, AudioPlayList* playList = 0);
+		bool playSound(const std::string &identifier, int channel = -1, int loop = 0, int ticks = -1, AudioPlayList* playList = 0);
 
-	void setSoundDisabled(bool disableSound){disableSounds = disableSound;}
-	bool getSoundDisabled(){return disableSounds;}
+		void setSoundDisabled(bool disableSound) { disableSounds = disableSound; }
+		bool getSoundDisabled() { return disableSounds; }
 
-	void stopSound(int channel = -1);
-	void stopMusic();
+		void stopSound(int channel = -1);
+		void stopMusic();
 
-	void pauseMusic();
-	void resumeMusic();
+		void pauseMusic();
+		void resumeMusic();
 
-	void pauseSound(int channel = -1);
-	void resumeSound(int channel = -1);
+		void pauseSound(int channel = -1);
+		void resumeSound(int channel = -1);
 
-	bool checkMusicPlaying(std::string *songIdentifier = NULL);
-	bool checkMusicPaused(std::string *songIdentifier = NULL);
-	bool setMusicPlayAtTime(double position);
-	void setMusicVolume(int volume);
-	//set one sound's volume
-	bool setSoundVolume(int volume, const std::string &identifier);
-	//set all sound's volume
-	void setSoundVolume(int volume);
+		bool checkMusicPlaying(std::string *songIdentifier = NULL);
+		bool checkMusicPaused(std::string *songIdentifier = NULL);
+		bool setMusicPlayAtTime(double position);
+		void setMusicVolume(int volume);
+		//set one sound's volume
+		bool setSoundVolume(int volume, const std::string &identifier);
+		//set all sound's volume
+		void setSoundVolume(int volume);
 
-	//negative indicates unlimited
-	void setMaxChannels(int channels){
-		maxChannels = channels;
-	}
-
-	int getMaxChannels(){
-		return maxChannels;
-	}
-	int getAllocatedChannels(){
-		return currentChannels;
-	}
-	int getMostRecentlyUsedChannel(){
-		return channelLastPlayed;
-	}
-	std::string getLatestSong(){
-		return currentSong;
-	}
-
-	AudioPlayList* getMusicPlayList();
-	void setMusicPlayList(AudioPlayList* playList);
-
-	AudioPlayList* getSoundPlayList(int channel);
-	void removeSoundPlayList(AudioPlayList* playList);
-	void removeSoundPlayList(int channel);
-
-	void updateSoundPositions();
-
-	void registerSoundInstance(int channel, SoundInstance* soundReference){
-		std::map<int, SoundInstance*>::iterator cell = soundInstances.find(channel);
-		if(cell != soundInstances.end()){
-			cell->second->donePlaying();
-			cell->second = soundReference;
-		}else{
-			soundInstances[channel] = soundReference;
+		//negative indicates unlimited
+		void setMaxChannels(int channels) {
+			maxChannels = channels;
 		}
-	}
-	SoundInstance* removeSoundInstance(int channel){
-		std::map<int, SoundInstance*>::iterator cell = soundInstances.find(channel);
-		SoundInstance *soundReturn = 0;
-		if(cell != soundInstances.end()){
-			soundReturn = cell->second;
-			soundInstances.erase(cell);
+
+		int getMaxChannels() {
+			return maxChannels;
 		}
-		return soundReturn;
-	}
-	void removeSoundInstance(SoundInstance* soundReference){
-		std::map<int, SoundInstance*>::iterator cell;
-		for(cell = soundInstances.begin();cell!=soundInstances.end() && cell->second != soundReference;++cell){;}
-		if(cell!=soundInstances.end()){
-			soundInstances.erase(cell);
+		int getAllocatedChannels() {
+			return currentChannels;
 		}
-	}
+		int getMostRecentlyUsedChannel() {
+			return channelLastPlayed;
+		}
+		std::string getLatestSong() {
+			return currentSong;
+		}
 
-protected:
-	AudioPlayer();
-private:
-	std::map<std::string, MusicIdentity> music;
-	std::map<std::string, MusicIdentity>::iterator musicCell;
-	std::map<std::string, SoundIdentity> sounds;
-	std::map<std::string, SoundIdentity>::iterator soundCell;
-	std::string currentSong;
-	std::map<int, AudioPlayList*> channelsWithCallbacks;
-	std::map<int, SoundInstance*> soundInstances;
-	bool disableSounds;
-	int audio_rate;
-	int maxChannels;
-	int currentChannels;
-	Uint16 audio_format;
-	int audio_channels;
-	int audio_buffers;
-	int channelLastPlayed;
-	int distance;
-	int angle;
-	bool initialized;
+		AudioPlayList* getMusicPlayList();
+		void setMusicPlayList(AudioPlayList* playList);
 
-	AudioPlayList *currentMusicPlayList;
+		AudioPlayList* getSoundPlayList(int channel);
+		void removeSoundPlayList(AudioPlayList* playList);
+		void removeSoundPlayList(int channel);
 
-	static AudioPlayer *_instance;
-};
+		void updateSoundPositions();
+
+		void registerSoundInstance(int channel, SoundInstance* soundReference) {
+			std::map<int, SoundInstance*>::iterator cell = soundInstances.find(channel);
+			if (cell != soundInstances.end()) {
+				cell->second->donePlaying();
+				cell->second = soundReference;
+			} else {
+				soundInstances[channel] = soundReference;
+			}
+		}
+		SoundInstance* removeSoundInstance(int channel) {
+			std::map<int, SoundInstance*>::iterator cell = soundInstances.find(channel);
+			SoundInstance *soundReturn = 0;
+			if (cell != soundInstances.end()) {
+				soundReturn = cell->second;
+				soundInstances.erase(cell);
+			}
+			return soundReturn;
+		}
+		void removeSoundInstance(SoundInstance* soundReference) {
+			std::map<int, SoundInstance*>::iterator cell;
+			for (cell = soundInstances.begin(); cell != soundInstances.end() && cell->second != soundReference; ++cell) { ; }
+			if (cell != soundInstances.end()) {
+				soundInstances.erase(cell);
+			}
+		}
+
+	protected:
+		AudioPlayer();
+	private:
+		std::map<std::string, MusicIdentity> music;
+		std::map<std::string, MusicIdentity>::iterator musicCell;
+		std::map<std::string, SoundIdentity> sounds;
+		std::map<std::string, SoundIdentity>::iterator soundCell;
+		std::string currentSong;
+		std::map<int, AudioPlayList*> channelsWithCallbacks;
+		std::map<int, SoundInstance*> soundInstances;
+		bool disableSounds;
+		int audio_rate;
+		int maxChannels;
+		int currentChannels;
+		Uint16 audio_format;
+		int audio_channels;
+		int audio_buffers;
+		int channelLastPlayed;
+		int distance;
+		int angle;
+		bool initialized;
+
+		AudioPlayList *currentMusicPlayList;
+
+		static AudioPlayer *_instance;
+	};
+}
 
 #endif

@@ -4,9 +4,8 @@
             "id": 2147483649,
             "data": {
                 "cereal_class_version": 0,
+                "id": "",
                 "name": "Dervacor",
-                "email": "",
-                "passwordHash": "",
                 "wallet": {
                     "cereal_class_version": 0,
                     "values": [

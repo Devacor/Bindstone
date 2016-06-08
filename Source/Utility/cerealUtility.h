@@ -37,9 +37,14 @@ namespace MV {
 		return toBase64(toBinaryString(a_input));
 	}
 
+	template <typename C, typename T>
+	std::string toBase64Cast(const std::shared_ptr<T> &a_input) {
+		return toBase64(std::static_pointer_cast<C>(a_input));
+	}
+
 	template <typename T>
 	T fromBase64(const std::string &a_input) {
-		return fromBinaryString(fromBase64(a_input));
+		return fromBinaryString<T>(fromBase64(a_input));
 	}
 
 	template <typename T>
@@ -48,6 +53,11 @@ namespace MV {
 		cereal::PortableBinaryOutputArchive output(messageStream);
 		output(a_input);
 		return messageStream.str();
+	}
+
+	template <typename C, typename T>
+	std::string toBinaryStringCast(const std::shared_ptr<T> &a_input) {
+		return toBinaryString(std::static_pointer_cast<C>(a_input));
 	}
 
 	template <typename T>

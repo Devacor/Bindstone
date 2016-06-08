@@ -27,8 +27,6 @@ struct LoadoutCollection {
 struct Player {
 	std::string id;
 	std::string name;
-	std::string email;
-	std::string passwordHash;
 
 	Wallet wallet;
 
@@ -38,9 +36,8 @@ struct Player {
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const version) {
 		archive(
+			CEREAL_NVP(id),
 			CEREAL_NVP(name),
-			CEREAL_NVP(email),
-			CEREAL_NVP(passwordHash),
 			CEREAL_NVP(wallet),
 			CEREAL_NVP(unlocked),
 			CEREAL_NVP(loadout)

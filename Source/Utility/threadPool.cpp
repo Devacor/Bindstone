@@ -7,7 +7,7 @@ namespace MV{
 	struct ThreadPoolDetails {
 		ThreadPoolDetails() :
 			service(std::make_shared<boost::asio::io_service>()),
-			working(std::make_unique<boost::asio::io_service::work>(service)) {
+			working(std::make_unique<boost::asio::io_service::work>(*service)) {
 		}
 
 		std::shared_ptr<boost::asio::io_service> service;

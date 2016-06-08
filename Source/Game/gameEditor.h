@@ -32,6 +32,7 @@ public:
 		auto grid = limbo->make("Grid")->position({ (static_cast<float>(game.getManager().renderer.window().width()) - 100.0f) / 2.0f, 200.0f })->
 			attach<MV::Scene::Grid>()->columns(1)->padding({ 2.0f, 2.0f })->margin({ 4.0f, 4.0f })->color({ BOX_BACKGROUND })->owner();
 
+
 		auto editorButton = makeButton(grid, game.getManager().textLibrary, mouse, "Editor", { 100.0f, 20.0f }, UTF_CHAR_STR("Editor"));
 		editorButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 			runEditor();
@@ -53,21 +54,22 @@ public:
 
 		auto clientButton = makeButton(grid, game.getManager().textLibrary, mouse, "Client", { 100.0f, 20.0f }, UTF_CHAR_STR("Client"));
 		clientButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
-			client = MV::Client::make(MV::Url{ "http://ec2-54-218-22-3.us-west-2.compute.amazonaws.com:22325" }, [=](const std::string &a_message) {
-			//client = MV::Client::make(MV::Url{ "http://96.229.120.252:22325" }, [=](const std::string &a_message) {
+			//client = MV::Client::make(MV::Url{ "http://ec2-54-218-22-3.us-west-2.compute.amazonaws.com:22325" }, [=](const std::string &a_message) {
+			client = MV::Client::make(MV::Url{ "http://96.229.120.252:22325" }, [=](const std::string &a_message) {
 				static int i = 0;
-				std::cout << "GOT MESSAGE: [" << a_message << "]" << std::endl;
-				client->send(std::to_string(++i));
+				std::cout << "GOT MESSAGE!\n" << a_message << std::endl;
+				auto value = MV::fromBase64<std::shared_ptr<ClientResponse>>(a_message);
+				value->execute();
 			}, [](const std::string &a_dcreason) {
 				std::cout << "Disconnected: " << a_dcreason << std::endl;
-			}, [=] { client->send("UUUUNG"); });
+			}, [=] {  });
 			//client->send("UUUUH!");
 		});
 
 		auto sendButton = makeButton(grid, game.getManager().textLibrary, mouse, "Send", { 100.0f, 20.0f }, UTF_CHAR_STR("Send"));
 		sendButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 			if (client) {
-				client->send("Client to server message!");
+				client->send(MV::toBase64Cast<ServerAction>(std::make_shared<CreatePlayer>("maxmike@gmail.com", "M2tM", "SuperTinker123")));
 			}
 		});
 

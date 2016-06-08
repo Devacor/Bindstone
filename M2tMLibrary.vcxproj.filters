@@ -530,6 +530,7 @@
     <ClCompile Include="Source\Utility\log.cpp">
       <Filter>Source Files\Utility</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Game\Server\lobbyServer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -579,9 +580,6 @@
     </ClInclude>
     <ClInclude Include="Source\exampleCode.h">
       <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Utility\messageHandler.hpp">
-      <Filter>Source Files\Utility</Filter>
     </ClInclude>
     <ClInclude Include="Source\Interface\package.h">
       <Filter>Source Files\Interface</Filter>

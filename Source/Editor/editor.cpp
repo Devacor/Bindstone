@@ -106,7 +106,7 @@ void Editor::initializeWindow(){
 		}, [](){}, "ControlPanelDrag"));
 	});
 
-	managers.textures.assemblePacks("Assets/Atlases", &managers.renderer);
+	//managers.textures.assemblePacks("Assets/Atlases", &managers.renderer);
 	managers.textures.files("Assets/Map");
 
 	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});

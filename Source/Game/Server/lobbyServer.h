@@ -107,7 +107,9 @@ class LobbyServer {
 public:
 	LobbyServer(Managers &a_managers) :
 		manager(a_managers),
+		db(std::make_shared<pqxx::connection>("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=5432 dbname=bindstone user=m2tm password=Tinker123")),
 		emailPool(1), //need to test values greater than 1 to make sure ssh does not break.
+		dbPool(1), //currently locked to 1 as pqxx requires one per thread. We can expand this later with more connections and a different query interface.
 		ourServer( std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325),
 			[this](MV::Connection *a_connection) {
 				return std::make_unique<LobbyConnectionState>(a_connection, *this);
@@ -125,7 +127,7 @@ public:
 	}
 
 	std::shared_ptr<pqxx::connection> database() {
-		return std::make_shared<pqxx::connection>("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=5432 dbname=bindstone user=m2tm password=Tinker123");
+		return db;
 	}
 
 	MV::ThreadPool& pool() {
@@ -134,6 +136,10 @@ public:
 
 	std::shared_ptr<MV::Server> server() {
 		return ourServer;
+	}
+
+	MV::ThreadPool& databasePool() {
+		return dbPool;
 	}
 
 	void email(const MV::Email::Addresses &a_addresses, const std::string &a_title, const std::string &a_message) {
@@ -150,6 +156,7 @@ private:
 
 	MV::ThreadPool threadPool;
 	MV::ThreadPool emailPool;
+	MV::ThreadPool dbPool;
 
 	Managers &manager;
 	bool done;
@@ -167,114 +174,7 @@ public:
 		password(a_password) {
 	}
 
-	virtual void execute(LobbyConnectionState& a_connection) override {
-		std::cout << "THREAD: " << pqxx::describe_thread_safety().safe_libpq << std::endl;
-
-		auto self = std::static_pointer_cast<CreatePlayer>(shared_from_this());
-		a_connection.server().pool().task([=]() mutable {
-			try {
-				self; //force capture;
-				if (email.empty() || !validateHandle(handle) || password.size() < 8) {
-					a_connection.connection()->send(MV::toBase64Cast<ClientResponse>(std::make_shared<MessageResponse>("Failed to supply a valid email/handle and password.")));
-					doneFlag = true;
-				} else {
-					auto database = a_connection.server().database();
-					pqxx::work transaction(*database);
-
-					std::string activeQuery = "SELECT verified, passsalt, passhash, passiterations FROM players WHERE ";
-					activeQuery += "email = " + transaction.quote(email);
-					activeQuery += " OR ";
-					activeQuery += "handle = " + transaction.quote(handle);
-
-					auto result = transaction.exec(activeQuery);
-
-					if (result.empty()) {
-						activeQuery = createPlayerQueryString(transaction);
-						result = transaction.exec(activeQuery);
-
-						if (result.affected_rows() == 1) {
-							a_connection.connection()->send(MV::toBase64Cast<ClientResponse>(std::make_shared<MessageResponse>("User created, woot!")));
-							a_connection.server().email(MV::Email::Addresses("mike@m2tm.net", email), "Bindstone Account Activation", "This will be a link to activate your account, for now... Check this out: https://www.youtube.com/watch?v=VAZsBEELqPw");
-
-						} else {
-							a_connection.connection()->send(MV::toBase64Cast<ClientResponse>(std::make_shared<MessageResponse>("User already exists, cannot create.")));
-						}
-					} else if (!result[0][0].as<bool>()) {
-						a_connection.connection()->send(MV::toBase64Cast<ClientResponse>(std::make_shared<MessageResponse>("Player not email validated yet.")));
-						std::cout << "Not verified." << std::endl;
-					} else if (MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>()) == result[0][1].c_str()) {
-						a_connection.connection()->send(MV::toBase64Cast<ClientResponse>(std::make_shared<MessageResponse>("Successful login.")));
-						std::cout << "Yup, we good." << std::endl;
-					} else {
-						a_connection.connection()->send(MV::toBase64Cast<ClientResponse>(std::make_shared<MessageResponse>("Failed to create due to existing player with different credentials.")));
-						std::cout << "Failed to create due to existing player with different credentials." << std::endl;
-					}
-					doneFlag = true;
-				}
-			} catch (std::exception& e) {
-				std::cerr << "Error caught: " << e.what() << std::endl;
-				doneFlag = true;
-			}
-		});
-	}
-
-	// 	virtual void execute(LobbyConnectionState& a_connection) override {
-	// 		std::cout << "THREAD: " << pqxx::describe_thread_safety().safe_libpq << std::endl;
-	// 
-	// 		auto self = std::static_pointer_cast<CreatePlayer>(shared_from_this());
-	// 		std::shared_ptr<pqxx::result> result;
-	// 		std::shared_ptr<pqxx::work> transaction;
-	// 		std::shared_ptr<pqxx::connection> database;
-	// 		a_connection.server().pool().task([=]() mutable {
-	// 			self; //force capture;
-	// 			if (email.empty() || !validateHandle(handle) || password.size() < 8) {
-	// 				a_connection.connection()->send(MV::toBase64Cast<ClientResponse>(std::make_shared<MessageResponse>("Failed to supply a valid email/handle and password.")));
-	// 				doneFlag = true;
-	// 			} else {
-	// 				database = a_connection.server().database();
-	// 				transaction = std::make_shared<pqxx::work>(*database);
-	// 
-	// 				std::string activeQuery = "SELECT verified, passalt, passhash, passiterations FROM players WHERE ";
-	// 				activeQuery += "email = " + transaction->quote(email);
-	// 				activeQuery += " OR ";
-	// 				activeQuery += "handle = " + transaction->quote(handle);
-	// 
-	// 				*result = transaction->exec(activeQuery);
-	// 			}
-	// 		}, [=]() mutable {
-	// 			self; //force capture;
-	// 			if (result->empty()) {
-	// 				a_connection.server().pool().task([=]() mutable {
-	// 					self; database; //force capture;
-	// 					transaction = std::make_shared<pqxx::work>(*database);
-	// 					auto activeQuery = CreatePlayerQueryString(*transaction, "");
-	// 					*result = transaction->exec(activeQuery);
-	// 				}, [=]() mutable {
-	// 					self; transaction; database; //force capture;
-	// 					if (result->affected_rows() == 1) {
-	// 						a_connection.connection()->send(MV::toBase64Cast<ClientResponse>(std::make_shared<MessageResponse>("User created, woot!")));
-	// 						a_connection.server().email(MV::Email::Addresses("mike@m2tm.net", email), "Bindstone Account Activation", "This will be a link to activate your account, for now... Check this out: https://www.youtube.com/watch?v=VAZsBEELqPw");
-	// 
-	// 					} else {
-	// 						a_connection.connection()->send(MV::toBase64Cast<ClientResponse>(std::make_shared<MessageResponse>("User already exists, cannot create.")));
-	// 					}
-	// 					doneFlag = true;
-	// 				});
-	// 			} else if (!(*result)[0][0].as<bool>()) {
-	// 				a_connection.connection()->send(MV::toBase64Cast<ClientResponse>(std::make_shared<MessageResponse>("Player not email validated yet.")));
-	// 				std::cout << "Not verified." << std::endl;
-	// 				doneFlag = true;
-	// 			} else if (MV::sha512(password, (*result)[0][2].c_str(), (*result)[0][3].as<int>()) == (*result)[0][1].c_str()) {
-	// 				a_connection.connection()->send(MV::toBase64Cast<ClientResponse>(std::make_shared<MessageResponse>("Successful login.")));
-	// 				std::cout << "Yup, we good." << std::endl;
-	// 				doneFlag = true;
-	// 			} else {
-	// 				a_connection.connection()->send(MV::toBase64Cast<ClientResponse>(std::make_shared<MessageResponse>("Failed to create due to existing player with different credentials.")));
-	// 				std::cout << "Failed to create due to existing player with different credentials." << std::endl;
-	// 				doneFlag = true;
-	// 			}
-	// 		});
-	// 	}
+	virtual void execute(LobbyConnectionState& a_connection) override;
 
 	virtual bool done() const override { return doneFlag; }
 
@@ -284,23 +184,15 @@ public:
 	}
 
 private:
+	void sendValidationEmail(LobbyConnectionState &a_connection, const std::string &a_passSalt);
+
 	bool validateHandle(const std::string &a_handle) {
 		return a_handle.size() > 3 && MV::simpleFilter(a_handle) == a_handle;
 	}
 
 	std::string makeSaveString();
 
-	std::string createPlayerQueryString(pqxx::work &transaction) {
-		static int work = 12;
-		auto salt = MV::randomString(64);
-		std::stringstream query;
-		query << "INSERT INTO public.players(email, handle, passhash, passsalt, passiterations, softcurrency, hardcurrency, state)";
-		query << "VALUES(" << transaction.quote(email) << ", " << transaction.quote(handle) << ", ";
-		query << transaction.quote(MV::sha512(password, salt, work)) << ", " << transaction.quote(salt) << ", " << work << ", ";
-		query << DEFAULT_SOFT_CURRENCY << ", " << DEFAULT_HARD_CURRENCY << ", ";
-		query << transaction.quote(makeSaveString()) << ")";
-		return query.str();
-	}
+	std::string createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt);
 
 	std::string handle;
 	std::string email;

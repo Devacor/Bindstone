@@ -38,11 +38,11 @@ namespace MV {
 			}
 
 			getline_platform_agnostic(response_stream, message);
-			std::cout << status_code <<  message << std::endl;
+			log(INFO, status_code, message);
 			std::string line;
 			while (getline_platform_agnostic(response_stream, line) && !line.empty()) {
 				lines.push_back(line);
-				std::cout << "L:" << line << std::endl;
+				log(INFO, "L: ", line);
 			}
 		}
 	};
@@ -256,7 +256,9 @@ namespace MV {
 							success = true;
 							done = true;
 							onFinish();
-							sendInternal("QUIT\r\n");
+							sendInternal("QUIT\r\n", {}, [this, self] {
+								log(INFO, "Email Complete [", addresses.from, "] -> [", addresses.to, "]");
+							});
 						});
 					});
 				});
@@ -269,8 +271,8 @@ namespace MV {
 				if (!a_err) {
 					responseStream = std::make_unique<std::istream>(&(*response));
 					activeResponse.read(*responseStream);
-					if (std::find(a_validResponses.begin(), a_validResponses.end(), activeResponse.status) != a_validResponses.end()) {
-						a_callback();
+					if (a_validResponses.empty() || std::find(a_validResponses.begin(), a_validResponses.end(), activeResponse.status) != a_validResponses.end()) {
+						if (a_callback) { a_callback(); }
 					} else if(!a_validResponses.empty()) {
 						alertFailure();
 					}
@@ -289,9 +291,9 @@ namespace MV {
 		}
 
 		void sendInternal(const std::string &a_content, std::vector<int> a_validResponses = std::vector<int>(), std::function<void()> a_callback = std::function<void()>()) {
+			auto self = shared_from_this();
 			ioService->post([=] {
-				auto self = shared_from_this();
-				
+				self; //force capture
 				boost::asio::async_write(*socket, boost::asio::buffer(a_content, a_content.size()), [this,a_validResponses,self,a_callback](boost::system::error_code a_err, size_t a_amount) {
 					if (!a_err) {
 						if (a_callback) {

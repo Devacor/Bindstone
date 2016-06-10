@@ -302,6 +302,7 @@
     <ClCompile Include="Source\Game\Instance\gameInstance.cpp" />
     <ClCompile Include="Source\Game\Interface\guiFactories.cpp" />
     <ClCompile Include="Source\Game\player.cpp" />
+    <ClCompile Include="Source\Game\Server\accountActions.cpp" />
     <ClCompile Include="Source\Game\Server\lobbyServer.cpp" />
     <ClCompile Include="Source\Game\state.cpp" />
     <ClCompile Include="Source\Game\wallet.cpp" />
@@ -490,7 +491,11 @@
     <ClInclude Include="Source\Game\Interface\guiFactories.h" />
     <ClInclude Include="Source\Game\managers.h" />
     <ClInclude Include="Source\Game\player.h" />
+    <ClInclude Include="Source\Game\Server\accountActions.h" />
+    <ClInclude Include="Source\Game\Server\clientActions.h" />
     <ClInclude Include="Source\Game\Server\lobbyServer.h" />
+    <ClInclude Include="Source\Game\Server\package.h" />
+    <ClInclude Include="Source\Game\Server\serverActions.h" />
     <ClInclude Include="Source\Game\state.h" />
     <ClInclude Include="Source\Game\wallet.h" />
     <ClInclude Include="Source\Network\download.h" />

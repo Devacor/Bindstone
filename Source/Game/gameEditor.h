@@ -6,7 +6,7 @@
 #include "DiggerGame/diggerGame.h"
 #include "editor/editor.h"
 #include "Game/managers.h"
-#include "Game/Server/lobbyServer.h"
+#include "Game/Server/package.h"
 
 class GameEditor {
 public:
@@ -56,9 +56,7 @@ public:
 		clientButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 			//client = MV::Client::make(MV::Url{ "http://ec2-54-218-22-3.us-west-2.compute.amazonaws.com:22325" }, [=](const std::string &a_message) {
 			client = MV::Client::make(MV::Url{ "http://96.229.120.252:22325" }, [=](const std::string &a_message) {
-				static int i = 0;
-				std::cout << "GOT MESSAGE!\n" << a_message << std::endl;
-				auto value = MV::fromBase64<std::shared_ptr<ClientResponse>>(a_message);
+				auto value = MV::fromBinaryString<std::shared_ptr<ClientAction>>(a_message);
 				value->execute();
 			}, [](const std::string &a_dcreason) {
 				std::cout << "Disconnected: " << a_dcreason << std::endl;
@@ -69,7 +67,7 @@ public:
 		auto sendButton = makeButton(grid, game.getManager().textLibrary, mouse, "Send", { 100.0f, 20.0f }, UTF_CHAR_STR("Send"));
 		sendButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 			if (client) {
-				client->send(MV::toBase64Cast<ServerAction>(std::make_shared<CreatePlayer>("maxmike@gmail.com", "M2tM", "SuperTinker123")));
+				client->send(MV::toBinaryStringCast<ServerAction>(std::make_shared<CreatePlayer>("maxmike@gmail.com", "M2tM", "SuperTinker123")));
 			}
 		});
 

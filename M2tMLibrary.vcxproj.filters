@@ -530,7 +530,12 @@
     <ClCompile Include="Source\Utility\log.cpp">
       <Filter>Source Files\Utility</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Game\Server\lobbyServer.cpp" />
+    <ClCompile Include="Source\Game\Server\lobbyServer.cpp">
+      <Filter>Source Files\Game\Server</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Game\Server\accountActions.cpp">
+      <Filter>Source Files\Game\Server</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -1138,6 +1143,18 @@
     </ClInclude>
     <ClInclude Include="Source\Utility\log.h">
       <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Server\accountActions.h">
+      <Filter>Source Files\Game\Server</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Server\serverActions.h">
+      <Filter>Source Files\Game\Server</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Server\clientActions.h">
+      <Filter>Source Files\Game\Server</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Server\package.h">
+      <Filter>Source Files\Game\Server</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

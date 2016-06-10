@@ -392,6 +392,7 @@ namespace MV {
 
 	class atomic_cout {
 		std::ostringstream stream;
+
 	public:
 		template <typename T>
 		atomic_cout& operator<<(T const& t) {
@@ -403,6 +404,8 @@ namespace MV {
 			return *this;
 		}
 		~atomic_cout() {
+			static std::mutex mutex;
+			std::lock_guard<std::mutex> lock(mutex);
 			std::cout << stream.str();
 		}
 	};

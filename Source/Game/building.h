@@ -177,7 +177,7 @@ public:
 		return "Assets/Prefabs/Buildings/" + buildingData.id + "/" + (skin.empty() ? buildingData.id : skin) + ".prefab";
 	}
 
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance) {
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& /*gameInstance*/) {
 		a_script.add(chaiscript::user_type<Building>(), "Building");
 		a_script.add(chaiscript::base_class<Component, Building>());
 

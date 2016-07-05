@@ -2,6 +2,7 @@
 *.suo
 *.psess
 *.vsp
+*.opendb
 *.opensdf
 *.exe
 *.log
@@ -18,3 +19,4 @@ sceneSave.txt
 /Assets/Atlases/*.png
 runsdvui.cmd
 M2tMLibrary.VC.opendb
+M2tMLibrary.VC.db

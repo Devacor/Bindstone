@@ -40,7 +40,6 @@ private:
 
 	void initializeData();
 	void initializeWindow();
-	void spawnCreature(const MV::Point<> &a_position);
 
 	GameData data;
 	std::unique_ptr<GameInstance> instance;

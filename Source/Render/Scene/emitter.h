@@ -191,7 +191,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(CEREAL_NVP(maximumParticles),
 					CEREAL_NVP(minimumSpawnRate), CEREAL_NVP(maximumSpawnRate),
 					CEREAL_NVP(minimumPosition), CEREAL_NVP(maximumPosition),
@@ -269,7 +269,7 @@ namespace MV {
 			virtual void defaultDrawImplementation() override;
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				std::vector<DrawPoint> tmpPoints{ };
 				std::vector<GLuint> tmpVertexIndices;
 
@@ -291,7 +291,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Emitter> &construct, std::uint32_t const version) {
+			static void load_and_construct(Archive & archive, cereal::construct<Emitter> &construct, std::uint32_t const /*version*/) {
 				ThreadPool *pool = nullptr;
 				archive.extract(cereal::make_nvp("pool", pool));
 				MV::require<PointerException>(pool != nullptr, "Null thread pool in Emitter::load_and_construct.");

@@ -7,47 +7,46 @@
 namespace MV {
 	namespace Scene {
 
-		class Clipped : public Sprite {
+		class Stencil : public Sprite {
 			friend Node;
 			friend cereal::access;
 
 		public:
-			DrawableDerivedAccessors(Clipped)
+			DrawableDerivedAccessors(Stencil)
 
-			std::shared_ptr<Clipped> bounds(const BoxAABB<> &a_bounds);
+			std::shared_ptr<Stencil> bounds(const BoxAABB<> &a_bounds);
 			BoxAABB<> bounds();
-			std::shared_ptr<Clipped> size(const Size<> &a_size, const Point<> &a_centerPoint);
-			std::shared_ptr<Clipped> size(const Size<> &a_size, bool a_center = false);
+			std::shared_ptr<Stencil> size(const Size<> &a_size, const Point<> &a_centerPoint);
+			std::shared_ptr<Stencil> size(const Size<> &a_size, bool a_center = false);
 			template<typename PointAssign>
 			std::shared_ptr<PointAssign> corners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight) {
 				dirtyTexture = true;
-				return std::static_pointer_cast<Clipped>(Sprite::corners(a_TopLeft, a_TopRight, a_BottomLeft, a_BottomRight));
+				return std::static_pointer_cast<Stencil>(Sprite::corners(a_TopLeft, a_TopRight, a_BottomLeft, a_BottomRight));
 			}
 
-			void refreshTexture(bool a_forceRefreshEvenIfNotDirty = true);
+			std::shared_ptr<Stencil> clearCaptureBounds();
 
-			std::shared_ptr<Clipped> clearCaptureBounds();
-
-			std::shared_ptr<Clipped> captureBounds(const BoxAABB<> &a_newCapturedBounds);
+			std::shared_ptr<Stencil> captureBounds(const BoxAABB<> &a_newCapturedBounds);
 			BoxAABB<> captureBounds();
 
-			std::shared_ptr<Clipped> clearCaptureOffset();
+			std::shared_ptr<Stencil> clearCaptureOffset();
 
-			std::shared_ptr<Clipped> captureOffset(const Point<> &a_newCapturedOffset);
+			std::shared_ptr<Stencil> captureOffset(const Point<> &a_newCapturedOffset);
 			Point<> captureOffset() const;
 
-			std::shared_ptr<Clipped> captureSize(const Size<> &a_size, const Point<> &a_centerPoint);
-			std::shared_ptr<Clipped> captureSize(const Size<> &a_size, bool a_center = false);
+			std::shared_ptr<Stencil> captureSize(const Size<> &a_size, const Point<> &a_centerPoint);
+			std::shared_ptr<Stencil> captureSize(const Size<> &a_size, bool a_center = false);
 
-			std::shared_ptr<Clipped> refreshShader(const std::string &a_refreshShaderId);
+			std::shared_ptr<Stencil> refreshShader(const std::string &a_refreshShaderId);
 			std::string refreshShader();
 		protected:
-			Clipped(const std::weak_ptr<Node> &a_owner);
+			Stencil(const std::weak_ptr<Node> &a_owner);
+
+			void drawStencil();
 
 			template <class Archive>
 			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
-					CEREAL_NVP(refreshShaderId),
 					CEREAL_NVP(capturedBounds),
 					CEREAL_NVP(capturedOffset),
 					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
@@ -55,7 +54,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Clipped> &construct, std::uint32_t const /*version*/) {
+			static void load_and_construct(Archive & archive, cereal::construct<Stencil> &construct, std::uint32_t const /*version*/) {
 				construct(std::shared_ptr<Node>());
 				archive(
 					cereal::make_nvp("refreshShaderId", construct->refreshShaderId),
@@ -69,7 +68,7 @@ namespace MV {
 			virtual void initialize() override;
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
-				return cloneHelper(a_parent->attach<Clipped>().self());
+				return cloneHelper(a_parent->attach<Stencil>().self());
 			}
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
@@ -82,17 +81,14 @@ namespace MV {
 			virtual bool preDraw();
 			virtual bool postDraw();
 
-			std::shared_ptr<DynamicTextureDefinition> clippedTexture;
-			std::shared_ptr<Framebuffer> framebuffer;
-
 			MouseState::SignalType onLeftMouseDownHandle;
 			MouseState::SignalType onLeftMouseUpHandle;
 
 			std::string refreshShaderId;
 			BoxAABB<> capturedBounds;
 			Point<> capturedOffset;
-			bool dirtyTexture = true;
-			Node::BasicSharedSignalType dirtyObserveSignal;
+
+			static int totalFramebuffers;
 		};
 	}
 }

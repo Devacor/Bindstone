@@ -144,9 +144,5 @@ namespace MV {
 			return a_clone;
 		}
 
-		std::shared_ptr<Clipped> Clipped::clone(const std::shared_ptr<Node> &a_parent) {
-			return std::static_pointer_cast<Clipped>(cloneImplementation(a_parent));
-		}
-
 	}
 }

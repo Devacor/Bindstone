@@ -16,7 +16,7 @@ struct LoadoutCollection {
 	std::vector<std::string> skins;
 
 	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const version) {
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(
 			CEREAL_NVP(buildings),
 			CEREAL_NVP(skins)
@@ -34,7 +34,7 @@ struct Player {
 	LoadoutCollection loadout;
 
 	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const version) {
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(
 			CEREAL_NVP(id),
 			CEREAL_NVP(name),

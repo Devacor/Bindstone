@@ -75,7 +75,7 @@ namespace MV {
 			std::shared_ptr<TextureDefinition> texture;
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version){
+			void serialize(Archive & archive, std::uint32_t const /*version*/){
 				archive(CEREAL_NVP(id), CEREAL_NVP(bounds), CEREAL_NVP(texture));
 			}
 		};
@@ -104,7 +104,7 @@ namespace MV {
 		bool dirty;
 
 		template <class Archive>
-		void serialize(Archive & archive, std::uint32_t const version){
+		void serialize(Archive & archive, std::uint32_t const /*version*/){
 			if(packedTexture.expired()){
 				packedTexture.reset();
 			}
@@ -112,7 +112,7 @@ namespace MV {
 		}
 
 		template <class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<TexturePack> &construct, std::uint32_t const version){
+		static void load_and_construct(Archive & archive, cereal::construct<TexturePack> &construct, std::uint32_t const /*version*/){
 			Draw2D *renderer = nullptr;
 			archive.extract(cereal::make_nvp("renderer", renderer));
 			MV::require<PointerException>(renderer != nullptr, "Null renderer in Node::load_and_construct.");
@@ -145,12 +145,12 @@ namespace MV {
 		}
 
 		template <class Archive>
-		void serialize(Archive & archive, std::uint32_t const version){
+		void serialize(Archive & archive, std::uint32_t const /*version*/){
 			archive(CEREAL_NVP(texturePack), cereal::make_nvp("base", cereal::base_class<DynamicTextureDefinition>(this)));
 		}
 
 		template <class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<PackedTextureDefinition> &construct, std::uint32_t const version){
+		static void load_and_construct(Archive & archive, cereal::construct<PackedTextureDefinition> &construct, std::uint32_t const /*version*/){
 			std::shared_ptr<TexturePack> texturePack;
 			archive(cereal::make_nvp("texturePack", texturePack));
 			construct("", texturePack, Size<int>(), Color());

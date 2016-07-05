@@ -44,7 +44,7 @@ public:
 	bool hasEnough(const Wallet& a_cost) const;
 
 	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const version) {
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(
 			CEREAL_NVP(values)
 		);

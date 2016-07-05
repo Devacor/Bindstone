@@ -94,7 +94,12 @@ public:
 
 	void beginMapDrag();
 
-	void nodeLoadBinder(cereal::JSONInputArchive &a_archive);
+	JsonNodeLoadBinder jsonLoadBinder() {
+		return { gameData.managers(), ourMouse };
+	}
+	BinaryNodeLoadBinder binaryLoadBinder() {
+		return{ gameData.managers(), ourMouse };
+	}
 
 	bool update(double dt);
 
@@ -208,15 +213,7 @@ public:
 			targetDeathWatcher.reset();
 		});
 
-		missile = gameInstance.missileContainer()->make("Assets/Prefabs/Missiles/" + a_prefab + ".prefab", [&](cereal::JSONInputArchive& archive) {
-			archive.add(
-				cereal::make_nvp("mouse", &gameInstance.mouse()),
-				cereal::make_nvp("renderer", &gameInstance.data().managers().renderer),
-				cereal::make_nvp("textLibrary", &gameInstance.data().managers().textLibrary),
-				cereal::make_nvp("pool", &gameInstance.data().managers().pool),
-				cereal::make_nvp("texture", &gameInstance.data().managers().textures)
-			);
-		}, gameInstance.missileContainer()->getUniqueId("missile"));
+		missile = gameInstance.missileContainer()->make("Assets/Prefabs/Missiles/" + a_prefab + ".prefab", gameInstance.jsonLoadBinder(), gameInstance.missileContainer()->getUniqueId("missile"));
 		missile->position(a_source->owner()->position());
 		missile->serializable(false);
 	}

@@ -130,7 +130,7 @@ namespace MV {
 			virtual void acceptUpClick(bool a_ignoreBounds = false);
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					cereal::make_nvp("hitDetectionType", hitDetectionType),
 					cereal::make_nvp("eatTouches", eatTouches),
@@ -141,7 +141,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Clickable> &construct, std::uint32_t const version) {
+			static void load_and_construct(Archive & archive, cereal::construct<Clickable> &construct, std::uint32_t const /*version*/) {
 				MouseState *mouse = nullptr;
 				archive.extract(cereal::make_nvp("mouse", mouse));
 				MV::require<PointerException>(mouse != nullptr, "Null mouse in Clickable::load_and_construct.");

@@ -156,7 +156,7 @@ private:
 	}
 
 	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const version) {
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(
 			cereal::make_nvp("creatures", creatureList)
 		);
@@ -322,7 +322,7 @@ protected:
 private:
 
 	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const version) {
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(
 			//CEREAL_NVP(shouldDraw),
 			cereal::make_nvp("Component", cereal::base_class<Component>(this))

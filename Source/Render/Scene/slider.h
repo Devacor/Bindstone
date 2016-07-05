@@ -29,7 +29,7 @@ namespace MV {
 			Slider(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					CEREAL_NVP(dragPercent),
 					CEREAL_NVP(dragHandle),
@@ -38,7 +38,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Slider> &construct, std::uint32_t const version) {
+			static void load_and_construct(Archive & archive, cereal::construct<Slider> &construct, std::uint32_t const /*version*/) {
 				MouseState *mouse = nullptr;
 				archive.extract(cereal::make_nvp("mouse", mouse));
 				MV::require<PointerException>(mouse != nullptr, "Null mouse in Slider::load_and_construct.");

@@ -14,6 +14,7 @@
 #include <type_traits>
 #include <mutex>
 #include <cctype>
+#include <algorithm>
 
 #include "Utility/require.hpp"
 #include <boost/uuid/uuid.hpp>
@@ -186,7 +187,7 @@ namespace MV {
 	UtfString to_wide(const std::string& s);
 
 	inline std::string toLower(std::string s) {
-		std::transform(s.begin(), s.end(), s.begin(), std::tolower);
+		std::transform(s.begin(), s.end(), s.begin(), [](char c) { return std::tolower(c); });
 		return s;
 	}
 
@@ -407,7 +408,7 @@ namespace MV {
 			static std::mutex mutex;
 			std::lock_guard<std::mutex> lock(mutex);
 			std::cout << stream.str();
-		}
+		} 
 	};
 
 	template<typename T>

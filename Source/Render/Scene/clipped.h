@@ -12,6 +12,8 @@ namespace MV {
 			friend cereal::access;
 
 		public:
+			DrawableDerivedAccessors(Clipped)
+
 			std::shared_ptr<Clipped> bounds(const BoxAABB<> &a_bounds);
 			BoxAABB<> bounds();
 			std::shared_ptr<Clipped> size(const Size<> &a_size, const Point<> &a_centerPoint);
@@ -21,8 +23,6 @@ namespace MV {
 				dirtyTexture = true;
 				return std::static_pointer_cast<Clipped>(Sprite::corners(a_TopLeft, a_TopRight, a_BottomLeft, a_BottomRight));
 			}
-
-			std::shared_ptr<Clipped> clone(const std::shared_ptr<Node> &a_parent);
 
 			void refreshTexture(bool a_forceRefreshEvenIfNotDirty = true);
 
@@ -45,7 +45,7 @@ namespace MV {
 			Clipped(const std::weak_ptr<Node> &a_owner);
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					CEREAL_NVP(refreshShaderId),
 					CEREAL_NVP(capturedBounds),
@@ -55,7 +55,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Clipped> &construct, std::uint32_t const version) {
+			static void load_and_construct(Archive & archive, cereal::construct<Clipped> &construct, std::uint32_t const /*version*/) {
 				construct(std::shared_ptr<Node>());
 				archive(
 					cereal::make_nvp("refreshShaderId", construct->refreshShaderId),

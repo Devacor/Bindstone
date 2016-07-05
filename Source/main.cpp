@@ -3,7 +3,7 @@
 #include "Utility/threadPool.h"
 
 #include "ArtificialIntelligence/pathfinding.h"
-#include "vld.h"
+//#include "vld.h"
 
 #include <memory>
 
@@ -30,7 +30,7 @@ struct TestClass {
 struct TestClassVersioned {
 	
 	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const version) {
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(CEREAL_NVP(test));
 		std::cout << "VERSION: " << version << std::endl;
 	}

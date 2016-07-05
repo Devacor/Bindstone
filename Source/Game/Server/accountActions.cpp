@@ -37,9 +37,10 @@ void CreatePlayer::execute(LobbyConnectionState& a_connection) {
 					result = createPlayer(transaction.get(), a_connection);
 				} else if (!result[0][0].as<bool>()) {
 					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Player not email validated yet.")));
-					sendValidationEmail(a_connection, result[0][3].c_str());
+					sendValidationEmail(a_connection, result[0][2].c_str());
 					MV::log(MV::INFO, "Need Validation: [", email, "]");
 				} else if (MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>()) == result[0][1].c_str()) {
+					a_connection.authenticate();
 					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Successful login.")));
 					MV::log(MV::INFO, "Login Success: [", email, "]");
 				} else {
@@ -116,6 +117,7 @@ void LoginRequest::execute(LobbyConnectionState& a_connection) {
 					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Player not email validated yet.")));
 					MV::log(MV::INFO, "Need Validation: [", identifier, "]");
 				} else if (MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>()) == result[0][1].c_str()) {
+					a_connection.authenticate();
 					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Successful login.")));
 					MV::log(MV::INFO, "Login Success: [", identifier, "]");
 				} else {

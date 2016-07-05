@@ -49,7 +49,7 @@ void GameInstance::handleScroll(int a_amount) {
 }
 
 GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data) :
-	worldScene(MV::Scene::Node::load("map.scene", std::bind(&GameInstance::nodeLoadBinder, this, std::placeholders::_1))),
+	worldScene(MV::Scene::Node::load("map.scene", jsonLoadBinder())),
 	ourMouse(a_mouse),
 	gameData(a_data),
 	left(a_leftPlayer, LEFT, *this),
@@ -139,16 +139,6 @@ void GameInstance::hook() {
 	scriptEngine.add(chaiscript::fun([](size_t a_from) {return MV::to_string(a_from); }), "to_string");
 	scriptEngine.add(chaiscript::fun([](float a_from) {return MV::to_string(a_from); }), "to_string");
 	scriptEngine.add(chaiscript::fun([](double a_from) {return MV::to_string(a_from); }), "to_string");
-}
-
-void GameInstance::nodeLoadBinder(cereal::JSONInputArchive &a_archive) {
-	a_archive.add(
-		cereal::make_nvp("mouse", &ourMouse),
-		cereal::make_nvp("renderer", &gameData.managers().renderer),
-		cereal::make_nvp("textLibrary", &gameData.managers().textLibrary),
-		cereal::make_nvp("pool", &gameData.managers().pool),
-		cereal::make_nvp("texture", &gameData.managers().textures)
-	);
 }
 
 bool GameInstance::update(double a_dt) {

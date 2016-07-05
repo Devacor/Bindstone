@@ -105,7 +105,7 @@ namespace MV {
 			}
 		protected:
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					cereal::make_nvp("gravityX", world.GetGravity().x),
 					cereal::make_nvp("gravityY", world.GetGravity().y),
@@ -114,7 +114,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Environment> &construct, std::uint32_t const version) {
+			static void load_and_construct(Archive & archive, cereal::construct<Environment> &construct, std::uint32_t const /*version*/) {
 				b2Vec2 loadedGravity;
 				archive(
 					cereal::make_nvp("gravityX", loadedGravity.x),
@@ -216,7 +216,7 @@ namespace MV {
 			CollisionBodyAttributes& disallowSleep();
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				syncronize();
 				archive(
 					cereal::make_nvp("x", details.position.x),
@@ -395,7 +395,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					cereal::make_nvp("restitution", details.restitution),
 					cereal::make_nvp("friction", details.friction),
@@ -578,7 +578,7 @@ namespace MV {
 			void attachInternal(const std::vector<Point<>> &a_points, const Point<> &a_offset = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				collisionAttributes.syncronize();
 				archive(
 					cereal::make_nvp("world", world),
@@ -646,7 +646,7 @@ namespace MV {
 				CollisionPartAttributes attributes;
 
 				template <class Archive>
-				void serialize(Archive & archive, std::uint32_t const version) {
+				void serialize(Archive & archive, std::uint32_t const /*version*/) {
 					archive(
 						cereal::make_nvp("type", shapeType),
 						cereal::make_nvp("size", size),
@@ -734,7 +734,7 @@ namespace MV {
 		};
 
 		template <class Archive>
-		void RotationJointAttributes::serialize(Archive & archive, std::uint32_t const version) {
+		void RotationJointAttributes::serialize(Archive & archive, std::uint32_t const /*version*/) {
 			worldPosition = Point<>();
 			if (joint) {
 				jointDef.motorSpeed = joint->GetMotorSpeed();

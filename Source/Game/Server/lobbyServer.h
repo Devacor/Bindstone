@@ -28,8 +28,15 @@ public:
 		return ourServer;
 	}
 
+	bool authenticated() const {
+		return loggedIn;
+	}
 
+	void authenticate() {
+		loggedIn = true;
+	}
 private:
+	bool loggedIn = false;
 	LobbyServer& ourServer;
 };
 

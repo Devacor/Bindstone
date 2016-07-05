@@ -118,9 +118,6 @@
     <ClCompile Include="Source\Render\Scene\node.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Render\Scene\clipped.cpp">
-      <Filter>Source Files\Render\Scene</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Render\Scene\button.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
@@ -536,6 +533,12 @@
     <ClCompile Include="Source\Game\Server\accountActions.cpp">
       <Filter>Source Files\Game\Server</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Render\Scene\stencil.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Render\Scene\clipped.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -605,9 +608,6 @@
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
     <ClInclude Include="Source\Render\Scene\package.h">
-      <Filter>Source Files\Render\Scene</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Render\Scene\clipped.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
     <ClInclude Include="Source\Render\Scene\text.h">
@@ -1155,6 +1155,15 @@
     </ClInclude>
     <ClInclude Include="Source\Game\Server\package.h">
       <Filter>Source Files\Game\Server</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Server\uiManager.h">
+      <Filter>Source Files\Game\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\stencil.h">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\clipped.h">
+      <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

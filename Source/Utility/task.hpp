@@ -605,9 +605,28 @@ namespace MV {
 		static void apply(Task &a_root, const std::shared_ptr<T> &a_action) {}\
 	};
 
+	#define CREATE_HOOK_UP_TASK_ACTION_NO_PARAM(member) \
+	CREATE_HAS_MEMBER(member, ())\
+	template <typename T, bool b>\
+	struct HookUpTaskAction_##member { \
+		static void apply(Task &a_root, const std::shared_ptr<T> &a_action) {\
+			a_root.member.connect(#member , [=](){\
+				a_action->member();\
+			});\
+		}\
+	};\
+	template <typename T>\
+	struct HookUpTaskAction_##member <T, false> {\
+		static void apply(Task &a_root, const std::shared_ptr<T> &a_action) {}\
+	};
+
 	CREATE_HOOK_UP_TASK_ACTION(onStart);
 	CREATE_HOOK_UP_TASK_ACTION(onFinish);
-	CREATE_HOOK_UP_TASK_ACTION(onFinishChildren);
+	CREATE_HOOK_UP_TASK_ACTION(onFinishAll);
+	CREATE_HOOK_UP_TASK_ACTION(onSuspend);
+	CREATE_HOOK_UP_TASK_ACTION(onResume);
+	CREATE_HOOK_UP_TASK_ACTION_NO_PARAM(onCancel);
+
 
 	template <typename T>
 	Task& ParallelTask(Task &a_root, const T &a_action, bool a_blockParentCompletion = true){
@@ -621,7 +640,10 @@ namespace MV {
 		auto& task = a_root.get(a_id);
 		HookUpTaskAction_onStart<T, has_onStart<T>::value>::apply(task, sharedAction);
 		HookUpTaskAction_onFinish<T, has_onFinish<T>::value>::apply(task, sharedAction);
-		HookUpTaskAction_onFinishChildren<T, has_onFinishChildren<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onFinishAll<T, has_onFinishAll<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onSuspend<T, has_onSuspend<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onResume<T, has_onResume<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onCancel<T, has_onCancel<T>::value>::apply(task, sharedAction);
 		return task;
 	}
 
@@ -637,7 +659,10 @@ namespace MV {
 		auto& task = a_root.get(a_id);
 		HookUpTaskAction_onStart<T, has_onStart<T>::value>::apply(task, sharedAction);
 		HookUpTaskAction_onFinish<T, has_onFinish<T>::value>::apply(task, sharedAction);
-		HookUpTaskAction_onFinishChildren<T, has_onFinishChildren<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onFinishAll<T, has_onFinishAll<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onSuspend<T, has_onSuspend<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onResume<T, has_onResume<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onCancel<T, has_onCancel<T>::value>::apply(task, sharedAction);
 		return task;
 	}
 
@@ -653,7 +678,10 @@ namespace MV {
 		auto& task = a_root.get(a_id);
 		HookUpTaskAction_onStart<T, has_onStart<T>::value>::apply(task, sharedAction);
 		HookUpTaskAction_onFinish<T, has_onFinish<T>::value>::apply(task, sharedAction);
-		HookUpTaskAction_onFinishChildren<T, has_onFinishChildren<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onFinishAll<T, has_onFinishAll<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onSuspend<T, has_onSuspend<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onResume<T, has_onResume<T>::value>::apply(task, sharedAction);
+		HookUpTaskAction_onCancel<T, has_onCancel<T>::value>::apply(task, sharedAction);
 		return task;
 	}
 }

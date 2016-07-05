@@ -110,14 +110,14 @@ namespace MV {
 			}
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Sprite> &construct, std::uint32_t const version) {
+			static void load_and_construct(Archive & archive, cereal::construct<Sprite> &construct, std::uint32_t const /*version*/) {
 				construct(std::shared_ptr<Node>());
 				archive(
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))

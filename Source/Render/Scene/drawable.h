@@ -141,12 +141,13 @@ namespace MV {
 			}
 
 			virtual void defaultDrawImplementation();
+			void Drawable::drawOpenGL(GLuint& a_bufferId, const std::vector<MV::DrawPoint>& a_points, const std::vector<unsigned int> &a_vertexIndices, MV::Shader* a_shader, const std::shared_ptr<MV::TextureHandle> &a_texture, const MV::TransformMatrix& a_matrix, GLenum a_drawType = GL_TRIANGLES);
 
 			void refreshBounds();
 
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					CEREAL_NVP(shouldDraw),
 					CEREAL_NVP(ourTexture),
@@ -160,7 +161,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Drawable> &construct, std::uint32_t const version) {
+			static void load_and_construct(Archive & archive, cereal::construct<Drawable> &construct, std::uint32_t const /*version*/) {
 				construct(std::shared_ptr<Node>());
 				archive(
 					cereal::make_nvp("shouldDraw", construct->shouldDraw),

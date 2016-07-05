@@ -1,8 +1,6 @@
 #ifndef _MV_FORMATTEDTEXT_H_
 #define _MV_FORMATTEDTEXT_H_
 
-#define GL_GLEXT_PROTOTYPES
-#define GLX_GLEXT_PROTOTYPES
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -158,14 +156,14 @@ namespace MV {
 		std::shared_ptr<FontDefinition> fontDefinition(const std::string &a_identifier) const;
 	private:
 		template <class Archive>
-		void serialize(Archive & archive, std::uint32_t const version){
+		void serialize(Archive & archive, std::uint32_t const /*version*/){
 			archive(
 				CEREAL_NVP(loadedFonts)
 			);
 		}
 
 		template <class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<TextLibrary> &construct, std::uint32_t const version){
+		static void load_and_construct(Archive & archive, cereal::construct<TextLibrary> &construct, std::uint32_t const /*version*/){
 			Draw2D *renderer = nullptr;
 			archive.extract(
 				cereal::make_nvp("renderer", renderer)

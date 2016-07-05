@@ -1,8 +1,6 @@
 #ifndef _MV_BOXAABB_H_
 #define _MV_BOXAABB_H_
 
-#define GL_GLEXT_PROTOTYPES
-#define GLX_GLEXT_PROTOTYPES
 #include <stdio.h>
 #include <iostream>
 #include <algorithm>

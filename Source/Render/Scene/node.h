@@ -1,8 +1,6 @@
 #ifndef _MV_SCENE_NODE_H_
 #define _MV_SCENE_NODE_H_
 
-#define GL_GLEXT_PROTOTYPES
-#define GLX_GLEXT_PROTOTYPES
 #include <stdio.h>
 #include <iostream>
 #include <algorithm>
@@ -231,7 +229,7 @@ namespace MV {
 			virtual void onRemoved(){}
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					CEREAL_NVP(componentId),
 					CEREAL_NVP(componentOwner)
@@ -239,7 +237,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Component> &construct, std::uint32_t const version) {
+			static void load_and_construct(Archive & archive, cereal::construct<Component> &construct, std::uint32_t const /*version*/) {
 				construct(std::shared_ptr<Node>());
 				archive(
 					cereal::make_nvp("componentId", construct->componentId),
@@ -965,7 +963,7 @@ namespace MV {
 			void postLoadStep(bool a_isRootNode);
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				std::vector<std::shared_ptr<Node>> filteredChildren;
 				std::copy_if(childNodes.begin(), childNodes.end(), std::back_inserter(filteredChildren), [](const auto &a_child){
 					return a_child->allowSerialize;
@@ -1004,7 +1002,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Node> &construct, std::uint32_t const version) {
+			static void load_and_construct(Archive & archive, cereal::construct<Node> &construct, std::uint32_t const /*version*/) {
 				Draw2D *renderer = nullptr;
 				archive.extract(cereal::make_nvp("renderer", renderer));
 				MV::require<PointerException>(renderer != nullptr, "Null renderer in Node::load_and_construct.");

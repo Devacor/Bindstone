@@ -8,9 +8,9 @@
 #ifndef NOMINMAX
 	#define NOMINMAX 1
 #endif
-#if defined(WIN32) && !defined(GL_BGR)
-#define GL_BGR GL_BGR_EXT
-#endif
+// #if defined(WIN32) && !defined(GL_BGR)
+// #define GL_BGR GL_BGR_EXT
+// #endif
 
 #if !defined(WIN32) && !defined(GLNULL)
 #define GLNULL GLuint(NULL)
@@ -41,12 +41,16 @@
 
 #include <SDL.h>
 
+#define GL_GLEXT_PROTOTYPES
+#define GLX_GLEXT_PROTOTYPES
+
 #ifdef HAVE_OPENGLES
 	#include <SDL_opengl.h>
 	#include <SDL_opengles.h>
 	typedef GLfloat GLdouble; //opengles has no GLdouble
 #else
 	#include "gl3w/include/GL/gl3w.h"
+	#include <SDL_opengl.h>
 #endif
 
 #ifdef GL_DEPTH_COMPONENT24
@@ -72,22 +76,22 @@ namespace MV {
 	extern const std::string PREMULTIPLY_ID;
 	extern const std::string COLOR_PICKER_ID;
 
-	#if SDL_BYTEORDER == SDL_BIG_ENDIAN
-	  const Uint32 SDL_RMASK = 0xff000000;
-	  const Uint32 SDL_GMASK = 0x00ff0000;
-	  const Uint32 SDL_BMASK = 0x0000ff00;
-	  const Uint32 SDL_AMASK = 0x000000ff;
-	#else
-	  const Uint32 SDL_RMASK = 0x000000ff;
-	  const Uint32 SDL_GMASK = 0x0000ff00;
-	  const Uint32 SDL_BMASK = 0x00ff0000;
-	  const Uint32 SDL_AMASK = 0xff000000;
-	#endif
+#if SDL_BYTEORDER == SDL_BIG_ENDIAN
+	const Uint32 SDL_RMASK = 0xff000000;
+	const Uint32 SDL_GMASK = 0x00ff0000;
+	const Uint32 SDL_BMASK = 0x0000ff00;
+	const Uint32 SDL_AMASK = 0x000000ff;
+#else
+	const Uint32 SDL_RMASK = 0x000000ff;
+	const Uint32 SDL_GMASK = 0x0000ff00;
+	const Uint32 SDL_BMASK = 0x00ff0000;
+	const Uint32 SDL_AMASK = 0xff000000;
+#endif
 
-	class glExtensionBlendMode{
+	class glExtensionBlendMode {
 	public:
 		glExtensionBlendMode(Draw2D *a_renderer);
-		bool blendModeExtensionEnabled(){return initialized;}
+		bool blendModeExtensionEnabled() { return initialized; }
 		void setBlendFunction(GLenum a_sfactorRGB, GLenum a_dfactorRGB, GLenum a_sfactorAlpha, GLenum a_dfactorAlpha);
 		void setBlendFunction(GLenum a_sfactorRGB, GLenum a_dfactorRGB);
 		void setBlendEquation(GLenum a_rgbBlendFunc, GLenum a_alphaBlendFunc);
@@ -106,23 +110,23 @@ namespace MV {
 		std::shared_ptr<Framebuffer> start();
 		void stop();
 
-		void setTextureId(GLuint a_texture){
+		void setTextureId(GLuint a_texture) {
 			texture = a_texture;
 		}
-		GLuint textureId() const{
+		GLuint textureId() const {
 			return texture;
 		}
 
-		void setSize(const Size<int> &a_size){
+		void setSize(const Size<int> &a_size) {
 			frameSize = a_size;
 		}
-		Size<int> size() const{
+		Size<int> size() const {
 			return frameSize;
 		}
-		void setPosition(const Point<int> &a_position){
+		void setPosition(const Point<int> &a_position) {
 			framePosition = a_position;
 		}
-		Point<int> position() const{
+		Point<int> position() const {
 			return framePosition;
 		}
 	private:
@@ -143,12 +147,12 @@ namespace MV {
 		Draw2D *renderer;
 	};
 
-	class glExtensionFramebufferObject{
+	class glExtensionFramebufferObject {
 		friend Framebuffer;
 	public:
 		glExtensionFramebufferObject(Draw2D *a_renderer);
 
-		bool framebufferObjectExtensionEnabled(){return initialized;}
+		bool framebufferObjectExtensionEnabled() { return initialized; }
 		std::shared_ptr<Framebuffer> makeFramebuffer(const Point<int> &a_position, const Size<int> &a_size, GLuint a_texture, const Color &a_backgroundColor = Color(0.0f, 0.0f, 0.0f, 0.0f));
 
 		void startUsingFramebuffer(std::weak_ptr<Framebuffer> a_framebuffer, bool a_push = true);
@@ -164,7 +168,7 @@ namespace MV {
 		void deleteFramebuffer(Framebuffer &a_framebuffer);
 		Draw2D *renderer;
 		bool initialized;
-		
+
 		Color savedClearColor;
 	};
 

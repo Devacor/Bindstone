@@ -221,9 +221,11 @@ namespace MV{
 					require<ResourceException>(false, "Error reading skeleton data file: ", a_fileBundle.skeletonFile);
 				}
 
+				//TODO <low>: maybe cache instead of disposing to avoid file reads.
 				spSkeletonJson_dispose(json);
 
 				skeleton = spSkeleton_create(skeletonData);
+
 				require<ResourceException>(skeleton && skeleton->bones && skeleton->bones[0], a_fileBundle.skeletonFile, " has no bones!");
 				rootBone = skeleton->bones[0];
 
@@ -421,8 +423,8 @@ namespace MV{
 								}
 								node->silence()->
 									position({ slot->bone->worldX, slot->bone->worldY })->
-									rotation({ 0.0f, 0.0f, slot->bone->worldRotation })->
-									scale({ slot->bone->worldScaleX, slot->bone->worldScaleY });
+									rotation({ 0.0f, spBone_getWorldRotationY(slot->bone), spBone_getWorldRotationX(slot->bone) })->
+									scale({ spBone_getWorldScaleX(slot->bone), spBone_getWorldScaleY(slot->bone) });
 								node->draw();
 								renderedChildren.push_back(node->id());
 							}
@@ -515,13 +517,9 @@ namespace MV{
 				spMeshAttachment* attachment = reinterpret_cast<spMeshAttachment*>(slot->attachment);
 				return getSpineTexture(attachment);
 			}
-			else if (slot->attachment->type == SP_ATTACHMENT_SKINNED_MESH) {
-				spSkinnedMeshAttachment* attachment = reinterpret_cast<spSkinnedMeshAttachment*>(slot->attachment);
-				return getSpineTexture(attachment);
-			}
 			return nullptr;
 		}
-
+		
 		FileTextureDefinition * Spine::loadSpineSlotIntoPoints(spSlot* slot) {
 			Color attachmentColor(skeleton->r * slot->r, skeleton->g * slot->g, skeleton->b * slot->b, skeleton->a * slot->a);
 			if(slot->attachment->type == SP_ATTACHMENT_REGION){
@@ -548,27 +546,11 @@ namespace MV{
 				return getSpineTexture(attachment);
 			} else if(slot->attachment->type == SP_ATTACHMENT_MESH){
 				spMeshAttachment* attachment = reinterpret_cast<spMeshAttachment*>(slot->attachment);
-				require<ResourceException>(attachment->verticesCount <= SPINE_MESH_VERTEX_COUNT_MAX, "VerticesCount exceeded for spine mesh.");
+				require<ResourceException>(attachment->super.verticesCount <= SPINE_MESH_VERTEX_COUNT_MAX, "VerticesCount exceeded for spine mesh.");
 				spMeshAttachment_computeWorldVertices(attachment, slot, spineWorldVertices);
 
 				for(int i = 0; i < attachment->trianglesCount; ++i) {
 					auto index = attachment->triangles[i] << 1;
-					points.push_back(DrawPoint(
-						Point<>(spineWorldVertices[index], spineWorldVertices[index + 1]),
-						attachmentColor,
-						TexturePoint(attachment->uvs[index], attachment->uvs[index + 1])
-						));
-					vertexIndices.push_back(static_cast<GLuint>(points.size() - 1));
-				}
-
-				return getSpineTexture(attachment);
-			} else if(slot->attachment->type == SP_ATTACHMENT_SKINNED_MESH){
-				spSkinnedMeshAttachment* attachment = reinterpret_cast<spSkinnedMeshAttachment*>(slot->attachment);
-				require<ResourceException>(attachment->uvsCount <= SPINE_MESH_VERTEX_COUNT_MAX, "UVS exceeded for spine skinned mesh.");
-				spSkinnedMeshAttachment_computeWorldVertices(attachment, slot, spineWorldVertices);
-
-				for(int i = 0; i < attachment->trianglesCount; ++i) {
-					int index = attachment->triangles[i] << 1;
 					points.push_back(DrawPoint(
 						Point<>(spineWorldVertices[index], spineWorldVertices[index + 1]),
 						attachmentColor,

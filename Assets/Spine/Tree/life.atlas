@@ -47,7 +47,7 @@ Assets/trunkback
   offset: 0, 0
   index: -1
 
-skeleton2.png
+life2.png
 size: 1024,1024
 format: RGBA8888
 filter: Linear,Linear

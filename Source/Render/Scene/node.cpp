@@ -103,6 +103,9 @@ namespace MV {
 				if (allowChildrenToDraw) {
 					drawChildren();
 				}
+				for (auto&& component : stableComponentList) {
+					component->endDraw();
+				}
 			}
 		}
 
@@ -163,36 +166,8 @@ namespace MV {
 
 		void Node::drawUpdate(double a_delta) {
 			auto selfReference = shared_from_this(); //keep us alive no matter the update step
-
-			if (allowDraw && allowUpdate) {
-				allowChangeCallNeeded = true;
-				bool allowChildrenToDraw = true;
-				auto stableComponentList = childComponents;
-				for (auto&& component : stableComponentList) {
-					component->updateImplementation(a_delta);
-					allowChildrenToDraw = component->draw() && allowChildrenToDraw;
-				}
-				auto stableChildNodes = childNodes;
-				if (allowChildrenToDraw) {
-					for (auto&& child : stableChildNodes) {
-						child->drawUpdate(a_delta);
-					}
-				} else {
-					for (auto&& child : stableChildNodes) {
-						child->update(a_delta);
-					}
-				}
-				rootTask.update(a_delta);
-				if (onChangeCallNeeded) {
-					onChangeCallNeeded = false;
-					allowChangeCallNeeded = false;
-					onChangeSignal(shared_from_this());
-				}
-			} else if (allowDraw) {
-				selfReference->draw();
-			} else if (allowUpdate) {
-				selfReference->update(a_delta);
-			}
+			selfReference->update(a_delta);
+			selfReference->draw();
 		}
 
 		std::shared_ptr<Node> Node::make(Draw2D& a_draw2d, const std::string &a_id) {

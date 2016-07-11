@@ -9,81 +9,68 @@ CEREAL_REGISTER_TYPE(MV::Scene::Stencil);
 namespace MV {
 	namespace Scene {
 
-// 		void Stencil::refreshTexture(bool a_forceRefreshEvenIfNotDirty /*= true*/) {
-// 			if (owner()->renderer().headless()) { return; }
-// 
-// 			if (a_forceRefreshEvenIfNotDirty || dirtyTexture) {
-// 				auto originalShaderId = shader();
-// 				SCOPE_EXIT{ dirtyTexture = false;  shader(originalShaderId); };
-// 				shader(refreshShaderId);
-// 				bool emptyCapturedBounds = capturedBounds.empty();
-// 				auto pointAABB = emptyCapturedBounds ? bounds() : capturedBounds;
-// 				pointAABB += capturedOffset;
-// 				auto textureSize = round<int>(pointAABB.size());
-// 				if (!clippedTexture || clippedTexture->size() != textureSize) {
-// 					clippedTexture = DynamicTextureDefinition::make("", textureSize, { 0.0f, 0.0f, 0.0f, 0.0f });
-// 				}
-// 
-// 				texture(clippedTexture->makeHandle(textureSize));
-// 				{
-// 					auto framebuffer = owner()->renderer().makeFramebuffer(round<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId())->start();
-// 
-// 					SCOPE_EXIT{ owner()->renderer().defaultBlendFunction(); };
-// 
-// 					owner()->drawChildren(TransformMatrix());
-// 				}
-// 				notifyParentOfComponentChange();
-// 			}
-// 		}
-
 		void Stencil::drawStencil() {
-
+// 			shaderUpdater = [&](MV::Shader* a_shader) {
+// 				a_shader->set("alphaFilter", 0.01f);
+// 			};
+			Drawable::defaultDrawImplementation();
 		}
 
-		int Stencil::totalFramebuffers = 0;
+		int Stencil::totalStencilDepth = 0;
 
-		bool Stencil::preDraw() {
+ 		bool Stencil::preDraw() {
 			if (shouldDraw) {
-				if (totalFramebuffers++ == 0)
+				glStencilMask(0xFF);
+				if (totalStencilDepth++ == 0) {
 					glEnable(GL_STENCIL_TEST);
+					glClear(GL_STENCIL_BUFFER_BIT);
+				}
 
-				glColorMask(false, false, false, false);
-				glDepthMask(false);
-				glStencilFunc(GL_ALWAYS, 0, 0);
-				glStencilOp(GL_INCR, GL_INCR, GL_INCR);
-
+				glStencilFunc(GL_ALWAYS, totalStencilDepth, totalStencilDepth);  //Always fail the stencil test
+				glStencilOp(GL_INCR, GL_INCR, GL_INCR);   //Set the pixels which failed to 1
+				
+				glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 				drawStencil();
-
+				glStencilMask(0x00);
 				glColorMask(true, true, true, true);
-				glDepthMask(true);
-				glStencilFunc(GL_EQUAL, 1, 0xff);
-				glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-
-				return true;
+				glStencilFunc(GL_EQUAL, totalStencilDepth, totalStencilDepth);   //Only pass the stencil test where the pixel is 1 in the stencil buffer
+				glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);   //Don't change the stencil buffer any further
 			}
 			return false;
 		}
 
 		bool Stencil::postDraw() {
+			return true;
+		}
+
+		//TODO: Cache the stencil properly instead of assuming nothing changed in this node and naively drawing it again (may cause artifacts!)
+		void Stencil::endDraw() {
 			if (shouldDraw) {
 				glColorMask(false, false, false, false);
-				glDepthMask(false);
-				glStencilFunc(GL_ALWAYS, 1, 0xff);
+				glStencilFunc(GL_ALWAYS, totalStencilDepth, totalStencilDepth);
 				glStencilOp(GL_DECR, GL_DECR, GL_DECR);
-
+				glStencilMask(0xFF);
 				drawStencil();
-
+				glStencilMask(0x00);
 				glColorMask(true, true, true, true);
-				glDepthMask(true);
 
-				if (--totalFramebuffers == 0)
+				if (--totalStencilDepth == 0) {
 					glDisable(GL_STENCIL_TEST);
+				}
 			}
-			return !shouldDraw;
+		}
+
+		void Stencil::defaultDrawImplementation() {
+			//Drawable::defaultDrawImplementation();
 		}
 
 		Stencil::Stencil(const std::weak_ptr<Node> &a_owner) :
 			Sprite(a_owner) {
+			//shaderProgramId = ALPHA_FILTER_ID;
+			auto newColor = Color(0.0f, 0.0f, 0.0f, 1.0f);
+			for (auto&& point : points) {
+				point = newColor;
+			}
 		}
 
 		std::shared_ptr<Stencil> Stencil::clearCaptureBounds() {

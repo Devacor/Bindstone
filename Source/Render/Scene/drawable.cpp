@@ -165,6 +165,9 @@ namespace MV {
 
 				shaderProgram->set("texture", ourTexture);
 				shaderProgram->set("transformation", owner()->renderer().projectionMatrix().top() * owner()->worldTransform());
+				if (shaderUpdater) {
+					shaderUpdater(shaderProgram);
+				}
 
 				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices.size()), GL_UNSIGNED_INT, &vertexIndices[0]);
 

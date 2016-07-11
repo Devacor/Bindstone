@@ -26,6 +26,14 @@ namespace MV {
 
 			void refreshTexture(bool a_forceRefreshEvenIfNotDirty = true);
 
+			bool refreshEveryFrame() const {
+				return forceRefreshEveryFrame;
+			}
+			std::shared_ptr<Clipped> refreshEveryFrame(bool a_yesOrNo) {
+				forceRefreshEveryFrame = a_yesOrNo;
+				return std::static_pointer_cast<Clipped>(shared_from_this());
+			}
+
 			std::shared_ptr<Clipped> clearCaptureBounds();
 
 			std::shared_ptr<Clipped> captureBounds(const BoxAABB<> &a_newCapturedBounds);
@@ -50,6 +58,7 @@ namespace MV {
 					CEREAL_NVP(refreshShaderId),
 					CEREAL_NVP(capturedBounds),
 					CEREAL_NVP(capturedOffset),
+					CEREAL_NVP(forceRefreshEveryFrame),
 					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
 				);
 			}
@@ -92,6 +101,7 @@ namespace MV {
 			BoxAABB<> capturedBounds;
 			Point<> capturedOffset;
 			bool dirtyTexture = true;
+			bool forceRefreshEveryFrame = false;
 			Node::BasicSharedSignalType dirtyObserveSignal;
 		};
 	}

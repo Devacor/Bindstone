@@ -1,5 +1,5 @@
-#ifndef _MV_SCENE_CLIPPED_H_
-#define _MV_SCENE_CLIPPED_H_
+#ifndef _MV_SCENE_STENCIL_H_
+#define _MV_SCENE_STENCIL_H_
 
 #include "sprite.h"
 #include "Interface/mouse.h"
@@ -13,6 +13,8 @@ namespace MV {
 
 		public:
 			DrawableDerivedAccessors(Stencil)
+
+			virtual void endDraw() override;
 
 			std::shared_ptr<Stencil> bounds(const BoxAABB<> &a_bounds);
 			BoxAABB<> bounds();
@@ -43,6 +45,8 @@ namespace MV {
 			Stencil(const std::weak_ptr<Node> &a_owner);
 
 			void drawStencil();
+
+			virtual void defaultDrawImplementation() override;
 
 			template <class Archive>
 			void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -78,8 +82,8 @@ namespace MV {
 				onLeftMouseUpHandle.reset();
 			}
 		private:
-			virtual bool preDraw();
-			virtual bool postDraw();
+ 			virtual bool preDraw() override;
+ 			virtual bool postDraw() override;
 
 			MouseState::SignalType onLeftMouseDownHandle;
 			MouseState::SignalType onLeftMouseUpHandle;
@@ -88,7 +92,7 @@ namespace MV {
 			BoxAABB<> capturedBounds;
 			Point<> capturedOffset;
 
-			static int totalFramebuffers;
+			static int totalStencilDepth;
 		};
 	}
 }

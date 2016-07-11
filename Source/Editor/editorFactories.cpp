@@ -183,10 +183,10 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 	auto boxContents = box->make("contents")->position({ 0.0f, headerSize });
 
 	std::weak_ptr<MV::Scene::Node> weakBoxContents = boxContents;
-	box->attach<MV::Scene::Clipped>();
+	box->attach<MV::Scene::Stencil>();
 
 	box->onChange.connect("changeResize", [headerSize, weakBoxContents, &a_mouse](const std::shared_ptr<MV::Scene::Node> &a_self){
-		auto clippedView = a_self->component<MV::Scene::Clipped>();
+		auto clippedView = a_self->component<MV::Scene::Stencil>();
 		auto newBounds = weakBoxContents.lock()->bounds();
 		auto sizeOfNode = newBounds.size() + MV::size(0.0f, headerSize);
 		if (sizeOfNode.height > 520.0f) {

@@ -155,6 +155,7 @@ namespace MV {
 	const std::string DEFAULT_ID = "default";
 	const std::string PREMULTIPLY_ID = "premultiply";
 	const std::string COLOR_PICKER_ID = "colorPicker";
+	const std::string ALPHA_FILTER_ID = "alphaFilter";
 
 	bool RUNNING_IN_HEADLESS = false;
 
@@ -538,7 +539,7 @@ namespace MV {
 			SDL_GL_SetAttribute(SDL_GL_BUFFER_SIZE, 0);
 
 			SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
-			SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
+			SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 1);
 
 			SDL_GL_SetAttribute(SDL_GL_ACCUM_RED_SIZE, 0);
 			SDL_GL_SetAttribute(SDL_GL_ACCUM_GREEN_SIZE, 0);
@@ -708,6 +709,7 @@ namespace MV {
 			if(a_summarize){
 				summarizeDisplayMode();
 			}
+			loadDefaultShaders();
 			return true;
 		}
 		return false;
@@ -803,6 +805,7 @@ namespace MV {
 #else
 			glClearDepth(1.0f);
 #endif
+			glClearStencil(0);
 
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 		}
@@ -958,6 +961,13 @@ namespace MV {
 		return shaderPtr;
 	}
 
+	void Draw2D::loadDefaultShaders() {
+		loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
+		loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
+		loadShader(MV::ALPHA_FILTER_ID, "Assets/Shaders/default.vert", "Assets/Shaders/alphaFilter.frag");
+		loadShader(MV::COLOR_PICKER_ID, "Assets/Shaders/default.vert", "Assets/Shaders/colorPicker.frag");
+	}
+
 	Shader* Draw2D::loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename) {
 		auto found = shaders.find(a_id);
 		if(found == shaders.end()){
@@ -970,7 +980,7 @@ namespace MV {
 			std::string fragmentShaderCode((std::istreambuf_iterator<char>(fragmentShaderFile)), std::istreambuf_iterator<char>());
 
 			return loadShaderCode(a_id, vertexShaderCode, fragmentShaderCode);
-		} else{
+		} else {
 			return &found->second;
 		}
 	}

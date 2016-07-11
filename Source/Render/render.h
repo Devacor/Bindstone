@@ -72,9 +72,11 @@ namespace MV {
 
 	extern bool RUNNING_IN_HEADLESS;
 
+	//Built In Shaders
 	extern const std::string DEFAULT_ID;
 	extern const std::string PREMULTIPLY_ID;
 	extern const std::string COLOR_PICKER_ID;
+	extern const std::string ALPHA_FILTER_ID;
 
 #if SDL_BYTEORDER == SDL_BIG_ENDIAN
 	const Uint32 SDL_RMASK = 0xff000000;
@@ -395,6 +397,7 @@ namespace MV {
 
 		void defaultBlendFunction();
 
+		void loadDefaultShaders();
 		Shader* loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename);
 		Shader* loadShaderCode(const std::string &a_id, const std::string &a_vertexShaderCode, const std::string &a_fragmentShaderCode);
 
@@ -402,7 +405,6 @@ namespace MV {
 		Shader* getShader(const std::string &a_id);
 
 		Shader* defaultShader() const;
-		Shader* defaultShader(GLuint a_newId);
 		Shader* defaultShader(const std::string &a_id);
 
 		bool headless() const {

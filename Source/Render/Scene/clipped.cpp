@@ -38,7 +38,7 @@ namespace MV {
 
 		bool Clipped::preDraw() {
 			if (shouldDraw) {
-				refreshTexture(false);
+				refreshTexture(forceRefreshEveryFrame);
 				return true;
 			}
 			return false;

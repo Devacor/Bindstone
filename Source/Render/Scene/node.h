@@ -129,6 +129,7 @@ namespace MV {
 			virtual ~Component() {}
 
 			virtual bool draw() { return true; }
+			virtual void endDraw() { }
 
 			void update(double a_delta) {
 				updateImplementation(a_delta);
@@ -498,14 +499,33 @@ namespace MV {
 				return SafeComponent<ComponentType>(nullptr, nullptr);
 			}
 
+			template<typename ... ComponentType>
+			std::vector<MV::Variant<SafeComponent<ComponentType>...>> componentsInParents(bool a_exactType = true, bool a_includeSelf = true) const {
+				typedef std::vector<MV::Variant<SafeComponent<ComponentType>...>> ResultType;
+				ResultType results;
+				if (a_includeSelf) {
+					results = components<ComponentType...>(a_exactType);
+				}
+
+				if (myParent) {
+					auto parentResults = myParent->componentsInParents<ComponentType...>(a_exactType, true);
+					moveAppend(results, parentResults);
+				}
+				return results;
+			}
+
 			template<typename ComponentType>
-			SafeComponent<ComponentType> componentInParents(bool a_exactType = true, bool a_throwIfNotFound = true) const {
+			SafeComponent<ComponentType> componentInParents(bool a_exactType = true, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
 				std::lock_guard<std::recursive_mutex> guard(lock);
-				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, false);
-				if (foundComponent != childComponents.end()) {
-					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
-				} else if (myParent) {
-					auto parentComponent = myParent->componentInParents<ComponentType>(a_exactType, false);
+				if (a_includeSelf) {
+					std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, false);
+					if (foundComponent != childComponents.end()) {
+						return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
+					}
+				}
+
+				if (myParent) {
+					auto parentComponent = myParent->componentInParents<ComponentType>(a_exactType, false, true);
 					if (parentComponent) {
 						return parentComponent;
 					}
@@ -518,14 +538,14 @@ namespace MV {
 			}
 
 			template<typename ComponentType>
-			SafeComponent<ComponentType> componentInChildren(bool a_exactType = true, bool a_throwIfNotFound = true) const {
+			SafeComponent<ComponentType> componentInChildren(bool a_exactType = true, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
 				std::lock_guard<std::recursive_mutex> guard(lock);
-				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, false);
+				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = a_includeSelf ? componentIterator<ComponentType>(a_exactType, false) : childComponents.end();
 				if (foundComponent != childComponents.end()) {
 					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
 				} else if (!childNodes.empty()) {
 					for (auto&& childNode : childNodes) {
-						auto childComponent = childNode->componentInChildren<ComponentType>(a_exactType, false);
+						auto childComponent = childNode->componentInChildren<ComponentType>(a_exactType, false, true);
 						if (childComponent) {
 							return childComponent;
 						}
@@ -561,16 +581,16 @@ namespace MV {
 			
 			//stop the bool overload from stealing raw strings.
 			template<typename ComponentType>
-			SafeComponent<ComponentType> componentInChildren(const char *a_componentId, bool a_throwIfNotFound = true) const {
-				return componentInChildren<ComponentType>(std::string(a_componentId), a_throwIfNotFound);
+			SafeComponent<ComponentType> componentInChildren(const char *a_componentId, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
+				return componentInChildren<ComponentType>(std::string(a_componentId), a_throwIfNotFound, a_includeSelf);
 			}
 
 			template<typename ComponentType>
-			SafeComponent<ComponentType> componentInChildren(const std::string &a_componentId, bool a_throwIfNotFound = true) const {
+			SafeComponent<ComponentType> componentInChildren(const std::string &a_componentId, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
 				std::lock_guard<std::recursive_mutex> guard(lock);
-				auto found = std::find_if(childComponents.cbegin(), childComponents.cend(), [&](const std::shared_ptr<Component> &a_component) {
+				auto found = a_includeSelf ? std::find_if(childComponents.cbegin(), childComponents.cend(), [&](const std::shared_ptr<Component> &a_component) {
 					return a_component->id() == a_componentId;
-				});
+				}) : childComponents.end();
 				if (found != childComponents.cend()) {
 					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*found));
 				} else if (!childNodes.empty()) {
@@ -605,10 +625,10 @@ namespace MV {
 			}
 
 			template<typename ... ComponentType>
-			std::vector<MV::Variant<SafeComponent<ComponentType>...>> componentsInChildren(bool includeComponentsInThis = false, bool exactType = true) const {
+			std::vector<MV::Variant<SafeComponent<ComponentType>...>> componentsInChildren(bool exactType = true, bool includeComponentsInThis = false) const {
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				std::vector<MV::Variant<SafeComponent<ComponentType>...>> results;
-				componentsInChildrenInternal<ComponentType...>(includeComponentsInThis, exactType, results);
+				componentsInChildrenInternal<ComponentType...>(exactType, includeComponentsInThis, results);
 				return results;
 			}
 
@@ -719,6 +739,10 @@ namespace MV {
 			std::shared_ptr<Node> hide();
 
 			bool visible() const {
+				return allowDraw && (myParent ? myParent->visible() : true);
+			}
+
+			bool selfVisible() const {
 				return allowDraw;
 			}
 
@@ -726,6 +750,10 @@ namespace MV {
 			std::shared_ptr<Node> resume();
 
 			bool updating() const {
+				return allowUpdate && (myParent ? myParent->updating() : true);
+			}
+
+			bool selfUpdating() const {
 				return allowUpdate;
 			}
 
@@ -733,6 +761,10 @@ namespace MV {
 			std::shared_ptr<Node> enable();
 
 			bool active() const {
+				return allowDraw && allowUpdate && (myParent ? myParent->active() : true);
+			}
+
+			bool selfActive() const {
 				return allowDraw && allowUpdate;
 			}
 
@@ -922,7 +954,7 @@ namespace MV {
 			}
 
 			template<typename ... ComponentType>
-			void componentsInChildrenInternal(bool includeComponentsInThis, bool exactType, std::vector<MV::Variant<SafeComponent<ComponentType>...>>& results) const {
+			void componentsInChildrenInternal(bool exactType, bool includeComponentsInThis, std::vector<MV::Variant<SafeComponent<ComponentType>...>>& results) const {
 				if (includeComponentsInThis) {
 					if (exactType) {
 						for (auto&& item : childComponents) {
@@ -935,7 +967,7 @@ namespace MV {
 					}
 				}
 				for (auto&& child : childNodes) {
-					child->componentsInChildrenInternal<ComponentType...>(true, exactType, results);
+					child->componentsInChildrenInternal<ComponentType...>(exactType, true, results);
 				}
 			}
 

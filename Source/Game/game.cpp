@@ -31,8 +31,6 @@ void Game::initializeWindow(){
 	if (!data.managers().renderer.initialize(windowSize, worldSize)) {
 		exit(0);
 	}
-	data.managers().renderer.loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
-	data.managers().renderer.loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
 	atexit(sdl_quit);
 
 	MV::AudioPlayer::instance()->initAudio();

@@ -28,8 +28,6 @@ void ClickerGame::initializeWindow() {
 	if (!renderer->initialize(windowSize, worldSize)) {
 		exit(0);
 	}
-	renderer->loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
-	renderer->loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
 	atexit(sdl_quit_2);
 
 	MV::AudioPlayer::instance()->initAudio();

@@ -122,6 +122,8 @@ namespace MV {
 		protected:
 			Drawable(const std::weak_ptr<Node> &a_owner);
 
+			std::function<void(Shader*)> shaderUpdater;
+
 			virtual void onRemoved() {
 				notifyParentOfBoundsChange();
 			}

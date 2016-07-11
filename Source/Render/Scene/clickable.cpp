@@ -1,5 +1,6 @@
 #include "clickable.h"
 #include "clipped.h"
+#include "stencil.h"
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
@@ -162,21 +163,33 @@ namespace MV {
 				BoxAABB<> hitBox;
 				if (hitDetectionType == BoundsType::LOCAL) {
 					hitBox = bounds();
-				}else if (hitDetectionType == BoundsType::NODE) {
+				}
+				else if (hitDetectionType == BoundsType::NODE) {
 					hitBox = owner()->bounds(false);
-				}else if (hitDetectionType == BoundsType::NODE_CHILDREN) {
+				}
+				else if (hitDetectionType == BoundsType::NODE_CHILDREN) {
 					hitBox = owner()->bounds(true);
-				}else if (hitDetectionType == BoundsType::CHILDREN) {
+				}
+				else if (hitDetectionType == BoundsType::CHILDREN) {
 					hitBox = owner()->childBounds();
 				}
 
-				auto foundClippedParent = owner()->componentInParents<Clipped>(false, false);
-				if (foundClippedParent) {
-					auto screenBounds = foundClippedParent->owner()->screenFromLocal(foundClippedParent->bounds());
+				auto foundClippedParents = owner()->componentsInParents<Clipped, Stencil>(false, false);
+				for (auto&& clippedParent : foundClippedParents) {
+					BoxAABB<int> screenBounds;
+
+					visit(clippedParent,
+						[&](const MV::Scene::SafeComponent<MV::Scene::Clipped> &a_clipped) {
+						screenBounds = a_clipped->owner()->screenFromLocal(a_clipped->bounds());
+					}, [&](const MV::Scene::SafeComponent<MV::Scene::Stencil> &a_stencil) {
+						screenBounds = a_stencil->owner()->screenFromLocal(a_stencil->bounds());
+					});
+
 					if (!screenBounds.contains(a_state.position())) {
 						return false;
 					}
 				}
+
 				return owner()->screenFromLocal(hitBox).contains(a_state.position());
 			} else {
 				return false;

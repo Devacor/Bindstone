@@ -8,7 +8,8 @@ uniform sampler2D texture;
 out vec4 colorResult;
  
 void main(){
-	vec4 premultipliedColor = color;
-	premultipliedColor *= color.a;
+    vec4 premultipliedColor = color;
+    premultipliedColor *= color.a;
+
     colorResult = texture2D(texture, uv.st) * premultipliedColor;
 }

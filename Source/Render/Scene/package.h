@@ -3,6 +3,7 @@
 	#include "Render/Scene/node.h"
 	#include "Render/Scene/sprite.h"
 	#include "Render/Scene/clipped.h"
+	#include "Render/Scene/stencil.h"
 	#include "Render/Scene/clickable.h"
 	#include "Render/Scene/button.h"
 	#include "Render/Scene/text.h"

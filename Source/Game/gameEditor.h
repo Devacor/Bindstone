@@ -15,10 +15,10 @@ public:
 		editor(managers),
 		limbo(MV::Scene::Node::make(managers.renderer)) {
 
-		auto stencilNode = limbo->make("StencilTestNode");
-		auto spineTestNode = stencilNode->make("SpineTest")->position({ 400.0f, 600.0f })->attach<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Tree/life.json", "Assets/Spine/Tree/life.atlas", 0.5f))->shader(MV::DEFAULT_ID)->animate("idle")->bindNode("effects", "tree_particle")->bindNode("effects", "simple")->owner();
-
-		stencilNode->attach<MV::Scene::Stencil>()->bounds({ MV::Point<>(), MV::Size<>(450.0f, 550.0f) });
+// 		auto stencilNode = limbo->make("StencilTestNode");
+// 		auto spineTestNode = stencilNode->make("SpineTest")->position({ 400.0f, 600.0f })->attach<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Tree/life.json", "Assets/Spine/Tree/life.atlas", 0.5f))->shader(MV::DEFAULT_ID)->animate("idle")->bindNode("effects", "tree_particle")->bindNode("effects", "simple")->owner();
+// 
+// 		stencilNode->attach<MV::Scene::Stencil>()->bounds({ MV::Point<>(), MV::Size<>(450.0f, 550.0f) });
 
 // 		spineTestNode->make("PaletteTest")->position({ -50.0f, -100.0f })->
 // 			attach<MV::Scene::Palette>(mouse)->bounds(MV::size(256.0f, 256.0f));

@@ -346,6 +346,10 @@ namespace MV {
 			friend ReSort;
 
 		public:
+			static int64_t recalculateLocalBoundsCalls;
+			static int64_t recalculateChildBoundsCalls;
+			static int64_t recalculateMatrixCalls;
+
 			~Node();
 
 			SignalRegister<BasicSignature> onChildAdd;
@@ -899,6 +903,20 @@ namespace MV {
 				}
 			}
 
+			void markBoundsDirty() {
+				dirtyLocalBounds = true;
+				markParentBoundsDirty();
+				onLocalBoundsChangeSignal(shared_from_this());
+			}
+
+			void markParentBoundsDirty() {
+				auto* currentParent = myParent;
+				while (currentParent) {
+					currentParent->dirtyChildBounds = true;
+					currentParent = currentParent->myParent;
+				}
+			}
+
 			void silenceInternal() {
 				onChildAddSignal.block();
 				onChildRemoveSignal.block();
@@ -1009,6 +1027,13 @@ namespace MV {
 				if (myParent) {
 					weakParent = myParent->shared_from_this();
 				}
+				if (dirtyChildBounds) {
+					recalculateChildBounds();
+				}
+				if (dirtyLocalBounds) {
+					recalculateLocalBounds();
+				}
+
 				archive(
 					CEREAL_NVP(nodeId),
 					cereal::make_nvp("isRootNode", myParent == nullptr),
@@ -1102,8 +1127,9 @@ namespace MV {
 			bool allowDraw = true;
 
 			bool inOnChange = false;
-			bool inBoundsCalculation = false;
-			bool inChildBoundsCalculation = false;
+
+			bool dirtyLocalBounds = false;
+			bool dirtyChildBounds = false;
 		};
 
 		std::ostream& operator<<(std::ostream& os, const std::shared_ptr<Node>& a_node);

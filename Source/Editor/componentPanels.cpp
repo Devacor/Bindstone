@@ -1159,6 +1159,11 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 				);
 		});
 		panel.root(newRoot);
+		std::cout << "\n____\n";
+		std::cout << "\nRecalculateLocalBounds: " << MV::Scene::Node::recalculateLocalBoundsCalls;
+		std::cout << "\nRecalculateChildBounds: " << MV::Scene::Node::recalculateChildBoundsCalls;
+		std::cout << "\nRecalculateMatrixBounds: " << MV::Scene::Node::recalculateMatrixCalls;
+		std::cout << "\n____\n";
 	});
 }
 

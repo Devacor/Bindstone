@@ -11,6 +11,11 @@ CEREAL_REGISTER_TYPE(MV::Scene::Component);
 
 namespace MV {
 	namespace Scene {
+		int64_t Node::recalculateLocalBoundsCalls = 0;
+		int64_t Node::recalculateChildBoundsCalls = 0;
+		int64_t Node::recalculateMatrixCalls = 0;
+
+
 		void appendQuadVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset) {
 			std::vector<GLuint> quadIndices{
 				a_pointOffset, a_pointOffset + 1,
@@ -39,7 +44,7 @@ namespace MV {
 
 		void Component::notifyParentOfBoundsChange() {
 			if (ownerIsAlive()) {
-				owner()->recalculateLocalBounds();
+				owner()->markBoundsDirty();
 			}
 		}
 
@@ -509,8 +514,14 @@ namespace MV {
 		}
 
 		BoxAABB<> Node::bounds(bool a_includeChildren /*= true*/) {
+			if (dirtyLocalBounds) {
+				recalculateLocalBounds();
+			}
 			onBoundsRequestSignal(shared_from_this());
 			if(a_includeChildren){
+				if (dirtyChildBounds) {
+					recalculateChildBounds();
+				}
 				if(!localBounds.empty() && !localChildBounds.empty()){
 					return BoxAABB<>(localChildBounds).expandWith(localBounds);
 				} else if(!localChildBounds.empty()){
@@ -521,6 +532,9 @@ namespace MV {
 		}
 
 		BoxAABB<> Node::childBounds() {
+			if (dirtyChildBounds) {
+				recalculateChildBounds();
+			}
 			return localChildBounds;
 		}
 
@@ -531,13 +545,12 @@ namespace MV {
 		}
 
 		void Node::recalculateLocalBounds() {
+			recalculateLocalBoundsCalls++;
 			std::lock_guard<std::recursive_mutex> guard(lock);
-			//if (!inBoundsCalculation) {
-				auto self = shared_from_this();
-				inBoundsCalculation = true;
-				SCOPE_EXIT{ inBoundsCalculation = false; };
-
-				auto oldBounds = localBounds;
+			auto self = shared_from_this();
+			auto oldBounds = localBounds;
+			{
+				dirtyLocalBounds = false;
 
 				if (!childComponents.empty()) {
 					localBounds = childComponents[0]->bounds();
@@ -547,24 +560,21 @@ namespace MV {
 							localBounds.expandWith(componentBounds);
 						}
 					}
-				} else {
+				}
+				else {
 					localBounds = BoxAABB<>();
 				}
-				if (myParent) {
-					myParent->recalculateChildBounds();
-				}
-
-				if (localBounds != oldBounds) {
-					onLocalBoundsChangeSignal(self);
-				}
-			//}
+			}
+			if (localBounds != oldBounds) {
+				markParentBoundsDirty();
+			}
 		}
 
 		void Node::recalculateChildBounds() {
 			std::lock_guard<std::recursive_mutex> guard(lock);
-			//if (!inChildBoundsCalculation) {
-				inChildBoundsCalculation = true;
-				SCOPE_EXIT{ inChildBoundsCalculation = false; };
+			recalculateChildBoundsCalls++;
+			{
+				dirtyChildBounds = false;
 				if (!childNodes.empty()) {
 					localChildBounds = childNodes[0]->bounds();
 					for (size_t i = 1; i < childNodes.size(); ++i) {
@@ -573,13 +583,12 @@ namespace MV {
 							localChildBounds.expandWith(nodeBounds);
 						}
 					}
-				} else {
+				}
+				else {
 					localChildBounds = BoxAABB<>();
 				}
-				if (myParent) {
-					myParent->recalculateChildBounds();
-				}
-			//}
+			}
+			markParentBoundsDirty();
 		}
 
 		void Node::recalculateMatrix() {
@@ -600,12 +609,11 @@ namespace MV {
 					localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
 				}
 
-				if (myParent) {
-					myParent->recalculateChildBounds();
-				}
+				markParentBoundsDirty();
 			}
 
 			if (eitherMatrixUpdated) {
+				recalculateMatrixCalls++;
 				worldMatrixDirty = false;
 				if (myParent) {
 					worldMatrixTransform = myParent->worldTransform() * localMatrixTransform;
@@ -641,23 +649,31 @@ namespace MV {
 			onDetach(onDetachSignal){
 
 			worldMatrixTransform.makeIdentity();
-			onAdd.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
-				onParentAlphaChangeSignal = myParent->onAlphaChangeSignal.connect([&](const std::shared_ptr<Node> &a_parent) {
+			auto blockOnChange = std::make_shared<bool>(false);
+			onAdd.connect("SELF", [&, blockOnChange](const std::shared_ptr<Node> &a_self) {
+				{
+					*blockOnChange = true;
+					SCOPE_EXIT{ *blockOnChange = false; };
+					onParentAlphaChangeSignal = myParent->onAlphaChangeSignal.connect([&, blockOnChange](const std::shared_ptr<Node> &a_parent) {
+						recalculateAlpha();
+					});
+					markBoundsDirty();
 					recalculateAlpha();
-				});
-				onTransformChangeSignal(a_self);
-				recalculateAlpha();
+				}
 				safeOnChange();
 			});
-			onRemove.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
-				if (myParent) {
-					myParent->recalculateChildBounds();
-					myParent = nullptr;
+			onRemove.connect("SELF", [&, blockOnChange](const std::shared_ptr<Node> &a_self) {
+				{
+					*blockOnChange = true;
+					SCOPE_EXIT{ *blockOnChange = false; };
+					if (myParent) {
+						myParent->markBoundsDirty();
+						myParent = nullptr;
+					}
+					onParentAlphaChangeSignal = nullptr;
+					onTransformChangeSignal(a_self);
+					recalculateAlpha();
 				}
-
-				onParentAlphaChangeSignal = nullptr;
-				onTransformChangeSignal(a_self);
-				recalculateAlpha();
 				safeOnChange();
 			});
 			onTransformChange.connect("SELF", [&](const std::shared_ptr<Node> &a_self) {
@@ -665,8 +681,10 @@ namespace MV {
 				safeOnChange();
 			});
 			
-			auto onChangeCallback = [](const std::shared_ptr<Node> &a_self) {
-				a_self->safeOnChange();
+			auto onChangeCallback = [blockOnChange](const std::shared_ptr<Node> &a_self) {
+				if (!*blockOnChange) {
+					a_self->safeOnChange();
+				}
 			};
 			onShow.connect("SELF", onChangeCallback);
 			onHide.connect("SELF", onChangeCallback);
@@ -676,6 +694,7 @@ namespace MV {
 			onComponentUpdate.connect("SELF", [&](const std::shared_ptr<Component> &a_component){
 				std::shared_ptr<Component> safeguard = a_component;
 				try {
+					markBoundsDirty();
 					auto owningNode = safeguard->owner();
 					owningNode->safeOnChange();
 				} catch (...) {
@@ -947,6 +966,8 @@ namespace MV {
 		void Node::markMatrixDirty(bool a_rootCall) {
 			if (a_rootCall) {
 				localMatrixDirty = true;
+				
+				markBoundsDirty();
 			} else {
 				worldMatrixDirty = true;
 			}

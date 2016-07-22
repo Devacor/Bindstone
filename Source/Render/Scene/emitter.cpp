@@ -313,6 +313,11 @@ namespace MV {
 			return{ spawnProperties.minimumPosition, spawnProperties.maximumPosition };
 		}
 
+		void Emitter::boundsImplementation(const BoxAABB<> &a_bounds) {
+			spawnProperties.minimumPosition = a_bounds.minPoint;
+			spawnProperties.maximumPosition = a_bounds.maxPoint;
+		}
+
 		std::shared_ptr<Component> Emitter::cloneHelper(const std::shared_ptr<Component> &a_clone) {
 			Drawable::cloneHelper(a_clone);
 			auto emitterClone = std::static_pointer_cast<Emitter>(a_clone);

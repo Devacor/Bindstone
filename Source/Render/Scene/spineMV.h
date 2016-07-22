@@ -185,6 +185,7 @@ namespace MV {
 			virtual void updateImplementation(double a_delta) override;
 			void unloadImplementation();
 		private:
+			virtual void boundsImplementation(const BoxAABB<> &) override {}
 			virtual BoxAABB<> boundsImplementation() override;
 
 			//called from spineAnimationCallback

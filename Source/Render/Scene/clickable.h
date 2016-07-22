@@ -164,6 +164,7 @@ namespace MV {
 
 		protected:
 			virtual void onOwnerDestroyed() {
+				Sprite::onOwnerDestroyed();
 				onLeftMouseDownHandle.reset();
 				onLeftMouseUpHandle.reset();
 				onMouseMoveHandle.reset();

@@ -116,14 +116,6 @@ namespace MV {
 			return captureSize(a_size, (a_center) ? MV::point(a_size.width / 2.0f, a_size.height / 2.0f) : MV::point(0.0f, 0.0f));
 		}
 
-		std::shared_ptr<Stencil> Stencil::bounds(const BoxAABB<> &a_bounds) {
-			return std::static_pointer_cast<Stencil>(Sprite::bounds(a_bounds));
-		}
-
-		BoxAABB<> Stencil::bounds() {
-			return boundsImplementation();
-		}
-
 		std::shared_ptr<Stencil> Stencil::size(const Size<> &a_size, const Point<> &a_centerPoint) {
 			return std::static_pointer_cast<Stencil>(Sprite::size(a_size, a_centerPoint));
 		}

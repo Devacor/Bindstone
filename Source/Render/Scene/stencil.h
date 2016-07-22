@@ -16,8 +16,6 @@ namespace MV {
 
 			virtual void endDraw() override;
 
-			std::shared_ptr<Stencil> bounds(const BoxAABB<> &a_bounds);
-			BoxAABB<> bounds();
 			std::shared_ptr<Stencil> size(const Size<> &a_size, const Point<> &a_centerPoint);
 			std::shared_ptr<Stencil> size(const Size<> &a_size, bool a_center = false);
 			template<typename PointAssign>
@@ -78,6 +76,7 @@ namespace MV {
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
 			virtual void onOwnerDestroyed() {
+				Sprite::onOwnerDestroyed();
 				onLeftMouseDownHandle.reset();
 				onLeftMouseUpHandle.reset();
 			}

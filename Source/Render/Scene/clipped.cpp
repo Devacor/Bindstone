@@ -100,13 +100,9 @@ namespace MV {
 			return captureSize(a_size, (a_center) ? MV::point(a_size.width / 2.0f, a_size.height / 2.0f) : MV::point(0.0f, 0.0f));
 		}
 
-		std::shared_ptr<Clipped> Clipped::bounds(const BoxAABB<> &a_bounds) {
+		void Clipped::boundsImplementation(const BoxAABB<> &a_bounds) {
 			dirtyTexture = true;
-			return std::static_pointer_cast<Clipped>(Sprite::bounds(a_bounds));
-		}
-
-		BoxAABB<> Clipped::bounds() {
-			return boundsImplementation();
+			Sprite::boundsImplementation(a_bounds);
 		}
 
 		std::shared_ptr<Clipped> Clipped::size(const Size<> &a_size, const Point<> &a_centerPoint) {

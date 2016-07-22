@@ -5,12 +5,6 @@
 
 #define SpriteDerivedAccessors(ComponentType) \
 	DrawableDerivedAccessors(ComponentType) \
-	std::shared_ptr<ComponentType> bounds(const MV::BoxAABB<> &a_bounds) { \
-		return std::static_pointer_cast<ComponentType>(MV::Scene::Sprite::bounds(a_bounds)); \
-	} \
-	BoxAABB<> bounds() { \
-		return boundsImplementation(); \
-	} \
 	std::shared_ptr<ComponentType> size(const MV::Size<> &a_size, const MV::Point<> &a_centerPoint) { \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Sprite::size(a_size, a_centerPoint)); \
 	} \
@@ -24,31 +18,13 @@
 
 namespace MV {
 	namespace Scene {
+
 		class Sprite : public Drawable {
 			friend Node;
 			friend cereal::access;
 
 		public:
 			DrawableDerivedAccessors(Sprite)
-
-
-			BoxAABB<> bounds() {
-				return boundsImplementation();
-			}
-
-			std::shared_ptr<Sprite> bounds(const BoxAABB<> &a_bounds) {
-				std::lock_guard<std::recursive_mutex> guard(lock);
-				auto self = std::static_pointer_cast<Sprite>(shared_from_this());
-
-				points[0] = a_bounds.minPoint;
-				points[1].x = a_bounds.minPoint.x;	points[1].y = a_bounds.maxPoint.y;	points[1].z = (a_bounds.maxPoint.z + a_bounds.minPoint.z) / 2.0f;
-				points[2] = a_bounds.maxPoint;
-				points[3].x = a_bounds.maxPoint.x;	points[3].y = a_bounds.minPoint.y;	points[3].z = points[1].z;
-
-				refreshBounds();
-
-				return self;
-			}
 
 			std::shared_ptr<Sprite> size(const Size<> &a_size, const Point<> &a_centerPoint) {
 				std::lock_guard<std::recursive_mutex> guard(lock);

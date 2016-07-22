@@ -311,7 +311,7 @@ namespace MV {
 			return self;
 		}
 
-		std::shared_ptr<Palette> Palette::bounds(const BoxAABB<> &a_bounds) {
+		void Palette::boundsImplementation(const BoxAABB<> &a_bounds) {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = std::static_pointer_cast<Palette>(shared_from_this());
 
@@ -357,7 +357,6 @@ namespace MV {
 			refreshBounds();
 
 			ApplyCurrentColorToPreviewBox();
-			return self;
 		}
 
 		std::shared_ptr<Component> Palette::cloneHelper(const std::shared_ptr<Component> &a_clone) {

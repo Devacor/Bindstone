@@ -97,18 +97,6 @@ namespace MV {
 				return map->corners();
 			}
 
-			std::shared_ptr<PathMap> bounds(const BoxAABB<> &a_bounds) {
-				auto self = std::static_pointer_cast<PathMap>(shared_from_this());
-				topLeftOffset = a_bounds.minPoint;
-				auto mapSize = cast<PointPrecision>(map->size());
-				cellDimensions = a_bounds.size() / mapSize;
-				repositionDebugDrawPoints();
-				return self;
-			}
-			BoxAABB<> bounds() {
-				return boundsImplementation();
-			}
-
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 				a_script.add(chaiscript::user_type<PathMap>(), "PathMap");
 				a_script.add(chaiscript::base_class<Drawable, PathMap>());
@@ -149,6 +137,15 @@ namespace MV {
 			}
 
 			PathMap(const std::weak_ptr<Node> &a_owner, const Size<> &a_size, const Size<int> &a_gridSize, bool a_useCorners = true);
+
+			virtual BoxAABB<> boundsImplementation() override { return Drawable::boundsImplementation(); }
+
+			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override {
+				topLeftOffset = a_bounds.minPoint;
+				auto mapSize = cast<PointPrecision>(map->size());
+				cellDimensions = a_bounds.size() / mapSize;
+				repositionDebugDrawPoints();
+			}
 
 			void resizeNumberOfDebugDrawPoints() {
 				auto totalMapNodes = (map->size().width * map->size().height);

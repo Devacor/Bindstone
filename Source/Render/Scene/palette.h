@@ -43,12 +43,6 @@ namespace MV {
 
 			std::shared_ptr<Palette> colorAlphaSelector(const Color& a_left, const Color& a_right);
 
-			BoxAABB<> bounds() {
-				return boundsImplementation();
-			}
-
-			std::shared_ptr<Palette> bounds(const BoxAABB<> &a_bounds);
-
 			std::shared_ptr<Palette> size(const Size<> &a_size, const Point<> &a_centerPoint) {
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				Point<> topLeft;
@@ -78,6 +72,9 @@ namespace MV {
 			bool eatingTouches() const;
 		protected:
 			Palette(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
+
+			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
+			virtual BoxAABB<> boundsImplementation() override { return Drawable::boundsImplementation(); }
 
 			void innerColorAlphaSelectorNoNotification(const Color& a_left, const Color& a_right);
 
@@ -142,7 +139,8 @@ namespace MV {
 
 			Color percentToSliderColor(PointPrecision a_percentPosition);
 		protected:
-			virtual void onOwnerDestroyed() {
+			virtual void onOwnerDestroyed() override {
+				Drawable::onOwnerDestroyed();
 				onLeftMouseDownHandle.reset();
 				onLeftMouseUpHandle.reset();
 				onMouseMoveHandle.reset();

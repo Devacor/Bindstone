@@ -9,7 +9,7 @@ namespace MV {
 	public:
 		Interface(const std::string &a_filename) :
 			fileName(a_filename){
-			root = MV::Scene::Node::load(fileContents(a_filename));
+			root = MV::Scene::Node::load(fileContents(a_filename), );
 		}
 
 	private:

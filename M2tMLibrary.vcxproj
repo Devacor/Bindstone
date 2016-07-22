@@ -322,6 +322,7 @@
     <ClCompile Include="Source\Physics\collider.cpp" />
     <ClCompile Include="Source\Render\boxaabb.cpp" />
     <ClCompile Include="Source\Render\Scene\button.cpp" />
+    <ClCompile Include="Source\Render\Scene\component.cpp" />
     <ClCompile Include="Source\Render\Scene\stencil.cpp" />
     <ClCompile Include="Source\Render\Scene\emitter.cpp" />
     <ClCompile Include="Source\Render\Scene\clipped.cpp" />
@@ -516,6 +517,7 @@
     <ClInclude Include="Source\Physics\collider.h" />
     <ClInclude Include="Source\Physics\package.h" />
     <ClInclude Include="Source\Render\boxaabb.h" />
+    <ClInclude Include="Source\Render\Scene\component.h" />
     <ClInclude Include="Source\Render\Scene\emitter.h" />
     <ClInclude Include="Source\Render\Scene\clipped.h" />
     <ClInclude Include="Source\Render\Scene\grid.h" />

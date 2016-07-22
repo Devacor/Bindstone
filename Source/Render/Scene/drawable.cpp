@@ -136,6 +136,16 @@ namespace MV {
 			}
 		}
 
+		void Drawable::boundsImplementation(const BoxAABB<> &a_bounds)
+		{
+			points[0] = a_bounds.minPoint;
+			points[1].x = a_bounds.minPoint.x;	points[1].y = a_bounds.maxPoint.y;	points[1].z = (a_bounds.maxPoint.z + a_bounds.minPoint.z) / 2.0f;
+			points[2] = a_bounds.maxPoint;
+			points[3].x = a_bounds.maxPoint.x;	points[3].y = a_bounds.minPoint.y;	points[3].z = points[1].z;
+
+			refreshBounds();
+		}
+
 		void Drawable::defaultDrawImplementation() {
 			if (owner()->renderer().headless()) { return; }
 
@@ -234,6 +244,5 @@ namespace MV {
 			drawableClone->notifyParentOfBoundsChange();
 			return a_clone;
 		}
-
 	}
 }

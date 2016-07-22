@@ -102,6 +102,7 @@ namespace MV {
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
 		private:
+			virtual void boundsImplementation(const BoxAABB<> &) override {}
 			virtual BoxAABB<> boundsImplementation() override;
 
 			bool bumpToNextLine(PointPrecision a_currentPosition, size_t a_index) const;

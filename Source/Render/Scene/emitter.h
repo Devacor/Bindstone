@@ -314,6 +314,7 @@ namespace MV {
 
 		private:
 			virtual BoxAABB<> boundsImplementation() override;
+			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
 
 			Point<> randomMix(const Point<> &a_rhs, const Point<> &a_lhs);
 

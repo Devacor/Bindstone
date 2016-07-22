@@ -554,6 +554,9 @@
     <ClCompile Include="..\external\spine\SlotData.c">
       <Filter>Spine</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Render\Scene\component.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -1194,6 +1197,9 @@
     </ClInclude>
     <ClInclude Include="..\external\spine\spine.h">
       <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\component.h">
+      <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

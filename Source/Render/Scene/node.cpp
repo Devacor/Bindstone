@@ -7,14 +7,11 @@
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
-CEREAL_REGISTER_TYPE(MV::Scene::Component);
-
 namespace MV {
 	namespace Scene {
 		int64_t Node::recalculateLocalBoundsCalls = 0;
 		int64_t Node::recalculateChildBoundsCalls = 0;
 		int64_t Node::recalculateMatrixCalls = 0;
-
 
 		void appendQuadVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset) {
 			std::vector<GLuint> quadIndices{
@@ -41,60 +38,15 @@ namespace MV {
 			}
 		}
 
-
-		void Component::notifyParentOfBoundsChange() {
-			if (ownerIsAlive()) {
-				owner()->markBoundsDirty();
-			}
-		}
-
-		bool Component::ownerIsAlive() const {
-			return !componentOwner.expired();
-		}
-
-		void Component::notifyParentOfComponentChange() {
-			try {
-				owner()->onComponentUpdateSignal(shared_from_this());
-			} catch (PointerException &) {
-			}
-		}
-
-		std::shared_ptr<Node> Component::owner() const {
-			require<PointerException>(!componentOwner.expired(), "Component owner has expired! You are storing a reference to the component, but not the node that owns it!");
-			return componentOwner.lock();
-		}
-
-		Component::Component(const std::weak_ptr<Node> &a_owner):
-			componentOwner(a_owner) {
-		}
-
-		BoxAABB<int> Component::screenBounds() {
-			return owner()->screenFromLocal(boundsImplementation());
-		}
-
-		BoxAABB<> Component::worldBounds() {
-			return owner()->worldFromLocal(boundsImplementation());
-		}
-
-		std::shared_ptr<Component> Component::cloneImplementation(const std::shared_ptr<Node> &a_parent) {
-			return cloneHelper(a_parent->attach<Component>().self());
-		}
-
-		std::shared_ptr<Component> Component::cloneHelper(const std::shared_ptr<Component> &a_clone) {
-			return a_clone;
-		}
-
-		void Component::detach() {
-			owner()->detach(shared_from_this());
-		}
-
 		Node::~Node() {
 			for (auto &&component : childComponents) {
 				component->onOwnerDestroyed();
 			}
 
 			for(auto &&child : childNodes){
-				child->myParent = nullptr;
+				if (child) {
+					child->myParent = nullptr;
+				}
 			}
 		}
 

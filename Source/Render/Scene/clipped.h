@@ -14,8 +14,6 @@ namespace MV {
 		public:
 			DrawableDerivedAccessors(Clipped)
 
-			std::shared_ptr<Clipped> bounds(const BoxAABB<> &a_bounds);
-			BoxAABB<> bounds();
 			std::shared_ptr<Clipped> size(const Size<> &a_size, const Point<> &a_centerPoint);
 			std::shared_ptr<Clipped> size(const Size<> &a_size, bool a_center = false);
 			template<typename PointAssign>
@@ -75,6 +73,11 @@ namespace MV {
 				construct->initialize();
 			}
 
+			virtual BoxAABB<> boundsImplementation() override {
+				return Sprite::boundsImplementation();
+			}
+			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
+
 			virtual void initialize() override;
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
@@ -84,6 +87,7 @@ namespace MV {
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
 			virtual void onOwnerDestroyed() {
+				Sprite::onOwnerDestroyed();
 				onLeftMouseDownHandle.reset();
 				onLeftMouseUpHandle.reset();
 			}

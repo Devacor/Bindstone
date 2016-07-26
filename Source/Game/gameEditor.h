@@ -29,10 +29,18 @@ public:
 // 		spineTestNode->loadChild("simple.scene", populateArchive);
 // 		spineTestNode->loadChild("tree_particle.scene", populateArchive);
 
+		screenScaler = limbo->attach<MV::Scene::Drawable>();
+		screenScaler->bounds({ MV::point(0.0f, 0.0f), game.getManager().renderer.world().size() });
+
+		auto textureSheet = MV::FileTextureDefinition::make("Assets/Images/dogfox.png");
+		auto alignedSprite = limbo->attach<MV::Scene::Sprite>();
+		alignedSprite->texture(textureSheet->makeHandle({ MV::Point<int>(0, 384), MV::Size<int>(128, 128) }));
+		alignedSprite->size(MV::Size<>(128.0f, 128.0f))->anchors().anchor({ MV::point(1.0f, 1.0f), MV::point(1.0f, 1.0f) }).
+			pivot({1.0f, 1.0f}).parent(screenScaler.self());
+
 		auto grid = limbo->make("Grid")->position({ (static_cast<float>(game.getManager().renderer.window().width()) - 100.0f) / 2.0f, 200.0f })->
 			attach<MV::Scene::Grid>()->columns(1)->padding({ 2.0f, 2.0f })->margin({ 4.0f, 4.0f })->color({ BOX_BACKGROUND })->owner();
-
-
+		
 		auto editorButton = makeButton(grid, game.getManager().textLibrary, mouse, "Editor", { 100.0f, 20.0f }, UTF_CHAR_STR("Editor"));
 		editorButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 			runEditor();
@@ -162,6 +170,7 @@ private:
 				}
 			}
 		}
+		screenScaler->bounds({ MV::point(0.0f, 0.0f), game.getManager().renderer.world().size() });
 		mouse.update();
 	}
 	
@@ -181,6 +190,8 @@ private:
 
 	std::shared_ptr<LobbyServer> server;
 	std::shared_ptr<MV::Client> client;
+
+	MV::Scene::SafeComponent<MV::Scene::Drawable> screenScaler;
 };
 
 #endif

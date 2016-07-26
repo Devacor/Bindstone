@@ -50,11 +50,86 @@
 namespace MV {
 	namespace Scene {
 
+		class Drawable;
+
+		class Anchors {
+			friend cereal::access;
+
+		public:
+			Anchors(Drawable *a_self);
+			~Anchors();
+
+			Anchors& parent(const std::weak_ptr<Drawable> &a_parent);
+
+			Anchors& anchor(const BoxAABB<> &a_anchor);
+
+			BoxAABB<> anchor() const {
+				return parentAnchors;
+			}
+
+			Anchors& offset(const BoxAABB<> &a_offset);
+
+			BoxAABB<> offset() const {
+				return ourOffset;
+			}
+
+			Anchors& pivot(const Point<> &a_pivot);
+
+			Point<> pivot() const {
+				return pivotPercent;
+			}
+
+			Anchors& apply();
+
+			Anchors& applyBoundsToOffset();
+
+		private:
+			Drawable *selfReference = nullptr;
+			std::weak_ptr<Drawable> parentReference;
+			BoxAABB<> parentAnchors;
+			BoxAABB<> ourOffset;
+			Point<> pivotPercent;
+			bool applying = false;
+
+			template <class Archive>
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
+				auto selfShared = std::static_pointer_cast<Drawable>(selfReference->shared_from_this());
+				archive(
+					cereal::make_nvp("self", selfShared),
+					cereal::make_nvp("parent", parentReference),
+					cereal::make_nvp("anchors", parentAnchors),
+					cereal::make_nvp("offset", ourOffset),
+					cereal::make_nvp("pivot", pivotPercent)
+				);
+			}
+
+			template <class Archive>
+			static void load_and_construct(Archive & archive, cereal::construct<Anchors> &construct, std::uint32_t const /*version*/) {
+				std::shared_ptr<Drawable> selfShared;
+				archive(
+					cereal::make_nvp("self", selfShared)
+				);
+				construct(selfShared->get());
+				archive(
+					cereal::make_nvp("parent", parentReference),
+					cereal::make_nvp("anchors", parentAnchors),
+					cereal::make_nvp("offset", ourOffset),
+					cereal::make_nvp("pivot", pivotPercent)
+				);
+				construct->registerWithParent();
+			}
+
+			void registerWithParent();
+			void removeFromParent();
+		};
+
 		class Drawable : public Component {
+			friend Anchors;
 			friend Node;
 			friend cereal::access;
 
 		public:
+			ComponentDerivedAccessors(Drawable)
 
 			virtual bool draw();
 
@@ -66,6 +141,10 @@ namespace MV {
 
 			std::string shader() const {
 				return shaderProgramId;
+			}
+
+			Anchors& anchors() {
+				return ourAnchors;
 			}
 
 			std::shared_ptr<Drawable> hide();
@@ -150,7 +229,10 @@ namespace MV {
 			void refreshBounds();
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const /*version*/) {
+			void serialize(Archive & archive, std::uint32_t const version) {
+				if (version > 0) {
+					archive(cereal::make_nvp("anchors", ourAnchors));
+				}
 				archive(
 					CEREAL_NVP(shouldDraw),
 					CEREAL_NVP(ourTexture),
@@ -164,8 +246,11 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Drawable> &construct, std::uint32_t const /*version*/) {
+			static void load_and_construct(Archive & archive, cereal::construct<Drawable> &construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
+				if (version > 0) {
+					archive(cereal::make_nvp("anchors", construct->ourAnchors));
+				}
 				archive(
 					cereal::make_nvp("shouldDraw", construct->shouldDraw),
 					cereal::make_nvp("ourTexture", construct->ourTexture),
@@ -204,7 +289,9 @@ namespace MV {
 
 			virtual void initialize() override;
 
+			Anchors ourAnchors;
 		private:
+			std::vector<Anchors*> childAnchors;
 
 			virtual void clearTextureCoordinates() {
 			}

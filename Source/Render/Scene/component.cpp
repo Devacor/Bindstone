@@ -5,7 +5,6 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Component);
-CEREAL_CLASS_VERSION(MV::Scene::Component, 1);
 
 namespace MV {
 	namespace Scene {
@@ -32,8 +31,7 @@ namespace MV {
 		}
 
 		Component::Component(const std::weak_ptr<Node> &a_owner) :
-			componentOwner(a_owner),
-			ourAnchors(this) {
+			componentOwner(a_owner) {
 		}
 
 		BoxAABB<int> Component::screenBounds() {
@@ -66,49 +64,6 @@ namespace MV {
 
 		void Component::detach() {
 			owner()->detach(shared_from_this());
-		}
-
-		Anchors::Anchors(Component *a_self) :
-			selfReference(a_self) {
-		}
-
-		Anchors::~Anchors() {
-			removeFromParent();
-		}
-
-		Anchors& Anchors::parent(const std::weak_ptr<Component> &a_parent) {
-			removeFromParent();
-			parentReference = a_parent;
-			registerWithParent();
-			return *this;
-		}
-
-		Anchors& Anchors::apply() {
-			if (!applying && !parentReference.expired()) {
-				applying = true;
-				SCOPE_EXIT{ applying = false; };
-				auto previousBounds = selfReference->worldBounds();
-				auto parentBounds = parentReference.lock()->worldBounds();
-
-				selfReference->worldBounds();
-			}
-			return *this;
-		}
-
-		void Anchors::removeFromParent() {
-			if (!parentReference.expired()) {
-				auto parentShared = parentReference.lock();
-				auto position = std::find(parentShared->childAnchors.begin(), parentShared->childAnchors.end(), this);
-				if (position != parentShared->childAnchors.end()) {
-					parentShared->childAnchors.erase(position);
-				}
-			}
-		}
-
-		void Anchors::registerWithParent() {
-			if (!parentReference.expired()) {
-				parentReference.lock()->childAnchors.push_back(this);
-			}
 		}
 	}
 }

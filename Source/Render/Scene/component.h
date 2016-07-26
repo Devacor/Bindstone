@@ -139,95 +139,12 @@ namespace MV {
 			std::shared_ptr<T> wrappedComponent;
 		};
 
-		class Anchors {
-			friend cereal::access;
-
-		public:
-			Anchors(Component *a_self);
-			~Anchors();
-
-			Anchors& parent(const std::weak_ptr<Component> &a_parent);
-
-			Anchors& min(const Point<> &a_min) {
-				minPercent = a_min;
-				return *this;
-			}
-
-			Point<> min() const {
-				return minPercent;
-			}
-
-			Anchors& max(const Point<> &a_max) {
-				maxPercent = a_max;
-				return *this;
-			}
-
-			Point<> max() const {
-				return maxPercent;
-			}
-
-			Anchors& pivot(const Point<> &a_pivot) {
-				pivotPercent = a_pivot;
-				return *this;
-			}
-
-			Point<> pivot() const {
-				return pivotPercent;
-			}
-
-			Anchors& apply();
-
-		private:
-			Component *selfReference = nullptr;
-			std::weak_ptr<Component> parentReference;
-			Point<> minPercent;
-			Point<> maxPercent;
-			Point<> pivotPercent;
-			bool applying = false;
-
-			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const /*version*/) {
-				auto selfShared = std::static_pointer_cast<Component>(selfReference->shared_from_this());
-				archive(
-					cereal::make_nvp("self", selfShared),
-					cereal::make_nvp("parent", parentReference),
-					cereal::make_nvp("min", minPercent),
-					cereal::make_nvp("max", maxPercent),
-					cereal::make_nvp("pivot", pivotPercent)
-				);
-			}
-
-			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Anchors> &construct, std::uint32_t const /*version*/) {
-				std::shared_ptr<Component> selfShared;
-				archive(
-					cereal::make_nvp("self", selfShared)
-				);
-				construct(selfShared->get());
-				archive(
-					cereal::make_nvp("parent", parentReference),
-					cereal::make_nvp("min", minPercent),
-					cereal::make_nvp("max", maxPercent),
-					cereal::make_nvp("pivot", pivotPercent)
-				);
-				construct->registerWithParent();
-			}
-
-			void registerWithParent();
-			void removeFromParent();
-		};
-
 		class Component : public std::enable_shared_from_this<Component> {
-			friend Anchors;
 			friend Node;
 			friend cereal::access;
 
 		public:
 			virtual ~Component() {}
-
-			Anchors& anchors() {
-				return ourAnchors;
-			}
 
 			virtual bool draw() { return true; }
 			virtual void endDraw() { }
@@ -342,11 +259,7 @@ namespace MV {
 			virtual void onRemoved() {}
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
-				if (version > 0) {
-					archive(CEREAL_NVP(ourAnchors));
-				}
-
+			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					CEREAL_NVP(componentId),
 					CEREAL_NVP(componentOwner)
@@ -354,13 +267,8 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Component> &construct, std::uint32_t const version) {
+			static void load_and_construct(Archive & archive, cereal::construct<Component> &construct, std::uint32_t const /*version*/) {
 				construct(std::shared_ptr<Node>());
-
-				if (version > 0) {
-					archive(CEREAL_NVP(construct->ourAnchors));
-				}
-
 				archive(
 					cereal::make_nvp("componentId", construct->componentId),
 					cereal::make_nvp("componentOwner", construct->componentOwner)
@@ -370,9 +278,7 @@ namespace MV {
 
 			virtual void updateImplementation(double a_delta) {}
 
-			Anchors ourAnchors;
 		private:
-			std::vector<Anchors*> childAnchors;
 			bool allowSerialize = true;
 
 			Task rootTask;

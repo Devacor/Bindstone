@@ -19,7 +19,6 @@ namespace MV{
 			formattedText(a_textLibrary, a_size.width, DEFAULT_ID),
 			boxSize(a_size) {
 			
-			points.resize(4);
 			for (auto&& point : points) {
 				point = Color(1.0f, 1.0f, 1.0f, 0.0f);
 			}

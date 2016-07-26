@@ -46,6 +46,8 @@ namespace MV {
 		bool flatWidth() const{ return equals(minPoint.x, maxPoint.x); }
 		bool flatHeight() const{ return equals(minPoint.y, maxPoint.y); }
 
+		BoxAABB<T>& set(const Point<T> &a_position, const Size<T> &a_size) { minPoint = a_position; maxPoint = minPoint + toPoint(a_size); return *this; }
+
 		Size<T> size() const{ return toSize(maxPoint - minPoint); }
 
 		Point<PointPrecision> percent(const Point<T> &a_point) const;
@@ -394,6 +396,7 @@ namespace MV {
 		a_script.add(chaiscript::constructor<BoxAABB<T>(const Point<T> &, const Size<T> &)>(), "BoxAABB" + a_postfix);
 
 		a_script.add(chaiscript::fun(&BoxAABB<T>::removeFromBounds), "removeFromBounds");
+		a_script.add(chaiscript::fun(&BoxAABB<T>::set), "set");
 		a_script.add(chaiscript::fun(&BoxAABB<T>::width), "width");
 		a_script.add(chaiscript::fun(&BoxAABB<T>::height), "height");
 		a_script.add(chaiscript::fun(&BoxAABB<T>::clear), "clear");

@@ -80,7 +80,6 @@ namespace MV {
 			Sprite(const std::weak_ptr<Node> &a_owner) :
 				Drawable(a_owner) {
 
-				points.resize(4);
 				clearTexturePoints(points);
 				appendQuadVertexIndices(vertexIndices, 0);
 			}

@@ -4,6 +4,7 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Drawable);
+CEREAL_CLASS_VERSION(MV::Scene::Drawable, 1);
 
 namespace MV {
 	namespace Scene {
@@ -200,6 +201,9 @@ namespace MV {
 				localBounds = BoxAABB<>();
 			}
 			if (originalBounds != localBounds) {
+				for (auto&& childAnchor : childAnchors) {
+					childAnchor->apply();
+				}
 				notifyParentOfBoundsChange();
 			}
 		}
@@ -219,7 +223,9 @@ namespace MV {
 		}
 
 		Drawable::Drawable(const std::weak_ptr<Node> &a_owner) :
-			Component(a_owner) {
+			Component(a_owner),
+			ourAnchors(this) {
+			points.resize(4);
 		}
 
 		void Drawable::initialize() {
@@ -243,6 +249,100 @@ namespace MV {
 			drawableClone->points = points;
 			drawableClone->notifyParentOfBoundsChange();
 			return a_clone;
+		}
+
+		Anchors::Anchors(Drawable *a_self) :
+			selfReference(a_self) {
+		}
+
+		Anchors::~Anchors() {
+			removeFromParent();
+		}
+
+		Anchors& Anchors::parent(const std::weak_ptr<Drawable> &a_parent) {
+			removeFromParent();
+			parentReference = a_parent;
+			registerWithParent();
+			applyBoundsToOffset();
+			apply();
+			return *this;
+		}
+
+		MV::Scene::Anchors& Anchors::anchor(const BoxAABB<> &a_anchor)
+		{
+			parentAnchors = a_anchor;
+			return *this;
+		}
+
+		MV::Scene::Anchors& Anchors::offset(const BoxAABB<> &a_offset)
+		{
+			ourOffset = a_offset;
+			return *this;
+		}
+
+		MV::Scene::Anchors& Anchors::pivot(const Point<> &a_pivot)
+		{
+			pivotPercent = a_pivot;
+			return *this;
+		}
+
+		Anchors& Anchors::apply() {
+			if (!applying && !parentReference.expired()) {
+				applying = true;
+				SCOPE_EXIT{ applying = false; };
+				auto parentBounds = parentReference.lock()->worldBounds();
+				auto parentSize = parentBounds.size();
+				
+				BoxAABB<> childBounds;
+
+				childBounds.minPoint.x = (parentSize.width * parentAnchors.minPoint.x) + ourOffset.minPoint.x;
+				childBounds.minPoint.y = (parentSize.height * parentAnchors.minPoint.y) + ourOffset.minPoint.x;
+
+				childBounds.maxPoint.x = (parentSize.width * parentAnchors.maxPoint.x) + ourOffset.maxPoint.x;
+				childBounds.maxPoint.y = (parentSize.height * parentAnchors.maxPoint.y) + ourOffset.maxPoint.y;
+				
+				auto pivotLocation = pivotPercent * toPoint(childBounds.size());
+				childBounds.minPoint += pivotLocation;
+				childBounds.maxPoint += pivotLocation;
+
+				selfReference->worldBounds(childBounds);
+			}
+			return *this;
+		}
+
+		Anchors& Anchors::applyBoundsToOffset() {
+			if (!parentReference.expired()) {
+				auto childBounds = selfReference->worldBounds();
+				auto parentBounds = parentReference.lock()->worldBounds();
+				auto parentSize = parentBounds.size();
+
+				ourOffset.minPoint.x = (parentSize.width * parentAnchors.minPoint.x) - childBounds.minPoint.x;
+				ourOffset.minPoint.y = (parentSize.height * parentAnchors.minPoint.y) - childBounds.minPoint.x;
+
+				ourOffset.maxPoint.x = (parentSize.width * parentAnchors.maxPoint.x) - childBounds.maxPoint.x;
+				ourOffset.maxPoint.y = (parentSize.height * parentAnchors.maxPoint.y) - childBounds.maxPoint.y;
+
+// 				auto pivotLocation = pivotPercent * toPoint(childBounds.size());
+// 				childBounds.minPoint += pivotLocation;
+// 				childBounds.maxPoint += pivotLocation;
+			}
+			return *this;
+		}
+
+		void Anchors::removeFromParent() {
+			if (!parentReference.expired()) {
+				auto parentShared = parentReference.lock();
+				auto position = std::find(parentShared->childAnchors.begin(), parentShared->childAnchors.end(), this);
+				if (position != parentShared->childAnchors.end()) {
+					parentShared->childAnchors.erase(position);
+				}
+			}
+		}
+
+		void Anchors::registerWithParent() {
+			if (!parentReference.expired()) {
+				parentReference.lock()->childAnchors.push_back(this);
+			}
 		}
 	}
 }

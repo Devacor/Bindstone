@@ -304,6 +304,7 @@
     <ClCompile Include="Source\Game\building.cpp" />
     <ClCompile Include="Source\Game\creature.cpp" />
     <ClCompile Include="Source\Game\game.cpp" />
+    <ClCompile Include="Source\Game\gameEditor.cpp" />
     <ClCompile Include="Source\Game\Instance\gameInstance.cpp" />
     <ClCompile Include="Source\Game\Interface\guiFactories.cpp" />
     <ClCompile Include="Source\Game\player.cpp" />

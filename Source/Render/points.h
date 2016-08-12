@@ -555,7 +555,12 @@ namespace MV {
 	}
 
 	template <typename T>
-	Size<T> size(T a_width, T a_height, T a_depth = 0){
+	Size<T> size(T a_width, T a_height){
+		return Size<T>{a_width, a_height};
+	}
+
+	template <typename T>
+	Size<T> size(T a_width, T a_height, T a_depth) {
 		return Size<T>{a_width, a_height, a_depth};
 	}
 
@@ -750,7 +755,12 @@ namespace MV {
 	\*************************/
 
 	template <typename T>
-	Point<T> point(T a_xPos, T a_yPos, T a_zPos = 0){
+	Point<T> point(T a_xPos, T a_yPos){
+		return Point<T>{a_xPos, a_yPos};
+	}
+
+	template <typename T>
+	Point<T> point(T a_xPos, T a_yPos, T a_zPos) {
 		return Point<T>{a_xPos, a_yPos, a_zPos};
 	}
 

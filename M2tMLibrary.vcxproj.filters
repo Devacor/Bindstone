@@ -557,6 +557,7 @@
     <ClCompile Include="Source\Render\Scene\component.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Game\gameEditor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">

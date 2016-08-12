@@ -201,6 +201,7 @@ namespace MV {
 				localBounds = BoxAABB<>();
 			}
 			if (originalBounds != localBounds) {
+				ourAnchors.applyBoundsToOffset();
 				for (auto&& childAnchor : childAnchors) {
 					childAnchor->apply();
 				}
@@ -259,29 +260,33 @@ namespace MV {
 			removeFromParent();
 		}
 
-		Anchors& Anchors::parent(const std::weak_ptr<Drawable> &a_parent) {
+		Anchors& Anchors::parent(const std::weak_ptr<Drawable> &a_parent, bool a_offsetFromBounds) {
 			removeFromParent();
 			parentReference = a_parent;
+			if (a_offsetFromBounds) {
+				applyBoundsToOffset();
+			}
 			registerWithParent();
-			applyBoundsToOffset();
-			apply();
 			return *this;
 		}
 
-		MV::Scene::Anchors& Anchors::anchor(const BoxAABB<> &a_anchor)
-		{
+		Anchors& Anchors::anchor(const BoxAABB<> &a_anchor) {
 			parentAnchors = a_anchor;
 			return *this;
 		}
 
-		MV::Scene::Anchors& Anchors::offset(const BoxAABB<> &a_offset)
-		{
+		Anchors& Anchors::anchor(const Point<> &a_anchor) {
+			parentAnchors.minPoint = a_anchor;
+			parentAnchors.maxPoint = a_anchor;
+			return *this;
+		}
+
+		Anchors& Anchors::offset(const BoxAABB<> &a_offset) {
 			ourOffset = a_offset;
 			return *this;
 		}
 
-		MV::Scene::Anchors& Anchors::pivot(const Point<> &a_pivot)
-		{
+		Anchors& Anchors::pivot(const Point<> &a_pivot) {
 			pivotPercent = a_pivot;
 			return *this;
 		}
@@ -293,17 +298,9 @@ namespace MV {
 				auto parentBounds = parentReference.lock()->worldBounds();
 				auto parentSize = parentBounds.size();
 				
-				BoxAABB<> childBounds;
+				BoxAABB<> childBounds { (parentAnchors * toScale(parentSize)) + ourOffset + parentBounds.minPoint };
 
-				childBounds.minPoint.x = (parentSize.width * parentAnchors.minPoint.x) + ourOffset.minPoint.x;
-				childBounds.minPoint.y = (parentSize.height * parentAnchors.minPoint.y) + ourOffset.minPoint.x;
-
-				childBounds.maxPoint.x = (parentSize.width * parentAnchors.maxPoint.x) + ourOffset.maxPoint.x;
-				childBounds.maxPoint.y = (parentSize.height * parentAnchors.maxPoint.y) + ourOffset.maxPoint.y;
-				
-				auto pivotLocation = pivotPercent * toPoint(childBounds.size());
-				childBounds.minPoint += pivotLocation;
-				childBounds.maxPoint += pivotLocation;
+				std::cout << childBounds << std::endl;
 
 				selfReference->worldBounds(childBounds);
 			}
@@ -311,20 +308,17 @@ namespace MV {
 		}
 
 		Anchors& Anchors::applyBoundsToOffset() {
-			if (!parentReference.expired()) {
+			if (!applying && !parentReference.expired()) {
 				auto childBounds = selfReference->worldBounds();
 				auto parentBounds = parentReference.lock()->worldBounds();
 				auto parentSize = parentBounds.size();
 
-				ourOffset.minPoint.x = (parentSize.width * parentAnchors.minPoint.x) - childBounds.minPoint.x;
-				ourOffset.minPoint.y = (parentSize.height * parentAnchors.minPoint.y) - childBounds.minPoint.x;
+				auto scaledParentAnchors = parentAnchors * toScale(parentSize);
 
-				ourOffset.maxPoint.x = (parentSize.width * parentAnchors.maxPoint.x) - childBounds.maxPoint.x;
-				ourOffset.maxPoint.y = (parentSize.height * parentAnchors.maxPoint.y) - childBounds.maxPoint.y;
+				childBounds += scaledParentAnchors - selfReference->owner()->worldPosition();
 
-// 				auto pivotLocation = pivotPercent * toPoint(childBounds.size());
-// 				childBounds.minPoint += pivotLocation;
-// 				childBounds.maxPoint += pivotLocation;
+				ourOffset.minPoint = -1.0f * (scaledParentAnchors.minPoint + parentBounds.minPoint - childBounds.minPoint);
+				ourOffset.maxPoint = -1.0f * (scaledParentAnchors.maxPoint + parentBounds.minPoint - childBounds.maxPoint);
 			}
 			return *this;
 		}
@@ -336,12 +330,16 @@ namespace MV {
 				if (position != parentShared->childAnchors.end()) {
 					parentShared->childAnchors.erase(position);
 				}
+				ourOffset.clear();
 			}
 		}
 
 		void Anchors::registerWithParent() {
 			if (!parentReference.expired()) {
 				parentReference.lock()->childAnchors.push_back(this);
+				apply();
+			} else {
+				ourOffset.clear();
 			}
 		}
 	}

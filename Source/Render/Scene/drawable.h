@@ -59,9 +59,10 @@ namespace MV {
 			Anchors(Drawable *a_self);
 			~Anchors();
 
-			Anchors& parent(const std::weak_ptr<Drawable> &a_parent);
+			Anchors& parent(const std::weak_ptr<Drawable> &a_parent, bool a_offsetFromBounds = false);
 
 			Anchors& anchor(const BoxAABB<> &a_anchor);
+			Anchors& anchor(const Point<> &a_anchor);
 
 			BoxAABB<> anchor() const {
 				return parentAnchors;

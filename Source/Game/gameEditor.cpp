@@ -22,26 +22,26 @@ GameEditor::GameEditor() :
 	// 		spineTestNode->loadChild("tree_particle.scene", populateArchive);
 
 	screenScaler = limbo->attach<MV::Scene::Sprite>();
-	screenScaler->color({ 1.0f, 1.0f, 1.0f, 0.5f });
+	screenScaler->color({ 1.0f, 1.0f, 1.0f, 0.0f });
 	screenScaler->bounds({ MV::point(0.0f, 0.0f), game.getManager().renderer.world().size() });
 
-	auto textureSheet = MV::FileTextureDefinition::make("Assets/Images/slice.png");
-	auto alignedSprite = limbo->attach<MV::Scene::Sprite>();
-	alignedSprite->texture(textureSheet->makeHandle())->bounds({ MV::point(0.0f, 0.0f), MV::size(0.0f, 32.0f) });
-	alignedSprite->anchors().anchor({ MV::point(.75f, 0.f), MV::point(1.0f, 0.f) }).parent(screenScaler.self(), true);
+//	auto textureSheet = MV::FileTextureDefinition::make("Assets/Images/slice.png");
+// 	auto alignedSprite = limbo->make("repositionNode")->attach<MV::Scene::Sprite>();
+// 	alignedSprite->texture(textureSheet->makeHandle());
+// 	alignedSprite->anchors().anchor({ MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f) }).usePosition(true).parent(screenScaler.self());
 
-	mouse.onLeftMouseDownEnd.connect("TEST", [&](MV::MouseState& a_mouse) {
-		std::cout << "PRE: " << screenScaler->bounds() << std::endl;
-		screenScaler->bounds({ screenScaler->owner()->localFromScreen(a_mouse.position()), screenScaler->bounds().maxPoint });
-		std::cout << "POST: " << screenScaler->bounds() << std::endl;
-	});
-	mouse.onRightMouseDownEnd.connect("TEST", [&](MV::MouseState& a_mouse) {
-		std::cout << "PRE: " << screenScaler->bounds() << std::endl;
-		screenScaler->bounds({ screenScaler->bounds().minPoint, screenScaler->owner()->localFromScreen(a_mouse.position()) });
-		std::cout << "POST: " << screenScaler->bounds() << std::endl;
-	});
+// 	mouse.onLeftMouseDownEnd.connect("TEST", [&](MV::MouseState& a_mouse) {
+// 		std::cout << "PRE: " << screenScaler->bounds() << std::endl;
+// 		screenScaler->bounds({ screenScaler->owner()->localFromScreen(a_mouse.position()), screenScaler->bounds().maxPoint });
+// 		std::cout << "POST: " << screenScaler->bounds() << std::endl;
+// 	});
+// 	mouse.onRightMouseDownEnd.connect("TEST", [&](MV::MouseState& a_mouse) {
+// 		std::cout << "PRE: " << screenScaler->bounds() << std::endl;
+// 		screenScaler->bounds({ screenScaler->bounds().minPoint, screenScaler->owner()->localFromScreen(a_mouse.position()) });
+// 		std::cout << "POST: " << screenScaler->bounds() << std::endl;
+// 	});
 
-	auto grid = limbo->make("Grid")->position({ (static_cast<float>(game.getManager().renderer.window().width()) - 100.0f) / 2.0f, 200.0f })->
+	auto grid = limbo->make("Grid")->position({ (static_cast<float>(game.getManager().renderer.window().width()) - 108.0f) / 2.0f, 200.0f })->
 		attach<MV::Scene::Grid>()->columns(1)->padding({ 2.0f, 2.0f })->margin({ 4.0f, 4.0f })->color({ BOX_BACKGROUND })->owner();
 
 	auto editorButton = makeButton(grid, game.getManager().textLibrary, mouse, "Editor", { 100.0f, 20.0f }, UTF_CHAR_STR("Editor"));
@@ -81,6 +81,8 @@ GameEditor::GameEditor() :
 			client->send(MV::toBinaryStringCast<ServerAction>(std::make_shared<CreatePlayer>("maxmike@gmail.com", "M2tM", "SuperTinker123")));
 		}
 	});
+
+	grid->component<MV::Scene::Grid>()->anchors().anchor({ MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f) }).usePosition(true).parent(screenScaler.self(), MV::Scene::Anchors::BoundsToOffset::Apply);
 
 	if (MV::RUNNING_IN_HEADLESS) {
 		serverButton->press();

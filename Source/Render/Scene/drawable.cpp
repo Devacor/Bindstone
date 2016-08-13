@@ -201,7 +201,6 @@ namespace MV {
 				localBounds = BoxAABB<>();
 			}
 			if (originalBounds != localBounds) {
-				ourAnchors.applyBoundsToOffset();
 				for (auto&& childAnchor : childAnchors) {
 					childAnchor->apply();
 				}
@@ -260,12 +259,12 @@ namespace MV {
 			removeFromParent();
 		}
 
-		Anchors& Anchors::parent(const std::weak_ptr<Drawable> &a_parent, bool a_offsetFromBounds) {
+		Anchors& Anchors::parent(const std::weak_ptr<Drawable> &a_parent, BoundsToOffset a_offsetFromBounds) {
 			removeFromParent();
 			parentReference = a_parent;
-			if (a_offsetFromBounds) {
-				applyBoundsToOffset();
-			}
+
+			applyBoundsToOffset(a_offsetFromBounds);
+
 			registerWithParent();
 			return *this;
 		}
@@ -299,26 +298,35 @@ namespace MV {
 				auto parentSize = parentBounds.size();
 				
 				BoxAABB<> childBounds { (parentAnchors * toScale(parentSize)) + ourOffset + parentBounds.minPoint };
-
-				std::cout << childBounds << std::endl;
-
-				selfReference->worldBounds(childBounds);
+				if (applyingPosition) {
+					selfReference->owner()->worldPosition(childBounds.minPoint);
+					selfReference->bounds({ Point<>(), childBounds.size() / selfReference->owner()->worldScale() });
+				} else {
+					selfReference->worldBounds(childBounds);
+				}
 			}
 			return *this;
 		}
 
-		Anchors& Anchors::applyBoundsToOffset() {
-			if (!applying && !parentReference.expired()) {
+		MV::Scene::Anchors& Anchors::usePosition(bool a_newValue) {
+			applyingPosition = a_newValue;
+			apply();
+			return *this;
+		}
+
+		Anchors& Anchors::applyBoundsToOffset(BoundsToOffset a_offsetFromBounds) {
+			if (a_offsetFromBounds != BoundsToOffset::Ignore && !parentReference.expired()) {
 				auto childBounds = selfReference->worldBounds();
 				auto parentBounds = parentReference.lock()->worldBounds();
 				auto parentSize = parentBounds.size();
 
 				auto scaledParentAnchors = parentAnchors * toScale(parentSize);
+				
+				if (a_offsetFromBounds == BoundsToOffset::Apply_Reposition) {
+					childBounds += scaledParentAnchors - selfReference->owner()->worldPosition();
+				}
 
-				childBounds += scaledParentAnchors - selfReference->owner()->worldPosition();
-
-				ourOffset.minPoint = -1.0f * (scaledParentAnchors.minPoint + parentBounds.minPoint - childBounds.minPoint);
-				ourOffset.maxPoint = -1.0f * (scaledParentAnchors.maxPoint + parentBounds.minPoint - childBounds.maxPoint);
+				ourOffset = childBounds - (scaledParentAnchors + parentBounds.minPoint);
 			}
 			return *this;
 		}

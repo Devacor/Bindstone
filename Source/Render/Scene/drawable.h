@@ -59,7 +59,9 @@ namespace MV {
 			Anchors(Drawable *a_self);
 			~Anchors();
 
-			Anchors& parent(const std::weak_ptr<Drawable> &a_parent, bool a_offsetFromBounds = false);
+			enum class BoundsToOffset { Ignore, Apply, Apply_Reposition };
+
+			Anchors& parent(const std::weak_ptr<Drawable> &a_parent, BoundsToOffset a_offsetFromBounds = BoundsToOffset::Ignore);
 
 			Anchors& anchor(const BoxAABB<> &a_anchor);
 			Anchors& anchor(const Point<> &a_anchor);
@@ -82,7 +84,13 @@ namespace MV {
 
 			Anchors& apply();
 
-			Anchors& applyBoundsToOffset();
+			Anchors& usePosition(bool a_newValue);
+
+			bool usePosition() const {
+				return applyingPosition;
+			}
+
+			Anchors& applyBoundsToOffset(BoundsToOffset a_offsetFromBounds);
 
 		private:
 			Drawable *selfReference = nullptr;
@@ -91,6 +99,7 @@ namespace MV {
 			BoxAABB<> ourOffset;
 			Point<> pivotPercent;
 			bool applying = false;
+			bool applyingPosition = false;
 
 			template <class Archive>
 			void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -100,7 +109,8 @@ namespace MV {
 					cereal::make_nvp("parent", parentReference),
 					cereal::make_nvp("anchors", parentAnchors),
 					cereal::make_nvp("offset", ourOffset),
-					cereal::make_nvp("pivot", pivotPercent)
+					cereal::make_nvp("pivot", pivotPercent),
+					cereal::make_nvp("applyingPosition", applyingPosition)
 				);
 			}
 
@@ -115,7 +125,8 @@ namespace MV {
 					cereal::make_nvp("parent", parentReference),
 					cereal::make_nvp("anchors", parentAnchors),
 					cereal::make_nvp("offset", ourOffset),
-					cereal::make_nvp("pivot", pivotPercent)
+					cereal::make_nvp("pivot", pivotPercent),
+					cereal::make_nvp("applyingPosition", applyingPosition)
 				);
 				construct->registerWithParent();
 			}

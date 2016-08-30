@@ -1,10 +1,30 @@
 #include "formattedText.h"
 #include "Render/Scene/package.h"
 #include <algorithm>
-#include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string.hpp>
+#include "Utility/log.h"
 
 namespace MV {
+
+	std::shared_ptr<MV::FontDefinition> FontDefinition::make(TextLibrary& a_library, const std::string &a_identifier, const std::string &a_file, int a_size, FontStyle a_style) {
+		auto exists = a_library.get(a_identifier);
+		if (exists){
+			require<ResourceException>(exists->equivalent(a_identifier, a_file, a_size, a_style), "Found an existing definition that doesn't match: ", exists);
+			return exists;
+		} else {
+			TTF_Font* newFont = TTF_OpenFont(a_file.c_str(), a_size);
+			if (newFont) {
+				TTF_SetFontHinting(newFont, TTF_HINTING_NORMAL);
+				TTF_SetFontStyle(newFont, static_cast<int>(a_style));
+				auto fontDefinitionToAdd = std::shared_ptr<FontDefinition>(new FontDefinition(&a_library, a_file, a_size, newFont, a_style, a_identifier));
+				a_library.add(fontDefinitionToAdd);
+				return fontDefinitionToAdd;
+			} else {
+				require<ResourceException>(false, "Error loading font [", a_identifier, "]: ", TTF_GetError());
+			}
+		}
+		return nullptr;
+	}
 
 	/*************************\
 	| -----FontDefinition---- |
@@ -17,8 +37,8 @@ namespace MV {
 				SurfaceTextureDefinition::make(toString(renderChar), [=]() -> SDL_Surface* {
 					if (textLibrary->renderer().headless()) { return nullptr; }
 
-					Uint16 text[] = {static_cast<Uint16>(renderChar), '\0'};
-					return TTF_RenderUNICODE_Blended(font, text, {255, 255, 255, 255});
+					char text[] = {static_cast<char>(renderChar), '\0'};
+					return TTF_RenderUTF8_Blended(font, text, {255, 255, 255, 255});
 				}),
 				renderChar,
 				shared_from_this()
@@ -88,27 +108,13 @@ namespace MV {
 		}
 	}
 
-	bool TextLibrary::loadFont(const std::string &a_identifier, std::string a_fontFileLocation, int a_pointSize, FontStyle a_styleFlags){
-		auto found = loadedFonts.find(a_identifier);
-		if(found == loadedFonts.end()){
-			TTF_Font* newFont = TTF_OpenFont(a_fontFileLocation.c_str(), a_pointSize);
-			TTF_SetFontHinting(newFont, TTF_HINTING_NORMAL);
-			TTF_SetFontStyle(newFont, static_cast<int>(a_styleFlags));
-			if(newFont) {
-				loadedFonts.insert({a_identifier, FontDefinition::make(this, a_fontFileLocation, a_pointSize, newFont)});
-				return true;
-			} else{
-				std::cerr << "Error loading font: " << TTF_GetError() << std::endl;
-			}
-		} else{
-			std::cerr << "Error, font identifier already used, cannot assign another font to the same id: " << a_identifier << std::endl;
-		}
-		return false;
+	void TextLibrary::add(const std::shared_ptr<FontDefinition> &a_definition){
+		loadedFonts[a_definition->id()] = a_definition;
 	}
 
 	//SDL Supports 16 bit unicode characters, ensure glyph only ever contains characters of that size unless that changes.
 
-	std::shared_ptr<FontDefinition> TextLibrary::fontDefinition(const std::string &a_identifier) const {
+	std::shared_ptr<FontDefinition> TextLibrary::get(const std::string &a_identifier) const {
 		auto found = loadedFonts.find(a_identifier);
 		if(found != loadedFonts.end()){
 			return found->second;
@@ -203,7 +209,7 @@ namespace MV {
 	Point<> FormattedCharacter::offset(PointPrecision a_x, PointPrecision a_lineHeight, PointPrecision a_baseLine) {
 		PointPrecision height = character->font()->height();
 		PointPrecision base = character->font()->base();
-		offset({a_x, a_baseLine - base});
+		offset({ a_x, a_baseLine - base });
 		shape->silence()->position(basePosition + offsetPosition);
 		return offsetPosition;
 	}
@@ -282,34 +288,39 @@ namespace MV {
 		Color result;
 		if(!colorStrings.empty()){
 			if(colorStrings.size() >= 1){
-				try{ result.R = boost::lexical_cast<float>(colorStrings[0]); } catch(boost::bad_lexical_cast){ result.R = 1.0; }
+				try{ result.R = std::stof(colorStrings[0]); } catch(std::exception&){ result.R = 1.0; }
 			}
 			if(colorStrings.size() >= 2){
-				try{ result.G = boost::lexical_cast<float>(colorStrings[1]); } catch(boost::bad_lexical_cast){ result.G = 1.0; }
+				try{ result.G = std::stof(colorStrings[1]); } catch(std::exception&){ result.G = 1.0; }
 			}
 			if(colorStrings.size() >= 3){
-				try{ result.B = boost::lexical_cast<float>(colorStrings[2]); } catch(boost::bad_lexical_cast){ result.B = 1.0; }
+				try{ result.B = std::stof(colorStrings[2]); } catch(std::exception&){ result.B = 1.0; }
 			}
 			if(colorStrings.size() >= 4){
-				try{ result.A = boost::lexical_cast<float>(colorStrings[3]); } catch(boost::bad_lexical_cast){ result.A = 1.0; }
+				try{ result.A = std::stof(colorStrings[3]); } catch(std::exception&){ result.A = 1.0; }
 			}
 		}
 		return result;
 	}
 
+	std::ostream& operator<<(std::ostream& os, const FontDefinition& a_font) {
+		os << "Identifier [" << a_font.identifier << "] - File [" << a_font.file << "] - Size [" << a_font.size << "] - Style [" << static_cast<int>(a_font.style) << "]\n";
+		return os;
+	}
+
 	std::shared_ptr<FormattedState> FormattedLine::getHeightState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current) {
-		std::string heightString = toString(a_text.substr(2));
+		std::string heightString = a_text.substr(2);
 		if(heightString.empty()){
 			return std::make_shared<FormattedState>(text.defaultState()->minimumLineHeight, a_current);
 		} else{
 			PointPrecision newMinimumHeight = 0;
-			try{ newMinimumHeight = boost::lexical_cast<PointPrecision>(heightString); } catch(boost::bad_lexical_cast){ newMinimumHeight = 0.0; }
+			try{ newMinimumHeight = std::stof(heightString); } catch(std::exception&) { newMinimumHeight = 0.0; }
 			return std::make_shared<FormattedState>(newMinimumHeight, a_current);
 		}
 	}
 
 	std::shared_ptr<FormattedState> FormattedLine::getColorState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current) {
-		std::string colorString = toString(a_text.substr(2));
+		std::string colorString = a_text.substr(2);
 		if(colorString.empty()){
 			return std::make_shared<FormattedState>(text.defaultState()->color, a_current);
 		} else{
@@ -318,11 +329,11 @@ namespace MV {
 	}
 
 	std::shared_ptr<FormattedState> FormattedLine::getFontState(const UtfString &a_text, const std::shared_ptr<FormattedState> & a_current) {
-		std::string fontIdentifier = toString(a_text.substr(2));
+		std::string fontIdentifier = a_text.substr(2);
 		if(fontIdentifier.empty()){
 			return std::make_shared<FormattedState>(text.defaultState()->font, a_current);
 		} else{
-			return std::make_shared<FormattedState>(text.library.fontDefinition(fontIdentifier), a_current);
+			return std::make_shared<FormattedState>(text.library->get(fontIdentifier), a_current);
 		}
 	}
 
@@ -400,7 +411,7 @@ namespace MV {
 				characters[index]->position({characterPosition, linePosition});
 				characters[index]->offset(0.0f, lineHeight, baseLine);
 				
-				if(index > 0 && text.exceedsWidth(characters[index]->position().x)){
+				if(text.wrapping() != TextWrapMethod::NONE && index > 0 && text.exceedsWidth(characters[index]->position().x)){
 					std::vector<std::shared_ptr<FormattedCharacter>> overflow(characters.begin() + index-1, characters.end());
 					characters.erase(characters.begin() + index-1, characters.end());
 					if(text.lines.size() <= lineIndex + 1){
@@ -540,8 +551,6 @@ namespace MV {
 
 
 
-
-
 	/*************************\
 	| -----FormattedText----- |
 	\*************************/
@@ -551,19 +560,29 @@ namespace MV {
 		return lines[a_index];
 	}
 
-	FormattedText::FormattedText(TextLibrary &a_library, PointPrecision a_width, const std::string &a_defaultStateIdentifier, TextWrapMethod a_wrapping, TextJustification a_justification):
-		library(a_library),
+	FormattedText::FormattedText(const FormattedText& a_rhs):
+		FormattedText(*a_rhs.library, a_rhs.defaultStateIdentifier, a_rhs.textWidth, a_rhs.textWrapping, a_rhs.textJustification){
+
+		append(a_rhs.string());
+	}
+
+	FormattedText::FormattedText(TextLibrary &a_library, const std::string &a_defaultStateIdentifier, PointPrecision a_width, TextWrapMethod a_wrapping, TextJustification a_justification):
+		library(&a_library),
 		textWidth(a_width),
-		defaultTextState(std::make_shared<FormattedState>(a_library.fontDefinition(a_defaultStateIdentifier))),
+		defaultStateIdentifier(a_defaultStateIdentifier),
+		cachedDefaultState(std::make_shared<FormattedState>(a_library.get(a_defaultStateIdentifier))),
 		textWrapping(a_wrapping),
 		textJustification(a_justification),
 		minimumTextLineHeight(-1){
 
-		textScene = Scene::Node::make(library.renderer())->serializable(false);
+		textScene = Scene::Node::make(library->renderer())->serializable(false);
 	}
 
 	PointPrecision FormattedText::width(PointPrecision a_width) {
 		textWidth = a_width;
+		for (auto&& line : lines) {
+			line->fixVisuals();
+		}
 		return textWidth;
 	}
 
@@ -578,13 +597,13 @@ namespace MV {
 		});
 	}
 
-	std::shared_ptr<FormattedState> FormattedText::defaultState(const std::string &a_defaultStateIdentifier) {
-		defaultTextState = std::make_shared<FormattedState>(library.fontDefinition(a_defaultStateIdentifier));
-		return defaultTextState;
+	FormattedText& FormattedText::defaultState(const std::string &a_defaultStateIdentifier) {
+		cachedDefaultState = std::make_shared<FormattedState>(library->get(a_defaultStateIdentifier));
+		return *this;
 	}
 
 	std::shared_ptr<FormattedState> FormattedText::defaultState() const {
-		return defaultTextState;
+		return cachedDefaultState;
 	}
 
 	size_t FormattedText::length() const {
@@ -599,6 +618,12 @@ namespace MV {
 			result += line->string();
 		}
 		return result;
+	}
+
+	MV::FormattedText& FormattedText::string(const std::string &a_newContent) {
+		clear();
+		append(a_newContent);
+		return *this;
 	}
 
 	bool FormattedText::exceedsWidth(PointPrecision a_xPosition) const {
@@ -743,7 +768,7 @@ namespace MV {
 		size_t characterInLineIndex;
 		std::tie(line, characterInLineIndex) = lineForCharacterIndex(a_startIndex);
 
-		std::shared_ptr<FormattedState> foundState = defaultTextState;
+		std::shared_ptr<FormattedState> foundState = defaultState();
 		if(a_startIndex > 0){
 			if(characterInLineIndex > 0){
 				foundState = (*line)[characterInLineIndex - 1]->state;
@@ -786,7 +811,7 @@ namespace MV {
 		if(a_characters.empty()){
 			return;
 		}
-		std::shared_ptr<FormattedState> foundState = defaultTextState;
+		std::shared_ptr<FormattedState> foundState = defaultState();
 		if(lines.empty()){
 			lines.push_back(FormattedLine::make(*this, lines.size()));
 		} else{
@@ -832,9 +857,19 @@ namespace MV {
 		return textJustification;
 	}
 
+	void FormattedText::wrapping(TextWrapMethod a_newWrapping, PointPrecision a_newWidth) {
+		textWidth = a_newWidth;
+		textWrapping = a_newWrapping;
+		for (auto&& line : lines) {
+			line->fixVisuals();
+		}
+	}
+
 	void FormattedText::wrapping(TextWrapMethod a_newWrapping) {
 		textWrapping = a_newWrapping;
-		//TODO: Need to update wrapping.
+		for (auto&& line : lines) {
+			line->fixVisuals();
+		}
 	}
 
 	MV::TextWrapMethod FormattedText::wrapping() const {

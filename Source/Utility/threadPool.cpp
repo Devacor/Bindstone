@@ -90,7 +90,7 @@ namespace MV{
 		totalThreads(a_threads < 2 ? 1 : a_threads - 1),
 		details(std::make_unique<ThreadPoolDetails>()) {
 
-		log(INFO, "Info: Generating ThreadPool [", totalThreads, "]");
+		info("Info: Generating ThreadPool [", totalThreads, "]");
 
 		for(size_t i = 0; i < totalThreads; ++i) {
 			workers.emplace_back(new std::thread([this]{

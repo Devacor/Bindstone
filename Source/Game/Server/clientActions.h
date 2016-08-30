@@ -11,7 +11,6 @@
 #include <memory>
 
 #include "pqxx/pqxx"
-#undef ERROR
 
 class LobbyConnectionState;
 

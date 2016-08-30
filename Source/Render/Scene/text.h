@@ -26,16 +26,18 @@ namespace MV{
 			UtfString text() const {
 				return formattedText.string();
 			}
-			std::shared_ptr<Text> text(const UtfString &a_text, const std::string &a_fontIdentifier = "");
-			std::shared_ptr<Text> text(UtfChar a_char, const std::string &a_fontIdentifier = "") {
-				return text(UtfString() + a_char, a_fontIdentifier);
+			std::shared_ptr<Text> text(const UtfString &a_text);
+			std::shared_ptr<Text> text(UtfChar a_char) {
+				return text(UtfString() + a_char);
 			}
-			std::shared_ptr<Text> text(Uint16 a_char, const std::string &a_fontIdentifier = "") {
+			std::shared_ptr<Text> text(Uint16 a_char) {
 				UtfChar *character = reinterpret_cast<UtfChar*>(&a_char);
-				return text(*character, a_fontIdentifier);
+				return text(*character);
 			}
 
 			bool text(SDL_Event &event);
+
+
 
 			PointPrecision number() const {
 				try {
@@ -45,12 +47,10 @@ namespace MV{
 				}
 			}
 			std::shared_ptr<Text> number(PointPrecision a_newText) {
-				UtfString str = toWide(std::to_string(a_newText));
-				return text(str);
+				return text(std::to_string(a_newText));
 			}
 			std::shared_ptr<Text> number(int a_newText) {
-				UtfString str = toWide(std::to_string(a_newText));
-				return text(str);
+				return text(std::to_string(a_newText));
 			}
 
 			std::shared_ptr<Text> justification(MV::TextJustification a_newJustification) {
@@ -61,12 +61,36 @@ namespace MV{
 				return formattedText.justification();
 			}
 
+			std::shared_ptr<Text> wrapping(MV::TextWrapMethod a_newWrapMethod, MV::PointPrecision a_width) {
+				formattedText.wrapping(a_newWrapMethod, a_width);
+
+				auto adjustedBounds = bounds();
+				adjustedBounds.maxPoint.x = adjustedBounds.minPoint.x + a_width;
+				bounds(adjustedBounds);
+
+				return std::static_pointer_cast<Text>(shared_from_this());
+			}
+
 			std::shared_ptr<Text> wrapping(MV::TextWrapMethod a_newWrapMethod) {
 				formattedText.wrapping(a_newWrapMethod);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
+
+			std::shared_ptr<Text> wrappingWidth(MV::PointPrecision a_width) {
+				formattedText.width(a_width);
+
+				auto adjustedBounds = bounds();
+				adjustedBounds.maxPoint.x = adjustedBounds.minPoint.x + a_width;
+				bounds(adjustedBounds);
+
+				return std::static_pointer_cast<Text>(shared_from_this());
+			}
+
 			MV::TextWrapMethod wrapping() const {
 				return formattedText.wrapping();
+			}
+			MV::PointPrecision wrappingWidth() const {
+				return formattedText.width();
 			}
 
 			std::shared_ptr<Text> append(const UtfString &a_text) {
@@ -124,18 +148,16 @@ namespace MV{
 				a_script.add(chaiscript::base_class<Drawable, Text>());
 				a_script.add(chaiscript::base_class<Component, Text>());
 
-				a_script.add(chaiscript::fun([](Node &a_self, TextLibrary& a_textLibrary, const Size<> &a_size, const std::string &a_defaultFontIdentifier) { return a_self.attach<Text>(a_textLibrary, a_size, a_defaultFontIdentifier); }), "attachText");
 				a_script.add(chaiscript::fun([](Node &a_self, TextLibrary& a_textLibrary) { return a_self.attach<Text>(a_textLibrary); }), "attachText");
-				a_script.add(chaiscript::fun([](Node &a_self, TextLibrary& a_textLibrary, const Size<> &a_size) { return a_self.attach<Text>(a_textLibrary, a_size); }), "attachText");
 				a_script.add(chaiscript::fun([](Node &a_self, TextLibrary& a_textLibrary, const std::string &a_defaultFontIdentifier) { return a_self.attach<Text>(a_textLibrary, a_defaultFontIdentifier); }), "attachText");
 
 				a_script.add(chaiscript::fun(&Text::enableCursor), "enableCursor");
 				a_script.add(chaiscript::fun(&Text::disableCursor), "disableCursor");
 
 				a_script.add(chaiscript::fun(static_cast<UtfString(Text::*)() const>(&Text::text)), "text");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(const UtfString &, const std::string &)>(&Text::text)), "text");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(UtfChar, const std::string &)>(&Text::text)), "text");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(Uint16, const std::string &)>(&Text::text)), "text");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(const UtfString &)>(&Text::text)), "text");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(UtfChar)>(&Text::text)), "text");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(Uint16)>(&Text::text)), "text");
 
 				a_script.add(chaiscript::fun(static_cast<PointPrecision(Text::*)() const>(&Text::number)), "number");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(PointPrecision)>(&Text::number)), "number");
@@ -152,32 +174,23 @@ namespace MV{
 				return a_script;
 			}
 		protected:
+			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
 			virtual void updateImplementation(double a_dt);
 
 			virtual void defaultDrawImplementation() {
 				Drawable::defaultDrawImplementation();
 			}
 
-			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const Size<> &a_size, const std::string &a_defaultFontIdentifier);
+			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const std::string &a_defaultFontIdentifier);
 
 			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary) :
-				Text(a_owner, a_textLibrary, Size<>(), DEFAULT_ID) {
-			}
-			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const Size<> &a_size) :
-				Text(a_owner, a_textLibrary, a_size, DEFAULT_ID) {
-			}
-			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const std::string &a_defaultFontIdentifier) :
-				Text(a_owner, a_textLibrary, Size<>(), a_defaultFontIdentifier) {
+				Text(a_owner, a_textLibrary, DEFAULT_ID) {
 			}
 
 			template <class Archive>
 			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
-					CEREAL_NVP(boxSize),
-					CEREAL_NVP(contentScrollPosition),
-					CEREAL_NVP(textJustification),
-					CEREAL_NVP(wrapMethod),
-					CEREAL_NVP(fontIdentifier),
+					CEREAL_NVP(formattedText),
 					CEREAL_NVP(cursorScene),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
@@ -189,19 +202,10 @@ namespace MV{
 				archive.extract(cereal::make_nvp("library", library));
 				MV::require<PointerException>(library != nullptr, "Null TextLibrary in Text::load_and_construct.");
 
-				std::string fontIdentifier;
-				Size<> boxSize;
-				archive(
-					cereal::make_nvp("fontIdentifier", fontIdentifier),
-					cereal::make_nvp("boxSize", boxSize)
-				);
-
-				construct(std::shared_ptr<Node>(), *library, boxSize, fontIdentifier);
+				construct(std::shared_ptr<Node>(), *library);
 
 				archive(
-					cereal::make_nvp("contentScrollPosition", construct->contentScrollPosition),
-					cereal::make_nvp("textJustification", construct->textJustification),
-					cereal::make_nvp("wrapMethod", construct->wrapMethod),
+					cereal::make_nvp("formattedText", construct->formattedText),
 					cereal::make_nvp("cursorScene", construct->cursorScene),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
@@ -209,7 +213,7 @@ namespace MV{
 			}
 			
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
-				return cloneHelper(a_parent->attach<Text>(textLibrary, boxSize, fontIdentifier).self());
+				return cloneHelper(a_parent->attach<Text>(textLibrary, formattedText.defaultStateId()).self());
 			}
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
@@ -236,12 +240,7 @@ namespace MV{
 				setCursor(cursor + a_change);
 			}
 
-			Size<> boxSize;
-			Point<> contentScrollPosition;
-
 			TextLibrary& textLibrary;
-			TextJustification textJustification = TextJustification::LEFT;
-			TextWrapMethod wrapMethod = TextWrapMethod::SOFT;
 
 			FormattedText formattedText;
 

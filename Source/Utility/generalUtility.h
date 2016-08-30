@@ -20,11 +20,11 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 
-#define UTF_CHAR_STR(stringVal) L##stringVal
+#define UTF_CHAR_STR(stringVal) u8##stringVal
 
 namespace MV {
-	typedef wchar_t UtfChar;
-	typedef std::wstring UtfString;
+	typedef char UtfChar;
+	typedef std::string UtfString;
 
 	enum AngleType {DEGREES, RADIANS};
 	const double PIE = 3.14159265358979323846;
@@ -174,17 +174,17 @@ namespace MV {
 
 	bool isPowerOfTwo(int num);
 
-	std::string toString(UtfChar wc);
-	UtfChar toWide(char c);
+	std::string toString(wchar_t wc);
+	wchar_t toWide(char c);
 
-	std::string to_string(UtfChar wc);
-	UtfChar to_wide(char c);
+	std::string to_string(wchar_t wc);
+	wchar_t to_wide(char c);
 
-	std::string toString(const UtfString& ws);
-	UtfString toWide(const std::string& s);
+	std::string toString(const std::wstring& ws);
+	std::wstring toWide(const std::string& s);
 
-	std::string to_string(const UtfString& ws);
-	UtfString to_wide(const std::string& s);
+	std::string to_string(const std::wstring& ws);
+	std::wstring to_wide(const std::string& s);
 
 	inline std::string toLower(std::string s) {
 		std::transform(s.begin(), s.end(), s.begin(), [](char c) { return std::tolower(c); });

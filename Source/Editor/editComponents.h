@@ -131,6 +131,49 @@ private:
 	std::shared_ptr<MV::Scene::Node> controlContainer;
 };
 
+class EditableText {
+public:
+	EditableText(MV::Scene::SafeComponent<MV::Scene::Text> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
+
+	~EditableText() {
+		controlContainer->removeFromParent();
+	}
+
+	void removeHandles();
+
+	void resetHandles();
+
+	void texture(const std::shared_ptr<MV::TextureHandle> a_handle);
+	std::shared_ptr<MV::TextureHandle> texture() const;
+	void position(MV::Point<> a_newPosition);
+	MV::Point<> position() const;
+
+	void size(MV::Size<> a_newSize);
+	MV::Size<> size();
+
+	void aspect(MV::Size<> a_newAspect);
+
+	void repositionHandles(bool a_fireOnChange = true, bool a_repositionElement = true, bool a_resizeElement = true);
+
+	std::function<void(EditableText*)> onChange;
+
+	MV::Scene::SafeComponent<MV::Scene::Text> elementToEdit;
+private:
+
+	MV::Scene::Node::BasicSharedSignalType nodeMoved;
+
+	MV::MouseState *mouse;
+
+	MV::Scene::SafeComponent<MV::Scene::Clickable> topLeftSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> topRightSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> bottomLeftSizeHandle;
+	MV::Scene::SafeComponent<MV::Scene::Clickable> bottomRightSizeHandle;
+
+	MV::Scene::SafeComponent<MV::Scene::Clickable> positionHandle;
+
+	std::shared_ptr<MV::Scene::Node> controlContainer;
+};
+
 class Selection {
 public:
 	Selection(std::shared_ptr<MV::Scene::Node> a_scene, MV::MouseState &a_mouse);

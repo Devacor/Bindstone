@@ -367,7 +367,129 @@ void EditableRectangle::aspect(MV::Size<> a_newAspect) {
 	resetHandles();
 }
 
+//EDITABLE TEXT
 
+void EditableText::resetHandles() {
+	removeHandles();
+	auto rectBox = MV::round<MV::PointPrecision>(elementToEdit->screenBounds());
+
+	rectBox.maxPoint = rectBox.minPoint;
+
+	auto handleSize = MV::point(8.0f, 8.0f);
+	EditableText* self = this;
+
+	topLeftSizeHandle = controlContainer->make(MV::guid("topLeft"))->position(MV::cast<MV::PointPrecision>(elementToEdit->owner()->screenPosition()))->attach<MV::Scene::Clickable>(*mouse);
+	topLeftSizeHandle->size(toSize(handleSize))->color({ SIZE_HANDLES })->show();
+	topLeftSizeHandle->onDrag.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
+		auto worldDelta = handle->owner()->renderer().worldFromScreen(deltaPosition);
+		handle->owner()->translate(worldDelta);
+		topRightSizeHandle->owner()->translate(MV::point(0.0f, worldDelta.y));
+		bottomLeftSizeHandle->owner()->translate(MV::point(worldDelta.x, 0.0f));
+
+		repositionHandles();
+	});
+
+	topLeftSizeHandle->onRelease.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &) {
+		resetHandles();
+	});
+
+	topRightSizeHandle = controlContainer->make(MV::guid("topRight"))->position(rectBox.topRightPoint() - MV::point(0.0f, handleSize.y))->attach<MV::Scene::Clickable>(*mouse);
+	topRightSizeHandle->size(toSize(handleSize))->color({ SIZE_HANDLES })->show();
+	topRightSizeHandle->onDrag.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
+		auto worldDelta = handle->owner()->renderer().worldFromScreen(deltaPosition);
+		handle->owner()->translate(worldDelta);
+		topLeftSizeHandle->owner()->translate(MV::point(0.0f, worldDelta.y));
+		bottomRightSizeHandle->owner()->translate(MV::point(worldDelta.x, 0.0f));
+
+		repositionHandles();
+	});
+	topRightSizeHandle->onRelease.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &) {
+		resetHandles();
+	});
+
+	repositionHandles(false, false, false);
+}
+
+EditableText::EditableText(MV::Scene::SafeComponent<MV::Scene::Text> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse) :
+	elementToEdit(a_elementToEdit),
+	controlContainer(a_rootContainer->make("Editable")->depth(-100.0f)),
+	mouse(a_mouse) {
+	resetHandles();
+	nodeMoved = elementToEdit->owner()->onTransformChange.connect([&](const std::shared_ptr<MV::Scene::Node> &a_this) {
+		resetHandles();
+	});
+}
+
+void EditableText::removeHandles() {
+	if (positionHandle) {
+		controlContainer->remove(positionHandle->owner());
+		controlContainer->remove(topLeftSizeHandle->owner());
+		controlContainer->remove(topRightSizeHandle->owner());
+		controlContainer->remove(bottomLeftSizeHandle->owner());
+		controlContainer->remove(bottomRightSizeHandle->owner());
+	}
+	positionHandle.reset();
+	topLeftSizeHandle.reset();
+	topRightSizeHandle.reset();
+	bottomLeftSizeHandle.reset();
+	bottomRightSizeHandle.reset();
+}
+
+void EditableText::repositionHandles(bool a_fireOnChange, bool a_repositionElement, bool a_resizeElement) {
+	auto box = MV::BoxAABB<>(topLeftSizeHandle->worldBounds().bottomRightPoint(), bottomRightSizeHandle->worldBounds().topLeftPoint());
+
+	auto originalPosition = elementToEdit->bounds().minPoint;
+	auto corners = elementToEdit->owner()->localFromWorld(box);
+	MV::Size<> currentDimensions = corners.size();
+
+	if (a_resizeElement) {
+		elementToEdit->bounds({ corners.minPoint, currentDimensions });
+	}
+	if (a_repositionElement) {
+		elementToEdit->bounds({ corners.minPoint, corners.size() });
+	}
+	else {
+		elementToEdit->bounds({ originalPosition, corners.size() });
+	}
+
+	auto rectBox = MV::round<MV::PointPrecision>(MV::round<MV::PointPrecision>(elementToEdit->screenBounds()));
+	positionHandle->bounds({ MV::point(0.0f, 0.0f), rectBox.size() });
+	positionHandle->owner()->position(rectBox.minPoint);
+
+	if (a_fireOnChange) {
+		onChange(this);
+	}
+}
+
+void EditableText::position(MV::Point<> a_newPosition) {
+	elementToEdit->bounds({ a_newPosition, elementToEdit->bounds().size() });
+	resetHandles();
+}
+
+MV::Point<> EditableText::position() const {
+	return elementToEdit->bounds().minPoint;
+}
+
+void EditableText::size(MV::Size<> a_newSize) {
+	elementToEdit->bounds({ elementToEdit->bounds().minPoint, a_newSize });
+	resetHandles();
+}
+
+MV::Size<> EditableText::size() {
+	return elementToEdit->bounds().size();
+}
+
+void EditableText::texture(const std::shared_ptr<MV::TextureHandle> a_handle) {
+	elementToEdit->texture(a_handle);
+}
+
+std::shared_ptr<MV::TextureHandle> EditableText::texture() const {
+	return elementToEdit->texture();
+}
+
+void EditableText::aspect(MV::Size<> a_newAspect) {
+	resetHandles();
+}
 
 //EDITABLE EMITTER
 

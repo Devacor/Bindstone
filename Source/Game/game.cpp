@@ -36,9 +36,9 @@ void Game::initializeWindow(){
 	MV::AudioPlayer::instance()->initAudio();
 	mouse.update();
 
-	data.managers().textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
-	data.managers().textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
-	data.managers().textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+	MV::FontDefinition::make(data.managers().textLibrary, "default", "Assets/Fonts/Verdana.ttf", 14);
+	MV::FontDefinition::make(data.managers().textLibrary, "small", "Assets/Fonts/Verdana.ttf", 9);
+	MV::FontDefinition::make(data.managers().textLibrary, "big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 	if (!data.managers().renderer.headless()) {
 		data.managers().textures.assemblePacks("Assets/Atlases", &data.managers().renderer);
 		data.managers().textures.files("Assets/Map");

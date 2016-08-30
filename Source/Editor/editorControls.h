@@ -38,7 +38,7 @@ public:
 
 	template <typename PanelType, typename ...Arg>
 	void loadPanel(Arg... a_parameters){
-		if(currentPanel){ currentPanel->activate(nullptr); }
+		if(currentPanel){ currentPanel->deactivateText(); }
 		currentPanel = std::make_unique<PanelType>(*this, std::forward<Arg>(a_parameters)...);
 	}
 

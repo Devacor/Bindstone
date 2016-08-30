@@ -25,26 +25,26 @@ private:
 	void initializeRootPicker() {
 		auto gridNode = MV::Scene::Node::make(root->renderer());
 		grid = gridNode->attach<MV::Scene::Grid>()->cellSize(MV::size(100.0f, 27.0f))->padding({ 2.0f, 2.0f })->columns(6)->margin({ 4.0f, 4.0f })->color({ BOX_BACKGROUND });
-		makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Back", { 100.0f, 27.0f }, UTF_CHAR_STR("Back"))->
-			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
-			setter(nullptr, false);
-		});
+		makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Close", { 100.0f, 27.0f }, UTF_CHAR_STR("Close"))->
+			onAccept.connect("Close", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+				setter(nullptr, false);
+			});
 		makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Null", { 100.0f, 27.0f }, UTF_CHAR_STR("Clear"))->
 			onAccept.connect("Null", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
-			setter(nullptr, true);
-		});
+				setter(nullptr, true);
+			});
 
 		auto pos = box ? box->parent()->position() : MV::Point<>(200.0f, 0.0f);
 		box = makeDraggableBox("TexturePicker", root, grid->bounds().size(), *sharedResources.mouse);
 		box->parent()->position(pos);
 		box->add(gridNode);
 
-		auto imageButton = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Files", { 100.0f, 27.0f }, MV::toWide("Files"));
+		auto imageButton = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Files", { 100.0f, 27.0f }, "Files");
 		imageButton->onAccept.connect("Accept", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 			initializeFilePicker();
 		});
 		for (auto&& packId : packs) {
-			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, packId, { 100.0f, 27.0f }, MV::toWide(packId));
+			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, packId, { 100.0f, 27.0f }, packId);
 			button->onAccept.connect("Accept", [&, packId](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				initializeImagePicker(packId);
 			});
@@ -68,7 +68,7 @@ private:
 		for (auto&& textureId : files) {
 			auto handle = sharedResources.textures->file(textureId.first, textureId.second)->makeHandle();
 
-			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId.first, cellSize, MV::toWide(""));
+			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId.first, cellSize, "");
 			button->onAccept.connect("Accept", [&, handle](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				setter(handle, false);
 			});
@@ -93,7 +93,7 @@ private:
 		for (auto&& textureId : pack->handleIds()) {
 			auto handle = pack->handle(textureId);
 
-			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId, cellSize, MV::toWide(""));
+			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId, cellSize, "");
 			button->onAccept.connect("Accept", [&, handle](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				setter(handle, false);
 			});

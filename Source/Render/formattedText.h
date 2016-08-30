@@ -20,16 +20,46 @@ namespace MV {
 
 	Color parseColorString(const std::string &a_colorString);
 
+	enum class TextWrapMethod {
+		NONE,
+		HARD,
+		SOFT
+	};
+
+	enum class TextJustification {
+		LEFT,
+		CENTER,
+		RIGHT
+	};
+
+	enum class FontStyle : int {
+		NORMAL = TTF_STYLE_NORMAL,
+		BOLD = TTF_STYLE_BOLD,
+		ITALIC = TTF_STYLE_ITALIC,
+		UNDERLINE = TTF_STYLE_UNDERLINE
+	};
+
+	inline FontStyle operator | (FontStyle lhs, FontStyle rhs) {
+		return static_cast<FontStyle>((int)lhs | (int)rhs);
+	}
+
+	inline FontStyle& operator |= (FontStyle& a_lhs, FontStyle a_rhs) {
+		a_lhs = static_cast<FontStyle>(static_cast<int>(a_lhs) | static_cast<int>(a_rhs));
+		return a_lhs;
+	}
+
+	class FontDefinition;
+	std::ostream& operator<<(std::ostream& os, const FontDefinition& a_font);
 
 	class CharacterDefinition;
 	class TextLibrary;
 	///////////////////////////////////
 	class FontDefinition : public std::enable_shared_from_this<FontDefinition>{
 		friend cereal::access;
+		friend TextLibrary;
+		friend std::ostream& operator<<(std::ostream&, const FontDefinition&);
 	public:
-		static std::shared_ptr<FontDefinition> make(TextLibrary *a_library, const std::string &a_file, int a_size, TTF_Font* a_font){
-			return std::shared_ptr<FontDefinition>(new FontDefinition(a_library, a_file, a_size, a_font));
-		}
+		static std::shared_ptr<FontDefinition> make(TextLibrary &a_library, const std::string &a_identifier, const std::string &a_file, int a_size, FontStyle a_style = FontStyle::NORMAL);
 		~FontDefinition(){
 			if(font != nullptr){
 				TTF_CloseFont(font);
@@ -47,10 +77,19 @@ namespace MV {
 		TextLibrary* library() const{
 			return textLibrary;
 		}
+		std::string id() const {
+			return identifier;
+		}
+
+		bool equivalent(const std::string &a_identifier, const std::string &a_file, int a_size, FontStyle a_style) const {
+			return identifier == a_identifier && file == a_file && size == a_size && style == a_style;
+		}
 	private:
 		std::string file;
 		TTF_Font* font;
+		std::string identifier;
 		int size;
+		FontStyle style;
 		PointPrecision lineHeight;
 		PointPrecision baseLine;
 		TextLibrary *textLibrary;
@@ -61,31 +100,53 @@ namespace MV {
 		template <class Archive>
 		void save(Archive & archive){
 			archive(
+				CEREAL_NVP(identifier),
 				CEREAL_NVP(file),
-				CEREAL_NVP(size)
+				CEREAL_NVP(size),
+				CEREAL_NVP(style)
 			);
 		}
 
 		template <class Archive>
-		void load(Archive & archive){
+		static void load_and_construct(Archive & archive, cereal::construct<FontDefinition> &construct, std::uint32_t const){
+			construct();
 			archive(
-				CEREAL_NVP(file),
-				CEREAL_NVP(size)
+				cereal::make_nvp("identifier", construct->identifier),
+				cereal::make_nvp("file", construct->file),
+				cereal::make_nvp("size", construct->size),
+				cereal::make_nvp("style", construct->style)
 			);
-			//TODO! Get textLibrary.
-			font = TTF_OpenFont(file.c_str(), size);
-			lineHeight = static_cast<PointPrecision>(TTF_FontLineSkip(font));
-			baseLine = static_cast<PointPrecision>(TTF_FontAscent(font));
+			construct->initializeFromLoad();
+
+			TextLibrary textLibrary = nullptr;
+			archive.extract(cereal::make_nvp("textLibrary", textLibrary));
+			if (textLibrary) {
+				textLibrary.add(construct->shared_from_this());
+			}
 		}
 
-		FontDefinition(TextLibrary *a_library, const std::string &a_file, int a_size, TTF_Font* a_font):
+		void initializeFromLoad() {
+			TTF_Font* newFont = TTF_OpenFont(file.c_str(), size);
+			if (newFont) {
+				TTF_SetFontHinting(newFont, TTF_HINTING_NORMAL);
+				TTF_SetFontStyle(newFont, static_cast<int>(style));
+			} else {
+				require<ResourceException>(false, "Error loading font [", identifier, "]: ", TTF_GetError());
+			}
+		}
+
+		FontDefinition(TextLibrary *a_library, const std::string &a_file, int a_size, TTF_Font* a_font, FontStyle a_style, const std::string &a_identifier):
 			file(a_file),
 			size(a_size),
 			font(a_font),
+			style(a_style),
+			identifier(a_identifier),
 			textLibrary(a_library),
 			lineHeight(static_cast<PointPrecision>(TTF_FontLineSkip(a_font))),
 			baseLine(static_cast<PointPrecision>(TTF_FontAscent(a_font))){
 		}
+		FontDefinition(){}
+
 		FontDefinition(const FontDefinition &a_other) = delete;
 		FontDefinition& operator=(const FontDefinition &a_other) = delete;
 	};
@@ -114,46 +175,18 @@ namespace MV {
 		std::shared_ptr<FontDefinition> fontDefinition;
 	};
 
-	enum class TextWrapMethod{
-		NONE,
-		HARD,
-		SOFT
-	};
-
-	enum class TextJustification{
-		LEFT,
-		CENTER,
-		RIGHT
-	};
-
-	enum class FontStyle : int{
-		NORMAL = TTF_STYLE_NORMAL,
-		BOLD = TTF_STYLE_BOLD,
-		ITALIC = TTF_STYLE_ITALIC,
-		UNDERLINE = TTF_STYLE_UNDERLINE
-	};
-
-	inline FontStyle operator | (FontStyle lhs, FontStyle rhs){
-		return static_cast<FontStyle>((int)lhs | (int)rhs);
-	}
-
-	inline FontStyle& operator |= (FontStyle& a_lhs, FontStyle a_rhs){
-		a_lhs = static_cast<FontStyle>(static_cast<int>(a_lhs) | static_cast<int>(a_rhs));
-		return a_lhs;
-	}
-
 	///////////////////////////////////
 	class Draw2D;
 	class TextLibrary{
+		friend FontDefinition;
 	public:
 		TextLibrary(Draw2D& a_rendering);
 		~TextLibrary(){}
 
-		bool loadFont(const std::string &a_identifier, std::string a_fontFileLocation, int a_pointSize, FontStyle a_styleFlags = FontStyle::NORMAL);
+		void add(const std::shared_ptr<FontDefinition> &a_definition);
+		std::shared_ptr<FontDefinition> get(const std::string &a_identifier) const;
 
 		Draw2D& renderer(){return render;}
-
-		std::shared_ptr<FontDefinition> fontDefinition(const std::string &a_identifier) const;
 	private:
 		template <class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/){
@@ -169,8 +202,10 @@ namespace MV {
 				cereal::make_nvp("renderer", renderer)
 			);
 			construct(*renderer);
+			archive.add(cereal::make_nvp("textLibrary", construct.ptr()));
+			std::map<std::string, std::shared_ptr<FontDefinition>> fontLoadScratchPad;
 			archive(
-				cereal::make_nvp("loadedFonts", construct()->loadedFonts)
+				cereal::make_nvp("loadedFonts", fontLoadScratchPad)
 			);
 		}
 
@@ -231,6 +266,7 @@ namespace MV {
 	class FormattedText;
 	///////////////////////////////////
 	class FormattedLine : public std::enable_shared_from_this<FormattedLine> {
+		friend FormattedText;
 	public:
 		static std::shared_ptr<FormattedLine> make(FormattedText &a_text, size_t a_lineIndex);
 
@@ -280,10 +316,14 @@ namespace MV {
 
 	///////////////////////////////////
 	class FormattedText{
+		friend cereal::access;
 		friend FormattedLine;
 	public:
-		FormattedText(TextLibrary &a_library, PointPrecision a_width, const std::string &a_defaultStateIdentifier, TextWrapMethod a_wrapping = TextWrapMethod::SOFT, TextJustification a_justification = TextJustification::LEFT);
-
+		FormattedText(const FormattedText& a_rhs);
+		FormattedText(TextLibrary &a_library, const std::string &a_defaultStateIdentifier, PointPrecision a_width, TextWrapMethod a_wrapping = TextWrapMethod::SOFT, TextJustification a_justification = TextJustification::LEFT);
+		FormattedText(TextLibrary &a_library, const std::string &a_defaultStateIdentifier, TextJustification a_justification = TextJustification::LEFT) :
+			FormattedText(a_library, a_defaultStateIdentifier, 0.0f, TextWrapMethod::NONE, a_justification){
+		}
 		PointPrecision width(PointPrecision a_width);
 		PointPrecision width() const;
 
@@ -291,8 +331,11 @@ namespace MV {
 
 		PointPrecision positionForLine(size_t a_index);
 
-		std::shared_ptr<FormattedState> defaultState(const std::string &a_defaultStateIdentifier);
+		FormattedText& defaultState(const std::string &a_defaultStateIdentifier);
 		std::shared_ptr<FormattedState> defaultState() const;
+		std::string defaultStateId() const {
+			return defaultStateIdentifier;
+		}
 
 		std::shared_ptr<FormattedLine>& operator[](size_t a_index);
 
@@ -303,6 +346,7 @@ namespace MV {
 		size_t length() const;
 
 		UtfString string() const;
+		FormattedText& string(const std::string &a_newContent);
 
 		std::shared_ptr<FormattedCharacter> characterRelativeTo(size_t a_lineIndex, size_t a_characterIndex, int64_t a_relativeCharacterIndex);
 
@@ -333,16 +377,56 @@ namespace MV {
 		void justification(TextJustification a_newJustification);
 		TextJustification justification() const;
 
+		void wrapping(TextWrapMethod a_newWrapping, PointPrecision a_newWidth);
 		void wrapping(TextWrapMethod a_newWrapping);
 		TextWrapMethod wrapping() const;
 
 		std::shared_ptr<Scene::Node> scene() const;
+
+		FormattedText& operator=(const FormattedText& a_rhs) {
+			defaultState(a_rhs.defaultStateIdentifier);
+			textWidth = a_rhs.textWidth;
+			textJustification = a_rhs.textJustification;
+			string(a_rhs.string());
+			return *this;
+		}
 	private:
-		TextLibrary &library;
+		template <class Archive>
+		void serialize(Archive & archive, std::uint32_t const /*version*/) {
+			archive(
+				cereal::make_nvp("defaultStateIdentifier", defaultStateIdentifier),
+				cereal::make_nvp("textWidth", textWidth),
+				cereal::make_nvp("textJustification", textJustification),
+				cereal::make_nvp("string", string())
+			);
+		}
+
+		template <class Archive>
+		static void load_and_construct(Archive & archive, cereal::construct<FormattedText> &construct, std::uint32_t const /*version*/) {
+			TextLibrary *library = nullptr;
+			archive.extract(cereal::make_nvp("textLibrary", library));
+			MV::require<PointerException>(library != nullptr, "Null TextLibrary in Text::load_and_construct.");
+
+			std::string stringContents;
+			std::string fontIdentifier;
+			float textWidth;
+			archive(
+				cereal::make_nvp("defaultStateIdentifier", defaultStateIdentifier),
+				cereal::make_nvp("textWidth", textWidth),
+				cereal::make_nvp("textJustification", textJustification),
+				cereal::make_nvp("string", stringContents)
+			);
+
+			construct(*library, defaultStateIdentifier, textWidth, textJustification);
+			construct->append(stringContents);
+		}
+
+		mutable TextLibrary *library;
 		TextWrapMethod textWrapping;
 		std::vector<std::shared_ptr<FormattedLine>> lines;
-		std::shared_ptr<FormattedState> defaultTextState;
 		std::shared_ptr<Scene::Node> textScene;
+		std::string defaultStateIdentifier;
+		std::shared_ptr<FormattedState> cachedDefaultState;
 		PointPrecision textWidth;
 		PointPrecision minimumTextLineHeight;
 

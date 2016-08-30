@@ -11,9 +11,11 @@ class EditableNode;
 class EditableRectangle;
 class EditableEmitter;
 class EditableGrid;
+class EditableText;
 class EditablePathMap;
 class EditableSpine;
 class TexturePicker;
+class AnchorEditor;
 
 class EditorPanel {
 protected:
@@ -31,22 +33,38 @@ public:
 	}
 	virtual void onSceneZoom() {
 	}
-	void activate(std::shared_ptr<MV::Scene::Text> a_textbox){
-		if(activeTextbox){
-			activeTextbox->disableCursor();
+	void activateText(std::weak_ptr<MV::Scene::Text> a_textbox){
+		if(!activeTextbox.expired()){
+			activeTextbox.lock()->disableCursor();
 		}
-		if(!a_textbox || a_textbox == activeTextbox){
-			activeTextbox = nullptr;
-		} else if(a_textbox){
+		activeTextbox.reset();
+		if(!a_textbox.expired()){
 			activeTextbox = a_textbox;
-			activeTextbox->enableCursor();
+			activeTextbox.lock()->enableCursor();
 		}
 	}
-	
+	void deactivateText() {
+		if (!activeTextbox.expired()) {
+			activeTextbox.lock()->disableCursor();
+		}
+		activeTextbox.reset();
+	}
+	SharedResources resources();
+
+	virtual void clearTexturePicker() {
+		picker = nullptr;
+	}
+	virtual void clearAnchorEditor() {
+		anchorEditor = nullptr;
+	}
 protected:
+	virtual void openTexturePicker() {}
+	virtual void openAnchorEditor() {}
+
 	EditorControls &panel;
 	std::shared_ptr<TexturePicker> picker;
-	std::shared_ptr<MV::Scene::Text> activeTextbox;
+	std::shared_ptr<AnchorEditor> anchorEditor;
+	std::weak_ptr<MV::Scene::Text> activeTextbox;
 };
 
 class SelectedNodeEditorPanel : public EditorPanel {
@@ -125,14 +143,35 @@ public:
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
 private:
-	void OpenTexturePicker();
-	void clearTexturePicker(){
-		picker = nullptr;
-	}
-
+	virtual void openTexturePicker() override;
+	virtual void openAnchorEditor() override;
 	MV::Scale aspectRatio;
 
 	std::shared_ptr<EditableRectangle> controls;
+	std::shared_ptr<MV::Scene::Text> offsetY;
+	std::shared_ptr<MV::Scene::Text> offsetX;
+	std::shared_ptr<MV::Scene::Text> width;
+	std::shared_ptr<MV::Scene::Text> height;
+	std::shared_ptr<MV::Scene::Text> aspectX;
+	std::shared_ptr<MV::Scene::Text> aspectY;
+};
+
+class SelectedTextEditorPanel : public EditorPanel {
+public:
+	SelectedTextEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableText> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
+
+	~SelectedTextEditorPanel();
+
+	virtual void handleInput(SDL_Event &a_event) override;
+
+	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
+	virtual void onSceneZoom() override;
+private:
+	virtual void openTexturePicker() override;
+	virtual void openAnchorEditor() override;
+	MV::Scale aspectRatio;
+
+	std::shared_ptr<EditableText> controls;
 	std::shared_ptr<MV::Scene::Text> offsetY;
 	std::shared_ptr<MV::Scene::Text> offsetX;
 	std::shared_ptr<MV::Scene::Text> width;
@@ -153,10 +192,8 @@ public:
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
 private:
-	void OpenTexturePicker();
-	void clearTexturePicker(){
-		picker = nullptr;
-	}
+	virtual void openTexturePicker() override;
+	virtual void openAnchorEditor() override;
 
 	std::shared_ptr<EditableEmitter> controls;
 	std::shared_ptr<MV::Scene::Text> offsetX;
@@ -234,6 +271,5 @@ private:
 
 	SelectedNodeEditorPanel* editorPanel;
 };
-
 
 #endif

@@ -254,6 +254,7 @@ namespace MV {
 				a_child->myParent = this;
 				a_child->onAddSignal(a_child);
 				onChildAddSignal(a_child);
+				a_child->markMatrixDirty(true);
 			}
 			return shared_from_this();
 		}

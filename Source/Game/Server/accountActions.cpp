@@ -38,21 +38,21 @@ void CreatePlayer::execute(LobbyConnectionState& a_connection) {
 				} else if (!result[0][0].as<bool>()) {
 					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Player not email validated yet.")));
 					sendValidationEmail(a_connection, result[0][2].c_str());
-					MV::log(MV::INFO, "Need Validation: [", email, "]");
+					MV::info("Need Validation: [", email, "]");
 				} else if (MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>()) == result[0][1].c_str()) {
 					a_connection.authenticate();
 					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Successful login.")));
-					MV::log(MV::INFO, "Login Success: [", email, "]");
+					MV::info("Login Success: [", email, "]");
 				} else {
 					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Failed to create due to existing player with different credentials.")));
-					MV::log(MV::INFO, "Failed to create: [", email, "] credential mismatch for existing user!");
+					MV::info("Failed to create: [", email, "] credential mismatch for existing user!");
 				}
 
 				transaction->commit();
 			}
 			doneFlag = true;
 		} catch (std::exception& e) {
-			MV::log(MV::ERROR, "Failed to execute CreatePlayer: [", email, "]\nWHAT: [", e.what(), "]");
+			MV::error("Failed to execute CreatePlayer: [", email, "]\nWHAT: [", e.what(), "]");
 			doneFlag = true;
 		}
 	});
@@ -115,21 +115,21 @@ void LoginRequest::execute(LobbyConnectionState& a_connection) {
 					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("No player exists.")));
 				} else if (!result[0][0].as<bool>()) {
 					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Player not email validated yet.")));
-					MV::log(MV::INFO, "Need Validation: [", identifier, "]");
+					MV::info("Need Validation: [", identifier, "]");
 				} else if (MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>()) == result[0][1].c_str()) {
 					a_connection.authenticate();
 					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Successful login.")));
-					MV::log(MV::INFO, "Login Success: [", identifier, "]");
+					MV::info("Login Success: [", identifier, "]");
 				} else {
 					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Failed to authenticate.")));
-					MV::log(MV::INFO, "Failed to authenticate: [", identifier, "] credential mismatch for existing user!");
+					MV::info("Failed to authenticate: [", identifier, "] credential mismatch for existing user!");
 				}
 
 				transaction->commit();
 			}
 			doneFlag = true;
 		} catch (std::exception& e) {
-			MV::log(MV::ERROR, "Failed to execute LoginRequest: [", identifier, "]\nWHAT: [", e.what(), "]");
+			MV::info("Failed to execute LoginRequest: [", identifier, "]\nWHAT: [", e.what(), "]");
 			doneFlag = true;
 		}
 	});

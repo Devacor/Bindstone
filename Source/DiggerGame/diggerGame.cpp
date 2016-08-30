@@ -45,9 +45,9 @@ void DiggerGame::initializeWindow() {
 // 
 // 	archive(cereal::make_nvp("scene", worldScene));
 
-	managers.textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
-	managers.textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
-	managers.textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+	MV::FontDefinition::make(managers.textLibrary, "default", "Assets/Fonts/Verdana.ttf", 14);
+	MV::FontDefinition::make(managers.textLibrary, "small", "Assets/Fonts/Verdana.ttf", 9);
+	MV::FontDefinition::make(managers.textLibrary, "big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 
 	InitializeWorldScene();
 

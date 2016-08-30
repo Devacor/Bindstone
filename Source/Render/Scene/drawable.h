@@ -61,7 +61,12 @@ namespace MV {
 
 			enum class BoundsToOffset { Ignore, Apply, Apply_Reposition };
 
+			bool hasParent() const {
+				return !parentReference.expired();
+			}
+			std::shared_ptr<Drawable> parent() const;
 			Anchors& parent(const std::weak_ptr<Drawable> &a_parent, BoundsToOffset a_offsetFromBounds = BoundsToOffset::Ignore);
+			Anchors& removeFromParent();
 
 			Anchors& anchor(const BoxAABB<> &a_anchor);
 			Anchors& anchor(const Point<> &a_anchor);
@@ -90,7 +95,7 @@ namespace MV {
 				return applyingPosition;
 			}
 
-			Anchors& applyBoundsToOffset(BoundsToOffset a_offsetFromBounds);
+			Anchors& applyBoundsToOffset(BoundsToOffset a_offsetFromBounds = BoundsToOffset::Apply);
 
 		private:
 			Drawable *selfReference = nullptr;
@@ -132,7 +137,6 @@ namespace MV {
 			}
 
 			void registerWithParent();
-			void removeFromParent();
 		};
 
 		class Drawable : public Component {

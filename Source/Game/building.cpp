@@ -116,7 +116,7 @@ void Building::initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &
 
 			for (size_t i = 0; i < current()->upgrades.size(); ++i) {
 				auto&& currentUpgrade = current()->upgrades[i];
-				auto upgradeButton = button(dialog, gameInstance.data().managers().textLibrary, gameInstance.mouse(), MV::size(256.0f, 20.0f), MV::toWide(currentUpgrade->name + ": " + MV::to_string(currentUpgrade->cost)));
+				auto upgradeButton = button(dialog, gameInstance.data().managers().textLibrary, gameInstance.mouse(), MV::size(256.0f, 20.0f), currentUpgrade->name + ": " + MV::to_string(currentUpgrade->cost));
 				auto* upgradePointer = currentUpgrade.get();
 				upgradeButton->onAccept.connect("tryToBuy", [&, i, upgradePointer](std::shared_ptr<MV::Scene::Clickable> a_self) {
 					if (owningPlayer->wallet.remove(Wallet::CurrencyType::SOFT, upgradePointer->cost)) {

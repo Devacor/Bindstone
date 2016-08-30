@@ -108,7 +108,7 @@ namespace MV {
 		return num>0 && ((num & (num-1))==0);
 	}
 
-	std::string toString(UtfChar wc){
+	std::string toString(wchar_t wc){
 		std::vector<char> c(MB_CUR_MAX);
 		mbstate_t ignore;
 		memset (&ignore, '\0', sizeof (ignore));
@@ -120,23 +120,23 @@ namespace MV {
 		return result;
 	}
 
-	UtfChar toWide(char c){
+	wchar_t toWide(char c){
 		wchar_t wc;
 		mbtowc(&wc, &c, 1);
 		return wc;
 	}
 
-	std::string to_string(UtfChar wc) {
+	std::string to_string(wchar_t wc) {
 		return toString(wc);
 	}
-	UtfChar to_wide(char c) {
+	wchar_t to_wide(char c) {
 		return toWide(c);
 	}
 
-	std::string to_string(const UtfString& ws) {
+	std::string to_string(const std::wstring& ws) {
 		return toString(ws);
 	}
-	UtfString to_wide(const std::string& s) {
+	std::wstring to_wide(const std::string& s) {
 		return toWide(s);
 	}
 
@@ -183,7 +183,7 @@ namespace MV {
 		return stream ? std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>()) : "";
 	}
 
-	std::string toString(const UtfString& ws) {
+	std::string toString(const std::wstring& ws) {
 		std::string s;
 		std::for_each(ws.begin(), ws.end(), [&](const UtfChar &wc){
 			s+=toString(wc);
@@ -191,8 +191,8 @@ namespace MV {
 		return s;
 	}
 
-	UtfString toWide(const std::string& s){
-		UtfString ws;
+	std::wstring toWide(const std::string& s){
+		std::wstring ws;
 		std::transform(s.begin(), s.end(), std::back_inserter(ws), [](char c){
 			return toWide(c);
 		});

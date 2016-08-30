@@ -49,9 +49,9 @@ void ClickerGame::initializeWindow() {
 	textures.assemblePacks("Assets/Atlases", renderer);
 	textures.files("Assets/Map");
 
-	textLibrary.loadFont("default", "Assets/Fonts/Verdana.ttf", 14);
-	textLibrary.loadFont("small", "Assets/Fonts/Verdana.ttf", 9);
-	textLibrary.loadFont("big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+	MV::FontDefinition::make(textLibrary, "default", "Assets/Fonts/Verdana.ttf", 14);
+	MV::FontDefinition::make(textLibrary, "small", "Assets/Fonts/Verdana.ttf", 9);
+	MV::FontDefinition::make(textLibrary, "big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 
 	InitializeWorldScene();
 }
@@ -87,7 +87,7 @@ void ClickerGame::InitializeWorldScene() {
 	auto goldTextComponent = makeLabel(currencyBarNode, textLibrary, "CurrencyLabel", goldTextSize, UTF_CHAR_STR("0"));
 
 	player.onGoldChange.connect("UpdateGoldValue", [goldTextComponent](uint64_t newValue) {
-		goldTextComponent->text(std::to_wstring(newValue));
+		goldTextComponent->text(MV::to_string(newValue));
 	});
 }
 

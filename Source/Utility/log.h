@@ -7,28 +7,45 @@
 #include <mutex>
 #include "require.hpp"
 
-//seriously fuck right off wingdi.h
-#undef ERROR
-
 namespace MV {
-	enum LogLevel {DEBUG, INFO, WARNING, ERROR, NONE};
+	enum class Severity {Debug, Info, Warning, Error, None};
 
 	struct LogData {
-		LogData() : level(LogLevel::DEBUG), targets({ &std::cout, &std::cout, &std::cout, &std::cerr }) {}
-		LogLevel level;
+		LogData() : level(Severity::Debug), targets({ &std::cout, &std::cout, &std::cout, &std::cerr }) {}
+		Severity level;
 		std::vector<std::ostream*> targets;
 	};
 
 	extern LogData logFilter;
 
 	template <typename... Args>
-	inline void log(LogLevel a_level, Args&&... a_args) {
-		if (a_level != LogLevel::NONE && a_level >= logFilter.level) {
+	inline void log(Severity a_level, Args&&... a_args) {
+		if (a_level != Severity::None && a_level >= logFilter.level) {
 			static std::mutex mutex;
 			std::lock_guard<std::mutex> lock(mutex);
 
 			(*logFilter.targets[static_cast<int>(a_level)]) << MV::to_string(std::make_tuple(std::forward<Args>(a_args)...)) << std::endl;
 		}
+	}
+
+	template <typename... Args>
+	inline void debug(Args&&... a_args) {
+		log(Severity::Debug, std::forward<Args>(a_args)...);
+	}
+
+	template <typename... Args>
+	inline void info(Args&&... a_args) {
+		log(Severity::Info, std::forward<Args>(a_args)...);
+	}
+
+	template <typename... Args>
+	inline void warning(Args&&... a_args) {
+		log(Severity::Warning, std::forward<Args>(a_args)...);
+	}
+
+	template <typename... Args>
+	inline void error(Args&&... a_args) {
+		log(Severity::Error, std::forward<Args>(a_args)...);
 	}
 }
 

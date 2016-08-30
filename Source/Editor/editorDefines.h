@@ -26,7 +26,9 @@ enum InterfaceColors : uint32_t {
 	CREATED_DEFAULT = 0xdfdfdf,
 	SIZE_HANDLES = 0x44ffb400,
 	SLIDER_BACKGROUND = 0x2c2e36,
-	SIDER_HANDLE = 0x516191
+	SIDER_HANDLE = 0x516191,
+	TOGGLE_BACKGROUND = 0x9fa4b7,
+	TOGGLE_CENTER = 0x3c404f
 };
 class Editor;
 struct SharedResources {

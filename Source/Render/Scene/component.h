@@ -120,6 +120,10 @@ namespace MV {
 				return wrappedComponent;
 			}
 
+			std::shared_ptr<T> get() const {
+				return self();
+			}
+
 			std::shared_ptr<Node> owner() const {
 				return wrappedComponent->owner();
 			}

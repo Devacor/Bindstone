@@ -38,11 +38,11 @@ namespace MV {
 			}
 
 			getline_platform_agnostic(response_stream, message);
-			log(INFO, status_code, message);
+			info(status_code, message);
 			std::string line;
 			while (getline_platform_agnostic(response_stream, line) && !line.empty()) {
 				lines.push_back(line);
-				log(INFO, "L: ", line);
+				info("L: ", line);
 			}
 		}
 	};
@@ -257,7 +257,7 @@ namespace MV {
 							done = true;
 							onFinish();
 							sendInternal("QUIT\r\n", {}, [this, self] {
-								log(INFO, "Email Complete [", addresses.from, "] -> [", addresses.to, "]");
+								info("Email Complete [", addresses.from, "] -> [", addresses.to, "]");
 							});
 						});
 					});

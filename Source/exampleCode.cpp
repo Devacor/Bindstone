@@ -3,10 +3,10 @@
 
 void CreateTextScene(std::shared_ptr<MV::Scene::Node> mainScene, MV::TextLibrary &textLibrary){
 	//load the font
-	textLibrary.loadFont("annabel", "Assets/Fonts/AnnabelScript.ttf", 20);
-	textLibrary.loadFont("bluehighway1", "Assets/Fonts/bluehigh.ttf", 12);
-	textLibrary.loadFont("bluehighway2", "Assets/Fonts/bluehigh.ttf", 24);
-	textLibrary.loadFont("bluehighway3", "Assets/Fonts/bluehigh.ttf", 42);
+	MV::FontDefinition::make(textLibrary, "annabel", "Assets/Fonts/AnnabelScript.ttf", 20);
+	MV::FontDefinition::make(textLibrary, "bluehighway1", "Assets/Fonts/bluehigh.ttf", 12);
+	MV::FontDefinition::make(textLibrary, "bluehighway2", "Assets/Fonts/bluehigh.ttf", 24);
+	MV::FontDefinition::make(textLibrary, "bluehighway3", "Assets/Fonts/bluehigh.ttf", 42);
 
 	mainScene->renderer().backgroundColor(MV::Color(0.0f, 0.0f, 0.0f, 0.0f));
 	mainScene->renderer().clearScreen();

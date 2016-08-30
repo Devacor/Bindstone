@@ -11,13 +11,12 @@ namespace MV{
 		const double Text::BLINK_DURATION = .35;
 
 
-		Text::Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const Size<> &a_size, const std::string &a_defaultFontIdentifier) :
+		Text::Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const std::string &a_defaultFontIdentifier) :
 			Drawable(a_owner),
 			textLibrary(a_textLibrary),
 			onEnter(onEnterSignal),
 			fontIdentifier(a_defaultFontIdentifier),
-			formattedText(a_textLibrary, a_size.width, DEFAULT_ID),
-			boxSize(a_size) {
+			formattedText(a_textLibrary, a_defaultFontIdentifier) {
 			
 			for (auto&& point : points) {
 				point = Color(1.0f, 1.0f, 1.0f, 0.0f);
@@ -27,6 +26,8 @@ namespace MV{
 
 			formattedText.scene()->id(guid("TEXT_"));
 			owner()->add(formattedText.scene());
+
+			formattedText.width(10.0f);
 
 			cursorScene = owner()->make(guid("CURSOR_"))->attach<Sprite>()->size({ 1.0f, 5.0f });
 			cursorScene->hide();
@@ -94,7 +95,7 @@ namespace MV{
 			if (owner()->renderer().headless()) { return false; }
 
 			if (event.type == SDL_TEXTINPUT) {
-				insertAtCursor(toWide(event.text.text));
+				insertAtCursor(event.text.text);
 				return true;
 			} else if (event.type == SDL_TEXTEDITING) {
 				//setTemporaryText(stringToWide(event.edit.text), event.edit.start, event.edit.length);
@@ -107,10 +108,10 @@ namespace MV{
 					backspace();
 					return true;
 				} else if (event.key.keysym.sym == SDLK_v && SDL_GetModState() & KMOD_CTRL) {
-					append(toWide(SDL_GetClipboardText()));
+					append(SDL_GetClipboardText());
 					return true;
 				} else if (event.key.keysym.sym == SDLK_c && SDL_GetModState() & KMOD_CTRL) {
-					SDL_SetClipboardText(toString(text()).c_str());
+					SDL_SetClipboardText(text().c_str());
 				} else if (event.key.keysym.sym == SDLK_LEFT) {
 					if (cursor > 0) {
 						incrementCursor(-1);
@@ -127,32 +128,51 @@ namespace MV{
 			return false;
 		}
 
-		std::shared_ptr<Text> Text::text(const UtfString &a_text, const std::string &a_fontIdentifier /*= ""*/) {
-			if (a_fontIdentifier != "") { fontIdentifier = a_fontIdentifier; }
-			formattedText.clear();
-			formattedText.append(a_text);
+		std::shared_ptr<Text> Text::text(const UtfString &a_text) {
+			formattedText.string(a_text);
 			setCursor(a_text.size());
 			return std::static_pointer_cast<Text>(shared_from_this());
 		}
 
 		void Text::enableCursor() {
-			displayCursor = true;
-			setCursor(cursor);
-			cursorScene->show();
+			if (!displayCursor) {
+				displayCursor = true;
+				setCursor(cursor);
+				cursorScene->show();
+			}
 		}
 
 		void Text::disableCursor() {
-			displayCursor = false;
-			setCursor(cursor);
-			cursorScene->hide();
+			if (displayCursor) {
+				auto self = std::static_pointer_cast<Text>(shared_from_this());
+				displayCursor = false;
+				setCursor(cursor);
+				cursorScene->hide();
+				if (self) {
+					onEnterSignal(self);
+				}
+			}
 		}
 
 		std::shared_ptr<Component> Text::cloneHelper(const std::shared_ptr<Component> &a_clone) {
 			Drawable::cloneHelper(a_clone);
 			auto textClone = std::static_pointer_cast<Text>(a_clone);
-			textClone->wrapping(wrapMethod);
-			textClone->contentScrollPosition = contentScrollPosition;
+			textClone->formattedText = formattedText;
+			textClone->text(text());
+			textClone->cursor = cursor;
 			return a_clone;
+		}
+
+		void Text::boundsImplementation(const BoxAABB<> &a_bounds) {
+			points[0] = a_bounds.minPoint;
+			points[1].x = a_bounds.minPoint.x;	points[1].y = a_bounds.maxPoint.y;	points[1].z = (a_bounds.maxPoint.z + a_bounds.minPoint.z) / 2.0f;
+			points[2] = a_bounds.maxPoint;
+			points[3].x = a_bounds.maxPoint.x;	points[3].y = a_bounds.minPoint.y;	points[3].z = points[1].z;
+
+			formattedText.scene()->position(a_bounds.minPoint);
+			formattedText.width(a_bounds.size().width);
+
+			refreshBounds();
 		}
 
 	}

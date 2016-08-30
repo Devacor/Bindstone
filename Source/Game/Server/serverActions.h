@@ -13,7 +13,6 @@
 #include "chaiscript/chaiscript.hpp"
 
 #include "pqxx/pqxx"
-#undef ERROR
 
 class LobbyConnectionState;
 

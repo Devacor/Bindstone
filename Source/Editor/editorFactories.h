@@ -20,4 +20,6 @@ void colorTopAndBottom(const std::shared_ptr<MV::Scene::Sprite> &a_rect, const M
 std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::Size<> a_boxSize, MV::MouseState &a_mouse);
 void applyColorToColorButton(std::shared_ptr<MV::Scene::Button> a_button, const MV::Color& a_color);
 
+std::shared_ptr<MV::Scene::Node> makeToggle(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::MouseState &a_mouse, const std::string &a_name, bool a_defaultValue, const std::function<void ()> a_on, const std::function<void ()> a_off, const MV::Size<> &a_size = MV::Size<>(27.0f, 27.0f));
+
 #endif

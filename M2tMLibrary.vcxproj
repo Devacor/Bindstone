@@ -489,6 +489,7 @@
     <ClInclude Include="Source\ArtificialIntelligence\pathfinding.h" />
     <ClInclude Include="Source\ClickerGame\clickerGame.h" />
     <ClInclude Include="Source\DiggerGame\diggerGame.h" />
+    <ClInclude Include="Source\Editor\anchorEditor.h" />
     <ClInclude Include="Source\Editor\editor.h" />
     <ClInclude Include="Source\Editor\editorControls.h" />
     <ClInclude Include="Source\Editor\editorDefines.h" />
@@ -572,6 +573,7 @@
     <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html" />
     <None Include="..\external\spine\LICENSE" />
     <None Include="..\external\spine\README.md" />
+    <None Include="ClassDiagram.cd" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="..\external\spine\CMakeLists.txt" />

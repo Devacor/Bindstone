@@ -269,6 +269,14 @@ namespace MV {
 			return *this;
 		}
 
+		std::shared_ptr<MV::Scene::Drawable> Anchors::parent() const {
+			if (!parentReference.expired()) {
+				return parentReference.lock();
+			} else {
+				return nullptr;
+			}
+		}
+
 		Anchors& Anchors::anchor(const BoxAABB<> &a_anchor) {
 			parentAnchors = a_anchor;
 			return *this;
@@ -315,7 +323,7 @@ namespace MV {
 		}
 
 		Anchors& Anchors::applyBoundsToOffset(BoundsToOffset a_offsetFromBounds) {
-			if (a_offsetFromBounds != BoundsToOffset::Ignore && !parentReference.expired()) {
+			if (!applying && a_offsetFromBounds != BoundsToOffset::Ignore && !parentReference.expired()) {
 				auto childBounds = selfReference->worldBounds();
 				auto parentBounds = parentReference.lock()->worldBounds();
 				auto parentSize = parentBounds.size();
@@ -331,15 +339,16 @@ namespace MV {
 			return *this;
 		}
 
-		void Anchors::removeFromParent() {
+		Anchors& Anchors::removeFromParent() {
 			if (!parentReference.expired()) {
 				auto parentShared = parentReference.lock();
 				auto position = std::find(parentShared->childAnchors.begin(), parentShared->childAnchors.end(), this);
 				if (position != parentShared->childAnchors.end()) {
 					parentShared->childAnchors.erase(position);
 				}
-				ourOffset.clear();
+				parentReference.reset();
 			}
+			return *this;
 		}
 
 		void Anchors::registerWithParent() {

@@ -111,7 +111,7 @@ void Editor::initializeWindow(){
 
 	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
 	fps = controls->make("FPS")->position({960.0f - 50.0f, 0.0f})->
-		attach<MV::Scene::Text>(managers.textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->wrapping(MV::TextWrapMethod::NONE);
+		attach<MV::Scene::Text>(managers.textLibrary)->number(0.0f)->wrapping(MV::TextWrapMethod::NONE)->bounds({MV::Point<>(), MV::size(50.0f, 15.0f) });
 }
 
 void Editor::handleInput(){
@@ -161,6 +161,12 @@ void Editor::render(){
 		scene = controlPanel.root();
 		scene->id("root");
 		selectorPanel.refresh(scene);
+	}
+	auto scaler = scene->component<MV::Scene::Drawable>("ScreenScaler", false);
+	if (!scaler) {
+		scene->attach<MV::Scene::Drawable>()->id("ScreenScaler")->screenBounds({ MV::Point<int>(0, 0), managers.renderer.window().size() });
+	} else {
+		scaler->screenBounds({ MV::Point<int>(0, 0), managers.renderer.window().size() });
 	}
 	scene->drawUpdate(lastUpdateDelta);
 	controls->drawUpdate(lastUpdateDelta);

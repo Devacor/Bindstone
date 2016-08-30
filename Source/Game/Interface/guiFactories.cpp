@@ -36,11 +36,11 @@ std::shared_ptr<MV::Scene::Button> button(const std::shared_ptr<MV::Scene::Node>
 
 	auto idleScene = button->owner()->make("idle")->attach<MV::Scene::Sprite>()->size(a_size)->colors(boxIdleColors)->owner();
 
-	auto activeBox = activeScene->attach<MV::Scene::Text>(a_library, a_size, fontIdentifier);
+	auto activeBox = activeScene->attach<MV::Scene::Text>(a_library, fontIdentifier)->bounds({ MV::Point<>(), a_size });
 	activeBox->justification(MV::TextJustification::CENTER);
 	activeBox->wrapping(MV::TextWrapMethod::HARD)->minimumLineHeight(a_size.height)->text(a_text);
 
-	auto idleBox = idleScene->attach<MV::Scene::Text>(a_library, a_size, fontIdentifier);
+	auto idleBox = idleScene->attach<MV::Scene::Text>(a_library, fontIdentifier)->bounds({ MV::Point<>(), a_size });
 	idleBox->justification(MV::TextJustification::CENTER);
 	idleBox->wrapping(MV::TextWrapMethod::HARD)->minimumLineHeight(a_size.height)->text(a_text);
 

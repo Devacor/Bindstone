@@ -16,39 +16,43 @@ namespace MV{
 			textLibrary(a_textLibrary),
 			onEnter(onEnterSignal),
 			fontIdentifier(a_defaultFontIdentifier),
-			formattedText(a_textLibrary, a_defaultFontIdentifier) {
+			formattedText(std::make_shared<FormattedText>(a_textLibrary, a_defaultFontIdentifier)) {
 			
 			for (auto&& point : points) {
 				point = Color(1.0f, 1.0f, 1.0f, 0.0f);
 			}
 			clearTexturePoints(points);
 			appendQuadVertexIndices(vertexIndices, 0);
+		}
 
-			formattedText.scene()->id(guid("TEXT_"));
-			owner()->add(formattedText.scene());
+		void Text::initialize() {
+			Drawable::initialize();
+			if (ownerIsAlive()) {
+				formattedText->scene()->id(guid("TEXT_"));
+				owner()->add(formattedText->scene());
+				formattedText->scene()->position(points[0]);
 
-			formattedText.width(10.0f);
-
-			cursorScene = owner()->make(guid("CURSOR_"))->attach<Sprite>()->size({ 1.0f, 5.0f });
-			cursorScene->hide();
+				cursorScene = owner()->make(guid("CURSOR_"))->serializable(false)->attach<Sprite>()->size({ 1.0f, 5.0f });
+				cursorScene->hide();
+			}
 		}
 
 		void Text::positionCursorWithoutCharacter() {
 			std::shared_ptr<FormattedLine> line;
 			size_t characterIndex;
-			std::tie(line, characterIndex) = formattedText.lineForCharacterIndex(cursor);
+			std::tie(line, characterIndex) = formattedText->lineForCharacterIndex(cursor);
 			float xPosition = 0.0f;
 			if (justification() == TextJustification::CENTER) {
-				xPosition = formattedText.width() / 2.0f - 1.0f;
+				xPosition = formattedText->width() / 2.0f - 1.0f;
 			} else if (justification() == TextJustification::RIGHT) {
-				xPosition = formattedText.width() - 2.0f;
+				xPosition = formattedText->width() - 2.0f;
 			}
-			auto cursorHeight = formattedText.defaultState()->font->height();
-			auto linePositionY = formattedText.positionForLine(line->index());
-			auto cursorLineHeight = std::max<float>(formattedText.minimumLineHeight(), (line) ? line->height() : cursorHeight);
+			auto cursorHeight = formattedText->defaultState()->font->height();
+			auto linePositionY = formattedText->positionForLine(line->index());
+			auto cursorLineHeight = std::max<float>(formattedText->minimumLineHeight(), (line) ? line->height() : cursorHeight);
 			linePositionY += cursorLineHeight / 2.0f - cursorHeight / 2.0f;
 
-			cursorScene->owner()->position({ xPosition, linePositionY });
+			cursorScene->owner()->position(formattedText->scene()->position() + MV::Point<>(xPosition, linePositionY));
 			cursorScene->size({ 2.0f, cursorHeight });
 
 			if (displayCursor) {
@@ -57,7 +61,7 @@ namespace MV{
 		}
 
 		void Text::positionCursorWithCharacter(size_t a_maxCursor, std::shared_ptr<FormattedCharacter> a_cursorCharacter) {
-			cursorScene->owner()->position(a_cursorCharacter->position() + a_cursorCharacter->offset());
+			cursorScene->owner()->position(formattedText->scene()->position() + a_cursorCharacter->position() + a_cursorCharacter->offset());
 			cursorScene->size({ 2.0f, a_cursorCharacter->characterSize().height });
 			if (cursor >= a_maxCursor) {
 				cursorScene->owner()->translate({ a_cursorCharacter->characterSize().width, 0.0f });
@@ -85,7 +89,7 @@ namespace MV{
 
 		std::shared_ptr<Text> Text::backspace() {
 			if (cursor > 0) {
-				formattedText.erase(cursor - 1, 1);
+				formattedText->erase(cursor - 1, 1);
 				incrementCursor(-1);
 			}
 			return std::static_pointer_cast<Text>(shared_from_this());
@@ -100,10 +104,10 @@ namespace MV{
 			} else if (event.type == SDL_TEXTEDITING) {
 				//setTemporaryText(stringToWide(event.edit.text), event.edit.start, event.edit.length);
 			} else if (event.type == SDL_KEYDOWN) {
-				if (event.key.keysym.sym == SDLK_BACKSPACE && !formattedText.empty()) {
+				if (event.key.keysym.sym == SDLK_BACKSPACE && !formattedText->empty()) {
 					backspace();
 					return true;
-				}if (event.key.keysym.sym == SDLK_DELETE && !formattedText.empty() && cursor < formattedText.size()) {
+				}if (event.key.keysym.sym == SDLK_DELETE && !formattedText->empty() && cursor < formattedText->size()) {
 					++cursor; //this is okay because backspace will reposition the cursor.
 					backspace();
 					return true;
@@ -117,7 +121,7 @@ namespace MV{
 						incrementCursor(-1);
 					}
 				} else if (event.key.keysym.sym == SDLK_RIGHT) {
-					if (cursor < formattedText.size()) {
+					if (cursor < formattedText->size()) {
 						incrementCursor(1);
 					}
 				} else if (event.key.keysym.sym == SDLK_RETURN) {
@@ -129,7 +133,7 @@ namespace MV{
 		}
 
 		std::shared_ptr<Text> Text::text(const UtfString &a_text) {
-			formattedText.string(a_text);
+			formattedText->string(a_text);
 			setCursor(a_text.size());
 			return std::static_pointer_cast<Text>(shared_from_this());
 		}
@@ -169,8 +173,10 @@ namespace MV{
 			points[2] = a_bounds.maxPoint;
 			points[3].x = a_bounds.maxPoint.x;	points[3].y = a_bounds.minPoint.y;	points[3].z = points[1].z;
 
-			formattedText.scene()->position(a_bounds.minPoint);
-			formattedText.width(a_bounds.size().width);
+			formattedText->scene()->position(a_bounds.minPoint);
+			formattedText->width(a_bounds.size().width);
+			
+			setCursor(cursor);
 
 			refreshBounds();
 		}

@@ -373,12 +373,24 @@ void EditableText::resetHandles() {
 	removeHandles();
 	auto rectBox = MV::round<MV::PointPrecision>(elementToEdit->screenBounds());
 
-	rectBox.maxPoint = rectBox.minPoint;
+	MV::Size<> currentDimensions = rectBox.size();
+	rectBox.maxPoint = rectBox.minPoint + toPoint(currentDimensions);
 
 	auto handleSize = MV::point(8.0f, 8.0f);
 	EditableText* self = this;
+	positionHandle = controlContainer->make(MV::guid("position"))->attach<MV::Scene::Clickable>(*mouse);
+	positionHandle->onDrag.connect("position", [&, self](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
+		auto castPosition = handle->owner()->renderer().worldFromScreen(deltaPosition);
+		handle->owner()->translate(castPosition);
+		elementToEdit->bounds({ elementToEdit->owner()->localFromWorld(handle->owner()->worldPosition()), elementToEdit->bounds().size() });
+		topLeftSizeHandle->owner()->translate(castPosition);
+		topRightSizeHandle->owner()->translate(castPosition);
+		bottomLeftSizeHandle->owner()->translate(castPosition);
+		bottomRightSizeHandle->owner()->translate(castPosition);
+		onChange(self);
+	});
 
-	topLeftSizeHandle = controlContainer->make(MV::guid("topLeft"))->position(MV::cast<MV::PointPrecision>(elementToEdit->owner()->screenPosition()))->attach<MV::Scene::Clickable>(*mouse);
+	topLeftSizeHandle = controlContainer->make(MV::guid("topLeft"))->position(rectBox.topLeftPoint() - handleSize)->attach<MV::Scene::Clickable>(*mouse);
 	topLeftSizeHandle->size(toSize(handleSize))->color({ SIZE_HANDLES })->show();
 	topLeftSizeHandle->onDrag.connect("topLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
 		auto worldDelta = handle->owner()->renderer().worldFromScreen(deltaPosition);
@@ -404,6 +416,34 @@ void EditableText::resetHandles() {
 		repositionHandles();
 	});
 	topRightSizeHandle->onRelease.connect("topRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &) {
+		resetHandles();
+	});
+
+	bottomLeftSizeHandle = controlContainer->make(MV::guid("bottomLeft"))->position(rectBox.bottomLeftPoint() - MV::point(handleSize.x, 0.0f))->attach<MV::Scene::Clickable>(*mouse);
+	bottomLeftSizeHandle->size(toSize(handleSize))->color({ SIZE_HANDLES })->show();
+	bottomLeftSizeHandle->onDrag.connect("bottomLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
+		auto worldDelta = handle->owner()->renderer().worldFromScreen(deltaPosition);
+		handle->owner()->translate(worldDelta);
+		topLeftSizeHandle->owner()->translate(MV::point(worldDelta.x, 0.0f));
+		bottomRightSizeHandle->owner()->translate(MV::point(0.0f, worldDelta.y));
+
+		repositionHandles();
+	});
+	bottomLeftSizeHandle->onRelease.connect("bottomLeft", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &) {
+		resetHandles();
+	});
+
+	bottomRightSizeHandle = controlContainer->make(MV::guid("bottomRight"))->position(rectBox.bottomRightPoint())->attach<MV::Scene::Clickable>(*mouse);
+	bottomRightSizeHandle->size(toSize(handleSize))->color({ SIZE_HANDLES })->show();
+	bottomRightSizeHandle->onDrag.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
+		auto worldDelta = handle->owner()->renderer().worldFromScreen(deltaPosition);
+		handle->owner()->translate(worldDelta);
+		topRightSizeHandle->owner()->translate(MV::point(worldDelta.x, 0.0f));
+		bottomLeftSizeHandle->owner()->translate(MV::point(0.0f, worldDelta.y));
+
+		repositionHandles();
+	});
+	bottomRightSizeHandle->onRelease.connect("bottomRight", [&](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<MV::PointPrecision> &) {
 		resetHandles();
 	});
 

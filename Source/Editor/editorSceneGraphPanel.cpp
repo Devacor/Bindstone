@@ -55,6 +55,9 @@ void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nu
 }
 
 void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth, std::shared_ptr<MV::Scene::Node> a_grid) {
+	if (!a_node->serializable()) {
+		return;
+	}
 	MV::Size<> buttonSize(200.0f, 18.0f);
 	auto buttonName = std::string(a_depth * 3, ' ') + a_node->id();
 

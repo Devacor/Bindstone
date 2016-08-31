@@ -396,6 +396,7 @@ namespace MV {
 			archive(
 				cereal::make_nvp("defaultStateIdentifier", defaultStateIdentifier),
 				cereal::make_nvp("textWidth", textWidth),
+				cereal::make_nvp("textWrapping", textWrapping),
 				cereal::make_nvp("textJustification", textJustification),
 				cereal::make_nvp("string", string())
 			);
@@ -407,17 +408,21 @@ namespace MV {
 			archive.extract(cereal::make_nvp("textLibrary", library));
 			MV::require<PointerException>(library != nullptr, "Null TextLibrary in Text::load_and_construct.");
 
-			std::string stringContents;
-			std::string fontIdentifier;
+			std::string defaultStateIdentifier;
 			float textWidth;
+			TextJustification textJustification;
+			TextWrapMethod textWrapping;
+			std::string stringContents;
+
 			archive(
 				cereal::make_nvp("defaultStateIdentifier", defaultStateIdentifier),
 				cereal::make_nvp("textWidth", textWidth),
+				cereal::make_nvp("textWrapping", textWrapping),
 				cereal::make_nvp("textJustification", textJustification),
 				cereal::make_nvp("string", stringContents)
 			);
 
-			construct(*library, defaultStateIdentifier, textWidth, textJustification);
+			construct(*library, defaultStateIdentifier, textWidth, textWrapping, textJustification);
 			construct->append(stringContents);
 		}
 

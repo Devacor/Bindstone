@@ -33,6 +33,13 @@ public:
 	}
 	virtual void onSceneZoom() {
 	}
+	void toggleText(std::weak_ptr<MV::Scene::Text> a_textbox) {
+		if(!activeTextbox.expired() && activeTextbox.lock() == a_textbox.lock()){
+			deactivateText();
+		}else{
+			activateText(a_textbox);
+		}
+	}
 	void activateText(std::weak_ptr<MV::Scene::Text> a_textbox){
 		if(!activeTextbox.expired()){
 			activeTextbox.lock()->disableCursor();
@@ -82,6 +89,7 @@ public:
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateSpineComponentButton(const MV::Scene::SafeComponent<MV::Scene::Spine> & a_grid);
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateEmitterComponentButton(const MV::Scene::SafeComponent<MV::Scene::Emitter> & a_emitter);
 	MV::Scene::SafeComponent<MV::Scene::Button> CreatePathMapComponentButton(const MV::Scene::SafeComponent<MV::Scene::PathMap> & a_pathMap);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateTextComponentButton(const MV::Scene::SafeComponent<MV::Scene::Text> & a_text);
 private:
 	void updateComponentEditButtons(bool a_attached);
 
@@ -167,8 +175,6 @@ public:
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
 private:
-	virtual void openTexturePicker() override;
-	virtual void openAnchorEditor() override;
 	MV::Scale aspectRatio;
 
 	std::shared_ptr<EditableText> controls;
@@ -268,6 +274,7 @@ private:
 	void createSpine();
 	void createPathMap(const MV::BoxAABB<int> &a_selected);
 	void createGrid();
+	void createText(const MV::BoxAABB<int> &a_selected);
 
 	SelectedNodeEditorPanel* editorPanel;
 };

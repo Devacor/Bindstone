@@ -24,7 +24,7 @@ namespace MV{
 			DrawableDerivedAccessors(Text)
 
 			UtfString text() const {
-				return formattedText.string();
+				return formattedText->string();
 			}
 			std::shared_ptr<Text> text(const UtfString &a_text);
 			std::shared_ptr<Text> text(UtfChar a_char) {
@@ -54,15 +54,15 @@ namespace MV{
 			}
 
 			std::shared_ptr<Text> justification(MV::TextJustification a_newJustification) {
-				formattedText.justification(a_newJustification);
+				formattedText->justification(a_newJustification);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 			MV::TextJustification justification() const {
-				return formattedText.justification();
+				return formattedText->justification();
 			}
 
 			std::shared_ptr<Text> wrapping(MV::TextWrapMethod a_newWrapMethod, MV::PointPrecision a_width) {
-				formattedText.wrapping(a_newWrapMethod, a_width);
+				formattedText->wrapping(a_newWrapMethod, a_width);
 
 				auto adjustedBounds = bounds();
 				adjustedBounds.maxPoint.x = adjustedBounds.minPoint.x + a_width;
@@ -72,12 +72,12 @@ namespace MV{
 			}
 
 			std::shared_ptr<Text> wrapping(MV::TextWrapMethod a_newWrapMethod) {
-				formattedText.wrapping(a_newWrapMethod);
+				formattedText->wrapping(a_newWrapMethod);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 
 			std::shared_ptr<Text> wrappingWidth(MV::PointPrecision a_width) {
-				formattedText.width(a_width);
+				formattedText->width(a_width);
 
 				auto adjustedBounds = bounds();
 				adjustedBounds.maxPoint.x = adjustedBounds.minPoint.x + a_width;
@@ -87,24 +87,24 @@ namespace MV{
 			}
 
 			MV::TextWrapMethod wrapping() const {
-				return formattedText.wrapping();
+				return formattedText->wrapping();
 			}
 			MV::PointPrecision wrappingWidth() const {
-				return formattedText.width();
+				return formattedText->width();
 			}
 
 			std::shared_ptr<Text> append(const UtfString &a_text) {
-				if (cursor >= formattedText.size()) {
+				if (cursor >= formattedText->size()) {
 					incrementCursor(a_text.size());
 				}
-				formattedText.append(a_text);
+				formattedText->append(a_text);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 			std::shared_ptr<Text> append(UtfChar a_char) {
-				if (cursor >= formattedText.size()) {
+				if (cursor >= formattedText->size()) {
 					incrementCursor(1);
 				}
-				formattedText.append(UtfString(1, a_char));
+				formattedText->append(UtfString(1, a_char));
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 			std::shared_ptr<Text> append(Uint16 a_char) {
@@ -113,18 +113,18 @@ namespace MV{
 			}
 
 			std::shared_ptr<Text> insertAtCursor(const UtfString &a_text) {
-				formattedText.insert(cursor, a_text);
+				formattedText->insert(cursor, a_text);
 				incrementCursor(a_text.size());
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 			std::shared_ptr<Text> insertAtCursor(UtfChar a_char) {
-				formattedText.insert(cursor, UtfString(1, a_char));
+				formattedText->insert(cursor, UtfString(1, a_char));
 				incrementCursor(1);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 			std::shared_ptr<Text> insertAtCursor(Uint16 a_char) {
 				UtfChar *character = reinterpret_cast<UtfChar*>(&a_char);
-				formattedText.insert(cursor, UtfString(1, *character));
+				formattedText->insert(cursor, UtfString(1, *character));
 				incrementCursor(1);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
@@ -135,11 +135,11 @@ namespace MV{
 			std::shared_ptr<Text> backspace();
 
 			PointPrecision minimumLineHeight() const {
-				return formattedText.minimumLineHeight();
+				return formattedText->minimumLineHeight();
 			}
 
 			std::shared_ptr<Text> minimumLineHeight(PointPrecision a_newLineHeight) {
-				formattedText.minimumLineHeight(a_newLineHeight);
+				formattedText->minimumLineHeight(a_newLineHeight);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 
@@ -177,6 +177,8 @@ namespace MV{
 			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
 			virtual void updateImplementation(double a_dt);
 
+			virtual void initialize() override;
+
 			virtual void defaultDrawImplementation() {
 				Drawable::defaultDrawImplementation();
 			}
@@ -191,7 +193,6 @@ namespace MV{
 			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					CEREAL_NVP(formattedText),
-					CEREAL_NVP(cursorScene),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
@@ -199,21 +200,23 @@ namespace MV{
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Text> &construct, std::uint32_t const /*version*/) {
 				TextLibrary *library = nullptr;
-				archive.extract(cereal::make_nvp("library", library));
+				archive.extract(cereal::make_nvp("textLibrary", library));
 				MV::require<PointerException>(library != nullptr, "Null TextLibrary in Text::load_and_construct.");
 
 				construct(std::shared_ptr<Node>(), *library);
 
+				construct->formattedText->scene()->removeFromParent();
+
 				archive(
 					cereal::make_nvp("formattedText", construct->formattedText),
-					cereal::make_nvp("cursorScene", construct->cursorScene),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
+
 				construct->initialize();
 			}
 			
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
-				return cloneHelper(a_parent->attach<Text>(textLibrary, formattedText.defaultStateId()).self());
+				return cloneHelper(a_parent->attach<Text>(textLibrary, formattedText->defaultStateId()).self());
 			}
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
@@ -221,10 +224,10 @@ namespace MV{
 		private:
 
 			void setCursor(int64_t a_value) {
-				auto maxCursor = formattedText.size();
+				auto maxCursor = formattedText->size();
 				a_value = std::max<int64_t>(std::min<int64_t>(a_value, maxCursor), 0);
 				cursor = a_value;
-				auto cursorCharacter = (cursor < maxCursor || cursor == 0) ? formattedText.characterForIndex(cursor) : formattedText.characterForIndex(cursor - 1);
+				auto cursorCharacter = (cursor < maxCursor || cursor == 0) ? formattedText->characterForIndex(cursor) : formattedText->characterForIndex(cursor - 1);
 				if (cursorCharacter) {
 					positionCursorWithCharacter(maxCursor, cursorCharacter);
 				} else {
@@ -242,7 +245,7 @@ namespace MV{
 
 			TextLibrary& textLibrary;
 
-			FormattedText formattedText;
+			std::shared_ptr<FormattedText> formattedText;
 
 			bool displayCursor = false;
 			size_t cursor;

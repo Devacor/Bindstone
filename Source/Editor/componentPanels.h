@@ -33,11 +33,13 @@ public:
 	}
 	virtual void onSceneZoom() {
 	}
-	void toggleText(std::weak_ptr<MV::Scene::Text> a_textbox) {
+	bool toggleText(std::weak_ptr<MV::Scene::Text> a_textbox) {
 		if(!activeTextbox.expired() && activeTextbox.lock() == a_textbox.lock()){
 			deactivateText();
+			return false;
 		}else{
 			activateText(a_textbox);
+			return true;
 		}
 	}
 	void activateText(std::weak_ptr<MV::Scene::Text> a_textbox){
@@ -77,7 +79,6 @@ protected:
 class SelectedNodeEditorPanel : public EditorPanel {
 public:
 	SelectedNodeEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableNode> a_controls);
-	~SelectedNodeEditorPanel();
 
 	virtual void handleInput(SDL_Event &a_event) override;
 
@@ -121,9 +122,6 @@ class SelectedGridEditorPanel : public EditorPanel {
 public:
 	SelectedGridEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableGrid> a_controls, std::shared_ptr<MV::Scene::Button> a_text);
 
-	~SelectedGridEditorPanel() {
-	}
-
 	virtual void handleInput(SDL_Event &a_event)  override;
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta)  override;
@@ -143,8 +141,6 @@ private:
 class SelectedRectangleEditorPanel : public EditorPanel {
 public:
 	SelectedRectangleEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableRectangle> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
-
-	~SelectedRectangleEditorPanel();
 
 	virtual void handleInput(SDL_Event &a_event) override;
 
@@ -167,8 +163,6 @@ private:
 class SelectedTextEditorPanel : public EditorPanel {
 public:
 	SelectedTextEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableText> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
-
-	~SelectedTextEditorPanel();
 
 	virtual void handleInput(SDL_Event &a_event) override;
 
@@ -237,8 +231,6 @@ private:
 class SelectedPathMapEditorPanel : public EditorPanel {
 public:
 	SelectedPathMapEditorPanel(EditorControls &a_panel, std::shared_ptr<EditablePathMap> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
-	~SelectedPathMapEditorPanel() {
-	}
 
 	virtual void handleInput(SDL_Event &a_event) override;
 

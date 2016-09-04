@@ -32,7 +32,7 @@ namespace MV{
 				owner()->add(formattedText->scene());
 				formattedText->scene()->position(points[0]);
 
-				cursorScene = owner()->make(guid("CURSOR_"))->serializable(false)->attach<Sprite>()->size({ 1.0f, 5.0f });
+				cursorScene = owner()->make(guid("CURSOR_"))->serializable(false)->attach<Sprite>()->size({ 2.0f, 5.0f });
 				cursorScene->hide();
 			}
 		}
@@ -61,10 +61,10 @@ namespace MV{
 		}
 
 		void Text::positionCursorWithCharacter(size_t a_maxCursor, std::shared_ptr<FormattedCharacter> a_cursorCharacter) {
-			cursorScene->owner()->position(formattedText->scene()->position() + a_cursorCharacter->position() + a_cursorCharacter->offset());
+			cursorScene->owner()->position(formattedText->scene()->position() + ((a_cursorCharacter->position() + a_cursorCharacter->offset()) * a_cursorCharacter->scale()));
 			cursorScene->size({ 2.0f, a_cursorCharacter->characterSize().height });
 			if (cursor >= a_maxCursor) {
-				cursorScene->owner()->translate({ a_cursorCharacter->characterSize().width, 0.0f });
+				cursorScene->owner()->translate({ a_cursorCharacter->characterSize().width * a_cursorCharacter->scale().x, 0.0f });
 			}
 			if (displayCursor) {
 				cursorScene->show();
@@ -107,12 +107,12 @@ namespace MV{
 				if (event.key.keysym.sym == SDLK_BACKSPACE && !formattedText->empty()) {
 					backspace();
 					return true;
-				}if (event.key.keysym.sym == SDLK_DELETE && !formattedText->empty() && cursor < formattedText->size()) {
+				} else if (event.key.keysym.sym == SDLK_DELETE && !formattedText->empty() && cursor < formattedText->size()) {
 					++cursor; //this is okay because backspace will reposition the cursor.
 					backspace();
 					return true;
 				} else if (event.key.keysym.sym == SDLK_v && SDL_GetModState() & KMOD_CTRL) {
-					append(SDL_GetClipboardText());
+					insertAtCursor(SDL_GetClipboardText());
 					return true;
 				} else if (event.key.keysym.sym == SDLK_c && SDL_GetModState() & KMOD_CTRL) {
 					SDL_SetClipboardText(text().c_str());

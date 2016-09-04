@@ -370,11 +370,13 @@ namespace MV {
 		void removeLines(size_t a_startIndex, size_t a_count);
 		size_t popCharacters(size_t a_count); //return new size
 
-		void insert(size_t a_startIndex, const UtfString &a_characters);
+		//returns the total utf8 code points inserted
+		size_t insert(size_t a_startIndex, const UtfString &a_characters);
 		void insert(size_t a_startIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters);
 
+		//returns the total utf8 code points inserted
+		size_t append(const UtfString &a_characters);
 		void append(const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters);
-		void append(const UtfString &a_characters);
 
 		PointPrecision minimumLineHeight() const;
 		PointPrecision minimumLineHeight(PointPrecision a_minimumLineHeight);

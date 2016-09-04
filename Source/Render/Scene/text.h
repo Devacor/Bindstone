@@ -94,37 +94,26 @@ namespace MV{
 			}
 
 			std::shared_ptr<Text> append(const UtfString &a_text) {
+				auto inserted = formattedText->append(a_text);
 				if (cursor >= formattedText->size()) {
-					incrementCursor(a_text.size());
+					incrementCursor(inserted);
 				}
-				formattedText->append(a_text);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 			std::shared_ptr<Text> append(UtfChar a_char) {
+				formattedText->append(UtfString(1, a_char));
 				if (cursor >= formattedText->size()) {
 					incrementCursor(1);
 				}
-				formattedText->append(UtfString(1, a_char));
 				return std::static_pointer_cast<Text>(shared_from_this());
-			}
-			std::shared_ptr<Text> append(Uint16 a_char) {
-				UtfChar *character = reinterpret_cast<UtfChar*>(&a_char);
-				return append(*character);
 			}
 
 			std::shared_ptr<Text> insertAtCursor(const UtfString &a_text) {
-				formattedText->insert(cursor, a_text);
-				incrementCursor(a_text.size());
+				incrementCursor(formattedText->insert(cursor, a_text));
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 			std::shared_ptr<Text> insertAtCursor(UtfChar a_char) {
 				formattedText->insert(cursor, UtfString(1, a_char));
-				incrementCursor(1);
-				return std::static_pointer_cast<Text>(shared_from_this());
-			}
-			std::shared_ptr<Text> insertAtCursor(Uint16 a_char) {
-				UtfChar *character = reinterpret_cast<UtfChar*>(&a_char);
-				formattedText->insert(cursor, UtfString(1, *character));
 				incrementCursor(1);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
@@ -165,7 +154,6 @@ namespace MV{
 
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(const UtfString &)>(&Text::append)), "append");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(UtfChar a_char)>(&Text::append)), "append");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(Uint16 a_char)>(&Text::append)), "append");
 
 				a_script.add(chaiscript::type_conversion<SafeComponent<Text>, std::shared_ptr<Text>>([](const SafeComponent<Text> &a_item) { return a_item.self(); }));
 				a_script.add(chaiscript::type_conversion<SafeComponent<Text>, std::shared_ptr<Drawable>>([](const SafeComponent<Text> &a_item) { return std::static_pointer_cast<Drawable>(a_item.self()); }));

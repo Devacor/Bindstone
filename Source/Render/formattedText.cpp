@@ -783,9 +783,9 @@ namespace MV {
 		return textSize;
 	}
 
-	void FormattedText::insert(size_t a_startIndex, const UtfString &a_characters) {
+	size_t FormattedText::insert(size_t a_startIndex, const UtfString &a_characters) {
 		if(a_characters.empty()){
-			return;
+			return 0;
 		}
 		std::shared_ptr<FormattedLine> line;
 		size_t characterInLineIndex;
@@ -801,13 +801,16 @@ namespace MV {
 			}
 		}
 
+		size_t inserted = 0;
 		std::vector<std::shared_ptr<FormattedCharacter>> formattedCharacters;
 		utf8_string utfCharacters(a_characters);
 		for (auto it = utfCharacters.begin(); it != utfCharacters.end();++it) {
 			formattedCharacters.push_back(FormattedCharacter::make(textScene, it.str(), foundState));
+			++inserted;
 		}
 
 		line->insert(characterInLineIndex, formattedCharacters);
+		return inserted;
 	}
 
 	void FormattedText::insert(size_t a_startIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters) {
@@ -831,9 +834,9 @@ namespace MV {
 		line->insert(line->size(), a_characters);
 	}
 
-	void FormattedText::append(const UtfString &a_characters) {
+	size_t FormattedText::append(const UtfString &a_characters) {
 		if(a_characters.empty()){
-			return;
+			return 0;
 		}
 		std::shared_ptr<FormattedState> foundState = defaultState();
 		if(lines.empty()){
@@ -846,15 +849,17 @@ namespace MV {
 				foundState = (*previousLine)[previousLine->size() - 1]->state;
 			}
 		}
-
+		size_t inserted = 0;
 		std::vector<std::shared_ptr<FormattedCharacter>> formattedCharacters;
 		utf8_string utfCharacters(a_characters);
 		for (auto it = utfCharacters.begin(); it != utfCharacters.end(); ++it) {
 			formattedCharacters.push_back(FormattedCharacter::make(textScene, it.str(), foundState));
+			++inserted;
 		}
 
 		std::shared_ptr<FormattedLine> line = lines.back();
 		line->insert(line->size(), formattedCharacters);
+		return inserted;
 	}
 
 	MV::PointPrecision FormattedText::minimumLineHeight() const {

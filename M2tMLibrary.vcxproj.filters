@@ -558,6 +558,9 @@
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
     <ClCompile Include="Source\Game\gameEditor.cpp" />
+    <ClCompile Include="Source\Utility\tinyutf8.cpp">
+      <Filter>Source Files\Utility</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Animation\frameSwapper.h">
@@ -1204,6 +1207,9 @@
     </ClInclude>
     <ClInclude Include="Source\Editor\anchorEditor.h">
       <Filter>Source Files\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\tinyutf8.h">
+      <Filter>Source Files\Utility</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

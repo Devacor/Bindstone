@@ -169,6 +169,16 @@ namespace MV {
 		return mixInOut(0.0f, 1.0f, percentOfRange(a_value, a_start, a_end), a_strength);
 	}
 
+	template <typename T>
+	int indexOf(const std::vector<T> &a_vector, const T& a_toFind){
+		auto foundIterator = std::find(a_vector.cbegin(), a_vector.cend(), a_toFind);
+		if(foundIterator == a_vector.cend()){
+			return -1;
+		}else{
+			return static_cast<int>(std::distance(a_vector.cbegin(), foundIterator));
+		}
+	}
+
 	//rounds num up to the next largest power of two (or the current value) and returns that value
 	int roundUpPowerOfTwo(int num);
 

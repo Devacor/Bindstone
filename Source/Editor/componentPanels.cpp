@@ -27,6 +27,9 @@ SharedResources EditorPanel::resources()
 }
 
 EditorPanel::~EditorPanel() {
+	deactivateText();
+	clearTexturePicker();
+	clearAnchorEditor();
 }
 
 SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableNode> a_controls) :
@@ -191,10 +194,6 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 	panel.updateBoxHeader(grid->bounds().width());
 
 	SDL_StartTextInput();
-}
-
-SelectedNodeEditorPanel::~SelectedNodeEditorPanel() {
-	std::cout << "deadPanel" << std::endl;
 }
 
 void SelectedNodeEditorPanel::updateComponentEditButtons(bool a_attached) {
@@ -723,11 +722,6 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	SDL_StartTextInput();
 }
 
-SelectedRectangleEditorPanel::~SelectedRectangleEditorPanel() {
-	clearTexturePicker();
-	clearAnchorEditor();
-}
-
 void SelectedRectangleEditorPanel::openTexturePicker() {
 	clearTexturePicker();
 	picker = std::make_shared<TexturePicker>(panel.editor(), panel.resources(), [&](std::shared_ptr<MV::TextureHandle> a_handle, bool a_allowClear){
@@ -758,8 +752,9 @@ void SelectedRectangleEditorPanel::onSceneZoom() {
 }
 
 SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableEmitter> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton):
-EditorPanel(a_panel),
-controls(a_controls) {
+	EditorPanel(a_panel),
+	controls(a_controls) {
+
 	std::weak_ptr<EditableEmitter> weakControls = controls;
 	auto node = panel.content();
 	auto grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(232.0f)->
@@ -1017,7 +1012,7 @@ controls(a_controls) {
 		controls->size({width->number(), height->number()});
 	});
 
-	controls->onChange = [&](EditableEmitter *a_element) {
+	controls->onChange = [&](ResizeHandles *a_element) {
 		offsetX->number(static_cast<int>(std::lround(controls->position().x)));
 		offsetY->number(static_cast<int>(std::lround(controls->position().y)));
 
@@ -1148,7 +1143,7 @@ SelectedPathMapEditorPanel::SelectedPathMapEditorPanel(EditorControls &a_panel, 
 			controls->elementToEdit->resizeGrid({ static_cast<int>(cellsX->number()), static_cast<int>(cellsY->number()) });
 		});
 
-		controls->onChange = [&](EditablePathMap *a_element) {
+		controls->onChange = [&](ResizeHandles *a_element) {
 			posX->number(static_cast<int>(std::lround(controls->position().x)));
 			posY->number(static_cast<int>(std::lround(controls->position().y)));
 
@@ -1357,8 +1352,29 @@ SelectedTextEditorPanel::SelectedTextEditorPanel(EditorControls &a_panel, std::s
 	});
 
 	auto editButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Edit", buttonSize, UTF_CHAR_STR("Edit"));
-	editButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
-		toggleText(controls->elementToEdit.get());
+	std::weak_ptr<MV::Scene::Button> weakEditButton(editButton);
+	editButton->onAccept.connect("click", [&, weakEditButton](std::shared_ptr<MV::Scene::Clickable>) {
+		renameButton(weakEditButton.lock()->safe(), toggleText(controls->elementToEdit.get()) ? "Edit" : "Stop");
+	});
+
+	std::vector<MV::TextWrapMethod> wrapMethods{ MV::TextWrapMethod::SOFT, MV::TextWrapMethod::HARD, MV::TextWrapMethod::SCALE, MV::TextWrapMethod::NONE };
+	std::vector<std::string> wrapMethodStrings {"Soft", "Hard", "Scale", "None"};
+	auto wrapButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "WrapMode", buttonSize, wrapMethodStrings[MV::indexOf(wrapMethods, controls->elementToEdit->wrapping())]);
+	std::weak_ptr<MV::Scene::Button> weakWrapButton(wrapButton);
+	wrapButton->onAccept.connect("click", [&, weakWrapButton, wrapMethods, wrapMethodStrings](std::shared_ptr<MV::Scene::Clickable>) mutable {
+		auto index = MV::wrap(0, wrapMethods.size(), MV::indexOf(wrapMethods, controls->elementToEdit->wrapping()) + 1);
+		controls->elementToEdit->wrapping(wrapMethods[index]);
+		renameButton(weakWrapButton.lock()->safe(), wrapMethodStrings[index]);
+	});
+
+	std::vector<MV::TextJustification> justificationList{ MV::TextJustification::LEFT, MV::TextJustification::CENTER, MV::TextJustification::RIGHT };
+	std::vector<std::string> justificationStrings{ "Left", "Center", "Right" };
+	auto justificationButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "JustificationMode", buttonSize, justificationStrings[MV::indexOf(justificationList, controls->elementToEdit->justification())]);
+	std::weak_ptr<MV::Scene::Button> weakJustifcationButton(justificationButton);
+	justificationButton->onAccept.connect("click", [&, weakJustifcationButton, justificationList, justificationStrings](std::shared_ptr<MV::Scene::Clickable>) mutable {
+		auto index = MV::wrap(0, justificationList.size(), MV::indexOf(justificationList, controls->elementToEdit->justification()) + 1);
+		controls->elementToEdit->justification(justificationList[index]);
+		renameButton(weakJustifcationButton.lock()->safe(), justificationStrings[index]);
 	});
 
 	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
@@ -1409,7 +1425,7 @@ SelectedTextEditorPanel::SelectedTextEditorPanel(EditorControls &a_panel, std::s
 			controls->size({ width->number(), height->number() });
 		});
 
-		controls->onChange = [&](EditableText *a_element) {
+		controls->onChange = [&](ResizeHandles *a_element) {
 			offsetX->number(static_cast<int>(std::lround(controls->position().x)));
 			offsetY->number(static_cast<int>(std::lround(controls->position().y)));
 
@@ -1424,8 +1440,6 @@ SelectedTextEditorPanel::SelectedTextEditorPanel(EditorControls &a_panel, std::s
 	SDL_StartTextInput();
 }
 
-SelectedTextEditorPanel::~SelectedTextEditorPanel(){
-}
 
 void SelectedTextEditorPanel::handleInput(SDL_Event &a_event) {
 	if (!activeTextbox.expired()) {

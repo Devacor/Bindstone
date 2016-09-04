@@ -351,6 +351,7 @@
     <ClCompile Include="Source\Utility\sha512.cpp" />
     <ClCompile Include="Source\Utility\stopwatch.cpp" />
     <ClCompile Include="Source\Utility\threadPool.cpp" />
+    <ClCompile Include="Source\Utility\tinyutf8.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\external\Box2D\Box2D.h" />
@@ -567,6 +568,7 @@
     <ClInclude Include="Source\Utility\stopwatch.h" />
     <ClInclude Include="Source\Utility\task.hpp" />
     <ClInclude Include="Source\Utility\threadPool.h" />
+    <ClInclude Include="Source\Utility\tinyutf8.h" />
     <ClInclude Include="Source\Utility\visitor.hpp" />
   </ItemGroup>
   <ItemGroup>

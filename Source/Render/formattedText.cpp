@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
 #include "Utility/log.h"
+#include "Utility/tinyutf8.h"
 
 namespace MV {
 
@@ -30,15 +31,14 @@ namespace MV {
 	| -----FontDefinition---- |
 	\*************************/
 	
-	std::shared_ptr<CharacterDefinition> FontDefinition::characterDefinition(UtfChar renderChar) {
+	std::shared_ptr<CharacterDefinition> FontDefinition::characterDefinition(const std::string &renderChar) {
 		std::shared_ptr<CharacterDefinition> &character = cachedGlyphs[renderChar];
 		if(!character){
 			character = CharacterDefinition::make(
-				SurfaceTextureDefinition::make(toString(renderChar), [=]() -> SDL_Surface* {
+				SurfaceTextureDefinition::make(renderChar, [=]() -> SDL_Surface* {
 					if (textLibrary->renderer().headless()) { return nullptr; }
-
-					char text[] = {static_cast<char>(renderChar), '\0'};
-					return TTF_RenderUTF8_Blended(font, text, {255, 255, 255, 255});
+					
+					return TTF_RenderUTF8_Blended(font, renderChar.c_str(), {255, 255, 255, 255});
 				}),
 				renderChar,
 				shared_from_this()
@@ -55,11 +55,11 @@ namespace MV {
 	| --CharacterDefinition-- |
 	\*************************/
 
-	std::shared_ptr<CharacterDefinition> CharacterDefinition::make(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition) {
+	std::shared_ptr<CharacterDefinition> CharacterDefinition::make(std::shared_ptr<SurfaceTextureDefinition> a_texture, const std::string &a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition) {
 		return std::shared_ptr<CharacterDefinition>(new CharacterDefinition(a_texture, a_glyphCharacter, a_fontDefinition));
 	}
 	
-	CharacterDefinition::CharacterDefinition(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition):
+	CharacterDefinition::CharacterDefinition(std::shared_ptr<SurfaceTextureDefinition> a_texture, const std::string &a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition):
 		glyphTexture(a_texture),
 		glyphHandle(a_texture->makeHandle()),
 		glyphCharacter(a_glyphCharacter),
@@ -68,7 +68,7 @@ namespace MV {
 		glyphHandle->bounds(glyphTexture->surfaceSize());
 	}
 
-	UtfChar CharacterDefinition::character() const{
+	std::string CharacterDefinition::character() const{
 		return glyphCharacter;
 	}
 
@@ -85,7 +85,7 @@ namespace MV {
 	}
 
 	bool CharacterDefinition::isSoftBreakCharacter() {
-		return glyphCharacter == ' ' || glyphCharacter == '-';
+		return glyphCharacter == " " || glyphCharacter == "-";
 	}
 
 	std::shared_ptr<FontDefinition> CharacterDefinition::font() const {
@@ -166,7 +166,7 @@ namespace MV {
 		}
 	}
 
-	std::shared_ptr<FormattedCharacter> FormattedCharacter::make(const std::shared_ptr<Scene::Node> &parent, UtfChar a_character, const std::shared_ptr<FormattedState> &a_state) {
+	std::shared_ptr<FormattedCharacter> FormattedCharacter::make(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state) {
 		return std::shared_ptr<FormattedCharacter>(new FormattedCharacter(parent, a_character, a_state));
 	}
 
@@ -184,7 +184,7 @@ namespace MV {
 
 	Point<> FormattedCharacter::position(const Point<> &a_newPosition) {
 		basePosition = a_newPosition;
-		shape->silence()->position(basePosition + offsetPosition);
+		shape->silence()->position((basePosition + offsetPosition) * characterScale);
 		return basePosition;
 	}
 
@@ -194,7 +194,7 @@ namespace MV {
 
 	Point<> FormattedCharacter::offset(const Point<> &a_newPosition) {
 		offsetPosition = a_newPosition;
-		shape->silence()->position(basePosition + offsetPosition);
+		shape->silence()->position((basePosition + offsetPosition) * characterScale);
 		return offsetPosition;
 	}
 
@@ -202,7 +202,7 @@ namespace MV {
 		PointPrecision height = character->font()->height();
 		PointPrecision base = character->font()->base();
 		offset({offsetPosition.x, a_baseLine - base});
-		shape->silence()->position(basePosition + offsetPosition);
+		shape->silence()->position((basePosition + offsetPosition) * characterScale);
 		return offsetPosition;
 	}
 
@@ -210,8 +210,16 @@ namespace MV {
 		PointPrecision height = character->font()->height();
 		PointPrecision base = character->font()->base();
 		offset({ a_x, a_baseLine - base });
-		shape->silence()->position(basePosition + offsetPosition);
+		shape->silence()->position((basePosition + offsetPosition) * characterScale);
 		return offsetPosition;
+	}
+
+	Scale FormattedCharacter::scale() const{
+		return characterScale;
+	}
+	void FormattedCharacter::scale(const Scale& a_scale){
+		characterScale = a_scale;
+		shape->silence()->position((basePosition + offsetPosition) * characterScale)->component<Scene::Sprite>()->size(cast<PointPrecision>(character->characterSize()) * characterScale);
 	}
 
 	void FormattedCharacter::applyState(const std::shared_ptr<FormattedState> &a_state) {
@@ -219,7 +227,7 @@ namespace MV {
 		character = state->font->characterDefinition(textCharacter);
 		auto silencedShape = shape->silence();
 		auto sprite = shape->component<Scene::Sprite>();
-		sprite->size(cast<PointPrecision>(character->characterSize()));
+		sprite->size(cast<PointPrecision>(character->characterSize()) * characterScale);
 		sprite->texture(character->texture());
 		sprite->color(state->color);
 	}
@@ -248,12 +256,12 @@ namespace MV {
 		}
 	}
 
-	FormattedCharacter::FormattedCharacter(const std::shared_ptr<Scene::Node> &parent, UtfChar a_character, const std::shared_ptr<FormattedState> &a_state):
+	FormattedCharacter::FormattedCharacter(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state):
 		textCharacter(a_character),
 		state(a_state),
 		character(a_state->font->characterDefinition(a_character)) {
 
-		shape = parent->silence()->make(guid(toString(character->character())))->
+		shape = parent->silence()->make(guid(character->character()))->
 			attach<Scene::Sprite>()->
 			size(cast<PointPrecision>(character->characterSize()))->
 			texture(character->texture())->
@@ -353,23 +361,24 @@ namespace MV {
 	void FormattedLine::updateFormatAfterAdd(size_t a_startIndex, size_t a_endIndex){
 		for(size_t i = a_startIndex; i < a_endIndex; ++i){
 			if(!characters[i]->partOfFormat()){
-				if(characters[i]->textCharacter == UTF_CHAR_STR(']')){
+				if(characters[i]->textCharacter == "]"){
 					auto previous = text.characterRelativeTo(lineIndex, i, -1); 
-					if(previous && previous->textCharacter == UTF_CHAR_STR(']')){
+					if(previous && previous->textCharacter == "]"){
 						UtfString content;
 						previous = text.characterRelativeTo(lineIndex, i, -2);
 						auto previous2 = text.characterRelativeTo(lineIndex, i, -3);
 						int64_t startOfNewState = -3;
-						for(size_t total = 0; previous && previous2 && (previous->textCharacter != UTF_CHAR_STR('[') && previous->textCharacter != UTF_CHAR_STR('[')) && total < 32; --startOfNewState, ++total){
+						for(size_t total = 0; previous && previous2 && total < 32; --startOfNewState, ++total){
 							content += previous->textCharacter;
 							previous = text.characterRelativeTo(lineIndex, i, startOfNewState);
 							previous2 = text.characterRelativeTo(lineIndex, i, startOfNewState-1);
-						}
-						if(!content.empty() && previous->textCharacter == UTF_CHAR_STR('[') && previous2->textCharacter == UTF_CHAR_STR('[')){
-							std::reverse(content.begin(), content.end());
-							auto newState = getNewState(content, previous2->state);
-							if(newState != previous2->state){
-								text.applyState(newState, text.absoluteIndexFromRelativeTo(lineIndex, i, startOfNewState), text.absoluteIndex(lineIndex, i));
+							if(previous->textCharacter == "[" && previous2->textCharacter == "["){
+								std::reverse(content.begin(), content.end());
+								auto newState = getNewState(content, previous2->state);
+								if (newState != previous2->state) {
+									text.applyState(newState, text.absoluteIndexFromRelativeTo(lineIndex, i, startOfNewState), text.absoluteIndex(lineIndex, i));
+								}
+								break;
 							}
 						}
 					}
@@ -387,16 +396,31 @@ namespace MV {
 		}
 	}
 
-	void FormattedLine::applyAlignment(){
+	void FormattedLine::applyAlignmentAndScale(){
+		float scaleTo = 1.0f;
+		if (text.wrapping() == TextWrapMethod::SCALE) {
+			auto width = lineWidth();
+			if (width > text.width()) {
+				scaleTo = text.width() / width;
+			}
+		}
+
 		float width = lineWidth();
 		float offset = 0;
-		if(text.justification() == TextJustification::CENTER){
-			offset = (text.width() - width) / 2.0f;
-		}else if(text.justification() == TextJustification::RIGHT){
-			offset = text.width() - width;
+		if (text.wrapping() != TextWrapMethod::SCALE || width < text.width()) {
+			if (text.justification() == TextJustification::CENTER) {
+				offset = (text.width() - width) * scaleTo / 2.0f;
+			}
+			else if (text.justification() == TextJustification::RIGHT) {
+				offset = text.width() - width * scaleTo;
+			}
 		}
+
 		for(size_t index = 0; index < characters.size(); ++index){
 			characters[index]->offset({offset, characters[index]->offset().y});
+			if (characters[index]->scale().x != scaleTo) {
+				characters[index]->scale(scaleTo);
+			}
 		}
 	}
 
@@ -411,9 +435,9 @@ namespace MV {
 				characters[index]->position({characterPosition, linePosition});
 				characters[index]->offset(0.0f, lineHeight, baseLine);
 				
-				if(text.wrapping() != TextWrapMethod::NONE && index > 0 && text.exceedsWidth(characters[index]->position().x)){
-					std::vector<std::shared_ptr<FormattedCharacter>> overflow(characters.begin() + index-1, characters.end());
-					characters.erase(characters.begin() + index-1, characters.end());
+				if(text.wrapping() != TextWrapMethod::NONE && text.wrapping() != TextWrapMethod::SCALE && index > 0 && text.exceedsWidth(characters[index]->position().x)){
+					std::vector<std::shared_ptr<FormattedCharacter>> overflow(characters.begin() + index, characters.end());
+					characters.erase(characters.begin() + index, characters.end());
 					if(text.lines.size() <= lineIndex + 1){
 						text.lines.push_back(FormattedLine::make(text, text.lines.size()));
 					}
@@ -426,9 +450,8 @@ namespace MV {
 			if(!exceeded && lineIndex+1 < text.lines.size()){
 				MV::PointPrecision widthRemaining = text.width() - lineWidth();
 				insert(characters.size(), text.lines[lineIndex + 1]->removeLeadingCharactersForWidth(widthRemaining));
-			}else if(text.justification() != TextJustification::LEFT){
-				applyAlignment();
 			}
+			applyAlignmentAndScale();
 		}
 	}
 
@@ -457,7 +480,7 @@ namespace MV {
 
 	std::vector<std::shared_ptr<FormattedCharacter>> FormattedLine::removeLeadingCharactersForWidth(float a_width) {
 		std::vector<std::shared_ptr<FormattedCharacter>> result;
-		if(text.textWrapping == TextWrapMethod::NONE){
+		if(text.textWrapping == TextWrapMethod::NONE || text.textWrapping == TextWrapMethod::SCALE){
 			return result;
 		}
 
@@ -779,8 +802,9 @@ namespace MV {
 		}
 
 		std::vector<std::shared_ptr<FormattedCharacter>> formattedCharacters;
-		for(const UtfChar &character : a_characters){
-			formattedCharacters.push_back(FormattedCharacter::make(textScene, character, foundState));
+		utf8_string utfCharacters(a_characters);
+		for (auto it = utfCharacters.begin(); it != utfCharacters.end();++it) {
+			formattedCharacters.push_back(FormattedCharacter::make(textScene, it.str(), foundState));
 		}
 
 		line->insert(characterInLineIndex, formattedCharacters);
@@ -824,8 +848,9 @@ namespace MV {
 		}
 
 		std::vector<std::shared_ptr<FormattedCharacter>> formattedCharacters;
-		for(const UtfChar &character : a_characters){
-			formattedCharacters.push_back(FormattedCharacter::make(textScene, character, foundState));
+		utf8_string utfCharacters(a_characters);
+		for (auto it = utfCharacters.begin(); it != utfCharacters.end(); ++it) {
+			formattedCharacters.push_back(FormattedCharacter::make(textScene, it.str(), foundState));
 		}
 
 		std::shared_ptr<FormattedLine> line = lines.back();
@@ -848,7 +873,7 @@ namespace MV {
 		if(textJustification != a_newJustification){
 			textJustification = a_newJustification;
 			for(auto &line : lines){
-				line->applyAlignment();
+				line->applyAlignmentAndScale();
 			}
 		}
 	}

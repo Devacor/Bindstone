@@ -22,6 +22,7 @@ namespace MV {
 
 	enum class TextWrapMethod {
 		NONE,
+		SCALE,
 		HARD,
 		SOFT
 	};
@@ -66,7 +67,7 @@ namespace MV {
 			}
 		}
 
-		std::shared_ptr<CharacterDefinition> characterDefinition(UtfChar renderChar);
+		std::shared_ptr<CharacterDefinition> characterDefinition(const std::string &renderChar);
 
 		PointPrecision height() const{
 			return lineHeight;
@@ -94,7 +95,7 @@ namespace MV {
 		PointPrecision baseLine;
 		TextLibrary *textLibrary;
 
-		typedef std::map<UtfChar, std::shared_ptr<CharacterDefinition>> CachedGlyphs;
+		typedef std::map<std::string, std::shared_ptr<CharacterDefinition>> CachedGlyphs;
 		CachedGlyphs cachedGlyphs;
 
 		template <class Archive>
@@ -156,9 +157,9 @@ namespace MV {
 	class TextureHandle;
 	class CharacterDefinition {
 	public:
-		static std::shared_ptr<CharacterDefinition> make(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition);
+		static std::shared_ptr<CharacterDefinition> make(std::shared_ptr<SurfaceTextureDefinition> a_texture, const std::string &a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition);
 
-		UtfChar character() const;
+		std::string character() const;
 		std::shared_ptr<TextureHandle> texture() const;
 		Size<int> characterSize() const;
 		Size<int> textureSize() const;
@@ -167,9 +168,9 @@ namespace MV {
 
 		std::shared_ptr<FontDefinition> font() const;
 	private:
-		CharacterDefinition(std::shared_ptr<SurfaceTextureDefinition> a_texture, UtfChar a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition);
+		CharacterDefinition(std::shared_ptr<SurfaceTextureDefinition> a_texture, const std::string &a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition);
 
-		UtfChar glyphCharacter;
+		std::string glyphCharacter;
 		std::shared_ptr<SurfaceTextureDefinition> glyphTexture;
 		std::shared_ptr<TextureHandle> glyphHandle;
 		std::shared_ptr<FontDefinition> fontDefinition;
@@ -231,7 +232,7 @@ namespace MV {
 	class FormattedCharacter{
 	public:
 		~FormattedCharacter();
-		static std::shared_ptr<FormattedCharacter> make(const std::shared_ptr<Scene::Node> &parent, UtfChar a_character, const std::shared_ptr<FormattedState> &a_state);
+		static std::shared_ptr<FormattedCharacter> make(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state);
 
 		Size<> characterSize() const;
 
@@ -243,6 +244,9 @@ namespace MV {
 		Point<> offset(PointPrecision a_lineHeight, PointPrecision a_baseLine);
 		Point<> offset(PointPrecision a_x, PointPrecision a_lineHeight, PointPrecision a_baseLine);
 
+		Scale scale() const;
+		void scale(const Scale& a_scale);
+
 		void applyState(const std::shared_ptr<FormattedState> &a_state);
 		bool partOfFormat(bool a_isPartOfFormat);
 		bool partOfFormat() const;
@@ -250,7 +254,7 @@ namespace MV {
 
 		void removeFromParent();
 
-		UtfChar textCharacter;
+		std::string textCharacter;
 		std::shared_ptr<CharacterDefinition> character;
 		std::shared_ptr<Scene::Node> shape;
 		std::shared_ptr<FormattedLine> line;
@@ -260,7 +264,8 @@ namespace MV {
 		bool isPartOfFormat = false;
 		Point<> basePosition;
 		Point<> offsetPosition;
-		FormattedCharacter(const std::shared_ptr<Scene::Node> &parent, UtfChar a_character, const std::shared_ptr<FormattedState> &a_state);
+		Scale characterScale;
+		FormattedCharacter(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state);
 	};
 
 	class FormattedText;
@@ -289,7 +294,7 @@ namespace MV {
 
 		float lineWidth() const;
 
-		void applyAlignment();
+		void applyAlignmentAndScale();
 	private:
 		FormattedLine(FormattedText &a_lines, size_t a_lineIndex);
 

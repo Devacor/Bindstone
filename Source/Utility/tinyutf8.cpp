@@ -19,7 +19,7 @@ utf8_string::utf8_string( utf8_string::size_type number , utf8_string::value_typ
 	
 	if( num_bytes == 1 )
 		while( number-- > 0 )
-			this->buffer[number] = ch;
+			this->buffer[number] = static_cast<char>(ch);
 	else
 	{
 		char representation[6];
@@ -1076,7 +1076,7 @@ int operator-( const utf8_string::iterator& left , const utf8_string::iterator& 
 	utf8_string::size_type minIndex = std::min( left.raw_index , right.raw_index );
 	utf8_string::size_type max_index = std::max( left.raw_index , right.raw_index );
 	utf8_string::size_type num_codepoints = left.instance->get_num_resulting_codepoints( minIndex , max_index - minIndex );
-	return max_index == left.raw_index ? num_codepoints : -num_codepoints;
+	return static_cast<int>(max_index) == left.raw_index ? static_cast<int>(num_codepoints) : static_cast<int>(num_codepoints) * -1;
 }
 
 utf8_string::iterator operator+( const utf8_string::iterator& it , utf8_string::size_type nth ){
@@ -1088,7 +1088,7 @@ int operator-( const utf8_string::reverse_iterator& left , const utf8_string::re
 	utf8_string::difference_type	minIndex = std::min( left.raw_index , right.raw_index );
 	utf8_string::difference_type	max_index = std::max( left.raw_index , right.raw_index );
 	utf8_string::size_type			num_codepoints = left.instance->get_num_resulting_codepoints( minIndex , max_index - minIndex );
-	return max_index == right.raw_index ? num_codepoints : -num_codepoints;
+	return static_cast<int>(max_index) == right.raw_index ? static_cast<int>(num_codepoints) : static_cast<int>(num_codepoints) * -1;
 }
 
 utf8_string::reverse_iterator operator+( const utf8_string::reverse_iterator& it , utf8_string::size_type nth )

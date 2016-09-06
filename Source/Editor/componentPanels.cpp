@@ -815,25 +815,25 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	}, MV::unmixIn(0.01f, 60.0f, controls->elementToEdit->properties().minimum.maxLifespan, 2));
 	grid->add(maximumLifespan);
 
-
+	float maxSpeedFloat = 750.0f;
 	auto maximumEndSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().maximum.endSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
-	}, MV::unmixInOut(-1000.0f, 1000.0f, controls->elementToEdit->properties().maximum.endSpeed, 2));
+		controls->elementToEdit->properties().maximum.endSpeed = MV::mixInOut(-maxSpeedFloat, maxSpeedFloat, a_slider->percent(), 2);
+	}, MV::unmixInOut(-maxSpeedFloat, maxSpeedFloat, controls->elementToEdit->properties().maximum.endSpeed, 2));
 	auto minimumEndSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [&,maximumEndSpeed](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().minimum.endSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
+		controls->elementToEdit->properties().minimum.endSpeed = MV::mixInOut(-maxSpeedFloat, maxSpeedFloat, a_slider->percent(), 2);
 		maximumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, MV::unmixInOut(-1000.0f, 1000.0f, controls->elementToEdit->properties().minimum.endSpeed, 2));
+	}, MV::unmixInOut(-maxSpeedFloat, maxSpeedFloat, controls->elementToEdit->properties().minimum.endSpeed, 2));
 
 	makeLabel(grid, *panel.resources().textLibrary, "initialSpeed", labelSize, UTF_CHAR_STR("Start Speed"));
 	auto startSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [&, maximumEndSpeed](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().maximum.beginSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
+		controls->elementToEdit->properties().maximum.beginSpeed = MV::mixInOut(-maxSpeedFloat, maxSpeedFloat, a_slider->percent(), 2);
 		maximumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, MV::unmixInOut(-1000.0f, 1000.0f, controls->elementToEdit->properties().maximum.beginSpeed, 2));
+	}, MV::unmixInOut(-maxSpeedFloat, maxSpeedFloat, controls->elementToEdit->properties().maximum.beginSpeed, 2));
 	makeSlider(*panel.resources().mouse, grid, [&, minimumEndSpeed, startSpeed](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().minimum.beginSpeed = MV::mixInOut(-1000.0f, 1000.0f, a_slider->percent(), 2);
+		controls->elementToEdit->properties().minimum.beginSpeed = MV::mixInOut(-maxSpeedFloat, maxSpeedFloat, a_slider->percent(), 2);
 		startSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
 		minimumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, MV::unmixInOut(-1000.0f, 1000.0f, controls->elementToEdit->properties().minimum.beginSpeed, 2));
+	}, MV::unmixInOut(-maxSpeedFloat, maxSpeedFloat, controls->elementToEdit->properties().minimum.beginSpeed, 2));
 	grid->add(startSpeed);
 
 	makeLabel(grid, *panel.resources().textLibrary, "speedChange", labelSize, UTF_CHAR_STR("End Speed"));

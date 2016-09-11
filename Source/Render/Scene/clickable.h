@@ -153,9 +153,9 @@ namespace MV {
 				MV::require<PointerException>(mouse != nullptr, "Null mouse in Clickable::load_and_construct.");
 				construct(std::shared_ptr<Node>(), *mouse);
 				archive(
-					cereal::make_nvp("onPress", onPressSignal),
-					cereal::make_nvp("onRelease", onReleaseSignal),
-					cereal::make_nvp("onDrag", onDragSignal),
+					cereal::make_nvp("onPress", construct->onPressSignal),
+					cereal::make_nvp("onRelease", construct->onReleaseSignal),
+					cereal::make_nvp("onDrag", construct->onDragSignal),
 					cereal::make_nvp("onAccept", construct->onAcceptSignal),
 					cereal::make_nvp("onCancel", construct->onCancelSignal),
 					cereal::make_nvp("onDrop", construct->onDropSignal),

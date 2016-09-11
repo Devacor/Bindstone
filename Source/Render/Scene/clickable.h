@@ -132,6 +132,12 @@ namespace MV {
 			template <class Archive>
 			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
+					cereal::make_nvp("onPress", onPressSignal),
+					cereal::make_nvp("onRelease", onReleaseSignal),
+					cereal::make_nvp("onDrag", onDragSignal),
+					cereal::make_nvp("onAccept", onAcceptSignal),
+					cereal::make_nvp("onCancel", onCancelSignal),
+					cereal::make_nvp("onDrop", onDropSignal),
 					cereal::make_nvp("hitDetectionType", hitDetectionType),
 					cereal::make_nvp("eatTouches", eatTouches),
 					cereal::make_nvp("globalClickPriority", globalClickPriority),
@@ -147,6 +153,12 @@ namespace MV {
 				MV::require<PointerException>(mouse != nullptr, "Null mouse in Clickable::load_and_construct.");
 				construct(std::shared_ptr<Node>(), *mouse);
 				archive(
+					cereal::make_nvp("onPress", onPressSignal),
+					cereal::make_nvp("onRelease", onReleaseSignal),
+					cereal::make_nvp("onDrag", onDragSignal),
+					cereal::make_nvp("onAccept", construct->onAcceptSignal),
+					cereal::make_nvp("onCancel", construct->onCancelSignal),
+					cereal::make_nvp("onDrop", construct->onDropSignal),
 					cereal::make_nvp("hitDetectionType", construct->hitDetectionType),
 					cereal::make_nvp("eatTouches", construct->eatTouches),
 					cereal::make_nvp("globalClickPriority", construct->globalClickPriority),
@@ -186,6 +198,9 @@ namespace MV {
 			MouseState& ourMouse;
 
 			Stopwatch dragTimer;
+
+			std::string onAcceptScript;
+			std::string onCancelScript;
 
 			size_t globalClickPriority = 100;
 			std::vector<size_t> overrideClickPriority;

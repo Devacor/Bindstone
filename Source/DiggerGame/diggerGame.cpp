@@ -115,7 +115,8 @@ void DiggerGame::handleInput() {
 						cereal::make_nvp("mouse", &mouse),
 						cereal::make_nvp("renderer", &managers.renderer),
 						cereal::make_nvp("textLibrary", &managers.textLibrary),
-						cereal::make_nvp("pool", &managers.pool)
+						cereal::make_nvp("pool", &managers.pool),
+						cereal::make_nvp("script", &scriptEngine)
 						);
 
 					archive(cereal::make_nvp("scene", worldScene));

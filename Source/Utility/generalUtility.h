@@ -15,6 +15,7 @@
 #include <mutex>
 #include <cctype>
 #include <algorithm>
+#include <tuple>
 
 #include "Utility/require.hpp"
 #include <boost/uuid/uuid.hpp>
@@ -542,5 +543,29 @@ namespace MV {
 		std::shared_ptr<CallbackQueue> queue;
 		std::function<void()> boundCallback;
 	};
+
+	template<class T, class Tuple, std::size_t N>
+	struct TupleAggregator {
+		static void addToVector(const Tuple& t, std::vector<T> &a_aggregate) {
+			TupleAggregator<T, Tuple, N - 1>::addToVector(t, a_aggregate);
+			a_aggregate.emplace_back(&std::get<N - 1>(t));
+		}
+	};
+
+	template<class T, class Tuple>
+	struct TupleAggregator<T, Tuple, 1> {
+		static void addToVector(const Tuple& t, std::vector<T> &a_aggregate) {
+			a_aggregate.emplace_back(&std::get<0>(t));
+		}
+	};
+
+	//Converts a tuple to a vector of pointers to the elements in the tuple.
+	//Works with boost::any or chaiscript::Boxed_Value etc.
+	template<class T, class... Args>
+	std::vector<T> toVector(const std::tuple<Args...>& t) {
+		std::vector<T> result;
+		TupleAggregator<T, decltype(t), sizeof...(Args)>::addToVector(t, result);
+		return result;
+	}
 }
 #endif

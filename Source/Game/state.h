@@ -28,28 +28,32 @@ struct Constants {
 
 class JsonNodeLoadBinder {
 public:
-	JsonNodeLoadBinder(Managers& a_managers, MV::MouseState& a_mouse) :
+	JsonNodeLoadBinder(Managers& a_managers, MV::MouseState& a_mouse, chaiscript::ChaiScript &a_script) :
 		managers(a_managers),
-		mouse(a_mouse) {
+		mouse(a_mouse),
+		script(a_script){
 	}
 
 	void operator()(cereal::JSONInputArchive& a_archive);
 private:
 	Managers& managers;
 	MV::MouseState& mouse;
+	chaiscript::ChaiScript &script;
 };
 
 class BinaryNodeLoadBinder {
 public:
-	BinaryNodeLoadBinder(Managers& a_managers, MV::MouseState& a_mouse) :
+	BinaryNodeLoadBinder(Managers& a_managers, MV::MouseState& a_mouse, chaiscript::ChaiScript &a_script) :
 		managers(a_managers),
-		mouse(a_mouse) {
+		mouse(a_mouse),
+		script(a_script){
 	}
 
 	void operator()(cereal::PortableBinaryInputArchive& a_archive);
 private:
 	Managers& managers;
 	MV::MouseState& mouse;
+	chaiscript::ChaiScript &script;
 };
 
 class GameData {

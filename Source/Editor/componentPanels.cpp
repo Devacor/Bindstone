@@ -76,7 +76,8 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 					cereal::make_nvp("renderer", &panel.root()->renderer()),
 					cereal::make_nvp("textLibrary", panel.resources().textLibrary),
 					cereal::make_nvp("pool", panel.resources().pool),
-					cereal::make_nvp("texture", panel.resources().textures)
+					cereal::make_nvp("texture", panel.resources().textures),
+					cereal::make_nvp("script", panel.resources().script)
 					);
 			});
 
@@ -316,7 +317,8 @@ void SelectedNodeEditorPanel::handleInput(SDL_Event &a_event) {
 					cereal::make_nvp("renderer", &panel.root()->renderer()),
 					cereal::make_nvp("textLibrary", panel.resources().textLibrary),
 					cereal::make_nvp("pool", panel.resources().pool),
-					cereal::make_nvp("texture", panel.resources().textures)
+					cereal::make_nvp("texture", panel.resources().textures),
+					cereal::make_nvp("script", panel.resources().script)
 				);
 			});
 
@@ -925,7 +927,7 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 		minimumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().minimum.beginScale.x));
 	grid->add(startSize);
-
+	
 	makeLabel(grid, *panel.resources().textLibrary, "endSize", labelSize, UTF_CHAR_STR("End Size"));
 	grid->add(minimumEndSize);
 	grid->add(maximumEndSize);
@@ -1208,7 +1210,8 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 				cereal::make_nvp("renderer", &panel.root()->renderer()),
 				cereal::make_nvp("textLibrary", panel.resources().textLibrary),
 				cereal::make_nvp("pool", panel.resources().pool),
-				cereal::make_nvp("texture", panel.resources().textures)
+				cereal::make_nvp("texture", panel.resources().textures),
+				cereal::make_nvp("script", panel.resources().script)
 				);
 		});
 		panel.root(newRoot);
@@ -1362,7 +1365,7 @@ SelectedTextEditorPanel::SelectedTextEditorPanel(EditorControls &a_panel, std::s
 	auto wrapButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "WrapMode", buttonSize, wrapMethodStrings[MV::indexOf(wrapMethods, controls->elementToEdit->wrapping())]);
 	std::weak_ptr<MV::Scene::Button> weakWrapButton(wrapButton);
 	wrapButton->onAccept.connect("click", [&, weakWrapButton, wrapMethods, wrapMethodStrings](std::shared_ptr<MV::Scene::Clickable>) mutable {
-		auto index = MV::wrap(0, wrapMethods.size(), MV::indexOf(wrapMethods, controls->elementToEdit->wrapping()) + 1);
+		auto index = MV::wrap(0, static_cast<int>(wrapMethods.size()), MV::indexOf(wrapMethods, controls->elementToEdit->wrapping()) + 1);
 		controls->elementToEdit->wrapping(wrapMethods[index]);
 		renameButton(weakWrapButton.lock()->safe(), wrapMethodStrings[index]);
 	});
@@ -1372,7 +1375,7 @@ SelectedTextEditorPanel::SelectedTextEditorPanel(EditorControls &a_panel, std::s
 	auto justificationButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "JustificationMode", buttonSize, justificationStrings[MV::indexOf(justificationList, controls->elementToEdit->justification())]);
 	std::weak_ptr<MV::Scene::Button> weakJustifcationButton(justificationButton);
 	justificationButton->onAccept.connect("click", [&, weakJustifcationButton, justificationList, justificationStrings](std::shared_ptr<MV::Scene::Clickable>) mutable {
-		auto index = MV::wrap(0, justificationList.size(), MV::indexOf(justificationList, controls->elementToEdit->justification()) + 1);
+		auto index = MV::wrap(0, static_cast<int>(justificationList.size()), MV::indexOf(justificationList, controls->elementToEdit->justification()) + 1);
 		controls->elementToEdit->justification(justificationList[index]);
 		renameButton(weakJustifcationButton.lock()->safe(), justificationStrings[index]);
 	});

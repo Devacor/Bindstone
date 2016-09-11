@@ -342,6 +342,36 @@ void EditableSpine::resetHandles() {
 	positionHandle->size(currentDimensions)->color({ 0x11FFFFFF });
 }
 
+EditableButton::EditableButton(MV::Scene::SafeComponent<MV::Scene::Button> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse) :
+	elementToEdit(a_elementToEdit),
+	controlContainer(a_rootContainer->make("Editable")->depth(-100.0f)),
+	mouse(a_mouse) {
+
+	resetHandles();
+
+	nodeMoved = elementToEdit->owner()->onTransformChange.connect([&](const std::shared_ptr<MV::Scene::Node> &a_this) {
+		resetHandles();
+	});
+}
+
+void EditableButton::removeHandles() {
+	if (positionHandle) {
+		controlContainer->remove(positionHandle->owner());
+	}
+	positionHandle.reset();
+}
+
+void EditableButton::resetHandles() {
+	removeHandles();
+	auto rectBox = MV::round<MV::PointPrecision>(elementToEdit->screenBounds());
+
+	auto currentDimensions = MV::Size<>(std::max(rectBox.size().width, 5.0f), std::max(rectBox.size().height, 5.0f));
+
+	EditableButton* self = this;
+	positionHandle = controlContainer->make(MV::guid("position"))->position(rectBox.minPoint)->attach<MV::Scene::Sprite>();
+	positionHandle->size(currentDimensions)->color({ 0x11FFFFFF });
+}
+
 EditableRectangle::EditableRectangle(MV::Scene::SafeComponent<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
 	ResizeHandles(a_elementToEdit.cast<MV::Scene::Component>(), a_rootContainer, a_mouse),
 	elementToEdit(a_elementToEdit) {

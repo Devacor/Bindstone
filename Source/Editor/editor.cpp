@@ -7,8 +7,9 @@ Editor::Editor(Managers &a_managers):
 	managers(a_managers),
 	scene(MV::Scene::Node::make(a_managers.renderer, "root")),
 	controls(MV::Scene::Node::make(a_managers.renderer)),
-	controlPanel(controls, scene, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &mouse)),
-	selectorPanel(scene, controls, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &mouse)),
+	chaiScript(MV::create_chaiscript_stdlib()),
+	controlPanel(controls, scene, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &mouse, &chaiScript)),
+	selectorPanel(scene, controls, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &mouse, &chaiScript)),
 	testNode(MV::Scene::Node::make(a_managers.renderer)){
 
 	initializeWindow();

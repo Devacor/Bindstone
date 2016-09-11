@@ -257,6 +257,8 @@ private:
 	int grounded = 0;
 	MV::Stopwatch jumpTimer;
 
+	chaiscript::ChaiScript scriptEngine;
+
 	DiggerPlayer player;
 	std::shared_ptr<DiggerWorld> world;
 };

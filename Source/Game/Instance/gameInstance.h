@@ -95,10 +95,10 @@ public:
 	void beginMapDrag();
 
 	JsonNodeLoadBinder jsonLoadBinder() {
-		return { gameData.managers(), ourMouse };
+		return { gameData.managers(), ourMouse, scriptEngine };
 	}
 	BinaryNodeLoadBinder binaryLoadBinder() {
-		return{ gameData.managers(), ourMouse };
+		return{ gameData.managers(), ourMouse, scriptEngine };
 	}
 
 	bool update(double dt);

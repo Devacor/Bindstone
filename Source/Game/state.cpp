@@ -7,7 +7,8 @@ void JsonNodeLoadBinder::operator()(cereal::JSONInputArchive& a_archive) {
 		cereal::make_nvp("renderer", &managers.renderer),
 		cereal::make_nvp("textLibrary", &managers.textLibrary),
 		cereal::make_nvp("pool", &managers.pool),
-		cereal::make_nvp("texture", &managers.textures)
+		cereal::make_nvp("texture", &managers.textures),
+		cereal::make_nvp("script", &script)
 	);
 }
 
@@ -17,6 +18,7 @@ void BinaryNodeLoadBinder::operator()(cereal::PortableBinaryInputArchive& a_arch
 		cereal::make_nvp("renderer", &managers.renderer),
 		cereal::make_nvp("textLibrary", &managers.textLibrary),
 		cereal::make_nvp("pool", &managers.pool),
-		cereal::make_nvp("texture", &managers.textures)
+		cereal::make_nvp("texture", &managers.textures),
+		cereal::make_nvp("script", &script)
 	);
 }

@@ -24,15 +24,7 @@ Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const Building
 }
 
 void Building::initialize() {
-	auto newNode = owner()->make(assetPath(), [&](cereal::JSONInputArchive& archive) {
-		archive.add(
-			cereal::make_nvp("mouse", &gameInstance.mouse()),
-			cereal::make_nvp("renderer", &gameInstance.data().managers().renderer),
-			cereal::make_nvp("textLibrary", &gameInstance.data().managers().textLibrary),
-			cereal::make_nvp("pool", &gameInstance.data().managers().pool),
-			cereal::make_nvp("texture", &gameInstance.data().managers().textures)
-			);
-	});
+	auto newNode = owner()->make(assetPath(), gameInstance.jsonLoadBinder());
 	newNode->component<MV::Scene::Spine>()->animate("idle");
 	owner()->scale(owner()->scale() * gameInstance.teamForPlayer(owningPlayer).scale());
 	initializeBuildingButton(newNode);

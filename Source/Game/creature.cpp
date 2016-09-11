@@ -47,15 +47,7 @@ std::string Creature::assetPath() const {
 }
 
 void Creature::initialize() {
-	auto newNode = owner()->make(assetPath(), [&](cereal::JSONInputArchive& archive) {
-		archive.add(
-			cereal::make_nvp("mouse", &gameInstance.mouse()),
-			cereal::make_nvp("renderer", &gameInstance.data().managers().renderer),
-			cereal::make_nvp("textLibrary", &gameInstance.data().managers().textLibrary),
-			cereal::make_nvp("pool", &gameInstance.data().managers().pool),
-			cereal::make_nvp("texture", &gameInstance.data().managers().textures)
-			);
-	});
+	auto newNode = owner()->make(assetPath(), gameInstance.jsonLoadBinder());
 	newNode->serializable(false);
 	newNode->componentInChildren<MV::Scene::Spine>()->animate("run");
 	

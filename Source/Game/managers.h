@@ -10,7 +10,7 @@
 #include "Interface/package.h"
 
 struct Managers {
-	Managers():textLibrary(renderer){}
+	Managers():textLibrary(renderer) {}
 
 	MV::Stopwatch timer;
 	MV::ThreadPool pool;

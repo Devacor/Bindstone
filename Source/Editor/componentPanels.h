@@ -16,6 +16,7 @@ class EditablePathMap;
 class EditableSpine;
 class TexturePicker;
 class AnchorEditor;
+class EditableButton;
 
 class EditorPanel {
 protected:
@@ -212,6 +213,7 @@ public:
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
+
 private:
 	void handleMakeButton(std::shared_ptr<MV::Scene::Node> a_grid, const std::string &a_socket = "", const std::string &a_node = "");
 	void clearTexturePicker() {
@@ -236,8 +238,8 @@ public:
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
-private:
 
+private:
 	std::shared_ptr<EditablePathMap> controls;
 	std::shared_ptr<MV::Scene::Text> posY;
 	std::shared_ptr<MV::Scene::Text> posX;
@@ -245,6 +247,21 @@ private:
 	std::shared_ptr<MV::Scene::Text> cellsY;
 	std::shared_ptr<MV::Scene::Text> width;
 	std::shared_ptr<MV::Scene::Text> height;
+};
+
+class SelectButtonEditorPanel : public EditorPanel {
+public:
+	SelectButtonEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableButton> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
+
+	virtual void handleInput(SDL_Event &a_event) override;
+
+	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
+	virtual void onSceneZoom() override;
+
+private:
+	std::shared_ptr<EditablePathMap> controls;
+	std::shared_ptr<MV::Scene::Text> active;
+	std::shared_ptr<MV::Scene::Text> idle;
 };
 
 class DeselectedEditorPanel : public EditorPanel {

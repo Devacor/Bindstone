@@ -45,6 +45,7 @@ private:
 	Managers& managers;
 
 	MV::MouseState mouse;
+	chaiscript::ChaiScript chaiScript;
 
 	MV::FrameSwapperRegister animationLibrary;
 

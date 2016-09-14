@@ -62,6 +62,14 @@ T mixOutInT(T start, T end, float percent, float strength = 1.0f) {
 
 int main(int, char *[]) {
 
+	chaiscript::ChaiScript scriptEngine(MV::create_chaiscript_stdlib());
+	MV::Signal<void(const std::string &, float)> callbackTest;
+	callbackTest.scriptEngine(&scriptEngine);
+	callbackTest.script("puts(\"ChaiScript: \"); puts(arg_0); puts(\" | \"); puts(arg_1);");
+	auto handle = callbackTest.connect([](const std::string &a_str, float a_num) {
+		std::cout << "Callback Handle: " << a_str << ", " << a_num << std::endl;
+	});
+	callbackTest(std::string("this is a test"), 10.5f);
 	// 	pqxx::connection c("host=***REMOVED*** port=5432 dbname=bindstone user=m2tm password=***REMOVED***");
 	// 	pqxx::work txn(c);
 	// 

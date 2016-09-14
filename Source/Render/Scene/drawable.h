@@ -54,6 +54,7 @@ namespace MV {
 
 		class Anchors {
 			friend cereal::access;
+			friend Drawable;
 
 		public:
 			Anchors(Drawable *a_self);
@@ -65,6 +66,7 @@ namespace MV {
 				return !parentReference.expired();
 			}
 			std::shared_ptr<Drawable> parent() const;
+
 			Anchors& parent(const std::weak_ptr<Drawable> &a_parent, BoundsToOffset a_offsetFromBounds = BoundsToOffset::Ignore);
 			Anchors& removeFromParent();
 
@@ -98,6 +100,9 @@ namespace MV {
 			Anchors& applyBoundsToOffset(BoundsToOffset a_offsetFromBounds = BoundsToOffset::Apply);
 
 		private:
+			Anchors(const Anchors& a_rhs);
+			Anchors& operator=(const Anchors& a_rhs);
+
 			Drawable *selfReference = nullptr;
 			std::weak_ptr<Drawable> parentReference;
 			BoxAABB<> parentAnchors;
@@ -107,11 +112,12 @@ namespace MV {
 			bool applyingPosition = false;
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const /*version*/) {
+			void save(Archive & archive, std::uint32_t const /*version*/) const {
 				auto selfShared = std::static_pointer_cast<Drawable>(selfReference->shared_from_this());
+				bool parentCanUseId = !parentReference.expired() && parentReference.lock() == selfReference->owner()->componentInParents(parentReference.lock()->id(), false).self();
 				archive(
-					cereal::make_nvp("self", selfShared),
-					cereal::make_nvp("parent", parentReference),
+					cereal::make_nvp("parent", parentCanUseId ? std::weak_ptr<Drawable>() : parentReference),
+					cereal::make_nvp("parentId", parentCanUseId ? parentReference.lock()->id() : std::string()),
 					cereal::make_nvp("anchors", parentAnchors),
 					cereal::make_nvp("offset", ourOffset),
 					cereal::make_nvp("pivot", pivotPercent),
@@ -120,22 +126,20 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Anchors> &construct, std::uint32_t const /*version*/) {
-				std::shared_ptr<Drawable> selfShared;
-				archive(
-					cereal::make_nvp("self", selfShared)
-				);
-				construct(selfShared->get());
+			void load(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					cereal::make_nvp("parent", parentReference),
+					cereal::make_nvp("parentId", parentIdLoaded),
 					cereal::make_nvp("anchors", parentAnchors),
 					cereal::make_nvp("offset", ourOffset),
 					cereal::make_nvp("pivot", pivotPercent),
 					cereal::make_nvp("applyingPosition", applyingPosition)
 				);
-				construct->registerWithParent();
 			}
 
+			std::string parentIdLoaded;
+			
+			void postLoadInitialize();
 			void registerWithParent();
 		};
 
@@ -284,6 +288,8 @@ namespace MV {
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
 				return cloneHelper(a_parent->attach<Drawable>().self());
 			}
+
+			virtual void postLoadInitialize() override;
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 

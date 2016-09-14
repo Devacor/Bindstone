@@ -243,6 +243,23 @@ void ResizeHandles::removeHandles() {
 	bottomRightSizeHandle.reset();
 }
 
+void ResizeHandles::size(MV::Size<> a_newSize) {
+	elementToEditBase->bounds({ elementToEditBase->bounds().minPoint, a_newSize });
+	resetHandles();
+}
+
+MV::Size<> ResizeHandles::size() {
+	return elementToEditBase->bounds().size();
+}
+
+void ResizeHandles::position(MV::Point<> a_newPosition) {
+	elementToEditBase->bounds({ a_newPosition, elementToEditBase->bounds().size() });
+	resetHandles();
+}
+
+MV::Point<> ResizeHandles::position() const {
+	return elementToEditBase->bounds().minPoint;
+}
 
 void ResizeHandles::repositionHandles(bool a_fireOnChange, bool a_repositionElement, bool a_resizeElement) {
 	auto box = MV::BoxAABB<>(topLeftSizeHandle->worldBounds().bottomRightPoint(), bottomRightSizeHandle->worldBounds().topLeftPoint());
@@ -343,56 +360,18 @@ void EditableSpine::resetHandles() {
 }
 
 EditableButton::EditableButton(MV::Scene::SafeComponent<MV::Scene::Button> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse) :
-	elementToEdit(a_elementToEdit),
-	controlContainer(a_rootContainer->make("Editable")->depth(-100.0f)),
-	mouse(a_mouse) {
-
-	resetHandles();
-
-	nodeMoved = elementToEdit->owner()->onTransformChange.connect([&](const std::shared_ptr<MV::Scene::Node> &a_this) {
-		resetHandles();
-	});
+	ResizeHandles(a_elementToEdit.cast<MV::Scene::Component>(), a_rootContainer, a_mouse),
+	elementToEdit(a_elementToEdit) {
+	elementToEdit->color({ 1.0f, 1.0f, 1.0f, .1f })->show();
 }
 
-void EditableButton::removeHandles() {
-	if (positionHandle) {
-		controlContainer->remove(positionHandle->owner());
-	}
-	positionHandle.reset();
-}
-
-void EditableButton::resetHandles() {
-	removeHandles();
-	auto rectBox = MV::round<MV::PointPrecision>(elementToEdit->screenBounds());
-
-	auto currentDimensions = MV::Size<>(std::max(rectBox.size().width, 5.0f), std::max(rectBox.size().height, 5.0f));
-
-	EditableButton* self = this;
-	positionHandle = controlContainer->make(MV::guid("position"))->position(rectBox.minPoint)->attach<MV::Scene::Sprite>();
-	positionHandle->size(currentDimensions)->color({ 0x11FFFFFF });
+EditableButton::~EditableButton(){
+	elementToEdit->color({ 1.0f, 1.0f, 1.0f, 1.0f })->hide();
 }
 
 EditableRectangle::EditableRectangle(MV::Scene::SafeComponent<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
 	ResizeHandles(a_elementToEdit.cast<MV::Scene::Component>(), a_rootContainer, a_mouse),
 	elementToEdit(a_elementToEdit) {
-}
-
-void EditableRectangle::position(MV::Point<> a_newPosition) {
-	elementToEdit->bounds({ a_newPosition, elementToEdit->bounds().size() });
-	resetHandles();
-}
-
-MV::Point<> EditableRectangle::position() const {
-	return elementToEdit->bounds().minPoint;
-}
-
-void EditableRectangle::size(MV::Size<> a_newSize){
-	elementToEdit->bounds({elementToEdit->bounds().minPoint, a_newSize});
-	resetHandles();
-}
-
-MV::Size<> EditableRectangle::size(){
-	return elementToEdit->bounds().size();
 }
 
 void EditableRectangle::texture(const std::shared_ptr<MV::TextureHandle> a_handle) {
@@ -417,34 +396,12 @@ EditableText::EditableText(MV::Scene::SafeComponent<MV::Scene::Text> a_elementTo
 	});
 }
 
-void EditableText::position(MV::Point<> a_newPosition) {
-	elementToEdit->bounds({ a_newPosition, elementToEdit->bounds().size() });
-	resetHandles();
-}
-
-MV::Point<> EditableText::position() const {
-	return elementToEdit->bounds().minPoint;
-}
-
-void EditableText::size(MV::Size<> a_newSize) {
-	elementToEdit->bounds({ elementToEdit->bounds().minPoint, a_newSize });
-	resetHandles();
-}
-
-MV::Size<> EditableText::size() {
-	return elementToEdit->bounds().size();
-}
-
 void EditableText::texture(const std::shared_ptr<MV::TextureHandle> a_handle) {
 	elementToEdit->texture(a_handle);
 }
 
 std::shared_ptr<MV::TextureHandle> EditableText::texture() const {
 	return elementToEdit->texture();
-}
-
-void EditableText::aspect(MV::Size<> a_newAspect) {
-	resetHandles();
 }
 
 EditableEmitter::EditableEmitter(MV::Scene::SafeComponent<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):

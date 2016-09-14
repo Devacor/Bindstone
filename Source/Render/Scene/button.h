@@ -28,6 +28,11 @@ namespace MV {
 			std::shared_ptr<Button> idleNode(const std::shared_ptr<Node> &a_idleView);
 			std::shared_ptr<Button> disabledNode(const std::shared_ptr<Node> &a_disabledView);
 
+			//sets all text components contained.
+			std::shared_ptr<Button> text(const std::string &a_newValue);
+			//gets the first text value of a component.
+			std::string text() const;
+
 			virtual void cancelPress(bool a_callCancelCallbacks = true);
 
 		protected:

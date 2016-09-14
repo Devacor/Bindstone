@@ -205,8 +205,12 @@ namespace MV {
 			}
 
 			std::shared_ptr<Component> serializable(bool a_serializable) {
-				allowSerialize = false;
+				allowSerialize = a_serializable;
 				return shared_from_this();
+			}
+
+			bool serializable() const {
+				return allowSerialize;
 			}
 
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
@@ -231,6 +235,7 @@ namespace MV {
 			}
 
 		protected:
+			virtual void postLoadInitialize() {}
 			//owner death *can* occur before node death in cases where a button deletes itself.
 			//In known cases where callback order can cause this to occur it's best we have an explicit query.
 			bool ownerIsAlive() const;

@@ -237,6 +237,10 @@ namespace MV {
 			}
 		}
 
+		void Drawable::postLoadInitialize() {
+			ourAnchors.postLoadInitialize();
+		}
+
 		std::shared_ptr<Component> Drawable::cloneHelper(const std::shared_ptr<Component> &a_clone) {
 			Component::cloneHelper(a_clone);
 			auto drawableClone = std::static_pointer_cast<Drawable>(a_clone);
@@ -247,12 +251,39 @@ namespace MV {
 			drawableClone->localBounds = localBounds;
 			drawableClone->drawType = drawType;
 			drawableClone->points = points;
+			drawableClone->ourAnchors = ourAnchors;
 			drawableClone->notifyParentOfBoundsChange();
 			return a_clone;
 		}
 
 		Anchors::Anchors(Drawable *a_self) :
 			selfReference(a_self) {
+		}
+
+		Anchors::Anchors(const Anchors& a_rhs) :
+			parentAnchors(a_rhs.parentAnchors),
+			ourOffset(a_rhs.ourOffset),
+			pivotPercent(a_rhs.pivotPercent) {
+
+			if (!a_rhs.parentReference.expired() && a_rhs.parentReference.lock() == a_rhs.selfReference->owner()->componentInParents(a_rhs.parentReference.lock()->id(), false, true).self()) {
+				parentIdLoaded = a_rhs.parentReference.lock()->id();
+			} else {
+				parentReference = a_rhs.parentReference;
+			}
+		}
+
+		Anchors& Anchors::operator=(const Anchors& a_rhs){
+			parentAnchors = a_rhs.parentAnchors;
+			ourOffset = a_rhs.ourOffset;
+			pivotPercent = a_rhs.pivotPercent;
+
+			if (!a_rhs.parentReference.expired() && a_rhs.parentReference.lock() == a_rhs.selfReference->owner()->componentInParents(a_rhs.parentReference.lock()->id(), false, true).self()) {
+				parentIdLoaded = a_rhs.parentReference.lock()->id();
+			}
+			else {
+				parentReference = a_rhs.parentReference;
+			}
+			return *this;
 		}
 
 		Anchors::~Anchors() {
@@ -349,6 +380,14 @@ namespace MV {
 				parentReference.reset();
 			}
 			return *this;
+		}
+
+		void Anchors::postLoadInitialize() {
+			if (!parentIdLoaded.empty()) {
+				parentReference = selfReference->owner()->componentInParents(parentIdLoaded, true, true).cast<Drawable>().get();
+				parentIdLoaded.clear();
+			}
+			registerWithParent();
 		}
 
 		void Anchors::registerWithParent() {

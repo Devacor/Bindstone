@@ -148,7 +148,7 @@ namespace MV {
 			friend cereal::access;
 
 		public:
-			virtual ~Component() {}
+			virtual ~Component() {detachImplementation();}
 
 			virtual bool draw() { return true; }
 			virtual void endDraw() { }
@@ -234,11 +234,13 @@ namespace MV {
 				return a_script;
 			}
 
-		protected:
-			virtual void postLoadInitialize() {}
 			//owner death *can* occur before node death in cases where a button deletes itself.
 			//In known cases where callback order can cause this to occur it's best we have an explicit query.
 			bool ownerIsAlive() const;
+
+		protected:
+			virtual void detachImplementation() {}
+			virtual void postLoadInitialize() {}
 
 			virtual void onOwnerDestroyed() {}
 

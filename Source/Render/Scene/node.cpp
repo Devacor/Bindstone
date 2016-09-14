@@ -816,6 +816,10 @@ namespace MV {
 			for (auto&& child : childNodes) {
 				child->recalculateMatrixAfterLoad();
 			}
+
+			for (auto&& childComponent : childComponents){
+				childComponent->postLoadInitialize();
+			}
 		}
 
 		Point<> Node::localFromScreen(const Point<int> &a_screen) {
@@ -982,16 +986,20 @@ namespace MV {
 			result->localMatrixDirty = true;
 			result->worldMatrixDirty = true;
 
-			for (auto&& childComponent : childComponents) {
-				childComponent->clone(result);
-			}
-
 			for (auto&& childNode : childNodes) {
-				result->childNodes.push_back(childNode->cloneInternal(result));
+				if (childNode->serializable()) {
+					result->childNodes.push_back(childNode->cloneInternal(result));
+				}
 			}
 
-			recalculateAlpha();
-			recalculateMatrixAfterLoad();
+			for (auto i = childComponents.rbegin(); i != childComponents.rend();++i) {
+				if ((*i)->serializable()) {
+					(*i)->clone(result);
+				}
+			}
+
+			result->recalculateAlpha();
+			result->recalculateMatrixAfterLoad();
 
 			if (a_parent) {
 				a_parent->add(result);
@@ -1019,12 +1027,12 @@ namespace MV {
 			result->localMatrixDirty = true;
 			result->worldMatrixDirty = true;
 
-			for (auto&& childComponent : childComponents) {
-				childComponent->clone(result);
-			}
-
 			for (auto&& childNode : childNodes) {
 				result->childNodes.push_back(childNode->cloneInternal(result));
+			}
+
+			for (auto i = childComponents.rbegin(); i != childComponents.rend(); ++i) {
+				(*i)->clone(result);
 			}
 
 			return result;

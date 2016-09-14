@@ -3,6 +3,8 @@
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
+#include "text.h"
+
 CEREAL_REGISTER_TYPE(MV::Scene::Button);
 
 namespace MV {
@@ -142,6 +144,22 @@ namespace MV {
 				buttonClone->disabledNode(foundHandle);
 			}
 			return a_clone;
+		}
+
+		std::shared_ptr<Button> Button::text(const std::string &a_textString){
+			auto self = std::static_pointer_cast<Button>(shared_from_this());
+			auto textComponents = owner()->componentsInChildren<MV::Scene::Text>(false);
+			for (auto&& button : textComponents) {
+				MV::visit(button, [&](const MV::Scene::SafeComponent<MV::Scene::Text> &a_text) {
+					a_text->text(a_textString);
+				});
+			}
+			return self;
+		}
+
+		std::string Button::text() const {
+			auto textComponents = owner()->componentInChildren<MV::Scene::Text>(false, false);
+			return textComponents ? textComponents->text() : "";
 		}
 
 	}

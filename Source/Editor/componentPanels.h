@@ -69,7 +69,7 @@ public:
 	}
 protected:
 	virtual void openTexturePicker() {}
-	virtual void openAnchorEditor() {}
+	virtual void openAnchorEditor(std::shared_ptr<MV::Scene::Component> a_componentToAnchor);
 
 	EditorControls &panel;
 	std::shared_ptr<TexturePicker> picker;
@@ -92,6 +92,7 @@ public:
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateEmitterComponentButton(const MV::Scene::SafeComponent<MV::Scene::Emitter> & a_emitter);
 	MV::Scene::SafeComponent<MV::Scene::Button> CreatePathMapComponentButton(const MV::Scene::SafeComponent<MV::Scene::PathMap> & a_pathMap);
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateTextComponentButton(const MV::Scene::SafeComponent<MV::Scene::Text> & a_text);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateButtonComponentButton(const MV::Scene::SafeComponent<MV::Scene::Button> & a_text);
 private:
 	void updateComponentEditButtons(bool a_attached);
 
@@ -149,7 +150,6 @@ public:
 	virtual void onSceneZoom() override;
 private:
 	virtual void openTexturePicker() override;
-	virtual void openAnchorEditor() override;
 	MV::Scale aspectRatio;
 
 	std::shared_ptr<EditableRectangle> controls;
@@ -177,8 +177,6 @@ private:
 	std::shared_ptr<MV::Scene::Text> offsetX;
 	std::shared_ptr<MV::Scene::Text> width;
 	std::shared_ptr<MV::Scene::Text> height;
-	std::shared_ptr<MV::Scene::Text> aspectX;
-	std::shared_ptr<MV::Scene::Text> aspectY;
 };
 
 class SelectedEmitterEditorPanel : public EditorPanel {
@@ -194,7 +192,6 @@ public:
 	virtual void onSceneZoom() override;
 private:
 	virtual void openTexturePicker() override;
-	virtual void openAnchorEditor() override;
 
 	std::shared_ptr<EditableEmitter> controls;
 	std::shared_ptr<MV::Scene::Text> offsetX;
@@ -249,9 +246,9 @@ private:
 	std::shared_ptr<MV::Scene::Text> height;
 };
 
-class SelectButtonEditorPanel : public EditorPanel {
+class SelectedButtonEditorPanel : public EditorPanel {
 public:
-	SelectButtonEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableButton> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
+	SelectedButtonEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableButton> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
 
 	virtual void handleInput(SDL_Event &a_event) override;
 
@@ -259,9 +256,16 @@ public:
 	virtual void onSceneZoom() override;
 
 private:
-	std::shared_ptr<EditablePathMap> controls;
+	std::shared_ptr<EditableButton> controls;
+	std::shared_ptr<MV::Scene::Text> detectType;
 	std::shared_ptr<MV::Scene::Text> active;
 	std::shared_ptr<MV::Scene::Text> idle;
+	std::shared_ptr<MV::Scene::Text> disabled;
+
+	std::shared_ptr<MV::Scene::Text> offsetY;
+	std::shared_ptr<MV::Scene::Text> offsetX;
+	std::shared_ptr<MV::Scene::Text> width;
+	std::shared_ptr<MV::Scene::Text> height;
 };
 
 class DeselectedEditorPanel : public EditorPanel {
@@ -284,6 +288,7 @@ private:
 	void createPathMap(const MV::BoxAABB<int> &a_selected);
 	void createGrid();
 	void createText(const MV::BoxAABB<int> &a_selected);
+	void createButton();
 
 	SelectedNodeEditorPanel* editorPanel;
 };

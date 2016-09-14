@@ -5,6 +5,7 @@
 #include "componentPanels.h"
 #include "editorDefines.h"
 #include "editorFactories.h"
+#include "Utility/generalUtility.h"
 
 class AnchorEditor {
 public:
@@ -23,31 +24,21 @@ public:
 
 private:
 	void initializeInterface() {
-		auto buttonSize = MV::size(116.0f, 27.0f);
+		auto buttonSize = MV::size(110.0f, 27.0f);
 		const MV::Size<> labelSize{ buttonSize.width, 20.0f };
 		
-		auto gridNode = MV::Scene::Node::make(root->renderer());
-		grid = gridNode->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
+		auto gridNode = MV::Scene::Node::make(root->renderer())->make("Background");
+		grid = gridNode->position({ 0.0f, 0.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
 			color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->
 			padding({ 2.0f, 2.0f });
 
-		makeButton(grid->owner(), *(resources.textLibrary), *(resources.mouse), "Close", { 100.0f, 27.0f }, UTF_CHAR_STR("Close"))->
+		makeButton(grid->owner(), *(resources.textLibrary), *(resources.mouse), "Close", buttonSize, UTF_CHAR_STR("Close"))->
 			onAccept.connect("Close", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				panel.clearAnchorEditor();
 			}
 		);
 
-		std::weak_ptr<MV::Scene::Node> weakToggle = makeToggle(grid->owner(), *(resources.mouse), "AttachToggle", target->anchors().hasParent(), [&](){
-			auto scaler = target->owner()->root()->component<MV::Scene::Drawable>("ScreenScaler", false);
-			if (!scaler) {
-				std::cout << "Couldn't find scaler" << std::endl;
-			}
-			else {
-				target->anchors().parent(scaler.get());
-			}
-		}, [&](){
-			target->anchors().removeFromParent();
-		});
+		makeLabel(gridNode, *panel.resources().textLibrary, "UsePositionLabel", labelSize, UTF_CHAR_STR("Use Position"));
 
 		makeToggle(grid->owner(), *(resources.mouse), "UsePosition", target->anchors().usePosition(), [&]() {
 			target->anchors().usePosition(true);
@@ -55,7 +46,40 @@ private:
 			target->anchors().usePosition(false);
 		});
 
-		makeLabel(gridNode, *panel.resources().textLibrary, "Anchors", labelSize, UTF_CHAR_STR("Anchors"));
+		makeLabel(gridNode, *panel.resources().textLibrary, "AnchorsLabel", labelSize, UTF_CHAR_STR("Anchors"));
+
+		auto currentBoundsMethod = std::make_shared<MV::Scene::Anchors::BoundsToOffset>(MV::Scene::Anchors::BoundsToOffset::Ignore);
+		std::vector<MV::Scene::Anchors::BoundsToOffset> offsetMethod{ MV::Scene::Anchors::BoundsToOffset::Ignore, MV::Scene::Anchors::BoundsToOffset::Apply, MV::Scene::Anchors::BoundsToOffset::Apply_Reposition };
+		std::vector<std::string> offsetMethodStrings{ "Ignore", "Apply", "Apply Reposition" };
+		auto offsetMethodButton = makeButton(gridNode, *panel.resources().textLibrary, *panel.resources().mouse, "WrapMode", buttonSize, offsetMethodStrings[MV::indexOf(offsetMethod, *currentBoundsMethod)]);
+		std::weak_ptr<MV::Scene::Button> weakOffsetMethodButton(offsetMethodButton);
+		offsetMethodButton->onAccept.connect("click", [&, weakOffsetMethodButton, offsetMethod, offsetMethodStrings, currentBoundsMethod](std::shared_ptr<MV::Scene::Clickable>) mutable {
+			auto index = MV::wrap(0, static_cast<int>(offsetMethod.size()), MV::indexOf(offsetMethod, *currentBoundsMethod) + 1);
+			*currentBoundsMethod = offsetMethod[index];
+			weakOffsetMethodButton.lock()->text(offsetMethodStrings[index]);
+		});
+
+		anchorParentId = makeInputField(&panel, *(resources.mouse), gridNode, *(resources.textLibrary), "parentName", buttonSize, target->anchors().hasParent() ? target->anchors().parent()->id() : "");
+		anchorParentId->onEnter.connect("!", [&, currentBoundsMethod](auto&&) {
+			auto foundParent = target->owner()->componentInParents<MV::Scene::Drawable>(anchorParentId->text(), false);
+			if(target->anchors().hasParent() && !foundParent){
+				target->anchors().removeFromParent();
+				MV::info("Removing anchors from parent.");
+			} else if(foundParent != target->anchors().parent()){
+				target->anchors().parent(foundParent.self(), *currentBoundsMethod);
+				MV::info("Applied anchors for Component Id: ", anchorParentId->text(), " On Node: ", anchorParentId->owner()->id());
+				auto offset = target->anchors().offset();
+				updatingFields = true;
+				offsetMinX->number(std::lround(offset.minPoint.x));
+				offsetMinY->number(std::lround(offset.minPoint.y));
+
+				offsetMaxX->number(std::lround(offset.maxPoint.x));
+				offsetMaxY->number(std::lround(offset.maxPoint.y));
+				updatingFields = false;
+			}
+		});
+
+
 		float halfButtonWidth = 52.0f;
 		anchorMinX = makeInputField(&panel, *(resources.mouse), gridNode, *(resources.textLibrary), "minX", MV::size(halfButtonWidth, 27.0f), std::to_string(target->anchors().anchor().minPoint.x));
 		anchorMinY = makeInputField(&panel, *(resources.mouse), gridNode, *(resources.textLibrary), "minY", MV::size(halfButtonWidth, 27.0f), std::to_string(target->anchors().anchor().minPoint.y));
@@ -120,29 +144,22 @@ private:
 		});
 
 		makeButton(grid->owner(), *(resources.textLibrary), *(resources.mouse), "Calculate", { 100.0f, 27.0f }, UTF_CHAR_STR("Calculate"))->
-			onAccept.connect("Calculate", [&, weakToggle](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
-				auto scaler = target->owner()->root()->component<MV::Scene::Drawable>("ScreenScaler", false);
-				if (!scaler) {
-					std::cout << "Couldn't find scaler" << std::endl;
-				} else {
-					target->anchors().parent(scaler.get(), MV::Scene::Anchors::BoundsToOffset::Apply);
+			onAccept.connect("Calculate", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+				target->anchors().applyBoundsToOffset(MV::Scene::Anchors::BoundsToOffset::Apply);
 					
-					weakToggle.lock()->get("toggle")->show();
+				auto offset = target->anchors().offset();
+				updatingFields = true;
+				offsetMinX->number(std::lround(offset.minPoint.x));
+				offsetMinY->number(std::lround(offset.minPoint.y));
 
-					auto offset = target->anchors().offset();
-					updatingFields = true;
-					offsetMinX->number(std::lround(offset.minPoint.x));
-					offsetMinY->number(std::lround(offset.minPoint.y));
-
-					offsetMaxX->number(std::lround(offset.maxPoint.x));
-					offsetMaxY->number(std::lround(offset.maxPoint.y));
-					updatingFields = false;
-				}
+				offsetMaxX->number(std::lround(offset.maxPoint.x));
+				offsetMaxY->number(std::lround(offset.maxPoint.y));
+				updatingFields = false;
 			}
 		);
 
 		auto pos = box ? box->parent()->position() : MV::Point<>(100.0f, 0.0f);
-		box = makeDraggableBox("AnchorEditor", root, grid->bounds().size(), *(resources.mouse));
+		box = makeDraggableBox("AnchorEditor", root, gridNode->bounds().size(), *(resources.mouse));
 		box->parent()->position(pos);
 		box->add(gridNode);
 	}
@@ -165,6 +182,8 @@ private:
 	std::shared_ptr<MV::Scene::Grid> grid;
 
 	std::shared_ptr<MV::Scene::Drawable> target;
+
+	std::shared_ptr<MV::Scene::Text> anchorParentId;
 
 	std::shared_ptr<MV::Scene::Text> anchorMinX;
 	std::shared_ptr<MV::Scene::Text> anchorMinY;

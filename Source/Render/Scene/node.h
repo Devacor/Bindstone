@@ -282,6 +282,35 @@ namespace MV {
 				return results;
 			}
 
+			//stop the bool overload from stealing raw strings.
+			template<typename ComponentType = Component>
+			SafeComponent<ComponentType> componentInParents(const char *a_componentId, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
+				return componentInParents<ComponentType>(std::string(a_componentId), a_throwIfNotFound, a_includeSelf);
+			}
+
+			template<typename ComponentType = Component>
+			SafeComponent<ComponentType> componentInParents(const std::string& a_id, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				if (a_includeSelf) {
+					auto foundComponent = component<ComponentType>(a_id, false);
+					if (foundComponent) {
+						return foundComponent;
+					}
+				}
+
+				if (myParent) {
+					auto parentComponent = myParent->componentInParents<ComponentType>(a_id, false, true);
+					if (parentComponent) {
+						return parentComponent;
+					}
+				}
+
+				if (a_throwIfNotFound) {
+					require<ResourceException>(false, "Component with id [", a_id, "] not found in node (or parents of node) [", id(), "]");
+				}
+				return SafeComponent<ComponentType>(nullptr, nullptr);
+			}
+
 			template<typename ComponentType>
 			SafeComponent<ComponentType> componentInParents(bool a_exactType = true, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
 				std::lock_guard<std::recursive_mutex> guard(lock);
@@ -328,12 +357,12 @@ namespace MV {
 			}
 
 			//stop the bool overload from stealing raw strings.
-			template<typename ComponentType>
+			template<typename ComponentType = Component>
 			SafeComponent<ComponentType> component(const char *a_componentId, bool a_throwIfNotFound = true) const {
 				return component<ComponentType>(std::string(a_componentId), a_throwIfNotFound);
 			}
 
-			template<typename ComponentType>
+			template<typename ComponentType = Component>
 			SafeComponent<ComponentType> component(const std::string &a_componentId, bool a_throwIfNotFound = true) const {
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				auto found = std::find_if(childComponents.cbegin(), childComponents.cend(), [&](const std::shared_ptr<Component> &a_component) {
@@ -348,12 +377,12 @@ namespace MV {
 			}
 			
 			//stop the bool overload from stealing raw strings.
-			template<typename ComponentType>
+			template<typename ComponentType = Component>
 			SafeComponent<ComponentType> componentInChildren(const char *a_componentId, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
 				return componentInChildren<ComponentType>(std::string(a_componentId), a_throwIfNotFound, a_includeSelf);
 			}
 
-			template<typename ComponentType>
+			template<typename ComponentType = Component>
 			SafeComponent<ComponentType> componentInChildren(const std::string &a_componentId, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				auto found = a_includeSelf ? std::find_if(childComponents.cbegin(), childComponents.cend(), [&](const std::shared_ptr<Component> &a_component) {
@@ -393,7 +422,7 @@ namespace MV {
 			}
 
 			template<typename ... ComponentType>
-			std::vector<MV::Variant<SafeComponent<ComponentType>...>> componentsInChildren(bool exactType = true, bool includeComponentsInThis = false) const {
+			std::vector<MV::Variant<SafeComponent<ComponentType>...>> componentsInChildren(bool exactType = true, bool includeComponentsInThis = true) const {
 				std::lock_guard<std::recursive_mutex> guard(lock);
 				std::vector<MV::Variant<SafeComponent<ComponentType>...>> results;
 				componentsInChildrenInternal<ComponentType...>(exactType, includeComponentsInThis, results);

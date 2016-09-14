@@ -163,14 +163,11 @@ namespace MV {
 				BoxAABB<> hitBox;
 				if (hitDetectionType == BoundsType::LOCAL) {
 					hitBox = bounds();
-				}
-				else if (hitDetectionType == BoundsType::NODE) {
+				} else if (hitDetectionType == BoundsType::NODE) {
 					hitBox = owner()->bounds(false);
-				}
-				else if (hitDetectionType == BoundsType::NODE_CHILDREN) {
+				} else if (hitDetectionType == BoundsType::NODE_CHILDREN) {
 					hitBox = owner()->bounds(true);
-				}
-				else if (hitDetectionType == BoundsType::CHILDREN) {
+				} else if (hitDetectionType == BoundsType::CHILDREN) {
 					hitBox = owner()->childBounds();
 				}
 

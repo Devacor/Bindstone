@@ -47,6 +47,12 @@ public:
 
 	virtual void repositionHandles(bool a_fireOnChange = true, bool a_repositionElement = true, bool a_resizeElement = true);
 
+	void position(MV::Point<> a_newPosition);
+	MV::Point<> position() const;
+
+	void size(MV::Size<> a_newSize);
+	MV::Size<> size();
+
 	std::function<void(ResizeHandles*)> onChange;
 
 	MV::Scene::SafeComponent<MV::Scene::Component> elementToEditBase;
@@ -119,30 +125,12 @@ private:
 };
 
 
-class EditableButton {
+class EditableButton : public ResizeHandles {
 public:
 	EditableButton(MV::Scene::SafeComponent<MV::Scene::Button> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
-
-	~EditableButton() {
-		controlContainer->removeFromParent();
-	}
-
-	void removeHandles();
-
-	void resetHandles();
-
-	std::function<void(EditableButton*)> onChange;
+	~EditableButton();
 
 	MV::Scene::SafeComponent<MV::Scene::Button> elementToEdit;
-private:
-
-	MV::Scene::Node::BasicSharedSignalType nodeMoved;
-
-	MV::MouseState *mouse;
-
-	MV::Scene::SafeComponent<MV::Scene::Sprite> positionHandle;
-
-	std::shared_ptr<MV::Scene::Node> controlContainer;
 };
 
 class EditableRectangle : public ResizeHandles {
@@ -151,15 +139,8 @@ public:
 
 	void texture(const std::shared_ptr<MV::TextureHandle> a_handle);
 	std::shared_ptr<MV::TextureHandle> texture() const;
-	void position(MV::Point<> a_newPosition);
-	MV::Point<> position() const;
-
-	void size(MV::Size<> a_newSize);
-	MV::Size<> size();
 
 	void aspect(MV::Size<> a_newAspect);
-
-	std::function<void(EditableRectangle*)> onChange;
 
 	MV::Scene::SafeComponent<MV::Scene::Sprite> elementToEdit;
 };
@@ -170,13 +151,6 @@ public:
 
 	void texture(const std::shared_ptr<MV::TextureHandle> a_handle);
 	std::shared_ptr<MV::TextureHandle> texture() const;
-	void position(MV::Point<> a_newPosition);
-	MV::Point<> position() const;
-
-	void size(MV::Size<> a_newSize);
-	MV::Size<> size();
-
-	void aspect(MV::Size<> a_newAspect);
 
 	MV::Scene::SafeComponent<MV::Scene::Text> elementToEdit;
 };

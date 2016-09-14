@@ -30,10 +30,6 @@ namespace MV{
 			std::shared_ptr<Text> text(UtfChar a_char) {
 				return text(UtfString() + a_char);
 			}
-			std::shared_ptr<Text> text(Uint16 a_char) {
-				UtfChar *character = reinterpret_cast<UtfChar*>(&a_char);
-				return text(*character);
-			}
 
 			bool text(SDL_Event &event);
 
@@ -146,7 +142,6 @@ namespace MV{
 				a_script.add(chaiscript::fun(static_cast<UtfString(Text::*)() const>(&Text::text)), "text");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(const UtfString &)>(&Text::text)), "text");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(UtfChar)>(&Text::text)), "text");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(Uint16)>(&Text::text)), "text");
 
 				a_script.add(chaiscript::fun(static_cast<PointPrecision(Text::*)() const>(&Text::number)), "number");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(PointPrecision)>(&Text::number)), "number");

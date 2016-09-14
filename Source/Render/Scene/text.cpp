@@ -161,8 +161,7 @@ namespace MV{
 		std::shared_ptr<Component> Text::cloneHelper(const std::shared_ptr<Component> &a_clone) {
 			Drawable::cloneHelper(a_clone);
 			auto textClone = std::static_pointer_cast<Text>(a_clone);
-			textClone->formattedText = formattedText;
-			textClone->text(text());
+			(*textClone->formattedText) = *formattedText;
 			textClone->cursor = cursor;
 			return a_clone;
 		}

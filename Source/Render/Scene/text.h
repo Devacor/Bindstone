@@ -157,6 +157,7 @@ namespace MV{
 				return a_script;
 			}
 		protected:
+			virtual void detachImplementation() override;
 			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
 			virtual void updateImplementation(double a_dt);
 
@@ -232,7 +233,7 @@ namespace MV{
 
 			bool displayCursor = false;
 			size_t cursor;
-			std::shared_ptr<MV::Scene::Sprite> cursorScene;
+			std::shared_ptr<MV::Scene::Sprite> cursorSprite;
 
 			std::string fontIdentifier;
 			double accumulatedTime = 0.0;

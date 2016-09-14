@@ -63,6 +63,7 @@ namespace MV {
 		}
 
 		void Component::detach() {
+			detachImplementation();
 			owner()->detach(shared_from_this());
 		}
 	}

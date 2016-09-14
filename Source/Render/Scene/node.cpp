@@ -992,9 +992,9 @@ namespace MV {
 				}
 			}
 
-			for (auto i = childComponents.rbegin(); i != childComponents.rend();++i) {
-				if ((*i)->serializable()) {
-					(*i)->clone(result);
+			for (auto&& childComponent : childComponents) {
+				if (childComponent->serializable()) {
+					childComponent->clone(result);
 				}
 			}
 
@@ -1028,11 +1028,15 @@ namespace MV {
 			result->worldMatrixDirty = true;
 
 			for (auto&& childNode : childNodes) {
-				result->childNodes.push_back(childNode->cloneInternal(result));
+				if (childNode->serializable()) {
+					result->childNodes.push_back(childNode->cloneInternal(result));
+				}
 			}
 
-			for (auto i = childComponents.rbegin(); i != childComponents.rend(); ++i) {
-				(*i)->clone(result);
+			for (auto&& childComponent : childComponents) {
+				if (childComponent->serializable()) {
+					childComponent->clone(result);
+				}
 			}
 
 			return result;

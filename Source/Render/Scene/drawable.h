@@ -221,6 +221,8 @@ namespace MV {
 		protected:
 			Drawable(const std::weak_ptr<Node> &a_owner);
 
+			virtual void detachImplementation() override;
+
 			std::function<void(Shader*)> shaderUpdater;
 
 			virtual void onRemoved() {

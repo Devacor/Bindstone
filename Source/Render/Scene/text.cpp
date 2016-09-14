@@ -32,8 +32,8 @@ namespace MV{
 				owner()->add(formattedText->scene());
 				formattedText->scene()->position(points[0]);
 
-				cursorScene = owner()->make(guid("CURSOR_"))->serializable(false)->attach<Sprite>()->size({ 2.0f, 5.0f });
-				cursorScene->hide();
+				cursorSprite = owner()->make(guid("CURSOR_"))->serializable(false)->attach<Sprite>()->size({ 2.0f, 5.0f });
+				cursorSprite->hide();
 			}
 		}
 
@@ -52,22 +52,24 @@ namespace MV{
 			auto cursorLineHeight = std::max<float>(formattedText->minimumLineHeight(), (line) ? line->height() : cursorHeight);
 			linePositionY += cursorLineHeight / 2.0f - cursorHeight / 2.0f;
 
-			cursorScene->owner()->position(formattedText->scene()->position() + MV::Point<>(xPosition, linePositionY));
-			cursorScene->size({ 2.0f, cursorHeight });
+			cursorSprite->owner()->position(formattedText->scene()->position() + MV::Point<>(xPosition, linePositionY));
+			cursorSprite->size({ 2.0f, cursorHeight });
 
 			if (displayCursor) {
-				cursorScene->show();
+				cursorSprite->show();
 			}
 		}
 
 		void Text::positionCursorWithCharacter(size_t a_maxCursor, std::shared_ptr<FormattedCharacter> a_cursorCharacter) {
-			cursorScene->owner()->position(formattedText->scene()->position() + ((a_cursorCharacter->position() + a_cursorCharacter->offset()) * a_cursorCharacter->scale()));
-			cursorScene->size({ 2.0f, a_cursorCharacter->characterSize().height });
-			if (cursor >= a_maxCursor) {
-				cursorScene->owner()->translate({ a_cursorCharacter->characterSize().width * a_cursorCharacter->scale().x, 0.0f });
-			}
-			if (displayCursor) {
-				cursorScene->show();
+			if (cursorSprite && cursorSprite->ownerIsAlive()) {
+				cursorSprite->owner()->position(formattedText->scene()->position() + ((a_cursorCharacter->position() + a_cursorCharacter->offset()) * a_cursorCharacter->scale()));
+				cursorSprite->size({ 2.0f, a_cursorCharacter->characterSize().height });
+				if (cursor >= a_maxCursor) {
+					cursorSprite->owner()->translate({ a_cursorCharacter->characterSize().width * a_cursorCharacter->scale().x, 0.0f });
+				}
+				if (displayCursor) {
+					cursorSprite->show();
+				}
 			}
 		}
 
@@ -76,14 +78,14 @@ namespace MV{
 				accumulatedTime += a_dt;
 				if (accumulatedTime > BLINK_DURATION) {
 					accumulatedTime = 0.0;
-					if (cursorScene->visible()) {
-						cursorScene->hide();
+					if (cursorSprite->visible()) {
+						cursorSprite->hide();
 					} else {
-						cursorScene->show();
+						cursorSprite->show();
 					}
 				}
 			} else {
-				cursorScene->hide();
+				cursorSprite->hide();
 			}
 		}
 
@@ -142,7 +144,7 @@ namespace MV{
 			if (!displayCursor) {
 				displayCursor = true;
 				setCursor(cursor);
-				cursorScene->show();
+				cursorSprite->show();
 			}
 		}
 
@@ -151,7 +153,7 @@ namespace MV{
 				auto self = std::static_pointer_cast<Text>(shared_from_this());
 				displayCursor = false;
 				setCursor(cursor);
-				cursorScene->hide();
+				cursorSprite->hide();
 				if (self) {
 					onEnterSignal(self);
 				}
@@ -164,6 +166,14 @@ namespace MV{
 			(*textClone->formattedText) = *formattedText;
 			textClone->cursor = cursor;
 			return a_clone;
+		}
+
+		void Text::detachImplementation() {
+			Drawable::detachImplementation();
+			formattedText->scene()->removeFromParent();
+			if (cursorSprite && cursorSprite->ownerIsAlive()) {
+				cursorSprite->owner()->removeFromParent();
+			}
 		}
 
 		void Text::boundsImplementation(const BoxAABB<> &a_bounds) {

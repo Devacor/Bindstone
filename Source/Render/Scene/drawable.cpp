@@ -228,6 +228,10 @@ namespace MV {
 			points.resize(4);
 		}
 
+		void Drawable::detachImplementation() {
+			ourAnchors.removeFromParent();
+		}
+
 		void Drawable::initialize() {
 			if (ourTexture && !textureSizeSignal) {
 				textureSizeSignal = TextureHandle::SignalType::make([&](std::shared_ptr<MV::TextureHandle> a_handle) {

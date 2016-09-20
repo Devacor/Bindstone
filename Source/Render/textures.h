@@ -291,8 +291,10 @@ namespace MV {
 		std::shared_ptr<TextureHandle> bounds(const BoxAABB<int> &a_bounds);
 		BoxAABB<int> bounds() const;
 
-		std::shared_ptr<TextureHandle> percentBounds(const BoxAABB<PointPrecision> &a_bounds);
-		BoxAABB<PointPrecision> percentBounds() const;
+		std::shared_ptr<TextureHandle> bounds(const BoxAABB<PointPrecision> &a_bounds);
+
+		std::shared_ptr<TextureHandle> rawPercent(const BoxAABB<PointPrecision> &a_bounds);
+		BoxAABB<PointPrecision> rawPercent() const;
 
 		//logical size == bounds.size() * texture scale
 		Size<PointPrecision> logicalSize() const;
@@ -300,8 +302,10 @@ namespace MV {
 		BoxAABB<PointPrecision> logicalSlice() const;
 
 		//percent of bounds, IE: 0-1 of bounds, not 0-1 of texture.
-		std::shared_ptr<TextureHandle> percentSlice(const BoxAABB<PointPrecision> &a_sliceBounds);
-		BoxAABB<PointPrecision> percentSlice() const;
+		std::shared_ptr<TextureHandle> slice(const BoxAABB<PointPrecision> &a_sliceBounds);
+		BoxAABB<PointPrecision> slice() const;
+		std::shared_ptr<TextureHandle> clearSlice();
+		bool hasSlice() const;
 
 		std::shared_ptr<TextureHandle> flipX(bool a_flip);
 		bool flipX() const;
@@ -327,8 +331,8 @@ namespace MV {
 			a_script.add(chaiscript::fun(&TextureHandle::texture), "texture");
 			a_script.add(chaiscript::fun(&TextureHandle::clone), "clone");
 
-			a_script.add(chaiscript::fun(static_cast<BoxAABB<PointPrecision>(TextureHandle::*)() const>(&TextureHandle::percentBounds)), "percentBounds");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<PointPrecision> &)>(&TextureHandle::percentBounds)), "percentBounds");
+			a_script.add(chaiscript::fun(static_cast<BoxAABB<PointPrecision>(TextureHandle::*)() const>(&TextureHandle::rawPercent)), "rawPercent");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<PointPrecision> &)>(&TextureHandle::rawPercent)), "rawPercent");
 
 			a_script.add(chaiscript::fun(static_cast<BoxAABB<int>(TextureHandle::*)() const>(&TextureHandle::bounds)), "bounds");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<int> &)>(&TextureHandle::bounds)), "bounds");

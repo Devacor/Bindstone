@@ -382,18 +382,16 @@ namespace MV {
 	\*********************/
 
 	std::shared_ptr<TextureHandle> TextureHandle::bounds(const BoxAABB<int> &a_bounds) {
-		handleRegion = a_bounds;
-		updatePercentBounds();
+		boundsNoSignal(a_bounds);
 		return shared_from_this();
 	}
 
 	BoxAABB<int> TextureHandle::bounds() const {
-		return handleRegion;
+		return cast<int>(handlePercent * toScale(textureDefinition->size()));
 	}
 
 	std::shared_ptr<TextureHandle> TextureHandle::percentBounds(const BoxAABB<PointPrecision> &a_bounds) {
 		handlePercent = a_bounds;
-		updateIntegralBounds();
 		return shared_from_this();
 	}
 
@@ -405,30 +403,26 @@ namespace MV {
 		return textureDefinition;
 	}
 
+	TextureHandle::TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const BoxAABB<PointPrecision> &a_bounds) :
+		sizeObserver(sizeChanges),
+		textureDefinition(a_texture),
+		handlePercent(a_bounds),
+		debugName(a_texture->name()) {
+	}
+
 	TextureHandle::TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const BoxAABB<int> &a_bounds) :
 		sizeObserver(sizeChanges),
 		textureDefinition(a_texture),
-		handleRegion((a_texture && a_texture->loaded() && a_bounds == BoxAABB<int>(point(-1, -1))) ? a_texture->size() : a_bounds),
-		resizeToParent(a_bounds == BoxAABB<int>(point(-1, -1))),
-		flipTextureX(false),
-		flipTextureY(false),
 		debugName(a_texture->name()) {
 
-		onParentReload = TextureDefinition::SignalType::make([&](std::shared_ptr<TextureDefinition> a_texture) {
-			if (resizeToParent) {
-				bounds({ a_texture->size() });
-			}
-			updatePercentBounds();
-		});
-		observeTextureReload();
-		if (a_texture && a_texture->loaded()) {
-			if (resizeToParent) {
-				handleRegion = textureDefinition->size();
-				handlePercent = { point(0.0f, 0.0f), point(1.0f, 1.0f) };
-			} else {
-				updatePercentBoundsNoSignal();
-			}
-		}
+		boundsNoSignal(a_bounds);
+	}
+
+	void TextureHandle::boundsNoSignal(const BoxAABB<int> &a_bounds) {
+		auto floatBounds = cast<PointPrecision>(a_bounds);
+		floatBounds.minPoint += point(.25f, .25f);
+		floatBounds.maxPoint -= point(.25f, .25f);
+		handlePercent = floatBounds / toScale(textureDefinition->size());
 	}
 
 	TextureHandle::~TextureHandle() {
@@ -437,51 +431,26 @@ namespace MV {
 		}
 	}
 
-	void TextureHandle::observeTextureReload() {
-		if (textureDefinition) {
-			textureDefinition->onReload.connect(onParentReload);
-		}
-	}
-
-	void TextureHandle::updatePercentBoundsNoSignal() {
-		handlePercent = cast<PointPrecision>(handleRegion) / toScale(textureDefinition->size());
-		handlePercent.minPoint += point(.25f, .25f) / toScale(textureDefinition->size());
-		handlePercent.maxPoint -= point(.25f, .25f) / toScale(textureDefinition->size());
-		if (flipX()) {
-			std::swap(handlePercent.maxPoint.x, handlePercent.minPoint.x);
-		}
-		if (flipY()) {
-			std::swap(handlePercent.maxPoint.y, handlePercent.minPoint.y);
-		}
-	}
-
-	void TextureHandle::updatePercentBounds(){
-		updatePercentBoundsNoSignal();
-		sizeChanges(shared_from_this());
-	}
-
-	void TextureHandle::updateIntegralBounds(){
-		handleRegion = round<int>(handlePercent * toScale(textureDefinition->size()));
-	}
-
 	std::shared_ptr<TextureHandle> TextureHandle::flipX( bool a_flip ) {
-		flipTextureX = a_flip;
-		updatePercentBounds();
+		if (flipX() != a_flip) {
+			std::swap(handlePercent.minPoint.x, handlePercent.maxPoint.x);
+		}
 		return shared_from_this();
 	}
 
 	std::shared_ptr<TextureHandle> TextureHandle::flipY(bool a_flip) {
-		flipTextureY = a_flip;
-		updatePercentBounds();
+		if(flipY() != a_flip){
+			std::swap(handlePercent.minPoint.y, handlePercent.maxPoint.y);
+		}
 		return shared_from_this();
 	}
 
 	bool TextureHandle::flipX() const {
-		return flipTextureX;
+		return handlePercent.minPoint.x > handlePercent.maxPoint.x;
 	}
 
 	bool TextureHandle::flipY() const {
-		return flipTextureY;
+		return handlePercent.minPoint.y > handlePercent.maxPoint.y;
 	}
 
 
@@ -502,13 +471,30 @@ namespace MV {
 
 	std::shared_ptr<TextureHandle> TextureHandle::clone() {
 		auto result = textureDefinition->makeHandle();
-		result->flipTextureX = flipTextureX;
-		result->flipTextureY = flipTextureY;
 		result->debugName = debugName;
-		result->resizeToParent = resizeToParent;
-		result->handleRegion = handleRegion;
 		result->handlePercent = handlePercent;
+		result->slicePercent = slicePercent;
 		return result;
+	}
+
+	//logical size == bounds.size() * texture scale
+	Size<PointPrecision> TextureHandle::logicalSize() const{
+		auto sanitizedBounds = handlePercent;
+		sanitizedBounds.sanitize();
+		return sanitizedBounds.size() * textureDefinition->scale();
+	}
+	//logical slice == percentSlice * logicalSize
+	BoxAABB<PointPrecision> TextureHandle::logicalSlice() const{
+		return slicePercent * toScale(logicalSize());
+	}
+
+	//percent of bounds, IE: 0-1 of bounds, not 0-1 of texture.
+	std::shared_ptr<TextureHandle> TextureHandle::percentSlice(const BoxAABB<PointPrecision> &a_sliceBounds){
+		slicePercent = a_sliceBounds;
+		return shared_from_this();
+	}
+	BoxAABB<PointPrecision> TextureHandle::percentSlice() const{
+		return slicePercent;
 	}
 
 	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture) {

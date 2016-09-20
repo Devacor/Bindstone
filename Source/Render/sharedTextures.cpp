@@ -1,7 +1,6 @@
+#include "sharedTextures.h"
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
-
-#include "sharedTextures.h"
 
 using namespace boost::filesystem;
 

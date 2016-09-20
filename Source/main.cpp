@@ -1,5 +1,4 @@
 #include "Game/gameEditor.h"
-#include "ClickerGame/clickerGame.h"
 #include "Utility/threadPool.h"
 
 #include "ArtificialIntelligence/pathfinding.h"
@@ -17,59 +16,7 @@ bool isDone() {
 	return false;
 }
 
-struct TestClass {
-
-	template <class Archive>
-	void serialize(Archive & archive) {
-		archive(CEREAL_NVP(test));
-	}
-
-	int test;
-};
-
-struct TestClassVersioned {
-	
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(test));
-		std::cout << "VERSION: " << version << std::endl;
-	}
-
-	int test;
-};
-
-template<typename T>
-T mixInOutT(T start, T end, float percent, float strength = 1.0f) {
-	auto halfRange = (end - start) / 2.0f + start;
-	if (percent < .5f)
-	{
-		return MV::mixIn(start, halfRange, percent * 2.0f, strength);
-	}
-	return MV::mixOut(halfRange, end, (percent - .5f) * 2.0f, strength);
-}
-
-template<typename T>
-T mixOutInT(T start, T end, float percent, float strength = 1.0f) {
-	auto halfRange = (end - start) / 2.0f + start;
-	if (percent < .5f)
-	{
-		return MV::mixOut(start, halfRange, percent * 2.0f, strength);
-	}
-	return MV::mixIn(halfRange, end, (percent - .5f) * 2.0f, strength);
-}
-
-#include "cereal/archives/json.hpp"
-
 int main(int, char *[]) {
-
-	chaiscript::ChaiScript scriptEngine(MV::create_chaiscript_stdlib());
-	MV::Signal<void(const std::string &, float)> callbackTest;
-	callbackTest.scriptEngine(&scriptEngine);
-	callbackTest.script("puts(\"ChaiScript: \"); puts(arg_0); puts(\" | \"); puts(arg_1);");
-	auto handle = callbackTest.connect([](const std::string &a_str, float a_num) {
-		std::cout << "Callback Handle: " << a_str << ", " << a_num << std::endl;
-	});
-	callbackTest(std::string("this is a test"), 10.5f);
 	// 	pqxx::connection c("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=5432 dbname=bindstone user=m2tm password=Tinker123");
 	// 	pqxx::work txn(c);
 	// 
@@ -122,25 +69,6 @@ int main(int, char *[]) {
 		}
 		*/
 
-	std::cout << 0.0f << " => " << MV::mixInOut(-10.0f, 10.0f, 0.5f, 2) << ", " << MV::unmixInOut(-10.0f, 10.0f, 0.0f, 2) << ", " << MV::mixInOut(-10.0f, 10.0f, MV::unmixInOut(-10.0f, 10.0f, 0.0f, 2), 2) <<  std::endl;
-	for (float strength = 1.0f; strength < 4.0f; ++strength) {
-		std::cout << "_________________________\nIN: ";
-		for (float i = 0.0f; i <= 1.0f; i += .2f) {
-			std::cout << i << ": " << MV::mixIn(-10.0f, 10.0f, i, strength) << " => " << MV::unmixIn(-10.0f, 10.0f, MV::mixIn(-10.0f, 10.0f, i, strength), strength) << std::endl;
-		}
-		std::cout << "_________________________\nOUT: ";
-		for (float i = 0.0f; i <= 1.0f; i += .2f) {
-			std::cout << i << ": " << MV::mixOut(-10.0f, 10.0f, i, strength) << " => " << MV::unmixOut(-10.0f, 10.0f, MV::mixOut(-10.0f, 10.0f, i, strength), strength) << std::endl;
-		}
-		std::cout << "_________________________\nINout: ";
-		for (float i = 0.0f; i <= 1.0f; i += .2f) {
-			std::cout << i << ": " << mixInOutT(-10.0f, 10.0f, i, strength) << " => " << MV::unmixInOut(-10.0f, 10.0f, mixInOutT(-10.0f, 10.0f, i, strength), strength) << std::endl;
-		}
-		std::cout << "_________________________\nOUTIN: ";
-		for (float i = 0.0f; i <= 1.0f; i += .2f) {
-			std::cout << i << ": " << mixOutInT(-10.0f, 10.0f, i, strength) << " => " << MV::unmixOutIn(-10.0f, 10.0f, mixOutInT(-10.0f, 10.0f, i, strength), strength) << std::endl;
-		}
-	}
 	//auto emailer = MV::Email::make("email-smtp.us-west-2.amazonaws.com", "587", { "AKIAIVINRAMKWEVUT6UQ", "AiUjj1lS/k3g9r0REJ1eCoy/xeYZgLXmB8Nrep36pUVw" });
 	//emailer->send({ "jai", "jackaldurante@gmail.com", "Derv", "maxmike@gmail.com" }, "Testing new Interface", "Does this work too?");
 	

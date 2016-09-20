@@ -47,8 +47,6 @@ private:
 	MV::MouseState mouse;
 	chaiscript::ChaiScript chaiScript;
 
-	MV::FrameSwapperRegister animationLibrary;
-
 	std::shared_ptr<MV::Scene::Text> fps;
 	std::shared_ptr<MV::Scene::Node> scene;
 	std::shared_ptr<MV::Scene::Node> controls;

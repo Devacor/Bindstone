@@ -39,8 +39,7 @@ namespace MV {
 	}
 
 
-	SDL_Surface* converToPowerOfTwo(SDL_Surface* surface)
-	{
+	SDL_Surface* converToPowerOfTwo(SDL_Surface* surface) {
 		int width = roundUpPowerOfTwo(surface->w);
 		int height = roundUpPowerOfTwo(surface->h);
 
@@ -386,16 +385,21 @@ namespace MV {
 		return shared_from_this();
 	}
 
+	std::shared_ptr<TextureHandle> TextureHandle::bounds(const BoxAABB<PointPrecision> &a_bounds) {
+		boundsNoSignal(cast<int>(a_bounds * toScale(textureDefinition->contentSize())));
+		return shared_from_this();
+	}
+
 	BoxAABB<int> TextureHandle::bounds() const {
 		return cast<int>(handlePercent * toScale(textureDefinition->size()));
 	}
 
-	std::shared_ptr<TextureHandle> TextureHandle::percentBounds(const BoxAABB<PointPrecision> &a_bounds) {
+	std::shared_ptr<TextureHandle> TextureHandle::rawPercent(const BoxAABB<PointPrecision> &a_bounds) {
 		handlePercent = a_bounds;
 		return shared_from_this();
 	}
 
-	BoxAABB<PointPrecision> TextureHandle::percentBounds() const {
+	BoxAABB<PointPrecision> TextureHandle::rawPercent() const {
 		return handlePercent;
 	}
 
@@ -489,12 +493,19 @@ namespace MV {
 	}
 
 	//percent of bounds, IE: 0-1 of bounds, not 0-1 of texture.
-	std::shared_ptr<TextureHandle> TextureHandle::percentSlice(const BoxAABB<PointPrecision> &a_sliceBounds){
+	std::shared_ptr<TextureHandle> TextureHandle::slice(const BoxAABB<PointPrecision> &a_sliceBounds){
 		slicePercent = a_sliceBounds;
 		return shared_from_this();
 	}
-	BoxAABB<PointPrecision> TextureHandle::percentSlice() const{
+	BoxAABB<PointPrecision> TextureHandle::slice() const{
 		return slicePercent;
+	}
+	std::shared_ptr<TextureHandle> TextureHandle::clearSlice() {
+		slicePercent.clear();
+		return shared_from_this();
+	}
+	bool TextureHandle::hasSlice() const {
+		return !slicePercent.empty();
 	}
 
 	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture) {

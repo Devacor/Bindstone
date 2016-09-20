@@ -120,10 +120,10 @@ namespace MV {
 
 			std::vector<TexturePoint> texturePoints;
 			if (ourTexture) {
-				texturePoints.push_back({ static_cast<float>(ourTexture->percentBounds().minPoint.x), static_cast<float>(ourTexture->percentBounds().minPoint.y) });
-				texturePoints.push_back({ static_cast<float>(ourTexture->percentBounds().minPoint.x), static_cast<float>(ourTexture->percentBounds().maxPoint.y) });
-				texturePoints.push_back({ static_cast<float>(ourTexture->percentBounds().maxPoint.x), static_cast<float>(ourTexture->percentBounds().maxPoint.y) });
-				texturePoints.push_back({ static_cast<float>(ourTexture->percentBounds().maxPoint.x), static_cast<float>(ourTexture->percentBounds().minPoint.y) });
+				texturePoints.push_back({ static_cast<float>(ourTexture->rawPercent().minPoint.x), static_cast<float>(ourTexture->rawPercent().minPoint.y) });
+				texturePoints.push_back({ static_cast<float>(ourTexture->rawPercent().minPoint.x), static_cast<float>(ourTexture->rawPercent().maxPoint.y) });
+				texturePoints.push_back({ static_cast<float>(ourTexture->rawPercent().maxPoint.x), static_cast<float>(ourTexture->rawPercent().maxPoint.y) });
+				texturePoints.push_back({ static_cast<float>(ourTexture->rawPercent().maxPoint.x), static_cast<float>(ourTexture->rawPercent().minPoint.y) });
 			} else {
 				texturePoints.push_back({ 0.0f, 0.0f });
 				texturePoints.push_back({ 0.0f, 1.0f });

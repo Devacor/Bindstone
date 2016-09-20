@@ -2,7 +2,8 @@
 #define _COLLISIONOBJECTS_H_
 
 #include "Render\package.h"
-#include "Utility\package.h"
+#include "Utility\stopwatch.h"
+#include "Utility\signal.hpp"
 #include "Box2D\Box2D.h"
 #include <list>
 #include <map>

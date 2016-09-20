@@ -8,9 +8,7 @@
 #include <vector>
 #include <memory>
 
-#include "points.h"
 #include "matrix.h"
-#include "Utility/generalUtility.h"
 
 namespace MV {
 

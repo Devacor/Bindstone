@@ -1,7 +1,6 @@
 #ifndef __MV_PLAYER_H__
 #define __MV_PLAYER_H__
 
-#include "Utility/package.h"
 #include <string>
 #include "Game/wallet.h"
 #include "cereal/cereal.hpp"

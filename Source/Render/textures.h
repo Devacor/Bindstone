@@ -58,6 +58,13 @@ namespace MV {
 		Size<int> size();
 		Size<int> contentSize() const;
 		Size<int> contentSize();
+
+		void scale(const Scale &a_newScale){
+			logicalScale = a_newScale;
+		}
+		Scale scale() const{
+			return logicalScale;
+		}
 		//bookkeeping
 		bool loaded() const;
 		void load();
@@ -93,6 +100,7 @@ namespace MV {
 		std::string textureName;
 		Size<int> textureSize;
 		Size<int> desiredSize;
+		Scale logicalScale;
 		GLuint texture;
 
 		std::vector< std::weak_ptr<TextureHandle> > handles;
@@ -100,8 +108,20 @@ namespace MV {
 
 	private:
 		template <class Archive>
-		void serialize(Archive & archive, std::uint32_t const /*version*/){
-			archive(cereal::make_nvp("name", textureName), cereal::make_nvp("size", textureSize), cereal::make_nvp("contentSize", desiredSize), CEREAL_NVP(handles));
+		void serialize(Archive & archive, std::uint32_t const version){
+			archive(
+				cereal::make_nvp("name", textureName),
+				cereal::make_nvp("size", textureSize),
+				cereal::make_nvp("contentSize", desiredSize)
+			);
+
+			if(version > 0){
+				archive(cereal::make_nvp("scale", logicalScale));
+			}
+
+			archive(
+				CEREAL_NVP(handles)
+			);
 			if(!handles.empty() && !texture){
 				reloadImplementation();
 			}
@@ -274,6 +294,15 @@ namespace MV {
 		std::shared_ptr<TextureHandle> percentBounds(const BoxAABB<PointPrecision> &a_bounds);
 		BoxAABB<PointPrecision> percentBounds() const;
 
+		//logical size == bounds.size() * texture scale
+		Size<PointPrecision> logicalSize() const;
+		//logical slice == percentSlice * logicalSize
+		BoxAABB<PointPrecision> logicalSlice() const;
+
+		//percent of bounds, IE: 0-1 of bounds, not 0-1 of texture.
+		std::shared_ptr<TextureHandle> percentSlice(const BoxAABB<PointPrecision> &a_sliceBounds);
+		BoxAABB<PointPrecision> percentSlice() const;
+
 		std::shared_ptr<TextureHandle> flipX(bool a_flip);
 		bool flipX() const;
 
@@ -313,52 +342,65 @@ namespace MV {
 			return a_script;
 		}
 	private:
-		TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const BoxAABB<int> &a_bounds = BoxAABB<int>(point(-1, -1)));
+		TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const BoxAABB<PointPrecision> &a_bounds = BoxAABB<PointPrecision>(Point<PointPrecision>(), Size<PointPrecision>(1.0f, 1.0f)));
+		TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const BoxAABB<int> &a_bounds);
+
+		void boundsNoSignal(const BoxAABB<int> &a_bounds);
 
 		template <class Archive>
-		void serialize(Archive & archive, std::uint32_t const /*version*/){
-			archive(CEREAL_NVP(handleRegion), CEREAL_NVP(handlePercent),
-				CEREAL_NVP(resizeToParent),
-				cereal::make_nvp("flipX", flipTextureX),
-				cereal::make_nvp("flipY", flipTextureY),
-				CEREAL_NVP(textureDefinition),
-				cereal::make_nvp("name", debugName));
+		void serialize(Archive & archive, std::uint32_t const version){
+			if (version == 0) {
+				BoxAABB<int> oldIntegralBounds;
+				bool oldFlipValues;
+				archive(
+					cereal::make_nvp("handleRegion", oldIntegralBounds),
+					cereal::make_nvp("flipX", oldFlipValues),
+					cereal::make_nvp("flipY", oldFlipValues),
+					CEREAL_NVP(textureDefinition),
+					CEREAL_NVP(handlePercent)
+				);
+			}else{
+				archive(
+					cereal::make_nvp("texture", textureDefinition),
+					cereal::make_nvp("handle", handlePercent),
+					cereal::make_nvp("slice", slicePercent),
+					cereal::make_nvp("name", debugName)
+				);
+			}
 		}
 
 		template <class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<TextureHandle> &construct, std::uint32_t const /*version*/){
+		static void load_and_construct(Archive & archive, cereal::construct<TextureHandle> &construct, std::uint32_t const version){
 			std::shared_ptr<TextureDefinition> textureDefinition;
-			archive(CEREAL_NVP(textureDefinition));
-			construct(textureDefinition);
-			archive(
-				cereal::make_nvp("handleRegion", construct->handleRegion),
-				cereal::make_nvp("handlePercent", construct->handlePercent),
-				cereal::make_nvp("resizeToParent", construct->resizeToParent),
-				cereal::make_nvp("flipX", construct->flipTextureX),
-				cereal::make_nvp("flipY", construct->flipTextureY),
-				cereal::make_nvp("name", construct->debugName)
-			);
-			construct->observeTextureReload();
+			if(version == 0){
+				archive(cereal::make_nvp("textureDefinition", textureDefinition));
+				construct(textureDefinition);
+				BoxAABB<int> oldIntegralBounds;
+				bool oldFlipValues;
+				archive(
+					cereal::make_nvp("handleRegion", oldIntegralBounds),
+					cereal::make_nvp("flipX", oldFlipValues),
+					cereal::make_nvp("flipY", oldFlipValues),
+					cereal::make_nvp("handlePercent", construct->handlePercent),
+					cereal::make_nvp("name", construct->debugName)
+				);
+			}else{
+				archive(cereal::make_nvp("texture", textureDefinition));
+				construct(textureDefinition);
+				archive(
+					cereal::make_nvp("handle", construct->handlePercent),
+					cereal::make_nvp("slice", construct->slicePercent),
+					cereal::make_nvp("name", construct->debugName)
+				);
+			}
 		}
-
-		void updatePercentBounds();
-		void updatePercentBoundsNoSignal();
-		void updateIntegralBounds();
-		void observeTextureReload();
-
-		BoxAABB<int> handleRegion;
-		BoxAABB<PointPrecision> handlePercent;
-
-		bool flipTextureX;
-		bool flipTextureY;
-
-		bool resizeToParent;
-
-		std::string debugName;
 
 		std::shared_ptr<TextureDefinition> textureDefinition;
 
-		TextureDefinition::SignalType::SharedType onParentReload;
+		BoxAABB<PointPrecision> slicePercent;
+		BoxAABB<PointPrecision> handlePercent;
+
+		std::string debugName;
 	};
 }
 

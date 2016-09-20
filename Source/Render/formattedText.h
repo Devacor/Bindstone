@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <memory>
-#include "Utility/package.h"
+#include "Utility/generalUtility.h"
 #include "SDL_ttf.h"
 #include "Render/points.h"
 

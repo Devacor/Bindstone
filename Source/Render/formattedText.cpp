@@ -1,5 +1,5 @@
 #include "formattedText.h"
-#include "Render/Scene/package.h"
+#include "Render/Scene/sprite.h"
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
 #include "Utility/log.h"

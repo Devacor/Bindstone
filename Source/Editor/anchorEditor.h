@@ -1,9 +1,7 @@
 #ifndef __MV_EDITOR_ANCHOR_EDITOR_H__
 #define __MV_EDITOR_ANCHOR_EDITOR_H__
 
-#include <memory>
 #include "componentPanels.h"
-#include "editorDefines.h"
 #include "editorFactories.h"
 #include "Utility/generalUtility.h"
 

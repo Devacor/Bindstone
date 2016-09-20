@@ -8,14 +8,16 @@
 #include <vector>
 #include <memory>
 
-#include "cereal/cereal.hpp"
-#include "cereal/access.hpp"
+#include "cereal\cereal.hpp"
+#include "cereal\access.hpp"
 
-#include "Render/render.h"
-#include "Render/textures.h"
-#include "Render/points.h"
-#include "Render/boxaabb.h"
-#include "Utility/package.h"
+#include "Render\render.h"
+#include "Render\textures.h"
+#include "Render\points.h"
+#include "Render\boxaabb.h"
+#include "Utility\generalUtility.h"
+#include "Utility\signal.hpp"
+#include "Utility\task.hpp"
 
 #define ComponentDerivedAccessors(ComponentType) \
 MV::Scene::SafeComponent<ComponentType> clone(const std::shared_ptr<MV::Scene::Node> &a_parent) { \

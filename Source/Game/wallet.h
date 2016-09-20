@@ -1,9 +1,10 @@
 #ifndef __MV_WALLET_H__
 #define __MV_WALLET_H__
 
-#include "Utility/package.h"
+#include "Utility\signal.hpp"
+#include "cereal\cereal.hpp"
 #include <string>
-#include "cereal/cereal.hpp"
+#include <array>
 
 namespace chaiscript { class ChaiScript; }
 

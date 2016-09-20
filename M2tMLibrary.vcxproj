@@ -125,10 +125,11 @@
       <GenerateDebugInformation>DebugFastLink</GenerateDebugInformation>
       <AdditionalDependencies>opengl32.lib;glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;libboost_filesystem-vc140-mt-1_58.lib;libboost_system-vc140-mt-1_58.lib;libpq.lib;ssleay32.lib;libeay32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
-      <Profile>true</Profile>
+      <Profile>false</Profile>
       <AdditionalLibraryDirectories>
       </AdditionalLibraryDirectories>
-      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
+      <LinkTimeCodeGeneration>UseFastLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <OptimizeReferences>true</OptimizeReferences>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -173,15 +174,16 @@
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>false</EnableCOMDATFolding>
-      <OptimizeReferences>false</OptimizeReferences>
+      <OptimizeReferences>true</OptimizeReferences>
       <AdditionalDependencies>opengl32.lib;glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;libboost_filesystem-vc140-mt-1_58.lib;libboost_system-vc140-mt-1_58.lib;libpq.lib;ssleay32.lib;libeay32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <SubSystem>Console</SubSystem>
       <AdditionalLibraryDirectories>
       </AdditionalLibraryDirectories>
-      <Profile>true</Profile>
+      <Profile>false</Profile>
       <LinkStatus>
       </LinkStatus>
       <PreventDllBinding>true</PreventDllBinding>
+      <LinkTimeCodeGeneration>UseFastLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -290,17 +292,14 @@
     <ClCompile Include="..\external\spine\TransformConstraintData.c" />
     <ClCompile Include="..\external\spine\VertexAttachment.c" />
     <ClCompile Include="Source\ArtificialIntelligence\pathfinding.cpp" />
-    <ClCompile Include="Source\ClickerGame\clickerGame.cpp" />
     <ClCompile Include="Source\DiggerGame\diggerGame.cpp" />
     <ClCompile Include="Source\Editor\editor.cpp" />
-    <ClCompile Include="Source\Animation\frameSwapper.cpp" />
     <ClCompile Include="Source\Audio\sound.cpp" />
     <ClCompile Include="Source\Editor\editorControls.cpp" />
     <ClCompile Include="Source\Editor\editorFactories.cpp" />
     <ClCompile Include="Source\Editor\componentPanels.cpp" />
     <ClCompile Include="Source\Editor\editorSceneGraphPanel.cpp" />
     <ClCompile Include="Source\Editor\editComponents.cpp" />
-    <ClCompile Include="Source\exampleCode.cpp" />
     <ClCompile Include="Source\Game\building.cpp" />
     <ClCompile Include="Source\Game\creature.cpp" />
     <ClCompile Include="Source\Game\game.cpp" />
@@ -345,7 +344,6 @@
     <ClCompile Include="Source\Render\texturePacker.cpp" />
     <ClCompile Include="Source\Render\textures.cpp" />
     <ClCompile Include="Source\Utility\chaiscriptStdLib.cpp" />
-    <ClCompile Include="Source\Utility\expression.cpp" />
     <ClCompile Include="Source\Utility\generalUtility.cpp" />
     <ClCompile Include="Source\Utility\log.cpp" />
     <ClCompile Include="Source\Utility\sha512.cpp" />
@@ -488,7 +486,6 @@
     <ClInclude Include="..\external\spine\TransformConstraintData.h" />
     <ClInclude Include="..\external\spine\VertexAttachment.h" />
     <ClInclude Include="Source\ArtificialIntelligence\pathfinding.h" />
-    <ClInclude Include="Source\ClickerGame\clickerGame.h" />
     <ClInclude Include="Source\DiggerGame\diggerGame.h" />
     <ClInclude Include="Source\Editor\anchorEditor.h" />
     <ClInclude Include="Source\Editor\editor.h" />
@@ -526,11 +523,8 @@
     <ClInclude Include="Source\Render\Scene\grid.h" />
     <ClInclude Include="Source\Render\Scene\drawable.h" />
     <ClInclude Include="Source\Render\Scene\button.h" />
-    <ClInclude Include="Source\Animation\frameSwapper.h" />
-    <ClInclude Include="Source\Animation\package.h" />
     <ClInclude Include="Source\Audio\package.h" />
     <ClInclude Include="Source\Audio\sound.h" />
-    <ClInclude Include="Source\exampleCode.h" />
     <ClInclude Include="Source\Game\game.h" />
     <ClInclude Include="Source\Interface\mouse.h" />
     <ClInclude Include="Source\Interface\package.h" />
@@ -556,7 +550,6 @@
     <ClInclude Include="Source\Render\textures.h" />
     <ClInclude Include="Source\Utility\cerealUtility.h" />
     <ClInclude Include="Source\Utility\chaiscriptStdLib.h" />
-    <ClInclude Include="Source\Utility\expression.h" />
     <ClInclude Include="Source\Utility\generalUtility.h" />
     <ClInclude Include="Source\Utility\log.h" />
     <ClInclude Include="Source\Utility\optionalCalls.hpp" />
@@ -569,6 +562,7 @@
     <ClInclude Include="Source\Utility\task.hpp" />
     <ClInclude Include="Source\Utility\threadPool.h" />
     <ClInclude Include="Source\Utility\tinyutf8.h" />
+    <ClInclude Include="Source\Utility\tupleHelpers.hpp" />
     <ClInclude Include="Source\Utility\visitor.hpp" />
   </ItemGroup>
   <ItemGroup>

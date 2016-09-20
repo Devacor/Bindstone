@@ -2,7 +2,6 @@
 #define _MV_GAME_EDITOR_H_
 
 #include "Game/game.h"
-#include "ClickerGame/clickerGame.h"
 #include "DiggerGame/diggerGame.h"
 #include "editor/editor.h"
 #include "Game/managers.h"

@@ -1,6 +1,6 @@
 #include "wallet.h"
 #include "chaiscript/chaiscript.hpp"
-
+#include "Utility/require.hpp"
 
 Wallet::Wallet() :
 	onChange(onChangeSignal),

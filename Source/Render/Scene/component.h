@@ -67,7 +67,7 @@ namespace MV {
 
 	namespace Scene {
 		void appendQuadVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset);
-
+		void appendNineSliceVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset);
 
 		class Node;
 		class Component;

@@ -2,20 +2,41 @@
 #define __MV_TUPLE_HELPERS_HPP__
 
 #include <tuple>
+#include <string>
 
 namespace MV {
+	namespace Detail {
+		template<class T>
+		std::reference_wrapper<T> prepareForChaiscript(T& a_value) {
+			return{ a_value };
+		}
+		template<class T>
+		T* prepareForChaiscript(T* a_value) {
+			return a_value;
+		}
+
+		//may be able to convert these to string_view when chaiscript gets support and it becomes standard.
+		inline std::string prepareForChaiscript(char* a_cstring) {
+			return{ a_cstring };
+		}
+
+		inline std::string prepareForChaiscript(const char* a_cstring) {
+			return{ a_cstring };
+		}
+	}
+
 	template<class T, class Tuple, std::size_t N>
 	struct TupleAggregator {
 		static void addToVector(const Tuple& t, std::vector<T> &a_aggregate) {
 			TupleAggregator<T, Tuple, N - 1>::addToVector(t, a_aggregate);
-			a_aggregate.emplace_back(std::ref(std::get<N - 1>(t)));
+			a_aggregate.emplace_back(Detail::prepareForChaiscript(std::get<N - 1>(t)));
 		}
 	};
 
 	template<class T, class Tuple>
 	struct TupleAggregator<T, Tuple, 1> {
 		static void addToVector(const Tuple& t, std::vector<T> &a_aggregate) {
-			a_aggregate.emplace_back(std::ref(std::get<0>(t)));
+			a_aggregate.emplace_back(Detail::prepareForChaiscript(std::get<0>(t)));
 		}
 	};
 
@@ -27,6 +48,7 @@ namespace MV {
 		TupleAggregator<T, decltype(t), sizeof...(Args)>::addToVector(t, result);
 		return result;
 	}
+
 }
 
 #endif

@@ -323,7 +323,7 @@ namespace MV {
 		void callScript(Arg &&... a_parameters) {
 			if (scriptEnginePointer && !scriptString.empty()) {
 				std::map<std::string, chaiscript::Boxed_Value> localVariables;
-				auto tupleReference = std::make_tuple(std::forward<Arg>(a_parameters)...);
+				auto tupleReference = std::forward_as_tuple(std::forward<Arg>(a_parameters)...);
 				auto parameterValues = toVector<chaiscript::Boxed_Value>(tupleReference);
 				for (size_t i = 0; i < parameterValues.size(); ++i) {
 					localVariables.emplace(
@@ -334,6 +334,8 @@ namespace MV {
 				scriptEnginePointer->set_locals(localVariables);
 				SCOPE_EXIT{ scriptEnginePointer->set_locals(resetLocals); };
 				scriptEnginePointer->eval(scriptString);
+			} else if (!scriptString.empty()) {
+				std::cerr << "Failed to run script in signal, you need to supply a chaiscript engine handle!\n";
 			}
 		}
 

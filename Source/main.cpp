@@ -4,7 +4,20 @@
 #include "ArtificialIntelligence/pathfinding.h"
 //#include "vld.h"
 
-#include <memory>
+struct TestObject {
+	TestObject() { std::cout << "\nConstructor\n"; }
+	~TestObject() { std::cout << "\nDestructor\n"; }
+	TestObject(TestObject&);
+	TestObject(TestObject&&) { std::cout << "\nMove\n"; }
+	TestObject& operator=(const TestObject&) { std::cout << "\nAssign\n"; }
+
+	int payload = 0;
+};
+
+TestObject::TestObject(TestObject&) {
+	std::cout << "\nCopy\n"; 
+	payload++;
+}
 
 bool isDone() {
 	SDL_Event event;
@@ -17,6 +30,21 @@ bool isDone() {
 }
 
 int main(int, char *[]) {
+	chaiscript::ChaiScript chaiScript(MV::create_chaiscript_stdlib());
+
+	std::string content = "Hello World";
+	std::string* contentPtr = &content;
+	auto scriptString = "puts('['); puts(arg_0); puts(']'); puts('['); puts(arg_1); puts(']'); puts('['); puts(arg_2); puts(']');";
+
+	MV::Signal<void(const std::string&, std::string*, const char *)> callbackTestSignal;
+	MV::SignalRegister<void(const std::string&, std::string*, const char*)> callbackTest(callbackTestSignal);
+	callbackTest.script(scriptString);
+	callbackTest.scriptEngine(&chaiScript);
+
+	callbackTestSignal(content, contentPtr, "TEST CHAR");
+
+	std::cout << std::endl;
+
 	// 	pqxx::connection c("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=5432 dbname=bindstone user=m2tm password=Tinker123");
 	// 	pqxx::work txn(c);
 	// 

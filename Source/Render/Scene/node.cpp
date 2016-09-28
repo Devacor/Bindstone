@@ -13,15 +13,6 @@ namespace MV {
 		int64_t Node::recalculateChildBoundsCalls = 0;
 		int64_t Node::recalculateMatrixCalls = 0;
 
-		void appendQuadVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset) {
-			std::vector<GLuint> quadIndices{
-				a_pointOffset, a_pointOffset + 1,
-				a_pointOffset + 2, a_pointOffset + 2,
-				a_pointOffset + 3, a_pointOffset
-			};
-			a_indices.insert(a_indices.end(), quadIndices.begin(), quadIndices.end());
-		}
-
 		Node::ReSort::ReSort(const std::shared_ptr<Node> &a_self):
 			self(a_self) {
 

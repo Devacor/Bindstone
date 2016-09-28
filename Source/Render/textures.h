@@ -22,6 +22,7 @@ namespace MV {
 
 	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture);
 
+	//Requires a 4 point vector. IE: Shrink to 4 before calling this if you use 9-slicing etc.
 	bool clearTexturePoints(std::vector<DrawPoint> &a_points);
 
 	//These methods are all destructive to the original surface.  Do not rely on SDL_Surface being viable after calling.
@@ -51,6 +52,8 @@ namespace MV {
 		virtual ~TextureDefinition();
 		std::shared_ptr<TextureHandle> makeHandle();
 		std::shared_ptr<TextureHandle> makeHandle(const BoxAABB<int> &a_bounds);
+		std::shared_ptr<TextureHandle> makeHandle(const BoxAABB<PointPrecision> &a_bounds);
+		std::shared_ptr<TextureHandle> makeRawHandle(const BoxAABB<PointPrecision> &a_bounds);
 
 		GLuint textureId() const;
 		std::string name() const;
@@ -88,8 +91,16 @@ namespace MV {
 			a_script.add(chaiscript::fun(static_cast<Size<int>(TextureDefinition::*)()>(&TextureDefinition::size)), "size");
 			a_script.add(chaiscript::fun(static_cast<Size<int>(TextureDefinition::*)()>(&TextureDefinition::contentSize)), "contentSize");
 
+			a_script.add(chaiscript::fun(static_cast<Scale(TextureDefinition::*)() const>(&TextureDefinition::scale)), "scale");
+			a_script.add(chaiscript::fun(static_cast<void(TextureDefinition::*)(const Scale &)>(&TextureDefinition::scale)), "scale");
+
 			a_script.add(chaiscript::fun(static_cast<void(TextureDefinition::*)()>(&TextureDefinition::unload)), "unload");
 			a_script.add(chaiscript::fun(static_cast<void(TextureDefinition::*)(TextureHandle*)>(&TextureDefinition::unload)), "unload");
+
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureDefinition::*)()>(&TextureDefinition::makeHandle)), "makeHandle");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureDefinition::*)(const BoxAABB<int> &)>(&TextureDefinition::makeHandle)), "makeHandle");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureDefinition::*)(const BoxAABB<PointPrecision> &)>(&TextureDefinition::makeHandle)), "makeHandle");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureDefinition::*)(const BoxAABB<PointPrecision> &)>(&TextureDefinition::makeRawHandle)), "makeRawHandle");
 
 			return a_script;
 		}
@@ -283,17 +294,22 @@ namespace MV {
 	class TextureHandle : public std::enable_shared_from_this<TextureHandle> {
 		friend cereal::access;
 		friend TextureDefinition;
-		Signal<void(std::shared_ptr<TextureHandle>)> sizeChanges;
+		Signal<void(std::shared_ptr<TextureHandle>)> sizeChangeSignal;
 	public:
 		virtual ~TextureHandle();
 		typedef Reciever<void (std::shared_ptr<TextureHandle>)> SignalType;
 
+		//0 to texturePixels
 		std::shared_ptr<TextureHandle> bounds(const BoxAABB<int> &a_bounds);
+		//in texturePixels
 		BoxAABB<int> bounds() const;
 
+		//0.0 to 1.0 (of the texture's contentSize)
 		std::shared_ptr<TextureHandle> bounds(const BoxAABB<PointPrecision> &a_bounds);
 
+		//0.0 to 1.0 of the whole texture... OpenGL coordinates.
 		std::shared_ptr<TextureHandle> rawPercent(const BoxAABB<PointPrecision> &a_bounds);
+		//OpenGL coordinates.
 		BoxAABB<PointPrecision> rawPercent() const;
 
 		//logical size == bounds.size() * texture scale
@@ -301,11 +317,18 @@ namespace MV {
 		//logical slice == percentSlice * logicalSize
 		BoxAABB<PointPrecision> logicalSlice() const;
 
+		//relative to the size of the int bounds
+		//a texture handle at position(128, 128), size(64, 64) would expect a sliceBounds of range x: 0-64, y: 0-64
+		std::shared_ptr<TextureHandle> slice(const BoxAABB<int> &a_sliceBounds);
 		//percent of bounds, IE: 0-1 of bounds, not 0-1 of texture.
 		std::shared_ptr<TextureHandle> slice(const BoxAABB<PointPrecision> &a_sliceBounds);
 		BoxAABB<PointPrecision> slice() const;
+
 		std::shared_ptr<TextureHandle> clearSlice();
 		bool hasSlice() const;
+
+		//RawSlice == percent of texture from 0-1 of texture size. Used for whole texture OpenGL
+		BoxAABB<PointPrecision> rawSlice() const;
 
 		std::shared_ptr<TextureHandle> flipX(bool a_flip);
 		bool flipX() const;
@@ -314,10 +337,11 @@ namespace MV {
 		bool flipY() const;
 
 		bool apply(std::vector<DrawPoint> &a_points) const;
+		bool applySlicePosition(std::vector<DrawPoint> &a_points) const;
 
 		std::shared_ptr<TextureDefinition> texture() const;
 
-		SignalRegister<void(std::shared_ptr<TextureHandle>)> sizeObserver;
+		SignalRegister<void(std::shared_ptr<TextureHandle>)> sizeChange;
 
 		std::string name() const;
 
@@ -331,12 +355,28 @@ namespace MV {
 			a_script.add(chaiscript::fun(&TextureHandle::texture), "texture");
 			a_script.add(chaiscript::fun(&TextureHandle::clone), "clone");
 
+			a_script.add(chaiscript::fun(&TextureHandle::clearSlice), "clearSlice");
+			a_script.add(chaiscript::fun(&TextureHandle::hasSlice), "hasSlice");
+
+			a_script.add(chaiscript::fun(&TextureHandle::hasSlice), "logicalSize");
+			a_script.add(chaiscript::fun(&TextureHandle::hasSlice), "logicalSlice");
+
+			a_script.add(chaiscript::fun(&TextureHandle::sizeChange), "sizeChange");
+			
 			a_script.add(chaiscript::fun(static_cast<BoxAABB<PointPrecision>(TextureHandle::*)() const>(&TextureHandle::rawPercent)), "rawPercent");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<PointPrecision> &)>(&TextureHandle::rawPercent)), "rawPercent");
 
 			a_script.add(chaiscript::fun(static_cast<BoxAABB<int>(TextureHandle::*)() const>(&TextureHandle::bounds)), "bounds");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<int> &)>(&TextureHandle::bounds)), "bounds");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<PointPrecision> &)>(&TextureHandle::bounds)), "bounds");
 			
+			a_script.add(chaiscript::fun(static_cast<BoxAABB<PointPrecision>(TextureHandle::*)() const>(&TextureHandle::slice)), "slice");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<int> &)>(&TextureHandle::slice)), "slice");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<PointPrecision> &)>(&TextureHandle::slice)), "slice");
+
+			a_script.add(chaiscript::fun([](TextureHandle &a_self) { return a_self.rawPercent(); }), "rawPercent");
+			a_script.add(chaiscript::fun([](TextureHandle &a_self, const BoxAABB<PointPrecision> &a_rawPercent) { return a_self.rawPercent(a_rawPercent); }), "rawPercent");
+
 			a_script.add(chaiscript::fun(static_cast<bool(TextureHandle::*)() const>(&TextureHandle::flipX)), "flipX");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(bool)>(&TextureHandle::flipX)), "flipX");
 

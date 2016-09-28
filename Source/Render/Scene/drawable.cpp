@@ -75,7 +75,7 @@ namespace MV {
 		std::shared_ptr<Drawable> Drawable::texture(std::shared_ptr<TextureHandle> a_texture) {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			if (ourTexture && textureSizeSignal) {
-				ourTexture->sizeObserver.disconnect(textureSizeSignal);
+				ourTexture->sizeChange.disconnect(textureSizeSignal);
 			}
 			textureSizeSignal.reset();
 			ourTexture = a_texture;
@@ -83,7 +83,7 @@ namespace MV {
 				textureSizeSignal = TextureHandle::SignalType::make([&](std::shared_ptr<MV::TextureHandle> a_handle) {
 					updateTextureCoordinates();
 				});
-				ourTexture->sizeObserver.connect(textureSizeSignal);
+				ourTexture->sizeChange.connect(textureSizeSignal);
 			}
 			updateTextureCoordinates();
 			return std::static_pointer_cast<Drawable>(shared_from_this());
@@ -92,7 +92,7 @@ namespace MV {
 		std::shared_ptr<Drawable> Drawable::clearTexture() {
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			if (ourTexture && textureSizeSignal) {
-				ourTexture->sizeObserver.disconnect(textureSizeSignal);
+				ourTexture->sizeChange.disconnect(textureSizeSignal);
 			}
 			ourTexture = nullptr;
 			updateTextureCoordinates();
@@ -237,7 +237,7 @@ namespace MV {
 				textureSizeSignal = TextureHandle::SignalType::make([&](std::shared_ptr<MV::TextureHandle> a_handle) {
 					updateTextureCoordinates();
 				});
-				ourTexture->sizeObserver.connect(textureSizeSignal);
+				ourTexture->sizeChange.connect(textureSizeSignal);
 			}
 		}
 

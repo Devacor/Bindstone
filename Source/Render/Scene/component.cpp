@@ -8,6 +8,57 @@ CEREAL_REGISTER_TYPE(MV::Scene::Component);
 
 namespace MV {
 	namespace Scene {
+		/*Vertex Indices*\
+		     0     3
+
+		     1     2
+		\*Vertex Indices*/
+		void appendQuadVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset) {
+			std::vector<GLuint> quadIndices{
+				a_pointOffset, a_pointOffset + 1, a_pointOffset + 2,
+				a_pointOffset + 2, a_pointOffset + 3, a_pointOffset
+			};
+			a_indices.insert(a_indices.end(), quadIndices.begin(), quadIndices.end());
+		}
+
+		/*Vertex Indices*\
+			0 15  14  3
+			8  4   7 13
+			9  5   6 12
+			1 10  11  2
+		\*Vertex Indices*/
+		void appendNineSliceVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset) {
+			std::vector<GLuint> quadIndices{
+				a_pointOffset, a_pointOffset + 8, a_pointOffset + 4,
+				a_pointOffset + 4, a_pointOffset + 15, a_pointOffset,
+
+				a_pointOffset + 15, a_pointOffset + 4, a_pointOffset + 7,
+				a_pointOffset + 7, a_pointOffset + 14, a_pointOffset + 15,
+
+				a_pointOffset + 14, a_pointOffset + 7, a_pointOffset + 13,
+				a_pointOffset + 13, a_pointOffset + 3, a_pointOffset + 14,
+
+				a_pointOffset + 8, a_pointOffset + 9, a_pointOffset + 5,
+				a_pointOffset + 5, a_pointOffset + 4, a_pointOffset + 8,
+
+				a_pointOffset + 4, a_pointOffset + 5, a_pointOffset + 6,
+				a_pointOffset + 6, a_pointOffset + 7, a_pointOffset + 4,
+
+				a_pointOffset + 7, a_pointOffset + 6, a_pointOffset + 12,
+				a_pointOffset + 12, a_pointOffset + 13, a_pointOffset + 7,
+
+				a_pointOffset + 9, a_pointOffset + 1, a_pointOffset + 10,
+				a_pointOffset + 10, a_pointOffset + 5, a_pointOffset + 9,
+
+				a_pointOffset + 5, a_pointOffset + 10, a_pointOffset + 11,
+				a_pointOffset + 11, a_pointOffset + 6, a_pointOffset + 5,
+
+				a_pointOffset + 6, a_pointOffset + 11, a_pointOffset + 2,
+				a_pointOffset + 2, a_pointOffset + 12, a_pointOffset + 6
+			};
+			a_indices.insert(a_indices.end(), quadIndices.begin(), quadIndices.end());
+		}
+
 		void Component::notifyParentOfBoundsChange() {
 			if (ownerIsAlive()) {
 				owner()->markBoundsDirty();

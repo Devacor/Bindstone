@@ -76,6 +76,10 @@ namespace MV {
 				
 				return a_script;
 			}
+
+			bool hasSlice(){
+				return ourTexture && ourTexture->hasSlice();
+			}
 		protected:
 			Sprite(const std::weak_ptr<Node> &a_owner) :
 				Drawable(a_owner) {
@@ -104,20 +108,19 @@ namespace MV {
 				return cloneHelper(a_parent->attach<Sprite>().self());
 			}
 
+			void updateSlice();
+
+			void clearSlice();
+
+			virtual void refreshBounds() override;
 		private:
-			virtual void clearTextureCoordinates() {
+			virtual void clearTextureCoordinates() override {
+				clearSlice();
 				clearTexturePoints(points);
 				notifyParentOfComponentChange();
 			}
 
-			virtual void updateTextureCoordinates() {
-				if (ourTexture != nullptr) {
-					ourTexture->apply(points);
-					notifyParentOfComponentChange();
-				} else {
-					clearTextureCoordinates();
-				}
-			}
+			virtual void updateTextureCoordinates() override;
 		};
 
 		template<typename PointAssign>
@@ -128,6 +131,7 @@ namespace MV {
 			points[1] = a_BottomLeft;
 			points[2] = a_BottomRight;
 			points[3] = a_TopRight;
+			
 			refreshBounds();
 			return self;
 		}

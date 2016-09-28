@@ -1551,6 +1551,13 @@ SelectedButtonEditorPanel::SelectedButtonEditorPanel(EditorControls &a_panel, st
 			controls->elementToEdit->disabledNode(controls->elementToEdit->owner()->get(a_text->text(), false));
 		});
 	
+	makeLabel(grid, *panel.resources().textLibrary, "TextLabel", buttonSize, "Text");
+	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Text", buttonSize)->
+		text(controls->elementToEdit->text())->
+		onEnter.connect("!", [&](std::shared_ptr<MV::Scene::Text> a_text) {
+			controls->elementToEdit->text(a_text->text());
+		});
+
 	std::vector<MV::Scene::Button::BoundsType> boundsTypes{ MV::Scene::Button::BoundsType::LOCAL, MV::Scene::Button::BoundsType::NODE, MV::Scene::Button::BoundsType::NODE_CHILDREN, MV::Scene::Button::BoundsType::CHILDREN, MV::Scene::Button::BoundsType::NONE };
 	std::vector<std::string> boundsTypeStrings{ "Local", "Node", "Children", "Node Children", "None" };
 	auto boundsButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "WrapMode", buttonSize, boundsTypeStrings[MV::indexOf(boundsTypes, controls->elementToEdit->clickDetectionType())]);

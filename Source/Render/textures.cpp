@@ -252,6 +252,25 @@ namespace MV {
 		return handle;
 	}
 
+	std::shared_ptr<TextureHandle> TextureDefinition::makeHandle(const BoxAABB<PointPrecision> &a_bounds) {
+		if (handles.empty()) {
+			load();
+		}
+		auto handle = std::shared_ptr<TextureHandle>(new TextureHandle(shared_from_this(), a_bounds));
+		handles.push_back(handle);
+		handle->bounds(a_bounds);
+		return handle;
+	}
+
+	std::shared_ptr<TextureHandle> TextureDefinition::makeRawHandle(const BoxAABB<PointPrecision> &a_bounds) {
+		if (handles.empty()) {
+			load();
+		}
+		auto handle = std::shared_ptr<TextureHandle>(new TextureHandle(shared_from_this(), a_bounds));
+		handles.push_back(handle);
+		return handle;
+	}
+
 	TextureDefinition::~TextureDefinition() {
 		handles.clear();
 		cleanupOpenglTexture();
@@ -382,12 +401,16 @@ namespace MV {
 
 	std::shared_ptr<TextureHandle> TextureHandle::bounds(const BoxAABB<int> &a_bounds) {
 		boundsNoSignal(a_bounds);
-		return shared_from_this();
+		auto self = shared_from_this();
+		sizeChangeSignal(self);
+		return self;
 	}
 
 	std::shared_ptr<TextureHandle> TextureHandle::bounds(const BoxAABB<PointPrecision> &a_bounds) {
 		boundsNoSignal(cast<int>(a_bounds * toScale(textureDefinition->contentSize())));
-		return shared_from_this();
+		auto self = shared_from_this();
+		sizeChangeSignal(self);
+		return self;
 	}
 
 	BoxAABB<int> TextureHandle::bounds() const {
@@ -396,7 +419,9 @@ namespace MV {
 
 	std::shared_ptr<TextureHandle> TextureHandle::rawPercent(const BoxAABB<PointPrecision> &a_bounds) {
 		handlePercent = a_bounds;
-		return shared_from_this();
+		auto self = shared_from_this();
+		sizeChangeSignal(self);
+		return self;
 	}
 
 	BoxAABB<PointPrecision> TextureHandle::rawPercent() const {
@@ -408,14 +433,14 @@ namespace MV {
 	}
 
 	TextureHandle::TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const BoxAABB<PointPrecision> &a_bounds) :
-		sizeObserver(sizeChanges),
+		sizeChange(sizeChangeSignal),
 		textureDefinition(a_texture),
 		handlePercent(a_bounds),
 		debugName(a_texture->name()) {
 	}
 
 	TextureHandle::TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const BoxAABB<int> &a_bounds) :
-		sizeObserver(sizeChanges),
+		sizeChange(sizeChangeSignal),
 		textureDefinition(a_texture),
 		debugName(a_texture->name()) {
 
@@ -436,17 +461,22 @@ namespace MV {
 	}
 
 	std::shared_ptr<TextureHandle> TextureHandle::flipX( bool a_flip ) {
+		auto self = shared_from_this();
 		if (flipX() != a_flip) {
 			std::swap(handlePercent.minPoint.x, handlePercent.maxPoint.x);
+			sizeChangeSignal(self);
 		}
-		return shared_from_this();
+		return self;
 	}
 
 	std::shared_ptr<TextureHandle> TextureHandle::flipY(bool a_flip) {
+		auto self = shared_from_this();
 		if(flipY() != a_flip){
 			std::swap(handlePercent.minPoint.y, handlePercent.maxPoint.y);
+			sizeChangeSignal(self);
 		}
-		return shared_from_this();
+		sizeChangeSignal(self);
+		return self;
 	}
 
 	bool TextureHandle::flipX() const {
@@ -462,12 +492,76 @@ namespace MV {
 		return debugName;
 	}
 
+	/*Vertex Indices*\
+		0 15  14  3
+		8  4   7 13
+		9  5   6 12
+		1 10  11  2
+	\*Vertex Indices*/
 	bool TextureHandle::apply(std::vector<DrawPoint> &a_points) const {
-		if(a_points.size() == 4){
+		if(a_points.size() == 4 || a_points.size() == 16){
 			a_points[0].textureX = handlePercent.minPoint.x; a_points[0].textureY = handlePercent.minPoint.y;
 			a_points[1].textureX = handlePercent.minPoint.x; a_points[1].textureY = handlePercent.maxPoint.y;
 			a_points[2].textureX = handlePercent.maxPoint.x; a_points[2].textureY = handlePercent.maxPoint.y;
 			a_points[3].textureX = handlePercent.maxPoint.x; a_points[3].textureY = handlePercent.minPoint.y;
+		}
+		if(a_points.size() == 16){
+			auto finalSlice = rawSlice();
+			a_points[4].textureX = finalSlice.minPoint.x; a_points[4].textureY = finalSlice.minPoint.y;
+			a_points[5].textureX = finalSlice.minPoint.x; a_points[5].textureY = finalSlice.maxPoint.y;
+			a_points[6].textureX = finalSlice.maxPoint.x; a_points[6].textureY = finalSlice.maxPoint.y;
+			a_points[7].textureX = finalSlice.maxPoint.x; a_points[7].textureY = finalSlice.minPoint.y;
+
+			a_points[8].textureX = handlePercent.minPoint.x; a_points[8].textureY = finalSlice.minPoint.y;
+			a_points[9].textureX = handlePercent.minPoint.x; a_points[9].textureY = finalSlice.maxPoint.y;
+
+			a_points[10].textureX = finalSlice.minPoint.x; a_points[10].textureY = handlePercent.maxPoint.y;
+			a_points[11].textureX = finalSlice.maxPoint.x; a_points[11].textureY = handlePercent.maxPoint.y;
+
+			a_points[12].textureX = handlePercent.maxPoint.x; a_points[12].textureY = finalSlice.maxPoint.y;
+			a_points[13].textureX = handlePercent.maxPoint.x; a_points[13].textureY = finalSlice.minPoint.y;
+
+			a_points[14].textureX = finalSlice.maxPoint.x; a_points[14].textureY = handlePercent.minPoint.y;
+			a_points[15].textureX = finalSlice.minPoint.x; a_points[15].textureY = handlePercent.minPoint.y;
+
+			applySlicePosition(a_points);
+		}
+		return a_points.size() == 4 || a_points.size() == 16;
+	}
+
+	/*Vertex Indices*\
+		0 15  14  3
+		8  4   7 13
+		9  5   6 12
+		1 10  11  2
+	\*Vertex Indices*/
+	bool TextureHandle::applySlicePosition(std::vector<DrawPoint> &a_points) const {
+		if(a_points.size() == 16){
+			auto parentBounds = BoxAABB<>(a_points[0].point(), a_points[2].point());
+			auto sliceBounds = logicalSlice();
+			auto widthPercent = parentBounds.width() / sliceBounds.width();
+			auto heightPercent = parentBounds.height() / sliceBounds.height();
+			sliceBounds *= Scale(std::min(widthPercent, 1.0f), std::min(heightPercent, 1.0f));
+			
+			sliceBounds.maxPoint = parentBounds.maxPoint - sliceBounds.maxPoint;
+			sliceBounds.minPoint = parentBounds.minPoint + sliceBounds.minPoint;
+
+			a_points[4] = sliceBounds.minPoint;
+			a_points[5] = point(sliceBounds.minPoint.x, sliceBounds.maxPoint.y);
+			a_points[6] = sliceBounds.maxPoint;
+			a_points[7] = point(sliceBounds.maxPoint.x, sliceBounds.minPoint.y);
+
+			a_points[8] = point(parentBounds.minPoint.x, sliceBounds.minPoint.y);
+			a_points[9] = point(parentBounds.minPoint.x, sliceBounds.maxPoint.y);
+
+			a_points[10] = point(sliceBounds.minPoint.x, parentBounds.maxPoint.y);
+			a_points[11] = point(sliceBounds.maxPoint.x, parentBounds.maxPoint.y);
+
+			a_points[12] = point(parentBounds.maxPoint.x, sliceBounds.maxPoint.y);
+			a_points[13] = point(parentBounds.maxPoint.x, sliceBounds.minPoint.y);
+
+			a_points[14] = point(sliceBounds.maxPoint.x, parentBounds.minPoint.y);
+			a_points[15] = point(sliceBounds.minPoint.x, parentBounds.minPoint.y);
 			return true;
 		}
 		return false;
@@ -492,10 +586,20 @@ namespace MV {
 		return slicePercent * toScale(logicalSize());
 	}
 
+	//relative to the size of the int bounds
+	//a texture handle at position(128, 128), size(64, 64) would expect a sliceBounds of range x: 0-64, y: 0-64
+	std::shared_ptr<TextureHandle> TextureHandle::slice(const BoxAABB<int> &a_sliceBounds) {
+		slicePercent = cast<PointPrecision>(a_sliceBounds) / toScale(bounds().size());
+		auto self = shared_from_this();
+		sizeChangeSignal(self);
+		return self;
+	}
 	//percent of bounds, IE: 0-1 of bounds, not 0-1 of texture.
 	std::shared_ptr<TextureHandle> TextureHandle::slice(const BoxAABB<PointPrecision> &a_sliceBounds){
 		slicePercent = a_sliceBounds;
-		return shared_from_this();
+		auto self = shared_from_this();
+		sizeChangeSignal(self);
+		return self;
 	}
 	BoxAABB<PointPrecision> TextureHandle::slice() const{
 		return slicePercent;
@@ -506,6 +610,13 @@ namespace MV {
 	}
 	bool TextureHandle::hasSlice() const {
 		return !slicePercent.empty();
+	}
+
+	MV::BoxAABB<MV::PointPrecision> TextureHandle::rawSlice() const {
+		auto finalSlice = slicePercent * toScale(handlePercent.size());
+		finalSlice.minPoint += handlePercent.minPoint;
+		finalSlice.maxPoint += handlePercent.maxPoint;
+		return finalSlice;
 	}
 
 	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture) {

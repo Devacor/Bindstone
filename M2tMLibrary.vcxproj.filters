@@ -583,9 +583,6 @@
     <ClInclude Include="Source\Utility\scopeGuard.hpp">
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Utility\signal.hpp">
-      <Filter>Source Files\Utility</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Interface\package.h">
       <Filter>Source Files\Interface</Filter>
     </ClInclude>
@@ -1181,6 +1178,9 @@
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
     <ClInclude Include="Source\Utility\tupleHelpers.hpp">
+      <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\signal.hpp">
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
   </ItemGroup>

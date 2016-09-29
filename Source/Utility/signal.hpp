@@ -109,6 +109,7 @@ namespace MV {
 				a_script.add(chaiscript::fun(&Receiver<T>::block), "block");
 				a_script.add(chaiscript::fun(&Receiver<T>::blocked), "blocked");
 				a_script.add(chaiscript::fun(&Receiver::unblock), "unblock");
+				a_script.add(chaiscript::fun(&Receiver::script), "script");
 			}
 			return a_script;
 		}
@@ -120,6 +121,12 @@ namespace MV {
 			return !scriptCallback.empty();
 		}
 
+		void scriptEngine(chaiscript::ChaiScript *a_scriptEnginePointer) {
+			scriptEnginePointer = a_scriptEnginePointer;
+		}
+		chaiscript::ChaiScript* scriptEngine() const {
+			return scriptEnginePointer;
+		}
 	private:
 		template <class Archive>
 		void save(Archive & archive, std::uint32_t const /*version*/) const {
@@ -161,7 +168,7 @@ namespace MV {
 				auto parameterValues = toVector<chaiscript::Boxed_Value>(tupleReference);
 				for (size_t i = 0; i < parameterValues.size(); ++i) {
 					localVariables.emplace(
-						(!orderedParameterNames || i < orderedParameterNames->size()) ? (*orderedParameterNames)[i] : "arg_" + std::to_string(i),
+						(orderedParameterNames && i < orderedParameterNames->size()) ? (*orderedParameterNames)[i] : "arg_" + std::to_string(i),
 						parameterValues[i]);
 				}
 				auto resetLocals = scriptEnginePointer->get_locals();
@@ -405,12 +412,18 @@ namespace MV {
 
 		Signal<T>& scriptEngine(chaiscript::ChaiScript *a_scriptEngine) {
 			scriptEnginePointer = a_scriptEngine;
+			for (auto&& observer : observers) {
+				if (!observer.expired()) {
+					observer.lock()->scriptEngine(a_scriptEngine);
+				}
+			}
 			return *this;
 		}
 		chaiscript::ChaiScript* scriptEngine() const{
 			return scriptEnginePointer;
 		}
 
+		//Supplied to the Receivers which are spawned.
 		Signal<T>& parameterNames(const std::vector<std::string> &a_orderedParameterNames){
 			orderedParameterNames = a_orderedParameterNames.empty() ? nullptr : std::make_shared<std::vector<std::string>>(a_orderedParameterNames);
 			return *this;
@@ -489,76 +502,67 @@ namespace MV {
 		typedef std::shared_ptr<Receiver<T>> SharedRecieverType;
 		typedef std::weak_ptr<Receiver<T>> WeakRecieverType;
 
-		SignalRegister(Signal<T> &a_slot) :
-			slot(a_slot){
+		SignalRegister(Signal<T> &a_signal) :
+			signal(a_signal){
 		}
 
 		SignalRegister(SignalRegister<T> &a_rhs) :
-			slot(a_rhs.slot) {
+			signal(a_rhs.signal) {
 		}
 
 		//no protection against duplicates
 		MV_NODISCARD std::shared_ptr<Receiver<T>> connect(std::function<T> a_callback){
-			return slot.connect(a_callback);
+			return signal.connect(a_callback);
+		}
+		MV_NODISCARD std::shared_ptr<Receiver<T>> connect(const std::string &a_callbackScript) {
+			return signal.connect(a_callbackScript);
 		}
 		//duplicate shared_ptr's will not be added
 		bool connect(std::shared_ptr<Receiver<T>> a_value){
-			return slot.connect(a_value);
+			return signal.connect(a_value);
 		}
 
 		void disconnect(std::shared_ptr<Receiver<T>> a_value){
-			slot.disconnect(a_value);
+			signal.disconnect(a_value);
 		}
 
 		std::shared_ptr<Receiver<T>> connect(const std::string &a_id, std::function<T> a_callback){
-			return slot.connect(a_id, a_callback);
+			return signal.connect(a_id, a_callback);
 		}
 		std::shared_ptr<Receiver<T>> connect(const std::string &a_id, const std::string &a_scriptCallback) {
-			return slot.connect(a_id, a_scriptCallback);
+			return signal.connect(a_id, a_scriptCallback);
 		}
 
 		bool connected(const std::string &a_id) {
-			return slot.connected(a_id);
+			return signal.connected(a_id);
 		}
 
 		void disconnect(const std::string &a_id){
-			slot.disconnect(a_id);
+			signal.disconnect(a_id);
 		}
 
 		std::shared_ptr<Receiver<T>> connection(const std::string &a_id){
-			return slot.connection(a_id);
+			return signal.connection(a_id);
 		}
 
 		//script support
 		void scriptEngine(chaiscript::ChaiScript *a_scriptEngine) {
-			slot.scriptEngine(a_scriptEngine);
+			signal.scriptEngine(a_scriptEngine);
 		}
 		chaiscript::ChaiScript* scriptEngine() const {
-			return slot.scriptEngine();
-		}
-
-		std::string script() const {
-			return slot.script();
-		}
-
-		void script(const std::string &a_script) {
-			slot.script(a_script);
-		}
-
-		void clearScript() {
-			slot.clearScript();
+			return signal.scriptEngine();
 		}
 
 		void parameterNames(const std::vector<std::string> &a_orderedParameterNames) {
-			slot.parameterNames(a_orderedParameterNames);
+			signal.parameterNames(a_orderedParameterNames);
 		}
 
 		std::vector<std::string> parameterNames() const {
-			return slot.parameterNames();
+			return signal.parameterNames();
 		}
 
 		bool hasParameterNames() const {
-			return slot.hasParameterNames();
+			return signal.hasParameterNames();
 		}
 
 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
@@ -579,7 +583,7 @@ namespace MV {
 		}
 
 	private:
-		Signal<T> &slot;
+		Signal<T> &signal;
 
 		static std::map<size_t, bool> scriptHookedUp;
 	};

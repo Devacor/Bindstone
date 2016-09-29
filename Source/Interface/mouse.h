@@ -39,7 +39,7 @@ namespace MV{
 		MouseState();
 
 		typedef void CallbackSignature(MouseState&);
-		typedef std::shared_ptr<Reciever<CallbackSignature>> SignalType;
+		typedef std::shared_ptr<Receiver<CallbackSignature>> SignalType;
 
 		void update();
 

@@ -219,12 +219,12 @@ private:
 	float stunDuration = 0.0f;
 	float rootDuration = 0.0f;
 
-	std::shared_ptr<MV::Reciever<void(std::shared_ptr<Creature>)>> arriveReceiver;
-	std::shared_ptr<MV::Reciever<void(std::shared_ptr<Creature>)>> blockedReceiver;
-	std::shared_ptr<MV::Reciever<void(std::shared_ptr<Creature>)>> stopReceiver;
+	std::shared_ptr<MV::Receiver<void(std::shared_ptr<Creature>)>> arriveReceiver;
+	std::shared_ptr<MV::Receiver<void(std::shared_ptr<Creature>)>> blockedReceiver;
+	std::shared_ptr<MV::Receiver<void(std::shared_ptr<Creature>)>> stopReceiver;
 
-	std::shared_ptr<MV::Reciever<void(std::shared_ptr<Creature>)>> selfDeathReceiver;
-	std::shared_ptr<MV::Reciever<void(std::shared_ptr<Creature>)>> targetDeathReceiver;
+	std::shared_ptr<MV::Receiver<void(std::shared_ptr<Creature>)>> selfDeathReceiver;
+	std::shared_ptr<MV::Receiver<void(std::shared_ptr<Creature>)>> targetDeathReceiver;
 };
 
 class Creature : public MV::Scene::Component, private MV::InstanceCounter<Creature> {

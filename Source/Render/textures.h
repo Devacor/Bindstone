@@ -47,7 +47,7 @@ namespace MV {
 		Signal<void(std::shared_ptr<TextureDefinition>)> onReloadAction;
 	public:
 		SignalRegister<void(std::shared_ptr<TextureDefinition>)> onReload;
-		typedef Reciever<void(std::shared_ptr<TextureDefinition>)> SignalType;
+		typedef Receiver<void(std::shared_ptr<TextureDefinition>)> SignalType;
 
 		virtual ~TextureDefinition();
 		std::shared_ptr<TextureHandle> makeHandle();
@@ -297,7 +297,7 @@ namespace MV {
 		Signal<void(std::shared_ptr<TextureHandle>)> sizeChangeSignal;
 	public:
 		virtual ~TextureHandle();
-		typedef Reciever<void (std::shared_ptr<TextureHandle>)> SignalType;
+		typedef Receiver<void (std::shared_ptr<TextureHandle>)> SignalType;
 
 		//0 to texturePixels
 		std::shared_ptr<TextureHandle> bounds(const BoxAABB<int> &a_bounds);

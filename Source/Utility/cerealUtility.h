@@ -70,17 +70,42 @@ namespace MV {
 	}
 
 	template <typename T>
+	T fromBinaryString(const std::string &a_input, std::function<void (cereal::PortableBinaryInputArchive&)> a_binder) {
+		std::stringstream messageStream(a_input);
+		cereal::PortableBinaryInputArchive input(messageStream);
+		a_binder(input);
+		T result;
+		input(result);
+		return result;
+	}
+
+	template <typename T>
 	std::string toJson(const T& a_input) {
 		std::stringstream messageStream;
-		cereal::JsonOutputArchive output(messageStream);
+		cereal::JSONOutputArchive output(messageStream);
 		output(a_input);
 		return messageStream.str();
+	}
+
+	template <typename C, typename T>
+	std::string toJsonCast(const std::shared_ptr<T> &a_input) {
+		return toJson(std::static_pointer_cast<C>(a_input));
 	}
 
 	template <typename T>
 	T fromJson(const std::string &a_input) {
 		std::stringstream messageStream(a_input);
-		cereal::JsonInputArchive input(messageStream);
+		cereal::JSONInputArchive input(messageStream);
+		T result;
+		input(result);
+		return result;
+	}
+
+	template <typename T>
+	T fromJson(const std::string &a_input, std::function<void (cereal::JSONInputArchive&)> a_binder) {
+		std::stringstream messageStream(a_input);
+		cereal::JSONInputArchive input(messageStream);
+		a_binder(input);
 		T result;
 		input(result);
 		return result;

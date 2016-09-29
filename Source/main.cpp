@@ -2,6 +2,7 @@
 #include "Utility/threadPool.h"
 
 #include "ArtificialIntelligence/pathfinding.h"
+#include "Utility/cerealUtility.h"
 //#include "vld.h"
 
 struct TestObject {
@@ -35,15 +36,24 @@ int main(int, char *[]) {
 	std::string content = "Hello World";
 	auto scriptString = "puts('['); puts(arg_0); puts(']'); puts('['); puts(arg_1); puts(']'); puts('['); puts(arg_2); puts(\"]\n\");";
 
-	MV::Signal<void(const std::string&, const std::string&, const std::string&)> callbackTestSignal;
-	MV::SignalRegister<void(const std::string&, const std::string&, const std::string&)> callbackTest(callbackTestSignal);
+	MV::Signal<void(const std::string&, const std::string&, const std::string&)> callbackTest;
 	callbackTest.scriptEngine(&chaiScript);
-	auto connection1 = callbackTest.connect(scriptString);
+	callbackTest.connect("test", scriptString);
 	{
 		auto connection2 = callbackTest.connect("puts(\"![\"); puts(arg_0); puts(\"]!\n\");");
-		callbackTestSignal(content, ":D :D :D", "TEST CHAR");
+		callbackTest(content, ":D :D :D", "TEST CHAR");
 	}
-	callbackTestSignal("!!!", "VVV", "~~~");
+	callbackTest("!!!", "VVV", "~~~");
+
+	auto jsonCallback = MV::toJson(callbackTest);
+
+	chaiscript::ChaiScript* chaiScriptPointer = &chaiScript;
+	auto callbackLoadTest = MV::fromJson<MV::Signal<void(const std::string&, const std::string&, const std::string&)>>(jsonCallback, [=](auto&& archive) {
+		archive.add(cereal::make_nvp("script", chaiScriptPointer));
+	});
+
+	callbackLoadTest("LoadTest2", "DidThisWork?", "Maybe");
+
 	std::cout << std::endl;
 
 	// 	pqxx::connection c("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=5432 dbname=bindstone user=m2tm password=Tinker123");

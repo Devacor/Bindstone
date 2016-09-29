@@ -10,6 +10,7 @@
 #include <ctime>
 #include <memory>
 
+#include "Utility/cerealUtility.h"
 #include "chaiscript/chaiscript.hpp"
 
 #include "pqxx/pqxx"

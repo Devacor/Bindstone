@@ -448,4 +448,6 @@ namespace MV {
 	};
 }
 
+CEREAL_CLASS_VERSION(MV::TextureHandle, 1);
+
 #endif

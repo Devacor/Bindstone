@@ -8,14 +8,17 @@
 
 CEREAL_REGISTER_TYPE(MV::PackedTextureDefinition);
 
-
 namespace MV{
 	bool TexturePack::add(const std::string &a_id, const std::shared_ptr<TextureDefinition> &a_shape, PointPrecision a_scale) {
+		return add(a_id, a_shape, MV::BoxAABB<float>(), a_scale);
+	}
+
+	bool TexturePack::add(const std::string &a_id, const std::shared_ptr<TextureDefinition> &a_shape, const MV::BoxAABB<float> &a_slice, PointPrecision a_scale) {
 		auto shapeSize = a_shape->contentSize() * Scale(a_scale);
 		auto newShape = positionShape(shapeSize);
 		if(newShape.minPoint.x >= 0){
 			dirty = true;
-			shapes.push_back({a_id, newShape, a_shape});
+			shapes.push_back({a_id, newShape, a_slice, a_shape});
 			updateContainers(newShape);
 
 			contentExtent = {std::max(newShape.maxPoint.x, contentExtent.width), std::max(newShape.maxPoint.y, contentExtent.height)};
@@ -94,7 +97,7 @@ namespace MV{
 				}), newContainers.end());
 
 				moveAppend(containers, newContainers);
-			} else{
+			} else {
 				++i;
 			}
 		}
@@ -160,7 +163,7 @@ namespace MV{
 		if (dirty || !sharedPackedTexture || !sharedPackedTexture->loaded()) {
 			dirty = false;
 			sharedPackedTexture->resize(contentExtent);
-			auto handle = sharedPackedTexture->makeHandle(foundShape.bounds);
+			auto handle = sharedPackedTexture->makeHandle(foundShape.bounds)->slice(foundShape.slice);
 
 			auto scene = makeScene();
 			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, sharedPackedTexture->textureId(), background)->start();
@@ -185,7 +188,7 @@ namespace MV{
 		if(dirty || !sharedPackedTexture || !sharedPackedTexture->loaded()){
 			dirty = false;
 			sharedPackedTexture->resize(contentExtent);
-			auto handle = sharedPackedTexture->makeHandle(foundShape->bounds);
+			auto handle = sharedPackedTexture->makeHandle(foundShape->bounds)->slice(foundShape->slice);
 
 			auto scene = makeScene();
 			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, sharedPackedTexture->textureId(), background)->start();
@@ -193,7 +196,7 @@ namespace MV{
 
 			return handle;
 		} else{
-			return sharedPackedTexture->makeHandle(foundShape->bounds);
+			return sharedPackedTexture->makeHandle(foundShape->bounds)->slice(foundShape->slice);
 		}
 	}
 
@@ -218,7 +221,7 @@ namespace MV{
 			auto sharedPackedTexture = PackedTextureDefinition::make("TexturePack", shared_from_this(), maximumExtent, background);
 			packedTexture = sharedPackedTexture;
 			return sharedPackedTexture;
-		} else{
+		} else {
 			return packedTexture.lock();
 		}
 	}

@@ -114,7 +114,12 @@ namespace MV {
 				std::string lowerCaseImageExtension = imagePath->path().extension().string();
 				boost::algorithm::to_lower(lowerCaseImageExtension);
 				if(std::find(validExtensions.begin(), validExtensions.end(), lowerCaseImageExtension) != validExtensions.end()){
-					newPack->add(imagePath->path().filename().string(), FileTextureDefinition::make(imagePath->path().string(), true, false));
+					std::ifstream stream(path(*imagePath).replace_extension("slc").string());
+					BoxAABB<float> sliceBounds;
+					if (stream) {
+						stream >> sliceBounds.minPoint.x >> sliceBounds.minPoint.y >> sliceBounds.maxPoint.x >> sliceBounds.maxPoint.y;
+					}
+					newPack->add(imagePath->path().filename().string(), FileTextureDefinition::make(imagePath->path().string(), true, false), sliceBounds);
 				}
 			}
 		}

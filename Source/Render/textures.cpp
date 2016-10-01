@@ -539,12 +539,34 @@ namespace MV {
 		if(a_points.size() == 16){
 			auto parentBounds = BoxAABB<>(a_points[0].point(), a_points[2].point());
 			auto sliceBounds = logicalSlice();
-			auto widthPercent = parentBounds.width() / sliceBounds.width();
-			auto heightPercent = parentBounds.height() / sliceBounds.height();
-			sliceBounds *= Scale(std::min(widthPercent, 1.0f), std::min(heightPercent, 1.0f));
 			
-			sliceBounds.maxPoint = parentBounds.maxPoint - sliceBounds.maxPoint;
+			sliceBounds.maxPoint = parentBounds.maxPoint - (toPoint(logicalSize()) - sliceBounds.maxPoint);
 			sliceBounds.minPoint = parentBounds.minPoint + sliceBounds.minPoint;
+
+			auto intermediateSliceBounds = sliceBounds;
+			if (intermediateSliceBounds.maxPoint.x < intermediateSliceBounds.minPoint.x) {
+				sliceBounds.maxPoint.x = parentBounds.minPoint.x + (parentBounds.width() * (slicePercent.minPoint.x + (slicePercent.width() / 2.0f)));
+				sliceBounds.minPoint.x = sliceBounds.maxPoint.x;
+			}
+
+			if (intermediateSliceBounds.minPoint.y > intermediateSliceBounds.maxPoint.y) {
+				sliceBounds.maxPoint.y = parentBounds.minPoint.y + (parentBounds.height() * (slicePercent.minPoint.y + (slicePercent.height() / 2.0f)));
+				sliceBounds.minPoint.y = sliceBounds.maxPoint.y;
+			}
+
+// 			if (intermediateSliceBounds.maxPoint.x < parentBounds.minPoint.x) {
+// 				sliceBounds.maxPoint.x = parentBounds.minPoint.x + (parentBounds.width() * slicePercent.maxPoint.x);
+// 			}
+// 			if (intermediateSliceBounds.maxPoint.y < parentBounds.minPoint.y || intermediateSliceBounds.maxPoint.y < intermediateSliceBounds.minPoint.y) {
+// 				sliceBounds.maxPoint.y = parentBounds.minPoint.y + (parentBounds.height() * slicePercent.maxPoint.y);
+// 			}
+// 
+// 			if (intermediateSliceBounds.minPoint.x > parentBounds.maxPoint.x || intermediateSliceBounds.minPoint.x > intermediateSliceBounds.maxPoint.x) {
+// 				sliceBounds.minPoint.x = parentBounds.minPoint.x + (parentBounds.width() * slicePercent.minPoint.x);
+// 			}
+// 			if (intermediateSliceBounds.minPoint.y > parentBounds.maxPoint.y || intermediateSliceBounds.minPoint.y > intermediateSliceBounds.maxPoint.y) {
+// 				sliceBounds.minPoint.y = parentBounds.minPoint.y + (parentBounds.height() * slicePercent.minPoint.y);
+// 			}
 
 			a_points[4] = sliceBounds.minPoint;
 			a_points[5] = point(sliceBounds.minPoint.x, sliceBounds.maxPoint.y);
@@ -562,6 +584,25 @@ namespace MV {
 
 			a_points[14] = point(sliceBounds.maxPoint.x, parentBounds.minPoint.y);
 			a_points[15] = point(sliceBounds.minPoint.x, parentBounds.minPoint.y);
+
+// 			for (int i = 0; i < 4; ++i) {
+// 				a_points[i] = Color(1.0f, 1.0f, 1.0f, 1.0f);
+// 			}
+// 			for (int i = 4; i < 8; ++i) {
+// 				a_points[i] = Color(1.0f, 0.0f, 1.0f, 1.0f);
+// 			}
+// 			for (int i = 8; i < 10; ++i) {
+// 				a_points[i] = Color(0.0f, 0.0f, 1.0f, 1.0f);
+// 			}
+// 			for (int i = 10; i < 12; ++i) {
+// 				a_points[i] = Color(1.0f, 0.0f, 0.0f, 1.0f);
+// 			}
+// 			for (int i = 12; i < 14; ++i) {
+// 				a_points[i] = Color(0.0f, 1.0f, 0.0f, 1.0f);
+// 			}
+// 			for (int i = 14; i < 16; ++i) {
+// 				a_points[i] = Color(0.0f, 1.0f, 1.0f, 1.0f);
+// 			}
 			return true;
 		}
 		return false;
@@ -579,7 +620,7 @@ namespace MV {
 	Size<PointPrecision> TextureHandle::logicalSize() const{
 		auto sanitizedBounds = handlePercent;
 		sanitizedBounds.sanitize();
-		return sanitizedBounds.size() * textureDefinition->scale();
+		return (sanitizedBounds.size() * cast<PointPrecision>(textureDefinition->contentSize())) * textureDefinition->scale();
 	}
 	//logical slice == percentSlice * logicalSize
 	BoxAABB<PointPrecision> TextureHandle::logicalSlice() const{
@@ -614,8 +655,7 @@ namespace MV {
 
 	MV::BoxAABB<MV::PointPrecision> TextureHandle::rawSlice() const {
 		auto finalSlice = slicePercent * toScale(handlePercent.size());
-		finalSlice.minPoint += handlePercent.minPoint;
-		finalSlice.maxPoint += handlePercent.maxPoint;
+		finalSlice += handlePercent.minPoint;
 		return finalSlice;
 	}
 

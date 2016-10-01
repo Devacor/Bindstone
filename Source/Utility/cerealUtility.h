@@ -70,7 +70,7 @@ namespace MV {
 	}
 
 	template <typename T>
-	T fromBinaryString(const std::string &a_input, std::function<void (cereal::PortableBinaryInputArchive&)> a_binder) {
+	T fromBinaryString(const std::string &a_input, std::function<void (cereal::PortableBinaryInputArchive &)> a_binder) {
 		std::stringstream messageStream(a_input);
 		cereal::PortableBinaryInputArchive input(messageStream);
 		a_binder(input);
@@ -102,7 +102,7 @@ namespace MV {
 	}
 
 	template <typename T>
-	T fromJson(const std::string &a_input, std::function<void (cereal::JSONInputArchive&)> a_binder) {
+	T fromJson(const std::string &a_input, std::function<void (cereal::JSONInputArchive &)> a_binder) {
 		std::stringstream messageStream(a_input);
 		cereal::JSONInputArchive input(messageStream);
 		a_binder(input);

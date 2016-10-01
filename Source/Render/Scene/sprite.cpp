@@ -48,9 +48,9 @@ namespace MV {
 
 		void Sprite::updateTextureCoordinates() {
 			if (ourTexture != nullptr) {
-				if (hasSlice()) {
-					updateSlice();
-				} else {
+				updateSlice();
+				//If we didn't have a slice, then we need to manually apply. Otherwise this was handled already.
+				if(!hasSlice()) {
 					ourTexture->apply(points);
 				}
 				notifyParentOfComponentChange();

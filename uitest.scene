@@ -1,0 +1,742 @@
+{
+    "value0": {
+        "ptr_wrapper": {
+            "id": 2147483649,
+            "data": {
+                "cereal_class_version": 0,
+                "nodeId": "uitest",
+                "isRootNode": true,
+                "parent": {
+                    "ptr_wrapper": {
+                        "id": 0
+                    }
+                },
+                "allowDraw": true,
+                "allowUpdate": true,
+                "translateTo": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "rotateTo": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "scaleTo": {
+                    "x": 1.0,
+                    "y": 1.0,
+                    "z": 1.0
+                },
+                "sortDepth": 0.0,
+                "nodeAlpha": 1.0,
+                "localBounds": {
+                    "minPoint": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.0
+                    },
+                    "maxPoint": {
+                        "x": 959.9999389648438,
+                        "y": 639.9999389648438,
+                        "z": 0.0
+                    }
+                },
+                "localChildBounds": {
+                    "minPoint": {
+                        "x": -116.99998474121094,
+                        "y": -57.999969482421878,
+                        "z": 0.0
+                    },
+                    "maxPoint": {
+                        "x": -35.999961853027347,
+                        "y": 122.0,
+                        "z": 0.0
+                    }
+                },
+                "childNodes": [
+                    {
+                        "ptr_wrapper": {
+                            "id": 2147483650,
+                            "data": {
+                                "nodeId": "node_0",
+                                "isRootNode": false,
+                                "parent": {
+                                    "ptr_wrapper": {
+                                        "id": 1
+                                    }
+                                },
+                                "allowDraw": true,
+                                "allowUpdate": true,
+                                "translateTo": {
+                                    "x": 479.9999694824219,
+                                    "y": 319.9999694824219,
+                                    "z": 0.0
+                                },
+                                "rotateTo": {
+                                    "x": 0.0,
+                                    "y": 0.0,
+                                    "z": 0.0
+                                },
+                                "scaleTo": {
+                                    "x": 1.0,
+                                    "y": 1.0,
+                                    "z": 1.0
+                                },
+                                "sortDepth": 0.0,
+                                "nodeAlpha": 1.0,
+                                "localBounds": {
+                                    "minPoint": {
+                                        "x": -116.99998474121094,
+                                        "y": -57.999969482421878,
+                                        "z": 0.0
+                                    },
+                                    "maxPoint": {
+                                        "x": -35.999961853027347,
+                                        "y": 122.0,
+                                        "z": 0.0
+                                    }
+                                },
+                                "localChildBounds": {
+                                    "minPoint": {
+                                        "x": 0.0,
+                                        "y": 0.0,
+                                        "z": 0.0
+                                    },
+                                    "maxPoint": {
+                                        "x": 0.0,
+                                        "y": 0.0,
+                                        "z": 0.0
+                                    }
+                                },
+                                "childNodes": [],
+                                "childComponents": [
+                                    {
+                                        "polymorphic_id": 2147483649,
+                                        "polymorphic_name": "MV::Scene::Sprite",
+                                        "ptr_wrapper": {
+                                            "id": 2147483651,
+                                            "data": {
+                                                "cereal_class_version": 0,
+                                                "Drawable": {
+                                                    "cereal_class_version": 1,
+                                                    "anchors": {
+                                                        "cereal_class_version": 0,
+                                                        "parent": {
+                                                            "locked_ptr": {
+                                                                "polymorphic_id": 0
+                                                            }
+                                                        },
+                                                        "parentId": "",
+                                                        "anchors": {
+                                                            "minPoint": {
+                                                                "x": 0.0,
+                                                                "y": 0.0,
+                                                                "z": 0.0
+                                                            },
+                                                            "maxPoint": {
+                                                                "x": 0.0,
+                                                                "y": 0.0,
+                                                                "z": 0.0
+                                                            }
+                                                        },
+                                                        "offset": {
+                                                            "minPoint": {
+                                                                "x": 0.0,
+                                                                "y": 0.0,
+                                                                "z": 0.0
+                                                            },
+                                                            "maxPoint": {
+                                                                "x": 0.0,
+                                                                "y": 0.0,
+                                                                "z": 0.0
+                                                            }
+                                                        },
+                                                        "pivot": {
+                                                            "x": 0.0,
+                                                            "y": 0.0,
+                                                            "z": 0.0
+                                                        },
+                                                        "applyingPosition": false
+                                                    },
+                                                    "shouldDraw": true,
+                                                    "ourTexture": {
+                                                        "polymorphic_id": 1073741824,
+                                                        "ptr_wrapper": {
+                                                            "id": 2147483652,
+                                                            "data": {
+                                                                "cereal_class_version": 1,
+                                                                "texture": {
+                                                                    "polymorphic_id": 2147483650,
+                                                                    "polymorphic_name": "MV::PackedTextureDefinition",
+                                                                    "ptr_wrapper": {
+                                                                        "id": 2147483653,
+                                                                        "data": {
+                                                                            "cereal_class_version": 0,
+                                                                            "texturePack": {
+                                                                                "ptr_wrapper": {
+                                                                                    "id": 2147483654,
+                                                                                    "data": {
+                                                                                        "cereal_class_version": 0,
+                                                                                        "packedTexture": {
+                                                                                            "locked_ptr": {
+                                                                                                "polymorphic_id": 1073741824,
+                                                                                                "ptr_wrapper": {
+                                                                                                    "id": 5
+                                                                                                }
+                                                                                            }
+                                                                                        },
+                                                                                        "shapes": [
+                                                                                            {
+                                                                                                "cereal_class_version": 1,
+                                                                                                "id": "slice.png",
+                                                                                                "bounds": {
+                                                                                                    "minPoint": {
+                                                                                                        "x": 0,
+                                                                                                        "y": 0,
+                                                                                                        "z": 0
+                                                                                                    },
+                                                                                                    "maxPoint": {
+                                                                                                        "x": 128,
+                                                                                                        "y": 128,
+                                                                                                        "z": 0
+                                                                                                    }
+                                                                                                },
+                                                                                                "slice": {
+                                                                                                    "minPoint": {
+                                                                                                        "x": 0.20000000298023225,
+                                                                                                        "y": 0.20000000298023225,
+                                                                                                        "z": 0.0
+                                                                                                    },
+                                                                                                    "maxPoint": {
+                                                                                                        "x": 0.800000011920929,
+                                                                                                        "y": 0.800000011920929,
+                                                                                                        "z": 0.0
+                                                                                                    }
+                                                                                                },
+                                                                                                "texture": {
+                                                                                                    "polymorphic_id": 0
+                                                                                                }
+                                                                                            }
+                                                                                        ],
+                                                                                        "maximumExtent": {
+                                                                                            "width": 2147483647,
+                                                                                            "height": 2147483647,
+                                                                                            "depth": 0
+                                                                                        },
+                                                                                        "contentExtent": {
+                                                                                            "width": 128,
+                                                                                            "height": 128,
+                                                                                            "depth": 0
+                                                                                        },
+                                                                                        "containers": [
+                                                                                            {
+                                                                                                "minPoint": {
+                                                                                                    "x": 128,
+                                                                                                    "y": 0,
+                                                                                                    "z": 0
+                                                                                                },
+                                                                                                "maxPoint": {
+                                                                                                    "x": 2147483647,
+                                                                                                    "y": 2147483647,
+                                                                                                    "z": 0
+                                                                                                }
+                                                                                            },
+                                                                                            {
+                                                                                                "minPoint": {
+                                                                                                    "x": 0,
+                                                                                                    "y": 128,
+                                                                                                    "z": 0
+                                                                                                },
+                                                                                                "maxPoint": {
+                                                                                                    "x": 2147483647,
+                                                                                                    "y": 2147483647,
+                                                                                                    "z": 0
+                                                                                                }
+                                                                                            }
+                                                                                        ],
+                                                                                        "consolidatedTexture": {
+                                                                                            "polymorphic_id": 1073741824,
+                                                                                            "ptr_wrapper": {
+                                                                                                "id": 2147483655,
+                                                                                                "data": {
+                                                                                                    "cereal_class_version": 0,
+                                                                                                    "powerTwo": true,
+                                                                                                    "repeat": false,
+                                                                                                    "pixel": false,
+                                                                                                    "base": {
+                                                                                                        "cereal_class_version": 0,
+                                                                                                        "name": "Assets/Atlases\\UI.png",
+                                                                                                        "size": {
+                                                                                                            "width": 0,
+                                                                                                            "height": 0,
+                                                                                                            "depth": 0
+                                                                                                        },
+                                                                                                        "contentSize": {
+                                                                                                            "width": 128,
+                                                                                                            "height": 128,
+                                                                                                            "depth": 0
+                                                                                                        },
+                                                                                                        "handles": []
+                                                                                                    }
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            },
+                                                                            "base": {
+                                                                                "cereal_class_version": 0,
+                                                                                "backgroundColor": {
+                                                                                    "R": 0.0,
+                                                                                    "G": 0.0,
+                                                                                    "B": 0.0,
+                                                                                    "A": 0.0
+                                                                                },
+                                                                                "base": {
+                                                                                    "name": "TexturePack",
+                                                                                    "size": {
+                                                                                        "width": 128,
+                                                                                        "height": 128,
+                                                                                        "depth": 0
+                                                                                    },
+                                                                                    "contentSize": {
+                                                                                        "width": 128,
+                                                                                        "height": 128,
+                                                                                        "depth": 0
+                                                                                    },
+                                                                                    "handles": [
+                                                                                        {
+                                                                                            "locked_ptr": {
+                                                                                                "polymorphic_id": 1073741824,
+                                                                                                "ptr_wrapper": {
+                                                                                                    "id": 4
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    ]
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "handle": {
+                                                                    "minPoint": {
+                                                                        "x": 0.001953125,
+                                                                        "y": 0.001953125,
+                                                                        "z": 0.0
+                                                                    },
+                                                                    "maxPoint": {
+                                                                        "x": 0.998046875,
+                                                                        "y": 0.998046875,
+                                                                        "z": 0.0
+                                                                    }
+                                                                },
+                                                                "slice": {
+                                                                    "minPoint": {
+                                                                        "x": 0.20000000298023225,
+                                                                        "y": 0.20000000298023225,
+                                                                        "z": 0.0
+                                                                    },
+                                                                    "maxPoint": {
+                                                                        "x": 0.800000011920929,
+                                                                        "y": 0.800000011920929,
+                                                                        "z": 0.0
+                                                                    }
+                                                                },
+                                                                "name": "TexturePack"
+                                                            }
+                                                        }
+                                                    },
+                                                    "shaderProgramId": "default",
+                                                    "vertexIndices": [
+                                                        0,
+                                                        8,
+                                                        4,
+                                                        4,
+                                                        15,
+                                                        0,
+                                                        15,
+                                                        4,
+                                                        7,
+                                                        7,
+                                                        14,
+                                                        15,
+                                                        14,
+                                                        7,
+                                                        13,
+                                                        13,
+                                                        3,
+                                                        14,
+                                                        8,
+                                                        9,
+                                                        5,
+                                                        5,
+                                                        4,
+                                                        8,
+                                                        4,
+                                                        5,
+                                                        6,
+                                                        6,
+                                                        7,
+                                                        4,
+                                                        7,
+                                                        6,
+                                                        12,
+                                                        12,
+                                                        13,
+                                                        7,
+                                                        9,
+                                                        1,
+                                                        10,
+                                                        10,
+                                                        5,
+                                                        9,
+                                                        5,
+                                                        10,
+                                                        11,
+                                                        11,
+                                                        6,
+                                                        5,
+                                                        6,
+                                                        11,
+                                                        2,
+                                                        2,
+                                                        12,
+                                                        6
+                                                    ],
+                                                    "localBounds": {
+                                                        "minPoint": {
+                                                            "x": -116.99998474121094,
+                                                            "y": -57.999969482421878,
+                                                            "z": 0.0
+                                                        },
+                                                        "maxPoint": {
+                                                            "x": -35.999961853027347,
+                                                            "y": 122.0,
+                                                            "z": 0.0
+                                                        }
+                                                    },
+                                                    "drawType": 4,
+                                                    "points": [
+                                                        {
+                                                            "x": -116.99998474121094,
+                                                            "y": -57.999969482421878,
+                                                            "z": 0.0,
+                                                            "R": 0.8745098114013672,
+                                                            "G": 0.8745098114013672,
+                                                            "B": 0.8745098114013672,
+                                                            "A": 1.0,
+                                                            "textureX": 0.001953125,
+                                                            "textureY": 0.001953125
+                                                        },
+                                                        {
+                                                            "x": -116.99998474121094,
+                                                            "y": 122.0,
+                                                            "z": 0.0,
+                                                            "R": 0.8745098114013672,
+                                                            "G": 0.8745098114013672,
+                                                            "B": 0.8745098114013672,
+                                                            "A": 1.0,
+                                                            "textureX": 0.001953125,
+                                                            "textureY": 0.998046875
+                                                        },
+                                                        {
+                                                            "x": -35.999961853027347,
+                                                            "y": 122.0,
+                                                            "z": 0.0,
+                                                            "R": 0.8745098114013672,
+                                                            "G": 0.8745098114013672,
+                                                            "B": 0.8745098114013672,
+                                                            "A": 1.0,
+                                                            "textureX": 0.998046875,
+                                                            "textureY": 0.998046875
+                                                        },
+                                                        {
+                                                            "x": -35.999961853027347,
+                                                            "y": -57.999969482421878,
+                                                            "z": 0.0,
+                                                            "R": 0.8745098114013672,
+                                                            "G": 0.8745098114013672,
+                                                            "B": 0.8745098114013672,
+                                                            "A": 1.0,
+                                                            "textureX": 0.998046875,
+                                                            "textureY": 0.001953125
+                                                        },
+                                                        {
+                                                            "x": -91.49998474121094,
+                                                            "y": -32.499969482421878,
+                                                            "z": 0.0,
+                                                            "R": 1.0,
+                                                            "G": 1.0,
+                                                            "B": 1.0,
+                                                            "A": 1.0,
+                                                            "textureX": 0.201171875,
+                                                            "textureY": 0.201171875
+                                                        },
+                                                        {
+                                                            "x": -91.49998474121094,
+                                                            "y": 96.5,
+                                                            "z": 0.0,
+                                                            "R": 1.0,
+                                                            "G": 1.0,
+                                                            "B": 1.0,
+                                                            "A": 1.0,
+                                                            "textureX": 0.201171875,
+                                                            "textureY": 0.798828125
+                                                        },
+                                                        {
+                                                            "x": -61.499961853027347,
+                                                            "y": 96.5,
+                                                            "z": 0.0,
+                                                            "R": 1.0,
+                                                            "G": 1.0,
+                                                            "B": 1.0,
+                                                            "A": 1.0,
+                                                            "textureX": 0.798828125,
+                                                            "textureY": 0.798828125
+                                                        },
+                                                        {
+                                                            "x": -61.499961853027347,
+                                                            "y": -32.499969482421878,
+                                                            "z": 0.0,
+                                                            "R": 1.0,
+                                                            "G": 1.0,
+                                                            "B": 1.0,
+                                                            "A": 1.0,
+                                                            "textureX": 0.798828125,
+                                                            "textureY": 0.201171875
+                                                        },
+                                                        {
+                                                            "x": -116.99998474121094,
+                                                            "y": -32.499969482421878,
+                                                            "z": 0.0,
+                                                            "R": 1.0,
+                                                            "G": 1.0,
+                                                            "B": 1.0,
+                                                            "A": 1.0,
+                                                            "textureX": 0.001953125,
+                                                            "textureY": 0.201171875
+                                                        },
+                                                        {
+                                                            "x": -116.99998474121094,
+                                                            "y": 96.5,
+                                                            "z": 0.0,
+                                                            "R": 1.0,
+                                                            "G": 1.0,
+                                                            "B": 1.0,
+                                                            "A": 1.0,
+                                                            "textureX": 0.001953125,
+                                                            "textureY": 0.798828125
+                                                        },
+                                                        {
+                                                            "x": -91.49998474121094,
+                                                            "y": 122.0,
+                                                            "z": 0.0,
+                                                            "R": 1.0,
+                                                            "G": 1.0,
+                                                            "B": 1.0,
+                                                            "A": 1.0,
+                                                            "textureX": 0.201171875,
+                                                            "textureY": 0.998046875
+                                                        },
+                                                        {
+                                                            "x": -61.499961853027347,
+                                                            "y": 122.0,
+                                                            "z": 0.0,
+                                                            "R": 1.0,
+                                                            "G": 1.0,
+                                                            "B": 1.0,
+                                                            "A": 1.0,
+                                                            "textureX": 0.798828125,
+                                                            "textureY": 0.998046875
+                                                        },
+                                                        {
+                                                            "x": -35.999961853027347,
+                                                            "y": 96.5,
+                                                            "z": 0.0,
+                                                            "R": 1.0,
+                                                            "G": 1.0,
+                                                            "B": 1.0,
+                                                            "A": 1.0,
+                                                            "textureX": 0.998046875,
+                                                            "textureY": 0.798828125
+                                                        },
+                                                        {
+                                                            "x": -35.999961853027347,
+                                                            "y": -32.499969482421878,
+                                                            "z": 0.0,
+                                                            "R": 1.0,
+                                                            "G": 1.0,
+                                                            "B": 1.0,
+                                                            "A": 1.0,
+                                                            "textureX": 0.998046875,
+                                                            "textureY": 0.201171875
+                                                        },
+                                                        {
+                                                            "x": -61.499961853027347,
+                                                            "y": -57.999969482421878,
+                                                            "z": 0.0,
+                                                            "R": 1.0,
+                                                            "G": 1.0,
+                                                            "B": 1.0,
+                                                            "A": 1.0,
+                                                            "textureX": 0.798828125,
+                                                            "textureY": 0.001953125
+                                                        },
+                                                        {
+                                                            "x": -91.49998474121094,
+                                                            "y": -57.999969482421878,
+                                                            "z": 0.0,
+                                                            "R": 1.0,
+                                                            "G": 1.0,
+                                                            "B": 1.0,
+                                                            "A": 1.0,
+                                                            "textureX": 0.201171875,
+                                                            "textureY": 0.001953125
+                                                        }
+                                                    ],
+                                                    "Component": {
+                                                        "cereal_class_version": 0,
+                                                        "componentId": "sprite_0",
+                                                        "componentOwner": {
+                                                            "ptr_wrapper": {
+                                                                "id": 2
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ],
+                "childComponents": [
+                    {
+                        "polymorphic_id": 2147483651,
+                        "polymorphic_name": "MV::Scene::Drawable",
+                        "ptr_wrapper": {
+                            "id": 2147483656,
+                            "data": {
+                                "anchors": {
+                                    "parent": {
+                                        "locked_ptr": {
+                                            "polymorphic_id": 0
+                                        }
+                                    },
+                                    "parentId": "",
+                                    "anchors": {
+                                        "minPoint": {
+                                            "x": 0.0,
+                                            "y": 0.0,
+                                            "z": 0.0
+                                        },
+                                        "maxPoint": {
+                                            "x": 0.0,
+                                            "y": 0.0,
+                                            "z": 0.0
+                                        }
+                                    },
+                                    "offset": {
+                                        "minPoint": {
+                                            "x": 0.0,
+                                            "y": 0.0,
+                                            "z": 0.0
+                                        },
+                                        "maxPoint": {
+                                            "x": 0.0,
+                                            "y": 0.0,
+                                            "z": 0.0
+                                        }
+                                    },
+                                    "pivot": {
+                                        "x": 0.0,
+                                        "y": 0.0,
+                                        "z": 0.0
+                                    },
+                                    "applyingPosition": false
+                                },
+                                "shouldDraw": true,
+                                "ourTexture": {
+                                    "polymorphic_id": 0
+                                },
+                                "shaderProgramId": "premultiply",
+                                "vertexIndices": [],
+                                "localBounds": {
+                                    "minPoint": {
+                                        "x": 0.0,
+                                        "y": 0.0,
+                                        "z": 0.0
+                                    },
+                                    "maxPoint": {
+                                        "x": 959.9999389648438,
+                                        "y": 639.9999389648438,
+                                        "z": 0.0
+                                    }
+                                },
+                                "drawType": 4,
+                                "points": [
+                                    {
+                                        "x": 0.0,
+                                        "y": 0.0,
+                                        "z": 0.0,
+                                        "R": 1.0,
+                                        "G": 1.0,
+                                        "B": 1.0,
+                                        "A": 1.0,
+                                        "textureX": 0.0,
+                                        "textureY": 0.0
+                                    },
+                                    {
+                                        "x": 0.0,
+                                        "y": 639.9999389648438,
+                                        "z": 0.0,
+                                        "R": 1.0,
+                                        "G": 1.0,
+                                        "B": 1.0,
+                                        "A": 1.0,
+                                        "textureX": 0.0,
+                                        "textureY": 0.0
+                                    },
+                                    {
+                                        "x": 959.9999389648438,
+                                        "y": 639.9999389648438,
+                                        "z": 0.0,
+                                        "R": 1.0,
+                                        "G": 1.0,
+                                        "B": 1.0,
+                                        "A": 1.0,
+                                        "textureX": 0.0,
+                                        "textureY": 0.0
+                                    },
+                                    {
+                                        "x": 959.9999389648438,
+                                        "y": 0.0,
+                                        "z": 0.0,
+                                        "R": 1.0,
+                                        "G": 1.0,
+                                        "B": 1.0,
+                                        "A": 1.0,
+                                        "textureX": 0.0,
+                                        "textureY": 0.0
+                                    }
+                                ],
+                                "Component": {
+                                    "componentId": "ScreenScaler",
+                                    "componentOwner": {
+                                        "ptr_wrapper": {
+                                            "id": 1
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

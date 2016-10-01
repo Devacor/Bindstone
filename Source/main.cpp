@@ -47,12 +47,11 @@ int main(int, char *[]) {
 
 	auto jsonCallback = MV::toJson(callbackTest);
 
-	chaiscript::ChaiScript* chaiScriptPointer = &chaiScript;
-	auto callbackLoadTest = MV::fromJson<MV::Signal<void(const std::string&, const std::string&, const std::string&)>>(jsonCallback, [=](auto&& archive) {
-		archive.add(cereal::make_nvp("script", chaiScriptPointer));
-	});
-
-	callbackLoadTest("LoadTest2", "DidThisWork?", "Maybe");
+// 	auto callbackLoadTest = MV::fromJson<MV::Signal<void(const std::string&, const std::string&, const std::string&)>>(jsonCallback, [&](cereal::JSONInputArchive& archive) {
+// 		archive.add(cereal::make_nvp("script", &chaiScript));
+// 	});
+// 
+// 	callbackLoadTest("LoadTest2", "DidThisWork?", "Maybe");
 
 	std::cout << std::endl;
 

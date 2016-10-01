@@ -141,7 +141,7 @@ namespace MV {
 			std::vector<std::string> scripts;
 			archive(
 				cereal::make_nvp("parameterNames", orderedParameterNames),
-				cereal::make_nvp("scripts", scriptCallback)
+				cereal::make_nvp("script", scriptCallback)
 			);
 			archive.extract(cereal::make_nvp("script", scriptEnginePointer));
 			id = ++uniqueId;

@@ -50,8 +50,10 @@ namespace MV {
 	template <typename T>
 	std::string toBinaryString(const T& a_input) {
 		std::stringstream messageStream;
-		cereal::PortableBinaryOutputArchive output(messageStream);
-		output(a_input);
+		{
+			cereal::PortableBinaryOutputArchive output(messageStream);
+			output(a_input);
+		}
 		return messageStream.str();
 	}
 
@@ -82,8 +84,10 @@ namespace MV {
 	template <typename T>
 	std::string toJson(const T& a_input) {
 		std::stringstream messageStream;
-		cereal::JSONOutputArchive output(messageStream);
-		output(a_input);
+		{
+			cereal::JSONOutputArchive output(messageStream);
+			output(a_input);
+		}
 		return messageStream.str();
 	}
 

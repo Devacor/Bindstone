@@ -22,6 +22,7 @@ namespace MV {
 			return std::shared_ptr<TexturePack>(new TexturePack(a_renderer, a_color, a_maximumExtent));
 		}
 		bool add(const std::string &a_id, const std::shared_ptr<TextureDefinition> &a_shape, PointPrecision a_scale = 1.0f);
+		bool add(const std::string &a_id, const std::shared_ptr<TextureDefinition> &a_shape, const MV::BoxAABB<float> &a_slice, PointPrecision a_scale = 1.0f);
 		std::string print() const;
 
 		std::shared_ptr<MV::Scene::Node> makeScene() const;
@@ -67,18 +68,24 @@ namespace MV {
 
 			return a_script;
 		}
-	private:
-		TexturePack(MV::Draw2D* a_renderer, const Color &a_color = Color(0.0f, 0.0f, 0.0f, 0.0f), const Size<int> &a_maximumExtent = Size<int>(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()));
+
 		struct ShapeDefinition {
 			std::string id;
 			BoxAABB<int> bounds;
+			BoxAABB<float> slice;
 			std::shared_ptr<TextureDefinition> texture;
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const /*version*/){
-				archive(CEREAL_NVP(id), CEREAL_NVP(bounds), CEREAL_NVP(texture));
+			void serialize(Archive & archive, std::uint32_t const a_version) {
+				archive(CEREAL_NVP(id), CEREAL_NVP(bounds));
+				if (a_version > 0) {
+					archive(CEREAL_NVP(slice));
+				}
+				archive(CEREAL_NVP(texture));
 			}
 		};
+	private:
+		TexturePack(MV::Draw2D* a_renderer, const Color &a_color = Color(0.0f, 0.0f, 0.0f, 0.0f), const Size<int> &a_maximumExtent = Size<int>(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()));
 
 		std::shared_ptr<PackedTextureDefinition> getOrMakeTexture();
 
@@ -161,5 +168,7 @@ namespace MV {
 		std::shared_ptr<TexturePack> texturePack;
 	};
 }
+
+CEREAL_CLASS_VERSION(MV::TexturePack::ShapeDefinition, 1);
 
 #endif

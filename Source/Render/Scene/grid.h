@@ -36,6 +36,11 @@ namespace MV {
 				return maximumWidth;
 			}
 
+			std::shared_ptr<Grid> gridOffset(const Point<> &a_topLeftOffset);
+			Point<> gridOffset() const {
+				return topLeftOffset;
+			}
+
 			std::shared_ptr<Grid> columns(size_t a_columns, bool a_useChildrenForSize = true);
 			size_t columns() const {
 				return cellColumns;
@@ -60,9 +65,12 @@ namespace MV {
 			virtual void updateImplementation(double a_delta) override;
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const /*version*/) {
+			void serialize(Archive & archive, std::uint32_t const a_version) {
 				if (dirtyGrid) {
 					layoutCells();
+				}
+				if (a_version > 1) {
+					archive(CEREAL_NVP(topLeftOffset));
 				}
 				archive(
 					CEREAL_NVP(maximumWidth),
@@ -77,8 +85,11 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Grid> &construct) {
+			static void load_and_construct(Archive & archive, cereal::construct<Grid> &construct, std::uint32_t const a_version) {
 				construct(std::shared_ptr<Node>());
+				if (a_version > 1) {
+					archive(cereal::make_nvp("topLeftOffset", construct->topLeftOffset));
+				}
 				archive(
 					cereal::make_nvp("maximumWidth", construct->maximumWidth),
 					cereal::make_nvp("cellDimensions", construct->cellDimensions),
@@ -102,7 +113,7 @@ namespace MV {
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
 		private:
-			virtual void boundsImplementation(const BoxAABB<> &) override {}
+			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
 			virtual BoxAABB<> boundsImplementation() override;
 
 			bool bumpToNextLine(PointPrecision a_currentPosition, size_t a_index) const;
@@ -133,6 +144,7 @@ namespace MV {
 			Size<> cellDimensions;
 			std::pair<Point<>, Point<>> cellPadding;
 			std::pair<Point<>, Point<>> margins;
+			Point<> topLeftOffset;
 			size_t cellColumns;
 			bool allowDirty = true;
 			bool dirtyGrid;

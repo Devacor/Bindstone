@@ -437,6 +437,11 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 	}
 	auto deselectLocalAABB = deselectButton->bounds();
 
+	auto anchorsButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Anchors", buttonSize, UTF_CHAR_STR("Anchors"));
+	anchorsButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) mutable {
+		openAnchorEditor(controls->elementToEdit.self());
+	});
+
 	panel.updateBoxHeader(grid->bounds().width());
 
 	SDL_StartTextInput();

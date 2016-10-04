@@ -677,6 +677,7 @@ namespace MV {
 	}
 
 	void FormattedText::applyState(const std::shared_ptr<FormattedState> &a_newState, size_t a_newFormatStart, size_t a_newFormatEnd) {
+		auto silenced = scene()->silence();
 		std::shared_ptr<FormattedState> originalState;
 		size_t i = a_newFormatStart;
 		for(auto character = characterForIndex(i); character; ++i, character = characterForIndex(i)){
@@ -738,6 +739,7 @@ namespace MV {
 	}
 
 	void FormattedText::erase(size_t a_startIndex, size_t a_count) {
+		auto silenced = scene()->silence();
 		if(a_count == 0){
 			return;
 		}
@@ -770,6 +772,7 @@ namespace MV {
 
 	void FormattedText::removeLines(size_t a_startIndex, size_t a_count) {
 		if(a_count > 0){
+			auto silenced = scene()->silence();
 			lines.erase(lines.begin() + a_startIndex, lines.begin() + a_startIndex + a_count);
 			for(size_t i = a_startIndex; i < lines.size(); ++i){
 				lines[i]->index(i);
@@ -787,6 +790,7 @@ namespace MV {
 		if(a_characters.empty()){
 			return 0;
 		}
+		auto silenced = scene()->silence();
 		std::shared_ptr<FormattedLine> line;
 		size_t characterInLineIndex;
 		std::tie(line, characterInLineIndex) = lineForCharacterIndex(a_startIndex);
@@ -817,6 +821,7 @@ namespace MV {
 		if(a_characters.empty()){
 			return;
 		}
+		auto silenced = scene()->silence();
 		std::shared_ptr<FormattedLine> line;
 		size_t characterInLineIndex;
 		std::tie(line, characterInLineIndex) = lineForCharacterIndex(a_startIndex);
@@ -827,6 +832,7 @@ namespace MV {
 		if(a_characters.empty()){
 			return;
 		}
+		auto silenced = scene()->silence();
 		if(lines.empty()){
 			lines.push_back(FormattedLine::make(*this, lines.size()));
 		}
@@ -838,6 +844,7 @@ namespace MV {
 		if(a_characters.empty()){
 			return 0;
 		}
+		auto silenced = scene()->silence();
 		std::shared_ptr<FormattedState> foundState = defaultState();
 		if(lines.empty()){
 			lines.push_back(FormattedLine::make(*this, lines.size()));
@@ -867,15 +874,19 @@ namespace MV {
 	}
 
 	MV::PointPrecision FormattedText::minimumLineHeight(PointPrecision a_minimumLineHeight) {
-		minimumTextLineHeight = a_minimumLineHeight;
-		for(auto line : lines){
-			line->minimumLineHeightChanged();
+		if (!equals(minimumTextLineHeight, a_minimumLineHeight)) {
+			minimumTextLineHeight = a_minimumLineHeight;
+			auto silenced = scene()->silence();
+			for (auto line : lines) {
+				line->minimumLineHeightChanged();
+			}
 		}
 		return minimumTextLineHeight;
 	}
 
 	void FormattedText::justification(TextJustification a_newJustification) {
 		if(textJustification != a_newJustification){
+			auto silenced = scene()->silence();
 			textJustification = a_newJustification;
 			for(auto &line : lines){
 				line->applyAlignmentAndScale();
@@ -888,17 +899,23 @@ namespace MV {
 	}
 
 	void FormattedText::wrapping(TextWrapMethod a_newWrapping, PointPrecision a_newWidth) {
-		textWidth = a_newWidth;
-		textWrapping = a_newWrapping;
-		for (auto&& line : lines) {
-			line->fixVisuals();
+		if (textWrapping != a_newWrapping || !equals(textWidth, a_newWidth)) {
+			auto silenced = scene()->silence();
+			textWidth = a_newWidth;
+			textWrapping = a_newWrapping;
+			for (auto&& line : lines) {
+				line->fixVisuals();
+			}
 		}
 	}
 
 	void FormattedText::wrapping(TextWrapMethod a_newWrapping) {
-		textWrapping = a_newWrapping;
-		for (auto&& line : lines) {
-			line->fixVisuals();
+		if (textWrapping != a_newWrapping) {
+			auto silenced = scene()->silence();
+			textWrapping = a_newWrapping;
+			for (auto&& line : lines) {
+				line->fixVisuals();
+			}
 		}
 	}
 

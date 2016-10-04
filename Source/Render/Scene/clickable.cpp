@@ -177,10 +177,10 @@ namespace MV {
 
 					visit(clippedParent,
 						[&](const MV::Scene::SafeComponent<MV::Scene::Clipped> &a_clipped) {
-						screenBounds = a_clipped->owner()->screenFromLocal(a_clipped->bounds());
-					}, [&](const MV::Scene::SafeComponent<MV::Scene::Stencil> &a_stencil) {
-						screenBounds = a_stencil->owner()->screenFromLocal(a_stencil->bounds());
-					});
+							screenBounds = a_clipped->owner()->screenFromLocal(a_clipped->bounds());
+						}, [&](const MV::Scene::SafeComponent<MV::Scene::Stencil> &a_stencil) {
+							screenBounds = a_stencil->owner()->screenFromLocal(a_stencil->bounds());
+						});
 
 					if (!screenBounds.contains(a_state.position())) {
 						return false;

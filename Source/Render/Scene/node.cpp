@@ -522,13 +522,14 @@ namespace MV {
 				if (!childNodes.empty()) {
 					localChildBounds = childNodes[0]->bounds();
 					for (size_t i = 1; i < childNodes.size(); ++i) {
-						auto nodeBounds = childNodes[i]->bounds();
-						if (!nodeBounds.empty()) {
-							localChildBounds.expandWith(nodeBounds);
+						if (childNodes[i]->selfVisible()) {
+							auto nodeBounds = childNodes[i]->bounds();
+							if (!nodeBounds.empty()) {
+								localChildBounds.expandWith(nodeBounds);
+							}
 						}
 					}
-				}
-				else {
+				} else {
 					localChildBounds = BoxAABB<>();
 				}
 			}
@@ -536,8 +537,6 @@ namespace MV {
 		}
 
 		void Node::recalculateMatrix() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
-			
 			bool eitherMatrixUpdated = localMatrixDirty || worldMatrixDirty;
 			if (localMatrixDirty) {
 				localMatrixDirty = false;
@@ -585,6 +584,7 @@ namespace MV {
 			onRemove(onRemoveSignal),
 			onTransformChange(onTransformChangeSignal),
 			onLocalBoundsChange(onLocalBoundsChangeSignal),
+			onChildBoundsChange(onChildBoundsChangeSignal),
 			onOrderChange(onOrderChangeSignal),
 			onAlphaChange(onAlphaChangeSignal),
 			onChange(onChangeSignal),
@@ -687,17 +687,26 @@ namespace MV {
 			if (!allowDraw) {
 				changedState = true;
 				allowDraw = true;
-				onResumeSignal(self);
+				markParentBoundsDirty();
+				onShowSignal(self);
 			}
 			if (!allowUpdate) {
 				changedState = true;
 				allowUpdate = true;
-				onShowSignal(self);
+				onResumeSignal(self);
 			}
 			if (changedState) {
 				onEnableSignal(self);
 			}
 			return self;
+		}
+
+		std::shared_ptr<MV::Scene::Node> Node::active(bool a_isActive) {
+			if (a_isActive) {
+				return enable();
+			} else {
+				return disable();
+			}
 		}
 
 		std::shared_ptr<Node> Node::disable() {
@@ -706,12 +715,13 @@ namespace MV {
 			if (allowDraw) {
 				changedState = true;
 				allowDraw = false;
-				onPauseSignal(self);
+				markParentBoundsDirty();
+				onHideSignal(self);
 			}
 			if (allowUpdate) {
 				changedState = true;
 				allowUpdate = false;
-				onHideSignal(self);
+				onPauseSignal(self);
 			}
 			if (changedState) {
 				onDisableSignal(self);
@@ -731,6 +741,14 @@ namespace MV {
 			return self;
 		}
 
+		std::shared_ptr<MV::Scene::Node> Node::updating(bool a_isUpdating) {
+			if (a_isUpdating) {
+				return resume();
+			} else {
+				return pause();
+			}
+		}
+
 		std::shared_ptr<Node> Node::pause() {
 			auto self = shared_from_this();
 			if (allowUpdate) {
@@ -747,6 +765,7 @@ namespace MV {
 			auto self = shared_from_this();
 			if (!allowDraw) {
 				allowDraw = true;
+				markParentBoundsDirty();
 				onShowSignal(self);
 				if (allowUpdate == true) {
 					onEnableSignal(self);
@@ -759,12 +778,21 @@ namespace MV {
 			auto self = shared_from_this();
 			if (allowDraw) {
 				allowDraw = false;
+				markParentBoundsDirty();
 				onHideSignal(self);
 				if (allowUpdate == false) {
 					onDisableSignal(self);
 				}
 			}
 			return self;
+		}
+
+		std::shared_ptr<MV::Scene::Node> Node::visible(bool a_isVisible) {
+			if (a_isVisible) {
+				return show();
+			} else {
+				return hide();
+			}
 		}
 
 		void Node::fixChildOwnership() {
@@ -780,10 +808,9 @@ namespace MV {
 			}
 		}
 
-		void Node::recalculateMatrixAfterLoad() {
+		void Node::quietLocalMatrixFix() {
 			localMatrixDirty = false;
 			worldMatrixDirty = false;
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			localMatrixTransform.makeIdentity();
 
 			if (!translateTo.atOrigin()) {
@@ -803,6 +830,18 @@ namespace MV {
 				worldMatrixTransform = localMatrixTransform;
 				parentAccumulatedAlpha = nodeAlpha;
 			}
+		}
+
+		void Node::quietLocalAndChildMatrixFix() {
+			quietLocalMatrixFix();
+
+			for (auto&& child : childNodes) {
+				child->quietLocalAndChildMatrixFix();
+			}
+		}
+
+		void Node::recalculateMatrixAfterLoad() {
+			quietLocalMatrixFix();
 
 			for (auto&& child : childNodes) {
 				child->recalculateMatrixAfterLoad();
@@ -1045,6 +1084,15 @@ namespace MV {
 			}
 		}
 
+		void Node::markParentBoundsDirty() {
+			auto* currentParent = myParent;
+			while (currentParent) {
+				currentParent->dirtyChildBounds = true;
+				currentParent->onChildBoundsChangeSignal(currentParent->shared_from_this());
+				currentParent = currentParent->myParent;
+			}
+		}
+
 		void Node::unsilenceInternal(bool a_callBatched /*= true*/, bool a_callChanged /*= true*/) {
 			const std::shared_ptr<Node> self = shared_from_this();
 			bool changed = false;
@@ -1268,16 +1316,19 @@ namespace MV {
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Scale &)>(&Node::worldScale)), "worldScale");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Scale &)>(&Node::addScale)), "addScale");
 
+			a_script.add(chaiscript::fun(static_cast<bool(Node::*)() const>(&Node::visible)), "visible");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(bool)>(&Node::visible)), "visible");
+			a_script.add(chaiscript::fun(static_cast<bool(Node::*)() const>(&Node::visible)), "updating");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(bool)>(&Node::visible)), "updating");
+			a_script.add(chaiscript::fun(static_cast<bool(Node::*)() const>(&Node::visible)), "active");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(bool)>(&Node::visible)), "active");
+
 			a_script.add(chaiscript::fun(&Node::show), "show");
 			a_script.add(chaiscript::fun(&Node::hide), "hide");
-			a_script.add(chaiscript::fun(&Node::visible), "visible");
-
 			a_script.add(chaiscript::fun(&Node::pause), "pause");
 			a_script.add(chaiscript::fun(&Node::resume), "resume");
-			a_script.add(chaiscript::fun(&Node::updating), "updating");
 			a_script.add(chaiscript::fun(&Node::disable), "disable");
 			a_script.add(chaiscript::fun(&Node::enable), "enable");
-			a_script.add(chaiscript::fun(&Node::active), "active");
 
 			a_script.add(chaiscript::fun(&Node::bounds), "bounds");
 			a_script.add(chaiscript::fun(&Node::worldBounds), "worldBounds");

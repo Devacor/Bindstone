@@ -85,6 +85,7 @@ namespace MV {
 
 			Signal<BasicSignature> onTransformChangeSignal;
 			Signal<BasicSignature> onLocalBoundsChangeSignal;
+			Signal<BasicSignature> onChildBoundsChangeSignal;
 			Signal<BasicSignature> onOrderChangeSignal;
 			Signal<BasicSignature> onAlphaChangeSignal;
 			
@@ -130,6 +131,7 @@ namespace MV {
 
 			SignalRegister<BasicSignature> onTransformChange;
 			SignalRegister<BasicSignature> onLocalBoundsChange;
+			SignalRegister<BasicSignature> onChildBoundsChange;
 			SignalRegister<BasicSignature> onOrderChange;
 			SignalRegister<BasicSignature> onAlphaChange;
 
@@ -533,6 +535,7 @@ namespace MV {
 			std::shared_ptr<Node> show();
 			std::shared_ptr<Node> hide();
 
+			std::shared_ptr<Node> visible(bool a_isVisible);
 			bool visible() const {
 				return allowDraw && (myParent ? myParent->visible() : true);
 			}
@@ -544,6 +547,7 @@ namespace MV {
 			std::shared_ptr<Node> pause();
 			std::shared_ptr<Node> resume();
 
+			std::shared_ptr<Node> updating(bool a_isUpdating);
 			bool updating() const {
 				return allowUpdate && (myParent ? myParent->updating() : true);
 			}
@@ -555,6 +559,7 @@ namespace MV {
 			std::shared_ptr<Node> disable();
 			std::shared_ptr<Node> enable();
 
+			std::shared_ptr<Node> active(bool a_isActive);
 			bool active() const {
 				return allowDraw && allowUpdate && (myParent ? myParent->active() : true);
 			}
@@ -646,6 +651,16 @@ namespace MV {
 
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 
+			//use this to suppress messages when you know what the fuck you're doing.
+			void quietLocalAndChildMatrixFix();
+			void quietLocalMatrixFix();
+
+			//loud recalculations if you know what you're doing.
+			void recalculateChildBounds();
+			void recalculateLocalBounds();
+			void recalculateAlpha();
+			void recalculateMatrix();
+
 		private:
 			Task rootTask;
 
@@ -700,13 +715,7 @@ namespace MV {
 				onLocalBoundsChangeSignal(shared_from_this());
 			}
 
-			void markParentBoundsDirty() {
-				auto* currentParent = myParent;
-				while (currentParent) {
-					currentParent->dirtyChildBounds = true;
-					currentParent = currentParent->myParent;
-				}
-			}
+			void markParentBoundsDirty();
 
 			void silenceInternal() {
 				onChildAddSignal.block();
@@ -790,11 +799,6 @@ namespace MV {
 			bool allowSerialize = true;
 
 			void markMatrixDirty(bool a_rootCall = true);
-
-			void recalculateChildBounds();
-			void recalculateLocalBounds();
-			void recalculateAlpha();
-			void recalculateMatrix();
 
 			void recalculateMatrixAfterLoad();
 

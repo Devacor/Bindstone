@@ -106,8 +106,8 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 
 		auto editableNode = std::make_shared<EditableNode>(newNode, panel.editor(), panel.resources().mouse);
 
-		panel.loadPanel<SelectedNodeEditorPanel>(editableNode);
 		panel.resources().editor->sceneUpdated();
+		panel.loadPanel<SelectedNodeEditorPanel>(editableNode);
 	});
 
 	auto deleteButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Delete", buttonSize, UTF_CHAR_STR("Delete"));
@@ -1193,14 +1193,14 @@ void SelectedPathMapEditorPanel::onSceneZoom() {
 DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	EditorPanel(a_panel) {
 	auto node = panel.content();
-	auto grid = node->make("grid")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
+	auto grid = node->make("grid");
+	auto gridComponent = grid->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
 		color({InterfaceColors::BOX_BACKGROUND})->margin({4.0f, 4.0f})->
-		padding({2.0f, 2.0f})->owner();
+		padding({2.0f, 2.0f});
 	auto createButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Create", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Create"));
 	fileName = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Filename", MV::size(110.0f, 27.0f), UTF_CHAR_STR("map.scene"));
 	auto saveButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Save", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Save"));
 	auto loadButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Load", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Load"));
-
 	panel.updateBoxHeader(grid->bounds().width());
 	//panel.updateBoxHeader(grid->component<MV::Scene::Grid>()->bounds().width());
 

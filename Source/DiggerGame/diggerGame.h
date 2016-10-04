@@ -114,9 +114,9 @@ public:
 		mouse(a_mouse),
 		sharedTextures(a_sharedTextures){
 
-		environment->repositionManual();
-		foreground->repositionManual();
-		background->repositionManual();
+		environment->repositionManual(true);
+		foreground->repositionManual(true);
+		background->repositionManual(true);
 
 		loadTextures();
 

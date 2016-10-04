@@ -52,11 +52,12 @@ namespace MV {
 			//unlikely you'll need to call this directly unless set to manual reposition
 			void layoutCells();
 
-			void repositionManual() {
-				manualReposition = true;
+			bool repositionManual() const {
+				return manualReposition;
 			}
-			void repositionAutomatic() {
-				manualReposition = false;
+			std::shared_ptr<Grid> repositionManual(bool a_repositionManual) {
+				manualReposition = a_repositionManual;
+				return std::static_pointer_cast<Grid>(shared_from_this());
 			}
 
 		protected:
@@ -129,7 +130,6 @@ namespace MV {
 			void layoutChildSize();
 
 			void observeOwner(const std::shared_ptr<Node>& a_node);
-			void observeChildNode(const std::shared_ptr<Node>& a_node);
 
 			std::shared_ptr<Node> gridTileForYIndexAndPosition(int yIndex, const Point<> &a_coordinate, bool a_throwOnFail);
 
@@ -138,16 +138,14 @@ namespace MV {
 			std::list<Node::BasicSharedSignalType> basicSignals;
 			std::list<Node::ParentInteractionSharedSignalType> parentInteractionSignals;
 
-			std::map<std::shared_ptr<Node>, std::list<Node::BasicSharedSignalType>> childSignals;
-
 			PointPrecision maximumWidth;
 			Size<> cellDimensions;
 			std::pair<Point<>, Point<>> cellPadding;
 			std::pair<Point<>, Point<>> margins;
 			Point<> topLeftOffset;
 			size_t cellColumns;
-			bool allowDirty = true;
-			bool dirtyGrid;
+			bool inLayoutCall = false;
+			bool dirtyGrid = true;
 			bool includeChildrenInChildSize = true;
 			bool manualReposition = false;
 

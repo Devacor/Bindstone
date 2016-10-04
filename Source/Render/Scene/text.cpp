@@ -28,9 +28,9 @@ namespace MV{
 		void Text::initialize() {
 			Drawable::initialize();
 			if (ownerIsAlive()) {
-				formattedText->scene()->id(guid("TEXT_"));
+				auto silenceSelf = owner()->silence();
+				formattedText->scene()->id(guid("TEXT_"))->position(points[0]);
 				owner()->add(formattedText->scene());
-				formattedText->scene()->position(points[0]);
 
 				cursorSprite = owner()->make(guid("CURSOR_"))->serializable(false)->attach<Sprite>()->size({ 2.0f, 5.0f });
 				cursorSprite->hide();
@@ -47,11 +47,13 @@ namespace MV{
 			} else if (justification() == TextJustification::RIGHT) {
 				xPosition = formattedText->width() - 2.0f;
 			}
+			auto textSilence = formattedText->scene()->silence();
 			auto cursorHeight = formattedText->defaultState()->font->height();
 			auto linePositionY = formattedText->positionForLine(line->index());
 			auto cursorLineHeight = std::max<float>(formattedText->minimumLineHeight(), (line) ? line->height() : cursorHeight);
 			linePositionY += cursorLineHeight / 2.0f - cursorHeight / 2.0f;
 
+			auto cursorSilence = cursorSprite->owner()->silence();
 			cursorSprite->owner()->position(formattedText->scene()->position() + MV::Point<>(xPosition, linePositionY));
 			cursorSprite->size({ 2.0f, cursorHeight });
 
@@ -62,6 +64,7 @@ namespace MV{
 
 		void Text::positionCursorWithCharacter(size_t a_maxCursor, std::shared_ptr<FormattedCharacter> a_cursorCharacter) {
 			if (cursorSprite && cursorSprite->ownerIsAlive()) {
+				auto cursorSilence = cursorSprite->owner()->silence();
 				cursorSprite->owner()->position(formattedText->scene()->position() + ((a_cursorCharacter->position() + a_cursorCharacter->offset()) * a_cursorCharacter->scale()));
 				cursorSprite->size({ 2.0f, a_cursorCharacter->characterSize().height });
 				if (cursor >= a_maxCursor) {

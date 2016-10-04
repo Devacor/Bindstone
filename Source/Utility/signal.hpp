@@ -38,7 +38,7 @@ namespace MV {
 
 		template <class ...Arg>
 		void notify(Arg &&... a_parameters){
-			if(!isBlocked){
+			if(!blocked()){
 				if (scriptCallback.empty()) {
 					callback(std::forward<Arg>(a_parameters)...);
 				} else {
@@ -48,7 +48,7 @@ namespace MV {
 		}
 		template <class ...Arg>
 		void operator()(Arg &&... a_parameters){
-			if(!isBlocked){
+			if(!blocked()){
 				if (scriptCallback.empty()) {
 					callback(std::forward<Arg>(a_parameters)...);
 				}else{
@@ -59,7 +59,7 @@ namespace MV {
 
 		template <class ...Arg>
 		void notify(){
-			if(!isBlocked){
+			if(!blocked()){
 				if (scriptCallback.empty()) {
 					callback();
 				} else {
@@ -69,7 +69,7 @@ namespace MV {
 		}
 		template <class ...Arg>
 		void operator()(){
-			if(!isBlocked){
+			if(!blocked()){
 				if (scriptCallback.empty()) {
 					callback();
 				} else {
@@ -79,13 +79,16 @@ namespace MV {
 		}
 
 		void block(){
-			isBlocked = true;
+			++isBlocked;
 		}
 		void unblock(){
-			isBlocked = false;
+			--isBlocked;
+			if (isBlocked < 0) {
+				isBlocked = 0;
+			}
 		}
 		bool blocked() const{
-			return isBlocked;
+			return isBlocked != 0;
 		}
 
 		//For sorting and comparison (removal/avoiding duplicates)
@@ -193,7 +196,7 @@ namespace MV {
 			}
 		}
 
-		bool isBlocked = false;
+		int isBlocked = 0;
 		std::function< T > callback;
 		std::string scriptCallback;
 		std::shared_ptr<std::vector<std::string>> orderedParameterNames;
@@ -307,27 +310,29 @@ namespace MV {
 			clearScript();
 		}
 
-		void block(std::function<T> a_blockedCallback = nullptr) {
-			isBlocked = true;
-			blockedCallback = a_blockedCallback;
-			calledWhileBlocked = false;
+		void block() {
+			if (isBlocked++ == 0) {
+				calledWhileBlocked = false;
+			}
 		}
 
 		bool unblock() {
-			if (isBlocked) {
-				isBlocked = false;
+			if (--isBlocked == 0) {
 				return calledWhileBlocked;
+			}
+			if (isBlocked < 0) {
+				isBlocked = 0;
 			}
 			return false;
 		}
 
 		bool blocked() const {
-			return isBlocked;
+			return isBlocked != 0;
 		}
 
 		template <typename ...Arg>
 		void operator()(Arg &&... a_parameters){
-			if (!isBlocked) {
+			if (!blocked()) {
 				inCall = true;
 				SCOPE_EXIT{
 					inCall = false;
@@ -349,7 +354,7 @@ namespace MV {
 				}
 			}
 
-			if (isBlocked) {
+			if (blocked()) {
 				calledWhileBlocked = true;
 				if (blockedCallback) {
 					blockedCallback(std::forward<Arg>(a_parameters)...);
@@ -359,7 +364,7 @@ namespace MV {
 
 		template <typename ...Arg>
 		void operator()(){
-			if (!isBlocked) {
+			if (!blocked()) {
 				inCall = true;
 				SCOPE_EXIT{
 					inCall = false;
@@ -381,7 +386,7 @@ namespace MV {
 				}
 			}
 
-			if (isBlocked){
+			if (blocked()){
 				calledWhileBlocked = true;
 				if (blockedCallback) {
 					blockedCallback(std::forward<Arg>(a_parameters)...);
@@ -480,7 +485,7 @@ namespace MV {
 		std::set< std::weak_ptr< Receiver<T> >, std::owner_less<std::weak_ptr<Receiver<T>>> > observers;
 		size_t observerLimit = std::numeric_limits<size_t>::max();
 		bool inCall = false;
-		bool isBlocked = false;
+		int isBlocked = 0;
 		std::function<T> blockedCallback;
 		std::set< std::shared_ptr<Receiver<T>> > disconnectQueue;
 		bool calledWhileBlocked = false;

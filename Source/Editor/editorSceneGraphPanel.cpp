@@ -3,16 +3,6 @@
 
 void SceneGraphPanel::clickedChild(std::shared_ptr<MV::Scene::Node> a_child) {
 	sharedResources.editor->panel().loadPanel<SelectedNodeEditorPanel>(std::make_shared<EditableNode>(a_child, root, sharedResources.mouse));
-// 	if(a_child->component<MV::Scene::Sprite>(true, false)){
-// 		sharedResources.editor->panel().loadPanel<SelectedRectangleEditorPanel>(std::make_shared<EditableRectangle>(a_child->component<MV::Scene::Sprite>(), root, sharedResources.mouse));
-// 	} else if(a_child->component<MV::Scene::Emitter>(true, false)){
-// 		auto emitter = a_child->component<MV::Scene::Emitter>();
-// 		auto editableEmitter = std::make_shared<EditableEmitter>(emitter, root, sharedResources.mouse);
-// 		editableEmitter->size(emitter->bounds().size());
-// 		sharedResources.editor->panel().loadPanel<SelectedEmitterEditorPanel>(editableEmitter);
-// 	} else if (a_child->component<MV::Scene::Grid>(true, false)) {
-// 		sharedResources.editor->panel().loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(a_child->component<MV::Scene::Grid>(), root, sharedResources.mouse));
-// 	}
 }
 
 void SceneGraphPanel::loadButtons(std::shared_ptr<MV::Scene::Node> a_grid, std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth /*= 0*/) {
@@ -37,7 +27,9 @@ void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nu
 		scene = a_newScene;
 	}
 	auto gridNode = MV::Scene::Node::make(root->renderer(), "SceneNodeGrid");
-	grid = gridNode->attach<MV::Scene::Grid>()->columns(1)->color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f });
+	auto newGrid = gridNode->attach<MV::Scene::Grid>();
+	newGrid->columns(1)->color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->repositionManual(true);
+	grid = newGrid.get();
 
 	makeChildButton(scene, 0, gridNode);
 
@@ -62,7 +54,9 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 	auto buttonName = std::string(a_depth * 3, ' ') + a_node->id();
 
 	auto button = makeSceneButton(a_grid, *sharedResources.textLibrary, *sharedResources.mouse, a_node->id(), buttonSize, buttonName);
+	auto expandButton = makeButton(button->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Expand", MV::Size<>(18.0f, 18.0f), collapsed[a_node.get()] ? "+" : "-");
 
+	expandButton->owner()->position({ 182.0f, 0.0f });
 	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.mouse)->size(MV::size(buttonSize.width, 5.0f));
 	dragBetween->onDrop.connect("dropped", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable, const MV::Point<float> &) {
 		if (activeSelection) {
@@ -121,5 +115,38 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 		}
 	});
 
-	loadButtons(a_grid, a_node, a_depth + 1);
+	auto gridNode = a_grid->make();
+	auto newGrid = gridNode->attach<MV::Scene::Grid>();
+	newGrid->columns(1)->color({ BOX_BACKGROUND })->repositionManual(true);
+	std::weak_ptr<MV::Scene::Node> weakGrid = gridNode;
+	MV::Scene::Node* nodePointer = a_node.get();
+	expandButton->onAccept.connect("Expand", [=](auto&& a_self) {
+		if (!weakGrid.expired()) {
+			if (weakGrid.lock()->visible()) {
+				collapsed[nodePointer] = true;
+				weakGrid.lock()->hide();
+				a_self->owner()->component<MV::Scene::Button>()->text("+");
+			} else {
+				collapsed[nodePointer] = false;
+				weakGrid.lock()->show();
+				a_self->owner()->component<MV::Scene::Button>()->text("-");
+			}
+			layoutParents(weakGrid.lock());
+		}
+	});
+
+	if (collapsed[a_node.get()]) {
+		gridNode->hide();
+	}
+
+	loadButtons(gridNode, a_node, a_depth + 1);
+}
+
+void SceneGraphPanel::layoutParents(std::shared_ptr<MV::Scene::Node> a_parent) {
+	auto parentGrids = a_parent->componentsInParents<MV::Scene::Grid>(true, true);
+	for (auto&& parentGrid : parentGrids) {
+		visit(parentGrid, [&](const MV::Scene::SafeComponent<MV::Scene::Grid> &a_clipped) {
+			a_clipped->layoutCells();
+		});
+	}
 }

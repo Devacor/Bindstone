@@ -17,7 +17,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Grid> Grid::padding(const std::pair<Point<>, Point<>> &a_padding) {
-			dirtyGrid = dirtyGrid || (allowDirty && cellPadding != a_padding);
+			dirtyGrid = dirtyGrid || (cellPadding != a_padding);
 			cellPadding = a_padding;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
@@ -27,7 +27,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Grid> Grid::padding(const Size<> &a_padding) {
-			dirtyGrid = dirtyGrid || (allowDirty &&
+			dirtyGrid = dirtyGrid || (
 				(!equals(a_padding.width, cellPadding.first.x) || !equals(a_padding.width, cellPadding.second.x) ||
 				!equals(a_padding.height, cellPadding.first.y) || !equals(a_padding.height, cellPadding.second.y)));
 			cellPadding.first = toPoint(a_padding);
@@ -40,7 +40,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Grid> Grid::margin(const std::pair<Point<>, Point<>> &a_margin) {
-			dirtyGrid = dirtyGrid || (allowDirty && margins != a_margin);
+			dirtyGrid = dirtyGrid || (margins != a_margin);
 			margins = a_margin;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
@@ -50,7 +50,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Grid> Grid::margin(const Size<> &a_margin) {
-			dirtyGrid = dirtyGrid || (allowDirty &&
+			dirtyGrid = dirtyGrid || (
 				(!equals(a_margin.width, margins.first.x) || !equals(a_margin.width, margins.second.x) ||
 				!equals(a_margin.height, margins.first.y) || !equals(a_margin.height, margins.second.y)));
 			margins.first = toPoint(a_margin);
@@ -59,25 +59,25 @@ namespace MV {
 		}
 
 		std::shared_ptr<Grid> Grid::cellSize(const Size<> &a_size) {
-			dirtyGrid = dirtyGrid || (allowDirty && a_size != cellDimensions);
+			dirtyGrid = dirtyGrid || (a_size != cellDimensions);
 			cellDimensions = a_size;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
 		std::shared_ptr<Grid> Grid::gridWidth(PointPrecision a_rowWidth) {
-			dirtyGrid = dirtyGrid || (allowDirty && maximumWidth != a_rowWidth);
+			dirtyGrid = dirtyGrid || (maximumWidth != a_rowWidth);
 			maximumWidth = a_rowWidth;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
 		std::shared_ptr<MV::Scene::Grid> Grid::gridOffset(const Point<> &a_topLeftOffset) {
-			dirtyGrid = dirtyGrid || (allowDirty && topLeftOffset != a_topLeftOffset);
+			dirtyGrid = dirtyGrid || (topLeftOffset != a_topLeftOffset);
 			topLeftOffset = a_topLeftOffset;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
 		std::shared_ptr<Grid> Grid::columns(size_t a_columns, bool a_useChildrenForSize) {
-			dirtyGrid = dirtyGrid || (allowDirty && (cellColumns != a_columns || includeChildrenInChildSize != a_useChildrenForSize));
+			dirtyGrid = dirtyGrid || ((cellColumns != a_columns || includeChildrenInChildSize != a_useChildrenForSize));
 			cellColumns = a_columns;
 			includeChildrenInChildSize = a_useChildrenForSize;
 			return std::static_pointer_cast<Grid>(shared_from_this());
@@ -108,15 +108,18 @@ namespace MV {
 		}
 
 		void Grid::layoutCells() {
-			allowDirty = false;
-			SCOPE_EXIT{ allowDirty = true; };
+			if (inLayoutCall) {
+				return;
+			}
+			inLayoutCall = true;
+			SCOPE_EXIT{ inLayoutCall = false; };
 			dirtyGrid = false;
-			
 			if (cellDimensions.width > 0.0f || cellDimensions.height > 0.0f) {
 				layoutCellSize();
 			} else {
 				layoutChildSize();
 			}
+			dirtyGrid = false;
 		}
 
 		Grid::Grid(const std::weak_ptr<Node> &a_owner) :
@@ -161,6 +164,7 @@ namespace MV {
 			for (auto&& node : *owner()) {
 				if (node->visible()) {
 					cellPosition = positionChildNode(cellPosition, index, node, cellDimensions, calculatedBounds, lineHeight);
+					node->recalculateMatrix();
 					++index;
 				}
 			}
@@ -212,6 +216,7 @@ namespace MV {
 					auto shapeSize = nodeBounds.size();
 					cellPosition = positionChildNode(cellPosition, index, node, shapeSize, calculatedBounds, lineHeight);
 					node->translate(nodeBounds.minPoint * -1.0f);
+					node->recalculateMatrix();
 					++index;
 				}
 			}
@@ -226,45 +231,29 @@ namespace MV {
 		}
 
 		void Grid::observeOwner(const std::shared_ptr<Node>& a_node) {
-			basicSignals.push_back(a_node->onChildAdd.connect([&](const std::shared_ptr<Node> &a_this) {
-				if (a_this->id() == "Background") {
-					std::cout << "Background child add!" << std::endl;
-				}
-				dirtyGrid = dirtyGrid || allowDirty;
-				observeChildNode(a_this);
+			basicSignals.push_back(a_node->onChildBoundsChange.connect([&](const std::shared_ptr<Node> &a_this) {
+				dirtyGrid = dirtyGrid || !manualReposition;
 			}));
 			basicSignals.push_back(a_node->onBoundsRequest.connect([&](const std::shared_ptr<Node> &a_this){
-				if (dirtyGrid) {
+				if (dirtyGrid && !manualReposition) {
 					layoutCells();
 				}
 			}));
+			basicSignals.push_back(a_node->onLocalBoundsChange.connect([&](const std::shared_ptr<Node> &a_child) {
+				dirtyGrid = dirtyGrid || !manualReposition;
+			}));
+			basicSignals.push_back(a_node->onTransformChange.connect([&](const std::shared_ptr<Node> &a_child) {
+				dirtyGrid = dirtyGrid || !manualReposition;
+			}));
+			basicSignals.push_back(a_node->onChildAdd.connect([&](const std::shared_ptr<Node> &a_child) {
+				dirtyGrid = true;
+			}));
 			parentInteractionSignals.push_back(a_node->onChildRemove.connect([&](const std::shared_ptr<Node> &a_parent, const std::shared_ptr<Node> &a_child) {
-				dirtyGrid = dirtyGrid || allowDirty;
+				dirtyGrid = true;
 			}));
 			if (owner()->id() == "Background") {
 				std::cout << "Background register!" << std::endl;
 			}
-			for (auto&& child : *a_node) {
-				observeChildNode(child);
-			}
-		}
-
-		void Grid::observeChildNode(const std::shared_ptr<Node>& a_node) {
-			auto markDirty = [&](const std::shared_ptr<Node> &a_this) {
-				dirtyGrid = dirtyGrid || allowDirty;
-			};
-			auto& childSignalBucket = childSignals[a_node];
-			childSignalBucket.push_back(a_node->onOrderChange.connect(markDirty));
-			childSignalBucket.push_back(a_node->onShow.connect(markDirty));
-			childSignalBucket.push_back(a_node->onHide.connect(markDirty));
-			childSignalBucket.push_back(a_node->onTransformChange.connect(markDirty));
-			childSignalBucket.push_back(a_node->onLocalBoundsChange.connect(markDirty));
-			childSignalBucket.push_back(a_node->onRemove.connect([&](const std::shared_ptr<Node> &a_this){
-				auto found = childSignals.find(a_this);
-				if (found != childSignals.end()) {
-					childSignals.erase(found);
-				}
-			}));
 		}
 
 		std::shared_ptr<Node> Grid::gridTileForYIndexAndPosition(int yIndex, const Point<> &a_coordinate, bool a_throwOnFail) {
@@ -310,7 +299,7 @@ namespace MV {
 		}
 
 		BoxAABB<> Grid::boundsImplementation() {
-			if (dirtyGrid) {
+			if (dirtyGrid && !inLayoutCall) {
 				layoutCells();
 			}
 			return Drawable::boundsImplementation();
@@ -319,7 +308,7 @@ namespace MV {
 		void Grid::boundsImplementation(const BoxAABB<> &a_bounds) {
 			topLeftOffset = a_bounds.minPoint;
 			maximumWidth = a_bounds.width();
-			dirtyGrid = dirtyGrid || allowDirty;
+			dirtyGrid = true;
 		}
 
 		void Grid::initialize() {

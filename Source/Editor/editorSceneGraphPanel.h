@@ -32,12 +32,14 @@ private:
 
 	void clickedChild(std::shared_ptr<MV::Scene::Node> a_child);
 
+	void layoutParents(std::shared_ptr<MV::Scene::Node> a_parent);
+
 	SharedResources sharedResources;
 	std::shared_ptr<MV::Scene::Node> scene;
 	std::shared_ptr<MV::Scene::Node> root;
 	std::shared_ptr<MV::Scene::Node> box;
 	std::shared_ptr<MV::Scene::Grid> grid;
-
+	
 	std::shared_ptr<MV::Scene::Node> activeSelection;
 
 	bool removeSelection = false;
@@ -45,6 +47,8 @@ private:
 
 	std::string selectedPack;
 	std::shared_ptr<MV::TexturePack> activePack;
+
+	std::map<MV::Scene::Node*, bool> collapsed;
 };
 
 

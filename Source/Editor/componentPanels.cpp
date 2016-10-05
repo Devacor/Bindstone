@@ -210,32 +210,29 @@ void SelectedNodeEditorPanel::updateComponentEditButtons(bool a_attached) {
 	componentEditButtons.clear();
 	buttonSize = MV::size(110.0f, 27.0f);
 	auto componentList = controls->elementToEdit->components<MV::Scene::Sprite, MV::Scene::Text, MV::Scene::Grid, MV::Scene::Emitter, MV::Scene::Spine, MV::Scene::PathMap, MV::Scene::Button>(true);
-	int count = 0;
-	for (auto&& component : componentList) {
-		++count;
-		MV::visit(component,
+	
+	MV::visit_each(componentList,
 		[&](const MV::Scene::SafeComponent<MV::Scene::Sprite> &a_sprite) {
-			CreateSpriteComponentButton(a_sprite);
-		},
+		CreateSpriteComponentButton(a_sprite);
+	},
 		[&](const MV::Scene::SafeComponent<MV::Scene::Text> &a_text) {
-			CreateTextComponentButton(a_text);
-		},
+		CreateTextComponentButton(a_text);
+	},
 		[&](const MV::Scene::SafeComponent<MV::Scene::Grid> &a_grid) {
-			CreateGridComponentButton(a_grid);
-		},
+		CreateGridComponentButton(a_grid);
+	},
 		[&](const MV::Scene::SafeComponent<MV::Scene::Emitter> &a_emitter) {
-			CreateEmitterComponentButton(a_emitter);
-		},
+		CreateEmitterComponentButton(a_emitter);
+	},
 		[&](const MV::Scene::SafeComponent<MV::Scene::Spine> &a_spine) {
-			CreateSpineComponentButton(a_spine);
-		},
+		CreateSpineComponentButton(a_spine);
+	},
 		[&](const MV::Scene::SafeComponent<MV::Scene::PathMap> &a_pathMap) {
-			CreatePathMapComponentButton(a_pathMap);
-		},
+		CreatePathMapComponentButton(a_pathMap);
+	},
 		[&](const MV::Scene::SafeComponent<MV::Scene::Button> &a_button) {
-			CreateButtonComponentButton(a_button);
-		});
-	}
+		CreateButtonComponentButton(a_button);
+	});
 }
 
 MV::Scene::SafeComponent<MV::Scene::Button> SelectedNodeEditorPanel::CreateSpriteComponentButton(const MV::Scene::SafeComponent<MV::Scene::Sprite> & a_sprite) {

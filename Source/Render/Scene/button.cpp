@@ -149,11 +149,9 @@ namespace MV {
 		std::shared_ptr<Button> Button::text(const std::string &a_textString){
 			auto self = std::static_pointer_cast<Button>(shared_from_this());
 			auto textComponents = owner()->componentsInChildren<MV::Scene::Text>(false);
-			for (auto&& button : textComponents) {
-				MV::visit(button, [&](const MV::Scene::SafeComponent<MV::Scene::Text> &a_text) {
-					a_text->text(a_textString);
-				});
-			}
+			MV::visit_each(textComponents, [&](const MV::Scene::SafeComponent<MV::Scene::Text> &a_text) {
+				a_text->text(a_textString);
+			});
 			return self;
 		}
 

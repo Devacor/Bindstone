@@ -682,9 +682,6 @@
     <ClInclude Include="Source\Editor\texturePicker.h">
       <Filter>Source Files\Editor</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Utility\visitor.hpp">
-      <Filter>Source Files\Utility</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Render\Scene\palette.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
@@ -1181,6 +1178,9 @@
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
     <ClInclude Include="Source\Utility\signal.hpp">
+      <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\visitor.hpp">
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
   </ItemGroup>

@@ -175,7 +175,7 @@ namespace MV {
 				for (auto&& clippedParent : foundClippedParents) {
 					BoxAABB<int> screenBounds;
 
-					visit(clippedParent,
+					MV::visit(clippedParent,
 						[&](const MV::Scene::SafeComponent<MV::Scene::Clipped> &a_clipped) {
 							screenBounds = a_clipped->owner()->screenFromLocal(a_clipped->bounds());
 						}, [&](const MV::Scene::SafeComponent<MV::Scene::Stencil> &a_stencil) {

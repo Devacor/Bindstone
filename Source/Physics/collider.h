@@ -523,14 +523,11 @@ namespace MV {
 			std::shared_ptr<Collider> observePhysicsAngle(bool a_newValue) {
 				useBodyAngle = a_newValue;
 				if (a_newValue == true) {
-					auto colliders = owner()->components<Collider>();
-					for (auto&& collider : colliders) {
-						visit(collider, [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
-							if (a_collider.self().get() != this) {
-								a_collider->observePhysicsAngle(false);
-							}
-						});
-					}
+					MV::visit_each(owner()->components<Collider>(), [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
+						if (a_collider.self().get() != this) {
+							a_collider->observePhysicsAngle(false);
+						}
+					});
 				}
 				return std::static_pointer_cast<Collider>(shared_from_this());
 			}
@@ -541,14 +538,11 @@ namespace MV {
 			std::shared_ptr<Collider> observePhysicsPosition(bool a_newValue) {
 				useBodyPosition = a_newValue;
 				if (a_newValue == true) {
-					auto colliders = owner()->components<Collider>();
-					for (auto&& collider : colliders) {
-						visit(collider, [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
-							if (a_collider.self().get() != this) {
-								a_collider->observePhysicsPosition(false);
-							}
-						});
-					}
+					MV::visit_each(owner()->components<Collider>(), [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
+						if (a_collider.self().get() != this) {
+							a_collider->observePhysicsPosition(false);
+						}
+					});
 				}
 				return std::static_pointer_cast<Collider>(shared_from_this());
 			}

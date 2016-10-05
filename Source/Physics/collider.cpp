@@ -92,19 +92,16 @@ namespace MV {
 		void Collider::initialize() {
 			Component::initialize();
 			if (!loadedFromJson) {
-				auto colliders = owner()->components<Collider>();
-				for (auto&& collider : colliders) {
-					visit(collider, [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
-						if (a_collider.self().get() != this) {
-							if (a_collider->observePhysicsAngle()) {
-								useBodyAngle = false;
-							}
-							if (a_collider->observePhysicsPosition()) {
-								useBodyPosition = false;
-							}
+				MV::visit_each(owner()->components<Collider>(), [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
+					if (a_collider.self().get() != this) {
+						if (a_collider->observePhysicsAngle()) {
+							useBodyAngle = false;
 						}
-					});
-				}
+						if (a_collider->observePhysicsPosition()) {
+							useBodyPosition = false;
+						}
+					}
+				});
 			}
 			physicsBody = world->createBody(collisionAttributes.details);
 			physicsBody->SetUserData((void *)this);

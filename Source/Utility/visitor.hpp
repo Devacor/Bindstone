@@ -343,6 +343,16 @@ namespace MV {
 		LambdaVisitor<typename WhenReturnType<Funcs_...>::Type, Funcs_...> visitThisor(funcs...);
 		return accept_returning<typename WhenReturnType<Funcs_...>::Type>(val, visitThisor);
 	}
+
+	template <typename Val_, typename... Funcs_>
+	typename WhenReturnType<Funcs_...>::Type
+		visit_each(const std::vector<Val_> & collection, Funcs_ && ... funcs)
+	{
+		for (auto&& val : collection) {
+			LambdaVisitor<typename WhenReturnType<Funcs_...>::Type, Funcs_...> visitThisor(funcs...);
+			return accept_returning<typename WhenReturnType<Funcs_...>::Type>(val, visitThisor);
+		}
+	}
 }
 
 #endif

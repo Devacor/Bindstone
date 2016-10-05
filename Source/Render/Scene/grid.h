@@ -12,6 +12,8 @@ namespace MV {
 			friend cereal::access;
 
 		public:
+			enum class AutoLayoutPolicy {None, Self, Local, Child, Comprehensive};
+
 			DrawableDerivedAccessors(Grid)
 
 			std::shared_ptr<Grid> padding(const std::pair<Point<>, Point<>> &a_padding);
@@ -52,14 +54,13 @@ namespace MV {
 			//unlikely you'll need to call this directly unless set to manual reposition
 			void layoutCells();
 
-			bool repositionManual() const {
-				return manualReposition;
+			AutoLayoutPolicy layoutPolicy() const {
+				return policy;
 			}
-			std::shared_ptr<Grid> repositionManual(bool a_repositionManual) {
-				manualReposition = a_repositionManual;
+			std::shared_ptr<Grid> layoutPolicy(AutoLayoutPolicy a_policy) {
+				policy = a_policy;
 				return std::static_pointer_cast<Grid>(shared_from_this());
 			}
-
 		protected:
 			Grid(const std::weak_ptr<Node> &a_owner);
 
@@ -71,7 +72,11 @@ namespace MV {
 					layoutCells();
 				}
 				if (a_version > 1) {
-					archive(CEREAL_NVP(topLeftOffset));
+					archive(CEREAL_NVP(topLeftOffset), CEREAL_NVP(policy));
+				}
+				if (a_version <= 1) {
+					bool manualReposition;
+					archive(cereal::make_nvp("manualReposition", manualReposition));
 				}
 				archive(
 					CEREAL_NVP(maximumWidth),
@@ -80,7 +85,6 @@ namespace MV {
 					CEREAL_NVP(margins),
 					CEREAL_NVP(cellColumns),
 					CEREAL_NVP(includeChildrenInChildSize),
-					CEREAL_NVP(manualReposition),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
@@ -89,7 +93,12 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<Grid> &construct, std::uint32_t const a_version) {
 				construct(std::shared_ptr<Node>());
 				if (a_version > 1) {
-					archive(cereal::make_nvp("topLeftOffset", construct->topLeftOffset));
+					archive(cereal::make_nvp("topLeftOffset", construct->topLeftOffset),
+						cereal::make_nvp("policy", construct->policy));
+				}
+				if (a_version <= 1) {
+					bool manualReposition;
+					archive(cereal::make_nvp("manualReposition", manualReposition));
 				}
 				archive(
 					cereal::make_nvp("maximumWidth", construct->maximumWidth),
@@ -98,7 +107,6 @@ namespace MV {
 					cereal::make_nvp("margins", construct->margins),
 					cereal::make_nvp("cellColumns", construct->cellColumns),
 					cereal::make_nvp("includeChildrenInChildSize", construct->includeChildrenInChildSize),
-					cereal::make_nvp("manualReposition", construct->manualReposition),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
 				construct->dirtyGrid = false;
@@ -147,13 +155,13 @@ namespace MV {
 			bool inLayoutCall = false;
 			bool dirtyGrid = true;
 			bool includeChildrenInChildSize = true;
-			bool manualReposition = false;
+			AutoLayoutPolicy policy = AutoLayoutPolicy::Comprehensive;
 
 			std::vector<std::vector<std::weak_ptr<MV::Scene::Node>>> tiles;
 		};
 	}
 }
 
-CEREAL_CLASS_VERSION(MV::Scene::Grid, 1)
+CEREAL_CLASS_VERSION(MV::Scene::Grid, 2)
 
 #endif

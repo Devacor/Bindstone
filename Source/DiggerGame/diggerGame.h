@@ -114,9 +114,9 @@ public:
 		mouse(a_mouse),
 		sharedTextures(a_sharedTextures){
 
-		environment->repositionManual(true);
-		foreground->repositionManual(true);
-		background->repositionManual(true);
+		environment->layoutPolicy(MV::Scene::Grid::AutoLayoutPolicy::None);
+		foreground->layoutPolicy(MV::Scene::Grid::AutoLayoutPolicy::None);
+		background->layoutPolicy(MV::Scene::Grid::AutoLayoutPolicy::None);
 
 		loadTextures();
 

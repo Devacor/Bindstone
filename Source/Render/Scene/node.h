@@ -734,6 +734,7 @@ namespace MV {
 
 				onTransformChangeSignal.block();
 				onLocalBoundsChangeSignal.block();
+				onChildBoundsChangeSignal.block();
 				onOrderChangeSignal.block();
 				onAlphaChangeSignal.block();
 

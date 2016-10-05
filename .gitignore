@@ -21,3 +21,4 @@ runsdvui.cmd
 M2tMLibrary.VC.opendb
 M2tMLibrary.VC.db
 .vs/config/applicationhost.config
+*.ipch

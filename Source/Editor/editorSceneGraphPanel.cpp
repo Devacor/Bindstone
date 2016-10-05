@@ -28,7 +28,7 @@ void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nu
 	}
 	auto gridNode = MV::Scene::Node::make(root->renderer(), "SceneNodeGrid");
 	auto newGrid = gridNode->attach<MV::Scene::Grid>();
-	newGrid->columns(1)->color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->repositionManual(true);
+	newGrid->columns(1)->color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->layoutPolicy(MV::Scene::Grid::AutoLayoutPolicy::Comprehensive);
 	grid = newGrid.get();
 
 	makeChildButton(scene, 0, gridNode);
@@ -117,7 +117,7 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 
 	auto gridNode = a_grid->make();
 	auto newGrid = gridNode->attach<MV::Scene::Grid>();
-	newGrid->columns(1)->color({ BOX_BACKGROUND })->repositionManual(true);
+	newGrid->columns(1)->color({ BOX_BACKGROUND })->layoutPolicy(MV::Scene::Grid::AutoLayoutPolicy::Comprehensive);
 	std::weak_ptr<MV::Scene::Node> weakGrid = gridNode;
 	MV::Scene::Node* nodePointer = a_node.get();
 	expandButton->onAccept.connect("Expand", [=](auto&& a_self) {
@@ -143,10 +143,10 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 }
 
 void SceneGraphPanel::layoutParents(std::shared_ptr<MV::Scene::Node> a_parent) {
+	//a_parent->parent()->childBounds();
 	auto parentGrids = a_parent->componentsInParents<MV::Scene::Grid>(true, true);
-	for (auto&& parentGrid : parentGrids) {
-		visit(parentGrid, [&](const MV::Scene::SafeComponent<MV::Scene::Grid> &a_clipped) {
-			a_clipped->layoutCells();
-		});
-	}
+	std::reverse(parentGrids.begin(), parentGrids.end());
+	MV::visit_each(parentGrids, [&](const MV::Scene::SafeComponent<MV::Scene::Grid> &a_grid) {
+		a_grid->layoutCells();
+	});
 }

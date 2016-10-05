@@ -519,6 +519,7 @@ namespace MV {
 			recalculateChildBoundsCalls++;
 			{
 				dirtyChildBounds = false;
+				auto originalChildBounds = localChildBounds;
 				if (!childNodes.empty()) {
 					localChildBounds = childNodes[0]->bounds();
 					for (size_t i = 1; i < childNodes.size(); ++i) {
@@ -531,6 +532,9 @@ namespace MV {
 					}
 				} else {
 					localChildBounds = BoxAABB<>();
+				}
+				if (originalChildBounds != localChildBounds) {
+					onChildBoundsChangeSignal(shared_from_this());
 				}
 			}
 			markParentBoundsDirty();
@@ -1088,7 +1092,6 @@ namespace MV {
 			auto* currentParent = myParent;
 			while (currentParent) {
 				currentParent->dirtyChildBounds = true;
-				currentParent->onChildBoundsChangeSignal(currentParent->shared_from_this());
 				currentParent = currentParent->myParent;
 			}
 		}
@@ -1220,6 +1223,17 @@ namespace MV {
 					try {
 						onLocalBoundsChangeSignal(self);
 					} catch (std::exception &e) {
+						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
+					}
+				}
+				changed = true;
+			}
+			if (onChildBoundsChangeSignal.unblock()) {
+				if (a_callBatched) {
+					try {
+						onChildBoundsChangeSignal(self);
+					}
+					catch (std::exception &e) {
 						std::cerr << "Node::unsilenceInternal callback exception: " << e.what() << std::endl;
 					}
 				}

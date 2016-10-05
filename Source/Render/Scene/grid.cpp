@@ -17,7 +17,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Grid> Grid::padding(const std::pair<Point<>, Point<>> &a_padding) {
-			dirtyGrid = dirtyGrid || (cellPadding != a_padding);
+			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && cellPadding != a_padding);
 			cellPadding = a_padding;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
@@ -27,7 +27,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Grid> Grid::padding(const Size<> &a_padding) {
-			dirtyGrid = dirtyGrid || (
+			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self &&
 				(!equals(a_padding.width, cellPadding.first.x) || !equals(a_padding.width, cellPadding.second.x) ||
 				!equals(a_padding.height, cellPadding.first.y) || !equals(a_padding.height, cellPadding.second.y)));
 			cellPadding.first = toPoint(a_padding);
@@ -40,7 +40,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Grid> Grid::margin(const std::pair<Point<>, Point<>> &a_margin) {
-			dirtyGrid = dirtyGrid || (margins != a_margin);
+			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && margins != a_margin);
 			margins = a_margin;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
@@ -50,7 +50,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Grid> Grid::margin(const Size<> &a_margin) {
-			dirtyGrid = dirtyGrid || (
+			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self &&
 				(!equals(a_margin.width, margins.first.x) || !equals(a_margin.width, margins.second.x) ||
 				!equals(a_margin.height, margins.first.y) || !equals(a_margin.height, margins.second.y)));
 			margins.first = toPoint(a_margin);
@@ -59,25 +59,25 @@ namespace MV {
 		}
 
 		std::shared_ptr<Grid> Grid::cellSize(const Size<> &a_size) {
-			dirtyGrid = dirtyGrid || (a_size != cellDimensions);
+			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && a_size != cellDimensions);
 			cellDimensions = a_size;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
 		std::shared_ptr<Grid> Grid::gridWidth(PointPrecision a_rowWidth) {
-			dirtyGrid = dirtyGrid || (maximumWidth != a_rowWidth);
+			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && maximumWidth != a_rowWidth);
 			maximumWidth = a_rowWidth;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
 		std::shared_ptr<MV::Scene::Grid> Grid::gridOffset(const Point<> &a_topLeftOffset) {
-			dirtyGrid = dirtyGrid || (topLeftOffset != a_topLeftOffset);
+			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && topLeftOffset != a_topLeftOffset);
 			topLeftOffset = a_topLeftOffset;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
 		std::shared_ptr<Grid> Grid::columns(size_t a_columns, bool a_useChildrenForSize) {
-			dirtyGrid = dirtyGrid || ((cellColumns != a_columns || includeChildrenInChildSize != a_useChildrenForSize));
+			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && (cellColumns != a_columns || includeChildrenInChildSize != a_useChildrenForSize));
 			cellColumns = a_columns;
 			includeChildrenInChildSize = a_useChildrenForSize;
 			return std::static_pointer_cast<Grid>(shared_from_this());
@@ -162,7 +162,7 @@ namespace MV {
 
 			PointPrecision lineHeight = 0.0f;
 			for (auto&& node : *owner()) {
-				if (node->visible()) {
+				if (node->selfVisible()) {
 					cellPosition = positionChildNode(cellPosition, index, node, cellDimensions, calculatedBounds, lineHeight);
 					node->recalculateMatrix();
 					++index;
@@ -211,7 +211,7 @@ namespace MV {
 
 			PointPrecision lineHeight = 0.0f;
 			for (auto&& node : *owner()) {
-				if (node->visible()) {
+				if (node->selfVisible()) {
 					auto nodeBounds = node->bounds(includeChildrenInChildSize);
 					auto shapeSize = nodeBounds.size();
 					cellPosition = positionChildNode(cellPosition, index, node, shapeSize, calculatedBounds, lineHeight);
@@ -232,28 +232,25 @@ namespace MV {
 
 		void Grid::observeOwner(const std::shared_ptr<Node>& a_node) {
 			basicSignals.push_back(a_node->onChildBoundsChange.connect([&](const std::shared_ptr<Node> &a_this) {
-				dirtyGrid = dirtyGrid || !manualReposition;
+				dirtyGrid = dirtyGrid || policy >= AutoLayoutPolicy::Comprehensive;
 			}));
 			basicSignals.push_back(a_node->onBoundsRequest.connect([&](const std::shared_ptr<Node> &a_this){
-				if (dirtyGrid && !manualReposition) {
+				if (dirtyGrid) {
 					layoutCells();
 				}
 			}));
 			basicSignals.push_back(a_node->onLocalBoundsChange.connect([&](const std::shared_ptr<Node> &a_child) {
-				dirtyGrid = dirtyGrid || !manualReposition;
+				dirtyGrid = dirtyGrid || policy >= AutoLayoutPolicy::Local;
 			}));
 			basicSignals.push_back(a_node->onTransformChange.connect([&](const std::shared_ptr<Node> &a_child) {
-				dirtyGrid = dirtyGrid || !manualReposition;
+				dirtyGrid = dirtyGrid || policy >= AutoLayoutPolicy::Local;
 			}));
 			basicSignals.push_back(a_node->onChildAdd.connect([&](const std::shared_ptr<Node> &a_child) {
-				dirtyGrid = true;
+				dirtyGrid = dirtyGrid || policy >= AutoLayoutPolicy::Child;
 			}));
 			parentInteractionSignals.push_back(a_node->onChildRemove.connect([&](const std::shared_ptr<Node> &a_parent, const std::shared_ptr<Node> &a_child) {
-				dirtyGrid = true;
+				dirtyGrid = dirtyGrid || policy >= AutoLayoutPolicy::Child;
 			}));
-			if (owner()->id() == "Background") {
-				std::cout << "Background register!" << std::endl;
-			}
 		}
 
 		std::shared_ptr<Node> Grid::gridTileForYIndexAndPosition(int yIndex, const Point<> &a_coordinate, bool a_throwOnFail) {
@@ -299,7 +296,7 @@ namespace MV {
 		}
 
 		BoxAABB<> Grid::boundsImplementation() {
-			if (dirtyGrid && !inLayoutCall) {
+			if (dirtyGrid) {
 				layoutCells();
 			}
 			return Drawable::boundsImplementation();
@@ -308,7 +305,7 @@ namespace MV {
 		void Grid::boundsImplementation(const BoxAABB<> &a_bounds) {
 			topLeftOffset = a_bounds.minPoint;
 			maximumWidth = a_bounds.width();
-			dirtyGrid = true;
+			dirtyGrid = dirtyGrid || policy >= AutoLayoutPolicy::Self;
 		}
 
 		void Grid::initialize() {
@@ -322,6 +319,7 @@ namespace MV {
 			gridClone->maximumWidth = maximumWidth;
 			gridClone->topLeftOffset = topLeftOffset;
 			gridClone->cellDimensions = cellDimensions;
+			gridClone->policy = policy;
 			gridClone->margins = margins;
 			gridClone->cellPadding = cellPadding;
 			gridClone->cellColumns = cellColumns;

@@ -131,11 +131,11 @@ namespace MV {
 
 			void setPointsFromBounds(const BoxAABB<> &a_bounds);
 
-			void layoutCellSize();
+			bool layoutCellSize();
 
 			Point<> positionChildNode(Point<> a_cellPosition, size_t a_index, std::shared_ptr<Node> a_node, const Size<> &a_cellSize, BoxAABB<> &a_calculatedBounds, PointPrecision &a_lineHeight);
 
-			void layoutChildSize();
+			bool layoutChildSize();
 
 			void observeOwner(const std::shared_ptr<Node>& a_node);
 

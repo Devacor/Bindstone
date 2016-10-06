@@ -111,15 +111,21 @@ namespace MV {
 			if (inLayoutCall) {
 				return;
 			}
-			inLayoutCall = true;
-			SCOPE_EXIT{ inLayoutCall = false; };
-			dirtyGrid = false;
-			if (cellDimensions.width > 0.0f || cellDimensions.height > 0.0f) {
-				layoutCellSize();
-			} else {
-				layoutChildSize();
+			bool changed = false;
+			{
+				inLayoutCall = true;
+				SCOPE_EXIT{ inLayoutCall = false; };
+				dirtyGrid = false;
+				if (cellDimensions.width > 0.0f || cellDimensions.height > 0.0f) {
+					changed = layoutCellSize();
+				} else {
+					changed = layoutChildSize();
+				}
+				if (changed) {
+					notifyParentOfBoundsChange();
+				}
+				dirtyGrid = false;
 			}
-			dirtyGrid = false;
 		}
 
 		Grid::Grid(const std::weak_ptr<Node> &a_owner) :
@@ -153,7 +159,7 @@ namespace MV {
 			points[3].x = a_bounds.maxPoint.x;	points[3].y = a_bounds.minPoint.y;	points[3].z = points[1].z;
 		}
 
-		void Grid::layoutCellSize() {
+		bool Grid::layoutCellSize() {
 			BoxAABB<> calculatedBounds(topLeftOffset, size(getContentWidth() - margins.second.x, cellDimensions.height + margins.first.y));
 			Point<> cellPosition = margins.first;
 			size_t index = 0;
@@ -172,10 +178,9 @@ namespace MV {
 			calculatedBounds = calculatedBounds.expandWith(calculatedBounds.maxPoint + margins.second);
 
 			setPointsFromBounds(calculatedBounds);
-			if (localBounds != calculatedBounds) {
-				localBounds = calculatedBounds;
-				notifyParentOfBoundsChange();
-			}
+			bool changed = localBounds != calculatedBounds;
+			localBounds = calculatedBounds;
+			return changed;
 		}
 
 
@@ -200,7 +205,7 @@ namespace MV {
 		}
 
 
-		void Grid::layoutChildSize() {
+		bool Grid::layoutChildSize() {
 			BoxAABB<> calculatedBounds(topLeftOffset, size(getContentWidth() - margins.second.x, cellDimensions.height + margins.first.y));
 			Point<> cellPosition = margins.first;
 			size_t index = 0;
@@ -224,15 +229,14 @@ namespace MV {
 			calculatedBounds = calculatedBounds.expandWith(calculatedBounds.maxPoint + margins.second);
 
 			setPointsFromBounds(calculatedBounds);
-			if (localBounds != calculatedBounds) {
-				localBounds = calculatedBounds;
-				notifyParentOfBoundsChange();
-			}
+			bool changed = localBounds != calculatedBounds;
+			localBounds = calculatedBounds;
+			return changed;
 		}
 
 		void Grid::observeOwner(const std::shared_ptr<Node>& a_node) {
 			basicSignals.push_back(a_node->onChildBoundsChange.connect([&](const std::shared_ptr<Node> &a_this) {
-				dirtyGrid = dirtyGrid || policy >= AutoLayoutPolicy::Comprehensive;
+				dirtyGrid = dirtyGrid || (!inLayoutCall && policy >= AutoLayoutPolicy::Comprehensive);
 			}));
 			basicSignals.push_back(a_node->onBoundsRequest.connect([&](const std::shared_ptr<Node> &a_this){
 				if (dirtyGrid) {
@@ -240,10 +244,7 @@ namespace MV {
 				}
 			}));
 			basicSignals.push_back(a_node->onLocalBoundsChange.connect([&](const std::shared_ptr<Node> &a_child) {
-				dirtyGrid = dirtyGrid || policy >= AutoLayoutPolicy::Local;
-			}));
-			basicSignals.push_back(a_node->onTransformChange.connect([&](const std::shared_ptr<Node> &a_child) {
-				dirtyGrid = dirtyGrid || policy >= AutoLayoutPolicy::Local;
+				dirtyGrid = dirtyGrid || (!inLayoutCall && policy >= AutoLayoutPolicy::Local);
 			}));
 			basicSignals.push_back(a_node->onChildAdd.connect([&](const std::shared_ptr<Node> &a_child) {
 				dirtyGrid = dirtyGrid || policy >= AutoLayoutPolicy::Child;

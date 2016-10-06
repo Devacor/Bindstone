@@ -519,7 +519,6 @@ namespace MV {
 			recalculateChildBoundsCalls++;
 			{
 				dirtyChildBounds = false;
-				auto originalChildBounds = localChildBounds;
 				if (!childNodes.empty()) {
 					localChildBounds = childNodes[0]->bounds();
 					for (size_t i = 1; i < childNodes.size(); ++i) {
@@ -532,9 +531,6 @@ namespace MV {
 					}
 				} else {
 					localChildBounds = BoxAABB<>();
-				}
-				if (originalChildBounds != localChildBounds) {
-					onChildBoundsChangeSignal(shared_from_this());
 				}
 			}
 			markParentBoundsDirty();
@@ -1092,6 +1088,7 @@ namespace MV {
 			auto* currentParent = myParent;
 			while (currentParent) {
 				currentParent->dirtyChildBounds = true;
+				currentParent->onChildBoundsChangeSignal(shared_from_this());
 				currentParent = currentParent->myParent;
 			}
 		}

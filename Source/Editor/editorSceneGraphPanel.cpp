@@ -33,7 +33,7 @@ void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nu
 
 	makeChildButton(scene, 0, gridNode);
 
-	MV::Point<> position;
+	MV::Point<> position{200.0f, 0.0f};
 	if(box){
 		position = box->parent()->position();
 	}
@@ -44,6 +44,7 @@ void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nu
 	}
 	box->get("CONTAINER")->remove("SceneNodeGrid", false);
 	box->get("CONTAINER")->add(gridNode);
+	box->position(position);
 }
 
 void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth, std::shared_ptr<MV::Scene::Node> a_grid) {
@@ -131,7 +132,7 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 				weakGrid.lock()->show();
 				a_self->owner()->component<MV::Scene::Button>()->text("-");
 			}
-			layoutParents(weakGrid.lock());
+			//layoutParents(weakGrid.lock());
 		}
 	});
 

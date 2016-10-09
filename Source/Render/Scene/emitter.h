@@ -363,6 +363,8 @@ namespace MV {
 			ThreadPool& pool;
 
 			std::atomic<bool> updateInProgress;
+
+			std::recursive_mutex lock;
 		};
 	}
 }

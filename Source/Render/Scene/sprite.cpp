@@ -34,7 +34,6 @@ namespace MV {
 
 		//no need to iterate over everything for a sprite. Also, update slice.
 		void Sprite::refreshBounds() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto originalBounds = localBounds;
 			localBounds = BoxAABB<>(points[0], points[2]);
 			if (originalBounds != localBounds) {

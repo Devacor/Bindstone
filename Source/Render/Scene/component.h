@@ -263,8 +263,6 @@ namespace MV {
 				//requires implementation in child class
 			}
 
-			mutable std::recursive_mutex lock;
-
 			virtual void initialize() {} //called after creation by node
 
 			Component(const Component& a_rhs) = delete;

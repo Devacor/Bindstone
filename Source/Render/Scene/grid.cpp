@@ -252,6 +252,9 @@ namespace MV {
 			parentInteractionSignals.push_back(a_node->onChildRemove.connect([&](const std::shared_ptr<Node> &a_parent, const std::shared_ptr<Node> &a_child) {
 				dirtyGrid = dirtyGrid || policy >= AutoLayoutPolicy::Child;
 			}));
+			parentInteractionSignals.push_back(a_node->onChildOrderChange.connect([&](const std::shared_ptr<Node> &a_parent, const std::shared_ptr<Node> &a_child) {
+				dirtyGrid = dirtyGrid || policy >= AutoLayoutPolicy::Child;
+			}));
 		}
 
 		std::shared_ptr<Node> Grid::gridTileForYIndexAndPosition(int yIndex, const Point<> &a_coordinate, bool a_throwOnFail) {

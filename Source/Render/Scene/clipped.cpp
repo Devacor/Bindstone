@@ -86,7 +86,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Clipped> Clipped::captureSize(const Size<> &a_size, const Point<> &a_centerPoint) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			Point<> topLeft;
 			Point<> bottomRight = toPoint(a_size);
 

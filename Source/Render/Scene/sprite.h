@@ -27,7 +27,6 @@ namespace MV {
 			DrawableDerivedAccessors(Sprite)
 
 			std::shared_ptr<Sprite> size(const Size<> &a_size, const Point<> &a_centerPoint) {
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				Point<> topLeft;
 				Point<> bottomRight = toPoint(a_size);
 
@@ -125,7 +124,6 @@ namespace MV {
 
 		template<typename PointAssign>
 		std::shared_ptr<Sprite> Sprite::corners(const PointAssign & a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomRight, const PointAssign & a_BottomLeft) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = std::static_pointer_cast<Sprite>(shared_from_this());
 			points[0] = a_TopLeft;
 			points[1] = a_BottomLeft;

@@ -48,7 +48,6 @@ namespace MV {
 			}
 
 		void Slider::acceptDownClick() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			Clickable::acceptDownClick();
 
 			updateDragFromMouse();

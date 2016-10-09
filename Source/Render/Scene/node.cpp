@@ -19,14 +19,24 @@ namespace MV {
 			if(self->myParent){
 				auto foundSelf = std::find(self->myParent->childNodes.begin(), self->myParent->childNodes.end(), self);
 				require<PointerException>(foundSelf != self->myParent->childNodes.end(), "Failed to re-sort: [", self->id(), "]");
+				originalIndex = std::distance(self->myParent->childNodes.begin(), foundSelf);
 				self->myParent->childNodes.erase(foundSelf);
 			}
 		}
 
-		Node::ReSort::~ReSort() {
-			if(self->myParent){
-				insertSorted(self->myParent->childNodes, self);
+		bool Node::ReSort::insert() {
+			if (!inserted) {
+				inserted = true;
+				if (self->myParent) {
+					int64_t newIndex = std::distance(self->myParent->childNodes.begin(), insertSorted(self->myParent->childNodes, self));
+					return originalIndex != newIndex;
+				}
 			}
+			return false;
+		}
+
+		Node::ReSort::~ReSort() {
+			insert();
 		}
 
 		Node::~Node() {
@@ -203,7 +213,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::loadChild(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_newNodeId) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto toAdd = Node::load(a_filename, a_binder, a_newNodeId);
 			remove(toAdd->id(), false);
 			add(toAdd);
@@ -211,7 +220,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::loadChildBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_newNodeId) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto toAdd = Node::loadBinary(a_filename, a_binder, a_newNodeId);
 			remove(toAdd->id(), false);
 			add(toAdd);
@@ -219,7 +227,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::make(const std::string &a_id) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto toAdd = Node::make(draw2d, a_id);
 			remove(a_id, false);
 			add(toAdd);
@@ -231,7 +238,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::add(const std::shared_ptr<Node> &a_child, bool a_overrideSortDepth) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			Node* parentCheck = this;
 			while (parentCheck = parentCheck->myParent) {
 				MV::require<RangeException>(parentCheck != a_child.get(), "Adding [", a_child->id(), "] to [", id(), "] would result in a circular ownership!");
@@ -251,7 +257,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::removeFromParent() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = shared_from_this();
 			if(myParent){
 				myParent->remove(self);
@@ -260,7 +265,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::remove(const std::string &a_id, bool a_throw) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child){
 				return a_child->id() == a_id;
 			});
@@ -277,7 +281,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::remove(const std::shared_ptr<Node> &a_child, bool a_throw) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_ourChild){
 				return a_ourChild == a_child;
 			});
@@ -294,7 +297,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::clear() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = shared_from_this();
 			while(!childNodes.empty()){
 				auto childToRemove = *childNodes.begin();
@@ -314,7 +316,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::get(const std::string &a_id, bool a_throw) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child){
 				return a_child->id() == a_id;
 			});
@@ -332,7 +333,6 @@ namespace MV {
 		}
 
 		bool Node::has(const std::string &a_id) const {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child) {
 				return a_child->id() == a_id;
 			});
@@ -349,27 +349,39 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::id(const std::string &a_id) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = shared_from_this();
 			if (nodeId != a_id) {
+				bool orderChanged = false;
 				{
 					ReSort sort(self);
 					nodeId = a_id;
+					orderChanged = sort.insert();
 				}
-				onOrderChangeSignal(self);
+				if (orderChanged) {
+					onOrderChangeSignal(self);
+					if (myParent) {
+						myParent->onChildOrderChangeSignal(myParent->shared_from_this(), self);
+					}
+				}
 			}
 			return self;
 		}
 
 		std::shared_ptr<Node> Node::depth(PointPrecision a_newDepth) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = shared_from_this();
 			if (sortDepth != a_newDepth) {
+				bool orderChanged = false;
 				{
 					ReSort sort(self);
 					sortDepth = a_newDepth;
+					orderChanged = sort.insert();
 				}
-				onOrderChangeSignal(self);
+				if (orderChanged) {
+					onOrderChangeSignal(self);
+					if (myParent) {
+						myParent->onChildOrderChangeSignal(myParent->shared_from_this(), self);
+					}
+				}
 			}
 			return self;
 		}
@@ -383,35 +395,40 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::position(const Point<> &a_newPosition) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
-			translateTo = a_newPosition;
 			auto self = shared_from_this();
-			onTransformChangeSignal(self);
+			if (a_newPosition != translateTo) {
+				translateTo = a_newPosition;
+				onTransformChangeSignal(self);
+			}
 			return self;
 		}
 
 		std::shared_ptr<Node> Node::rotation(const AxisAngles &a_newRotation) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
-			rotateTo = a_newRotation;
 			auto self = shared_from_this();
-			onTransformChangeSignal(self);
+			if (a_newRotation != rotateTo) {
+				rotateTo = a_newRotation;
+				onTransformChangeSignal(self);
+			}
 			return self;
 		}
 
 		std::shared_ptr<Node> Node::scale(const Scale &a_newScale) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
-			scaleTo = a_newScale;
 			auto self = shared_from_this();
-			onTransformChangeSignal(self);
+			if (scaleTo != a_newScale) {
+				scaleTo = a_newScale;
+				onTransformChangeSignal(self);
+			}
 			return self;
 		}
 
 		std::shared_ptr<Node> Node::alpha(PointPrecision a_alpha) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
+			auto self = shared_from_this();
+			auto originalAlpha = nodeAlpha;
 			nodeAlpha = a_alpha;
 			recalculateAlpha();
-			auto self = shared_from_this();
-			onAlphaChangeSignal(self);
+			if (!equals(originalAlpha, a_alpha)) {
+				onAlphaChangeSignal(self);
+			}
 			return self;
 		}
 
@@ -490,7 +507,6 @@ namespace MV {
 
 		void Node::recalculateLocalBounds() {
 			recalculateLocalBoundsCalls++;
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = shared_from_this();
 			auto oldBounds = localBounds;
 			{
@@ -515,7 +531,6 @@ namespace MV {
 		}
 
 		void Node::recalculateChildBounds() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			recalculateChildBoundsCalls++;
 			{
 				dirtyChildBounds = false;
@@ -587,6 +602,7 @@ namespace MV {
 			onChildBoundsChange(onChildBoundsChangeSignal),
 			onOrderChange(onOrderChangeSignal),
 			onAlphaChange(onAlphaChangeSignal),
+			onChildOrderChange(onChildOrderChangeSignal),
 			onChange(onChangeSignal),
 			onComponentUpdate(onComponentUpdateSignal),
 			onAttach(onAttachSignal),
@@ -665,7 +681,6 @@ namespace MV {
 		}
 
 		void Node::recalculateAlpha() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			parentAccumulatedAlpha = (myParent) ? myParent->parentAccumulatedAlpha * nodeAlpha : nodeAlpha;
 			for (auto&& child : childNodes) {
 				child->recalculateAlpha();
@@ -1073,7 +1088,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::makeOrGet(const std::string &a_id) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto foundNode = get(a_id, false);
 			if (foundNode) {
 				return foundNode;
@@ -1109,6 +1123,10 @@ namespace MV {
 
 			if (onChildRemoveSignal.unblock()) {
 				//TODO: call for each child removed
+				changed = true;
+			}
+			if (onChildOrderChangeSignal.unblock()) {
+				//TODO: call for each child 
 				changed = true;
 			}
 

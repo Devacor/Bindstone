@@ -38,6 +38,7 @@ namespace MV {
 		protected:
 			Button(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
 
+			void text(const std::shared_ptr<Node> &a_owner, const std::string &a_newValue);
 
 			template <class Archive>
 			void serialize(Archive & archive, std::uint32_t const /*version*/) {

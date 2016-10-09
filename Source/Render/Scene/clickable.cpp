@@ -47,7 +47,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Clickable> Clickable::clickDetectionType(BoundsType a_type) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = std::static_pointer_cast<Clickable>(shared_from_this());
 			if (a_type == BoundsType::NONE && hitDetectionType != BoundsType::NONE) {
 				onEnabledSignal(self);
@@ -114,7 +113,6 @@ namespace MV {
 		}
 
 		void Clickable::acceptUpClick(bool a_ignoreBounds) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
 			bool inBounds = a_ignoreBounds || mouseInBounds(ourMouse);
 			if (inPressEvent()) {
@@ -134,7 +132,6 @@ namespace MV {
 		}
 
 		void Clickable::acceptDownClick() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
 			isInPressEvent = true;
 			onPressSignal(protectFromDismissal);

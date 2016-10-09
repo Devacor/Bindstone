@@ -71,6 +71,7 @@ namespace MV {
 
 			Signal<BasicSignature> onChildAddSignal;
 			Signal<ParentInteractionSignature> onChildRemoveSignal;
+			Signal<ParentInteractionSignature> onChildOrderChangeSignal;
 			Signal<BasicSignature> onAddSignal;
 			Signal<BasicSignature> onRemoveSignal;
 
@@ -102,8 +103,12 @@ namespace MV {
 				ReSort(const std::shared_ptr<Node> &a_self);
 				~ReSort();
 
+				//returns true if the insert changed its position.
+				bool insert();
 			private:
 				std::shared_ptr<Node> self;
+				int64_t originalIndex = -1;
+				bool inserted = false;
 			};
 
 			friend ReSort;
@@ -117,6 +122,7 @@ namespace MV {
 
 			SignalRegister<BasicSignature> onChildAdd;
 			SignalRegister<ParentInteractionSignature> onChildRemove;
+			SignalRegister<ParentInteractionSignature> onChildOrderChange;
 			SignalRegister<BasicSignature> onAdd;
 			SignalRegister<BasicSignature> onRemove;
 
@@ -190,7 +196,6 @@ namespace MV {
 			template<typename ComponentType>
 			SafeComponent<ComponentType> attach() {
 				auto self = shared_from_this();
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				auto newComponent = std::shared_ptr<ComponentType>(new ComponentType(self));
 				childComponents.push_back(newComponent);
 				newComponent->initialize();
@@ -201,7 +206,6 @@ namespace MV {
 			template<typename ComponentType, typename... Args>
 			SafeComponent<ComponentType> attach(Args&&... a_arguments){
 				auto self = shared_from_this();
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				auto newComponent = std::shared_ptr<ComponentType>(new ComponentType(self, std::forward<Args>(a_arguments)...));
 				childComponents.push_back(newComponent);
 				newComponent->initialize();
@@ -212,7 +216,6 @@ namespace MV {
 			template<typename ComponentType>
 			std::shared_ptr<Node> detach(bool a_exactType = true, bool a_throwIfNotFound = true) {
 				auto self = shared_from_this();
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
 				if (foundComponent != childComponents.end()) {
 					auto sharedComponent = (*foundComponent);
@@ -226,7 +229,6 @@ namespace MV {
 			template<typename ComponentType>
 			std::shared_ptr<Node> detach(std::shared_ptr<ComponentType> a_component) {
 				auto self = shared_from_this();
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				auto found = std::find(childComponents.begin(), childComponents.end(), a_component);
 				if (found != childComponents.end()) {
 					a_component->onRemoved();
@@ -243,7 +245,6 @@ namespace MV {
 
 			std::shared_ptr<Node> detach(const std::string &a_componentId, bool a_throwIfNotFound = true) {
 				auto self = shared_from_this();
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				auto found = std::find_if(childComponents.begin(), childComponents.end(), [&](const std::shared_ptr<Component> &a_component) {
 					return a_component->id() == a_componentId;
 				});
@@ -259,7 +260,6 @@ namespace MV {
 
 			template<typename ComponentType>
 			SafeComponent<ComponentType> component(bool a_exactType = true, bool a_throwIfNotFound = true) const {
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
 				if (foundComponent != childComponents.end()) {
 					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
@@ -290,7 +290,6 @@ namespace MV {
 
 			template<typename ComponentType = Component>
 			SafeComponent<ComponentType> componentInParents(const std::string& a_id, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				if (a_includeSelf) {
 					auto foundComponent = component<ComponentType>(a_id, false);
 					if (foundComponent) {
@@ -313,7 +312,6 @@ namespace MV {
 
 			template<typename ComponentType>
 			SafeComponent<ComponentType> componentInParents(bool a_exactType = true, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				if (a_includeSelf) {
 					std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, false);
 					if (foundComponent != childComponents.end()) {
@@ -336,7 +334,6 @@ namespace MV {
 
 			template<typename ComponentType>
 			SafeComponent<ComponentType> componentInChildren(bool a_exactType = true, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = a_includeSelf ? componentIterator<ComponentType>(a_exactType, false) : childComponents.end();
 				if (foundComponent != childComponents.end()) {
 					return SafeComponent<ComponentType>(shared_from_this(), std::dynamic_pointer_cast<ComponentType>(*foundComponent));
@@ -364,7 +361,6 @@ namespace MV {
 
 			template<typename ComponentType = Component>
 			SafeComponent<ComponentType> component(const std::string &a_componentId, bool a_throwIfNotFound = true) const {
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				auto found = std::find_if(childComponents.cbegin(), childComponents.cend(), [&](const std::shared_ptr<Component> &a_component) {
 					return a_component->id() == a_componentId;
 				});
@@ -384,7 +380,6 @@ namespace MV {
 
 			template<typename ComponentType = Component>
 			SafeComponent<ComponentType> componentInChildren(const std::string &a_componentId, bool a_throwIfNotFound = true, bool a_includeSelf = true) const {
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				auto found = a_includeSelf ? std::find_if(childComponents.cbegin(), childComponents.cend(), [&](const std::shared_ptr<Component> &a_component) {
 					return a_component->id() == a_componentId;
 				}) : childComponents.end();
@@ -407,7 +402,6 @@ namespace MV {
 
 			template<typename ... ComponentType>
 			std::vector<MV::Variant<SafeComponent<ComponentType>...>> components(bool exactType = true) const {
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				std::vector<MV::Variant<SafeComponent<ComponentType>...>> results;
 				if (exactType) {
 					for (auto&& item : childComponents) {
@@ -423,7 +417,6 @@ namespace MV {
 
 			template<typename ... ComponentType>
 			std::vector<MV::Variant<SafeComponent<ComponentType>...>> componentsInChildren(bool exactType = true, bool includeComponentsInThis = true) const {
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				std::vector<MV::Variant<SafeComponent<ComponentType>...>> results;
 				componentsInChildrenInternal<ComponentType...>(exactType, includeComponentsInThis, results);
 				return results;
@@ -720,6 +713,7 @@ namespace MV {
 			void silenceInternal() {
 				onChildAddSignal.block();
 				onChildRemoveSignal.block();
+				onChildOrderChangeSignal.block();
 				onAddSignal.block();
 				onRemoveSignal.block();
 
@@ -747,7 +741,6 @@ namespace MV {
 
 			template<typename ComponentType>
 			std::vector<std::shared_ptr<Component>>::const_iterator componentIterator(bool a_exactType = true, bool a_throwIfNotFound = true) const {
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				if (a_exactType) {
 					for (auto currentComponent = childComponents.cbegin(); currentComponent != childComponents.cend(); ++currentComponent) {
 						if (typeid(*(*currentComponent)) == typeid(ComponentType)) {
@@ -885,8 +878,6 @@ namespace MV {
 				);
 				construct->postLoadStep(isRootNode);
 			}
-
-			mutable std::recursive_mutex lock;
 
 			Draw2D &draw2d;
 

@@ -28,7 +28,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Drawable> Drawable::color(const Color &a_newColor) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			for (auto&& point : points) {
 				point = a_newColor;
 			}
@@ -36,7 +35,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Drawable> MV::Scene::Drawable::colors(const std::vector<Color>& a_newColors) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			MV::require<RangeException>(a_newColors.size() == points.size(), "Point and Color vector size mismatch!");
 			for (size_t i = 0; i < points.size(); ++i) {
 				points[i] = a_newColors[i];
@@ -45,7 +43,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Drawable> Drawable::hide() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			std::shared_ptr<Drawable> self = std::static_pointer_cast<Drawable>(shared_from_this());
 			if (shouldDraw) {
 				shouldDraw = false;
@@ -55,7 +52,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Drawable> MV::Scene::Drawable::show() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			std::shared_ptr<Drawable> self = std::static_pointer_cast<Drawable>(shared_from_this());
 			if (!shouldDraw) {
 				shouldDraw = true;
@@ -65,7 +61,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Drawable> Drawable::shader(const std::string &a_shaderProgramId) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			shaderProgramId = a_shaderProgramId;
 			auto self = std::static_pointer_cast<Drawable>(shared_from_this());
 			forceInitializeShader();
@@ -73,7 +68,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Drawable> Drawable::texture(std::shared_ptr<TextureHandle> a_texture) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			if (ourTexture && textureSizeSignal) {
 				ourTexture->sizeChange.disconnect(textureSizeSignal);
 			}
@@ -90,7 +84,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Drawable> Drawable::clearTexture() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			if (ourTexture && textureSizeSignal) {
 				ourTexture->sizeChange.disconnect(textureSizeSignal);
 			}
@@ -150,7 +143,6 @@ namespace MV {
 		void Drawable::defaultDrawImplementation() {
 			if (owner()->renderer().headless()) { return; }
 
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			if (!vertexIndices.empty()) {
 				require<ResourceException>(shaderProgram, "No shader program for Drawable!");
 				shaderProgram->use();
@@ -190,7 +182,6 @@ namespace MV {
 		}
 
 		void Drawable::refreshBounds() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto originalBounds = localBounds;
 			if (!points.empty()) {
 				localBounds.initialize(points[0]);

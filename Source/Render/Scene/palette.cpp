@@ -312,7 +312,6 @@ namespace MV {
 		}
 
 		void Palette::boundsImplementation(const BoxAABB<> &a_bounds) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = std::static_pointer_cast<Palette>(shared_from_this());
 
 			auto selectorPixelSize = Size<>(a_bounds.width(), a_bounds.height()) * selectorPercentSize;

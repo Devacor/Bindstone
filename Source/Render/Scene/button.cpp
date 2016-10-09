@@ -26,7 +26,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Button> Button::activeNode(const std::shared_ptr<Node> &a_activeView) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			if (activeView) {
 				activeView->show();
 			}
@@ -43,7 +42,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Button> Button::idleNode(const std::shared_ptr<Node> &a_idleView) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			if (idleView) {
 				idleView->show();
 			}
@@ -60,7 +58,6 @@ namespace MV {
 		}
 
 		std::shared_ptr<Button> Button::disabledNode(const std::shared_ptr<Node> &a_disabledView) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = shared_from_this(); //guard against deletion
 			if (disabledView) {
 				disabledView->show();
@@ -78,7 +75,6 @@ namespace MV {
 		}
 
 		void Button::acceptDownClick() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = shared_from_this(); //guard self against deletion
 			Clickable::acceptDownClick(); //this may still pull the "node" rug out from under us, hence the ownerIsAlive check.
 			if (clickDetectionType() != Clickable::BoundsType::NONE && ownerIsAlive()) {
@@ -87,7 +83,6 @@ namespace MV {
 		}
 
 		void Button::acceptUpClick(bool a_ignoreBounds) {
-			std::lock_guard<std::recursive_mutex> guard(lock);
 			auto self = shared_from_this();
 			Clickable::acceptUpClick(a_ignoreBounds);
 			if (clickDetectionType() != Clickable::BoundsType::NONE && ownerIsAlive()) {
@@ -107,7 +102,6 @@ namespace MV {
 
 		void Button::setCurrentView(const std::shared_ptr<Node> &a_view) {
 			if (currentView != a_view) {
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				currentView = a_view;
 
 				showOrHideView(activeView);
@@ -148,16 +142,30 @@ namespace MV {
 
 		std::shared_ptr<Button> Button::text(const std::string &a_textString){
 			auto self = std::static_pointer_cast<Button>(shared_from_this());
-			auto textComponents = owner()->componentsInChildren<MV::Scene::Text>(false);
-			MV::visit_each(textComponents, [&](const MV::Scene::SafeComponent<MV::Scene::Text> &a_text) {
-				a_text->text(a_textString);
-			});
+			text(activeView, a_textString);
+			text(idleView, a_textString);
+			text(disabledView, a_textString);
 			return self;
 		}
 
 		std::string Button::text() const {
-			auto textComponents = owner()->componentInChildren<MV::Scene::Text>(false, false);
-			return textComponents ? textComponents->text() : "";
+			auto textComponent = activeView->componentInChildren<MV::Scene::Text>(false);
+			if (textComponent) { return textComponent->text(); }
+			textComponent = idleView->componentInChildren<MV::Scene::Text>(false);
+			if (textComponent) { return textComponent->text(); }
+			textComponent = disabledView->componentInChildren<MV::Scene::Text>(false);
+			if (textComponent) { return textComponent->text(); }
+
+			return "";
+		}
+
+		void Button::text(const std::shared_ptr<Node> &a_owner, const std::string &a_textString) {
+			if (a_owner) {
+				auto textComponents = a_owner->componentsInChildren<MV::Scene::Text>(false);
+				MV::visit_each(textComponents, [&](const MV::Scene::SafeComponent<MV::Scene::Text> &a_text) {
+					a_text->text(a_textString);
+				});
+			}
 		}
 
 	}

@@ -48,7 +48,7 @@ private:
 	std::string selectedPack;
 	std::shared_ptr<MV::TexturePack> activePack;
 
-	std::map<MV::Scene::Node*, bool> collapsed;
+	std::map<MV::Scene::Node*, bool> expanded;
 };
 
 

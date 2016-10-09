@@ -44,7 +44,6 @@ namespace MV {
 			std::shared_ptr<Palette> colorAlphaSelector(const Color& a_left, const Color& a_right);
 
 			std::shared_ptr<Palette> size(const Size<> &a_size, const Point<> &a_centerPoint) {
-				std::lock_guard<std::recursive_mutex> guard(lock);
 				Point<> topLeft;
 				Point<> bottomRight = toPoint(a_size);
 

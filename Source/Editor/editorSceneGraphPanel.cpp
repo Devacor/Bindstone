@@ -23,28 +23,35 @@ void SceneGraphPanel::update(){
 }
 
 void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nullptr*/) {
-	if(a_newScene){
+	MV::Point<> position{ 200.0f, 0.0f };
+	MV::Point<> boxInnerPosition{ 0.0f, 0.0f };
+	auto box = root->get("SceneNodePicker", false);
+
+	if (a_newScene) {
 		scene = a_newScene;
 	}
+
 	auto gridNode = MV::Scene::Node::make(root->renderer(), "SceneNodeGrid");
 	auto newGrid = gridNode->attach<MV::Scene::Grid>();
-	newGrid->columns(1)->color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->layoutPolicy(MV::Scene::Grid::AutoLayoutPolicy::Comprehensive);
+	newGrid->columns(1)->color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f });
 	grid = newGrid.get();
-
 	makeChildButton(scene, 0, gridNode);
 
-	MV::Point<> position{200.0f, 0.0f};
-	if(box){
-		position = box->parent()->position();
-	}
-	auto box = root->get("SceneNodePicker", false);
 	if (!box) {
 		box = makeDraggableBox("SceneNodePicker", root, grid->bounds().size(), *sharedResources.mouse);
+		box->parent()->position(position);
+		box->position(boxInnerPosition);
 		box->make("CONTAINER");
 	}
+	else {
+		position = box->parent()->position();
+		boxInnerPosition = box->position();
+	}
+
 	box->get("CONTAINER")->remove("SceneNodeGrid", false);
 	box->get("CONTAINER")->add(gridNode);
-	box->position(position);
+	box->position(boxInnerPosition);
+	box->parent()->position(position);
 }
 
 void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth, std::shared_ptr<MV::Scene::Node> a_grid) {
@@ -55,7 +62,7 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 	auto buttonName = std::string(a_depth * 3, ' ') + a_node->id();
 
 	auto button = makeSceneButton(a_grid, *sharedResources.textLibrary, *sharedResources.mouse, a_node->id(), buttonSize, buttonName);
-	auto expandButton = makeButton(button->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Expand", MV::Size<>(18.0f, 18.0f), collapsed[a_node.get()] ? "+" : "-");
+	auto expandButton = makeButton(button->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Expand", MV::Size<>(18.0f, 18.0f), (a_node->empty() ? "" : (expanded[a_node.get()] ? "+" : "-")));
 
 	expandButton->owner()->position({ 182.0f, 0.0f });
 	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.mouse)->size(MV::size(buttonSize.width, 5.0f));
@@ -124,19 +131,19 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 	expandButton->onAccept.connect("Expand", [=](auto&& a_self) {
 		if (!weakGrid.expired()) {
 			if (weakGrid.lock()->visible()) {
-				collapsed[nodePointer] = true;
+				expanded[nodePointer] = false;
 				weakGrid.lock()->hide();
-				a_self->owner()->component<MV::Scene::Button>()->text("+");
+				a_self->owner()->component<MV::Scene::Button>()->text(a_node->empty() ? "" : "+");
 			} else {
-				collapsed[nodePointer] = false;
+				expanded[nodePointer] = true;
 				weakGrid.lock()->show();
-				a_self->owner()->component<MV::Scene::Button>()->text("-");
+				a_self->owner()->component<MV::Scene::Button>()->text(a_node->empty() ? "" : "-");
 			}
 			//layoutParents(weakGrid.lock());
 		}
 	});
 
-	if (collapsed[a_node.get()]) {
+	if (!expanded[a_node.get()]) {
 		gridNode->hide();
 	}
 

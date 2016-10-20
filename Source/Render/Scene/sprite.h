@@ -103,6 +103,8 @@ namespace MV {
 				construct->initialize();
 			}
 
+			void updateSliceColorsFromCorners();
+
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
 				return cloneHelper(a_parent->attach<Sprite>().self());
 			}
@@ -129,7 +131,7 @@ namespace MV {
 			points[1] = a_BottomLeft;
 			points[2] = a_BottomRight;
 			points[3] = a_TopRight;
-			
+			updateSliceColorsFromCorners();
 			refreshBounds();
 			return self;
 		}

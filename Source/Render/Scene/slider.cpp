@@ -45,7 +45,7 @@ namespace MV {
 			Clickable(a_owner, a_mouse),
 			onPercentChange(onPercentChangeSignal) {
 			shouldDraw = true;
-			}
+		}
 
 		void Slider::acceptDownClick() {
 			Clickable::acceptDownClick();

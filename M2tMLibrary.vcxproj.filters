@@ -545,6 +545,9 @@
     <ClCompile Include="Source\Game\gameEditor.cpp">
       <Filter>Source Files\Game</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Render\Scene\scroller.cpp">
+      <Filter>Source Files\Render\Scene</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Audio\package.h">
@@ -1182,6 +1185,9 @@
     </ClInclude>
     <ClInclude Include="Source\Utility\visitor.hpp">
       <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\Scene\scroller.h">
+      <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

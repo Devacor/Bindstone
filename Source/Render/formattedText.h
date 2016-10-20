@@ -158,7 +158,7 @@ namespace MV {
 	class CharacterDefinition {
 	public:
 		static std::shared_ptr<CharacterDefinition> make(std::shared_ptr<SurfaceTextureDefinition> a_texture, const std::string &a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition);
-
+		
 		std::string character() const;
 		std::shared_ptr<TextureHandle> texture() const;
 		Size<int> characterSize() const;
@@ -232,7 +232,7 @@ namespace MV {
 	class FormattedCharacter{
 	public:
 		~FormattedCharacter();
-		static std::shared_ptr<FormattedCharacter> make(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state);
+		static std::shared_ptr<FormattedCharacter> make(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state, bool a_isPassword);
 
 		Size<> characterSize() const;
 
@@ -247,7 +247,7 @@ namespace MV {
 		Scale scale() const;
 		void scale(const Scale& a_scale);
 
-		void applyState(const std::shared_ptr<FormattedState> &a_state);
+		void applyState(const std::shared_ptr<FormattedState> &a_state, bool a_isPassword = false);
 		bool partOfFormat(bool a_isPartOfFormat);
 		bool partOfFormat() const;
 		bool isSoftBreakCharacter() const;
@@ -265,7 +265,7 @@ namespace MV {
 		Point<> basePosition;
 		Point<> offsetPosition;
 		Scale characterScale;
-		FormattedCharacter(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state);
+		FormattedCharacter(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state, bool a_isPassword);
 	};
 
 	class FormattedText;
@@ -308,6 +308,7 @@ namespace MV {
 		std::shared_ptr<FormattedState> getNewState(const UtfString &a_text, const std::shared_ptr<FormattedState> &a_current);
 
 		void fixVisuals();
+		void reapplyState();
 
 		PointPrecision lineHeight;
 		PointPrecision baseLine;
@@ -365,6 +366,11 @@ namespace MV {
 		
 		std::tuple<std::shared_ptr<FormattedLine>, size_t> lineForCharacterIndex(size_t a_characterIndex);
 
+		void passwordField(bool a_passwordField);
+
+		bool passwordField() const {
+			return showAsPassword;
+		}
 
 		void erase(size_t a_startIndex, size_t a_count);
 		void removeLines(size_t a_startIndex, size_t a_count);
@@ -405,6 +411,7 @@ namespace MV {
 				cereal::make_nvp("textWidth", textWidth),
 				cereal::make_nvp("textWrapping", textWrapping),
 				cereal::make_nvp("textJustification", textJustification),
+				cereal::make_nvp("showAsPassword", showAsPassword),
 				cereal::make_nvp("string", string())
 			);
 		}
@@ -420,16 +427,18 @@ namespace MV {
 			TextJustification textJustification;
 			TextWrapMethod textWrapping;
 			std::string stringContents;
-
+			bool showAsPassword = false;
 			archive(
 				cereal::make_nvp("defaultStateIdentifier", defaultStateIdentifier),
 				cereal::make_nvp("textWidth", textWidth),
 				cereal::make_nvp("textWrapping", textWrapping),
 				cereal::make_nvp("textJustification", textJustification),
+				cereal::make_nvp("showAsPassword", showAsPassword),
 				cereal::make_nvp("string", stringContents)
 			);
 
 			construct(*library, defaultStateIdentifier, textWidth, textWrapping, textJustification);
+			construct->showAsPassword = showAsPassword;
 			construct->append(stringContents);
 		}
 
@@ -441,6 +450,7 @@ namespace MV {
 		std::shared_ptr<FormattedState> cachedDefaultState;
 		PointPrecision textWidth;
 		PointPrecision minimumTextLineHeight;
+		bool showAsPassword = false;
 
 		TextJustification textJustification = TextJustification::LEFT;
 	};

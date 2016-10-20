@@ -8,11 +8,17 @@ CEREAL_REGISTER_TYPE(MV::Scene::Sprite);
 
 namespace MV {
 	namespace Scene {
-
+		/*Vertex Indices*\
+			0 15  14  3
+			8  4   7 13
+			9  5   6 12
+			1 10  11  2
+		\*Vertex Indices*/
 		void Sprite::updateSlice() {
 			if (hasSlice()) {
 				if (points.size() != 16) {
 					points.resize(16);
+					updateSliceColorsFromCorners();
 					vertexIndices.clear();
 					appendNineSliceVertexIndices(vertexIndices, 0);
 					ourTexture->apply(points);
@@ -21,6 +27,26 @@ namespace MV {
 				}
 			} else {
 				clearSlice();
+			}
+		}
+
+		void Sprite::updateSliceColorsFromCorners() {
+			if (hasSlice()) {
+				points[4].copyColor(points[0]);
+				points[8].copyColor(points[0]);
+				points[15].copyColor(points[0]);
+
+				points[5].copyColor(points[1]);
+				points[9].copyColor(points[1]);
+				points[10].copyColor(points[1]);
+
+				points[6].copyColor(points[2]);
+				points[11].copyColor(points[2]);
+				points[12].copyColor(points[2]);
+
+				points[7].copyColor(points[3]);
+				points[14].copyColor(points[3]);
+				points[13].copyColor(points[3]);
 			}
 		}
 

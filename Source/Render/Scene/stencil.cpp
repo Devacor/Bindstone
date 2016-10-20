@@ -73,63 +73,12 @@ namespace MV {
 			}
 		}
 
-		std::shared_ptr<Stencil> Stencil::clearCaptureBounds() {
-			capturedBounds = BoxAABB<>();
-			return std::static_pointer_cast<Stencil>(shared_from_this());
-		}
-
-		std::shared_ptr<Stencil> Stencil::captureBounds(const BoxAABB<> &a_newCapturedBounds) {
-			capturedBounds = a_newCapturedBounds;
-			return std::static_pointer_cast<Stencil>(shared_from_this());
-		}
-
-		BoxAABB<> Stencil::captureBounds() {
-			return capturedBounds.empty() ? bounds() : capturedBounds;
-		}
-
-		std::shared_ptr<Stencil> MV::Scene::Stencil::clearCaptureOffset() {
-			capturedOffset.clear();
-			return std::static_pointer_cast<Stencil>(shared_from_this());
-		}
-
-		std::shared_ptr<Stencil> Stencil::captureOffset(const Point<> &a_newCapturedOffset) {
-			capturedOffset = a_newCapturedOffset;
-			return std::static_pointer_cast<Stencil>(shared_from_this());
-		}
-
-		Point<> Stencil::captureOffset() const{
-			return capturedOffset;
-		}
-
-		std::shared_ptr<Stencil> Stencil::captureSize(const Size<> &a_size, const Point<> &a_centerPoint) {
-			Point<> topLeft;
-			Point<> bottomRight = toPoint(a_size);
-
-			topLeft -= a_centerPoint;
-			bottomRight -= a_centerPoint;
-			
-			return captureBounds({ topLeft, bottomRight });
-		}
-
-		std::shared_ptr<Stencil> Stencil::captureSize(const Size<> &a_size, bool a_center /*= false*/) {
-			return captureSize(a_size, (a_center) ? MV::point(a_size.width / 2.0f, a_size.height / 2.0f) : MV::point(0.0f, 0.0f));
-		}
-
 		std::shared_ptr<Stencil> Stencil::size(const Size<> &a_size, const Point<> &a_centerPoint) {
 			return std::static_pointer_cast<Stencil>(Sprite::size(a_size, a_centerPoint));
 		}
 
 		std::shared_ptr<Stencil> Stencil::size(const Size<> &a_size, bool a_center /*= false*/) {
 			return std::static_pointer_cast<Stencil>(Sprite::size(a_size, a_center));
-		}
-
-		std::shared_ptr<Stencil> Stencil::refreshShader(const std::string &a_refreshShaderId) {
-			refreshShaderId = a_refreshShaderId;
-			return std::static_pointer_cast<Stencil>(shared_from_this());
-		}
-
-		std::string Stencil::refreshShader() {
-			return refreshShaderId;
 		}
 
 		void Stencil::initialize() {
@@ -139,9 +88,6 @@ namespace MV {
 		std::shared_ptr<Component> Stencil::cloneHelper(const std::shared_ptr<Component> &a_clone) {
 			Sprite::cloneHelper(a_clone);
 			auto textClone = std::static_pointer_cast<Stencil>(a_clone);
-			textClone->refreshShader(refreshShaderId);
-			textClone->capturedBounds = capturedBounds;
-			textClone->capturedOffset = capturedOffset;
 			return a_clone;
 		}
 

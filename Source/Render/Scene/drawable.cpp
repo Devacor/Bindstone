@@ -274,8 +274,7 @@ namespace MV {
 
 			if (!a_rhs.parentReference.expired() && a_rhs.parentReference.lock() == a_rhs.selfReference->owner()->componentInParents(a_rhs.parentReference.lock()->id(), false, true).self()) {
 				parentIdLoaded = a_rhs.parentReference.lock()->id();
-			}
-			else {
+			} else {
 				parentReference = a_rhs.parentReference;
 			}
 			return *this;

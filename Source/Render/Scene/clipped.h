@@ -85,21 +85,12 @@ namespace MV {
 			}
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
-
-			virtual void onOwnerDestroyed() {
-				Sprite::onOwnerDestroyed();
-				onLeftMouseDownHandle.reset();
-				onLeftMouseUpHandle.reset();
-			}
 		private:
 			virtual bool preDraw();
 			virtual bool postDraw();
 
 			std::shared_ptr<DynamicTextureDefinition> clippedTexture;
 			std::shared_ptr<Framebuffer> framebuffer;
-
-			MouseState::SignalType onLeftMouseDownHandle;
-			MouseState::SignalType onLeftMouseUpHandle;
 
 			std::string refreshShaderId;
 			BoxAABB<> capturedBounds;

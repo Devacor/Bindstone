@@ -5,6 +5,7 @@
 	#include "Render/Scene/clipped.h"
 	#include "Render/Scene/stencil.h"
 	#include "Render/Scene/clickable.h"
+	#include "Render/Scene/scroller.h"
 	#include "Render/Scene/button.h"
 	#include "Render/Scene/text.h"
 	#include "Render/Scene/spineMV.h"

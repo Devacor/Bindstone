@@ -198,89 +198,24 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 	auto box = a_parent->make(a_id);
 
 	MV::PointPrecision headerSize = 20.0f;
-	auto boxContents = box->make("contents")->position({ 80.0f, headerSize });
+	auto boxContents = box->make("contents")->position({ 0.0f, headerSize });
 
 	std::weak_ptr<MV::Scene::Node> weakBoxContents = boxContents;
-	box->attach<MV::Scene::Stencil>();
-	auto resizeCallback = [headerSize, weakBoxContents, &a_mouse](const std::shared_ptr<MV::Scene::Node> &a_self) {
-		auto clippedView = a_self->component<MV::Scene::Stencil>();
-		auto newBounds = weakBoxContents.lock()->bounds();
-		auto sizeOfNode = newBounds.size() + MV::size(0.0f, headerSize);
-		if (sizeOfNode.height > 520.0f) {
-			clippedView->bounds({ { 0.0f, 0.0f }, MV::size(sizeOfNode.width, 520.0f) });
-			auto scrollBarComponent = a_self->component<MV::Scene::Clickable>("Scrollbar", false);
-			if (!scrollBarComponent) {
-				scrollBarComponent = a_self->attach<MV::Scene::Clickable>(a_mouse)->id("Scrollbar")->safe();
-				scrollBarComponent->stopEatingTouches();
-				auto indexList = scrollBarComponent->owner()->parentIndexList(scrollBarComponent->globalPriority());
-				std::vector<size_t> appendPriority{ 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10 };
-				indexList.insert(indexList.end(), appendPriority.begin(), appendPriority.end());
-				scrollBarComponent->overridePriority(indexList);
-				scrollBarComponent->color({ 1.0f, 1.0f, 1.0f, .5f });
-				//scrollBarComponent->show();
-				scrollBarComponent->bounds({ { 0.0f, headerSize }, MV::size(sizeOfNode.width, 500.0f) });
-				auto dragThreshold = std::make_shared<int>(4);
-				double maxDragTime = 1.0f;
-				auto isDragging = std::make_shared<bool>(false);
-				scrollBarComponent->onDrag.connect("scroll", [=, &a_mouse](std::shared_ptr<MV::Scene::Clickable> a_clickable, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) mutable {
-					if (!*isDragging && *dragThreshold > 0 && a_clickable->dragTime() < maxDragTime) {
-						std::shared_ptr<MV::Task> existing = weakBoxContents.lock()->task().get("movingSCROLL", false);
-						if (existing) {
-							existing->cancel();
-						}
-						*dragThreshold -= std::abs(deltaPosition.y);
-						if (*dragThreshold <= 0) {
-							*isDragging = true;
-							*dragThreshold = 4;
-							auto buttons = a_clickable->owner()->componentsInChildren<MV::Scene::Clickable>(false, false);
-							MV::visit_each(buttons, [&](const MV::Scene::SafeComponent<MV::Scene::Clickable> &a_button) {
-								a_button->cancelPress();
-							});
-						}
-					}
-					if (*isDragging) {
-						auto boxLocation = weakBoxContents.lock()->position();
-						boxLocation.y = MV::clamp(boxLocation.y + deltaPosition.y, 20.0f, -(sizeOfNode.height - 540.0f));
-						weakBoxContents.lock()->position(boxLocation);
-					}
-				});
-				scrollBarComponent->onRelease.connect("drop", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable, const MV::Point<float> &a_velocity) {
-					if (!weakBoxContents.expired() && *isDragging) {
-						std::shared_ptr<MV::Task> existing = weakBoxContents.lock()->task().get("movingSCROLL", false);
-						if (existing) {
-							existing->cancel();
-						}
-						auto velocity = MV::point(0.0f, a_velocity.y, 0.0f);
-						velocity.y = MV::clamp(velocity.y, -1000.0f, 1000.0f);
-						weakBoxContents.lock()->task().also("movingSCROLL", [=](const MV::Task&, double a_dt) mutable {
-							bool done = false;
-							velocity.y = velocity.y - (velocity.y / (1.75f / static_cast<MV::PointPrecision>(a_dt)));
-							done = std::abs(velocity.y) < 1.0f;
-							auto boxLocation = weakBoxContents.lock()->position();
-							boxLocation.y = MV::clamp(boxLocation.y + velocity.y, 20.0f, -(sizeOfNode.height - 540.0f));
-							if (boxLocation.y == 20.0f || boxLocation.y == -(sizeOfNode.height - 540.0f)) {
-								velocity.y *= -1.0f;
-							}
-							weakBoxContents.lock()->position(boxLocation);
-							return done;
-						});
-					}
-					*isDragging = false;
-					*dragThreshold = 4;
-				});
-			}
-		}
-		else {
-			clippedView->bounds({ { 0.0f, 0.0f }, sizeOfNode });
-			weakBoxContents.lock()->position({ 0.0f, headerSize });
-			a_self->detach("Scrollbar", false);
-		}
-	};
-	box->onChange.connect("changeResize", resizeCallback);
+	auto boxScroller = box->attach<MV::Scene::Scroller>(a_mouse)->content(boxContents)->bounds({MV::Point<>(0.0f, headerSize), MV::Size<>(a_boxSize.width, a_boxSize.height - headerSize)});
+	box->attach<MV::Scene::Stencil>()->anchors()
+		.anchor({ MV::Point<>(0.0f, 0.0f), MV::Point<>(1.0f, 1.0f) })
+		.offset({MV::Point<>(0.0f, -headerSize), MV::Point<>()})
+		.parent(boxScroller);
+	box->attach<MV::Scene::Clickable>(a_mouse)->color({ BOX_BACKGROUND })->show()->anchors()
+		.anchor({ MV::Point<>(0.0f, 0.0f), MV::Point<>(1.0f, 1.0f) })
+		.parent(boxScroller);
+
 	auto boxHeader = box->make("headerContainer")->attach<MV::Scene::Clickable>(a_mouse);
-	auto indexList = box->parentIndexList(boxHeader->globalPriority());
-	indexList[1] += 10;
-	boxHeader->overridePriority(indexList);
+// 	auto indexList = box->parentIndexList(boxHeader->globalPriority());
+// 	indexList[1] += 10;
+// 	boxHeader->overridePriority(indexList);
+// 	indexList[1] += 10;
+// 	boxScroller->overridePriority(indexList);
 	boxHeader->size({ a_boxSize.width, headerSize });
 	boxHeader->color({ BOX_HEADER });
 	boxHeader->show();
@@ -288,7 +223,6 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 	boxHeader->onDrag.connect("DragSignal", [](std::shared_ptr<MV::Scene::Clickable> a_boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
 		a_boxHeader->owner()->parent()->translate(a_boxHeader->owner()->renderer().worldFromScreen(deltaPosition));
 	});
-	resizeCallback(box);
 	return boxContents;
 }
 

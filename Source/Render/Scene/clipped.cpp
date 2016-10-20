@@ -132,10 +132,10 @@ namespace MV {
 
 		std::shared_ptr<Component> Clipped::cloneHelper(const std::shared_ptr<Component> &a_clone) {
 			Sprite::cloneHelper(a_clone);
-			auto textClone = std::static_pointer_cast<Clipped>(a_clone);
-			textClone->refreshShader(refreshShaderId);
-			textClone->capturedBounds = capturedBounds;
-			textClone->capturedOffset = capturedOffset;
+			auto clippedClone = std::static_pointer_cast<Clipped>(a_clone);
+			clippedClone->refreshShader(refreshShaderId);
+			clippedClone->capturedBounds = capturedBounds;
+			clippedClone->capturedOffset = capturedOffset;
 			return a_clone;
 		}
 

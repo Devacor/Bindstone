@@ -245,16 +245,16 @@ namespace MV {
 			return ourMouse;
 		}
 
-		size_t Palette::globalPriority() const {
+		int64_t Palette::globalPriority() const {
 			return globalClickPriority;
 		}
 
-		std::shared_ptr<Palette> Palette::globalPriority(size_t a_newPriority) {
+		std::shared_ptr<Palette> Palette::globalPriority(int64_t a_newPriority) {
 			globalClickPriority = a_newPriority;
 			return std::static_pointer_cast<Palette>(shared_from_this());
 		}
 
-		std::vector<size_t> Palette::overridePriority() const {
+		std::vector<int64_t> Palette::overridePriority() const {
 			return overrideClickPriority;
 		}
 
@@ -405,7 +405,7 @@ namespace MV {
 			points[44] = MV::point(colorLocation.x, colorLocation.y + 2);
 			points[45] = MV::point(colorLocation.x + 2, colorLocation.y);
 
-			float greyColor = mixOut(0.0f, 1.0f, (hsv.V + (1.0f - hsv.S)) / 2.0f, 4.5f);
+			float greyColor = mixOut(0.0f, 1.0f, ((1.0f - hsv.V) + (hsv.S)) / 2.0f, 4.5f);
 			Color cursorColor(greyColor, greyColor, greyColor);
 			for (int i = 30; i <= 45; ++i) {
 				points[i].x = clamp(points[i].x, localBounds.minPoint.x, localBounds.maxPoint.x);

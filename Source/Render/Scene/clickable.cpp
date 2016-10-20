@@ -69,16 +69,25 @@ namespace MV {
 			return ourMouse;
 		}
 
-		size_t Clickable::globalPriority() const {
+		int64_t Clickable::globalPriority() const {
 			return globalClickPriority;
 		}
 
-		std::shared_ptr<Clickable> Clickable::globalPriority(size_t a_newPriority) {
+		std::shared_ptr<Clickable> Clickable::globalPriority(int64_t a_newPriority) {
 			globalClickPriority = a_newPriority;
 			return std::static_pointer_cast<Clickable>(shared_from_this());
 		}
 
-		std::vector<size_t> Clickable::overridePriority() const {
+		int64_t Clickable::appendPriority() const {
+			return appendClickPriority;
+		}
+
+		std::shared_ptr<Clickable> Clickable::appendPriority(int64_t a_newPriority) {
+			appendClickPriority = a_newPriority;
+			return std::static_pointer_cast<Clickable>(shared_from_this());
+		}
+
+		std::vector<int64_t> Clickable::overridePriority() const {
 			return overrideClickPriority;
 		}
 
@@ -101,7 +110,7 @@ namespace MV {
 			Sprite::initialize();
 			onLeftMouseDownHandle = ourMouse.onLeftMouseDown.connect([&](MouseState& a_mouse) {
 				if (mouseInBounds(a_mouse)) {
-					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority.empty() ? owner()->parentIndexList(globalClickPriority) : overrideClickPriority), [&]() {
+					a_mouse.queueExclusiveAction({ eatTouches, clickPriority(), [&]() {
 						acceptDownClick();
 					}, []() {}, owner()->id() });
 				}
@@ -110,6 +119,18 @@ namespace MV {
 			onLeftMouseUpHandle = ourMouse.onLeftMouseUp.connect([&](MouseState& a_mouse) {
 				acceptUpClick();
 			});
+		}
+
+		std::vector<int64_t> Clickable::clickPriority() const {
+			if (overrideClickPriority.empty()) {
+				auto priority = owner()->parentIndexList(globalClickPriority);
+				if (appendPriority() != 0) {
+					priority.push_back(appendPriority());
+				}
+				return priority;
+			} else {
+				return overrideClickPriority;
+			}
 		}
 
 		void Clickable::acceptUpClick(bool a_ignoreBounds) {

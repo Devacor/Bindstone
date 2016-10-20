@@ -587,7 +587,7 @@ namespace MV {
 			size_t indexOf(const std::shared_ptr<const Node> &a_childItem) const;
 			size_t myIndex() const;
 
-			std::vector<size_t> parentIndexList(size_t a_globalPriority = 0, size_t a_modifyLastPriority = 0);
+			std::vector<int64_t> parentIndexList(int64_t a_globalPriority = 0);
 			std::vector<std::shared_ptr<MV::Scene::Node>> parents();
 
 			BoxAABB<> bounds(bool a_includeChildren = true); //our node's local bounds + optionally included childBounds;
@@ -673,8 +673,7 @@ namespace MV {
 			void castAndAddIfExact(const std::shared_ptr<Component> &base, std::vector<ContainerObjectType> &container) const {
 				if (typeid(*base) == typeid(T)) {
 					container.push_back(SafeComponent<T>(shared_from_this(), std::static_pointer_cast<T>(base)));
-				}
-				else {
+				} else {
 					castAndAddIfExact<ContainerObjectType, T2, V...>(base, container);
 				}
 			}

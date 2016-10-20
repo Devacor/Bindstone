@@ -323,6 +323,7 @@
     <ClCompile Include="Source\Render\boxaabb.cpp" />
     <ClCompile Include="Source\Render\Scene\button.cpp" />
     <ClCompile Include="Source\Render\Scene\component.cpp" />
+    <ClCompile Include="Source\Render\Scene\scroller.cpp" />
     <ClCompile Include="Source\Render\Scene\stencil.cpp" />
     <ClCompile Include="Source\Render\Scene\emitter.cpp" />
     <ClCompile Include="Source\Render\Scene\clipped.cpp" />
@@ -530,6 +531,7 @@
     <ClInclude Include="Source\Interface\package.h" />
     <ClInclude Include="Source\Network\network.h" />
     <ClInclude Include="Source\Network\package.h" />
+    <ClInclude Include="Source\Render\Scene\scroller.h" />
     <ClInclude Include="Source\Render\Scene\stencil.h" />
     <ClInclude Include="Source\Render\Scene\path.h" />
     <ClInclude Include="Source\Render\Scene\package.h" />

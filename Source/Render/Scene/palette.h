@@ -57,11 +57,11 @@ namespace MV {
 				return size(a_size, (a_center) ? MV::point(a_size.width / 2.0f, a_size.height / 2.0f) : MV::point(0.0f, 0.0f));
 			}
 
-			size_t globalPriority() const;
-			std::shared_ptr<Palette> globalPriority(size_t a_newPriority);
+			int64_t globalPriority() const;
+			std::shared_ptr<Palette> globalPriority(int64_t a_newPriority);
 
-			std::vector<size_t> overridePriority() const;
-			std::shared_ptr<Palette> overridePriority(const std::vector<size_t> &a_newPriority) {
+			std::vector<int64_t> overridePriority() const;
+			std::shared_ptr<Palette> overridePriority(const std::vector<int64_t> &a_newPriority) {
 				overrideClickPriority = a_newPriority;
 				return std::static_pointer_cast<Palette>(shared_from_this());
 			}
@@ -153,7 +153,7 @@ namespace MV {
 			MouseState::SignalType onMouseMoveHandle;
 
 			size_t globalClickPriority = 100;
-			std::vector<size_t> overrideClickPriority;
+			std::vector<int64_t> overrideClickPriority;
 			bool eatTouches = true;
 
 			MouseState& ourMouse;

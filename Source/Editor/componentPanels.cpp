@@ -340,9 +340,9 @@ void SelectedNodeEditorPanel::handleInput(SDL_Event &a_event) {
 				);
 			});
 
-			auto editableNode = std::make_shared<EditableNode>(newNode, panel.editor(), panel.resources().mouse);
+			//auto editableNode = std::make_shared<EditableNode>(newNode, panel.editor(), panel.resources().mouse);
 
-			panel.loadPanel<SelectedNodeEditorPanel>(editableNode);
+			//panel.loadPanel<SelectedNodeEditorPanel>(editableNode);
 			panel.resources().editor->sceneUpdated();
 		}
 	}
@@ -1347,17 +1347,25 @@ void ChooseElementCreationType::createButton() {
 	panel.selection().disable();
 	auto newButton = nodeToAttachTo->attach<MV::Scene::Button>(*(editorPanel->resources().mouse));
 
-	auto active = nodeToAttachTo->make("Active");
-	auto idle = nodeToAttachTo->make("Idle");
-	auto disabled = nodeToAttachTo->make("Disabled");
+	std::vector<std::shared_ptr<MV::Scene::Node>> nodes { nodeToAttachTo->make("Active"), nodeToAttachTo->make("Idle"), nodeToAttachTo->make("Disabled") };
 
-	active->attach<MV::Scene::Sprite>()->color({InterfaceColors::BUTTON_TOP_ACTIVE })->anchors().anchor({ MV::point(0.0f, 0.0f), MV::size(1.0f, 1.0f) }).parent(newButton.self());
-	idle->attach<MV::Scene::Sprite>()->color({ InterfaceColors::BUTTON_TOP_IDLE })->anchors().anchor({ MV::point(0.0f, 0.0f), MV::size(1.0f, 1.0f) }).parent(newButton.self());
-	disabled->attach<MV::Scene::Sprite>()->color({ .2f, .2f, .2f, .5f })->anchors().anchor({ MV::point(0.0f, 0.0f), MV::size(1.0f, 1.0f) }).parent(newButton.self());
-	
-	newButton->activeNode(active);
-	newButton->idleNode(idle);
-	newButton->disabledNode(disabled);
+	auto attachSprite = [&](const std::shared_ptr<MV::Scene::Node> &a_target, const MV::Color &a_color) {
+		a_target->attach<MV::Scene::Sprite>()->color(a_color)->anchors().anchor({ MV::point(0.0f, 0.0f), MV::size(1.0f, 1.0f) }).parent(newButton.self());
+	};
+
+	auto attachText = [&](const std::shared_ptr<MV::Scene::Node> &a_target) {
+		a_target->attach<MV::Scene::Text>(*panel.resources().textLibrary)->text("!")->useBoundsForLineHeight(true)->justification(MV::TextJustification::CENTER)->anchors().anchor({ MV::point(0.0f, 0.0f), MV::size(1.0f, 1.0f) }).parent(newButton.self());
+	};
+
+	std::vector<MV::Color> colors{ {0.25f, 0.25f, 0.25f, 1.0f},{ 1.0f, 1.0f, 1.0f, 1.0f }, {0.5f, 0.5f, 0.5f, 0.75f} };
+	for (int i = 0; i < nodes.size();++i) {
+		attachSprite(nodes[i], colors[i]);
+		attachText(nodes[i]);
+	}
+
+	newButton->activeNode(nodes[0]);
+	newButton->idleNode(nodes[1]);
+	newButton->disabledNode(nodes[2]);
 
 	panel.resources().editor->sceneUpdated();
 
@@ -1436,6 +1444,20 @@ SelectedTextEditorPanel::SelectedTextEditorPanel(EditorControls &a_panel, std::s
 
 	offsetX = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posX", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(controlBounds.minPoint.x)));
 	offsetY = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "posY", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(controlBounds.minPoint.y)));
+
+	makeLabel(grid, *panel.resources().textLibrary, "HeightBoundsLabel", buttonSize, UTF_CHAR_STR("Height Bounds"));
+	makeToggle(grid, *panel.resources().mouse, "HeightBounds", a_controls->elementToEdit->useBoundsForLineHeight(), [&] {
+		controls->elementToEdit->useBoundsForLineHeight(true);
+	}, [&] {
+		controls->elementToEdit->useBoundsForLineHeight(false);
+	}, buttonSize);
+
+	makeLabel(grid, *panel.resources().textLibrary, "PasswordToggleLabel", buttonSize, UTF_CHAR_STR("Password"));
+	makeToggle(grid, *panel.resources().mouse, "PasswordToggle", a_controls->elementToEdit->passwordField(), [&]{
+		controls->elementToEdit->passwordField(true);
+	}, [&]{
+		controls->elementToEdit->passwordField(false);
+	}, buttonSize);
 
 	if (controls) {
 		auto xClick = offsetX->owner()->component<MV::Scene::Clickable>();
@@ -1558,6 +1580,22 @@ SelectedButtonEditorPanel::SelectedButtonEditorPanel(EditorControls &a_panel, st
 		text(controls->elementToEdit->text())->
 		onEnter.connect("!", [&](std::shared_ptr<MV::Scene::Text> a_text) {
 			controls->elementToEdit->text(a_text->text());
+		});
+
+	makeLabel(grid, *panel.resources().textLibrary, "ScriptLabel", buttonSize, "Script File");
+	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Script", buttonSize)->
+		text("")->
+		onEnter.connect("!", [&](std::shared_ptr<MV::Scene::Text> a_text) {
+			if (a_text->text().empty()) {
+				controls->elementToEdit->onAccept.disconnect("script");
+			} else {
+				auto content = MV::fileContents("Assets/Scripts/" + a_text->text());
+				if (content.empty()) {
+					content = a_text->text();
+				}
+				controls->elementToEdit->onAccept.connect("script", content);
+				std::cout << "Hooked up script to button [" << content << "]" << std::endl;
+			}
 		});
 
 	std::vector<MV::Scene::Button::BoundsType> boundsTypes{ MV::Scene::Button::BoundsType::LOCAL, MV::Scene::Button::BoundsType::NODE, MV::Scene::Button::BoundsType::NODE_CHILDREN, MV::Scene::Button::BoundsType::CHILDREN, MV::Scene::Button::BoundsType::NONE };

@@ -186,6 +186,9 @@ namespace MV{
 			points[3].x = a_bounds.maxPoint.x;	points[3].y = a_bounds.minPoint.y;	points[3].z = points[1].z;
 
 			formattedText->scene()->position(a_bounds.minPoint);
+			if (usingBoundsForLineHeight) {
+				formattedText->minimumLineHeight(a_bounds.height());
+			}
 			formattedText->width(a_bounds.size().width);
 			
 			setCursor(cursor);

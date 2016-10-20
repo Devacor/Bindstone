@@ -149,11 +149,11 @@ namespace MV {
 		}
 
 		std::string Button::text() const {
-			auto textComponent = activeView->componentInChildren<MV::Scene::Text>(false);
+			auto textComponent = activeView->componentInChildren<MV::Scene::Text>(false, false);
 			if (textComponent) { return textComponent->text(); }
-			textComponent = idleView->componentInChildren<MV::Scene::Text>(false);
+			textComponent = idleView->componentInChildren<MV::Scene::Text>(false, false);
 			if (textComponent) { return textComponent->text(); }
-			textComponent = disabledView->componentInChildren<MV::Scene::Text>(false);
+			textComponent = disabledView->componentInChildren<MV::Scene::Text>(false, false);
 			if (textComponent) { return textComponent->text(); }
 
 			return "";

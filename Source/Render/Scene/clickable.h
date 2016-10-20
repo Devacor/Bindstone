@@ -9,16 +9,22 @@
 	std::shared_ptr<ComponentType> clickDetectionType(MV::Scene::Clickable::BoundsType a_type) { \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Clickable::clickDetectionType(a_type)); \
 	} \
-	size_t globalPriority() const { \
+	int64_t globalPriority() const { \
 		return MV::Scene::Clickable::globalPriority(); \
 	} \
-	std::shared_ptr<Clickable> globalPriority(size_t a_newPriority) { \
+	std::shared_ptr<ComponentType> globalPriority(int64_t a_newPriority) { \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Clickable::globalPriority(a_newPriority)); \
 	} \
-	std::vector<size_t> overridePriority() const { \
+	int64_t appendPriority() const { \
+		return MV::Scene::Clickable::appendPriority(); \
+	} \
+	std::shared_ptr<ComponentType> appendPriority(int64_t a_newPriority) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Clickable::appendPriority(a_newPriority)); \
+	} \
+	std::vector<int64_t> overridePriority() const { \
 		return MV::Scene::Clickable::overridePriority(); \
 	} \
-	std::shared_ptr<Clickable> overridePriority(const std::vector<size_t> &a_newPriority) { \
+	std::shared_ptr<ComponentType> overridePriority(const std::vector<int64_t> &a_newPriority) { \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Clickable::overridePriority(a_newPriority)); \
 	} \
 	MV::Scene::Clickable::BoundsType clickDetectionType() { \
@@ -106,11 +112,14 @@ namespace MV {
 				return dragTimer.check();
 			}
 
-			size_t globalPriority() const;
-			std::shared_ptr<Clickable> globalPriority(size_t a_newPriority);
+			int64_t globalPriority() const;
+			std::shared_ptr<Clickable> globalPriority(int64_t a_newPriority);
 
-			std::vector<size_t> overridePriority() const;
-			std::shared_ptr<Clickable> overridePriority( const std::vector<size_t> &a_newPriority) {
+			int64_t appendPriority() const;
+			std::shared_ptr<Clickable> appendPriority(int64_t a_newPriority);
+
+			std::vector<int64_t> overridePriority() const;
+			std::shared_ptr<Clickable> overridePriority( const std::vector<int64_t> &a_newPriority) {
 				overrideClickPriority = a_newPriority;
 				return std::static_pointer_cast<Clickable>(shared_from_this());
 			}
@@ -124,6 +133,8 @@ namespace MV {
 			Clickable(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
 
 			virtual void initialize() override;
+
+			virtual std::vector<int64_t> clickPriority() const;
 
 			virtual void acceptDownClick();
 
@@ -141,6 +152,7 @@ namespace MV {
 					cereal::make_nvp("hitDetectionType", hitDetectionType),
 					cereal::make_nvp("eatTouches", eatTouches),
 					cereal::make_nvp("globalClickPriority", globalClickPriority),
+					cereal::make_nvp("appendClickPriority", appendClickPriority),
 					cereal::make_nvp("overrideClickPriority", overrideClickPriority),
 					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
 				);
@@ -162,6 +174,7 @@ namespace MV {
 					cereal::make_nvp("hitDetectionType", construct->hitDetectionType),
 					cereal::make_nvp("eatTouches", construct->eatTouches),
 					cereal::make_nvp("globalClickPriority", construct->globalClickPriority),
+					cereal::make_nvp("appendClickPriority", construct->appendClickPriority),
 					cereal::make_nvp("overrideClickPriority", construct->overrideClickPriority),
 					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(construct.ptr()))
 				);
@@ -174,7 +187,6 @@ namespace MV {
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
-		protected:
 			virtual void onOwnerDestroyed() {
 				Sprite::onOwnerDestroyed();
 				onLeftMouseDownHandle.reset();
@@ -182,6 +194,8 @@ namespace MV {
 				onMouseMoveHandle.reset();
 			}
 
+			int64_t globalClickPriority = 100;
+			int64_t appendClickPriority = 0;
 		private:
 			MouseState::SignalType onLeftMouseDownHandle;
 			MouseState::SignalType onLeftMouseUpHandle;
@@ -202,8 +216,7 @@ namespace MV {
 			std::string onAcceptScript;
 			std::string onCancelScript;
 
-			size_t globalClickPriority = 100;
-			std::vector<size_t> overrideClickPriority;
+			std::vector<int64_t> overrideClickPriority;
 			bool eatTouches = true;
 			BoundsType hitDetectionType = BoundsType::LOCAL;
 		};

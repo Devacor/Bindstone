@@ -25,7 +25,8 @@ void SceneGraphPanel::update(){
 void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nullptr*/) {
 	MV::Point<> position{ 200.0f, 0.0f };
 	MV::Point<> boxInnerPosition{ 0.0f, 0.0f };
-	auto box = root->get("SceneNodePicker", false);
+	std::shared_ptr<MV::Scene::Node> box;
+	box = root->get("SceneNodePicker", false);
 
 	if (a_newScene) {
 		scene = a_newScene;
@@ -38,7 +39,9 @@ void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nu
 	makeChildButton(scene, 0, gridNode);
 
 	if (!box) {
-		box = makeDraggableBox("SceneNodePicker", root, grid->bounds().size(), *sharedResources.mouse);
+		auto size = grid->bounds().size();
+		size.height = 620.0f;
+		box = makeDraggableBox("SceneNodePicker", root, size, *sharedResources.mouse);
 		box->parent()->position(position);
 		box->position(boxInnerPosition);
 		box->make("CONTAINER");

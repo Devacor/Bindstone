@@ -128,6 +128,26 @@ namespace MV{
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
 
+			void passwordField(bool a_passwordField) {
+				formattedText->passwordField(a_passwordField);
+			}
+
+			bool passwordField() const {
+				return formattedText->passwordField();
+			}
+
+			bool useBoundsForLineHeight() const {
+				return usingBoundsForLineHeight;
+			}
+
+			std::shared_ptr<Text> useBoundsForLineHeight(bool a_useBounds) {
+				usingBoundsForLineHeight = a_useBounds;
+				if (a_useBounds) {
+					formattedText->minimumLineHeight(bounds().height());
+				}
+				return std::static_pointer_cast<Text>(shared_from_this());
+			}
+
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 				a_script.add(chaiscript::user_type<Text>(), "Text");
 				a_script.add(chaiscript::base_class<Drawable, Text>());
@@ -177,6 +197,7 @@ namespace MV{
 			void serialize(Archive & archive, std::uint32_t const /*version*/) {
 				archive(
 					CEREAL_NVP(formattedText),
+					CEREAL_NVP(usingBoundsForLineHeight),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
@@ -193,6 +214,7 @@ namespace MV{
 
 				archive(
 					cereal::make_nvp("formattedText", construct->formattedText),
+					cereal::make_nvp("usingBoundsForLineHeight", construct->usingBoundsForLineHeight),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
 
@@ -230,6 +252,8 @@ namespace MV{
 			TextLibrary& textLibrary;
 
 			std::shared_ptr<FormattedText> formattedText;
+
+			bool usingBoundsForLineHeight = false;
 
 			bool displayCursor = false;
 			size_t cursor;

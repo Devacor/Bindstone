@@ -1,4 +1,4 @@
-#include "formattedText.h"
+﻿#include "formattedText.h"
 #include "Render/Scene/sprite.h"
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
@@ -166,8 +166,8 @@ namespace MV {
 		}
 	}
 
-	std::shared_ptr<FormattedCharacter> FormattedCharacter::make(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state) {
-		return std::shared_ptr<FormattedCharacter>(new FormattedCharacter(parent, a_character, a_state));
+	std::shared_ptr<FormattedCharacter> FormattedCharacter::make(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state, bool a_isPassword) {
+		return std::shared_ptr<FormattedCharacter>(new FormattedCharacter(parent, a_character, a_state, a_isPassword));
 	}
 
 	Size<> FormattedCharacter::characterSize() const {
@@ -222,9 +222,9 @@ namespace MV {
 		shape->silence()->position((basePosition + offsetPosition) * characterScale)->component<Scene::Sprite>()->size(cast<PointPrecision>(character->characterSize()) * characterScale);
 	}
 
-	void FormattedCharacter::applyState(const std::shared_ptr<FormattedState> &a_state) {
+	void FormattedCharacter::applyState(const std::shared_ptr<FormattedState> &a_state, bool a_isPassword) {
 		state = a_state;
-		character = state->font->characterDefinition(textCharacter);
+		character = a_isPassword ? a_state->font->characterDefinition(u8"●") : state->font->characterDefinition(textCharacter);
 		auto silencedShape = shape->silence();
 		auto sprite = shape->component<Scene::Sprite>();
 		sprite->size(cast<PointPrecision>(character->characterSize()) * characterScale);
@@ -256,10 +256,10 @@ namespace MV {
 		}
 	}
 
-	FormattedCharacter::FormattedCharacter(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state):
+	FormattedCharacter::FormattedCharacter(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state, bool a_isPassword):
 		textCharacter(a_character),
 		state(a_state),
-		character(a_state->font->characterDefinition(a_character)) {
+		character(a_isPassword ? a_state->font->characterDefinition(u8"●") : a_state->font->characterDefinition(a_character)) {
 
 		shape = parent->silence()->make(guid(character->character()))->
 			attach<Scene::Sprite>()->
@@ -421,6 +421,12 @@ namespace MV {
 			if (characters[index]->scale().x != scaleTo) {
 				characters[index]->scale(scaleTo);
 			}
+		}
+	}
+
+	void FormattedLine::reapplyState() {
+		for (auto&& character : characters) {
+			character->applyState(character->state, text.showAsPassword);
 		}
 	}
 
@@ -687,7 +693,7 @@ namespace MV {
 				break;
 			}
 			character->partOfFormat(i <= a_newFormatEnd);
-			character->applyState(a_newState);
+			character->applyState(a_newState, showAsPassword);
 		}
 	}
 
@@ -735,6 +741,18 @@ namespace MV {
 			auto newLine = FormattedLine::make(*this, lines.size());
 			lines.push_back(newLine);
 			return std::make_tuple(newLine, 0);
+		}
+	}
+
+	void FormattedText::passwordField(bool a_passwordField) {
+		if (a_passwordField != showAsPassword) {
+			showAsPassword = a_passwordField;
+			for (auto&& line : lines) {
+				line->reapplyState();
+			}
+			for (auto&& line : lines) {
+				line->fixVisuals();
+			}
 		}
 	}
 
@@ -809,7 +827,7 @@ namespace MV {
 		std::vector<std::shared_ptr<FormattedCharacter>> formattedCharacters;
 		utf8_string utfCharacters(a_characters);
 		for (auto it = utfCharacters.begin(); it != utfCharacters.end();++it) {
-			formattedCharacters.push_back(FormattedCharacter::make(textScene, it.str(), foundState));
+			formattedCharacters.push_back(FormattedCharacter::make(textScene, it.str(), foundState, showAsPassword));
 			++inserted;
 		}
 
@@ -860,7 +878,7 @@ namespace MV {
 		std::vector<std::shared_ptr<FormattedCharacter>> formattedCharacters;
 		utf8_string utfCharacters(a_characters);
 		for (auto it = utfCharacters.begin(); it != utfCharacters.end(); ++it) {
-			formattedCharacters.push_back(FormattedCharacter::make(textScene, it.str(), foundState));
+			formattedCharacters.push_back(FormattedCharacter::make(textScene, it.str(), foundState, showAsPassword));
 			++inserted;
 		}
 

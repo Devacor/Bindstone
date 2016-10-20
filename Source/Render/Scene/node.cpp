@@ -447,15 +447,12 @@ namespace MV {
 			return (myParent) ? myParent->indexOf(shared_from_this()) : 0;
 		}
 
-		std::vector<size_t> Node::parentIndexList(size_t a_globalPriority, size_t a_modifyLastPriority) {
-			std::vector<size_t> list;
+		std::vector<int64_t> Node::parentIndexList(int64_t a_globalPriority) {
+			std::vector<int64_t> list;
 			Node* current = this;
 			while(current){
 				list.push_back(current->myIndex());
 				current = current->myParent;
-			}
-			if (!list.empty()) {
-				list[0] += a_modifyLastPriority;
 			}
 			list.push_back(a_globalPriority); //This gives us the ability to prioritize more things before any nodes get evaluated.
 			std::reverse(list.begin(), list.end());
@@ -1102,7 +1099,7 @@ namespace MV {
 			auto* currentParent = myParent;
 			while (currentParent) {
 				currentParent->dirtyChildBounds = true;
-				currentParent->onChildBoundsChangeSignal(shared_from_this());
+				currentParent->onChildBoundsChangeSignal(currentParent->shared_from_this());
 				currentParent = currentParent->myParent;
 			}
 		}

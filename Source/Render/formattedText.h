@@ -257,7 +257,7 @@ namespace MV {
 		std::string textCharacter;
 		std::shared_ptr<CharacterDefinition> character;
 		std::shared_ptr<Scene::Node> shape;
-		std::shared_ptr<FormattedLine> line;
+		std::weak_ptr<FormattedLine> line;
 		std::shared_ptr<FormattedState> state;
 
 	private:
@@ -400,44 +400,58 @@ namespace MV {
 			defaultState(a_rhs.defaultStateIdentifier);
 			textWidth = a_rhs.textWidth;
 			textJustification = a_rhs.textJustification;
+			minimumTextLineHeight = a_rhs.minimumTextLineHeight;
+			showAsPassword = a_rhs.showAsPassword;
 			string(a_rhs.string());
 			return *this;
 		}
 	private:
 		template <class Archive>
-		void serialize(Archive & archive, std::uint32_t const /*version*/) {
+		void serialize(Archive & archive, std::uint32_t const a_version) {
+			if (a_version > 0) {
+				archive(
+					cereal::make_nvp("minimumTextLineHeight", minimumTextLineHeight),
+					cereal::make_nvp("showAsPassword", showAsPassword)
+				);
+			}
 			archive(
 				cereal::make_nvp("defaultStateIdentifier", defaultStateIdentifier),
 				cereal::make_nvp("textWidth", textWidth),
 				cereal::make_nvp("textWrapping", textWrapping),
 				cereal::make_nvp("textJustification", textJustification),
-				cereal::make_nvp("showAsPassword", showAsPassword),
 				cereal::make_nvp("string", string())
 			);
 		}
 
 		template <class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<FormattedText> &construct, std::uint32_t const /*version*/) {
+		static void load_and_construct(Archive & archive, cereal::construct<FormattedText> &construct, std::uint32_t const a_version) {
 			TextLibrary *library = nullptr;
 			archive.extract(cereal::make_nvp("textLibrary", library));
 			MV::require<PointerException>(library != nullptr, "Null TextLibrary in Text::load_and_construct.");
 
 			std::string defaultStateIdentifier;
 			float textWidth;
+			PointPrecision minimumTextLineHeight;
 			TextJustification textJustification;
 			TextWrapMethod textWrapping;
 			std::string stringContents;
 			bool showAsPassword = false;
+			if (a_version > 0) {
+				archive(
+					cereal::make_nvp("minimumTextLineHeight", minimumTextLineHeight),
+					cereal::make_nvp("showAsPassword", showAsPassword)
+				);
+			}
 			archive(
 				cereal::make_nvp("defaultStateIdentifier", defaultStateIdentifier),
 				cereal::make_nvp("textWidth", textWidth),
 				cereal::make_nvp("textWrapping", textWrapping),
 				cereal::make_nvp("textJustification", textJustification),
-				cereal::make_nvp("showAsPassword", showAsPassword),
 				cereal::make_nvp("string", stringContents)
 			);
 
 			construct(*library, defaultStateIdentifier, textWidth, textWrapping, textJustification);
+			construct->minimumTextLineHeight = minimumTextLineHeight;
 			construct->showAsPassword = showAsPassword;
 			construct->append(stringContents);
 		}
@@ -455,5 +469,7 @@ namespace MV {
 		TextJustification textJustification = TextJustification::LEFT;
 	};
 }
+
+CEREAL_CLASS_VERSION(MV::FormattedText, 1);
 
 #endif

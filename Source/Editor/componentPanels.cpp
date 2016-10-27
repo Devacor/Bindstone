@@ -27,7 +27,7 @@ SharedResources EditorPanel::resources()
 }
 
 EditorPanel::~EditorPanel() {
-	deactivateText();
+//	deactivateText();
 	clearTexturePicker();
 	clearAnchorEditor();
 }

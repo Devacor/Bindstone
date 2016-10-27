@@ -175,8 +175,8 @@ namespace MV {
 						parameterValues[i]);
 				}
 				auto resetLocals = scriptEnginePointer->get_locals();
-				scriptEnginePointer->set_locals(localVariables);
 				SCOPE_EXIT{ scriptEnginePointer->set_locals(resetLocals); };
+				scriptEnginePointer->set_locals(localVariables);
 				scriptEnginePointer->eval(scriptCallback);
 			} else if (!scriptCallback.empty()) {
 				std::cerr << "Failed to run script in receiver, you need to supply a chaiscript engine handle!\n";
@@ -188,8 +188,8 @@ namespace MV {
 			if (scriptEnginePointer && !scriptCallback.empty()) {
 				std::map<std::string, chaiscript::Boxed_Value> localVariables;
 				auto resetLocals = scriptEnginePointer->get_locals();
-				scriptEnginePointer->set_locals(localVariables);
 				SCOPE_EXIT{ scriptEnginePointer->set_locals(resetLocals); };
+				scriptEnginePointer->set_locals(localVariables);
 				scriptEnginePointer->eval(scriptCallback);
 			} else if (!scriptCallback.empty()) {
 				std::cerr << "Failed to run script in receiver, you need to supply a chaiscript engine handle!\n";

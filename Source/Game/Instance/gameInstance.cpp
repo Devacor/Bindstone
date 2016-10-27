@@ -48,13 +48,16 @@ void GameInstance::handleScroll(int a_amount) {
 	}
 }
 
-GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data) :
-	worldScene(MV::Scene::Node::load("map.scene", jsonLoadBinder())),
+GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data) :
+	worldScene(a_root->make("map.scene", jsonLoadBinder())),
 	ourMouse(a_mouse),
 	gameData(a_data),
 	left(a_leftPlayer, LEFT, *this),
 	right(a_rightPlayer, RIGHT, *this),
 	scriptEngine(MV::create_chaiscript_stdlib()) {
+
+	//manually updating this.
+	worldScene->silence().forget()->pause();
 
 	pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
 
@@ -71,9 +74,13 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 	hook();
 
 	worldTimestep.then("update", [&](MV::Task& a_self, double a_dt) {
-		worldScene->update(static_cast<float>(a_dt));
+		worldScene->update(static_cast<float>(a_dt), true);
 		return false;
 	}).last()->interval(1.0 / 30, 15);
+}
+
+GameInstance::~GameInstance() {
+	worldScene->removeFromParent();
 }
 
 void GameInstance::beginMapDrag() {
@@ -148,7 +155,6 @@ bool GameInstance::update(double a_dt) {
 	removeExpiredMissiles();
 	worldTimestep.update(a_dt);
 	cameraAction.update(a_dt);
-	worldScene->draw();
 	return false;
 }
 

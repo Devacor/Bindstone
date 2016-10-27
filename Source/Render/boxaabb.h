@@ -474,6 +474,31 @@ namespace MV {
 
 		return a_script;
 	}
+
+	template <typename T>
+	void makeBounds(const Point<T> &a_startPoint) {
+		return BoxAABB<T>(a_startPoint);
+	}
+	template <typename T>
+	void makeBounds(const Size<T> &a_startSize) {
+		return BoxAABB<T>(a_startSize);
+	}
+	template <typename T>
+	void makeBounds(const Size<T> &a_startPoint, bool a_center) {
+		return BoxAABB<T>(a_startPoint, a_center);
+	}
+	template <typename T>
+	void makeBounds(const BoxAABB<T> &a_startBox) {
+		return BoxAABB<T>(a_startBox);
+	}
+	template <typename T>
+	void makeBounds(const Point<T> &a_startPoint, const Point<T> &a_endPoint) {
+		return BoxAABB<T>(a_startPoint, a_endPoint);
+	}
+	template <typename T>
+	void makeBounds(const Point<T> &a_startPoint, const Size<T> &a_size) {
+		return BoxAABB<T>(a_startPoint, a_size);
+	}
 }
 
 #endif

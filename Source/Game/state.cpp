@@ -22,3 +22,27 @@ void BinaryNodeLoadBinder::operator()(cereal::PortableBinaryInputArchive& a_arch
 		cereal::make_nvp("script", &script)
 	);
 }
+
+GameData::GameData(Managers& a_managers) :
+	allManagers(a_managers) {
+	buildingCatalog = std::make_unique<BuildingCatalog>("buildings.json");
+	creatureCatalog = std::make_unique<CreatureCatalog>("creatures.json");
+}
+
+chaiscript::ChaiScript& GameData::hook(chaiscript::ChaiScript &a_script) {
+	a_script.add(chaiscript::user_type<GameData>(), "GameData");
+
+	Constants::hook(a_script);
+
+	a_script.add(chaiscript::fun([](GameData &a_self) {
+		return a_self.buildingCatalog.get();
+	}), "buildings");
+	a_script.add(chaiscript::fun([](GameData &a_self) {
+		return a_self.creatureCatalog.get();
+	}), "creatures");
+	a_script.add(chaiscript::fun([](GameData &a_self) {
+		return a_self.metadataConstants;
+	}), "constants");
+
+	return a_script;
+}

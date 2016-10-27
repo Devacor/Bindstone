@@ -6,8 +6,6 @@
 #include <string>
 #include <array>
 
-namespace chaiscript { class ChaiScript; }
-
 class Wallet {
 public:
 	enum CurrencyType { GAME, SOFT, HARD, TOTAL };

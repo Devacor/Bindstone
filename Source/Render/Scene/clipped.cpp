@@ -104,16 +104,6 @@ namespace MV {
 			Sprite::boundsImplementation(a_bounds);
 		}
 
-		std::shared_ptr<Clipped> Clipped::size(const Size<> &a_size, const Point<> &a_centerPoint) {
-			dirtyTexture = true;
-			return std::static_pointer_cast<Clipped>(Sprite::size(a_size, a_centerPoint));
-		}
-
-		std::shared_ptr<Clipped> Clipped::size(const Size<> &a_size, bool a_center /*= false*/) {
-			dirtyTexture = true;
-			return std::static_pointer_cast<Clipped>(Sprite::size(a_size, a_center));
-		}
-
 		std::shared_ptr<Clipped> Clipped::refreshShader(const std::string &a_refreshShaderId) {
 			refreshShaderId = a_refreshShaderId;
 			return std::static_pointer_cast<Clipped>(shared_from_this());

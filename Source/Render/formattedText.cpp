@@ -219,7 +219,7 @@ namespace MV {
 	}
 	void FormattedCharacter::scale(const Scale& a_scale){
 		characterScale = a_scale;
-		shape->silence()->position((basePosition + offsetPosition) * characterScale)->component<Scene::Sprite>()->size(cast<PointPrecision>(character->characterSize()) * characterScale);
+		shape->silence()->position((basePosition + offsetPosition) * characterScale)->component<Scene::Sprite>()->bounds(cast<PointPrecision>(character->characterSize()) * characterScale);
 	}
 
 	void FormattedCharacter::applyState(const std::shared_ptr<FormattedState> &a_state, bool a_isPassword) {
@@ -227,7 +227,7 @@ namespace MV {
 		character = a_isPassword ? a_state->font->characterDefinition(u8"●") : state->font->characterDefinition(textCharacter);
 		auto silencedShape = shape->silence();
 		auto sprite = shape->component<Scene::Sprite>();
-		sprite->size(cast<PointPrecision>(character->characterSize()) * characterScale);
+		sprite->bounds(cast<PointPrecision>(character->characterSize()) * characterScale);
 		sprite->texture(character->texture());
 		sprite->color(state->color);
 	}
@@ -263,7 +263,7 @@ namespace MV {
 
 		shape = parent->silence()->make(guid(character->character()))->
 			attach<Scene::Sprite>()->
-			size(cast<PointPrecision>(character->characterSize()))->
+			bounds(cast<PointPrecision>(character->characterSize()))->
 			texture(character->texture())->
 			color(state->color)->
 			shader(MV::PREMULTIPLY_ID)->
@@ -292,7 +292,7 @@ namespace MV {
 	Color parseColorString(const std::string &a_colorString){
 		if(a_colorString.empty()){ return Color(); }
 		std::vector<std::string> colorStrings;
-		boost::split(colorStrings, a_colorString, boost::is_any_of(":"));
+		boost::split(colorStrings, a_colorString, boost::is_any_of(":|"));
 		Color result;
 		if(!colorStrings.empty()){
 			if(colorStrings.size() >= 1){
@@ -372,11 +372,11 @@ namespace MV {
 							content += previous->textCharacter;
 							previous = text.characterRelativeTo(lineIndex, i, startOfNewState);
 							previous2 = text.characterRelativeTo(lineIndex, i, startOfNewState-1);
-							if(previous->textCharacter == "[" && previous2->textCharacter == "["){
+							if(previous && previous2 && previous->textCharacter == "[" && previous2->textCharacter == "["){
 								std::reverse(content.begin(), content.end());
 								auto newState = getNewState(content, previous2->state);
 								if (newState != previous2->state) {
-									text.applyState(newState, text.absoluteIndexFromRelativeTo(lineIndex, i, startOfNewState), text.absoluteIndex(lineIndex, i));
+									text.applyState(newState, text.absoluteIndexFromRelativeTo(lineIndex, i, startOfNewState - 1), text.absoluteIndex(lineIndex, i));
 								}
 								break;
 							}
@@ -390,6 +390,10 @@ namespace MV {
 	void FormattedLine::insert(size_t a_characterIndex, const std::vector<std::shared_ptr<FormattedCharacter>> &a_characters){
 		if(!a_characters.empty()){
 			auto insertIndex = std::min(a_characterIndex, characters.size());
+			auto self = shared_from_this();
+			for (auto&& character : a_characters) {
+				character->line = self;
+			}
 			characters.insert(characters.begin() + insertIndex, a_characters.begin(), a_characters.end());
 			updateFormatAfterAdd(insertIndex, insertIndex + a_characters.size());
 			fixVisuals();
@@ -528,12 +532,37 @@ namespace MV {
 			a_totalToRemove = characters.size() - a_characterIndex;
 		}
 		std::vector<std::shared_ptr<FormattedCharacter>> result;
+		auto referenceState = characters[a_characterIndex]->state;
+		int64_t minLineIndex = static_cast<int64_t>(lineIndex);
+		if (characters[a_characterIndex]->partOfFormat()) {
+			std::shared_ptr<FormattedCharacter> currentCharacter;
+			int relativeIndex = -1;
+			while ((currentCharacter = text.characterRelativeTo(lineIndex, a_characterIndex, relativeIndex)) && currentCharacter->partOfFormat() && currentCharacter->state == referenceState) {
+				currentCharacter->partOfFormat(false);
+				minLineIndex = currentCharacter->line.lock()->index();
+				--relativeIndex;
+			}
+		}
+
+		int64_t maxLineIndex = static_cast<int64_t>(lineIndex);
+		if (characters[a_characterIndex + a_totalToRemove - 1]->partOfFormat()) {
+			std::shared_ptr<FormattedCharacter> currentCharacter;
+			int relativeIndex = 1;
+			while ((currentCharacter = text.characterRelativeTo(lineIndex, a_characterIndex, relativeIndex)) && currentCharacter->partOfFormat() && currentCharacter->state == referenceState) {
+				currentCharacter->partOfFormat(false);
+				maxLineIndex = currentCharacter->line.lock()->index();
+				++relativeIndex;
+			}
+		}
+
 		for(size_t i = a_characterIndex; i < characters.size() && i < a_characterIndex + a_totalToRemove; ++i){
 			characters[i]->removeFromParent();
 			result.push_back(characters[i]);
 		}
 		characters.erase(characters.begin() + a_characterIndex, characters.begin() + a_characterIndex + a_totalToRemove);
-		fixVisuals();
+		for (int64_t i = minLineIndex; i <= maxLineIndex; ++i) {
+			text.lines[static_cast<size_t>(i)]->fixVisuals();
+		}
 		return result;
 	}
 
@@ -591,7 +620,8 @@ namespace MV {
 
 	FormattedText::FormattedText(const FormattedText& a_rhs):
 		FormattedText(*a_rhs.library, a_rhs.defaultStateIdentifier, a_rhs.textWidth, a_rhs.textWrapping, a_rhs.textJustification){
-
+		minimumTextLineHeight = a_rhs.minimumTextLineHeight;
+		showAsPassword = a_rhs.showAsPassword;
 		append(a_rhs.string());
 	}
 
@@ -675,7 +705,7 @@ namespace MV {
 
 	std::shared_ptr<FormattedCharacter> FormattedText::characterRelativeTo(size_t a_lineIndex, size_t a_characterIndex, int64_t a_relativeCharacterIndex) {
 		auto index = absoluteIndex(a_lineIndex, a_characterIndex);
-		if(a_relativeCharacterIndex + static_cast<int64_t>(index) > 0){
+		if(a_relativeCharacterIndex + static_cast<int64_t>(index) >= 0){
 			return characterForIndex(index + a_relativeCharacterIndex);
 		} else{
 			return nullptr;
@@ -877,12 +907,12 @@ namespace MV {
 		size_t inserted = 0;
 		std::vector<std::shared_ptr<FormattedCharacter>> formattedCharacters;
 		utf8_string utfCharacters(a_characters);
+		std::shared_ptr<FormattedLine> line = lines.back();
 		for (auto it = utfCharacters.begin(); it != utfCharacters.end(); ++it) {
 			formattedCharacters.push_back(FormattedCharacter::make(textScene, it.str(), foundState, showAsPassword));
 			++inserted;
 		}
 
-		std::shared_ptr<FormattedLine> line = lines.back();
 		line->insert(line->size(), formattedCharacters);
 		return inserted;
 	}

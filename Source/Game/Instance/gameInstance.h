@@ -86,8 +86,8 @@ class Missile;
 class GameInstance {
 	friend Team;
 public:
-	GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data);
-
+	GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data);
+	~GameInstance();
 	GameData& data() {
 		return gameData;
 	}
@@ -170,8 +170,8 @@ private:
 
 class ClientGameInstance : public GameInstance {
 public:
-	ClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data, const std::shared_ptr<Player> &a_localPlayer):
-		GameInstance(a_leftPlayer, a_rightPlayer, a_mouse, a_data),
+	ClientGameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data, const std::shared_ptr<Player> &a_localPlayer):
+		GameInstance(a_root, a_leftPlayer, a_rightPlayer, a_mouse, a_data),
 		localPlayer(a_localPlayer){
 	}
 
@@ -185,8 +185,8 @@ private:
 
 class ServerGameInstance : public GameInstance {
 public:
-	ServerGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data) :
-		GameInstance(a_leftPlayer, a_rightPlayer, a_mouse, a_data){
+	ServerGameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data) :
+		GameInstance(a_root, a_leftPlayer, a_rightPlayer, a_mouse, a_data){
 	}
 
 private:

@@ -1,0 +1,196 @@
+{
+    "value0": {
+        "ptr_wrapper": {
+            "id": 2147483649,
+            "data": {
+                "cereal_class_version": 0,
+                "nodeId": "LoginName",
+                "isRootNode": true,
+                "parent": {
+                    "ptr_wrapper": {
+                        "id": 0
+                    }
+                },
+                "allowDraw": true,
+                "allowUpdate": true,
+                "translateTo": {
+                    "x": 34.99993896484375,
+                    "y": 35.00001525878906,
+                    "z": 0.0
+                },
+                "rotateTo": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "scaleTo": {
+                    "x": 0.0,
+                    "y": 1.0,
+                    "z": 1.0
+                },
+                "sortDepth": 0.0,
+                "nodeAlpha": 1.0,
+                "localBounds": {
+                    "minPoint": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.0
+                    },
+                    "maxPoint": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.0
+                    }
+                },
+                "localChildBounds": {
+                    "minPoint": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.0
+                    },
+                    "maxPoint": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.0
+                    }
+                },
+                "childNodes": [],
+                "childComponents": [
+                    {
+                        "polymorphic_id": 2147483649,
+                        "polymorphic_name": "MV::Scene::Sprite",
+                        "ptr_wrapper": {
+                            "id": 2147483650,
+                            "data": {
+                                "cereal_class_version": 0,
+                                "Drawable": {
+                                    "cereal_class_version": 1,
+                                    "anchors": {
+                                        "cereal_class_version": 0,
+                                        "parent": {
+                                            "locked_ptr": {
+                                                "polymorphic_id": 0
+                                            }
+                                        },
+                                        "parentId": "",
+                                        "anchors": {
+                                            "minPoint": {
+                                                "x": 0.0,
+                                                "y": 0.0,
+                                                "z": 0.0
+                                            },
+                                            "maxPoint": {
+                                                "x": 0.0,
+                                                "y": 0.0,
+                                                "z": 0.0
+                                            }
+                                        },
+                                        "offset": {
+                                            "minPoint": {
+                                                "x": 0.0,
+                                                "y": 0.0,
+                                                "z": 0.0
+                                            },
+                                            "maxPoint": {
+                                                "x": 0.0,
+                                                "y": 0.0,
+                                                "z": 0.0
+                                            }
+                                        },
+                                        "pivot": {
+                                            "x": 0.0,
+                                            "y": 0.0,
+                                            "z": 0.0
+                                        },
+                                        "applyingPosition": false
+                                    },
+                                    "shouldDraw": true,
+                                    "ourTexture": {
+                                        "polymorphic_id": 0
+                                    },
+                                    "shaderProgramId": "default",
+                                    "vertexIndices": [
+                                        0,
+                                        1,
+                                        2,
+                                        2,
+                                        3,
+                                        0
+                                    ],
+                                    "localBounds": {
+                                        "minPoint": {
+                                            "x": 0.0,
+                                            "y": 0.0,
+                                            "z": 0.0
+                                        },
+                                        "maxPoint": {
+                                            "x": 0.0,
+                                            "y": 0.0,
+                                            "z": 0.0
+                                        }
+                                    },
+                                    "drawType": 4,
+                                    "points": [
+                                        {
+                                            "x": 0.0,
+                                            "y": 0.0,
+                                            "z": 0.0,
+                                            "R": 0.27427995204925539,
+                                            "G": 0.2636141777038574,
+                                            "B": 0.3302752375602722,
+                                            "A": 1.0,
+                                            "textureX": 0.0,
+                                            "textureY": 0.0
+                                        },
+                                        {
+                                            "x": 0.0,
+                                            "y": 0.0,
+                                            "z": 0.0,
+                                            "R": 0.27427995204925539,
+                                            "G": 0.2636141777038574,
+                                            "B": 0.3302752375602722,
+                                            "A": 1.0,
+                                            "textureX": 0.0,
+                                            "textureY": 1.0
+                                        },
+                                        {
+                                            "x": 0.0,
+                                            "y": 0.0,
+                                            "z": 0.0,
+                                            "R": 0.27427995204925539,
+                                            "G": 0.2636141777038574,
+                                            "B": 0.3302752375602722,
+                                            "A": 1.0,
+                                            "textureX": 1.0,
+                                            "textureY": 1.0
+                                        },
+                                        {
+                                            "x": 0.0,
+                                            "y": 0.0,
+                                            "z": 0.0,
+                                            "R": 0.27427995204925539,
+                                            "G": 0.2636141777038574,
+                                            "B": 0.3302752375602722,
+                                            "A": 1.0,
+                                            "textureX": 1.0,
+                                            "textureY": 0.0
+                                        }
+                                    ],
+                                    "Component": {
+                                        "cereal_class_version": 0,
+                                        "componentId": "sprite_1",
+                                        "componentOwner": {
+                                            "ptr_wrapper": {
+                                                "id": 1
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

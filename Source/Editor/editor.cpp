@@ -14,68 +14,10 @@ Editor::Editor(Managers &a_managers):
 
 	initializeWindow();
 	initializeControls();
-
-	/*
-	auto rockTexture = MV::FileTextureDefinition::make("Assets/Images/rock.png");
-
-	auto middleSquare = testNode->make("middleSquare")->//position({ 480.0f, 320.0f })->
-		//attach<MV::Scene::Sprite>()->size({ 100.0f, 100.0f }, true)->color({ 0x00ff00 })->texture(rockTexture->makeHandle())->shader(MV::PREMULTIPLY_ID)->owner()->
-		attach<MV::Scene::Sprite>()->size({ 50.0f, 50.0f }, true)->color({ 0x884422 })->owner()->
-		attach<MV::Scene::Clipped>()->size({ 100.0f, 100.0f }, true)->captureSize({ 100.0f, 100.0f }, false)->owner();
-	//middleSquare->rotation({ 0.0f, 0.0f, 90.0f });
-
-	auto innerSquare = middleSquare->make("twoDeep")->
-		attach<MV::Scene::Sprite>()->size({ 25.0f, 25.0f }, true)->color({ 0x0000ff })->shader(MV::PREMULTIPLY_ID)->owner();
-
-	auto mostInner = innerSquare->make("threeDeep")->
-		attach<MV::Scene::Sprite>()->size({ 12.0f, 12.0f }, true)->color({ 0xff00ff })->shader(MV::PREMULTIPLY_ID)->owner();
-
-	auto textSquare = testNode->make("ourText")->
-		attach<MV::Scene::Text>(textLibrary)->text(UTF_CHAR_STR("This is a test!"));
-	auto clickable = textSquare->owner()->attach<MV::Scene::Clickable>(mouse)->size({ 15.0f, 100.0f })->color({0xFFFF00})->show();
-	clickable->onAccept.connect("Clicked", [](const std::shared_ptr<MV::Scene::Clickable> &a_clickable){
-		std::cout << "Clicked: " << a_clickable->mouse().position() << std::endl;
-	});
-
-	innerSquare->position({ 100.0f, 100.0f });
-	innerSquare->rotation({ 0.0f, 0.0f, 45.0f });
-
-	testNode->position({ 300.0f, 300.0f });
-
-	auto emitter = middleSquare->make("EmitterTest")->position({ 50.0f, 50.0f })->attach<MV::Scene::Emitter>(pool)->properties(MV::Scene::loadEmitterProperties("particle.txt"))->shader(MV::PREMULTIPLY_ID);
-
-	auto emitter2 = testNode->make("EmitterTest")->position({ 150.0f, 50.0f })->attach<MV::Scene::Emitter>(pool)->properties(MV::Scene::loadEmitterProperties("particle.txt"))->shader(MV::PREMULTIPLY_ID);
-
-	auto button = testNode->make("ButtonTest")->position({ -200.0f, -200.0f })->attach<MV::Scene::Button>(mouse)->size({ 100.0f, 15.0f });
-	button->activeNode(button->owner()->make("Active")->attach<MV::Scene::Sprite>()->size({ 100.0f, 15.0f })->color({0x553355})->owner());
-	button->idleNode(button->owner()->make("Idle")->attach<MV::Scene::Sprite>()->size({ 100.0f, 15.0f })->color({ 0x225522 })->owner());
-	button->disabledNode(button->owner()->make("Disabled")->attach<MV::Scene::Sprite>()->size({ 100.0f, 15.0f })->color({ 0xCCCCCC })->owner());
-	button->onAccept.connect("Accepted", [](const std::shared_ptr<MV::Scene::Clickable> &a_clickable) {
-		auto button = std::static_pointer_cast<MV::Scene::Button>(a_clickable);
-		button->disable();
-	});
-
-
-	auto gridNode = testNode->make("Grid")->position({ 100.0f, 100.0f })->attach<MV::Scene::Grid>()->cellSize({ 20.0f, 20.0f })->gridWidth(110.0f)->margin({ 1.0f, 1.0f })->padding({ 1.0f, 1.0f })->owner();
-	for (int i = 0; i < 20; ++i) {
-		gridNode->make()->attach<MV::Scene::Sprite>()->size({ 20.0f, 20.0f })->color({ 0x333333 });
-	}
-
-	auto gridNode2 = testNode->make("Grid2")->position({ 300.0f, 100.0f })->attach<MV::Scene::Grid>()->cellSize({ 20.0f, 20.0f })->columns(5)->margin({ 1.0f, 1.0f })->padding({ 1.0f, 1.0f })->owner();
-	for (int i = 0; i < 20; ++i) {
-		gridNode2->make()->attach<MV::Scene::Sprite>()->size({ 20.0f, 20.0f })->color({ 0x333333 });
-	}
-
-	auto sliderTest = testNode->make("Slider")->position({ 0.0f, 200.0f })->attach<MV::Scene::Slider>(mouse)->size({ 100.0f, 20.0f })->show()->color({0x777777});
-	sliderTest->handle(sliderTest->owner()->make("Handle")->attach<MV::Scene::Sprite>()->size({ 20.0f, 20.0f })->owner());*/
-	//mostInner->rotation({ 0.0f, 0.0f, 45.0f });
 }
 
 //return true if we're still good to go
 bool Editor::update(double dt){
-	//testNode->translate(MV::Point<>(10.0, 10.0f) * static_cast<float>(dt));
-	//testNode->get("middleSquare")->get("twoDeep")->addRotation(MV::AxisAngles(0.0f, 0.0f, 45.0f) * static_cast<float>(dt))->translate(MV::Point<>(-10.0, -10.0f) * static_cast<float>(dt));
-	//fps->number(accumulatedTime > 0.0f ? accumulatedFrames / accumulatedTime : 0.0f);
 	lastUpdateDelta = dt;
 	selectorPanel.update();
 	managers.pool.run();

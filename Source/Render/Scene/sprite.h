@@ -5,12 +5,6 @@
 
 #define SpriteDerivedAccessors(ComponentType) \
 	DrawableDerivedAccessors(ComponentType) \
-	std::shared_ptr<ComponentType> size(const MV::Size<> &a_size, const MV::Point<> &a_centerPoint) { \
-		return std::static_pointer_cast<ComponentType>(MV::Scene::Sprite::size(a_size, a_centerPoint)); \
-	} \
-	std::shared_ptr<ComponentType> size(const MV::Size<> &a_size, bool a_center = false) { \
-		return std::static_pointer_cast<ComponentType>(MV::Scene::Sprite::size(a_size, a_center)); \
-	} \
 	template<typename PointAssign> \
 	std::shared_ptr<PointAssign> corners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight){ \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Sprite::corners(a_TopLeft, a_TopRight, a_BottomLeft, a_BottomRight)); \
@@ -25,24 +19,6 @@ namespace MV {
 
 		public:
 			DrawableDerivedAccessors(Sprite)
-
-			std::shared_ptr<Sprite> size(const Size<> &a_size, const Point<> &a_centerPoint) {
-				Point<> topLeft;
-				Point<> bottomRight = toPoint(a_size);
-
-				topLeft -= a_centerPoint;
-				bottomRight -= a_centerPoint;
-
-				return bounds({ topLeft, bottomRight });
-			}
-
-			std::shared_ptr<Sprite> size(const Size<> &a_size, bool a_center) {
-				return size(a_size, (a_center) ? MV::point(a_size.width / 2.0f, a_size.height / 2.0f) : MV::point(0.0f, 0.0f));
-			}
-
-			std::shared_ptr<Sprite> size(const Size<> &a_size) {
-				return size(a_size, MV::point(0.0f, 0.0f));
-			}
 
 			template<typename PointAssign>
 			std::shared_ptr<Sprite> corners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight);
@@ -59,12 +35,6 @@ namespace MV {
 				a_script.add(chaiscript::fun([](Node &a_self) {
 					return a_self.componentInChildren<Sprite>();
 				}), "spriteComponent");
-
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const BoxAABB<> &)>(&Sprite::bounds)), "bounds");
-
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Size<> &, const Point<> &)>(&Sprite::size)), "size");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Size<> &, bool)>(&Sprite::size)), "size");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Size<> &)>(&Sprite::size)), "size");
 
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Point<> &, const Point<> &, const Point<> &, const Point<> &)>(&Sprite::corners<Point<>>)), "corners");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Color &, const Color &, const Color &, const Color &)>(&Sprite::corners<Color>)), "corners");

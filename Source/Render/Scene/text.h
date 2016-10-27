@@ -156,6 +156,8 @@ namespace MV{
 				a_script.add(chaiscript::fun([](Node &a_self, TextLibrary& a_textLibrary) { return a_self.attach<Text>(a_textLibrary); }), "attachText");
 				a_script.add(chaiscript::fun([](Node &a_self, TextLibrary& a_textLibrary, const std::string &a_defaultFontIdentifier) { return a_self.attach<Text>(a_textLibrary, a_defaultFontIdentifier); }), "attachText");
 
+				a_script.add(chaiscript::fun([](Node &a_self) { return a_self.componentInChildren<Text>(true, false, true); }), "componentText");
+
 				a_script.add(chaiscript::fun(&Text::enableCursor), "enableCursor");
 				a_script.add(chaiscript::fun(&Text::disableCursor), "disableCursor");
 
@@ -228,16 +230,30 @@ namespace MV{
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
 		private:
-
 			void setCursor(int64_t a_value) {
-				auto maxCursor = formattedText->size();
-				a_value = std::max<int64_t>(std::min<int64_t>(a_value, maxCursor), 0);
-				cursor = a_value;
-				auto cursorCharacter = (cursor < maxCursor || cursor == 0) ? formattedText->characterForIndex(cursor) : formattedText->characterForIndex(cursor - 1);
-				if (cursorCharacter) {
-					positionCursorWithCharacter(maxCursor, cursorCharacter);
-				} else {
-					positionCursorWithoutCharacter();
+				if (a_value != cursor) {
+					auto maxCursor = formattedText->size();
+					a_value = std::max<int64_t>(std::min<int64_t>(a_value, maxCursor), 0);
+
+					auto characterToTest = formattedText->characterForIndex(a_value);
+					if (characterToTest) {
+						int iterateDirection = a_value > static_cast<int64_t>(cursor) ? 1 : -1;
+						auto referenceState = characterToTest->state;
+						while (characterToTest && characterToTest->partOfFormat() && characterToTest->state == referenceState){
+							characterToTest = formattedText->characterForIndex(a_value);
+							if (characterToTest && characterToTest->partOfFormat()) {
+								a_value += iterateDirection;
+							}
+						}
+					}
+
+					cursor = a_value;
+					auto cursorCharacter = (cursor < maxCursor || cursor == 0) ? formattedText->characterForIndex(cursor) : formattedText->characterForIndex(cursor - 1);
+					if (cursorCharacter) {
+						positionCursorWithCharacter(maxCursor, cursorCharacter);
+					} else {
+						positionCursorWithoutCharacter();
+					}
 				}
 			}
 

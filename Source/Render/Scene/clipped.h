@@ -14,8 +14,6 @@ namespace MV {
 		public:
 			DrawableDerivedAccessors(Clipped)
 
-			std::shared_ptr<Clipped> size(const Size<> &a_size, const Point<> &a_centerPoint);
-			std::shared_ptr<Clipped> size(const Size<> &a_size, bool a_center = false);
 			template<typename PointAssign>
 			std::shared_ptr<PointAssign> corners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight) {
 				dirtyTexture = true;

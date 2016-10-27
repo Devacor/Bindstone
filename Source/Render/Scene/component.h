@@ -8,17 +8,17 @@
 #include <vector>
 #include <memory>
 
-#include "cereal\cereal.hpp"
-#include "cereal\access.hpp"
+#include "cereal/cereal.hpp"
+#include "cereal/access.hpp"
 
-#include "Render\render.h"
-#include "Render\textures.h"
-#include "Render\points.h"
-#include "Render\boxaabb.h"
-#include "Utility\generalUtility.h"
-#include "Utility\signal.hpp"
-#include "Utility\task.hpp"
-#include "Utility\visitor.hpp"
+#include "Render/render.h"
+#include "Render/textures.h"
+#include "Render/points.h"
+#include "Render/boxaabb.h"
+#include "Utility/generalUtility.h"
+#include "Utility/signal.hpp"
+#include "Utility/task.hpp"
+#include "Utility/visitor.hpp"
 
 #define ComponentDerivedAccessors(ComponentType) \
 MV::Scene::SafeComponent<ComponentType> clone(const std::shared_ptr<MV::Scene::Node> &a_parent) { \
@@ -53,10 +53,6 @@ std::shared_ptr<ComponentType> worldBounds(const MV::BoxAABB<> &a_worldBounds){ 
 } \
 MV::BoxAABB<> worldBounds() { \
 	return MV::Scene::Component::worldBounds(); \
-}
-
-namespace chaiscript {
-	class ChaiScript;
 }
 
 namespace cereal {
@@ -227,6 +223,9 @@ namespace MV {
 
 				a_script.add(chaiscript::fun(static_cast<std::string(Component::*)() const>(&Component::id)), "id");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Component>(Component::*)(const std::string &)>(&Component::id)), "id");
+
+				a_script.add(chaiscript::fun(static_cast<bool(Component::*)() const>(&Component::serializable)), "serializable");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Component>(Component::*)(bool)>(&Component::serializable)), "serializable");
 
 				a_script.add(chaiscript::fun(static_cast<BoxAABB<>(Component::*)()>(&Component::bounds)), "bounds");
 				a_script.add(chaiscript::fun(static_cast<BoxAABB<int>(Component::*)()>(&Component::screenBounds)), "screenBounds");

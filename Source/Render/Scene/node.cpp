@@ -102,9 +102,9 @@ namespace MV {
 			}
 		}
 
-		void Node::update(double a_delta) {
+		void Node::update(double a_delta, bool a_force) {
 			allowChangeCallNeeded = true;
-			if (allowUpdate) {
+			if (allowUpdate || a_force) {
 				auto stableComponentList = childComponents;
 				for (auto&& component : stableComponentList) {
 					component->update(a_delta);
@@ -1294,6 +1294,7 @@ namespace MV {
 			a_script.add(chaiscript::fun(&Node::clear), "clear");
 			a_script.add(chaiscript::fun(&Node::root), "root");
 			a_script.add(chaiscript::fun(&Node::get), "get");
+			a_script.add(chaiscript::fun([](Node &a_self, const std::string &a_componentId) { return a_self.componentInChildren<Component>(a_componentId, false, true); }), "component");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node> (Node::*)() const>(&Node::parent)), "parent");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node> (Node::*)(const std::shared_ptr<Node> &)>(&Node::parent)), "parent");
 			a_script.add(chaiscript::fun(&Node::operator[]), "[]");

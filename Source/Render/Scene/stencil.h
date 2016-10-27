@@ -16,8 +16,6 @@ namespace MV {
 
 			virtual void endDraw() override;
 
-			std::shared_ptr<Stencil> size(const Size<> &a_size, const Point<> &a_centerPoint);
-			std::shared_ptr<Stencil> size(const Size<> &a_size, bool a_center = false);
 			template<typename PointAssign>
 			std::shared_ptr<PointAssign> corners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight) {
 				return std::static_pointer_cast<Stencil>(Sprite::corners(a_TopLeft, a_TopRight, a_BottomLeft, a_BottomRight));

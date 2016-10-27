@@ -7,7 +7,6 @@
 #include "Game/building.h"
 #include "Game/state.h"
 
-namespace chaiscript { class ChaiScript; }
 namespace MV { class MouseState; }
 
 struct LoadoutCollection {

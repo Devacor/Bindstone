@@ -43,20 +43,6 @@ namespace MV {
 
 			std::shared_ptr<Palette> colorAlphaSelector(const Color& a_left, const Color& a_right);
 
-			std::shared_ptr<Palette> size(const Size<> &a_size, const Point<> &a_centerPoint) {
-				Point<> topLeft;
-				Point<> bottomRight = toPoint(a_size);
-
-				topLeft -= a_centerPoint;
-				bottomRight -= a_centerPoint;
-
-				return bounds({ topLeft, bottomRight });
-			}
-
-			std::shared_ptr<Palette> size(const Size<> &a_size, bool a_center = false) {
-				return size(a_size, (a_center) ? MV::point(a_size.width / 2.0f, a_size.height / 2.0f) : MV::point(0.0f, 0.0f));
-			}
-
 			int64_t globalPriority() const;
 			std::shared_ptr<Palette> globalPriority(int64_t a_newPriority);
 

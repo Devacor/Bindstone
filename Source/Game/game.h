@@ -8,6 +8,7 @@
 #include "Game/creature.h"
 #include "Game/state.h"
 #include "Game/Instance/gameInstance.h"
+#include "Game/Interface/interfaceManager.h"
 
 #include <string>
 #include <ctime>
@@ -27,8 +28,8 @@ public:
 		return data.managers();
 	}
 
-	MV::MouseState& getMouse() {
-		return mouse;
+	MV::MouseState& mouse() {
+		return ourMouse;
 	}
 
 	GameInstance& getInstance() {
@@ -38,11 +39,17 @@ private:
 	Game(const Game &) = delete;
 	Game& operator=(const Game &) = delete;
 
+	void updateScreenScaler();
 	void initializeData();
 	void initializeWindow();
 
 	GameData data;
+	std::unique_ptr<MV::InterfaceManager> gui;
 	std::unique_ptr<GameInstance> instance;
+
+	std::shared_ptr<MV::Scene::Node> root;
+
+	chaiscript::ChaiScript scriptEngine;
 
 	std::shared_ptr<Player> localPlayer;
 
@@ -50,8 +57,7 @@ private:
 
 	double lastUpdateDelta;
 
-	MV::MouseState mouse;
-	//MV::Scene::Clickable::Signals armInputHandles;
+	MV::MouseState ourMouse;
 };
 
 void sdl_quit(void);

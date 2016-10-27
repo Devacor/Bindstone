@@ -73,14 +73,6 @@ namespace MV {
 			}
 		}
 
-		std::shared_ptr<Stencil> Stencil::size(const Size<> &a_size, const Point<> &a_centerPoint) {
-			return std::static_pointer_cast<Stencil>(Sprite::size(a_size, a_centerPoint));
-		}
-
-		std::shared_ptr<Stencil> Stencil::size(const Size<> &a_size, bool a_center /*= false*/) {
-			return std::static_pointer_cast<Stencil>(Sprite::size(a_size, a_center));
-		}
-
 		void Stencil::initialize() {
 			Sprite::initialize();
 		}

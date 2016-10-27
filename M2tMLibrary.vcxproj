@@ -306,6 +306,7 @@
     <ClCompile Include="Source\Game\gameEditor.cpp" />
     <ClCompile Include="Source\Game\Instance\gameInstance.cpp" />
     <ClCompile Include="Source\Game\Interface\guiFactories.cpp" />
+    <ClCompile Include="Source\Game\Interface\interfaceManager.cpp" />
     <ClCompile Include="Source\Game\player.cpp" />
     <ClCompile Include="Source\Game\Server\accountActions.cpp" />
     <ClCompile Include="Source\Game\Server\lobbyServer.cpp" />
@@ -502,6 +503,7 @@
     <ClInclude Include="Source\Game\gameEditor.h" />
     <ClInclude Include="Source\Game\Instance\gameInstance.h" />
     <ClInclude Include="Source\Game\Interface\guiFactories.h" />
+    <ClInclude Include="Source\Game\Interface\interfaceManager.h" />
     <ClInclude Include="Source\Game\managers.h" />
     <ClInclude Include="Source\Game\player.h" />
     <ClInclude Include="Source\Game\Server\accountActions.h" />
@@ -509,7 +511,6 @@
     <ClInclude Include="Source\Game\Server\lobbyServer.h" />
     <ClInclude Include="Source\Game\Server\package.h" />
     <ClInclude Include="Source\Game\Server\serverActions.h" />
-    <ClInclude Include="Source\Game\Server\uiManager.h" />
     <ClInclude Include="Source\Game\state.h" />
     <ClInclude Include="Source\Game\wallet.h" />
     <ClInclude Include="Source\Network\download.h" />
@@ -552,6 +553,7 @@
     <ClInclude Include="Source\Render\textures.h" />
     <ClInclude Include="Source\Utility\cerealUtility.h" />
     <ClInclude Include="Source\Utility\chaiscriptStdLib.h" />
+    <ClInclude Include="Source\Utility\chaiscriptUtility.h" />
     <ClInclude Include="Source\Utility\generalUtility.h" />
     <ClInclude Include="Source\Utility\log.h" />
     <ClInclude Include="Source\Utility\optionalCalls.hpp" />

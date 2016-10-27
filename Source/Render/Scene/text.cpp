@@ -32,7 +32,7 @@ namespace MV{
 				formattedText->scene()->id(guid("TEXT_"))->position(points[0]);
 				owner()->add(formattedText->scene());
 
-				cursorSprite = owner()->make(guid("CURSOR_"))->serializable(false)->attach<Sprite>()->size({ 2.0f, 5.0f });
+				cursorSprite = owner()->make(guid("CURSOR_"))->serializable(false)->attach<Sprite>()->bounds(size(2.0f, 5.0f));
 				cursorSprite->hide();
 			}
 		}
@@ -55,7 +55,7 @@ namespace MV{
 
 			auto cursorSilence = cursorSprite->owner()->silence();
 			cursorSprite->owner()->position(formattedText->scene()->position() + MV::Point<>(xPosition, linePositionY));
-			cursorSprite->size({ 2.0f, cursorHeight });
+			cursorSprite->bounds(MV::size(2.0f, cursorHeight));
 
 			if (displayCursor) {
 				cursorSprite->show();
@@ -66,7 +66,7 @@ namespace MV{
 			if (cursorSprite && cursorSprite->ownerIsAlive()) {
 				auto cursorSilence = cursorSprite->owner()->silence();
 				cursorSprite->owner()->position(formattedText->scene()->position() + ((a_cursorCharacter->position() + a_cursorCharacter->offset()) * a_cursorCharacter->scale()));
-				cursorSprite->size({ 2.0f, a_cursorCharacter->characterSize().height });
+				cursorSprite->bounds(MV::size(2.0f, a_cursorCharacter->characterSize().height));
 				if (cursor >= a_maxCursor) {
 					cursorSprite->owner()->translate({ a_cursorCharacter->characterSize().width * a_cursorCharacter->scale().x, 0.0f });
 				}
@@ -168,6 +168,7 @@ namespace MV{
 			auto textClone = std::static_pointer_cast<Text>(a_clone);
 			(*textClone->formattedText) = *formattedText;
 			textClone->cursor = cursor;
+			textClone->usingBoundsForLineHeight = usingBoundsForLineHeight;
 			return a_clone;
 		}
 

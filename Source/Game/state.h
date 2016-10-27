@@ -58,11 +58,7 @@ private:
 
 class GameData {
 public:
-	GameData(Managers& a_managers) :
-		allManagers(a_managers) {
-		buildingCatalog = std::make_unique<BuildingCatalog>("buildings.json");
-		creatureCatalog = std::make_unique<CreatureCatalog>("creatures.json");
-	}
+	GameData(Managers& a_managers);
 
 	BuildingCatalog& buildings() {
 		return *(buildingCatalog.get());
@@ -80,23 +76,7 @@ public:
 		return allManagers;
 	}
 
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-		a_script.add(chaiscript::user_type<GameData>(), "GameData");
-
-		Constants::hook(a_script);
-
-		a_script.add(chaiscript::fun([](GameData &a_self) {
-			return a_self.buildingCatalog.get();
-		}), "buildings");
-		a_script.add(chaiscript::fun([](GameData &a_self) {
-			return a_self.creatureCatalog.get();
-		}), "creatures");
-		a_script.add(chaiscript::fun([](GameData &a_self) {
-			return a_self.metadataConstants;
-		}), "constants");
-
-		return a_script;
-	}
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 private:
 	std::unique_ptr<BuildingCatalog> buildingCatalog;
 	std::unique_ptr<CreatureCatalog> creatureCatalog;

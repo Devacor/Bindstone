@@ -28,13 +28,13 @@ enum GameInterfaceColors : uint32_t {
 std::shared_ptr<MV::Scene::Button> button(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::UtfString &a_text) {
 	auto fontIdentifier = MV::DEFAULT_ID;
 	static long buttonId = 0;
-	auto button = a_parent->make(MV::guid(MV::to_string(a_text)))->attach<MV::Scene::Button>(a_mouse)->size(a_size);
+	auto button = a_parent->make(MV::guid(MV::to_string(a_text)))->attach<MV::Scene::Button>(a_mouse)->bounds(a_size);
 	std::vector<MV::Color> boxActiveColors = { { GameInterfaceColors::BUTTON_TOP_ACTIVE },{ GameInterfaceColors::BUTTON_BOTTOM_ACTIVE },{ GameInterfaceColors::BUTTON_BOTTOM_ACTIVE },{ GameInterfaceColors::BUTTON_TOP_ACTIVE } };
 	std::vector<MV::Color> boxIdleColors = { { GameInterfaceColors::BUTTON_TOP_IDLE },{ GameInterfaceColors::BUTTON_BOTTOM_IDLE },{ GameInterfaceColors::BUTTON_BOTTOM_IDLE },{ GameInterfaceColors::BUTTON_TOP_IDLE } };
 
-	auto activeScene = button->owner()->make("active")->attach<MV::Scene::Sprite>()->size(a_size)->colors(boxActiveColors)->owner();
+	auto activeScene = button->owner()->make("active")->attach<MV::Scene::Sprite>()->bounds(a_size)->colors(boxActiveColors)->owner();
 
-	auto idleScene = button->owner()->make("idle")->attach<MV::Scene::Sprite>()->size(a_size)->colors(boxIdleColors)->owner();
+	auto idleScene = button->owner()->make("idle")->attach<MV::Scene::Sprite>()->bounds(a_size)->colors(boxIdleColors)->owner();
 
 	auto activeBox = activeScene->attach<MV::Scene::Text>(a_library, fontIdentifier)->bounds({ MV::Point<>(), a_size });
 	activeBox->justification(MV::TextJustification::CENTER);

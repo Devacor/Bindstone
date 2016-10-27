@@ -68,7 +68,7 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 	auto expandButton = makeButton(button->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Expand", MV::Size<>(18.0f, 18.0f), (a_node->empty() ? "" : (expanded[a_node.get()] ? "+" : "-")));
 
 	expandButton->owner()->position({ 182.0f, 0.0f });
-	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.mouse)->size(MV::size(buttonSize.width, 5.0f));
+	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.mouse)->bounds(MV::size(buttonSize.width, 5.0f));
 	dragBetween->onDrop.connect("dropped", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable, const MV::Point<float> &) {
 		if (activeSelection) {
 			float newDepth = activeSelection->depth();

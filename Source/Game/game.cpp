@@ -8,7 +8,8 @@ void sdl_quit(void){
 
 Game::Game(Managers& a_managers) :
 	data(a_managers),
-	done(false){
+	done(false),
+	scriptEngine(MV::create_chaiscript_stdlib()){
 
 	MV::initializeFilesystem();
 	initializeData();
@@ -34,7 +35,9 @@ void Game::initializeWindow(){
 	atexit(sdl_quit);
 
 	MV::AudioPlayer::instance()->initAudio();
-	mouse.update();
+	ourMouse.update();
+
+	root = MV::Scene::Node::make(data.managers().renderer);
 
 	MV::FontDefinition::make(data.managers().textLibrary, "default", "Assets/Fonts/Verdana.ttf", 14);
 	MV::FontDefinition::make(data.managers().textLibrary, "small", "Assets/Fonts/Verdana.ttf", 9);
@@ -64,7 +67,9 @@ void Game::initializeWindow(){
 	enemyPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
 	enemyPlayer->wallet.add(Wallet::CurrencyType::SOFT, 5000);
 
-	instance = std::make_unique<GameInstance>(localPlayer, enemyPlayer, mouse, data);
+	instance = std::make_unique<GameInstance>(root, localPlayer, enemyPlayer, ourMouse, data);
+
+	gui = std::make_unique<MV::InterfaceManager>(root, ourMouse, data.managers(), scriptEngine, "interface");
 }
 
 bool Game::update(double dt) {
@@ -111,14 +116,29 @@ void Game::handleInput() {
 			}
 		}
 	}
-	mouse.update();
+	ourMouse.update();
 }
 
 void Game::render() {
 	data.managers().renderer.clearScreen();
+	updateScreenScaler();
+
 	if (instance) {
 		instance->update(lastUpdateDelta);
 	}
+	root->update(lastUpdateDelta);
+	root->draw();
+	
 	data.managers().renderer.updateScreen();
+}
+
+void Game::updateScreenScaler() {
+	auto scaler = root->component<MV::Scene::Drawable>("ScreenScaler", false);
+	if (!scaler) {
+		root->attach<MV::Scene::Drawable>()->id("ScreenScaler")->screenBounds({ MV::Point<int>(0, 0), data.managers().renderer.window().size() });
+	}
+	else {
+		scaler->screenBounds({ MV::Point<int>(0, 0), data.managers().renderer.window().size() });
+	}
 }
 

@@ -548,6 +548,9 @@
     <ClCompile Include="Source\Render\Scene\scroller.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Game\Interface\interfaceManager.cpp">
+      <Filter>Source Files\Game\Interface</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Audio\package.h">
@@ -1063,9 +1066,6 @@
     <ClInclude Include="Source\Game\Server\package.h">
       <Filter>Source Files\Game\Server</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Game\Server\uiManager.h">
-      <Filter>Source Files\Game\Interface</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Render\Scene\stencil.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
@@ -1188,6 +1188,12 @@
     </ClInclude>
     <ClInclude Include="Source\Render\Scene\scroller.h">
       <Filter>Source Files\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Interface\interfaceManager.h">
+      <Filter>Source Files\Game\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\chaiscriptUtility.h">
+      <Filter>Source Files\Utility</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

@@ -3,15 +3,6 @@
 
 #include "component.h"
 
-namespace chaiscript {
-	class ChaiScript;
-}
-
-namespace cereal {
-	class PortableBinaryInputArchive;
-	class JSONInputArchive;
-}
-
 namespace MV {
 
 	namespace Scene {
@@ -42,8 +33,8 @@ namespace MV {
 
 			class Quiet {
 			public:
-				Quiet(const std::shared_ptr<Node> &a_node) : 
-					node(a_node) {
+				Quiet(const std::shared_ptr<Node> &a_node) :
+					node(a_node){
 					node->silenceInternal();
 				}
 
@@ -51,9 +42,14 @@ namespace MV {
 					node(std::move(a_other.node)) {
 				}
 
+				Quiet& forget() {
+					callBatchedAfterUnsilence = false;
+					return *this;
+				}
+
 				~Quiet() {
 					if (node) {
-						node->unsilenceInternal();
+						node->unsilenceInternal(callBatchedAfterUnsilence, callBatchedAfterUnsilence);
 					}
 				}
 
@@ -64,6 +60,7 @@ namespace MV {
 			private:
 				Quiet(const Quiet &) = delete;
 				std::shared_ptr<Node> node;
+				bool callBatchedAfterUnsilence = true;
 			};
 
 		private:
@@ -149,7 +146,7 @@ namespace MV {
 
 			void draw();
 			void drawChildren();
-			void update(double a_delta = 0.0f);
+			void update(double a_delta = 0.0f, bool a_force = false);
 			void drawUpdate(double a_delta = 0.0f);
 
 			void draw(const TransformMatrix &a_overrideParentMatrix);

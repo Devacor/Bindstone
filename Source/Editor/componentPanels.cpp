@@ -212,25 +212,25 @@ void SelectedNodeEditorPanel::updateComponentEditButtons(bool a_attached) {
 	auto componentList = controls->elementToEdit->components<MV::Scene::Sprite, MV::Scene::Text, MV::Scene::Grid, MV::Scene::Emitter, MV::Scene::Spine, MV::Scene::PathMap, MV::Scene::Button>(true);
 	
 	MV::visit_each(componentList,
-		[&](const MV::Scene::SafeComponent<MV::Scene::Sprite> &a_sprite) {
+	[&](const MV::Scene::SafeComponent<MV::Scene::Sprite> &a_sprite) {
 		CreateSpriteComponentButton(a_sprite);
 	},
-		[&](const MV::Scene::SafeComponent<MV::Scene::Text> &a_text) {
+	[&](const MV::Scene::SafeComponent<MV::Scene::Text> &a_text) {
 		CreateTextComponentButton(a_text);
 	},
-		[&](const MV::Scene::SafeComponent<MV::Scene::Grid> &a_grid) {
+	[&](const MV::Scene::SafeComponent<MV::Scene::Grid> &a_grid) {
 		CreateGridComponentButton(a_grid);
 	},
-		[&](const MV::Scene::SafeComponent<MV::Scene::Emitter> &a_emitter) {
+	[&](const MV::Scene::SafeComponent<MV::Scene::Emitter> &a_emitter) {
 		CreateEmitterComponentButton(a_emitter);
 	},
-		[&](const MV::Scene::SafeComponent<MV::Scene::Spine> &a_spine) {
+	[&](const MV::Scene::SafeComponent<MV::Scene::Spine> &a_spine) {
 		CreateSpineComponentButton(a_spine);
 	},
-		[&](const MV::Scene::SafeComponent<MV::Scene::PathMap> &a_pathMap) {
+	[&](const MV::Scene::SafeComponent<MV::Scene::PathMap> &a_pathMap) {
 		CreatePathMapComponentButton(a_pathMap);
 	},
-		[&](const MV::Scene::SafeComponent<MV::Scene::Button> &a_button) {
+	[&](const MV::Scene::SafeComponent<MV::Scene::Button> &a_button) {
 		CreateButtonComponentButton(a_button);
 	});
 }
@@ -529,8 +529,6 @@ SelectedSpineEditorPanel::SelectedSpineEditorPanel(EditorControls &a_panel, std:
 				catch (...) {}
 			}
 		};
-
-
 
 		animationPreview->onEnter.connect("animate", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
 			controls->elementToEdit->animate(animationPreview->text());

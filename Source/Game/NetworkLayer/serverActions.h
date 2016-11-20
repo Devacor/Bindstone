@@ -30,6 +30,18 @@ public:
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(0);
 	}
+
+	std::string toNetworkString() {
+		return MV::toBinaryString(shared_from_this());
+	}
+
+	static void hook(chaiscript::ChaiScript& a_script) {
+		a_script.add(chaiscript::user_type<ServerAction>(), "ServerAction");
+		a_script.add(chaiscript::fun(&ServerAction::toNetworkString), "toNetworkString");
+
+		a_script.add(chaiscript::fun(&ServerAction::execute), "execute");
+		a_script.add(chaiscript::fun(&ServerAction::done), "done");
+	}
 };
 
 #endif

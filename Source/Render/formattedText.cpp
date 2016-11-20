@@ -590,7 +590,7 @@ namespace MV {
 	MV::UtfString FormattedLine::string() const {
 		UtfString result;
 		for(auto& character : characters){
-			result += character->character->character();
+			result += character->textCharacter;
 		}
 		return result;
 	}

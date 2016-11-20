@@ -85,8 +85,9 @@ namespace MV {
 	}
 
 	bool AudioPlayer::initAudio() {
-		if (RUNNING_IN_HEADLESS)
+		if (RUNNING_IN_HEADLESS) {
 			return false;
+		}
 		if (Mix_OpenAudio(audio_rate, audio_format, audio_channels, audio_buffers) != 0) {
 			initialized = false;
 			std::cerr << "Failed to initialize audio." << Mix_GetError();

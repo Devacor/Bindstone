@@ -99,12 +99,12 @@ pqxx::result LoginRequest::selectUser(pqxx::work* a_transaction) {
 }
 
 void LoginRequest::execute(LobbyConnectionState& a_connection) {
-	auto self = std::static_pointer_cast<CreatePlayer>(shared_from_this());
+	auto self = std::static_pointer_cast<LoginRequest>(shared_from_this());
 	a_connection.server().databasePool().task([=]() mutable {
 		try {
 			self; //force capture;
 			if (identifier.empty() || password.size() < 8) {
-				a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Failed to supply a valid email/handle and password.")));
+				a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Failed to supply a valid email/handle and password.")));
 			} else {
 				auto database = a_connection.server().database();
 				auto transaction = std::make_unique<pqxx::work>(*database);
@@ -112,16 +112,16 @@ void LoginRequest::execute(LobbyConnectionState& a_connection) {
 				auto result = selectUser(transaction.get());
 
 				if (result.empty()) {
-					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("No player exists.")));
+					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("No player exists.")));
 				} else if (!result[0][0].as<bool>()) {
-					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Player not email validated yet.")));
+					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Player not email validated yet.")));
 					MV::info("Need Validation: [", identifier, "]");
 				} else if (MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>()) == result[0][1].c_str()) {
 					a_connection.authenticate();
-					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Successful login.")));
+					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Successful login.", true)));
 					MV::info("Login Success: [", identifier, "]");
 				} else {
-					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Failed to authenticate.")));
+					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Failed to authenticate.")));
 					MV::info("Failed to authenticate: [", identifier, "] credential mismatch for existing user!");
 				}
 

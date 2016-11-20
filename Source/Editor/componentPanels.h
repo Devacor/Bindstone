@@ -30,7 +30,7 @@ public:
 
 	virtual void handleInput(SDL_Event &a_event);
 
-	virtual void onSceneDrag(const MV::Point<int> &a_delta){
+	virtual void onSceneDrag(const MV::Point<int> &/*a_delta*/){
 	}
 	virtual void onSceneZoom() {
 	}

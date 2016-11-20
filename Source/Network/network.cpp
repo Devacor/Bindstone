@@ -11,7 +11,7 @@ namespace MV {
 		if (socket) {
 			socket->close();
 		}
-
+		remainingTimeDeltas = EXPECTED_TIMESTEPS;
 		socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
 
 		boost::asio::ip::tcp::resolver::query query(url.host(), std::to_string(url.port()));
@@ -70,9 +70,11 @@ namespace MV {
 
 	void Client::initialize() {
 		try {
+			hasBeenInitialized = false;
 			initiateConnection();
 			worker = std::make_unique<std::thread>([this] { ioService.run(); });
 		} catch (std::exception &e) {
+			remainingTimeDeltas = EXPECTED_TIMESTEPS;
 			socket->close();
 			std::cerr << "Exception caught in Client: " << e.what() << std::endl;
 		}
@@ -105,6 +107,7 @@ namespace MV {
 	}
 
 	void Client::send(const std::string &a_content) {
+		require<DeviceException>(connected() || a_content == "T", "Failed to send message due to lack of connection.");
 		ioService.post([=] {
 			auto self = shared_from_this();
 			auto message = std::make_shared<NetworkMessage>(a_content);
@@ -137,7 +140,7 @@ namespace MV {
 	}
 
 	void Client::tryInitializeCallback() {
-		if (!hasBeenInitialized && initialized()) {
+		if (!hasBeenInitialized && connected()) {
 			hasBeenInitialized = true;
 			if (onInitialized) {
 				try {

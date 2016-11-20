@@ -136,19 +136,25 @@ namespace MV {
 		void Clickable::acceptUpClick(bool a_ignoreBounds) {
 			auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
 			bool inBounds = a_ignoreBounds || mouseInBounds(ourMouse);
-			if (inPressEvent()) {
-				onMouseMoveHandle = nullptr;
+			try {
+				if (inPressEvent()) {
+					onMouseMoveHandle = nullptr;
 
-				isInPressEvent = false;
-				if (inBounds) {
-					onAcceptSignal(protectFromDismissal);
-				} else {
-					onCancelSignal(protectFromDismissal);
+					isInPressEvent = false;
+					if (inBounds) {
+						onAcceptSignal(protectFromDismissal);
+					} else {
+						onCancelSignal(protectFromDismissal);
+					}
+					onReleaseSignal(protectFromDismissal, lastKnownVelocity);
 				}
-				onReleaseSignal(protectFromDismissal, lastKnownVelocity);
-			}
-			if (inBounds) {
-				onDropSignal(protectFromDismissal, lastKnownVelocity);
+				if (inBounds) {
+					onDropSignal(protectFromDismissal, lastKnownVelocity);
+				}
+			} catch (const std::exception& e) {
+				std::cerr << "Clickable::acceptUpClick Exception [" << e.what() << "]" << std::endl;
+			} catch (chaiscript::Boxed_Value &bv) {
+				std::cerr << "Clickable::acceptUpClick Exception [" << chaiscript::boxed_cast<chaiscript::exception::eval_error&>(bv).what() << "]" << std::endl;
 			}
 		}
 

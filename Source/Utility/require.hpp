@@ -121,6 +121,17 @@ namespace MV {
 		}
 	};
 
+	class DeviceException : public Exception {
+	public:
+		explicit DeviceException(const std::string& a_message) : Exception(a_message), std::runtime_error(a_message) {}
+		explicit DeviceException(const char *a_message) : Exception(a_message), std::runtime_error(a_message) {}
+
+		virtual const char * what() const override {
+			prefixWhat("Device Exception: ");
+			return combinedWhat.c_str();
+		}
+	};
+
 	class PointerException : public Exception {
 	public:
 		explicit PointerException(const std::string& a_message): Exception(a_message), std::runtime_error(a_message){}

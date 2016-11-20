@@ -17,7 +17,11 @@ namespace MV {
 	}
 
 	inline void scriptFileEval(const std::string &scriptFile, chaiscript::ChaiScript &script, const std::map<std::string, chaiscript::Boxed_Value>& localVariables) {
-		scriptEval(MV::fileContents(scriptFile), script, localVariables);
+		auto resetLocals = script.get_locals();
+		SCOPE_EXIT{ script.set_locals(resetLocals); };
+
+		script.set_locals(localVariables);
+		script.eval_file(scriptFile);
 	}
 }
 

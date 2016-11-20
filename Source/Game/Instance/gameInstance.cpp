@@ -1,6 +1,7 @@
 #include "Game/Instance/gameInstance.h"
 #include "Game/building.h"
 #include "Game/creature.h"
+#include "Game/game.h"
 #include <iostream>
 
 Team::Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_game) :
@@ -48,13 +49,14 @@ void GameInstance::handleScroll(int a_amount) {
 	}
 }
 
-GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data) :
-	worldScene(a_root->make("map.scene", jsonLoadBinder())),
-	ourMouse(a_mouse),
-	gameData(a_data),
+GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game) :
+	worldScene(a_game.root()->make("map.scene", jsonLoadBinder())->depth(0)),
+	ourMouse(a_game.mouse()),
+	ourGame(a_game),
+	gameData(a_game.data()),
 	left(a_leftPlayer, LEFT, *this),
 	right(a_rightPlayer, RIGHT, *this),
-	scriptEngine(MV::create_chaiscript_stdlib()) {
+	scriptEngine(MV::create_chaiscript_stdlib(), MV::chaiscript_module_paths(), MV::chaiscript_use_paths()) {
 
 	//manually updating this.
 	worldScene->silence().forget()->pause();
@@ -67,13 +69,13 @@ GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, const
 	right.ourWellPosition = left.enemyWellPosition;
 	left.ourWellPosition = right.enemyWellPosition;
 
-	ourMouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse) {
+	mouseSignal = ourMouse.onLeftMouseDown.connect([&](MV::MouseState& /*a_mouse*/) {
 		beginMapDrag();
 	});
 
 	hook();
 
-	worldTimestep.then("update", [&](MV::Task& a_self, double a_dt) {
+	worldTimestep.then("update", [&](MV::Task& /*a_self*/, double a_dt) {
 		worldScene->update(static_cast<float>(a_dt), true);
 		return false;
 	}).last()->interval(1.0 / 30, 15);
@@ -87,7 +89,9 @@ void GameInstance::beginMapDrag() {
 	if (cameraAction.finished()) {
 		ourMouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
 			auto signature = ourMouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse) {
-				worldScene->translate(MV::round<MV::PointPrecision>(a_mouse.position() - a_mouse.oldPosition()));
+				if (worldScene) {
+					worldScene->translate(MV::round<MV::PointPrecision>(a_mouse.position() - a_mouse.oldPosition()));
+				}
 			});
 			auto cancelId = MV::guid("cancelDrag");
 			ourMouse.onLeftMouseUp.connect(cancelId, [=](MV::MouseState& a_mouse2) {
@@ -99,39 +103,7 @@ void GameInstance::beginMapDrag() {
 }
 
 void GameInstance::hook() {
-	MV::TexturePoint::hook(scriptEngine);
-	MV::Color::hook(scriptEngine);
-	MV::Size<MV::PointPrecision>::hook(scriptEngine);
-	MV::Size<int>::hook(scriptEngine, "i");
-	MV::Point<MV::PointPrecision>::hook(scriptEngine);
-	MV::Point<int>::hook(scriptEngine, "i");
-	MV::BoxAABB<MV::PointPrecision>::hook(scriptEngine);
-	MV::BoxAABB<int>::hook(scriptEngine, "i");
-
-	MV::TexturePack::hook(scriptEngine);
-	MV::TextureDefinition::hook(scriptEngine);
-	MV::FileTextureDefinition::hook(scriptEngine);
-	MV::TextureHandle::hook(scriptEngine);
-	MV::SharedTextures::hook(scriptEngine);
-
-	Wallet::hook(scriptEngine);
-	Player::hook(scriptEngine);
-	Team::hook(scriptEngine);
-	MV::Task::hook(scriptEngine);
-	GameData::hook(scriptEngine);
-
-	MV::PathNode::hook(scriptEngine);
-	MV::NavigationAgent::hook(scriptEngine);
-
-	MV::Scene::Node::hook(scriptEngine);
-	MV::Scene::Component::hook(scriptEngine);
-	MV::Scene::Drawable::hook(scriptEngine);
-	MV::Scene::Sprite::hook(scriptEngine);
-	MV::Scene::Spine::hook(scriptEngine);
-	MV::Scene::Text::hook(scriptEngine);
-	MV::Scene::PathMap::hook(scriptEngine);
-	MV::Scene::PathAgent::hook(scriptEngine);
-	MV::Scene::Emitter::hook(scriptEngine, gameData.managers().pool);
+	ourGame.hook(scriptEngine);
 
 	Building::hook(scriptEngine, *this);
 	Creature::hook(scriptEngine, *this);
@@ -141,11 +113,6 @@ void GameInstance::hook() {
 	scriptEngine.add(chaiscript::fun([](GameInstance& a_self, std::shared_ptr<Creature> a_source, std::shared_ptr<Creature> a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive) { 
 		a_self.spawnMissile(a_source, a_target, a_prefab, a_speed, a_onArrive);
 	}), "spawnMissile");
-
-	scriptEngine.add(chaiscript::fun([](int a_from) {return MV::to_string(a_from); }), "to_string");
-	scriptEngine.add(chaiscript::fun([](size_t a_from) {return MV::to_string(a_from); }), "to_string");
-	scriptEngine.add(chaiscript::fun([](float a_from) {return MV::to_string(a_from); }), "to_string");
-	scriptEngine.add(chaiscript::fun([](double a_from) {return MV::to_string(a_from); }), "to_string");
 }
 
 bool GameInstance::update(double a_dt) {
@@ -173,7 +140,7 @@ void GameInstance::moveCamera(MV::Point<> endPosition, MV::Scale endScale) {
 	auto startPosition = worldScene->position();
 	auto startScale = worldScene->scale();
 	cameraAction.finish();
-	cameraAction.then("zoomAndPan", [&, startPosition, endPosition, startScale, endScale](MV::Task &a_self, double a_dt) {
+	cameraAction.then("zoomAndPan", [&, startPosition, endPosition, startScale, endScale](MV::Task &a_self, double /*a_dt*/) {
 		auto percent = std::min(static_cast<MV::PointPrecision>(a_self.elapsed() / 0.5f), 1.0f);
 		worldScene->position(MV::mix(startPosition, endPosition, percent, 2.0f));
 		worldScene->scale(MV::mix(startScale, endScale, percent, 2.0f));

@@ -5,7 +5,7 @@
 #include "DiggerGame/diggerGame.h"
 #include "editor/editor.h"
 #include "Game/managers.h"
-#include "Game/Server/package.h"
+#include "Game/NetworkLayer/package.h"
 
 class GameEditor {
 public:
@@ -27,7 +27,6 @@ private:
 			limbo->drawUpdate(tick);
 			limbo->renderer().updateScreen();
 			if (server) { server->update(tick); }
-			if (client) { client->update(); }
 			MV::systemSleep(0);
 		}
 	}
@@ -65,7 +64,7 @@ private:
 	void handleInput() {
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
-			if (!game.getManager().renderer.handleEvent(event)) {
+			if (!game.managers().renderer.handleEvent(event)) {
 				switch (event.type) {
 				case SDL_QUIT:
 					done = true;
@@ -96,7 +95,7 @@ private:
 					break;
 				}
 			}else{
-				screenScaler->bounds({ MV::point(0.0f, 0.0f), game.getManager().renderer.world().size() });
+				screenScaler->bounds({ MV::point(0.0f, 0.0f), game.managers().renderer.world().size() });
 			}
 		}
 		mouse.update();
@@ -117,7 +116,6 @@ private:
 	Editor editor;
 
 	std::shared_ptr<LobbyServer> server;
-	std::shared_ptr<MV::Client> client;
 
 	MV::Scene::SafeComponent<MV::Scene::Sprite> screenScaler;
 };

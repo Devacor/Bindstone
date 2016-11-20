@@ -31,29 +31,31 @@ bool isDone() {
 }
 
 int main(int, char *[]) {
-	chaiscript::ChaiScript chaiScript(MV::create_chaiscript_stdlib());
-
-	std::string content = "Hello World";
-	auto scriptString = "puts('['); puts(arg_0); puts(']'); puts('['); puts(arg_1); puts(']'); puts('['); puts(arg_2); puts(\"]\n\");";
-
-	MV::Signal<void(const std::string&, const std::string&, const std::string&)> callbackTest;
-	callbackTest.scriptEngine(&chaiScript);
-	callbackTest.connect("test", scriptString);
-	{
-		auto connection2 = callbackTest.connect("puts(\"![\"); puts(arg_0); puts(\"]!\n\");");
-		callbackTest(content, ":D :D :D", "TEST CHAR");
-	}
-	callbackTest("!!!", "VVV", "~~~");
-
-	auto jsonCallback = MV::toJson(callbackTest);
-
-	auto callbackLoadTest = MV::fromJson<MV::Signal<void(const std::string&, const std::string&, const std::string&)>>(jsonCallback, [&](cereal::JSONInputArchive& archive) {
-		archive.add(cereal::make_nvp("script", &chaiScript));
-	});
-
-	callbackLoadTest("LoadTest2", "DidThisWork?", "Maybe");
-
-	std::cout << std::endl;
+// 	chaiscript::ChaiScript chaiScript(MV::create_chaiscript_stdlib(), std::vector<std::string>{ }, std::vector<std::string>{
+// 		"./Assets/Scripts/"
+// 	});
+// 	chaiScript.eval("eval_file(\"Login/loginButton.script\");");
+// 	std::string content = "Hello World";
+// 	auto scriptString = "puts('['); puts(arg_0); puts(']'); puts('['); puts(arg_1); puts(']'); puts('['); puts(arg_2); puts(\"]\n\");";
+// 
+// 	MV::Signal<void(const std::string&, const std::string&, const std::string&)> callbackTest;
+// 	callbackTest.scriptEngine(&chaiScript);
+// 	callbackTest.connect("test", scriptString);
+// 	{
+// 		auto connection2 = callbackTest.connect("puts(\"![\"); puts(arg_0); puts(\"]!\n\");");
+// 		callbackTest(content, ":D :D :D", "TEST CHAR");
+// 	}
+// 	callbackTest("!!!", "VVV", "~~~");
+// 
+// 	auto jsonCallback = MV::toJson(callbackTest);
+// 
+// 	auto callbackLoadTest = MV::fromJson<MV::Signal<void(const std::string&, const std::string&, const std::string&)>>(jsonCallback, [&](cereal::JSONInputArchive& archive) {
+// 		archive.add(cereal::make_nvp("script", &chaiScript));
+// 	});
+// 
+// 	callbackLoadTest("LoadTest2", "DidThisWork?", "Maybe");
+// 
+// 	std::cout << std::endl;
 
 	// 	pqxx::connection c("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=5432 dbname=bindstone user=m2tm password=Tinker123");
 	// 	pqxx::work txn(c);

@@ -18,6 +18,7 @@
 #include "Utility/generalUtility.h"
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
+#include "chaiscript/chaiscript.hpp"
 
 namespace MV {
 	struct NetworkMessage {
@@ -68,12 +69,32 @@ namespace MV {
 
 		void update();
 
-		bool initialized() const{
+		void reconnect() {
+			initialize();
+		}
+
+		void reconnect(const std::function<void()> &a_onInitialized) {
+			onInitialized = a_onInitialized;
+			initialize();
+		}
+
+		bool connected() const{
 			return remainingTimeDeltas <= 0;
 		}
 
 		double clientServerTime() const {
 			return clientServerTimeValue;
+		}
+
+		static void hook(chaiscript::ChaiScript& a_script) {
+			a_script.add(chaiscript::user_type<Client>(), "Client");
+
+			a_script.add(chaiscript::fun(&Client::send), "send");
+			a_script.add(chaiscript::fun(&Client::connected), "connected");
+			a_script.add(chaiscript::fun([](Client& a_self) { a_self.reconnect(); }), "reconnect");
+			a_script.add(chaiscript::fun([](Client& a_self, const std::function<void()> &a_onInitialized) { a_self.reconnect(a_onInitialized); }), "reconnect");
+			
+			a_script.add(chaiscript::fun(&Client::clientServerTime), "clientServerTime");
 		}
 
 	private:
@@ -102,6 +123,7 @@ namespace MV {
 				socket->close();
 				socket.reset();
 			}
+			remainingTimeDeltas = EXPECTED_TIMESTEPS;
 			failMessage = "[" + a_section + "] ERROR: " + a_err.message();
 			std::cerr << failMessage << std::endl;
 		}

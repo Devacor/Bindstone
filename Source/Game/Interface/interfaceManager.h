@@ -15,23 +15,22 @@ namespace MV {
 
 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 
-		void show() {
-			initialize();
-			if (scriptShow) {
-				scriptShow(*this);
-			}
-		}
+		void show();
 
-		void hide() {
-			if (scriptHide) {
-				scriptHide(*this);
-			}
-		}
+		void hide();
 
 		void update(double a_dt) {
 			if (scriptUpdate) {
 				scriptUpdate(*this, a_dt);
 			}
+		}
+
+		std::string id() {
+			return pageId;
+		}
+
+		std::shared_ptr<MV::Scene::Node> root() {
+			return node;
 		}
 
 	private:
@@ -49,20 +48,7 @@ namespace MV {
 
 	class InterfaceManager {
 	public:
-		InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, MouseState& a_mouse, Managers& a_managers, chaiscript::ChaiScript &a_script, std::string a_scriptName) :
-			ourMouse(a_mouse),
-			ourManagers(a_managers),
-			ourScript(a_script),
-			node(a_root->make(a_scriptName)){
-
-			scriptFileEval("Assets/UI/" + a_scriptName + ".script", ourScript, {
-				{ std::string("self"), chaiscript::Boxed_Value(this) }
-			});
-
-			if (scriptInitialize) {
-				scriptInitialize(*this);
-			}
-		}
+		InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, MouseState& a_mouse, Managers& a_managers, chaiscript::ChaiScript &a_script, std::string a_scriptName);
 
 		MouseState& mouse() {
 			return ourMouse;
@@ -85,6 +71,15 @@ namespace MV {
 
 		std::shared_ptr<MV::Scene::Node> root() {
 			return node;
+		}
+
+		Interface& page(const std::string &a_pageId) {
+			for (auto&& p : pages) {
+				if (p.id() == a_pageId) {
+					return p;
+				}
+			}
+			require<ResourceException>(false, "Failed to find page [", a_pageId, "]");
 		}
 
 	private:

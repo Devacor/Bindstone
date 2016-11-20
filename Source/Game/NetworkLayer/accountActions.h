@@ -1,7 +1,7 @@
 #ifndef _ACCOUNTACTIONS_MV_H_
 #define _ACCOUNTACTIONS_MV_H_
 
-#include "Game/Server/serverActions.h"
+#include "Game/NetworkLayer/serverActions.h"
 
 class CreatePlayer : public ServerAction {
 public:
@@ -20,6 +20,12 @@ public:
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(CEREAL_NVP(handle), CEREAL_NVP(email), CEREAL_NVP(password), cereal::make_nvp("ServerAction", cereal::base_class<ServerAction>(this)));
+	}
+
+	static void hook(chaiscript::ChaiScript& a_script) {
+		a_script.add(chaiscript::user_type<CreatePlayer>(), "CreatePlayer");
+		a_script.add(chaiscript::base_class<ServerAction, CreatePlayer>());
+		a_script.add(chaiscript::constructor<CreatePlayer(const std::string &a_email, const std::string &a_identifier, const std::string &a_password)>(), "CreatePlayer");
 	}
 
 private:
@@ -63,6 +69,12 @@ public:
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(CEREAL_NVP(identifier), CEREAL_NVP(password), cereal::make_nvp("ServerAction", cereal::base_class<ServerAction>(this)));
 		doneFlag = false;
+	}
+
+	static void hook(chaiscript::ChaiScript& a_script) {
+		a_script.add(chaiscript::user_type<LoginRequest>(), "LoginRequest");
+		a_script.add(chaiscript::base_class<ServerAction, LoginRequest>());
+		a_script.add(chaiscript::constructor<LoginRequest(const std::string &a_identifier, const std::string &a_password)>(), "LoginRequest");
 	}
 
 private:

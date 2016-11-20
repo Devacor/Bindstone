@@ -1293,7 +1293,8 @@ namespace MV {
 			a_script.add(chaiscript::fun(&Node::removeFromParent), "removeFromParent");
 			a_script.add(chaiscript::fun(&Node::clear), "clear");
 			a_script.add(chaiscript::fun(&Node::root), "root");
-			a_script.add(chaiscript::fun(&Node::get), "get");
+			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id) {return a_self.get(a_id); }), "get");
+			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id, bool a_throw) {return a_self.get(a_id, a_throw); }), "get");
 			a_script.add(chaiscript::fun([](Node &a_self, const std::string &a_componentId) { return a_self.componentInChildren<Component>(a_componentId, false, true); }), "component");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node> (Node::*)() const>(&Node::parent)), "parent");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node> (Node::*)(const std::shared_ptr<Node> &)>(&Node::parent)), "parent");

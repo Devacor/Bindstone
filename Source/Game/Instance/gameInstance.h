@@ -15,6 +15,7 @@ inline std::string sideToString(TeamSide a_side) { return (a_side == LEFT) ? "le
 struct Constants;
 class GameInstance;
 class Building;
+class Game;
 
 class Team {
 	friend GameInstance;
@@ -86,7 +87,7 @@ class Missile;
 class GameInstance {
 	friend Team;
 public:
-	GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data);
+	GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game);
 	~GameInstance();
 	GameData& data() {
 		return gameData;
@@ -150,6 +151,7 @@ private:
 	void hook();
 
 	GameData& gameData;
+	Game& ourGame;
 
 	MV::MouseState &ourMouse;
 	std::shared_ptr<MV::Scene::Node> worldScene;
@@ -161,6 +163,8 @@ private:
 	std::vector<std::unique_ptr<Missile>> missiles;
 	std::vector<Missile*> expiredMissiles;
 
+	MV::MouseState::SignalType mouseSignal;
+
 	Team left;
 	Team right;
 
@@ -170,8 +174,8 @@ private:
 
 class ClientGameInstance : public GameInstance {
 public:
-	ClientGameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data, const std::shared_ptr<Player> &a_localPlayer):
-		GameInstance(a_root, a_leftPlayer, a_rightPlayer, a_mouse, a_data),
+	ClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game, const std::shared_ptr<Player> &a_localPlayer):
+		GameInstance(a_leftPlayer, a_rightPlayer, a_game),
 		localPlayer(a_localPlayer){
 	}
 
@@ -185,8 +189,8 @@ private:
 
 class ServerGameInstance : public GameInstance {
 public:
-	ServerGameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, MV::MouseState& a_mouse, GameData& a_data) :
-		GameInstance(a_root, a_leftPlayer, a_rightPlayer, a_mouse, a_data){
+	ServerGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game) :
+		GameInstance(a_leftPlayer, a_rightPlayer, a_game) {
 	}
 
 private:

@@ -20,11 +20,11 @@ GameEditor::GameEditor() :
 	// 		};
 	// 		spineTestNode->loadChild("simple.scene", populateArchive);
 	// 		spineTestNode->loadChild("tree_particle.scene", populateArchive);
-
+	std::cout << "1" << std::endl;
 	screenScaler = limbo->attach<MV::Scene::Sprite>();
 	screenScaler->color({ 1.0f, 1.0f, 1.0f, 0.0f });
-	screenScaler->bounds({ MV::point(0.0f, 0.0f), game.getManager().renderer.world().size() });
-
+	screenScaler->bounds({ MV::point(0.0f, 0.0f), game.managers().renderer.world().size() });
+	std::cout << "2" << std::endl;
 //	auto textureSheet = MV::FileTextureDefinition::make("Assets/Images/slice.png");
 // 	auto alignedSprite = limbo->make("repositionNode")->attach<MV::Scene::Sprite>();
 // 	alignedSprite->texture(textureSheet->makeHandle());
@@ -41,48 +41,38 @@ GameEditor::GameEditor() :
 // 		std::cout << "POST: " << screenScaler->bounds() << std::endl;
 // 	});
 
-	auto grid = limbo->make("Grid")->position({ (static_cast<float>(game.getManager().renderer.window().width()) - 108.0f) / 2.0f, 200.0f })->
+	auto grid = limbo->make("Grid")->position({ (static_cast<float>(game.managers().renderer.window().width()) - 108.0f) / 2.0f, 200.0f })->
 		attach<MV::Scene::Grid>()->columns(1)->padding({ 2.0f, 2.0f })->margin({ 4.0f, 4.0f })->color({ BOX_BACKGROUND })->owner();
 
-	auto editorButton = makeButton(grid, game.getManager().textLibrary, mouse, "Editor", { 100.0f, 20.0f }, UTF_CHAR_STR("Editor"));
+	auto editorButton = makeButton(grid, game.managers().textLibrary, mouse, "Editor", { 100.0f, 20.0f }, UTF_CHAR_STR("Editor"));
 	editorButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 		runEditor();
 	});
-	auto gameButton = makeButton(grid, game.getManager().textLibrary, mouse, "Game", { 100.0f, 20.0f }, UTF_CHAR_STR("Game"));
+	auto gameButton = makeButton(grid, game.managers().textLibrary, mouse, "Game", { 100.0f, 20.0f }, UTF_CHAR_STR("Game"));
 	gameButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 		runGame();
 	});
-	auto quitButton = makeButton(grid, game.getManager().textLibrary, mouse, "Quit", { 100.0f, 20.0f }, UTF_CHAR_STR("Quit"));
+	auto quitButton = makeButton(grid, game.managers().textLibrary, mouse, "Quit", { 100.0f, 20.0f }, UTF_CHAR_STR("Quit"));
 	quitButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 		done = true;
 	});
 
-	auto serverButton = makeButton(grid, game.getManager().textLibrary, mouse, "Server", { 100.0f, 20.0f }, UTF_CHAR_STR("Server"));
+	auto serverButton = makeButton(grid, game.managers().textLibrary, mouse, "Server", { 100.0f, 20.0f }, UTF_CHAR_STR("Server"));
 	serverButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 		std::cout << "serving" << std::endl;
 		server = std::make_shared<LobbyServer>(managers);
 	});
-
-	auto clientButton = makeButton(grid, game.getManager().textLibrary, mouse, "Client", { 100.0f, 20.0f }, UTF_CHAR_STR("Client"));
-	clientButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
-		//client = MV::Client::make(MV::Url{ "http://ec2-54-218-22-3.us-west-2.compute.amazonaws.com:22325" }, [=](const std::string &a_message) {
-		client = MV::Client::make(MV::Url{ "http://96.229.120.252:22325" }, [=](const std::string &a_message) {
-			auto value = MV::fromBinaryString<std::shared_ptr<ClientAction>>(a_message);
-			value->execute();
-		}, [](const std::string &a_dcreason) {
-			std::cout << "Disconnected: " << a_dcreason << std::endl;
-		}, [=] {});
-		//client->send("UUUUH!");
-	});
-
-	auto sendButton = makeButton(grid, game.getManager().textLibrary, mouse, "Send", { 100.0f, 20.0f }, UTF_CHAR_STR("Send"));
-	sendButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
-		if (client) {
-			client->send(MV::toBinaryStringCast<ServerAction>(std::make_shared<CreatePlayer>("maxmike@gmail.com", "M2tM", "SuperTinker123")));
-		}
-	});
+	std::cout << "3" << std::endl;
+// 	auto sendButton = makeButton(grid, game.managers().textLibrary, mouse, "Send", { 100.0f, 20.0f }, UTF_CHAR_STR("Send"));
+// 	sendButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
+// 		if (client) {
+// 			client->send(MV::toBinaryStringCast<ServerAction>(std::make_shared<CreatePlayer>("maxmike@gmail.com", "M2tM", "SuperTinker123")));
+// 		}
+// 	});
 
 	grid->component<MV::Scene::Grid>()->anchors().anchor({ MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f) }).usePosition(true).parent(screenScaler.self(), MV::Scene::Anchors::BoundsToOffset::Apply);
+
+	std::cout << "4" << std::endl;
 
 	if (MV::RUNNING_IN_HEADLESS) {
 		serverButton->press();

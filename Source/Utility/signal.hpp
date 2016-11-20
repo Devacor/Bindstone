@@ -307,7 +307,6 @@ namespace MV {
 
 		void clear(){
 			clearObservers();
-			clearScript();
 		}
 
 		void block() {

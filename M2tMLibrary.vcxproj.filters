@@ -62,7 +62,10 @@
     <Filter Include="pqxx">
       <UniqueIdentifier>{795cca5b-4931-4dd8-a382-72e00e2cedac}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Game\Server">
+    <Filter Include="Chaiscript">
+      <UniqueIdentifier>{46e50aa0-7e12-40dd-b6fa-5090ff3258e1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Game\NetworkLayer">
       <UniqueIdentifier>{4988f8a3-c401-48d3-a3f5-48e932198ab4}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
@@ -431,12 +434,6 @@
     <ClCompile Include="Source\Utility\log.cpp">
       <Filter>Source Files\Utility</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Game\Server\lobbyServer.cpp">
-      <Filter>Source Files\Game\Server</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Game\Server\accountActions.cpp">
-      <Filter>Source Files\Game\Server</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Render\Scene\stencil.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
@@ -551,6 +548,13 @@
     <ClCompile Include="Source\Game\Interface\interfaceManager.cpp">
       <Filter>Source Files\Game\Interface</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Game\NetworkLayer\accountActions.cpp">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Game\NetworkLayer\lobbyServer.cpp">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Game\NetworkLayer\clientActions.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Audio\package.h">
@@ -1048,23 +1052,8 @@
     <ClInclude Include="Source\Utility\cerealUtility.h">
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Game\Server\lobbyServer.h">
-      <Filter>Source Files\Game\Server</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Utility\log.h">
       <Filter>Source Files\Utility</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Game\Server\accountActions.h">
-      <Filter>Source Files\Game\Server</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Game\Server\serverActions.h">
-      <Filter>Source Files\Game\Server</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Game\Server\clientActions.h">
-      <Filter>Source Files\Game\Server</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Game\Server\package.h">
-      <Filter>Source Files\Game\Server</Filter>
     </ClInclude>
     <ClInclude Include="Source\Render\Scene\stencil.h">
       <Filter>Source Files\Render\Scene</Filter>
@@ -1194,6 +1183,132 @@
     </ClInclude>
     <ClInclude Include="Source\Utility\chaiscriptUtility.h">
       <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\chaiscript_threading.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\any.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\bad_boxed_cast.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\bind_first.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\bootstrap.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\bootstrap_stl.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\boxed_cast.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\boxed_cast_helper.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\boxed_number.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\boxed_value.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\callable_traits.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\dispatchkit.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\dynamic_object.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\dynamic_object_detail.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\exception_specification.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\function_call.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\function_call_detail.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\handle_return.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\operators.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\proxy_constructors.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\proxy_functions.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\proxy_functions_detail.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\register_function.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\type_conversions.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\dispatchkit\type_info.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\language\chaiscript_algebraic.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\language\chaiscript_common.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\language\chaiscript_engine.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\language\chaiscript_eval.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\language\chaiscript_parser.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\language\chaiscript_prelude_docs.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\utility\json.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\utility\json_wrap.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\utility\utility.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\chaiscript.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\chaiscript_defines.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\ChaiScript-5.8.1\include\chaiscript\chaiscript_stdlib.hpp">
+      <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\NetworkLayer\lobbyServer.h">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\NetworkLayer\package.h">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\NetworkLayer\serverActions.h">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\NetworkLayer\accountActions.h">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\NetworkLayer\clientActions.h">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

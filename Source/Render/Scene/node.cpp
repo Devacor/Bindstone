@@ -315,6 +315,26 @@ namespace MV {
 			return current->shared_from_this();
 		}
 
+		bool Node::hasParent(const std::string &a_id) const {
+			const Node* currentParent = this;
+			while (currentParent = currentParent->myParent) {
+				if (currentParent->id() == a_id) {
+					return true;
+				}
+			}
+			return false;
+		}
+		std::shared_ptr<Node> Node::getParent(const std::string &a_id, bool a_throw) {
+			Node* currentParent = this;
+			while (currentParent = currentParent->myParent) {
+				if (currentParent->id() == a_id) {
+					return currentParent->shared_from_this();
+				}
+			}
+			require<ResourceException>(!a_throw, "Failed to getParent: [", a_id, "] from child node: [", nodeId, "]");
+			return nullptr;
+		}
+
 		std::shared_ptr<Node> Node::get(const std::string &a_id, bool a_throw) {
 			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child){
 				return a_child->id() == a_id;
@@ -327,6 +347,16 @@ namespace MV {
 				if(found){
 					return found;
 				}
+			}
+			require<ResourceException>(!a_throw, "Failed to get: [", a_id, "] from parent node: [", nodeId, "]");
+			return nullptr;
+		}
+		std::shared_ptr<Node> Node::getImmediate(const std::string &a_id, bool a_throw) {
+			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child) {
+				return a_child->id() == a_id;
+			});
+			if (foundNode != childNodes.end()) {
+				return *foundNode;
 			}
 			require<ResourceException>(!a_throw, "Failed to get: [", a_id, "] from parent node: [", nodeId, "]");
 			return nullptr;
@@ -346,6 +376,13 @@ namespace MV {
 				}
 			}
 			return false;
+		}
+
+		bool Node::hasImmediate(const std::string &a_id) const {
+			auto foundNode = std::find_if(childNodes.begin(), childNodes.end(), [&](const std::shared_ptr<Node> &a_child) {
+				return a_child->id() == a_id;
+			});
+			return foundNode != childNodes.end();
 		}
 
 		std::shared_ptr<Node> Node::id(const std::string &a_id) {
@@ -1293,6 +1330,13 @@ namespace MV {
 			a_script.add(chaiscript::fun(&Node::removeFromParent), "removeFromParent");
 			a_script.add(chaiscript::fun(&Node::clear), "clear");
 			a_script.add(chaiscript::fun(&Node::root), "root");
+			a_script.add(chaiscript::fun(&Node::hasImmediate), "hasImmediate");
+			a_script.add(chaiscript::fun(&Node::has), "has");
+			a_script.add(chaiscript::fun(&Node::hasParent), "hasParent");
+			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id) {return a_self.getParent(a_id); }), "getParent");
+			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id, bool a_throw) {return a_self.getParent(a_id, a_throw); }), "getParent");
+			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id) {return a_self.getImmediate(a_id); }), "getImmediate");
+			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id, bool a_throw) {return a_self.getImmediate(a_id, a_throw); }), "getImmediate");
 			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id) {return a_self.get(a_id); }), "get");
 			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id, bool a_throw) {return a_self.get(a_id, a_throw); }), "get");
 			a_script.add(chaiscript::fun([](Node &a_self, const std::string &a_componentId) { return a_self.componentInChildren<Component>(a_componentId, false, true); }), "component");

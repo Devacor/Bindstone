@@ -17,6 +17,7 @@ class EditableSpine;
 class TexturePicker;
 class AnchorEditor;
 class EditableButton;
+class EditableClickable;
 
 class EditorPanel {
 protected:
@@ -92,7 +93,8 @@ public:
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateEmitterComponentButton(const MV::Scene::SafeComponent<MV::Scene::Emitter> & a_emitter);
 	MV::Scene::SafeComponent<MV::Scene::Button> CreatePathMapComponentButton(const MV::Scene::SafeComponent<MV::Scene::PathMap> & a_pathMap);
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateTextComponentButton(const MV::Scene::SafeComponent<MV::Scene::Text> & a_text);
-	MV::Scene::SafeComponent<MV::Scene::Button> CreateButtonComponentButton(const MV::Scene::SafeComponent<MV::Scene::Button> & a_text);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateButtonComponentButton(const MV::Scene::SafeComponent<MV::Scene::Button> & a_button);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateClickableComponentButton(const MV::Scene::SafeComponent<MV::Scene::Clickable> & a_clickable);
 private:
 	void updateComponentEditButtons(bool a_attached);
 
@@ -268,6 +270,28 @@ private:
 	std::shared_ptr<MV::Scene::Text> height;
 };
 
+class SelectedClickableEditorPanel : public EditorPanel {
+public:
+	SelectedClickableEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableClickable> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
+
+	virtual void handleInput(SDL_Event &a_event) override;
+
+	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
+	virtual void onSceneZoom() override;
+
+private:
+	std::shared_ptr<EditableClickable> controls;
+	std::shared_ptr<MV::Scene::Text> detectType;
+	std::shared_ptr<MV::Scene::Text> active;
+	std::shared_ptr<MV::Scene::Text> idle;
+	std::shared_ptr<MV::Scene::Text> disabled;
+
+	std::shared_ptr<MV::Scene::Text> offsetY;
+	std::shared_ptr<MV::Scene::Text> offsetX;
+	std::shared_ptr<MV::Scene::Text> width;
+	std::shared_ptr<MV::Scene::Text> height;
+};
+
 class DeselectedEditorPanel : public EditorPanel {
 public:
 	DeselectedEditorPanel(EditorControls &a_panel);
@@ -288,7 +312,8 @@ private:
 	void createPathMap(const MV::BoxAABB<int> &a_selected);
 	void createGrid();
 	void createText(const MV::BoxAABB<int> &a_selected);
-	void createButton();
+	void createButton(const MV::BoxAABB<int> &a_selected);
+	void createClickable(const MV::BoxAABB<int> &a_selected);
 
 	SelectedNodeEditorPanel* editorPanel;
 };

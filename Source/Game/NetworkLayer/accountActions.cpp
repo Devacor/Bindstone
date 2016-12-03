@@ -4,7 +4,7 @@
 #include "Game/player.h"
 
 pqxx::result CreatePlayer::selectUser(pqxx::work* a_transaction) {
-	std::string activeQuery = "SELECT verified, passsalt, passhash, passiterations FROM players WHERE ";
+	std::string activeQuery = "SELECT verified, passhash, passsalt, passiterations FROM players WHERE ";
 	activeQuery += "email = " + a_transaction->quote(email);
 	activeQuery += " OR ";
 	activeQuery += "handle = " + a_transaction->quote(handle);
@@ -39,13 +39,16 @@ void CreatePlayer::execute(LobbyConnectionState& a_connection) {
 					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Player not email validated yet.")));
 					sendValidationEmail(a_connection, result[0][2].c_str());
 					MV::info("Need Validation: [", email, "]");
-				} else if (MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>()) == result[0][1].c_str()) {
-					a_connection.authenticate();
-					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Successful login.")));
-					MV::info("Login Success: [", email, "]");
 				} else {
-					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Failed to create due to existing player with different credentials.")));
-					MV::info("Failed to create: [", email, "] credential mismatch for existing user!");
+					auto hashedPassword = MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>());
+					if (hashedPassword == result[0][1].c_str()) {
+						a_connection.authenticate();
+						a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Successful login.")));
+						MV::info("Login Success: [", email, "]");
+					} else {
+						a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("Failed to create due to existing player with different credentials.")));
+						MV::info("Failed to create: [", email, "] credential mismatch for existing user!");
+					}
 				}
 
 				transaction->commit();
@@ -90,7 +93,7 @@ std::string CreatePlayer::createPlayerQueryString(pqxx::work &transaction, const
 }
 
 pqxx::result LoginRequest::selectUser(pqxx::work* a_transaction) {
-	std::string activeQuery = "SELECT verified, passsalt, passhash, passiterations FROM players WHERE ";
+	std::string activeQuery = "SELECT verified, passhash, passsalt, passiterations FROM players WHERE ";
 	activeQuery += "email = " + a_transaction->quote(identifier);
 	activeQuery += " OR ";
 	activeQuery += "handle = " + a_transaction->quote(identifier);
@@ -116,13 +119,16 @@ void LoginRequest::execute(LobbyConnectionState& a_connection) {
 				} else if (!result[0][0].as<bool>()) {
 					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Player not email validated yet.")));
 					MV::info("Need Validation: [", identifier, "]");
-				} else if (MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>()) == result[0][1].c_str()) {
-					a_connection.authenticate();
-					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Successful login.", true)));
-					MV::info("Login Success: [", identifier, "]");
 				} else {
-					a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Failed to authenticate.")));
-					MV::info("Failed to authenticate: [", identifier, "] credential mismatch for existing user!");
+					auto hashedPassword = MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>());
+					if (hashedPassword == result[0][1].c_str()) {
+						a_connection.authenticate();
+						a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Successful login.", true)));
+						MV::info("Login Success: [", identifier, "]");
+					} else {
+						a_connection.connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Failed to authenticate.")));
+						MV::info("Failed to authenticate: [", identifier, "][", password,"] credential mismatch for existing user!\n[", hashedPassword, "]\n[", result[0][1].c_str(), "]");
+					}
 				}
 
 				transaction->commit();

@@ -114,7 +114,7 @@ namespace MV {
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
 				auto selfShared = std::static_pointer_cast<Drawable>(selfReference->shared_from_this());
-				bool parentCanUseId = !parentReference.expired() && parentReference.lock() == selfReference->owner()->componentInParents(parentReference.lock()->id(), true).self();
+				bool parentCanUseId = !parentReference.expired() && parentReference.lock() == selfReference->owner()->componentInParents(parentReference.lock()->id(), false, true).self();
 				archive(
 					cereal::make_nvp("parent", parentCanUseId ? std::weak_ptr<Drawable>() : parentReference),
 					cereal::make_nvp("parentId", parentCanUseId ? parentReference.lock()->id() : std::string()),

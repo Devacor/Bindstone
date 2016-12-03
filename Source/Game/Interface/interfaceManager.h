@@ -33,12 +33,25 @@ namespace MV {
 			return node;
 		}
 
+		void focus(std::shared_ptr<MV::Scene::Text> a_textbox);
+
+		void removeFocus();
+
+		bool handleInput(SDL_Event &a_event) {
+			if (!activeText.expired()) {
+				return activeText.lock()->text(a_event);
+			}
+			return false;
+		}
+
 	private:
 		void initialize();
 
 		std::string pageId;
 		InterfaceManager& manager;
 		std::shared_ptr<MV::Scene::Node> node;
+
+		std::weak_ptr<MV::Scene::Text> activeText;
 
 		std::function<void(Interface&)> scriptInitialize;
 		std::function<void(Interface&, double)> scriptUpdate;
@@ -80,8 +93,18 @@ namespace MV {
 				}
 			}
 			require<ResourceException>(false, "Failed to find page [", a_pageId, "]");
+			return pages[0]; //never hit in reality
 		}
 
+		bool handleInput(SDL_Event &a_event) {
+			if (activeTextPage) {
+				return activeTextPage->handleInput(a_event);
+			}
+			return false;
+		}
+
+		void setActiveText(Interface* a_current);
+		void removeActiveText(Interface* a_current);
 	private:
 		std::vector<Interface> pages;
 
@@ -90,6 +113,8 @@ namespace MV {
 		chaiscript::ChaiScript& ourScript;
 
 		std::shared_ptr<MV::Scene::Node> node;
+
+		Interface* activeTextPage = nullptr;
 
 		std::function<void(InterfaceManager&)> scriptInitialize;
 	};

@@ -133,6 +133,14 @@ public:
 	MV::Scene::SafeComponent<MV::Scene::Button> elementToEdit;
 };
 
+class EditableClickable : public ResizeHandles {
+public:
+	EditableClickable(MV::Scene::SafeComponent<MV::Scene::Clickable> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+	~EditableClickable();
+
+	MV::Scene::SafeComponent<MV::Scene::Clickable> elementToEdit;
+};
+
 class EditableRectangle : public ResizeHandles {
 public:
 	EditableRectangle(MV::Scene::SafeComponent<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);

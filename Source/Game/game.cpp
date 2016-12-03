@@ -52,6 +52,9 @@ void Game::initializeWindow(){
 	ourMouse.update();
 
 	rootScene = MV::Scene::Node::make(gameData.managers().renderer);
+	screenScaler = rootScene->attach<MV::Scene::Sprite>();
+	screenScaler->hide()->id("ScreenScaler");
+	screenScaler->bounds({ MV::point(0.0f, 0.0f), gameData.managers().renderer.world().size() });
 
 	MV::FontDefinition::make(gameData.managers().textLibrary, "default", "Assets/Fonts/Verdana.ttf", 14);
 	MV::FontDefinition::make(gameData.managers().textLibrary, "small", "Assets/Fonts/Verdana.ttf", 9);
@@ -78,8 +81,6 @@ void Game::initializeWindow(){
 	if (!MV::RUNNING_IN_HEADLESS) {
 		ourGui = std::make_unique<MV::InterfaceManager>(rootScene, ourMouse, gameData.managers(), scriptEngine, "./Assets/Interface/interfaceManager.script");
 	}
-
-	SDL_SetClipboardText(MV::sha512("SuperTinker123", "oREr1ybrCNxCrckhzAEr_v-4xSNtciOV", 12).c_str());
 }
 
 bool Game::update(double dt) {
@@ -96,7 +97,8 @@ bool Game::update(double dt) {
 void Game::handleInput() {
 	SDL_Event event;
 	while(SDL_PollEvent(&event)){
-		if(!gameData.managers().renderer.handleEvent(event) && (!ourInstance || (ourInstance && !ourInstance->handleEvent(event)))){
+		auto windowResized = gameData.managers().renderer.handleEvent(event);
+		if(!windowResized && (!ourGui || (ourGui && !ourGui->handleInput(event))) && (!ourInstance || (ourInstance && !ourInstance->handleEvent(event)))){
 			switch(event.type){
 			case SDL_QUIT:
 				done = true;
@@ -125,6 +127,8 @@ void Game::handleInput() {
 				}
 				break;
 			}
+		} else if (windowResized) {
+			screenScaler->bounds({ MV::point(0.0f, 0.0f), gameData.managers().renderer.world().size() });
 		}
 	}
 	ourMouse.update();
@@ -176,6 +180,7 @@ void Game::hook(chaiscript::ChaiScript &a_script) {
 	MV::Scene::PathMap::hook(a_script);
 	MV::Scene::PathAgent::hook(a_script);
 	MV::Scene::Emitter::hook(a_script, gameData.managers().pool);
+	MV::Scene::Clickable::hook(a_script, ourMouse);
 
 	MV::Client::hook(a_script);
 	CreatePlayer::hook(a_script);

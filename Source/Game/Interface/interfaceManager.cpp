@@ -24,6 +24,9 @@ namespace MV {
 		a_script.add(chaiscript::fun(&Interface::scriptUpdate), "update");
 		a_script.add(chaiscript::fun(&Interface::pageId), "id");
 
+		a_script.add(chaiscript::fun(&Interface::focus), "focus");
+		a_script.add(chaiscript::fun(&Interface::removeFocus), "removeFocus");
+
 		return a_script;
 	}
 
@@ -36,10 +39,28 @@ namespace MV {
 	}
 
 	void Interface::hide() {
+		removeFocus();
 		if (scriptHide) {
 			scriptHide(*this);
 		}
 		node->active(false);
+	}
+
+	void Interface::focus(std::shared_ptr<MV::Scene::Text> a_textbox) {
+		if (!activeText.expired()) {
+			activeText.lock()->disableCursor();
+		}
+		manager.setActiveText(this);
+		a_textbox->enableCursor();
+		activeText = a_textbox;
+	}
+
+	void Interface::removeFocus() {
+		manager.removeActiveText(this);
+		if (!activeText.expired()) {
+			activeText.lock()->disableCursor();
+		}
+		activeText.reset();
 	}
 
 	void Interface::initialize() {
@@ -93,6 +114,21 @@ namespace MV {
 		//a_script.add(chaiscript::fun(&InterfaceManager::scriptUpdate), "update");
 
 		return a_script;
+	}
+
+	void InterfaceManager::setActiveText(Interface* a_current) {
+		if (activeTextPage && activeTextPage != a_current) {
+			activeTextPage->removeFocus();
+		}
+		activeTextPage = a_current;
+		SDL_StartTextInput();
+	}
+
+	void InterfaceManager::removeActiveText(Interface* a_current) {
+		if (activeTextPage && activeTextPage == a_current) {
+			activeTextPage = nullptr;
+			SDL_StopTextInput();
+		}
 	}
 
 }

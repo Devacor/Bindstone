@@ -5,6 +5,10 @@
 #include "Utility/cerealUtility.h"
 //#include "vld.h"
 
+
+#include "Utility/scopeGuard.hpp"
+#include "chaiscript/chaiscript.hpp"
+
 struct TestObject {
 	TestObject() { std::cout << "\nConstructor\n"; }
 	~TestObject() { std::cout << "\nDestructor\n"; }
@@ -30,11 +34,113 @@ bool isDone() {
 	return false;
 }
 
+#include <tuple>
+#include <string>
+
+class BaseTest : public std::enable_shared_from_this<BaseTest> {
+public:
+	virtual void print() const {
+		std::cout << value << std::endl;
+	}
+
+	int value;
+};
+
+namespace TEST {
+	namespace Detail {
+		template<class T>
+		std::reference_wrapper<T> prepareForChaiscript(T& a_value) {
+			return{ a_value };
+		}
+		template<class T>
+		T* prepareForChaiscript(std::unique_ptr<T>& a_value) {
+			return a_value.get();
+		}
+		template<class T>
+		T* prepareForChaiscript(std::weak_ptr<T>& a_value) {
+			return{ !a_value.expired() ? a_value.lock().get() : nullptr };
+		}
+		template<class T>
+		std::shared_ptr<T> prepareForChaiscript(std::shared_ptr<T>& a_value) {
+			return{ a_value };
+		}
+		template<class T>
+		const std::shared_ptr<T> prepareForChaiscript(const std::shared_ptr<T>& a_value) {
+			return{ a_value };
+		}
+		template<class T>
+		T* prepareForChaiscript(T* a_value) {
+			return a_value;
+		}
+
+		//may be able to convert these to string_view when chaiscript gets support and it becomes standard.
+		inline std::string prepareForChaiscript(char* a_cstring) {
+			return{ a_cstring };
+		}
+
+		inline std::string prepareForChaiscript(const char* a_cstring) {
+			return{ a_cstring };
+		}
+	}
+
+	template<class T, class Tuple, std::size_t N>
+	struct TupleAggregator {
+		static void addToVector(const Tuple& t, std::vector<T> &a_aggregate) {
+			TupleAggregator<T, Tuple, N - 1>::addToVector(t, a_aggregate);
+			a_aggregate.emplace_back(Detail::prepareForChaiscript(std::get<N - 1>(t)));
+		}
+	};
+
+	template<class T, class Tuple>
+	struct TupleAggregator<T, Tuple, 1> {
+		static void addToVector(const Tuple& t, std::vector<T> &a_aggregate) {
+			a_aggregate.emplace_back(Detail::prepareForChaiscript(std::get<0>(t)));
+		}
+	};
+
+	//Converts a tuple to a vector of pointers to the elements in the tuple.
+	//Works with boost::any or chaiscript::Boxed_Value etc.
+	template<class T, class... Args>
+	std::vector<T> toVector(const std::tuple<Args...>& t) {
+		std::vector<T> result;
+		TupleAggregator<T, decltype(t), sizeof...(Args)>::addToVector(t, result);
+		return result;
+	}
+
+
+	template <typename ...Arg>
+	void callScript(chaiscript::ChaiScript* scriptEnginePointer, const std::string & scriptCallback, Arg &&... a_parameters) {
+		if (scriptEnginePointer && !scriptCallback.empty()) {
+			std::map<std::string, chaiscript::Boxed_Value> localVariables;
+			auto tupleReference = std::forward_as_tuple(std::forward<Arg>(a_parameters)...);
+			auto parameterValues = toVector<chaiscript::Boxed_Value>(tupleReference);
+			for (size_t i = 0; i < parameterValues.size(); ++i) {
+				localVariables.emplace("arg_" + std::to_string(i), parameterValues[i]);
+			}
+			auto resetLocals = scriptEnginePointer->get_locals();
+			SCOPE_EXIT{ scriptEnginePointer->set_locals(resetLocals); };
+			scriptEnginePointer->set_locals(localVariables);
+			scriptEnginePointer->eval(scriptCallback);
+		}
+		else if (!scriptCallback.empty()) {
+			std::cerr << "Failed to run script in receiver, you need to supply a chaiscript engine handle!\n";
+		}
+	}
+	void callScriptConst(chaiscript::ChaiScript* scriptEnginePointer, const std::string & scriptCallback, const std::shared_ptr<BaseTest> &a_test) {
+		TEST::callScript(scriptEnginePointer, scriptCallback, std::weak_ptr<BaseTest>(a_test));
+	}
+}
+
+
 int main(int, char *[]) {
-// 	chaiscript::ChaiScript chaiScript(MV::create_chaiscript_stdlib(), std::vector<std::string>{ }, std::vector<std::string>{
-// 		"./Assets/Scripts/"
-// 	});
-// 	chaiScript.eval("eval_file(\"Login/loginButton.script\");");
+	auto sharedTest = std::make_shared<BaseTest>();
+	sharedTest->value = 10;
+	chaiscript::ChaiScript chaiScript(MV::create_chaiscript_stdlib(), MV::chaiscript_module_paths(), MV::chaiscript_use_paths());
+
+	chaiScript.add(chaiscript::user_type<BaseTest>(), "BaseTest");
+	chaiScript.add(chaiscript::fun(&BaseTest::print), "print");
+
+ 	TEST::callScriptConst(&chaiScript, "eval_file(\"test.script\");", sharedTest);
 // 	std::string content = "Hello World";
 // 	auto scriptString = "puts('['); puts(arg_0); puts(']'); puts('['); puts(arg_1); puts(']'); puts('['); puts(arg_2); puts(\"]\n\");";
 // 

@@ -22,7 +22,7 @@ GameEditor::GameEditor() :
 	// 		spineTestNode->loadChild("tree_particle.scene", populateArchive);
 	std::cout << "1" << std::endl;
 	screenScaler = limbo->attach<MV::Scene::Sprite>();
-	screenScaler->color({ 1.0f, 1.0f, 1.0f, 0.0f });
+	screenScaler->hide();
 	screenScaler->bounds({ MV::point(0.0f, 0.0f), game.managers().renderer.world().size() });
 	std::cout << "2" << std::endl;
 //	auto textureSheet = MV::FileTextureDefinition::make("Assets/Images/slice.png");

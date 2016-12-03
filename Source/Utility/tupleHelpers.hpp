@@ -3,6 +3,7 @@
 
 #include <tuple>
 #include <string>
+#include <memory>
 
 namespace MV {
 	namespace Detail {
@@ -22,6 +23,23 @@ namespace MV {
 
 		inline std::string prepareForChaiscript(const char* a_cstring) {
 			return{ a_cstring };
+		}
+
+		template<class T>
+		T* prepareForChaiscript(std::unique_ptr<T>& a_value) {
+			return a_value.get();
+		}
+		template<class T>
+		T* prepareForChaiscript(std::weak_ptr<T>& a_value) {
+			return{ !a_value.expired() ? a_value.lock().get() : nullptr };
+		}
+		template<class T>
+		std::shared_ptr<T> prepareForChaiscript(std::shared_ptr<T>& a_value) {
+			return{ a_value };
+		}
+		template<class T>
+		const std::shared_ptr<T> prepareForChaiscript(const std::shared_ptr<T>& a_value) {
+			return{ a_value };
 		}
 	}
 

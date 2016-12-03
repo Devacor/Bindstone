@@ -11,6 +11,6 @@ namespace MV {
 	}
 
 	std::vector<std::string> chaiscript_use_paths() {
-		return {"./Assets/Interface/", "./Assets/Scripts/"};
+		return {"./Assets/Interface/", "./Assets/Scripts/", ""};
 	}
 }

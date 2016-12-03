@@ -129,6 +129,53 @@ namespace MV {
 
 			void press();
 
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, MouseState &a_mouseState) {
+				a_script.add(chaiscript::user_type<Clickable>(), "Clickable");
+				a_script.add(chaiscript::base_class<Sprite, Clickable>());
+				a_script.add(chaiscript::base_class<Drawable, Clickable>());
+				a_script.add(chaiscript::base_class<Component, Clickable>());
+
+				a_script.add(chaiscript::fun([&](Node &a_self) { return a_self.attach<Clickable>(a_mouseState); }), "attachClickable");
+
+				a_script.add(chaiscript::fun([](Node &a_self) { return a_self.componentInChildren<Clickable>(true, false, true); }), "componentClickable");
+
+				a_script.add(chaiscript::fun(&Clickable::eatingTouches), "eatingTouches");
+				a_script.add(chaiscript::fun(&Clickable::startEatingTouches), "startEatingTouches");
+				a_script.add(chaiscript::fun(&Clickable::stopEatingTouches), "stopEatingTouches");
+
+				a_script.add(chaiscript::fun([](Clickable &a_self) { return a_self.clickDetectionType(); }), "clickDetectionType");
+				a_script.add(chaiscript::fun([](Clickable &a_self, BoundsType a_boundsType) { return a_self.clickDetectionType(a_boundsType); }), "clickDetectionType");
+
+				a_script.add(chaiscript::fun(&Clickable::inPressEvent), "inPressEvent");
+
+				a_script.add(chaiscript::fun(&Clickable::disable), "disable");
+
+				a_script.add(chaiscript::fun(&Clickable::enabled), "enabled");
+				a_script.add(chaiscript::fun(&Clickable::disabled), "disabled");
+
+				a_script.add(chaiscript::fun(&Clickable::mouse), "mouse");
+
+				a_script.add(chaiscript::fun(&Clickable::dragTime), "dragTime");
+				a_script.add(chaiscript::fun(&Clickable::dragDelta), "dragDelta");
+				a_script.add(chaiscript::fun(&Clickable::totalDragDistance), "totalDragDistance");
+
+				a_script.add(chaiscript::fun(&Clickable::cancelPress), "cancelPress");
+
+				a_script.add(chaiscript::fun(&Clickable::onPress), "onPress");
+				a_script.add(chaiscript::fun(&Clickable::onRelease), "onRelease");
+				a_script.add(chaiscript::fun(&Clickable::onAccept), "onAccept");
+				a_script.add(chaiscript::fun(&Clickable::onCancel), "onCancel");
+				a_script.add(chaiscript::fun(&Clickable::onDrag), "onDrag");
+				a_script.add(chaiscript::fun(&Clickable::onDrop), "onDrop");
+
+				a_script.add(chaiscript::type_conversion<SafeComponent<Clickable>, std::shared_ptr<Clickable>>([](const SafeComponent<Clickable> &a_item) { return a_item.self(); }));
+				a_script.add(chaiscript::type_conversion<SafeComponent<Clickable>, std::shared_ptr<Sprite>>([](const SafeComponent<Clickable> &a_item) { return std::static_pointer_cast<Sprite>(a_item.self()); }));
+				a_script.add(chaiscript::type_conversion<SafeComponent<Clickable>, std::shared_ptr<Drawable>>([](const SafeComponent<Clickable> &a_item) { return std::static_pointer_cast<Drawable>(a_item.self()); }));
+				a_script.add(chaiscript::type_conversion<SafeComponent<Clickable>, std::shared_ptr<Component>>([](const SafeComponent<Clickable> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
+
+				return a_script;
+			}
+
 		protected:
 			Clickable(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
 

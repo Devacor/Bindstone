@@ -369,6 +369,16 @@ EditableButton::~EditableButton(){
 	elementToEdit->color({ 1.0f, 1.0f, 1.0f, 1.0f })->hide();
 }
 
+EditableClickable::EditableClickable(MV::Scene::SafeComponent<MV::Scene::Clickable> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse) :
+	ResizeHandles(a_elementToEdit.cast<MV::Scene::Component>(), a_rootContainer, a_mouse),
+	elementToEdit(a_elementToEdit) {
+	elementToEdit->color({ 1.0f, 1.0f, 1.0f, .1f })->show();
+}
+
+EditableClickable::~EditableClickable() {
+	elementToEdit->color({ 1.0f, 1.0f, 1.0f, 1.0f })->hide();
+}
+
 EditableRectangle::EditableRectangle(MV::Scene::SafeComponent<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
 	ResizeHandles(a_elementToEdit.cast<MV::Scene::Component>(), a_rootContainer, a_mouse),
 	elementToEdit(a_elementToEdit) {

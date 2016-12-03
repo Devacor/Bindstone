@@ -98,7 +98,7 @@ private:
 	bool done;
 
 	double lastUpdateDelta;
-
+	MV::Scene::SafeComponent<MV::Scene::Sprite> screenScaler;
 	MV::MouseState ourMouse;
 };
 

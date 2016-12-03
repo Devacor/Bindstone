@@ -1,0 +1,3 @@
+self.initialize = fun(self){
+  //self.root.get("");
+};

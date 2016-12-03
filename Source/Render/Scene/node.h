@@ -440,8 +440,13 @@ namespace MV {
 
 			std::shared_ptr<Node> root();
 
+			bool hasParent(const std::string &a_id) const;
+			std::shared_ptr<Node> getParent(const std::string &a_id, bool a_throw = true);
+
 			std::shared_ptr<Node> get(const std::string &a_id, bool a_throw = true);
+			std::shared_ptr<Node> getImmediate(const std::string &a_id, bool a_throw = true);
 			bool has(const std::string &a_id) const;
+			bool hasImmediate(const std::string &a_id) const;
 
 			std::shared_ptr<Node> operator[](size_t a_index) const{
 				require<RangeException>(a_index < childNodes.size(), "Failed to get node at index: [", a_index, "] from parent node: [", nodeId, "]");

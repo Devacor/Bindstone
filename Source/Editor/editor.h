@@ -48,6 +48,7 @@ private:
 	chaiscript::ChaiScript chaiScript;
 
 	std::shared_ptr<MV::Scene::Text> fps;
+	std::shared_ptr<MV::Scene::Node> visor; //scene parent
 	std::shared_ptr<MV::Scene::Node> scene;
 	std::shared_ptr<MV::Scene::Node> controls;
 	std::shared_ptr<MV::Scene::Node> testNode;

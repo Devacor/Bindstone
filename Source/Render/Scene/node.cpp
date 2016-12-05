@@ -136,7 +136,11 @@ namespace MV {
 			return make(a_draw2d, guid("root_"));
 		}
 
-		std::shared_ptr<Node> Node::load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_newNodeId) {
+		std::shared_ptr<Node> Node::load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, bool a_doPostLoadStep) {
+			return load(a_filename, a_binder, "", a_doPostLoadStep);
+		}
+
+		std::shared_ptr<Node> Node::load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_newNodeId, bool a_doPostLoadStep) {
 			std::ifstream stream(a_filename);
 			require<ResourceException>(stream, "File not found for Node::load: ", a_filename);
 			cereal::JSONInputArchive archive(stream);
@@ -144,6 +148,7 @@ namespace MV {
 				a_binder(archive);
 			}
 			std::shared_ptr<Node> result;
+			archive.add(cereal::make_nvp("postLoad", a_doPostLoadStep));
 			archive(result);
 			if (!a_newNodeId.empty()) {
 				result->id(a_newNodeId);
@@ -151,7 +156,11 @@ namespace MV {
 			return result;
 		}
 
-		std::shared_ptr<Node> Node::loadBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_newNodeId) {
+		std::shared_ptr<Node> Node::loadBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, bool a_doPostLoadStep) {
+			return loadBinary(a_filename, a_binder, "", a_doPostLoadStep);
+		}
+
+		std::shared_ptr<Node> Node::loadBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_newNodeId, bool a_doPostLoadStep) {
 			std::ifstream stream(a_filename);
 			require<ResourceException>(stream, "File not found for Node::load: ", a_filename);
 			cereal::PortableBinaryInputArchive archive(stream);
@@ -159,6 +168,7 @@ namespace MV {
 				a_binder(archive);
 			}
 			std::shared_ptr<Node> result;
+			archive.add(cereal::make_nvp("postLoad", a_doPostLoadStep));
 			archive(result);
 			if (!a_newNodeId.empty()) {
 				result->id(a_newNodeId);
@@ -213,22 +223,21 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::loadChild(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_newNodeId) {
-			auto toAdd = Node::load(a_filename, a_binder, a_newNodeId);
-			remove(toAdd->id(), false);
+			auto toAdd = Node::load(a_filename, a_binder, a_newNodeId, false);
 			add(toAdd);
+			toAdd->postLoadStep();
 			return toAdd;
 		}
 
 		std::shared_ptr<Node> Node::loadChildBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_newNodeId) {
-			auto toAdd = Node::loadBinary(a_filename, a_binder, a_newNodeId);
-			remove(toAdd->id(), false);
+			auto toAdd = Node::loadBinary(a_filename, a_binder, a_newNodeId, false);
 			add(toAdd);
+			toAdd->postLoadStep();
 			return toAdd;
 		}
 
 		std::shared_ptr<Node> Node::make(const std::string &a_id) {
 			auto toAdd = Node::make(draw2d, a_id);
-			remove(a_id, false);
 			add(toAdd);
 			return toAdd;
 		}
@@ -243,6 +252,7 @@ namespace MV {
 				MV::require<RangeException>(parentCheck != a_child.get(), "Adding [", a_child->id(), "] to [", id(), "] would result in a circular ownership!");
 			}
 			if(a_child->myParent != this){
+				remove(a_child->id(), false);
 				a_child->removeFromParent();
 				if(a_overrideSortDepth){
 					a_child->sortDepth = (childNodes.empty()) ? 0.0f : childNodes[childNodes.size() - 1]->sortDepth + 1.0f;
@@ -850,11 +860,9 @@ namespace MV {
 			}
 		}
 
-		void Node::postLoadStep(bool a_isRootNode) {
-			if (a_isRootNode) {
-				recalculateAlpha();
-				recalculateMatrixAfterLoad();
-			}
+		void Node::postLoadStep() {
+			recalculateAlpha();
+			recalculateMatrixAfterLoad();
 		}
 
 		void Node::quietLocalMatrixFix() {
@@ -886,6 +894,15 @@ namespace MV {
 
 			for (auto&& child : childNodes) {
 				child->quietLocalAndChildMatrixFix();
+			}
+		}
+
+		void Node::localAndChildPostLoadInitializeComponents() {
+			for (auto&& child : childNodes) {
+				child->localAndChildPostLoadInitializeComponents();
+			}
+			for (auto&& childComponent : childComponents) {
+				childComponent->postLoadInitialize();
 			}
 		}
 
@@ -1077,14 +1094,16 @@ namespace MV {
 				}
 			}
 
-			result->recalculateAlpha();
-			result->recalculateMatrixAfterLoad();
+			result->quietLocalAndChildMatrixFix();
 
 			if (a_parent) {
 				a_parent->add(result);
 			} else if (myParent) {
 				myParent->add(result);
 			}
+
+			result->recalculateAlpha();
+			result->localAndChildPostLoadInitializeComponents();
 
 			return result;
 		}

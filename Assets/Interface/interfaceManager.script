@@ -1,3 +1,4 @@
 self.initialize = fun(self){
   self.make("Login").show();
+  self.make("Main");
 };

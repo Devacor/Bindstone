@@ -378,7 +378,9 @@ namespace MV {
 
 		void Anchors::postLoadInitialize() {
 			if (!parentIdLoaded.empty()) {
-				parentReference = selfReference->owner()->componentInParents(parentIdLoaded, true, true).cast<Drawable>().get();
+				auto found = selfReference->owner()->componentInParents(parentIdLoaded, false, true);
+				require<ResourceException>(found, "Failed to find Anchor Component Id: [", parentIdLoaded, "] when loading node [", selfReference->owner()->id(), "].[", selfReference->id(), "]");
+				parentReference = found.cast<Drawable>().get();
 				parentIdLoaded.clear();
 			}
 			registerWithParent();

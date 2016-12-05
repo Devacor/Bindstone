@@ -1208,7 +1208,10 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 		color({InterfaceColors::BOX_BACKGROUND})->margin({4.0f, 4.0f})->
 		padding({2.0f, 2.0f});
 	auto createButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Create", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Create"));
-	fileName = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Filename", MV::size(110.0f, 27.0f), UTF_CHAR_STR("map.scene"));
+	fileName = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Filename", MV::size(110.0f, 27.0f), previousFileName);
+	fileName->onChange.connect("!!!", [&](std::shared_ptr<MV::Scene::Text>) {
+		previousFileName = fileName->text();
+	});
 	auto saveButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Save", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Save"));
 	auto loadButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Load", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Load"));
 	panel.updateBoxHeader(grid->bounds().width());
@@ -1239,8 +1242,9 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 				cereal::make_nvp("texture", panel.resources().textures),
 				cereal::make_nvp("script", panel.resources().script)
 				);
-		});
+		}, false);
 		panel.root(newRoot);
+		newRoot->postLoadStep();
 		std::cout << "\n____\n";
 		std::cout << "\nRecalculateLocalBounds: " << MV::Scene::Node::recalculateLocalBoundsCalls;
 		std::cout << "\nRecalculateChildBounds: " << MV::Scene::Node::recalculateChildBoundsCalls;
@@ -1248,6 +1252,8 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 		std::cout << "\n____\n";
 	});
 }
+
+std::string DeselectedEditorPanel::previousFileName = "Assets/Scenes/map.scene";
 
 ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel, const std::shared_ptr<MV::Scene::Node> &a_nodeToAttachTo, SelectedNodeEditorPanel *a_editorPanel):
 	EditorPanel(a_panel),

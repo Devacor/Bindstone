@@ -50,7 +50,7 @@ void GameInstance::handleScroll(int a_amount) {
 }
 
 GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game) :
-	worldScene(a_game.root()->make("map.scene", jsonLoadBinder())->depth(0)),
+	worldScene(a_game.root()->make("Assets/Scenes/map.scene", jsonLoadBinder())->depth(0)),
 	ourMouse(a_game.mouse()),
 	ourGame(a_game),
 	gameData(a_game.data()),

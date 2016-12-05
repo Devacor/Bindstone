@@ -1,0 +1,14 @@
+print("HI!");
+/*auto scene = game.gui.page("Main").root();
+auto email = scene.get("EmailInput").componentText().text();
+auto password = scene.get("PasswordInput").componentText().text();
+
+print(email);
+print(password);
+
+game.client.send(LoginRequest(email, password).toNetworkString());
+game.onLoginResponse.connect("LoginButton", fun(response){
+  print("Got Message:");
+  print(response.success);
+  print(response.message);
+});*/

@@ -31,19 +31,23 @@ namespace MV {
 	}
 
 	void Interface::show() {
-		initialize();
-		node->active(true);
-		if (scriptShow) {
-			scriptShow(*this);
+		if (!node->active()) {
+			initialize();
+			node->active(true);
+			if (scriptShow) {
+				scriptShow(*this);
+			}
 		}
 	}
 
 	void Interface::hide() {
-		removeFocus();
-		if (scriptHide) {
-			scriptHide(*this);
+		if (node->active()) {
+			removeFocus();
+			if (scriptHide) {
+				scriptHide(*this);
+			}
+			node->active(false);
 		}
-		node->active(false);
 	}
 
 	void Interface::focus(std::shared_ptr<MV::Scene::Text> a_textbox) {
@@ -65,7 +69,7 @@ namespace MV {
 
 	void Interface::initialize() {
 		if (!node) {
-			node = MV::Scene::Node::load("Assets/Interface/" + pageId + "/view.scene", JsonNodeLoadBinder(manager.managers(), manager.mouse(), manager.script()));
+			node = manager.root()->loadChild("Assets/Interface/" + pageId + "/view.scene", JsonNodeLoadBinder(manager.managers(), manager.mouse(), manager.script()), pageId);
 
 			scriptFileEval("Assets/Interface/" + pageId + "/initialize.script", manager.script(), {
 				{ "self", chaiscript::Boxed_Value(this) }

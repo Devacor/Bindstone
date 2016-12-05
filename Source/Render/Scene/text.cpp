@@ -15,6 +15,7 @@ namespace MV{
 			Drawable(a_owner),
 			textLibrary(a_textLibrary),
 			onEnter(onEnterSignal),
+			onChange(onChangeSignal),
 			fontIdentifier(a_defaultFontIdentifier),
 			formattedText(std::make_shared<FormattedText>(a_textLibrary, a_defaultFontIdentifier)) {
 			
@@ -93,11 +94,13 @@ namespace MV{
 		}
 
 		std::shared_ptr<Text> Text::backspace() {
+			auto self = std::static_pointer_cast<Text>(shared_from_this());
 			if (cursor > 0) {
 				formattedText->erase(cursor - 1, 1);
 				incrementCursor(-1);
+				onChangeSignal(self);
 			}
-			return std::static_pointer_cast<Text>(shared_from_this());
+			return self;
 		}
 
 		bool Text::text(SDL_Event &event) {
@@ -140,7 +143,9 @@ namespace MV{
 		std::shared_ptr<Text> Text::text(const UtfString &a_text) {
 			formattedText->string(a_text);
 			setCursor(a_text.size());
-			return std::static_pointer_cast<Text>(shared_from_this());
+			auto self = std::static_pointer_cast<Text>(shared_from_this());
+			onChangeSignal(self);
+			return self;
 		}
 
 		void Text::enableCursor() {

@@ -5,13 +5,14 @@
 
 Editor::Editor(Managers &a_managers):
 	managers(a_managers),
-	scene(MV::Scene::Node::make(a_managers.renderer, "root")),
+	visor(MV::Scene::Node::make(a_managers.renderer, "visor")),
+	scene(visor->make("root")),
 	controls(MV::Scene::Node::make(a_managers.renderer)),
 	chaiScript(MV::create_chaiscript_stdlib(), MV::chaiscript_module_paths(), MV::chaiscript_use_paths()),
 	controlPanel(controls, scene, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &mouse, &chaiScript)),
 	selectorPanel(scene, controls, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &mouse, &chaiScript)),
 	testNode(MV::Scene::Node::make(a_managers.renderer)){
-
+	
 	initializeWindow();
 	initializeControls();
 }
@@ -73,13 +74,14 @@ void Editor::handleInput(){
 				case SDLK_UP:
 					std::cout << "SCENE:\n" << scene << "\n______________" << std::endl;
 					break;
-				case SDLK_LEFT:
-					break;
 				case SDLK_DOWN:
 					std::cout << "CONTROLS:\n" << controls << "\n______________" << std::endl;
 					break;
 				case SDLK_SPACE:
-
+					scene->position({ 0, 0, 0 });
+					scene->scale({ 1, 1, 1 });
+					break;
+				case SDLK_LEFT:
 					break;
 				case SDLK_RIGHT:
 					break;
@@ -105,9 +107,9 @@ void Editor::render(){
 		scene->id("root");
 		selectorPanel.refresh(scene);
 	}
-	auto scaler = scene->component<MV::Scene::Drawable>("ScreenScaler", false);
+	auto scaler = visor->component<MV::Scene::Drawable>("ScreenScaler", false);
 	if (!scaler) {
-		scene->attach<MV::Scene::Drawable>()->id("ScreenScaler")->screenBounds({ MV::Point<int>(0, 0), managers.renderer.window().size() });
+		visor->attach<MV::Scene::Drawable>()->id("ScreenScaler")->screenBounds({ MV::Point<int>(0, 0), managers.renderer.window().size() });
 	} else {
 		scaler->screenBounds({ MV::Point<int>(0, 0), managers.renderer.window().size() });
 	}

@@ -16,9 +16,11 @@ namespace MV{
 
 		private:
 
+			Signal<TextSignalSignature> onChangeSignal;
 			Signal<TextSignalSignature> onEnterSignal;
 
 		public:
+			SignalRegister<TextSignalSignature> onChange;
 			SignalRegister<TextSignalSignature> onEnter;
 
 			DrawableDerivedAccessors(Text)
@@ -32,8 +34,6 @@ namespace MV{
 			}
 
 			bool text(SDL_Event &event);
-
-
 
 			PointPrecision number() const {
 				try {
@@ -94,24 +94,32 @@ namespace MV{
 				if (cursor >= formattedText->size()) {
 					incrementCursor(inserted);
 				}
-				return std::static_pointer_cast<Text>(shared_from_this());
+				auto self = std::static_pointer_cast<Text>(shared_from_this());
+				onChangeSignal(self);
+				return self;
 			}
 			std::shared_ptr<Text> append(UtfChar a_char) {
 				formattedText->append(UtfString(1, a_char));
 				if (cursor >= formattedText->size()) {
 					incrementCursor(1);
 				}
-				return std::static_pointer_cast<Text>(shared_from_this());
+				auto self = std::static_pointer_cast<Text>(shared_from_this());
+				onChangeSignal(self);
+				return self;
 			}
 
 			std::shared_ptr<Text> insertAtCursor(const UtfString &a_text) {
 				incrementCursor(formattedText->insert(cursor, a_text));
-				return std::static_pointer_cast<Text>(shared_from_this());
+				auto self = std::static_pointer_cast<Text>(shared_from_this());
+				onChangeSignal(self);
+				return self;
 			}
 			std::shared_ptr<Text> insertAtCursor(UtfChar a_char) {
 				formattedText->insert(cursor, UtfString(1, a_char));
 				incrementCursor(1);
-				return std::static_pointer_cast<Text>(shared_from_this());
+				auto self = std::static_pointer_cast<Text>(shared_from_this());
+				onChangeSignal(self);
+				return self;
 			}
 
 			void enableCursor();
@@ -160,6 +168,10 @@ namespace MV{
 
 				a_script.add(chaiscript::fun(&Text::enableCursor), "enableCursor");
 				a_script.add(chaiscript::fun(&Text::disableCursor), "disableCursor");
+
+				MV::SignalRegister<TextSignalSignature>::hook(a_script);
+				a_script.add(chaiscript::fun(&Text::onEnter), "onEnter");
+				a_script.add(chaiscript::fun(&Text::onChange), "onChange");
 
 				a_script.add(chaiscript::fun(static_cast<UtfString(Text::*)() const>(&Text::text)), "text");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(const UtfString &)>(&Text::text)), "text");

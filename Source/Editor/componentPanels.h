@@ -297,6 +297,7 @@ public:
 	DeselectedEditorPanel(EditorControls &a_panel);
 
 private:
+	static std::string previousFileName;
 	std::shared_ptr<MV::Scene::Text> fileName;
 };
 

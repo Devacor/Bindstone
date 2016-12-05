@@ -20,6 +20,9 @@ public:
 	}
 
 	EditorControls* root(std::shared_ptr<MV::Scene::Node> a_newRoot){
+		auto parent = rootScene->parent();
+		rootScene->removeFromParent();
+		parent->add(a_newRoot);
 		rootScene = a_newRoot;
 		return this;
 	}

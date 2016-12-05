@@ -160,8 +160,10 @@ namespace MV {
 
 			static std::shared_ptr<Node> make(Draw2D& a_draw2d, const std::string &a_id);
 			static std::shared_ptr<Node> make(Draw2D& a_draw2d);
-			static std::shared_ptr<Node> load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_overrideId = "");
-			static std::shared_ptr<Node> loadBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_overrideId = "");
+			static std::shared_ptr<Node> load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, bool a_doPostLoadStep = true);
+			static std::shared_ptr<Node> loadBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, bool a_doPostLoadStep = true);
+			static std::shared_ptr<Node> load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_overrideId, bool a_doPostLoadStep = true);
+			static std::shared_ptr<Node> loadBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_overrideId, bool a_doPostLoadStep = true);
 
 			std::shared_ptr<Node> save(const std::string &a_filename, bool a_renameNodeToFile = true);
 			std::shared_ptr<Node> save(const std::string &a_filename, const std::string &a_overrideId);
@@ -656,6 +658,9 @@ namespace MV {
 			void recalculateAlpha();
 			void recalculateMatrix();
 
+			//manual post load only if you know what you're doing.
+			void postLoadStep();
+
 		private:
 			Task rootTask;
 
@@ -796,11 +801,11 @@ namespace MV {
 			void markMatrixDirty(bool a_rootCall = true);
 
 			void recalculateMatrixAfterLoad();
+			void localAndChildPostLoadInitializeComponents();
 
 			Node(Draw2D &a_draw2d, const std::string &a_id);
 
 			void fixChildOwnership();
-			void postLoadStep(bool a_isRootNode);
 
 			template <class Archive>
 			void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -852,6 +857,8 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<Node> &construct, std::uint32_t const /*version*/) {
 				Draw2D *renderer = nullptr;
 				archive.extract(cereal::make_nvp("renderer", renderer));
+				bool doPostLoad = true;
+				archive.extract(cereal::make_nvp("postLoad", doPostLoad));
 				MV::require<PointerException>(renderer != nullptr, "Null renderer in Node::load_and_construct.");
 				std::string nodeId;
 				archive(cereal::make_nvp("nodeId", nodeId));
@@ -877,7 +884,9 @@ namespace MV {
 					cereal::make_nvp("childNodes", construct->childNodes),
 					cereal::make_nvp("childComponents", construct->childComponents)
 				);
-				construct->postLoadStep(isRootNode);
+				if (doPostLoad && isRootNode) {
+					construct->postLoadStep();
+				}
 			}
 
 			Draw2D &draw2d;

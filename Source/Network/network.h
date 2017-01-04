@@ -160,29 +160,40 @@ namespace MV {
 	//derive from this in your own code.
 	class ConnectionStateBase {
 	public:
-		ConnectionStateBase(Connection* a_connection) :
+		ConnectionStateBase(const std::shared_ptr<Connection>& a_connection) :
 			ourConnection(a_connection) {
 		}
 
-		virtual void connect() { }
-		virtual void disconnect() { }
+		void connect() { disconnectRecieved = false; connectImplementation(); }
+		void disconnect() { disconnectRecieved = true; disconnectImplementation(); }
+
+		bool disconnected() const { return disconnectRecieved; }
+
 		virtual void message(const std::string& a_message) { }
 
 		virtual void update(double a_dt) { }
 
-		Connection* connection() { return ourConnection; }
+		//Get a shared_ptr handle keep the connection alive in long running requests even if disconnected.
+		std::shared_ptr<Connection> connection() { return ourConnection.lock(); }
 	protected:
-		Connection *ourConnection;
+		virtual void connectImplementation() {}
+		virtual void disconnectImplementation() {}
+
+		std::weak_ptr<Connection> ourConnection;
+		bool disconnectRecieved = false;
 	};
 
 	class Connection : public std::enable_shared_from_this<Connection> {
 	public:
-		Connection(Server& a_server, const std::shared_ptr<boost::asio::ip::tcp::socket> &a_socket, boost::asio::io_service& a_ioService, std::function<std::unique_ptr<ConnectionStateBase> (Connection*)> a_connectionStateFactory) :
+		Connection(Server& a_server, const std::shared_ptr<boost::asio::ip::tcp::socket> &a_socket, boost::asio::io_service& a_ioService) :
 			server(a_server),
 			socket(a_socket),
 			ioService(a_ioService){
+		}
 
-			state = a_connectionStateFactory(this);
+		//can't happen in the constructor due to shared_from_this
+		void initialize(std::function<std::unique_ptr<ConnectionStateBase>(const std::shared_ptr<Connection> &)> a_connectionStateFactory) {
+			ourState = a_connectionStateFactory(shared_from_this());
 		}
 
 		~Connection() {
@@ -194,6 +205,18 @@ namespace MV {
 		void initiateRead();
 		void update(double a_dt);
 		void sendTimeStamp();
+
+		ConnectionStateBase* state() const {
+			return ourState.get();
+		}
+
+		void disconnect() {
+			ourState->disconnect();
+		}
+
+		bool disconnected() const {
+			return ourState->disconnected();
+		}
 	private:
 		std::mutex lock;
 
@@ -205,7 +228,7 @@ namespace MV {
 		std::shared_ptr<boost::asio::ip::tcp::socket> socket;
 		std::vector<std::shared_ptr<NetworkMessage>> inbox;
 
-		std::unique_ptr<ConnectionStateBase> state;
+		std::unique_ptr<ConnectionStateBase> ourState = nullptr;
 
 		int timeRequestsRemaining = Client::EXPECTED_TIMESTEPS;
 	};
@@ -213,11 +236,9 @@ namespace MV {
 	class Server {
 		friend Connection;
 	public:
-		Server(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase> (Connection*)> a_connectionStateFactory);
+		Server(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase> (const std::shared_ptr<Connection> &)> a_connectionStateFactory);
 
 		~Server();
-
-		void disconnect(Connection* a_connection);
 
 		void send(const std::string &a_message);
 		void sendExcept(const std::string &a_message, Connection* a_connectionToSkip);
@@ -235,7 +256,7 @@ namespace MV {
 		std::unique_ptr<std::thread> worker;
 		std::unique_ptr<boost::asio::io_service::work> work;
 
-		std::function<std::unique_ptr<ConnectionStateBase> (Connection*)> connectionStateFactory;
+		std::function<std::unique_ptr<ConnectionStateBase> (const std::shared_ptr<Connection> &)> connectionStateFactory;
 
 		uint32_t randomSeed;
 	};

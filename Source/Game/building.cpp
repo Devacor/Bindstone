@@ -15,8 +15,8 @@ Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const Building
 	gameInstance(a_instance),
 	onUpgraded(onUpgradedSignal){
 
-	if (!a_owner.expired()) {
-		auto spawnObject = a_owner.lock()->get("spawn", false);
+	if (auto lockedOwner = a_owner.lock()) {
+		auto spawnObject = lockedOwner->get("spawn", false);
 		if (spawnObject) {
 			spawnPoint = spawnObject->position();
 		}

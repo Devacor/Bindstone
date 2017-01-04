@@ -21,7 +21,7 @@ class ServerAction : public std::enable_shared_from_this<ServerAction> {
 public:
 	virtual ~ServerAction() = default;
 
-	virtual void execute(LobbyConnectionState&) {
+	virtual void execute(LobbyConnectionState*) {
 	}
 
 	virtual bool done() const { return true; }

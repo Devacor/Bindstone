@@ -866,8 +866,8 @@ namespace MV {
 				bool isRootNode = false;
 				std::weak_ptr<Node> weakParent;
 				archive(cereal::make_nvp("parent", weakParent));
-				if (!weakParent.expired()) {
-					construct->myParent = weakParent.lock().get();
+				if (auto lockedParent = weakParent.lock()) {
+					construct->myParent = lockedParent.get();
 				}
 				archive(
 					cereal::make_nvp("isRootNode", isRootNode),

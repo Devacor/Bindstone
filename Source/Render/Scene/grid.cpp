@@ -90,8 +90,8 @@ namespace MV {
 			if (a_coordinate.y >= 0 && tiles.size() < a_coordinate.y) {
 				if (a_coordinate.x >= 0 && tiles[a_coordinate.y].size() < a_coordinate.x) {
 					auto result = tiles[a_coordinate.y][a_coordinate.x];
-					if (!result.expired()) {
-						return result.lock();
+					if (auto lockedResult = result.lock()) {
+						return lockedResult;
 					}
 				}
 			}
@@ -261,8 +261,7 @@ namespace MV {
 			if (yIndex >= 0) {
 				bool foundLessX = false;
 				for (int x = 0; x < tiles[yIndex].size(); ++x) {
-					if (!tiles[yIndex][x].expired()) {
-						auto tile = tiles[yIndex][x].lock();
+					if (auto tile = tiles[yIndex][x].lock()) {
 						if (equals(tile->position().x, a_coordinate.x)) {
 							return tile;
 						} else if (tile->position().x < a_coordinate.x) {
@@ -282,16 +281,17 @@ namespace MV {
 		int Grid::gridYIndexForCoordinate(const Point<> &a_coordinate, bool a_throwOnFail) {
 			bool foundLessY = false;
 			for (int y = 0; y < tiles.size(); ++y) {
-				if (!tiles[y].empty() && !tiles[y][0].expired()) {
-					auto tile = tiles[y][0].lock();
-					if (equals(tile->position().y, a_coordinate.y)) {
-						return y;
-					} else if (tile->position().y < a_coordinate.y) {
-						foundLessY = true;
-					} else if (foundLessY && tile->position().y > a_coordinate.y) {
-						return y;
-					} else if (tile->position().y > a_coordinate.y) {
-						break;
+				if (!tiles[y].empty()) {
+					if (auto tile = tiles[y][0].lock()) {
+						if (equals(tile->position().y, a_coordinate.y)) {
+							return y;
+						} else if (tile->position().y < a_coordinate.y) {
+							foundLessY = true;
+						} else if (foundLessY && tile->position().y > a_coordinate.y) {
+							return y;
+						} else if (tile->position().y > a_coordinate.y) {
+							break;
+						}
 					}
 				}
 			}

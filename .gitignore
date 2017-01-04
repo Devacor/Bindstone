@@ -22,3 +22,8 @@ M2tMLibrary.VC.opendb
 M2tMLibrary.VC.db
 .vs/config/applicationhost.config
 *.ipch
+*.tmp
+.vs/M2tMLibrary/v15/Browse.VC.db
+.vs/M2tMLibrary/v15/Solution.VC.db
+.vs/M2tMLibrary/v15/Solution.VC.db-shm
+.vs/M2tMLibrary/v15/Solution.VC.db-wal

@@ -251,9 +251,9 @@ namespace MV {
 		CollisionBodyAttributes& CollisionBodyAttributes::stop() {
 			details.linearVelocity = b2Vec2(0, 0);
 			details.angularVelocity = 0;
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetLinearVelocity(details.linearVelocity);
-				parent.lock()->physicsBody->SetAngularVelocity(details.angularVelocity);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetLinearVelocity(details.linearVelocity);
+				lockedParent->physicsBody->SetAngularVelocity(details.angularVelocity);
 			}
 			return *this;
 		}
@@ -272,30 +272,30 @@ namespace MV {
 
 		CollisionBodyAttributes& CollisionBodyAttributes::makeStatic() {
 			details.type = b2_staticBody;
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetType(b2_staticBody);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetType(b2_staticBody);
 			}
 			return *this;
 		}
 		CollisionBodyAttributes& CollisionBodyAttributes::makeDynamic() {
 			details.type = b2_dynamicBody;
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetType(b2_dynamicBody);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetType(b2_dynamicBody);
 			}
 			return *this;
 		}
 		CollisionBodyAttributes& CollisionBodyAttributes::makeKinematic() {
 			details.type = b2_kinematicBody;
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetType(b2_kinematicBody);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetType(b2_kinematicBody);
 			}
 			return *this;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::bullet(bool a_isBullet) {
 			details.bullet = a_isBullet;
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetBullet(a_isBullet);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetBullet(a_isBullet);
 			}
 			return *this;
 		}
@@ -306,8 +306,7 @@ namespace MV {
 
 		CollisionBodyAttributes& CollisionBodyAttributes::position(const Point<> &a_position) {
 			details.position = castToPhysics(a_position);
-			if (!parent.expired()) {
-				auto lockedParent = parent.lock();
+			if (auto lockedParent = parent.lock()) {
 				lockedParent->physicsBody->SetTransform(details.position, lockedParent->physicsBody->GetAngle());
 				lockedParent->previousPosition = lockedParent->currentPosition = cast(details.position, lockedParent->owner()->position().z);
 				lockedParent->updateInterpolatedPositionAndApply();
@@ -316,51 +315,50 @@ namespace MV {
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::impulse(const Point<> &a_impulse) {
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->ApplyLinearImpulse(castToPhysics(a_impulse), parent.lock()->physicsBody->GetPosition(), true);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->ApplyLinearImpulse(castToPhysics(a_impulse), parent.lock()->physicsBody->GetPosition(), true);
 			}
 			return *this;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::force(const Point<> &a_force) {
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->ApplyForceToCenter(castToPhysics(a_force), true);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->ApplyForceToCenter(castToPhysics(a_force), true);
 			}
 			return *this;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::impulse(const Point<> &a_impulse, const Point<> &a_position) {
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->ApplyLinearImpulse(castToPhysics(a_impulse), castToPhysics(a_position), true);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->ApplyLinearImpulse(castToPhysics(a_impulse), castToPhysics(a_position), true);
 			}
 			return *this;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::force(const Point<> &a_force, const Point<> &a_position) {
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->ApplyForce(castToPhysics(a_force), castToPhysics(a_position), true);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->ApplyForce(castToPhysics(a_force), castToPhysics(a_position), true);
 			}
 			return *this;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::torque(PointPrecision a_amount) {
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->ApplyTorque(a_amount, true);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->ApplyTorque(a_amount, true);
 			}
 			return *this;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::angularImpulse(PointPrecision a_amount) {
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->ApplyAngularImpulse(a_amount, true);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->ApplyAngularImpulse(a_amount, true);
 			}
 			return *this;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::angle(PointPrecision a_newAngle) {
 			details.angle = toRadians(a_newAngle);
-			if (!parent.expired()) {
-				auto lockedParent = parent.lock();
+			if (auto lockedParent = parent.lock()) {
 				lockedParent->physicsBody->SetTransform(lockedParent->physicsBody->GetPosition(), details.angle);
 				lockedParent->previousAngle = lockedParent->currentAngle = details.angle;
 				lockedParent->updateInterpolatedPositionAndApply();
@@ -371,8 +369,7 @@ namespace MV {
 		CollisionBodyAttributes& CollisionBodyAttributes::transform(const Point<> &a_position, PointPrecision a_newAngle) {
 			details.position = castToPhysics(a_position);
 			details.angle = toRadians(a_newAngle);
-			if (!parent.expired()) {
-				auto lockedParent = parent.lock();
+			if (auto lockedParent = parent.lock()) {
 				lockedParent->physicsBody->SetTransform(details.position, details.angle);
 				lockedParent->previousPosition = lockedParent->currentPosition = cast(details.position, lockedParent->owner()->position().z);
 				lockedParent->previousAngle = lockedParent->currentAngle = details.angle;
@@ -382,17 +379,17 @@ namespace MV {
 		}
 
 		PointPrecision CollisionBodyAttributes::angle() const {
-			if (!parent.expired()) {
-				return toDegrees(parent.lock()->physicsBody->GetAngle());
+			if (auto lockedParent = parent.lock()) {
+				return toDegrees(lockedParent->physicsBody->GetAngle());
 			} else {
 				return toDegrees(details.angle);
 			}
 		}
 
 		Point<> CollisionBodyAttributes::position() const {
-			if (!parent.expired()) {
-				auto pysicsPosition = parent.lock()->physicsBody->GetPosition();
-				return cast(pysicsPosition, parent.lock()->owner()->position().z);
+			if (auto lockedParent = parent.lock()) {
+				auto pysicsPosition = lockedParent->physicsBody->GetPosition();
+				return cast(pysicsPosition, lockedParent->owner()->position().z);
 			} else {
 				return cast(details.position);
 			}
@@ -400,92 +397,92 @@ namespace MV {
 
 		CollisionBodyAttributes& CollisionBodyAttributes::gravityScale(PointPrecision a_newScale) {
 			details.gravityScale = a_newScale;
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetGravityScale(details.gravityScale);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetGravityScale(details.gravityScale);
 			}
 			return *this;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::disableRotation() {
 			details.fixedRotation = true;
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetFixedRotation(true);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetFixedRotation(true);
 			}
 			return *this;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::enableRotation() {
 			details.fixedRotation = false;
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetFixedRotation(false);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetFixedRotation(false);
 			}
 			return *this;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::velocity(const Point<> &a_velocity) {
 			details.linearVelocity = castToPhysics(a_velocity);
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetLinearVelocity(details.linearVelocity);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetLinearVelocity(details.linearVelocity);
 			}
 			return *this;
 		}
 
 		Point<> CollisionBodyAttributes::velocity() const {
-			if (!parent.expired()) {
-				return cast(parent.lock()->physicsBody->GetLinearVelocity());
+			if (auto lockedParent = parent.lock()) {
+				return cast(lockedParent->physicsBody->GetLinearVelocity());
 			}
 			return cast(details.linearVelocity);
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::angularVelocity(PointPrecision a_value) {
 			details.angularVelocity = a_value;
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetAngularVelocity(details.angularVelocity);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetAngularVelocity(details.angularVelocity);
 			}
 			return *this;
 		}
 
 		PointPrecision CollisionBodyAttributes::angularVelocity() const {
-			if (!parent.expired()) {
-				return parent.lock()->physicsBody->GetAngularVelocity();
+			if (auto lockedParent = parent.lock()) {
+				return lockedParent->physicsBody->GetAngularVelocity();
 			}
 			return details.angularVelocity;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::movementDamping(PointPrecision a_value) {
 			details.linearDamping = a_value;
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetLinearDamping(details.linearDamping);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetLinearDamping(details.linearDamping);
 			}
 			return *this;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::angularDamping(PointPrecision a_value) {
 			details.angularDamping = a_value;
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetAngularDamping(details.angularDamping);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetAngularDamping(details.angularDamping);
 			}
 			return *this;
 		}
 
 		CollisionBodyAttributes& CollisionBodyAttributes::allowSleep() {
 			details.allowSleep = true;
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetSleepingAllowed(true);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetSleepingAllowed(true);
 			}
 			return *this;
 		}
 		CollisionBodyAttributes& CollisionBodyAttributes::disallowSleep() {
 			details.allowSleep = false;
-			if (!parent.expired()) {
-				parent.lock()->physicsBody->SetSleepingAllowed(false);
+			if (auto lockedParent = parent.lock()) {
+				lockedParent->physicsBody->SetSleepingAllowed(false);
 			}
 			return *this;
 		}
 
 		void CollisionBodyAttributes::syncronize() {
-			if (!parent.expired()) {
-				b2Body* body = parent.lock()->physicsBody;
+			if (auto lockedParent = parent.lock()) {
+				b2Body* body = lockedParent->physicsBody;
 				details.position = body->GetPosition();
 				details.angle = body->GetAngle();
 				details.linearVelocity = body->GetLinearVelocity();
@@ -593,12 +590,10 @@ namespace MV {
 		}
 
 		void RotationJointAttributes::destroy() {
-			if (!B.expired()) {
-				auto lockedB = B.lock();
+			if (auto lockedB = B.lock()) {
 				lockedB->rotationJoints.erase(std::remove_if(lockedB->rotationJoints.begin(), lockedB->rotationJoints.end(), [&](const std::shared_ptr<RotationJointAttributes> &a_object) { return a_object.get() == this; }), lockedB->rotationJoints.end());
 			}
-			if (!A.expired()) {
-				auto lockedA = A.lock();
+			if (auto lockedA = A.lock()) {
 				lockedA->rotationJoints.erase(std::remove_if(lockedA->rotationJoints.begin(), lockedA->rotationJoints.end(), [&](const std::shared_ptr<RotationJointAttributes> &a_object) { return a_object.get() == this; }), lockedA->rotationJoints.end());
 			}
 			if (joint) {

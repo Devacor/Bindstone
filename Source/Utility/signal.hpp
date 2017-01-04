@@ -298,8 +298,8 @@ namespace MV {
 			}else{
 				disconnectQueue.clear();
 				for (auto&& observer : observers) {
-					if (!observer.expired()) {
-						disconnectQueue.insert(observer.lock());
+					if (auto lockedObserver = observer.lock()) {
+						disconnectQueue.insert(lockedObserver);
 					}
 				}
 			}
@@ -342,13 +342,13 @@ namespace MV {
 				};
 
 				for (auto i = observers.begin(); !observers.empty() && i != observers.end();) {
-					if (i->expired()) {
-						observers.erase(i++);
-					} else {
+					if (auto lockedI = i->lock()) {
 						auto next = i;
 						++next;
-						i->lock()->notify(std::forward<Arg>(a_parameters)...);
+						lockedI->notify(std::forward<Arg>(a_parameters)...);
 						i = next;
+					} else {
+						observers.erase(i++);
 					}
 				}
 			}
@@ -374,13 +374,13 @@ namespace MV {
 				};
 
 				for (auto i = observers.begin(); i != observers.end();) {
-					if (i->expired()) {
-						observers.erase(i++);
-					} else {
+					if (auto lockedI = i->lock()) {
 						auto next = i;
 						++next;
-						i->lock()->notify();
+						lockedI->notify();
 						i = next;
+					} else {
+						observers.erase(i++);
 					}
 				}
 			}
@@ -417,8 +417,8 @@ namespace MV {
 		Signal<T>& scriptEngine(chaiscript::ChaiScript *a_scriptEngine) {
 			scriptEnginePointer = a_scriptEngine;
 			for (auto&& observer : observers) {
-				if (!observer.expired()) {
-					observer.lock()->scriptEngine(a_scriptEngine);
+				if (auto lockedObserver = observer.lock()) {
+					lockedObserver->scriptEngine(a_scriptEngine);
 				}
 			}
 			return *this;

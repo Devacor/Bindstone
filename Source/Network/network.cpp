@@ -152,7 +152,7 @@ namespace MV {
 		}
 	}
 
-	Server::Server(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase>(Connection*)> a_connectionStateFactory) :
+	Server::Server(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase>(const std::shared_ptr<Connection> &)> a_connectionStateFactory) :
 		acceptor(ioService, a_endpoint),
 		connectionStateFactory(a_connectionStateFactory),
 		work(std::make_unique<boost::asio::io_service::work>(ioService)) {
@@ -165,11 +165,6 @@ namespace MV {
 		std::cout << "Server Died" << std::endl;
 		ioService.stop();
 		if (worker && worker->joinable()) { worker->join(); }
-	}
-
-	void Server::disconnect(Connection* a_connection) {
-		std::lock_guard<std::mutex> guard(lock);
-		SCOPE_EXIT{ connections.erase(std::remove_if(connections.begin(), connections.end(), [&](auto &c) {return c.get() == a_connection; }), connections.end()); };
 	}
 
 	void Server::send(const std::string &a_message) {
@@ -190,7 +185,8 @@ namespace MV {
 		auto socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
 		acceptor.async_accept(*socket, [this, socket](boost::system::error_code ec) {
 			if (!ec) {
-				auto connection = std::make_shared<Connection>(*this, socket, ioService, connectionStateFactory);
+				auto connection = std::make_shared<Connection>(*this, socket, ioService);
+				connection->initialize(connectionStateFactory);
 
 				std::lock_guard<std::mutex> guard(lock);
 				connections.push_back(connection);
@@ -213,14 +209,21 @@ namespace MV {
 		}
 		send(message.str());
 		if (timeRequestsRemaining == 0) {
-			state->connect();
+			ourState->connect();
 		}
 	}
 
 	void Server::update(double a_dt) {
-		for (auto&& connection : connections) {
-			connection->update(a_dt);
-		}
+		connections.erase(std::remove_if(connections.begin(), connections.end(), [&](auto &c) {
+			try {
+				c->update(a_dt);
+			} catch (std::exception &e) {
+				std::cerr << "Exception for connection update: " << e.what() << std::endl;
+			} catch (...) {
+				std::cerr << "Unknown Exception for connection update!" << std::endl;
+			}
+			return c->disconnected();
+		}), connections.end());
 	}
 
 	void Connection::send(const std::string &a_content) {
@@ -264,26 +267,30 @@ namespace MV {
 	}
 
 	void Connection::update(double a_dt) {
+		if (ourState->disconnected()) {
+			inbox.clear();
+			return;
+		}
 		std::lock_guard<std::mutex> guard(lock);
 		auto self = shared_from_this();
 		for (auto&& message : inbox) {
 			try {
-				state->message(message->content);
+				ourState->message(message->content);
 			} catch (std::exception &e) {
 				std::cerr << "Caught an exception in Connection::update: " << e.what() << std::endl;
-				state->disconnect();
+				ourState->disconnect();
 				inbox.clear();
 				return;
 			}
 		}
 		inbox.clear();
-		state->update(a_dt);
+		ourState->update(a_dt);
 	}
 
 	void Connection::HandleError(const boost::system::error_code &a_err, const std::string &a_section) {
 		socket->close();
 		std::cerr << "[" << a_section << "] ERROR: " << a_err.message() << std::endl;
-		state->disconnect();
+		ourState->disconnect();
 		inbox.clear();
 	}
 

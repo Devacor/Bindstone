@@ -62,6 +62,21 @@ namespace MV {
 	}
 
 	template< typename T >
+	typename std::vector<std::weak_ptr<T>>::iterator insertSorted(std::vector<std::weak_ptr<T>> & a_vec, const std::weak_ptr<T>& a_item) {
+		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::weak_ptr<T>& a_lhs, const std::weak_ptr<T> &a_rhs) {
+			if (auto lhsLocked = a_lhs.lock()) {
+				if (auto rhsLocked = a_rhs.lock()) {
+					return *lhsLocked < *rhsLocked;
+				} else {
+					return false;
+				}
+			} else {
+				return !a_rhs.expired();
+			}
+		}), a_item);
+	}
+
+	template< typename T >
 	typename std::vector<T>::iterator insertSorted(std::vector<T> & a_vec, const T& a_item) {
 		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const T& a_lhs, const T &a_rhs) {return a_lhs < a_rhs; }), a_item);
 	}
@@ -74,6 +89,21 @@ namespace MV {
 	template< typename T >
 	typename std::vector<T>::iterator insertReverseSorted(std::vector<T> & a_vec, const T& a_item) {
 		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const T& a_lhs, const T &a_rhs) {return !(a_lhs < a_rhs); }), a_item);
+	}
+
+	template< typename T >
+	typename std::vector<std::weak_ptr<T>>::iterator insertReverseSorted(std::vector<std::weak_ptr<T>> & a_vec, const std::weak_ptr<T>& a_item) {
+		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::weak_ptr<T>& a_lhs, const std::weak_ptr<T> &a_rhs) {
+			if (auto lhsLocked = a_lhs.lock()) {
+				if (auto rhsLocked = a_rhs.lock()) {
+					return !(*lhsLocked < *rhsLocked);
+				} else {
+					return true;
+				}
+			} else {
+				return a_rhs.expired();
+			}
+		}), a_item);
 	}
 
 	template <class T, size_t I, size_t... J>
@@ -377,6 +407,28 @@ namespace MV {
 		float number(float a_min, float a_max){
 			return std::uniform_real_distribution<float>{a_min, std::nextafter(a_max, a_max + 1.0f)}(generator);
 		}
+
+		std::string randomString(std::string a_charset, size_t a_length) {
+			if (a_length == 0 || a_charset.empty()) { return ""; }
+
+			std::string result;
+			while (a_length--) {
+				result += a_charset[integer(0, a_charset.size())];
+			}
+			return result;
+		}
+
+		template<typename T>
+		void shuffle(T collection) {
+			std::shuffle(std::begin(collection), std::end(collection), generator);
+		}
+
+		static Random* global() {
+			if (!instance) {
+				instance = new Random();
+			}
+			return instance;
+		}
 	private:
 		uint64_t generatorSeed;
 		std::mt19937 generator;
@@ -387,6 +439,10 @@ namespace MV {
 		friend int64_t randomInteger(int64_t, int64_t);
 	};
 
+	template<typename T>
+	void randomShuffle(T collection) {
+		return Random::global()->shuffle(collection);
+	}
 	double randomNumber(double a_min, double a_max);
 	float randomNumber(float a_min, float a_max);
 	int64_t randomInteger(int64_t a_min, int64_t a_max);

@@ -16,8 +16,8 @@ void EditorPanel::cancelInput() {
 }
 
 void EditorPanel::handleInput(SDL_Event &a_event) {
-	if(!activeTextbox.expired()){
-		activeTextbox.lock()->text(a_event);
+	if(auto lockedAT = activeTextbox.lock()){
+		lockedAT->text(a_event);
 	}
 }
 
@@ -336,8 +336,8 @@ MV::Scene::SafeComponent<MV::Scene::Button> SelectedNodeEditorPanel::CreateClick
 }
 
 void SelectedNodeEditorPanel::handleInput(SDL_Event &a_event) {
-	if (!activeTextbox.expired()) {
-		activeTextbox.lock()->text(a_event);
+	if (auto lockedAT = activeTextbox.lock()) {
+		lockedAT->text(a_event);
 	}
 	componentPanel->handleInput(a_event);
 
@@ -460,8 +460,8 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 }
 
 void SelectedGridEditorPanel::handleInput(SDL_Event &a_event) {
-	if (!activeTextbox.expired()) {
-		activeTextbox.lock()->text(a_event);
+	if (auto lockedAT = activeTextbox.lock()) {
+		lockedAT->text(a_event);
 	}
 }
 
@@ -603,8 +603,8 @@ void SelectedSpineEditorPanel::handleMakeButton(std::shared_ptr<MV::Scene::Node>
 }
 
 void SelectedSpineEditorPanel::handleInput(SDL_Event &a_event) {
-	if (!activeTextbox.expired()) {
-		activeTextbox.lock()->text(a_event);
+	if (auto lockedAT = activeTextbox.lock()) {
+		lockedAT->text(a_event);
 	}
 }
 
@@ -771,8 +771,8 @@ void SelectedRectangleEditorPanel::openTexturePicker() {
 }
 
 void SelectedRectangleEditorPanel::handleInput(SDL_Event &a_event) {
-	if (!activeTextbox.expired()) {
-		activeTextbox.lock()->text(a_event);
+	if (auto lockedAT = activeTextbox.lock()) {
+		lockedAT->text(a_event);
 	}
 }
 
@@ -1070,8 +1070,8 @@ void SelectedEmitterEditorPanel::openTexturePicker() {
 }
 
 void SelectedEmitterEditorPanel::handleInput(SDL_Event &a_event) {
-	if(!activeTextbox.expired()){
-		activeTextbox.lock()->text(a_event);
+	if (auto lockedAT = activeTextbox.lock()) {
+		lockedAT->text(a_event);
 	}
 }
 
@@ -1187,8 +1187,8 @@ SelectedPathMapEditorPanel::SelectedPathMapEditorPanel(EditorControls &a_panel, 
 }
 
 void SelectedPathMapEditorPanel::handleInput(SDL_Event &a_event) {
-	if (!activeTextbox.expired()) {
-		activeTextbox.lock()->text(a_event);
+	if (auto lockedAT = activeTextbox.lock()) {
+		lockedAT->text(a_event);
 	}
 }
 
@@ -1553,8 +1553,8 @@ SelectedTextEditorPanel::SelectedTextEditorPanel(EditorControls &a_panel, std::s
 
 
 void SelectedTextEditorPanel::handleInput(SDL_Event &a_event) {
-	if (!activeTextbox.expired()) {
-		activeTextbox.lock()->text(a_event);
+	if (auto lockedAT = activeTextbox.lock()) {
+		lockedAT->text(a_event);
 	}
 }
 
@@ -1711,8 +1711,8 @@ SelectedButtonEditorPanel::SelectedButtonEditorPanel(EditorControls &a_panel, st
 
 
 void SelectedButtonEditorPanel::handleInput(SDL_Event &a_event) {
-	if (!activeTextbox.expired()) {
-		activeTextbox.lock()->text(a_event);
+	if (auto lockedAT = activeTextbox.lock()) {
+		lockedAT->text(a_event);
 	}
 }
 
@@ -1844,8 +1844,8 @@ SelectedClickableEditorPanel::SelectedClickableEditorPanel(EditorControls &a_pan
 
 
 void SelectedClickableEditorPanel::handleInput(SDL_Event &a_event) {
-	if (!activeTextbox.expired()) {
-		activeTextbox.lock()->text(a_event);
+	if (auto lockedAT = activeTextbox.lock()) {
+		lockedAT->text(a_event);
 	}
 }
 

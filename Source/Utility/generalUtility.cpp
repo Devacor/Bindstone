@@ -231,34 +231,19 @@ namespace MV {
 	Random* Random::instance = nullptr;
 
 	double randomNumber(double a_min, double a_max) {
-		if(!Random::instance){
-			Random::instance = new Random();
-		}
-		return Random::instance->number(a_min, a_max);
+		return Random::global()->number(a_min, a_max);
 	}
 
 	float randomNumber(float a_min, float a_max) {
-		if(!Random::instance){
-			Random::instance = new Random();
-		}
-		return Random::instance->number(a_min, a_max);
+		return Random::global()->number(a_min, a_max);
 	}
 
 	int64_t randomInteger(int64_t a_min, int64_t a_max) {
-		if(!Random::instance){
-			Random::instance = new Random();
-		}
-		return Random::instance->integer(a_min, a_max);
+		return Random::global()->integer(a_min, a_max);
 	}
 
 	std::string randomString(std::string a_charset, size_t a_length) {
-		if (a_length == 0 || a_charset.empty()) { return ""; }
-
-		std::string result;
-		while (a_length--) {
-			result += a_charset[randomInteger(0, a_charset.size())];
-		}
-		return result;
+		return Random::global()->randomString(a_charset, a_length);
 	}
 
 	std::string randomString(size_t a_length) {

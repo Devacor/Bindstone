@@ -295,11 +295,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<MV::Scene::Drawable> Anchors::parent() const {
-			if (!parentReference.expired()) {
-				return parentReference.lock();
-			} else {
-				return nullptr;
-			}
+			return parentReference.lock();
 		}
 
 		Anchors& Anchors::anchor(const BoxAABB<> &a_anchor) {
@@ -324,18 +320,21 @@ namespace MV {
 		}
 
 		Anchors& Anchors::apply() {
-			if (!applying && !parentReference.expired()) {
-				applying = true;
-				SCOPE_EXIT{ applying = false; };
-				auto parentBounds = parentReference.lock()->worldBounds();
-				auto parentSize = parentBounds.size();
-				
-				BoxAABB<> childBounds { (parentAnchors * toScale(parentSize)) + ourOffset + parentBounds.minPoint };
-				if (applyingPosition) {
-					selfReference->owner()->worldPosition(childBounds.minPoint);
-					selfReference->bounds({ Point<>(), childBounds.size() / selfReference->owner()->worldScale() });
-				} else {
-					selfReference->worldBounds(childBounds);
+			if (!applying) {
+				if (auto lockedParentReference = parentReference.lock()) {
+					applying = true;
+					SCOPE_EXIT{ applying = false; };
+					auto parentBounds = lockedParentReference->worldBounds();
+					auto parentSize = parentBounds.size();
+
+					BoxAABB<> childBounds{ (parentAnchors * toScale(parentSize)) + ourOffset + parentBounds.minPoint };
+					if (applyingPosition) {
+						selfReference->owner()->worldPosition(childBounds.minPoint);
+						selfReference->bounds({ Point<>(), childBounds.size() / selfReference->owner()->worldScale() });
+					}
+					else {
+						selfReference->worldBounds(childBounds);
+					}
 				}
 			}
 			return *this;
@@ -348,25 +347,26 @@ namespace MV {
 		}
 
 		Anchors& Anchors::applyBoundsToOffset(BoundsToOffset a_offsetFromBounds) {
-			if (!applying && a_offsetFromBounds != BoundsToOffset::Ignore && !parentReference.expired()) {
-				auto childBounds = selfReference->worldBounds();
-				auto parentBounds = parentReference.lock()->worldBounds();
-				auto parentSize = parentBounds.size();
+			if (!applying && a_offsetFromBounds != BoundsToOffset::Ignore) {
+				if (auto lockedParent = parentReference.lock()) {
+					auto childBounds = selfReference->worldBounds();
+					auto parentBounds = lockedParent->worldBounds();
+					auto parentSize = parentBounds.size();
 
-				auto scaledParentAnchors = parentAnchors * toScale(parentSize);
-				
-				if (a_offsetFromBounds == BoundsToOffset::Apply_Reposition) {
-					childBounds += scaledParentAnchors - selfReference->owner()->worldPosition();
+					auto scaledParentAnchors = parentAnchors * toScale(parentSize);
+
+					if (a_offsetFromBounds == BoundsToOffset::Apply_Reposition) {
+						childBounds += scaledParentAnchors - selfReference->owner()->worldPosition();
+					}
+
+					ourOffset = childBounds - (scaledParentAnchors + parentBounds.minPoint);
 				}
-
-				ourOffset = childBounds - (scaledParentAnchors + parentBounds.minPoint);
 			}
 			return *this;
 		}
 
 		Anchors& Anchors::removeFromParent() {
-			if (!parentReference.expired()) {
-				auto parentShared = parentReference.lock();
+			if (auto parentShared = parentReference.lock()) {
 				auto position = std::find(parentShared->childAnchors.begin(), parentShared->childAnchors.end(), this);
 				if (position != parentShared->childAnchors.end()) {
 					parentShared->childAnchors.erase(position);
@@ -387,8 +387,8 @@ namespace MV {
 		}
 
 		void Anchors::registerWithParent() {
-			if (!parentReference.expired()) {
-				parentReference.lock()->childAnchors.push_back(this);
+			if (auto lockedParent = parentReference.lock()) {
+				lockedParent->childAnchors.push_back(this);
 				apply();
 			} else {
 				ourOffset.clear();

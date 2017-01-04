@@ -51,8 +51,8 @@ namespace MV {
 	}
 
 	void Interface::focus(std::shared_ptr<MV::Scene::Text> a_textbox) {
-		if (!activeText.expired()) {
-			activeText.lock()->disableCursor();
+		if (auto lockedText = activeText.lock()) {
+			lockedText->disableCursor();
 		}
 		manager.setActiveText(this);
 		a_textbox->enableCursor();
@@ -61,8 +61,8 @@ namespace MV {
 
 	void Interface::removeFocus() {
 		manager.removeActiveText(this);
-		if (!activeText.expired()) {
-			activeText.lock()->disableCursor();
+		if (auto lockedText = activeText.lock()) {
+			lockedText->disableCursor();
 		}
 		activeText.reset();
 	}

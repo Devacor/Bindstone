@@ -269,8 +269,8 @@ namespace MV {
 			}
 			if (updateInProgress.compare_exchange_strong(falseValue, true)) {
 				MV::Point<> particleOffset;
-				if (!relativeNodePosition.expired()) {
-					particleOffset = owner()->localFromWorld(relativeNodePosition.lock()->worldPosition());
+				if (auto lockedRelativeNodePosition = relativeNodePosition.lock()) {
+					particleOffset = owner()->localFromWorld(lockedRelativeNodePosition->worldPosition());
 				}
 				for (auto&& data : threadData) {
 					data.particleOffset = particleOffset;

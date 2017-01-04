@@ -1,16 +1,12 @@
 #include "sound.h"
 #include "Render/render.h"
 #include <iostream>
+#include "Utility/generalUtility.h"
 
 namespace MV {
 	/*************************\
 	| ------AudioPlayer------ |
 	\*************************/
-
-	int AudioRandom(int n) { //ensure srand affects random_shuffle on all implementations
-		return int(n*rand() / (RAND_MAX + 1.0));
-	}
-
 
 	AudioPlayer* AudioPlayer::_instance = NULL;
 
@@ -395,7 +391,7 @@ namespace MV {
 		for (auto cell = songLineup.begin(); cell != songLineup.end(); ++cell) {
 			TmpSortContainer.push_back(*cell);
 		}
-		std::random_shuffle(TmpSortContainer.begin(), TmpSortContainer.end(), AudioRandom);
+		MV::randomShuffle(TmpSortContainer);
 		songLineup.clear();
 		for (auto cell = TmpSortContainer.begin(); cell != TmpSortContainer.end(); ++cell) {
 			songLineup.push_back(*cell);

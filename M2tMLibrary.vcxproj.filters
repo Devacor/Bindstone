@@ -554,7 +554,9 @@
     <ClCompile Include="Source\Game\NetworkLayer\lobbyServer.cpp">
       <Filter>Source Files\Game\NetworkLayer</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Game\NetworkLayer\clientActions.cpp" />
+    <ClCompile Include="Source\Game\NetworkLayer\clientActions.cpp">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Audio\package.h">

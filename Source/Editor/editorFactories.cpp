@@ -147,8 +147,8 @@ std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::MouseS
 	auto clickable = box->attach<MV::Scene::Clickable>(a_mouse)->bounds(a_size);
 	std::weak_ptr<MV::Scene::Text> weakText = text;
 	clickable->onAccept.connect("register", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
-		if(!weakText.expired()){
-			a_panel->activateText(weakText.lock());
+		if(auto lockedText = weakText.lock()){
+			a_panel->activateText(lockedText);
 		} else{
 			std::cerr << "Error: onAccept failure in box." << std::endl;
 		}

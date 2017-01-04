@@ -18,9 +18,9 @@
 #include "chaiscript/chaiscript.hpp"
 
 class Game {
+	MV::Signal<void(LoginResponse&)> onLoginResponseSignal;
 public:
-	MV::Signal<void(LoginResponse&)> onLoginResponse;
-	MV::SignalRegister<void(LoginResponse&)> onLoginResponseScript;
+	MV::SignalRegister<void(LoginResponse&)> onLoginResponse;
 
 	Game(Managers &a_managers);
 
@@ -71,6 +71,13 @@ public:
 	}
 
 	void hook(chaiscript::ChaiScript &a_script);
+
+	void authenticate(LoginResponse& a_response) {
+		if (a_response.hasPlayerState()) {
+			localPlayer = a_response.loadedPlayer();
+		}
+		onLoginResponseSignal(a_response);
+	}
 private:
 	Game(const Game &) = delete;
 	Game& operator=(const Game &) = delete;

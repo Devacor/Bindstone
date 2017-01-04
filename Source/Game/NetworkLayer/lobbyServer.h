@@ -5,21 +5,58 @@
 #include "Network/package.h"
 #include "Game/managers.h"
 
+#include "Game/player.h"
+
 #include <string>
 #include <vector>
 #include <ctime>
 #include <memory>
+#include <tuple>
 
 #include "pqxx/pqxx"
 
+#include "Utility/cerealUtility.h"
+
 class ServerAction;
 class LobbyServer;
+class MatchQueue;
+class LobbyConnectionState;
+
+struct MatchSeeker {
+	MatchSeeker(LobbyConnectionState* a_connection, MatchQueue& a_queue);
+	~MatchSeeker();
+
+	ServerPlayer* player();
+
+	double tolerance() {
+		if (time < 5.0) {
+			return .025;
+		} else if(time < 10.0) {
+			return .05;
+		} else if (time < 20.0) {
+			return .075;
+		} else if (time < 40.0) {
+			return .10;
+		} else if (time < 60.0) {
+			return .15;
+		} else if (time < 80.0) {
+			return .25;
+		} else {
+			return 1.0; //any match.
+		}
+	}
+
+	double time = 0.0;
+	bool matching = false;
+	LobbyConnectionState* state;
+	MatchQueue& queue;
+};
+
+bool operator<(MatchSeeker &a_lhs, MatchSeeker &a_rhs);
 
 class LobbyConnectionState : public MV::ConnectionStateBase {
 public:
-	LobbyConnectionState(MV::Connection *a_connection, LobbyServer& a_server);
-
-	virtual void connect() override;
+	LobbyConnectionState(const std::shared_ptr<MV::Connection> &a_connection, LobbyServer& a_server);
 
 	virtual void message(const std::string &a_message);
 
@@ -31,12 +68,125 @@ public:
 		return loggedIn;
 	}
 
-	void authenticate() {
-		loggedIn = true;
+	bool authenticate(const std::string &a_newState, const std::string &a_serverState);
+
+	std::string state() const {
+		return activeState;
 	}
+
+	void state(const std::string &a_newState) {
+		activeState = a_newState;
+	}
+
+	std::shared_ptr<ServerPlayer> player() {
+		return ourPlayer;
+	}
+
+	std::shared_ptr<MatchSeeker> seeker() {
+		return seeking;
+	}
+
+	void save() {
+		//commit player to db
+	}
+	
+protected:
+	virtual void connectImplementation() override;
+
 private:
+	std::string activeState;
 	bool loggedIn = false;
 	LobbyServer& ourServer;
+	std::shared_ptr<ServerPlayer> ourPlayer;
+	std::shared_ptr<MatchSeeker> seeking;
+};
+
+class LobbyServer;
+
+class MatchQueue {
+public:
+	MatchQueue(LobbyServer& a_server, const std::string &a_id) :
+		ourId(a_id),
+		server(&a_server) {
+	}
+
+	void add(const std::weak_ptr<MatchSeeker> &a_seeker) {
+		std::lock_guard<std::mutex> guard(lock);
+		MV::insertSorted(seekers, a_seeker);
+	}
+
+	void remove(MatchSeeker* a_removeSeeker) {
+		std::lock_guard<std::mutex> guard(lock);
+		seekers.erase(std::remove_if(seekers.begin(), seekers.end(), [&](auto& seeker){
+			if (auto lockedSeeker = seeker.lock()) {
+				return lockedSeeker.get() == a_removeSeeker;
+			} else {
+				return false;
+			}
+		}), seekers.end());
+	}
+
+	void update(double a_dt) {
+		std::lock_guard<std::mutex> guard(lock);
+
+		auto pairs = getMatchPairs(a_dt);
+
+
+		for (auto && match : pairs) {
+
+		}
+	}
+
+	std::vector<std::pair<std::shared_ptr<MatchSeeker>, std::shared_ptr<MatchSeeker>>> getMatchPairs(double a_dt) {
+		std::vector<std::pair<std::shared_ptr<MatchSeeker>, std::shared_ptr<MatchSeeker>>> pairs;
+		for (size_t i = 0; i < seekers.size(); ++i) {
+			if (auto current = seekers[i].lock()) {
+				if (!current->matching) {
+					current->time += a_dt;
+
+					double currentBest; std::shared_ptr<MatchSeeker> opponent;
+					std::tie(opponent, currentBest) = opponentFromIndex(i, current);
+
+					if (opponent && (current->tolerance() <= currentBest)) {
+						std::cout << "Matching [" << current->player()->client->id << "] vs [" << opponent->player()->client->id << "]" << std::endl;
+						current->matching = true;
+						opponent->matching = true;
+						pairs.emplace_back(current, opponent);
+					}
+				}
+			}
+		}
+		return pairs;
+	}
+
+	std::tuple<std::shared_ptr<MatchSeeker>, double> opponentFromIndex(size_t i, const std::shared_ptr<MatchSeeker> &current) {
+		std::shared_ptr<MatchSeeker> opponent;
+		double currentBest = 10.0;
+		int remainingComparisons = PLAYERS_TO_SEARCH_FOR_MATCH;
+		for (size_t j = i + 1; j < seekers.size() && remainingComparisons > 0; ++j) {
+			if (auto seekerCompare = seekers[j].lock()) {
+				if (!seekerCompare->matching) {
+					auto difference = current->player()->queue(ourId).skillDifference(seekerCompare->player()->queue(ourId));
+					if (difference < currentBest) {
+						currentBest = difference;
+						opponent = seekerCompare;
+					}
+				}
+			}
+		}					
+		return std::make_tuple(opponent, currentBest);
+	}
+
+	const std::string& id() const {
+		return ourId;
+	}
+private:
+	const int PLAYERS_TO_SEARCH_FOR_MATCH = 7;
+
+	std::mutex lock;
+	std::vector<std::weak_ptr<MatchSeeker>> seekers;
+	LobbyServer* server;
+	std::string ourId;
 };
 
 class LobbyServer {
@@ -46,14 +196,18 @@ public:
 		db(std::make_shared<pqxx::connection>("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=5432 dbname=bindstone user=m2tm password=Tinker123")),
 		emailPool(1), //need to test values greater than 1 to make sure ssh does not break.
 		dbPool(1), //currently locked to 1 as pqxx requires one per thread. We can expand this later with more connections and a different query interface.
+		rankedQueue(*this, "ranked"),
+		normalQueue(*this, "normal"),
 		ourServer( std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325),
-			[this](MV::Connection *a_connection) {
+			[this](const std::shared_ptr<MV::Connection> &a_connection) {
 				return std::make_unique<LobbyConnectionState>(a_connection, *this);
 			})) {
 	}
 
 	void update(double dt) {
 		ourServer->update(dt);
+		rankedQueue.update(dt);
+		normalQueue.update(dt);
 		threadPool.run();
 		emailPool.run();
 	}
@@ -83,6 +237,14 @@ public:
 		emailer->send(a_addresses, a_title, a_message);
 	}
 
+	MatchQueue& ranked() {
+		return rankedQueue;
+	}
+
+	MatchQueue& normal() {
+		return normalQueue;
+	}
+
 private:
 	LobbyServer(const LobbyServer &) = delete;
 	LobbyServer& operator=(const LobbyServer &) = delete;
@@ -93,6 +255,9 @@ private:
 	MV::ThreadPool threadPool;
 	MV::ThreadPool emailPool;
 	MV::ThreadPool dbPool;
+
+	MatchQueue rankedQueue;
+	MatchQueue normalQueue;
 
 	Managers &manager;
 	bool done;

@@ -13,6 +13,7 @@
 //#include "pqxx/pqxx"
 
 class Game;
+struct Player;
 
 class ClientAction : public std::enable_shared_from_this<ClientAction> {
 public:
@@ -63,16 +64,17 @@ CEREAL_REGISTER_TYPE(MessageResponse);
 
 class LoginResponse : public ClientAction {
 public:
-	LoginResponse(const std::string& a_message, bool a_success = false) : message(a_message), success(a_success) {}
+	LoginResponse(const std::string& a_message, const std::string& a_player = "", bool a_success = false) : message(a_message), player(a_player), success(a_success) {}
 	LoginResponse() {}
 
 	virtual void execute(Game& a_game) override;
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(message), CEREAL_NVP(success), cereal::make_nvp("ClientResponse", cereal::base_class<ClientAction>(this)));
+		archive(CEREAL_NVP(message), CEREAL_NVP(player), CEREAL_NVP(success), cereal::make_nvp("ClientResponse", cereal::base_class<ClientAction>(this)));
 	}
 
+	//Response actually happens in chaiscript anyway, so we just expose these in script and move on.
 	static void hook(chaiscript::ChaiScript& a_script) {
 		a_script.add(chaiscript::user_type<LoginResponse>(), "LoginResponse");
 		a_script.add(chaiscript::base_class<ClientAction, LoginResponse>());
@@ -80,12 +82,43 @@ public:
 		a_script.add(chaiscript::fun(&LoginResponse::message), "message");
 		a_script.add(chaiscript::fun(&LoginResponse::success), "success");
 	}
+
+	//useful to do in C++.
+	std::shared_ptr<Player> loadedPlayer();
+
+	bool hasPlayerState() const { return !player.empty(); }
 private:
 	std::string message;
+	std::string player;
+
 	bool success = false;
 };
 
 CEREAL_REGISTER_TYPE(LoginResponse);
+
+class IllegalResponse : public ClientAction {
+public:
+	IllegalResponse(const std::string& a_message) : message(a_message) {}
+	IllegalResponse() {}
+
+	virtual void execute(Game& a_game) override;
+
+	template <class Archive>
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
+		archive(CEREAL_NVP(message), cereal::make_nvp("ClientResponse", cereal::base_class<ClientAction>(this)));
+	}
+
+	static void hook(chaiscript::ChaiScript& a_script) {
+		a_script.add(chaiscript::user_type<IllegalResponse>(), "IllegalResponse");
+		a_script.add(chaiscript::base_class<ClientAction, IllegalResponse>());
+
+		a_script.add(chaiscript::fun(&IllegalResponse::message), "message");
+	}
+private:
+	std::string message;
+};
+
+CEREAL_REGISTER_TYPE(IllegalResponse);
 
 class ServerDetails : public ClientAction {
 public:

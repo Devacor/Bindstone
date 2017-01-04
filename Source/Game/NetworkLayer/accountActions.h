@@ -13,7 +13,7 @@ public:
 		password(a_password) {
 	}
 
-	virtual void execute(LobbyConnectionState& a_connection) override;
+	virtual void execute(LobbyConnectionState* a_connection) override;
 
 	virtual bool done() const override { return doneFlag; }
 
@@ -29,17 +29,18 @@ public:
 	}
 
 private:
-	void sendValidationEmail(LobbyConnectionState &a_connection, const std::string &a_passSalt);
+	void sendValidationEmail(LobbyConnectionState *a_connection, const std::string &a_passSalt);
 
 	bool validateHandle(const std::string &a_handle) {
 		return a_handle.size() > 3 && MV::simpleFilter(a_handle) == a_handle;
 	}
 
 	std::string makeSaveString();
+	std::string makeServerSaveString();
 
 	std::string createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt);
 	pqxx::result selectUser(pqxx::work* a_transaction);
-	pqxx::result createPlayer(pqxx::work* transaction, LobbyConnectionState &a_connection);
+	pqxx::result createPlayer(pqxx::work* transaction, LobbyConnectionState *a_connection);
 
 	std::string handle;
 	std::string email;
@@ -60,14 +61,19 @@ public:
 		identifier(a_identifier),
 		password(a_password) {
 	}
+	LoginRequest(const std::string &a_identifier, const std::string &a_password, const std::string &a_saveHash) :
+		identifier(a_identifier),
+		password(a_password),
+		saveHash(a_saveHash) {
+	}
 
-	virtual void execute(LobbyConnectionState& a_connection) override;
+	virtual void execute(LobbyConnectionState* a_connection) override;
 
 	virtual bool done() const override { return doneFlag; }
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(identifier), CEREAL_NVP(password), cereal::make_nvp("ServerAction", cereal::base_class<ServerAction>(this)));
+		archive(CEREAL_NVP(identifier), CEREAL_NVP(password), CEREAL_NVP(saveHash), cereal::make_nvp("ServerAction", cereal::base_class<ServerAction>(this)));
 		doneFlag = false;
 	}
 
@@ -75,6 +81,7 @@ public:
 		a_script.add(chaiscript::user_type<LoginRequest>(), "LoginRequest");
 		a_script.add(chaiscript::base_class<ServerAction, LoginRequest>());
 		a_script.add(chaiscript::constructor<LoginRequest(const std::string &a_identifier, const std::string &a_password)>(), "LoginRequest");
+		a_script.add(chaiscript::constructor<LoginRequest(const std::string &a_identifier, const std::string &a_password, const std::string &a_saveHash)>(), "LoginRequest");
 	}
 
 private:
@@ -82,10 +89,41 @@ private:
 
 	std::string identifier;
 	std::string password;
+	std::string saveHash;
 		
 	bool doneFlag = false;
 };
 
 CEREAL_REGISTER_TYPE(LoginRequest);
+
+class FindMatchRequest : public ServerAction {
+public:
+	enum MatchType {NORMAL, RANKED};
+
+	FindMatchRequest() {}
+	FindMatchRequest(MatchType a_type) : type(a_type) {}
+	
+	virtual void execute(LobbyConnectionState* a_connection) override;
+
+	virtual bool done() const override { return true; }
+
+	template <class Archive>
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
+		archive(
+			cereal::make_nvp("ServerAction", cereal::base_class<ServerAction>(this)),
+			cereal::make_nvp("type", type));
+	}
+
+	static void hook(chaiscript::ChaiScript& a_script) {
+		a_script.add(chaiscript::user_type<FindMatchRequest>(), "FindMatchRequest");
+		a_script.add(chaiscript::base_class<ServerAction, FindMatchRequest>());
+		a_script.add(chaiscript::fun(&FindMatchRequest::type), "type");
+	}
+
+private:
+	MatchType type;
+};
+
+CEREAL_REGISTER_TYPE(FindMatchRequest);
 
 #endif

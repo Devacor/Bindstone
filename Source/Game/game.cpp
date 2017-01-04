@@ -10,7 +10,7 @@ Game::Game(Managers& a_managers) :
 	gameData(a_managers),
 	done(false),
 	scriptEngine(MV::create_chaiscript_stdlib(), MV::chaiscript_module_paths(), MV::chaiscript_use_paths()),
-	onLoginResponseScript(onLoginResponse){
+	onLoginResponse(onLoginResponseSignal){
 	
 	MV::initializeFilesystem();
 	initializeData();
@@ -202,7 +202,7 @@ void Game::hook(chaiscript::ChaiScript &a_script) {
 	a_script.add(chaiscript::fun(&Game::client), "client");
 
 	MV::SignalRegister<void(LoginResponse&)>::hook(a_script);
-	a_script.add(chaiscript::fun(&Game::onLoginResponseScript), "onLoginResponse");
+	a_script.add(chaiscript::fun(&Game::onLoginResponse), "onLoginResponse");
 
 	a_script.add_global(chaiscript::var(this), "game");
 

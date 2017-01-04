@@ -45,18 +45,18 @@ public:
 		}
 	}
 	void activateText(std::weak_ptr<MV::Scene::Text> a_textbox){
-		if(!activeTextbox.expired()){
-			activeTextbox.lock()->disableCursor();
+		if (auto lockedAT = activeTextbox.lock()) {
+			lockedAT->disableCursor();
 		}
 		activeTextbox.reset();
-		if(!a_textbox.expired()){
-			activeTextbox = a_textbox;
-			activeTextbox.lock()->enableCursor();
+		if(auto lockedNewAT = a_textbox.lock()){
+			activeTextbox = lockedNewAT;
+			lockedNewAT->enableCursor();
 		}
 	}
 	void deactivateText() {
-		if (!activeTextbox.expired()) {
-			activeTextbox.lock()->disableCursor();
+		if (auto lockedAT = activeTextbox.lock()) {
+			lockedAT->disableCursor();
 		}
 		activeTextbox.reset();
 	}

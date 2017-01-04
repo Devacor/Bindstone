@@ -77,8 +77,9 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Component::owner() const {
-			require<PointerException>(!componentOwner.expired(), "Component owner has expired! You are storing a reference to the component, but not the node that owns it!");
-			return componentOwner.lock();
+			auto lockedComponentOwner = componentOwner.lock();
+			require<PointerException>(lockedComponentOwner != nullptr, "Component owner has expired! You are storing a reference to the component, but not the node that owns it!");
+			return lockedComponentOwner;
 		}
 
 		Component::Component(const std::weak_ptr<Node> &a_owner) :

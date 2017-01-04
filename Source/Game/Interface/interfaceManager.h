@@ -38,8 +38,8 @@ namespace MV {
 		void removeFocus();
 
 		bool handleInput(SDL_Event &a_event) {
-			if (!activeText.expired()) {
-				return activeText.lock()->text(a_event);
+			if (auto lockedText = activeText.lock()) {
+				lockedText->text(a_event);
 			}
 			return false;
 		}

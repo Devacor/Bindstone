@@ -217,28 +217,32 @@ namespace MV{
 	}
 
 	std::shared_ptr<PackedTextureDefinition> TexturePack::getOrMakeTexture() {
-		if(packedTexture.expired()){
+		if (auto lockedTexture = packedTexture.lock()) {
+			return lockedTexture;
+		} else {
 			auto sharedPackedTexture = PackedTextureDefinition::make("TexturePack", shared_from_this(), maximumExtent, background);
 			packedTexture = sharedPackedTexture;
 			return sharedPackedTexture;
-		} else {
-			return packedTexture.lock();
 		}
 	}
 
 	void TexturePack::reloadedPackedTextureChild() {
-		if(!packedTexture.expired() && packedTexture.lock()->loaded()){
-			auto scene = makeScene();
-			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, packedTexture.lock()->textureId(), background)->start();
-			scene->draw();
+		if (auto lockedTexture = packedTexture.lock()) {
+			if (lockedTexture->loaded()) {
+				auto scene = makeScene();
+				auto framebuffer = renderer->makeFramebuffer({}, contentExtent, lockedTexture->textureId(), background)->start();
+				scene->draw();
+			}
 		}
 	}
 
 	void TexturePack::initializeAfterLoad() {
-		if (!packedTexture.expired() && packedTexture.lock()->loaded()) {
-			auto scene = makeScene();
-			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, packedTexture.lock()->textureId(), background)->start();
-			scene->draw();
+		if (auto lockedTexture = packedTexture.lock()) {
+			if (lockedTexture->loaded()) {
+				auto scene = makeScene();
+				auto framebuffer = renderer->makeFramebuffer({}, contentExtent, lockedTexture->textureId(), background)->start();
+				scene->draw();
+			}
 		}
 	}
 

@@ -40,7 +40,7 @@ void Game::initializeWindow(){
 	MV::Size<> worldSize(960, 640);
 	MV::Size<int> windowSize(960, 640);
 
-	gameData.managers().renderer.//makeHeadless().
+	gameData.managers().renderer.makeHeadless().
 		window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
 
 	if (!gameData.managers().renderer.initialize(windowSize, worldSize)) {
@@ -70,12 +70,6 @@ void Game::initializeWindow(){
 	localPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
 
 	localPlayer->wallet.add(Wallet::CurrencyType::SOFT, 5000);
-
-// 	{
-// 		std::ofstream stream("playerExample.json");
-// 		cereal::JSONOutputArchive archive(stream);
-// 		archive(localPlayer);
-// 	}
 
 	hook(scriptEngine);
 	if (!MV::RUNNING_IN_HEADLESS) {
@@ -188,6 +182,7 @@ void Game::hook(chaiscript::ChaiScript &a_script) {
 	ServerAction::hook(a_script);
 	LoginRequest::hook(a_script);
 	LoginResponse::hook(a_script);
+	FindMatchRequest::hook(a_script);
 
 	MV::InterfaceManager::hook(a_script);
 

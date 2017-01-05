@@ -17,13 +17,15 @@
 
 #include "Utility/cerealUtility.h"
 
+#include <conio.h>
+
 class ServerAction;
 class LobbyServer;
 class MatchQueue;
 class LobbyConnectionState;
 
 struct MatchSeeker {
-	MatchSeeker(LobbyConnectionState* a_connection, MatchQueue& a_queue);
+	MatchSeeker(const std::shared_ptr<MV::Connection> &a_connection, MatchQueue& a_queue);
 	~MatchSeeker();
 
 	ServerPlayer* player();
@@ -45,6 +47,8 @@ struct MatchSeeker {
 			return 1.0; //any match.
 		}
 	}
+
+	std::weak_ptr<MV::Connection> lifespan;
 
 	double time = 0.0;
 	bool matching = false;
@@ -82,8 +86,16 @@ public:
 		return ourPlayer;
 	}
 
-	std::shared_ptr<MatchSeeker> seeker() {
-		return seeking;
+	std::shared_ptr<MatchSeeker> seekMatch(MatchQueue& a_queue) {
+		if (auto strongConnection = connection()) {
+			seeking = std::make_shared<MatchSeeker>(strongConnection, a_queue);
+			return seeking;
+		}
+		return std::shared_ptr<MatchSeeker>();
+	}
+
+	void cancelSeekMatch() {
+		seeking.reset();
 	}
 
 	void save() {
@@ -126,32 +138,27 @@ public:
 		}), seekers.end());
 	}
 
-	void update(double a_dt) {
-		std::lock_guard<std::mutex> guard(lock);
-
-		auto pairs = getMatchPairs(a_dt);
-
-
-		for (auto && match : pairs) {
-
-		}
-	}
+	void update(double a_dt);
 
 	std::vector<std::pair<std::shared_ptr<MatchSeeker>, std::shared_ptr<MatchSeeker>>> getMatchPairs(double a_dt) {
 		std::vector<std::pair<std::shared_ptr<MatchSeeker>, std::shared_ptr<MatchSeeker>>> pairs;
 		for (size_t i = 0; i < seekers.size(); ++i) {
 			if (auto current = seekers[i].lock()) {
-				if (!current->matching) {
-					current->time += a_dt;
+				if (auto lifespan = current->lifespan.lock()) {
+					if (!current->matching) {
+						current->time += a_dt;
 
-					double currentBest; std::shared_ptr<MatchSeeker> opponent;
-					std::tie(opponent, currentBest) = opponentFromIndex(i, current);
+						double currentBest; std::shared_ptr<MatchSeeker> opponent;
+						std::tie(opponent, currentBest) = opponentFromIndex(i, current);
 
-					if (opponent && (current->tolerance() <= currentBest)) {
-						std::cout << "Matching [" << current->player()->client->id << "] vs [" << opponent->player()->client->id << "]" << std::endl;
-						current->matching = true;
-						opponent->matching = true;
-						pairs.emplace_back(current, opponent);
+						if (opponent && (current->tolerance() <= currentBest)) {
+							if (auto opponentLifespan = opponent->lifespan.lock()) {
+								std::cout << "Matching [" << current->player()->client->id << "] vs [" << opponent->player()->client->id << "]" << std::endl;
+								current->matching = true;
+								opponent->matching = true;
+								pairs.emplace_back(current, opponent);
+							}
+						}
 					}
 				}
 			}
@@ -165,11 +172,13 @@ public:
 		int remainingComparisons = PLAYERS_TO_SEARCH_FOR_MATCH;
 		for (size_t j = i + 1; j < seekers.size() && remainingComparisons > 0; ++j) {
 			if (auto seekerCompare = seekers[j].lock()) {
-				if (!seekerCompare->matching) {
-					auto difference = current->player()->queue(ourId).skillDifference(seekerCompare->player()->queue(ourId));
-					if (difference < currentBest) {
-						currentBest = difference;
-						opponent = seekerCompare;
+				if (auto seekerLifespan = seekerCompare->lifespan.lock()) {
+					if (!seekerCompare->matching) {
+						auto difference = current->player()->queue(ourId).skillDifference(seekerCompare->player()->queue(ourId));
+						if (difference < currentBest) {
+							currentBest = difference;
+							opponent = seekerCompare;
+						}
 					}
 				}
 			}
@@ -180,6 +189,8 @@ public:
 	const std::string& id() const {
 		return ourId;
 	}
+
+	void print() const;
 private:
 	const int PLAYERS_TO_SEARCH_FOR_MATCH = 7;
 
@@ -210,6 +221,20 @@ public:
 		normalQueue.update(dt);
 		threadPool.run();
 		emailPool.run();
+
+		if (_kbhit()) {
+			switch (_getch()) {
+			case 'q':
+				std::cout << "Ranked Queue: " << std::endl;
+				rankedQueue.print();
+				std::cout << "Normal Queue: " << std::endl;
+				normalQueue.print();
+				break;
+			case 'c':
+				std::cout << "Connections: " << ourServer->activeConnections() << std::endl;
+				break;
+			}
+		}
 	}
 
 	Managers& managers() {

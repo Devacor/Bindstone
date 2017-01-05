@@ -2,6 +2,7 @@
 #define _ACCOUNTACTIONS_MV_H_
 
 #include "Game/NetworkLayer/serverActions.h"
+#include "Utility/chaiscriptUtility.h"
 
 class CreatePlayer : public ServerAction {
 public:
@@ -117,7 +118,15 @@ public:
 	static void hook(chaiscript::ChaiScript& a_script) {
 		a_script.add(chaiscript::user_type<FindMatchRequest>(), "FindMatchRequest");
 		a_script.add(chaiscript::base_class<ServerAction, FindMatchRequest>());
+		a_script.add(chaiscript::constructor<FindMatchRequest(MatchType a_type)>(), "FindMatchRequest");
 		a_script.add(chaiscript::fun(&FindMatchRequest::type), "type");
+
+		chaiscript::ModulePtr m = chaiscript::ModulePtr(new chaiscript::Module());
+		chaiscript::utility::add_class<MatchType>(*m, "MatchType", { 
+			{ NORMAL, "NORMAL" },
+			{ RANKED, "RANKED" }
+		});
+		a_script.add(m);
 	}
 
 private:

@@ -4,6 +4,7 @@
 #include <map>
 
 #include "chaiscript/chaiscript.hpp"
+#include "chaiscript/utility/utility.hpp"
 #include "generalUtility.h"
 #include "scopeGuard.hpp"
 

@@ -243,6 +243,10 @@ namespace MV {
 		void send(const std::string &a_message);
 		void sendExcept(const std::string &a_message, Connection* a_connectionToSkip);
 		void update(double a_dt);
+
+		size_t activeConnections() const {
+			return connections.size();
+		}
 	private:
 		void acceptClients();
 

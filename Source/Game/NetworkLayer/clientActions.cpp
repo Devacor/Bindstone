@@ -17,3 +17,7 @@ std::shared_ptr<Player> LoginResponse::loadedPlayer() {
 void IllegalResponse::execute(Game& /*a_game*/) {
 	std::cout << "Illegal: [" << message << "]" << std::endl;
 }
+
+void MatchedResponse::execute(Game& a_game) {
+	a_game.enterGameServer(gameServer);
+}

@@ -53,6 +53,10 @@ public:
 		return rootScene;
 	}
 
+	void enterGameServer(const std::string &gameServer) {
+		std::cout << "Game Found: " << gameServer << std::endl;
+	}
+
 	GameInstance& enterGame() {
 		auto enemyPlayer = std::make_shared<Player>();
 		enemyPlayer->name = "Jai";

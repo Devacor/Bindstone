@@ -137,4 +137,21 @@ public:
 
 CEREAL_REGISTER_TYPE(ServerDetails);
 
+class MatchedResponse : public ClientAction {
+public:
+	MatchedResponse(const std::string& a_gameServer) : gameServer(a_gameServer) {}
+	MatchedResponse() {}
+
+	virtual void execute(Game& a_game) override;
+
+	template <class Archive>
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
+		archive(CEREAL_NVP(gameServer), cereal::make_nvp("ClientResponse", cereal::base_class<ClientAction>(this)));
+	}
+
+	std::string gameServer;
+};
+
+CEREAL_REGISTER_TYPE(MatchedResponse);
+
 #endif

@@ -20,11 +20,9 @@ GameEditor::GameEditor() :
 	// 		};
 	// 		spineTestNode->loadChild("simple.scene", populateArchive);
 	// 		spineTestNode->loadChild("tree_particle.scene", populateArchive);
-	std::cout << "1" << std::endl;
 	screenScaler = limbo->attach<MV::Scene::Sprite>();
 	screenScaler->hide();
 	screenScaler->bounds({ MV::point(0.0f, 0.0f), game.managers().renderer.world().size() });
-	std::cout << "2" << std::endl;
 //	auto textureSheet = MV::FileTextureDefinition::make("Assets/Images/slice.png");
 // 	auto alignedSprite = limbo->make("repositionNode")->attach<MV::Scene::Sprite>();
 // 	alignedSprite->texture(textureSheet->makeHandle());
@@ -62,7 +60,6 @@ GameEditor::GameEditor() :
 		std::cout << "serving" << std::endl;
 		server = std::make_shared<LobbyServer>(managers);
 	});
-	std::cout << "3" << std::endl;
 // 	auto sendButton = makeButton(grid, game.managers().textLibrary, mouse, "Send", { 100.0f, 20.0f }, UTF_CHAR_STR("Send"));
 // 	sendButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 // 		if (client) {
@@ -71,8 +68,6 @@ GameEditor::GameEditor() :
 // 	});
 
 	grid->component<MV::Scene::Grid>()->anchors().anchor({ MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f) }).usePosition(true).parent(screenScaler.self(), MV::Scene::Anchors::BoundsToOffset::Apply);
-
-	std::cout << "4" << std::endl;
 
 	if (MV::RUNNING_IN_HEADLESS) {
 		serverButton->press();

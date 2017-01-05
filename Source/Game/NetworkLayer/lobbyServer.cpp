@@ -32,8 +32,9 @@ bool LobbyConnectionState::authenticate(const std::string &a_newState, const std
 	}
 }
 
-MatchSeeker::MatchSeeker(LobbyConnectionState *a_state, MatchQueue& a_queue) :
-	state(a_state),
+MatchSeeker::MatchSeeker(const std::shared_ptr<MV::Connection> &a_connection, MatchQueue& a_queue) :
+	lifespan(a_connection),
+	state(static_cast<LobbyConnectionState*>(a_connection->state())),
 	queue(a_queue) {
 }
 
@@ -52,4 +53,32 @@ bool operator<(MatchSeeker &a_lhs, MatchSeeker &a_rhs) {
 	double lhsRating = !lhsPlayer ? 0.0 : lhsPlayer->queue(a_lhs.queue.id()).rating;
 	double rhsRating = !rhsPlayer ? 0.0 : rhsPlayer->queue(a_rhs.queue.id()).rating;
 	return lhsRating < rhsRating;
+}
+
+void MatchQueue::update(double a_dt) {
+	std::lock_guard<std::mutex> guard(lock);
+
+	auto pairs = getMatchPairs(a_dt);
+
+	for (auto && match : pairs) {
+		if (auto firstConnection = match.first->lifespan.lock()) {
+			if (auto secondConnection = match.second->lifespan.lock()) {
+				try {
+					auto response = MV::toBinaryStringCast<ClientAction>(std::make_shared<MatchedResponse>("TODO: Supply Server IP"));
+					firstConnection->send(response);
+					secondConnection->send(response);
+				} catch (...) {
+
+				}
+			}
+		}
+	}
+}
+
+void MatchQueue::print() const {
+	for (auto&& seeker : seekers) {
+		if (auto lockedSeeker = seeker.lock()) {
+			std::cout << lockedSeeker->player()->client->id << ":\t\t" << lockedSeeker->time << "\n";
+		}
+	}
 }

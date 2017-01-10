@@ -25,6 +25,13 @@ bool LobbyConnectionState::authenticate(const std::string &a_newState, const std
 	try {
 		ourPlayer = MV::fromJson<std::shared_ptr<ServerPlayer>>(a_serverState);
 		ourPlayer->client = MV::fromJson<std::shared_ptr<Player>>(a_newState);
+		auto lockedConnection = connection();
+		for (auto&& c : ourServer.server()->connections()) {
+			if (lockedConnection != c && (static_cast<LobbyConnectionState*>(c->state())->player()->client->id == ourPlayer->client->id)) {
+				c->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<IllegalResponse>("Logged in elsewhere.")));
+				c->disconnect();
+			}
+		}
 		loggedIn = true;
 		return true;
 	} catch (...) {

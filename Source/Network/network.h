@@ -97,6 +97,16 @@ namespace MV {
 			a_script.add(chaiscript::fun(&Client::clientServerTime), "clientServerTime");
 		}
 
+		void disconnect() {
+			if (socket) {
+				socket->shutdown(boost::asio::ip::tcp::socket::shutdown_both);
+				socket->close();
+				socket.reset();
+			}
+			remainingTimeDeltas = EXPECTED_TIMESTEPS;
+			std::cout << "client.disconnect();" << std::endl;
+		}
+
 	private:
 		Client(const MV::Url& a_url, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail, const std::function<void()> &a_onInitialized) :
 			url(a_url),
@@ -120,6 +130,7 @@ namespace MV {
 
 		void HandleError(const boost::system::error_code &a_err, const std::string &a_section) {
 			if (socket) {
+				socket->shutdown(boost::asio::ip::tcp::socket::shutdown_both);
 				socket->close();
 				socket.reset();
 			}
@@ -130,7 +141,7 @@ namespace MV {
 
 		MV::Url url;
 
-		std::mutex lock;
+		std::recursive_mutex lock;
 
 		boost::asio::io_service ioService;
 		boost::asio::ip::tcp::resolver resolver;
@@ -197,6 +208,7 @@ namespace MV {
 		}
 
 		~Connection() {
+			std::cout << "Connection::~Connection()\n";
 			socket.reset();
 		}
 
@@ -244,9 +256,10 @@ namespace MV {
 		void sendExcept(const std::string &a_message, Connection* a_connectionToSkip);
 		void update(double a_dt);
 
-		size_t activeConnections() const {
-			return connections.size();
+		std::vector<std::shared_ptr<Connection>>& connections() {
+			return ourConnections;
 		}
+
 	private:
 		void acceptClients();
 
@@ -255,7 +268,7 @@ namespace MV {
 		boost::asio::io_service ioService;
  		boost::asio::ip::tcp::acceptor acceptor;
 
-		std::vector<std::shared_ptr<Connection>> connections;
+		std::vector<std::shared_ptr<Connection>> ourConnections;
 
 		std::unique_ptr<std::thread> worker;
 		std::unique_ptr<boost::asio::io_service::work> work;

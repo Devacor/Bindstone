@@ -82,6 +82,10 @@ public:
 		}
 		onLoginResponseSignal(a_response);
 	}
+
+	std::shared_ptr<MV::Client> client() {
+		return ourClient;
+	}
 private:
 	Game(const Game &) = delete;
 	Game& operator=(const Game &) = delete;
@@ -102,7 +106,7 @@ private:
 
 	std::shared_ptr<Player> localPlayer;
 
-	std::shared_ptr<MV::Client> client;
+	std::shared_ptr<MV::Client> ourClient;
 
 	MV::Task task;
 	

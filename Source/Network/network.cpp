@@ -50,7 +50,7 @@ namespace MV {
 					if (!a_err) {
 						message->readContentFromBuffer();
 						{
-							std::lock_guard<std::mutex> guard(lock);
+							std::lock_guard<std::recursive_mutex> guard(lock);
 							if (remainingTimeDeltas > 0) {
 								appendClientServerTime(message);
 							} else {
@@ -92,7 +92,7 @@ namespace MV {
 		} else{
 			tryInitializeCallback();
 			if (!inbox.empty()) {
-				std::lock_guard<std::mutex> guard(lock);
+				std::lock_guard<std::recursive_mutex> guard(lock);
 
 				for (auto&& message : inbox) {
 					try {
@@ -108,14 +108,15 @@ namespace MV {
 
 	void Client::send(const std::string &a_content) {
 		require<DeviceException>(connected() || a_content == "T", "Failed to send message due to lack of connection.");
+		auto self = shared_from_this();
 		ioService.post([=] {
-			auto self = shared_from_this();
+			self;
 			auto message = std::make_shared<NetworkMessage>(a_content);
 			boost::asio::async_write(*socket, boost::asio::buffer(message->headerAndContent(), message->headerAndContentSize()), [self, message](boost::system::error_code a_err, size_t a_amount) {
 				if (a_err) {
 					self->HandleError(a_err, "write");
 				}
-			}); 
+			});
 		});
 	}
 
@@ -168,13 +169,13 @@ namespace MV {
 	}
 
 	void Server::send(const std::string &a_message) {
-		for (auto&& connection : connections) {
+		for (auto&& connection : ourConnections) {
 			connection->send(a_message);
 		}
 	}
 
 	void Server::sendExcept(const std::string &a_message, Connection* a_exceptConnection) {
-		for (auto&& connection : connections) {
+		for (auto&& connection : ourConnections) {
 			if (connection.get() != a_exceptConnection) {
 				connection->send(a_message);
 			}
@@ -189,7 +190,7 @@ namespace MV {
 				connection->initialize(connectionStateFactory);
 
 				std::lock_guard<std::mutex> guard(lock);
-				connections.push_back(connection);
+				ourConnections.push_back(connection);
 
 				connection->sendTimeStamp();
 				connection->initiateRead();
@@ -214,7 +215,8 @@ namespace MV {
 	}
 
 	void Server::update(double a_dt) {
-		connections.erase(std::remove_if(connections.begin(), connections.end(), [&](auto &c) {
+		auto startSize = ourConnections.size();
+		ourConnections.erase(std::remove_if(ourConnections.begin(), ourConnections.end(), [&](auto &c) {
 			try {
 				c->update(a_dt);
 			} catch (std::exception &e) {
@@ -223,12 +225,15 @@ namespace MV {
 				std::cerr << "Unknown Exception for connection update!" << std::endl;
 			}
 			return c->disconnected();
-		}), connections.end());
+		}), ourConnections.end());
+		if (startSize != ourConnections.size()) {
+			std::cout << "Connections lost: " << startSize - ourConnections.size() << std::endl;
+		}
 	}
 
 	void Connection::send(const std::string &a_content) {
-		ioService.post([=] {
-			auto self = shared_from_this();
+		auto self = shared_from_this();
+		ioService.post([&, self, a_content] {
 			auto message = std::make_shared<NetworkMessage>(a_content);
 			boost::asio::async_write(*socket, boost::asio::buffer(message->headerAndContent(), message->headerAndContentSize()), [self, message](boost::system::error_code a_err, size_t a_amount) {
 				if (a_err) {

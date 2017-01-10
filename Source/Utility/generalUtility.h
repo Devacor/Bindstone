@@ -15,6 +15,7 @@
 #include <mutex>
 #include <cctype>
 #include <algorithm>
+#include <set>
 
 #include "Utility/require.hpp"
 #include <boost/uuid/uuid.hpp>
@@ -597,6 +598,32 @@ namespace MV {
 	private:
 		std::shared_ptr<CallbackQueue> queue;
 		std::function<void()> boundCallback;
+	};
+
+	class LifespanTest {
+	public:
+		~LifespanTest() {
+			std::cout << "--LifespanTest[" << ourId << "]" << std::endl;
+			active.erase(ourId);
+		}
+
+		static std::shared_ptr<LifespanTest> make() {
+			return std::shared_ptr<LifespanTest>(new LifespanTest(count++));
+		}
+
+		size_t id() const {
+			return ourId;
+		}
+	private:
+		LifespanTest(size_t a_id) :ourId(a_id) {
+			active.insert(ourId);
+			std::cout << "++LifespanTest[" << ourId << "]" << std::endl;
+		}
+
+		size_t ourId;
+
+		static size_t count;
+		static std::set<size_t> active;
 	};
 }
 #endif

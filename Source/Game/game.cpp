@@ -25,7 +25,7 @@ void Game::initializeData() {
 }
 
 void Game::initializeClientConnection() {
-	client = MV::Client::make(MV::Url{ /*"http://96.229.120.252:22325"*/ "http://54.218.22.3:22325" }, [=](const std::string &a_message) {
+	ourClient = MV::Client::make(MV::Url{ "http://localhost:22325" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
 		auto value = MV::fromBinaryString<std::shared_ptr<ClientAction>>(a_message);
 		value->execute(*this);
 	}, [&](const std::string &a_dcreason) {
@@ -80,7 +80,10 @@ void Game::initializeWindow(){
 bool Game::update(double dt) {
 	lastUpdateDelta = dt;
 	gameData.managers().pool.run();
-	client->update();
+	if (!ourClient->connected()) {
+		ourClient->reconnect();
+	}
+	ourClient->update();
 	if (done) {
 		done = false;
 		return false;
@@ -194,7 +197,7 @@ void Game::hook(chaiscript::ChaiScript &a_script) {
 	a_script.add(chaiscript::fun(&Game::ourMouse), "mouse");
 	a_script.add(chaiscript::fun(&Game::enterGame), "enterGame");
 	a_script.add(chaiscript::fun(&Game::killGame), "killGame");
-	a_script.add(chaiscript::fun(&Game::client), "client");
+	a_script.add(chaiscript::fun(&Game::ourClient), "client");
 
 	MV::SignalRegister<void(LoginResponse&)>::hook(a_script);
 	a_script.add(chaiscript::fun(&Game::onLoginResponse), "onLoginResponse");

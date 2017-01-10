@@ -185,7 +185,7 @@ namespace MV {
 
 	std::string toString(const std::wstring& ws) {
 		std::string s;
-		std::for_each(ws.begin(), ws.end(), [&](const UtfChar &wc){
+		std::for_each(ws.begin(), ws.end(), [&](const wchar_t &wc){
 			s+=toString(wc);
 		});
 		return s;
@@ -250,4 +250,7 @@ namespace MV {
 		return randomString("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_", a_length);
 	}
 
+	size_t LifespanTest::count = 0;
+
+	std::set<size_t> LifespanTest::active = {};
 }

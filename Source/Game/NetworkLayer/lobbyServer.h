@@ -127,13 +127,23 @@ public:
 		MV::insertSorted(seekers, a_seeker);
 	}
 
+	void cull() {
+		std::lock_guard<std::mutex> guard(lock);
+		seekers.erase(std::remove_if(seekers.begin(), seekers.end(), [&](auto& seeker) {
+			if (auto lockedSeeker = seeker.lock()) {
+				return lockedSeeker->lifespan.expired();
+			}
+			return true;
+		}), seekers.end());
+	}
+
 	void remove(MatchSeeker* a_removeSeeker) {
 		std::lock_guard<std::mutex> guard(lock);
 		seekers.erase(std::remove_if(seekers.begin(), seekers.end(), [&](auto& seeker){
 			if (auto lockedSeeker = seeker.lock()) {
-				return lockedSeeker.get() == a_removeSeeker;
+				return lockedSeeker.get() == a_removeSeeker || lockedSeeker->lifespan.expired();
 			} else {
-				return false;
+				return true;
 			}
 		}), seekers.end());
 	}
@@ -142,8 +152,9 @@ public:
 
 	std::vector<std::pair<std::shared_ptr<MatchSeeker>, std::shared_ptr<MatchSeeker>>> getMatchPairs(double a_dt) {
 		std::vector<std::pair<std::shared_ptr<MatchSeeker>, std::shared_ptr<MatchSeeker>>> pairs;
-		for (size_t i = 0; i < seekers.size(); ++i) {
-			if (auto current = seekers[i].lock()) {
+		size_t i = 0;
+		for (auto it = seekers.begin(); it != seekers.end();) {
+			if (auto current = it->lock()) {
 				if (auto lifespan = current->lifespan.lock()) {
 					if (!current->matching) {
 						current->time += a_dt;
@@ -151,7 +162,7 @@ public:
 						double currentBest; std::shared_ptr<MatchSeeker> opponent;
 						std::tie(opponent, currentBest) = opponentFromIndex(i, current);
 
-						if (opponent && (current->tolerance() <= currentBest)) {
+						if (opponent && (currentBest <= current->tolerance())) {
 							if (auto opponentLifespan = opponent->lifespan.lock()) {
 								std::cout << "Matching [" << current->player()->client->id << "] vs [" << opponent->player()->client->id << "]" << std::endl;
 								current->matching = true;
@@ -160,8 +171,12 @@ public:
 							}
 						}
 					}
+					++it;
+					++i;
+					continue;
 				}
 			}
+			it = seekers.erase(it);
 		}
 		return pairs;
 	}
@@ -221,6 +236,7 @@ public:
 		normalQueue.update(dt);
 		threadPool.run();
 		emailPool.run();
+		dbPool.run();
 
 		if (_kbhit()) {
 			switch (_getch()) {
@@ -231,7 +247,7 @@ public:
 				normalQueue.print();
 				break;
 			case 'c':
-				std::cout << "Connections: " << ourServer->activeConnections() << std::endl;
+				std::cout << "Connections: " << ourServer->connections().size() << std::endl;
 				break;
 			}
 		}

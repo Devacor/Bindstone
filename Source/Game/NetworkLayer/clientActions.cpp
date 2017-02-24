@@ -19,5 +19,5 @@ void IllegalResponse::execute(Game& /*a_game*/) {
 }
 
 void MatchedResponse::execute(Game& a_game) {
-	a_game.enterGameServer(gameServer);
+	a_game.enterGameServer(gameServer, secret);
 }

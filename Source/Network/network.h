@@ -130,8 +130,6 @@ namespace MV {
 
 		void HandleError(const boost::system::error_code &a_err, const std::string &a_section) {
 			if (socket) {
-				socket->shutdown(boost::asio::ip::tcp::socket::shutdown_both);
-				socket->close();
 				socket.reset();
 			}
 			remainingTimeDeltas = EXPECTED_TIMESTEPS;

@@ -8,9 +8,6 @@
 namespace MV {
 
 	void Client::initiateConnection() {
-		if (socket) {
-			socket->close();
-		}
 		remainingTimeDeltas = EXPECTED_TIMESTEPS;
 		socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
 
@@ -32,7 +29,7 @@ namespace MV {
 		} else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
 			// The connection failed. Try the next endpoint in the list.
 			std::cerr << "Trying next endpoint: " << a_err.message() << std::endl;
-			socket->close();
+			socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
 			auto endpoint = *endpoint_iterator;
 			socket->async_connect(endpoint, boost::bind(&Client::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
 		} else {

@@ -119,8 +119,8 @@ inline bool operator<(const ServerPlayer::Rating& left, const ServerPlayer::Rati
 }
 
 struct Player {
-	std::string id;
-	std::string name;
+	std::string email;
+	std::string handle;
 
 	Wallet wallet;
 
@@ -132,8 +132,8 @@ struct Player {
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(
-			CEREAL_NVP(id),
-			CEREAL_NVP(name),
+			CEREAL_NVP(email),
+			CEREAL_NVP(handle),
 			CEREAL_NVP(experience),
 			CEREAL_NVP(wallet),
 			CEREAL_NVP(unlocked),
@@ -142,7 +142,7 @@ struct Player {
 	}
 
 	bool operator==(const Player& a_rhs) const {
-		return id == a_rhs.id;
+		return email == a_rhs.email;
 	}
 
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);

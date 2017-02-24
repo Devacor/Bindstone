@@ -19,10 +19,10 @@
 
 #include <conio.h>
 
-class ServerAction;
+class ServerUserAction;
 class LobbyServer;
 class MatchQueue;
-class LobbyConnectionState;
+class LobbyUserConnectionState;
 
 struct MatchSeeker {
 	MatchSeeker(const std::shared_ptr<MV::Connection> &a_connection, MatchQueue& a_queue);
@@ -52,15 +52,15 @@ struct MatchSeeker {
 
 	double time = 0.0;
 	bool matching = false;
-	LobbyConnectionState* state;
+	LobbyUserConnectionState* state;
 	MatchQueue& queue;
 };
 
 bool operator<(MatchSeeker &a_lhs, MatchSeeker &a_rhs);
 
-class LobbyConnectionState : public MV::ConnectionStateBase {
+class LobbyUserConnectionState : public MV::ConnectionStateBase {
 public:
-	LobbyConnectionState(const std::shared_ptr<MV::Connection> &a_connection, LobbyServer& a_server);
+	LobbyUserConnectionState(const std::shared_ptr<MV::Connection> &a_connection, LobbyServer& a_server);
 
 	virtual void message(const std::string &a_message);
 
@@ -72,7 +72,7 @@ public:
 		return loggedIn;
 	}
 
-	bool authenticate(const std::string &a_newState, const std::string &a_serverState);
+	bool authenticate(const std::string& a_email, const std::string& a_name, const std::string &a_newState, const std::string &a_serverState);
 
 	std::string state() const {
 		return activeState;
@@ -88,6 +88,7 @@ public:
 
 	std::shared_ptr<MatchSeeker> seekMatch(MatchQueue& a_queue) {
 		if (auto strongConnection = connection()) {
+			//strongConnection->state = "seeking";
 			seeking = std::make_shared<MatchSeeker>(strongConnection, a_queue);
 			return seeking;
 		}
@@ -113,7 +114,35 @@ private:
 	std::shared_ptr<MatchSeeker> seeking;
 };
 
-class LobbyServer;
+class LobbyGameConnectionState : public MV::ConnectionStateBase {
+public:
+	enum State {WAITING, OCCUPIED};
+
+	LobbyGameConnectionState(const std::shared_ptr<MV::Connection> &a_connection, LobbyServer& a_server);
+
+	virtual void message(const std::string &a_message);
+
+	LobbyServer& server() {
+		return ourServer;
+	}
+
+	State state() const {
+		return activeState;
+	}
+
+	void state(const State a_newState) {
+		activeState = a_newState;
+	}
+
+protected:
+	virtual void connectImplementation() override;
+
+private:
+	
+	std::string queueType;
+	State activeState;
+	LobbyServer& ourServer;
+};
 
 class MatchQueue {
 public:
@@ -164,7 +193,7 @@ public:
 
 						if (opponent && (currentBest <= current->tolerance())) {
 							if (auto opponentLifespan = opponent->lifespan.lock()) {
-								std::cout << "Matching [" << current->player()->client->id << "] vs [" << opponent->player()->client->id << "]" << std::endl;
+								std::cout << "Matching [" << current->player()->client->email << "] vs [" << opponent->player()->client->email << "]" << std::endl;
 								current->matching = true;
 								opponent->matching = true;
 								pairs.emplace_back(current, opponent);
@@ -224,14 +253,19 @@ public:
 		dbPool(1), //currently locked to 1 as pqxx requires one per thread. We can expand this later with more connections and a different query interface.
 		rankedQueue(*this, "ranked"),
 		normalQueue(*this, "normal"),
-		ourServer( std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325),
+		ourUserServer( std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325),
 			[this](const std::shared_ptr<MV::Connection> &a_connection) {
-				return std::make_unique<LobbyConnectionState>(a_connection, *this);
+				return std::make_unique<LobbyUserConnectionState>(a_connection, *this);
+			})),
+		ourGameServer(std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325),
+			[this](const std::shared_ptr<MV::Connection> &a_connection) {
+				return std::make_unique<LobbyGameConnectionState>(a_connection, *this);
 			})) {
 	}
 
 	void update(double dt) {
-		ourServer->update(dt);
+		ourUserServer->update(dt);
+		ourGameServer->update(dt);
 		rankedQueue.update(dt);
 		normalQueue.update(dt);
 		threadPool.run();
@@ -247,7 +281,7 @@ public:
 				normalQueue.print();
 				break;
 			case 'c':
-				std::cout << "Connections: " << ourServer->connections().size() << std::endl;
+				std::cout << "Connections: " << ourUserServer->connections().size() << std::endl;
 				break;
 			}
 		}
@@ -266,7 +300,7 @@ public:
 	}
 
 	std::shared_ptr<MV::Server> server() {
-		return ourServer;
+		return ourUserServer;
 	}
 
 	MV::ThreadPool& databasePool() {
@@ -286,12 +320,21 @@ public:
 		return normalQueue;
 	}
 
+	MatchQueue& queue(const std::string &a_type) {
+		if (a_type == rankedQueue.id()) {
+			return rankedQueue;
+		} else {
+			return normalQueue;
+		}
+	}
+
 private:
 	LobbyServer(const LobbyServer &) = delete;
 	LobbyServer& operator=(const LobbyServer &) = delete;
 
 	std::shared_ptr<pqxx::connection> db;
-	std::shared_ptr<MV::Server> ourServer;
+	std::shared_ptr<MV::Server> ourUserServer;
+	std::shared_ptr<MV::Server> ourGameServer;
 
 	MV::ThreadPool threadPool;
 	MV::ThreadPool emailPool;

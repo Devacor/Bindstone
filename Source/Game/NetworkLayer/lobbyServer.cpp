@@ -2,12 +2,12 @@
 #include "serverActions.h"
 #include "clientActions.h"
 
-LobbyConnectionState::LobbyConnectionState(const std::shared_ptr<MV::Connection> &a_connection, LobbyServer& a_server) :
+LobbyUserConnectionState::LobbyUserConnectionState(const std::shared_ptr<MV::Connection> &a_connection, LobbyServer& a_server) :
 	MV::ConnectionStateBase(a_connection),
 	ourServer(a_server) {
 }
 
-void LobbyConnectionState::connectImplementation() {
+void LobbyUserConnectionState::connectImplementation() {
 	auto in = MV::toBinaryStringCast<ClientAction>(std::make_shared<ServerDetails>());
 	std::cout << "SENDING:\n" << in << std::endl;
 	auto out = MV::fromBinaryString<std::shared_ptr<ClientAction>>(in);
@@ -16,18 +16,20 @@ void LobbyConnectionState::connectImplementation() {
 	connection()->send(in);
 }
 
-void LobbyConnectionState::message(const std::string &a_message) {
-	auto action = MV::fromBinaryString<std::shared_ptr<ServerAction>>(a_message);
+void LobbyUserConnectionState::message(const std::string &a_message) {
+	auto action = MV::fromBinaryString<std::shared_ptr<ServerUserAction>>(a_message);
 	action->execute(this);
 }
 
-bool LobbyConnectionState::authenticate(const std::string &a_newState, const std::string &a_serverState) {
+bool LobbyUserConnectionState::authenticate(const std::string& a_email, const std::string& a_name, const std::string &a_newState, const std::string &a_serverState) {
 	try {
 		ourPlayer = MV::fromJson<std::shared_ptr<ServerPlayer>>(a_serverState);
 		ourPlayer->client = MV::fromJson<std::shared_ptr<Player>>(a_newState);
+		ourPlayer->client->email = a_email;
+		ourPlayer->client->handle = a_name;
 		auto lockedConnection = connection();
 		for (auto&& c : ourServer.server()->connections()) {
-			if (lockedConnection != c && (static_cast<LobbyConnectionState*>(c->state())->player()->client->id == ourPlayer->client->id)) {
+			if (lockedConnection != c && (static_cast<LobbyUserConnectionState*>(c->state())->player()->client->email == ourPlayer->client->email)) {
 				c->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<IllegalResponse>("Logged in elsewhere.")));
 				c->disconnect();
 			}
@@ -39,9 +41,28 @@ bool LobbyConnectionState::authenticate(const std::string &a_newState, const std
 	}
 }
 
+LobbyGameConnectionState::LobbyGameConnectionState(const std::shared_ptr<MV::Connection> &a_connection, LobbyServer& a_server) :
+	MV::ConnectionStateBase(a_connection),
+	ourServer(a_server) {
+}
+
+void LobbyGameConnectionState::connectImplementation() {
+	auto in = MV::toBinaryStringCast<ClientAction>(std::make_shared<ServerDetails>());
+	std::cout << "SENDING:\n" << in << std::endl;
+	auto out = MV::fromBinaryString<std::shared_ptr<ClientAction>>(in);
+	std::cout << std::static_pointer_cast<ServerDetails>(out)->forceClientVersion << std::endl;
+
+	connection()->send(in);
+}
+
+void LobbyGameConnectionState::message(const std::string &a_message) {
+	auto action = MV::fromBinaryString<std::shared_ptr<ServerGameAction>>(a_message);
+	action->execute(this);
+}
+
 MatchSeeker::MatchSeeker(const std::shared_ptr<MV::Connection> &a_connection, MatchQueue& a_queue) :
 	lifespan(a_connection),
-	state(static_cast<LobbyConnectionState*>(a_connection->state())),
+	state(static_cast<LobbyUserConnectionState*>(a_connection->state())),
 	queue(a_queue) {
 }
 
@@ -67,11 +88,16 @@ void MatchQueue::update(double a_dt) {
 
 	auto pairs = getMatchPairs(a_dt);
 
+	std::set<std::string> emailsToRemove;
+
 	for (auto && match : pairs) {
 		if (auto firstConnection = match.first->lifespan.lock()) {
 			if (auto secondConnection = match.second->lifespan.lock()) {
+				emailsToRemove.insert(match.first->player()->client->email);
+				emailsToRemove.insert(match.second->player()->client->email);
 				try {
-					auto response = MV::toBinaryStringCast<ClientAction>(std::make_shared<MatchedResponse>("TODO: Supply Server IP"));
+					auto secret = MV::randomInteger(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
+					auto response = MV::toBinaryStringCast<ClientAction>(std::make_shared<MatchedResponse>("TODO: Supply Server IP", secret));
 					firstConnection->send(response);
 					secondConnection->send(response);
 				} catch (...) {
@@ -80,12 +106,20 @@ void MatchQueue::update(double a_dt) {
 			}
 		}
 	}
+
+	seekers.erase(std::remove_if(seekers.begin(), seekers.end(), [&](auto& seeker) {
+		if (auto lockedSeeker = seeker.lock()) {
+			return lockedSeeker->lifespan.expired() || emailsToRemove.find(lockedSeeker->player()->client->email) != emailsToRemove.end();
+		} else {
+			return true;
+		}
+	}), seekers.end());
 }
 
 void MatchQueue::print() const {
 	for (auto&& seeker : seekers) {
 		if (auto lockedSeeker = seeker.lock()) {
-			std::cout << lockedSeeker->player()->client->id << ":\t\t" << lockedSeeker->time << "\n";
+			std::cout << lockedSeeker->player()->client->email << ":\t\t" << lockedSeeker->time << "\n";
 		}
 	}
 }

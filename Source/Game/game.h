@@ -53,13 +53,13 @@ public:
 		return rootScene;
 	}
 
-	void enterGameServer(const std::string &gameServer) {
-		std::cout << "Game Found: " << gameServer << std::endl;
+	void enterGameServer(const std::string &gameServer, int64_t secret) {
+		std::cout << "Game Found: " << gameServer << " Secret: " << secret << std::endl;
 	}
 
 	GameInstance& enterGame() {
 		auto enemyPlayer = std::make_shared<Player>();
-		enemyPlayer->name = "Jai";
+		enemyPlayer->handle = "Jai";
 		enemyPlayer->loadout.buildings = { "life", "life", "life", "life", "life", "life", "life", "life" };
 		enemyPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
 		enemyPlayer->wallet.add(Wallet::CurrencyType::SOFT, 5000);
@@ -83,8 +83,8 @@ public:
 		onLoginResponseSignal(a_response);
 	}
 
-	std::shared_ptr<MV::Client> client() {
-		return ourClient;
+	std::shared_ptr<MV::Client> lobbyClient() {
+		return ourLobbyClient;
 	}
 private:
 	Game(const Game &) = delete;
@@ -106,7 +106,7 @@ private:
 
 	std::shared_ptr<Player> localPlayer;
 
-	std::shared_ptr<MV::Client> ourClient;
+	std::shared_ptr<MV::Client> ourLobbyClient;
 
 	MV::Task task;
 	
@@ -115,6 +115,9 @@ private:
 	double lastUpdateDelta;
 	MV::Scene::SafeComponent<MV::Scene::Sprite> screenScaler;
 	MV::MouseState ourMouse;
+
+	std::string loginId;
+	std::string loginPassword;
 };
 
 void sdl_quit(void);

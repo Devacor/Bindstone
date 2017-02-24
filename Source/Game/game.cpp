@@ -11,7 +11,7 @@ Game::Game(Managers& a_managers) :
 	done(false),
 	scriptEngine(MV::create_chaiscript_stdlib(), MV::chaiscript_module_paths(), MV::chaiscript_use_paths()),
 	onLoginResponse(onLoginResponseSignal){
-	
+
 	MV::initializeFilesystem();
 	initializeData();
 	initializeWindow();
@@ -25,7 +25,7 @@ void Game::initializeData() {
 }
 
 void Game::initializeClientConnection() {
-	ourClient = MV::Client::make(MV::Url{ "http://localhost:22325" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
+	ourLobbyClient = MV::Client::make(MV::Url{ "http://localhost:22325" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
 		auto value = MV::fromBinaryString<std::shared_ptr<ClientAction>>(a_message);
 		value->execute(*this);
 	}, [&](const std::string &a_dcreason) {
@@ -40,7 +40,7 @@ void Game::initializeWindow(){
 	MV::Size<> worldSize(960, 640);
 	MV::Size<int> windowSize(960, 640);
 
-	gameData.managers().renderer.makeHeadless().
+	gameData.managers().renderer.//makeHeadless().
 		window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
 
 	if (!gameData.managers().renderer.initialize(windowSize, worldSize)) {
@@ -65,7 +65,7 @@ void Game::initializeWindow(){
 	}
 	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::MouseState& a_mouse, LocalData& a_data)
 	localPlayer = std::make_shared<Player>();
-	localPlayer->name = "Dervacor";
+	localPlayer->handle = "Dervacor";
 	localPlayer->loadout.buildings = {"life", "life", "life", "life", "life", "life", "life", "life"};
 	localPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
 
@@ -80,10 +80,10 @@ void Game::initializeWindow(){
 bool Game::update(double dt) {
 	lastUpdateDelta = dt;
 	gameData.managers().pool.run();
-	if (!ourClient->connected()) {
-		ourClient->reconnect();
+	if (!ourLobbyClient->connected()) {
+		ourLobbyClient->reconnect();
 	}
-	ourClient->update();
+	ourLobbyClient->update();
 	if (done) {
 		done = false;
 		return false;
@@ -182,7 +182,7 @@ void Game::hook(chaiscript::ChaiScript &a_script) {
 	MV::Client::hook(a_script);
 	CreatePlayer::hook(a_script);
 	ClientAction::hook(a_script);
-	ServerAction::hook(a_script);
+	ServerUserAction::hook(a_script);
 	LoginRequest::hook(a_script);
 	LoginResponse::hook(a_script);
 	FindMatchRequest::hook(a_script);
@@ -197,7 +197,9 @@ void Game::hook(chaiscript::ChaiScript &a_script) {
 	a_script.add(chaiscript::fun(&Game::ourMouse), "mouse");
 	a_script.add(chaiscript::fun(&Game::enterGame), "enterGame");
 	a_script.add(chaiscript::fun(&Game::killGame), "killGame");
-	a_script.add(chaiscript::fun(&Game::ourClient), "client");
+	a_script.add(chaiscript::fun(&Game::ourLobbyClient), "client");
+	a_script.add(chaiscript::fun(&Game::loginId), "loginId");
+	a_script.add(chaiscript::fun(&Game::loginPassword), "loginPassword");
 
 	MV::SignalRegister<void(LoginResponse&)>::hook(a_script);
 	a_script.add(chaiscript::fun(&Game::onLoginResponse), "onLoginResponse");

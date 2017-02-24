@@ -5,7 +5,7 @@
 #include "Utility/cerealUtility.h"
 
 pqxx::result CreatePlayer::selectUser(pqxx::work* a_transaction) {
-	std::string activeQuery = "SELECT verified, passhash, passsalt, passiterations, state, serverstate FROM players WHERE ";
+	std::string activeQuery = "SELECT verified, passhash, passsalt, passiterations, state, serverstate, email, handle FROM players WHERE ";
 	activeQuery += "email = " + a_transaction->quote(email);
 	activeQuery += " OR ";
 	activeQuery += "handle = " + a_transaction->quote(handle);
@@ -13,7 +13,7 @@ pqxx::result CreatePlayer::selectUser(pqxx::work* a_transaction) {
 	return a_transaction->exec(activeQuery);
 }
 
-pqxx::result CreatePlayer::createPlayer(pqxx::work* transaction, LobbyConnectionState *a_connection) {
+pqxx::result CreatePlayer::createPlayer(pqxx::work* transaction, LobbyUserConnectionState *a_connection) {
 	auto salt = MV::randomString(32);
 
 	a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("User created, woot!")));
@@ -21,7 +21,7 @@ pqxx::result CreatePlayer::createPlayer(pqxx::work* transaction, LobbyConnection
 	return transaction->exec(createPlayerQueryString(*transaction, salt));;
 }
 
-void CreatePlayer::execute(LobbyConnectionState* a_connection) {
+void CreatePlayer::execute(LobbyUserConnectionState* a_connection) {
 	auto self = std::static_pointer_cast<CreatePlayer>(shared_from_this());
 	auto connectionLifespan = a_connection->connection();
 	a_connection->server().databasePool().task([=]() mutable {
@@ -48,7 +48,7 @@ void CreatePlayer::execute(LobbyConnectionState* a_connection) {
 					auto hashedPassword = MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>());
 					if (hashedPassword == result[0][1].c_str()) {
 						std::string playerStateJson = result[0][4].c_str();
-						if (a_connection->authenticate(playerStateJson, result[0][5].c_str())) {
+						if (a_connection->authenticate(result[0][6].c_str(), result[0][7].c_str(), playerStateJson, result[0][5].c_str())) {
 							a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Successful login.", playerStateJson, true)));
 							MV::info("Login Success: [", email, "]");
 						} else {
@@ -71,13 +71,13 @@ void CreatePlayer::execute(LobbyConnectionState* a_connection) {
 	});
 }
 
-void CreatePlayer::sendValidationEmail(LobbyConnectionState *a_connection, const std::string &a_passSalt) {
+void CreatePlayer::sendValidationEmail(LobbyUserConnectionState *a_connection, const std::string &a_passSalt) {
 	a_connection->server().email(MV::Email::Addresses("mike@m2tm.net", email), "Bindstone Account Activation", "This will be a link to activate your account, for now... Check this out: https://www.youtube.com/watch?v=VAZsBEELqPw \n" + a_passSalt);
 }
 
 std::string CreatePlayer::makeSaveString() {
 	auto newPlayer = std::make_shared<Player>();
-	newPlayer->name = handle;
+	newPlayer->handle = handle;
 	newPlayer->loadout.buildings = { "life", "life", "life", "life", "life", "life", "life", "life" };
 	newPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
 
@@ -103,7 +103,7 @@ std::string CreatePlayer::createPlayerQueryString(pqxx::work &transaction, const
 }
 
 pqxx::result LoginRequest::selectUser(pqxx::work* a_transaction) {
-	std::string activeQuery = "SELECT verified, passhash, passsalt, passiterations, state, serverstate FROM players WHERE ";
+	std::string activeQuery = "SELECT verified, passhash, passsalt, passiterations, state, serverstate, email, handle FROM players WHERE ";
 	activeQuery += "email = " + a_transaction->quote(identifier);
 	activeQuery += " OR ";
 	activeQuery += "handle = " + a_transaction->quote(identifier);
@@ -111,7 +111,7 @@ pqxx::result LoginRequest::selectUser(pqxx::work* a_transaction) {
 	return a_transaction->exec(activeQuery);
 }
 
-void LoginRequest::execute(LobbyConnectionState* a_connection) {
+void LoginRequest::execute(LobbyUserConnectionState* a_connection) {
 	auto self = std::static_pointer_cast<LoginRequest>(shared_from_this());
 	auto connectionLifespan = a_connection->connection();
 	a_connection->server().databasePool().task([=]() mutable {
@@ -137,7 +137,7 @@ void LoginRequest::execute(LobbyConnectionState* a_connection) {
 					auto hashedPassword = MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>());
 					if (hashedPassword == result[0][1].c_str()) {
 						std::string playerStateJson = result[0][4].c_str();
-						if (a_connection->authenticate(playerStateJson, result[0][5].c_str())) {
+						if (a_connection->authenticate(result[0][6].c_str(), result[0][7].c_str(), playerStateJson, result[0][5].c_str())) {
 							a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Successful login.", MV::sha512(playerStateJson) == saveHash ? "" : playerStateJson, true)));
 							MV::info("Login Success: [", identifier, "]");
 						} else {
@@ -160,11 +160,7 @@ void LoginRequest::execute(LobbyConnectionState* a_connection) {
 	});
 }
 
-void FindMatchRequest::execute(LobbyConnectionState* a_connection) {
+void FindMatchRequest::execute(LobbyUserConnectionState* a_connection) {
 	a_connection->state("finding");
-	if (type == NORMAL) {
-		a_connection->server().normal().add(a_connection->seekMatch(a_connection->server().normal()));
-	} else if (type == RANKED) {
-		a_connection->server().ranked().add(a_connection->seekMatch(a_connection->server().ranked()));
-	}
+	a_connection->server().queue(type).add(a_connection->seekMatch(a_connection->server().queue(type)));
 }

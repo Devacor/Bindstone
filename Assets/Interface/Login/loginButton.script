@@ -3,11 +3,13 @@ auto email = scene.get("EmailInput").componentText().text();
 auto password = scene.get("PasswordInput").componentText().text();
 
 game.client.send(LoginRequest(email, password).toNetworkString());
-game.onLoginResponse.connect("LoginButton", fun(response){
+game.onLoginResponse.connect("LoginButton", fun[email,password](response){
   print("Got Message:");
   print(response.success);
   print(response.message);
   if(response.success){
+    game.loginId = email;
+    game.loginPassword = password;
     game.gui.page("Login").hide();
     game.gui.page("Main").show();
   }

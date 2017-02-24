@@ -226,7 +226,7 @@ private:
 			cereal::make_nvp("data", buildingData),
 			cereal::make_nvp("skin", skin),
 			cereal::make_nvp("slot", slot),
-			cereal::make_nvp("player", owningPlayer->id),
+			cereal::make_nvp("player", owningPlayer->email),
 			cereal::make_nvp("Component", cereal::base_class<Component>(this))
 		);
 	}

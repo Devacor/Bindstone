@@ -1,10 +1,12 @@
 #ifndef _ACCOUNTACTIONS_MV_H_
 #define _ACCOUNTACTIONS_MV_H_
 
-#include "Game/NetworkLayer/serverActions.h"
+#include "Game/NetworkLayer/networkAction.h"
+#include "pqxx/pqxx"
+
 #include "Utility/chaiscriptUtility.h"
 
-class CreatePlayer : public ServerUserAction {
+class CreatePlayer : public NetworkAction {
 public:
 	CreatePlayer() {}
 
@@ -20,12 +22,12 @@ public:
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(handle), CEREAL_NVP(email), CEREAL_NVP(password), cereal::make_nvp("ServerAction", cereal::base_class<ServerUserAction>(this)));
+		archive(CEREAL_NVP(handle), CEREAL_NVP(email), CEREAL_NVP(password), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
 	static void hook(chaiscript::ChaiScript& a_script) {
 		a_script.add(chaiscript::user_type<CreatePlayer>(), "CreatePlayer");
-		a_script.add(chaiscript::base_class<ServerUserAction, CreatePlayer>());
+		a_script.add(chaiscript::base_class<NetworkAction, CreatePlayer>());
 		a_script.add(chaiscript::constructor<CreatePlayer(const std::string &a_email, const std::string &a_identifier, const std::string &a_password)>(), "CreatePlayer");
 	}
 
@@ -55,7 +57,7 @@ private:
 CEREAL_REGISTER_TYPE(CreatePlayer);
 
 
-class LoginRequest : public ServerUserAction {
+class LoginRequest : public NetworkAction {
 public:
 	LoginRequest() {}
 	LoginRequest(const std::string &a_identifier, const std::string &a_password) :
@@ -74,13 +76,13 @@ public:
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(identifier), CEREAL_NVP(password), CEREAL_NVP(saveHash), cereal::make_nvp("ServerAction", cereal::base_class<ServerUserAction>(this)));
+		archive(CEREAL_NVP(identifier), CEREAL_NVP(password), CEREAL_NVP(saveHash), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 		doneFlag = false;
 	}
 
 	static void hook(chaiscript::ChaiScript& a_script) {
 		a_script.add(chaiscript::user_type<LoginRequest>(), "LoginRequest");
-		a_script.add(chaiscript::base_class<ServerUserAction, LoginRequest>());
+		a_script.add(chaiscript::base_class<NetworkAction, LoginRequest>());
 		a_script.add(chaiscript::constructor<LoginRequest(const std::string &a_identifier, const std::string &a_password)>(), "LoginRequest");
 		a_script.add(chaiscript::constructor<LoginRequest(const std::string &a_identifier, const std::string &a_password, const std::string &a_saveHash)>(), "LoginRequest");
 	}
@@ -97,30 +99,25 @@ private:
 
 CEREAL_REGISTER_TYPE(LoginRequest);
 
-class FindMatchRequest : public ServerUserAction {
+class FindMatchRequest : public NetworkAction {
 public:
 	FindMatchRequest() {}
 	FindMatchRequest(const std::string &a_type) : type(a_type) {}
 	
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
 
-	virtual bool done() const override { return true; }
-
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(
-			cereal::make_nvp("ServerAction", cereal::base_class<ServerUserAction>(this)),
-			cereal::make_nvp("type", type));
+			cereal::make_nvp("type", type),
+			cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
 	static void hook(chaiscript::ChaiScript& a_script) {
 		a_script.add(chaiscript::user_type<FindMatchRequest>(), "FindMatchRequest");
-		a_script.add(chaiscript::base_class<ServerUserAction, FindMatchRequest>());
+		a_script.add(chaiscript::base_class<NetworkAction, FindMatchRequest>());
 		a_script.add(chaiscript::constructor<FindMatchRequest(const std::string &a_type)>(), "FindMatchRequest");
 		a_script.add(chaiscript::fun(&FindMatchRequest::type), "type");
-
-		chaiscript::ModulePtr m = chaiscript::ModulePtr(new chaiscript::Module());
-		a_script.add(m);
 	}
 
 private:
@@ -128,5 +125,19 @@ private:
 };
 
 CEREAL_REGISTER_TYPE(FindMatchRequest);
+
+class ExpectedPlayersNoted : public NetworkAction {
+public:
+	ExpectedPlayersNoted() {}
+
+	virtual void execute(LobbyGameConnectionState* a_connection) override;
+
+	template <class Archive>
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
+		archive(cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	}
+};
+
+CEREAL_REGISTER_TYPE(ExpectedPlayersNoted);
 
 #endif

@@ -3,13 +3,21 @@
 #include "lobbyServer.h"
 #include "Game/player.h"
 #include "Utility/cerealUtility.h"
+#include "Game/NetworkLayer/gameServer.h"
 
+void GameServerAvailable::execute(LobbyGameConnectionState* a_connection) {
+	a_connection->setEndpoint(ourUrl, ourPort);
+}
 
-void GameServerFinishedRequest::execute(LobbyGameConnectionState* a_connection) {
-// 	a_connection->state("finding");
-// 	if (type == NORMAL) {
-// 		a_connection->server().normal().add(a_connection->seekMatch(a_connection->server().normal()));
-// 	} else if (type == RANKED) {
-// 		a_connection->server().ranked().add(a_connection->seekMatch(a_connection->server().ranked()));
-// 	}
+void AssignPlayersToGame::execute(GameServer& a_server) {
+	a_server.assign(left, right, matchQueueId);
+	a_server.lobby()->send(makeNetworkString<ExpectedPlayersNoted>());
+}
+
+void GetFullGameState::execute(GameUserConnectionState* a_connection, GameServer &) {
+	a_connection->connection()->send(makeNetworkString<SuppliedFullGameState>());
+}
+
+void SuppliedFullGameState::execute(Game& a_connection) {
+
 }

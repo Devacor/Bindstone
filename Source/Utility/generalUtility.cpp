@@ -54,15 +54,6 @@ namespace MV {
 	}
 #endif
 
-
-	void systemSleep(int time){
-#ifdef __APPLE__
-		sleep(time);
-#else
-		Sleep(time);
-#endif
-	}
-
 	void initializeFilesystem(){
 #ifdef __APPLE__
 		//from http://stackoverflow.com/questions/516200/relative-paths-not-working-in-xcode-c

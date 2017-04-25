@@ -557,6 +557,12 @@
     <ClCompile Include="Source\Game\NetworkLayer\clientActions.cpp">
       <Filter>Source Files\Game\NetworkLayer</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Game\NetworkLayer\gameServerActions.cpp">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Game\managers.cpp">
+      <Filter>Source Files\Game</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Audio\package.h">
@@ -1021,9 +1027,6 @@
     <ClInclude Include="Source\Game\player.h">
       <Filter>Source Files\Game</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Game\managers.h">
-      <Filter>Source Files\Game</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Game\state.h">
       <Filter>Source Files\Game</Filter>
     </ClInclude>
@@ -1311,6 +1314,15 @@
     </ClInclude>
     <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\chaiscript_stdlib.hpp">
       <Filter>Chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\NetworkLayer\networkAction.h">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\NetworkLayer\gameServerActions.h">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\managers.h">
+      <Filter>Source Files\Game</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

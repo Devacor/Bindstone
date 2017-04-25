@@ -19,5 +19,5 @@ void IllegalResponse::execute(Game& /*a_game*/) {
 }
 
 void MatchedResponse::execute(Game& a_game) {
-	a_game.enterGameServer(gameServer, secret);
+	a_game.enterGameServer(gameServer + ":" + std::to_string(port), secret);
 }

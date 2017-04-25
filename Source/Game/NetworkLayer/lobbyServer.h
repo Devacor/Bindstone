@@ -3,6 +3,7 @@
 
 #include "Utility/package.h"
 #include "Network/package.h"
+#include "Game/NetworkLayer/package.h"
 #include "Game/managers.h"
 
 #include "Game/player.h"
@@ -14,6 +15,7 @@
 #include <tuple>
 
 #include "pqxx/pqxx"
+#include "LINQ/boolinq.hpp"
 
 #include "Utility/cerealUtility.h"
 
@@ -24,9 +26,11 @@ class LobbyServer;
 class MatchQueue;
 class LobbyUserConnectionState;
 
-struct MatchSeeker {
+struct MatchSeeker : public std::enable_shared_from_this<MatchSeeker> {
 	MatchSeeker(const std::shared_ptr<MV::Connection> &a_connection, MatchQueue& a_queue);
 	~MatchSeeker();
+
+	void initialize();
 
 	ServerPlayer* player();
 
@@ -54,6 +58,7 @@ struct MatchSeeker {
 	bool matching = false;
 	LobbyUserConnectionState* state;
 	MatchQueue& queue;
+	int64_t secret;
 };
 
 bool operator<(MatchSeeker &a_lhs, MatchSeeker &a_rhs);
@@ -86,14 +91,7 @@ public:
 		return ourPlayer;
 	}
 
-	std::shared_ptr<MatchSeeker> seekMatch(MatchQueue& a_queue) {
-		if (auto strongConnection = connection()) {
-			//strongConnection->state = "seeking";
-			seeking = std::make_shared<MatchSeeker>(strongConnection, a_queue);
-			return seeking;
-		}
-		return std::shared_ptr<MatchSeeker>();
-	}
+	std::shared_ptr<MatchSeeker> seekMatch(MatchQueue& a_queue);
 
 	void cancelSeekMatch() {
 		seeking.reset();
@@ -116,11 +114,16 @@ private:
 
 class LobbyGameConnectionState : public MV::ConnectionStateBase {
 public:
-	enum State {WAITING, OCCUPIED};
+	enum State {INITIALIZING, AVAILABLE, CONNECTING_PLAYERS, OCCUPIED};
+	static const std::vector<std::string> states;
 
 	LobbyGameConnectionState(const std::shared_ptr<MV::Connection> &a_connection, LobbyServer& a_server);
-
+	~LobbyGameConnectionState() {
+		handleExpiredPlayers();
+	}
 	virtual void message(const std::string &a_message);
+
+	void matchMade(std::shared_ptr<MatchSeeker> a_leftPlayer, std::shared_ptr<MatchSeeker> a_rightPlayer);
 
 	LobbyServer& server() {
 		return ourServer;
@@ -130,18 +133,64 @@ public:
 		return activeState;
 	}
 
+	std::string stateString() const {
+		return states[activeState];
+	}
+
 	void state(const State a_newState) {
 		activeState = a_newState;
 	}
 
+	bool available() const {
+		return activeState == AVAILABLE;
+	}
+
+	std::string url() const {
+		return ourUrl;
+	}
+
+	uint32_t port() const {
+		return ourPort;
+	}
+
+	void setEndpoint(const std::string &a_url, uint32_t a_port) {
+		activeState = AVAILABLE;
+		ourUrl = a_url;
+		ourPort = a_port;
+		std::cout << "GameServer Connected: " << a_url << ":" << a_port << std::endl;
+	}
+
+	void matchMade(const std::vector<std::shared_ptr<MatchSeeker>> a_team1, const std::vector<std::shared_ptr<MatchSeeker>> a_team2) {
+		activeState = OCCUPIED;
+		for (auto&& seeker : a_team1) {
+			seeker->lifespan.lock()->send(
+				makeNetworkString<MessageAction>("User created, woot!")
+			);
+		}
+	}
+
+	void notifyPlayersOfGameServer();
+
+	virtual void update(double a_dt) override;
 protected:
 	virtual void connectImplementation() override;
 
 private:
 	
 	std::string queueType;
-	State activeState;
+	State activeState = INITIALIZING;
 	LobbyServer& ourServer;
+
+	std::string ourUrl;
+	uint32_t ourPort;
+
+	std::shared_ptr<MatchSeeker> leftPlayer;
+	std::shared_ptr<MatchSeeker> rightPlayer;
+
+	void notifyGameServerOfPlayers();
+
+	bool handleExpiredPlayers();
+
 };
 
 class MatchQueue {
@@ -226,7 +275,7 @@ public:
 					}
 				}
 			}
-		}					
+		}
 		return std::make_tuple(opponent, currentBest);
 	}
 
@@ -236,6 +285,8 @@ public:
 
 	void print() const;
 private:
+	void removeMatchedPairsFromSeekers(const std::vector<std::pair<std::shared_ptr<MatchSeeker>, std::shared_ptr<MatchSeeker>>>& pairs);
+
 	const int PLAYERS_TO_SEARCH_FOR_MATCH = 7;
 
 	std::mutex lock;
@@ -257,7 +308,7 @@ public:
 			[this](const std::shared_ptr<MV::Connection> &a_connection) {
 				return std::make_unique<LobbyUserConnectionState>(a_connection, *this);
 			})),
-		ourGameServer(std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325),
+		ourGameServer(std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22326),
 			[this](const std::shared_ptr<MV::Connection> &a_connection) {
 				return std::make_unique<LobbyGameConnectionState>(a_connection, *this);
 			})) {
@@ -282,6 +333,12 @@ public:
 				break;
 			case 'c':
 				std::cout << "Connections: " << ourUserServer->connections().size() << std::endl;
+				break;
+			case 'g':
+				for (auto&& gs : ourGameServer->connections()) {
+					auto* gsState = static_cast<LobbyGameConnectionState*>(gs->state());
+					std::cout << "Game Server: " << gsState->url() << ":" << gsState->port() << " - " << gsState->stateString() << std::endl;
+				}
 				break;
 			}
 		}
@@ -326,6 +383,13 @@ public:
 		} else {
 			return normalQueue;
 		}
+	}
+
+	LobbyGameConnectionState* availableGameServer() {
+		auto foundConnection = boolinq::from(ourGameServer->connections()).firstOrDefault([](const auto& connection) {
+			return static_cast<LobbyGameConnectionState*>(connection->state())->available();
+		});
+		return (foundConnection) ? static_cast<LobbyGameConnectionState*>(foundConnection->state()) : nullptr;
 	}
 
 private:

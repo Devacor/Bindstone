@@ -1,6 +1,7 @@
 #include "lobbyServer.h"
-#include "serverActions.h"
+#include "networkAction.h"
 #include "clientActions.h"
+
 
 LobbyUserConnectionState::LobbyUserConnectionState(const std::shared_ptr<MV::Connection> &a_connection, LobbyServer& a_server) :
 	MV::ConnectionStateBase(a_connection),
@@ -8,16 +9,11 @@ LobbyUserConnectionState::LobbyUserConnectionState(const std::shared_ptr<MV::Con
 }
 
 void LobbyUserConnectionState::connectImplementation() {
-	auto in = MV::toBinaryStringCast<ClientAction>(std::make_shared<ServerDetails>());
-	std::cout << "SENDING:\n" << in << std::endl;
-	auto out = MV::fromBinaryString<std::shared_ptr<ClientAction>>(in);
-	std::cout << std::static_pointer_cast<ServerDetails>(out)->forceClientVersion << std::endl;
-
-	connection()->send(in);
+	connection()->send(makeNetworkString<ServerDetails>());
 }
 
 void LobbyUserConnectionState::message(const std::string &a_message) {
-	auto action = MV::fromBinaryString<std::shared_ptr<ServerUserAction>>(a_message);
+	auto action = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 	action->execute(this);
 }
 
@@ -30,8 +26,9 @@ bool LobbyUserConnectionState::authenticate(const std::string& a_email, const st
 		auto lockedConnection = connection();
 		for (auto&& c : ourServer.server()->connections()) {
 			if (lockedConnection != c && (static_cast<LobbyUserConnectionState*>(c->state())->player()->client->email == ourPlayer->client->email)) {
-				c->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<IllegalResponse>("Logged in elsewhere.")));
+				c->send(makeNetworkString<IllegalResponse>("Logged in elsewhere."));
 				c->disconnect();
+				break;
 			}
 		}
 		loggedIn = true;
@@ -41,23 +38,76 @@ bool LobbyUserConnectionState::authenticate(const std::string& a_email, const st
 	}
 }
 
+std::shared_ptr<MatchSeeker> LobbyUserConnectionState::seekMatch(MatchQueue& a_queue) {
+	if (auto strongConnection = connection()) {
+		seeking = std::make_shared<MatchSeeker>(strongConnection, a_queue);
+		seeking->initialize(); //must be called due to shared_from_this
+		return seeking;
+	}
+	return std::shared_ptr<MatchSeeker>();
+}
+
+const std::vector<std::string> LobbyGameConnectionState::states = { "INITIALIZING", "AVAILABLE", "CONNECTING_PLAYERS", "OCCUPIED" };
+
 LobbyGameConnectionState::LobbyGameConnectionState(const std::shared_ptr<MV::Connection> &a_connection, LobbyServer& a_server) :
 	MV::ConnectionStateBase(a_connection),
 	ourServer(a_server) {
 }
 
 void LobbyGameConnectionState::connectImplementation() {
-	auto in = MV::toBinaryStringCast<ClientAction>(std::make_shared<ServerDetails>());
-	std::cout << "SENDING:\n" << in << std::endl;
-	auto out = MV::fromBinaryString<std::shared_ptr<ClientAction>>(in);
-	std::cout << std::static_pointer_cast<ServerDetails>(out)->forceClientVersion << std::endl;
+	connection()->send(makeNetworkString<ServerDetails>());
+}
 
-	connection()->send(in);
+bool LobbyGameConnectionState::handleExpiredPlayers() {
+	if (leftPlayer->lifespan.expired() || rightPlayer->lifespan.expired()) {
+		activeState = AVAILABLE;
+		if (!leftPlayer->lifespan.expired()) {
+			leftPlayer->queue.add(leftPlayer);
+			leftPlayer.reset();
+		}
+		if (!rightPlayer->lifespan.expired()) {
+			rightPlayer->queue.add(leftPlayer);
+			rightPlayer.reset();
+		}
+		return true;
+	}
+	return false;
 }
 
 void LobbyGameConnectionState::message(const std::string &a_message) {
-	auto action = MV::fromBinaryString<std::shared_ptr<ServerGameAction>>(a_message);
+	auto action = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 	action->execute(this);
+}
+
+void LobbyGameConnectionState::notifyGameServerOfPlayers() {
+	activeState = CONNECTING_PLAYERS;
+
+	connection()->send(makeNetworkString<AssignPlayersToGame>(
+		AssignedPlayer(leftPlayer->player()->client, leftPlayer->secret),
+		AssignedPlayer(rightPlayer->player()->client, rightPlayer->secret),
+		rightPlayer->queue.id()));
+}
+
+void LobbyGameConnectionState::matchMade(std::shared_ptr<MatchSeeker> a_leftPlayer, std::shared_ptr<MatchSeeker> a_rightPlayer) {
+	leftPlayer = a_leftPlayer;
+	rightPlayer = a_rightPlayer;
+
+	leftPlayer->secret = MV::randomInteger(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
+	rightPlayer->secret = MV::randomInteger(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
+
+	notifyGameServerOfPlayers();
+}
+
+void LobbyGameConnectionState::notifyPlayersOfGameServer() {
+	if (handleExpiredPlayers()) {
+		return;
+	}
+
+	leftPlayer->lifespan.lock()->send(makeNetworkString<MatchedResponse>(url(), port(), leftPlayer->secret));
+	rightPlayer->lifespan.lock()->send(makeNetworkString<MatchedResponse>(url(), port(), rightPlayer->secret));
+}
+
+void LobbyGameConnectionState::update(double a_dt) {
 }
 
 MatchSeeker::MatchSeeker(const std::shared_ptr<MV::Connection> &a_connection, MatchQueue& a_queue) :
@@ -66,9 +116,13 @@ MatchSeeker::MatchSeeker(const std::shared_ptr<MV::Connection> &a_connection, Ma
 	queue(a_queue) {
 }
 
+void MatchSeeker::initialize() {
+	state->state("seeking");
+	queue.add(shared_from_this());
+}
+
 MatchSeeker::~MatchSeeker() {
 	queue.remove(this);
-	//queue.remove(lockedPlayer);
 }
 
 ServerPlayer* MatchSeeker::player() {
@@ -88,23 +142,33 @@ void MatchQueue::update(double a_dt) {
 
 	auto pairs = getMatchPairs(a_dt);
 
-	std::set<std::string> emailsToRemove;
+	removeMatchedPairsFromSeekers(pairs);
 
+	auto* gameServer = server->availableGameServer();
 	for (auto && match : pairs) {
+		if (!gameServer) {
+			break;
+		}
 		if (auto firstConnection = match.first->lifespan.lock()) {
 			if (auto secondConnection = match.second->lifespan.lock()) {
-				emailsToRemove.insert(match.first->player()->client->email);
-				emailsToRemove.insert(match.second->player()->client->email);
 				try {
-					auto secret = MV::randomInteger(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
-					auto response = MV::toBinaryStringCast<ClientAction>(std::make_shared<MatchedResponse>("TODO: Supply Server IP", secret));
-					firstConnection->send(response);
-					secondConnection->send(response);
+					gameServer->matchMade(match.first, match.second);
 				} catch (...) {
-
+					std::cerr << "Failed to match!" << std::endl;
 				}
+				gameServer = server->availableGameServer(); //find the next available game server.
 			}
 		}
+	}
+}
+
+void MatchQueue::removeMatchedPairsFromSeekers(const std::vector<std::pair<std::shared_ptr<MatchSeeker>, std::shared_ptr<MatchSeeker>>>& pairs) {
+	std::set<std::string> emailsToRemove;
+	for (auto && match : pairs) {
+		match.first->matching = false;
+		match.second->matching = false;
+		emailsToRemove.insert(match.first->player()->client->email);
+		emailsToRemove.insert(match.second->player()->client->email);
 	}
 
 	seekers.erase(std::remove_if(seekers.begin(), seekers.end(), [&](auto& seeker) {

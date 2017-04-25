@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include "Game/player.h"
+#include "Game/NetworkLayer/gameServer.h"
 
 enum TeamSide { LEFT, RIGHT };
 
@@ -58,11 +59,6 @@ public:
 			return a_self.creaturesInRange(a_location, a_radius);
 		}), "creaturesInRange");
 
-		a_script.add(chaiscript::fun([](Team &a_self) {
-			std::vector<int> testVector = { 1, 2, 3, 4, 5 };
-			return testVector;
-		}), "vectorSizeTest");
-
 		return a_script;
 	}
 
@@ -87,7 +83,7 @@ class Missile;
 class GameInstance {
 	friend Team;
 public:
-	GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game);
+	GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::MouseState& a_mouse);
 	~GameInstance();
 	GameData& data() {
 		return gameData;
@@ -141,7 +137,7 @@ public:
 
 	void removeMissile(Missile* a_toRemove);
 
-	virtual bool canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const {
+	virtual bool canUpgradeBuildingFor(const std::shared_ptr<Player> &) const {
 		return true;
 	}
 private:
@@ -151,7 +147,6 @@ private:
 	void hook();
 
 	GameData& gameData;
-	Game& ourGame;
 
 	MV::MouseState &ourMouse;
 	std::shared_ptr<MV::Scene::Node> worldScene;
@@ -174,10 +169,7 @@ private:
 
 class ClientGameInstance : public GameInstance {
 public:
-	ClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game, const std::shared_ptr<Player> &a_localPlayer):
-		GameInstance(a_leftPlayer, a_rightPlayer, a_game),
-		localPlayer(a_localPlayer){
-	}
+	ClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game, const std::shared_ptr<Player> &a_localPlayer);
 
 	virtual bool canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const override {
 		return a_player == localPlayer;
@@ -189,9 +181,7 @@ private:
 
 class ServerGameInstance : public GameInstance {
 public:
-	ServerGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game) :
-		GameInstance(a_leftPlayer, a_rightPlayer, a_game) {
-	}
+	ServerGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, GameServer& a_game);
 
 private:
 	std::shared_ptr<MV::Server> server;

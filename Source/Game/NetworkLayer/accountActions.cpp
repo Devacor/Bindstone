@@ -16,7 +16,7 @@ pqxx::result CreatePlayer::selectUser(pqxx::work* a_transaction) {
 pqxx::result CreatePlayer::createPlayer(pqxx::work* transaction, LobbyUserConnectionState *a_connection) {
 	auto salt = MV::randomString(32);
 
-	a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<MessageResponse>("User created, woot!")));
+	a_connection->connection()->send(makeNetworkString<MessageAction>("User created, woot!"));
 	sendValidationEmail(a_connection, salt);
 	return transaction->exec(createPlayerQueryString(*transaction, salt));;
 }
@@ -31,7 +31,7 @@ void CreatePlayer::execute(LobbyUserConnectionState* a_connection) {
 				return;
 			}
 			if (email.empty() || !validateHandle(handle) || password.size() < 8) {
-				a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Failed to supply a valid email/handle and password.")));
+				a_connection->connection()->send(makeNetworkString<LoginResponse>("Failed to supply a valid email/handle and password."));
 			} else {
 				auto database = a_connection->server().database();
 				auto transaction = std::make_unique<pqxx::work>(*database);
@@ -41,7 +41,7 @@ void CreatePlayer::execute(LobbyUserConnectionState* a_connection) {
 				if (result.empty()) {
 					result = createPlayer(transaction.get(), a_connection);
 				} else if (!result[0][0].as<bool>()) {
-					a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Player not email validated yet.")));
+					a_connection->connection()->send(makeNetworkString<LoginResponse>("Player not email validated yet."));
 					sendValidationEmail(a_connection, result[0][2].c_str());
 					MV::info("Need Validation: [", email, "]");
 				} else {
@@ -49,14 +49,14 @@ void CreatePlayer::execute(LobbyUserConnectionState* a_connection) {
 					if (hashedPassword == result[0][1].c_str()) {
 						std::string playerStateJson = result[0][4].c_str();
 						if (a_connection->authenticate(result[0][6].c_str(), result[0][7].c_str(), playerStateJson, result[0][5].c_str())) {
-							a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Successful login.", playerStateJson, true)));
+							a_connection->connection()->send(makeNetworkString<LoginResponse>("Successful login.", playerStateJson, true));
 							MV::info("Login Success: [", email, "]");
 						} else {
-							a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Load Player Parse Fail: Contact Support")));
+							a_connection->connection()->send(makeNetworkString<LoginResponse>("Load Player Parse Fail: Contact Support"));
 							MV::error("Parse Fail Load Player: [", email, "]\n___\n", playerStateJson, "\n___\n");
 						}
 					} else {
-						a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Failed to create due to existing player with different credentials.")));
+						a_connection->connection()->send(makeNetworkString<LoginResponse>("Failed to create due to existing player with different credentials."));
 						MV::info("Failed to create: [", email, "] credential mismatch for existing user!");
 					}
 				}
@@ -121,7 +121,7 @@ void LoginRequest::execute(LobbyUserConnectionState* a_connection) {
 				return;
 			}
 			if (identifier.empty() || password.size() < 8) {
-				a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Failed to supply a valid email/handle and password.")));
+				a_connection->connection()->send(makeNetworkString<LoginResponse>("Failed to supply a valid email/handle and password."));
 			} else {
 				auto database = a_connection->server().database();
 				auto transaction = std::make_unique<pqxx::work>(*database);
@@ -129,23 +129,23 @@ void LoginRequest::execute(LobbyUserConnectionState* a_connection) {
 				auto result = selectUser(transaction.get());
 
 				if (result.empty()) {
-					a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("No player exists.")));
+					a_connection->connection()->send(makeNetworkString<LoginResponse>("No player exists."));
 				} else if (!result[0][0].as<bool>()) {
-					a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Player not email validated yet.")));
+					a_connection->connection()->send(makeNetworkString<LoginResponse>("Player not email validated yet."));
 					MV::info("Need Validation: [", identifier, "]");
 				} else {
 					auto hashedPassword = MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>());
 					if (hashedPassword == result[0][1].c_str()) {
 						std::string playerStateJson = result[0][4].c_str();
 						if (a_connection->authenticate(result[0][6].c_str(), result[0][7].c_str(), playerStateJson, result[0][5].c_str())) {
-							a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Successful login.", MV::sha512(playerStateJson) == saveHash ? "" : playerStateJson, true)));
+							a_connection->connection()->send(makeNetworkString<LoginResponse>("Successful login.", MV::sha512(playerStateJson) == saveHash ? "" : playerStateJson, true));
 							MV::info("Login Success: [", identifier, "]");
 						} else {
-							a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Load Player Parse Fail: Contact Support")));
+							a_connection->connection()->send(makeNetworkString<LoginResponse>("Load Player Parse Fail: Contact Support"));
 							MV::error("Parse Fail Load Player: [", identifier, "]\n___\n", playerStateJson, "\n___\n");
 						}
 					} else {
-						a_connection->connection()->send(MV::toBinaryStringCast<ClientAction>(std::make_shared<LoginResponse>("Failed to authenticate.")));
+						a_connection->connection()->send(makeNetworkString<LoginResponse>("Failed to authenticate."));
 						MV::info("Failed to authenticate: [", identifier, "] credential mismatch for existing user!\n[", hashedPassword, "]\n[", result[0][1].c_str(), "]");
 					}
 				}
@@ -162,5 +162,9 @@ void LoginRequest::execute(LobbyUserConnectionState* a_connection) {
 
 void FindMatchRequest::execute(LobbyUserConnectionState* a_connection) {
 	a_connection->state("finding");
-	a_connection->server().queue(type).add(a_connection->seekMatch(a_connection->server().queue(type)));
+	a_connection->seekMatch(a_connection->server().queue(type));
+}
+
+void ExpectedPlayersNoted::execute(LobbyGameConnectionState* a_connection) {
+	a_connection->notifyPlayersOfGameServer();
 }

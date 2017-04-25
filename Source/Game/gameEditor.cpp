@@ -55,11 +55,6 @@ GameEditor::GameEditor() :
 		done = true;
 	});
 
-	auto serverButton = makeButton(grid, game.managers().textLibrary, mouse, "Server", { 100.0f, 20.0f }, UTF_CHAR_STR("Server"));
-	serverButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
-		std::cout << "serving" << std::endl;
-		server = std::make_shared<LobbyServer>(managers);
-	});
 // 	auto sendButton = makeButton(grid, game.managers().textLibrary, mouse, "Send", { 100.0f, 20.0f }, UTF_CHAR_STR("Send"));
 // 	sendButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 // 		if (client) {
@@ -68,8 +63,4 @@ GameEditor::GameEditor() :
 // 	});
 
 	grid->component<MV::Scene::Grid>()->anchors().anchor({ MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f) }).usePosition(true).parent(screenScaler.self(), MV::Scene::Anchors::BoundsToOffset::Apply);
-
-	if (MV::RUNNING_IN_HEADLESS) {
-		//serverButton->press();
-	}
 }

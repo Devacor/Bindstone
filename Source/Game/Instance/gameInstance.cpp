@@ -49,11 +49,10 @@ void GameInstance::handleScroll(int a_amount) {
 	}
 }
 
-GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game) :
-	worldScene(a_game.root()->make("Assets/Scenes/map.scene", jsonLoadBinder())->depth(0)),
-	ourMouse(a_game.mouse()),
-	ourGame(a_game),
-	gameData(a_game.data()),
+GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::MouseState& a_mouse) :
+	worldScene(a_root->make("Assets/Scenes/map.scene", jsonLoadBinder())->depth(0)),
+	ourMouse(a_mouse),
+	gameData(a_gameData),
 	left(a_leftPlayer, LEFT, *this),
 	right(a_rightPlayer, RIGHT, *this),
 	scriptEngine(MV::create_chaiscript_stdlib(), MV::chaiscript_module_paths(), MV::chaiscript_use_paths()) {
@@ -103,7 +102,7 @@ void GameInstance::beginMapDrag() {
 }
 
 void GameInstance::hook() {
-	ourGame.hook(scriptEngine);
+	bindstoneScriptHook(scriptEngine, ourMouse, gameData.managers().pool);
 
 	Building::hook(scriptEngine, *this);
 	Creature::hook(scriptEngine, *this);
@@ -161,4 +160,13 @@ void GameInstance::removeExpiredMissiles() {
 		return std::find_if(expiredMissiles.begin(), expiredMissiles.end(), [&](Missile* a_compareWith) {return a_missile.get() == a_compareWith; }) != expiredMissiles.end();
 	}), missiles.end());
 	expiredMissiles.clear();
+}
+
+ClientGameInstance::ClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game, const std::shared_ptr<Player> &a_localPlayer) :
+	GameInstance(a_leftPlayer, a_rightPlayer, a_game.root(), a_game.data(), a_game.mouse()),
+	localPlayer(a_localPlayer) {
+}
+
+ServerGameInstance::ServerGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, GameServer& a_game) :
+	GameInstance(a_leftPlayer, a_rightPlayer, a_game.root(), a_game.data(), a_game.mouse()) {
 }

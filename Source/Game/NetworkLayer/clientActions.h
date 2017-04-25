@@ -4,65 +4,55 @@
 #include "Utility/package.h"
 #include "Network/package.h"
 #include "Game/managers.h"
+#include "Game/NetworkLayer/networkAction.h"
 
 #include <string>
 #include <vector>
 #include <ctime>
 #include <memory>
 
-//#include "pqxx/pqxx"
-
 class Game;
 struct Player;
 
-class ClientAction : public std::enable_shared_from_this<ClientAction> {
+class MessageAction : public NetworkAction {
 public:
-	virtual ~ClientAction() = default;
-
-	virtual void execute(Game& /*a_game*/) {}
-
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(0);
-	}
-
-	std::string toNetworkString() {
-		return MV::toBinaryString(shared_from_this());
-	}
-
-	static void hook(chaiscript::ChaiScript& a_script) {
-		a_script.add(chaiscript::user_type<ClientAction>(), "ClientAction");
-		a_script.add(chaiscript::fun(&ClientAction::toNetworkString), "toNetworkString");
-	}
-};
-
-class MessageResponse : public ClientAction {
-public:
-	MessageResponse(const std::string& a_message) : message(a_message) {}
-	MessageResponse() {}
+	MessageAction(const std::string& a_message) : message(a_message) {}
+	MessageAction() {}
 
 	virtual void execute(Game& /*a_game*/) override {
+		std::cout << "Message Got: " << message << std::endl;
+	}
+	virtual void execute(GameServer&) override {
+		std::cout << "Message Got: " << message << std::endl;
+	}
+	virtual void execute(GameUserConnectionState*, GameServer&) override {
+		std::cout << "Message Got: " << message << std::endl;
+	}
+	virtual void execute(LobbyUserConnectionState* /*a_game*/) override {
+		std::cout << "Message Got: " << message << std::endl;
+	}
+	virtual void execute(LobbyGameConnectionState*) override {
 		std::cout << "Message Got: " << message << std::endl;
 	}
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(message), cereal::make_nvp("ClientResponse", cereal::base_class<ClientAction>(this)));
+		archive(CEREAL_NVP(message), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
 	static void hook(chaiscript::ChaiScript& a_script) {
-		a_script.add(chaiscript::user_type<MessageResponse>(), "MessageResponse");
-		a_script.add(chaiscript::base_class<ClientAction, MessageResponse>());
+		a_script.add(chaiscript::user_type<MessageAction>(), "MessageResponse");
+		a_script.add(chaiscript::base_class<NetworkAction, MessageAction>());
 
-		a_script.add(chaiscript::fun(&MessageResponse::message), "message");
+		a_script.add(chaiscript::fun(&MessageAction::message), "message");
 	}
 private:
 	std::string message;
 };
 
-CEREAL_REGISTER_TYPE(MessageResponse);
+CEREAL_REGISTER_TYPE(MessageAction);
 
-class LoginResponse : public ClientAction {
+class LoginResponse : public NetworkAction {
 public:
 	LoginResponse(const std::string& a_message, const std::string& a_player = "", bool a_success = false) : message(a_message), player(a_player), success(a_success) {}
 	LoginResponse() {}
@@ -71,13 +61,13 @@ public:
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(message), CEREAL_NVP(player), CEREAL_NVP(success), cereal::make_nvp("ClientResponse", cereal::base_class<ClientAction>(this)));
+		archive(CEREAL_NVP(message), CEREAL_NVP(player), CEREAL_NVP(success), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
 	//Response actually happens in chaiscript anyway, so we just expose these in script and move on.
 	static void hook(chaiscript::ChaiScript& a_script) {
 		a_script.add(chaiscript::user_type<LoginResponse>(), "LoginResponse");
-		a_script.add(chaiscript::base_class<ClientAction, LoginResponse>());
+		a_script.add(chaiscript::base_class<NetworkAction, LoginResponse>());
 
 		a_script.add(chaiscript::fun(&LoginResponse::message), "message");
 		a_script.add(chaiscript::fun(&LoginResponse::success), "success");
@@ -96,7 +86,7 @@ private:
 
 CEREAL_REGISTER_TYPE(LoginResponse);
 
-class IllegalResponse : public ClientAction {
+class IllegalResponse : public NetworkAction {
 public:
 	IllegalResponse(const std::string& a_message) : message(a_message) {}
 	IllegalResponse() {}
@@ -105,12 +95,12 @@ public:
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(message), cereal::make_nvp("ClientResponse", cereal::base_class<ClientAction>(this)));
+		archive(CEREAL_NVP(message), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
 	static void hook(chaiscript::ChaiScript& a_script) {
 		a_script.add(chaiscript::user_type<IllegalResponse>(), "IllegalResponse");
-		a_script.add(chaiscript::base_class<ClientAction, IllegalResponse>());
+		a_script.add(chaiscript::base_class<NetworkAction, IllegalResponse>());
 
 		a_script.add(chaiscript::fun(&IllegalResponse::message), "message");
 	}
@@ -120,15 +110,21 @@ private:
 
 CEREAL_REGISTER_TYPE(IllegalResponse);
 
-class ServerDetails : public ClientAction {
+class ServerDetails : public NetworkAction {
 public:
-	virtual void execute(Game& /*a_game*/) override {
+	virtual void execute(Game&) override {
+		std::cout << "Connected and expecting client version: " << forceClientVersion << std::endl;
+	}
+	virtual void execute(GameServer&) override {
+		std::cout << "Connected and expecting client version: " << forceClientVersion << std::endl;
+	}
+	virtual void execute(GameUserConnectionState*, GameServer&) override {
 		std::cout << "Connected and expecting client version: " << forceClientVersion << std::endl;
 	}
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(forceClientVersion), CEREAL_NVP(configurationHashes), cereal::make_nvp("ClientResponse", cereal::base_class<ClientAction>(this)));
+		archive(CEREAL_NVP(forceClientVersion), CEREAL_NVP(configurationHashes), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
 	int forceClientVersion = 1;
@@ -137,19 +133,20 @@ public:
 
 CEREAL_REGISTER_TYPE(ServerDetails);
 
-class MatchedResponse : public ClientAction {
+class MatchedResponse : public NetworkAction {
 public:
-	MatchedResponse(const std::string& a_gameServer, int64_t a_secret) : gameServer(a_gameServer), secret(a_secret) {}
+	MatchedResponse(const std::string& a_gameServer, int32_t a_port, int64_t a_secret) : gameServer(a_gameServer), port(a_port), secret(a_secret) {}
 	MatchedResponse() {}
 
 	virtual void execute(Game& a_game) override;
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(gameServer), CEREAL_NVP(secret), cereal::make_nvp("ClientResponse", cereal::base_class<ClientAction>(this)));
+		archive(CEREAL_NVP(gameServer), CEREAL_NVP(secret), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
 	std::string gameServer;
+	int32_t port;
 	int64_t secret;
 };
 

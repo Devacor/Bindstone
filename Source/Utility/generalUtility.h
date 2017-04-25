@@ -34,8 +34,6 @@ namespace MV {
 
 	void initializeFilesystem();
 
-	void systemSleep(int time);
-
 	inline bool isLittleEndian() {
 		static std::int32_t test = 1;
 		return *reinterpret_cast<std::int8_t*>(&test) == 1;

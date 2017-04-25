@@ -19,4 +19,6 @@ struct Managers {
 	MV::SharedTextures textures;
 };
 
+void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::MouseState &a_mouseState, MV::ThreadPool &a_pool);
+
 #endif

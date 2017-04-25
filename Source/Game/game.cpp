@@ -26,7 +26,7 @@ void Game::initializeData() {
 
 void Game::initializeClientConnection() {
 	ourLobbyClient = MV::Client::make(MV::Url{ "http://localhost:22325" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
-		auto value = MV::fromBinaryString<std::shared_ptr<ClientAction>>(a_message);
+		auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 		value->execute(*this);
 	}, [&](const std::string &a_dcreason) {
 		std::cout << "Disconnected: " << a_dcreason << std::endl;
@@ -80,10 +80,11 @@ void Game::initializeWindow(){
 bool Game::update(double dt) {
 	lastUpdateDelta = dt;
 	gameData.managers().pool.run();
-	if (!ourLobbyClient->connected()) {
+	if (ourLobbyClient->state() == MV::Client::DISCONNECTED) {
 		ourLobbyClient->reconnect();
 	}
 	ourLobbyClient->update();
+
 	if (done) {
 		done = false;
 		return false;
@@ -144,50 +145,7 @@ void Game::render() {
 }
 
 void Game::hook(chaiscript::ChaiScript &a_script) {
-	MV::TexturePoint::hook(a_script);
-	MV::Color::hook(a_script);
-	MV::Size<MV::PointPrecision>::hook(a_script);
-	MV::Size<int>::hook(a_script, "i");
-	MV::Point<MV::PointPrecision>::hook(a_script);
-	MV::Point<int>::hook(a_script, "i");
-	MV::BoxAABB<MV::PointPrecision>::hook(a_script);
-	MV::BoxAABB<int>::hook(a_script, "i");
-
-	MV::TexturePack::hook(a_script);
-	MV::TextureDefinition::hook(a_script);
-	MV::FileTextureDefinition::hook(a_script);
-	MV::TextureHandle::hook(a_script);
-	MV::SharedTextures::hook(a_script);
-
-	Wallet::hook(a_script);
-	Player::hook(a_script);
-	Team::hook(a_script);
-	MV::Task::hook(a_script);
-	GameData::hook(a_script);
-
-	MV::PathNode::hook(a_script);
-	MV::NavigationAgent::hook(a_script);
-
-	MV::Scene::Node::hook(a_script);
-	MV::Scene::Component::hook(a_script);
-	MV::Scene::Drawable::hook(a_script);
-	MV::Scene::Sprite::hook(a_script);
-	MV::Scene::Spine::hook(a_script);
-	MV::Scene::Text::hook(a_script);
-	MV::Scene::PathMap::hook(a_script);
-	MV::Scene::PathAgent::hook(a_script);
-	MV::Scene::Emitter::hook(a_script, gameData.managers().pool);
-	MV::Scene::Clickable::hook(a_script, ourMouse);
-
-	MV::Client::hook(a_script);
-	CreatePlayer::hook(a_script);
-	ClientAction::hook(a_script);
-	ServerUserAction::hook(a_script);
-	LoginRequest::hook(a_script);
-	LoginResponse::hook(a_script);
-	FindMatchRequest::hook(a_script);
-
-	MV::InterfaceManager::hook(a_script);
+	bindstoneScriptHook(a_script, ourMouse, gameData.managers().pool);
 
 	a_script.add(chaiscript::user_type<Game>(), "Game");
 	a_script.add(chaiscript::fun(&Game::gui), "gui");
@@ -205,11 +163,6 @@ void Game::hook(chaiscript::ChaiScript &a_script) {
 	a_script.add(chaiscript::fun(&Game::onLoginResponse), "onLoginResponse");
 
 	a_script.add_global(chaiscript::var(this), "game");
-
-	a_script.add(chaiscript::fun([](int a_from) {return MV::to_string(a_from); }), "to_string");
-	a_script.add(chaiscript::fun([](size_t a_from) {return MV::to_string(a_from); }), "to_string");
-	a_script.add(chaiscript::fun([](float a_from) {return MV::to_string(a_from); }), "to_string");
-	a_script.add(chaiscript::fun([](double a_from) {return MV::to_string(a_from); }), "to_string");
 }
 
 void Game::updateScreenScaler() {

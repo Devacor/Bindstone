@@ -68,6 +68,9 @@
     <Filter Include="Source Files\Game\NetworkLayer">
       <UniqueIdentifier>{c772f9ed-5566-4acb-8be7-44b01d4f1005}</UniqueIdentifier>
     </Filter>
+    <Filter Include="LINQ">
+      <UniqueIdentifier>{66360704-123a-40cf-871c-269537cd2bab}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Audio\sound.cpp">
@@ -1300,9 +1303,6 @@
     <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\chaiscript_stdlib.hpp">
       <Filter>Chaiscript</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Game\NetworkLayer\serverActions.h">
-      <Filter>Source Files\Game\NetworkLayer</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Game\NetworkLayer\accountActions.h">
       <Filter>Source Files\Game\NetworkLayer</Filter>
     </ClInclude>
@@ -1316,6 +1316,12 @@
       <Filter>Source Files\Game\NetworkLayer</Filter>
     </ClInclude>
     <ClInclude Include="Source\Game\NetworkLayer\gameServerActions.h">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\LINQ\boolinq.hpp">
+      <Filter>LINQ</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\NetworkLayer\networkAction.h">
       <Filter>Source Files\Game\NetworkLayer</Filter>
     </ClInclude>
   </ItemGroup>

@@ -80,6 +80,8 @@
     <LibraryPath>$(SolutionDir)../external/boost_1_62_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL-2.0.4-9583/VisualC/x64/Release/;C:\Program Files\PostgreSQL\9.5\lib\;$(SolutionDir)../external\openssl\lib\;$(LibraryPath)</LibraryPath>
     <SourcePath>$(SolutionDir)../external/boost_1_62_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/libpqxx-4.0.1/src/;$(SolutionDir)../external/spine/spine-c/src/spine/;C:\Program Files\PostgreSQL\9.5\lib\</SourcePath>
     <LibraryWPath>$(WindowsSDK_MetadataPath);</LibraryWPath>
+    <OutDir>$(SolutionDir)\$(ProjectName)\$(Configuration)\</OutDir>
+    <IntDir>$(Platform)\$(ProjectName)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <IncludePath>$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\compiler\VisualStudio2010\;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\libpq\9.0\;$(SolutionDir)../external\openssl\include\;$(SolutionDir)../external/libpqxx-4.0.1/include/;$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/;$(IncludePath)</IncludePath>
@@ -97,6 +99,8 @@
     <SourcePath>$(SolutionDir)../external/boost_1_62_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/libpqxx-4.0.1/src/;$(SolutionDir)../external/spine/spine-c/src/spine/;C:\Program Files\PostgreSQL\9.5\lib\</SourcePath>
     <RunCodeAnalysis>false</RunCodeAnalysis>
     <LinkIncremental>true</LinkIncremental>
+    <OutDir>$(SolutionDir)\$(ProjectName)\$(Configuration)\</OutDir>
+    <IntDir>$(Platform)\$(ProjectName)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -321,6 +325,7 @@
     <ClCompile Include="Source\Game\Instance\gameInstance.cpp" />
     <ClCompile Include="Source\Game\Interface\guiFactories.cpp" />
     <ClCompile Include="Source\Game\Interface\interfaceManager.cpp" />
+    <ClCompile Include="Source\Game\managers.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\accountActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\clientActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\gameServer.cpp" />
@@ -505,6 +510,7 @@
     <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\utility\json_wrap.hpp" />
     <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\utility\utility.hpp" />
     <ClInclude Include="..\external\exprtk\exprtk.hpp" />
+    <ClInclude Include="..\external\LINQ\boolinq.hpp" />
     <ClInclude Include="..\external\spine\Animation.h" />
     <ClInclude Include="..\external\spine\AnimationState.h" />
     <ClInclude Include="..\external\spine\AnimationStateData.h" />
@@ -560,6 +566,7 @@
     <ClInclude Include="Source\Game\NetworkLayer\gameServer.h" />
     <ClInclude Include="Source\Game\NetworkLayer\gameServerActions.h" />
     <ClInclude Include="Source\Game\NetworkLayer\lobbyServer.h" />
+    <ClInclude Include="Source\Game\NetworkLayer\networkAction.h" />
     <ClInclude Include="Source\Game\NetworkLayer\package.h" />
     <ClInclude Include="Source\Game\player.h" />
     <ClInclude Include="Source\Game\state.h" />

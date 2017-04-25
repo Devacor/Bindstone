@@ -8,6 +8,7 @@
 
 #include "Utility/scopeGuard.hpp"
 #include "chaiscript/chaiscript.hpp"
+#include "Game/NetworkLayer/gameServer.h"
 
 struct TestObject {
 	TestObject() { std::cout << "\nConstructor\n"; }
@@ -30,12 +31,12 @@ int main(int, char *[]) {
 	Managers managers;
 	managers.timer.start();
 	bool done = false;
-	auto server = std::make_shared<LobbyServer>(managers);
+	auto server = std::make_shared<GameServer>(managers, 22333);
 	while (!done) {
 		managers.pool.run();
 		auto tick = managers.timer.delta("tick");
 		server->update(tick);
-		MV::systemSleep(0);
+		std::this_thread::yield();
 	}
 
 	return 0;

@@ -35,14 +35,7 @@ namespace MV {
 		PointPrecision theta2 = atan2(a_p2.y, a_p2.x);
 		PointPrecision dtheta = theta2 - theta1;
 
-		while(dtheta > static_cast<PointPrecision>(PIE)){
-			dtheta -= static_cast<PointPrecision>(PIE*2.0);
-		}
-		while(dtheta < -PIE){
-			dtheta += static_cast<PointPrecision>(PIE*2.0);
-		}
-
-		return(dtheta);
+		return wrap(static_cast<PointPrecision>(-PIE), static_cast<PointPrecision>(PIE), dtheta);
 	}
 
 	Point<> PointVolume::getCenter(){

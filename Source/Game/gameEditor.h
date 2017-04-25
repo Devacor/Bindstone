@@ -26,8 +26,7 @@ private:
 			auto tick = managers.timer.delta("tick");
 			limbo->drawUpdate(tick);
 			limbo->renderer().updateScreen();
-			if (server) { server->update(tick); }
-			MV::systemSleep(0);
+			std::this_thread::yield();
 		}
 	}
 
@@ -37,7 +36,7 @@ private:
 		while (editor.update(managers.timer.delta("tick"))) {
 			editor.handleInput();
 			editor.render();
-			MV::systemSleep(0);
+			std::this_thread::yield();
 		}
 	}
 
@@ -47,7 +46,7 @@ private:
 		while (game.update(managers.timer.delta("tick"))) {
 			game.handleInput();
 			game.render();
-			MV::systemSleep(0);
+			std::this_thread::yield();
 		}
 	}
 
@@ -114,8 +113,6 @@ private:
 
 	Game game;
 	Editor editor;
-
-	std::shared_ptr<LobbyServer> server;
 
 	MV::Scene::SafeComponent<MV::Scene::Sprite> screenScaler;
 };

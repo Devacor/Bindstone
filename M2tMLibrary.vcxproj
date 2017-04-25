@@ -22,7 +22,7 @@
     <ProjectGuid>{732BFA09-4C56-4F49-BE0E-1E4A2A129DA4}</ProjectGuid>
     <RootNamespace>M2tMLibrary</RootNamespace>
     <TargetPlatformVersion>8.1</TargetPlatformVersion>
-    <WindowsTargetPlatformVersion>10.0.14393.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -75,6 +75,8 @@
     <LibraryPath>$(SolutionDir)../external/boost_1_62_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL-2.0.4-9583/VisualC/x64/Release/;C:\Program Files\PostgreSQL\9.5\lib\;$(SolutionDir)../external\openssl\lib\;$(LibraryPath)</LibraryPath>
     <SourcePath>$(SolutionDir)../external/boost_1_62_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/libpqxx-4.0.1/src/;$(SolutionDir)../external/spine/spine-c/src/spine/;C:\Program Files\PostgreSQL\9.5\lib\</SourcePath>
     <LibraryWPath>$(WindowsSDK_MetadataPath);</LibraryWPath>
+    <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\GameClient\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\GameClient\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <IncludePath>$(SolutionDir)../external/;$(SolutionDir)../external/boost_1_49_0/;$(IncludePath)</IncludePath>
@@ -87,6 +89,8 @@
     <SourcePath>$(SolutionDir)../external/boost_1_62_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/libpqxx-4.0.1/src/;$(SolutionDir)../external/spine/spine-c/src/spine/;C:\Program Files\PostgreSQL\9.5\lib\</SourcePath>
     <RunCodeAnalysis>false</RunCodeAnalysis>
     <LinkIncremental>true</LinkIncremental>
+    <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\GameClient\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\GameClient\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -310,8 +314,10 @@
     <ClCompile Include="Source\Game\Instance\gameInstance.cpp" />
     <ClCompile Include="Source\Game\Interface\guiFactories.cpp" />
     <ClCompile Include="Source\Game\Interface\interfaceManager.cpp" />
+    <ClCompile Include="Source\Game\managers.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\accountActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\clientActions.cpp" />
+    <ClCompile Include="Source\Game\NetworkLayer\gameServerActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\lobbyServer.cpp" />
     <ClCompile Include="Source\Game\player.cpp" />
     <ClCompile Include="Source\Game\state.cpp" />
@@ -548,7 +554,9 @@
     <ClInclude Include="Source\Game\managers.h" />
     <ClInclude Include="Source\Game\NetworkLayer\accountActions.h" />
     <ClInclude Include="Source\Game\NetworkLayer\clientActions.h" />
+    <ClInclude Include="Source\Game\NetworkLayer\gameServerActions.h" />
     <ClInclude Include="Source\Game\NetworkLayer\lobbyServer.h" />
+    <ClInclude Include="Source\Game\NetworkLayer\networkAction.h" />
     <ClInclude Include="Source\Game\NetworkLayer\package.h" />
     <ClInclude Include="Source\Game\NetworkLayer\serverActions.h" />
     <ClInclude Include="Source\Game\player.h" />

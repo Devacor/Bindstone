@@ -5,6 +5,7 @@
 #include "Utility/cerealUtility.h"
 //#include "vld.h"
 
+#include "Game/NetworkLayer/lobbyServer.h"
 
 #include "Utility/scopeGuard.hpp"
 #include "chaiscript/chaiscript.hpp"
@@ -35,7 +36,7 @@ int main(int, char *[]) {
 		managers.pool.run();
 		auto tick = managers.timer.delta("tick");
 		server->update(tick);
-		MV::systemSleep(0);
+		std::this_thread::yield();
 	}
 
 	return 0;

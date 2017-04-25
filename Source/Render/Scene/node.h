@@ -865,13 +865,14 @@ namespace MV {
 				construct(*renderer, nodeId);
 				bool isRootNode = false;
 				std::weak_ptr<Node> weakParent;
-				archive(cereal::make_nvp("parent", weakParent));
+				archive(
+					cereal::make_nvp("isRootNode", isRootNode), 
+					cereal::make_nvp("parent", weakParent));
+
 				if (auto lockedParent = weakParent.lock()) {
 					construct->myParent = lockedParent.get();
 				}
 				archive(
-					cereal::make_nvp("isRootNode", isRootNode),
-					cereal::make_nvp("parent", weakParent),
 					cereal::make_nvp("allowDraw", construct->allowDraw),
 					cereal::make_nvp("allowUpdate", construct->allowUpdate),
 					cereal::make_nvp("translateTo", construct->translateTo),

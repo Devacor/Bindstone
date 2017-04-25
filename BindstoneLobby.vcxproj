@@ -504,6 +504,7 @@
     <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\utility\json_wrap.hpp" />
     <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\utility\utility.hpp" />
     <ClInclude Include="..\external\exprtk\exprtk.hpp" />
+    <ClInclude Include="..\external\LINQ\boolinq.hpp" />
     <ClInclude Include="..\external\spine\Animation.h" />
     <ClInclude Include="..\external\spine\AnimationState.h" />
     <ClInclude Include="..\external\spine\AnimationStateData.h" />
@@ -558,8 +559,8 @@
     <ClInclude Include="Source\Game\NetworkLayer\clientActions.h" />
     <ClInclude Include="Source\Game\NetworkLayer\gameServerActions.h" />
     <ClInclude Include="Source\Game\NetworkLayer\lobbyServer.h" />
+    <ClInclude Include="Source\Game\NetworkLayer\networkAction.h" />
     <ClInclude Include="Source\Game\NetworkLayer\package.h" />
-    <ClInclude Include="Source\Game\NetworkLayer\serverActions.h" />
     <ClInclude Include="Source\Game\player.h" />
     <ClInclude Include="Source\Game\state.h" />
     <ClInclude Include="Source\Game\wallet.h" />

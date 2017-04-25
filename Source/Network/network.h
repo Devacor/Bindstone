@@ -49,6 +49,7 @@ namespace MV {
 
 	class Client : public std::enable_shared_from_this<Client> {
 	public:
+		enum ConnectionState { DISCONNECTED, CONNECTING, CONNECTED };
 		static const int EXPECTED_TIMESTEPS = 5;
 
 		static std::shared_ptr<Client> make(const MV::Url& a_url, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail, const std::function<void()> &a_onInitialized = std::function<void ()>()) {
@@ -70,16 +71,26 @@ namespace MV {
 		void update();
 
 		void reconnect() {
+			if (ourConnectionState != DISCONNECTED) {
+				return;
+			}
 			initialize();
 		}
 
 		void reconnect(const std::function<void()> &a_onInitialized) {
+			if (ourConnectionState != DISCONNECTED) {
+				return;
+			}
 			onInitialized = a_onInitialized;
 			initialize();
 		}
 
-		bool connected() const{
-			return remainingTimeDeltas <= 0;
+		ConnectionState state() const{
+			return ourConnectionState;
+		}
+
+		bool connected() const {
+			return ourConnectionState == CONNECTED;
 		}
 
 		double clientServerTime() const {
@@ -104,6 +115,7 @@ namespace MV {
 				socket.reset();
 			}
 			remainingTimeDeltas = EXPECTED_TIMESTEPS;
+			ourConnectionState = DISCONNECTED;
 			std::cout << "client.disconnect();" << std::endl;
 		}
 
@@ -128,11 +140,12 @@ namespace MV {
 
 		void appendClientServerTime(std::shared_ptr<NetworkMessage> message);
 
-		void HandleError(const boost::system::error_code &a_err, const std::string &a_section) {
+		void handleError(const boost::system::error_code &a_err, const std::string &a_section) {
 			if (socket) {
 				socket.reset();
 			}
 			remainingTimeDeltas = EXPECTED_TIMESTEPS;
+			ourConnectionState = DISCONNECTED;
 			failMessage = "[" + a_section + "] ERROR: " + a_err.message();
 			std::cerr << failMessage << std::endl;
 		}
@@ -158,7 +171,7 @@ namespace MV {
 		std::unique_ptr<boost::asio::io_service::work> work;
 
 		std::vector<double> serverTimeDeltas;
-		bool hasBeenInitialized = false;
+		ConnectionState ourConnectionState;
 		int remainingTimeDeltas = EXPECTED_TIMESTEPS;
 		double clientServerTimeValue = 0.0;
 	};

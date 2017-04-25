@@ -8,6 +8,7 @@
 namespace MV {
 
 	void Client::initiateConnection() {
+		ourConnectionState = CONNECTING;
 		remainingTimeDeltas = EXPECTED_TIMESTEPS;
 		socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
 
@@ -17,7 +18,7 @@ namespace MV {
 				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
 				socket->async_connect(endpoint, boost::bind(&Client::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
 			} else {
-				HandleError(a_err, "resolve");
+				handleError(a_err, "resolve");
 			}
 		});
 	}
@@ -33,7 +34,7 @@ namespace MV {
 			auto endpoint = *endpoint_iterator;
 			socket->async_connect(endpoint, boost::bind(&Client::handleConnect, this, boost::asio::placeholders::error, ++endpoint_iterator));
 		} else {
-			HandleError(a_err, "connect");
+			handleError(a_err, "connect");
 		}
 	}
 
@@ -56,20 +57,21 @@ namespace MV {
 						}
 						initiateRead();
 					} else {
-						HandleError(a_err, "content");
+						handleError(a_err, "content");
 					}
 				});
 			} else {
-				HandleError(a_err, "header");
+				handleError(a_err, "header");
 			}
 		});
 	}
 
 	void Client::initialize() {
 		try {
-			hasBeenInitialized = false;
 			initiateConnection();
-			worker = std::make_unique<std::thread>([this] { ioService.run(); });
+			if (!worker) {
+				worker = std::make_unique<std::thread>([this] { ioService.run(); });
+			}
 		} catch (std::exception &e) {
 			remainingTimeDeltas = EXPECTED_TIMESTEPS;
 			socket->close();
@@ -86,7 +88,7 @@ namespace MV {
 			onConnectionFail = std::function<void(const std::string &)>();
 			onMessageGet = std::function<void(const std::string &)>();
 			onInitialized = std::function<void()>();
-		} else{
+		} else {
 			tryInitializeCallback();
 			if (!inbox.empty()) {
 				std::lock_guard<std::recursive_mutex> guard(lock);
@@ -111,7 +113,7 @@ namespace MV {
 			auto message = std::make_shared<NetworkMessage>(a_content);
 			boost::asio::async_write(*socket, boost::asio::buffer(message->headerAndContent(), message->headerAndContentSize()), [self, message](boost::system::error_code a_err, size_t a_amount) {
 				if (a_err) {
-					self->HandleError(a_err, "write");
+					self->handleError(a_err, "write");
 				}
 			});
 		});
@@ -138,8 +140,8 @@ namespace MV {
 	}
 
 	void Client::tryInitializeCallback() {
-		if (!hasBeenInitialized && connected()) {
-			hasBeenInitialized = true;
+		if (!ourConnectionState == CONNECTED && remainingTimeDeltas <= 0) {
+			ourConnectionState = CONNECTED;
 			if (onInitialized) {
 				try {
 					onInitialized();

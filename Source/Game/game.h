@@ -55,6 +55,16 @@ public:
 
 	void enterGameServer(const std::string &gameServer, int64_t secret) {
 		std::cout << "Game Found: " << gameServer << " Secret: " << secret << std::endl;
+		ourGameClient = MV::Client::make(MV::Url{ gameServer }, [=](const std::string &a_message) {
+			auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
+			value->execute(*this);
+		}, [&](const std::string &a_dcreason) {
+			std::cout << "Disconnected: " << a_dcreason << std::endl;
+			killGame();
+		}, [=] {
+			//ourGameClient->send(makeNetworkString<FullGameState>());
+			enterGame();
+		});
 	}
 
 	GameInstance& enterGame() {
@@ -64,7 +74,7 @@ public:
 		enemyPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
 		enemyPlayer->wallet.add(Wallet::CurrencyType::SOFT, 5000);
 
-		ourInstance = std::make_unique<GameInstance>(localPlayer, enemyPlayer, *this);
+		ourInstance = std::make_unique<GameInstance>(localPlayer, enemyPlayer, rootScene->makeOrGet("GameCamera"), gameData, ourMouse);
 		lastUpdateDelta = 0.0f;
 		return *ourInstance;
 	}
@@ -107,6 +117,7 @@ private:
 	std::shared_ptr<Player> localPlayer;
 
 	std::shared_ptr<MV::Client> ourLobbyClient;
+	std::shared_ptr<MV::Client> ourGameClient;
 
 	MV::Task task;
 	

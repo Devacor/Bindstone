@@ -321,6 +321,7 @@
     <ClCompile Include="Source\Game\Instance\gameInstance.cpp" />
     <ClCompile Include="Source\Game\Interface\guiFactories.cpp" />
     <ClCompile Include="Source\Game\Interface\interfaceManager.cpp" />
+    <ClCompile Include="Source\Game\managers.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\accountActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\clientActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\gameServerActions.cpp" />

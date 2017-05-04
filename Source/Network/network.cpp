@@ -140,7 +140,7 @@ namespace MV {
 	}
 
 	void Client::tryInitializeCallback() {
-		if (!ourConnectionState == CONNECTED && remainingTimeDeltas <= 0) {
+		if (ourConnectionState != CONNECTED && remainingTimeDeltas <= 0) {
 			ourConnectionState = CONNECTED;
 			if (onInitialized) {
 				try {
@@ -216,6 +216,7 @@ namespace MV {
 	void Server::update(double a_dt) {
 		auto startSize = ourConnections.size();
 		ourConnections.erase(std::remove_if(ourConnections.begin(), ourConnections.end(), [&](auto &c) {
+			if (!c) { return true; }
 			try {
 				c->update(a_dt);
 			} catch (std::exception &e) {

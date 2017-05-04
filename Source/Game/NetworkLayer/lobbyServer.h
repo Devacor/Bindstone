@@ -149,11 +149,11 @@ public:
 		return ourUrl;
 	}
 
-	uint32_t port() const {
+	uint16_t port() const {
 		return ourPort;
 	}
 
-	void setEndpoint(const std::string &a_url, uint32_t a_port) {
+	void setEndpoint(const std::string &a_url, uint16_t a_port) {
 		activeState = AVAILABLE;
 		ourUrl = a_url;
 		ourPort = a_port;
@@ -182,7 +182,7 @@ private:
 	LobbyServer& ourServer;
 
 	std::string ourUrl;
-	uint32_t ourPort;
+	uint16_t ourPort;
 
 	std::shared_ptr<MatchSeeker> leftPlayer;
 	std::shared_ptr<MatchSeeker> rightPlayer;

@@ -77,7 +77,7 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 	worldTimestep.then("update", [&](MV::Task& /*a_self*/, double a_dt) {
 		worldScene->update(static_cast<float>(a_dt), true);
 		return false;
-	}).last()->interval(1.0 / 30, 15);
+	}).recent()->interval(1.0 / 30, 15);
 }
 
 GameInstance::~GameInstance() {
@@ -138,7 +138,7 @@ void GameInstance::moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV:
 void GameInstance::moveCamera(MV::Point<> endPosition, MV::Scale endScale) {
 	auto startPosition = worldScene->position();
 	auto startScale = worldScene->scale();
-	cameraAction.finish();
+	cameraAction.cancel();
 	cameraAction.then("zoomAndPan", [&, startPosition, endPosition, startScale, endScale](MV::Task &a_self, double /*a_dt*/) {
 		auto percent = std::min(static_cast<MV::PointPrecision>(a_self.elapsed() / 0.5f), 1.0f);
 		worldScene->position(MV::mix(startPosition, endPosition, percent, 2.0f));

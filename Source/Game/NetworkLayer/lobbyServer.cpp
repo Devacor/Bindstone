@@ -24,8 +24,10 @@ bool LobbyUserConnectionState::authenticate(const std::string& a_email, const st
 		ourPlayer->client->email = a_email;
 		ourPlayer->client->handle = a_name;
 		auto lockedConnection = connection();
-		for (auto&& c : ourServer.server()->connections()) {
-			if (lockedConnection != c && (static_cast<LobbyUserConnectionState*>(c->state())->player()->client->email == ourPlayer->client->email)) {
+		auto connectionList = ourServer.server()->connections();
+		for (auto&& c : connectionList) {
+			auto* connectionState = static_cast<LobbyUserConnectionState*>(c->state());
+			if (lockedConnection != c && (connectionState->player() && connectionState->player()->client->email == ourPlayer->client->email)) {
 				c->send(makeNetworkString<IllegalResponse>("Logged in elsewhere."));
 				c->disconnect();
 				break;
@@ -34,6 +36,7 @@ bool LobbyUserConnectionState::authenticate(const std::string& a_email, const st
 		loggedIn = true;
 		return true;
 	} catch (...) {
+		std::cerr << "Failed to authenticate user!" << std::endl;
 		return false;
 	}
 }

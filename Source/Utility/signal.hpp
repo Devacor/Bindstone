@@ -46,6 +46,18 @@ namespace MV {
 				}
 			}
 		}
+
+		template <class ...Arg>
+		bool predicate(Arg &&... a_parameters) {
+			if (!blocked()) {
+				if (scriptCallback.empty()) {
+					return callback(std::forward<Arg>(a_parameters)...);
+				} else {
+					return callScriptPredicate(std::forward<Arg>(a_parameters)...);
+				}
+			}
+		}
+
 		template <class ...Arg>
 		void operator()(Arg &&... a_parameters){
 			if(!blocked()){
@@ -181,6 +193,28 @@ namespace MV {
 			} else if (!scriptCallback.empty()) {
 				std::cerr << "Failed to run script in receiver, you need to supply a chaiscript engine handle!\n";
 			}
+		}
+
+		template <typename ...Arg>
+		bool callScriptPredicate(Arg &&... a_parameters) {
+			if (scriptEnginePointer && !scriptCallback.empty()) {
+				std::map<std::string, chaiscript::Boxed_Value> localVariables;
+				auto tupleReference = std::forward_as_tuple(std::forward<Arg>(a_parameters)...);
+				auto parameterValues = toVector<chaiscript::Boxed_Value>(tupleReference);
+				for (size_t i = 0; i < parameterValues.size(); ++i) {
+					localVariables.emplace(
+						(orderedParameterNames && i < orderedParameterNames->size()) ? (*orderedParameterNames)[i] : "arg_" + std::to_string(i),
+						parameterValues[i]);
+				}
+				auto resetLocals = scriptEnginePointer->get_locals();
+				SCOPE_EXIT{ scriptEnginePointer->set_locals(resetLocals); };
+				scriptEnginePointer->set_locals(localVariables);
+				return chaiscript::boxed_cast<bool>(scriptEnginePointer->eval(scriptCallback));
+			} else if (!scriptCallback.empty()) {
+				std::cerr << "Failed to run script in receiver, you need to supply a chaiscript engine handle!\n";
+				return false;
+			}
+			return false;
 		}
 
 		template <class ...Arg>

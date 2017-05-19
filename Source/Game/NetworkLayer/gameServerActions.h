@@ -1,6 +1,7 @@
 #ifndef _GAMESERVERACTIONS_MV_H_
 #define _GAMESERVERACTIONS_MV_H_
 
+#include "Game/Instance/team.h"
 #include "Game/NetworkLayer/networkAction.h"
 #include "Utility/chaiscriptUtility.h"
 
@@ -10,8 +11,6 @@ public:
 	GameServerAvailable(const std::string &a_url, uint32_t a_port) : ourUrl(a_url), ourPort(a_port) {}
 	
 	virtual void execute(LobbyGameConnectionState* a_connection) override;
-
-	virtual bool done() const override { return true; }
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -53,8 +52,6 @@ public:
 
 	virtual void execute(GameServer& a_connection) override;
 
-	virtual bool done() const override { return true; }
-
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(
@@ -71,36 +68,33 @@ private:
 
 CEREAL_REGISTER_TYPE(AssignPlayersToGame);
 
-class GetFullGameState : public NetworkAction {
+class GetInitialGameState : public NetworkAction {
 public:
-	GetFullGameState() {}
+	GetInitialGameState() {}
+	GetInitialGameState(int64_t a_secret) : secret(a_secret) {}
 
 	virtual void execute(GameUserConnectionState*, GameServer &) override;
 
-	virtual bool done() const override { return true; }
-
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+		archive(CEREAL_NVP(secret), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
+private:
+	int64_t secret;
 };
 
-CEREAL_REGISTER_TYPE(GetFullGameState);
+CEREAL_REGISTER_TYPE(GetInitialGameState);
 
-class SuppliedFullGameState : public NetworkAction {
+class SuppliedInitialGameState : public NetworkAction {
 public:
-	SuppliedFullGameState() {}
-	SuppliedFullGameState(const std::shared_ptr<Player> &a_left, const std::shared_ptr<Player> &a_right) : left(a_left), right(a_right) {}
+	SuppliedInitialGameState() {}
+	SuppliedInitialGameState(const std::shared_ptr<Player> &a_left, const std::shared_ptr<Player> &a_right) : left(a_left), right(a_right) {}
 
 	virtual void execute(Game& a_connection) override;
 
-	virtual bool done() const override { return true; }
-
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		CEREAL_NVP(left),
-		CEREAL_NVP(right),
-		archive(cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+		archive(CEREAL_NVP(left), CEREAL_NVP(right), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
 private:
@@ -108,6 +102,26 @@ private:
 	std::shared_ptr<Player> right;
 };
 
-CEREAL_REGISTER_TYPE(SuppliedFullGameState);
+CEREAL_REGISTER_TYPE(SuppliedInitialGameState);
+
+class RequestBuildingUpgrade : public NetworkAction {
+public:
+	RequestBuildingUpgrade() {}
+	RequestBuildingUpgrade(TeamSide a_side, int32_t a_slot, int64_t a_id) : side(a_side), slot(a_slot), id(static_cast<int32_t>(a_id)) {}
+
+	virtual void execute(GameUserConnectionState*a_gameUser, GameServer &a_game) override;
+	virtual void execute(Game &a_game) override;
+
+	template <class Archive>
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
+		archive(CEREAL_NVP(side), CEREAL_NVP(slot), CEREAL_NVP(id), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	}
+
+	TeamSide side;
+	int32_t slot;
+	int32_t id;
+};
+
+CEREAL_REGISTER_TYPE(RequestBuildingUpgrade);
 
 #endif

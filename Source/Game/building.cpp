@@ -31,7 +31,7 @@ void Building::initialize() {
 }
 
 void Building::spawnCurrentCreature() {
-	auto creatureNode = gameInstance.path().owner()->make(MV::guid(currentCreature().id));
+	auto creatureNode = gameInstance.creatureContainer()->make(MV::guid(currentCreature().id));
 	creatureNode->worldPosition(owner()->worldFromLocal(spawnPoint));
 	creatureNode->attach<Creature>(currentCreature().id, skin, owningPlayer, gameInstance);
 }
@@ -68,6 +68,10 @@ void Building::upgrade(size_t a_index) {
 	waveIndex = 0;
 	creatureIndex = 0;
 	countdown = waveHasCreatures() ? 0 : current()->waves[0].creatures[0].delay;
+}
+
+void Building::requestUpgrade(size_t a_index) {
+	gameInstance.requestUpgrade(owningPlayer, slot, a_index);
 }
 
 const BuildTree* Building::current() const {
@@ -112,7 +116,8 @@ void Building::initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &
 				auto* upgradePointer = currentUpgrade.get();
 				upgradeButton->onAccept.connect("tryToBuy", [&, i, upgradePointer](std::shared_ptr<MV::Scene::Clickable> a_self) {
 					if (owningPlayer->wallet.remove(Wallet::CurrencyType::SOFT, upgradePointer->cost)) {
-						upgrade(i);
+						requestUpgrade(i);
+						//upgrade(i);
 					}
 					gameInstance.scene()->get("modal")->removeFromParent();
 				});

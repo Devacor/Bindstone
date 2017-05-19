@@ -156,6 +156,16 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 		a_self.reset();
 	}), "reset");
 
+	a_script.add(chaiscript::fun([](std::shared_ptr<Creature> &a_lhs, std::shared_ptr<Creature> &a_rhs){
+		return a_lhs.get() == a_rhs.get();
+	}), "==");
+	a_script.add(chaiscript::fun([](std::shared_ptr<Creature> &a_lhs, std::shared_ptr<Creature> &a_rhs) {
+		return a_lhs.get() != a_rhs.get();
+	}), "!=");
+	a_script.add(chaiscript::fun([]() {
+		return std::shared_ptr<Creature>();
+	}), "nullCreature");
+
 	a_script.add(chaiscript::fun(&Creature::targeting), "targeting");
 
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Creature>, std::shared_ptr<Creature>>([](const MV::Scene::SafeComponent<Creature> &a_item) { return a_item.self(); }));

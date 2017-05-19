@@ -319,6 +319,7 @@
     <ClCompile Include="Source\Game\game.cpp" />
     <ClCompile Include="Source\Game\gameEditor.cpp" />
     <ClCompile Include="Source\Game\Instance\gameInstance.cpp" />
+    <ClCompile Include="Source\Game\Instance\team.cpp" />
     <ClCompile Include="Source\Game\Interface\guiFactories.cpp" />
     <ClCompile Include="Source\Game\Interface\interfaceManager.cpp" />
     <ClCompile Include="Source\Game\managers.cpp" />
@@ -553,6 +554,7 @@
     <ClInclude Include="Source\Game\creature.h" />
     <ClInclude Include="Source\Game\gameEditor.h" />
     <ClInclude Include="Source\Game\Instance\gameInstance.h" />
+    <ClInclude Include="Source\Game\Instance\team.h" />
     <ClInclude Include="Source\Game\Interface\guiFactories.h" />
     <ClInclude Include="Source\Game\Interface\interfaceManager.h" />
     <ClInclude Include="Source\Game\managers.h" />

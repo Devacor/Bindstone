@@ -63,10 +63,8 @@ void CreatePlayer::execute(LobbyUserConnectionState* a_connection) {
 
 				transaction->commit();
 			}
-			doneFlag = true;
 		} catch (std::exception& e) {
 			MV::error("Failed to execute CreatePlayer: [", email, "]\nWHAT: [", e.what(), "]");
-			doneFlag = true;
 		}
 	});
 }
@@ -152,10 +150,8 @@ void LoginRequest::execute(LobbyUserConnectionState* a_connection) {
 
 				transaction->commit();
 			}
-			doneFlag = true;
 		} catch (std::exception& e) {
 			MV::info("Failed to execute LoginRequest: [", identifier, "]\nWHAT: [", e.what(), "]");
-			doneFlag = true;
 		}
 	});
 }

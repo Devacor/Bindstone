@@ -62,5 +62,22 @@ GameEditor::GameEditor() :
 // 		}
 // 	});
 
+	auto waterfall = limbo->make("WaterfallTestShaderThing")->position({ 100.0f, 100.0f });
+	auto drawable = waterfall->attach<MV::Scene::Drawable>()->shader("waterfall")->texture(MV::FileTextureDefinition::make("Assets/Map/stream_1.jpg")->makeHandle())
+		->setPoints(
+			{ 
+				MV::DrawPoint{ MV::point(0.0f, 0.0f), MV::TexturePoint(0.0f, 0.0f) },
+				MV::DrawPoint{ MV::point(0.0f, 100.0f), MV::TexturePoint(0.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(100.0f, 100.0f), MV::TexturePoint(1.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(100.0f, 0.0f), MV::TexturePoint(1.0f, 0.0f) },
+				MV::DrawPoint{ MV::point(0.0f, 100.0f), MV::TexturePoint(0.0f, 0.0f) },
+				MV::DrawPoint{ MV::point(100.0f, 200.0f), MV::TexturePoint(0.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(200.0f, 200.0f), MV::TexturePoint(1.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(100.0f, 100.0f), MV::TexturePoint(1.0f, 0.0f) },
+			},
+			{ 0, 1, 2, 2, 3, 0,
+			  4, 5, 6, 6, 7, 4 }
+		)->materialSettings([](MV::Shader* a_shader){a_shader->set("duration", 2.0f, false);});
+
 	grid->component<MV::Scene::Grid>()->anchors().anchor({ MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f) }).usePosition(true).parent(screenScaler.self(), MV::Scene::Anchors::BoundsToOffset::Apply);
 }

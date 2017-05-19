@@ -38,7 +38,7 @@ namespace MV {
 
 		template <class ...Arg>
 		void notify(Arg &&... a_parameters){
-			if(!blocked()){
+			if(!blocked() && !invalid()){
 				if (scriptCallback.empty()) {
 					callback(std::forward<Arg>(a_parameters)...);
 				} else {
@@ -49,18 +49,23 @@ namespace MV {
 
 		template <class ...Arg>
 		bool predicate(Arg &&... a_parameters) {
-			if (!blocked()) {
+			if (!blocked() && !invalid()) {
 				if (scriptCallback.empty()) {
 					return callback(std::forward<Arg>(a_parameters)...);
 				} else {
 					return callScriptPredicate(std::forward<Arg>(a_parameters)...);
 				}
 			}
+			return false;
+		}
+
+		bool invalid() const {
+			return scriptCallback.empty() && !callback;
 		}
 
 		template <class ...Arg>
 		void operator()(Arg &&... a_parameters){
-			if(!blocked()){
+			if(!blocked() && !invalid()){
 				if (scriptCallback.empty()) {
 					callback(std::forward<Arg>(a_parameters)...);
 				}else{
@@ -70,8 +75,19 @@ namespace MV {
 		}
 
 		template <class ...Arg>
+		bool predicate() {
+			if (!blocked() && !invalid()) {
+				if (scriptCallback.empty()) {
+					return callback();
+				} else {
+					return callScriptPredicate();
+				}
+			}
+			return false;
+		}
+		template <class ...Arg>
 		void notify(){
-			if(!blocked()){
+			if(!blocked() && !invalid()){
 				if (scriptCallback.empty()) {
 					callback();
 				} else {
@@ -81,7 +97,7 @@ namespace MV {
 		}
 		template <class ...Arg>
 		void operator()(){
-			if(!blocked()){
+			if(!blocked() && !invalid()){
 				if (scriptCallback.empty()) {
 					callback();
 				} else {

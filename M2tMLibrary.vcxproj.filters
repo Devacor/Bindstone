@@ -563,6 +563,9 @@
     <ClCompile Include="Source\Game\managers.cpp">
       <Filter>Source Files\Game</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Game\Instance\team.cpp">
+      <Filter>Source Files\Game\Instance</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Audio\package.h">
@@ -1323,6 +1326,9 @@
     </ClInclude>
     <ClInclude Include="Source\Game\managers.h">
       <Filter>Source Files\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Instance\team.h">
+      <Filter>Source Files\Game\Instance</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

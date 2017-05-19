@@ -172,6 +172,7 @@ public:
 	bool waveHasCreatures(size_t a_waveIndex = 0, size_t a_creatureIndex = 0) const;
 
 	void upgrade(size_t a_index);
+	void requestUpgrade(size_t a_index);
 
 	std::string assetPath() const {
 		return "Assets/Prefabs/Buildings/" + buildingData.id + "/" + (skin.empty() ? buildingData.id : skin) + ".prefab";

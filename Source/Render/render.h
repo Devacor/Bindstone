@@ -313,26 +313,28 @@ namespace MV {
 			}
 		}
 
-		void set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_texture, GLuint a_textureBindIndex = 0);
-		void set(std::string a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex = 0);
-		void set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex = 0);
+		void set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_texture, GLuint a_textureBindIndex = 0, bool a_errorIfNotPresent = true);
+		void set(std::string a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex = 0, bool a_errorIfNotPresent = true);
+		void set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex = 0, bool a_errorIfNotPresent = true);
 
-		void set(std::string a_variableName, PointPrecision a_value);
+		void set(std::string a_variableName, PointPrecision a_value, bool a_errorIfNotPresent = true);
 
-		void set(std::string a_variableName, const TransformMatrix &a_matrix);
+		void set(std::string a_variableName, const TransformMatrix &a_matrix, bool a_errorIfNotPresent = true);
+
+		bool has(std::string a_variableName) {
+			return variableOffset(a_variableName) >= 0;
+		}
 	private:
 		GLint variableOffset(const std::string &a_variableName){
 			auto found = variables.find(a_variableName);
 			if(found != variables.end()){
 				return found->second;
-			} else{
+			} else {
 				auto foundLocation = glGetUniformLocation(programId, a_variableName.c_str());
-				if(foundLocation >= 0){
-					variables[a_variableName] = foundLocation;
-					return foundLocation;
-				}
+				//might be -1 if missing, this is fine, avoid calling glGetUniformLocation next time.
+				variables[a_variableName] = foundLocation;
+				return foundLocation;
 			}
-			return -1;
 		}
 		std::string stringId;
 		GLuint programId;

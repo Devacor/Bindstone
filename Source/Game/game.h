@@ -45,8 +45,8 @@ public:
 		return ourMouse;
 	}
 
-	GameInstance& instance() {
-		return *ourInstance;
+	GameInstance* instance() {
+		return ourInstance.get();
 	}
 
 	std::shared_ptr<MV::Scene::Node> root() {
@@ -62,21 +62,16 @@ public:
 			std::cout << "Disconnected: " << a_dcreason << std::endl;
 			killGame();
 		}, [=] {
-			//ourGameClient->send(makeNetworkString<FullGameState>());
-			enterGame();
+			std::cout << "Connection Initialized" << std::endl;
+
+			ourGameClient->send(makeNetworkString<GetInitialGameState>(secret));
 		});
 	}
 
-	GameInstance& enterGame() {
-		auto enemyPlayer = std::make_shared<Player>();
-		enemyPlayer->handle = "Jai";
-		enemyPlayer->loadout.buildings = { "life", "life", "life", "life", "life", "life", "life", "life" };
-		enemyPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
-		enemyPlayer->wallet.add(Wallet::CurrencyType::SOFT, 5000);
-
-		ourInstance = std::make_unique<GameInstance>(localPlayer, enemyPlayer, rootScene->makeOrGet("GameCamera"), gameData, ourMouse);
-		lastUpdateDelta = 0.0f;
-		return *ourInstance;
+	GameInstance* enterGame(const std::shared_ptr<Player> &a_left, const std::shared_ptr<Player> &a_right) {
+		ourInstance = std::make_unique<ClientGameInstance>(a_left, a_right, *this);
+		lastUpdateDelta = 0;// ourGameClient->clientServerTimeDelta();
+		return ourInstance.get();
 	}
 
 	void killGame() {
@@ -96,6 +91,14 @@ public:
 	std::shared_ptr<MV::Client> lobbyClient() {
 		return ourLobbyClient;
 	}
+
+	std::shared_ptr<MV::Client> gameClient() {
+		return ourGameClient;
+	}
+
+	std::shared_ptr<Player> player() {
+		return localPlayer;
+	}
 private:
 	Game(const Game &) = delete;
 	Game& operator=(const Game &) = delete;
@@ -108,7 +111,7 @@ private:
 
 	GameData gameData;
 	std::unique_ptr<MV::InterfaceManager> ourGui;
-	std::unique_ptr<GameInstance> ourInstance;
+	std::unique_ptr<ClientGameInstance> ourInstance;
 
 	std::shared_ptr<MV::Scene::Node> rootScene;
 

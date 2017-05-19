@@ -11,7 +11,6 @@ namespace MV {
 		ourConnectionState = CONNECTING;
 		remainingTimeDeltas = EXPECTED_TIMESTEPS;
 		socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
-
 		boost::asio::ip::tcp::resolver::query query(url.host(), std::to_string(url.port()));
 		resolver.async_resolve(query, [=](const boost::system::error_code& a_err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
 			if (!a_err) {
@@ -25,6 +24,7 @@ namespace MV {
 
 	void Client::handleConnect(const boost::system::error_code& a_err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
 		if (!a_err) {
+			//socket->set_option(boost::asio::ip::tcp::no_delay(true));
 			serverTimeDeltas.push_back(Stopwatch::systemTime());
 			initiateRead();
 		} else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
@@ -185,6 +185,7 @@ namespace MV {
 		auto socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
 		acceptor.async_accept(*socket, [this, socket](boost::system::error_code ec) {
 			if (!ec) {
+				//socket->set_option(boost::asio::ip::tcp::no_delay(true));
 				auto connection = std::make_shared<Connection>(*this, socket, ioService);
 				connection->initialize(connectionStateFactory);
 
@@ -215,7 +216,7 @@ namespace MV {
 
 	void Server::update(double a_dt) {
 		auto startSize = ourConnections.size();
-		ourConnections.erase(std::remove_if(ourConnections.begin(), ourConnections.end(), [&](auto &c) {
+		ourConnections.erase(std::remove_if(ourConnections.begin(), ourConnections.end(), [&](auto c) {
 			if (!c) { return true; }
 			try {
 				c->update(a_dt);

@@ -25,7 +25,7 @@ void Game::initializeData() {
 }
 
 void Game::initializeClientConnection() {
-	ourLobbyClient = MV::Client::make(MV::Url{ "http://localhost:22325" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
+	ourLobbyClient = MV::Client::make(MV::Url{ "http://192.168.1.237:22325" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
 		auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 		value->execute(*this);
 	}, [&](const std::string &a_dcreason) {
@@ -56,6 +56,8 @@ void Game::initializeWindow(){
 	screenScaler->hide()->id("ScreenScaler");
 	screenScaler->bounds({ MV::point(0.0f, 0.0f), gameData.managers().renderer.world().size() });
 
+	gameData.managers().renderer.loadShader("waterfall", "Assets/Shaders/default.vert", "Assets/Shaders/waterfall.frag");
+
 	MV::FontDefinition::make(gameData.managers().textLibrary, "default", "Assets/Fonts/Verdana.ttf", 14);
 	MV::FontDefinition::make(gameData.managers().textLibrary, "small", "Assets/Fonts/Verdana.ttf", 9);
 	MV::FontDefinition::make(gameData.managers().textLibrary, "big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
@@ -64,12 +66,6 @@ void Game::initializeWindow(){
 		gameData.managers().textures.files("Assets/Map");
 	}
 	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::MouseState& a_mouse, LocalData& a_data)
-	localPlayer = std::make_shared<Player>();
-	localPlayer->handle = "Dervacor";
-	localPlayer->loadout.buildings = {"life", "life", "life", "life", "life", "life", "life", "life"};
-	localPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
-
-	localPlayer->wallet.add(Wallet::CurrencyType::SOFT, 5000);
 
 	hook(scriptEngine);
 	if (!MV::RUNNING_IN_HEADLESS) {
@@ -84,6 +80,9 @@ bool Game::update(double dt) {
 		ourLobbyClient->reconnect();
 	}
 	ourLobbyClient->update();
+	if (ourGameClient) {
+		ourGameClient->update();
+	}
 
 	if (done) {
 		done = false;

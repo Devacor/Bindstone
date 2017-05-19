@@ -93,7 +93,7 @@ namespace MV {
 			return ourConnectionState == CONNECTED;
 		}
 
-		double clientServerTime() const {
+		double clientServerTimeDelta() const {
 			return clientServerTimeValue;
 		}
 
@@ -105,7 +105,7 @@ namespace MV {
 			a_script.add(chaiscript::fun([](Client& a_self) { a_self.reconnect(); }), "reconnect");
 			a_script.add(chaiscript::fun([](Client& a_self, const std::function<void()> &a_onInitialized) { a_self.reconnect(a_onInitialized); }), "reconnect");
 			
-			a_script.add(chaiscript::fun(&Client::clientServerTime), "clientServerTime");
+			a_script.add(chaiscript::fun(&Client::clientServerTimeDelta), "clientServerTimeDelta");
 		}
 
 		void disconnect() {

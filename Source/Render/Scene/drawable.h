@@ -23,6 +23,10 @@
 	std::shared_ptr<ComponentType> shader(const std::string &a_shaderProgramId) { \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::shader(a_shaderProgramId)); \
 	} \
+	std::shared_ptr<ComponentType> materialSettings(std::function<void(Shader*)> a_materialSettingsCallback) { \
+		userMaterialSettings = a_materialSettingsCallback; \
+		return std::static_pointer_cast<ComponentType>(shared_from_this()); \
+	} \
 	std::shared_ptr<ComponentType> texture(std::shared_ptr<MV::TextureHandle> a_texture) { \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::texture(a_texture)); \
 	} \
@@ -190,6 +194,8 @@ namespace MV {
 				a_script.add(chaiscript::fun(&Drawable::hide), "hide");
 				a_script.add(chaiscript::fun(&Drawable::show), "show");
 
+				a_script.add(chaiscript::fun(&Drawable::materialSettings), "materialSettings");
+
 				a_script.add(chaiscript::fun(static_cast<Color(Drawable::*)() const>(&Drawable::color)), "color");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(const Color &)>(&Drawable::color)), "color");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(const std::vector<Color> &)>(&Drawable::colors)), "colors");
@@ -218,12 +224,28 @@ namespace MV {
 			size_t pointSize() const {
 				return points.size();
 			}
+
+			std::shared_ptr<Drawable> materialSettings(std::function<void(Shader*)> a_materialSettingsCallback) {
+				userMaterialSettings = a_materialSettingsCallback;
+				return std::static_pointer_cast<Drawable>(shared_from_this());
+			}
+
+			std::shared_ptr<Drawable> setPoints(const std::vector<DrawPoint> &a_points, const std::vector<GLuint> &a_vertexIndices) {
+				points = a_points;
+				vertexIndices = a_vertexIndices;
+				return std::static_pointer_cast<Drawable>(shared_from_this());
+			}
+
 		protected:
 			Drawable(const std::weak_ptr<Node> &a_owner);
 
 			virtual void detachImplementation() override;
 
-			std::function<void(Shader*)> shaderUpdater;
+			virtual void materialSettingsImplementation(Shader* a_shaderProgram) {
+				a_shaderProgram->set("time", static_cast<PointPrecision>(Stopwatch::systemTime()), false); //optional but helpful default
+				a_shaderProgram->set("texture", ourTexture);
+				a_shaderProgram->set("transformation", owner()->renderer().projectionMatrix().top() * owner()->worldTransform());
+			}
 
 			virtual void onRemoved() {
 				notifyParentOfBoundsChange();
@@ -246,7 +268,6 @@ namespace MV {
 			}
 
 			virtual void defaultDrawImplementation();
-			void Drawable::drawOpenGL(GLuint& a_bufferId, const std::vector<MV::DrawPoint>& a_points, const std::vector<unsigned int> &a_vertexIndices, MV::Shader* a_shader, const std::shared_ptr<MV::TextureHandle> &a_texture, const MV::TransformMatrix& a_matrix, GLenum a_drawType = GL_TRIANGLES);
 
 			virtual void refreshBounds();
 
@@ -315,6 +336,10 @@ namespace MV {
 
 			Anchors ourAnchors;
 			std::vector<Anchors*> childAnchors;
+
+			std::function<void(Shader*)> userMaterialSettings;
+
+			void hookupTextureSizeWatcher();
 
 		private:
 			virtual void clearTextureCoordinates() {

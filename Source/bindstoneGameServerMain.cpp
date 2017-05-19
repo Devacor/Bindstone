@@ -10,6 +10,8 @@
 #include "chaiscript/chaiscript.hpp"
 #include "Game/NetworkLayer/gameServer.h"
 
+#include "Utility/taskActions.hpp"
+
 struct TestObject {
 	TestObject() { std::cout << "\nConstructor\n"; }
 	~TestObject() { std::cout << "\nDestructor\n"; }

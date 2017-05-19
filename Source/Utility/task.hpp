@@ -10,7 +10,6 @@
 
 #include "Utility/require.hpp"
 #include "Utility/signal.hpp"
-#include "Utility/optionalCalls.hpp"
 
 #include "cereal/cereal.hpp"
 #include "cereal/types/list.hpp"
@@ -28,7 +27,7 @@ namespace MV {
 
 	class ActionBase {
 		friend Task;
-		friend cereal::access;
+		friend ::cereal::access;
 	public:
 		virtual std::string name() const { 
 			return "Base";
@@ -66,16 +65,20 @@ namespace MV {
 	};
 
 	class BasicAction : public ActionBase {
-		friend cereal::access;
+		friend ::cereal::access;
 	public:
-		BasicAction(bool a_infinite) : infinite(a_infinite) {}
+		virtual std::string name() const override {
+			return "BasicAction";
+		}
+
+		BasicAction(bool a_infinite = false) : infinite(a_infinite) {}
 
 		virtual bool update(Task& a_self, double a_dt) override { return !infinite; }
 
 	protected:
 		template <class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/) {
-			archive(CEREAL_NVP(infinite), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+			archive(CEREAL_NVP(infinite), cereal::make_nvp("ActionBase", cereal::base_class<ActionBase>(this)));
 		}
 
 	private:
@@ -588,14 +591,14 @@ namespace MV {
 		void load(Archive & archive, std::uint32_t const /*version*/) {
 			archive(
 				CEREAL_NVP(task),
-				CEREAL_NVP(onStart),
-				CEREAL_NVP(onFinish),
-				CEREAL_NVP(onFinishAll),
-				CEREAL_NVP(onFinishAll),
-				CEREAL_NVP(onSuspend),
-				CEREAL_NVP(onResume),
-				CEREAL_NVP(onCancel),
-				CEREAL_NVP(onException),
+				CEREAL_NVP(onStartSignal),
+				CEREAL_NVP(onFinishSignal),
+				CEREAL_NVP(onFinishAllSignal),
+				CEREAL_NVP(onFinishAllSignal),
+				CEREAL_NVP(onSuspendSignal),
+				CEREAL_NVP(onResumeSignal),
+				CEREAL_NVP(onCancelSignal),
+				CEREAL_NVP(onExceptionSignal),
 				CEREAL_NVP(sequentialTasks),
 				CEREAL_NVP(parallelTasks),
 				CEREAL_NVP(taskName),
@@ -618,10 +621,10 @@ namespace MV {
 				CEREAL_NVP(optionalAction)
 			);
 			if (optionalAction) {
-				task = MV::Receiver<void(Task&,double)>::make([&](Task& a_self, double a_dt) -> bool {return a_self.update(a_self, a_dt); });
+				task = MV::Receiver<bool(Task&,double)>::make([&](Task& a_self, double a_dt) -> bool {return a_self.optionalAction->update(a_self, a_dt); });
 				optionalAction->initialize(this);
-			} else {
-				task = [&](Task& a_self, double a_dt) -> bool { return true; };
+			} else if (!task || task->invalid()) {
+				task = MV::Receiver<bool(Task&, double)>::make([&](Task&, double) -> bool {return true; });
 			}
 		}
 
@@ -629,14 +632,14 @@ namespace MV {
 		void save(Archive & archive, std::uint32_t const /*version*/) const {
 			archive(
 				CEREAL_NVP(task),
-				CEREAL_NVP(onStart),
-				CEREAL_NVP(onFinish),
-				CEREAL_NVP(onFinishAll),
-				CEREAL_NVP(onFinishAll),
-				CEREAL_NVP(onSuspend),
-				CEREAL_NVP(onResume),
-				CEREAL_NVP(onCancel),
-				CEREAL_NVP(onException),
+				CEREAL_NVP(onStartSignal),
+				CEREAL_NVP(onFinishSignal),
+				CEREAL_NVP(onFinishAllSignal),
+				CEREAL_NVP(onFinishAllSignal),
+				CEREAL_NVP(onSuspendSignal),
+				CEREAL_NVP(onResumeSignal),
+				CEREAL_NVP(onCancelSignal),
+				CEREAL_NVP(onExceptionSignal),
 				CEREAL_NVP(sequentialTasks),
 				CEREAL_NVP(parallelTasks),
 				CEREAL_NVP(taskName),
@@ -816,10 +819,10 @@ namespace MV {
 					}; 
 				} catch (std::exception &a_e) {
 					handleCallbackException(a_e);
-					return true;
+					removeList.insert(a_task);
 				} catch (chaiscript::Boxed_Value &bv) {
 					handleChaiscriptException(bv);
-					return true;
+					removeList.insert(a_task);
 				}
 			});
 
@@ -933,7 +936,6 @@ namespace MV {
 		}
 
 		Receiver<bool(Task&, double)>::SharedType task;
-		//std::function<bool(Task&, double)> task;
 
 		std::list<std::shared_ptr<Task>> parallelTasks;
 		std::list<std::shared_ptr<Task>> sequentialTasks;
@@ -979,5 +981,7 @@ namespace MV {
 		}
 	}
 }
+
+CEREAL_REGISTER_TYPE(MV::BasicAction);
 
 #endif

@@ -4,40 +4,6 @@
 #include "Game/game.h"
 #include <iostream>
 
-Team::Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_game) :
-	player(a_player),
-	game(a_game),
-	side(a_side),
-	health(a_game.data().constants().startHealth) {
-
-	auto sideString = sideToString(side);
-	for (int i = 0; i < 8; ++i) {
-		auto buildingNode = game.worldScene->get(sideString + "_" + std::to_string(i));
-
-		buildings.push_back(buildingNode->attach<Building>(game.data().buildings().data(a_player->loadout.buildings[i]), a_player->loadout.skins[i], i, a_player, game).self());
-	}
-}
-
-std::vector<std::shared_ptr<Creature>> Team::creaturesInRange(const MV::Point<> &a_location, float a_radius) {
-	std::vector<std::shared_ptr<Creature>> result;
-	std::copy_if(creatures.begin(), creatures.end(), std::back_inserter(result), [&](std::shared_ptr<Creature> &a_creature) {
-		return a_creature->alive() && MV::distance(a_location, a_creature->agent()->gridPosition()) <= a_radius;
-	});
-	std::sort(result.begin(), result.end(), [&](std::shared_ptr<Creature> &a_lhs, std::shared_ptr<Creature> &a_rhs) {
-		return MV::distance(a_location, a_lhs->agent()->gridPosition()) < MV::distance(a_location, a_rhs->agent()->gridPosition());
-	});
-	return result;
-}
-
-void Team::spawn(std::shared_ptr<Creature> &a_registerCreature) {
-	if (a_registerCreature->alive()) {
-		creatures.push_back(a_registerCreature);
-		a_registerCreature->onDeath.connect("_RemoveFromTeam", [&](std::shared_ptr<Creature> a_creature) {
-			creatures.erase(std::remove(creatures.begin(), creatures.end(), a_creature), creatures.end());
-		});
-	}
-}
-
 void GameInstance::handleScroll(int a_amount) {
 	if (cameraAction.finished()) {
 		auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount);
@@ -162,11 +128,27 @@ void GameInstance::removeExpiredMissiles() {
 	expiredMissiles.clear();
 }
 
-ClientGameInstance::ClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game, const std::shared_ptr<Player> &a_localPlayer) :
+ClientGameInstance::ClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game) :
 	GameInstance(a_leftPlayer, a_rightPlayer, a_game.root(), a_game.data(), a_game.mouse()),
-	localPlayer(a_localPlayer) {
+	game(a_game) {
+}
+
+void ClientGameInstance::requestUpgrade(const std::shared_ptr<Player> &a_owner, int a_slot, size_t a_upgrade) {
+	GameInstance::requestUpgrade(a_owner, a_slot, a_upgrade);
+	game.gameClient()->send(makeNetworkString<RequestBuildingUpgrade>(teamForPlayer(a_owner).side(), a_slot, a_upgrade));
+}
+
+void ClientGameInstance::performUpgrade(TeamSide team, int a_slot, size_t a_upgrade) {
+	auto selectedBuilding = teamForSide(team).building(a_slot);
+	selectedBuilding->upgrade(a_upgrade);
+	//selectedBuilding->update(game.gameClient()->clientServerTimeDelta());
+}
+
+bool ClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const {
+	return a_player == game.player();
 }
 
 ServerGameInstance::ServerGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, GameServer& a_game) :
-	GameInstance(a_leftPlayer, a_rightPlayer, a_game.root(), a_game.data(), a_game.mouse()) {
+	GameInstance(a_leftPlayer, a_rightPlayer, a_game.root(), a_game.data(), a_game.mouse()),
+	gameServer(a_game){
 }

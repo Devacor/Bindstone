@@ -396,6 +396,10 @@ namespace MV {
 			Color(a_color),
 			TexturePoint(a_texture){	
 		}
+		DrawPoint(const Point<>& a_position, const TexturePoint &a_texture) :
+			Point<>(a_position),
+			TexturePoint(a_texture) {
+		}
 		~DrawPoint(){}
 
 		void clear();

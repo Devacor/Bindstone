@@ -1100,7 +1100,7 @@ namespace MV {
 		renderer->stopUsingFramebuffer();
 	}
 
-	void Shader::set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex) {
+	void Shader::set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent) {
 		if (!headless) {
 			GLuint offset = variableOffset(a_variableName);
 			if (offset >= 0) {
@@ -1111,13 +1111,13 @@ namespace MV {
 				glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
 				glUniform1i(offset, a_textureBindIndex);
 				glBindTexture(GL_TEXTURE_2D, textureId);
-			} else {
+			} else if (a_errorIfNotPresent) {
 				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
 			}
 		}
 	}
 
-	void Shader::set(std::string a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex) {
+	void Shader::set(std::string a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent) {
 		if (!headless) {
 			GLuint offset = variableOffset(a_variableName);
 			if (offset >= 0) {
@@ -1128,13 +1128,13 @@ namespace MV {
 				glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
 				glUniform1i(offset, a_textureBindIndex);
 				glBindTexture(GL_TEXTURE_2D, textureId);
-			} else {
+			} else if (a_errorIfNotPresent) {
 				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
 			}
 		}
 	}
 
-	void Shader::set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_value, GLuint a_textureBindIndex) {
+	void Shader::set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent) {
 		if (!headless) {
 			GLuint offset = variableOffset(a_variableName);
 			if (offset >= 0) {
@@ -1145,30 +1145,30 @@ namespace MV {
 				glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
 				glUniform1i(offset, a_textureBindIndex);
 				glBindTexture(GL_TEXTURE_2D, textureId);
-			} else {
+			} else if (a_errorIfNotPresent) {
 				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
 			}
 		}
 	}
 
-	void Shader::set(std::string a_variableName, PointPrecision a_value) {
+	void Shader::set(std::string a_variableName, PointPrecision a_value, bool a_errorIfNotPresent) {
 		if (!headless) {
 			GLuint offset = variableOffset(a_variableName);
 			if (offset >= 0) {
 				glUniform1fv(offset, 1, &a_value);
-			} else {
+			} else if (a_errorIfNotPresent) {
 				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
 			}
 		}
 	}
 
-	void Shader::set(std::string a_variableName, const TransformMatrix &a_matrix) {
+	void Shader::set(std::string a_variableName, const TransformMatrix &a_matrix, bool a_errorIfNotPresent) {
 		if (!headless) {
 			GLint offset = variableOffset(a_variableName);
 			if (offset >= 0) {
 				GLfloat *mat = &((*a_matrix.getMatrixArray())[0]);
 				glUniformMatrix4fv(offset, 1, GL_FALSE, mat);
-			} else {
+			} else if(a_errorIfNotPresent) {
 				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
 			}
 		}

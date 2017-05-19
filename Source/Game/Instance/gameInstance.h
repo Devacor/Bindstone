@@ -5,79 +5,8 @@
 #include <string>
 #include "Game/player.h"
 #include "Game/NetworkLayer/gameServer.h"
+#include "Game/Instance/team.h"
 
-enum TeamSide { LEFT, RIGHT };
-
-inline TeamSide operator!(TeamSide a_side) { return (a_side == LEFT) ? RIGHT : LEFT; }
-
-inline std::string sideToString(TeamSide a_side) { return (a_side == LEFT) ? "left" : "right"; }
-
-
-struct Constants;
-class GameInstance;
-class Building;
-class Game;
-
-class Team {
-	friend GameInstance;
-public:
-	Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_game);
-
-	MV::Point<> ourWell() const { return ourWellPosition; }
-	MV::Point<> enemyWell() const { return enemyWellPosition; }
-
-	MV::Scale scale() const { return side == TeamSide::LEFT ? MV::Scale(1, 1) : MV::Scale(-1, 1); }
-
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-		a_script.add(chaiscript::user_type<Team>(), "Team");
-
-		a_script.add(chaiscript::fun([](Team &a_self) {
-			return &a_self.game;
-		}), "game");
-
-		a_script.add(chaiscript::fun([](Team &a_self) {
-			return a_self.enemyWellPosition;
-		}), "enemyWell");
-
-		a_script.add(chaiscript::fun([](Team &a_self) {
-			return a_self.ourWellPosition;
-		}), "ourWell");
-
-		a_script.add(chaiscript::fun([](Team &a_self) {
-			return a_self.health;
-		}), "health");
-
-		a_script.add(chaiscript::fun([](Team &a_self) {
-			return a_self.buildings;
-		}), "buildings");
-
-		a_script.add(chaiscript::fun([](Team &a_self) {
-			return a_self.creatures;
-		}), "creatures");
-
-		a_script.add(chaiscript::fun([](Team &a_self, const MV::Point<> &a_location, float a_radius) {
-			return a_self.creaturesInRange(a_location, a_radius);
-		}), "creaturesInRange");
-
-		return a_script;
-	}
-
-	std::vector<std::shared_ptr<Creature>> creaturesInRange(const MV::Point<> &a_location, float a_radius);
-
-	void spawn(std::shared_ptr<Creature> &a_registerCreature);
-private:
-	std::vector<std::shared_ptr<Building>> buildings;
-	std::vector<std::shared_ptr<Creature>> creatures;
-
-	GameInstance& game;
-
-	std::shared_ptr<Player> player;
-	int health;
-	TeamSide side;
-
-	MV::Point<> ourWellPosition;
-	MV::Point<> enemyWellPosition;
-};
 
 class Missile;
 class GameInstance {
@@ -100,14 +29,26 @@ public:
 
 	bool update(double dt);
 
+	virtual void requestUpgrade(const std::shared_ptr<Player> &a_owner, int a_slot, size_t a_upgrade) {
+		std::cout << "Building Upgrade Request: " << a_slot << ", " << a_upgrade << std::endl;
+	}
+
+	virtual void performUpgrade(TeamSide team, int a_slot, size_t a_upgrade) {
+		teamForSide(team).building(a_slot)->upgrade(a_upgrade);
+	}
+
 	bool handleEvent(const SDL_Event &a_event);
 
 	MV::MouseState& mouse() {
 		return ourMouse;
 	}
 
+	std::shared_ptr<MV::Scene::Node> creatureContainer() const {
+		return pathMap->owner()->makeOrGet("Creatures");
+	}
+
 	std::shared_ptr<MV::Scene::Node> missileContainer() const {
-		return pathMap->owner();
+		return pathMap->owner()->makeOrGet("Missiles");
 	}
 
 	std::shared_ptr<MV::Scene::Node> scene() const {
@@ -140,6 +81,10 @@ public:
 	virtual bool canUpgradeBuildingFor(const std::shared_ptr<Player> &) const {
 		return true;
 	}
+
+	Team& teamForSide(TeamSide a_side) {
+		return a_side == LEFT ? left : right;
+	}
 private:
 	void removeExpiredMissiles();
 	void handleScroll(int a_amount);
@@ -169,22 +114,24 @@ private:
 
 class ClientGameInstance : public GameInstance {
 public:
-	ClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game, const std::shared_ptr<Player> &a_localPlayer);
+	ClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game);
 
-	virtual bool canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const override {
-		return a_player == localPlayer;
-	}
+	virtual void requestUpgrade(const std::shared_ptr<Player> &a_owner, int a_slot, size_t a_upgrade);
+
+	virtual void performUpgrade(TeamSide team, int a_slot, size_t a_upgrade) override;
+
+	virtual bool canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const override;
 private:
-	std::shared_ptr<Player> localPlayer;
-	std::shared_ptr<MV::Client> client;
+	Game &game;
 };
 
+class GameServer;
 class ServerGameInstance : public GameInstance {
 public:
 	ServerGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, GameServer& a_game);
 
 private:
-	std::shared_ptr<MV::Server> server;
+	GameServer &gameServer;
 };
 
 class Missile {

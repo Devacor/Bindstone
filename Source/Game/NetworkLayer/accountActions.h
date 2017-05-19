@@ -18,8 +18,6 @@ public:
 
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
 
-	virtual bool done() const override { return doneFlag; }
-
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(CEREAL_NVP(handle), CEREAL_NVP(email), CEREAL_NVP(password), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
@@ -48,7 +46,6 @@ private:
 	std::string handle;
 	std::string email;
 	std::string password;
-	bool doneFlag = false;
 
 	const int DEFAULT_HARD_CURRENCY = 150;
 	const int DEFAULT_SOFT_CURRENCY = 500;
@@ -72,12 +69,9 @@ public:
 
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
 
-	virtual bool done() const override { return doneFlag; }
-
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(CEREAL_NVP(identifier), CEREAL_NVP(password), CEREAL_NVP(saveHash), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
-		doneFlag = false;
 	}
 
 	static void hook(chaiscript::ChaiScript& a_script) {
@@ -93,8 +87,6 @@ private:
 	std::string identifier;
 	std::string password;
 	std::string saveHash;
-		
-	bool doneFlag = false;
 };
 
 CEREAL_REGISTER_TYPE(LoginRequest);

@@ -73,12 +73,7 @@ namespace MV {
 			}
 			textureSizeSignal.reset();
 			ourTexture = a_texture;
-			if (ourTexture) {
-				textureSizeSignal = TextureHandle::SignalType::make([&](std::shared_ptr<MV::TextureHandle> a_handle) {
-					updateTextureCoordinates();
-				});
-				ourTexture->sizeChange.connect(textureSizeSignal);
-			}
+			hookupTextureSizeWatcher();
 			updateTextureCoordinates();
 			return std::static_pointer_cast<Drawable>(shared_from_this());
 		}
@@ -87,51 +82,13 @@ namespace MV {
 			if (ourTexture && textureSizeSignal) {
 				ourTexture->sizeChange.disconnect(textureSizeSignal);
 			}
+			textureSizeSignal.reset();
 			ourTexture = nullptr;
 			updateTextureCoordinates();
 			return std::static_pointer_cast<Drawable>(shared_from_this());
 		}
 
-		void Drawable::drawOpenGL(GLuint& a_bufferId, const std::vector<MV::DrawPoint>& a_points, const std::vector<unsigned int> &a_vertexIndices, MV::Shader* a_shader, const std::shared_ptr<MV::TextureHandle> &a_texture, const MV::TransformMatrix& a_matrix, GLenum a_drawType) {
-			if (owner()->renderer().headless()) { return; }
-
-			if (!a_vertexIndices.empty()) {
-				require<ResourceException>(a_shader, "No shader program for Drawable!");
-				a_shader->use();
-
-				if (a_bufferId == 0) {
-					glGenBuffers(1, &a_bufferId);
-				}
-
-				glBindBuffer(GL_ARRAY_BUFFER, a_bufferId);
-				auto structSize = static_cast<GLsizei>(sizeof(a_points[0]));
-				glBufferData(GL_ARRAY_BUFFER, a_points.size() * structSize, &(a_points[0]), GL_STATIC_DRAW);
-
-				glEnableVertexAttribArray(0);
-				glEnableVertexAttribArray(1);
-				glEnableVertexAttribArray(2);
-
-				auto positionOffset = static_cast<size_t>(offsetof(DrawPoint, x));
-				auto textureOffset = static_cast<size_t>(offsetof(DrawPoint, textureX));
-				auto colorOffset = static_cast<size_t>(offsetof(DrawPoint, R));
-				glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)positionOffset); //Point
-				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
-				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
-
-				a_shader->set("texture", a_texture);
-				a_shader->set("transformation", a_matrix);
-
-				glDrawElements(a_drawType, static_cast<GLsizei>(a_vertexIndices.size()), GL_UNSIGNED_INT, &a_vertexIndices[0]);
-
-				glDisableVertexAttribArray(0);
-				glDisableVertexAttribArray(1);
-				glDisableVertexAttribArray(2);
-				glUseProgram(0);
-			}
-		}
-
-		void Drawable::boundsImplementation(const BoxAABB<> &a_bounds)
-		{
+		void Drawable::boundsImplementation(const BoxAABB<> &a_bounds) {
 			points[0] = a_bounds.minPoint;
 			points[1].x = a_bounds.minPoint.x;	points[1].y = a_bounds.maxPoint.y;	points[1].z = (a_bounds.maxPoint.z + a_bounds.minPoint.z) / 2.0f;
 			points[2] = a_bounds.maxPoint;
@@ -166,10 +123,9 @@ namespace MV {
 				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
 				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
 
-				shaderProgram->set("texture", ourTexture);
-				shaderProgram->set("transformation", owner()->renderer().projectionMatrix().top() * owner()->worldTransform());
-				if (shaderUpdater) {
-					shaderUpdater(shaderProgram);
+				materialSettingsImplementation(shaderProgram);
+				if (userMaterialSettings) {
+					userMaterialSettings(shaderProgram);
 				}
 
 				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices.size()), GL_UNSIGNED_INT, &vertexIndices[0]);
@@ -224,7 +180,13 @@ namespace MV {
 		}
 
 		void Drawable::initialize() {
-			if (ourTexture && !textureSizeSignal) {
+			if (!textureSizeSignal) {
+				hookupTextureSizeWatcher();
+			}
+		}
+
+		void Drawable::hookupTextureSizeWatcher() {
+			if (ourTexture) {
 				textureSizeSignal = TextureHandle::SignalType::make([&](std::shared_ptr<MV::TextureHandle> a_handle) {
 					updateTextureCoordinates();
 				});
@@ -248,6 +210,7 @@ namespace MV {
 			drawableClone->points = points;
 			drawableClone->ourAnchors = ourAnchors;
 			drawableClone->notifyParentOfBoundsChange();
+			drawableClone->hookupTextureSizeWatcher();
 			return a_clone;
 		}
 

@@ -30,8 +30,6 @@ public:
 	virtual void execute(LobbyUserConnectionState*) { MV::require<MV::ResourceException>(false, "Unimplemented NetworkAction::execute(LobbyUserConnectionState);"); }
 	virtual void execute(LobbyGameConnectionState*) { MV::require<MV::ResourceException>(false, "Unimplemented NetworkAction::execute(LobbyGameConnectionState);"); }
 
-	virtual bool done() const { return true; }
-
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(0);

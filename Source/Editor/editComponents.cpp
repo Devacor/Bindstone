@@ -298,6 +298,55 @@ void ResizeHandles::repositionHandles(bool a_fireOnChange, bool a_repositionElem
 	}
 }
 
+EditablePoints::EditablePoints(MV::Scene::SafeComponent<MV::Scene::Drawable> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse) :
+	elementToEdit(a_elementToEdit),
+	controlContainer(a_rootContainer->make("Editable")->depth(-100.0f)),
+	mouse(a_mouse) {
+
+	resetHandles();
+
+	nodeMoved = elementToEdit->owner()->onTransformChange.connect([&](const std::shared_ptr<MV::Scene::Node> &a_this) {
+		resetHandles();
+	});
+}
+
+void EditablePoints::removeHandles() {
+	for (auto&& pointHandle : pointHandles) {
+		pointHandle->owner()->removeFromParent();
+	}
+	pointHandles.clear();
+}
+
+void EditablePoints::resetHandles() {
+	removeHandles();
+	for (size_t i = 0; i < elementToEdit->pointSize();++i) {
+		auto point = elementToEdit->point(i);
+		auto screenPosition = elementToEdit->owner()->screenFromLocal(point.point());
+		auto position = MV::round<MV::PointPrecision>(screenPosition);
+		if (std::find_if(pointHandles.begin(), pointHandles.end(), [&](auto& ph) { return ph->owner()->position() == position; }) == pointHandles.end()) {
+			auto pointHandle = controlContainer->make(std::to_string(i))->position(position)->attach<MV::Scene::Clickable>(*mouse);
+			pointHandle->bounds({ MV::size(6.0f, 6.0f), true })->color({ 1.0f, 0.0f, 1.0f, .25f })->show();
+			hookupSignals(pointHandle, static_cast<int>(i));
+			pointHandles.push_back(pointHandle);
+		}
+	}
+	//positionHandle = controlContainer->make(MV::guid("position"))->position(rectBox.minPoint)->attach<MV::Scene::Sprite>();
+	//positionHandle->bounds(currentDimensions)->color({ 0x22FFFFFF });
+}
+
+void EditablePoints::hookupSignals(MV::Scene::SafeComponent<MV::Scene::Clickable> pointHandle, int i) {
+	pointHandle->onPress.connect("!", [=](std::shared_ptr<MV::Scene::Clickable>) {
+		std::cout << "Clicked " << elementToEdit->point(i).point() << std::endl;
+		if (onSelected) { onSelected(elementToEdit->point(i)); }
+	});
+	pointHandle->onDrag.connect("!", [=](std::shared_ptr<MV::Scene::Clickable> a_this, const MV::Point<int> &, const MV::Point<int> &deltaPosition) {
+		auto worldDelta = a_this->owner()->renderer().worldFromScreen(deltaPosition);
+		a_this->owner()->translate(worldDelta);
+		onDragged(elementToEdit->point(i), elementToEdit->owner()->localFromWorld(a_this->owner()->worldPosition()));
+	});
+}
+
+
 EditableGrid::EditableGrid(MV::Scene::SafeComponent<MV::Scene::Grid> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
 	elementToEdit(a_elementToEdit),
 	controlContainer(a_rootContainer->make("Editable")->depth(-100.0f)),

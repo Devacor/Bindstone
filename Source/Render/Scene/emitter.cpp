@@ -342,7 +342,8 @@ namespace MV {
 		}
 
 		void Emitter::defaultDrawImplementation() {
-			if (owner()->renderer().headless()) { return; }
+			auto ourOwner = owner();
+			if (ourOwner->renderer().headless()) { return; }
 
 			std::lock_guard<std::recursive_mutex> guard(lock);
 			if (!vertexIndices.empty()) {
@@ -351,6 +352,18 @@ namespace MV {
 
 				if (bufferId == 0) {
 					glGenBuffers(1, &bufferId);
+				}
+
+				if (blendModePreset != DEFAULT) {
+					if (blendModePreset == ADD) {
+						ourOwner->renderer().setBlendFunction(GL_ONE, GL_ONE);
+					}
+					else if (blendModePreset == MULTIPLY) {
+						ourOwner->renderer().setBlendFunction(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
+					}
+					else if (blendModePreset == SCREEN) {
+						ourOwner->renderer().setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
+					}
 				}
 
 				glBindBuffer(GL_ARRAY_BUFFER, bufferId);
@@ -369,7 +382,7 @@ namespace MV {
 				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
 
 				shaderProgram->set("texture", ourTexture);
-				auto emitterSpace = relativeNodePosition.expired() ? owner() : relativeNodePosition.lock();
+				auto emitterSpace = relativeNodePosition.expired() ? ourOwner : relativeNodePosition.lock();
 				shaderProgram->set("transformation", emitterSpace->renderer().projectionMatrix().top() * emitterSpace->worldTransform());
 
 				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices.size()), GL_UNSIGNED_INT, &vertexIndices[0]);
@@ -378,6 +391,9 @@ namespace MV {
 				glDisableVertexAttribArray(1);
 				glDisableVertexAttribArray(2);
 				glUseProgram(0);
+				if (blendModePreset != DEFAULT) {
+					ourOwner->renderer().defaultBlendFunction();
+				}
 			}
 		}
 

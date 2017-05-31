@@ -209,7 +209,7 @@ void SelectedNodeEditorPanel::updateComponentEditButtons(bool a_attached) {
 	}
 	componentEditButtons.clear();
 	buttonSize = MV::size(110.0f, 27.0f);
-	auto componentList = controls->elementToEdit->components<MV::Scene::Sprite, MV::Scene::Text, MV::Scene::Grid, MV::Scene::Emitter, MV::Scene::Spine, MV::Scene::PathMap, MV::Scene::Button, MV::Scene::Clickable>(true);
+	auto componentList = controls->elementToEdit->components<MV::Scene::Sprite, MV::Scene::Text, MV::Scene::Grid, MV::Scene::Emitter, MV::Scene::Spine, MV::Scene::PathMap, MV::Scene::Button, MV::Scene::Clickable, MV::Scene::Drawable>(true);
 	
 	MV::visit_each(componentList,
 	[&](const MV::Scene::SafeComponent<MV::Scene::Sprite> &a_sprite) {
@@ -235,6 +235,9 @@ void SelectedNodeEditorPanel::updateComponentEditButtons(bool a_attached) {
 	},
 	[&](const MV::Scene::SafeComponent<MV::Scene::Clickable> &a_clickable) {
 		CreateClickableComponentButton(a_clickable);
+	},
+	[&](const MV::Scene::SafeComponent<MV::Scene::Drawable> &a_drawable) {
+		CreateDrawableComponentButton(a_drawable);
 	});
 }
 
@@ -256,6 +259,18 @@ MV::Scene::SafeComponent<MV::Scene::Button> SelectedNodeEditorPanel::CreateGridC
 		componentPanel->loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(a_grid, panel.editor()->make("EditableGrid"), panel.resources().mouse), button);
 		componentPanel->activePanel()->onNameChange.connect(MV::guid("NameChange"), [button](const std::string &a_newName) {
 			renameButton(button->safe(), std::string("G: ") + a_newName);
+		});
+	});
+	componentEditButtons.push_back(button->owner());
+	return button->safe();
+}
+
+MV::Scene::SafeComponent<MV::Scene::Button> SelectedNodeEditorPanel::CreateDrawableComponentButton(const MV::Scene::SafeComponent<MV::Scene::Drawable> & a_drawable) {
+	auto button = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, MV::guid("EditGrid"), buttonSize, std::string("D: ") + a_drawable->id());
+	button->onAccept.connect(MV::guid("click"), [&, a_drawable, button](std::shared_ptr<MV::Scene::Clickable>) {
+		componentPanel->loadPanel<SelectedDrawableEditorPanel>(std::make_shared<EditablePoints>(a_drawable, panel.editor()->make("EditableDrawable"), panel.resources().mouse), button);
+		componentPanel->activePanel()->onNameChange.connect(MV::guid("NameChange"), [button](const std::string &a_newName) {
+			renameButton(button->safe(), std::string("D: ") + a_newName);
 		});
 	});
 	componentEditButtons.push_back(button->owner());
@@ -371,6 +386,341 @@ void SelectedNodeEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
 void SelectedNodeEditorPanel::onSceneZoom() {
 	controls->resetHandles();
 	componentPanel->onSceneZoom();
+}
+
+SelectedDrawableEditorPanel::SelectedDrawableEditorPanel(EditorControls &a_panel, std::shared_ptr<EditablePoints> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton) :
+	EditorPanel(a_panel),
+	controls(a_controls) {
+
+	controls->onDragged = [&](MV::Point<> a_point, MV::Point<> a_final){
+		auto pointList = controls->elementToEdit->getPoints();
+		for (int i = 0; i < pointList.size(); ++i) {
+			if (MV::distance(a_point, pointList[i].point()) < 1.0f) {
+				pointList[i] = a_final;
+				controls->elementToEdit->setPoint(i, pointList[i]);
+				const Uint8* keystate = SDL_GetKeyboardState(NULL);
+				if (keystate[SDL_SCANCODE_LSHIFT]) {
+					return true;
+				}
+			}
+		}
+		return true;
+	};
+
+	controls->onSelected = [&](MV::Point<> a_point) {
+		auto pointList = controls->elementToEdit->getPoints();
+		for (int i = 0; i < pointList.size(); ++i) {
+			if (MV::distance(a_point, pointList[i].point()) < 1.0f) {
+				selectedPointIndex = i;
+				applyColorToColorButton(colorButton, pointList[i].color());
+				return;
+			}
+		}
+	};
+
+	float gridWidth = 220.0f;
+	auto node = panel.content();
+	auto grid = node->make("Background")->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(gridWidth + 6.0f)->
+		color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->
+		padding({ 2.0f, 2.0f })->owner();
+	auto buttonSize = MV::size(gridWidth, 27.0f);
+	auto deselectButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
+	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		panel.deleteFullScene();
+	});
+
+	auto deleteButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Delete", buttonSize, UTF_CHAR_STR("Delete"));
+	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		controls->elementToEdit->detach();
+		panel.deleteFullScene();
+	});
+
+	openTexturePicker();
+
+	std::weak_ptr<EditablePoints> weakControls = controls;
+	colorButton = makeColorButton(grid, panel.content(), *panel.resources().textLibrary, *panel.resources().mouse, buttonSize, controls->elementToEdit->color(), [=](const MV::Color &a_color) {
+		auto element = weakControls.lock()->elementToEdit;
+		if (element->pointSize() == 0) {
+			return;
+		}
+		auto specifiedPoint = element->point(selectedPointIndex).point();
+		auto pointList = element->getPoints();
+		for (int i = 0; i < pointList.size(); ++i) {
+			if (MV::distance(specifiedPoint, pointList[i].point()) < 1.0f) {
+				element->setPoint(i, a_color);
+			}
+		}
+	});
+
+	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Name", buttonSize)->
+		text(controls->elementToEdit->id())->
+		onEnter.connect("rename", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
+		controls->elementToEdit->id(a_text->text());
+		onNameChangeSignal(controls->elementToEdit->id());
+		if (a_associatedButton) {
+			renameButton(a_associatedButton->safe(), std::string("D: ") + a_text->text());
+		}
+	});
+
+	float textboxWidth = 52.0f;
+
+	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "Texture", buttonSize, UTF_CHAR_STR("Texture"))->
+		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		openTexturePicker();
+	});
+
+	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Shader", buttonSize)->
+		text(controls->elementToEdit->shader())->
+		onEnter.connect("shader", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
+			controls->elementToEdit->shader(a_text->text());
+		});
+
+	auto deselectLocalAABB = deselectButton->bounds();
+
+	panel.updateBoxHeader(grid->bounds().width());
+
+	SDL_StartTextInput();
+}
+
+void SelectedDrawableEditorPanel::openTexturePicker() {
+	clearTexturePicker();
+	picker = std::make_shared<TexturePicker>(panel.editor(), panel.resources(), [&](std::shared_ptr<MV::TextureHandle> a_handle, bool a_allowClear) {
+		if (a_handle || a_allowClear) {
+			controls->elementToEdit->texture(a_handle);
+		}
+		clearTexturePicker();
+	});
+}
+
+void SelectedDrawableEditorPanel::handleInput(SDL_Event &a_event) {
+	if (auto lockedAT = activeTextbox.lock()) {
+		lockedAT->text(a_event);
+	}
+	else if (a_event.type == SDL_KEYDOWN) {
+		auto offsetPosition = controls->elementToEdit->owner()->localFromScreen(panel.resources().mouse->position());
+		auto originalMouseLocalPosition = offsetPosition;
+		auto ourPoints = controls->elementToEdit->getPoints();
+		auto shortestDistance = std::numeric_limits<MV::PointPrecision>().max();
+		for (auto&& point : ourPoints) {
+			auto currentDistance = MV::distance(point.point(), originalMouseLocalPosition);
+			if (currentDistance < shortestDistance) {
+				shortestDistance = currentDistance;
+				offsetPosition = point.point();
+			}
+		}
+
+		MV::Scale scale(.5f, .5f);
+
+		if (a_event.key.keysym.sym == SDLK_q) {
+			controls->elementToEdit->appendPoints({
+				MV::DrawPoint{ MV::point(0.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.0f) },
+				MV::DrawPoint{ MV::point(0.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(100.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(100.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.0f) },
+
+				MV::DrawPoint{ MV::point(0.0f, 25.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.25f) },
+				MV::DrawPoint{ MV::point(0.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.5f) },
+				MV::DrawPoint{ MV::point(0.0f, 75.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.75f) },
+
+				MV::DrawPoint{ MV::point(12.5f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.125f, 1.0f) },
+				MV::DrawPoint{ MV::point(25.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.25f, 1.0f) },
+				MV::DrawPoint{ MV::point(37.5f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.375f, 1.0f) },
+				MV::DrawPoint{ MV::point(50.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 1.0f) },
+				MV::DrawPoint{ MV::point(62.5f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.625f, 1.0f) },
+				MV::DrawPoint{ MV::point(75.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.75f, 1.0f) },
+				MV::DrawPoint{ MV::point(87.5f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.875f, 1.0f) },
+
+				MV::DrawPoint{ MV::point(100.0f, 75.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.75f) },
+				MV::DrawPoint{ MV::point(100.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.5f) },
+				MV::DrawPoint{ MV::point(100.0f, 25.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.25f) },
+
+				MV::DrawPoint{ MV::point(87.5f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.875f, 0.0f) },
+				MV::DrawPoint{ MV::point(75.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.75f, 0.0f) },
+				MV::DrawPoint{ MV::point(62.5f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.625f, 0.0f) },
+				MV::DrawPoint{ MV::point(50.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 0.0f) },
+				MV::DrawPoint{ MV::point(37.5f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.375f, 0.0f) },
+				MV::DrawPoint{ MV::point(25.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.25f, 0.0f) },
+				MV::DrawPoint{ MV::point(12.5f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.125f, 0.0f) },
+
+				MV::DrawPoint{ MV::point(25.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.25f, 0.5f) },
+				MV::DrawPoint{ MV::point(50.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 0.5f) },
+				MV::DrawPoint{ MV::point(75.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.75f, 0.5f) },
+			},
+				{
+					21, 22, 24,
+					22, 23, 24,
+					23, 0, 24,
+					0, 4, 24,
+					4, 5, 24,
+					5, 6, 24,
+					6, 1, 24,
+					1, 7, 24,
+					7, 8, 24,
+					8, 9, 24,
+
+					24, 9, 25,
+					9, 10, 25,
+					10, 11, 25,
+					25, 11, 26,
+
+					11, 12, 26,
+					12, 13, 26,
+					13, 2, 26,
+					2, 14, 26,
+					14, 15, 26,
+					15, 16, 26,
+					16, 3, 26,
+					3, 17, 26,
+					17, 18, 26,
+					18, 19, 26,
+
+					19, 25, 26,
+					19, 20, 25,
+					20, 21, 25,
+					21, 24, 25
+				});
+			controls->resetHandles();
+		} else if (a_event.key.keysym.sym == SDLK_a) {
+			controls->elementToEdit->appendPoints({
+				MV::DrawPoint{ MV::point(0.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.0f) },
+				MV::DrawPoint{ MV::point(0.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(100.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(100.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.0f) },
+
+				MV::DrawPoint{ MV::point(0.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.5f) },
+				MV::DrawPoint{ MV::point(50.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 1.0f) },
+				MV::DrawPoint{ MV::point(100.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.5f) },
+				MV::DrawPoint{ MV::point(50.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 0.0f) },
+
+				MV::DrawPoint{ MV::point(50.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 0.5f) } },
+				{ 
+					0, 4, 8, 8, 7, 0,
+					7, 8, 6, 6, 3, 7,
+					4, 1, 5, 5, 8, 4,
+					8, 5, 2, 2, 6, 8
+				});
+
+			controls->resetHandles();
+		} else if (a_event.key.keysym.sym == SDLK_z) {
+			controls->elementToEdit->appendPoints({
+				MV::DrawPoint{ MV::point(0.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.0f) },
+				MV::DrawPoint{ MV::point(0.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(100.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(100.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.0f) },
+
+				MV::DrawPoint{ MV::point(0.0f, 25.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.25f) },
+				MV::DrawPoint{ MV::point(0.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.5f) },
+				MV::DrawPoint{ MV::point(0.0f, 75.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.75f) },
+
+				MV::DrawPoint{ MV::point(50.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 1.0f) },
+
+				MV::DrawPoint{ MV::point(100.0f, 75.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.75f) },
+				MV::DrawPoint{ MV::point(100.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.5f) },
+				MV::DrawPoint{ MV::point(100.0f, 25.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.25f) },
+
+				MV::DrawPoint{ MV::point(50.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 0.0f) },
+
+				MV::DrawPoint{ MV::point(50.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 0.5f) } },
+				{
+					0, 4, 12, 12, 11, 0,
+					4, 5, 12, 5, 6, 12,
+					6, 1, 7, 7, 12, 6,
+					11, 12, 10, 10, 3, 11,
+					12, 9, 10, 12, 8, 9,
+					12, 7, 2, 2, 8, 12
+				});
+
+			controls->resetHandles();
+		} else if (a_event.key.keysym.sym == SDLK_s) {
+			controls->elementToEdit->appendPoints({
+				MV::DrawPoint{ MV::point(0.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.0f) },
+				MV::DrawPoint{ MV::point(-75.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(175.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(100.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.0f) },
+
+				MV::DrawPoint{ MV::point(0.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.5f) },   //4
+				MV::DrawPoint{ MV::point(25.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 1.0f) }, //5
+				MV::DrawPoint{ MV::point(75.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) }, //6
+				MV::DrawPoint{ MV::point(100.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.5f) }, //7
+				MV::DrawPoint{ MV::point(50.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 0.0f) },   //8
+
+				MV::DrawPoint{ MV::point(50.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.5f) },  //9
+				MV::DrawPoint{ MV::point(50.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.5f) },  //10
+
+				MV::DrawPoint{ MV::point(50.0f, 25.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 0.25f) }, //11
+
+				MV::DrawPoint{ MV::point(25.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 0.5f) },  //12
+				MV::DrawPoint{ MV::point(-25.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 1.0f) },//13
+
+				MV::DrawPoint{ MV::point(75.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 0.5f) },  //14
+				MV::DrawPoint{ MV::point(125.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 1.0f) },//15
+			},
+				{
+					0, 4, 11, 11, 8, 0,
+					8, 11, 7, 7, 3, 8,
+					11, 4, 12, 12, 9, 11,
+					11, 10, 14, 14, 7, 11,
+					4, 1, 13, 13, 12, 4,
+					12, 13, 5, 5, 9, 12,
+					10, 6, 15, 15, 14, 10,
+					14, 15, 2, 2, 7, 14
+				});
+
+			controls->resetHandles();
+		}
+		else if (a_event.key.keysym.sym == SDLK_x) {
+			controls->elementToEdit->appendPoints({
+				MV::DrawPoint{ MV::point(0.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.0f) },
+				MV::DrawPoint{ MV::point(-75.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(175.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 1.0f) },
+				MV::DrawPoint{ MV::point(100.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.0f) },
+
+				MV::DrawPoint{ MV::point(0.0f, 25.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.25f) },   //4
+				MV::DrawPoint{ MV::point(0.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.5f) },    //5
+				MV::DrawPoint{ MV::point(-37.5f, 75.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.75f) }, //6
+
+				MV::DrawPoint{ MV::point(-25.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 1.0f) }, //7
+				MV::DrawPoint{ MV::point(25.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 1.0f) },  //8
+
+				MV::DrawPoint{ MV::point(37.5f, 75.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.75f) },  //9
+
+				MV::DrawPoint{ MV::point(50.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.5f) },   //10
+				MV::DrawPoint{ MV::point(50.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.5f) },   //11
+
+				MV::DrawPoint{ MV::point(62.5f, 75.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.75f) },   //12
+
+				MV::DrawPoint{ MV::point(75.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) },  //13
+				MV::DrawPoint{ MV::point(125.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 1.0f) }, //14
+
+				MV::DrawPoint{ MV::point(137.5f, 75.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.75f) }, //15
+				MV::DrawPoint{ MV::point(100.0f, 50.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.5f) },  //16
+				MV::DrawPoint{ MV::point(100.0f, 25.0f) * scale + offsetPosition, MV::TexturePoint(1.0f, 0.25f) }, //17
+
+				MV::DrawPoint{ MV::point(50.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 0.0f) },    //18
+				MV::DrawPoint{ MV::point(50.0f, 25.0f) * scale + offsetPosition, MV::TexturePoint(0.5f, 0.25f) },  //19
+			},
+			{
+				0, 4, 19, 19, 18, 0,
+				18, 19, 17, 17, 3, 18,
+				4, 5, 10, 10, 19, 4,
+				19, 11, 16, 16, 17, 19,
+				5, 6, 9, 9, 10, 5,
+				6, 1, 7, 6, 7, 9, 7, 8, 9,
+				11, 12, 15, 15, 16, 11,
+				12, 13, 14, 12, 14, 15, 14, 2, 15
+			});
+
+			controls->resetHandles();
+		}
+	}
+}
+
+void SelectedDrawableEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
+	controls->resetHandles();
+}
+
+void SelectedDrawableEditorPanel::onSceneZoom() {
+	controls->resetHandles();
 }
 
 SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableGrid> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton) :
@@ -848,21 +1198,21 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	}, MV::unmixIn(0.01f, 60.0f, controls->elementToEdit->properties().minimum.maxLifespan, 2));
 	grid->add(maximumLifespan);
 
-	float maxSpeedFloat = 750.0f;
-	auto maximumEndSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
+	float maxSpeedFloat = 200.0f;
+	auto maximumEndSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [&, maxSpeedFloat](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.endSpeed = MV::mixInOut(-maxSpeedFloat, maxSpeedFloat, a_slider->percent(), 2);
 	}, MV::unmixInOut(-maxSpeedFloat, maxSpeedFloat, controls->elementToEdit->properties().maximum.endSpeed, 2));
-	auto minimumEndSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [&,maximumEndSpeed](std::shared_ptr<MV::Scene::Slider> a_slider){
+	auto minimumEndSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [&, maxSpeedFloat,maximumEndSpeed](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.endSpeed = MV::mixInOut(-maxSpeedFloat, maxSpeedFloat, a_slider->percent(), 2);
 		maximumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, MV::unmixInOut(-maxSpeedFloat, maxSpeedFloat, controls->elementToEdit->properties().minimum.endSpeed, 2));
 
 	makeLabel(grid, *panel.resources().textLibrary, "initialSpeed", labelSize, UTF_CHAR_STR("Start Speed"));
-	auto startSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [&, maximumEndSpeed](std::shared_ptr<MV::Scene::Slider> a_slider){
+	auto startSpeed = makeSlider(node->renderer(), *panel.resources().mouse, [&, maximumEndSpeed,maxSpeedFloat](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginSpeed = MV::mixInOut(-maxSpeedFloat, maxSpeedFloat, a_slider->percent(), 2);
 		maximumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, MV::unmixInOut(-maxSpeedFloat, maxSpeedFloat, controls->elementToEdit->properties().maximum.beginSpeed, 2));
-	makeSlider(*panel.resources().mouse, grid, [&, minimumEndSpeed, startSpeed](std::shared_ptr<MV::Scene::Slider> a_slider){
+	makeSlider(*panel.resources().mouse, grid, [&, maxSpeedFloat, minimumEndSpeed, startSpeed](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum.beginSpeed = MV::mixInOut(-maxSpeedFloat, maxSpeedFloat, a_slider->percent(), 2);
 		startSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
 		minimumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
@@ -1008,6 +1358,12 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 		applyColorToColorButton(minEndColor.self(), a_color);
 		applyColorToColorButton(maxStartColor.self(), a_color);
 	}, UTF_CHAR_STR("Start Min"));
+
+	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Shader", buttonSize)->
+		text(std::to_string(static_cast<int>(controls->elementToEdit->blend())))->
+		onEnter.connect("rename", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
+			controls->elementToEdit->blend(static_cast<MV::Scene::Drawable::BlendModePreset>(std::stoi(a_text->text())));
+		});
 
 	grid->add(minStartColor->owner());
 	grid->add(maxStartColor->owner());
@@ -1253,6 +1609,17 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	});
 }
 
+void DeselectedEditorPanel::handleInput(SDL_Event &a_event) {
+	if (auto lockedAT = activeTextbox.lock()) {
+		lockedAT->text(a_event);
+	}
+	else if (a_event.type == SDL_KEYDOWN) {
+		if (a_event.key.keysym.sym == SDLK_s) {
+			panel.content()->renderer().reloadShaders();
+		}
+	}
+}
+
 std::string DeselectedEditorPanel::previousFileName = "Assets/Scenes/map.scene";
 
 ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel, const std::shared_ptr<MV::Scene::Node> &a_nodeToAttachTo, SelectedNodeEditorPanel *a_editorPanel):
@@ -1272,6 +1639,7 @@ ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel, co
 	auto createPathMapButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "PathMap", MV::size(110.0f, 27.0f), UTF_CHAR_STR("PathMap"));
 	auto createButtonButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Button", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Button"));
 	auto createClickableButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Clickable", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Clickable"));
+	auto createDrawableButton = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Drawable", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Drawable"));
 
 	auto cancel = makeButton(grid, *panel.resources().textLibrary, *panel.resources().mouse, "Cancel", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Cancel"));
 
@@ -1291,6 +1659,10 @@ ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel, co
 
 	createSpineButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
 		createSpine();
+	});
+
+	createDrawableButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		createDrawable();
 	});
 
 	createButtonButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>) {
@@ -1369,6 +1741,14 @@ void ChooseElementCreationType::createGrid() {
 	auto newGrid = nodeToAttachTo->attach<MV::Scene::Grid>();
 
 	panel.loadPanel<SelectedGridEditorPanel>(std::make_shared<EditableGrid>(newGrid, panel.editor(), panel.resources().mouse), editorPanel->CreateGridComponentButton(newGrid).self());
+}
+
+void ChooseElementCreationType::createDrawable() {
+	panel.selection().disable();
+	auto newDrawable = nodeToAttachTo->attach<MV::Scene::Drawable>();
+	newDrawable->setPoints({}, {});
+
+	panel.loadPanel<SelectedDrawableEditorPanel>(std::make_shared<EditablePoints>(newDrawable, panel.editor(), panel.resources().mouse), editorPanel->CreateDrawableComponentButton(newDrawable).self());
 }
 
 void ChooseElementCreationType::createButton(const MV::BoxAABB<int> &a_selected) {

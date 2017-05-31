@@ -14,6 +14,14 @@ public:
 		files(sharedResources.textures->fileIds()),
 		setter(a_setter) {
 
+		files.erase(std::remove_if(files.begin(), files.end(), [&](std::pair<std::string, bool> &a_item) {
+			if (a_item.first.find("/Map") != std::string::npos) {
+				mapFiles.push_back(a_item);
+				return true;
+			}
+			return false;
+		}), files.end());
+
 		initializeRootPicker();
 	}
 
@@ -34,24 +42,30 @@ private:
 				setter(nullptr, true);
 			});
 
-		auto pos = box ? box->parent()->position() : MV::Point<>(200.0f, 0.0f);
-		box = makeDraggableBox("TexturePicker", root, grid->bounds().size(), *sharedResources.mouse);
-		box->parent()->position(pos);
-		box->add(gridNode);
-
-		auto imageButton = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Files", { 100.0f, 27.0f }, "Files");
+		auto imageButton = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Images", { 100.0f, 27.0f }, "Images");
 		imageButton->onAccept.connect("Accept", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
-			initializeFilePicker();
+			initializeFilePicker(files);
 		});
+
+		auto imageButton2 = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Map", { 100.0f, 27.0f }, "Map");
+		imageButton2->onAccept.connect("Accept", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			initializeFilePicker(mapFiles);
+		});
+
 		for (auto&& packId : packs) {
 			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, packId, { 100.0f, 27.0f }, packId);
 			button->onAccept.connect("Accept", [&, packId](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				initializeImagePicker(packId);
 			});
 		}
+
+		auto pos = box ? box->parent()->position() : MV::Point<>(200.0f, 0.0f);
+		box = makeDraggableBox("TexturePicker", root, grid->bounds().size(), *sharedResources.mouse);
+		box->parent()->position(pos);
+		box->add(gridNode);
 	}
 
-	void initializeFilePicker() {
+	void initializeFilePicker(std::vector<std::pair<std::string, bool>>& a_fileList) {
 		auto cellSize = MV::size(64.0f, 64.0f);
 		auto gridNode = MV::Scene::Node::make(root->renderer());
 		grid = gridNode->attach<MV::Scene::Grid>()->cellSize(cellSize)->padding({ 2.0f, 2.0f })->columns(6)->color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f });
@@ -60,12 +74,7 @@ private:
 			initializeRootPicker();
 		});
 
-		auto pos = box ? box->parent()->position() : MV::Point<>(200.0f, 0.0f);
-		box = makeDraggableBox("TexturePicker", root, grid->bounds().size(), *sharedResources.mouse);
-		box->parent()->position(pos);
-		box->add(grid->owner());
-
-		for (auto&& textureId : files) {
+		for (auto&& textureId : a_fileList) {
 			auto handle = sharedResources.textures->file(textureId.first, textureId.second)->makeHandle();
 
 			auto button = makeButton(grid->owner(), *sharedResources.textLibrary, *sharedResources.mouse, textureId.first, cellSize, "");
@@ -74,6 +83,11 @@ private:
 			});
 			button->owner()->make("icon")->attach<MV::Scene::Sprite>()->bounds({ MV::fitAspect(MV::cast<MV::PointPrecision>(handle->bounds().size()), cellSize) })->texture(handle);
 		}
+
+		auto pos = box ? box->parent()->position() : MV::Point<>(200.0f, 0.0f);
+		box = makeDraggableBox("TexturePicker", root, grid->bounds().size(), *sharedResources.mouse);
+		box->parent()->position(pos);
+		box->add(grid->owner());
 	}
 
 	void initializeImagePicker(const std::string &a_packId) {
@@ -85,10 +99,6 @@ private:
 			initializeRootPicker();
 		});
 
-		auto pos = box ? box->parent()->position() : MV::Point<>(200.0f, 0.0f);
-		box = makeDraggableBox("TexturePicker", root, grid->bounds().size(), *sharedResources.mouse);
-		box->parent()->position(pos);
-		box->add(grid->owner());
 		auto pack = sharedResources.textures->pack(a_packId);
 		for (auto&& textureId : pack->handleIds()) {
 			auto handle = pack->handle(textureId);
@@ -99,6 +109,11 @@ private:
 			});
 			button->owner()->make("icon")->attach<MV::Scene::Sprite>()->bounds({ MV::fitAspect(MV::round<MV::PointPrecision>(handle->bounds().size()), cellSize) })->texture(handle);
 		}
+
+		auto pos = box ? box->parent()->position() : MV::Point<>(200.0f, 0.0f);
+		box = makeDraggableBox("TexturePicker", root, grid->bounds().size(), *sharedResources.mouse);
+		box->parent()->position(pos);
+		box->add(grid->owner());
 	}
 
 	SharedResources sharedResources;
@@ -107,6 +122,7 @@ private:
 	std::shared_ptr<MV::Scene::Grid> grid;
 
 	std::vector<std::pair<std::string, bool>> files;
+	std::vector<std::pair<std::string, bool>> mapFiles;
 	std::vector<std::string> packs;
 
 	std::string selectedPack;

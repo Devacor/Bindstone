@@ -52,6 +52,7 @@ void Editor::initializeWindow(){
 
 	//managers.textures.assemblePacks("Assets/Atlases", &managers.renderer);
 	managers.textures.files("Assets/Map");
+	managers.textures.files("Assets/Images");
 
 	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
 	fps = controls->make("FPS")->position({960.0f - 50.0f, 0.0f})->
@@ -93,10 +94,10 @@ void Editor::handleInput(){
 				handleScroll(event.wheel.y);
 				break;
 			}
+			controlPanel.handleInput(event);
 		}
 	}
 	mouse.update();
-	controlPanel.handleInput(event);
 }
 
 void Editor::render(){

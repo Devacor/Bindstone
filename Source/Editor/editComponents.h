@@ -74,6 +74,35 @@ protected:
 	std::shared_ptr<MV::Scene::Node> controlContainer;
 };
 
+class EditablePoints {
+public:
+	EditablePoints(MV::Scene::SafeComponent<MV::Scene::Drawable> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+
+	~EditablePoints() {
+		controlContainer->removeFromParent();
+	}
+
+	void removeHandles();
+
+	void resetHandles();
+
+	std::function<void(MV::Point<>)> onSelected;
+	std::function<bool(MV::Point<>, MV::Point<>)> onDragged; //true if drag should move it.
+
+	MV::Scene::SafeComponent<MV::Scene::Drawable> elementToEdit;
+private:
+
+	void hookupSignals(MV::Scene::SafeComponent<MV::Scene::Clickable> pointHandle, int pointIndex);
+
+	MV::Scene::Node::BasicSharedSignalType nodeMoved;
+
+	MV::MouseState *mouse;
+
+	std::vector<MV::Scene::SafeComponent<MV::Scene::Clickable>> pointHandles;
+
+	std::shared_ptr<MV::Scene::Node> controlContainer;
+};
+
 class EditableGrid {
 public:
 	EditableGrid(MV::Scene::SafeComponent<MV::Scene::Grid> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);

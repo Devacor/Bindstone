@@ -57,6 +57,7 @@ void Game::initializeWindow(){
 	screenScaler->bounds({ MV::point(0.0f, 0.0f), gameData.managers().renderer.world().size() });
 
 	gameData.managers().renderer.loadShader("waterfall", "Assets/Shaders/default.vert", "Assets/Shaders/waterfall.frag");
+	gameData.managers().renderer.loadShader("pool", "Assets/Shaders/default.vert", "Assets/Shaders/pool.frag");
 
 	MV::FontDefinition::make(gameData.managers().textLibrary, "default", "Assets/Fonts/Verdana.ttf", 14);
 	MV::FontDefinition::make(gameData.managers().textLibrary, "small", "Assets/Fonts/Verdana.ttf", 9);
@@ -64,6 +65,7 @@ void Game::initializeWindow(){
 	if (!gameData.managers().renderer.headless()) {
 		gameData.managers().textures.assemblePacks("Assets/Atlases", &gameData.managers().renderer);
 		gameData.managers().textures.files("Assets/Map");
+		gameData.managers().textures.files("Assets/Images");
 	}
 	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::MouseState& a_mouse, LocalData& a_data)
 

@@ -54,7 +54,7 @@ void Creature::initialize() {
 	pathAgent = owner()->attach<MV::Scene::PathAgent>(gameInstance.path().self(), gameInstance.path()->gridFromLocal(gameInstance.path()->owner()->localFromWorld(owner()->worldPosition())), 3)->
 		gridSpeed(statTemplate.moveSpeed);
 
-	task().also("UpdateZOrder", [&](const MV::Task &a_self, double a_dt) {
+	task().also("UpdateZOrder", [&](const MV::Task &, double) {
 		owner()->depth(pathAgent->gridPosition().y);
 		return false;
 	});
@@ -88,7 +88,7 @@ void Creature::updateImplementation(double a_delta) {
 	}
 }
 
-chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance) {
+chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameInstance& /*gameInstance*/) {
 	CreatureData::hook(a_script);
 	a_script.add(chaiscript::user_type<Creature>(), "Creature");
 	a_script.add(chaiscript::base_class<Component, Creature>());

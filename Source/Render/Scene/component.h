@@ -153,6 +153,7 @@ namespace MV {
 			virtual void endDraw() { }
 
 			void update(double a_delta) {
+				accumulatedDelta += a_delta;
 				updateImplementation(a_delta);
 				rootTask.update(a_delta);
 			}
@@ -288,7 +289,7 @@ namespace MV {
 			}
 
 			virtual void updateImplementation(double a_delta) {}
-
+			double accumulatedDelta = 0.0;
 		private:
 			bool allowSerialize = true;
 

@@ -53,6 +53,7 @@ GameServer::GameServer(Managers &a_managers, unsigned short a_port) :
 	if (!gameData.managers().renderer.headless()) {
 		gameData.managers().textures.assemblePacks("Assets/Atlases", &gameData.managers().renderer);
 		gameData.managers().textures.files("Assets/Map");
+		gameData.managers().textures.files("Assets/Images");
 	}
 	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::MouseState& a_mouse, LocalData& a_data)
 

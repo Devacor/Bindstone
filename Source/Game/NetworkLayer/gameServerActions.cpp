@@ -27,7 +27,7 @@ void SuppliedInitialGameState::execute(Game& a_game) {
 	a_game.enterGame(left, right);
 }
 
-void RequestBuildingUpgrade::execute(GameUserConnectionState*a_gameUser, GameServer &a_game) {
+void RequestBuildingUpgrade::execute(GameUserConnectionState*/*a_gameUser*/, GameServer &a_game) {
 	a_game.instance()->performUpgrade(side, slot, id);
 	a_game.server()->send(makeNetworkString<RequestBuildingUpgrade>(side, slot, id));
 }

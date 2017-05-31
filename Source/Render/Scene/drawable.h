@@ -153,6 +153,8 @@ namespace MV {
 			friend cereal::access;
 
 		public:
+			enum BlendModePreset { DEFAULT, MULTIPLY, ADD, SCREEN };
+
 			ComponentDerivedAccessors(Drawable)
 
 			virtual bool draw();
@@ -194,6 +196,16 @@ namespace MV {
 				a_script.add(chaiscript::fun(&Drawable::hide), "hide");
 				a_script.add(chaiscript::fun(&Drawable::show), "show");
 
+				a_script.add(chaiscript::fun(&Drawable::point), "point");
+				a_script.add(chaiscript::fun(&Drawable::pointSize), "pointSize");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(size_t a_index, const DrawPoint& a_value)>(&Drawable::setPoint)), "setPoint");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(size_t a_index, const Color& a_value)>(&Drawable::setPoint)), "setPoint");
+				a_script.add(chaiscript::fun(&Drawable::getPoints), "getPoints");
+
+				a_script.add(chaiscript::fun(&Drawable::setPoints), "setPoints");
+
+				a_script.add(chaiscript::fun(&Drawable::pointIndices), "pointIndices");
+
 				a_script.add(chaiscript::fun(&Drawable::materialSettings), "materialSettings");
 
 				a_script.add(chaiscript::fun(static_cast<Color(Drawable::*)() const>(&Drawable::color)), "color");
@@ -213,11 +225,8 @@ namespace MV {
 				return a_script;
 			}
 
-			const DrawPoint point(size_t a_index) const {
-				return points[a_index];
-			}
-
-			DrawPoint& point(size_t a_index) {
+			//encapsulated to enforce bounds refreshing.
+			const DrawPoint &point(size_t a_index) const {
 				return points[a_index];
 			}
 
@@ -225,15 +234,58 @@ namespace MV {
 				return points.size();
 			}
 
-			std::shared_ptr<Drawable> materialSettings(std::function<void(Shader*)> a_materialSettingsCallback) {
-				userMaterialSettings = a_materialSettingsCallback;
+			std::shared_ptr<Drawable> setPoint(size_t a_index, const DrawPoint& a_value) {
+				bool needRefresh = points[a_index].point() != a_value.point();
+				points[a_index] = a_value;
+				if (needRefresh) {
+					refreshBounds();
+				}
 				return std::static_pointer_cast<Drawable>(shared_from_this());
+			}
+
+			std::shared_ptr<Drawable> setPoint(size_t a_index, const Color& a_value) {
+				points[a_index] = a_value;
+				return std::static_pointer_cast<Drawable>(shared_from_this());
+			}
+
+			//returns a copy of the points list, intentionally not a reference to enforce bounds refreshing.
+			std::vector<DrawPoint> getPoints() const {
+				return points;
+			}
+
+			//fine to just pass back a reference, changing the index order doesn't impact the bounding box logic.
+			std::vector<GLuint>& pointIndices() {
+				return vertexIndices;
 			}
 
 			std::shared_ptr<Drawable> setPoints(const std::vector<DrawPoint> &a_points, const std::vector<GLuint> &a_vertexIndices) {
 				points = a_points;
 				vertexIndices = a_vertexIndices;
+				refreshBounds();
 				return std::static_pointer_cast<Drawable>(shared_from_this());
+			}
+
+			std::shared_ptr<Drawable> appendPoints(const std::vector<DrawPoint> &a_points, std::vector<GLuint> a_vertexIndices) {
+				auto offsetIndex = static_cast<GLuint>(points.size());
+				std::transform(a_vertexIndices.begin(), a_vertexIndices.end(), a_vertexIndices.begin(), [&](GLuint index) {return index + offsetIndex; });
+				points.insert(points.end(), a_points.begin(), a_points.end());
+				vertexIndices.insert(vertexIndices.end(), a_vertexIndices.begin(), a_vertexIndices.end());
+				refreshBounds();
+				return std::static_pointer_cast<Drawable>(shared_from_this());
+			}
+
+			std::shared_ptr<Drawable> materialSettings(std::function<void(Shader*)> a_materialSettingsCallback) {
+				userMaterialSettings = a_materialSettingsCallback;
+				return std::static_pointer_cast<Drawable>(shared_from_this());
+			}
+
+			std::shared_ptr<Drawable> blend(BlendModePreset a_newPreset) {
+				blendModePreset = a_newPreset;
+				return std::static_pointer_cast<Drawable>(shared_from_this());
+			}
+
+			BlendModePreset blend() const {
+				return blendModePreset;
 			}
 
 		protected:
@@ -241,11 +293,7 @@ namespace MV {
 
 			virtual void detachImplementation() override;
 
-			virtual void materialSettingsImplementation(Shader* a_shaderProgram) {
-				a_shaderProgram->set("time", static_cast<PointPrecision>(Stopwatch::systemTime()), false); //optional but helpful default
-				a_shaderProgram->set("texture", ourTexture);
-				a_shaderProgram->set("transformation", owner()->renderer().projectionMatrix().top() * owner()->worldTransform());
-			}
+			virtual void materialSettingsImplementation(Shader* a_shaderProgram);
 
 			virtual void onRemoved() {
 				notifyParentOfBoundsChange();
@@ -283,9 +331,12 @@ namespace MV {
 					CEREAL_NVP(vertexIndices),
 					CEREAL_NVP(localBounds),
 					CEREAL_NVP(drawType),
-					CEREAL_NVP(points),
-					cereal::make_nvp("Component", cereal::base_class<Component>(this))
+					CEREAL_NVP(points)
 				);
+				if (version > 1) {
+					archive(cereal::make_nvp("blendMode", blendModePreset));
+				}
+				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 			}
 
 			template <class Archive>
@@ -304,6 +355,9 @@ namespace MV {
 					cereal::make_nvp("points", construct->points),
 					cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
 				);
+				if (version > 1) {
+					archive(cereal::make_nvp("blendMode", construct->blendModePreset));
+				}
 				auto test = construct->shared_from_this();
 				construct->initialize();
 			}
@@ -340,6 +394,8 @@ namespace MV {
 			std::function<void(Shader*)> userMaterialSettings;
 
 			void hookupTextureSizeWatcher();
+
+			BlendModePreset blendModePreset = DEFAULT;
 
 		private:
 			virtual void clearTextureCoordinates() {

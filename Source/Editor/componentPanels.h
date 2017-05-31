@@ -18,6 +18,7 @@ class TexturePicker;
 class AnchorEditor;
 class EditableButton;
 class EditableClickable;
+class EditablePoints;
 
 class EditorPanel {
 protected:
@@ -95,6 +96,7 @@ public:
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateTextComponentButton(const MV::Scene::SafeComponent<MV::Scene::Text> & a_text);
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateButtonComponentButton(const MV::Scene::SafeComponent<MV::Scene::Button> & a_button);
 	MV::Scene::SafeComponent<MV::Scene::Button> CreateClickableComponentButton(const MV::Scene::SafeComponent<MV::Scene::Clickable> & a_clickable);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateDrawableComponentButton(const MV::Scene::SafeComponent<MV::Scene::Drawable> & a_drawable);
 private:
 	void updateComponentEditButtons(bool a_attached);
 
@@ -140,6 +142,29 @@ private:
 	std::shared_ptr<MV::Scene::Text> paddingY;
 	std::shared_ptr<MV::Scene::Text> marginsX;
 	std::shared_ptr<MV::Scene::Text> marginsY;
+};
+
+class SelectedDrawableEditorPanel : public EditorPanel {
+public:
+	SelectedDrawableEditorPanel(EditorControls &a_panel, std::shared_ptr<EditablePoints> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
+
+	virtual void handleInput(SDL_Event &a_event) override;
+
+	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
+	virtual void onSceneZoom() override;
+private:
+	virtual void openTexturePicker() override;
+	MV::Scale aspectRatio;
+
+	std::shared_ptr<EditablePoints> controls;
+
+	std::shared_ptr<MV::Scene::Button> colorButton;
+
+	size_t selectedPointIndex = 0;
+
+	std::shared_ptr<MV::Scene::Text> shaderId;
+
+	bool createMode = false;
 };
 
 class SelectedRectangleEditorPanel : public EditorPanel {
@@ -296,6 +321,7 @@ class DeselectedEditorPanel : public EditorPanel {
 public:
 	DeselectedEditorPanel(EditorControls &a_panel);
 
+	virtual void handleInput(SDL_Event &a_event) override;
 private:
 	static std::string previousFileName;
 	std::shared_ptr<MV::Scene::Text> fileName;
@@ -315,6 +341,7 @@ private:
 	void createText(const MV::BoxAABB<int> &a_selected);
 	void createButton(const MV::BoxAABB<int> &a_selected);
 	void createClickable(const MV::BoxAABB<int> &a_selected);
+	void createDrawable();
 
 	SelectedNodeEditorPanel* editorPanel;
 };

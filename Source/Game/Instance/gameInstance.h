@@ -29,7 +29,7 @@ public:
 
 	bool update(double dt);
 
-	virtual void requestUpgrade(const std::shared_ptr<Player> &a_owner, int a_slot, size_t a_upgrade) {
+	virtual void requestUpgrade(const std::shared_ptr<Player> &/*a_owner*/, int a_slot, size_t a_upgrade) {
 		std::cout << "Building Upgrade Request: " << a_slot << ", " << a_upgrade << std::endl;
 	}
 

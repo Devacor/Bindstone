@@ -4,7 +4,7 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Drawable);
-CEREAL_CLASS_VERSION(MV::Scene::Drawable, 1);
+CEREAL_CLASS_VERSION(MV::Scene::Drawable, 2);
 
 namespace MV {
 	namespace Scene {
@@ -98,7 +98,8 @@ namespace MV {
 		}
 
 		void Drawable::defaultDrawImplementation() {
-			if (owner()->renderer().headless()) { return; }
+			auto& ourRenderer = owner()->renderer();
+			if (ourRenderer.headless()) { return; }
 
 			if (!vertexIndices.empty()) {
 				require<ResourceException>(shaderProgram, "No shader program for Drawable!");
@@ -106,6 +107,16 @@ namespace MV {
 
 				if (bufferId == 0) {
 					glGenBuffers(1, &bufferId);
+				}
+
+				if (blendModePreset != DEFAULT) {
+					if (blendModePreset == ADD) {
+						ourRenderer.setBlendFunction(GL_ONE, GL_ONE);
+					} else if (blendModePreset == MULTIPLY) {
+						ourRenderer.setBlendFunction(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
+					} else if (blendModePreset == SCREEN) {
+						ourRenderer.setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
+					}
 				}
 
 				glBindBuffer(GL_ARRAY_BUFFER, bufferId);
@@ -134,6 +145,9 @@ namespace MV {
 				glDisableVertexAttribArray(1);
 				glDisableVertexAttribArray(2);
 				glUseProgram(0);
+				if (blendModePreset != DEFAULT) {
+					ourRenderer.defaultBlendFunction();
+				}
 			}
 		}
 
@@ -179,6 +193,12 @@ namespace MV {
 			ourAnchors.removeFromParent();
 		}
 
+		void Drawable::materialSettingsImplementation(Shader* a_shaderProgram) {
+			a_shaderProgram->set("time", static_cast<PointPrecision>(accumulatedDelta), false); //optional but helpful default
+			a_shaderProgram->set("texture", ourTexture);
+			a_shaderProgram->set("transformation", owner()->renderer().projectionMatrix().top() * owner()->worldTransform());
+		}
+
 		void Drawable::initialize() {
 			if (!textureSizeSignal) {
 				hookupTextureSizeWatcher();
@@ -209,6 +229,7 @@ namespace MV {
 			drawableClone->drawType = drawType;
 			drawableClone->points = points;
 			drawableClone->ourAnchors = ourAnchors;
+			drawableClone->blendModePreset = blendModePreset;
 			drawableClone->notifyParentOfBoundsChange();
 			drawableClone->hookupTextureSizeWatcher();
 			return a_clone;

@@ -275,32 +275,16 @@ namespace MV {
 	class TextureDefinition;
 	class TextureHandle;
 	class Shader {
+		friend Draw2D;
 	public:
-		Shader(const std::string &a_stringId, GLuint a_id, bool a_headless):
+		Shader(const std::string &a_stringId, GLuint a_id, bool a_headless, const std::string &a_vertexFile = "", const std::string &a_fragmentFile = "") :
 			stringId(a_stringId),
 			programId(a_id),
-			headless(a_headless){
+			headless(a_headless),
+			vertexShaderFile(a_vertexFile),
+			fragmentShaderFile(a_fragmentFile){
 
-			if (!headless) {
-				if (!glIsProgram(a_id)) {
-					std::cerr << "GL Program Id IS NOT A PROGRAM: " << a_id << std::endl;
-				} else {
-					int total = -1;
-					glGetProgramiv(programId, GL_ACTIVE_UNIFORMS, &total);
-					std::cout << "Shader Id: " << programId << std::endl;
-					for (int i = 0; i < total; ++i) {
-						int name_len = -1, num = -1;
-						GLenum type = GL_ZERO;
-						char name[256];
-						glGetActiveUniform(programId, GLuint(i), sizeof(name) - 1, &name_len, &num, &type, name);
-						name[name_len] = 0;
-						GLuint location = glGetUniformLocation(programId, name);
-						std::cout << "Shader Uniform: [" << name << "] = " << location << std::endl;
-						variables[name] = location;
-					}
-					std::cout << "_" << std::endl;
-				}
-			}
+			initialize();
 		}
 
 		std::string id() const{
@@ -325,6 +309,30 @@ namespace MV {
 			return variableOffset(a_variableName) >= 0;
 		}
 	private:
+		void initialize() {
+			if (!headless) {
+				variables.clear();
+				if (!glIsProgram(programId)) {
+					std::cerr << "GL Program Id IS NOT A PROGRAM: " << programId << std::endl;
+				} else {
+					int total = -1;
+					glGetProgramiv(programId, GL_ACTIVE_UNIFORMS, &total);
+					std::cout << "Shader Id: " << programId << std::endl;
+					for (int i = 0; i < total; ++i) {
+						int name_len = -1, num = -1;
+						GLenum type = GL_ZERO;
+						char name[256];
+						glGetActiveUniform(programId, GLuint(i), sizeof(name) - 1, &name_len, &num, &type, name);
+						name[name_len] = 0;
+						GLuint location = glGetUniformLocation(programId, name);
+						std::cout << "Shader Uniform: [" << name << "] = " << location << std::endl;
+						variables[name] = location;
+					}
+					std::cout << "_" << std::endl;
+				}
+			}
+		}
+
 		GLint variableOffset(const std::string &a_variableName){
 			auto found = variables.find(a_variableName);
 			if(found != variables.end()){
@@ -337,6 +345,8 @@ namespace MV {
 			}
 		}
 		std::string stringId;
+		std::string vertexShaderFile;
+		std::string fragmentShaderFile;
 		GLuint programId;
 		std::map<std::string, GLuint> variables;
 		bool headless;
@@ -403,6 +413,8 @@ namespace MV {
 		Shader* loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename);
 		Shader* loadShaderCode(const std::string &a_id, const std::string &a_vertexShaderCode, const std::string &a_fragmentShaderCode);
 
+		void reloadShaders();
+
 		bool hasShader(const std::string &a_id);
 		Shader* getShader(const std::string &a_id);
 
@@ -424,6 +436,8 @@ namespace MV {
 
 		void draw(GLenum drawType, std::shared_ptr<Scene::Node> a_node);
 	private:
+		GLuint loadShaderGetProgramId(const std::string & a_vertexShaderCode, const std::string & a_fragmentShaderCode);
+
 		void validateShaderStatus(GLuint a_id, bool a_isShader);
 		void loadPartOfShader(GLuint a_id, const std::string &a_code);
 

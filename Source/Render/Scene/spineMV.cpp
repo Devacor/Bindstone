@@ -463,9 +463,10 @@ namespace MV{
 			auto bufferSizeToRender = (points.size()) * structSize;
 
 			if(bufferSizeToRender > 0){
+				auto ourOwner = owner();
 				shaderProgram->use();
 				SCOPE_EXIT{ glUseProgram(0); };
-				SCOPE_EXIT{ owner()->renderer().defaultBlendFunction(); };
+				SCOPE_EXIT{ ourOwner->renderer().defaultBlendFunction(); };
 				applySpineBlendMode(a_blendMode);
 				glBufferData(GL_ARRAY_BUFFER, bufferSizeToRender, &(points[0]), GL_STATIC_DRAW);
 
@@ -480,7 +481,7 @@ namespace MV{
 				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
 				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
 
-				TransformMatrix transformationMatrix(owner()->renderer().projectionMatrix().top() * owner()->worldTransform());
+				TransformMatrix transformationMatrix(ourOwner->renderer().projectionMatrix().top() * ourOwner->worldTransform());
 
 				shaderProgram->set("texture", a_textureId);
 				shaderProgram->set("transformation", transformationMatrix);

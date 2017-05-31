@@ -932,23 +932,8 @@ namespace MV {
 	}
 
 	Shader* Draw2D::loadShaderCode(const std::string &a_id, const std::string &a_vertexShaderCode, const std::string &a_fragmentShaderCode) {
-		
 		bool makeDefault = shaders.empty();
-		GLuint programId = -1;
-		if (!headless()) {
-			auto vsId = glCreateShader(GL_VERTEX_SHADER);
-			auto fsId = glCreateShader(GL_FRAGMENT_SHADER);
-
-			loadPartOfShader(vsId, a_vertexShaderCode);
-			loadPartOfShader(fsId, a_fragmentShaderCode);
-
-			programId = glCreateProgram();
-			glAttachShader(programId, vsId);
-			glAttachShader(programId, fsId);
-			glLinkProgram(programId);
-
-			validateShaderStatus(programId, false);
-		}
+		auto programId = loadShaderGetProgramId(a_vertexShaderCode, a_fragmentShaderCode);
 
 		auto emplaceResult = shaders.emplace(std::make_pair(a_id, Shader(a_id, programId, headless())));
 		MV::require<ResourceException>(emplaceResult.second, "Failed to insert shader to map: ", a_id);
@@ -959,6 +944,55 @@ namespace MV {
 		}
 
 		return shaderPtr;
+	}
+
+	void Draw2D::reloadShaders() {
+		if (!headless()) {
+			for (auto&& shader : shaders) {
+				try {
+					if (shader.second.vertexShaderFile.empty() || shader.second.fragmentShaderFile.empty()) { continue; }
+
+					std::ifstream vertexShaderFile(shader.second.vertexShaderFile);
+					if (!vertexShaderFile.is_open()) { continue; }
+					std::string vertexShaderCode((std::istreambuf_iterator<char>(vertexShaderFile)), std::istreambuf_iterator<char>());
+
+					std::ifstream fragmentShaderFile(shader.second.fragmentShaderFile);
+					if (!fragmentShaderFile.is_open()) { continue; }
+					std::string fragmentShaderCode((std::istreambuf_iterator<char>(fragmentShaderFile)), std::istreambuf_iterator<char>());
+
+					auto newId = loadShaderGetProgramId(vertexShaderCode, fragmentShaderCode);
+					glDeleteProgram(shader.second.programId);
+					shader.second.programId = newId;
+					shader.second.initialize();
+				} catch (ResourceException &e) {
+					std::cerr << "Failed to reload shader: " << e.what() << std::endl;
+				}
+			}
+		}
+	}
+
+	GLuint Draw2D::loadShaderGetProgramId(const std::string & a_vertexShaderCode, const std::string & a_fragmentShaderCode) {
+		GLuint programId = -1;
+		if (!headless()) {
+			auto vsId = glCreateShader(GL_VERTEX_SHADER);
+			auto fsId = glCreateShader(GL_FRAGMENT_SHADER);
+
+			loadPartOfShader(vsId, a_vertexShaderCode);
+			loadPartOfShader(fsId, a_fragmentShaderCode);
+
+			programId = glCreateProgram();
+
+			glAttachShader(programId, vsId);
+			glAttachShader(programId, fsId);
+
+			glLinkProgram(programId);
+
+			glDeleteShader(vsId);
+			glDeleteShader(fsId);
+
+			validateShaderStatus(programId, false);
+		}
+		return programId;
 	}
 
 	void Draw2D::loadDefaultShaders() {
@@ -976,10 +1010,21 @@ namespace MV {
 			std::string vertexShaderCode((std::istreambuf_iterator<char>(vertexShaderFile)), std::istreambuf_iterator<char>());
 
 			std::ifstream fragmentShaderFile(a_fragmentShaderFilename);
-			MV::require<ResourceException>(vertexShaderFile.is_open(), "Failed to load fragment shader: ", a_fragmentShaderFilename);
+			MV::require<ResourceException>(fragmentShaderFile.is_open(), "Failed to load fragment shader: ", a_fragmentShaderFilename);
 			std::string fragmentShaderCode((std::istreambuf_iterator<char>(fragmentShaderFile)), std::istreambuf_iterator<char>());
 
-			return loadShaderCode(a_id, vertexShaderCode, fragmentShaderCode);
+			bool makeDefault = shaders.empty();
+			auto programId = loadShaderGetProgramId(vertexShaderCode, fragmentShaderCode);
+
+			auto emplaceResult = shaders.emplace(std::make_pair(a_id, Shader(a_id, programId, headless(), a_vertexShaderFilename, a_fragmentShaderFilename)));
+			MV::require<ResourceException>(emplaceResult.second, "Failed to insert shader to map: ", a_id);
+			Shader* shaderPtr = &emplaceResult.first->second;
+
+			if (makeDefault) {
+				defaultShaderPtr = shaderPtr;
+			}
+
+			return shaderPtr;
 		} else {
 			return &found->second;
 		}

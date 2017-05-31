@@ -8,7 +8,7 @@
 class GameServerAvailable : public NetworkAction {
 public:
 	GameServerAvailable() {}
-	GameServerAvailable(const std::string &a_url, uint32_t a_port) : ourUrl(a_url), ourPort(a_port) {}
+	GameServerAvailable(const std::string &a_url, uint16_t a_port) : ourUrl(a_url), ourPort(a_port) {}
 	
 	virtual void execute(LobbyGameConnectionState* a_connection) override;
 
@@ -22,7 +22,7 @@ public:
 
 private:
 	std::string ourUrl;
-	uint32_t ourPort;
+	uint16_t ourPort;
 };
 
 CEREAL_REGISTER_TYPE(GameServerAvailable);

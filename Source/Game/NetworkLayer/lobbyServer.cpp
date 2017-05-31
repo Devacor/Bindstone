@@ -110,7 +110,7 @@ void LobbyGameConnectionState::notifyPlayersOfGameServer() {
 	rightPlayer->lifespan.lock()->send(makeNetworkString<MatchedResponse>(url(), port(), rightPlayer->secret));
 }
 
-void LobbyGameConnectionState::update(double a_dt) {
+void LobbyGameConnectionState::update(double /*a_dt*/) {
 }
 
 MatchSeeker::MatchSeeker(const std::shared_ptr<MV::Connection> &a_connection, MatchQueue& a_queue) :

@@ -45,7 +45,7 @@ namespace MV {
 		return average;
 	}
 
-	bool PointVolume::volumeCollision(PointVolume &a_compareVolume, Draw2D* a_renderer, const TransformMatrix &a_matrix){
+	bool PointVolume::volumeCollision(PointVolume &a_compareVolume, Draw2D* a_renderer, int32_t a_cameraId, const TransformMatrix &a_matrix){
 		require<PointerException>(a_renderer != nullptr, "PointVolume::volumeCollision was passed a null renderer.");
 		Point<> point1 = getCenter();
 		Point<> point2 = a_compareVolume.getCenter();
@@ -61,12 +61,12 @@ namespace MV {
 
 		totalPoints = (int)points.size();
 		for(int i = 0; i < totalPoints; i++){
-			tmpVolume1.addPoint(a_renderer->worldFromLocal(points[i], rotatedMatrix));
+			tmpVolume1.addPoint(a_renderer->worldFromLocal(points[i], a_cameraId, rotatedMatrix));
 		}
 
 		totalPoints = (int)a_compareVolume.points.size();
 		for(int i = 0; i < totalPoints; i++){
-			tmpVolume2.addPoint(a_renderer->worldFromLocal(a_compareVolume.points[i], rotatedMatrix));
+			tmpVolume2.addPoint(a_renderer->worldFromLocal(a_compareVolume.points[i], a_cameraId, rotatedMatrix));
 		}
 
 		BoxAABB<> box1 = tmpVolume1.getAABB();

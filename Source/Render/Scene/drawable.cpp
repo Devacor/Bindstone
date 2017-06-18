@@ -4,7 +4,7 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Drawable);
-CEREAL_CLASS_VERSION(MV::Scene::Drawable, 2);
+CEREAL_CLASS_VERSION(MV::Scene::Drawable, 3);
 
 namespace MV {
 	namespace Scene {
@@ -67,24 +67,46 @@ namespace MV {
 			return self;
 		}
 
-		std::shared_ptr<Drawable> Drawable::texture(std::shared_ptr<TextureHandle> a_texture) {
-			if (ourTexture && textureSizeSignal) {
-				ourTexture->sizeChange.disconnect(textureSizeSignal);
+		std::shared_ptr<Drawable> Drawable::texture(std::shared_ptr<TextureHandle> a_texture, size_t a_textureId) {
+			if (!a_texture) {
+				clearTexture(a_textureId);
+			} else {
+				disconnectTexture(a_textureId);
+
+				ourTextures[a_textureId] = a_texture;
+				hookupTextureSizeWatcher(a_textureId);
+				updateTextureCoordinates(a_textureId);
+				rebuildTextureCache();
 			}
-			textureSizeSignal.reset();
-			ourTexture = a_texture;
-			hookupTextureSizeWatcher();
-			updateTextureCoordinates();
 			return std::static_pointer_cast<Drawable>(shared_from_this());
 		}
 
-		std::shared_ptr<Drawable> Drawable::clearTexture() {
-			if (ourTexture && textureSizeSignal) {
-				ourTexture->sizeChange.disconnect(textureSizeSignal);
+		std::map<size_t, std::shared_ptr<MV::TextureHandle>>::const_iterator Drawable::disconnectTexture(size_t a_textureId) {
+			auto found = ourTextures.find(a_textureId);
+			if (found != ourTextures.end()) {
+				found->second->sizeChange.disconnect(textureSizeSignals[a_textureId]);
 			}
-			textureSizeSignal.reset();
-			ourTexture = nullptr;
-			updateTextureCoordinates();
+			return found;
+		}
+
+		std::shared_ptr<Drawable> Drawable::clearTexture(size_t a_textureId) {
+			disconnectTexture(a_textureId);
+			ourTextures.erase(a_textureId);
+			textureSizeSignals.erase(a_textureId);
+			clearTextureCoordinates(a_textureId);
+			rebuildTextureCache();
+			return std::static_pointer_cast<Drawable>(shared_from_this());
+		}
+
+		std::shared_ptr<Drawable> Drawable::clearTextures() {
+			auto texturesToClear = ourTextures;
+			ourTextures.clear();
+			textureSizeSignals.clear();
+			for(auto&& kv : texturesToClear){
+				kv.second->sizeChange.disconnect(textureSizeSignals[kv.first]);
+				clearTextureCoordinates(kv.first);
+			}
+			rebuildTextureCache();
 			return std::static_pointer_cast<Drawable>(shared_from_this());
 		}
 
@@ -109,15 +131,7 @@ namespace MV {
 					glGenBuffers(1, &bufferId);
 				}
 
-				if (blendModePreset != DEFAULT) {
-					if (blendModePreset == ADD) {
-						ourRenderer.setBlendFunction(GL_ONE, GL_ONE);
-					} else if (blendModePreset == MULTIPLY) {
-						ourRenderer.setBlendFunction(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
-					} else if (blendModePreset == SCREEN) {
-						ourRenderer.setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
-					}
-				}
+				applyPresetBlendMode(ourRenderer);
 
 				glBindBuffer(GL_ARRAY_BUFFER, bufferId);
 				auto structSize = static_cast<GLsizei>(sizeof(points[0]));
@@ -136,7 +150,7 @@ namespace MV {
 
 				materialSettingsImplementation(shaderProgram);
 				if (userMaterialSettings) {
-					userMaterialSettings(shaderProgram);
+					try { userMaterialSettings(shaderProgram); } catch (std::exception &e) { MV::error("Drawable::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
 				}
 
 				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices.size()), GL_UNSIGNED_INT, &vertexIndices[0]);
@@ -147,6 +161,18 @@ namespace MV {
 				glUseProgram(0);
 				if (blendModePreset != DEFAULT) {
 					ourRenderer.defaultBlendFunction();
+				}
+			}
+		}
+
+		void Drawable::applyPresetBlendMode(Draw2D &ourRenderer) const {
+			if (blendModePreset != DEFAULT) {
+				if (blendModePreset == ADD) {
+					ourRenderer.setBlendFunction(GL_ONE, GL_ONE);
+				} else if (blendModePreset == MULTIPLY) {
+					ourRenderer.setBlendFunction(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
+				} else if (blendModePreset == SCREEN) {
+					ourRenderer.setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
 				}
 			}
 		}
@@ -194,24 +220,60 @@ namespace MV {
 		}
 
 		void Drawable::materialSettingsImplementation(Shader* a_shaderProgram) {
+			auto ourOwner = owner();
 			a_shaderProgram->set("time", static_cast<PointPrecision>(accumulatedDelta), false); //optional but helpful default
-			a_shaderProgram->set("texture", ourTexture);
-			a_shaderProgram->set("transformation", owner()->renderer().projectionMatrix().top() * owner()->worldTransform());
+			if (ourOwner->worldAlpha() != 1.0f) { a_shaderProgram->set("alpha", ourOwner->worldAlpha(), false); }
+			addTexturesToShader();
+
+			a_shaderProgram->set("transformation", ourOwner->renderer().cameraProjectionMatrix(ourOwner->cameraId()) * ourOwner->worldTransform());
+		}
+
+		void Drawable::addTexturesToShader() {
+			bool firstTexture = true;
+			for (auto&& kv : cachedTextureList) {
+				shaderProgram->set(kv.first, kv.second, firstTexture);
+				firstTexture = false;
+			}
+		}
+
+		void Drawable::rebuildTextureCache() {
+			cachedTextureList.clear();
+			std::set<std::shared_ptr<MV::TextureDefinition>> actuallyRegistered;
+			for (auto&& kv : ourTextures) {
+				if (actuallyRegistered.find(kv.second->texture()) == actuallyRegistered.end()) {
+					cachedTextureList.emplace_back((kv.first > 0 ? "texture" + std::to_string(actuallyRegistered.size() - 1) : "texture"), kv.second->texture());
+					actuallyRegistered.insert(kv.second->texture());
+				}
+			}
+			if (actuallyRegistered.empty()) {
+				cachedTextureList.emplace_back("texture", nullptr);
+			}
 		}
 
 		void Drawable::initialize() {
-			if (!textureSizeSignal) {
-				hookupTextureSizeWatcher();
+			hookupTextureSizeWatchers();
+			rebuildTextureCache();
+		}
+
+		void Drawable::hookupTextureSizeWatchers() {
+			for(auto&& kv : ourTextures) {
+				size_t theTextureId = kv.first;
+				auto signal = TextureHandle::SignalType::make([&, theTextureId](std::shared_ptr<MV::TextureHandle> a_handle) {
+					updateTextureCoordinates(theTextureId);
+				});
+				kv.second->sizeChange.disconnect(textureSizeSignals[kv.first]);
+				textureSizeSignals[kv.first] = signal;
+				kv.second->sizeChange.connect(signal);
 			}
 		}
 
-		void Drawable::hookupTextureSizeWatcher() {
-			if (ourTexture) {
-				textureSizeSignal = TextureHandle::SignalType::make([&](std::shared_ptr<MV::TextureHandle> a_handle) {
-					updateTextureCoordinates();
-				});
-				ourTexture->sizeChange.connect(textureSizeSignal);
-			}
+		void Drawable::hookupTextureSizeWatcher(size_t a_textureId) {
+			auto signal = TextureHandle::SignalType::make([&, a_textureId](std::shared_ptr<MV::TextureHandle> a_handle) {
+				updateTextureCoordinates(a_textureId);
+			});
+			disconnectTexture(a_textureId);
+			textureSizeSignals[a_textureId] = signal;
+			ourTextures[a_textureId]->sizeChange.connect(signal);
 		}
 
 		void Drawable::postLoadInitialize() {
@@ -222,7 +284,10 @@ namespace MV {
 			Component::cloneHelper(a_clone);
 			auto drawableClone = std::static_pointer_cast<Drawable>(a_clone);
 			drawableClone->shouldDraw = shouldDraw;
-			drawableClone->ourTexture = (ourTexture) ? ourTexture->clone() : nullptr;
+			drawableClone->ourTextures.clear();
+			for (auto&& kv : ourTextures) {
+				drawableClone->ourTextures[kv.first] = kv.second->clone();
+			}
 			drawableClone->shader(shaderProgramId);
 			drawableClone->vertexIndices = vertexIndices;
 			drawableClone->localBounds = localBounds;
@@ -231,7 +296,8 @@ namespace MV {
 			drawableClone->ourAnchors = ourAnchors;
 			drawableClone->blendModePreset = blendModePreset;
 			drawableClone->notifyParentOfBoundsChange();
-			drawableClone->hookupTextureSizeWatcher();
+			drawableClone->hookupTextureSizeWatchers();
+			drawableClone->rebuildTextureCache();
 			return a_clone;
 		}
 
@@ -315,8 +381,7 @@ namespace MV {
 					if (applyingPosition) {
 						selfReference->owner()->worldPosition(childBounds.minPoint);
 						selfReference->bounds({ Point<>(), childBounds.size() / selfReference->owner()->worldScale() });
-					}
-					else {
+					} else {
 						selfReference->worldBounds(childBounds);
 					}
 				}

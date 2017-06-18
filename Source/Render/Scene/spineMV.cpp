@@ -481,7 +481,7 @@ namespace MV{
 				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
 				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
 
-				TransformMatrix transformationMatrix(ourOwner->renderer().projectionMatrix().top() * ourOwner->worldTransform());
+				TransformMatrix transformationMatrix(ourOwner->renderer().cameraProjectionMatrix(ourOwner->cameraId()) * ourOwner->worldTransform());
 
 				shaderProgram->set("texture", a_textureId);
 				shaderProgram->set("transformation", transformationMatrix);

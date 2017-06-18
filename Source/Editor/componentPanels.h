@@ -180,6 +180,7 @@ private:
 	MV::Scale aspectRatio;
 
 	std::shared_ptr<EditableRectangle> controls;
+	std::shared_ptr<MV::Scene::Text> subdivided;
 	std::shared_ptr<MV::Scene::Text> offsetY;
 	std::shared_ptr<MV::Scene::Text> offsetX;
 	std::shared_ptr<MV::Scene::Text> width;

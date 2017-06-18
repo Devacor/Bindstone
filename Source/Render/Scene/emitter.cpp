@@ -30,6 +30,8 @@ namespace MV {
 		void Emitter::spawnParticle(size_t a_groupIndex) {
 			Particle particle;
 
+			particle.textureCount = ourTextures.size();
+
 			particle.position = randomMix(spawnProperties.minimumPosition, spawnProperties.maximumPosition) - threadData[a_groupIndex].particleOffset;
 			particle.rotation = randomMix(spawnProperties.minimumRotation, spawnProperties.maximumRotation);
 			particle.change.rotationalChange = randomMix(spawnProperties.minimum.rotationalChange, spawnProperties.maximum.rotationalChange);
@@ -119,11 +121,12 @@ namespace MV {
 			threadData[a_groupIndex].vertexIndices.clear();
 
 			std::vector<TexturePoint> texturePoints;
-			if (ourTexture) {
-				texturePoints.push_back({ static_cast<float>(ourTexture->rawPercent().minPoint.x), static_cast<float>(ourTexture->rawPercent().minPoint.y) });
-				texturePoints.push_back({ static_cast<float>(ourTexture->rawPercent().minPoint.x), static_cast<float>(ourTexture->rawPercent().maxPoint.y) });
-				texturePoints.push_back({ static_cast<float>(ourTexture->rawPercent().maxPoint.x), static_cast<float>(ourTexture->rawPercent().maxPoint.y) });
-				texturePoints.push_back({ static_cast<float>(ourTexture->rawPercent().maxPoint.x), static_cast<float>(ourTexture->rawPercent().minPoint.y) });
+			auto foundTexture = ourTextures.find(0);
+			if (foundTexture != ourTextures.end()) {
+				texturePoints.push_back({ static_cast<float>((foundTexture->second)->rawPercent().minPoint.x), static_cast<float>((foundTexture->second)->rawPercent().minPoint.y) });
+				texturePoints.push_back({ static_cast<float>((foundTexture->second)->rawPercent().minPoint.x), static_cast<float>((foundTexture->second)->rawPercent().maxPoint.y) });
+				texturePoints.push_back({ static_cast<float>((foundTexture->second)->rawPercent().maxPoint.x), static_cast<float>((foundTexture->second)->rawPercent().maxPoint.y) });
+				texturePoints.push_back({ static_cast<float>((foundTexture->second)->rawPercent().maxPoint.x), static_cast<float>((foundTexture->second)->rawPercent().minPoint.y) });
 			} else {
 				texturePoints.push_back({ 0.0f, 0.0f });
 				texturePoints.push_back({ 0.0f, 1.0f });
@@ -343,9 +346,10 @@ namespace MV {
 
 		void Emitter::defaultDrawImplementation() {
 			auto ourOwner = owner();
-			if (ourOwner->renderer().headless()) { return; }
+			auto& ourRenderer = ourOwner->renderer();
+			if (ourRenderer.headless()) { return; }
 
-			std::lock_guard<std::recursive_mutex> guard(lock);
+			std::lock_guard<std::recursive_mutex> guard(lock); //important!
 			if (!vertexIndices.empty()) {
 				require<ResourceException>(shaderProgram, "No shader program for Drawable!");
 				shaderProgram->use();
@@ -354,17 +358,7 @@ namespace MV {
 					glGenBuffers(1, &bufferId);
 				}
 
-				if (blendModePreset != DEFAULT) {
-					if (blendModePreset == ADD) {
-						ourOwner->renderer().setBlendFunction(GL_ONE, GL_ONE);
-					}
-					else if (blendModePreset == MULTIPLY) {
-						ourOwner->renderer().setBlendFunction(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
-					}
-					else if (blendModePreset == SCREEN) {
-						ourOwner->renderer().setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
-					}
-				}
+				applyPresetBlendMode(ourRenderer);
 
 				glBindBuffer(GL_ARRAY_BUFFER, bufferId);
 				auto structSize = static_cast<GLsizei>(sizeof(points[0]));
@@ -381,9 +375,13 @@ namespace MV {
 				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
 				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
 
-				shaderProgram->set("texture", ourTexture);
+				std::set<std::shared_ptr<MV::TextureDefinition>> actuallyRegistered;
+				addTexturesToShader();
 				auto emitterSpace = relativeNodePosition.expired() ? ourOwner : relativeNodePosition.lock();
-				shaderProgram->set("transformation", emitterSpace->renderer().projectionMatrix().top() * emitterSpace->worldTransform());
+				shaderProgram->set("transformation", ourRenderer.cameraProjectionMatrix(ourOwner->cameraId()) * emitterSpace->worldTransform());
+				if (userMaterialSettings) {
+					try { userMaterialSettings(shaderProgram); } catch (std::exception &e) { MV::error("Emitter::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
+				}
 
 				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices.size()), GL_UNSIGNED_INT, &vertexIndices[0]);
 

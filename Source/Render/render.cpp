@@ -164,10 +164,10 @@ namespace MV {
 
 	static GLint viewport[4];
 
-	Point<> ProjectionDetails::projectScreenRaw(const Point<> &a_point, const TransformMatrix &a_modelview) {
+	Point<> ProjectionDetails::projectScreenRaw(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview) {
 		Point<> result;
 
-		if (MESA::gluProject(a_point.x, a_point.y, a_point.z, &(*a_modelview.getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE) {
+		if (MESA::gluProject(a_point.x, a_point.y, a_point.z, &(a_modelview.getMatrixArray())[0], &(renderer.cameraProjectionMatrix(a_cameraId).getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE) {
 			std::cerr << "gluProject failure!" << std::endl;
 		}
 		result.y = renderer.window().height() - result.y;
@@ -176,20 +176,20 @@ namespace MV {
 		return result;
 	}
 
-	Point<int> ProjectionDetails::projectScreen(const Point<> &a_point, const TransformMatrix &a_modelview){
-		return round<int>(projectScreenRaw(a_point, a_modelview));
+	Point<int> ProjectionDetails::projectScreen(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview){
+		return round<int>(projectScreenRaw(a_point, a_cameraId, a_modelview));
 	}
 
-	Point<> ProjectionDetails::projectWorld(const Point<> &a_point, const TransformMatrix &a_modelview){
-		return renderer.worldFromScreenRaw(projectScreenRaw(a_point, a_modelview));
+	Point<> ProjectionDetails::projectWorld(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview){
+		return renderer.worldFromScreenRaw(projectScreenRaw(a_point, a_cameraId, a_modelview));
 	}
 
-	Point<> ProjectionDetails::unProjectScreenRaw(const Point<> &a_point, const TransformMatrix &a_modelview){
+	Point<> ProjectionDetails::unProjectScreenRaw(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview){
 		Point<> result;
 
 		auto inputPoint = a_point;
 		inputPoint.y = renderer.window().height() - inputPoint.y;
-		if(MESA::gluUnProject(inputPoint.x, inputPoint.y, .5, &(*a_modelview.getMatrixArray())[0], &(*renderer.projectionMatrix().top().getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
+		if(MESA::gluUnProject(inputPoint.x, inputPoint.y, .5, &(a_modelview.getMatrixArray())[0], &(renderer.cameraProjectionMatrix(a_cameraId).getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
 			std::cerr << "gluUnProject failure!" << std::endl;
 		}
 		result.z = static_cast<PointPrecision>(a_point.z);//restore original z since we're just 2d.
@@ -197,12 +197,12 @@ namespace MV {
 		return result;
 	}
 
-	Point<> ProjectionDetails::unProjectScreen(const Point<int> &a_point, const TransformMatrix &a_modelview) {
-		return unProjectScreenRaw(cast<PointPrecision>(a_point), a_modelview);
+	Point<> ProjectionDetails::unProjectScreen(const Point<int> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview) {
+		return unProjectScreenRaw(cast<PointPrecision>(a_point), a_cameraId, a_modelview);
 	}
 
-	Point<> ProjectionDetails::unProjectWorld(const Point<> &a_point, const TransformMatrix &a_modelview){
-		return renderer.screenFromWorldRaw(unProjectScreenRaw(a_point, a_modelview));
+	Point<> ProjectionDetails::unProjectWorld(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview){
+		return renderer.screenFromWorldRaw(unProjectScreenRaw(a_point, a_cameraId, a_modelview));
 	}
 
 	void checkSDLError(int line)
@@ -327,7 +327,7 @@ namespace MV {
 			glViewport(a_framebuffer.lock()->framePosition.x, a_framebuffer.lock()->framePosition.y, a_framebuffer.lock()->frameSize.width, a_framebuffer.lock()->frameSize.height);
 			glGetIntegerv(GL_VIEWPORT, viewport);
 		}
-		renderer->projectionMatrix().push().makeOrtho(0, static_cast<MatrixValue>(a_framebuffer.lock()->frameSize.width), 0, static_cast<MatrixValue>(a_framebuffer.lock()->frameSize.height), -128.0f, 128.0f);
+		renderer->projectionMatrix().push().makeOrtho(0, static_cast<PointPrecision>(a_framebuffer.lock()->frameSize.width), 0, static_cast<PointPrecision>(a_framebuffer.lock()->frameSize.height), -128.0f, 128.0f);
 
 #ifdef WIN32
 		GLenum buffers[] = {GL_COLOR_ATTACHMENT0};
@@ -338,6 +338,7 @@ namespace MV {
 #endif
 
 		renderer->clearScreen();
+		renderer->clearCameraProjectionMatrices(); //important after clearScreen;
 	}
 
 	void glExtensionFramebufferObject::stopUsingFramebuffer(){
@@ -358,6 +359,7 @@ namespace MV {
 				glGetIntegerv(GL_VIEWPORT, viewport);
 			}
 			renderer->projectionMatrix().pop();
+			renderer->updateCameraProjectionMatrices();
 			renderer->backgroundColor(savedClearColor);
 		}
 	}
@@ -820,6 +822,7 @@ namespace MV {
 	}
 
 	void Draw2D::clearScreen(){
+		updateCameraProjectionMatrices();
 		sdlWindow.refreshContext();
 		if (!headless()) {
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -830,24 +833,24 @@ namespace MV {
 		sdlWindow.updateScreen();
 	}
 
-	Point<> Draw2D::worldFromLocal(const Point<> &a_localPoint, const TransformMatrix &a_modelview) const{
+	Point<> Draw2D::worldFromLocal(const Point<> &a_localPoint, int32_t a_cameraId, const TransformMatrix &a_modelview) const{
 		MV::ProjectionDetails projectIt(*this);
-		return projectIt.projectWorld(a_localPoint, a_modelview);
+		return projectIt.projectWorld(a_localPoint, a_cameraId, a_modelview);
 	}
 
-	Point<int> Draw2D::screenFromLocal(const Point<> &a_localPoint, const TransformMatrix &a_modelview) const{
+	Point<int> Draw2D::screenFromLocal(const Point<> &a_localPoint, int32_t a_cameraId, const TransformMatrix &a_modelview) const{
 		MV::ProjectionDetails projectIt(*this);
-		return projectIt.projectScreen(a_localPoint, a_modelview);
+		return projectIt.projectScreen(a_localPoint, a_cameraId, a_modelview);
 	}
 
-	Point<> Draw2D::localFromWorld(const Point<> &a_worldPoint, const TransformMatrix &a_modelview) const{
+	Point<> Draw2D::localFromWorld(const Point<> &a_worldPoint, int32_t a_cameraId, const TransformMatrix &a_modelview) const{
 		MV::ProjectionDetails projectIt(*this);
-		return projectIt.unProjectWorld(a_worldPoint, a_modelview);
+		return projectIt.unProjectWorld(a_worldPoint, a_cameraId, a_modelview);
 	}
 
-	Point<> Draw2D::localFromScreen(const Point<int> &a_worldPoint, const TransformMatrix &a_modelview) const{
+	Point<> Draw2D::localFromScreen(const Point<int> &a_worldPoint, int32_t a_cameraId, const TransformMatrix &a_modelview) const{
 		MV::ProjectionDetails projectIt(*this);
-		return projectIt.unProjectScreen(a_worldPoint, a_modelview);
+		return projectIt.unProjectScreen(a_worldPoint, a_cameraId, a_modelview);
 	}
 
 	Point<> Draw2D::worldFromScreenRaw(const Point<> &a_screenPoint) const {
@@ -1211,7 +1214,7 @@ namespace MV {
 		if (!headless) {
 			GLint offset = variableOffset(a_variableName);
 			if (offset >= 0) {
-				GLfloat *mat = &((*a_matrix.getMatrixArray())[0]);
+				const GLfloat *mat = &((a_matrix.getMatrixArray())[0]);
 				glUniformMatrix4fv(offset, 1, GL_FALSE, mat);
 			} else if(a_errorIfNotPresent) {
 				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;

@@ -454,6 +454,21 @@ namespace MV {
 		handlePercent = floatBounds / toScale(textureDefinition->size());
 	}
 
+	void TextureHandle::postLoadInitialize(const std::shared_ptr<SharedTextures> &a_sharedTextures) {
+		if (a_sharedTextures) {
+			auto packFound = a_sharedTextures->pack(packId);
+			if (packFound) {
+				auto ids = packFound->handleIds();
+				if (std::find(ids.begin(), ids.end(), debugName) != ids.end()) {
+					auto foundHandle = packFound->handle(debugName);
+					slicePercent = foundHandle->slicePercent;
+					handlePercent = foundHandle->handlePercent;
+					textureDefinition = foundHandle->textureDefinition;
+				}
+			}
+		}
+	}
+
 	TextureHandle::~TextureHandle() {
 		if (textureDefinition) {
 			textureDefinition->unload(this);
@@ -554,20 +569,6 @@ namespace MV {
 				sliceBounds.minPoint.y = sliceBounds.maxPoint.y;
 			}
 
-// 			if (intermediateSliceBounds.maxPoint.x < parentBounds.minPoint.x) {
-// 				sliceBounds.maxPoint.x = parentBounds.minPoint.x + (parentBounds.width() * slicePercent.maxPoint.x);
-// 			}
-// 			if (intermediateSliceBounds.maxPoint.y < parentBounds.minPoint.y || intermediateSliceBounds.maxPoint.y < intermediateSliceBounds.minPoint.y) {
-// 				sliceBounds.maxPoint.y = parentBounds.minPoint.y + (parentBounds.height() * slicePercent.maxPoint.y);
-// 			}
-// 
-// 			if (intermediateSliceBounds.minPoint.x > parentBounds.maxPoint.x || intermediateSliceBounds.minPoint.x > intermediateSliceBounds.maxPoint.x) {
-// 				sliceBounds.minPoint.x = parentBounds.minPoint.x + (parentBounds.width() * slicePercent.minPoint.x);
-// 			}
-// 			if (intermediateSliceBounds.minPoint.y > parentBounds.maxPoint.y || intermediateSliceBounds.minPoint.y > intermediateSliceBounds.maxPoint.y) {
-// 				sliceBounds.minPoint.y = parentBounds.minPoint.y + (parentBounds.height() * slicePercent.minPoint.y);
-// 			}
-
 			a_points[4] = sliceBounds.minPoint;
 			a_points[5] = point(sliceBounds.minPoint.x, sliceBounds.maxPoint.y);
 			a_points[6] = sliceBounds.maxPoint;
@@ -585,24 +586,6 @@ namespace MV {
 			a_points[14] = point(sliceBounds.maxPoint.x, parentBounds.minPoint.y);
 			a_points[15] = point(sliceBounds.minPoint.x, parentBounds.minPoint.y);
 
-// 			for (int i = 0; i < 4; ++i) {
-// 				a_points[i] = Color(1.0f, 1.0f, 1.0f, 1.0f);
-// 			}
-// 			for (int i = 4; i < 8; ++i) {
-// 				a_points[i] = Color(1.0f, 0.0f, 1.0f, 1.0f);
-// 			}
-// 			for (int i = 8; i < 10; ++i) {
-// 				a_points[i] = Color(0.0f, 0.0f, 1.0f, 1.0f);
-// 			}
-// 			for (int i = 10; i < 12; ++i) {
-// 				a_points[i] = Color(1.0f, 0.0f, 0.0f, 1.0f);
-// 			}
-// 			for (int i = 12; i < 14; ++i) {
-// 				a_points[i] = Color(0.0f, 1.0f, 0.0f, 1.0f);
-// 			}
-// 			for (int i = 14; i < 16; ++i) {
-// 				a_points[i] = Color(0.0f, 1.0f, 1.0f, 1.0f);
-// 			}
 			return true;
 		}
 		return false;

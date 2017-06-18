@@ -487,6 +487,19 @@ namespace MV {
 
 			std::shared_ptr<Node> normalizeDepth();
 
+			TransformMatrix& camera() {
+				return renderer().camera(ourCameraId);
+			}
+
+			int32_t cameraId() const {
+				return ourCameraId;
+			}
+
+			std::shared_ptr<Node> cameraId(int32_t a_newCameraId) {
+				cameraIdInternal(a_newCameraId);
+				return shared_from_this();
+			}
+
 			PointPrecision depth() const {
 				return sortDepth;
 			}
@@ -616,16 +629,16 @@ namespace MV {
 			std::vector<Point<>> localFromScreen(const std::vector<Point<int>> &a_screen);
 
 			BoxAABB<> worldFromLocal(const BoxAABB<>& a_local){
-				return BoxAABB<>(draw2d.worldFromLocal(a_local.minPoint, worldTransform()), draw2d.worldFromLocal(a_local.maxPoint, worldTransform()));
+				return BoxAABB<>(draw2d.worldFromLocal(a_local.minPoint, ourCameraId, worldTransform()), draw2d.worldFromLocal(a_local.maxPoint, ourCameraId, worldTransform()));
 			}
 			BoxAABB<int> screenFromLocal(const BoxAABB<>& a_local){
-				return BoxAABB<int>(draw2d.screenFromLocal(a_local.minPoint, worldTransform()), draw2d.screenFromLocal(a_local.maxPoint, worldTransform()));
+				return BoxAABB<int>(draw2d.screenFromLocal(a_local.minPoint, ourCameraId, worldTransform()), draw2d.screenFromLocal(a_local.maxPoint, ourCameraId, worldTransform()));
 			}
 			BoxAABB<> localFromScreen(const BoxAABB<int> &a_screen){
-				return BoxAABB<>(draw2d.localFromScreen(a_screen.minPoint, worldTransform()), draw2d.localFromScreen(a_screen.maxPoint, worldTransform()));
+				return BoxAABB<>(draw2d.localFromScreen(a_screen.minPoint, ourCameraId, worldTransform()), draw2d.localFromScreen(a_screen.maxPoint, ourCameraId, worldTransform()));
 			}
 			BoxAABB<> localFromWorld(const BoxAABB<> &a_world){
-				return BoxAABB<>(draw2d.localFromWorld(a_world.minPoint, worldTransform()), draw2d.localFromWorld(a_world.maxPoint, worldTransform()));
+				return BoxAABB<>(draw2d.localFromWorld(a_world.minPoint, ourCameraId, worldTransform()), draw2d.localFromWorld(a_world.maxPoint, ourCameraId, worldTransform()));
 			}
 
 			bool operator<(const Node &a_rhs) {
@@ -663,6 +676,13 @@ namespace MV {
 
 		private:
 			Task rootTask;
+
+			void cameraIdInternal(int32_t a_newCameraId) {
+				ourCameraId = a_newCameraId;
+				for (auto&& child : childNodes) {
+					child->cameraIdInternal(a_newCameraId);
+				}
+			}
 
 			template<typename ContainerObjectType>
 			void castAndAddIfExact(const std::shared_ptr<Component> &base, std::vector<ContainerObjectType> &container) const {
@@ -808,7 +828,7 @@ namespace MV {
 			void fixChildOwnership();
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const /*version*/) {
+			void serialize(Archive & archive, std::uint32_t const version) {
 				std::vector<std::shared_ptr<Node>> filteredChildren;
 				std::copy_if(childNodes.begin(), childNodes.end(), std::back_inserter(filteredChildren), [](const auto &a_child){
 					return a_child->allowSerialize;
@@ -841,7 +861,11 @@ namespace MV {
 					CEREAL_NVP(sortDepth),
 					CEREAL_NVP(nodeAlpha),
 					CEREAL_NVP(localBounds),
-					CEREAL_NVP(localChildBounds),
+					CEREAL_NVP(localChildBounds));
+				if (version > 0) {
+					archive(cereal::make_nvp("cameraId", ourCameraId));
+				}
+				archive(
 					cereal::make_nvp("childNodes", filteredChildren),
 					cereal::make_nvp("childComponents", filteredChildComponents)
 				);
@@ -854,7 +878,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Node> &construct, std::uint32_t const /*version*/) {
+			static void load_and_construct(Archive & archive, cereal::construct<Node> &construct, std::uint32_t const version) {
 				Draw2D *renderer = nullptr;
 				archive.extract(cereal::make_nvp("renderer", renderer));
 				bool doPostLoad = true;
@@ -881,7 +905,11 @@ namespace MV {
 					cereal::make_nvp("sortDepth", construct->sortDepth),
 					cereal::make_nvp("nodeAlpha", construct->nodeAlpha),
 					cereal::make_nvp("localBounds", construct->localBounds),
-					cereal::make_nvp("localChildBounds", construct->localChildBounds),
+					cereal::make_nvp("localChildBounds", construct->localChildBounds));
+				if (version > 0) {
+					archive(cereal::make_nvp("cameraId", construct->ourCameraId));
+				}
+				archive(
 					cereal::make_nvp("childNodes", construct->childNodes),
 					cereal::make_nvp("childComponents", construct->childComponents)
 				);
@@ -928,6 +956,8 @@ namespace MV {
 
 			bool dirtyLocalBounds = false;
 			bool dirtyChildBounds = false;
+
+			int32_t ourCameraId = 0;
 		};
 
 		std::ostream& operator<<(std::ostream& os, const std::shared_ptr<Node>& a_node);

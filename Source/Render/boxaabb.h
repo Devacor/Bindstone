@@ -402,7 +402,7 @@ namespace MV {
 		//ignores z
 		bool pointContained(const Point<> &a_comparePoint);
 
-		bool volumeCollision(PointVolume &a_compareVolume, Draw2D* a_renderer, const TransformMatrix &a_matrix);
+		bool volumeCollision(PointVolume &a_compareVolume, Draw2D* a_renderer, int32_t a_cameraId, const TransformMatrix &a_matrix);
 		Point<> getCenter();
 		BoxAABB<> getAABB();
 

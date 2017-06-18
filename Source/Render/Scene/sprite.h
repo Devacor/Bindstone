@@ -36,6 +36,13 @@ namespace MV {
 					return a_self.componentInChildren<Sprite>();
 				}), "spriteComponent");
 
+				a_script.add(chaiscript::fun([](const std::shared_ptr<Sprite> &a_self, uint16_t a_subdivisions) {
+					return a_self->subdivide(a_subdivisions);
+				}), "subdivide");
+				a_script.add(chaiscript::fun([](const std::shared_ptr<Sprite> &a_self) {
+					return a_self->subdivisions();
+				}), "subdivisions");
+
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Point<> &, const Point<> &, const Point<> &, const Point<> &)>(&Sprite::corners<Point<>>)), "corners");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Color &, const Color &, const Color &, const Color &)>(&Sprite::corners<Color>)), "corners");
 
@@ -46,8 +53,21 @@ namespace MV {
 				return a_script;
 			}
 
+			std::shared_ptr<Sprite> subdivide(uint16_t a_subdivisions) {
+				if (ourSubdivisions != a_subdivisions) {
+					ourSubdivisions = a_subdivisions;
+					updateSubdivision();
+				}
+				return std::static_pointer_cast<Sprite>(shared_from_this());
+			}
+
+			uint16_t subdivisions() const {
+				return ourSubdivisions;
+			}
+
 			bool hasSlice(){
-				return ourTexture && ourTexture->hasSlice();
+				auto found = ourTextures.find(0);
+				return found != ourTextures.end() && found->second->hasSlice();
 			}
 		protected:
 			Sprite(const std::weak_ptr<Node> &a_owner) :
@@ -58,15 +78,21 @@ namespace MV {
 			}
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const /*version*/) {
+			void serialize(Archive & archive, std::uint32_t const version) {
+				if (version > 0) {
+					archive(cereal::make_nvp("subdivisions", ourSubdivisions));
+				}
 				archive(
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Sprite> &construct, std::uint32_t const /*version*/) {
+			static void load_and_construct(Archive & archive, cereal::construct<Sprite> &construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
+				if (version > 0) {
+					archive(cereal::make_nvp("subdivisions", construct->ourSubdivisions));
+				}
 				archive(
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(construct.ptr()))
 				);
@@ -74,6 +100,9 @@ namespace MV {
 			}
 
 			void updateSliceColorsFromCorners();
+
+			void updateSubdivision();
+			void updateSubdivisionTexture();
 
 			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
 				return cloneHelper(a_parent->attach<Sprite>().self());
@@ -85,13 +114,18 @@ namespace MV {
 
 			virtual void refreshBounds() override;
 		private:
-			virtual void clearTextureCoordinates() override {
-				clearSlice();
-				clearTexturePoints(points);
-				notifyParentOfComponentChange();
+			void clearTextureCoordinates(size_t a_textureId) override {
+				if (a_textureId == 0) {
+					clearSlice();
+
+					clearTexturePoints(points);
+					notifyParentOfComponentChange();
+				}
 			}
 
-			virtual void updateTextureCoordinates() override;
+			void updateTextureCoordinates(size_t a_textureId) override;
+
+			uint16_t ourSubdivisions = 0;
 		};
 
 		template<typename PointAssign>
@@ -101,6 +135,7 @@ namespace MV {
 			points[1] = a_BottomLeft;
 			points[2] = a_BottomRight;
 			points[3] = a_TopRight;
+			updateSubdivision();
 			updateSliceColorsFromCorners();
 			refreshBounds();
 			return self;

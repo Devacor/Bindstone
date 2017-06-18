@@ -18,12 +18,12 @@ namespace MV{
 		return result*=a_right;
 	}
 
-	const Matrix operator*(const Matrix &a_left, const MatrixValue &a_right){
+	const Matrix operator*(const Matrix &a_left, const PointPrecision &a_right){
 		Matrix result = a_left;
 		return result*=a_right;
 	}
 
-	const Matrix operator/(const Matrix &a_left, const MatrixValue &a_right){
+	const Matrix operator/(const Matrix &a_left, const PointPrecision &a_right){
 		Matrix result = a_left;
 		return result/=a_right;
 	}
@@ -32,7 +32,7 @@ namespace MV{
 		for (size_t y = 0; y < a_matrix.getSizeY(); ++y) {
 			os << "[";
 			for (size_t x = 0; x < a_matrix.getSizeX(); ++x) {
-				os << a_matrix[x][y] << (x != a_matrix.getSizeX() - 1 ? ", " : "]");
+				os << a_matrix(x, y) << (x != a_matrix.getSizeX() - 1 ? ", " : "]");
 			}
 			os << "\n";
 		}
@@ -40,55 +40,28 @@ namespace MV{
 		return os;
 	}
 
-	Matrix::MatrixRowAccess::MatrixRowAccess( std::shared_ptr<std::vector<MatrixValue>> a_matrixArray, size_t a_x ) :
-		matrixArray(a_matrixArray),
-		sizeX(a_x),
-		currentX(0){
-	}
-
-	MatrixValue& Matrix::MatrixRowAccess::operator[]( size_t a_index ) {
-		return (*matrixArray)[(sizeX * currentX) + (a_index)];
-	}
-
-	const MatrixValue& Matrix::MatrixRowAccess::operator[]( size_t a_index ) const {
-		return (*matrixArray)[(sizeX * currentX) + (a_index)];
-	}
-
-	void Matrix::MatrixRowAccess::setCurrentX( size_t a_currentX ) const {
-		currentX = a_currentX;
-	}
-
-	void Matrix::MatrixRowAccess::resize(size_t a_x){
-		sizeX = a_x;
-	}
-
-	Matrix::Matrix( size_t a_size, MatrixValue a_value ) :
+	Matrix::Matrix( size_t a_size, PointPrecision a_value ) :
 		sizeX(a_size),
 		sizeY(a_size),
-		matrixArray(std::make_shared<std::vector<MatrixValue>>(a_size*a_size, a_value)),
-		rowAccessor(matrixArray, a_size){
+		matrixArray(a_size*a_size, a_value){
 	}
 
-	Matrix::Matrix( size_t a_x, size_t a_y, MatrixValue a_value ) :
+	Matrix::Matrix( size_t a_x, size_t a_y, PointPrecision a_value ) :
 		sizeX(a_x),
 		sizeY(a_y),
-		matrixArray(std::make_shared<std::vector<MatrixValue>>(a_x*a_y, a_value)),
-		rowAccessor(matrixArray, a_x){
+		matrixArray(a_x*a_y, a_value){
 	}
 
 	Matrix::Matrix( const Matrix& a_other ):
 		sizeX(a_other.sizeX),
 		sizeY(a_other.sizeY),
-		matrixArray(std::make_shared<std::vector<MatrixValue>>(a_other.matrixArray->begin(), a_other.matrixArray->end())),
-		rowAccessor(matrixArray, a_other.sizeX){
+		matrixArray(a_other.matrixArray.begin(), a_other.matrixArray.end()){
 	}
 
 	Matrix::Matrix( Matrix&& a_other ):
 		sizeX(std::move(a_other.sizeX)),
 		sizeY(std::move(a_other.sizeY)),
-		matrixArray(std::move(a_other.matrixArray)),
-		rowAccessor(matrixArray, sizeX){
-		a_other.matrixArray.reset();
+		matrixArray(std::move(a_other.matrixArray)){
 	}
 
 	void Matrix::print(){
@@ -137,55 +110,46 @@ namespace MV{
 		return *this;
 	}
 
-	Matrix& Matrix::operator*=( const MatrixValue& a_other ){
-		std::for_each(matrixArray->begin(), matrixArray->end(), [&](MatrixValue &value){
+	Matrix& Matrix::operator*=( const PointPrecision& a_other ){
+		std::for_each(matrixArray.begin(), matrixArray.end(), [&](PointPrecision &value){
 			value*=a_other;
 		});
 		return *this;
 	}
 
-	Matrix& Matrix::operator/=( const MatrixValue& a_other ){
-		std::for_each(matrixArray->begin(), matrixArray->end(), [&](MatrixValue &value){
+	Matrix& Matrix::operator/=( const PointPrecision& a_other ){
+		std::for_each(matrixArray.begin(), matrixArray.end(), [&](PointPrecision &value){
 			value/=a_other;
 		});
 		return *this;
 	}
 
-	std::shared_ptr<std::vector<MatrixValue>> Matrix::getMatrixArray() const{
+	const std::vector<PointPrecision>& Matrix::getMatrixArray() const{
 		return matrixArray;
 	}
 
-	Matrix& Matrix::clear( MatrixValue a_value ) {
-		std::for_each(matrixArray->begin(), matrixArray->end(), [&](MatrixValue &value){
+	std::vector<PointPrecision>& Matrix::getMatrixArray() {
+		return matrixArray;
+	}
+
+	Matrix& Matrix::clear( PointPrecision a_value ) {
+		std::for_each(matrixArray.begin(), matrixArray.end(), [&](PointPrecision &value){
 			value=a_value;
 		});
 		return *this;
 	}
 
-	Matrix::MatrixRowAccess& Matrix::operator[]( size_t a_index ) {
-		rowAccessor.setCurrentX(a_index);
-		return rowAccessor;
-	}
-
-	const Matrix::MatrixRowAccess& Matrix::operator[]( size_t a_index ) const {
-		rowAccessor.setCurrentX(a_index);
-		return rowAccessor;
-	}
-
 	Matrix& Matrix::operator=(const Matrix& a_other){
-		*matrixArray = *a_other.matrixArray;
+		matrixArray = a_other.matrixArray;
 		sizeX = a_other.sizeX;
 		sizeY = a_other.sizeY;
-		rowAccessor.resize(sizeX);
 		return *this;
 	}
 
 	Matrix& Matrix::operator=(Matrix&& a_other){
 		matrixArray = std::move(a_other.matrixArray);
-		a_other.matrixArray.reset();
 		sizeX = std::move(a_other.sizeX);
 		sizeY = std::move(a_other.sizeY);
-		rowAccessor.resize(sizeX);
 		return *this;
 	}
 
@@ -210,11 +174,11 @@ namespace MV{
 	}
 
 
-	TransformMatrix::TransformMatrix( MatrixValue a_value ) :Matrix(4, a_value){
+	TransformMatrix::TransformMatrix( PointPrecision a_value ) :Matrix(4, a_value){
 		makeIdentity();
 	}
 
-	TransformMatrix::TransformMatrix( const Point<MatrixValue> &a_position ) :Matrix(4){
+	TransformMatrix::TransformMatrix( const Point<PointPrecision> &a_position ) :Matrix(4){
 		makeIdentity();
 		translate(a_position.x, a_position.y, a_position.z);
 	}
@@ -227,14 +191,14 @@ namespace MV{
 		return *this;
 	}
 
-	TransformMatrix& TransformMatrix::makeOrtho( MatrixValue a_left, MatrixValue a_right, MatrixValue a_bottom, MatrixValue a_top, MatrixValue a_near, MatrixValue a_far ){
-		MatrixValue a = 2.0f / (a_right - a_left);
-		MatrixValue b = 2.0f / (a_top - a_bottom);
-		MatrixValue c = -2.0f / (a_far - a_near);
+	TransformMatrix& TransformMatrix::makeOrtho( PointPrecision a_left, PointPrecision a_right, PointPrecision a_bottom, PointPrecision a_top, PointPrecision a_near, PointPrecision a_far ){
+		PointPrecision a = 2.0f / (a_right - a_left);
+		PointPrecision b = 2.0f / (a_top - a_bottom);
+		PointPrecision c = -2.0f / (a_far - a_near);
 
-		MatrixValue tx = - ((a_right + a_left)/(a_right - a_left));
-		MatrixValue ty = - ((a_top + a_bottom)/(a_top - a_bottom));
-		MatrixValue tz = - ((a_far + a_near)/(a_far - a_near));
+		PointPrecision tx = - ((a_right + a_left)/(a_right - a_left));
+		PointPrecision ty = - ((a_top + a_bottom)/(a_top - a_bottom));
+		PointPrecision tz = - ((a_far + a_near)/(a_far - a_near));
 
 		clear();
 		(*this).access(0, 0) = a;
@@ -248,9 +212,17 @@ namespace MV{
 		return *this;
 	}
 
-	TransformMatrix& TransformMatrix::translate( MatrixValue a_x, MatrixValue a_y, MatrixValue a_z /*= 0.0*/ ){
+	TransformMatrix& TransformMatrix::translate(const MV::Point<PointPrecision> &a_point) {
 		TransformMatrix translation;
-		translation.makeIdentity();
+		translation.access(3, 0) = a_point.x;
+		translation.access(3, 1) = a_point.y;
+		translation.access(3, 2) = a_point.z;
+		*this *= translation;
+		return *this;
+	}
+
+	TransformMatrix& TransformMatrix::translate( PointPrecision a_x, PointPrecision a_y, PointPrecision a_z /*= 0.0*/ ){
+		TransformMatrix translation;
 		translation.access(3, 0) = a_x;
 		translation.access(3, 1) = a_y;
 		translation.access(3, 2) = a_z;
@@ -258,9 +230,8 @@ namespace MV{
 		return *this;
 	}
 
-	TransformMatrix& TransformMatrix::scale( MatrixValue a_x, MatrixValue a_y, MatrixValue a_z /*= 1.0*/ ){
+	TransformMatrix& TransformMatrix::scale( PointPrecision a_x, PointPrecision a_y, PointPrecision a_z /*= 1.0*/ ){
 		TransformMatrix scaling;
-		scaling.makeIdentity();
 		scaling.access(0, 0) = a_x;
 		scaling.access(1, 1) = a_y;
 		scaling.access(2, 2) = a_z;
@@ -268,7 +239,34 @@ namespace MV{
 		return *this;
 	}
 
-	TransformMatrix& MatrixStack::top(){
+	TransformMatrix& TransformMatrix::scale(const MV::Scale &a_scale) {
+		TransformMatrix scaling;
+		scaling.access(0, 0) = a_scale.x;
+		scaling.access(1, 1) = a_scale.y;
+		scaling.access(2, 2) = a_scale.z;
+		*this *= scaling;
+		return *this;
+	}
+
+	TransformMatrix& TransformMatrix::overrideScale(const MV::Scale &a_scale) {
+		access(0, 0) = a_scale.x;
+		access(1, 1) = a_scale.y;
+		access(2, 2) = a_scale.z;
+		return *this;
+	}
+
+	MV::Scale TransformMatrix::scale() const {
+		return MV::Scale(access(0, 0), access(1, 1), access(2, 2));
+	}
+
+	MV::TransformMatrix& TransformMatrix::position(const MV::Point<PointPrecision> &a_point) {
+		access(3, 0) = a_point.x;
+		access(3, 1) = a_point.y;
+		access(3, 2) = a_point.y;
+		return *this;
+	}
+
+	TransformMatrix& MatrixStack::top() {
 		MV::require<ResourceException>(!stack.empty(), "MatrixStack::top() failed, stack is empty!");
 		return stack.back();
 	}

@@ -9,15 +9,25 @@ namespace MV {
 	| ---SharedTextures--- |
 	\**********************/
 
-	std::shared_ptr<TexturePack> SharedTextures::pack(const std::string &a_name, Draw2D* a_renderer){
+	std::shared_ptr<TexturePack> SharedTextures::pack(const std::string &a_name) {
 		std::string identifier = a_name;
 		auto foundDefinition = texturePacks.find(identifier);
-		if(foundDefinition == texturePacks.end()){
+		if (foundDefinition == texturePacks.end()) {
+			return std::shared_ptr<TexturePack>();
+		} else {
+			return foundDefinition->second;
+		}
+	}
+
+	std::shared_ptr<TexturePack> SharedTextures::pack(const std::string &a_name, Draw2D* a_renderer) {
+		std::string identifier = a_name;
+		auto foundDefinition = texturePacks.find(identifier);
+		if (foundDefinition == texturePacks.end()) {
 			require<PointerException>(a_renderer, "No renderer supplied in creation of pack: ", a_name);
-			auto newDefinition = TexturePack::make(a_renderer);
+			auto newDefinition = TexturePack::make(a_name, a_renderer);
 			texturePacks[identifier] = newDefinition;
 			return newDefinition;
-		} else{
+		} else {
 			return foundDefinition->second;
 		}
 	}

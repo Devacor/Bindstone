@@ -56,6 +56,8 @@ void Game::initializeWindow(){
 	screenScaler->hide()->id("ScreenScaler");
 	screenScaler->bounds({ MV::point(0.0f, 0.0f), gameData.managers().renderer.world().size() });
 
+	gameData.managers().renderer.loadShader("lillypad", "Assets/Shaders/lillypad.vert", "Assets/Shaders/default.frag");
+	gameData.managers().renderer.loadShader("wave", "Assets/Shaders/wave.vert", "Assets/Shaders/wave.frag");
 	gameData.managers().renderer.loadShader("waterfall", "Assets/Shaders/default.vert", "Assets/Shaders/waterfall.frag");
 	gameData.managers().renderer.loadShader("pool", "Assets/Shaders/default.vert", "Assets/Shaders/pool.frag");
 
@@ -170,8 +172,7 @@ void Game::updateScreenScaler() {
 	auto scaler = rootScene->component<MV::Scene::Drawable>("ScreenScaler", false);
 	if (!scaler) {
 		rootScene->attach<MV::Scene::Drawable>()->id("ScreenScaler")->screenBounds({ MV::Point<int>(0, 0), gameData.managers().renderer.window().size() });
-	}
-	else {
+	} else {
 		scaler->screenBounds({ MV::Point<int>(0, 0), gameData.managers().renderer.window().size() });
 	}
 }

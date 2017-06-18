@@ -7,6 +7,8 @@
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
+CEREAL_CLASS_VERSION(MV::Scene::Node, 1);
+
 namespace MV {
 	namespace Scene {
 		int64_t Node::recalculateLocalBoundsCalls = 0;
@@ -259,6 +261,9 @@ namespace MV {
 				}
 				insertSorted(childNodes, a_child);
 				a_child->myParent = this;
+				if (a_child->ourCameraId != ourCameraId) {
+					a_child->cameraIdInternal(ourCameraId);
+				}
 				a_child->onAddSignal(a_child);
 				onChildAddSignal(a_child);
 				a_child->markMatrixDirty(true);
@@ -919,47 +924,47 @@ namespace MV {
 		}
 
 		Point<> Node::localFromScreen(const Point<int> &a_screen) {
-			return draw2d.localFromScreen(a_screen, worldTransform());
+			return draw2d.localFromScreen(a_screen, ourCameraId, worldTransform());
 		}
 
 		std::vector<Point<>> Node::localFromScreen(const std::vector<Point<int>> &a_screen) {
 			std::vector<Point<>> processed;
 			for (const Point<int>& point : a_screen) {
-				processed.push_back(draw2d.localFromScreen(point, worldTransform()));
+				processed.push_back(draw2d.localFromScreen(point, ourCameraId, worldTransform()));
 			}
 			return processed;
 		}
 
 		Point<> Node::localFromWorld(const Point<> &a_world) {
-			return draw2d.localFromWorld(a_world, worldTransform());
+			return draw2d.localFromWorld(a_world, ourCameraId, worldTransform());
 		}
 
 		std::vector<Point<>> Node::localFromWorld(std::vector<Point<>> a_world) {
 			for (Point<>& point : a_world) {
-				point = draw2d.localFromWorld(point, worldTransform());
+				point = draw2d.localFromWorld(point, ourCameraId, worldTransform());
 			}
 			return a_world;
 		}
 
 		Point<int> Node::screenFromLocal(const Point<> &a_local) {
-			return draw2d.screenFromLocal(a_local, worldTransform());
+			return draw2d.screenFromLocal(a_local, ourCameraId, worldTransform());
 		}
 
 		std::vector<Point<int>> Node::screenFromLocal(const std::vector<Point<>> &a_local) {
 			std::vector<Point<int>> processed;
 			for (const Point<>& point : a_local) {
-				processed.push_back(draw2d.screenFromLocal(point, worldTransform()));
+				processed.push_back(draw2d.screenFromLocal(point, ourCameraId, worldTransform()));
 			}
 			return processed;
 		}
 
 		Point<> Node::worldFromLocal(const Point<> &a_local) {
-			return draw2d.worldFromLocal(a_local, worldTransform());
+			return draw2d.worldFromLocal(a_local, ourCameraId, worldTransform());
 		}
 
 		std::vector<Point<>> Node::worldFromLocal(std::vector<Point<>> a_local) {
 			for (Point<>& point : a_local) {
-				point = draw2d.worldFromLocal(point, worldTransform());
+				point = draw2d.worldFromLocal(point, ourCameraId, worldTransform());
 			}
 			return a_local;
 		}
@@ -1079,6 +1084,7 @@ namespace MV {
 			result->localBounds = localBounds;
 			result->localChildBounds = localChildBounds;
 			result->allowSerialize = allowSerialize;
+			result->ourCameraId = ourCameraId;
 			result->localMatrixDirty = true;
 			result->worldMatrixDirty = true;
 
@@ -1122,6 +1128,7 @@ namespace MV {
 			result->localBounds = localBounds;
 			result->localChildBounds = localChildBounds;
 			result->allowSerialize = allowSerialize;
+			result->ourCameraId = ourCameraId;
 			result->localMatrixDirty = true;
 			result->worldMatrixDirty = true;
 

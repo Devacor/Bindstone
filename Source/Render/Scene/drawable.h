@@ -27,11 +27,11 @@
 		userMaterialSettings = a_materialSettingsCallback; \
 		return std::static_pointer_cast<ComponentType>(shared_from_this()); \
 	} \
-	std::shared_ptr<ComponentType> texture(std::shared_ptr<MV::TextureHandle> a_texture) { \
-		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::texture(a_texture)); \
+	std::shared_ptr<ComponentType> texture(std::shared_ptr<MV::TextureHandle> a_texture, size_t a_textureId = 0) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::texture(a_texture, a_textureId)); \
 	} \
-	std::shared_ptr<MV::TextureHandle> texture() const{ \
-		return ourTexture; \
+	std::shared_ptr<MV::TextureHandle> texture(size_t a_textureId = 0) const{ \
+		return ourTextures.at(a_textureId); \
 	} \
 	std::string shader() const { \
 		return shaderProgramId; \
@@ -86,9 +86,9 @@ namespace MV {
 			BoxAABB<> offset() const {
 				return ourOffset;
 			}
-
+			//NOTE: not currently implemented
 			Anchors& pivot(const Point<> &a_pivot);
-
+			//NOTE: not currently implemented
 			Point<> pivot() const {
 				return pivotPercent;
 			}
@@ -181,12 +181,14 @@ namespace MV {
 
 			std::shared_ptr<Drawable> shader(const std::string &a_shaderProgramId);
 
-			std::shared_ptr<TextureHandle> texture() const {
-				return ourTexture;
+			std::shared_ptr<TextureHandle> texture(size_t a_index = 0) const {
+				return ourTextures.at(a_index);
 			}
 
-			std::shared_ptr<Drawable> texture(std::shared_ptr<TextureHandle> a_texture);
-			std::shared_ptr<Drawable> clearTexture();
+			std::shared_ptr<Drawable> texture(std::shared_ptr<TextureHandle> a_texture, size_t a_textureId = 0);
+
+			std::shared_ptr<Drawable> clearTextures();
+			std::shared_ptr<Drawable> clearTexture(size_t a_textureId = 0);
 
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 				a_script.add(chaiscript::user_type<Drawable>(), "Drawable");
@@ -212,9 +214,13 @@ namespace MV {
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(const Color &)>(&Drawable::color)), "color");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(const std::vector<Color> &)>(&Drawable::colors)), "colors");
 
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(Drawable::*)() const>(&Drawable::texture)), "texture");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(std::shared_ptr<TextureHandle>)>(&Drawable::texture)), "texture");
-				a_script.add(chaiscript::fun(&Drawable::clearTexture), "clearTexture");
+				a_script.add(chaiscript::fun([](Drawable &a_self, std::shared_ptr<TextureHandle> a_texture, size_t a_textureId) {return a_self.texture(a_texture, a_textureId); }), "texture");
+				a_script.add(chaiscript::fun([](Drawable &a_self, std::shared_ptr<TextureHandle> a_texture) {return a_self.texture(a_texture); }), "texture");
+				a_script.add(chaiscript::fun([](Drawable &a_self, size_t a_textureId) {return a_self.texture(a_textureId); }), "texture");
+				a_script.add(chaiscript::fun([](Drawable &a_self) {return a_self.texture(); }), "texture");
+				a_script.add(chaiscript::fun([](Drawable &a_self, size_t a_textureId) {return a_self.clearTexture(a_textureId); }), "clearTexture");
+				a_script.add(chaiscript::fun([](Drawable &a_self) {return a_self.clearTexture(); }), "clearTexture");
+				a_script.add(chaiscript::fun([](Drawable &a_self) {return a_self.clearTextures(); }), "clearTextures");
 
 				a_script.add(chaiscript::fun(static_cast<std::string(Drawable::*)() const>(&Drawable::shader)), "shader");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(const std::string &)>(&Drawable::shader)), "shader");
@@ -291,9 +297,13 @@ namespace MV {
 		protected:
 			Drawable(const std::weak_ptr<Node> &a_owner);
 
+			std::map<size_t, std::shared_ptr<TextureHandle>>::const_iterator disconnectTexture(size_t a_textureId);
+
 			virtual void detachImplementation() override;
 
 			virtual void materialSettingsImplementation(Shader* a_shaderProgram);
+
+			void addTexturesToShader();
 
 			virtual void onRemoved() {
 				notifyParentOfBoundsChange();
@@ -302,6 +312,8 @@ namespace MV {
 			virtual BoxAABB<> boundsImplementation() override {
 				return localBounds;
 			}
+
+			void applyPresetBlendMode(Draw2D &ourRenderer) const;
 
 			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
 
@@ -324,9 +336,18 @@ namespace MV {
 				if (version > 0) {
 					archive(cereal::make_nvp("anchors", ourAnchors));
 				}
+				archive(CEREAL_NVP(shouldDraw));
+				if (version < 3) {
+					std::shared_ptr<TextureHandle> ourTexture;
+					archive(cereal::make_nvp("ourTexture", ourTexture));
+					if (ourTexture) {
+						ourTextures.clear();
+						ourTextures[0] = ourTexture;
+					}
+				} else {
+					archive(cereal::make_nvp("textures", ourTextures));
+				}
 				archive(
-					CEREAL_NVP(shouldDraw),
-					CEREAL_NVP(ourTexture),
 					CEREAL_NVP(shaderProgramId),
 					CEREAL_NVP(vertexIndices),
 					CEREAL_NVP(localBounds),
@@ -345,9 +366,17 @@ namespace MV {
 				if (version > 0) {
 					archive(cereal::make_nvp("anchors", construct->ourAnchors));
 				}
+				archive(cereal::make_nvp("shouldDraw", construct->shouldDraw));
+				if (version < 3) {
+					std::shared_ptr<TextureHandle> ourTexture;
+					archive(cereal::make_nvp("ourTexture", ourTexture));
+					if (ourTexture) {
+						construct->ourTextures[0] = ourTexture;
+					}
+				} else {
+					archive(cereal::make_nvp("textures", construct->ourTextures));
+				}
 				archive(
-					cereal::make_nvp("shouldDraw", construct->shouldDraw),
-					cereal::make_nvp("ourTexture", construct->ourTexture),
 					cereal::make_nvp("shaderProgramId", construct->shaderProgramId),
 					cereal::make_nvp("vertexIndices", construct->vertexIndices),
 					cereal::make_nvp("localBounds", construct->localBounds),
@@ -379,8 +408,8 @@ namespace MV {
 			std::string shaderProgramId = PREMULTIPLY_ID;
 			GLuint bufferId = 0;
 
-			std::shared_ptr<TextureHandle> ourTexture;
-			TextureHandle::SignalType::SharedType textureSizeSignal;
+			std::map<size_t, std::shared_ptr<TextureHandle>> ourTextures;
+			std::map<size_t, TextureHandle::SignalType::SharedType> textureSizeSignals;
 
 			GLenum drawType = GL_TRIANGLES;
 
@@ -393,15 +422,20 @@ namespace MV {
 
 			std::function<void(Shader*)> userMaterialSettings;
 
-			void hookupTextureSizeWatcher();
+			void hookupTextureSizeWatchers();
+			void hookupTextureSizeWatcher(size_t a_textureId);
 
 			BlendModePreset blendModePreset = DEFAULT;
 
+			void rebuildTextureCache();
+
+			std::vector<std::pair<std::string, std::shared_ptr<TextureDefinition>>> cachedTextureList;
+
 		private:
-			virtual void clearTextureCoordinates() {
+			virtual void clearTextureCoordinates(size_t a_textureId) {
 			}
 
-			virtual void updateTextureCoordinates() {
+			virtual void updateTextureCoordinates(size_t a_textureId) {
 			}
 
 			void lazyInitializeShader();

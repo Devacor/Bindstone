@@ -116,8 +116,9 @@ namespace MV {
 				rotatePoint(distance, direction);
 				position += distance * timeScale;
 				position += gravityConstant * timeScale;
-
-				currentFrame = static_cast<int>(wrap(0.0f, static_cast<float>(myTextures.size()), static_cast<float>(myTextures.size() * (change.animationFramesPerSecond / timeScale))));
+				
+				currentFrame = static_cast<int>(wrap(0.0f, static_cast<float>(textureCount), static_cast<float>(textureCount * (change.animationFramesPerSecond / timeScale))));
+				
 				return totalLifespan == change.maxLifespan;
 			}
 
@@ -131,13 +132,14 @@ namespace MV {
 			AxisAngles rotation;
 			Scale scale;
 			Color color;
-			int currentFrame;
+			int previousFrame = -1;
+			int currentFrame = 0;
 
 			float totalLifespan = 0.0f;
 
 			ParticleChangeValues change;
 
-			std::vector<std::shared_ptr<TextureHandle>> myTextures;
+			size_t textureCount;
 
 			void setGravity(float a_magnitude, const AxisAngles &a_direction = AxisAngles(0.0f, 180.0f, 0.0f)) {
 				gravityConstant.locate(0.0f, -a_magnitude, 0.0f);

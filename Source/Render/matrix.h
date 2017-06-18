@@ -15,37 +15,10 @@
 
 namespace MV {
 
-#ifdef __APPLE__
-	#import "TargetConditionals.h"
-	#ifdef TARGET_OS_IPHONE
-		typedef float MatrixValue;
-	#else
-		typedef float MatrixValue; //used to be double
-	#endif
-#else
-	typedef float MatrixValue;	//used to be double
-#endif
-
 	class Matrix {
-	private:
-		class MatrixRowAccess {
-		public:
-			MatrixRowAccess(std::shared_ptr<std::vector<MatrixValue>> a_matrixArray, size_t a_x);
-
-			void setCurrentX(size_t a_currentX) const;
-
-			MatrixValue& operator[](size_t a_index);
-			const MatrixValue& operator[](size_t a_index) const;
-			void resize(size_t a_x);
-		private:
-			mutable size_t currentX;
-			std::shared_ptr<std::vector<MatrixValue>> matrixArray;
-			size_t sizeX;
-		};
-
 	public:
-		Matrix(size_t a_size, MatrixValue a_value = 0.0);
-		Matrix(size_t a_x, size_t a_y, MatrixValue a_value = 0.0);
+		Matrix(size_t a_size, PointPrecision a_value = 0.0);
+		Matrix(size_t a_x, size_t a_y, PointPrecision a_value = 0.0);
 		Matrix(const Matrix& a_other);
 		Matrix(Matrix&& a_other);
 
@@ -54,54 +27,55 @@ namespace MV {
 
 		void print();
 
-		//A tiny bit faster than operator[] due to less indirection.
-		MatrixValue& access(size_t a_x, size_t a_y){
-			return (*matrixArray)[(sizeX * a_x) + (a_y)];
+		PointPrecision& access(size_t a_x, size_t a_y){
+			return (matrixArray)[(sizeX * a_x) + (a_y)];
 		}
-		const MatrixValue& access(size_t a_x, size_t a_y) const{
-			return (*matrixArray)[(sizeX * a_x) + (a_y)];
+		const PointPrecision& access(size_t a_x, size_t a_y) const{
+			return (matrixArray)[(sizeX * a_x) + (a_y)];
 		}
 
-		MatrixValue& accessTransposed(size_t a_x, size_t a_y){
-			return (*matrixArray)[(a_x) + (a_y * sizeY)];
+		PointPrecision& accessTransposed(size_t a_x, size_t a_y){
+			return (matrixArray)[(a_x) + (a_y * sizeY)];
 		}
-		const MatrixValue& accessTransposed(size_t a_x, size_t a_y) const{
-			return (*matrixArray)[(a_x) + (a_y * sizeY)];
+		const PointPrecision& accessTransposed(size_t a_x, size_t a_y) const{
+			return (matrixArray)[(a_x) + (a_y * sizeY)];
 		}
 
 		Matrix transpose() const;
 
-		//Enjoy using these, but do not use them in tight loops.
-		MatrixRowAccess& operator[] (size_t a_index);
-		const MatrixRowAccess& operator[] (size_t a_index) const;
+		PointPrecision& operator() (size_t a_x, size_t a_y){
+			return (matrixArray)[(sizeX * a_x) + (a_y)];
+		}
+		const PointPrecision& operator() (size_t a_x, size_t a_y) const{
+			return (matrixArray)[(sizeX * a_x) + (a_y)];
+		}
 
-		Matrix& clear(MatrixValue a_value = 0.0);
+		Matrix& clear(PointPrecision a_value = 0.0);
 
 		Matrix& operator+=(const Matrix& a_other);
 		Matrix& operator-=(const Matrix& a_other);
 		Matrix& operator*=(const Matrix& a_other);
 
-		Matrix& operator*=(const MatrixValue& a_other);
-		Matrix& operator/=(const MatrixValue& a_other);
+		Matrix& operator*=(const PointPrecision& a_other);
+		Matrix& operator/=(const PointPrecision& a_other);
 
 		Matrix& operator=(const Matrix& a_other);
 		Matrix& operator=(Matrix&& a_other);
 
-		std::shared_ptr<std::vector<MatrixValue>> getMatrixArray() const;
+		const std::vector<PointPrecision>& getMatrixArray() const;
+		std::vector<PointPrecision>& getMatrixArray();
 	protected:
 		size_t sizeX, sizeY;
-		std::shared_ptr<std::vector<MatrixValue>> matrixArray;
-	private:
-		MatrixRowAccess rowAccessor;
+		std::vector<PointPrecision> matrixArray;
 	};
 
 	const Matrix operator-(const Matrix &a_left, const Matrix &a_right);
 	const Matrix operator+(const Matrix &a_left, const Matrix &a_right);
 
 	const Matrix operator*(const Matrix &a_left, const Matrix &a_right);
-	const Matrix operator*(const Matrix &a_left, const MatrixValue &a_right);
+	const Matrix operator*(const Matrix &a_left, const PointPrecision &a_right);
 
-	const Matrix operator/(const Matrix &a_left, const MatrixValue &a_right);
+	const Matrix operator/(const Matrix &a_left, const PointPrecision &a_right);
 
 	std::ostream& operator<<(std::ostream& os, const Matrix& a_matrix);
 
@@ -113,26 +87,26 @@ namespace MV {
 		TransformMatrix(const TransformMatrix &&a_matrix):Matrix(std::move(a_matrix)){}
 		TransformMatrix(const Matrix &&a_matrix):Matrix(std::move(a_matrix)){}
 
-		TransformMatrix(MatrixValue a_value = 0.0);
-		TransformMatrix(const Point<MatrixValue> &a_position);
+		TransformMatrix(PointPrecision a_value = 0.0);
+		TransformMatrix(const Point<PointPrecision> &a_position);
 
 		TransformMatrix& operator=(const TransformMatrix& a_other);
 		TransformMatrix& operator=(TransformMatrix&& a_other);
 
-		MatrixValue getX() const{
+		PointPrecision getX() const{
 			return (*this).access(3, 0);
 		}
-		MatrixValue getY() const{
+		PointPrecision getY() const{
 			return (*this).access(3, 1);
 		}
-		MatrixValue getZ() const{
+		PointPrecision getZ() const{
 			return (*this).access(3, 2);
 		}
 
 		TransformMatrix& makeIdentity();
-		TransformMatrix& makeOrtho(MatrixValue a_left, MatrixValue a_right, MatrixValue a_bottom, MatrixValue a_top, MatrixValue a_near, MatrixValue a_far);
+		TransformMatrix& makeOrtho(PointPrecision a_left, PointPrecision a_right, PointPrecision a_bottom, PointPrecision a_top, PointPrecision a_near, PointPrecision a_far);
 
-		TransformMatrix& rotateXSupplyCosSin(MatrixValue a_cosRad, MatrixValue a_sinRad) {
+		TransformMatrix& rotateXSupplyCosSin(PointPrecision a_cosRad, PointPrecision a_sinRad) {
 			//1	0	0
 			//0	cos	-sin
 			//0	sin	cos
@@ -144,7 +118,7 @@ namespace MV {
 			*this *= rotation;
 			return *this;
 		}
-		TransformMatrix& rotateYSupplyCosSin(MatrixValue a_cosRad, MatrixValue a_sinRad) {
+		TransformMatrix& rotateYSupplyCosSin(PointPrecision a_cosRad, PointPrecision a_sinRad) {
 			//cos	0  sin
 			//0		1  0
 			//-sin	0  cos
@@ -156,7 +130,7 @@ namespace MV {
 			*this *= rotation;
 			return *this;
 		}
-		TransformMatrix& rotateZSupplyCosSin(MatrixValue a_cosRad, MatrixValue a_sinRad) {
+		TransformMatrix& rotateZSupplyCosSin(PointPrecision a_cosRad, PointPrecision a_sinRad) {
 			//cos	 -sin  0
 			//sin	 cos	0
 			//0		0	  1
@@ -169,20 +143,31 @@ namespace MV {
 			return *this;
 		}
 
-		TransformMatrix& rotateX(MatrixValue a_radian) {
+		TransformMatrix& rotateX(PointPrecision a_radian) {
 			return (a_radian != 0.0f) ? rotateXSupplyCosSin(cos(a_radian), sin(a_radian)) : *this;
 		}
 
-		TransformMatrix& rotateY(MatrixValue a_radian) {
+		TransformMatrix& rotateY(PointPrecision a_radian) {
 			return (a_radian != 0.0f) ? rotateYSupplyCosSin(cos(a_radian), sin(a_radian)) : *this;
 		}
 
-		TransformMatrix& rotateZ(MatrixValue a_radian) {
+		TransformMatrix& rotateZ(PointPrecision a_radian) {
 			return (a_radian != 0.0f) ? rotateZSupplyCosSin(cos(a_radian), sin(a_radian)) : *this;
 		}
 
-		TransformMatrix& translate(MatrixValue a_x, MatrixValue a_y, MatrixValue a_z = 0.0);
-		TransformMatrix& scale(MatrixValue a_x, MatrixValue a_y, MatrixValue a_z = 1.0);
+		TransformMatrix& translate(const MV::Point<PointPrecision> &a_point);
+		TransformMatrix& translate(PointPrecision a_x, PointPrecision a_y, PointPrecision a_z = 0.0);
+		TransformMatrix& scale(const MV::Scale &a_point);
+		TransformMatrix& scale(PointPrecision a_x, PointPrecision a_y, PointPrecision a_z = 1.0);
+
+		MV::Scale scale() const;
+
+		TransformMatrix& position(const MV::Point<PointPrecision> &a_point);
+
+		TransformMatrix& overrideScale(const MV::Scale &a_point);
+		MV::Point<PointPrecision> position() const {
+			return MV::Point<PointPrecision>(access(3, 0), access(3, 1), access(3, 2));
+		}
 	};
 
 	class MatrixStack {

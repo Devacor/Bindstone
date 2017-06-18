@@ -12,13 +12,15 @@ Editor::Editor(Managers &a_managers):
 	controlPanel(controls, scene, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &mouse, &chaiScript)),
 	selectorPanel(scene, controls, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &mouse, &chaiScript)),
 	testNode(MV::Scene::Node::make(a_managers.renderer)){
-	
+	visor->cameraId(1);
+
 	initializeWindow();
 	initializeControls();
 }
 
 //return true if we're still good to go
 bool Editor::update(double dt){
+	updateFps(dt);
 	lastUpdateDelta = dt;
 	selectorPanel.update();
 	managers.pool.run();
@@ -39,7 +41,13 @@ void Editor::initializeWindow(){
 	mouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse){
 		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, {10}, [&](){
 			auto signature = mouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse2){
-				scene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
+				const Uint8* keystate = SDL_GetKeyboardState(NULL);
+				if (!keystate[SDL_SCANCODE_LSHIFT]) {
+					scene->camera().translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
+					scene->renderer().updateCameraProjectionMatrices();
+				} else {
+					scene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
+				}
 				controlPanel.onSceneDrag(a_mouse2.position() - a_mouse2.oldPosition());
 			});
 			auto cancelId = MV::guid("cancelDrag");
@@ -55,8 +63,8 @@ void Editor::initializeWindow(){
 	managers.textures.files("Assets/Images");
 
 	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
-	fps = controls->make("FPS")->position({960.0f - 50.0f, 0.0f})->
-		attach<MV::Scene::Text>(managers.textLibrary)->number(0.0f)->wrapping(MV::TextWrapMethod::NONE)->bounds({MV::Point<>(), MV::size(50.0f, 15.0f) });
+	fps = controls->make("FPS")->
+		attach<MV::Scene::Text>(managers.textLibrary)->number(0.0f)->wrapping(MV::TextWrapMethod::NONE)->bounds({ MV::Point<>(), MV::size(50.0f, 15.0f) });
 }
 
 void Editor::handleInput(){
@@ -110,7 +118,9 @@ void Editor::render(){
 	}
 	auto scaler = visor->component<MV::Scene::Drawable>("ScreenScaler", false);
 	if (!scaler) {
-		visor->attach<MV::Scene::Drawable>()->id("ScreenScaler")->screenBounds({ MV::Point<int>(0, 0), managers.renderer.window().size() });
+		scaler = visor->attach<MV::Scene::Drawable>()->id("ScreenScaler")->screenBounds({ MV::Point<int>(0, 0), managers.renderer.window().size() });
+		fps->anchors().anchor(MV::point(1.0f, 0.0f)).parent(scaler.get());
+		fps->anchors().offset({ { -50.0f, 15.0f }, MV::point(0.0f, 0.0f)});
 	} else {
 		scaler->screenBounds({ MV::Point<int>(0, 0), managers.renderer.window().size() });
 	}
@@ -124,7 +134,8 @@ void Editor::initializeControls(){
 }
 
 void Editor::handleScroll(int a_amount) {
-	auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount);
+	const Uint8* keystate = SDL_GetKeyboardState(NULL);
+	auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount) + (scene->scale() / 20.0f * (a_amount > 0 ? 1.f : -1.f));
 	if (scene->scale().x + screenScale.x > .05f) {
 		auto originalScreenPosition = scene->localFromScreen(mouse.position()) * (MV::toPoint(screenScale));
 		scene->addScale(screenScale);

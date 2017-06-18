@@ -342,7 +342,7 @@ void EditablePoints::hookupSignals(MV::Scene::SafeComponent<MV::Scene::Clickable
 	pointHandle->onDrag.connect("!", [=](std::shared_ptr<MV::Scene::Clickable> a_this, const MV::Point<int> &, const MV::Point<int> &deltaPosition) {
 		auto worldDelta = a_this->owner()->renderer().worldFromScreen(deltaPosition);
 		a_this->owner()->translate(worldDelta);
-		onDragged(elementToEdit->point(i), elementToEdit->owner()->localFromWorld(a_this->owner()->worldPosition()));
+		onDragged(static_cast<size_t>(i), elementToEdit->owner()->localFromWorld(a_this->owner()->worldPosition()));
 	});
 }
 

@@ -35,6 +35,24 @@ public:
 	}
 
 private:
+
+	void updateFps(double a_dt) {
+		lastUpdateDelta = a_dt;
+		accumulatedTime += static_cast<float>(a_dt);
+		++accumulatedFrames;
+		if (accumulatedFrames > 60.0f) {
+			accumulatedFrames /= 2.0f;
+			accumulatedTime /= 2.0f;
+		}
+		if (static_cast<int>(accumulatedFrames) % 10 == 0) {
+			//fps->text(MV::to_string(accumulatedFrames / accumulatedTime, 3));
+			const Uint8* keystate = SDL_GetKeyboardState(NULL);
+			if (keystate[SDL_SCANCODE_RSHIFT]) {
+				std::cout << accumulatedFrames / accumulatedTime << '\t';
+			}
+		}
+	}
+
 	Editor(const Editor &) = delete;
 	Editor& operator=(const Editor &) = delete;
 
@@ -54,6 +72,9 @@ private:
 	std::shared_ptr<MV::Scene::Node> testNode;
 
 	double lastUpdateDelta = 0.0;
+
+	float accumulatedTime = 0.0f;
+	float accumulatedFrames = 0.0f;
 
 	bool done = false;
 

@@ -7,6 +7,7 @@
 #include <tuple>
 #include <sstream>
 #include <stdint.h>
+#include <iomanip>
 
 namespace MV {
 
@@ -48,6 +49,21 @@ namespace MV {
 	}
 	inline char* to_string(char *a_string){
 		return a_string;
+	}
+	inline std::string to_string(long double toCast, unsigned precision) {
+		std::ostringstream result;
+		result << std::setprecision(precision) << toCast;
+		return result.str();
+	}
+	inline std::string to_string(double toCast, unsigned precision) {
+		std::ostringstream result;
+		result << std::setprecision(precision) << toCast;
+		return result.str();
+	}
+	inline std::string to_string(float toCast, unsigned precision) {
+		std::ostringstream result;
+		result << std::setprecision(precision) << toCast;
+		return result.str();
 	}
 
 	template<typename T>

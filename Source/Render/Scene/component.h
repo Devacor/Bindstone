@@ -276,6 +276,9 @@ namespace MV {
 					CEREAL_NVP(componentId),
 					CEREAL_NVP(componentOwner)
 				);
+				if (accumulatedDelta == 0.0) {
+					accumulatedDelta = MV::randomNumber(0.0f, 1.0f); //avoid awkward synchronization
+				}
 			}
 
 			template <class Archive>
@@ -285,6 +288,7 @@ namespace MV {
 					cereal::make_nvp("componentId", construct->componentId),
 					cereal::make_nvp("componentOwner", construct->componentOwner)
 				);
+				construct->accumulatedDelta = MV::randomNumber(0.0f, 1.0f); //avoid awkward synchronization
 				construct->initialize();
 			}
 

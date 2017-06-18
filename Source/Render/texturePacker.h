@@ -18,9 +18,11 @@ namespace MV {
 	class TexturePack : public std::enable_shared_from_this<TexturePack> {
 		friend cereal::access;
 	public:
-		static std::shared_ptr<TexturePack> make(MV::Draw2D* a_renderer, const Color &a_color = Color(0.0f, 0.0f, 0.0f, 0.0f), const Size<int> &a_maximumExtent = Size<int>(std::numeric_limits<int>::max(), std::numeric_limits<int>::max())){
-			return std::shared_ptr<TexturePack>(new TexturePack(a_renderer, a_color, a_maximumExtent));
-		}
+		static std::shared_ptr<TexturePack> make(const std::string &a_id, MV::Draw2D* a_renderer, const Color &a_color, const Size<int> &a_maximumExtent);
+		static std::shared_ptr<TexturePack> make(const std::string &a_id, MV::Draw2D* a_renderer, const Color &a_color);
+		static std::shared_ptr<TexturePack> make(const std::string &a_id, MV::Draw2D* a_renderer, const Size<int> &a_maximumExtent);
+		static std::shared_ptr<TexturePack> make(const std::string &a_id, MV::Draw2D* a_renderer);
+
 		bool add(const std::string &a_id, const std::shared_ptr<TextureDefinition> &a_shape, PointPrecision a_scale = 1.0f);
 		bool add(const std::string &a_id, const std::shared_ptr<TextureDefinition> &a_shape, const MV::BoxAABB<float> &a_slice, PointPrecision a_scale = 1.0f);
 		std::string print() const;
@@ -62,6 +64,7 @@ namespace MV {
 			a_script.add(chaiscript::fun(&TexturePack::texture), "texture");
 
 			a_script.add(chaiscript::fun(&TexturePack::handleIds), "handleIds");
+			a_script.add(chaiscript::fun(&TexturePack::id), "identifier");
 
 			a_script.add(chaiscript::fun([](TexturePack & a_self, size_t a_index) {return a_self.handle(a_index); }), "handle");
 			a_script.add(chaiscript::fun([](TexturePack & a_self, const std::string &a_id) {return a_self.handle(a_id); }), "handle");
@@ -84,8 +87,17 @@ namespace MV {
 				archive(CEREAL_NVP(texture));
 			}
 		};
+
+		std::string identifier() const{
+			return id;
+		}
+
+		void identifier(const std::string &a_id) {
+			id = a_id;
+		}
+
 	private:
-		TexturePack(MV::Draw2D* a_renderer, const Color &a_color = Color(0.0f, 0.0f, 0.0f, 0.0f), const Size<int> &a_maximumExtent = Size<int>(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()));
+		TexturePack(const std::string & a_id, MV::Draw2D* a_renderer, const Color &a_color = Color(0.0f, 0.0f, 0.0f, 0.0f), const Size<int> &a_maximumExtent = Size<int>(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()));
 
 		std::shared_ptr<PackedTextureDefinition> getOrMakeTexture();
 
@@ -105,25 +117,33 @@ namespace MV {
 		std::shared_ptr<FileTextureDefinition> consolidatedTexture;
 		
 		Color background;
+		std::string id;
 
 		MV::Draw2D* renderer;
 
 		bool dirty;
 
 		template <class Archive>
-		void serialize(Archive & archive, std::uint32_t const /*version*/){
+		void serialize(Archive & archive, std::uint32_t const version){
 			if(packedTexture.expired()){
 				packedTexture.reset();
+			}
+			if (version > 0) {
+				archive(CEREAL_NVP(id));
 			}
 			archive(CEREAL_NVP(packedTexture), CEREAL_NVP(shapes), CEREAL_NVP(maximumExtent), CEREAL_NVP(contentExtent), CEREAL_NVP(containers), CEREAL_NVP(consolidatedTexture));
 		}
 
 		template <class Archive>
-		static void load_and_construct(Archive & archive, cereal::construct<TexturePack> &construct, std::uint32_t const /*version*/){
+		static void load_and_construct(Archive & archive, cereal::construct<TexturePack> &construct, std::uint32_t const version){
 			Draw2D *renderer = nullptr;
 			archive.extract(cereal::make_nvp("renderer", renderer));
 			MV::require<PointerException>(renderer != nullptr, "Null renderer in Node::load_and_construct.");
-			construct(renderer);
+			std::string id;
+			if (version > 0) {
+				archive(cereal::make_nvp("id", id));
+			}
+			construct(id, renderer);
 			archive(cereal::make_nvp("packedTexture", construct->packedTexture),
 				cereal::make_nvp("shapes", construct->shapes), 
 				cereal::make_nvp("maximumExtent", construct->maximumExtent), cereal::make_nvp("contentExtent", construct->contentExtent),

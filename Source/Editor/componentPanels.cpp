@@ -392,15 +392,18 @@ SelectedDrawableEditorPanel::SelectedDrawableEditorPanel(EditorControls &a_panel
 	EditorPanel(a_panel),
 	controls(a_controls) {
 
-	controls->onDragged = [&](MV::Point<> a_point, MV::Point<> a_final){
+	controls->onDragged = [&](size_t a_pointIndex, MV::Point<> a_final){
 		auto pointList = controls->elementToEdit->getPoints();
-		for (int i = 0; i < pointList.size(); ++i) {
-			if (MV::distance(a_point, pointList[i].point()) < 1.0f) {
-				pointList[i] = a_final;
-				controls->elementToEdit->setPoint(i, pointList[i]);
-				const Uint8* keystate = SDL_GetKeyboardState(NULL);
-				if (keystate[SDL_SCANCODE_LSHIFT]) {
-					return true;
+		auto pointSelected = pointList[a_pointIndex];
+		pointList[a_pointIndex] = a_final;
+		controls->elementToEdit->setPoint(a_pointIndex, pointList[a_pointIndex]);
+
+		const Uint8* keystate = SDL_GetKeyboardState(NULL);
+		if (!keystate[SDL_SCANCODE_LSHIFT]) {
+			for (size_t i = 0; i < pointList.size(); ++i) {
+				if (i != a_pointIndex && MV::distance(pointSelected.point(), pointList[i].point()) < 0.75f) {
+					pointList[i] = a_final;
+					controls->elementToEdit->setPoint(i, pointList[i]);
 				}
 			}
 		}
@@ -475,6 +478,14 @@ SelectedDrawableEditorPanel::SelectedDrawableEditorPanel(EditorControls &a_panel
 			controls->elementToEdit->shader(a_text->text());
 		});
 
+	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "BlendMode", buttonSize)->
+		text(std::to_string(static_cast<int>(controls->elementToEdit->blend())))->
+		onEnter.connect("rename", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
+			try {
+				controls->elementToEdit->blend(static_cast<MV::Scene::Drawable::BlendModePreset>(std::stoi(a_text->text())));
+			} catch (std::invalid_argument&) {} catch (std::out_of_range&) {}
+		});
+
 	auto deselectLocalAABB = deselectButton->bounds();
 
 	panel.updateBoxHeader(grid->bounds().width());
@@ -501,9 +512,10 @@ void SelectedDrawableEditorPanel::handleInput(SDL_Event &a_event) {
 		auto originalMouseLocalPosition = offsetPosition;
 		auto ourPoints = controls->elementToEdit->getPoints();
 		auto shortestDistance = std::numeric_limits<MV::PointPrecision>().max();
+		float minimumDistance = 10.0f;
 		for (auto&& point : ourPoints) {
 			auto currentDistance = MV::distance(point.point(), originalMouseLocalPosition);
-			if (currentDistance < shortestDistance) {
+			if (currentDistance < shortestDistance && currentDistance < minimumDistance) {
 				shortestDistance = currentDistance;
 				offsetPosition = point.point();
 			}
@@ -511,7 +523,53 @@ void SelectedDrawableEditorPanel::handleInput(SDL_Event &a_event) {
 
 		MV::Scale scale(.5f, .5f);
 
-		if (a_event.key.keysym.sym == SDLK_q) {
+		if (a_event.key.keysym.sym == SDLK_p) {
+			if (selectedPointIndex != -1) {
+				std::set<size_t> attachedIndices;
+				attachedIndices.insert(selectedPointIndex);
+
+				selectedPointIndex = -1;
+				auto pointList = controls->elementToEdit->getPoints();
+				auto indexList = controls->elementToEdit->pointIndices();
+
+				for (size_t i = 0; i <= (indexList.size() - 1) / 3; ++i) {
+					bool firstFound = attachedIndices.find(indexList[i * 3]) != attachedIndices.end();
+					bool secondFound = attachedIndices.find(indexList[i * 3 + 1]) != attachedIndices.end();
+					bool thirdFound = attachedIndices.find(indexList[i * 3 + 2]) != attachedIndices.end();
+					
+					bool allFound = firstFound && secondFound && thirdFound;
+
+					if (!allFound && (firstFound || secondFound || thirdFound)) {
+						attachedIndices.insert(indexList[i * 3]);
+						attachedIndices.insert(indexList[i * 3 + 1]);
+						attachedIndices.insert(indexList[i * 3 + 2]);
+						i = -1; // reset search!
+					}
+				}
+				indexList.erase(std::remove_if(indexList.begin(), indexList.end(), [&](size_t index) {
+					return attachedIndices.find(index) != attachedIndices.end();
+				}), indexList.end());
+				size_t currentPointIndex = 0;
+				for (auto it = pointList.begin();it != pointList.end();) {
+					if (attachedIndices.find(currentPointIndex++) != attachedIndices.end()) {
+						it = pointList.erase(it);
+					} else {
+						++it;
+					}
+				}
+
+				for (auto&& index : indexList) {
+					int originalIndex = index;
+					for (auto deletingIndex : attachedIndices) {
+						if (originalIndex >= deletingIndex) {
+							--index;
+						}
+					}
+				}
+				controls->elementToEdit->setPoints(pointList, indexList);
+				controls->resetHandles();
+			}
+		} else if (a_event.key.keysym.sym == SDLK_q) {
 			controls->elementToEdit->appendPoints({
 				MV::DrawPoint{ MV::point(0.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.0f) },
 				MV::DrawPoint{ MV::point(0.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) },
@@ -667,8 +725,7 @@ void SelectedDrawableEditorPanel::handleInput(SDL_Event &a_event) {
 				});
 
 			controls->resetHandles();
-		}
-		else if (a_event.key.keysym.sym == SDLK_x) {
+		} else if (a_event.key.keysym.sym == SDLK_x) {
 			controls->elementToEdit->appendPoints({
 				MV::DrawPoint{ MV::point(0.0f, 0.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 0.0f) },
 				MV::DrawPoint{ MV::point(-75.0f, 100.0f) * scale + offsetPosition, MV::TexturePoint(0.0f, 1.0f) },
@@ -1105,6 +1162,31 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 		openAnchorEditor(controls->elementToEditBase.self());
 	});
 
+	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Shader", buttonSize)->
+		text(controls->elementToEdit->shader())->
+		onEnter.connect("shader", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
+		controls->elementToEdit->shader(a_text->text());
+	});
+
+	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "BlendMode", buttonSize)->
+		text(std::to_string(static_cast<int>(controls->elementToEdit->blend())))->
+		onEnter.connect("rename", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
+		try {
+			controls->elementToEdit->blend(static_cast<MV::Scene::Drawable::BlendModePreset>(std::stoi(a_text->text())));
+		} catch (std::invalid_argument&) {} catch (std::out_of_range&) {}
+	});
+
+	makeLabel(grid, *panel.resources().textLibrary, "subDivideLabel", MV::size(textboxWidth, 23.0f), UTF_CHAR_STR("Subdivisions"));
+	subdivided = makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Subdivided", MV::size(textboxWidth, 27.0f))->
+		text(std::to_string(controls->elementToEdit->subdivisions()));
+	auto subClick = subdivided->owner()->component<MV::Scene::Clickable>();
+	subClick->onAccept.connect("updateSub", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+		controls->elementToEdit->subdivide(std::stoi(subdivided->text()));
+	});
+	subdivided->onEnter.connect("updateSub", [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
+		controls->elementToEdit->subdivide(std::stoi(subdivided->text()));
+	});
+
 	panel.updateBoxHeader(grid->bounds().width());
 
 	SDL_StartTextInput();
@@ -1362,7 +1444,9 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Shader", buttonSize)->
 		text(std::to_string(static_cast<int>(controls->elementToEdit->blend())))->
 		onEnter.connect("rename", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
+		try {
 			controls->elementToEdit->blend(static_cast<MV::Scene::Drawable::BlendModePreset>(std::stoi(a_text->text())));
+		} catch (std::invalid_argument&) {} catch (std::out_of_range&) {}
 		});
 
 	grid->add(minStartColor->owner());

@@ -7,8 +7,26 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::PackedTextureDefinition);
+CEREAL_CLASS_VERSION(MV::PackedTextureDefinition, 1);
 
 namespace MV{
+
+	std::shared_ptr<MV::TexturePack> TexturePack::make(const std::string &a_id, MV::Draw2D* a_renderer, const Color &a_color, const Size<int> &a_maximumExtent) {
+		return std::shared_ptr<TexturePack>(new TexturePack(a_id, a_renderer, a_color, a_maximumExtent));
+	}
+
+	std::shared_ptr<MV::TexturePack> TexturePack::make(const std::string &a_id, MV::Draw2D* a_renderer, const Size<int> &a_maximumExtent) {
+		return std::shared_ptr<TexturePack>(new TexturePack(a_id, a_renderer, Color(0.0f, 0.0f, 0.0f, 0.0f), a_maximumExtent));
+	}
+
+	std::shared_ptr<MV::TexturePack> TexturePack::make(const std::string &a_id, MV::Draw2D* a_renderer, const Color &a_color) {
+		return std::shared_ptr<TexturePack>(new TexturePack(a_id, a_renderer, a_color, Size<int>(std::numeric_limits<int>::max(), std::numeric_limits<int>::max())));
+	}
+
+	std::shared_ptr<MV::TexturePack> TexturePack::make(const std::string &a_id, MV::Draw2D* a_renderer) {
+		return std::shared_ptr<TexturePack>(new TexturePack(a_id, a_renderer, Color(0.0f, 0.0f, 0.0f, 0.0f), Size<int>(std::numeric_limits<int>::max(), std::numeric_limits<int>::max())));
+	}
+
 	bool TexturePack::add(const std::string &a_id, const std::shared_ptr<TextureDefinition> &a_shape, PointPrecision a_scale) {
 		return add(a_id, a_shape, MV::BoxAABB<float>(), a_scale);
 	}
@@ -31,15 +49,17 @@ namespace MV{
 		BoxAABB<int> bestShape;
 		bestShape.minPoint.x = -1;
 
-		int bestSpaceLeft = maximumExtent.area();
+		int64_t bestSpaceLeft = cast<int64_t>(maximumExtent).area();
 		auto bestContainer = containers.end();
 		bool bestRequiresExpansion = true;
 
 		for(auto container = containers.begin(); container != containers.end(); ++container){
-			auto spaceLeft = container->size().area() - a_shape.area();
+			auto spaceLeft = container->size().area() - a_shape.area(); //goofy but intentional overflow.
 			auto newExtent = toSize(container->minPoint) + a_shape;
 			bool requiresExpansion = !contentExtent.contains(newExtent);
-			if(maximumExtent.contains(newExtent) && ((bestRequiresExpansion && (spaceLeft < bestSpaceLeft || !requiresExpansion)) || (!bestRequiresExpansion && !requiresExpansion && spaceLeft < bestSpaceLeft)) && container->size().contains(a_shape)){
+			bool expansionCondition = (bestRequiresExpansion && (spaceLeft < bestSpaceLeft || !requiresExpansion)) || 
+								 (!bestRequiresExpansion && !requiresExpansion && spaceLeft < bestSpaceLeft);
+			if (maximumExtent.contains(newExtent) && expansionCondition && container->size().contains(a_shape)) {
 				bestShape = {container->minPoint, a_shape};
 				bestSpaceLeft = spaceLeft;
 				bestContainer = container;
@@ -76,8 +96,9 @@ namespace MV{
 		return out.str();
 	}
 
-	TexturePack::TexturePack(MV::Draw2D* a_renderer, const Color &a_color, const Size<int> &a_maximumExtent):
+	TexturePack::TexturePack(const std::string &a_id, MV::Draw2D* a_renderer, const Color &a_color, const Size<int> &a_maximumExtent):
 		renderer(a_renderer),
+		id(a_id),
 		maximumExtent(a_maximumExtent),
 		background(a_color),
 		dirty(true){
@@ -163,7 +184,7 @@ namespace MV{
 		if (dirty || !sharedPackedTexture || !sharedPackedTexture->loaded()) {
 			dirty = false;
 			sharedPackedTexture->resize(contentExtent);
-			auto handle = sharedPackedTexture->makeHandle(foundShape.bounds)->slice(foundShape.slice);
+			auto handle = sharedPackedTexture->makeHandle(foundShape.bounds)->slice(foundShape.slice)->pack(id)->name(foundShape.id);
 
 			auto scene = makeScene();
 			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, sharedPackedTexture->textureId(), background)->start();
@@ -171,7 +192,7 @@ namespace MV{
 
 			return handle;
 		} else {
-			return sharedPackedTexture->makeHandle(foundShape.bounds);
+			return sharedPackedTexture->makeHandle(foundShape.bounds)->pack(id)->name(foundShape.id);
 		}
 	}
 
@@ -188,15 +209,15 @@ namespace MV{
 		if(dirty || !sharedPackedTexture || !sharedPackedTexture->loaded()){
 			dirty = false;
 			sharedPackedTexture->resize(contentExtent);
-			auto handle = sharedPackedTexture->makeHandle(foundShape->bounds)->slice(foundShape->slice);
+			auto handle = sharedPackedTexture->makeHandle(foundShape->bounds)->slice(foundShape->slice)->pack(id)->name(a_id);
 
 			auto scene = makeScene();
 			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, sharedPackedTexture->textureId(), background)->start();
 			scene->draw();
 
 			return handle;
-		} else{
-			return sharedPackedTexture->makeHandle(foundShape->bounds)->slice(foundShape->slice);
+		} else {
+			return sharedPackedTexture->makeHandle(foundShape->bounds)->slice(foundShape->slice)->pack(id)->name(a_id);
 		}
 	}
 

@@ -192,15 +192,15 @@ namespace MV {
 			renderer(a_renderer){
 		}
 			
-		Point<int> projectScreen(const Point<> &a_point, const TransformMatrix &a_modelview);
-		Point<> projectWorld(const Point<> &a_point, const TransformMatrix &a_modelview);
-		Point<> unProjectScreen(const Point<int> &a_point, const TransformMatrix &a_modelview);
-		Point<> unProjectWorld(const Point<> &a_point, const TransformMatrix &a_modelview);
+		Point<int> projectScreen(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview);
+		Point<> projectWorld(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview);
+		Point<> unProjectScreen(const Point<int> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview);
+		Point<> unProjectWorld(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview);
 
 		const Draw2D &renderer;
 	private:
-		Point<> projectScreenRaw(const Point<> &a_point, const TransformMatrix &a_modelview);
-		Point<> unProjectScreenRaw(const Point<> &a_point, const TransformMatrix &a_modelview);
+		Point<> projectScreenRaw(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview);
+		Point<> unProjectScreenRaw(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview);
 	};
 
 	class RenderWorld {
@@ -375,6 +375,30 @@ namespace MV {
 			return contextProjectionMatrix;
 		}
 
+		TransformMatrix& camera(int32_t a_index) {
+			return ourCameras[a_index];
+		}
+
+		const TransformMatrix& cameraProjectionMatrix(int32_t a_index) const {
+			auto found = ourCameraProjectionMatrices.find(a_index);
+			if (found != ourCameraProjectionMatrices.end()) {
+				return found->second;
+			} else {
+				return contextProjectionMatrix.top();
+			}
+		}
+		
+		void clearCameraProjectionMatrices() {
+			ourCameraProjectionMatrices.clear();
+		}
+
+		void updateCameraProjectionMatrices() {
+			ourCameraProjectionMatrices.clear();
+			for (auto&& kv : ourCameras) {
+				ourCameraProjectionMatrices.emplace(kv.first, projectionMatrix().top() * kv.second);
+			}
+		}
+
 		Draw2D& makeHeadless() {
 			require<ResourceException>(!initialized, "Renderer: Failed to make headless because we're already initialized!");
 			isHeadless = true;
@@ -393,11 +417,11 @@ namespace MV {
 		void clearScreen();
 		void updateScreen();
 
-		Point<> worldFromLocal(const Point<> &a_localPoint, const TransformMatrix &a_modelview) const;
-		Point<int> screenFromLocal(const Point<> &a_localPoint, const TransformMatrix &a_modelview) const;
+		Point<> worldFromLocal(const Point<> &a_localPoint, int32_t a_cameraId, const TransformMatrix &a_modelview) const;
+		Point<int> screenFromLocal(const Point<> &a_localPoint, int32_t a_cameraId, const TransformMatrix &a_modelview) const;
 
-		Point<> localFromWorld(const Point<> &a_worldPoint, const TransformMatrix &a_modelview) const;
-		Point<> localFromScreen(const Point<int> &a_screenPoint, const TransformMatrix &a_modelview) const;
+		Point<> localFromWorld(const Point<> &a_worldPoint, int32_t a_cameraId, const TransformMatrix &a_modelview) const;
+		Point<> localFromScreen(const Point<int> &a_screenPoint, int32_t a_cameraId, const TransformMatrix &a_modelview) const;
 
 		Point<> screenFromWorldRaw(const Point<> &a_worldPoint) const;
 		Point<int> screenFromWorld(const Point<> &a_worldPoint) const;
@@ -453,6 +477,9 @@ namespace MV {
 		RenderWorld mvWorld;
 
 		MatrixStack contextProjectionMatrix;
+
+		std::map<int32_t, TransformMatrix> ourCameras;
+		std::map<int32_t, TransformMatrix> ourCameraProjectionMatrices;
 
 		std::map<std::string, Shader> shaders;
 		Shader* defaultShaderPtr = nullptr;

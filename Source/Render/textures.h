@@ -343,7 +343,19 @@ namespace MV {
 
 		SignalRegister<void(std::shared_ptr<TextureHandle>)> sizeChange;
 
+		std::shared_ptr<TextureHandle> name(const std::string &a_name) {
+			debugName = a_name;
+			return shared_from_this();
+		}
 		std::string name() const;
+
+		std::shared_ptr<TextureHandle> pack(const std::string &a_pack) {
+			packId = packId;
+			return shared_from_this();
+		}
+		std::string pack() const {
+			return packId;
+		}
 
 		std::shared_ptr<TextureHandle> clone();
 
@@ -351,7 +363,8 @@ namespace MV {
 			a_script.add(chaiscript::user_type<TextureHandle>(), "TextureHandle");
 
 			a_script.add(chaiscript::fun(&TextureHandle::apply), "apply");
-			a_script.add(chaiscript::fun(&TextureHandle::name), "name");
+			a_script.add(chaiscript::fun([](TextureHandle &a_self) { return a_self.name(); }), "name");
+			a_script.add(chaiscript::fun([](TextureHandle &a_self, const std::string &a_name) { return a_self.name(a_name); }), "name");
 			a_script.add(chaiscript::fun(&TextureHandle::texture), "texture");
 			a_script.add(chaiscript::fun(&TextureHandle::clone), "clone");
 
@@ -385,7 +398,7 @@ namespace MV {
 
 			return a_script;
 		}
-	private:
+	protected:
 		TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const BoxAABB<PointPrecision> &a_bounds = BoxAABB<PointPrecision>(Point<PointPrecision>(), Size<PointPrecision>(1.0f, 1.0f)));
 		TextureHandle(std::shared_ptr<TextureDefinition> a_texture, const BoxAABB<int> &a_bounds);
 
@@ -410,6 +423,9 @@ namespace MV {
 					cereal::make_nvp("slice", slicePercent),
 					cereal::make_nvp("name", debugName)
 				);
+				if (version > 1) {
+					archive(cereal::make_nvp("packId", packId));
+				}
 			}
 		}
 
@@ -436,8 +452,18 @@ namespace MV {
 					cereal::make_nvp("slice", construct->slicePercent),
 					cereal::make_nvp("name", construct->debugName)
 				);
+				if (version > 1) {
+					archive(cereal::make_nvp("packId", construct->packId));
+				}
+				if (!construct->packId.empty()) {
+					std::shared_ptr<SharedTextures> sharedTextures;
+					archive.extract(cereal::make_nvp("texture", sharedTextures));
+					construct->postLoadInitialize(sharedTextures);
+				}
 			}
 		}
+
+		void postLoadInitialize(const std::shared_ptr<SharedTextures> &a_sharedTextures);
 
 		std::shared_ptr<TextureDefinition> textureDefinition;
 
@@ -445,9 +471,10 @@ namespace MV {
 		BoxAABB<PointPrecision> handlePercent;
 
 		std::string debugName;
+		std::string packId;
 	};
 }
 
-CEREAL_CLASS_VERSION(MV::TextureHandle, 1);
+CEREAL_CLASS_VERSION(MV::TextureHandle, 2);
 
 #endif

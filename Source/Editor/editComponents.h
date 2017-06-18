@@ -87,7 +87,7 @@ public:
 	void resetHandles();
 
 	std::function<void(MV::Point<>)> onSelected;
-	std::function<bool(MV::Point<>, MV::Point<>)> onDragged; //true if drag should move it.
+	std::function<bool(size_t, MV::Point<>)> onDragged; //true if drag should move it.
 
 	MV::Scene::SafeComponent<MV::Scene::Drawable> elementToEdit;
 private:

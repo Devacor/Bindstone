@@ -170,10 +170,10 @@ namespace MV{
 	}
 
 	TexturePack::ShapeDefinition TexturePack::shape(const std::string &a_id) const {
-		auto foundShape = std::find_if(shapes.cbegin(), shapes.cend(), [&](ShapeDefinition& a_shape) {
+		auto foundShape = std::find_if(shapes.cbegin(), shapes.cend(), [&](const ShapeDefinition& a_shape) {
 			return a_shape.id == a_id;
 		});
-		require<ResourceException>(foundShape != shapes.end(), "No shape found for id: [", a_id, "]");
+		require<ResourceException>(foundShape != shapes.cend(), "No shape found for id: [", a_id, "]");
 		return *foundShape;
 	}
 	TexturePack::ShapeDefinition TexturePack::shape(size_t a_index) const {
@@ -240,10 +240,6 @@ namespace MV{
 			return shape.id;
 		});
 		return keys;
-	}
-
-	MV::BoxAABB<MV::PointPrecision> TexturePack::handlePercent() const {
-
 	}
 
 	std::shared_ptr<PackedTextureDefinition> TexturePack::getOrMakeTexture() {

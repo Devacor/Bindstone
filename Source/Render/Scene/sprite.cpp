@@ -69,10 +69,10 @@ namespace MV {
 
 					for (size_t x = 0; x <= ourSubdivisions; ++x) {
 						for (size_t y = 0; y <= ourSubdivisions; ++y) {
-							GLuint topLeft = (x == 0 && y == 0) ? 0 : x > 0 ? ((2 + ourSubdivisions) * x) + y + 2 : 3 + y;
-							GLuint bottomLeft = (x == 0 && y == ourSubdivisions) ? 1 : x > 0 ? ((2 + ourSubdivisions) * x) + (y + 1) + 2 : 3 + (y + 1);
-							GLuint bottomRight = (x == ourSubdivisions && y == ourSubdivisions) ? 2 : ((2 + ourSubdivisions) * (x + 1)) + (y + 1) + 2 - (x == ourSubdivisions ? 1 : 0);
-							GLuint topRight = (x == ourSubdivisions && y == 0) ? 3 : ((2 + ourSubdivisions) * (x + 1)) + y + 2 - (x == ourSubdivisions ? 1 : 0);
+							GLuint topLeft = static_cast<GLuint>((x == 0 && y == 0) ? 0 : x > 0 ? ((2 + ourSubdivisions) * x) + y + 2 : 3 + y);
+							GLuint bottomLeft = static_cast<GLuint>((x == 0 && y == ourSubdivisions) ? 1 : x > 0 ? ((2 + ourSubdivisions) * x) + (y + 1) + 2 : 3 + (y + 1));
+							GLuint bottomRight = static_cast<GLuint>((x == ourSubdivisions && y == ourSubdivisions) ? 2 : ((2 + ourSubdivisions) * (x + 1)) + (y + 1) + 2 - (x == ourSubdivisions ? 1 : 0));
+							GLuint topRight = static_cast<GLuint>((x == ourSubdivisions && y == 0) ? 3 : ((2 + ourSubdivisions) * (x + 1)) + y + 2 - (x == ourSubdivisions ? 1 : 0));
 
 							PointPrecision leftPercent = static_cast<PointPrecision>(x) / static_cast<PointPrecision>(ourSubdivisions + 1);
 							PointPrecision topPercent = static_cast<PointPrecision>(y) / static_cast<PointPrecision>(ourSubdivisions + 1);
@@ -129,10 +129,10 @@ namespace MV {
 
 				for (size_t x = 0; x <= ourSubdivisions; ++x) {
 					for (size_t y = 0; y <= ourSubdivisions; ++y) {
-						GLuint topLeft = (x == 0 && y == 0) ? 0 : x > 0 ? ((2 + ourSubdivisions) * x) + y + 2 : 3 + y;
-						GLuint bottomLeft = (x == 0 && y == ourSubdivisions) ? 1 : x > 0 ? ((2 + ourSubdivisions) * x) + (y + 1) + 2 : 3 + (y + 1);
-						GLuint bottomRight = (x == ourSubdivisions && y == ourSubdivisions) ? 2 : ((2 + ourSubdivisions) * (x + 1)) + (y + 1) + 2 - (x == ourSubdivisions ? 1 : 0);
-						GLuint topRight = (x == ourSubdivisions && y == 0) ? 3 : ((2 + ourSubdivisions) * (x + 1)) + y + 2 - (x == ourSubdivisions ? 1 : 0);
+						GLuint topLeft = static_cast<GLuint>((x == 0 && y == 0) ? 0 : x > 0 ? ((2 + ourSubdivisions) * x) + y + 2 : 3 + y);
+						GLuint bottomLeft = static_cast<GLuint>((x == 0 && y == ourSubdivisions) ? 1 : x > 0 ? ((2 + ourSubdivisions) * x) + (y + 1) + 2 : 3 + (y + 1));
+						GLuint bottomRight = static_cast<GLuint>((x == ourSubdivisions && y == ourSubdivisions) ? 2 : ((2 + ourSubdivisions) * (x + 1)) + (y + 1) + 2 - (x == ourSubdivisions ? 1 : 0));
+						GLuint topRight = static_cast<GLuint>((x == ourSubdivisions && y == 0) ? 3 : ((2 + ourSubdivisions) * (x + 1)) + y + 2 - (x == ourSubdivisions ? 1 : 0));
 
 						PointPrecision leftPercent = static_cast<PointPrecision>(x) / static_cast<PointPrecision>(ourSubdivisions + 1);
 						PointPrecision topPercent = static_cast<PointPrecision>(y) / static_cast<PointPrecision>(ourSubdivisions + 1);

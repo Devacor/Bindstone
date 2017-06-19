@@ -6,6 +6,8 @@
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
+#include "sharedTextures.h"
+
 CEREAL_REGISTER_TYPE(MV::PackedTextureDefinition);
 CEREAL_CLASS_VERSION(MV::PackedTextureDefinition, 1);
 
@@ -138,39 +140,46 @@ namespace MV{
 	}
 
 	std::shared_ptr<TextureHandle> TexturePack::contentHandle() {
+		if (!dirty && consolidatedTexture) {
+			return consolidatedTexture->makeHandle(percentBounds({contentExtent}))->pack(id)->name("CONTENT_HANDLE");
+		}
+
 		auto sharedPackedTexture = getOrMakeTexture();
-		if(dirty || !sharedPackedTexture || !sharedPackedTexture->loaded()){
+		if(dirty){
 			dirty = false;
 			sharedPackedTexture->resize(contentExtent);
-			auto handle = sharedPackedTexture->makeHandle({contentExtent});
-
-			auto scene = makeScene();
-			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, sharedPackedTexture->textureId(), background)->start();
-			scene->draw();
-
-			return handle;
+			return sharedPackedTexture->makeHandle(percentBounds({contentExtent}))->pack(id)->name("CONTENT_HANDLE");
 		} else{
-			return sharedPackedTexture->makeHandle({contentExtent});
+			return sharedPackedTexture->makeHandle(percentBounds({contentExtent}))->pack(id)->name("CONTENT_HANDLE");
 		}
 	}
 
 	std::shared_ptr<TextureHandle> TexturePack::fullHandle() {
+		if (!dirty && consolidatedTexture) {
+			return consolidatedTexture->makeHandle()->pack(id)->name("FULL_HANDLE");
+		}
+
 		auto sharedPackedTexture = getOrMakeTexture();
-		if(dirty || !sharedPackedTexture || !sharedPackedTexture->loaded()){
+		if(dirty){
 			dirty = false;
 			sharedPackedTexture->resize(contentExtent);
-			auto handle = sharedPackedTexture->makeHandle();
-
-			auto scene = makeScene();
-			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, sharedPackedTexture->textureId(), background)->start();
-			scene->draw();
-
-			return handle;
+			return sharedPackedTexture->makeHandle()->pack(id)->name("FULL_HANDLE");
 		} else{
-			return sharedPackedTexture->makeHandle();
+			return sharedPackedTexture->makeHandle()->pack(id)->name("FULL_HANDLE");
 		}
 	}
 
+	TexturePack::ShapeDefinition TexturePack::shape(const std::string &a_id) const {
+		auto foundShape = std::find_if(shapes.cbegin(), shapes.cend(), [&](ShapeDefinition& a_shape) {
+			return a_shape.id == a_id;
+		});
+		require<ResourceException>(foundShape != shapes.end(), "No shape found for id: [", a_id, "]");
+		return *foundShape;
+	}
+	TexturePack::ShapeDefinition TexturePack::shape(size_t a_index) const {
+		require<ResourceException>(a_index <= shapes.size(), "No shape found for index: [", a_index, "]");
+		return shapes[a_index];
+	}
 
 	std::shared_ptr<TextureHandle> TexturePack::handle(size_t a_index) {
 		if (a_index > shapes.size()) {
@@ -180,19 +189,17 @@ namespace MV{
 
 		auto& foundShape = shapes[a_index];
 
+		if (!dirty && consolidatedTexture) {
+			return consolidatedTexture->makeHandle(percentBounds(foundShape.bounds))->slice(foundShape.slice)->pack(id)->name(foundShape.id);
+		}
+
 		auto sharedPackedTexture = getOrMakeTexture();
-		if (dirty || !sharedPackedTexture || !sharedPackedTexture->loaded()) {
+		if (dirty) {
 			dirty = false;
 			sharedPackedTexture->resize(contentExtent);
-			auto handle = sharedPackedTexture->makeHandle(foundShape.bounds)->slice(foundShape.slice)->pack(id)->name(foundShape.id);
-
-			auto scene = makeScene();
-			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, sharedPackedTexture->textureId(), background)->start();
-			scene->draw();
-
-			return handle;
+			return sharedPackedTexture->makeHandle(percentBounds(foundShape.bounds))->slice(foundShape.slice)->pack(id)->name(foundShape.id);
 		} else {
-			return sharedPackedTexture->makeHandle(foundShape.bounds)->pack(id)->name(foundShape.id);
+			return sharedPackedTexture->makeHandle(percentBounds(foundShape.bounds))->pack(id)->name(foundShape.id);
 		}
 	}
 
@@ -205,25 +212,23 @@ namespace MV{
 			return fullHandle();
 		}
 		
+		if (!dirty && consolidatedTexture) {
+			return consolidatedTexture->makeHandle(percentBounds(foundShape->bounds))->slice(foundShape->slice)->pack(id)->name(a_id);
+		}
+
 		auto sharedPackedTexture = getOrMakeTexture();
-		if(dirty || !sharedPackedTexture || !sharedPackedTexture->loaded()){
+		if(dirty){
 			dirty = false;
 			sharedPackedTexture->resize(contentExtent);
-			auto handle = sharedPackedTexture->makeHandle(foundShape->bounds)->slice(foundShape->slice)->pack(id)->name(a_id);
-
-			auto scene = makeScene();
-			auto framebuffer = renderer->makeFramebuffer({}, contentExtent, sharedPackedTexture->textureId(), background)->start();
-			scene->draw();
-
-			return handle;
+			return sharedPackedTexture->makeHandle(percentBounds(foundShape->bounds))->slice(foundShape->slice)->pack(id)->name(a_id);
 		} else {
-			return sharedPackedTexture->makeHandle(foundShape->bounds)->slice(foundShape->slice)->pack(id)->name(a_id);
+			return sharedPackedTexture->makeHandle(percentBounds(foundShape->bounds))->slice(foundShape->slice)->pack(id)->name(a_id);
 		}
 	}
 
-	void TexturePack::consolidate(const std::string & a_fileName){
+	void TexturePack::consolidate(const std::string & a_fileName, SharedTextures* a_shared){
 		fullHandle()->texture()->save(a_fileName);
-		consolidatedTexture = FileTextureDefinition::make(a_fileName);
+		consolidatedTexture = a_shared->file(a_fileName);
 		for(auto&& shape : shapes){
 			shape.texture = nullptr;
 		}
@@ -235,6 +240,10 @@ namespace MV{
 			return shape.id;
 		});
 		return keys;
+	}
+
+	MV::BoxAABB<MV::PointPrecision> TexturePack::handlePercent() const {
+
 	}
 
 	std::shared_ptr<PackedTextureDefinition> TexturePack::getOrMakeTexture() {
@@ -255,6 +264,10 @@ namespace MV{
 				scene->draw();
 			}
 		}
+	}
+
+	BoxAABB<PointPrecision> TexturePack::percentBounds(const BoxAABB<int> &a_shape) const {
+		return cast<PointPrecision>(a_shape) / Scale(roundUpPowerOfTwo(contentExtent.width), roundUpPowerOfTwo(contentExtent.height));
 	}
 
 	void TexturePack::initializeAfterLoad() {

@@ -454,19 +454,30 @@ namespace MV {
 		handlePercent = floatBounds / toScale(textureDefinition->size());
 	}
 
-	void TextureHandle::postLoadInitialize(const std::shared_ptr<SharedTextures> &a_sharedTextures) {
-		if (a_sharedTextures) {
+	void TextureHandle::postLoadInitialize(SharedTextures* a_sharedTextures) {
+		if (a_sharedTextures && !packId.empty()) {
 			auto packFound = a_sharedTextures->pack(packId);
 			if (packFound) {
 				auto ids = packFound->handleIds();
 				if (std::find(ids.begin(), ids.end(), debugName) != ids.end()) {
-					auto foundHandle = packFound->handle(debugName);
-					slicePercent = foundHandle->slicePercent;
-					handlePercent = foundHandle->handlePercent;
-					textureDefinition = foundHandle->textureDefinition;
+					if (debugName == "CONTENT_HANDLE") {
+						handlePercent = packFound->contentPercent();
+					} else if (debugName == "FULL_HANDLE") {
+						handlePercent = { MV::point(0.0f, 0.0f), MV::size(1.0f, 1.0f) };
+					} else {
+						auto shapeFound = packFound->shape(debugName);
+						slicePercent = shapeFound.slice;
+						handlePercent = packFound->percentBounds(shapeFound.bounds);
+					}
+					auto textureFound = packFound->texture();
+					if (textureFound) {
+						textureDefinition = textureFound;
+					}
 				}
 			}
 		}
+
+		textureDefinition->load();
 	}
 
 	TextureHandle::~TextureHandle() {

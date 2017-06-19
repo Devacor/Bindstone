@@ -133,9 +133,6 @@ namespace MV {
 			archive(
 				CEREAL_NVP(handles)
 			);
-			if(!handles.empty() && !texture){
-				reloadImplementation();
-			}
 		}
 
 		virtual void reloadImplementation() = 0;
@@ -169,8 +166,9 @@ namespace MV {
 			powerTwo(a_powerTwo){
 		}
 
+		void reloadImplementation() override;
+
 	private:
-		virtual void reloadImplementation();
 
 		template <class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/){
@@ -222,6 +220,8 @@ namespace MV {
 			desiredSize = a_size;
 		}
 
+		virtual void reloadImplementation() override;
+
 	private:
 		template <class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/){
@@ -236,7 +236,6 @@ namespace MV {
 			construct->backgroundColor = backgroundColor;
 		}
 
-		virtual void reloadImplementation();
 		Color backgroundColor;
 	};
 
@@ -272,6 +271,8 @@ namespace MV {
 			surfaceGenerator(a_surfaceGenerator){
 		}
 
+		void reloadImplementation() override;
+
 	private:
 		template <class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/){
@@ -284,8 +285,6 @@ namespace MV {
 			construct("", std::function<SDL_Surface*()>());
 			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
 		}
-
-		virtual void reloadImplementation();
 
 		std::function<SDL_Surface*()> surfaceGenerator;
 		Size<int> generatedSurfaceSize;
@@ -350,7 +349,7 @@ namespace MV {
 		std::string name() const;
 
 		std::shared_ptr<TextureHandle> pack(const std::string &a_pack) {
-			packId = packId;
+			packId = a_pack;
 			return shared_from_this();
 		}
 		std::string pack() const {
@@ -455,15 +454,15 @@ namespace MV {
 				if (version > 1) {
 					archive(cereal::make_nvp("packId", construct->packId));
 				}
+				MV::SharedTextures* sharedTextures = nullptr;
 				if (!construct->packId.empty()) {
-					std::shared_ptr<SharedTextures> sharedTextures;
 					archive.extract(cereal::make_nvp("texture", sharedTextures));
-					construct->postLoadInitialize(sharedTextures);
 				}
+				construct->postLoadInitialize(sharedTextures);
 			}
 		}
 
-		void postLoadInitialize(const std::shared_ptr<SharedTextures> &a_sharedTextures);
+		void postLoadInitialize(SharedTextures* a_sharedTextures);
 
 		std::shared_ptr<TextureDefinition> textureDefinition;
 

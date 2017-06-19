@@ -20,10 +20,6 @@ void main(){
     v.y -= (sin(time * 1.25f) * (1.0f - inUV.x) * 12.5f * cos(time * 1.0f));
 
     v.x += (sin(time * 0.3f) * fract(inUV.y - .5f) * 12.5f * sin(time * 2.0f));
-    //v.x -= (sin(time * 0.8f) * (1.0f - inUV.y) * 6.5f * cos(time * 1.5f));
-    //v.y += (sin(time) * (1.0f - inUV.x) * 12.5f * cos(time * 2.0f);
-    //v.y += (cos(time * 2.5) * inUV.x * 6.5f * sin(time * 2.25));
-    //v.y += (sin(time * 2.0) * (1.0f - inUV.x) * 8.0f * cos(time * 2.25));
-    //v.y += (sin(time * 0.25f) * 0.6f);
+    
     gl_Position = transformation * v;
 }

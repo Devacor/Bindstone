@@ -11,6 +11,7 @@
 #include "textures.h"
 
 namespace MV {
+	class SharedTextures;
 	namespace Scene {
 		class Node;
 	}
@@ -18,6 +19,23 @@ namespace MV {
 	class TexturePack : public std::enable_shared_from_this<TexturePack> {
 		friend cereal::access;
 	public:
+		struct ShapeDefinition {
+			std::string id;
+			BoxAABB<int> bounds;
+			BoxAABB<float> slice;
+			std::shared_ptr<TextureDefinition> texture;
+
+			template <class Archive>
+			void serialize(Archive & archive, std::uint32_t const a_version) {
+				archive(CEREAL_NVP(id), CEREAL_NVP(bounds));
+				if (a_version > 0) {
+					archive(CEREAL_NVP(slice));
+				}
+				archive(CEREAL_NVP(texture));
+			}
+		};
+
+
 		static std::shared_ptr<TexturePack> make(const std::string &a_id, MV::Draw2D* a_renderer, const Color &a_color, const Size<int> &a_maximumExtent);
 		static std::shared_ptr<TexturePack> make(const std::string &a_id, MV::Draw2D* a_renderer, const Color &a_color);
 		static std::shared_ptr<TexturePack> make(const std::string &a_id, MV::Draw2D* a_renderer, const Size<int> &a_maximumExtent);
@@ -41,14 +59,24 @@ namespace MV {
 		std::shared_ptr<TextureHandle> fullHandle();
 
 		std::shared_ptr<TextureHandle> handle(size_t a_index);
+		size_t size() const { return shapes.size(); }
 		std::shared_ptr<TextureHandle> handle(const std::string &a_id);
 		std::vector<std::string> handleIds() const;
 
-		std::shared_ptr<TextureDefinition> texture() {
-			return fullHandle()->texture();
+		ShapeDefinition shape(const std::string &a_id) const;
+		ShapeDefinition shape(size_t a_index) const;
+
+		BoxAABB<PointPrecision> contentPercent() const {
+			return percentBounds(contentExtent);
 		}
 
-		void consolidate(const std::string &a_fileName);
+		BoxAABB<PointPrecision> percentBounds(const BoxAABB<int> &a_shape) const;
+
+		std::shared_ptr<TextureDefinition> texture() {
+			return consolidatedTexture;
+		}
+
+		void consolidate(const std::string &a_fileName, SharedTextures *a_shared);
 
 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 			a_script.add(chaiscript::user_type<TexturePack>(), "TexturePack");
@@ -63,6 +91,7 @@ namespace MV {
 			a_script.add(chaiscript::fun(&TexturePack::contentHandle), "contentHandle");
 			a_script.add(chaiscript::fun(&TexturePack::texture), "texture");
 
+			a_script.add(chaiscript::fun(&TexturePack::size), "size");
 			a_script.add(chaiscript::fun(&TexturePack::handleIds), "handleIds");
 			a_script.add(chaiscript::fun(&TexturePack::id), "identifier");
 
@@ -71,22 +100,6 @@ namespace MV {
 
 			return a_script;
 		}
-
-		struct ShapeDefinition {
-			std::string id;
-			BoxAABB<int> bounds;
-			BoxAABB<float> slice;
-			std::shared_ptr<TextureDefinition> texture;
-
-			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const a_version) {
-				archive(CEREAL_NVP(id), CEREAL_NVP(bounds));
-				if (a_version > 0) {
-					archive(CEREAL_NVP(slice));
-				}
-				archive(CEREAL_NVP(texture));
-			}
-		};
 
 		std::string identifier() const{
 			return id;
@@ -112,6 +125,7 @@ namespace MV {
 
 		Size<int> maximumExtent;
 		Size<int> contentExtent;
+
 		std::weak_ptr<PackedTextureDefinition> packedTexture;
 
 		std::shared_ptr<FileTextureDefinition> consolidatedTexture;
@@ -182,6 +196,10 @@ namespace MV {
 			archive(cereal::make_nvp("texturePack", texturePack));
 			construct("", texturePack, Size<int>(), Color());
 			archive(cereal::make_nvp("base", cereal::base_class<DynamicTextureDefinition>(construct.ptr())));
+		}
+
+		void reloadImplementation() override {
+			DynamicTextureDefinition::reloadImplementation();
 			texturePack->reloadedPackedTextureChild();
 		}
 

@@ -139,7 +139,7 @@ namespace MV {
 			combinedSavePath.pop_back();
 		}
 		combinedSavePath += ".png";
-		newPack->consolidate(combinedSavePath);
+		newPack->consolidate(combinedSavePath, this);
 
 		return newPack;
 	}

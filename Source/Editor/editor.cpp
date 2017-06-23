@@ -20,7 +20,32 @@ Editor::Editor(Managers &a_managers):
 
 //return true if we're still good to go
 bool Editor::update(double dt){
+	const static float speed = 175.0f;
+	const static float zoomSpeed = 7.5f;
 	updateFps(dt);
+	const Uint8* keystate = SDL_GetKeyboardState(NULL);
+	if (keystate[SDL_SCANCODE_LEFT]) {
+		scene->camera().translate(MV::point(speed, 0.0f) * static_cast<float>(dt));
+		controlPanel.onSceneDrag(MV::cast<int>(MV::point(speed, 0.0f) * static_cast<float>(dt)));
+	}
+	if (keystate[SDL_SCANCODE_RIGHT]) {
+		scene->camera().translate(MV::point(-speed, 0.0f) * static_cast<float>(dt));
+		controlPanel.onSceneDrag(MV::cast<int>(MV::point(-speed, 0.0f) * static_cast<float>(dt)));
+	}
+	if (keystate[SDL_SCANCODE_UP]) {
+		scene->camera().translate(MV::point(0.0f, speed) * static_cast<float>(dt));
+		controlPanel.onSceneDrag(MV::cast<int>(MV::point(0.0f, speed) * static_cast<float>(dt)));
+	}
+	if (keystate[SDL_SCANCODE_DOWN]) {
+		scene->camera().translate(MV::point(0.0f, -speed) * static_cast<float>(dt));
+		controlPanel.onSceneDrag(MV::cast<int>(MV::point(0.0f, -speed) * static_cast<float>(dt)));
+	}
+	if (keystate[SDL_SCANCODE_V]) {
+		handleScroll(-zoomSpeed * static_cast<float>(dt));
+	}
+	if (keystate[SDL_SCANCODE_B]) {
+		handleScroll(zoomSpeed * static_cast<float>(dt));
+	}
 	lastUpdateDelta = dt;
 	selectorPanel.update();
 	managers.pool.run();
@@ -81,10 +106,10 @@ void Editor::handleInput(){
 					done = true;
 					break;
 				case SDLK_UP:
-					std::cout << "SCENE:\n" << scene << "\n______________" << std::endl;
+					//std::cout << "SCENE:\n" << scene << "\n______________" << std::endl;
 					break;
 				case SDLK_DOWN:
-					std::cout << "CONTROLS:\n" << controls << "\n______________" << std::endl;
+					//std::cout << "CONTROLS:\n" << controls << "\n______________" << std::endl;
 					break;
 				case SDLK_SPACE:
 					scene->position({ 0, 0, 0 });
@@ -99,7 +124,7 @@ void Editor::handleInput(){
 			case SDL_WINDOWEVENT:
 				break;
 			case SDL_MOUSEWHEEL:
-				handleScroll(event.wheel.y);
+				handleScroll(static_cast<float>(event.wheel.y));
 				break;
 			}
 			controlPanel.handleInput(event);
@@ -133,9 +158,9 @@ void Editor::initializeControls(){
 	controlPanel.loadPanel<DeselectedEditorPanel>();
 }
 
-void Editor::handleScroll(int a_amount) {
+void Editor::handleScroll(float a_amount) {
 	const Uint8* keystate = SDL_GetKeyboardState(NULL);
-	auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount) + (scene->scale() / 20.0f * (a_amount > 0 ? 1.f : -1.f));
+	auto screenScale = MV::Scale(.05f, .05f, .05f) * a_amount + (scene->scale() / 20.0f * a_amount);
 	if (scene->scale().x + screenScale.x > .05f) {
 		auto originalScreenPosition = scene->localFromScreen(mouse.position()) * (MV::toPoint(screenScale));
 		scene->addScale(screenScale);

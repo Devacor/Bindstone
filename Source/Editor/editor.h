@@ -58,7 +58,7 @@ private:
 
 	void initializeWindow();
 	void initializeControls();
-	void handleScroll(int a_amount);
+	void handleScroll(float a_amount);
 
 	Managers& managers;
 

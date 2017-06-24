@@ -1,0 +1,9 @@
+[requires]
+chaiscript/6.0.0@hi3c/experimental
+boost/1.64.0@hi3c/experimental
+cereal/1.2.2@hi3c/experimental
+exprtk/5d0dd1b@hi3c/experimental
+SDL/2.0.5@hi3c/experimental
+
+[generators]
+cmake

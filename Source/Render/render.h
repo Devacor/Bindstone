@@ -49,7 +49,7 @@
 	#include <SDL_opengles.h>
 	typedef GLfloat GLdouble; //opengles has no GLdouble
 #else
-	#include "gl3w/include/GL/gl3w.h"
+	#include <GL/gl3w.h>
 	#include <SDL_opengl.h>
 #endif
 

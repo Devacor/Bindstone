@@ -7,9 +7,9 @@
 CEREAL_REGISTER_TYPE(MV::Scene::Collider);
 CEREAL_REGISTER_TYPE(MV::Scene::Environment);
 
-bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs) {
+/*bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs) {
 	return !(a_lhs == a_rhs);
-}
+}*/
 
 namespace MV {
 	namespace Scene {
@@ -146,7 +146,7 @@ namespace MV {
 				auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());
 				Point<> interpolatedPoint = physicsLocalPosition();
 				double interpolatedAngle = interpolateDrawAngle(percentOfStep);
-				
+
 				applyScenePositionUpdate(interpolatedPoint, currentAngle);
 			} else if (useBodyPosition) {
 				auto percentOfStep = static_cast<PointPrecision>(world->percentOfStep());

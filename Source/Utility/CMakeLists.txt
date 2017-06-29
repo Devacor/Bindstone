@@ -19,13 +19,13 @@ target_link_libraries(utility PUBLIC
   CONAN_PKG::boost
   CONAN_PKG::cereal
   CONAN_PKG::exprtk
-  CONAN_PKG::SDL
+  CONAN_PKG::SDL2
 )
 
-target_compile_options(utility PRIVATE -fpermissive)
-set_target_properties(utility PROPERTIES
-  COTIRE_CXX_PREFIX_HEADER_INIT ${CMAKE_SOURCE_DIR}/Source/StdAfx.h
-  COTIRE_ADD_UNITY_BUILD FALSE
+target_compile_options(utility PUBLIC
+  $<$<CXX_COMPILER_ID:MSVC>:/std:c++latest /bigobj>
 )
 
-cotire(utility)
+target_compile_definitions(utility PUBLIC
+  $<$<CXX_COMPILER_ID:MSVC>:_SCL_SECURE_NO_WARNINGS NOMINMAX _WIN32_WINNT=0x0501 _HAS_AUTO_PTR_ETC>
+)

@@ -7,6 +7,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
 
-include(CMake/cotire.cmake)
+include(CMake/PrecompiledHeader.cmake)
+
+if(${CMAKE_GENERATOR} MATCHES "^Visual Studio.*$")
+  set(GENERATOR_MSVC TRUE)
+endif()
 
 add_subdirectory(Source)

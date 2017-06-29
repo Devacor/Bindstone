@@ -9,6 +9,16 @@ SDL2_ttf/2.0.14@hi3c/experimental
 SDL2_image/2.0.1@hi3c/experimental
 SDL2_mixer/2.0.1@hi3c/experimental
 spine/3.6.32@hi3c/experimental
+OpenSSL/1.0.2l@conan/stable
+libpqxx/5.0.1@hi3c/experimental
+Box2D/488beac@hi3c/experimental
+boolinq/1468eff@hi3c/experimental
 
 [generators]
 cmake
+
+[options]
+SDL2:sdlmain=True
+
+[imports]
+bin, *.dll -> ./bin

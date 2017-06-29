@@ -14,8 +14,8 @@
 #include <memory>
 #include <tuple>
 
-#include "pqxx/pqxx"
-#include "LINQ/boolinq.hpp"
+#include <pqxx/pqxx>
+#include <boolinq/boolinq.h>
 
 #include "Utility/cerealUtility.h"
 
@@ -100,7 +100,7 @@ public:
 	void save() {
 		//commit player to db
 	}
-	
+
 protected:
 	virtual void connectImplementation() override;
 
@@ -176,7 +176,7 @@ protected:
 	virtual void connectImplementation() override;
 
 private:
-	
+
 	std::string queueType;
 	State activeState = INITIALIZING;
 	LobbyServer& ourServer;

@@ -33,3 +33,4 @@ M2tMLibrary.VC.db
 BindstoneGameServer/
 *.user
 .vs/VSWorkspaceState.json
+build/

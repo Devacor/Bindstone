@@ -237,8 +237,8 @@ namespace MV {
 			auto self = shared_from_this();
 			sendInternal("EHLO " + domainFromEmail(addresses.from) + "\r\n", {250}, [this, self] {
 				sendInternal("AUTH LOGIN\r\n", { 334 }, [this, self] {
-					sendInternal(cereal::base64::encode(credentials.name) + "\r\n", { 334 }, [this, self] {
-						sendInternal(cereal::base64::encode(credentials.password) + "\r\n", { 235 }, [this, self] {
+					sendInternal(cerealEncodeWrapper(credentials.name) + "\r\n", { 334 }, [this, self] {
+						sendInternal(cerealEncodeWrapper(credentials.password) + "\r\n", { 235 }, [this, self] {
 							sendMessageAndQuit();
 						});
 					});

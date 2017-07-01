@@ -19,17 +19,21 @@
 
 namespace MV {
 
+	inline std::string cerealEncodeWrapper(std::string const& unencoded_string) {
+		return cereal::base64::encode(reinterpret_cast<const unsigned char *>(unencoded_string.c_str()), unencoded_string.size());
+	}
+
 	inline std::string toBase64(const std::string& input) {
-		return cereal::base64::encode(input);
+		return cerealEncodeWrapper(input);
 	}
 	inline std::string fromBase64(const std::string& input) {
-		return cereal::base64::decode(input);
+		return cerealEncodeWrapper(input);
 	}
 	inline std::string toBase64(const char* input) {
-		return cereal::base64::encode(input);
+		return cerealEncodeWrapper(input);
 	}
 	inline std::string fromBase64(const char* input) {
-		return cereal::base64::decode(input);
+		return cerealEncodeWrapper(input);
 	}
 
 	template <typename T>

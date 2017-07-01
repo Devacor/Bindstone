@@ -1,7 +1,7 @@
 [requires]
 chaiscript/5.8.5@hi3c/experimental
 boost/1.64.0@hi3c/experimental
-cereal/1.2.2@hi3c/experimental
+cereal/67f742f@hi3c/experimental
 exprtk/5d0dd1b@hi3c/experimental
 gl3w/git-f1c961b@hi3c/experimental
 SDL2/2.0.5@hi3c/experimental

@@ -125,7 +125,7 @@ public:
 		std::ifstream instream(a_filename);
 		cereal::JSONInputArchive archive(instream);
 
-		archive(cereal::make_nvp("buildings", buildingList));
+		//archive(cereal::make_nvp("buildings", buildingList));
 	}
 
 	BuildingData data(const std::string &a_id) const {

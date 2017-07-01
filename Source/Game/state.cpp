@@ -25,8 +25,8 @@ void BinaryNodeLoadBinder::operator()(cereal::PortableBinaryInputArchive& a_arch
 
 GameData::GameData(Managers& a_managers) :
 	allManagers(a_managers) {
-	buildingCatalog = std::make_unique<BuildingCatalog>("buildings.json");
-	creatureCatalog = std::make_unique<CreatureCatalog>("creatures.json");
+	buildingCatalog = std::make_unique<BuildingCatalog>("Assets/Configuration/buildings.json");
+	creatureCatalog = std::make_unique<CreatureCatalog>("Assets/Configuration/creatures.json");
 }
 
 chaiscript::ChaiScript& GameData::hook(chaiscript::ChaiScript &a_script) {

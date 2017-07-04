@@ -9,8 +9,10 @@ class GameServerAvailable : public NetworkAction {
 public:
 	GameServerAvailable() {}
 	GameServerAvailable(const std::string &a_url, uint16_t a_port) : ourUrl(a_url), ourPort(a_port) {}
-	
+
+#ifdef BINDSTONE_SERVER
 	virtual void execute(LobbyGameConnectionState* a_connection) override;
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -50,7 +52,9 @@ public:
 	AssignPlayersToGame() {}
 	AssignPlayersToGame(const AssignedPlayer &a_left, const AssignedPlayer &a_right, const std::string &a_matchQueueId) : left(a_left), right(a_right), matchQueueId(a_matchQueueId) {}
 
+#ifdef BINDSTONE_SERVER
 	virtual void execute(GameServer& a_connection) override;
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {

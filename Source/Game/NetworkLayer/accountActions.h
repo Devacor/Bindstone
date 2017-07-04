@@ -2,7 +2,10 @@
 #define _ACCOUNTACTIONS_MV_H_
 
 #include "Game/NetworkLayer/networkAction.h"
+
+#ifdef BINDSTONE_SERVER
 #include "pqxx/pqxx"
+#endif
 
 #include "Utility/chaiscriptUtility.h"
 
@@ -16,7 +19,9 @@ public:
 		password(a_password) {
 	}
 
+#ifdef BINDSTONE_SERVER
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -30,6 +35,7 @@ public:
 	}
 
 private:
+#ifdef BINDSTONE_SERVER
 	void sendValidationEmail(LobbyUserConnectionState *a_connection, const std::string &a_passSalt);
 
 	bool validateHandle(const std::string &a_handle) {
@@ -42,6 +48,7 @@ private:
 	std::string createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt);
 	pqxx::result selectUser(pqxx::work* a_transaction);
 	pqxx::result createPlayer(pqxx::work* transaction, LobbyUserConnectionState *a_connection);
+#endif
 
 	std::string handle;
 	std::string email;
@@ -66,8 +73,9 @@ public:
 		password(a_password),
 		saveHash(a_saveHash) {
 	}
-
+#ifdef BINDSTONE_SERVER
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -82,7 +90,9 @@ public:
 	}
 
 private:
+#ifdef BINDSTONE_SERVER
 	pqxx::result selectUser(pqxx::work* a_transaction);
+#endif
 
 	std::string identifier;
 	std::string password;
@@ -96,7 +106,9 @@ public:
 	FindMatchRequest() {}
 	FindMatchRequest(const std::string &a_type) : type(a_type) {}
 	
+#ifdef BINDSTONE_SERVER
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -122,7 +134,9 @@ class ExpectedPlayersNoted : public NetworkAction {
 public:
 	ExpectedPlayersNoted() {}
 
+#ifdef BINDSTONE_SERVER
 	virtual void execute(LobbyGameConnectionState* a_connection) override;
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {

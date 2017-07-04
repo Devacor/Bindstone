@@ -1,11 +1,16 @@
 #include "gameServerActions.h"
 #include "clientActions.h"
+
+#ifdef BINDSTONE_SERVER
 #include "lobbyServer.h"
+#endif
+
 #include "Game/player.h"
 #include "Utility/cerealUtility.h"
 #include "Game/NetworkLayer/gameServer.h"
 #include "Game/game.h"
 
+#ifdef BINDSTONE_SERVER
 void GameServerAvailable::execute(LobbyGameConnectionState* a_connection) {
 	a_connection->setEndpoint(ourUrl, ourPort);
 }
@@ -14,6 +19,7 @@ void AssignPlayersToGame::execute(GameServer& a_server) {
 	a_server.assign(left, right, matchQueueId);
 	a_server.lobby()->send(makeNetworkString<ExpectedPlayersNoted>());
 }
+#endif
 
 void GetInitialGameState::execute(GameUserConnectionState* a_connection, GameServer &a_game) {
 	auto player = a_game.userConnected(secret);

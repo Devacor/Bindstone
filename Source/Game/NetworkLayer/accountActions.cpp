@@ -1,8 +1,24 @@
 #include "accountActions.h"
 #include "clientActions.h"
+
+#ifdef BINDSTONE_SERVER
 #include "lobbyServer.h"
+#endif
+
 #include "Game/player.h"
 #include "Utility/cerealUtility.h"
+
+#ifdef BINDSTONE_SERVER
+std::string CreatePlayer::createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt) {
+	static int work = 12;
+	std::stringstream query;
+	query << "INSERT INTO players(email, handle, passhash, passsalt, passiterations, softcurrency, hardcurrency, state, serverstate)";
+	query << "VALUES(" << transaction.quote(email) << ", " << transaction.quote(handle) << ", ";
+	query << transaction.quote(MV::sha512(password, a_salt, work)) << ", " << transaction.quote(a_salt) << ", " << work << ", ";
+	query << DEFAULT_SOFT_CURRENCY << ", " << DEFAULT_HARD_CURRENCY << ", ";
+	query << transaction.quote(makeSaveString()) << ", " << transaction.quote(makeServerSaveString()) << ")";
+	return query.str();
+}
 
 pqxx::result CreatePlayer::selectUser(pqxx::work* a_transaction) {
 	std::string activeQuery = "SELECT verified, passhash, passsalt, passiterations, state, serverstate, email, handle FROM players WHERE ";
@@ -89,17 +105,6 @@ std::string CreatePlayer::makeServerSaveString() {
 	return MV::toJson(newServerPlayer);
 }
 
-std::string CreatePlayer::createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt) {
-	static int work = 12;
-	std::stringstream query;
-	query << "INSERT INTO players(email, handle, passhash, passsalt, passiterations, softcurrency, hardcurrency, state, serverstate)";
-	query << "VALUES(" << transaction.quote(email) << ", " << transaction.quote(handle) << ", ";
-	query << transaction.quote(MV::sha512(password, a_salt, work)) << ", " << transaction.quote(a_salt) << ", " << work << ", ";
-	query << DEFAULT_SOFT_CURRENCY << ", " << DEFAULT_HARD_CURRENCY << ", ";
-	query << transaction.quote(makeSaveString()) << ", " << transaction.quote(makeServerSaveString()) << ")";
-	return query.str();
-}
-
 pqxx::result LoginRequest::selectUser(pqxx::work* a_transaction) {
 	std::string activeQuery = "SELECT verified, passhash, passsalt, passiterations, state, serverstate, email, handle FROM players WHERE ";
 	activeQuery += "email = " + a_transaction->quote(identifier);
@@ -164,3 +169,4 @@ void FindMatchRequest::execute(LobbyUserConnectionState* a_connection) {
 void ExpectedPlayersNoted::execute(LobbyGameConnectionState* a_connection) {
 	a_connection->notifyPlayersOfGameServer();
 }
+#endif

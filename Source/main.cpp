@@ -1,3 +1,5 @@
+#define BINDSTONE_CLIENT 1
+
 #include "Game/gameEditor.h"
 #include "Utility/threadPool.h"
 

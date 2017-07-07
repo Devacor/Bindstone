@@ -1,24 +1,22 @@
 [requires]
-chaiscript/5.8.5@hi3c/experimental
-boost/1.64.0@hi3c/experimental
-cereal/67f742f@hi3c/experimental
-exprtk/5d0dd1b@hi3c/experimental
-gl3w/git-f1c961b@hi3c/experimental
-SDL2/2.0.5@hi3c/experimental
-SDL2_ttf/2.0.14@hi3c/experimental
-SDL2_image/2.0.1@hi3c/experimental
-SDL2_mixer/2.0.1@hi3c/experimental
-spine/3.6.32@hi3c/experimental
-OpenSSL/1.0.2l@conan/stable
-libpqxx/5.0.1@hi3c/experimental
-Box2D/488beac@hi3c/experimental
+Box2D/488beac_2@hi3c/experimental
+OpenSSL/1.0.2l@hi3c/experimental
+SDL2/2.0.5_1@hi3c/experimental
+SDL2_image/2.0.1_2@hi3c/experimental
+SDL2_mixer/2.0.1_2@hi3c/experimental
+SDL2_ttf/2.0.14_2@hi3c/experimental
+boost/1.64.0_2@hi3c/experimental
+chaiscript/5.8.5_1@hi3c/experimental
+exprtk/5d0dd1b_1@hi3c/experimental
+spine/3.6.32_1@hi3c/experimental
+cereal/a9c1494@hi3c/experimental
 boolinq/1468eff@hi3c/experimental
 
 [generators]
 cmake
 
 [options]
-SDL2:sdlmain=True
+#SDL2:sdlmain=True
 
 [imports]
 bin, *.dll -> ./bin

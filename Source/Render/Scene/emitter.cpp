@@ -73,7 +73,7 @@ namespace MV {
 			double maxParticlesPerFramePerThread = 500;
 
 			if (particlesToSpawn >= emitterThreads) {
-				ThreadPool::TaskList spawnTasks;
+				std::vector<MV::ThreadPool::Job> spawnTasks;
 				for (size_t currentThread = 0; currentThread < emitterThreads; ++currentThread) {
 					spawnTasks.emplace_back([=]() {
 						for (size_t count = 0; count < maxParticlesPerFramePerThread && (count < particlesToSpawn / emitterThreads); ++count) {
@@ -86,7 +86,7 @@ namespace MV {
 
 				pool.tasks(spawnTasks, [=]() {
 					updateParticlesOnMultipleThreads(a_dt);
-				}, false);
+				});
 			} else if (particlesToSpawn > 0) {
 				auto randomOffset = randomInteger(0, emitterThreads);
 				for (size_t count = 0; count < particlesToSpawn; ++count) {
@@ -102,7 +102,7 @@ namespace MV {
 		}
 
 		void Emitter::updateParticlesOnMultipleThreads(double a_dt) {
-			ThreadPool::TaskList spawnTasks;
+			std::vector<MV::ThreadPool::Job> spawnTasks;
 			for (size_t currentThread = 0; currentThread < emitterThreads; ++currentThread) {
 				spawnTasks.emplace_back([=]() {
 					threadData[currentThread].particles.erase(std::remove_if(threadData[currentThread].particles.begin(), threadData[currentThread].particles.end(), [&](Particle& a_particle) {
@@ -111,9 +111,9 @@ namespace MV {
 					loadParticlesToPoints(currentThread);
 				});
 			}
-			auto tmpUpdate = pool.tasks(spawnTasks, [=]() {
+			pool.tasks(spawnTasks, [=]() {
 				loadParticlePointsFromGroups();
-			}, false);
+			});
 		}
 
 		void Emitter::loadParticlesToPoints(size_t a_groupIndex) {
@@ -163,7 +163,7 @@ namespace MV {
 
 			size_t pointOffset = 0;
 			size_t vertexOffset = 0;
-			ThreadPool::TaskList copyTasks;
+			std::vector<MV::ThreadPool::Job> copyTasks;
 			for (int group = 0; group < emitterThreads; ++group) {
 				copyTasks.emplace_back([=]() {
 					size_t indexSize = threadData[group].vertexIndices.size();
@@ -178,7 +178,7 @@ namespace MV {
 			}
 			pool.tasks(copyTasks, [=]() {
 				loadPointsFromBufferAndAllowUpdate();
-			}, false);
+			});
 		}
 
 		void Emitter::loadPointsFromBufferAndAllowUpdate() {
@@ -187,6 +187,7 @@ namespace MV {
 			vertexIndices.clear();
 			std::swap(points, pointBuffer);
 			std::swap(vertexIndices, vertexIndexBuffer);
+			dirtyVertexBuffer = true;
 			updateInProgress.store(false);
 		}
 
@@ -362,7 +363,10 @@ namespace MV {
 
 				glBindBuffer(GL_ARRAY_BUFFER, bufferId);
 				auto structSize = static_cast<GLsizei>(sizeof(points[0]));
-				glBufferData(GL_ARRAY_BUFFER, points.size() * structSize, &(points[0]), GL_STATIC_DRAW);
+				if (dirtyVertexBuffer) {
+					dirtyVertexBuffer = false;
+					glBufferData(GL_ARRAY_BUFFER, points.size() * structSize, &(points[0]), GL_STATIC_DRAW);
+				}
 
 				glEnableVertexAttribArray(0);
 				glEnableVertexAttribArray(1);

@@ -33,6 +33,7 @@ namespace MV {
 
 		void Sprite::updateSliceColorsFromCorners() {
 			if (hasSlice()) {
+				dirtyVertexBuffer = true;
 				points[4].copyColor(points[0]);
 				points[8].copyColor(points[0]);
 				points[15].copyColor(points[0]);
@@ -53,6 +54,7 @@ namespace MV {
 
 		void Sprite::updateSubdivision() {
 			if (!hasSlice()) {
+				dirtyVertexBuffer = true;
 				if (ourSubdivisions == 0) {
 					points.resize(4);
 					vertexIndices.clear();
@@ -124,6 +126,7 @@ namespace MV {
 
 		void Sprite::updateSubdivisionTexture() {
 			if (!hasSlice() && ourSubdivisions > 0) {
+				dirtyVertexBuffer = true;
 				auto minTexturePoint = points[0].texturePoint();
 				auto maxTexturePoint = points[2].texturePoint();
 
@@ -161,6 +164,7 @@ namespace MV {
 
 		//no need to iterate over everything for a sprite. Also, update slice.
 		void Sprite::refreshBounds() {
+			dirtyVertexBuffer = true;
 			auto originalBounds = localBounds;
 			localBounds = BoxAABB<>(points[0], points[2]);
 			if (originalBounds != localBounds) {
@@ -175,6 +179,7 @@ namespace MV {
 
 		void Sprite::updateTextureCoordinates(size_t a_textureId) {
 			if (a_textureId == 0) {
+				dirtyVertexBuffer = true;
 				updateSlice();
 				//If we didn't have a slice, then we need to manually apply. Otherwise this was handled already.
 				if (!hasSlice()) {

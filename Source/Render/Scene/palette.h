@@ -132,7 +132,7 @@ namespace MV {
 			}
 
 		private:
-			void ApplyCurrentColorToPreviewBox();
+			void applyCurrentColorToPreviewBox();
 
 			MouseState::SignalType onLeftMouseDownHandle;
 			MouseState::SignalType onLeftMouseUpHandle;

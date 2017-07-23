@@ -230,6 +230,7 @@ namespace MV {
 				points[i] = a_right;
 				points[i].A = 1.0f;
 			}
+			dirtyVertexBuffer = true;
 		}
 
 		std::shared_ptr<Palette> Palette::colorAlphaSelector(const Color& a_left, const Color& a_right) {
@@ -276,7 +277,7 @@ namespace MV {
 			topRightColor = percentToSliderColor(hsv.invertedPercentHue());
 			selectorCursorPercent.x = hsv.S;
 			selectorCursorPercent.y = 1.0f - hsv.V;
-			ApplyCurrentColorToPreviewBox();
+			applyCurrentColorToPreviewBox();
 
 			auto middlePointX = currentColor.A * (points[25].x - points[19].x);
 
@@ -286,6 +287,7 @@ namespace MV {
 			points[22].x = middlePointX;
 			points[23].x = middlePointX;
 
+			dirtyVertexBuffer = true;
 			auto self = std::static_pointer_cast<Palette>(shared_from_this());
 			onColorChangeSignal(self);
 			notifyParentOfComponentChange();
@@ -295,7 +297,7 @@ namespace MV {
 		std::shared_ptr<Palette> Palette::colorInternal(const MV::Color &a_newColor) {
 			currentColor = a_newColor;
 			hsv = currentColor.getHsv(hsv);
-			ApplyCurrentColorToPreviewBox();
+			applyCurrentColorToPreviewBox();
 			
 			auto middlePointX = currentColor.A * (points[25].x - points[19].x);
 
@@ -305,6 +307,7 @@ namespace MV {
 			points[22].x = middlePointX;
 			points[23].x = middlePointX;
 
+			dirtyVertexBuffer = true;
 			auto self = std::static_pointer_cast<Palette>(shared_from_this());
 			onColorChangeSignal(self);
 			notifyParentOfComponentChange();
@@ -355,7 +358,7 @@ namespace MV {
 
 			refreshBounds();
 
-			ApplyCurrentColorToPreviewBox();
+			applyCurrentColorToPreviewBox();
 		}
 
 		std::shared_ptr<Component> Palette::cloneHelper(const std::shared_ptr<Component> &a_clone) {
@@ -367,7 +370,7 @@ namespace MV {
 			return a_clone;
 		}
 
-		void Palette::ApplyCurrentColorToPreviewBox() {
+		void Palette::applyCurrentColorToPreviewBox() {
 			for (int i = 26; i < 30; ++i) {
 				points[i] = currentColor;
 			}
@@ -417,6 +420,8 @@ namespace MV {
 				points[i].x = clamp(points[i].x, localBounds.minPoint.x, localBounds.maxPoint.x);
 				points[i].y = clamp(points[i].y, localBounds.minPoint.y, localBounds.maxPoint.y);
 			}
+
+			dirtyVertexBuffer = true;
 		}
 	}
 }

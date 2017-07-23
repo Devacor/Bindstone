@@ -9,6 +9,7 @@
 	#include "Utility/signal.hpp"
 	#include "Utility/task.hpp"
 	#include "Utility/threadPool.h"
+	#include "Utility/asioThreadPool.h"
 	#include "Utility/optionalCalls.hpp"
 	#include "Utility/visitor.hpp"
 	#include "Utility/chaiscriptStdLib.h"

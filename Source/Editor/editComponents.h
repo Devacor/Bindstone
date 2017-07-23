@@ -174,9 +174,6 @@ class EditableRectangle : public ResizeHandles {
 public:
 	EditableRectangle(MV::Scene::SafeComponent<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
 
-	void texture(const std::shared_ptr<MV::TextureHandle> a_handle);
-	std::shared_ptr<MV::TextureHandle> texture() const;
-
 	void aspect(MV::Size<> a_newAspect);
 
 	MV::Scene::SafeComponent<MV::Scene::Sprite> elementToEdit;
@@ -185,9 +182,6 @@ public:
 class EditableText : public ResizeHandles {
 public:
 	EditableText(MV::Scene::SafeComponent<MV::Scene::Text> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
-
-	void texture(const std::shared_ptr<MV::TextureHandle> a_handle);
-	std::shared_ptr<MV::TextureHandle> texture() const;
 
 	MV::Scene::SafeComponent<MV::Scene::Text> elementToEdit;
 };
@@ -230,8 +224,6 @@ public:
 
 	void size(MV::Size<> a_newSize);
 	MV::Size<> size();
-
-	void texture(const std::shared_ptr<MV::TextureHandle> a_handle);
 
 	virtual void repositionHandles(bool a_fireOnChange = true, bool a_repositionElement = true, bool a_resizeElement = true) override;
 

@@ -433,14 +433,6 @@ EditableRectangle::EditableRectangle(MV::Scene::SafeComponent<MV::Scene::Sprite>
 	elementToEdit(a_elementToEdit) {
 }
 
-void EditableRectangle::texture(const std::shared_ptr<MV::TextureHandle> a_handle) {
-	elementToEdit->texture(a_handle);
-}
-
-std::shared_ptr<MV::TextureHandle> EditableRectangle::texture() const {
-	return elementToEdit->texture();
-}
-
 void EditableRectangle::aspect(MV::Size<> a_newAspect) {
 	aspectSize = a_newAspect;
 	resetHandles();
@@ -453,14 +445,6 @@ EditableText::EditableText(MV::Scene::SafeComponent<MV::Scene::Text> a_elementTo
 	nodeMoved = elementToEdit->owner()->onTransformChange.connect([&](const std::shared_ptr<MV::Scene::Node> &a_this) {
 		resetHandles();
 	});
-}
-
-void EditableText::texture(const std::shared_ptr<MV::TextureHandle> a_handle) {
-	elementToEdit->texture(a_handle);
-}
-
-std::shared_ptr<MV::TextureHandle> EditableText::texture() const {
-	return elementToEdit->texture();
 }
 
 EditableEmitter::EditableEmitter(MV::Scene::SafeComponent<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse):
@@ -515,11 +499,6 @@ void EditableEmitter::size(MV::Size<> a_newSize){
 MV::Size<> EditableEmitter::size(){
 	return MV::BoxAABB<>(elementToEdit->properties().minimumPosition, elementToEdit->properties().maximumPosition).size();
 }
-
-void EditableEmitter::texture(const std::shared_ptr<MV::TextureHandle> a_handle) {
-	elementToEdit->texture(a_handle);
-}
-
 
 //EDITABLE PATH MAP
 

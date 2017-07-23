@@ -70,7 +70,7 @@ public:
 		anchorEditor = nullptr;
 	}
 protected:
-	virtual void openTexturePicker() {}
+	virtual void openTexturePicker(size_t a_textureId = 0) {}
 	virtual void openAnchorEditor(std::shared_ptr<MV::Scene::Component> a_componentToAnchor);
 
 	EditorControls &panel;
@@ -153,7 +153,7 @@ public:
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
 private:
-	virtual void openTexturePicker() override;
+	virtual void openTexturePicker(size_t a_textureId = 0) override;
 	MV::Scale aspectRatio;
 
 	std::shared_ptr<EditablePoints> controls;
@@ -176,7 +176,7 @@ public:
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
 private:
-	virtual void openTexturePicker() override;
+	virtual void openTexturePicker(size_t a_textureId = 0) override;
 	MV::Scale aspectRatio;
 
 	std::shared_ptr<EditableRectangle> controls;
@@ -219,7 +219,7 @@ public:
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
 private:
-	virtual void openTexturePicker() override;
+	virtual void openTexturePicker(size_t a_textureId = 0) override;
 
 	std::shared_ptr<EditableEmitter> controls;
 	std::shared_ptr<MV::Scene::Text> offsetX;

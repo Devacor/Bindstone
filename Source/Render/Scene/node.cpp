@@ -56,14 +56,14 @@ namespace MV {
 		void Node::draw() {
 			if (allowDraw) {
 				bool allowChildrenToDraw = true;
-				auto stableComponentList = childComponents;
-				for (auto&& component : stableComponentList) {
+				//auto stableComponentList = childComponents;
+				for (auto&& component : childComponents) {
 					allowChildrenToDraw = component->draw() && allowChildrenToDraw;
 				}
 				if (allowChildrenToDraw) {
 					drawChildren();
 				}
-				for (auto&& component : stableComponentList) {
+				for (auto&& component : childComponents) {
 					component->endDraw();
 				}
 			}
@@ -71,8 +71,8 @@ namespace MV {
 
 		void Node::drawChildren() {
 			if (allowDraw) {
-				auto stableChildNodes = childNodes;
-				for (auto&& child : stableChildNodes) {
+				//auto stableChildNodes = childNodes;
+				for (auto&& child : childNodes) {
 					child->draw();
 				}
 			}
@@ -85,8 +85,8 @@ namespace MV {
 				temporaryWorldMatrixTransform = a_overrideParentMatrix;
 				temporaryWorldMatrixTransform *= localTransform();
 				bool allowChildrenToDraw = true;
-				auto stableComponentList = childComponents;
-				for (auto&& component : stableComponentList) {
+				//auto stableComponentList = childComponents;
+				for (auto&& component : childComponents) {
 					allowChildrenToDraw = component->draw() && allowChildrenToDraw;
 				}
 				if (allowChildrenToDraw) {
@@ -97,8 +97,8 @@ namespace MV {
 
 		void Node::drawChildren(const TransformMatrix &a_overrideParentMatrix) {
 			if (allowDraw) {
-				auto stableChildNodes = childNodes;
-				for (auto&& child : stableChildNodes) {
+				//auto stableChildNodes = childNodes;
+				for (auto&& child : childNodes) {
 					child->draw(a_overrideParentMatrix);
 				}
 			}
@@ -107,12 +107,12 @@ namespace MV {
 		void Node::update(double a_delta, bool a_force) {
 			allowChangeCallNeeded = true;
 			if (allowUpdate || a_force) {
-				auto stableComponentList = childComponents;
-				for (auto&& component : stableComponentList) {
+				//auto stableComponentList = childComponents;
+				for (auto&& component : childComponents) {
 					component->update(a_delta);
 				}
-				auto stableChildNodes = childNodes;
-				for (auto&& child : stableChildNodes) {
+				//auto stableChildNodes = childNodes;
+				for (auto&& child : childNodes) {
 					child->update(a_delta);
 				}
 				rootTask.update(a_delta);

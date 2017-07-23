@@ -401,7 +401,7 @@ private:
 	std::shared_ptr<MV::Server> ourGameServer;
 
 	MV::ThreadPool threadPool;
-	MV::ThreadPool emailPool;
+	MV::AsioThreadPool emailPool;
 	MV::ThreadPool dbPool;
 
 	MatchQueue rankedQueue;

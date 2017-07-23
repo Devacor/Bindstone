@@ -616,7 +616,7 @@
     <ClInclude Include="Source\Utility\signal.hpp" />
     <ClInclude Include="Source\Utility\stopwatch.h" />
     <ClInclude Include="Source\Utility\task.hpp" />
-    <ClInclude Include="Source\Utility\threadPool.h" />
+    <ClInclude Include="Source\Utility\threadPool.hpp" />
     <ClInclude Include="Source\Utility\tinyutf8.h" />
     <ClInclude Include="Source\Utility\tupleHelpers.hpp" />
     <ClInclude Include="Source\Utility\visitor.hpp" />

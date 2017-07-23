@@ -8,7 +8,7 @@
 	#include "Utility/stopwatch.h"
 	#include "Utility/signal.hpp"
 	#include "Utility/task.hpp"
-	#include "Utility/threadPool.h"
+	#include "Utility/threadPool.hpp"
 	#include "Utility/asioThreadPool.h"
 	#include "Utility/optionalCalls.hpp"
 	#include "Utility/visitor.hpp"

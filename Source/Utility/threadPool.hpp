@@ -8,7 +8,6 @@
 #include <atomic>
 #include <list>
 #include "log.h"
-#include "asioThreadPool.h"
 
 namespace MV {
 	class ThreadPool {
@@ -67,7 +66,7 @@ namespace MV {
 			std::shared_ptr<std::atomic<size_t>> groupCounter;
 			std::shared_ptr<std::function<void()>> onGroupFinish;
 		};
-
+		friend Job;
 	private:
 		class Worker {
 		public:
@@ -179,15 +178,6 @@ namespace MV {
 			}
 		}
 
-		void exception(std::exception &e) {
-			std::lock_guard<std::mutex> guard(exceptionLock);
-			if (onException) {
-				onException(e);
-			} else {
-				MV::error("Uncaught Exception in Thread Pool: ", e.what());
-			}
-		}
-
 		void exceptionHandler(std::function<void(std::exception &e)> a_onException) {
 			std::lock_guard<std::mutex> guard(exceptionLock);
 			onException = a_onException;
@@ -197,6 +187,15 @@ namespace MV {
 			return workers.size();
 		}
 	private:
+		void exception(std::exception &e) {
+			std::lock_guard<std::mutex> guard(exceptionLock);
+			if (onException) {
+				onException(e);
+			} else {
+				MV::error("Uncaught Exception in Thread Pool: ", e.what());
+			}
+		}
+
 		std::condition_variable notify;
 		bool stopped = false;
 		std::mutex lock;

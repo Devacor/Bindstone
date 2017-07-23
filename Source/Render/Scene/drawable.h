@@ -157,6 +157,8 @@ namespace MV {
 
 			ComponentDerivedAccessors(Drawable)
 
+			~Drawable();
+
 			virtual bool draw();
 
 			bool visible() const {
@@ -250,7 +252,10 @@ namespace MV {
 			}
 
 			std::shared_ptr<Drawable> setPoint(size_t a_index, const Color& a_value) {
-				points[a_index] = a_value;
+				if (points[a_index].color() != a_value) {
+					points[a_index] = a_value;
+					dirtyVertexBuffer = true;
+				}
 				return std::static_pointer_cast<Drawable>(shared_from_this());
 			}
 
@@ -407,6 +412,8 @@ namespace MV {
 			Shader* shaderProgram = nullptr;
 			std::string shaderProgramId = PREMULTIPLY_ID;
 			GLuint bufferId = 0;
+
+			bool dirtyVertexBuffer = true;
 
 			std::map<size_t, std::shared_ptr<TextureHandle>> ourTextures;
 			std::map<size_t, TextureHandle::SignalType::SharedType> textureSizeSignals;

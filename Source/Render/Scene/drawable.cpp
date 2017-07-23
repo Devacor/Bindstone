@@ -9,6 +9,12 @@ CEREAL_CLASS_VERSION(MV::Scene::Drawable, 3);
 namespace MV {
 	namespace Scene {
 
+		Drawable::~Drawable() {
+			if (bufferId != 0) {
+				glDeleteBuffers(1, &bufferId);
+			}
+		}
+
 		bool Drawable::draw() {
 			bool allowChildrenToDraw = true;
 			lazyInitializeShader();
@@ -31,6 +37,7 @@ namespace MV {
 			for (auto&& point : points) {
 				point = a_newColor;
 			}
+			dirtyVertexBuffer = true;
 			return std::static_pointer_cast<Drawable>(shared_from_this());
 		}
 
@@ -39,6 +46,7 @@ namespace MV {
 			for (size_t i = 0; i < points.size(); ++i) {
 				points[i] = a_newColors[i];
 			}
+			dirtyVertexBuffer = true;
 			return std::static_pointer_cast<Drawable>(shared_from_this());
 		}
 
@@ -134,9 +142,12 @@ namespace MV {
 				applyPresetBlendMode(ourRenderer);
 
 				glBindBuffer(GL_ARRAY_BUFFER, bufferId);
-				auto structSize = static_cast<GLsizei>(sizeof(points[0]));
-				glBufferData(GL_ARRAY_BUFFER, points.size() * structSize, &(points[0]), GL_STATIC_DRAW);
 
+				auto structSize = static_cast<GLsizei>(sizeof(points[0]));
+				if (dirtyVertexBuffer) {
+					dirtyVertexBuffer = false;
+					glBufferData(GL_ARRAY_BUFFER, points.size() * structSize, &(points[0]), GL_STATIC_DRAW);
+				}
 				glEnableVertexAttribArray(0);
 				glEnableVertexAttribArray(1);
 				glEnableVertexAttribArray(2);
@@ -178,6 +189,7 @@ namespace MV {
 		}
 
 		void Drawable::refreshBounds() {
+			dirtyVertexBuffer = true;
 			auto originalBounds = localBounds;
 			if (!points.empty()) {
 				localBounds.initialize(points[0]);

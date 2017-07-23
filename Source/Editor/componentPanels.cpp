@@ -18,6 +18,11 @@ void EditorPanel::cancelInput() {
 void EditorPanel::handleInput(SDL_Event &a_event) {
 	if(auto lockedAT = activeTextbox.lock()){
 		lockedAT->text(a_event);
+	} else {
+		const Uint8* keystate = SDL_GetKeyboardState(NULL);
+		if (!keystate[SDL_SCANCODE_LSHIFT]) {
+
+		}
 	}
 }
 
@@ -472,6 +477,11 @@ SelectedDrawableEditorPanel::SelectedDrawableEditorPanel(EditorControls &a_panel
 		openTexturePicker();
 	});
 
+	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "Texture1", buttonSize, UTF_CHAR_STR("Texture1"))->
+		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>) {
+		openTexturePicker(1);
+	});
+
 	makeInputField(this, *panel.resources().mouse, grid, *panel.resources().textLibrary, "Shader", buttonSize)->
 		text(controls->elementToEdit->shader())->
 		onEnter.connect("shader", [&, a_associatedButton](std::shared_ptr<MV::Scene::Text> a_text) {
@@ -493,11 +503,11 @@ SelectedDrawableEditorPanel::SelectedDrawableEditorPanel(EditorControls &a_panel
 	SDL_StartTextInput();
 }
 
-void SelectedDrawableEditorPanel::openTexturePicker() {
+void SelectedDrawableEditorPanel::openTexturePicker(size_t a_textureId) {
 	clearTexturePicker();
-	picker = std::make_shared<TexturePicker>(panel.editor(), panel.resources(), [&](std::shared_ptr<MV::TextureHandle> a_handle, bool a_allowClear) {
+	picker = std::make_shared<TexturePicker>(panel.editor(), panel.resources(), [&, a_textureId](std::shared_ptr<MV::TextureHandle> a_handle, bool a_allowClear) {
 		if (a_handle || a_allowClear) {
-			controls->elementToEdit->texture(a_handle);
+			controls->elementToEdit->texture(a_handle, a_textureId);
 		}
 		clearTexturePicker();
 	});
@@ -1077,8 +1087,8 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 
 	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "SetAspect", buttonSize, UTF_CHAR_STR("Snap Aspect"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
-			if (controls->texture()) {
-				auto size = controls->texture()->bounds().size();
+			if (controls->elementToEdit->texture()) {
+				auto size = controls->elementToEdit->texture()->bounds().size();
 				aspectX->number(size.width);
 				aspectY->number(size.height);
 				controls->aspect(MV::round<MV::PointPrecision>(size));
@@ -1087,8 +1097,8 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 
 	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "SetSize", buttonSize, UTF_CHAR_STR("Snap Size"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
-			if (controls->texture()) {
-				auto size = controls->texture()->bounds().size();
+			if (controls->elementToEdit->texture()) {
+				auto size = controls->elementToEdit->texture()->bounds().size();
 				width->number(size.width);
 				height->number(size.width);
 				controls->size(MV::round<MV::PointPrecision>(size));
@@ -1097,15 +1107,15 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 
 	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "FlipX", buttonSize, UTF_CHAR_STR("Flip X"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>) {
-			if (controls->texture()) {
-				controls->texture()->flipX(!controls->texture()->flipX());
+			if (controls->elementToEdit->texture()) {
+				controls->elementToEdit->texture()->flipX(!controls->elementToEdit->texture()->flipX());
 			}
 		});
 
 	makeButton(grid, *a_panel.resources().textLibrary, *a_panel.resources().mouse, "FlipY", buttonSize, UTF_CHAR_STR("Flip Y"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>) {
-			if (controls->texture()) {
-				controls->texture()->flipY(!controls->texture()->flipY());
+			if (controls->elementToEdit->texture()) {
+				controls->elementToEdit->texture()->flipY(!controls->elementToEdit->texture()->flipY());
 			}
 		});
 
@@ -1192,11 +1202,11 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	SDL_StartTextInput();
 }
 
-void SelectedRectangleEditorPanel::openTexturePicker() {
+void SelectedRectangleEditorPanel::openTexturePicker(size_t a_textureId) {
 	clearTexturePicker();
-	picker = std::make_shared<TexturePicker>(panel.editor(), panel.resources(), [&](std::shared_ptr<MV::TextureHandle> a_handle, bool a_allowClear){
+	picker = std::make_shared<TexturePicker>(panel.editor(), panel.resources(), [&, a_textureId](std::shared_ptr<MV::TextureHandle> a_handle, bool a_allowClear){
 		if(a_handle || a_allowClear){
-			controls->texture(a_handle);
+			controls->elementToEdit->texture(a_handle, a_textureId);
 		}
 		clearTexturePicker();
 	});
@@ -1500,10 +1510,10 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	SDL_StartTextInput();
 }
 
-void SelectedEmitterEditorPanel::openTexturePicker() {
-	picker = std::make_shared<TexturePicker>(panel.editor(), panel.resources(), [&](std::shared_ptr<MV::TextureHandle> a_handle, bool a_allowNull){
+void SelectedEmitterEditorPanel::openTexturePicker(size_t a_textureId) {
+	picker = std::make_shared<TexturePicker>(panel.editor(), panel.resources(), [&, a_textureId](std::shared_ptr<MV::TextureHandle> a_handle, bool a_allowNull){
 		if(a_handle || a_allowNull){
-			controls->texture(a_handle);
+			controls->elementToEdit->texture(a_handle, a_textureId);
 		}
 		clearTexturePicker();
 	});

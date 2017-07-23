@@ -2,101 +2,211 @@
 #define _MV_THREADPOOL_H_
 
 #include <thread>
-#include <mutex>
-#include <atomic>
-#include <memory>
+#include <condition_variable>
+#include <deque>
 #include <vector>
+#include <atomic>
 #include <list>
-#include <chrono>
+#include "log.h"
+#include "asioThreadPool.h"
 
-namespace boost { namespace asio { class io_service; } }
-
-namespace MV{
-	struct ThreadPoolDetails;
-	class TaskStatus {
-	public:
-		TaskStatus(){}
-		TaskStatus(std::shared_ptr<std::atomic<bool>> a_isFinished):
-			isFinished(a_isFinished){
-		}
-		bool clear() {
-			isFinished = nullptr;
-		}
-		bool active() const{
-			return isFinished != nullptr;
-		}
-		bool finished(){
-			return !isFinished || isFinished->load();
-		}
-		void join(){
-			while(!finished()){
-				std::this_thread::sleep_for(std::chrono::nanoseconds(100));
-			}
-		}
-	private:
-		std::shared_ptr<std::atomic<bool>> isFinished;
-	};
-
+namespace MV {
 	class ThreadPool {
-	private:
-		class ThreadTask {
+		class Worker;
+	public:
+		class Job {
+			friend Worker;
 		public:
-			ThreadTask(const std::function<void()> &a_call);
-			ThreadTask(const std::function<void()> &a_call, const std::function<void()> &a_onFinish);
-			ThreadTask(ThreadTask&& a_rhs);
+			Job(const std::function<void()> &a_action) :
+				action(a_action) {
+			}
+			Job(const std::function<void()> &a_action, const std::function<void()> &a_onFinish) :
+				action(a_action),
+				onFinish(a_onFinish) {
+			}
+			Job(const std::function<void()> &a_action, const std::function<void()> &a_onFinish, const std::shared_ptr<std::atomic<size_t>> &a_groupCounter, const std::shared_ptr<std::function<void()>> &a_onGroupFinish) :
+				action(a_action),
+				onFinish(a_onFinish),
+				groupCounter(a_groupCounter),
+				onGroupFinish(a_onGroupFinish) {
+			}
+			Job(const std::function<void()> &a_action, const std::shared_ptr<std::atomic<size_t>> &a_groupCounter, const std::shared_ptr<std::function<void()>> &a_onGroupFinish) :
+				action(a_action),
+				groupCounter(a_groupCounter),
+				onGroupFinish(a_onGroupFinish) {
+			}
+			Job(Job&& a_rhs) = default;
+			Job(const Job& a_rhs) = default;
 
-			void operator()();
+			void group(const std::shared_ptr<std::atomic<size_t>> &a_groupCounter, const std::shared_ptr<std::function<void()>> &a_onGroupFinish) {
+				groupCounter = a_groupCounter;
+				onGroupFinish = a_onGroupFinish;
+			}
 
-			bool finished();
-
-			void group(const std::shared_ptr<std::atomic<size_t>> &a_groupCounter, const std::shared_ptr<std::function<void()>> &a_onGroupFinish, const std::shared_ptr<std::atomic<bool>> &a_isGroupFinished, bool a_groupFinishWaitForFrame);
-
-			std::shared_ptr<std::atomic<bool>> isFinished;
-			std::shared_ptr<std::atomic<bool>> isGroupFinished;
+			void operator()() noexcept {
+				try { action(); } catch (std::exception &e) { parent->exception(e); }
+				bool groupFinished = groupCounter && --(*groupCounter) == 0 && onGroupFinish && *onGroupFinish;
+				if (onFinish && !groupFinished) {
+					parent->task(onFinish);
+				}
+				else if (onFinish && groupFinished) {
+					parent->task([=] {
+						try { onFinish(); } catch (std::exception &e) { parent->exception(e); }
+						try { (*onGroupFinish)(); } catch (std::exception &e) { parent->exception(e); }
+					});
+				}
+				else if (groupFinished) {
+					parent->task((*onGroupFinish));
+				}
+			}
 		private:
-			ThreadTask(const ThreadTask& a_rhs) = delete;
-			ThreadTask& operator=(const ThreadTask& a_rhs) = delete;
+			ThreadPool* parent;
 
+			std::function<void()> action;
+			std::function<void()> onFinish;
 			std::shared_ptr<std::atomic<size_t>> groupCounter;
 			std::shared_ptr<std::function<void()>> onGroupFinish;
-			bool groupFinishWaitForFrame;
-			std::unique_ptr<std::atomic<bool>> isRun;
-			bool handled;
-			std::function<void()> call;
-			std::function<void()> onFinish;
 		};
+
+	private:
+		class Worker {
+		public:
+			Worker(ThreadPool* a_parent) :
+				parent(a_parent) {
+				thread = std::make_unique<std::thread>([=]() { work(); });
+			}
+			~Worker() { if (thread && thread->joinable()) { thread->join(); } }
+
+			void cleanup() {
+				while (!finished) {}
+			}
+		private:
+			void work() {
+				while (!parent->stopped) {
+					std::unique_lock<std::mutex> guard(parent->lock);
+					parent->notify.wait(guard, [=] {return parent->jobs.size() > 0 || parent->stopped; });
+					if (parent->stopped) { break; }
+
+					auto job = std::move(parent->jobs.front());
+					parent->jobs.pop_front();
+					guard.unlock();
+
+					job.parent = parent;
+					job();
+				}
+				finished = true;
+			}
+			ThreadPool* parent;
+			bool finished = false;
+			std::unique_ptr<std::thread> thread;
+		};
+		friend Worker;
 
 	public:
-		struct TaskDefinition {
-			TaskDefinition(const std::function<void()> &a_task);
-			TaskDefinition(const std::function<void()> &a_task, const std::function<void()> &a_onComplete);
-			std::function<void()> task;
-			std::function<void()> onComplete;
-		};
-
-		ThreadPool();
-		ThreadPool(std::size_t a_threads);
-		~ThreadPool();
-
-		TaskStatus task(const std::function<void()> &a_task);
-		TaskStatus task(const std::function<void()> &a_task, const std::function<void()> &a_onComplete);
-
-		typedef std::vector<TaskDefinition> TaskList;
-		TaskStatus tasks(const TaskList &a_tasks, const std::function<void()> &a_onGroupComplete, bool a_groupFinishWaitForFrame = true);
-
-		size_t run();
-
-		size_t threads() const{
-			return totalThreads;
+		ThreadPool() :
+			ThreadPool(std::thread::hardware_concurrency() > 1 ? std::thread::hardware_concurrency() - 1 : 1) {
 		}
 
-		std::shared_ptr<boost::asio::io_service> service() const;
+		ThreadPool(size_t a_threads) {
+			for (size_t i = 0; i < a_threads; ++i) {
+				workers.push_back(std::make_unique<Worker>(this));
+			}
+		}
+
+		~ThreadPool() {
+			{
+				std::lock_guard<std::mutex> guard(lock);
+				jobs.clear();
+				stopped = true;
+			}
+			notify.notify_all();
+			for (auto&& worker : workers) {
+				worker->cleanup();
+			}
+		}
+
+		void task(const Job &a_newWork) {
+			{
+				std::lock_guard<std::mutex> guard(lock);
+				jobs.emplace_back(std::move(a_newWork));
+			}
+			notify.notify_one();
+		}
+		void task(const std::function<void()> &a_task) {
+			{
+				std::lock_guard<std::mutex> guard(lock);
+				jobs.emplace_back(a_task);
+			}
+			notify.notify_one();
+		}
+		void task(const std::function<void()> &a_task, const std::function<void()> &a_onComplete) {
+			{
+				std::lock_guard<std::mutex> guard(lock);
+				jobs.emplace_back(a_task, a_onComplete);
+			}
+			notify.notify_one();
+		}
+
+		void tasks(const std::vector<Job> &a_tasks, const std::function<void()> &a_onGroupComplete) {
+			std::shared_ptr<std::atomic<size_t>> counter = std::make_shared<std::atomic<size_t>>(a_tasks.size());
+			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(std::move(a_onGroupComplete));
+			for (auto&& job : a_tasks)
+			{
+				{
+					std::lock_guard<std::mutex> guard(lock);
+					jobs.emplace_back(std::move(job));
+					jobs.back().group(counter, sharedGroupComplete);
+				}
+				notify.notify_one();
+			}
+		}
+
+		void schedule(const std::function<void()> &a_method) {
+			std::lock_guard<std::mutex> guard(scheduleLock);
+			scheduled.push_back(a_method);
+		}
+
+		void run() {
+			for (auto i = scheduled.begin(); i != scheduled.end();) {
+				try {
+					(*i)();
+				} catch (std::exception &e) {
+					exception(e);
+				}
+
+				std::lock_guard<std::mutex> guard(scheduleLock);
+				scheduled.erase(i++);
+			}
+		}
+
+		void exception(std::exception &e) {
+			std::lock_guard<std::mutex> guard(exceptionLock);
+			if (onException) {
+				onException(e);
+			} else {
+				MV::error("Uncaught Exception in Thread Pool: ", e.what());
+			}
+		}
+
+		void exceptionHandler(std::function<void(std::exception &e)> a_onException) {
+			std::lock_guard<std::mutex> guard(exceptionLock);
+			onException = a_onException;
+		}
+
+		size_t threads() const {
+			return workers.size();
+		}
 	private:
-		std::recursive_mutex lock;
-		std::unique_ptr<ThreadPoolDetails> details;
-		size_t totalThreads;
-		std::list<ThreadTask> runningTasks;
-		std::vector<std::unique_ptr<std::thread>> workers;
+		std::condition_variable notify;
+		bool stopped = false;
+		std::mutex lock;
+		std::mutex scheduleLock;
+		std::mutex exceptionLock;
+		std::vector<std::unique_ptr<Worker>> workers;
+		std::deque<Job> jobs;
+		std::list<std::function<void()>> scheduled;
+		std::deque<std::string> exceptionMessages;
+		std::function<void(std::exception &e)> onException;
 	};
 }
 

@@ -67,7 +67,7 @@ namespace MV {
 			std::shared_ptr<std::atomic<size_t>> groupCounter;
 			std::shared_ptr<std::function<void()>> onGroupFinish;
 		};
-
+		friend Job;
 	public:
 		AsioThreadPool() :
 			AsioThreadPool(std::thread::hardware_concurrency() > 1 ? std::thread::hardware_concurrency() - 1 : 1) {
@@ -88,8 +88,7 @@ namespace MV {
 		void tasks(const std::vector<Job> &a_tasks, const std::function<void()> &a_onGroupComplete) {
 			std::shared_ptr<std::atomic<size_t>> counter = std::make_shared<std::atomic<size_t>>(a_tasks.size());
 			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(std::move(a_onGroupComplete));
-			for (auto&& job : a_tasks)
-			{
+			for (auto&& job : a_tasks) {
 				task(Job{job.action, job.onFinish, counter, sharedGroupComplete});
 			}
 		}
@@ -112,15 +111,6 @@ namespace MV {
 			}
 		}
 
-		void exception(std::exception &e) {
-			std::lock_guard<std::mutex> guard(exceptionLock);
-			if (onException) {
-				onException(e);
-			} else {
-				MV::error("Uncaught Exception in Thread Pool: ", e.what());
-			}
-		}
-
 		void exceptionHandler(std::function<void(std::exception &e)> a_onException) {
 			std::lock_guard<std::mutex> guard(exceptionLock);
 			onException = a_onException;
@@ -132,6 +122,15 @@ namespace MV {
 
 		std::shared_ptr<boost::asio::io_service> service() const;
 	private:
+		void exception(std::exception &e) {
+			std::lock_guard<std::mutex> guard(exceptionLock);
+			if (onException) {
+				onException(e);
+			} else {
+				MV::error("Uncaught Exception in Thread Pool: ", e.what());
+			}
+		}
+
 		std::unique_ptr<ThreadPoolDetails> details;
 		std::vector<std::unique_ptr<std::thread>> workers;
 		std::mutex lock;

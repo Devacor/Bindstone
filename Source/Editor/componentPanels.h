@@ -70,8 +70,9 @@ public:
 		anchorEditor = nullptr;
 	}
 protected:
-	virtual void openTexturePicker(size_t a_textureId = 0) {}
+	virtual void openTexturePicker(size_t /*a_textureId*/ = 0) {}
 	virtual void openAnchorEditor(std::shared_ptr<MV::Scene::Component> a_componentToAnchor);
+	virtual std::shared_ptr<MV::Scene::Component> getEditingComponent() { return nullptr; }
 
 	EditorControls &panel;
 	std::shared_ptr<TexturePicker> picker;
@@ -132,6 +133,9 @@ public:
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta)  override;
 	virtual void onSceneZoom() override;
+protected:
+	std::shared_ptr<MV::Scene::Component> getEditingComponent() override;
+
 private:
 	std::shared_ptr<EditableGrid> controls;
 	std::shared_ptr<MV::Scene::Text> posY;
@@ -152,6 +156,9 @@ public:
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
+protected:
+	std::shared_ptr<MV::Scene::Component> getEditingComponent() override;
+
 private:
 	virtual void openTexturePicker(size_t a_textureId = 0) override;
 	MV::Scale aspectRatio;
@@ -175,6 +182,8 @@ public:
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
+protected:
+	std::shared_ptr<MV::Scene::Component> getEditingComponent() override;
 private:
 	virtual void openTexturePicker(size_t a_textureId = 0) override;
 	MV::Scale aspectRatio;
@@ -197,6 +206,8 @@ public:
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
+protected:
+	std::shared_ptr<MV::Scene::Component> getEditingComponent() override;
 private:
 	MV::Scale aspectRatio;
 
@@ -218,6 +229,8 @@ public:
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
+protected:
+	std::shared_ptr<MV::Scene::Component> getEditingComponent() override;
 private:
 	virtual void openTexturePicker(size_t a_textureId = 0) override;
 
@@ -238,6 +251,9 @@ public:
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
+
+protected:
+	std::shared_ptr<MV::Scene::Component> getEditingComponent() override;
 
 private:
 	void handleMakeButton(std::shared_ptr<MV::Scene::Node> a_grid, const std::string &a_socket = "", const std::string &a_node = "");
@@ -263,6 +279,8 @@ public:
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
+protected:
+	std::shared_ptr<MV::Scene::Component> getEditingComponent() override;
 
 private:
 	std::shared_ptr<EditablePathMap> controls;
@@ -282,6 +300,9 @@ public:
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
+
+protected:
+	std::shared_ptr<MV::Scene::Component> getEditingComponent() override;
 
 private:
 	std::shared_ptr<EditableButton> controls;
@@ -304,6 +325,9 @@ public:
 
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
+
+protected:
+	std::shared_ptr<MV::Scene::Component> getEditingComponent() override;
 
 private:
 	std::shared_ptr<EditableClickable> controls;

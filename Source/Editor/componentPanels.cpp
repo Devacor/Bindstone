@@ -15,13 +15,17 @@ void EditorPanel::cancelInput() {
 	panel.selection().exitSelection();
 }
 
+std::shared_ptr<MV::Scene::Component> CopiedComponent;
+
 void EditorPanel::handleInput(SDL_Event &a_event) {
 	if(auto lockedAT = activeTextbox.lock()){
 		lockedAT->text(a_event);
 	} else {
-		const Uint8* keystate = SDL_GetKeyboardState(NULL);
-		if (!keystate[SDL_SCANCODE_LSHIFT]) {
-
+		if (a_event.type == SDL_KEYDOWN && a_event.key.keysym.sym == SDLK_c) {
+			const Uint8* keystate = SDL_GetKeyboardState(NULL);
+			if (keystate[SDL_SCANCODE_LSHIFT] && keystate[SDL_SCANCODE_LCTRL]) {
+				CopiedComponent = getEditingComponent();
+			}
 		}
 	}
 }
@@ -356,10 +360,15 @@ MV::Scene::SafeComponent<MV::Scene::Button> SelectedNodeEditorPanel::CreateClick
 }
 
 void SelectedNodeEditorPanel::handleInput(SDL_Event &a_event) {
-	if (auto lockedAT = activeTextbox.lock()) {
-		lockedAT->text(a_event);
-	}
+	EditorPanel::handleInput(a_event);
 	componentPanel->handleInput(a_event);
+
+	if (CopiedComponent && a_event.type == SDL_KEYDOWN && a_event.key.keysym.sym == SDLK_v) {
+		const Uint8* keystate = SDL_GetKeyboardState(NULL);
+		if (keystate[SDL_SCANCODE_LSHIFT] && keystate[SDL_SCANCODE_LCTRL]) {
+			CopiedComponent->clone(controls->elementToEdit);
+		}
+	}
 
 	if (a_event.type == SDL_DROPFILE) {
 		std::cout << a_event.drop.file << std::endl;
@@ -516,8 +525,8 @@ void SelectedDrawableEditorPanel::openTexturePicker(size_t a_textureId) {
 void SelectedDrawableEditorPanel::handleInput(SDL_Event &a_event) {
 	if (auto lockedAT = activeTextbox.lock()) {
 		lockedAT->text(a_event);
-	}
-	else if (a_event.type == SDL_KEYDOWN) {
+	} else if (a_event.type == SDL_KEYDOWN) {
+		EditorPanel::handleInput(a_event);
 		auto offsetPosition = controls->elementToEdit->owner()->localFromScreen(panel.resources().mouse->position());
 		auto originalMouseLocalPosition = offsetPosition;
 		auto ourPoints = controls->elementToEdit->getPoints();
@@ -790,6 +799,10 @@ void SelectedDrawableEditorPanel::onSceneZoom() {
 	controls->resetHandles();
 }
 
+std::shared_ptr<MV::Scene::Component> SelectedDrawableEditorPanel::getEditingComponent() {
+	return std::static_pointer_cast<MV::Scene::Component>(controls->elementToEdit.self());
+}
+
 SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableGrid> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton) :
 	EditorPanel(a_panel),
 	controls(a_controls) {
@@ -877,9 +890,7 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 }
 
 void SelectedGridEditorPanel::handleInput(SDL_Event &a_event) {
-	if (auto lockedAT = activeTextbox.lock()) {
-		lockedAT->text(a_event);
-	}
+	EditorPanel::handleInput(a_event);
 }
 
 void SelectedGridEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
@@ -888,6 +899,10 @@ void SelectedGridEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
 
 void SelectedGridEditorPanel::onSceneZoom() {
 	controls->resetHandles();
+}
+
+std::shared_ptr<MV::Scene::Component> SelectedGridEditorPanel::getEditingComponent() {
+	return std::static_pointer_cast<MV::Scene::Component>(controls->elementToEdit.self());
 }
 
 SelectedSpineEditorPanel::SelectedSpineEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableSpine> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton) :
@@ -1020,9 +1035,7 @@ void SelectedSpineEditorPanel::handleMakeButton(std::shared_ptr<MV::Scene::Node>
 }
 
 void SelectedSpineEditorPanel::handleInput(SDL_Event &a_event) {
-	if (auto lockedAT = activeTextbox.lock()) {
-		lockedAT->text(a_event);
-	}
+	EditorPanel::handleInput(a_event);
 }
 
 void SelectedSpineEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
@@ -1031,6 +1044,10 @@ void SelectedSpineEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
 
 void SelectedSpineEditorPanel::onSceneZoom() {
 	controls->resetHandles();
+}
+
+std::shared_ptr<MV::Scene::Component> SelectedSpineEditorPanel::getEditingComponent() {
+	return std::static_pointer_cast<MV::Scene::Component>(controls->elementToEdit.self());
 }
 
 SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableRectangle> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton):
@@ -1213,9 +1230,7 @@ void SelectedRectangleEditorPanel::openTexturePicker(size_t a_textureId) {
 }
 
 void SelectedRectangleEditorPanel::handleInput(SDL_Event &a_event) {
-	if (auto lockedAT = activeTextbox.lock()) {
-		lockedAT->text(a_event);
-	}
+	EditorPanel::handleInput(a_event);
 }
 
 void SelectedRectangleEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
@@ -1224,6 +1239,10 @@ void SelectedRectangleEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
 
 void SelectedRectangleEditorPanel::onSceneZoom() {
 	controls->resetHandles();
+}
+
+std::shared_ptr<MV::Scene::Component> SelectedRectangleEditorPanel::getEditingComponent() {
+	return std::static_pointer_cast<MV::Scene::Component>(controls->elementToEdit.self());
 }
 
 SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableEmitter> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton):
@@ -1520,9 +1539,7 @@ void SelectedEmitterEditorPanel::openTexturePicker(size_t a_textureId) {
 }
 
 void SelectedEmitterEditorPanel::handleInput(SDL_Event &a_event) {
-	if (auto lockedAT = activeTextbox.lock()) {
-		lockedAT->text(a_event);
-	}
+	EditorPanel::handleInput(a_event);
 }
 
 void SelectedEmitterEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
@@ -1533,6 +1550,10 @@ void SelectedEmitterEditorPanel::onSceneZoom() {
 	controls->resetHandles();
 }
 
+
+std::shared_ptr<MV::Scene::Component> SelectedEmitterEditorPanel::getEditingComponent() {
+	return std::static_pointer_cast<MV::Scene::Component>(controls->elementToEdit.self());
+}
 
 SelectedPathMapEditorPanel::SelectedPathMapEditorPanel(EditorControls &a_panel, std::shared_ptr<EditablePathMap> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton) :
 	EditorPanel(a_panel),
@@ -1637,9 +1658,7 @@ SelectedPathMapEditorPanel::SelectedPathMapEditorPanel(EditorControls &a_panel, 
 }
 
 void SelectedPathMapEditorPanel::handleInput(SDL_Event &a_event) {
-	if (auto lockedAT = activeTextbox.lock()) {
-		lockedAT->text(a_event);
-	}
+	EditorPanel::handleInput(a_event);
 }
 
 void SelectedPathMapEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
@@ -1648,6 +1667,10 @@ void SelectedPathMapEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
 
 void SelectedPathMapEditorPanel::onSceneZoom() {
 	controls->resetHandles();
+}
+
+std::shared_ptr<MV::Scene::Component> SelectedPathMapEditorPanel::getEditingComponent() {
+	return std::static_pointer_cast<MV::Scene::Component>(controls->elementToEdit.self());
 }
 
 DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
@@ -2027,9 +2050,7 @@ SelectedTextEditorPanel::SelectedTextEditorPanel(EditorControls &a_panel, std::s
 
 
 void SelectedTextEditorPanel::handleInput(SDL_Event &a_event) {
-	if (auto lockedAT = activeTextbox.lock()) {
-		lockedAT->text(a_event);
-	}
+	EditorPanel::handleInput(a_event);
 }
 
 void SelectedTextEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
@@ -2040,6 +2061,10 @@ void SelectedTextEditorPanel::onSceneZoom() {
 	controls->resetHandles();
 }
 
+
+std::shared_ptr<MV::Scene::Component> SelectedTextEditorPanel::getEditingComponent() {
+	return std::static_pointer_cast<MV::Scene::Component>(controls->elementToEdit.self());
+}
 
 SelectedButtonEditorPanel::SelectedButtonEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableButton> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton) :
 	EditorPanel(a_panel),
@@ -2185,9 +2210,7 @@ SelectedButtonEditorPanel::SelectedButtonEditorPanel(EditorControls &a_panel, st
 
 
 void SelectedButtonEditorPanel::handleInput(SDL_Event &a_event) {
-	if (auto lockedAT = activeTextbox.lock()) {
-		lockedAT->text(a_event);
-	}
+	EditorPanel::handleInput(a_event);
 }
 
 void SelectedButtonEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
@@ -2200,6 +2223,10 @@ void SelectedButtonEditorPanel::onSceneZoom() {
 
 
 
+
+std::shared_ptr<MV::Scene::Component> SelectedButtonEditorPanel::getEditingComponent() {
+	return std::static_pointer_cast<MV::Scene::Component>(controls->elementToEdit.self());
+}
 
 SelectedClickableEditorPanel::SelectedClickableEditorPanel(EditorControls &a_panel, std::shared_ptr<EditableClickable> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton) :
 	EditorPanel(a_panel),
@@ -2318,9 +2345,7 @@ SelectedClickableEditorPanel::SelectedClickableEditorPanel(EditorControls &a_pan
 
 
 void SelectedClickableEditorPanel::handleInput(SDL_Event &a_event) {
-	if (auto lockedAT = activeTextbox.lock()) {
-		lockedAT->text(a_event);
-	}
+	EditorPanel::handleInput(a_event);
 }
 
 void SelectedClickableEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
@@ -2329,4 +2354,8 @@ void SelectedClickableEditorPanel::onSceneDrag(const MV::Point<int> &a_delta) {
 
 void SelectedClickableEditorPanel::onSceneZoom() {
 	controls->resetHandles();
+}
+
+std::shared_ptr<MV::Scene::Component> SelectedClickableEditorPanel::getEditingComponent() {
+	return std::static_pointer_cast<MV::Scene::Component>(controls->elementToEdit.self());
 }

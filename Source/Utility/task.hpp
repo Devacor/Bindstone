@@ -99,26 +99,29 @@ namespace MV {
 		Signal<void(Task&, std::exception &)> onExceptionSignal;
 
 	public:
-		Task(bool a_infinite = false, bool a_blocking = true, bool a_blockParentCompletion = true):
-			Task("root", a_infinite, a_blocking, a_blockParentCompletion){
+		enum class Blocking {False, True};
+		enum class Infinite {False, True};
+
+		Task(Infinite a_infinite = Infinite::False, Blocking a_blocking = Blocking::True, Blocking a_blockParentCompletion = Blocking::True) :
+			Task("root", a_infinite, a_blocking, a_blockParentCompletion) {
 		}
 
-		Task(const std::string &a_name, bool a_infinite = false, bool a_blocking = true, bool a_blockParentCompletion = true) :
-			Task(a_name, std::make_shared<BasicAction>(a_infinite), a_blocking, a_blockParentCompletion) {
-			if (a_infinite) {
+		Task(const std::string &a_name, Infinite a_infinite = Infinite::False, Blocking a_blocking = Blocking::True, Blocking a_blockParentCompletion = Blocking::True) :
+			Task(a_name, std::make_shared<BasicAction>(a_infinite != Infinite::False), a_blocking, a_blockParentCompletion) {
+			if (a_infinite != Infinite::False) {
 				unblockChildren();
 			}
 		}
 
-		Task(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blocking = true, bool a_blockParentCompletion = true):
-			Task(a_name, Receiver<bool(Task&, double)>::make(a_task), a_blocking, a_blockParentCompletion){
+		Task(const std::string &a_name, std::function<bool(Task&, double)> a_task, Blocking a_blocking = Blocking::True, Blocking a_blockParentCompletion = Blocking::True) :
+			Task(a_name, Receiver<bool(Task&, double)>::make(a_task), a_blocking, a_blockParentCompletion) {
 		}
 
-		Task(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, bool a_blocking = true, bool a_blockParentCompletion = true) :
+		Task(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, Blocking a_blocking = Blocking::True, Blocking a_blockParentCompletion = Blocking::True) :
 			taskName(a_name),
 			task(a_task),
-			block(a_blocking),
-			blockParentCompletion(a_blockParentCompletion),
+			block(a_blocking != Blocking::False),
+			blockParentCompletion(a_blockParentCompletion != Blocking::False),
 			onStart(onStartSignal),
 			onFinishAll(onFinishAllSignal),
 			onFinish(onFinishSignal),
@@ -129,12 +132,12 @@ namespace MV {
 			onException(onExceptionSignal) {
 		}
 
-		Task(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, bool a_blocking = true, bool a_blockParentCompletion = true) :
-			Task(a_name, [](Task& a_self, double a_dt){return a_self.optionalAction->update(a_self, a_dt); }, a_blocking, a_blockParentCompletion) {
+		Task(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, Blocking a_blocking = Blocking::True, Blocking a_blockParentCompletion = Blocking::True) :
+			Task(a_name, std::function<bool(Task&, double)>([](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }), a_blocking, a_blockParentCompletion) {
 			registerActionBase(a_action);
 		}
 
-		Task(const std::shared_ptr<ActionBase> &a_action, bool a_blocking = true, bool a_blockParentCompletion = true) :
+		Task(const std::shared_ptr<ActionBase> &a_action, Blocking a_blocking = Blocking::True, Blocking a_blockParentCompletion = Blocking::True) :
 			Task(a_action->name(), [](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }, a_blocking, a_blockParentCompletion) {
 			registerActionBase(a_action);
 		}
@@ -246,25 +249,25 @@ namespace MV {
 			return *this;
 		}
 
-		Task& now(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, bool a_blockParentCompletion = true) {
-			return now(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+		Task& now(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, Blocking a_blockParentCompletion = Blocking::True) {
+			return now(std::make_shared<Task>(a_name, a_task, Blocking::True, a_blockParentCompletion));
 		}
 
-		Task& now(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion = true) {
-			return now(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+		Task& now(const std::string &a_name, std::function<bool(Task&, double)> a_task, Blocking a_blockParentCompletion = Blocking::True) {
+			return now(std::make_shared<Task>(a_name, a_task, Blocking::True, a_blockParentCompletion));
 		}
 
-		Task& now(const std::string &a_name, bool a_blockParentCompletion = true){
+		Task& now(const std::string &a_name, Blocking a_blockParentCompletion = Blocking::True){
 			return now(a_name, std::make_shared<BasicAction>(false), a_blockParentCompletion);
 		}
 
-		Task& now(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, bool a_blockParentCompletion = true) {
+		Task& now(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, Blocking a_blockParentCompletion = Blocking::True) {
 			now(a_name, [](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }, a_blockParentCompletion);
 			registerActionBase(a_action);
 			return *this;
 		}
 
-		Task& now(const std::shared_ptr<ActionBase> &a_action, bool a_blockParentCompletion = true) {
+		Task& now(const std::shared_ptr<ActionBase> &a_action, Blocking a_blockParentCompletion = Blocking::True) {
 			return now(a_action->name(), a_action, a_blockParentCompletion);
 		}
 
@@ -275,25 +278,25 @@ namespace MV {
 			return *this;
 		}
 
-		Task& then(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, bool a_blockParentCompletion = true) {
-			return then(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+		Task& then(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, Blocking a_blockParentCompletion = Blocking::True) {
+			return then(std::make_shared<Task>(a_name, a_task, Blocking::True, a_blockParentCompletion));
 		}
 
-		Task& then(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion = true) {
-			return then(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+		Task& then(const std::string &a_name, std::function<bool(Task&, double)> a_task, Blocking a_blockParentCompletion = Blocking::True) {
+			return then(std::make_shared<Task>(a_name, a_task, Blocking::True, a_blockParentCompletion));
 		}
 
-		Task& then(const std::string &a_name, bool a_blockParentCompletion = true){
+		Task& then(const std::string &a_name, Blocking a_blockParentCompletion = Blocking::True){
 			return then(a_name, std::make_shared<BasicAction>(false), a_blockParentCompletion);
 		}
 
-		Task& then(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, bool a_blockParentCompletion = true) {
+		Task& then(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, Blocking a_blockParentCompletion = Blocking::True) {
 			then(a_name, [](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }, a_blockParentCompletion);
 			registerActionBase(a_action);
 			return *this;
 		}
 
-		Task& then(const std::shared_ptr<ActionBase> &a_action, bool a_blockParentCompletion = true) {
+		Task& then(const std::shared_ptr<ActionBase> &a_action, Blocking a_blockParentCompletion = Blocking::True) {
 			return then(a_action->name(), a_action, a_blockParentCompletion);
 		}
 
@@ -305,29 +308,29 @@ namespace MV {
 			return *this;
 		}
 
-		Task& thenAlso(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, bool a_blockParentCompletion = true) {
-			return thenAlso(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
+		Task& thenAlso(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, Blocking a_blockParentCompletion = Blocking::True) {
+			return thenAlso(std::make_shared<Task>(a_name, a_task, Blocking::False, a_blockParentCompletion));
 		}
 
-		Task& thenAlso(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion = true) {
-			return thenAlso(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
+		Task& thenAlso(const std::string &a_name, std::function<bool(Task&, double)> a_task, Blocking a_blockParentCompletion = Blocking::True) {
+			return thenAlso(std::make_shared<Task>(a_name, a_task, Blocking::False, a_blockParentCompletion));
 		}
 
-		Task& thenAlso(const std::string &a_name, bool a_infinite = false, bool a_blockParentCompletion = true) {
-			thenAlso(a_name, std::make_shared<BasicAction>(a_infinite), a_blockParentCompletion);
-			if (a_infinite) {
+		Task& thenAlso(const std::string &a_name, Infinite a_infinite = Infinite::False, Blocking a_blockParentCompletion = Blocking::True) {
+			thenAlso(a_name, std::make_shared<BasicAction>(a_infinite != Infinite::False), a_blockParentCompletion);
+			if (a_infinite != Infinite::False) {
 				recent()->unblockChildren();
 			}
 			return *this;
 		}
 
-		Task& thenAlso(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, bool a_blockParentCompletion = true) {
+		Task& thenAlso(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, Blocking a_blockParentCompletion = Blocking::True) {
 			thenAlso(a_name, [](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }, a_blockParentCompletion);
 			registerActionBase(a_action);
 			return *this;
 		}
 
-		Task& thenAlso(const std::shared_ptr<ActionBase> &a_action, bool a_blockParentCompletion = true) {
+		Task& thenAlso(const std::shared_ptr<ActionBase> &a_action, Blocking a_blockParentCompletion = Blocking::True) {
 			return thenAlso(a_action->name(), a_action, a_blockParentCompletion);
 		}
 
@@ -338,29 +341,29 @@ namespace MV {
 			return *this;
 		}
 
-		Task& also(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, bool a_blockParentCompletion = true) {
-			return also(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
+		Task& also(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, Blocking a_blockParentCompletion = Blocking::True) {
+			return also(std::make_shared<Task>(a_name, a_task, Blocking::False, a_blockParentCompletion));
 		}
 
-		Task& also(const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion = true) {
-			return also(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
+		Task& also(const std::string &a_name, std::function<bool(Task&, double)> a_task, Blocking a_blockParentCompletion = Blocking::True) {
+			return also(std::make_shared<Task>(a_name, a_task, Blocking::False, a_blockParentCompletion));
 		}
 
-		Task& also(const std::string &a_name, bool a_infinite = false, bool a_blockParentCompletion = true) {
-			also(a_name, std::make_shared<BasicAction>(a_infinite), a_blockParentCompletion);
-			if (a_infinite) {
+		Task& also(const std::string &a_name, Infinite a_infinite = Infinite::False, Blocking a_blockParentCompletion = Blocking::True) {
+			also(a_name, std::make_shared<BasicAction>(a_infinite != Infinite::False), a_blockParentCompletion);
+			if (a_infinite != Infinite::False) {
 				recent()->unblockChildren();
 			}
 			return *this;
 		}
 
-		Task& also(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, bool a_blockParentCompletion = true) {
+		Task& also(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, Blocking a_blockParentCompletion = Blocking::True) {
 			also(a_name, [](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }, a_blockParentCompletion);
 			registerActionBase(a_action);
 			return *this;
 		}
 
-		Task& also(const std::shared_ptr<ActionBase> &a_action, bool a_blockParentCompletion = true) {
+		Task& also(const std::shared_ptr<ActionBase> &a_action, Blocking a_blockParentCompletion = Blocking::True) {
 			return also(a_action->name(), a_action, a_blockParentCompletion);
 		}
 
@@ -378,25 +381,25 @@ namespace MV {
 			return *this;
 		}
 
-		Task& after(const std::string &a_reference, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, bool a_blockParentCompletion = true) {
-			return after(a_reference, std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+		Task& after(const std::string &a_reference, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, Blocking a_blockParentCompletion = Blocking::True) {
+			return after(a_reference, std::make_shared<Task>(a_name, a_task, Blocking::True, a_blockParentCompletion));
 		}
 
-		Task& after(const std::string &a_reference, const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion = true) {
-			return after(a_reference, std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+		Task& after(const std::string &a_reference, const std::string &a_name, std::function<bool(Task&, double)> a_task, Blocking a_blockParentCompletion = Blocking::True) {
+			return after(a_reference, std::make_shared<Task>(a_name, a_task, Blocking::True, a_blockParentCompletion));
 		}
 
-		Task& after(const std::string &a_reference, const std::string &a_name, bool a_blockParentCompletion = true) {
+		Task& after(const std::string &a_reference, const std::string &a_name, Blocking a_blockParentCompletion = Blocking::True) {
 			return after(a_reference, a_name, std::make_shared<BasicAction>(false), a_blockParentCompletion);
 		}
 
-		Task& after(const std::string &a_reference, const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, bool a_blockParentCompletion = true) {
+		Task& after(const std::string &a_reference, const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, Blocking a_blockParentCompletion = Blocking::True) {
 			after(a_reference, a_name, [](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }, a_blockParentCompletion);
 			registerActionBase(a_action);
 			return *this;
 		}
 
-		Task& after(const std::string &a_reference, std::shared_ptr<ActionBase> &a_action, bool a_blockParentCompletion = true) {
+		Task& after(const std::string &a_reference, std::shared_ptr<ActionBase> &a_action, Blocking a_blockParentCompletion = Blocking::True) {
 			return after(a_reference, a_action->name(), a_action, a_blockParentCompletion);
 		}
 
@@ -412,25 +415,25 @@ namespace MV {
 			return *this;
 		}
 
-		Task& before(const std::string &a_reference, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, bool a_blockParentCompletion = true) {
-			return before(a_reference, std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+		Task& before(const std::string &a_reference, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, Blocking a_blockParentCompletion = Blocking::True) {
+			return before(a_reference, std::make_shared<Task>(a_name, a_task, Blocking::True, a_blockParentCompletion));
 		}
 
-		Task& before(const std::string &a_reference, const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion = true) {
-			return before(a_reference, std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+		Task& before(const std::string &a_reference, const std::string &a_name, std::function<bool(Task&, double)> a_task, Blocking a_blockParentCompletion = Blocking::True) {
+			return before(a_reference, std::make_shared<Task>(a_name, a_task, Blocking::True, a_blockParentCompletion));
 		}
 
-		Task& before(const std::string &a_reference, const std::string &a_name, bool a_blockParentCompletion = true) {
+		Task& before(const std::string &a_reference, const std::string &a_name, Blocking a_blockParentCompletion = Blocking::True) {
 			return before(a_reference, a_name, std::make_shared<BasicAction>(false), a_blockParentCompletion);
 		}
 
-		Task& before(const std::string &a_reference, const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, bool a_blockParentCompletion = true) {
+		Task& before(const std::string &a_reference, const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, Blocking a_blockParentCompletion = Blocking::True) {
 			before(a_reference, a_name, [](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }, a_blockParentCompletion);
 			registerActionBase(a_action);
 			return *this;
 		}
 
-		Task& before(const std::string &a_reference, std::shared_ptr<ActionBase> &a_action, bool a_blockParentCompletion = true) {
+		Task& before(const std::string &a_reference, std::shared_ptr<ActionBase> &a_action, Blocking a_blockParentCompletion = Blocking::True) {
 			return before(a_reference, a_action->name(), a_action, a_blockParentCompletion);
 		}
 
@@ -489,72 +492,83 @@ namespace MV {
 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 			a_script.add(chaiscript::user_type<Task>(), "Task");
 			a_script.add(chaiscript::constructor<Task()>(), "Task");
-			a_script.add(chaiscript::constructor<Task(bool)>(), "Task");
-			a_script.add(chaiscript::constructor<Task(bool, bool)>(), "Task");
-			a_script.add(chaiscript::constructor<Task(bool, bool, bool)>(), "Task");
-			a_script.add(chaiscript::constructor<Task(const std::string &, bool)>(), "Task");
-			a_script.add(chaiscript::constructor<Task(const std::string &, bool, bool)>(), "Task");
-			a_script.add(chaiscript::constructor<Task(const std::string &, bool, bool, bool)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(Infinite)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(Infinite, Blocking)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(Infinite, Blocking, Blocking)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(const std::string &, Infinite)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(const std::string &, Infinite, Blocking)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(const std::string &, Infinite, Blocking, Blocking)>(), "Task");
 			a_script.add(chaiscript::constructor<Task(const std::string &, std::function<bool(Task&, double)>)>(), "Task");
-			a_script.add(chaiscript::constructor<Task(const std::string &, std::function<bool(Task&, double)>, bool)>(), "Task");
-			a_script.add(chaiscript::constructor<Task(const std::string &, std::function<bool(Task&, double)>, bool, bool)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(const std::string &, std::function<bool(Task&, double)>, Blocking)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(const std::string &, std::function<bool(Task&, double)>, Blocking, Blocking)>(), "Task");
 			a_script.add(chaiscript::constructor<Task(const std::string &, const Receiver<bool(Task&, double)>::SharedType &)>(), "Task");
-			a_script.add(chaiscript::constructor<Task(const std::string &, const Receiver<bool(Task&, double)>::SharedType &, bool)>(), "Task");
-			a_script.add(chaiscript::constructor<Task(const std::string &, const Receiver<bool(Task&, double)>::SharedType &, bool, bool)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(const std::string &, const Receiver<bool(Task&, double)>::SharedType &, Blocking)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(const std::string &, const Receiver<bool(Task&, double)>::SharedType &, Blocking, Blocking)>(), "Task");
 			a_script.add(chaiscript::constructor<Task(const std::string &, const std::shared_ptr<ActionBase> &a_action)>(), "Task");
-			a_script.add(chaiscript::constructor<Task(const std::string &, const std::shared_ptr<ActionBase> &a_action, bool)>(), "Task");
-			a_script.add(chaiscript::constructor<Task(const std::string &, const std::shared_ptr<ActionBase> &a_action, bool, bool)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(const std::string &, const std::shared_ptr<ActionBase> &a_action, Blocking)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(const std::string &, const std::shared_ptr<ActionBase> &a_action, Blocking, Blocking)>(), "Task");
 			a_script.add(chaiscript::constructor<Task(const std::shared_ptr<ActionBase> &a_action)>(), "Task");
-			a_script.add(chaiscript::constructor<Task(const std::shared_ptr<ActionBase> &a_action, bool)>(), "Task");
-			a_script.add(chaiscript::constructor<Task(const std::shared_ptr<ActionBase> &a_action, bool, bool)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(const std::shared_ptr<ActionBase> &a_action, Blocking)>(), "Task");
+			a_script.add(chaiscript::constructor<Task(const std::shared_ptr<ActionBase> &a_action, Blocking, Blocking)>(), "Task");
 
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, bool a_blockParentCompletion) { return a_self.now(a_name, a_task, a_blockParentCompletion); }), "now");
+			a_script.add_global_const(chaiscript::const_var(Blocking::True), "TaskNonblocking");
+			a_script.add_global_const(chaiscript::const_var(Blocking::False), "TaskBlocking");
+			a_script.add_global_const(chaiscript::const_var(Infinite::True), "TaskInfinite");
+			a_script.add_global_const(chaiscript::const_var(Infinite::False), "TaskFinite");
+			a_script.add(chaiscript::fun([](Infinite lhs, Infinite rhs) {return (lhs != rhs); }), "!=");
+			a_script.add(chaiscript::fun([](Infinite lhs, Infinite rhs) {return (lhs == rhs); }), "==");
+			a_script.add(chaiscript::fun([](Infinite lhs, Infinite rhs) {return (lhs = rhs); }), "=");
+			a_script.add(chaiscript::fun([](Blocking lhs, Blocking rhs) {return (lhs != rhs); }), "!=");
+			a_script.add(chaiscript::fun([](Blocking lhs, Blocking rhs) {return (lhs == rhs); }), "==");
+			a_script.add(chaiscript::fun([](Blocking lhs, Blocking rhs) {return (lhs = rhs); }), "=");
+
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, Blocking a_blockParentCompletion) { return a_self.now(a_name, a_task, a_blockParentCompletion); }), "now");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task) { return a_self.now(a_name, a_task); }), "now");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion) { return a_self.now(a_name, a_task, a_blockParentCompletion); }), "now");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task, Blocking a_blockParentCompletion) { return a_self.now(a_name, a_task, a_blockParentCompletion); }), "now");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task) { return a_self.now(a_name, a_task); }), "now");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, bool a_blockParentCompletion) { return a_self.now(a_name, a_blockParentCompletion); }), "now");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, Blocking a_blockParentCompletion) { return a_self.now(a_name, a_blockParentCompletion); }), "now");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name) { return a_self.now(a_name); }), "now");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::shared_ptr<Task> &a_task) { return a_self.now(a_task); }), "now");
 
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, bool a_blockParentCompletion) { return a_self.then(a_name, a_task, a_blockParentCompletion); }), "then");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, Blocking a_blockParentCompletion) { return a_self.then(a_name, a_task, a_blockParentCompletion); }), "then");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task) { return a_self.then(a_name, a_task); }), "then");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion) { return a_self.then(a_name, a_task, a_blockParentCompletion); }), "then");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task, Blocking a_blockParentCompletion) { return a_self.then(a_name, a_task, a_blockParentCompletion); }), "then");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task) { return a_self.then(a_name, a_task); }), "then");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, bool a_blockParentCompletion) { return a_self.then(a_name, a_blockParentCompletion); }), "then");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, Blocking a_blockParentCompletion) { return a_self.then(a_name, a_blockParentCompletion); }), "then");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name) { return a_self.then(a_name); }), "then");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::shared_ptr<Task> &a_task) { return a_self.then(a_task); }), "then");
 
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, bool a_blockParentCompletion) { return a_self.thenAlso(a_name, a_task, a_blockParentCompletion); }), "thenAlso");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, Blocking a_blockParentCompletion) { return a_self.thenAlso(a_name, a_task, a_blockParentCompletion); }), "thenAlso");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task) { return a_self.thenAlso(a_name, a_task); }), "thenAlso");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion) { return a_self.thenAlso(a_name, a_task, a_blockParentCompletion); }), "thenAlso");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task, Blocking a_blockParentCompletion) { return a_self.thenAlso(a_name, a_task, a_blockParentCompletion); }), "thenAlso");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task) { return a_self.thenAlso(a_name, a_task); }), "thenAlso");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, bool a_infinite, bool a_blockParentCompletion) { return a_self.thenAlso(a_name, a_infinite, a_blockParentCompletion); }), "thenAlso");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, bool a_infinite) { return a_self.thenAlso(a_name, a_infinite); }), "thenAlso");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, Infinite a_infinite, Blocking a_blockParentCompletion) { return a_self.thenAlso(a_name, a_infinite, a_blockParentCompletion); }), "thenAlso");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, Infinite a_infinite) { return a_self.thenAlso(a_name, a_infinite); }), "thenAlso");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name) { return a_self.thenAlso(a_name); }), "thenAlso");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::shared_ptr<Task> &a_task) { return a_self.thenAlso(a_task); }), "thenAlso");
 
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, bool a_blockParentCompletion) { return a_self.also(a_name, a_task, a_blockParentCompletion); }), "also");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, Blocking a_blockParentCompletion) { return a_self.also(a_name, a_task, a_blockParentCompletion); }), "also");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task) { return a_self.also(a_name, a_task); }), "also");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion) { return a_self.also(a_name, a_task, a_blockParentCompletion); }), "also");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task, Blocking a_blockParentCompletion) { return a_self.also(a_name, a_task, a_blockParentCompletion); }), "also");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, std::function<bool(Task&, double)> a_task) { return a_self.also(a_name, a_task); }), "also");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, bool a_infinite, bool a_blockParentCompletion) { return a_self.also(a_name, a_infinite, a_blockParentCompletion); }), "also");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, bool a_infinite) { return a_self.also(a_name, a_infinite); }), "also");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, Infinite a_infinite, Blocking a_blockParentCompletion) { return a_self.also(a_name, a_infinite, a_blockParentCompletion); }), "also");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name, Infinite a_infinite) { return a_self.also(a_name, a_infinite); }), "also");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_name) { return a_self.also(a_name); }), "also");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::shared_ptr<Task> &a_task) { return a_self.also(a_task); }), "also");
 
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, bool a_blockParentCompletion) { return a_self.after(a_reference, a_name, a_task, a_blockParentCompletion); }), "after");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, Blocking a_blockParentCompletion) { return a_self.after(a_reference, a_name, a_task, a_blockParentCompletion); }), "after");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task) { return a_self.after(a_reference, a_name, a_task); }), "after");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion) { return a_self.after(a_reference, a_name, a_task, a_blockParentCompletion); }), "after");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, std::function<bool(Task&, double)> a_task, Blocking a_blockParentCompletion) { return a_self.after(a_reference, a_name, a_task, a_blockParentCompletion); }), "after");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, std::function<bool(Task&, double)> a_task) { return a_self.after(a_reference, a_name, a_task); }), "after");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, bool a_blockParentCompletion) { return a_self.after(a_reference, a_name, a_blockParentCompletion); }), "after");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, Blocking a_blockParentCompletion) { return a_self.after(a_reference, a_name, a_blockParentCompletion); }), "after");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name) { return a_self.after(a_reference, a_name); }), "after");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::shared_ptr<Task> &a_task) { return a_self.after(a_reference, a_task); }), "after");
 
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, bool a_blockParentCompletion) { return a_self.before(a_reference, a_name, a_task, a_blockParentCompletion); }), "before");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, Blocking a_blockParentCompletion) { return a_self.before(a_reference, a_name, a_task, a_blockParentCompletion); }), "before");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task) { return a_self.before(a_reference, a_name, a_task); }), "before");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, std::function<bool(Task&, double)> a_task, bool a_blockParentCompletion) { return a_self.before(a_reference, a_name, a_task, a_blockParentCompletion); }), "before");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, std::function<bool(Task&, double)> a_task, Blocking a_blockParentCompletion) { return a_self.before(a_reference, a_name, a_task, a_blockParentCompletion); }), "before");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, std::function<bool(Task&, double)> a_task) { return a_self.before(a_reference, a_name, a_task); }), "before");
-			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, bool a_blockParentCompletion) { return a_self.before(a_reference, a_name, a_blockParentCompletion); }), "before");
+			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name, Blocking a_blockParentCompletion) { return a_self.before(a_reference, a_name, a_blockParentCompletion); }), "before");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::string &a_name) { return a_self.before(a_reference, a_name); }), "before");
 			a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_reference, const std::shared_ptr<Task> &a_task) { return a_self.before(a_reference, a_task); }), "before");
 

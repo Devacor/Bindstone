@@ -137,8 +137,7 @@ namespace MV {
 			return false;
 		}
 		if (music.find(identifier) != music.end()) {
-			if (Mix_PlayMusic(music[identifier].musicHandle, loop) == -1)
-			{
+			if (Mix_PlayMusic(music[identifier].musicHandle, loop) == -1) {
 				return false;
 			}
 		}

@@ -119,8 +119,8 @@ namespace MV {
 
 	class RangeException : public Exception {
 	public:
-		explicit RangeException(const std::string& a_message): Exception(a_message), std::runtime_error(a_message){}
-		explicit RangeException(const char *a_message): Exception(a_message), std::runtime_error(a_message) {}
+        explicit RangeException(const std::string& a_message): std::runtime_error(a_message), Exception(a_message) {}
+		explicit RangeException(const char *a_message): std::runtime_error(a_message), Exception(a_message) {}
 
 		virtual const char * what() const noexcept override {
 			prefixWhat("Range Exception: ");
@@ -130,8 +130,8 @@ namespace MV {
 
 	class ResourceException : public Exception {
 	public:
-		explicit ResourceException(const std::string& a_message): Exception(a_message), std::runtime_error(a_message){}
-		explicit ResourceException(const char *a_message): Exception(a_message), std::runtime_error(a_message) {}
+		explicit ResourceException(const std::string& a_message): std::runtime_error(a_message), Exception(a_message) {}
+		explicit ResourceException(const char *a_message): std::runtime_error(a_message), Exception(a_message) {}
 
 		virtual const char * what() const noexcept override {
 			prefixWhat("Resource Exception: ");
@@ -141,8 +141,8 @@ namespace MV {
 
 	class DeviceException : public Exception {
 	public:
-		explicit DeviceException(const std::string& a_message) : Exception(a_message), std::runtime_error(a_message) {}
-		explicit DeviceException(const char *a_message) : Exception(a_message), std::runtime_error(a_message) {}
+		explicit DeviceException(const std::string& a_message) : std::runtime_error(a_message), Exception(a_message) {}
+		explicit DeviceException(const char *a_message) : std::runtime_error(a_message), Exception(a_message) {}
 
 		virtual const char * what() const noexcept override {
 			prefixWhat("Device Exception: ");
@@ -152,8 +152,8 @@ namespace MV {
 
 	class PointerException : public Exception {
 	public:
-		explicit PointerException(const std::string& a_message): Exception(a_message), std::runtime_error(a_message){}
-		explicit PointerException(const char *a_message): Exception(a_message), std::runtime_error(a_message){}
+		explicit PointerException(const std::string& a_message): std::runtime_error(a_message), Exception(a_message) {}
+		explicit PointerException(const char *a_message): std::runtime_error(a_message), Exception(a_message) {}
 
 		virtual const char * what() const noexcept override {
 			prefixWhat("Pointer Exception: ");
@@ -163,8 +163,8 @@ namespace MV {
 
 	class LogicException : public Exception {
 	public:
-		explicit LogicException(const std::string& a_message) : Exception(a_message), std::runtime_error(a_message) {}
-		explicit LogicException(const char *a_message) : Exception(a_message), std::runtime_error(a_message) {}
+		explicit LogicException(const std::string& a_message) : std::runtime_error(a_message), Exception(a_message) {}
+		explicit LogicException(const char *a_message) : std::runtime_error(a_message), Exception(a_message) {}
 
 		virtual const char * what() const noexcept override {
 			prefixWhat("Logic Exception: ");

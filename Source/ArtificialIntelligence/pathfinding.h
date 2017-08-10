@@ -84,30 +84,10 @@ namespace MV {
 	private:
 
 		template <class Archive>
-		void save(Archive & archive) const {
-			std::weak_ptr<Map> weakMap;
-			weakMap = map->shared_from_this();
-			archive(
-				CEREAL_NVP(location),
-				CEREAL_NVP(useCorners),
-				CEREAL_NVP(travelCost),
-				CEREAL_NVP(staticBlockedSemaphore),
-				cereal::make_nvp("map", weakMap)
-			);
-		}
+        void save(Archive & archive) const;
 
 		template <class Archive>
-		void load(Archive & archive) {
-			std::weak_ptr<Map> weakMap;
-			archive(
-				CEREAL_NVP(location),
-				CEREAL_NVP(useCorners),
-				CEREAL_NVP(travelCost),
-				CEREAL_NVP(staticBlockedSemaphore),
-				cereal::make_nvp("map", weakMap)
-			);
-			map = weakMap.lock().get();
-		}
+        void load(Archive & archive);
 
 		void calculateClearance() const;
 
@@ -705,6 +685,32 @@ namespace MV {
 			return a_script;
 		}
 	};
+    
+    template <class Archive>
+    void MapNode::save(Archive & archive) const {
+        std::weak_ptr<Map> weakMap;
+        weakMap = map->shared_from_this();
+        archive(
+            CEREAL_NVP(location),
+            CEREAL_NVP(useCorners),
+            CEREAL_NVP(travelCost),
+            CEREAL_NVP(staticBlockedSemaphore),
+            cereal::make_nvp("map", weakMap)
+        );
+    }
+    
+    template <class Archive>
+    void MapNode::load(Archive & archive) {
+        std::weak_ptr<Map> weakMap;
+        archive(
+            CEREAL_NVP(location),
+            CEREAL_NVP(useCorners),
+            CEREAL_NVP(travelCost),
+            CEREAL_NVP(staticBlockedSemaphore),
+            cereal::make_nvp("map", weakMap)
+        );
+        map = weakMap.lock().get();
+    }
 }
 
 #endif

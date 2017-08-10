@@ -4,7 +4,11 @@
 #include <memory>
 #include <string>
 #include "Game/player.h"
+
+#ifdef BINDSTONE_SERVER
 #include "Game/NetworkLayer/gameServer.h"
+#endif
+
 #include "Game/Instance/team.h"
 
 
@@ -125,6 +129,7 @@ private:
 	Game &game;
 };
 
+#ifdef BINDSTONE_SERVER
 class GameServer;
 class ServerGameInstance : public GameInstance {
 public:
@@ -133,6 +138,7 @@ public:
 private:
 	GameServer &gameServer;
 };
+#endif
 
 class Missile {
 public:

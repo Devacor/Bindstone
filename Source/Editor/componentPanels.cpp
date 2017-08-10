@@ -178,10 +178,10 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 		});
 
 		controls->onChange = [&](EditableNode *a_element) {
-			posX->number(static_cast<int>(std::lround(controls->position().x)));
-			posY->number(static_cast<int>(std::lround(controls->position().y)));
+			posX->set(static_cast<int>(std::lround(controls->position().x)));
+			posY->set(static_cast<int>(std::lround(controls->position().y)));
 
-			rotate->number(static_cast<int>(std::lround(controls->rotation().z)));
+			rotate->set(static_cast<int>(std::lround(controls->rotation().z)));
 		};
 	}
 	
@@ -1078,8 +1078,8 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
 			if (controls->texture()) {
 				auto size = controls->texture()->bounds().size();
-				aspectX->number(size.width);
-				aspectY->number(size.height);
+				aspectX->set(size.width);
+				aspectY->set(size.height);
 				controls->aspect(MV::round<MV::PointPrecision>(size));
 			}
 		});
@@ -1088,8 +1088,8 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
 			if (controls->texture()) {
 				auto size = controls->texture()->bounds().size();
-				width->number(size.width);
-				height->number(size.width);
+				width->set(size.width);
+				height->set(size.width);
 				controls->size(MV::round<MV::PointPrecision>(size));
 			}
 		});
@@ -1147,11 +1147,11 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 		});
 
 		controls->onChange = [&](ResizeHandles *a_element){
-			offsetX->number(static_cast<int>(std::lround(controls->position().x)));
-			offsetY->number(static_cast<int>(std::lround(controls->position().y)));
+			offsetX->set(static_cast<int>(std::lround(controls->position().x)));
+			offsetY->set(static_cast<int>(std::lround(controls->position().y)));
 
-			width->number(static_cast<int>(std::lround(controls->size().width)));
-			height->number(static_cast<int>(std::lround(controls->size().height)));
+			width->set(static_cast<int>(std::lround(controls->size().width)));
+			height->set(static_cast<int>(std::lround(controls->size().height)));
 		};
 	}
 	auto deselectLocalAABB = deselectButton->bounds();
@@ -1485,11 +1485,11 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	});
 
 	controls->onChange = [&](ResizeHandles *a_element) {
-		offsetX->number(static_cast<int>(std::lround(controls->position().x)));
-		offsetY->number(static_cast<int>(std::lround(controls->position().y)));
+		offsetX->set(static_cast<int>(std::lround(controls->position().x)));
+		offsetY->set(static_cast<int>(std::lround(controls->position().y)));
 
-		width->number(static_cast<int>(std::lround(controls->size().width)));
-		height->number(static_cast<int>(std::lround(controls->size().height)));
+		width->set(static_cast<int>(std::lround(controls->size().width)));
+		height->set(static_cast<int>(std::lround(controls->size().height)));
 	};
 
 	auto deselectLocalAABB = deselectButton->bounds();
@@ -1611,11 +1611,11 @@ SelectedPathMapEditorPanel::SelectedPathMapEditorPanel(EditorControls &a_panel, 
 		});
 
 		controls->onChange = [&](ResizeHandles *a_element) {
-			posX->number(static_cast<int>(std::lround(controls->position().x)));
-			posY->number(static_cast<int>(std::lround(controls->position().y)));
+			posX->set(static_cast<int>(std::lround(controls->position().x)));
+			posY->set(static_cast<int>(std::lround(controls->position().y)));
 
-			width->number(static_cast<int>(std::lround(controls->size().width)));
-			height->number(static_cast<int>(std::lround(controls->size().height)));
+			width->set(static_cast<int>(std::lround(controls->size().width)));
+			height->set(static_cast<int>(std::lround(controls->size().height)));
 		};
 	}
 	auto deselectLocalAABB = deselectButton->bounds();
@@ -1996,11 +1996,11 @@ SelectedTextEditorPanel::SelectedTextEditorPanel(EditorControls &a_panel, std::s
 		});
 
 		controls->onChange = [&](ResizeHandles *a_element) {
-			offsetX->number(static_cast<int>(std::lround(controls->position().x)));
-			offsetY->number(static_cast<int>(std::lround(controls->position().y)));
+			offsetX->set(static_cast<int>(std::lround(controls->position().x)));
+			offsetY->set(static_cast<int>(std::lround(controls->position().y)));
 
-			width->number(static_cast<int>(std::lround(controls->size().width)));
-			height->number(static_cast<int>(std::lround(controls->size().height)));
+			width->set(static_cast<int>(std::lround(controls->size().width)));
+			height->set(static_cast<int>(std::lround(controls->size().height)));
 		};
 	}
 
@@ -2154,11 +2154,11 @@ SelectedButtonEditorPanel::SelectedButtonEditorPanel(EditorControls &a_panel, st
 		});
 
 		controls->onChange = [&](ResizeHandles *a_element) {
-			offsetX->number(static_cast<int>(std::lround(controls->position().x)));
-			offsetY->number(static_cast<int>(std::lround(controls->position().y)));
+			offsetX->set(static_cast<int>(std::lround(controls->position().x)));
+			offsetY->set(static_cast<int>(std::lround(controls->position().y)));
 
-			width->number(static_cast<int>(std::lround(controls->size().width)));
-			height->number(static_cast<int>(std::lround(controls->size().height)));
+			width->set(static_cast<int>(std::lround(controls->size().width)));
+			height->set(static_cast<int>(std::lround(controls->size().height)));
 		};
 	}
 
@@ -2287,11 +2287,11 @@ SelectedClickableEditorPanel::SelectedClickableEditorPanel(EditorControls &a_pan
 		});
 
 		controls->onChange = [&](ResizeHandles *a_element) {
-			offsetX->number(static_cast<int>(std::lround(controls->position().x)));
-			offsetY->number(static_cast<int>(std::lround(controls->position().y)));
+			offsetX->set(static_cast<int>(std::lround(controls->position().x)));
+			offsetY->set(static_cast<int>(std::lround(controls->position().y)));
 
-			width->number(static_cast<int>(std::lround(controls->size().width)));
-			height->number(static_cast<int>(std::lround(controls->size().height)));
+			width->set(static_cast<int>(std::lround(controls->size().width)));
+			height->set(static_cast<int>(std::lround(controls->size().height)));
 		};
 	}
 

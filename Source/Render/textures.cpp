@@ -654,6 +654,7 @@ namespace MV {
 	}
 
 	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture) {
+#ifdef GL_TEXTURE_WIDTH
 		require<ResourceException>(a_texture, "saveLoadedOpenglTexture was supplied a null texture id: ", a_fileName);
 		glBindTexture(GL_TEXTURE_2D, a_texture);
 		GLint textureWidth, textureHeight;
@@ -668,6 +669,7 @@ namespace MV {
 		SDL_Surface *surf = SDL_CreateRGBSurfaceFrom(&pixels[0], textureWidth, textureHeight, 32, textureWidth * 4, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
 		IMG_SavePNG(surf, a_fileName.c_str());
 		SDL_FreeSurface(surf);
+#endif
 	}
 
 

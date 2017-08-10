@@ -526,25 +526,29 @@ namespace MV {
 
 	template <class T>
 	Color operator+(const T& a_left, const Color& a_right){
-		Color tmpPoint = Color(a_left, a_left, a_left, a_left);
+        auto value = static_cast<float>(a_left);
+		Color tmpPoint = Color(value, value, value, value);
 		return tmpPoint += a_right;
 	}
 
 	template <class T>
 	Color operator-(const T& a_left, const Color& a_right){
-		Color tmpPoint = Color(a_left, a_left, a_left, a_left);
+        auto value = static_cast<float>(a_left);
+        Color tmpPoint = Color(value, value, value, value);
 		return tmpPoint -= a_right;
 	}
 
 	template <class T>
 	Color operator*(const T& a_left, const Color& a_right){
-		Color tmpPoint = Color(a_left, a_left, a_left, a_left);
+        auto value = static_cast<float>(a_left);
+        Color tmpPoint = Color(value, value, value, value);
 		return tmpPoint *= a_right;
 	}
 
 	template <class T>
 	Color operator/(const T& a_left, const Color& a_right){
-		Color tmpPoint = Color(a_left, a_left, a_left, a_left);
+        auto value = static_cast<float>(a_left);
+        Color tmpPoint = Color(value, value, value, value);
 		return tmpPoint /= a_right;
 	}
 

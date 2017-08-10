@@ -48,6 +48,10 @@
 	#include <SDL_opengl.h>
 	#include <SDL_opengles2.h>
 	typedef GLfloat GLdouble; //opengles has no GLdouble
+
+    inline int gl3wInit(){
+        return 0;
+    }
 #else
 	#include <GL/gl3w.h>
 	#include <SDL_opengl.h>

@@ -131,7 +131,7 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 	newGrid->columns(1)->color({ BOX_BACKGROUND })->layoutPolicy(MV::Scene::Grid::AutoLayoutPolicy::Comprehensive);
 	std::weak_ptr<MV::Scene::Node> weakGrid = gridNode;
 	MV::Scene::Node* nodePointer = a_node.get();
-	expandButton->onAccept.connect("Expand", [=](auto&& a_self) {
+    expandButton->onAccept.connect("Expand", [=](std::shared_ptr<MV::Scene::Clickable> a_self) {
 		if (auto lockedGrid = weakGrid.lock()) {
 			if (lockedGrid->visible()) {
 				expanded[nodePointer] = false;

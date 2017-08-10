@@ -72,13 +72,13 @@ namespace MV {
 		void Component::notifyParentOfComponentChange() {
 			try {
 				owner()->onComponentUpdateSignal(shared_from_this());
-			} catch (PointerException &) {
+			} catch (MV::PointerException &) {
 			}
 		}
 
 		std::shared_ptr<Node> Component::owner() const {
 			auto lockedComponentOwner = componentOwner.lock();
-			require<PointerException>(lockedComponentOwner != nullptr, "Component owner has expired! You are storing a reference to the component, but not the node that owns it!");
+			MV::require<MV::PointerException>(lockedComponentOwner != nullptr, "Component owner has expired! You are storing a reference to the component, but not the node that owns it!");
 			return lockedComponentOwner;
 		}
 

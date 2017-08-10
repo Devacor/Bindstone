@@ -59,7 +59,7 @@ namespace MV {
 
 		void sanitize();
 
-		Point<T> centerPoint() const { return minPoint + ((minPoint + maxPoint) / 2.0f); }
+        Point<T> centerPoint() const { return minPoint + ((minPoint + maxPoint) / static_cast<T>(2)); }
 
 		Point<T> topLeftPoint() const { return minPoint; }
 		Point<T> bottomLeftPoint() const { return point(minPoint.x, maxPoint.y); }
@@ -206,7 +206,7 @@ namespace MV {
 	void BoxAABB<T>::initialize(const Size<T> &a_size, bool a_center){
 		minPoint.clear(); maxPoint = toPoint(a_size);
 		if (a_center) {
-			auto halfPoint = toPoint(a_size) * 0.5f;
+			auto halfPoint = toPoint(a_size) / static_cast<T>(2);
 			minPoint -= halfPoint;
 			maxPoint -= halfPoint;
 		}

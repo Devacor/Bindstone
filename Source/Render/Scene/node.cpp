@@ -20,7 +20,7 @@ namespace MV {
 
 			if(self->myParent){
 				auto foundSelf = std::find(self->myParent->childNodes.begin(), self->myParent->childNodes.end(), self);
-				require<PointerException>(foundSelf != self->myParent->childNodes.end(), "Failed to re-sort: [", self->id(), "]");
+				MV::require<MV::PointerException>(foundSelf != self->myParent->childNodes.end(), "Failed to re-sort: [", self->id(), "]");
 				originalIndex = std::distance(self->myParent->childNodes.begin(), foundSelf);
 				self->myParent->childNodes.erase(foundSelf);
 			}

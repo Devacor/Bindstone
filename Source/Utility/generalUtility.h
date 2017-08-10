@@ -621,30 +621,21 @@ namespace MV {
 		std::function<void()> boundCallback;
 	};
 
-	class LifespanTest {
-	public:
-		~LifespanTest() {
-			std::cout << "--LifespanTest[" << ourId << "]" << std::endl;
-			active.erase(ourId);
-		}
+	//useful to disambiguate bool and a lambda with no captures [](){}
+	template<class T>
+	struct ExactType {
+		T t;
+		template<class U, std::enable_if_t < std::is_same<T, std::decay_t<U>>{}, int > = 0 >
+		ExactType(U&& u) :t(std::forward<U>(u)) {}
+		ExactType() :t() {}
+		ExactType(ExactType&&) = default;
+		ExactType(ExactType const&) = default;
 
-		static std::shared_ptr<LifespanTest> make() {
-			return std::shared_ptr<LifespanTest>(new LifespanTest(count++));
-		}
-
-		size_t id() const {
-			return ourId;
-		}
-	private:
-		LifespanTest(size_t a_id) :ourId(a_id) {
-			active.insert(ourId);
-			std::cout << "++LifespanTest[" << ourId << "]" << std::endl;
-		}
-
-		size_t ourId;
-
-		static size_t count;
-		static std::set<size_t> active;
+		operator T() const& { return t; }
+		operator T() && { return std::move(t); }
+		T& get()& { return t; }
+		T const& get() const& { return t; }
+		T get() && { return std::move(t); }
 	};
 }
 #endif

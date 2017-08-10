@@ -606,6 +606,7 @@
     <ClInclude Include="Source\Utility\cerealUtility.h" />
     <ClInclude Include="Source\Utility\chaiscriptStdLib.h" />
     <ClInclude Include="Source\Utility\chaiscriptUtility.h" />
+    <ClInclude Include="Source\Utility\exactType.hpp" />
     <ClInclude Include="Source\Utility\generalUtility.h" />
     <ClInclude Include="Source\Utility\log.h" />
     <ClInclude Include="Source\Utility\optionalCalls.hpp" />

@@ -241,7 +241,4 @@ namespace MV {
 		return randomString("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_", a_length);
 	}
 
-	size_t LifespanTest::count = 0;
-
-	std::set<size_t> LifespanTest::active = {};
 }

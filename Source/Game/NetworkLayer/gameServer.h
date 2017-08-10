@@ -186,5 +186,4 @@ private:
 	
 	uint32_t port;
 };
-
 #endif

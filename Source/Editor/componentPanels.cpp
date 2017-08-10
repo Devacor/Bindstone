@@ -21,8 +21,7 @@ void EditorPanel::handleInput(SDL_Event &a_event) {
 	}
 }
 
-SharedResources EditorPanel::resources()
-{
+SharedResources EditorPanel::resources() {
 	return panel.resources();
 }
 

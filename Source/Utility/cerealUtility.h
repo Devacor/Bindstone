@@ -35,22 +35,7 @@ namespace MV {
 	inline std::string fromBase64(const char* input) {
 		return cerealEncodeWrapper(input);
 	}
-
-	template <typename T>
-	std::string toBase64(const T& a_input) {
-		return toBase64(toBinaryString(a_input));
-	}
-
-	template <typename C, typename T>
-	std::string toBase64Cast(const std::shared_ptr<T> &a_input) {
-		return toBase64(std::static_pointer_cast<C>(a_input));
-	}
-
-	template <typename T>
-	T fromBase64(const std::string &a_input) {
-		return fromBinaryString<T>(fromBase64(a_input));
-	}
-
+    
 	template <typename T>
 	std::string toBinaryString(const T& a_input) {
 		std::stringstream messageStream;
@@ -84,6 +69,21 @@ namespace MV {
 		input(result);
 		return result;
 	}
+    
+    template <typename T>
+    T fromBase64(const std::string &a_input) {
+        return fromBinaryString<T>(fromBase64(a_input));
+    }
+    
+    template <typename T>
+    std::string toBase64(const T& a_input) {
+        return toBase64(toBinaryString(a_input));
+    }
+    
+    template <typename C, typename T>
+    std::string toBase64Cast(const std::shared_ptr<T> &a_input) {
+        return toBase64(std::static_pointer_cast<C>(a_input));
+    }
 
 	template <typename T>
 	std::string toJson(const T& a_input) {

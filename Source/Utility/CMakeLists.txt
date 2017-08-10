@@ -1,6 +1,7 @@
 target_sources(MoonDog PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/chaiscriptStdLib.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/chaiscriptStdLib.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/exactType.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/expression.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/expression.h
   ${CMAKE_CURRENT_SOURCE_DIR}/generalUtility.cpp

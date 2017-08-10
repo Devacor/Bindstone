@@ -230,11 +230,7 @@ namespace MV {
 	void glExtensionBlendMode::setBlendFunction(GLenum a_sfactorRGB, GLenum a_dfactorRGB, GLenum a_sfactorAlpha, GLenum a_dfactorAlpha){
 		if (!renderer->headless()) {
 			if (initialized) {
-#ifdef WIN32
 				glBlendFuncSeparate(a_sfactorRGB, a_dfactorRGB, a_sfactorAlpha, a_dfactorAlpha);
-#else
-				glBlendFuncSeparateOES(a_sfactorRGB, a_dfactorRGB, a_sfactorAlpha, a_dfactorAlpha);
-#endif
 			} else {
 				glBlendFunc(a_sfactorRGB, a_dfactorRGB);
 			}
@@ -249,11 +245,7 @@ namespace MV {
 
 	void glExtensionBlendMode::setBlendEquation(GLenum a_rgbBlendFunc, GLenum a_alphaBlendFunc){
 		if(initialized){
-#ifdef WIN32
 			glBlendEquationSeparate(a_rgbBlendFunc, a_alphaBlendFunc);
-#else
-			glBlendEquationSeparate(a_rgbBlendFunc, a_alphaBlendFunc);
-#endif
 		}
 	}
 
@@ -276,15 +268,9 @@ namespace MV {
 		require<ResourceException>(renderer->headless() || initialized, "CreateFramebuffer failed because the extension could not be loaded");
 		GLuint framebufferId = 0, renderbufferId = 0, depthbufferId = 0;
 		if (!renderer->headless()) {
-#ifdef WIN32
 			glGenFramebuffers(1, &framebufferId);
 			glGenRenderbuffers(1, &renderbufferId);
 			//glGenRenderbuffers(1, &depthbufferId); //not used right now
-#else
-			glGenFramebuffersOES(1, &framebufferId);
-			glGenRenderbuffersOES(1, &renderbufferId);
-			glGenRenderbuffersOES(1, &depthbufferId);
-#endif
 		}
 		return std::shared_ptr<Framebuffer>(new Framebuffer(renderer, framebufferId, renderbufferId, depthbufferId, a_texture, a_size, a_position, a_backgroundColor));
 	}
@@ -299,12 +285,17 @@ namespace MV {
 			activeFramebuffers.push_back(a_framebuffer);
 		}
 		if (!renderer->headless()) {
-#ifdef WIN32
+//#ifdef WIN32
+        
 			glBindFramebuffer(GL_FRAMEBUFFER, a_framebuffer.lock()->framebuffer);
 			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, a_framebuffer.lock()->texture, 0);
 			glBindRenderbuffer(GL_RENDERBUFFER, a_framebuffer.lock()->renderbuffer);
+#ifdef WIN32
 			glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, roundUpPowerOfTwo(a_framebuffer.lock()->frameSize.width), roundUpPowerOfTwo(a_framebuffer.lock()->frameSize.height));
 #else
+			glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24_OES, roundUpPowerOfTwo(a_framebuffer.lock()->frameSize.width), roundUpPowerOfTwo(a_framebuffer.lock()->frameSize.height));
+#endif
+/*#else
 			int width = roundUpPowerOfTwo(a_framebuffer.frameSize.width);
 			int height = roundUpPowerOfTwo(a_framebuffer.frameSize.height);
 
@@ -323,20 +314,15 @@ namespace MV {
 			if (glCheckFramebufferStatusOES(GL_FRAMEBUFFER_OES) != GL_FRAMEBUFFER_COMPLETE_OES) {
 				std::cout << "Start Using Framebuffer failure: " << glCheckFramebufferStatusOES(GL_FRAMEBUFFER_OES) << std::endl;
 			}
-#endif
+#endif*/
 			glViewport(a_framebuffer.lock()->framePosition.x, a_framebuffer.lock()->framePosition.y, a_framebuffer.lock()->frameSize.width, a_framebuffer.lock()->frameSize.height);
 			glGetIntegerv(GL_VIEWPORT, viewport);
 		}
 		renderer->projectionMatrix().push().makeOrtho(0, static_cast<PointPrecision>(a_framebuffer.lock()->frameSize.width), 0, static_cast<PointPrecision>(a_framebuffer.lock()->frameSize.height), -128.0f, 128.0f);
 
-#ifdef WIN32
 		GLenum buffers[] = {GL_COLOR_ATTACHMENT0};
 		//pglDrawBuffersEXT(1, buffers);
-#else
-		GLenum buffers[] = {GL_COLOR_ATTACHMENT0_OES};
-		//glDrawBuffersOES(1, buffers)
-#endif
-
+        
 		renderer->clearScreen();
 		renderer->clearCameraProjectionMatrices(); //important after clearScreen;
 	}
@@ -352,8 +338,8 @@ namespace MV {
 				glBindFramebuffer(GL_FRAMEBUFFER, 0);
 				glBindRenderbuffer(GL_RENDERBUFFER, 0);
 #else
-				glBindFramebufferOES(GL_FRAMEBUFFER_OES, originalFramebufferId);
-				glBindRenderbufferOES(GL_RENDERBUFFER_OES, originalRenderbufferId);
+				glBindFramebuffer(GL_FRAMEBUFFER, originalFramebufferId);
+				glBindRenderbuffer(GL_RENDERBUFFER, originalRenderbufferId);
 #endif
 				glViewport(0, 0, renderer->window().width(), renderer->window().height());
 				glGetIntegerv(GL_VIEWPORT, viewport);
@@ -366,15 +352,9 @@ namespace MV {
 	
 	void glExtensionFramebufferObject::deleteFramebuffer( Framebuffer &a_framebuffer ){
 		if (!renderer->headless()) {
-#ifdef WIN32
 			glDeleteFramebuffers(1, &a_framebuffer.framebuffer);
 			glDeleteRenderbuffers(1, &a_framebuffer.renderbuffer);
 			//glDeleteRenderbuffers(1, &a_framebuffer.depthbuffer); //not used currently
-#else
-			glDeleteFramebuffersOES(1, &a_framebuffer.framebuffer);
-			glDeleteRenderbuffersOES(1, &a_framebuffer.renderbuffer);
-			glDeleteRenderbuffersOES(1, &a_framebuffer.depthbuffer);
-#endif
 		}
 		a_framebuffer.framebuffer = 0;
 		a_framebuffer.renderbuffer = 0;
@@ -391,14 +371,14 @@ namespace MV {
 	\*************************/
 
 	Window::Window(Draw2D &a_renderer):
-		renderer(a_renderer),
+        glcontext(0),
+		initialized(false),
 		maintainProportions(true),
 		sizeWorldWithWindow(false),
-		SDLflags(SDL_WINDOW_OPENGL|SDL_WINDOW_SHOWN|SDL_WINDOW_RESIZABLE),
-		initialized(false),
+        SDLflags(SDL_WINDOW_OPENGL|SDL_WINDOW_SHOWN|SDL_WINDOW_RESIZABLE),
 		vsync(false),
 		userCanResize(false),
-		glcontext(0){
+        renderer(a_renderer){
 		
 		updateAspectRatio();
 	}
@@ -600,7 +580,7 @@ namespace MV {
 				atexit(SDL_Quit);
 			}
 			if(renderer.firstInitializationOpenGL){
-				MV::require<PointerException>(gl3wInit() == 0, "gl3wInit failed!");
+				MV::require<MV::PointerException>(gl3wInit() == 0, "gl3wInit failed!");
 				renderer.firstInitializationOpenGL = false;
 			}
 
@@ -783,22 +763,11 @@ namespace MV {
 
 			glDisable(GL_CULL_FACE);
 
-			glDisable(GL_POLYGON_SMOOTH);
-			glDisable(GL_LINE_SMOOTH);
-
-			//glDisable (GL_ALPHA_TEST);
-
-			glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
-			glHint(GL_FRAGMENT_SHADER_DERIVATIVE_HINT, GL_NICEST);
-			glHint(GL_TEXTURE_COMPRESSION_HINT, GL_NICEST);
-			glHint(GL_POLYGON_SMOOTH_HINT, GL_NICEST);
-
 			defaultBlendFunction();
 			setBlendEquation(GL_FUNC_ADD, GL_FUNC_ADD);
 
 			glDepthMask(GL_FALSE);
 			glDisable(GL_DEPTH_TEST);
-			glEnable(GL_DEPTH_CLAMP);
 			glDepthFunc(GL_LEQUAL);
 
 
@@ -806,6 +775,16 @@ namespace MV {
 			glClearDepthf(1.0f);
 #else
 			glClearDepth(1.0f);
+            
+            glDisable(GL_POLYGON_SMOOTH);
+            glDisable(GL_LINE_SMOOTH);
+            
+            glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
+            glHint(GL_FRAGMENT_SHADER_DERIVATIVE_HINT, GL_NICEST);
+            glHint(GL_TEXTURE_COMPRESSION_HINT, GL_NICEST);
+            glHint(GL_POLYGON_SMOOTH_HINT, GL_NICEST);
+            
+            glEnable(GL_DEPTH_CLAMP);
 #endif
 			glClearStencil(0);
 
@@ -1047,7 +1026,7 @@ namespace MV {
 
 	Shader* Draw2D::defaultShader(const std::string &a_id) {
 		defaultShaderPtr = getShader(a_id);
-		MV::require<PointerException>(defaultShaderPtr != nullptr, "No default shader.");
+		MV::require<MV::PointerException>(defaultShaderPtr != nullptr, "No default shader.");
 		return defaultShaderPtr;
 	}
 

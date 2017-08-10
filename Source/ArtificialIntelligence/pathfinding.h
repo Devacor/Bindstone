@@ -215,9 +215,9 @@ namespace MV {
 		}
 
 		TemporaryCost(TemporaryCost &&a_rhs):
-			temporaryCost(std::move(a_rhs.temporaryCost)),
+            map(std::move(a_rhs.map)),
 			position(std::move(a_rhs.position)),
-			map(std::move(a_rhs.map)){
+            temporaryCost(std::move(a_rhs.temporaryCost)){
 
 			a_rhs.temporaryCost = 0;
 		}
@@ -265,12 +265,12 @@ namespace MV {
 	class Path {
 	public:
 		Path(std::shared_ptr<Map> a_map, const Point<int>& a_start, const Point<int>& a_end, PointPrecision a_distance = 0.0f, int a_unitSize = 1, int64_t a_maxSearchNodes = -1) :
+            maxSearchNodes(a_maxSearchNodes),
+            minimumDistance(a_distance),
+            unitSize(a_unitSize),
 			map(a_map),
-			unitSize(a_unitSize),
 			startPosition(std::min(a_start.x, map->size().width), std::min(a_start.y, map->size().height)),
-			goalPosition(std::min(a_end.x, map->size().width), std::min(a_end.y, map->size().height)),
-			minimumDistance(a_distance),
-			maxSearchNodes(a_maxSearchNodes) {
+			goalPosition(std::min(a_end.x, map->size().width), std::min(a_end.y, map->size().height)) {
 		}
 
 		std::vector<PathNode> path() {
@@ -299,10 +299,10 @@ namespace MV {
 		class PathCalculationNode {
 		public:
 			PathCalculationNode(const Point<int> &a_pathGoal, MapNode& a_mapCell, float a_startCost, Path::PathCalculationNode* a_parent = nullptr, bool a_isCorner = false) :
-				isCorner(a_isCorner),
 				initialCost(a_startCost),
-				mapCell(&a_mapCell),
-				ourParent(a_parent) {
+                isCorner(a_isCorner),
+                ourParent(a_parent),
+				mapCell(&a_mapCell) {
 
 				goalCost = static_cast<float>(std::abs(mapCell->position().x - a_pathGoal.x) + std::abs(mapCell->position().y - a_pathGoal.y));
 			}
@@ -548,9 +548,9 @@ namespace MV {
 		}
 		NavigationAgent() :
 			onArrive(onArriveSignal),
-			onStop(onStopSignal),
-			onStart(onStartSignal),
-			onBlocked(onBlockedSignal){}
+			onBlocked(onBlockedSignal),
+            onStop(onStopSignal),
+            onStart(onStartSignal){}
 	private:
 		bool attemptToRecalculate();
 
@@ -558,15 +558,15 @@ namespace MV {
 			NavigationAgent(a_map, cast<PointPrecision>(a_newPosition), a_unitSize, a_offsetCenterByHalf){
 		}
 		NavigationAgent(std::shared_ptr<Map> a_map, const Point<> &a_newPosition, int a_unitSize, bool a_offsetCenterByHalf) :
+            onArrive(onArriveSignal),
+            onBlocked(onBlockedSignal),
+            onStop(onStopSignal),
+            onStart(onStartSignal),
 			map(a_map),
 			centerOffset(a_offsetCenterByHalf ? point(.5f, .5f) : point(.0f, .0f)),
 			ourPosition(a_newPosition + centerOffset),
 			ourGoal(a_newPosition + centerOffset),
-			unitSize(a_unitSize),
-			onArrive(onArriveSignal),
-			onStop(onStopSignal),
-			onStart(onStartSignal),
-			onBlocked(onBlockedSignal) {
+			unitSize(a_unitSize) {
 			blockMap();
 		}
 		NavigationAgent(const NavigationAgent &) = delete;

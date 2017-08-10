@@ -27,11 +27,9 @@ target_sources(MoonDog PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/accountActions.h
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/clientActions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/clientActions.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/gameServer.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/gameServer.h
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/gameServerActions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/gameServerActions.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/lobbyServer.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/lobbyServer.h
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/networkAction.h
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/package.h

@@ -128,7 +128,7 @@ namespace MV {
 
 	template<typename T>
 	T mixIn(T a_start, T a_end, float a_percent, float a_strength = 1.0f) {
-		return pow(a_percent, a_strength)*(a_end - a_start) + a_start;
+		return ((a_end - a_start) * static_cast<float>(pow(a_percent, a_strength))) + a_start;
 	}
 
 	template<typename T>
@@ -138,7 +138,7 @@ namespace MV {
 
 	template<typename T>
 	T mixOut(T a_start, T a_end, float a_percent, float a_strength = 1.0f) {
-		return (1.0f - pow(1.0f - a_percent, a_strength)) * (a_end - a_start) + a_start;
+		return ((a_end - a_start) * static_cast<float>(1.0f - pow(1.0f - a_percent, a_strength))) + a_start;
 	}
 
 	template<typename T>
@@ -323,15 +323,6 @@ namespace MV {
         z = ztmp;
     }
 
-	template <class Type>
-	void rotatePoint(Type &a_point, Type a_angle, AngleType angleUnitIs = DEGREES){
-		if(equals(a_angle.x, 0.0f) && equals(a_angle.y, 0.0f)){
-			rotatePoint2D(a_point.x, a_point.y, a_angle.z, angleUnitIs);
-		} else{
-			rotatePoint3D(a_point.x, a_point.y, a_point.z, a_angle.x, a_angle.y, a_angle.z, angleUnitIs);
-		}
-	}
-
 	//returns the shortest distance between two numbers within a given bounding set of values.  If the closest value is the
 	//wraparound value and wrapDist is passed in then wrapDist is set to 1, if it is closer between the two numbers, wrapDist==0
 	template <class Type>
@@ -399,6 +390,18 @@ namespace MV {
 			}
 		}
 	}
+    
+    template <class Type>
+    void rotatePoint(Type &a_point, Type a_angle, AngleType angleUnitIs = DEGREES){
+        if(equals(a_angle.x, 0.0f) && equals(a_angle.y, 0.0f)){
+            rotatePoint2D(a_point.x, a_point.y, a_angle.z, angleUnitIs);
+        } else{
+            auto maxAngle = std::max(std::max(a_angle.x, a_angle.y), a_angle.z);
+            if(maxAngle > 0.0f){
+                rotatePoint3D(a_point.x, a_point.y, a_point.z, a_angle.x / maxAngle, a_angle.y / maxAngle, a_angle.z / maxAngle, maxAngle, angleUnitIs);
+            }
+        }
+    }
 
 	class Random {
 	public:

@@ -46,7 +46,7 @@
 
 #ifdef HAVE_OPENGLES
 	#include <SDL_opengl.h>
-	#include <SDL_opengles.h>
+	#include <SDL_opengles2.h>
 	typedef GLfloat GLdouble; //opengles has no GLdouble
 #else
 	#include <GL/gl3w.h>

@@ -4,17 +4,17 @@
 namespace MV {
 
 	MapNode::MapNode(Map& a_grid, const Point<int> &a_location, float a_cost, bool a_useCorners) :
-		initialized(false),
-		travelCost(a_cost),
-		location(a_location),
-		map(&a_grid),
-		useCorners(a_useCorners),
 		onBlock(onBlockSignal),
 		onUnblock(onUnblockSignal),
 		onStaticBlock(onStaticBlockSignal),
 		onStaticUnblock(onStaticUnblockSignal),
 		onCostChange(onCostChangeSignal),
-		onClearanceChange(onClearanceChangeSignal){
+		onClearanceChange(onClearanceChangeSignal),
+        map(&a_grid),
+        initialized(false),
+        location(a_location),
+        useCorners(a_useCorners),
+        travelCost(a_cost){
 		edges.fill(nullptr);
 	}
 

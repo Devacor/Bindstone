@@ -16,7 +16,6 @@ add_subdirectory(Physics)
 
 target_link_libraries(MoonDog
   CONAN_PKG::OpenSSL
-  $<$<PLATFORM_ID:Windows>CONAN_PKG::libpqxx>
   CONAN_PKG::Box2D
   CONAN_PKG::chaiscript
   CONAN_PKG::boost
@@ -26,7 +25,6 @@ target_link_libraries(MoonDog
   CONAN_PKG::SDL2_ttf
   CONAN_PKG::SDL2_mixer
   CONAN_PKG::SDL2_image
-  $<$<PLATFORM_ID:Windows>CONAN_PKG::gl3w>
   CONAN_PKG::spine
   CONAN_PKG::boolinq
 )
@@ -34,12 +32,9 @@ target_link_libraries(MoonDog
 target_include_directories(MoonDog PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 
 target_compile_options(MoonDog PRIVATE
-  $<$<CXX_COMPILER_ID:MSVC>:/std:c++latest /bigobj>
-  $<$<BOOL:${GENERATOR_MSVC}>:/MP>
 )
 
 target_compile_definitions(MoonDog PRIVATE
-  $<$<CXX_COMPILER_ID:MSVC>:_SCL_SECURE_NO_WARNINGS NOMINMAX _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0501 _HAS_AUTO_PTR_ETC>
 )
 
 if(NOT XCODE)

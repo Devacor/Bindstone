@@ -3,6 +3,7 @@ compiler=apple-clang
 compiler.version=8.1
 compiler.libcxx=libc++
 os=iOS
+os.version=10.0
 arch=universal
 build_type=Release
 

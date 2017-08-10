@@ -68,11 +68,11 @@ private:
 				MV::info("Applied anchors for Component Id: ", anchorParentId->text(), " On Node: ", anchorParentId->owner()->id());
 				auto offset = target->anchors().offset();
 				updatingFields = true;
-				offsetMinX->number(std::lround(offset.minPoint.x));
-				offsetMinY->number(std::lround(offset.minPoint.y));
+				offsetMinX->set(std::lround(offset.minPoint.x));
+				offsetMinY->set(std::lround(offset.minPoint.y));
 
-				offsetMaxX->number(std::lround(offset.maxPoint.x));
-				offsetMaxY->number(std::lround(offset.maxPoint.y));
+				offsetMaxX->set(std::lround(offset.maxPoint.x));
+				offsetMaxY->set(std::lround(offset.maxPoint.y));
 				updatingFields = false;
 			}
 		});
@@ -147,11 +147,11 @@ private:
 					
 				auto offset = target->anchors().offset();
 				updatingFields = true;
-				offsetMinX->number(std::lround(offset.minPoint.x));
-				offsetMinY->number(std::lround(offset.minPoint.y));
+				offsetMinX->set(std::lround(offset.minPoint.x));
+				offsetMinY->set(std::lround(offset.minPoint.y));
 
-				offsetMaxX->number(std::lround(offset.maxPoint.x));
-				offsetMaxY->number(std::lround(offset.maxPoint.y));
+				offsetMaxX->set(std::lround(offset.maxPoint.x));
+				offsetMaxY->set(std::lround(offset.maxPoint.y));
 				updatingFields = false;
 			}
 		);

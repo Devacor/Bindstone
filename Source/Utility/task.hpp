@@ -488,8 +488,9 @@ namespace MV {
 		SignalRegister<void(Task&)> onCancel;
 		SignalRegister<void(Task&)> onCancelUpdate;
 		SignalRegister<void(Task&, std::exception &)> onException;
-/*
+
 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
+/*
 			a_script.add(chaiscript::user_type<Task>(), "Task");
 			a_script.add(chaiscript::constructor<Task()>(), "Task");
 			a_script.add(chaiscript::constructor<Task(ExactType<bool>)>(), "Task");
@@ -586,9 +587,9 @@ namespace MV {
 			a_script.add(chaiscript::fun(&Task::onResume), "onResume");
 			a_script.add(chaiscript::fun(&Task::onCancel), "onCancel");
 			a_script.add(chaiscript::fun(&Task::onException), "onException");
-
+*/
 			return a_script;
-		}*/
+		}
 
 		template <class Archive>
 		void load(Archive & archive, std::uint32_t const /*version*/) {

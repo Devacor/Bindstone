@@ -263,7 +263,7 @@ namespace MV{
 	}
 
 	BoxAABB<PointPrecision> TexturePack::percentBounds(const BoxAABB<int> &a_shape) const {
-		return cast<PointPrecision>(a_shape) / Scale(roundUpPowerOfTwo(contentExtent.width), roundUpPowerOfTwo(contentExtent.height));
+		return cast<PointPrecision>(a_shape) / Scale(static_cast<MV::PointPrecision>(roundUpPowerOfTwo(contentExtent.width)), static_cast<MV::PointPrecision>(roundUpPowerOfTwo(contentExtent.height)));
 	}
 
 	void TexturePack::initializeAfterLoad() {

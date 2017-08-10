@@ -1333,6 +1333,9 @@
     <ClInclude Include="Source\Utility\threadPool.hpp">
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Utility\exactType.hpp">
+      <Filter>Source Files\Utility</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html">

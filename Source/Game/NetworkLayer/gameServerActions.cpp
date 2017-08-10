@@ -3,11 +3,11 @@
 
 #ifdef BINDSTONE_SERVER
 #include "lobbyServer.h"
+#include "Game/NetworkLayer/gameServer.h"
 #endif
 
 #include "Game/player.h"
 #include "Utility/cerealUtility.h"
-#include "Game/NetworkLayer/gameServer.h"
 #include "Game/game.h"
 
 #ifdef BINDSTONE_SERVER
@@ -19,7 +19,6 @@ void AssignPlayersToGame::execute(GameServer& a_server) {
 	a_server.assign(left, right, matchQueueId);
 	a_server.lobby()->send(makeNetworkString<ExpectedPlayersNoted>());
 }
-#endif
 
 void GetInitialGameState::execute(GameUserConnectionState* a_connection, GameServer &a_game) {
 	auto player = a_game.userConnected(secret);
@@ -29,13 +28,14 @@ void GetInitialGameState::execute(GameUserConnectionState* a_connection, GameSer
 	}
 }
 
-void SuppliedInitialGameState::execute(Game& a_game) {
-	a_game.enterGame(left, right);
-}
-
 void RequestBuildingUpgrade::execute(GameUserConnectionState* /*a_gameUser*/, GameServer &a_game) {
 	a_game.instance()->performUpgrade(side, slot, id);
 	a_game.server()->send(makeNetworkString<RequestBuildingUpgrade>(side, slot, id));
+}
+#endif
+
+void SuppliedInitialGameState::execute(Game& a_game) {
+	a_game.enterGame(left, right);
 }
 
 void RequestBuildingUpgrade::execute(Game &a_game) {

@@ -11,13 +11,11 @@
 #include "Utility/tupleHelpers.hpp"
 #include "Utility/scopeGuard.hpp"
 #include "chaiscript/chaiscript.hpp"
+#include "cereal/cereal.hpp"
+#include "cereal/access.hpp"
 
 //change to [[nodiscard]] when we get support.
 #define MV_NODISCARD
-
-namespace cereal {
-	class access;
-}
 
 namespace MV {
 
@@ -181,8 +179,8 @@ namespace MV {
 		Receiver() {
 		}
 		Receiver(std::function<T> a_callback, long long a_id):
-			id(a_id),
-			callback(a_callback){
+			callback(a_callback),
+            id(a_id){
 		}
 		Receiver(const std::string& a_callback, chaiscript::ChaiScript* a_scriptEngine, const std::shared_ptr<std::vector<std::string>> &a_parameterNames, long long a_id) :
 			id(a_id),
@@ -438,7 +436,7 @@ namespace MV {
 			if (blocked()){
 				calledWhileBlocked = true;
 				if (blockedCallback) {
-					blockedCallback(std::forward<Arg>(a_parameters)...);
+					blockedCallback();
 				}
 			}
 		}
@@ -488,7 +486,7 @@ namespace MV {
 		}
 
 		bool hasParameterNames() const{
-			return !orderedParameterNames.empty();
+			return !orderedParameterNames->empty();
 		}
 
 	private:

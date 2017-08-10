@@ -16,17 +16,7 @@ namespace MV {
 	class Stopwatch{
 	public:
 		typedef double TimeType;
-	
-		Stopwatch():
-			timeOffset(0),
-			prevtime(0),
-			pausetime(0),
-			firstCall(true),
-			started(false),
-			paused(false){
-		}
-		~Stopwatch(){}
-		
+        
 		//starts the timer from 0, restarts the timer if already started
 		void start();
 		
@@ -74,10 +64,12 @@ namespace MV {
 		static TimeType systemTime();
 	private:
 		TimeType timerfunc(bool reset);
-		TimeType prevtime;
-		TimeType pausetime;
-		TimeType timeOffset;
-		bool started, paused, firstCall;
+		TimeType prevtime = 0;
+		TimeType pausetime = 0;
+		TimeType timeOffset = 0;
+        bool started = false;
+        bool paused = false;
+        bool firstCall = false;
 		class TimeDelta{
 		public:
 			TimeDelta():

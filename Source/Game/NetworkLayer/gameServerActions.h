@@ -77,7 +77,9 @@ public:
 	GetInitialGameState() {}
 	GetInitialGameState(int64_t a_secret) : secret(a_secret) {}
 
+#ifdef BINDSTONE_SERVER
 	virtual void execute(GameUserConnectionState*, GameServer &) override;
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -113,7 +115,9 @@ public:
 	RequestBuildingUpgrade() {}
 	RequestBuildingUpgrade(TeamSide a_side, int32_t a_slot, int64_t a_id) : side(a_side), slot(a_slot), id(static_cast<int32_t>(a_id)) {}
 
+#ifdef BINDSTONE_SERVER
 	virtual void execute(GameUserConnectionState*a_gameUser, GameServer &a_game) override;
+#endif
 	virtual void execute(Game &a_game) override;
 
 	template <class Archive>

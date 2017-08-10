@@ -319,7 +319,6 @@
     <ClCompile Include="Source\Game\NetworkLayer\accountActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\clientActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\gameServerActions.cpp" />
-    <ClCompile Include="Source\Game\NetworkLayer\lobbyServer.cpp" />
     <ClCompile Include="Source\Game\player.cpp" />
     <ClCompile Include="Source\Game\state.cpp" />
     <ClCompile Include="Source\Game\wallet.cpp" />

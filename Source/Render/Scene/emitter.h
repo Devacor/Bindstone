@@ -296,7 +296,7 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<Emitter> &construct, std::uint32_t const /*version*/) {
 				ThreadPool *pool = nullptr;
 				archive.extract(cereal::make_nvp("pool", pool));
-				MV::require<PointerException>(pool != nullptr, "Null thread pool in Emitter::load_and_construct.");
+				MV::require<MV::PointerException>(pool != nullptr, "Null thread pool in Emitter::load_and_construct.");
 				construct(std::shared_ptr<Node>(), *pool);
 				archive(
 					cereal::make_nvp("spawnProperties", construct->spawnProperties),
@@ -332,7 +332,7 @@ namespace MV {
 
 			void loadParticlePointsFromGroups();
 
-			void Emitter::loadPointsFromBufferAndAllowUpdate();
+			void loadPointsFromBufferAndAllowUpdate();
 
 
 			double accumulatedTimeDelta = 0.0f;
@@ -359,7 +359,7 @@ namespace MV {
 			bool spawnParticles = true;
 			static const double MAX_TIME_STEP;
 			static const int MAX_PARTICLES_PER_FRAME = 2500;
-			std::atomic<double> timeSinceLastParticle = 0.0;
+            std::atomic<double> timeSinceLastParticle = {0.0};
 			double nextSpawnDelta = 0.0;
 
 			ThreadPool& pool;

@@ -119,11 +119,11 @@ namespace MV {
 			);
 			construct->initializeFromLoad();
 
-			TextLibrary textLibrary = nullptr;
-			archive.extract(cereal::make_nvp("textLibrary", textLibrary));
-			if (textLibrary) {
-				textLibrary.add(construct->shared_from_this());
-			}
+            //std::shared_ptr<TextLibrary> textLibrary;
+			//archive.extract(cereal::make_nvp("textLibrary", textLibrary));
+			//if (textLibrary) {
+			//	textLibrary->add(construct->shared_from_this());
+			//}
 		}
 
 		void initializeFromLoad() {
@@ -138,13 +138,13 @@ namespace MV {
 
 		FontDefinition(TextLibrary *a_library, const std::string &a_file, int a_size, TTF_Font* a_font, FontStyle a_style, const std::string &a_identifier):
 			file(a_file),
-			size(a_size),
 			font(a_font),
-			style(a_style),
+            size(a_size),
 			identifier(a_identifier),
-			textLibrary(a_library),
+            style(a_style),
 			lineHeight(static_cast<PointPrecision>(TTF_FontLineSkip(a_font))),
-			baseLine(static_cast<PointPrecision>(TTF_FontAscent(a_font))){
+			baseLine(static_cast<PointPrecision>(TTF_FontAscent(a_font))),
+            textLibrary(a_library){
 		}
 		FontDefinition(){}
 
@@ -427,7 +427,7 @@ namespace MV {
 		static void load_and_construct(Archive & archive, cereal::construct<FormattedText> &construct, std::uint32_t const a_version) {
 			TextLibrary *library = nullptr;
 			archive.extract(cereal::make_nvp("textLibrary", library));
-			MV::require<PointerException>(library != nullptr, "Null TextLibrary in Text::load_and_construct.");
+			MV::require<MV::PointerException>(library != nullptr, "Null TextLibrary in Text::load_and_construct.");
 
 			std::string defaultStateIdentifier;
 			float textWidth;

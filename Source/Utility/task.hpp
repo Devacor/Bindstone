@@ -22,6 +22,8 @@
 #include "cereal/archives/portable_binary.hpp"
 #include "cereal/archives/json.hpp"
 
+#include "chaiscript/utility/utility.hpp"
+
 namespace MV {
 
 	class Task;
@@ -461,14 +463,14 @@ namespace MV {
 			}
 
 			for (auto&& task : sequentialTasks) {
-				Task* found = getDeep(a_name, false);
+				Task* found = task->getDeep(a_name, false);
 				if (found) {
 					return found;
 				}
 			}
 
 			for (auto&& task : parallelTasks) {
-				Task* found = getDeep(a_name, false);
+				Task* found = task->getDeep(a_name, false);
 				if (found) {
 					return found;
 				}
@@ -677,7 +679,9 @@ namespace MV {
 			const char* whatContents = chaiscript::boxed_cast<chaiscript::exception::eval_error&>(bv).what();
 			std::cerr << "Task [" << name() << "] script: " << chaiscript::boxed_cast<chaiscript::exception::eval_error&>(bv).what() << std::endl;
 			if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
-			onExceptionSignal(*this, std::exception(whatContents));
+            auto errorWithContents = std::runtime_error(whatContents);
+            std::exception &toThrow = errorWithContents;
+			onExceptionSignal(*this, toThrow);
 		}
 
 		void registerActionBase(const std::shared_ptr<ActionBase> &a_base) {

@@ -23,12 +23,14 @@ namespace MV {
 	inline std::string to_string(unsigned long a_type){
 		return std::to_string(a_type);
 	}
+  #ifndef __GNUC__
 	inline std::string to_string(int64_t a_type){
 		return std::to_string(a_type);
 	}
 	inline std::string to_string(uint64_t a_type){
 		return std::to_string(a_type);
 	}
+  #endif
 	inline std::string to_string(long double a_type){
 		return std::to_string(a_type);
 	}
@@ -100,7 +102,7 @@ namespace MV {
 		explicit Exception(const std::string& a_message): std::runtime_error(a_message){}
 		explicit Exception(const char *a_message): std::runtime_error(a_message) {}
 
-		virtual const char * what() const override {
+		virtual const char * what() const noexcept override {
 			prefixWhat("General Exception: ");
 			return combinedWhat.c_str();
 		}
@@ -117,10 +119,10 @@ namespace MV {
 
 	class RangeException : public Exception {
 	public:
-		explicit RangeException(const std::string& a_message): Exception(a_message), std::runtime_error(a_message){}
-		explicit RangeException(const char *a_message): Exception(a_message), std::runtime_error(a_message) {}
+        explicit RangeException(const std::string& a_message): std::runtime_error(a_message), Exception(a_message) {}
+		explicit RangeException(const char *a_message): std::runtime_error(a_message), Exception(a_message) {}
 
-		virtual const char * what() const override {
+		virtual const char * what() const noexcept override {
 			prefixWhat("Range Exception: ");
 			return combinedWhat.c_str();
 		}
@@ -128,10 +130,10 @@ namespace MV {
 
 	class ResourceException : public Exception {
 	public:
-		explicit ResourceException(const std::string& a_message): Exception(a_message), std::runtime_error(a_message){}
-		explicit ResourceException(const char *a_message): Exception(a_message), std::runtime_error(a_message) {}
+		explicit ResourceException(const std::string& a_message): std::runtime_error(a_message), Exception(a_message) {}
+		explicit ResourceException(const char *a_message): std::runtime_error(a_message), Exception(a_message) {}
 
-		virtual const char * what() const override {
+		virtual const char * what() const noexcept override {
 			prefixWhat("Resource Exception: ");
 			return combinedWhat.c_str();
 		}
@@ -139,10 +141,10 @@ namespace MV {
 
 	class DeviceException : public Exception {
 	public:
-		explicit DeviceException(const std::string& a_message) : Exception(a_message), std::runtime_error(a_message) {}
-		explicit DeviceException(const char *a_message) : Exception(a_message), std::runtime_error(a_message) {}
+		explicit DeviceException(const std::string& a_message) : std::runtime_error(a_message), Exception(a_message) {}
+		explicit DeviceException(const char *a_message) : std::runtime_error(a_message), Exception(a_message) {}
 
-		virtual const char * what() const override {
+		virtual const char * what() const noexcept override {
 			prefixWhat("Device Exception: ");
 			return combinedWhat.c_str();
 		}
@@ -150,10 +152,10 @@ namespace MV {
 
 	class PointerException : public Exception {
 	public:
-		explicit PointerException(const std::string& a_message): Exception(a_message), std::runtime_error(a_message){}
-		explicit PointerException(const char *a_message): Exception(a_message), std::runtime_error(a_message){}
+		explicit PointerException(const std::string& a_message): std::runtime_error(a_message), Exception(a_message) {}
+		explicit PointerException(const char *a_message): std::runtime_error(a_message), Exception(a_message) {}
 
-		virtual const char * what() const override {
+		virtual const char * what() const noexcept override {
 			prefixWhat("Pointer Exception: ");
 			return combinedWhat.c_str();
 		}
@@ -161,10 +163,10 @@ namespace MV {
 
 	class LogicException : public Exception {
 	public:
-		explicit LogicException(const std::string& a_message) : Exception(a_message), std::runtime_error(a_message) {}
-		explicit LogicException(const char *a_message) : Exception(a_message), std::runtime_error(a_message) {}
+		explicit LogicException(const std::string& a_message) : std::runtime_error(a_message), Exception(a_message) {}
+		explicit LogicException(const char *a_message) : std::runtime_error(a_message), Exception(a_message) {}
 
-		virtual const char * what() const override {
+		virtual const char * what() const noexcept override {
 			prefixWhat("Logic Exception: ");
 			return combinedWhat.c_str();
 		}

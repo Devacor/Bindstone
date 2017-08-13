@@ -106,7 +106,7 @@ void GameInstance::moveCamera(MV::Point<> endPosition, MV::Scale endScale) {
 	auto startScale = worldScene->scale();
 	cameraAction.cancel();
 	cameraAction.then("zoomAndPan", [&, startPosition, endPosition, startScale, endScale](MV::Task &a_self, double /*a_dt*/) {
-		auto percent = std::min(static_cast<MV::PointPrecision>(a_self.elapsed() / 0.5f), 1.0f);
+        float percent = std::min(static_cast<MV::PointPrecision>(a_self.elapsed() / 0.5f), 1.0f);
 		worldScene->position(MV::mix(startPosition, endPosition, percent, 2.0f));
 		worldScene->scale(MV::mix(startScale, endScale, percent, 2.0f));
 		return percent == 1.0f;

@@ -223,11 +223,12 @@ private:
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
+        std::string implementMe;
 		archive(
 			cereal::make_nvp("data", buildingData),
 			cereal::make_nvp("skin", skin),
 			cereal::make_nvp("slot", slot),
-			cereal::make_nvp("player", owningPlayer->email),
+			cereal::make_nvp("player", /*owningPlayer->email*/ implementMe),
 			cereal::make_nvp("Component", cereal::base_class<Component>(this))
 		);
 	}
@@ -247,9 +248,9 @@ private:
 		);
 		GameInstance *gameInstance = nullptr;
 		archive.extract(cereal::make_nvp("game", gameInstance));
-		MV::require<PointerException>(gameInstance != nullptr, "Null gameInstance in Building::load_and_construct.");
-		gameInstance->data().player()
-		construct(std::shared_ptr<Node>(), buildingData, skin, slot, player, *gameInstance);
+		MV::require<MV::PointerException>(gameInstance != nullptr, "Null gameInstance in Building::load_and_construct.");
+		//gameInstance->data().player()
+        //construct(std::shared_ptr<MV::Scene::Node>(), buildingData, skin, slot, player, *gameInstance);
 		archive(
 			cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
 		);

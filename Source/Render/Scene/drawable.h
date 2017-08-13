@@ -116,18 +116,7 @@ namespace MV {
 			bool applyingPosition = false;
 
 			template <class Archive>
-			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				auto selfShared = std::static_pointer_cast<Drawable>(selfReference->shared_from_this());
-				bool parentCanUseId = !parentReference.expired() && parentReference.lock() == selfReference->owner()->componentInParents(parentReference.lock()->id(), false, true).self();
-				archive(
-					cereal::make_nvp("parent", parentCanUseId ? std::weak_ptr<Drawable>() : parentReference),
-					cereal::make_nvp("parentId", parentCanUseId ? parentReference.lock()->id() : std::string()),
-					cereal::make_nvp("anchors", parentAnchors),
-					cereal::make_nvp("offset", ourOffset),
-					cereal::make_nvp("pivot", pivotPercent),
-					cereal::make_nvp("applyingPosition", applyingPosition)
-				);
-			}
+            void save(Archive & archive, std::uint32_t const /*version*/) const;
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const /*version*/) {
@@ -449,6 +438,20 @@ namespace MV {
 
 			void forceInitializeShader();
 		};
+        
+        template <class Archive>
+        void Anchors::save(Archive & archive, std::uint32_t const /*version*/) const {
+            auto selfShared = std::static_pointer_cast<Drawable>(selfReference->shared_from_this());
+            bool parentCanUseId = !parentReference.expired() && parentReference.lock() == selfReference->owner()->componentInParents(parentReference.lock()->id(), false, true).self();
+            archive(
+                    cereal::make_nvp("parent", parentCanUseId ? std::weak_ptr<Drawable>() : parentReference),
+                    cereal::make_nvp("parentId", parentCanUseId ? parentReference.lock()->id() : std::string()),
+                    cereal::make_nvp("anchors", parentAnchors),
+                    cereal::make_nvp("offset", ourOffset),
+                    cereal::make_nvp("pivot", pivotPercent),
+                    cereal::make_nvp("applyingPosition", applyingPosition)
+            );
+        }
 	}
 }
 

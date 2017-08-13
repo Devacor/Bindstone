@@ -41,7 +41,7 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<Slider> &construct, std::uint32_t const /*version*/) {
 				MouseState *mouse = nullptr;
 				archive.extract(cereal::make_nvp("mouse", mouse));
-				MV::require<PointerException>(mouse != nullptr, "Null mouse in Slider::load_and_construct.");
+				MV::require<MV::PointerException>(mouse != nullptr, "Null mouse in Slider::load_and_construct.");
 				construct(std::shared_ptr<Node>(), *mouse);
 				archive(
 					cereal::make_nvp("dragPercent", construct->dragPercent),

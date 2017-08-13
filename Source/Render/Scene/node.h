@@ -883,7 +883,7 @@ namespace MV {
 				archive.extract(cereal::make_nvp("renderer", renderer));
 				bool doPostLoad = true;
 				archive.extract(cereal::make_nvp("postLoad", doPostLoad));
-				MV::require<PointerException>(renderer != nullptr, "Null renderer in Node::load_and_construct.");
+				MV::require<MV::PointerException>(renderer != nullptr, "Null renderer in Node::load_and_construct.");
 				std::string nodeId;
 				archive(cereal::make_nvp("nodeId", nodeId));
 				construct(*renderer, nodeId);

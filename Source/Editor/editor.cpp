@@ -87,9 +87,9 @@ void Editor::initializeWindow(){
 	managers.textures.files("Assets/Map");
 	managers.textures.files("Assets/Images");
 
-	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->number(0.0f)->position({960.0f - 50.0f, 0.0f});
+	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->set(0.0f)->position({960.0f - 50.0f, 0.0f});
 	fps = controls->make("FPS")->
-		attach<MV::Scene::Text>(managers.textLibrary)->number(0.0f)->wrapping(MV::TextWrapMethod::NONE)->bounds({ MV::Point<>(), MV::size(50.0f, 15.0f) });
+		attach<MV::Scene::Text>(managers.textLibrary)->set(0.0f)->wrapping(MV::TextWrapMethod::NONE)->bounds({ MV::Point<>(), MV::size(50.0f, 15.0f) });
 }
 
 void Editor::handleInput(){

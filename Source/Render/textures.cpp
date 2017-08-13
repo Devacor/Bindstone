@@ -290,10 +290,10 @@ namespace MV {
 
 		if (!loaded()) {
 			load();
-			saveLoadedTexture(a_fileName, texture);
+			saveLoadedTexture(a_fileName, texture, textureSize.width, textureSize.height);
 			cleanupOpenglTexture();
 		} else {
-			saveLoadedTexture(a_fileName, texture);
+			saveLoadedTexture(a_fileName, texture, textureSize.width, textureSize.height);
 		}
 	}
 
@@ -653,23 +653,27 @@ namespace MV {
 		return finalSlice;
 	}
 
-	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture) {
-		require<ResourceException>(a_texture, "saveLoadedOpenglTexture was supplied a null texture id: ", a_fileName);
-		glBindTexture(GL_TEXTURE_2D, a_texture);
-		GLint textureWidth, textureHeight;
-		glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &textureWidth);
-		glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &textureHeight);
+	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture, GLuint a_width, GLuint a_height) {
+		GLint prev_fbo = 0;
+		GLuint fbo = 0;
+		glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+		glGenFramebuffers(1, &fbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
-		require<ResourceException>(textureWidth > 0 && textureHeight > 0, "saveLoadedOpenglTexture encountered a 0 dimension image: ", a_fileName);
+		std::vector<char> pixels(a_width*a_height * 4);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, a_texture, 0);
+		GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+		if (status != GL_FRAMEBUFFER_COMPLETE) {
+			std::cerr << "failed to make complete framebuffer object" << status << '\n';
+		}
+		glReadPixels(0, 0, a_width, a_height, GL_RGBA, GL_UNSIGNED_BYTE, &pixels[0]);
+		glBindFramebuffer(GL_FRAMEBUFFER, prev_fbo);
+		glDeleteFramebuffers(1, &fbo);
 
-		std::vector<char> pixels(textureWidth*textureHeight * 4);
-		glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, &pixels[0]);
-
-		SDL_Surface *surf = SDL_CreateRGBSurfaceFrom(&pixels[0], textureWidth, textureHeight, 32, textureWidth * 4, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+		SDL_Surface *surf = SDL_CreateRGBSurfaceFrom(&pixels[0], a_width, a_height, 32, a_width * 4, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
 		IMG_SavePNG(surf, a_fileName.c_str());
 		SDL_FreeSurface(surf);
 	}
-
 
 	void TextureUnloader::increment(GLuint a_id) {
 		MV::require<MV::ResourceException>(a_id != 0, "Null texture attempted to increment in TextureUnloader!");

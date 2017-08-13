@@ -31,7 +31,7 @@ struct CreatureScriptMethods {
 		if (scriptDeath) { scriptDeath(a_creature); }
 	}
 
-	static chaiscript::ChaiScript& CreatureScriptMethods::hook(chaiscript::ChaiScript &a_script) {
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 		a_script.add(chaiscript::user_type<CreatureScriptMethods>(), "CreatureScriptMethods");
 
 		a_script.add(chaiscript::fun(&CreatureScriptMethods::scriptSpawn), "spawn");
@@ -331,7 +331,7 @@ private:
 
 	template <class Archive>
 	static void load_and_construct(Archive & archive, cereal::construct<Creature> &construct) {
-		construct(std::shared_ptr<Node>());
+        construct(std::shared_ptr<MV::Scene::Node>());
 		archive(
 			cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
 		);

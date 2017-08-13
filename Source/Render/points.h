@@ -387,6 +387,77 @@ namespace MV {
 	Scale operator/(Scale a_lhs, PointPrecision a_rhs);
 	Scale operator/(PointPrecision a_lhs, Scale a_rhs);
 
+	inline Scale mixIn(Scale a_start, Scale a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			mixIn(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength),
+			mixIn(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength),
+			mixIn(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength)
+		};
+	}
+
+	inline Scale mix(Scale a_start, Scale a_end, float a_percent, float a_strength = 1.0f) {
+		return mixIn(a_start, a_end, a_percent, a_strength);
+	}
+
+	inline Scale mixOut(Scale a_start, Scale a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			mixOut(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength),
+			mixOut(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength),
+			mixOut(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength)
+		};
+	}
+
+	inline Scale mixInOut(Scale a_start, Scale a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			mixInOut(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength),
+			mixInOut(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength),
+			mixInOut(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength)
+		};
+	}
+
+	inline Scale mixOutIn(Scale a_start, Scale a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			mixOutIn(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength),
+			mixOutIn(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength),
+			mixOutIn(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength)
+		};
+	}
+
+	inline Scale unmixIn(Scale a_start, Scale a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			unmixIn(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength),
+			unmixIn(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength),
+			unmixIn(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength)
+		};
+	}
+	inline Scale unmix(Scale a_start, Scale a_end, float a_percent, float a_strength = 1.0f) {
+		return unmixIn(a_start, a_end, a_percent, a_strength);
+	}
+
+	inline Scale unmixOut(Scale a_start, Scale a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			unmixOut(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength),
+			unmixOut(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength),
+			unmixOut(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength)
+		};
+	}
+
+	inline Scale unmixInOut(Scale a_start, Scale a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			unmixInOut(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength),
+			unmixInOut(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength),
+			unmixInOut(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength)
+		};
+	}
+
+	inline Scale unmixOutIn(Scale a_start, Scale a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			unmixOutIn(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength),
+			unmixOutIn(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength),
+			unmixOutIn(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength)
+		};
+	}
+
 	class DrawPoint : public Point<>, public Color, public TexturePoint{
 	public:
 		DrawPoint(){}
@@ -550,6 +621,85 @@ namespace MV {
         auto value = static_cast<float>(a_left);
         Color tmpPoint = Color(value, value, value, value);
 		return tmpPoint /= a_right;
+	}
+
+	inline Color mixIn(Color a_start, Color a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			mixIn(static_cast<float>(a_start.R), static_cast<float>(a_end.R), a_percent, a_strength),
+			mixIn(static_cast<float>(a_start.G), static_cast<float>(a_end.G), a_percent, a_strength),
+			mixIn(static_cast<float>(a_start.B), static_cast<float>(a_end.B), a_percent, a_strength),
+			mixIn(static_cast<float>(a_start.A), static_cast<float>(a_end.A), a_percent, a_strength)
+		};
+	}
+
+	inline Color mix(Color a_start, Color a_end, float a_percent, float a_strength = 1.0f) {
+		return mixIn(a_start, a_end, a_percent, a_strength);
+	}
+
+	inline Color mixOut(Color a_start, Color a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			mixOut(static_cast<float>(a_start.R), static_cast<float>(a_end.R), a_percent, a_strength),
+			mixOut(static_cast<float>(a_start.G), static_cast<float>(a_end.G), a_percent, a_strength),
+			mixOut(static_cast<float>(a_start.B), static_cast<float>(a_end.B), a_percent, a_strength),
+			mixOut(static_cast<float>(a_start.A), static_cast<float>(a_end.A), a_percent, a_strength)
+		};
+	}
+
+	inline Color mixInOut(Color a_start, Color a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			mixInOut(static_cast<float>(a_start.R), static_cast<float>(a_end.R), a_percent, a_strength),
+			mixInOut(static_cast<float>(a_start.G), static_cast<float>(a_end.G), a_percent, a_strength),
+			mixInOut(static_cast<float>(a_start.B), static_cast<float>(a_end.B), a_percent, a_strength),
+			mixInOut(static_cast<float>(a_start.A), static_cast<float>(a_end.A), a_percent, a_strength)
+		};
+	}
+
+	inline Color mixOutIn(Color a_start, Color a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			mixOutIn(static_cast<float>(a_start.R), static_cast<float>(a_end.R), a_percent, a_strength),
+			mixOutIn(static_cast<float>(a_start.G), static_cast<float>(a_end.G), a_percent, a_strength),
+			mixOutIn(static_cast<float>(a_start.B), static_cast<float>(a_end.B), a_percent, a_strength),
+			mixOutIn(static_cast<float>(a_start.A), static_cast<float>(a_end.A), a_percent, a_strength)
+		};
+	}
+
+	inline Color unmixIn(Color a_start, Color a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			unmixIn(static_cast<float>(a_start.R), static_cast<float>(a_end.R), a_percent, a_strength),
+			unmixIn(static_cast<float>(a_start.G), static_cast<float>(a_end.G), a_percent, a_strength),
+			unmixIn(static_cast<float>(a_start.B), static_cast<float>(a_end.B), a_percent, a_strength),
+			unmixIn(static_cast<float>(a_start.A), static_cast<float>(a_end.A), a_percent, a_strength)
+		};
+	}
+	inline Color unmix(Color a_start, Color a_end, float a_percent, float a_strength = 1.0f) {
+		return unmixIn(a_start, a_end, a_percent, a_strength);
+	}
+
+	inline Color unmixOut(Color a_start, Color a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			unmixOut(static_cast<float>(a_start.R), static_cast<float>(a_end.R), a_percent, a_strength),
+			unmixOut(static_cast<float>(a_start.G), static_cast<float>(a_end.G), a_percent, a_strength),
+			unmixOut(static_cast<float>(a_start.B), static_cast<float>(a_end.B), a_percent, a_strength),
+			unmixOut(static_cast<float>(a_start.A), static_cast<float>(a_end.A), a_percent, a_strength)
+		};
+	}
+
+	inline Color unmixInOut(Color a_start, Color a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			unmixInOut(static_cast<float>(a_start.R), static_cast<float>(a_end.R), a_percent, a_strength),
+			unmixInOut(static_cast<float>(a_start.G), static_cast<float>(a_end.G), a_percent, a_strength),
+			unmixInOut(static_cast<float>(a_start.B), static_cast<float>(a_end.B), a_percent, a_strength),
+			unmixInOut(static_cast<float>(a_start.A), static_cast<float>(a_end.A), a_percent, a_strength)
+		};
+	}
+
+	inline Color unmixOutIn(Color a_start, Color a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			unmixOutIn(static_cast<float>(a_start.R), static_cast<float>(a_end.R), a_percent, a_strength),
+			unmixOutIn(static_cast<float>(a_start.G), static_cast<float>(a_end.G), a_percent, a_strength),
+			unmixOutIn(static_cast<float>(a_start.B), static_cast<float>(a_end.B), a_percent, a_strength),
+			unmixOutIn(static_cast<float>(a_start.A), static_cast<float>(a_end.A), a_percent, a_strength)
+		};
 	}
 
 	/************************\
@@ -758,6 +908,87 @@ namespace MV {
 		return is;
 	}
 
+	template <class T>
+	Size<T> mixIn(Size<T> a_start, Size<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(mixIn(static_cast<float>(a_start.width), static_cast<float>(a_end.width), a_percent, a_strength)),
+			static_cast<T>(mixIn(static_cast<float>(a_start.height), static_cast<float>(a_end.height), a_percent, a_strength)),
+			static_cast<T>(mixIn(static_cast<float>(a_start.depth), static_cast<float>(a_end.depth), a_percent, a_strength))
+		};
+	}
+
+	template <class T>
+	Size<T> mix(Size<T> a_start, Size<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return mixIn(a_start, a_end, a_percent, a_strength);
+	}
+
+	template <class T>
+	Size<T> mixOut(Size<T> a_start, Size<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(mixOut(static_cast<float>(a_start.width), static_cast<float>(a_end.width), a_percent, a_strength)),
+			static_cast<T>(mixOut(static_cast<float>(a_start.height), static_cast<float>(a_end.height), a_percent, a_strength)),
+			static_cast<T>(mixOut(static_cast<float>(a_start.depth), static_cast<float>(a_end.depth), a_percent, a_strength))
+		};
+	}
+
+	template <class T>
+	Size<T> mixInOut(Size<T> a_start, Size<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(mixInOut(static_cast<float>(a_start.width), static_cast<float>(a_end.width), a_percent, a_strength)),
+			static_cast<T>(mixInOut(static_cast<float>(a_start.height), static_cast<float>(a_end.height), a_percent, a_strength)),
+			static_cast<T>(mixInOut(static_cast<float>(a_start.depth), static_cast<float>(a_end.depth), a_percent, a_strength))
+		};
+	}
+
+	template <class T>
+	Size<T> mixOutIn(Size<T> a_start, Size<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(mixOutIn(static_cast<float>(a_start.width), static_cast<float>(a_end.width), a_percent, a_strength)),
+			static_cast<T>(mixOutIn(static_cast<float>(a_start.height), static_cast<float>(a_end.height), a_percent, a_strength)),
+			static_cast<T>(mixOutIn(static_cast<float>(a_start.depth), static_cast<float>(a_end.depth), a_percent, a_strength))
+		};
+	}
+
+	template <class T>
+	Size<T> unmixIn(Size<T> a_start, Size<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(unmixIn(static_cast<float>(a_start.width), static_cast<float>(a_end.width), a_percent, a_strength)),
+			static_cast<T>(unmixIn(static_cast<float>(a_start.height), static_cast<float>(a_end.height), a_percent, a_strength)),
+			static_cast<T>(unmixIn(static_cast<float>(a_start.depth), static_cast<float>(a_end.depth), a_percent, a_strength))
+		};
+	}
+	template <class T>
+	Size<T> unmix(Size<T> a_start, Size<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return unmixIn(a_start, a_end, a_percent, a_strength);
+	}
+
+	template <class T>
+	Size<T> unmixOut(Size<T> a_start, Size<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(unmixOut(static_cast<float>(a_start.width), static_cast<float>(a_end.width), a_percent, a_strength)),
+			static_cast<T>(unmixOut(static_cast<float>(a_start.height), static_cast<float>(a_end.height), a_percent, a_strength)),
+			static_cast<T>(unmixOut(static_cast<float>(a_start.depth), static_cast<float>(a_end.depth), a_percent, a_strength))
+		};
+	}
+
+	template <class T>
+	Size<T> unmixInOut(Size<T> a_start, Size<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(unmixInOut(static_cast<float>(a_start.width), static_cast<float>(a_end.width), a_percent, a_strength)),
+			static_cast<T>(unmixInOut(static_cast<float>(a_start.height), static_cast<float>(a_end.height), a_percent, a_strength)),
+			static_cast<T>(unmixInOut(static_cast<float>(a_start.depth), static_cast<float>(a_end.depth), a_percent, a_strength))
+		};
+	}
+
+	template <class T>
+	Size<T> unmixOutIn(Size<T> a_start, Size<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(unmixOutIn(static_cast<float>(a_start.width), static_cast<float>(a_end.width), a_percent, a_strength)),
+			static_cast<T>(unmixOutIn(static_cast<float>(a_start.height), static_cast<float>(a_end.height), a_percent, a_strength)),
+			static_cast<T>(unmixOutIn(static_cast<float>(a_start.depth), static_cast<float>(a_end.depth), a_percent, a_strength))
+		};
+	}
+
 	/*************************\
 	| -------Point IMP------- |
 	\*************************/
@@ -873,6 +1104,87 @@ namespace MV {
 			std::cerr << "ERROR: Point<T> operator/=(const T& a_other) divide by 0!" << std::endl;
 		}
 		return *this;
+	}
+
+	template <class T>
+	Point<T> mixIn(Point<T> a_start, Point<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(mixIn(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength)),
+			static_cast<T>(mixIn(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength)),
+			static_cast<T>(mixIn(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength))
+		};
+	}
+
+	template <class T>
+	Point<T> mix(Point<T> a_start, Point<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return mixIn(a_start, a_end, a_percent, a_strength);
+	}
+
+	template <class T>
+	Point<T> mixOut(Point<T> a_start, Point<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(mixOut(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength)),
+			static_cast<T>(mixOut(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength)),
+			static_cast<T>(mixOut(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength))
+		};
+	}
+
+	template <class T>
+	Point<T> mixInOut(Point<T> a_start, Point<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(mixInOut(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength)),
+			static_cast<T>(mixInOut(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength)),
+			static_cast<T>(mixInOut(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength))
+		};
+	}
+
+	template <class T>
+	Point<T> mixOutIn(Point<T> a_start, Point<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(mixOutIn(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength)),
+			static_cast<T>(mixOutIn(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength)),
+			static_cast<T>(mixOutIn(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength))
+		};
+	}
+
+	template <class T>
+	Point<T> unmixIn(Point<T> a_start, Point<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(unmixIn(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength)),
+			static_cast<T>(unmixIn(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength)),
+			static_cast<T>(unmixIn(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength))
+		};
+	}
+	template <class T>
+	Point<T> unmix(Point<T> a_start, Point<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return unmixIn(a_start, a_end, a_percent, a_strength);
+	}
+
+	template <class T>
+	Point<T> unmixOut(Point<T> a_start, Point<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(unmixOut(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength)),
+			static_cast<T>(unmixOut(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength)),
+			static_cast<T>(unmixOut(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength))
+		};
+	}
+
+	template <class T>
+	Point<T> unmixInOut(Point<T> a_start, Point<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(unmixInOut(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength)),
+			static_cast<T>(unmixInOut(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength)),
+			static_cast<T>(unmixInOut(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength))
+		};
+	}
+
+	template <class T>
+	Point<T> unmixOutIn(Point<T> a_start, Point<T> a_end, float a_percent, float a_strength = 1.0f) {
+		return {
+			static_cast<T>(unmixOutIn(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent, a_strength)),
+			static_cast<T>(unmixOutIn(static_cast<float>(a_start.y), static_cast<float>(a_end.y), a_percent, a_strength)),
+			static_cast<T>(unmixOutIn(static_cast<float>(a_start.z), static_cast<float>(a_end.z), a_percent, a_strength))
+		};
 	}
 
 	template <class T>

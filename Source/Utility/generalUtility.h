@@ -126,23 +126,19 @@ namespace MV {
     float wrap(float lowerBound, float upperBound, float val);
     double wrap(double lowerBound, double upperBound, double val);
 
-	template<typename T>
-	T mixIn(T a_start, T a_end, float a_percent, float a_strength = 1.0f) {
-		return ((a_end - a_start) * static_cast<float>(pow(a_percent, a_strength))) + a_start;
+	inline float mixIn(float a_start, float a_end, float a_percent, float a_strength = 1.0f) {
+		return pow(a_percent, a_strength)*(a_end - a_start) + a_start;
 	}
 
-	template<typename T>
-	T mix(T a_start, T a_end, float a_percent, float a_strength = 1.0f) {
+	inline float mix(float a_start, float a_end, float a_percent, float a_strength = 1.0f) {
 		return mixIn(a_start, a_end, a_percent, a_strength);
 	}
 
-	template<typename T>
-	T mixOut(T a_start, T a_end, float a_percent, float a_strength = 1.0f) {
-		return ((a_end - a_start) * static_cast<float>(1.0f - pow(1.0f - a_percent, a_strength))) + a_start;
+	inline float mixOut(float a_start, float a_end, float a_percent, float a_strength = 1.0f) {
+		return (1.0f - pow(1.0f - a_percent, a_strength)) * (a_end - a_start) + a_start;
 	}
 
-	template<typename T>
-	T mixInOut(T a_start, T a_end, float a_percent, float a_strength = 1.0f) {
+	inline float mixInOut(float a_start, float a_end, float a_percent, float a_strength = 1.0f) {
 		auto halfRange = (a_end - a_start) / 2.0f + a_start;
 		if (a_percent < .5f) {
 			return mixIn(a_start, halfRange, a_percent*2.0f, a_strength);
@@ -150,8 +146,7 @@ namespace MV {
 		return mixOut(halfRange, a_end, (a_percent - .5f) * 2.0f, a_strength);
 	}
 
-	template<typename T>
-	T mixOutIn(T a_start, T a_end, float a_percent, float a_strength = 1.0f) {
+	inline float mixOutIn(float a_start, float a_end, float a_percent, float a_strength = 1.0f) {
 		auto halfRange = (a_end - a_start) / 2.0f + a_start;
 		if (a_percent < .5f) {
 			return mixOut(a_start, halfRange, a_percent * 2.0f, a_strength);
@@ -159,22 +154,18 @@ namespace MV {
 		return mixIn(halfRange, a_end, (a_percent - .5f) * 2.0f, a_strength);
 	}
 
-	template<typename T>
-	T unmix(T a_start, T a_end, T a_value, float a_strength = 1.0f) {
+	inline float unmix(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
 		return pow((a_value - a_start) / (a_end - a_start), 1.0f / a_strength);
 	}
-	template<typename T>
-	T unmixIn(T a_start, T a_end, T a_value, float a_strength = 1.0f) {
+	inline float unmixIn(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
 		return pow((a_value - a_start) / (a_end - a_start), 1.0f / a_strength);
 	}
 
-	template<typename T>
-	T unmixOut(T a_start, T a_end, T a_value, float a_strength = 1.0f) {
+	inline float unmixOut(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
 		return (pow((-1.0f * ((a_value - a_start) / (a_end - a_start) - 1.0f)), 1.0f / a_strength) - 1.0f) * -1.0f;
 	}
 
-	template<typename T>
-	T unmixInOut(T a_start, T a_end, T a_value, float a_strength = 1.0f) {
+	inline float unmixInOut(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
 		auto halfRange = (a_end - a_start) / 2.0f + a_start;
 		if (a_value < halfRange) {
 			return unmixIn(a_start, halfRange, a_value, a_strength) / 2.0f;
@@ -182,8 +173,7 @@ namespace MV {
 		return (unmixOut(halfRange, a_end, a_value, a_strength) / 2.0f) + .5f;
 	}
 
-	template<typename T>
-	T unmixOutIn(T a_start, T a_end, T a_value, float a_strength = 1.0f) {
+	inline float unmixOutIn(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
 		auto halfRange = (a_end - a_start) / 2.0f + a_start;
 		if (a_value < halfRange) {
 			return unmixOut(a_start, halfRange, a_value, a_strength) / 2.0f;

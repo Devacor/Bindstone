@@ -55,13 +55,13 @@ namespace MV {
 			std::map<std::string, EventSignal> eventSignals;
 
 			AnimationTrack(int a_trackIndex, spAnimationState *a_animationState, spSkeleton *a_skeleton):
+                onStart(onStartSignal),
+                onEnd(onEndSignal),
+                onComplete(onCompleteSignal),
+                onEvent(onEventSignal),
 				myTrackIndex(a_trackIndex),
 				animationState(a_animationState),
-				skeleton(a_skeleton),
-				onStart(onStartSignal),
-				onEnd(onEndSignal),
-				onComplete(onCompleteSignal),
-				onEvent(onEventSignal){
+                skeleton(a_skeleton){
 			}
 
 			int trackIndex() const{
@@ -254,7 +254,7 @@ namespace MV {
 			bool autoUpdate;
 
 			int defaultTrack = 0;
-			std::map<int, AnimationTrack> tracks;
+            std::map<int, std::unique_ptr<AnimationTrack>> tracks;
 			std::map<std::string, std::set<std::string>> slotsToNodes;
 		};
 

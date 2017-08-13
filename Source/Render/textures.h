@@ -20,7 +20,7 @@ namespace MV {
 	GLenum getTextureFormat(SDL_Surface* img);
 	GLenum getInternalTextureFormat(SDL_Surface* img);
 
-	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture);
+	void saveLoadedTexture(const std::string &a_fileName, GLuint a_texture, GLuint a_width, GLuint a_height);
 
 	//Requires a 4 point vector. IE: Shrink to 4 before calling this if you use 9-slicing etc.
 	bool clearTexturePoints(std::vector<DrawPoint> &a_points);

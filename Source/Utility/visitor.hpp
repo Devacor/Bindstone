@@ -345,7 +345,7 @@ namespace MV {
 	}
 
 	template <typename Val_, typename... Funcs_>
-	typename void
+	void
 		visit_each(const std::vector<Val_> & collection, Funcs_ && ... funcs)
 	{
 		for (auto&& val : collection) {

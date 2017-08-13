@@ -4,46 +4,49 @@
 namespace MV {
 
 	MapNode::MapNode(Map& a_grid, const Point<int> &a_location, float a_cost, bool a_useCorners) :
-		initialized(false),
-		travelCost(a_cost),
-		location(a_location),
-		map(&a_grid),
-		useCorners(a_useCorners),
 		onBlock(onBlockSignal),
 		onUnblock(onUnblockSignal),
 		onStaticBlock(onStaticBlockSignal),
 		onStaticUnblock(onStaticUnblockSignal),
 		onCostChange(onCostChangeSignal),
-		onClearanceChange(onClearanceChangeSignal){
+		onClearanceChange(onClearanceChangeSignal),
+        map(&a_grid),
+        initialized(false),
+        useCorners(a_useCorners),
+        location(a_location),
+        travelCost(a_cost){
+        
 		edges.fill(nullptr);
 	}
 
 	MapNode::MapNode(const MapNode &a_rhs) :
-		initialized(false),
-		travelCost(a_rhs.travelCost),
-		location(a_rhs.location),
+        onBlock(onBlockSignal),
+        onUnblock(onUnblockSignal),
+        onStaticBlock(onStaticBlockSignal),
+        onStaticUnblock(onStaticUnblockSignal),
+        onCostChange(onCostChangeSignal),
+        onClearanceChange(onClearanceChangeSignal),
 		map(a_rhs.map),
-		staticBlockedSemaphore(a_rhs.staticBlockedSemaphore),
+		initialized(false),
 		useCorners(a_rhs.useCorners),
-		onBlock(onBlockSignal),
-		onUnblock(onUnblockSignal),
-		onStaticBlock(onStaticBlockSignal),
-		onStaticUnblock(onStaticUnblockSignal),
-		onCostChange(onCostChangeSignal),
-		onClearanceChange(onClearanceChangeSignal) {
+		location(a_rhs.location),
+        travelCost(a_rhs.travelCost),
+		staticBlockedSemaphore(a_rhs.staticBlockedSemaphore){
+        
 		edges.fill(nullptr);
 	}
 
 	MapNode::MapNode() :
-		initialized(false),
+        onBlock(onBlockSignal),
+        onUnblock(onUnblockSignal),
+        onStaticBlock(onStaticBlockSignal),
+        onStaticUnblock(onStaticUnblockSignal),
+        onCostChange(onCostChangeSignal),
+        onClearanceChange(onClearanceChangeSignal),
 		map(nullptr),
-		useCorners(false),
-		onBlock(onBlockSignal),
-		onUnblock(onUnblockSignal),
-		onStaticBlock(onStaticBlockSignal),
-		onStaticUnblock(onStaticUnblockSignal),
-		onCostChange(onCostChangeSignal),
-		onClearanceChange(onClearanceChangeSignal) {
+		initialized(false),
+		useCorners(false) {
+        
 		edges.fill(nullptr);
 	}
 
@@ -205,6 +208,7 @@ namespace MV {
 		auto& mapRef = *map;
 		return !mapRef.blocked({ location.x + a_offset.y, location.y }) && !mapRef.blocked({ location.x, location.y + a_offset.y }) && !mapRef.blocked({ location.x + a_offset.x, location.y + a_offset.y });
 	}
+    const int MapNode::MAXIMUM_CLEARANCE;
 
 	void MapNode::lazyInitialize() const {
 		if (!initialized) {

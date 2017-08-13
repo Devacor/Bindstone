@@ -42,10 +42,16 @@ namespace MV{
 					return 0.0f;
 				}
 			}
-			std::shared_ptr<Text> number(PointPrecision a_newText) {
-				return text(std::to_string(a_newText));
-			}
-			std::shared_ptr<Text> number(int a_newText) {
+            
+            std::shared_ptr<Text> number(PointPrecision a_newText) {
+                return text(std::to_string(a_newText));
+            }
+            std::shared_ptr<Text> number(int a_newText) {
+                return text(std::to_string(a_newText));
+            }
+            
+            template <typename T>
+			std::shared_ptr<Text> set(T a_newText) {
 				return text(std::to_string(a_newText));
 			}
 
@@ -220,7 +226,7 @@ namespace MV{
 			static void load_and_construct(Archive & archive, cereal::construct<Text> &construct, std::uint32_t const /*version*/) {
 				TextLibrary *library = nullptr;
 				archive.extract(cereal::make_nvp("textLibrary", library));
-				MV::require<PointerException>(library != nullptr, "Null TextLibrary in Text::load_and_construct.");
+				MV::require<MV::PointerException>(library != nullptr, "Null TextLibrary in Text::load_and_construct.");
 
 				construct(std::shared_ptr<Node>(), *library);
 

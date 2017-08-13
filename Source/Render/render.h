@@ -46,10 +46,14 @@
 
 #ifdef HAVE_OPENGLES
 	#include <SDL_opengl.h>
-	#include <SDL_opengles.h>
+	#include <SDL_opengles2.h>
 	typedef GLfloat GLdouble; //opengles has no GLdouble
+
+    inline int gl3wInit(){
+        return 0;
+    }
 #else
-	#include "gl3w/include/GL/gl3w.h"
+	#include <gl3w/include/GL/gl3w.h>
 	#include <SDL_opengl.h>
 #endif
 
@@ -159,9 +163,17 @@ namespace MV {
 
 		void startUsingFramebuffer(std::weak_ptr<Framebuffer> a_framebuffer, bool a_push = true);
 		void stopUsingFramebuffer();
+
+		inline static GLint defaultFramebufferId() {
+			return originalFramebufferId;
+		}
+
+		inline static GLint defaultRenderbufferId() {
+			return originalFramebufferId;
+		}
 	protected:
-		GLint originalFramebufferId;
-		GLint originalRenderbufferId;
+		static GLint originalFramebufferId;
+		static GLint originalRenderbufferId;
 		std::vector< std::weak_ptr<Framebuffer> > activeFramebuffers;
 
 		void loadExtensionFramebufferObject(char* a_extensionsList);
@@ -457,6 +469,8 @@ namespace MV {
 				std::cerr << "GL Error: (" << error << ")\nencountered in " << a_location << ".\n" << std::endl;
 			}
 		}
+
+		void resetViewport();
 
 		void draw(GLenum drawType, std::shared_ptr<Scene::Node> a_node);
 	private:

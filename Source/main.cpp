@@ -1,5 +1,3 @@
-//Change this from 1 to 0 or vice versa to either compile the actual game, or the SUPER basic SDL test.
-#if 1
 #define BINDSTONE_CLIENT 1
 
 #include "Game/gameEditor.h"
@@ -13,7 +11,8 @@
 #include "Utility/scopeGuard.hpp"
 #include "chaiscript/chaiscript.hpp"
 
-#include <fstream>
+//Change this from 1 to 0 or vice versa to either compile the actual game, or the SUPER basic SDL test.
+#if 0
 
 int main(int, char *[]) {
 // 	std::string content = "Hello World";

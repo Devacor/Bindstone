@@ -1,4 +1,4 @@
-#if 1
+#define BINDSTONE_CLIENT 1
 
 #include "Game/gameEditor.h"
 #include "Utility/threadPool.hpp"
@@ -13,6 +13,8 @@
 
 #include <fstream>
 #include <windows.h>
+
+#if 0
 
 int random(int min, int max) //range : [min, max)
 {

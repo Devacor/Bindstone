@@ -172,16 +172,16 @@ namespace MV {
 		}
 
 		bool update(double a_dt){
-			if (!finished()) {
-				unsuspend();
+			if (finished()) { return true; }
 
-				totalTime += a_dt;
-				if (deltaInterval > 0) {
-					totalUpdateIntervals();
-				} else {
-					lastCalledInterval = totalTime;
-					totalUpdateStep(a_dt);
-				}
+			unsuspend();
+
+			totalTime += a_dt;
+			if (deltaInterval > 0) {
+				totalUpdateIntervals();
+			} else {
+				lastCalledInterval = totalTime;
+				totalUpdateStep(a_dt);
 			}
 			return finished();
 		}

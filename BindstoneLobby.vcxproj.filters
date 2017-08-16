@@ -140,9 +140,6 @@
     <ClCompile Include="Source\Render\Scene\slider.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Utility\threadPool.cpp">
-      <Filter>Source Files\Utility</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Render\texturePacker.cpp">
       <Filter>Source Files\Render</Filter>
     </ClCompile>
@@ -569,6 +566,9 @@
     <ClCompile Include="Source\Game\Instance\team.cpp">
       <Filter>Source Files\Game\Instance</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Utility\asioThreadPool.cpp">
+      <Filter>Source Files\Utility</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Audio\package.h">
@@ -662,9 +662,6 @@
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
     <ClInclude Include="Source\Utility\task.hpp">
-      <Filter>Source Files\Utility</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Utility\threadPool.h">
       <Filter>Source Files\Utility</Filter>
     </ClInclude>
     <ClInclude Include="Source\Render\texturePacker.h">
@@ -1332,6 +1329,12 @@
     </ClInclude>
     <ClInclude Include="Source\Game\Instance\team.h">
       <Filter>Source Files\Game\Instance</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\asioThreadPool.h">
+      <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Utility\threadPool.hpp">
+      <Filter>Source Files\Utility</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

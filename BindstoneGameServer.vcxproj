@@ -129,7 +129,7 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <AdditionalIncludeDirectories>
       </AdditionalIncludeDirectories>
-      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj</AdditionalOptions>
+      <AdditionalOptions>-DBINDSTONE_SERVER -DBINDSTONE_GAME_SERVER -D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj</AdditionalOptions>
       <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <CompileAs>CompileAsCpp</CompileAs>
@@ -180,7 +180,7 @@
       <AdditionalIncludeDirectories>
       </AdditionalIncludeDirectories>
       <EnablePREfast>false</EnablePREfast>
-      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj</AdditionalOptions>
+      <AdditionalOptions>-DBINDSTONE_SERVER -DBINDSTONE_GAME_SERVER -D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj</AdditionalOptions>
       <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <DisableLanguageExtensions>false</DisableLanguageExtensions>
@@ -364,12 +364,12 @@
     <ClCompile Include="Source\Render\sharedTextures.cpp" />
     <ClCompile Include="Source\Render\texturePacker.cpp" />
     <ClCompile Include="Source\Render\textures.cpp" />
+    <ClCompile Include="Source\Utility\asioThreadPool.cpp" />
     <ClCompile Include="Source\Utility\chaiscriptStdLib.cpp" />
     <ClCompile Include="Source\Utility\generalUtility.cpp" />
     <ClCompile Include="Source\Utility\log.cpp" />
     <ClCompile Include="Source\Utility\sha512.cpp" />
     <ClCompile Include="Source\Utility\stopwatch.cpp" />
-    <ClCompile Include="Source\Utility\threadPool.cpp" />
     <ClCompile Include="Source\Utility\tinyutf8.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -611,6 +611,7 @@
     <ClInclude Include="Source\Render\sharedTextures.h" />
     <ClInclude Include="Source\Render\texturePacker.h" />
     <ClInclude Include="Source\Render\textures.h" />
+    <ClInclude Include="Source\Utility\asioThreadPool.h" />
     <ClInclude Include="Source\Utility\cerealUtility.h" />
     <ClInclude Include="Source\Utility\chaiscriptStdLib.h" />
     <ClInclude Include="Source\Utility\chaiscriptUtility.h" />
@@ -625,7 +626,7 @@
     <ClInclude Include="Source\Utility\stopwatch.h" />
     <ClInclude Include="Source\Utility\task.hpp" />
     <ClInclude Include="Source\Utility\taskActions.hpp" />
-    <ClInclude Include="Source\Utility\threadPool.h" />
+    <ClInclude Include="Source\Utility\threadPool.hpp" />
     <ClInclude Include="Source\Utility\tinyutf8.h" />
     <ClInclude Include="Source\Utility\tupleHelpers.hpp" />
     <ClInclude Include="Source\Utility\visitor.hpp" />

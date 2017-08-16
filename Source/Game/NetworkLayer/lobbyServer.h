@@ -15,7 +15,7 @@
 #include <tuple>
 
 #include <pqxx/pqxx>
-#include <boolinq/boolinq.h>
+#include <LINQ/boolinq.hpp>
 
 #include "Utility/cerealUtility.h"
 

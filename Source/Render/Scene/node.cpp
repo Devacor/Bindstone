@@ -56,24 +56,22 @@ namespace MV {
 		void Node::draw() {
 			if (allowDraw) {
 				bool allowChildrenToDraw = true;
-				//auto stableComponentList = childComponents;
-				for (auto&& component : childComponents) {
-					allowChildrenToDraw = component->draw() && allowChildrenToDraw;
+				for (size_t i = 0; i < childComponents.size();++i) {
+					allowChildrenToDraw = childComponents[i]->draw() && allowChildrenToDraw;
 				}
 				if (allowChildrenToDraw) {
 					drawChildren();
 				}
-				for (auto&& component : childComponents) {
-					component->endDraw();
+				for (size_t i = 0; i < childComponents.size(); ++i) {
+					childComponents[i]->endDraw();
 				}
 			}
 		}
 
 		void Node::drawChildren() {
 			if (allowDraw) {
-				//auto stableChildNodes = childNodes;
-				for (auto&& child : childNodes) {
-					child->draw();
+				for (size_t i = 0;i < childNodes.size();++i) {
+					childNodes[i]->draw();
 				}
 			}
 		}
@@ -85,21 +83,22 @@ namespace MV {
 				temporaryWorldMatrixTransform = a_overrideParentMatrix;
 				temporaryWorldMatrixTransform *= localTransform();
 				bool allowChildrenToDraw = true;
-				//auto stableComponentList = childComponents;
-				for (auto&& component : childComponents) {
-					allowChildrenToDraw = component->draw() && allowChildrenToDraw;
+				for (size_t i = 0; i < childComponents.size();++i) {
+					allowChildrenToDraw = childComponents[i]->draw() && allowChildrenToDraw;
 				}
 				if (allowChildrenToDraw) {
 					drawChildren(worldTransform());
+				}
+				for (size_t i = 0; i < childComponents.size(); ++i) {
+					childComponents[i]->endDraw();
 				}
 			}
 		}
 
 		void Node::drawChildren(const TransformMatrix &a_overrideParentMatrix) {
 			if (allowDraw) {
-				//auto stableChildNodes = childNodes;
-				for (auto&& child : childNodes) {
-					child->draw(a_overrideParentMatrix);
+				for (size_t i = 0; i < childNodes.size(); ++i) {
+					childNodes[i]->draw(a_overrideParentMatrix);
 				}
 			}
 		}
@@ -107,15 +106,17 @@ namespace MV {
 		void Node::update(double a_delta, bool a_force) {
 			allowChangeCallNeeded = true;
 			if (allowUpdate || a_force) {
-				//auto stableComponentList = childComponents;
-				for (auto&& component : childComponents) {
-					component->update(a_delta);
+				for (size_t i = 0; i < childComponents.size(); ++i) {
+					childComponents[i]->update(a_delta);
 				}
-				//auto stableChildNodes = childNodes;
-				for (auto&& child : childNodes) {
-					child->update(a_delta);
+				for (size_t i = 0; i < childNodes.size(); ++i) {
+					childNodes[i]->update(a_delta);
 				}
-				rootTask.update(a_delta);
+				if (rootTask) {
+					if (rootTask->update(a_delta)) {
+						rootTask.reset();
+					}
+				}
 			}
 			if (onChangeCallNeeded) {
 				onChangeCallNeeded = false;

@@ -7,9 +7,6 @@ namespace MV {
 
 	namespace Scene {
 
-		class Node;
-		class Component;
-
 		class Node : public std::enable_shared_from_this<Node> {
 			friend cereal::access;
 			friend Component;
@@ -184,10 +181,9 @@ namespace MV {
 			template<typename ComponentType>
 			SafeComponent<ComponentType> attach(std::shared_ptr<ComponentType> a_component) {
 				auto self = shared_from_this();
-				if (a_component->ownerIsAlive()) {
-					a_component->detach();
-				}
+				a_component->detach();
 				childComponents.push_back(a_component);
+				a_component->reattached(self);
 				onAttachSignal(a_component);
 				return SafeComponent<ComponentType>(self, a_component);
 			}
@@ -217,10 +213,11 @@ namespace MV {
 				auto self = shared_from_this();
 				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
 				if (foundComponent != childComponents.end()) {
+					(*foundComponent)->detachImplementation();
 					auto sharedComponent = (*foundComponent);
-					sharedComponent->onRemoved();
 					childComponents.erase(foundComponent);
 					onDetachSignal(sharedComponent);
+					(*foundComponent)->componentOwner.reset();
 				}
 				return self;
 			}
@@ -230,9 +227,10 @@ namespace MV {
 				auto self = shared_from_this();
 				auto found = std::find(childComponents.begin(), childComponents.end(), a_component);
 				if (found != childComponents.end()) {
-					a_component->onRemoved();
+					(*found)->detachImplementation();
 					childComponents.erase(found);
 					onDetachSignal(a_component);
+					(*found)->componentOwner.reset();
 				}
 				return self;
 			}
@@ -248,9 +246,11 @@ namespace MV {
 					return a_component->id() == a_componentId;
 				});
 				if (found != childComponents.end()) {
+					(*found)->detachImplementation();
 					auto foundComponent = *found;
 					childComponents.erase(found);
 					onDetachSignal(foundComponent);
+					(*found)->componentOwner.reset();
 				} else if (a_throwIfNotFound) {
 					require<ResourceException>(false, "Component with id [", a_componentId, "] not found in node [", id(), "]");
 				}
@@ -656,7 +656,10 @@ namespace MV {
 			std::shared_ptr<Node> clone(const std::shared_ptr<Node> &a_parent = nullptr);
 
 			Task& task() {
-				return rootTask;
+				if (!rootTask) {
+					rootTask = std::make_unique<Task>();
+				}
+				return *rootTask;
 			}
 
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
@@ -675,7 +678,7 @@ namespace MV {
 			void postLoadStep();
 
 		private:
-			Task rootTask;
+			std::unique_ptr<Task> rootTask;
 
 			void cameraIdInternal(int32_t a_newCameraId) {
 				ourCameraId = a_newCameraId;

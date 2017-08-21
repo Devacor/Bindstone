@@ -115,8 +115,19 @@ namespace MV {
 		}
 
 		void Component::detach() {
-			detachImplementation();
-			owner()->detach(shared_from_this());
+			if (ownerIsAlive()) {
+				owner()->detach(shared_from_this());
+			}
 		}
+
+		void Component::attach(const std::shared_ptr<Node> &a_parent) {
+			a_parent->attach(shared_from_this());
+		}
+
+		void Component::reattached(const std::shared_ptr<Node> &a_parent) {
+			componentOwner = a_parent;
+			reattachImplementation();
+		}
+
 	}
 }

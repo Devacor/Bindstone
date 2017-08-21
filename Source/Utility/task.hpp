@@ -242,7 +242,7 @@ namespace MV {
 			if (!sequentialTasks.empty()) {
 				sequentialTasks.front()->suspend();
 			}
-			if (a_other->blockParentCompletion) { ++childrenBlockingOurCompletionCount; }
+			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.push_front(a_other);
 			mostRecentCreated = a_other;
 			resetFinishState();
@@ -272,7 +272,7 @@ namespace MV {
 		}
 
 		Task& then(const std::shared_ptr<Task> &a_other) {
-			if (a_other->blockParentCompletion) { ++childrenBlockingOurCompletionCount; }
+			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.push_back(a_other);
 			mostRecentCreated = a_other;
 			resetFinishState();
@@ -302,7 +302,7 @@ namespace MV {
 		}
 
 		Task& thenAlso(const std::shared_ptr<Task> &a_other) {
-			if (a_other->blockParentCompletion) { ++childrenBlockingOurCompletionCount; }
+			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.push_back(a_other);
 			a_other->block = false;
 			mostRecentCreated = a_other;
@@ -337,7 +337,7 @@ namespace MV {
 		}
 
 		Task& also(const std::shared_ptr<Task> &a_other) {
-			if (a_other->blockParentCompletion) { ++childrenBlockingOurCompletionCount; }
+			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			parallelTasks.push_back(a_other);
 			resetFinishState();
 			mostRecentCreated = parallelTasks.back();
@@ -378,7 +378,7 @@ namespace MV {
 			auto found = std::find_if(sequentialTasks.begin(), sequentialTasks.end(), [&](const std::shared_ptr<Task> &a_item) {return a_item->name() == a_reference; });
 			require<ResourceException>(found != sequentialTasks.end(), "Task::after missing [", a_reference, "]");
 			++found;
-			if (a_other->blockParentCompletion) { ++childrenBlockingOurCompletionCount; }
+			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.insert(found, a_other);
 			mostRecentCreated = a_other;
 			resetFinishState();
@@ -413,7 +413,7 @@ namespace MV {
 			if (found == sequentialTasks.begin()) {
 				(*found)->suspend();
 			}
-			if (a_other->blockParentCompletion) { ++childrenBlockingOurCompletionCount; }
+			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.insert(found, a_other);
 			mostRecentCreated = a_other;
 			resetFinishState();
@@ -713,7 +713,7 @@ namespace MV {
 				if (!sequentialTasks.empty()) {
 					auto currentSequentialTask = sequentialTasks.begin();
 					if ((*currentSequentialTask)->update(a_dt)) {
-						if ((*currentSequentialTask)->blockParentCompletion) { --childrenBlockingOurCompletionCount; }
+						childrenBlockingOurCompletionCount -= static_cast<int>((*currentSequentialTask)->blockParentCompletion);
 						sequentialTasks.erase(currentSequentialTask);
 						a_dt = 0;
 						continue; //Avoid forcing a frame between sequential task completions if they immediately finish.
@@ -738,7 +738,7 @@ namespace MV {
 					needToErase = true;
 				}
 				if (needToErase) {
-					if ((*task)->blockParentCompletion) { --childrenBlockingOurCompletionCount; }
+					childrenBlockingOurCompletionCount -= static_cast<int>((*task)->blockParentCompletion);
 					parallelTasks.erase(task++);
 				} else {
 					++task;

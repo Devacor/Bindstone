@@ -9,8 +9,8 @@ boost/1.64.0_2@hi3c/experimental
 chaiscript/5.8.5_1@hi3c/experimental
 exprtk/5d0dd1b_1@hi3c/experimental
 spine/3.6.32_1@hi3c/experimental
-cereal/a9c1494@hi3c/experimental
 boolinq/1468eff@hi3c/experimental
+cereal/8f47291@hi3c/experimental
 
 [generators]
 cmake

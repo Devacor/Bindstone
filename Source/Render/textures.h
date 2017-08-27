@@ -11,6 +11,7 @@
 #include "render.h"
 #include "boxaabb.h"
 
+#include "Utility/signal.hpp"
 #include "Utility/cerealUtility.h"
 
 #include "chaiscript/chaiscript.hpp"

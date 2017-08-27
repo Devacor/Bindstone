@@ -126,19 +126,27 @@ namespace MV {
     float wrap(float lowerBound, float upperBound, float val);
     double wrap(double lowerBound, double upperBound, double val);
 
-	inline float mixIn(float a_start, float a_end, float a_percent, float a_strength = 1.0f) {
+	inline float mix(float a_start, float a_end, float a_percent) {
+		return (a_percent * (a_end - a_start)) + a_start;
+	}
+
+	inline float unmix(float a_start, float a_end, float a_value) {
+		return a_end == a_start ? a_end : (a_value - a_start) / (a_end - a_start);
+	}
+
+	inline float mixIn(float a_start, float a_end, float a_percent, float a_strength) {
 		return pow(a_percent, a_strength)*(a_end - a_start) + a_start;
 	}
 
-	inline float mix(float a_start, float a_end, float a_percent, float a_strength = 1.0f) {
+	inline float mix(float a_start, float a_end, float a_percent, float a_strength) {
 		return mixIn(a_start, a_end, a_percent, a_strength);
 	}
 
-	inline float mixOut(float a_start, float a_end, float a_percent, float a_strength = 1.0f) {
+	inline float mixOut(float a_start, float a_end, float a_percent, float a_strength) {
 		return (1.0f - pow(1.0f - a_percent, a_strength)) * (a_end - a_start) + a_start;
 	}
 
-	inline float mixInOut(float a_start, float a_end, float a_percent, float a_strength = 1.0f) {
+	inline float mixInOut(float a_start, float a_end, float a_percent, float a_strength) {
 		auto halfRange = (a_end - a_start) / 2.0f + a_start;
 		if (a_percent < .5f) {
 			return mixIn(a_start, halfRange, a_percent*2.0f, a_strength);
@@ -146,7 +154,7 @@ namespace MV {
 		return mixOut(halfRange, a_end, (a_percent - .5f) * 2.0f, a_strength);
 	}
 
-	inline float mixOutIn(float a_start, float a_end, float a_percent, float a_strength = 1.0f) {
+	inline float mixOutIn(float a_start, float a_end, float a_percent, float a_strength) {
 		auto halfRange = (a_end - a_start) / 2.0f + a_start;
 		if (a_percent < .5f) {
 			return mixOut(a_start, halfRange, a_percent * 2.0f, a_strength);
@@ -154,18 +162,18 @@ namespace MV {
 		return mixIn(halfRange, a_end, (a_percent - .5f) * 2.0f, a_strength);
 	}
 
-	inline float unmix(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
-		return pow((a_value - a_start) / (a_end - a_start), 1.0f / a_strength);
+	inline float unmixIn(float a_start, float a_end, float a_value, float a_strength) {
+		return a_end == a_start ? a_end : pow((a_value - a_start) / (a_end - a_start), 1.0f / a_strength);
 	}
-	inline float unmixIn(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
-		return pow((a_value - a_start) / (a_end - a_start), 1.0f / a_strength);
-	}
-
-	inline float unmixOut(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
-		return (pow((-1.0f * ((a_value - a_start) / (a_end - a_start) - 1.0f)), 1.0f / a_strength) - 1.0f) * -1.0f;
+	inline float unmix(float a_start, float a_end, float a_value, float a_strength) {
+		return unmixIn(a_start, a_end, a_value, a_strength);
 	}
 
-	inline float unmixInOut(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
+	inline float unmixOut(float a_start, float a_end, float a_value, float a_strength) {
+		return 1.0f - pow(1.0f - ((a_value - a_start) / (a_end - a_start)), 1.0f / a_strength);
+	}
+
+	inline float unmixInOut(float a_start, float a_end, float a_value, float a_strength) {
 		auto halfRange = (a_end - a_start) / 2.0f + a_start;
 		if (a_value < halfRange) {
 			return unmixIn(a_start, halfRange, a_value, a_strength) / 2.0f;
@@ -173,7 +181,7 @@ namespace MV {
 		return (unmixOut(halfRange, a_end, a_value, a_strength) / 2.0f) + .5f;
 	}
 
-	inline float unmixOutIn(float a_start, float a_end, float a_value, float a_strength = 1.0f) {
+	inline float unmixOutIn(float a_start, float a_end, float a_value, float a_strength) {
 		auto halfRange = (a_end - a_start) / 2.0f + a_start;
 		if (a_value < halfRange) {
 			return unmixOut(a_start, halfRange, a_value, a_strength) / 2.0f;
@@ -265,10 +273,7 @@ namespace MV {
 	}
 
 	template <class Type>
-	void rotatePoint2D(Type &x, Type &y, Type angle, AngleType angleUnitIs = DEGREES){
-		if(angleUnitIs == DEGREES){
-			angle = toRadians(angle);
-		}
+	void rotatePoint2DRad(Type &x, Type &y, Type angle) {
 		Type tmpX, tmpY;
 		auto c = cos(angle);
 		auto s = sin(angle);
@@ -278,40 +283,9 @@ namespace MV {
 	}
 
 	template <class Type>
-	void rotatePoint3D(Type &x, Type &y, Type &z, Type aX, Type aY, Type aZ, Type angle, AngleType angleUnitIs = DEGREES){
-        Type radians = (angleUnitIs == DEGREES) ? toRadians(angle) : angle;
-        
-        Type matrix[3][3];
-        
-        Type sn = sin(radians);
-        Type cs = cos(radians);
-        
-        Type xSin = aX * sn;
-        Type ySin = aY * sn;
-        Type zSin = aZ * sn;
-        Type oneMinusCS = 1.0f - cs;
-        Type xym = aX * aY * oneMinusCS;
-        Type xzm = aX * aZ * oneMinusCS;
-        Type yzm = aY * aZ * oneMinusCS;
-        
-        matrix[0][0] = (aX * aX) * oneMinusCS + cs;
-        matrix[0][1] = xym + zSin;
-        matrix[0][2] = xzm - ySin;
-        matrix[1][0] = xym - zSin;
-        matrix[1][1] = (aY * aY) * oneMinusCS + cs;
-        matrix[1][2] = yzm + xSin;
-        matrix[2][0] = xzm + ySin;
-        matrix[2][1] = yzm - xSin;
-        matrix[2][2] = (aZ * aZ) * oneMinusCS + cs;
-        
-        Type xtmp = matrix[0][0] * x + matrix[0][1] * y + matrix[0][2] * z;
-        Type ytmp = matrix[1][0] * x + matrix[1][1] * y + matrix[1][2] * z;
-        Type ztmp = matrix[2][0] * x + matrix[2][1] * y + matrix[2][2] * z;
-        
-        x = xtmp;
-        y = ytmp;
-        z = ztmp;
-    }
+	void rotatePoint2D(Type &x, Type &y, Type angle){
+		rotatePoint2DRad(x, y, toRadians(angle));
+	}
 
 	//returns the shortest distance between two numbers within a given bounding set of values.  If the closest value is the
 	//wraparound value and wrapDist is passed in then wrapDist is set to 1, if it is closer between the two numbers, wrapDist==0
@@ -380,18 +354,6 @@ namespace MV {
 			}
 		}
 	}
-    
-    template <class Type>
-    void rotatePoint(Type &a_point, Type a_angle, AngleType angleUnitIs = DEGREES){
-        if(equals(a_angle.x, 0.0f) && equals(a_angle.y, 0.0f)){
-            rotatePoint2D(a_point.x, a_point.y, a_angle.z, angleUnitIs);
-        } else{
-            auto maxAngle = std::max(std::max(a_angle.x, a_angle.y), a_angle.z);
-            if(maxAngle > 0.0f){
-                rotatePoint3D(a_point.x, a_point.y, a_point.z, a_angle.x / maxAngle, a_angle.y / maxAngle, a_angle.z / maxAngle, maxAngle, angleUnitIs);
-            }
-        }
-    }
 
 	class Random {
 	public:

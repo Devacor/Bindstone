@@ -10,7 +10,7 @@ namespace MV {
 
 		const double Emitter::MAX_TIME_STEP  = .25;
 
-		Point<> Emitter::randomMix(const Point<>& a_rhs, const Point<>& a_lhs) {
+		Point<> randomMix(const Point<>& a_rhs, const Point<>& a_lhs) {
 			return{
 				mix(a_rhs.x, a_lhs.x, randomNumber(0.0f, 1.0f)),
 				mix(a_rhs.y, a_lhs.y, randomNumber(0.0f, 1.0f)),
@@ -18,7 +18,7 @@ namespace MV {
 			};
 		}
 
-		Color Emitter::randomMix(const Color & a_rhs, const Color & a_lhs) {
+		Color randomMix(const Color & a_rhs, const Color & a_lhs) {
 			return{
 				mix(a_rhs.R, a_lhs.R, randomNumber(0.0f, 1.0f)),
 				mix(a_rhs.G, a_lhs.G, randomNumber(0.0f, 1.0f)),
@@ -27,40 +27,73 @@ namespace MV {
 			};
 		}
 
-		void Emitter::spawnParticle(size_t a_groupIndex) {
-			Particle particle;
+		void EmitterSpawnProperties::initializeCallbacks() {
+			if (!dirty) { return; }
 
-			particle.textureCount = ourTextures.size();
+			if (minimumPosition == maximumPosition) {
+				getPosition = [&] {return minimumPosition; };
+			} else {
+				getPosition = [&] { return randomMix(minimumPosition, maximumPosition); };
+			}
 
-			particle.position = randomMix(spawnProperties.minimumPosition, spawnProperties.maximumPosition) - threadData[a_groupIndex].particleOffset;
-			particle.rotation = randomMix(spawnProperties.minimumRotation, spawnProperties.maximumRotation);
-			particle.change.rotationalChange = randomMix(spawnProperties.minimum.rotationalChange, spawnProperties.maximum.rotationalChange);
+			if (minimumRotation == maximumRotation) {
+				getRotation = [&] {return minimumRotation; };
+			} else {
+				getRotation = [&] {return randomMix(minimumRotation, maximumRotation); };
+			}
 
-			particle.direction = randomMix(spawnProperties.minimumDirection, spawnProperties.maximumDirection);
-			particle.change.rateOfChange = randomMix(spawnProperties.minimum.rateOfChange, spawnProperties.maximum.rateOfChange);
-			particle.change.directionalChange(randomMix(spawnProperties.minimum.directionalChange(), spawnProperties.maximum.directionalChange()));
+			if (minimumDirection == maximumDirection) {
+				getDirection = [&] {return minimumDirection; };
+			} else {
+				getDirection = [&] {return randomMix(minimumDirection, maximumDirection); };
+			}
 
-			particle.change.beginSpeed = mix(spawnProperties.minimum.beginSpeed, spawnProperties.maximum.beginSpeed, randomNumber(0.0f, 1.0f));
-			particle.change.endSpeed = mix(spawnProperties.minimum.endSpeed, spawnProperties.maximum.endSpeed, randomNumber(0.0f, 1.0f));
+			if (minimum.rotationalChange == maximum.rotationalChange) {
+				getRotationChange = [&] {return minimum.rotationalChange; };
+			} else {
+				getRotationChange = [&] {return randomMix(minimum.rotationalChange, maximum.rotationalChange); };
+			}
 
-			particle.change.beginScale = mix(spawnProperties.minimum.beginScale, spawnProperties.maximum.beginScale, randomNumber(0.0f, 1.0f));
-			particle.change.endScale = mix(spawnProperties.minimum.endScale, spawnProperties.maximum.endScale, randomNumber(0.0f, 1.0f));
+			if (minimum.rateOfChange == maximum.rateOfChange) {
+				getRateOfChange = [&] {return minimum.rateOfChange; };
+			} else {
+				getRateOfChange = [&] {return randomMix(minimum.rateOfChange, maximum.rateOfChange); };
+			}
 
-			particle.change.beginColor = randomMix(spawnProperties.minimum.beginColor, spawnProperties.maximum.beginColor);
-			particle.change.endColor = randomMix(spawnProperties.minimum.endColor, spawnProperties.maximum.endColor);
+			if (minimum.directionalChange() == maximum.directionalChange()) {
+				getDirectionChange = [&] {return minimum.directionalChange(); };
+			} else {
+				getDirectionChange = [&] {return randomMix(minimum.directionalChange(), maximum.directionalChange()); };
+			}
 
-			particle.change.animationFramesPerSecond = mix(spawnProperties.minimum.animationFramesPerSecond, spawnProperties.maximum.animationFramesPerSecond, randomNumber(0.0f, 1.0f));
+			if (MV::equals(minimum.beginSpeed, maximum.beginSpeed) && MV::equals(minimum.endSpeed, maximum.endSpeed)) {
+				setSpeed = [&](float& begin, float& end) {begin = minimum.beginSpeed; end = minimum.endSpeed; };
+			} else {
+				setSpeed = [&](float& begin, float& end) {
+					begin = mix(minimum.beginSpeed, maximum.beginSpeed, randomNumber(0.0f, 1.0f)); 
+					end = mix(minimum.endSpeed, maximum.endSpeed, randomNumber(0.0f, 1.0f));
+				};
+			}
 
-			particle.change.maxLifespan = mix(spawnProperties.minimum.maxLifespan, spawnProperties.maximum.maxLifespan, randomNumber(0.0f, 1.0f));
+			if (minimum.beginScale == maximum.beginScale && minimum.endScale == maximum.endScale) {
+				setScale = [&](Scale& begin, Scale& end) {begin = minimum.beginScale; end = minimum.endScale; };
+			} else {
+				setScale = [&](Scale& begin, Scale& end) {
+					begin = mix(minimum.beginScale, maximum.beginScale, randomNumber(0.0f, 1.0f));
+					end = mix(minimum.endScale, maximum.endScale, randomNumber(0.0f, 1.0f));
+				};
+			}
 
-			particle.setGravity(
-				mix(spawnProperties.minimum.gravityMagnitude, spawnProperties.maximum.gravityMagnitude, randomNumber(0.0f, 1.0f)),
-				randomMix(spawnProperties.minimum.gravityDirection, spawnProperties.maximum.gravityDirection)
-			);
+			if (minimum.beginColor == maximum.beginColor && minimum.endColor == maximum.endColor) {
+				setColor = [&](Color& begin, Color& end) {begin = minimum.beginColor; end = minimum.endColor; };
+			} else {
+				setColor = [&](Color& begin, Color& end) {
+					begin = randomMix(minimum.beginColor, maximum.beginColor);
+					end = randomMix(minimum.endColor, maximum.endColor);
+				};
+			}
 
-			particle.update(0.0f);
-
-			threadData[a_groupIndex].particles.push_back(particle);
+			dirty = false;
 		}
 
 		void Emitter::spawnParticlesOnMultipleThreads(double a_dt) {
@@ -140,7 +173,7 @@ namespace MV {
 				
 				for (size_t i = 0; i < 4; ++i) {
 					auto corner = bounds[i];
-					rotatePoint(corner, particle.rotation);
+					rotatePoint2D(corner.x, corner.y, particle.rotation.z);
 					corner += particle.position;
 					threadData[a_groupIndex].points.push_back(DrawPoint(corner, particle.color, texturePoints[i]));
 				}
@@ -233,6 +266,7 @@ namespace MV {
 		std::shared_ptr<Emitter> Emitter::properties(const EmitterSpawnProperties & a_emitterProperties) {
 			spawnProperties = a_emitterProperties;
 			nextSpawnDelta = randomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
+			spawnProperties.dirty = true;
 			return std::static_pointer_cast<Emitter>(shared_from_this());
 		}
 
@@ -242,6 +276,7 @@ namespace MV {
 
 		EmitterSpawnProperties & Emitter::properties() {
 			nextSpawnDelta = 0.0f; //zero this out since we return a reference to the properties and may need to re-evaluate our nextSpawnDelta.
+			spawnProperties.dirty = true;
 			return spawnProperties;
 		}
 
@@ -268,10 +303,12 @@ namespace MV {
 
 			bool falseValue = false;
 			accumulatedTimeDelta += a_dt;
-			if (relativeNodePosition.expired() && relativeParentCount >= 0) {
-				makeRelativeToParent(relativeParentCount);
-			}
 			if (updateInProgress.compare_exchange_strong(falseValue, true)) {
+				if (relativeNodePosition.expired() && relativeParentCount >= 0) {
+					makeRelativeToParent(relativeParentCount);
+				}
+				spawnProperties.initializeCallbacks();
+
 				MV::Point<> particleOffset;
 				if (auto lockedRelativeNodePosition = relativeNodePosition.lock()) {
 					particleOffset = owner()->localFromWorld(lockedRelativeNodePosition->worldPosition());

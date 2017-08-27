@@ -3,6 +3,8 @@
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
+#include "Utility/log.h"
+
 CEREAL_REGISTER_TYPE(MV::Scene::Drawable);
 CEREAL_CLASS_VERSION(MV::Scene::Drawable, 3);
 

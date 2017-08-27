@@ -2,10 +2,14 @@
 #define _MV_SCENE_EMITTER_H_
 
 #include "sprite.h"
+#include "Utility/threadPool.hpp"
 #include <atomic>
 
 namespace MV {
 	namespace Scene {
+
+		Point<> randomMix(const Point<> &a_rhs, const Point<> &a_lhs);
+		Color randomMix(const Color &a_rhs, const Color &a_lhs);
 
 		struct ParticleChangeValues {
 		private:
@@ -99,7 +103,7 @@ namespace MV {
 
 		struct Particle {
 			//return true if dead.
-			bool update(double a_dt) {
+			inline bool update(double a_dt) {
 				float timeScale = static_cast<float>(a_dt);
 				totalLifespan = std::min(totalLifespan + timeScale, change.maxLifespan);
 
@@ -112,9 +116,8 @@ namespace MV {
 				scale = mix(change.beginScale, change.endScale, mixValue);
 				color = mix(change.beginColor, change.endColor, mixValue);
 
-				Point<> distance(0.0f, -speed, 0.0f);
-				rotatePoint(distance, direction);
-				position += distance * timeScale;
+				Point<> distance = anglesToDirection(direction.z, direction.x) * (speed * timeScale);
+				position += distance;
 				position += gravityConstant * timeScale;
 				
 				currentFrame = static_cast<int>(wrap(0.0f, static_cast<float>(textureCount), static_cast<float>(textureCount * (change.animationFramesPerSecond / timeScale))));
@@ -141,9 +144,8 @@ namespace MV {
 
 			size_t textureCount;
 
-			void setGravity(float a_magnitude, const AxisAngles &a_direction = AxisAngles(0.0f, 180.0f, 0.0f)) {
-				gravityConstant.locate(0.0f, -a_magnitude, 0.0f);
-				rotatePoint(gravityConstant, a_direction);
+			void setGravity(float a_magnitude, const AxisAngles &a_direction = AxisAngles(0.0f, 0.0f, 180.0f)) {
+				gravityConstant = anglesToDirection(a_direction.z, a_direction.x) * a_magnitude;
 			}
 		private:
 			Point<> gravityConstant;
@@ -157,15 +159,29 @@ namespace MV {
 
 			Point<> minimumPosition;
 			Point<> maximumPosition;
+			std::function<Point<>()> getPosition;
 
 			AxisAngles minimumDirection;
 			AxisAngles maximumDirection;
+			std::function<AxisAngles()> getDirection;
 
 			AxisAngles minimumRotation;
 			AxisAngles maximumRotation;
+			std::function<AxisAngles()> getRotation;
 
 			ParticleChangeValues minimum;
 			ParticleChangeValues maximum;
+
+			std::function<AxisAngles()> getRotationChange;
+			std::function<AxisAngles()> getRateOfChange;
+			std::function<AxisAngles()> getDirectionChange;
+			std::function<void(float&, float&)> setSpeed;
+			std::function<void(Scale&, Scale&)> setScale;
+			std::function<void(Color&, Color&)> setColor;
+
+			void initializeCallbacks();
+
+			bool dirty = true;
 
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 				a_script.add(chaiscript::user_type<EmitterSpawnProperties>(), "EmitterSpawnProperties");
@@ -201,6 +217,7 @@ namespace MV {
 					CEREAL_NVP(minimumRotation), CEREAL_NVP(maximumRotation),
 					CEREAL_NVP(minimum), CEREAL_NVP(maximum)
 				);
+				dirty = true;
 			}
 		};
 
@@ -318,11 +335,38 @@ namespace MV {
 			virtual BoxAABB<> boundsImplementation() override;
 			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
 
-			Point<> randomMix(const Point<> &a_rhs, const Point<> &a_lhs);
+			inline void spawnParticle(size_t a_groupIndex) {
+				Particle particle;
 
-			Color randomMix(const Color &a_rhs, const Color &a_lhs);
+				particle.textureCount = ourTextures.size();
 
-			void spawnParticle(size_t a_groupIndex);
+				particle.position = spawnProperties.getPosition() - threadData[a_groupIndex].particleOffset;
+				particle.rotation = spawnProperties.getRotation();
+				particle.change.rotationalChange = spawnProperties.getRotationChange();
+
+				particle.direction = spawnProperties.getDirection();
+				particle.change.rateOfChange = spawnProperties.getRateOfChange();
+				particle.change.directionalChange(spawnProperties.getDirectionChange());
+
+				spawnProperties.setSpeed(particle.change.beginSpeed, particle.change.endSpeed);
+
+				spawnProperties.setScale(particle.change.beginScale, particle.change.endScale);
+
+				spawnProperties.setColor(particle.change.beginColor, particle.change.endColor);
+
+				particle.change.animationFramesPerSecond = mix(spawnProperties.minimum.animationFramesPerSecond, spawnProperties.maximum.animationFramesPerSecond, randomNumber(0.0f, 1.0f));
+
+				particle.change.maxLifespan = mix(spawnProperties.minimum.maxLifespan, spawnProperties.maximum.maxLifespan, randomNumber(0.0f, 1.0f));
+
+				particle.setGravity(
+					mix(spawnProperties.minimum.gravityMagnitude, spawnProperties.maximum.gravityMagnitude, randomNumber(0.0f, 1.0f)),
+					randomMix(spawnProperties.minimum.gravityDirection, spawnProperties.maximum.gravityDirection)
+				);
+
+				particle.update(0.0f);
+
+				threadData[a_groupIndex].particles.emplace_back(std::move(particle));
+			}
 
 			void spawnParticlesOnMultipleThreads(double a_dt);
 

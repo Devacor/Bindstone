@@ -607,12 +607,12 @@ namespace MV {
 				localMatrixDirty = false;
 				localMatrixTransform.makeIdentity();
 
-				if (!translateTo.atOrigin()) {
-					localMatrixTransform.translate(translateTo.x, translateTo.y, translateTo.z);
-				}
-				if (rotateTo != 0.0f) {
-					localMatrixTransform.rotateX(toRadians(rotateTo.x)).rotateY(toRadians(rotateTo.y)).rotateZ(toRadians(rotateTo.z));
-				}
+				localMatrixTransform.position(translateTo);
+
+				if (!MV::equals(rotateTo.x, 0.0f)) { localMatrixTransform.rotateX(toRadians(rotateTo.x)); }
+				if (!MV::equals(rotateTo.y, 0.0f)) { localMatrixTransform.rotateY(toRadians(rotateTo.y)); }
+				if (!MV::equals(rotateTo.z, 0.0f)) { localMatrixTransform.rotateZ(toRadians(rotateTo.z)); }
+
 				if (scaleTo != 1.0f) {
 					localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
 				}

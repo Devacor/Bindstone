@@ -2,7 +2,7 @@
 
 #define ALLOW_MATRIX_DEBUG 0
 
-namespace MV{
+namespace MV2{
 	const Matrix operator-(const Matrix &a_left, const Matrix &a_right){
 		Matrix result = a_left;
 		return result-=a_right;
@@ -74,7 +74,7 @@ namespace MV{
 	}
 
 	Matrix& Matrix::operator+=( const Matrix& a_other ){
-		require<RangeException>(sizeX == a_other.sizeX && sizeY == a_other.sizeY, "Invalid Matrix addition in operator+=, mismatched sizes.");
+		//require<RangeException>(sizeX == a_other.sizeX && sizeY == a_other.sizeY, "Invalid Matrix addition in operator+=, mismatched sizes.");
 		for(size_t x=0; x < getSizeX(); ++x){
 			for(size_t y=0; y < getSizeY(); ++y){
 				(*this).access(x, y)+=a_other.access(x, y);
@@ -84,7 +84,7 @@ namespace MV{
 	}
 
 	Matrix& Matrix::operator-=( const Matrix& a_other ){
-		require<RangeException>(sizeX == a_other.sizeX && sizeY == a_other.sizeY, "Invalid Matrix subtraction in operator-=, mismatched sizes.");
+		//require<RangeException>(sizeX == a_other.sizeX && sizeY == a_other.sizeY, "Invalid Matrix subtraction in operator-=, mismatched sizes.");
 		for(size_t x=0; x < getSizeX(); ++x){
 			for(size_t y=0; y < getSizeY(); ++y){
 				(*this).access(x, y)-=a_other.access(x, y);
@@ -94,7 +94,7 @@ namespace MV{
 	}
 
 	Matrix& Matrix::operator*=( const Matrix& a_other ){
-		require<RangeException>(sizeX == a_other.sizeY, "Invalid Matrix multiplication in operator*=, mismatched sizes.");
+		//require<RangeException>(sizeX == a_other.sizeY, "Invalid Matrix multiplication in operator*=, mismatched sizes.");
 		size_t resultX = getSizeY(), resultY = a_other.getSizeX(), commonSize = sizeX;
 		Matrix result(resultY, resultX);
 
@@ -163,7 +163,7 @@ namespace MV{
 		return *this;
 	}
 
-	MV::Matrix Matrix::transpose() const {
+	Matrix Matrix::transpose() const {
 		Matrix result(*this);
 		for(size_t x = 0; x < sizeX; ++x){
 			for(size_t y = 0; y < sizeY; ++y){
@@ -178,7 +178,7 @@ namespace MV{
 		makeIdentity();
 	}
 
-	TransformMatrix::TransformMatrix( const Point<PointPrecision> &a_position ) :Matrix(4){
+	TransformMatrix::TransformMatrix( const MV::Point<PointPrecision> &a_position ) :Matrix(4){
 		makeIdentity();
 		translate(a_position.x, a_position.y, a_position.z);
 	}
@@ -259,20 +259,20 @@ namespace MV{
 		return MV::Scale(access(0, 0), access(1, 1), access(2, 2));
 	}
 
-	MV::TransformMatrix& TransformMatrix::position(const MV::Point<PointPrecision> &a_point) {
+	TransformMatrix& TransformMatrix::position(const MV::Point<PointPrecision> &a_point) {
 		access(3, 0) = a_point.x;
 		access(3, 1) = a_point.y;
-		access(3, 2) = a_point.y;
+		access(3, 2) = a_point.z;
 		return *this;
 	}
 
 	TransformMatrix& MatrixStack::top() {
-		MV::require<ResourceException>(!stack.empty(), "MatrixStack::top() failed, stack is empty!");
+		//MV::require<ResourceException>(!stack.empty(), "MatrixStack::top() failed, stack is empty!");
 		return stack.back();
 	}
 
 	const TransformMatrix& MatrixStack::top() const{
-		MV::require<ResourceException>(!stack.empty(), "MatrixStack::top() failed, stack is empty!");
+		//MV::require<ResourceException>(!stack.empty(), "MatrixStack::top() failed, stack is empty!");
 		return stack.back();
 	}
 
@@ -283,7 +283,6 @@ namespace MV{
 		}
 #endif
 		stack.push_back(stack.back());
-		onChangedSignal();
 		return stack.back();
 	}
 
@@ -294,7 +293,6 @@ namespace MV{
 		}
 #endif
 		stack.push_back(matrix);
-		onChangedSignal();
 		return stack.back();
 	}
 
@@ -308,7 +306,6 @@ namespace MV{
 		if(stack.empty()){
 			push(TransformMatrix());
 		} else{
-			onChangedSignal();
 		}
 	}
 

@@ -26,7 +26,8 @@
 #include <map>
 #include <fstream>
 #include "Render/points.h"
-#include "Render/matrix.h"
+#include "Render/matrix.hpp"
+#include "Utility/generalUtility.h"
 
 #ifdef __APPLE__
 	#import "TargetConditionals.h" 

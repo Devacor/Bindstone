@@ -13,8 +13,8 @@
 #include "Render/points.h"
 #include "Utility/package.h"
 
-namespace MV {
-
+namespace MV2 {
+	typedef float PointPrecision;
 	class Matrix {
 	public:
 		Matrix(size_t a_size, PointPrecision a_value = 0.0);
@@ -88,7 +88,7 @@ namespace MV {
 		TransformMatrix(const Matrix &&a_matrix):Matrix(std::move(a_matrix)){}
 
 		TransformMatrix(PointPrecision a_value = 0.0);
-		TransformMatrix(const Point<PointPrecision> &a_position);
+		TransformMatrix(const MV::Point<PointPrecision> &a_position);
 
 		TransformMatrix& operator=(const TransformMatrix& a_other);
 		TransformMatrix& operator=(TransformMatrix&& a_other);
@@ -171,10 +171,8 @@ namespace MV {
 	};
 
 	class MatrixStack {
-		Signal<void()> onChangedSignal;
 	public:
 		MatrixStack(const std::string &a_name = ""):
-			onChanged(onChangedSignal),
 			name(a_name){
 			push(TransformMatrix());
 		}
@@ -186,7 +184,6 @@ namespace MV {
 		void pop();
 		void clear();
 
-		SignalRegister<void()> onChanged;
 	private:
 		std::vector<TransformMatrix> stack;
 		std::string name;

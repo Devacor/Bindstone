@@ -332,6 +332,7 @@
     <ClCompile Include="Source\Network\url.cpp" />
     <ClCompile Include="Source\Physics\collider.cpp" />
     <ClCompile Include="Source\Render\boxaabb.cpp" />
+    <ClCompile Include="Source\Render\matrix.cpp" />
     <ClCompile Include="Source\Render\Scene\button.cpp" />
     <ClCompile Include="Source\Render\Scene\component.cpp" />
     <ClCompile Include="Source\Render\Scene\scroller.cpp" />
@@ -341,7 +342,6 @@
     <ClCompile Include="Source\Render\Scene\grid.cpp" />
     <ClCompile Include="Source\Render\Scene\path.cpp" />
     <ClCompile Include="Source\Render\Scene\node.cpp" />
-    <ClCompile Include="Source\Render\matrix.cpp" />
     <ClCompile Include="Source\Render\points.cpp" />
     <ClCompile Include="Source\Render\render.cpp" />
     <ClCompile Include="Source\Render\Scene\drawable.cpp" />
@@ -569,6 +569,7 @@
     <ClInclude Include="Source\Physics\collider.h" />
     <ClInclude Include="Source\Physics\package.h" />
     <ClInclude Include="Source\Render\boxaabb.h" />
+    <ClInclude Include="Source\Render\matrix.h" />
     <ClInclude Include="Source\Render\Scene\component.h" />
     <ClInclude Include="Source\Render\Scene\emitter.h" />
     <ClInclude Include="Source\Render\Scene\clipped.h" />
@@ -587,7 +588,7 @@
     <ClInclude Include="Source\Render\Scene\path.h" />
     <ClInclude Include="Source\Render\Scene\package.h" />
     <ClInclude Include="Source\Render\Scene\node.h" />
-    <ClInclude Include="Source\Render\matrix.h" />
+    <ClInclude Include="Source\Render\matrix.hpp" />
     <ClInclude Include="Source\Render\package.h" />
     <ClInclude Include="Source\Render\points.h" />
     <ClInclude Include="Source\Render\render.h" />

@@ -13,71 +13,8 @@
 
 #include <fstream>
 #include <windows.h>
-#include "Render/matrix.h"
-int random(int min, int max) //range : [min, max)
-{
-	return min + rand() % (max - min);
-}
 
 int main(int, char *[]) {
-	LARGE_INTEGER frequency;        // ticks per second
-	LARGE_INTEGER m1, m2, f1, f2;           // ticks
-	double elapsedTime;
-	srand((int)time(0));
-
-	std::vector<MV::Point<MV::PointPrecision>> points;
-	std::vector<MV::Point<MV::PointPrecision>> points2;
-	std::vector<MV::Point<MV::PointPrecision>> angles;
-
-	for (size_t i = 0; i < 5; ++i) {
-		points.push_back({ (float)random(-10, 10), (float)random(-10, 10), (float)random(-10, 10) });
-		angles.push_back({ (float)random(0, 360), (float)random(0, 360), (float)random(0, 360) });
-	}
-	points2 = points;
-	QueryPerformanceFrequency(&frequency);
-
-	MV::TransformMatrix cam1;
-	cam1.makeOrtho(0, 100.0f, 0, 100.0f, -128.0f, 128.0f);
-	MV2::TransformMatrix cam2;
-	cam2.makeOrtho(0, 100.0f, 0, 100.0f, -128.0f, 128.0f);
-
-	QueryPerformanceCounter(&m1);
-	for (size_t i = 0; i < points.size(); ++i) {
-		MV2::TransformMatrix matrix;
-		matrix.makeIdentity();
-
-		matrix.position(points2[i]);
-		matrix.rotateX(MV::toRadians(angles[i].x)).rotateY(MV::toRadians(angles[i].y)).rotateZ(MV::toRadians(angles[i].z));
-
-		matrix.scale(angles[i].x, angles[i].y, angles[i].z);
-
-		auto resultMat1 = cam2 * matrix;
-	}
-
-	QueryPerformanceCounter(&m2);
-	elapsedTime = double(m2.QuadPart - m1.QuadPart) * 1000.0 / double(frequency.QuadPart);
-	std::cout << "Matrix: " << elapsedTime << "\n";
-
-	QueryPerformanceCounter(&f1);
-	for (size_t i = 0; i < points.size(); ++i) {
-		MV::TransformMatrix matrix;
-		matrix.makeIdentity();
-
-		matrix.position(points2[i]);
-		matrix.rotateX(MV::toRadians(angles[i].x)).rotateY(MV::toRadians(angles[i].y)).rotateZ(MV::toRadians(angles[i].z));
-
-		matrix.scale(angles[i].x, angles[i].y, angles[i].z);
-
-		auto resultMat1 = cam1 * matrix;
-	}
-	QueryPerformanceCounter(&f2);
-	elapsedTime = double(f2.QuadPart - f1.QuadPart) * 1000.0 / double(frequency.QuadPart);
-	std::cout << "Matrix2: " << elapsedTime << "\n";
-
-	for (int i = 0; i < points.size(); ++i) {
-		std::cout << points[i] << " ~ " << points2[i] << "\n";
-	}
-
 // 	std::string content = "Hello World";
 // 	auto scriptString = "puts('['); puts(arg_0); puts(']'); puts('['); puts(arg_1); puts(']'); puts('['); puts(arg_2); puts(\"]\n\");";
 // 

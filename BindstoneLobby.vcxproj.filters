@@ -91,9 +91,6 @@
     <ClCompile Include="Source\Utility\generalUtility.cpp">
       <Filter>Source Files\Utility</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Render\matrix.cpp">
-      <Filter>Source Files\Render</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Network\network.cpp">
       <Filter>Source Files\Network</Filter>
     </ClCompile>
@@ -597,9 +594,6 @@
     </ClInclude>
     <ClInclude Include="Source\Utility\generalUtility.h">
       <Filter>Source Files\Utility</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Render\matrix.h">
-      <Filter>Source Files\Render</Filter>
     </ClInclude>
     <ClInclude Include="Source\Network\network.h">
       <Filter>Source Files\Network</Filter>
@@ -1335,6 +1329,9 @@
     </ClInclude>
     <ClInclude Include="Source\Utility\threadPool.hpp">
       <Filter>Source Files\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Render\matrix.hpp">
+      <Filter>Source Files\Render</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

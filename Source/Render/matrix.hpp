@@ -157,9 +157,9 @@ namespace MV {
 		Matrix<SizeX, ResultY> result;
 
 		for (size_t x = 0; x < SizeX; ++x) {
-			for (size_t y = 0; y < ResultY; ++y) {
-				for (size_t common = 0; common < SizeX; ++common) {
-					result.access(y, x) += a_left(common, x) * a_right(y, common);
+			for (size_t common = 0; common < SizeX; ++common) {
+				for (size_t y = 0; y < ResultY; ++y) {
+					result.access(x, y) += a_left(common, y) * a_right(x, common);
 				}
 			}
 		}

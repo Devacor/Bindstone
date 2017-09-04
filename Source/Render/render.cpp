@@ -1128,80 +1128,6 @@ namespace MV {
 		renderer->stopUsingFramebuffer();
 	}
 
-	void Shader::set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent) {
-		if (!headless) {
-			GLuint offset = variableOffset(a_variableName);
-			if (offset >= 0) {
-				auto textureId = (a_texture != 0) ?
-					a_texture :
-					SharedTextures::white()->texture()->textureId();
-
-				glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
-				glUniform1i(offset, a_textureBindIndex);
-				glBindTexture(GL_TEXTURE_2D, textureId);
-			} else if (a_errorIfNotPresent) {
-				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-			}
-		}
-	}
-
-	void Shader::set(std::string a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent) {
-		if (!headless) {
-			GLuint offset = variableOffset(a_variableName);
-			if (offset >= 0) {
-				auto textureId = (a_texture != nullptr) ?
-					a_texture->textureId() :
-					SharedTextures::white()->texture()->textureId();
-
-				glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
-				glUniform1i(offset, a_textureBindIndex);
-				glBindTexture(GL_TEXTURE_2D, textureId);
-			} else if (a_errorIfNotPresent) {
-				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-			}
-		}
-	}
-
-	void Shader::set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent) {
-		if (!headless) {
-			GLuint offset = variableOffset(a_variableName);
-			if (offset >= 0) {
-				auto textureId = (a_value != nullptr && a_value->texture() != nullptr) ?
-					a_value->texture()->textureId() :
-					SharedTextures::white()->texture()->textureId();
-
-				glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
-				glUniform1i(offset, a_textureBindIndex);
-				glBindTexture(GL_TEXTURE_2D, textureId);
-			} else if (a_errorIfNotPresent) {
-				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-			}
-		}
-	}
-
-	void Shader::set(std::string a_variableName, PointPrecision a_value, bool a_errorIfNotPresent) {
-		if (!headless) {
-			GLuint offset = variableOffset(a_variableName);
-			if (offset >= 0) {
-				glUniform1fv(offset, 1, &a_value);
-			} else if (a_errorIfNotPresent) {
-				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-			}
-		}
-	}
-
-	void Shader::set(std::string a_variableName, const TransformMatrix &a_matrix, bool a_errorIfNotPresent) {
-		if (!headless) {
-			GLint offset = variableOffset(a_variableName);
-			if (offset >= 0) {
-				const GLfloat *mat = &((a_matrix.getMatrixArray())[0]);
-				glUniformMatrix4fv(offset, 1, GL_FALSE, mat);
-			} else if(a_errorIfNotPresent) {
-				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
-			}
-		}
-	}
-
 	glExtensions::glExtensions(Draw2D *a_renderer) :
 		renderer(a_renderer),
 		glExtensionBlendMode(a_renderer),
@@ -1219,6 +1145,67 @@ namespace MV {
 				loadExtensionFramebufferObject(extensionsList);
 			}
 		}
+	}
+
+	GLuint Shader::getDefaultTextureId() const {
+		return SharedTextures::white()->texture()->textureId();
+	}
+
+	bool Shader::set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
+		if (!headless) {
+			GLuint offset = variableOffset(a_variableName);
+			if (offset >= 0) {
+				auto textureId = (a_texture != 0) ?
+					a_texture :
+					getDefaultTextureId();
+
+				glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
+				glUniform1i(offset, a_textureBindIndex);
+				glBindTexture(GL_TEXTURE_2D, textureId);
+				return true;
+			} else if (a_errorIfNotPresent) {
+				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
+			}
+		}
+		return false;
+	}
+
+	bool Shader::set(std::string a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
+		if (!headless) {
+			GLuint offset = variableOffset(a_variableName);
+			if (offset >= 0) {
+				auto textureId = (a_texture != nullptr) ?
+					a_texture->textureId() :
+					getDefaultTextureId();
+
+				glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
+				glUniform1i(offset, a_textureBindIndex);
+				glBindTexture(GL_TEXTURE_2D, textureId);
+				return true;
+			} else if (a_errorIfNotPresent) {
+				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
+			}
+		}
+		return false;
+	}
+
+	bool Shader::set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
+		if (!headless) {
+			GLuint offset = variableOffset(a_variableName);
+			if (offset >= 0) {
+				auto textureId = (a_value != nullptr && a_value->texture() != nullptr) ?
+					a_value->texture()->textureId() :
+					getDefaultTextureId();
+
+				glActiveTexture(GL_TEXTURE0 + a_textureBindIndex);
+				glUniform1i(offset, a_textureBindIndex);
+				glBindTexture(GL_TEXTURE_2D, textureId);
+				return true;
+			} else if (a_errorIfNotPresent) {
+				std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
+			}
+		}
+		return false;
 	}
 
 }

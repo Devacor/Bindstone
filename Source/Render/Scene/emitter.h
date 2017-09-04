@@ -363,7 +363,7 @@ namespace MV {
 					randomMix(spawnProperties.minimum.gravityDirection, spawnProperties.maximum.gravityDirection)
 				);
 
-				particle.update(0.0f);
+				//particle.update(0.0f);
 
 				threadData[a_groupIndex].particles.emplace_back(std::move(particle));
 			}

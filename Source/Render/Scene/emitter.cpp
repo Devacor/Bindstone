@@ -107,9 +107,12 @@ namespace MV {
 
 			if (particlesToSpawn >= emitterThreads) {
 				std::vector<MV::ThreadPool::Job> spawnTasks;
+				spawnTasks.reserve(emitterThreads);
 				for (size_t currentThread = 0; currentThread < emitterThreads; ++currentThread) {
 					spawnTasks.emplace_back([=]() {
-						for (size_t count = 0; count < maxParticlesPerFramePerThread && (count < particlesToSpawn / emitterThreads); ++count) {
+						size_t particlesToSpawnThisThread = std::min(particlesToSpawn / emitterThreads, static_cast<size_t>(maxParticlesPerFramePerThread));
+						threadData[currentThread].particles.reserve(particlesToSpawnThisThread);
+						for (size_t count = 0; count < particlesToSpawnThisThread; ++count) {
 							spawnParticle(currentThread);
 						}
 					});
@@ -136,6 +139,7 @@ namespace MV {
 
 		void Emitter::updateParticlesOnMultipleThreads(double a_dt) {
 			std::vector<MV::ThreadPool::Job> spawnTasks;
+			spawnTasks.reserve(emitterThreads);
 			for (size_t currentThread = 0; currentThread < emitterThreads; ++currentThread) {
 				spawnTasks.emplace_back([=]() {
 					threadData[currentThread].particles.erase(std::remove_if(threadData[currentThread].particles.begin(), threadData[currentThread].particles.end(), [&](Particle& a_particle) {
@@ -154,18 +158,21 @@ namespace MV {
 			threadData[a_groupIndex].vertexIndices.clear();
 
 			std::vector<TexturePoint> texturePoints;
+			texturePoints.reserve(4);
 			auto foundTexture = ourTextures.find(0);
 			if (foundTexture != ourTextures.end()) {
-				texturePoints.push_back({ static_cast<float>((foundTexture->second)->rawPercent().minPoint.x), static_cast<float>((foundTexture->second)->rawPercent().minPoint.y) });
-				texturePoints.push_back({ static_cast<float>((foundTexture->second)->rawPercent().minPoint.x), static_cast<float>((foundTexture->second)->rawPercent().maxPoint.y) });
-				texturePoints.push_back({ static_cast<float>((foundTexture->second)->rawPercent().maxPoint.x), static_cast<float>((foundTexture->second)->rawPercent().maxPoint.y) });
-				texturePoints.push_back({ static_cast<float>((foundTexture->second)->rawPercent().maxPoint.x), static_cast<float>((foundTexture->second)->rawPercent().minPoint.y) });
+				texturePoints.emplace_back( static_cast<float>((foundTexture->second)->rawPercent().minPoint.x), static_cast<float>((foundTexture->second)->rawPercent().minPoint.y) );
+				texturePoints.emplace_back( static_cast<float>((foundTexture->second)->rawPercent().minPoint.x), static_cast<float>((foundTexture->second)->rawPercent().maxPoint.y) );
+				texturePoints.emplace_back( static_cast<float>((foundTexture->second)->rawPercent().maxPoint.x), static_cast<float>((foundTexture->second)->rawPercent().maxPoint.y) );
+				texturePoints.emplace_back( static_cast<float>((foundTexture->second)->rawPercent().maxPoint.x), static_cast<float>((foundTexture->second)->rawPercent().minPoint.y) );
 			} else {
-				texturePoints.push_back({ 0.0f, 0.0f });
-				texturePoints.push_back({ 0.0f, 1.0f });
-				texturePoints.push_back({ 1.0f, 1.0f });
-				texturePoints.push_back({ 1.0f, 0.0f });
+				texturePoints.emplace_back( 0.0f, 0.0f );
+				texturePoints.emplace_back( 0.0f, 1.0f );
+				texturePoints.emplace_back( 1.0f, 1.0f );
+				texturePoints.emplace_back( 1.0f, 0.0f );
 			}
+			threadData[a_groupIndex].points.reserve(threadData[a_groupIndex].particles.size() * 4);
+			threadData[a_groupIndex].vertexIndices.reserve(threadData[a_groupIndex].particles.size() * 6);
 			for (auto &&particle : threadData[a_groupIndex].particles) {
 				BoxAABB<> bounds(toPoint(particle.scale / 2.0f), toPoint(particle.scale / -2.0f));
 				
@@ -175,7 +182,7 @@ namespace MV {
 					auto corner = bounds[i];
 					rotatePoint2D(corner.x, corner.y, particle.rotation.z);
 					corner += particle.position;
-					threadData[a_groupIndex].points.push_back(DrawPoint(corner, particle.color, texturePoints[i]));
+					threadData[a_groupIndex].points.emplace_back(corner, particle.color, texturePoints[i]);
 				}
 			}
 		}
@@ -197,6 +204,7 @@ namespace MV {
 			size_t pointOffset = 0;
 			size_t vertexOffset = 0;
 			std::vector<MV::ThreadPool::Job> copyTasks;
+			copyTasks.reserve(emitterThreads);
 			for (int group = 0; group < emitterThreads; ++group) {
 				copyTasks.emplace_back([=]() {
 					size_t indexSize = threadData[group].vertexIndices.size();

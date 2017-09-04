@@ -310,7 +310,7 @@ namespace MV {
 		//0.0 to 1.0 of the whole texture... OpenGL coordinates.
 		std::shared_ptr<TextureHandle> rawPercent(const BoxAABB<PointPrecision> &a_bounds);
 		//OpenGL coordinates.
-		BoxAABB<PointPrecision> rawPercent() const;
+		const BoxAABB<PointPrecision> &rawPercent() const;
 
 		//logical size == bounds.size() * texture scale
 		Size<PointPrecision> logicalSize() const;
@@ -375,9 +375,6 @@ namespace MV {
 			a_script.add(chaiscript::fun(&TextureHandle::hasSlice), "logicalSlice");
 
 			a_script.add(chaiscript::fun(&TextureHandle::sizeChange), "sizeChange");
-			
-			a_script.add(chaiscript::fun(static_cast<BoxAABB<PointPrecision>(TextureHandle::*)() const>(&TextureHandle::rawPercent)), "rawPercent");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<PointPrecision> &)>(&TextureHandle::rawPercent)), "rawPercent");
 
 			a_script.add(chaiscript::fun(static_cast<BoxAABB<int>(TextureHandle::*)() const>(&TextureHandle::bounds)), "bounds");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<int> &)>(&TextureHandle::bounds)), "bounds");

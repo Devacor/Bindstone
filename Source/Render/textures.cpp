@@ -424,7 +424,7 @@ namespace MV {
 		return self;
 	}
 
-	BoxAABB<PointPrecision> TextureHandle::rawPercent() const {
+	const BoxAABB<PointPrecision> &TextureHandle::rawPercent() const {
 		return handlePercent;
 	}
 

@@ -14,11 +14,12 @@ namespace MV {
 		     1     2
 		\*Vertex Indices*/
 		void appendQuadVertexIndices(std::vector<GLuint> &a_indices, GLuint a_pointOffset) {
-			std::vector<GLuint> quadIndices{
-				a_pointOffset, a_pointOffset + 1, a_pointOffset + 2,
-				a_pointOffset + 2, a_pointOffset + 3, a_pointOffset
-			};
-			a_indices.insert(a_indices.end(), quadIndices.begin(), quadIndices.end());
+			a_indices.push_back(a_pointOffset);
+			a_indices.push_back(a_pointOffset + 1);
+			a_indices.push_back(a_pointOffset + 2);
+			a_indices.push_back(a_pointOffset + 2);
+			a_indices.push_back(a_pointOffset + 3);
+			a_indices.push_back(a_pointOffset);
 		}
 
 		/*Vertex Indices*\

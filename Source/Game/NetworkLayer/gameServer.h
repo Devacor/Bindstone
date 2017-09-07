@@ -50,6 +50,7 @@ public:
 
 protected:
 	virtual void connectImplementation() override;
+	virtual void disconnectImplementation() override;
 
 private:
 	std::string queueType;
@@ -60,7 +61,7 @@ private:
 
 class GameServer {
 public:
-	GameServer(Managers &a_managers, unsigned short a_port);
+	GameServer(Managers &a_managers, unsigned short a_port = 0);
 
 	void update(double dt) {
 		ourUserServer->update(dt);
@@ -137,6 +138,20 @@ public:
 		return true;
 	}
 
+	void userDisconnected(int64_t a_secret) {
+		if (left->secret == a_secret) {
+			
+		} else if (right->secret == a_secret) {
+
+		}
+		for (auto&& connection : ourUserServer->connections()) {
+			if (!connection->disconnected()) {
+				connection->disconnect();
+			}
+		}
+		makeUsAvailableToTheLobby();
+	}
+
 	std::shared_ptr<Player> leftPlayer() const {
 		return left->player;
 	}
@@ -149,14 +164,23 @@ private:
 	GameServer(const GameServer &) = delete;
 
 	void initializeClientToLobbyServer() {
-		ourLobbyClient = MV::Client::make(MV::Url{ "http://192.168.1.237:22326" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
+		ourLobbyClient = MV::Client::make(MV::Url{ "http://localhost:22326" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
 			auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
-			value->execute(*this);
+			try {
+				value->execute(*this);
+			} catch (std::exception &e) {
+				MV::error("Failed to execute NetworkAction: ", e.what());
+				makeUsAvailableToTheLobby();
+			}
 		}, [&](const std::string &a_dcreason) {
 			std::cout << "Disconnected: " << a_dcreason << std::endl;
 		}, [=] {
-			ourLobbyClient->send(makeNetworkString<GameServerAvailable>("http://192.168.1.237", port));
+			makeUsAvailableToTheLobby();
 		});
+	}
+
+	void makeUsAvailableToTheLobby() {
+		ourLobbyClient->send(makeNetworkString<GameServerAvailable>("http://localhost", ourUserServer->port()));
 	}
 
 	GameServer& operator=(const GameServer &) = delete;
@@ -183,7 +207,5 @@ private:
 	std::optional<AssignedPlayer> left;
 	std::optional<AssignedPlayer> right;
 	std::string queueId;
-	
-	uint32_t port;
 };
 #endif

@@ -47,10 +47,21 @@ namespace MV {
 		std::string content;
 	};
 
+
+	inline void closeSocket(std::shared_ptr<boost::asio::ip::tcp::socket> &socket) {
+		if (socket) {
+			if (socket->is_open()) {
+				boost::system::error_code ec; //don't really care
+				socket->shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+				socket->close();
+			}
+			socket.reset();
+		}
+	}
+
 	class Client : public std::enable_shared_from_this<Client> {
 	public:
-		enum ConnectionState { DISCONNECTED, CONNECTING, CONNECTED };
-		static const int EXPECTED_TIMESTEPS = 5;
+		enum ConnectionState { DISCONNECTED, CONNECTING, CONNECTING_SUCCESS, CONNECTED };
 
 		static std::shared_ptr<Client> make(const MV::Url& a_url, const std::function<void(const std::string &)> &a_onMessageGet, const std::function<void(const std::string &)> &a_onConnectionFail, const std::function<void()> &a_onInitialized = std::function<void ()>()) {
 			auto self = std::shared_ptr<Client>(new Client(a_url, a_onMessageGet, a_onConnectionFail, a_onInitialized));
@@ -59,7 +70,7 @@ namespace MV {
 		}
 
 		~Client() {
-			socket.reset();
+			disconnect();
 			ioService.stop();
 			if (worker && worker->joinable()) {
 				worker->detach(); //getting errors if we join for some reason? :<
@@ -92,9 +103,8 @@ namespace MV {
 		bool connected() const {
 			return ourConnectionState == CONNECTED;
 		}
-
-		double clientServerTimeDelta() const {
-			return clientServerTimeValue;
+		bool disconnected() const {
+			return ourConnectionState == DISCONNECTED;
 		}
 
 		static void hook(chaiscript::ChaiScript& a_script) {
@@ -104,17 +114,12 @@ namespace MV {
 			a_script.add(chaiscript::fun(&Client::connected), "connected");
 			a_script.add(chaiscript::fun([](Client& a_self) { a_self.reconnect(); }), "reconnect");
 			a_script.add(chaiscript::fun([](Client& a_self, const std::function<void()> &a_onInitialized) { a_self.reconnect(a_onInitialized); }), "reconnect");
-			
-			a_script.add(chaiscript::fun(&Client::clientServerTimeDelta), "clientServerTimeDelta");
 		}
 
 		void disconnect() {
-			if (socket) {
-				socket->shutdown(boost::asio::ip::tcp::socket::shutdown_both);
-				socket->close();
-				socket.reset();
-			}
-			remainingTimeDeltas = EXPECTED_TIMESTEPS;
+			closeSocket(socket);
+
+			inbox.clear();
 			ourConnectionState = DISCONNECTED;
 			std::cout << "client.disconnect();" << std::endl;
 		}
@@ -138,14 +143,8 @@ namespace MV {
 
 		void initiateRead();
 
-		void appendClientServerTime(std::shared_ptr<NetworkMessage> message);
-
 		void handleError(const boost::system::error_code &a_err, const std::string &a_section) {
-			if (socket) {
-				socket.reset();
-			}
-			remainingTimeDeltas = EXPECTED_TIMESTEPS;
-			ourConnectionState = DISCONNECTED;
+			disconnect();
 			failMessage = "[" + a_section + "] ERROR: " + a_err.message();
 			std::cerr << failMessage << std::endl;
 		}
@@ -172,8 +171,6 @@ namespace MV {
 
 		std::vector<double> serverTimeDeltas;
 		ConnectionState ourConnectionState;
-		int remainingTimeDeltas = EXPECTED_TIMESTEPS;
-		double clientServerTimeValue = 0.0;
 	};
 
 	class Server;
@@ -184,9 +181,10 @@ namespace MV {
 	public:
 		ConnectionStateBase(const std::shared_ptr<Connection>& a_connection) :
 			ourConnection(a_connection) {
+
+			connectImplementation();
 		}
 
-		void connect() { disconnectRecieved = false; connectImplementation(); }
 		void disconnect() { disconnectRecieved = true; disconnectImplementation(); }
 
 		bool disconnected() const { return disconnectRecieved; }
@@ -220,28 +218,29 @@ namespace MV {
 
 		~Connection() {
 			std::cout << "Connection::~Connection()\n";
-			socket.reset();
+			disconnect();
 		}
 
 		void send(const std::string &a_content);
 
 		void initiateRead();
 		void update(double a_dt);
-		void sendTimeStamp();
 
 		ConnectionStateBase* state() const {
 			return ourState.get();
 		}
 
 		void disconnect() {
+			closeSocket(socket);
 			ourState->disconnect();
+			inbox.clear();
 		}
 
 		bool disconnected() const {
 			return ourState->disconnected();
 		}
 	private:
-		std::mutex lock;
+		std::recursive_mutex lock;
 
 		void HandleError(const boost::system::error_code &a_err, const std::string &a_section);
 
@@ -252,8 +251,6 @@ namespace MV {
 		std::vector<std::shared_ptr<NetworkMessage>> inbox;
 
 		std::unique_ptr<ConnectionStateBase> ourState = nullptr;
-
-		int timeRequestsRemaining = Client::EXPECTED_TIMESTEPS;
 	};
 
 	class Server {
@@ -263,7 +260,7 @@ namespace MV {
 
 		~Server();
 
-		void send(const std::string &a_message);
+		void sendAll(const std::string &a_message);
 		void sendExcept(const std::string &a_message, Connection* a_connectionToSkip);
 		void update(double a_dt);
 
@@ -271,6 +268,9 @@ namespace MV {
 			return ourConnections;
 		}
 
+		uint16_t port() {
+			return acceptor.local_endpoint().port();
+		}
 	private:
 		void acceptClients();
 
@@ -285,8 +285,6 @@ namespace MV {
 		std::unique_ptr<boost::asio::io_service::work> work;
 
 		std::function<std::unique_ptr<ConnectionStateBase> (const std::shared_ptr<Connection> &)> connectionStateFactory;
-
-		uint32_t randomSeed;
 	};
 
 };

@@ -18,6 +18,10 @@ void GameUserConnectionState::connectImplementation() {
 	connection()->send(makeNetworkString<ServerDetails>());
 }
 
+void GameUserConnectionState::disconnectImplementation() {
+	ourServer.userDisconnected(ourSecret);
+}
+
 void GameUserConnectionState::message(const std::string &a_message) {
 	auto action = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 	action->execute(this, ourServer);
@@ -25,7 +29,6 @@ void GameUserConnectionState::message(const std::string &a_message) {
 
 GameServer::GameServer(Managers &a_managers, unsigned short a_port) :
 	manager(a_managers),
-	port(a_port),
 	gameData(a_managers),
 	ourUserServer(std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), a_port),
 		[this](const std::shared_ptr<MV::Connection> &a_connection) {

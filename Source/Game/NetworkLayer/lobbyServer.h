@@ -201,12 +201,12 @@ public:
 	}
 
 	void add(const std::weak_ptr<MatchSeeker> &a_seeker) {
-		std::lock_guard<std::mutex> guard(lock);
+		std::lock_guard<std::recursive_mutex> guard(lock);
 		MV::insertSorted(seekers, a_seeker);
 	}
 
 	void cull() {
-		std::lock_guard<std::mutex> guard(lock);
+		std::lock_guard<std::recursive_mutex> guard(lock);
 		seekers.erase(std::remove_if(seekers.begin(), seekers.end(), [&](auto& seeker) {
 			if (auto lockedSeeker = seeker.lock()) {
 				return lockedSeeker->lifespan.expired();
@@ -216,7 +216,7 @@ public:
 	}
 
 	void remove(MatchSeeker* a_removeSeeker) {
-		std::lock_guard<std::mutex> guard(lock);
+		std::lock_guard<std::recursive_mutex> guard(lock);
 		seekers.erase(std::remove_if(seekers.begin(), seekers.end(), [&](auto& seeker){
 			if (auto lockedSeeker = seeker.lock()) {
 				return lockedSeeker.get() == a_removeSeeker || lockedSeeker->lifespan.expired();
@@ -229,6 +229,7 @@ public:
 	void update(double a_dt);
 
 	std::vector<std::pair<std::shared_ptr<MatchSeeker>, std::shared_ptr<MatchSeeker>>> getMatchPairs(double a_dt) {
+		std::lock_guard<std::recursive_mutex> guard(lock);
 		std::vector<std::pair<std::shared_ptr<MatchSeeker>, std::shared_ptr<MatchSeeker>>> pairs;
 		size_t i = 0;
 		for (auto it = seekers.begin(); it != seekers.end();) {
@@ -260,6 +261,7 @@ public:
 	}
 
 	std::tuple<std::shared_ptr<MatchSeeker>, double> opponentFromIndex(size_t i, const std::shared_ptr<MatchSeeker> &current) {
+		std::lock_guard<std::recursive_mutex> guard(lock);
 		std::shared_ptr<MatchSeeker> opponent;
 		double currentBest = 10.0;
 		int remainingComparisons = PLAYERS_TO_SEARCH_FOR_MATCH;
@@ -289,7 +291,7 @@ private:
 
 	const int PLAYERS_TO_SEARCH_FOR_MATCH = 7;
 
-	std::mutex lock;
+	std::recursive_mutex lock;
 	std::vector<std::weak_ptr<MatchSeeker>> seekers;
 	LobbyServer* server;
 	std::string ourId;

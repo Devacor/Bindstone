@@ -132,4 +132,26 @@ public:
 
 CEREAL_REGISTER_TYPE(RequestBuildingUpgrade);
 
+class RequestFullGameState : public NetworkAction {
+public:
+	RequestFullGameState() {}
+	RequestFullGameState(const std::shared_ptr<Player> &a_left, const std::shared_ptr<Player> &a_right) : left(a_left), right(a_right) {}
+
+#ifdef BINDSTONE_SERVER
+	virtual void execute(GameUserConnectionState*, GameServer &) override;
+#endif
+	virtual void execute(Game& a_connection) override;
+
+	template <class Archive>
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
+		archive(CEREAL_NVP(left), CEREAL_NVP(right), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	}
+
+private:
+	std::shared_ptr<Player> left;
+	std::shared_ptr<Player> right;
+};
+
+CEREAL_REGISTER_TYPE(RequestFullGameState);
+
 #endif

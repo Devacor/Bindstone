@@ -141,7 +141,7 @@ bool operator<(MatchSeeker &a_lhs, MatchSeeker &a_rhs) {
 }
 
 void MatchQueue::update(double a_dt) {
-	std::lock_guard<std::mutex> guard(lock);
+	std::lock_guard<std::recursive_mutex> guard(lock);
 
 	auto pairs = getMatchPairs(a_dt);
 

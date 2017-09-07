@@ -25,7 +25,7 @@ void Game::initializeData() {
 }
 
 void Game::initializeClientConnection() {
-	ourLobbyClient = MV::Client::make(MV::Url{ "http://192.168.1.237:22325" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
+	ourLobbyClient = MV::Client::make(MV::Url{ "http://localhost:22325" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
 		auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 		value->execute(*this);
 	}, [&](const std::string &a_dcreason) {

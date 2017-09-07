@@ -24,15 +24,23 @@ void GetInitialGameState::execute(GameUserConnectionState* a_connection, GameSer
 	auto player = a_game.userConnected(secret);
 	a_connection->authenticate(player, secret);
 	if (a_game.allUsersConnected()) {
-		a_game.server()->send(makeNetworkString<SuppliedInitialGameState>(a_game.leftPlayer(), a_game.rightPlayer()));
+		a_game.server()->sendAll(makeNetworkString<SuppliedInitialGameState>(a_game.leftPlayer(), a_game.rightPlayer()));
 	}
 }
 
 void RequestBuildingUpgrade::execute(GameUserConnectionState* /*a_gameUser*/, GameServer &a_game) {
 	a_game.instance()->performUpgrade(side, slot, id);
-	a_game.server()->send(makeNetworkString<RequestBuildingUpgrade>(side, slot, id));
+	a_game.server()->sendAll(makeNetworkString<RequestBuildingUpgrade>(side, slot, id));
+}
+
+void RequestFullGameState::execute(GameUserConnectionState* /*a_gameUser*/, GameServer &a_game) {
+	//a_game.server()->send(makeNetworkString<RequestBuildingUpgrade>(a_game.data));
 }
 #endif
+
+void RequestFullGameState::execute(Game &a_game) {
+
+}
 
 void SuppliedInitialGameState::execute(Game& a_game) {
 	a_game.enterGame(left, right);

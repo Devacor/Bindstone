@@ -117,9 +117,6 @@ namespace MV {
 		}
 
 		void disconnect() {
-			closeSocket(socket);
-
-			inbox.clear();
 			ourConnectionState = DISCONNECTED;
 			std::cout << "client.disconnect();" << std::endl;
 		}
@@ -231,9 +228,7 @@ namespace MV {
 		}
 
 		void disconnect() {
-			closeSocket(socket);
 			ourState->disconnect();
-			inbox.clear();
 		}
 
 		bool disconnected() const {
@@ -274,7 +269,7 @@ namespace MV {
 	private:
 		void acceptClients();
 
-		std::mutex lock;
+		std::recursive_mutex lock;
 
 		boost::asio::io_service ioService;
  		boost::asio::ip::tcp::acceptor acceptor;

@@ -434,99 +434,6 @@
     <ClCompile Include="Source\Render\Scene\clipped.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
-    <ClCompile Include="..\external\spine\TransformConstraint.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\TransformConstraintData.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\VertexAttachment.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\Animation.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\AnimationState.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\AnimationStateData.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\Atlas.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\AtlasAttachmentLoader.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\Attachment.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\AttachmentLoader.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\Bone.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\BoneData.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\BoundingBoxAttachment.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\Event.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\EventData.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\extension.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\IkConstraint.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\IkConstraintData.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\Json.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\MeshAttachment.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\PathAttachment.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\PathConstraint.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\PathConstraintData.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\RegionAttachment.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\Skeleton.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\SkeletonBounds.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\SkeletonData.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\SkeletonJson.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\Skin.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\Slot.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
-    <ClCompile Include="..\external\spine\SlotData.c">
-      <Filter>Spine</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Render\Scene\component.cpp">
       <Filter>Source Files\Render\Scene</Filter>
     </ClCompile>
@@ -565,6 +472,123 @@
     </ClCompile>
     <ClCompile Include="Source\Utility\asioThreadPool.cpp">
       <Filter>Source Files\Utility</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\Animation.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\AnimationState.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\AnimationStateData.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\Array.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\Atlas.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\AtlasAttachmentLoader.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\Attachment.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\AttachmentLoader.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\Bone.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\BoneData.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\BoundingBoxAttachment.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\ClippingAttachment.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\Color.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\Event.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\EventData.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\extension.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\IkConstraint.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\IkConstraintData.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\Json.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\MeshAttachment.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\PathAttachment.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\PathConstraint.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\PathConstraintData.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\PointAttachment.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\RegionAttachment.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\Skeleton.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\SkeletonBinary.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\SkeletonBounds.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\SkeletonClipping.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\SkeletonData.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\SkeletonJson.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\Skin.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\Slot.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\SlotData.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\TransformConstraint.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\TransformConstraintData.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\Triangulator.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\VertexAttachment.c">
+      <Filter>Spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\external\spine\VertexEffect.c">
+      <Filter>Spine</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -1066,102 +1090,6 @@
     <ClInclude Include="Source\Render\Scene\clipped.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
-    <ClInclude Include="..\external\spine\TransformConstraint.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\TransformConstraintData.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\VertexAttachment.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\Animation.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\AnimationState.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\AnimationStateData.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\Atlas.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\AtlasAttachmentLoader.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\Attachment.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\AttachmentLoader.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\Bone.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\BoneData.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\BoundingBoxAttachment.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\Event.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\EventData.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\extension.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\IkConstraint.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\IkConstraintData.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\Json.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\MeshAttachment.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\PathAttachment.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\PathConstraint.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\PathConstraintData.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\RegionAttachment.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\Skeleton.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\SkeletonBounds.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\SkeletonData.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\SkeletonJson.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\Skin.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\Slot.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\SlotData.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
-    <ClInclude Include="..\external\spine\spine.h">
-      <Filter>Spine</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Render\Scene\component.h">
       <Filter>Source Files\Render\Scene</Filter>
     </ClInclude>
@@ -1333,22 +1261,140 @@
     <ClInclude Include="Source\Render\matrix.hpp">
       <Filter>Source Files\Render</Filter>
     </ClInclude>
+    <ClInclude Include="..\external\spine\Animation.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\AnimationState.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\AnimationStateData.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\Array.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\Atlas.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\AtlasAttachmentLoader.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\Attachment.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\AttachmentLoader.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\Bone.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\BoneData.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\BoundingBoxAttachment.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\ClippingAttachment.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\Color.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\dll.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\Event.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\EventData.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\extension.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\IkConstraint.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\IkConstraintData.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\Json.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\kvec.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\MeshAttachment.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\PathAttachment.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\PathConstraint.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\PathConstraintData.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\PointAttachment.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\RegionAttachment.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\Skeleton.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\SkeletonBinary.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\SkeletonBounds.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\SkeletonClipping.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\SkeletonData.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\SkeletonJson.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\Skin.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\Slot.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\SlotData.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\spine.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\TransformConstraint.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\TransformConstraintData.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\Triangulator.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\VertexAttachment.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\external\spine\VertexEffect.h">
+      <Filter>Spine</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html">
       <Filter>Cereal</Filter>
     </None>
+    <None Include="ClassDiagram.cd" />
     <None Include="..\external\spine\LICENSE">
       <Filter>Spine</Filter>
     </None>
-    <None Include="..\external\spine\README.md">
-      <Filter>Spine</Filter>
-    </None>
-    <None Include="ClassDiagram.cd" />
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="..\external\spine\CMakeLists.txt">
-      <Filter>Spine</Filter>
-    </Text>
   </ItemGroup>
 </Project>

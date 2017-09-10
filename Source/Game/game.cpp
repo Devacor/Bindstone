@@ -142,6 +142,7 @@ void Game::render() {
 	updateScreenScaler();
 	if (ourInstance) {
 		ourInstance->update(lastUpdateDelta);
+		ourInstance->scene()->draw();
 	}
 	rootScene->update(lastUpdateDelta);
 	rootScene->draw();

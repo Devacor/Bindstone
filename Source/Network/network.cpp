@@ -47,7 +47,7 @@ namespace MV {
 				message->readHeaderFromBuffer();
 				boost::asio::async_read(*copiedSocket, message->buffer, boost::asio::transfer_exactly(message->content.size()), [&, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
 					if (!a_err && socket) {
-						if (ourConnectionState == CONNECTED) {
+						if (ourConnectionState != DISCONNECTED) {
 							message->readContentFromBuffer();
 							{
 								std::lock_guard<std::recursive_mutex> guard(lock);
@@ -84,6 +84,12 @@ namespace MV {
 			if (onConnectionFail) {
 				onConnectionFail(failMessageCached);
 			}
+			disconnect();
+		}
+
+		if (ourConnectionState == DISCONNECTED) {
+			closeSocket(socket);
+			inbox.clear();
 		} else {
 			tryInitializeCallback();
 			if (!inbox.empty()) {
@@ -144,14 +150,14 @@ namespace MV {
 	}
 
 	void Server::sendAll(const std::string &a_message) {
-		std::lock_guard<std::mutex> guard(lock);
+		std::lock_guard<std::recursive_mutex> guard(lock);
 		for (auto&& connection : ourConnections) {
 			connection->send(a_message);
 		}
 	}
 
 	void Server::sendExcept(const std::string &a_message, Connection* a_exceptConnection) {
-		std::lock_guard<std::mutex> guard(lock);
+		std::lock_guard<std::recursive_mutex> guard(lock);
 		for (auto&& connection : ourConnections) {
 			if (connection.get() != a_exceptConnection) {
 				connection->send(a_message);
@@ -167,7 +173,7 @@ namespace MV {
 				auto connection = std::make_shared<Connection>(*this, socket, ioService);
 				connection->initialize(connectionStateFactory);
 				{
-					std::lock_guard<std::mutex> guard(lock);
+					std::lock_guard<std::recursive_mutex> guard(lock);
 					ourConnections.push_back(connection);
 				}
 				connection->initiateRead();
@@ -178,7 +184,7 @@ namespace MV {
 	}
 
 	void Server::update(double a_dt) {
-		std::lock_guard<std::mutex> guard(lock);
+		std::lock_guard<std::recursive_mutex> guard(lock);
 		auto startSize = ourConnections.size();
 		ourConnections.erase(std::remove_if(ourConnections.begin(), ourConnections.end(), [&](auto c) {
 			if (!c) { return true; }
@@ -235,6 +241,7 @@ namespace MV {
 
 	void Connection::update(double a_dt) {
 		if (ourState->disconnected()) {
+			closeSocket(socket);
 			inbox.clear();
 			return;
 		}

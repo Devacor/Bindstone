@@ -167,7 +167,7 @@ namespace MV {
 		std::unique_ptr<boost::asio::io_service::work> work;
 
 		std::vector<double> serverTimeDeltas;
-		ConnectionState ourConnectionState;
+		ConnectionState ourConnectionState = DISCONNECTED;
 	};
 
 	class Server;

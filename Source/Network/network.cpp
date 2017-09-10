@@ -8,18 +8,20 @@
 namespace MV {
 
 	void Client::initiateConnection() {
-		ourConnectionState = CONNECTING;
-		socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
-		boost::asio::ip::tcp::resolver::query query(url.host(), std::to_string(url.port()), boost::asio::ip::tcp::resolver::query::canonical_name);
-		auto self = shared_from_this();
-		resolver.async_resolve(query, [=](const boost::system::error_code& a_err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
-			if (!a_err) {
-				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-				socket->async_connect(endpoint, boost::bind(&Client::handleConnect, self, boost::asio::placeholders::error, ++endpoint_iterator));
-			} else {
-				handleError(a_err, "resolve");
-			}
-		});
+		if (ourConnectionState == DISCONNECTED) {
+			ourConnectionState = CONNECTING;
+			socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
+			boost::asio::ip::tcp::resolver::query query(url.host(), std::to_string(url.port()), boost::asio::ip::tcp::resolver::query::canonical_name);
+			auto self = shared_from_this();
+			resolver.async_resolve(query, [=](const boost::system::error_code& a_err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
+				if (!a_err && socket) {
+					boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
+					socket->async_connect(endpoint, boost::bind(&Client::handleConnect, self, boost::asio::placeholders::error, ++endpoint_iterator));
+				} else {
+					handleError(a_err, "resolve");
+				}
+			});
+		}
 	}
 
 	void Client::handleConnect(const boost::system::error_code& a_err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {

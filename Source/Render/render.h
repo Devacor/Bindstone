@@ -310,7 +310,7 @@ namespace MV {
 			}
 		}
 
-		bool set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
+		bool set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex = 0, bool a_errorIfNotPresent = true);
 		bool set(std::string a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
 		bool set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
 

@@ -4,6 +4,8 @@
 
 #include <SDL.h>
 
+#include <conio.h>
+
 void sdl_quit_gameserver(void) {
 	SDL_Quit();
 	TTF_Quit();
@@ -38,7 +40,7 @@ GameServer::GameServer(Managers &a_managers, unsigned short a_port) :
 	MV::Size<> worldSize(960, 640);
 	MV::Size<int> windowSize(960, 640);
 
-	gameData.managers().renderer.makeHeadless().
+	gameData.managers().renderer.//makeHeadless().
 		window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
 
 	if (!gameData.managers().renderer.initialize(windowSize, worldSize)) {
@@ -61,4 +63,44 @@ GameServer::GameServer(Managers &a_managers, unsigned short a_port) :
 	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::MouseState& a_mouse, LocalData& a_data)
 
 	initializeClientToLobbyServer();
+}
+
+void GameServer::update(double dt) {
+	ourUserServer->update(dt);
+	ourLobbyClient->update();
+	threadPool.run();
+
+	if (ourInstance) {
+		ourInstance->update(dt);
+		ourInstance->scene()->draw();
+	}
+
+	gameData.managers().renderer.updateScreen();
+
+	handleInput();
+}
+
+void GameServer::handleInput() {
+	SDL_Event event;
+	while (SDL_PollEvent(&event)) {
+		auto windowResized = gameData.managers().renderer.handleEvent(event);
+		if (!windowResized && (!ourInstance || (ourInstance && !ourInstance->handleEvent(event)))) {
+		}
+	}
+	nullMouse.update();
+
+	if (_kbhit()) {
+		switch (_getch()) {
+		case 'c':
+			std::cout << "Connections: " << ourUserServer->connections().size() << std::endl;
+			break;
+		}
+	}
+}
+
+void GameServer::assign(const AssignedPlayer &a_left, const AssignedPlayer &a_right, const std::string &a_queueId) {
+	left = a_left;
+	right = a_right;
+	queueId = a_queueId;
+	ourInstance = std::make_unique<ServerGameInstance>(left->player, right->player, *this);
 }

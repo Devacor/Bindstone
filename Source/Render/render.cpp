@@ -729,6 +729,10 @@ namespace MV {
 					return false;
 				}
 				gl3wInit();
+			} else {
+				if (SDL_Init(SDL_INIT_EVENTS) == -1) {
+					std::cerr << "SDL_Init [HEADLESS]: " << SDL_GetError();
+				}
 			}
 		}
 		if(!sdlWindow.initialize()){

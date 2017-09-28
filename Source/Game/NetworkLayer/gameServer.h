@@ -21,7 +21,6 @@
 
 #include "Utility/cerealUtility.h"
 
-#include <conio.h>
 #include <optional>
 
 class ServerGameAction;
@@ -63,22 +62,7 @@ class GameServer {
 public:
 	GameServer(Managers &a_managers, unsigned short a_port = 0);
 
-	void update(double dt) {
-		ourUserServer->update(dt);
-		ourLobbyClient->update();
-		threadPool.run();
-
-		if (_kbhit()) {
-			switch (_getch()) {
-			case 's':
-				std::cout << "State query not really sure?" << std::endl;
-				break;
-			case 'c':
-				std::cout << "Connections: " << ourUserServer->connections().size() << std::endl;
-				break;
-			}
-		}
-	}
+	void update(double dt);
 
 	Managers& managers() {
 		return manager;
@@ -92,12 +76,7 @@ public:
 		return ourUserServer;
 	}
 
-	void assign(const AssignedPlayer &a_left, const AssignedPlayer &a_right, const std::string &a_queueId) {
-		left = a_left;
-		right = a_right;
-		queueId = a_queueId;
-		ourInstance = std::make_unique<ServerGameInstance>(left->player, right->player, *this);
-	}
+	void assign(const AssignedPlayer &a_left, const AssignedPlayer &a_right, const std::string &a_queueId);
 
 	std::shared_ptr<MV::Client> lobby() {
 		return ourLobbyClient;
@@ -163,6 +142,8 @@ public:
 private:
 	GameServer(const GameServer &) = delete;
 
+	void handleInput();
+
 	void initializeClientToLobbyServer() {
 		ourLobbyClient = MV::Client::make(MV::Url{ "http://localhost:22326" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
 			auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
@@ -201,8 +182,6 @@ private:
 
 	Managers &manager;
 	bool done;
-
-	double lastUpdateDelta;
 
 	std::optional<AssignedPlayer> left;
 	std::optional<AssignedPlayer> right;

@@ -19,8 +19,6 @@
 
 #include "Utility/cerealUtility.h"
 
-#include <conio.h>
-
 class ServerUserAction;
 class LobbyServer;
 class MatchQueue;
@@ -316,35 +314,7 @@ public:
 			})) {
 	}
 
-	void update(double dt) {
-		ourUserServer->update(dt);
-		ourGameServer->update(dt);
-		rankedQueue.update(dt);
-		normalQueue.update(dt);
-		threadPool.run();
-		emailPool.run();
-		dbPool.run();
-
-		if (_kbhit()) {
-			switch (_getch()) {
-			case 'q':
-				std::cout << "Ranked Queue: " << std::endl;
-				rankedQueue.print();
-				std::cout << "Normal Queue: " << std::endl;
-				normalQueue.print();
-				break;
-			case 'c':
-				std::cout << "Connections: " << ourUserServer->connections().size() << std::endl;
-				break;
-			case 'g':
-				for (auto&& gs : ourGameServer->connections()) {
-					auto* gsState = static_cast<LobbyGameConnectionState*>(gs->state());
-					std::cout << "Game Server: " << gsState->url() << ":" << gsState->port() << " - " << gsState->stateString() << std::endl;
-				}
-				break;
-			}
-		}
-	}
+	void update(double dt);
 
 	Managers& managers() {
 		return manager;

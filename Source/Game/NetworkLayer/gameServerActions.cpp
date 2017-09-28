@@ -33,8 +33,8 @@ void RequestBuildingUpgrade::execute(GameUserConnectionState* /*a_gameUser*/, Ga
 	a_game.server()->sendAll(makeNetworkString<RequestBuildingUpgrade>(side, slot, id));
 }
 
-void RequestFullGameState::execute(GameUserConnectionState* /*a_gameUser*/, GameServer &a_game) {
-	//a_game.server()->send(makeNetworkString<RequestBuildingUpgrade>(a_game.data));
+void RequestFullGameState::execute(GameUserConnectionState* a_gameUser, GameServer &a_game) {
+	//a_gameUser->connection()->send(makeNetworkString<RequestBuildingUpgrade>(a_game.data));
 }
 #endif
 

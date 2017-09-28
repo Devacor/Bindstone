@@ -272,20 +272,23 @@ namespace MV{
 				points.clear();
 				vertexIndices.clear();
 				fileBundle = FileBundle();
+				if (spineWorldVertices) {
+					FREE(spineWorldVertices);
+				}
 				if (atlas) {
 					spAtlas_dispose(atlas);
+				}
+				if (animationState) {
+					if (animationState->data) {
+						spAnimationStateData_dispose(animationState->data);
+					}
+					spAnimationState_dispose(animationState);
 				}
 				if (skeleton) {
 					if (skeleton->data) {
 						spSkeletonData_dispose(skeleton->data);
 					}
 					spSkeleton_dispose(skeleton);
-				}
-				if (animationState) {
-					spAnimationState_dispose(animationState);
-				}
-				if (spineWorldVertices) {
-					delete[] spineWorldVertices;
 				}
 
 				skeleton = nullptr;

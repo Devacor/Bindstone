@@ -18,9 +18,10 @@
 #include <list>
 #include <vector>
 #include <algorithm>
+#include <memory>
 
 namespace MV {
-	class SoundInstance {
+	class SoundInstance : std::enable_shared_from_this<SoundInstance> {
 	public:
 		SoundInstance();
 		~SoundInstance();
@@ -62,7 +63,7 @@ namespace MV {
 
 	enum PlayListType { MUSIC_PLAYLIST, SOUND_PLAYLIST };
 
-	class AudioPlayList {
+	class AudioPlayList : public std::enable_shared_from_this<AudioPlayList> {
 	public:
 		AudioPlayList();
 		~AudioPlayList();
@@ -100,8 +101,8 @@ namespace MV {
 		void pause();
 		void resume();
 	private:
-		std::list<std::string> songLineup;
-		std::list<std::string>::iterator currentSong;
+		std::vector<std::string> songLineup;
+		size_t currentSong = 0;
 		bool shuffle, loop, play;
 		int currentChannel;
 		int currentAngle;
@@ -127,7 +128,7 @@ namespace MV {
 		void setPosition(int degreeAngle, float distancePercent, int channel = -1);
 		void removePosition(int channel = -1);
 
-		bool playSound(const std::string &identifier, int channel = -1, int loop = 0, int ticks = -1, AudioPlayList* playList = 0);
+		bool playSound(const std::string &identifier, int channel = -1, int loop = 0, int ticks = -1, std::shared_ptr<AudioPlayList> playList = std::shared_ptr<AudioPlayList>());
 
 		void setSoundDisabled(bool disableSound) { disableSounds = disableSound; }
 		bool getSoundDisabled() { return disableSounds; }
@@ -168,17 +169,17 @@ namespace MV {
 			return currentSong;
 		}
 
-		AudioPlayList* getMusicPlayList();
-		void setMusicPlayList(AudioPlayList* playList);
+		std::shared_ptr<AudioPlayList> getMusicPlayList();
+		void setMusicPlayList(std::shared_ptr<AudioPlayList> playList);
 
-		AudioPlayList* getSoundPlayList(int channel);
-		void removeSoundPlayList(AudioPlayList* playList);
+		std::shared_ptr<AudioPlayList> getSoundPlayList(int channel);
+		void removeSoundPlayList(std::shared_ptr<AudioPlayList> playList);
 		void removeSoundPlayList(int channel);
 
 		void updateSoundPositions();
 
-		void registerSoundInstance(int channel, SoundInstance* soundReference) {
-			std::map<int, SoundInstance*>::iterator cell = soundInstances.find(channel);
+		void registerSoundInstance(int channel, std::shared_ptr<SoundInstance> soundReference) {
+			std::map<int, std::shared_ptr<SoundInstance>>::iterator cell = soundInstances.find(channel);
 			if (cell != soundInstances.end()) {
 				cell->second->donePlaying();
 				cell->second = soundReference;
@@ -186,17 +187,17 @@ namespace MV {
 				soundInstances[channel] = soundReference;
 			}
 		}
-		SoundInstance* removeSoundInstance(int channel) {
-			std::map<int, SoundInstance*>::iterator cell = soundInstances.find(channel);
-			SoundInstance *soundReturn = 0;
+		std::shared_ptr<SoundInstance> removeSoundInstance(int channel) {
+			std::map<int, std::shared_ptr<SoundInstance>>::iterator cell = soundInstances.find(channel);
+			std::shared_ptr<SoundInstance> soundReturn;
 			if (cell != soundInstances.end()) {
 				soundReturn = cell->second;
 				soundInstances.erase(cell);
 			}
 			return soundReturn;
 		}
-		void removeSoundInstance(SoundInstance* soundReference) {
-			std::map<int, SoundInstance*>::iterator cell;
+		void removeSoundInstance(std::shared_ptr<SoundInstance> soundReference) {
+			std::map<int, std::shared_ptr<SoundInstance>>::iterator cell;
 			for (cell = soundInstances.begin(); cell != soundInstances.end() && cell->second != soundReference; ++cell) { ; }
 			if (cell != soundInstances.end()) {
 				soundInstances.erase(cell);
@@ -211,8 +212,8 @@ namespace MV {
 		std::map<std::string, SoundIdentity> sounds;
 		std::map<std::string, SoundIdentity>::iterator soundCell;
 		std::string currentSong;
-		std::map<int, AudioPlayList*> channelsWithCallbacks;
-		std::map<int, SoundInstance*> soundInstances;
+		std::map<int, std::shared_ptr<AudioPlayList>> channelsWithCallbacks;
+		std::map<int, std::shared_ptr<SoundInstance>> soundInstances;
 		bool disableSounds;
 		int audio_rate;
 		int maxChannels;
@@ -225,7 +226,7 @@ namespace MV {
 		int angle;
 		bool initialized;
 
-		AudioPlayList *currentMusicPlayList;
+		std::shared_ptr<AudioPlayList> currentMusicPlayList;
 
 		static AudioPlayer *_instance;
 	};

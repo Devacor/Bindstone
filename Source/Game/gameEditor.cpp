@@ -2,11 +2,27 @@
 
 
 
+void GameEditor::resumeTitleMusic() {
+	auto playlistGame = std::make_shared<MV::AudioPlayList>();
+	playlistGame->addSoundBack("title");
+	playlistGame->loopSounds(false);
+
+	game.managers().audio.setMusicPlayList(playlistGame);
+
+	playlistGame->beginPlaying();
+}
+
 GameEditor::GameEditor() :
 	game(managers),
 	editor(managers),
 	limbo(MV::Scene::Node::make(managers.renderer))
 {
+	managers.audio.loadMusic("Assets/Audio/TitleTheme.ogg", "title");
+	managers.audio.loadMusic("Assets/Audio/FieldIntro.ogg", "gameintro");
+	managers.audio.loadMusic("Assets/Audio/FieldLoopNeutral.ogg", "gameloop");
+
+	resumeTitleMusic();
+
 	// 		auto stencilNode = limbo->make("StencilTestNode");
 	// 		auto spineTestNode = stencilNode->make("SpineTest")->position({ 400.0f, 600.0f })->attach<MV::Scene::Spine>(MV::Scene::Spine::FileBundle("Assets/Spine/Tree/life.json", "Assets/Spine/Tree/life.atlas", 0.5f))->shader(MV::DEFAULT_ID)->animate("idle")->bindNode("effects", "tree_particle")->bindNode("effects", "simple")->owner();
 	// 
@@ -45,10 +61,12 @@ GameEditor::GameEditor() :
 	auto editorButton = makeButton(grid, game.managers().textLibrary, mouse, "Editor", { 100.0f, 20.0f }, UTF_CHAR_STR("Editor"));
 	editorButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 		runEditor();
+		resumeTitleMusic();
 	});
 	auto gameButton = makeButton(grid, game.managers().textLibrary, mouse, "Game", { 100.0f, 20.0f }, UTF_CHAR_STR("Game"));
 	gameButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 		runGame();
+		resumeTitleMusic();
 	});
 	auto quitButton = makeButton(grid, game.managers().textLibrary, mouse, "Quit", { 100.0f, 20.0f }, UTF_CHAR_STR("Quit"));
 	quitButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
@@ -61,37 +79,6 @@ GameEditor::GameEditor() :
 // 			client->send(MV::toBinaryStringCast<ServerAction>(std::make_shared<CreatePlayer>("maxmike@gmail.com", "M2tM", "SuperTinker123")));
 // 		}
 // 	});
-
-	auto waterfall = limbo->make("WaterfallTestShaderThing")->position({ 100.0f, 100.0f });
-	auto drawable = waterfall->attach<MV::Scene::Drawable>()->shader("waterfall")->texture(MV::FileTextureDefinition::make("Assets/Images/stream_1.png")->makeHandle())
-		->setPoints(
-			{ 
-				MV::DrawPoint{ MV::point(0.0f, 0.0f), MV::TexturePoint(0.0f, 0.0f) },
-				MV::DrawPoint{ MV::point(0.0f, 100.0f), MV::TexturePoint(0.0f, 1.0f) },
-				MV::DrawPoint{ MV::point(100.0f, 100.0f), MV::TexturePoint(1.0f, 1.0f) },
-				MV::DrawPoint{ MV::point(100.0f, 0.0f), MV::TexturePoint(1.0f, 0.0f) },
-				MV::DrawPoint{ MV::point(0.0f, 100.0f), MV::TexturePoint(0.0f, 0.0f) },
-				MV::DrawPoint{ MV::point(100.0f, 200.0f), MV::TexturePoint(0.0f, 1.0f) },
-				MV::DrawPoint{ MV::point(200.0f, 200.0f), MV::TexturePoint(1.0f, 1.0f) },
-				MV::DrawPoint{ MV::point(100.0f, 100.0f), MV::TexturePoint(1.0f, 0.0f) },
-
-				MV::DrawPoint{ MV::point(100.0f, 200.0f), MV::TexturePoint(0.0f, 0.0f) },
-				MV::DrawPoint{ MV::point(150.0f, 200.0f), MV::TexturePoint(0.5f, 0.0f) },
-				MV::DrawPoint{ MV::point(200.0f, 200.0f), MV::TexturePoint(1.0f, 0.0f) },
-
-				MV::DrawPoint{ MV::point(25.0f, 275.0f), MV::TexturePoint(0.0f, 1.0f) },
-				MV::DrawPoint{ MV::point(100.0f, 275.0f), MV::TexturePoint(1.0f, 1.0f) },
-
-				MV::DrawPoint{ MV::point(200.0f, 275.0f), MV::TexturePoint(0.0f, 1.0f) },
-				MV::DrawPoint{ MV::point(275.0f, 275.0f), MV::TexturePoint(1.0f, 1.0f) },
-			},
-			{ 
-				0, 1, 2, 2, 3, 0,
-				4, 5, 6, 6, 7, 4,
-				8,11,12,12, 9, 8,
-				9,13,14,14,10, 9
-			}
-		)->materialSettings([](MV::Shader* a_shader){a_shader->set("duration", 2.0f, false);});
 
 	grid->component<MV::Scene::Grid>()->anchors().anchor({ MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f) }).usePosition(true).parent(screenScaler.self(), MV::Scene::Anchors::BoundsToOffset::Apply);
 }

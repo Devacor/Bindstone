@@ -239,7 +239,6 @@ namespace MV {
 
 			FileTextureDefinition * loadSpineSlotIntoPoints(spSlot* slot);
 			FileTextureDefinition *getSpineTextureFromSlot(spSlot* slot) const;
-			Color getSpineColorFromSlot(spSlot* slot) const;
 
 			FileBundle fileBundle;
 

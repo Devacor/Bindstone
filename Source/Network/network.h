@@ -19,6 +19,7 @@
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
 #include "chaiscript/chaiscript.hpp"
+#include "Utility/log.h"
 
 namespace MV {
 	struct NetworkMessage {
@@ -82,18 +83,14 @@ namespace MV {
 		void update();
 
 		void reconnect() {
-			if (ourConnectionState != DISCONNECTED) {
-				return;
-			}
 			initialize();
 		}
 
 		void reconnect(const std::function<void()> &a_onInitialized) {
-			if (ourConnectionState != DISCONNECTED) {
-				return;
+			if (ourConnectionState == DISCONNECTED) {
+				onInitialized = a_onInitialized;
+				initialize();
 			}
-			onInitialized = a_onInitialized;
-			initialize();
 		}
 
 		ConnectionState state() const{
@@ -118,7 +115,7 @@ namespace MV {
 
 		void disconnect() {
 			ourConnectionState = DISCONNECTED;
-			std::cout << "client.disconnect();" << std::endl;
+			info("client.disconnect();");
 		}
 
 	private:
@@ -142,13 +139,19 @@ namespace MV {
 
 		void handleError(const boost::system::error_code &a_err, const std::string &a_section) {
 			disconnect();
-			failMessage = "[" + a_section + "] ERROR: " + a_err.message();
-			std::cerr << failMessage << std::endl;
+			{
+				std::lock_guard<std::mutex> guard(errorLock);
+				failMessage = a_err.message();
+			}
+			error("[", a_section, "] => ", failMessage);
 		}
+
+		void disconnectIfFailed();
 
 		MV::Url url;
 
 		std::recursive_mutex lock;
+		std::mutex errorLock;
 
 		boost::asio::io_service ioService;
 		boost::asio::ip::tcp::resolver resolver;
@@ -167,7 +170,7 @@ namespace MV {
 		std::unique_ptr<boost::asio::io_service::work> work;
 
 		std::vector<double> serverTimeDeltas;
-		ConnectionState ourConnectionState = DISCONNECTED;
+		std::atomic<ConnectionState> ourConnectionState = DISCONNECTED;
 	};
 
 	class Server;
@@ -214,7 +217,7 @@ namespace MV {
 		}
 
 		~Connection() {
-			std::cout << "Connection::~Connection()\n";
+			info("Connection::~Connection()");
 			disconnect();
 		}
 
@@ -237,7 +240,7 @@ namespace MV {
 	private:
 		std::recursive_mutex lock;
 
-		void HandleError(const boost::system::error_code &a_err, const std::string &a_section);
+		void handleError(const boost::system::error_code &a_err, const std::string &a_section);
 
 		Server& server;
 		boost::asio::io_service& ioService;

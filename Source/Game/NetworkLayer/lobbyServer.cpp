@@ -2,6 +2,7 @@
 #include "networkAction.h"
 #include "clientActions.h"
 
+#include <conio.h>
 
 LobbyUserConnectionState::LobbyUserConnectionState(const std::shared_ptr<MV::Connection> &a_connection, LobbyServer& a_server) :
 	MV::ConnectionStateBase(a_connection),
@@ -187,6 +188,36 @@ void MatchQueue::print() const {
 	for (auto&& seeker : seekers) {
 		if (auto lockedSeeker = seeker.lock()) {
 			std::cout << lockedSeeker->player()->client->email << ":\t\t" << lockedSeeker->time << "\n";
+		}
+	}
+}
+
+void LobbyServer::update(double dt) {
+	ourUserServer->update(dt);
+	ourGameServer->update(dt);
+	rankedQueue.update(dt);
+	normalQueue.update(dt);
+	threadPool.run();
+	emailPool.run();
+	dbPool.run();
+
+	if (_kbhit()) {
+		switch (_getch()) {
+		case 'q':
+			std::cout << "Ranked Queue: " << std::endl;
+			rankedQueue.print();
+			std::cout << "Normal Queue: " << std::endl;
+			normalQueue.print();
+			break;
+		case 'c':
+			std::cout << "Connections: " << ourUserServer->connections().size() << std::endl;
+			break;
+		case 'g':
+			for (auto&& gs : ourGameServer->connections()) {
+				auto* gsState = static_cast<LobbyGameConnectionState*>(gs->state());
+				std::cout << "Game Server: " << gsState->url() << ":" << gsState->port() << " - " << gsState->stateString() << std::endl;
+			}
+			break;
 		}
 	}
 }

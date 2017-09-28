@@ -80,7 +80,6 @@ void Game::initializeWindow(){
 }
 
 bool Game::update(double dt) {
-	lastUpdateDelta = dt;
 	gameData.managers().pool.run();
 	if (ourLobbyClient->state() == MV::Client::DISCONNECTED) {
 		ourLobbyClient->reconnect();
@@ -89,6 +88,11 @@ bool Game::update(double dt) {
 	if (ourGameClient) {
 		ourGameClient->update();
 	}
+
+	if (ourInstance) {
+		ourInstance->update(dt);
+	}
+	rootScene->update(dt);
 
 	if (done) {
 		done = false;
@@ -141,10 +145,8 @@ void Game::render() {
 	gameData.managers().renderer.clearScreen();
 	updateScreenScaler();
 	if (ourInstance) {
-		ourInstance->update(lastUpdateDelta);
 		ourInstance->scene()->draw();
 	}
-	rootScene->update(lastUpdateDelta);
 	rootScene->draw();
 	
 	gameData.managers().renderer.updateScreen();

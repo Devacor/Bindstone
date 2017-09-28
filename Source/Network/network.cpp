@@ -30,8 +30,8 @@ namespace MV {
 			ourConnectionState = CONNECTING_SUCCESS;
 			initiateRead();
 		} else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
-			// The connection failed. Try the next endpoint in the list.
-			std::cerr << "Trying next endpoint: " << a_err.message() << std::endl;
+			// Try the next endpoint in the list.
+			info("Trying next endpoint: ", a_err.message());
 			socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
 			auto endpoint = *endpoint_iterator;
 			socket->async_connect(endpoint, boost::bind(&Client::handleConnect, shared_from_this(), boost::asio::placeholders::error, ++endpoint_iterator));
@@ -75,19 +75,27 @@ namespace MV {
 			}
 		} catch (std::exception &e) {
 			disconnect();
-			std::cerr << "Exception caught in Client: " << e.what() << std::endl;
+			error("Exception caught in Client: ", e.what());
 		}
 	}
 
-	void Client::update() {
+
+	void Client::disconnectIfFailed() {
+		std::unique_lock<std::mutex> guard(errorLock);
 		if (!failMessage.empty()) {
 			auto failMessageCached = failMessage;
 			failMessage.clear();
+			guard.unlock();
+
 			if (onConnectionFail) {
 				onConnectionFail(failMessageCached);
 			}
 			disconnect();
 		}
+	}
+
+	void Client::update() {
+		disconnectIfFailed();
 
 		if (ourConnectionState == DISCONNECTED) {
 			closeSocket(socket);
@@ -101,7 +109,7 @@ namespace MV {
 					try {
 						onMessageGet(message->content);
 					} catch (std::exception &e) {
-						std::cerr << "Exception caught in network message handler: " << e.what() << std::endl;
+						error("Exception caught in network message handler: ", e.what());
 					}
 				}
 				inbox.clear();
@@ -110,7 +118,7 @@ namespace MV {
 	}
 
 	void Client::send(const std::string &a_content) {
-		require<DeviceException>(connected() || a_content == "T", "Failed to send message due to lack of connection.");
+		require<DeviceException>(connected(), "Failed to send message due to lack of connection.");
 		auto self = shared_from_this();
 		ioService.post([=] {
 			self;
@@ -130,7 +138,7 @@ namespace MV {
 				try {
 					onInitialized();
 				} catch (std::exception &e) {
-					std::cerr << "Exception caught in network initialization call: " << e.what() << std::endl;
+					error("Exception caught in network initialization call: ", e.what());
 				}
 			}
 		}
@@ -146,7 +154,7 @@ namespace MV {
 	}
 
 	Server::~Server() {
-		std::cout << "Server Died" << std::endl;
+		info("Server::~Server");
 		ioService.stop();
 		if (worker && worker->joinable()) { worker->join(); }
 	}
@@ -193,14 +201,14 @@ namespace MV {
 			try {
 				c->update(a_dt);
 			} catch (std::exception &e) {
-				std::cerr << "Exception for connection update: " << e.what() << std::endl;
+				error("Exception for connection update: ", e.what());
 			} catch (...) {
-				std::cerr << "Unknown Exception for connection update!" << std::endl;
+				error("Unknown Exception for connection update!");
 			}
 			return c->disconnected();
 		}), ourConnections.end());
 		if (startSize != ourConnections.size()) {
-			std::cout << "Connections lost: " << startSize - ourConnections.size() << std::endl;
+			info("Connections lost: ", startSize - ourConnections.size());
 		}
 	}
 
@@ -210,7 +218,7 @@ namespace MV {
 			auto message = std::make_shared<NetworkMessage>(a_content);
 			boost::asio::async_write(*socket, boost::asio::buffer(message->headerAndContent(), message->headerAndContentSize()), [self, message](boost::system::error_code a_err, size_t a_amount) {
 				if (a_err) {
-					self->HandleError(a_err, "write");
+					self->handleError(a_err, "write");
 				}
 			});
 		});
@@ -232,11 +240,11 @@ namespace MV {
 						}
 						initiateRead();
 					} else if(socket) {
-						HandleError(a_err, "content");
+						handleError(a_err, "content");
 					}
 				});
 			} else if(socket) {
-				HandleError(a_err, "header");
+				handleError(a_err, "header");
 			}
 		});
 	}
@@ -253,7 +261,7 @@ namespace MV {
 			try {
 				ourState->message(message->content);
 			} catch (std::exception &e) {
-				std::cerr << "Caught an exception in Connection::update: " << e.what() << std::endl;
+				error("Caught an exception in Connection::update: ", e.what());
 				disconnect();
 				return;
 			}
@@ -262,8 +270,8 @@ namespace MV {
 		ourState->update(a_dt);
 	}
 
-	void Connection::HandleError(const boost::system::error_code &a_err, const std::string &a_section) {
-		std::cerr << "[" << a_section << "] ERROR: " << a_err.message() << std::endl;
+	void Connection::handleError(const boost::system::error_code &a_err, const std::string &a_section) {
+		error("[", a_section, "] -> ", a_err.message());
 		disconnect();
 	}
 

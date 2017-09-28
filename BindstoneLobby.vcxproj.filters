@@ -590,6 +590,9 @@
     <ClCompile Include="..\external\spine\VertexEffect.c">
       <Filter>Spine</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Game\NetworkLayer\gameServer.cpp">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Audio\package.h">
@@ -1386,6 +1389,9 @@
     </ClInclude>
     <ClInclude Include="..\external\spine\VertexEffect.h">
       <Filter>Spine</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\NetworkLayer\gameServer.h">
+      <Filter>Source Files\Game\NetworkLayer</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

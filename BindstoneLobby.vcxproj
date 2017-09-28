@@ -333,6 +333,7 @@
     <ClCompile Include="Source\Game\managers.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\accountActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\clientActions.cpp" />
+    <ClCompile Include="Source\Game\NetworkLayer\gameServer.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\gameServerActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\lobbyServer.cpp" />
     <ClCompile Include="Source\Game\player.cpp" />
@@ -577,6 +578,7 @@
     <ClInclude Include="Source\Game\managers.h" />
     <ClInclude Include="Source\Game\NetworkLayer\accountActions.h" />
     <ClInclude Include="Source\Game\NetworkLayer\clientActions.h" />
+    <ClInclude Include="Source\Game\NetworkLayer\gameServer.h" />
     <ClInclude Include="Source\Game\NetworkLayer\gameServerActions.h" />
     <ClInclude Include="Source\Game\NetworkLayer\lobbyServer.h" />
     <ClInclude Include="Source\Game\NetworkLayer\networkAction.h" />

@@ -16,23 +16,40 @@ namespace MV {
 			AxisAngles directionalChangeTemplate;
 			AxisAngles directionalChangeCurrent;
 		public:
+			inline void rateOfChangeDeg(AxisAngles a_rateOfChange) { rateOfChange = toRadians(a_rateOfChange); }
+			inline AxisAngles rateOfChangeDeg() { return toDegrees(rateOfChange); }
+
 			AxisAngles rateOfChange;
 
-			AxisAngles directionalChange(const AxisAngles &a_newDirectionalChange) {
+			AxisAngles directionalChangeDeg(const AxisAngles &a_newDirectionalChange) {
+				return directionalChangeRad(toRadians(a_newDirectionalChange));
+			}
+			AxisAngles directionalChangeRad(const AxisAngles &a_newDirectionalChange) {
 				directionalChangeTemplate = a_newDirectionalChange;
 				directionalChangeCurrent = a_newDirectionalChange;
 				return directionalChangeCurrent;
 			}
 
-			AxisAngles currentDirectionalChange(const AxisAngles &a_newDirectionalChange) {
+			AxisAngles currentDirectionalChangeDeg(const AxisAngles &a_newDirectionalChange) {
+				directionalChangeCurrent = toRadians(a_newDirectionalChange);
+				return a_newDirectionalChange;
+			}
+			AxisAngles currentDirectionalChangeRad(const AxisAngles &a_newDirectionalChange) {
 				directionalChangeCurrent = a_newDirectionalChange;
 				return directionalChangeCurrent;
 			}
 
-			AxisAngles directionalChange() const {
+			AxisAngles directionalChangeDeg() const {
+				return toDegrees(directionalChangeTemplate);
+			}
+			AxisAngles currentDirectionalChangeDeg() const {
+				return toDegrees(directionalChangeCurrent);
+			}
+
+			AxisAngles directionalChangeRad() const {
 				return directionalChangeTemplate;
 			}
-			AxisAngles currentDirectionalChange() const {
+			AxisAngles currentDirectionalChangeRad() const {
 				return directionalChangeCurrent;
 			}
 
@@ -76,7 +93,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			void save(Archive & archive) const {
+			void save(Archive & archive, std::uint32_t const /*version*/) const {
 				archive(CEREAL_NVP(rateOfChange), cereal::make_nvp("directionalChange", directionalChangeTemplate), CEREAL_NVP(rotationalChange),
 					CEREAL_NVP(beginSpeed), CEREAL_NVP(endSpeed),
 					CEREAL_NVP(beginScale), CEREAL_NVP(endScale),
@@ -88,7 +105,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			void load(Archive & archive) {
+			void load(Archive & archive, std::uint32_t const version) {
 				archive(CEREAL_NVP(rateOfChange), cereal::make_nvp("directionalChange", directionalChangeTemplate), CEREAL_NVP(rotationalChange),
 					CEREAL_NVP(beginSpeed), CEREAL_NVP(endSpeed),
 					CEREAL_NVP(beginScale), CEREAL_NVP(endScale),
@@ -97,6 +114,12 @@ namespace MV {
 					CEREAL_NVP(gravityMagnitude), CEREAL_NVP(gravityDirection),
 					CEREAL_NVP(animationFramesPerSecond)
 				);
+				if (version < 1) {
+					toRadiansInPlace(rateOfChange);
+					toRadiansInPlace(directionalChangeTemplate);
+					toRadiansInPlace(rotationalChange);
+					toRadiansInPlace(gravityDirection);
+				}
 				directionalChangeCurrent = directionalChangeTemplate;
 			}
 		};
@@ -109,18 +132,19 @@ namespace MV {
 
 				float mixValue = totalLifespan / change.maxLifespan;
 				
-				direction += change.currentDirectionalChange(change.currentDirectionalChange() + (change.rateOfChange * timeScale)) * timeScale;
+				direction += change.currentDirectionalChangeRad(change.currentDirectionalChangeRad() + (change.rateOfChange * timeScale)) * timeScale;
 				rotation += change.rotationalChange * timeScale;
 
 				speed = mix(change.beginSpeed, change.endSpeed, mixValue);
 				scale = mix(change.beginScale, change.endScale, mixValue);
 				color = mix(change.beginColor, change.endColor, mixValue);
 
-				Point<> distance = anglesToDirection(direction.z, direction.x) * (speed * timeScale);
+				Point<> distance(0.0f, speed * timeScale, 0.0f);
+				PointRotator(direction).apply(distance);
 				position += distance;
 				position += gravityConstant * timeScale;
 				
-				currentFrame = static_cast<int>(wrap(0.0f, static_cast<float>(textureCount), static_cast<float>(textureCount * (change.animationFramesPerSecond / timeScale))));
+				//currentFrame = static_cast<int>(wrap(0.0f, static_cast<float>(textureCount), static_cast<float>(textureCount * (change.animationFramesPerSecond / timeScale))));
 				
 				return totalLifespan == change.maxLifespan;
 			}
@@ -144,8 +168,9 @@ namespace MV {
 
 			size_t textureCount;
 
-			void setGravity(float a_magnitude, const AxisAngles &a_direction = AxisAngles(0.0f, 0.0f, 180.0f)) {
-				gravityConstant = anglesToDirection(a_direction.z, a_direction.x) * a_magnitude;
+			void setGravity(float a_magnitude, const AxisAngles &a_direction = AxisAngles(0.0f, 0.0f, toRadians(180.0f))) {
+				gravityConstant.locate(0.0f, a_magnitude, 0.0f);
+				PointRotator(a_direction).apply(gravityConstant);
 			}
 		private:
 			Point<> gravityConstant;
@@ -161,9 +186,21 @@ namespace MV {
 			Point<> maximumPosition;
 			std::function<Point<>()> getPosition;
 
+			inline void minimumDirectionDeg(AxisAngles a_minimumDirection) { minimumDirection = toRadians(a_minimumDirection); }
+			inline AxisAngles minimumDirectionDeg() { return toDegrees(minimumDirection); }
+
+			inline void maximumDirectionDeg(AxisAngles a_maximumDirection) { maximumDirection = toRadians(a_maximumDirection); }
+			inline AxisAngles maximumDirectionDeg() { return toDegrees(maximumDirection); }
+
 			AxisAngles minimumDirection;
 			AxisAngles maximumDirection;
 			std::function<AxisAngles()> getDirection;
+
+			inline void minimumRotationDeg(AxisAngles a_minimumRotation) { minimumRotation = toRadians(a_minimumRotation); }
+			inline AxisAngles minimumRotationDeg() { return toDegrees(minimumRotation); }
+
+			inline void maximumRotationDeg(AxisAngles a_maximumRotation) { maximumRotation = toRadians(a_maximumRotation); }
+			inline AxisAngles maximumRotationDeg() { return toDegrees(maximumRotation); }
 
 			AxisAngles minimumRotation;
 			AxisAngles maximumRotation;
@@ -209,7 +246,7 @@ namespace MV {
 			}
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const /*version*/) {
+			void serialize(Archive & archive, std::uint32_t const version) {
 				archive(CEREAL_NVP(maximumParticles),
 					CEREAL_NVP(minimumSpawnRate), CEREAL_NVP(maximumSpawnRate),
 					CEREAL_NVP(minimumPosition), CEREAL_NVP(maximumPosition),
@@ -217,6 +254,12 @@ namespace MV {
 					CEREAL_NVP(minimumRotation), CEREAL_NVP(maximumRotation),
 					CEREAL_NVP(minimum), CEREAL_NVP(maximum)
 				);
+				if (version < 1) {
+					toRadiansInPlace(minimumDirection);
+					toRadiansInPlace(maximumDirection);
+					toRadiansInPlace(minimumRotation);
+					toRadiansInPlace(maximumRotation);
+				}
 				dirty = true;
 			}
 		};
@@ -346,7 +389,7 @@ namespace MV {
 
 				particle.direction = spawnProperties.getDirection();
 				particle.change.rateOfChange = spawnProperties.getRateOfChange();
-				particle.change.directionalChange(spawnProperties.getDirectionChange());
+				particle.change.directionalChangeRad(spawnProperties.getDirectionChange());
 
 				spawnProperties.setSpeed(particle.change.beginSpeed, particle.change.endSpeed);
 

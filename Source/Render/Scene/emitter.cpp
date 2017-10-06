@@ -4,6 +4,8 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Emitter);
+CEREAL_CLASS_VERSION(MV::Scene::ParticleChangeValues, 1);
+CEREAL_CLASS_VERSION(MV::Scene::EmitterSpawnProperties, 1);
 
 namespace MV {
 	namespace Scene {
@@ -60,10 +62,10 @@ namespace MV {
 				getRateOfChange = [&] {return randomMix(minimum.rateOfChange, maximum.rateOfChange); };
 			}
 
-			if (minimum.directionalChange() == maximum.directionalChange()) {
-				getDirectionChange = [&] {return minimum.directionalChange(); };
+			if (minimum.directionalChangeRad() == maximum.directionalChangeRad()) {
+				getDirectionChange = [&] {return minimum.directionalChangeRad(); };
 			} else {
-				getDirectionChange = [&] {return randomMix(minimum.directionalChange(), maximum.directionalChange()); };
+				getDirectionChange = [&] {return randomMix(minimum.directionalChangeRad(), maximum.directionalChangeRad()); };
 			}
 
 			if (MV::equals(minimum.beginSpeed, maximum.beginSpeed) && MV::equals(minimum.endSpeed, maximum.endSpeed)) {
@@ -178,9 +180,11 @@ namespace MV {
 				
 				appendQuadVertexIndices(threadData[a_groupIndex].vertexIndices, static_cast<GLuint>(threadData[a_groupIndex].points.size()));
 				
+				auto c = cos(particle.rotation.z);
+				auto s = sin(particle.rotation.z);
 				for (size_t i = 0; i < 4; ++i) {
 					auto corner = bounds[i];
-					rotatePoint2D(corner.x, corner.y, particle.rotation.z);
+					rotatePoint2DRad(corner.x, corner.y, c, s);
 					corner += particle.position;
 					threadData[a_groupIndex].points.emplace_back(corner, particle.color, texturePoints[i]);
 				}

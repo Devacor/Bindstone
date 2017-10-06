@@ -524,12 +524,21 @@ namespace MV {
 
 			AxisAngles worldRotation() const;
 			std::shared_ptr<Node> worldRotation(const AxisAngles &a_newAngle);
-			AxisAngles rotation() const{
+			AxisAngles worldRotationRad() const;
+			std::shared_ptr<Node> worldRotationRad(const AxisAngles &a_newAngle);
+			AxisAngles rotation() const {
+				return toDegrees(rotateTo);
+			}
+			AxisAngles rotationRad() const{
 				return rotateTo;
 			}
 			std::shared_ptr<Node> rotation(const AxisAngles &a_newRotation);
-			std::shared_ptr<Node> addRotation(const AxisAngles &a_incrementRotation){
-				return rotation(rotateTo + a_incrementRotation);
+			std::shared_ptr<Node> rotationRad(const AxisAngles &a_newRotation);
+			std::shared_ptr<Node> addRotation(const AxisAngles &a_incrementRotation) {
+				return rotationRad(rotateTo + toRadians(a_incrementRotation));
+			}
+			std::shared_ptr<Node> addRotationRad(const AxisAngles &a_incrementRotation) {
+				return rotationRad(rotateTo + a_incrementRotation);
 			}
 
 			Scale scale() const{
@@ -878,6 +887,9 @@ namespace MV {
 				if (childComponents.empty() && !filteredChildComponents.empty()) {
 					childComponents = filteredChildComponents;
 				}
+				if (version < 2) {
+					rotateTo = toRadians(rotateTo);
+				}
 			}
 
 			template <class Archive>
@@ -916,6 +928,9 @@ namespace MV {
 					cereal::make_nvp("childNodes", construct->childNodes),
 					cereal::make_nvp("childComponents", construct->childComponents)
 				);
+				if (version < 2) {
+					toRadiansInPlace(construct->rotateTo);
+				}
 				if (doPostLoad && isRootNode) {
 					construct->postLoadStep();
 				}

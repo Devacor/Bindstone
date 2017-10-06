@@ -1267,6 +1267,32 @@ namespace MV {
 	}
 
 	template <class T>
+	Point<T> toDegrees(const Point<T> &a_in) {
+		return a_in * static_cast<T>(180.0 / PIE);
+	}
+
+	template <class T>
+	Point<T> toRadians(const Point<T> &a_in) {
+		return a_in * static_cast<T>(PIE / 180.0);
+	}
+
+	template <class T>
+	void toDegreesInPlace(Point<T> &a_in) {
+		T amount = static_cast<T>(180.0 / PIE);
+		a_in.x *= amount;
+		a_in.y *= amount;
+		a_in.z *= amount;
+	}
+
+	template <class T>
+	void toRadiansInPlace(Point<T> &a_in) {
+		T amount = static_cast<T>(PIE / 180.0);
+		a_in.x *= amount;
+		a_in.y *= amount;
+		a_in.z *= amount;
+	}
+
+	template <class T>
 	bool operator!=(const Point<T>& a_left, const Point<T>& a_right){
 		return !(a_left == a_right);
 	}
@@ -1380,8 +1406,13 @@ namespace MV {
 	}
 
 	template <typename T>
-	PointPrecision angle(const Point<T> &a_lhs, const Point<T> &a_rhs, AngleType returnAs = DEGREES) {
-		return static_cast<PointPrecision>(angle(a_lhs.x, a_lhs.y, a_rhs.x, a_rhs.y, returnAs));
+	PointPrecision angle2D(const Point<T> &a_lhs, const Point<T> &a_rhs) {
+		return static_cast<PointPrecision>(angle2D(a_lhs.x, a_lhs.y, a_rhs.x, a_rhs.y));
+	}
+
+	template <typename T>
+	PointPrecision angle2DRad(const Point<T> &a_lhs, const Point<T> &a_rhs) {
+		return static_cast<PointPrecision>(angle2DRad(a_lhs.x, a_lhs.y, a_rhs.x, a_rhs.y));
 	}
 
 	template <class T>
@@ -1397,7 +1428,7 @@ namespace MV {
 		a_script.add(chaiscript::fun(&Point<T>::normalized), "normalized");
 		a_script.add(chaiscript::fun(&Point<T>::magnitude), "magnitude");
 		a_script.add(chaiscript::fun(&Point<T>::clear), "clear");
-		a_script.add(chaiscript::fun(static_cast<PointPrecision (*)(const Point<T> &, const Point<T> &, AngleType)>(&MV::angle<T>)), "angle");
+		a_script.add(chaiscript::fun(static_cast<PointPrecision (*)(const Point<T> &, const Point<T> &)>(&MV::angle2D<T>)), "angle2D");
 		a_script.add(chaiscript::fun(static_cast<PointPrecision (*)(const Point<T> &, const Point<T> &)>(&MV::distance<T>)), "distance");
 		a_script.add(chaiscript::fun(static_cast<Point<T>&(Point<T>::*)(T, T, T)>(&Point<T>::locate)), "locate");
 		a_script.add(chaiscript::fun(static_cast<Point<T>&(Point<T>::*)(T, T)>(&Point<T>::locate)), "locate");
@@ -1518,5 +1549,60 @@ namespace MV {
 		}
 		return a_start + (delta.normalized() * magnitude);
 	}
+
+	class PointRotator {
+	public:
+		inline PointRotator(AxisAngles angle) : PointRotator(angle.x, angle.y, angle.z){}
+
+		inline PointRotator(PointPrecision pitch, PointPrecision roll, PointPrecision yaw) {
+			auto cosa = std::cos(yaw);
+			auto sina = std::sin(yaw);
+
+			auto cosb = std::cos(pitch);
+			auto sinb = std::sin(pitch);
+
+			auto cosc = std::cos(roll);
+			auto sinc = std::sin(roll);
+
+			auto cAsB = cosa*sinb;
+			auto sAsB = sina*sinb;
+
+			Axx = cosa*cosb;
+			Axy = cAsB*sinc - sina*cosc;
+			Axz = cAsB*cosc + sina*sinc;
+
+			Ayx = sina*cosb;
+			Ayy = sAsB*sinc + cosa*cosc;
+			Ayz = sAsB*cosc - cosa*sinc;
+
+			Azx = -sinb;
+			Azy = cosb*sinc;
+			Azz = cosb*cosc;
+		}
+		PointRotator(const PointRotator&) = default;
+		PointRotator(PointRotator&&) = default;
+
+		inline void apply(Point<PointPrecision> &a_point) {
+			auto px = a_point.x;
+			auto py = a_point.y;
+			auto pz = a_point.z;
+
+			a_point.x = Axx*px + Axy*py + Axz*pz;
+			a_point.y = Ayx*px + Ayy*py + Ayz*pz;
+			a_point.z = Azx*px + Azy*py + Azz*pz;
+		}
+	private:
+		PointPrecision Axx;
+		PointPrecision Axy;
+		PointPrecision Axz;
+
+		PointPrecision Ayx;
+		PointPrecision Ayy;
+		PointPrecision Ayz;
+
+		PointPrecision Azx;
+		PointPrecision Azy;
+		PointPrecision Azz;
+	};
 }
 #endif

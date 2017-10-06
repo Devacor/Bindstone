@@ -27,8 +27,8 @@ namespace MV {
 	typedef char UtfChar;
 	typedef std::string UtfString;
 
-	enum AngleType {DEGREES, RADIANS};
-	const double PIE = 3.14159265358979323846;
+	const double PIE = 3.141592653589793115997963468544185161590576171875;
+	const float PIEf = 3.1415927410125732421875f;
 
 	std::string guid(std::string a_baseName = "guid_");
 
@@ -121,10 +121,45 @@ namespace MV {
 		return a_original;
 	}
     
-    int wrap(int lowerBound, int upperBound, int val);
-    long wrap(long lowerBound, long upperBound, long val);
-    float wrap(float lowerBound, float upperBound, float val);
-    double wrap(double lowerBound, double upperBound, double val);
+	inline int wrap(int lowerBound, int upperBound, int val) {
+		using std::swap;
+		if (lowerBound > upperBound) { swap(lowerBound, upperBound); }
+		int rangeSize = upperBound - lowerBound;
+
+		if (val < lowerBound)
+			val += rangeSize * ((lowerBound - val) / rangeSize + 1);
+
+		return lowerBound + (val - lowerBound) % rangeSize;
+	}
+
+	inline long wrap(long lowerBound, long upperBound, long val) {
+		using std::swap;
+		if (lowerBound > upperBound) { swap(lowerBound, upperBound); }
+		long rangeSize = upperBound - lowerBound;
+
+		if (val < lowerBound)
+			val += rangeSize * ((lowerBound - val) / rangeSize + 1);
+
+		return lowerBound + (val - lowerBound) % rangeSize;
+	}
+
+	inline float wrap(float lowerBound, float upperBound, float val) {
+		using std::swap;
+		if (lowerBound > upperBound) { swap(lowerBound, upperBound); }
+		val -= lowerBound; //adjust to 0
+		float rangeSize = upperBound - lowerBound;
+		if (rangeSize == 0) { return upperBound; } //avoid dividing by 0
+		return val - (rangeSize * std::floor(val / rangeSize)) + lowerBound;
+	}
+
+	inline double wrap(double lowerBound, double upperBound, double val) {
+		using std::swap;
+		if (lowerBound > upperBound) { swap(lowerBound, upperBound); }
+		val -= lowerBound; //adjust to 0
+		double rangeSize = upperBound - lowerBound;
+		if (rangeSize == 0) { return upperBound; } //avoid dividing by 0
+		return val - (rangeSize * std::floor(val / rangeSize)) + lowerBound;
+	}
 
 	inline float mix(float a_start, float a_end, float a_percent) {
 		return (a_percent * (a_end - a_start)) + a_start;
@@ -243,14 +278,19 @@ namespace MV {
 		return s;
 	}
 
-	template <class Type>
-	Type toDegrees(const Type &val){
-		return static_cast<Type>(val*(180.0 / PIE));
+	inline constexpr float toDegrees(float val){
+		return val*(180.0f / float(PIE));
+	}
+	inline constexpr double toDegrees(double val) {
+		return val*(180.0 / PIE);
 	}
 
-	template <class Type>
-	Type toRadians(const Type &val){
-		return static_cast<Type>(val*(PIE / 180.0));
+	inline constexpr float toRadians(float val){
+		return val*(float(PIE) / 180.0f);
+	}
+
+	inline constexpr double toRadians(double val) {
+		return val*(PIE / 180.0);
 	}
 
 	double distance(const double &x1, const double &y1, const double &x2, const double &y2);
@@ -263,27 +303,55 @@ namespace MV {
 
 	std::string fileContents(const std::string& a_path);
 
-	template <class Type>
-	double angle(const Type &x1, const Type &y1, const Type &x2, const Type &y2, AngleType returnAs = DEGREES){
-		if(returnAs == DEGREES){
-			return wrap(static_cast<double>(toDegrees(atan2(y2 -y1, x2 - x1))), 0.0, 360.0);
-		}else{
-			return static_cast<double>(atan2(y2 - y1, x2 - x1));
-		}
+	inline float angle2D(int x1, int y1, int x2, int y2) {
+		return wrap(toDegrees(atan2(static_cast<float>(y2 - y1), static_cast<float>(x2 - y2))), 0.0f, 360.0f);
 	}
 
-	template <class Type>
-	void rotatePoint2DRad(Type &x, Type &y, Type angle) {
-		Type tmpX, tmpY;
-		auto c = cos(angle);
-		auto s = sin(angle);
-		tmpX = Type((x * c) - (y * s));
-		tmpY = Type((y * c) + (x * s));
+	inline float angle2D(float x1, float y1, float x2, float y2){
+		return wrap(toDegrees(atan2(y2 -y1, x2 - x1)), 0.0f, 360.0f);
+	}
+
+	inline double angle2D(double x1, double y1, double x2, double y2) {
+		return wrap(toDegrees(atan2(y2 - y1, x2 - x1)), 0.0, 360.0);
+	}
+
+	inline float angle2DRad(int x1, int y1, int x2, int y2) {
+		return atan2(static_cast<float>(y2 - y1), static_cast<float>(x2 - y2));
+	}
+
+	inline float angle2DRad(float x1, float y1, float x2, float y2) {
+		return atan2(y2 - y1, x2 - x1);
+	}
+
+	inline double angle2DRad(double x1, double y1, double x2, double y2) {
+		return atan2(y2 - y1, x2 - x1);
+	}
+
+	inline void rotatePoint2DRad(float &x, float &y, float c, float s) {
+		auto tmpX = ((x * c) - (y * s));
+		auto tmpY = ((y * c) + (x * s));
 		x = tmpX; y = tmpY;
 	}
 
-	template <class Type>
-	void rotatePoint2D(Type &x, Type &y, Type angle){
+	inline void rotatePoint2DRad(float &x, float &y, float angle) {
+		rotatePoint2DRad(x, y, cos(angle), sin(angle));
+	}
+
+	inline void rotatePoint2D(float &x, float &y, float angle){
+		rotatePoint2DRad(x, y, toRadians(angle));
+	}
+
+	inline void rotatePoint2DRad(double &x, double &y, double c, double s) {
+		auto tmpX = ((x * c) - (y * s));
+		auto tmpY = ((y * c) + (x * s));
+		x = tmpX; y = tmpY;
+	}
+
+	inline void rotatePoint2DRad(double &x, double &y, double angle) {
+		rotatePoint2DRad(x, y, cos(angle), sin(angle));
+	}
+
+	inline void rotatePoint2D(double &x, double &y, double angle) {
 		rotatePoint2DRad(x, y, toRadians(angle));
 	}
 

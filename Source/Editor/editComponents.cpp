@@ -94,16 +94,7 @@ void EditableNode::resetHandles() {
 		onChange(self);
 	});
 
-	rotationHandle = positionHandle->owner()->make("RotationControl")->serializable(false)->attach<MV::Scene::Clickable>(*mouse);
-	rotationHandle->bounds({MV::point( 5.0f, 5.0f ), MV::point(-5.0f,-5.0f)})->show()->color({ ROTATION_HANDLE })->globalPriority(rotationHandle->globalPriority() + 90);
-	rotationHandle->onDrag.connect("rotation", [&, self](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
-		MV::PointPrecision angle = static_cast<float>(MV::angle(positionHandle->owner()->screenPosition(), handle->mouse().position()));
-		positionHandle->owner()->worldRotation({ 0.0f, 0.0f, angle - 45.0f });
-		elementToEdit->worldRotation(positionHandle->owner()->worldRotation());
-		onChange(self);
-	});
-
-	positionHandle->owner()->worldRotation(elementToEdit->worldRotation());
+	positionHandle->owner()->worldRotationRad(elementToEdit->worldRotationRad());
 }
 
 void EditableNode::rotation(const MV::AxisAngles &a_rotate) {

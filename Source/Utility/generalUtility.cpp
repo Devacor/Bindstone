@@ -192,35 +192,6 @@ namespace MV {
 		return ws;
 	}
 
-
-	int wrap(int lowerBound, int upperBound, int val){
-		return static_cast<int>(wrap(static_cast<long>(lowerBound), static_cast<long>(upperBound), static_cast<long>(val)));
-	}
-
-	long wrap(long lowerBound, long upperBound, long val){
-		using std::swap;
-		if(lowerBound > upperBound){swap(lowerBound, upperBound);}
-		long rangeSize = upperBound - lowerBound;
-
-		if (val < lowerBound)
-			val += rangeSize * ((lowerBound - val) / rangeSize + 1);
-
-		return lowerBound + (val - lowerBound) % rangeSize;
-	}
-
-	float wrap(float lowerBound, float upperBound, float val){
-		return static_cast<float>(wrap(static_cast<double>(lowerBound), static_cast<double>(upperBound), static_cast<double>(val)));
-	}
-
-	double wrap(double lowerBound, double upperBound, double val){
-		using std::swap;
-		if(lowerBound > upperBound){swap(lowerBound, upperBound);}
-		val-=lowerBound; //adjust to 0
-		double rangeSize = upperBound - lowerBound;
-		if(rangeSize == 0){return upperBound;} //avoid dividing by 0
-		return val - (rangeSize * std::floor(val/rangeSize)) + lowerBound;
-	}
-
 	Random* Random::instance = nullptr;
 
 	double randomNumber(double a_min, double a_max) {

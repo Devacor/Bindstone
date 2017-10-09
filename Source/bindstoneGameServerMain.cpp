@@ -1,8 +1,5 @@
-#define BINDSTONE_SERVER 1
-#define BINDSTONE_GAME_SERVER 1
-
 #include "Game/gameEditor.h"
-#include "Utility/threadPool.h"
+#include "Utility/threadPool.hpp"
 
 #include "ArtificialIntelligence/pathfinding.h"
 #include "Utility/cerealUtility.h"
@@ -36,7 +33,7 @@ int main(int, char *[]) {
 	Managers managers;
 	managers.timer.start();
 	bool done = false;
-	auto server = std::make_shared<GameServer>(managers, 22333);
+	auto server = std::make_shared<GameServer>(managers);
 	while (!done) {
 		managers.pool.run();
 		auto tick = managers.timer.delta("tick");

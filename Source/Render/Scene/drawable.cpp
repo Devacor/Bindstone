@@ -3,6 +3,8 @@
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
+#include "Utility/log.h"
+
 CEREAL_REGISTER_TYPE(MV::Scene::Drawable);
 CEREAL_CLASS_VERSION(MV::Scene::Drawable, 3);
 
@@ -241,6 +243,14 @@ namespace MV {
 		}
 
 		void Drawable::addTexturesToShader() {
+			static const MV::BoxAABB<> unitBox{ MV::Point<>{}, MV::Point<>{1.0f, 1.0f} };
+			if (cachedTextureList.empty()) {
+				return;
+			}
+			auto& bounds = !ourTextures.empty() ? ourTextures.begin()->second->rawPercent() : unitBox;
+			if (shaderProgram->setVec2("uvMin", bounds.minPoint, false)) {
+				shaderProgram->setVec2("uvMax", bounds.maxPoint, false); //optional but helpful default
+			}
 			bool firstTexture = true;
 			for (auto&& kv : cachedTextureList) {
 				shaderProgram->set(kv.first, kv.second, firstTexture);

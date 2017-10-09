@@ -155,7 +155,11 @@ namespace MV {
 			void update(double a_delta) {
 				accumulatedDelta += a_delta;
 				updateImplementation(a_delta);
-				rootTask.update(a_delta);
+				if (rootTask) {
+					if (rootTask->update(a_delta)) {
+						rootTask.reset();
+					}
+				}
 			}
 
 			std::shared_ptr<Component> bounds(const BoxAABB<> &a_localBounds) {
@@ -190,6 +194,7 @@ namespace MV {
 			}
 
 			void detach();
+			void attach(const std::shared_ptr<Node> &a_parent);
 
 			std::string id() const {
 				return componentId;
@@ -201,7 +206,10 @@ namespace MV {
 			}
 
 			Task& task() {
-				return rootTask;
+				if (!rootTask) {
+					rootTask = std::make_unique<Task>();
+				}
+				return *rootTask;
 			}
 
 			std::shared_ptr<Component> serializable(bool a_serializable) {
@@ -242,7 +250,9 @@ namespace MV {
 			bool ownerIsAlive() const;
 
 		protected:
+			void reattached(const std::shared_ptr<Node> &a_parent);
 			virtual void detachImplementation() {}
+			virtual void reattachImplementation() {}
 			virtual void postLoadInitialize() {}
 
 			virtual void onOwnerDestroyed() {}
@@ -267,8 +277,6 @@ namespace MV {
 
 			Component(const Component& a_rhs) = delete;
 			Component& operator=(const Component& a_rhs) = delete;
-
-			virtual void onRemoved() {}
 
 			template <class Archive>
 			void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -297,7 +305,7 @@ namespace MV {
 		private:
 			bool allowSerialize = true;
 
-			Task rootTask;
+			std::unique_ptr<Task> rootTask;
 			std::string componentId;
 			std::weak_ptr<Node> componentOwner;
 		};

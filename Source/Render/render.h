@@ -1,4 +1,4 @@
-﻿/**********************************************************\
+/**********************************************************\
 | Michael Hamilton (maxmike@gmail.com) www.mutedvision.net |
 |----------------------------------------------------------|
 \**********************************************************/
@@ -310,13 +310,13 @@ namespace MV {
 			}
 		}
 
-		bool set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex = 0, bool a_errorIfNotPresent = true);
-		bool set(std::string a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
-		bool set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
+		bool set(const std::string &a_variableName, GLuint a_texture, GLuint a_textureBindIndex = 0, bool a_errorIfNotPresent = true);
+		bool set(const std::string &a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
+		bool set(const std::string &a_variableName, const std::shared_ptr<TextureHandle> &a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
 
-		inline bool Shader::set(std::string a_variableName, PointPrecision a_value, bool a_errorIfNotPresent = true) {
+		inline bool set(std::string a_variableName, PointPrecision a_value, bool a_errorIfNotPresent = true) {
 			if (!headless) {
-				GLuint offset = variableOffset(a_variableName);
+				GLint offset = variableOffset(a_variableName);
 				if (offset >= 0) {
 					glUniform1fv(offset, 1, &a_value);
 					return true;
@@ -327,9 +327,9 @@ namespace MV {
 			return false;
 		}
 
-		inline bool Shader::setVec2(std::string a_variableName, const Point<PointPrecision> &a_point, bool a_errorIfNotPresent = true) {
+		inline bool setVec2(const std::string &a_variableName, const Point<PointPrecision> &a_point, bool a_errorIfNotPresent = true) {
 			if (!headless) {
-				GLuint offset = variableOffset(a_variableName);
+				GLint offset = variableOffset(a_variableName);
 				if (offset >= 0) {
 					glUniform2fv(offset, 1, &a_point.x);
 					return true;
@@ -339,9 +339,9 @@ namespace MV {
 			}
 			return false;
 		}
-		inline bool Shader::setVec3(std::string a_variableName, const Point<PointPrecision> &a_point, bool a_errorIfNotPresent = true) {
+		inline bool setVec3(const std::string &a_variableName, const Point<PointPrecision> &a_point, bool a_errorIfNotPresent = true) {
 			if (!headless) {
-				GLuint offset = variableOffset(a_variableName);
+				GLint offset = variableOffset(a_variableName);
 				if (offset >= 0) {
 					glUniform3fv(offset, 1, &a_point.x);
 					return true;
@@ -352,7 +352,7 @@ namespace MV {
 			return false;
 		}
 
-		inline bool Shader::set(std::string a_variableName, const TransformMatrix &a_matrix, bool a_errorIfNotPresent = true) {
+		inline bool set(const std::string &a_variableName, const TransformMatrix &a_matrix, bool a_errorIfNotPresent = true) {
 			if (!headless) {
 				GLint offset = variableOffset(a_variableName);
 				if (offset >= 0) {

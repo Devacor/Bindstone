@@ -15,66 +15,6 @@
 #if 0
 
 int main(int, char *[]) {
-// 	std::string content = "Hello World";
-// 	auto scriptString = "puts('['); puts(arg_0); puts(']'); puts('['); puts(arg_1); puts(']'); puts('['); puts(arg_2); puts(\"]\n\");";
-// 
-// 	MV::Signal<void(const std::string&, const std::string&, const std::string&)> callbackTest;
-// 	callbackTest.scriptEngine(&chaiScript);
-// 	callbackTest.connect("test", scriptString);
-// 	{
-// 		auto connection2 = callbackTest.connect("puts(\"![\"); puts(arg_0); puts(\"]!\n\");");
-// 		callbackTest(content, ":D :D :D", "TEST CHAR");
-// 	}
-// 	callbackTest("!!!", "VVV", "~~~");
-// 
-// 	auto jsonCallback = MV::toJson(callbackTest);
-// 
-// 	auto callbackLoadTest = MV::fromJson<MV::Signal<void(const std::string&, const std::string&, const std::string&)>>(jsonCallback, [&](cereal::JSONInputArchive& archive) {
-// 		archive.add(cereal::make_nvp("script", &chaiScript));
-// 	});
-// 
-// 	callbackLoadTest("LoadTest2", "DidThisWork?", "Maybe");
-// 
-// 	std::cout << std::endl;
-
-	// 	pqxx::connection c("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=5432 dbname=bindstone user=m2tm password=Tinker123");
-	// 	pqxx::work txn(c);
-	// 
-	// 
-	// 	txn.exec(
-	// 		"CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;"
-	// 		"CREATE TABLE Instances ("
-	// 		"	Id SERIAL primary key,"
-	// 		"	Available boolean			default false,"
-	// 		"	Host text						default '',"
-	// 		"	Port integer				default 0,"
-	// 		"	PlayerLeft	int				default 0,"
-	// 		"	PlayerRight	int				default 0,"
-	// 		"	LastUpdate timestamp without time zone default (now() at time zone 'utc'),"
-	// 		"	Result JSON"
-	// 		");");
-	// 	txn.commit();
-
-	// 	pqxx::result r = txn.exec(
-	// 		"SELECT state "
-	// 		"FROM players "
-	// 		"WHERE email = " + txn.quote("maxmike@gmail.com"));
-	// 
-	// 	if (r.size() != 1)
-	// 	{
-	// 		std::cerr
-	// 			<< "Expected 1 player with email " << txn.quote("maxmike@gmail.com") << ", "
-	// 			<< "but found " << r.size() << std::endl;
-	// 		return 1;
-	// 	}
-	// 
-	// 	std::string status = r[0][0].c_str();
-	// 	std::cout << "Updating employee #" << status << std::endl;
-
-
-	//auto emailer = MV::Email::make("email-smtp.us-west-2.amazonaws.com", "587", { "AKIAIVINRAMKWEVUT6UQ", "AiUjj1lS/k3g9r0REJ1eCoy/xeYZgLXmB8Nrep36pUVw" });
-	//emailer->send({ "jai", "jackaldurante@gmail.com", "Derv", "maxmike@gmail.com" }, "Testing new Interface", "Does this work too?");
-	
 	GameEditor menu;
 
 	menu.start();

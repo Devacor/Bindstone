@@ -257,6 +257,16 @@ namespace MV {
 			}));
 		}
 
+		void Grid::detachImplementation() {
+			basicSignals.clear();
+			parentInteractionSignals.clear();
+			dirtyGrid = true;
+		}
+
+		void Grid::reattachImplementation() {
+			observeOwner(owner());
+		}
+
 		std::shared_ptr<Node> Grid::gridTileForYIndexAndPosition(int yIndex, const Point<> &a_coordinate, bool a_throwOnFail) {
 			if (yIndex >= 0) {
 				bool foundLessX = false;

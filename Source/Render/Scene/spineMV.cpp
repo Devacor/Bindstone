@@ -63,17 +63,17 @@ char* _spUtil_readFile(const char* path, int* length){
 namespace MV{
 	namespace Scene {
 
-		void spineAnimationCallback(spAnimationState* a_state, int a_trackIndex, spEventType a_type, spEvent* a_event, int a_loopCount) {
+		void spineAnimationCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event) {
 			if (a_state && a_state->rendererObject) {
-				static_cast<Spine*>(a_state->rendererObject)->onAnimationStateEvent(a_trackIndex, a_type, a_event, a_loopCount);
+				static_cast<Spine*>(a_state->rendererObject)->onAnimationStateEvent(a_state, a_type, a_entry, a_event);
 			}
 		}
 
-		void spineTrackEntryCallback(spAnimationState* a_state, int a_trackIndex, spEventType a_type, spEvent* a_event, int a_loopCount) {
+		void spineTrackEntryCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event) {
 			if (a_state && a_state->rendererObject) {
 				auto *spine = static_cast<Spine*>(a_state->rendererObject);
 				if (spine) {
-					spine->track(a_trackIndex).onAnimationStateEvent(a_trackIndex, a_type, a_event, a_loopCount);
+					spine->track(a_entry->trackIndex).onAnimationStateEvent(a_state, a_type, a_entry, a_event);
 				}
 			}
 		}
@@ -272,20 +272,23 @@ namespace MV{
 				points.clear();
 				vertexIndices.clear();
 				fileBundle = FileBundle();
+				if (spineWorldVertices) {
+					FREE(spineWorldVertices);
+				}
 				if (atlas) {
 					spAtlas_dispose(atlas);
+				}
+				if (animationState) {
+					if (animationState->data) {
+						spAnimationStateData_dispose(animationState->data);
+					}
+					spAnimationState_dispose(animationState);
 				}
 				if (skeleton) {
 					if (skeleton->data) {
 						spSkeletonData_dispose(skeleton->data);
 					}
 					spSkeleton_dispose(skeleton);
-				}
-				if (animationState) {
-					spAnimationState_dispose(animationState);
-				}
-				if (spineWorldVertices) {
-					delete[] spineWorldVertices;
 				}
 
 				skeleton = nullptr;
@@ -522,16 +525,16 @@ namespace MV{
 		}
 		
 		FileTextureDefinition * Spine::loadSpineSlotIntoPoints(spSlot* slot) {
-			Color attachmentColor(skeleton->r * slot->r, skeleton->g * slot->g, skeleton->b * slot->b, skeleton->a * slot->a);
 			if(slot->attachment->type == SP_ATTACHMENT_REGION){
 				spRegionAttachment* attachment = reinterpret_cast<spRegionAttachment*>(slot->attachment);
-				spRegionAttachment_computeWorldVertices(attachment, slot->bone, spineWorldVertices);
+				Color attachmentColor(skeleton->color.r * slot->color.r * attachment->color.r, skeleton->color.g * slot->color.g * attachment->color.g, skeleton->color.b * slot->color.b * attachment->color.b, skeleton->color.a * slot->color.a * attachment->color.a);
+				spRegionAttachment_computeWorldVertices(attachment, slot->bone, spineWorldVertices, 0, 2);
 
-				std::vector<std::pair<spVertexIndex, spVertexIndex>> spineVertexIndices{
-					{SP_VERTEX_X1, SP_VERTEX_Y1},
-					{SP_VERTEX_X2, SP_VERTEX_Y2},
-					{SP_VERTEX_X3, SP_VERTEX_Y3},
-					{SP_VERTEX_X4, SP_VERTEX_Y4},
+				std::vector<std::pair<GLint, GLint>> spineVertexIndices{
+					{0, 1},
+					{2, 3},
+					{4, 5},
+					{6, 7},
 				};
 
 				MV::Scene::appendQuadVertexIndices(vertexIndices, static_cast<GLuint>(points.size()));
@@ -547,8 +550,9 @@ namespace MV{
 				return getSpineTexture(attachment);
 			} else if(slot->attachment->type == SP_ATTACHMENT_MESH){
 				spMeshAttachment* attachment = reinterpret_cast<spMeshAttachment*>(slot->attachment);
+				Color attachmentColor(skeleton->color.r * slot->color.r * attachment->color.r, skeleton->color.g * slot->color.g * attachment->color.g, skeleton->color.b * slot->color.b * attachment->color.b, skeleton->color.a * slot->color.a * attachment->color.a);
 				require<ResourceException>(attachment->super.verticesCount <= SPINE_MESH_VERTEX_COUNT_MAX, "VerticesCount exceeded for spine mesh.");
-				spMeshAttachment_computeWorldVertices(attachment, slot, spineWorldVertices);
+				spVertexAttachment_computeWorldVertices(SUPER(attachment), slot, 0, attachment->super.worldVerticesLength, spineWorldVertices, 0, 2);
 
 				for(int i = 0; i < attachment->trianglesCount; ++i) {
 					auto index = attachment->triangles[i] << 1;
@@ -588,16 +592,16 @@ namespace MV{
 		}
 
 		//log("%d event: %s, %s: %d, %f, %s", trackIndex, animationName, event->data->name, event->intValue, event->floatValue, event->stringValue);
-		void Spine::onAnimationStateEvent(int a_trackIndex, spEventType type, spEvent* event, int loopCount) {
+		void Spine::onAnimationStateEvent(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event) {
 			auto self = std::static_pointer_cast<Spine>(shared_from_this());
-			if(type == SP_ANIMATION_START){
-				onStartSignal(self, a_trackIndex);
-			} else if(type == SP_ANIMATION_END){
-				onEndSignal(self, a_trackIndex);
-			} else if(type == SP_ANIMATION_COMPLETE){
-				onCompleteSignal(self, a_trackIndex, loopCount);
-			} else if(type == SP_ANIMATION_EVENT){
-				onEventSignal(self, a_trackIndex, AnimationEventData((event->data && event->data->name) ? event->data->name : "Anon", (event->stringValue) ? event->stringValue : "", event->intValue, event->floatValue));
+			if(a_type == SP_ANIMATION_START){
+				onStartSignal(self, a_entry->trackIndex);
+			} else if(a_type == SP_ANIMATION_END){
+				onEndSignal(self, a_entry->trackIndex);
+			} else if(a_type == SP_ANIMATION_COMPLETE){
+				onCompleteSignal(self, a_entry->trackIndex, a_entry->timelinesRotationCount);
+			} else if(a_type == SP_ANIMATION_EVENT){
+				onEventSignal(self, a_entry->trackIndex, AnimationEventData((a_event->data && a_event->data->name) ? a_event->data->name : "NULL", (a_event->stringValue) ? a_event->stringValue : "", a_event->intValue, a_event->floatValue));
 			}
 		}
 
@@ -609,16 +613,16 @@ namespace MV{
 			return !shouldDraw;
 		}
 
-		void AnimationTrack::onAnimationStateEvent(int a_trackIndex, spEventType type, spEvent* event, int loopCount) {
-			if(a_trackIndex == myTrackIndex){
-				if(type == SP_ANIMATION_START){
+		void AnimationTrack::onAnimationStateEvent(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event) {
+			if(a_entry->trackIndex == myTrackIndex){
+				if(a_type == SP_ANIMATION_START){
 					onStartSignal(*this);
-				} else if(type == SP_ANIMATION_END){
+				} else if(a_type == SP_ANIMATION_END){
 					onEndSignal(*this);
-				} else if(type == SP_ANIMATION_COMPLETE){
-					onCompleteSignal(*this, loopCount);
-				} else if(type == SP_ANIMATION_EVENT){
-					onEventSignal(*this, AnimationEventData((event->data && event->data->name) ? event->data->name : "Anon", (event->stringValue)?event->stringValue:"", event->intValue, event->floatValue));
+				} else if(a_type == SP_ANIMATION_COMPLETE){
+					onCompleteSignal(*this, a_entry->timelinesRotationCount);
+				} else if(a_type == SP_ANIMATION_EVENT){
+					onEventSignal(*this, AnimationEventData((a_event->data && a_event->data->name) ? a_event->data->name : "NULL", (a_event->stringValue)? a_event->stringValue:"", a_event->intValue, a_event->floatValue));
 				}
 			}
 		}
@@ -665,18 +669,17 @@ namespace MV{
 
 		AnimationTrack& AnimationTrack::time(double a_newTime){
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call time.");
-			spAnimationState_getCurrent(animationState, myTrackIndex)->time = static_cast<float>(a_newTime);
+			spAnimationState_getCurrent(animationState, myTrackIndex)->trackTime = static_cast<float>(a_newTime);
 			return *this;
 		}
 		double AnimationTrack::time() const{
-			return static_cast<double>(spAnimationState_getCurrent(animationState, myTrackIndex)->time);
+			return static_cast<double>(spAnimationState_getCurrent(animationState, myTrackIndex)->trackTime);
 		}
 
 		AnimationTrack& AnimationTrack::crossfade(double a_newTime){
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call crossfade.");
 			auto *trackState = spAnimationState_getCurrent(animationState, myTrackIndex);
 			trackState->mixDuration = static_cast<float>(a_newTime);
-			trackState->mix = equals(a_newTime, 0.0) ? 1.0f : 0.0f;
 
 			return *this;
 		}

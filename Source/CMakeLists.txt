@@ -1,13 +1,16 @@
 #add_subdirectory(Animation)
 
-add_executable(MoonDog main.cpp StdAfx.cpp)
+if(XCODE)
+  get_resources_source_list(MoonDog ALL_RESOURCES)
+endif()
+
+add_executable(MoonDog main.cpp StdAfx.cpp ${ALL_RESOURCES})
+copy_resources(MoonDog)
 
 add_subdirectory(Utility)
 add_subdirectory(ArtificialIntelligence)
 add_subdirectory(Render)
 add_subdirectory(Audio)
-#add_subdirectory(ClickerGame)
-#add_subdirectory(DiggerGame)
 add_subdirectory(Editor)
 add_subdirectory(Game)
 add_subdirectory(Interface)
@@ -40,3 +43,12 @@ target_compile_definitions(MoonDog PRIVATE
 if(NOT XCODE)
   add_precompiled_header(MoonDog StdAfx.h SOURCE_CXX StdAfx.cpp FORCEINCLUDE)
 endif()
+
+set_target_properties(MoonDog PROPERTIES
+  MACOSX_BUNDLE_BUNDLE_NAME BindStone
+  MACOSX_BUNDLE_GUI_IDENTIFIER com.mutedvision.bindstone
+  MACOSX_BUNDLE_BUNDLE_VERSION ${APP_VERSION}
+  MACOSX_BUNDLE_LONG_VERSION_STRING ${APP_VERSION}
+  MACOSX_BUNDLE_SHORT_VERSION_STRING ${APP_VERSION}
+#  MACOSX_BUNDLE_ICON_FILE 
+)

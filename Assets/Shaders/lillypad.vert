@@ -8,6 +8,9 @@ layout(location = 2) in vec4 inColor;
 uniform mat4 transformation;
 uniform float time;
 
+uniform vec2 uvMin;
+uniform vec2 uvMax;
+
 smooth out vec4 color;
 smooth out vec2 uv;
 
@@ -15,11 +18,21 @@ void main(){
     color = inColor;
     uv = inUV;
 
-    vec4 v = vec4(inPosition, 1.0f);
-    v.y += (sin(time * 0.25f) * inUV.x * 12.5f * cos(time * 3.0f));
-    v.y -= (sin(time * 1.25f) * (1.0f - inUV.x) * 12.5f * cos(time * 1.0f));
+    vec2 percentUv = (inUV - uvMin) / (uvMax - uvMin);
 
-    v.x += (sin(time * 0.3f) * fract(inUV.y - .5f) * 12.5f * sin(time * 2.0f));
+    vec4 v = vec4(inPosition, 1.0f);
+
+    float cTime1 = cos(time * 1.15f);
+    float cTime2 = cos(time * 2.85f);
+
+    float sTime1 = sin(time * 0.275f);
+    float sTime2 = sin(time * 1.25f);
+
+    v.y += (sTime1 * percentUv.x * 8.5f * cTime2);
+    v.y -= (sTime2 * (1.0f - percentUv.x) * 12.5f * cTime1);
+
+    v.x += (sTime1 * fract(percentUv.y - 0.25f) * 9.5f * cTime1);
+    v.x += (sTime2 * fract(percentUv.y - 0.575f) * 4.5f * cTime2);
     
     gl_Position = transformation * v;
 }

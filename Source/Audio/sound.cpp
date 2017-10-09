@@ -167,7 +167,7 @@ namespace MV {
 		}
 	}
 
-	bool AudioPlayer::playSound(const std::string &identifier, int channel, int loop, int ticks, AudioPlayList* playList) {
+	bool AudioPlayer::playSound(const std::string &identifier, int channel, int loop, int ticks, std::shared_ptr<AudioPlayList> playList) {
 		if (!initialized || disableSounds) {
 			return false;
 		}
@@ -204,7 +204,7 @@ namespace MV {
 				channelsWithCallbacks[channel]->continuousPlay(false);
 			}
 		} else {
-			std::map<int, AudioPlayList*>::iterator cell;
+			std::map<int, std::shared_ptr<AudioPlayList>>::iterator cell;
 			for (cell = channelsWithCallbacks.begin(); cell != channelsWithCallbacks.end(); ++cell) {
 				cell->second->continuousPlay(false);
 			}
@@ -266,18 +266,18 @@ namespace MV {
 		}
 	}
 
-	AudioPlayList* AudioPlayer::getMusicPlayList() {
+	std::shared_ptr<AudioPlayList> AudioPlayer::getMusicPlayList() {
 		return currentMusicPlayList;
 	}
 
-	void AudioPlayer::setMusicPlayList(AudioPlayList* playList) {
+	void AudioPlayer::setMusicPlayList(std::shared_ptr<AudioPlayList> playList) {
 		currentMusicPlayList = playList;
 		if (playList != 0) {
 			playList->setPlayListType(MUSIC_PLAYLIST);
 		}
 	}
 
-	AudioPlayList* AudioPlayer::getSoundPlayList(int channel) {
+	std::shared_ptr<AudioPlayList> AudioPlayer::getSoundPlayList(int channel) {
 		if (channelsWithCallbacks.find(channel) != channelsWithCallbacks.end()) {
 			return channelsWithCallbacks[channel];
 		}
@@ -290,8 +290,8 @@ namespace MV {
 		}
 	}
 
-	void AudioPlayer::removeSoundPlayList(AudioPlayList* playList) {
-		std::map<int, AudioPlayList*>::iterator cell, delCell;
+	void AudioPlayer::removeSoundPlayList(std::shared_ptr<AudioPlayList> playList) {
+		std::map<int, std::shared_ptr<AudioPlayList>>::iterator cell, delCell;
 		bool deletePrevious = false;
 		for (cell = channelsWithCallbacks.begin(); cell != channelsWithCallbacks.end(); ++cell) {
 			if (deletePrevious) {
@@ -309,7 +309,7 @@ namespace MV {
 	}
 
 	void AudioPlayer::updateSoundPositions() {
-		std::map<int, AudioPlayList*>::iterator cell, delCell;
+		std::map<int, std::shared_ptr<AudioPlayList>>::iterator cell, delCell;
 		for (cell = channelsWithCallbacks.begin(); cell != channelsWithCallbacks.end(); ++cell) {
 			cell->second->updatePosition();
 		}
@@ -322,7 +322,7 @@ namespace MV {
 	AudioPlayList::AudioPlayList() {
 		loop = false;
 		shuffle = false;
-		play = false;
+		play = true;
 		type = SOUND_PLAYLIST;
 		currentChannel = -1;
 		currentAngle = 0;
@@ -331,14 +331,6 @@ namespace MV {
 	}
 
 	AudioPlayList::~AudioPlayList() {
-		AudioPlayer* activePlayList = AudioPlayer::instance();
-		if (type == MUSIC_PLAYLIST) {
-			if (activePlayList->getMusicPlayList() == this) {
-				activePlayList->setMusicPlayList(0);
-			}
-		} else if (type == SOUND_PLAYLIST) {
-			activePlayList->removeSoundPlayList(this);
-		}
 	}
 
 	void AudioPlayList::addSoundBack(const std::string &songName) {
@@ -346,11 +338,11 @@ namespace MV {
 	}
 
 	void AudioPlayList::addSoundFront(const std::string &songName) {
-		songLineup.push_front(songName);
+		songLineup.insert(songLineup.begin(), songName);
 	}
 
 	void AudioPlayList::removeSound(const std::string &songName) {
-		std::list<std::string>::iterator cell;
+		std::vector<std::string>::iterator cell;
 		for (cell = songLineup.begin(); cell != songLineup.end() && (*cell) != songName; ++cell) { ; }
 		if (cell != songLineup.end()) {
 			songLineup.erase(cell);
@@ -358,27 +350,29 @@ namespace MV {
 	}
 
 	bool AudioPlayList::endOfList() {
-		return currentSong == songLineup.end();
+		return currentSong >= songLineup.size();
 	}
 
 	bool AudioPlayList::advancePlayList() {
-		if (currentSong != songLineup.end()) {
+		if (currentSong < songLineup.size()) {
 			currentSong++;
+		} else {
+			currentSong = songLineup.size();
 		}
-		if (currentSong == songLineup.end() && loop) {
+		if (currentSong == songLineup.size() && loop) {
 			if (shuffle) {
 				performShuffle();
 			}
-			currentSong = songLineup.begin();
+			currentSong = 0;
 		}
-		if (currentSong == songLineup.end()) {
+		if (currentSong == songLineup.size()) {
 			currentChannel = -1;
 		}
-		return currentSong != songLineup.end();
+		return currentSong != songLineup.size();
 	}
 
 	std::string AudioPlayList::getCurrentSound() {
-		return (*currentSong);
+		return currentSong < songLineup.size() ? songLineup[currentSong] : "";
 	}
 
 	void AudioPlayList::clearSounds() {
@@ -399,21 +393,21 @@ namespace MV {
 	}
 
 	void AudioPlayList::resetPlayHead() {
-		currentSong = songLineup.begin();
+		currentSong = 0;
 	}
 
 	void AudioPlayList::beginPlaying() {
 		if (type == MUSIC_PLAYLIST) {
 			AudioPlayer::instance()->playMusic(getCurrentSound());
 		} else if (type == SOUND_PLAYLIST) {
-			AudioPlayer::instance()->playSound(getCurrentSound(), -1, 0, -1, this);
+			AudioPlayer::instance()->playSound(getCurrentSound(), -1, 0, -1, shared_from_this());
 			currentChannel = AudioPlayer::instance()->getMostRecentlyUsedChannel();
 		}
 	}
 
 	void AudioPlayList::resume() {
 		if (type == MUSIC_PLAYLIST) {
-			if (AudioPlayer::instance()->getMusicPlayList() == this) {
+			if (AudioPlayer::instance()->getMusicPlayList() == shared_from_this()) {
 				AudioPlayer::instance()->resumeMusic();
 			}
 		} else if (type == SOUND_PLAYLIST) {
@@ -425,7 +419,7 @@ namespace MV {
 
 	void AudioPlayList::pause() {
 		if (type == MUSIC_PLAYLIST) {
-			if (AudioPlayer::instance()->getMusicPlayList() == this) {
+			if (AudioPlayer::instance()->getMusicPlayList() == shared_from_this()) {
 				AudioPlayer::instance()->pauseMusic();
 			}
 		} else if (type == SOUND_PLAYLIST) {
@@ -473,7 +467,7 @@ namespace MV {
 	void SoundInstance::play() {
 		AudioPlayer::instance()->playSound(name);
 		currentChannel = AudioPlayer::instance()->getMostRecentlyUsedChannel();
-		AudioPlayer::instance()->registerSoundInstance(currentChannel, this);
+		AudioPlayer::instance()->registerSoundInstance(currentChannel, shared_from_this());
 		if (isPlaying()) {
 			AudioPlayer::instance()->setPosition(currentAngle, currentDistance, currentChannel);
 		}
@@ -515,7 +509,7 @@ namespace MV {
 	//Called upon the completion of a music file playing (or being stopped)
 	void AudioMusicHook() {
 		static AudioPlayer *player = AudioPlayer::instance();
-		AudioPlayList *activePlayList = player->getMusicPlayList();
+		std::shared_ptr<AudioPlayList> activePlayList = player->getMusicPlayList();
 		if (activePlayList != 0) {
 			if (activePlayList->isPlaying()) {
 				if (activePlayList->advancePlayList()) {
@@ -528,7 +522,7 @@ namespace MV {
 	//Called upon the completion of a sound file playing (or being stopped)
 	void AudioSoundHook(int channel) {
 		static AudioPlayer *player = AudioPlayer::instance();
-		AudioPlayList *activePlayList = player->getSoundPlayList(channel);
+		std::shared_ptr<AudioPlayList> activePlayList = player->getSoundPlayList(channel);
 		if (activePlayList != 0) {
 			player->removeSoundPlayList(channel);
 			if (activePlayList->isPlaying()) {
@@ -537,7 +531,7 @@ namespace MV {
 				}
 			}
 		} else {
-			SoundInstance *soundInstance = player->removeSoundInstance(channel);
+			std::shared_ptr<SoundInstance> soundInstance = player->removeSoundInstance(channel);
 			if (soundInstance != 0) {
 				soundInstance->donePlaying();
 			}

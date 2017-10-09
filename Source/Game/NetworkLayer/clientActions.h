@@ -135,7 +135,7 @@ CEREAL_REGISTER_TYPE(ServerDetails);
 
 class MatchedResponse : public NetworkAction {
 public:
-	MatchedResponse(const std::string& a_gameServer, int16_t a_port, int64_t a_secret) : gameServer(a_gameServer), port(a_port), secret(a_secret) {}
+	MatchedResponse(const std::string& a_gameServer, uint16_t a_port, int64_t a_secret) : gameServer(a_gameServer), port(a_port), secret(a_secret) {}
 	MatchedResponse() {}
 
 	virtual void execute(Game& a_game) override;
@@ -146,7 +146,7 @@ public:
 	}
 
 	std::string gameServer;
-	int16_t port;
+	uint16_t port;
 	int64_t secret;
 };
 

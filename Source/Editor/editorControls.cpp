@@ -12,7 +12,7 @@ void EditorControls::updateBoxHeader(MV::PointPrecision a_width) {
 			}
 			draggableBox->translate(draggableBox->renderer().worldFromScreen(deltaPosition));
 		});
-	} else{
+	} else {
 		boxHeader->bounds(MV::Size<>(a_width, 20.0f));
 	}
 }

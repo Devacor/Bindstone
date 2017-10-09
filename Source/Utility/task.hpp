@@ -172,16 +172,16 @@ namespace MV {
 		}
 
 		bool update(double a_dt){
-			if (!finished()) {
-				unsuspend();
+			if (finished()) { return true; }
 
-				totalTime += a_dt;
-				if (deltaInterval > 0) {
-					totalUpdateIntervals();
-				} else {
-					lastCalledInterval = totalTime;
-					totalUpdateStep(a_dt);
-				}
+			unsuspend();
+
+			totalTime += a_dt;
+			if (deltaInterval > 0) {
+				totalUpdateIntervals();
+			} else {
+				lastCalledInterval = totalTime;
+				totalUpdateStep(a_dt);
 			}
 			return finished();
 		}
@@ -242,7 +242,7 @@ namespace MV {
 			if (!sequentialTasks.empty()) {
 				sequentialTasks.front()->suspend();
 			}
-
+			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.push_front(a_other);
 			mostRecentCreated = a_other;
 			resetFinishState();
@@ -272,6 +272,7 @@ namespace MV {
 		}
 
 		Task& then(const std::shared_ptr<Task> &a_other) {
+			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.push_back(a_other);
 			mostRecentCreated = a_other;
 			resetFinishState();
@@ -301,6 +302,7 @@ namespace MV {
 		}
 
 		Task& thenAlso(const std::shared_ptr<Task> &a_other) {
+			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.push_back(a_other);
 			a_other->block = false;
 			mostRecentCreated = a_other;
@@ -335,6 +337,7 @@ namespace MV {
 		}
 
 		Task& also(const std::shared_ptr<Task> &a_other) {
+			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			parallelTasks.push_back(a_other);
 			resetFinishState();
 			mostRecentCreated = parallelTasks.back();
@@ -375,6 +378,7 @@ namespace MV {
 			auto found = std::find_if(sequentialTasks.begin(), sequentialTasks.end(), [&](const std::shared_ptr<Task> &a_item) {return a_item->name() == a_reference; });
 			require<ResourceException>(found != sequentialTasks.end(), "Task::after missing [", a_reference, "]");
 			++found;
+			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.insert(found, a_other);
 			mostRecentCreated = a_other;
 			resetFinishState();
@@ -409,6 +413,7 @@ namespace MV {
 			if (found == sequentialTasks.begin()) {
 				(*found)->suspend();
 			}
+			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.insert(found, a_other);
 			mostRecentCreated = a_other;
 			resetFinishState();
@@ -522,7 +527,8 @@ namespace MV {
 				CEREAL_NVP(blockParentCompletion),
 				CEREAL_NVP(alwaysRunChildren),
 				CEREAL_NVP(mostRecentCreated),
-				CEREAL_NVP(optionalAction)
+				CEREAL_NVP(optionalAction),
+				CEREAL_NVP(childrenBlockingOurCompletionCount)
 			);
 			if (optionalAction) {
 				task = MV::Receiver<bool(Task&,double)>::make([&](Task& a_self, double a_dt) -> bool {return a_self.optionalAction->update(a_self, a_dt); });
@@ -563,7 +569,8 @@ namespace MV {
 				CEREAL_NVP(blockParentCompletion),
 				CEREAL_NVP(alwaysRunChildren),
 				CEREAL_NVP(mostRecentCreated),
-				CEREAL_NVP(optionalAction)
+				CEREAL_NVP(optionalAction),
+				CEREAL_NVP(childrenBlockingOurCompletionCount)
 			);
 		}
 
@@ -694,7 +701,7 @@ namespace MV {
 			}
 		}
 
-		void updateSequentialTasks(double a_dt){
+		void updateSequentialTasks(double a_dt) {
 			while (true) {
 				auto firstBlockingTask = std::find_if(sequentialTasks.begin(), sequentialTasks.end(), [](const std::shared_ptr<Task> &a_task) {
 					return a_task->block;
@@ -706,6 +713,7 @@ namespace MV {
 				if (!sequentialTasks.empty()) {
 					auto currentSequentialTask = sequentialTasks.begin();
 					if ((*currentSequentialTask)->update(a_dt)) {
+						childrenBlockingOurCompletionCount -= static_cast<int>((*currentSequentialTask)->blockParentCompletion);
 						sequentialTasks.erase(currentSequentialTask);
 						a_dt = 0;
 						continue; //Avoid forcing a frame between sequential task completions if they immediately finish.
@@ -715,36 +723,31 @@ namespace MV {
 			}
 		}
 
-		void updateParallelTasks(double a_dt){
-			auto temporaryParallel = parallelTasks;
-			std::set<std::shared_ptr<Task>> removeList;
-			std::for_each(temporaryParallel.begin(), temporaryParallel.end(), [&](const std::shared_ptr<Task> &a_task){
-				try { 
-					if (a_task->update(a_dt)) {
-						removeList.insert(a_task);
-					}; 
-				} catch (std::exception &a_e) {
+		void updateParallelTasks(double a_dt) {
+			auto task = parallelTasks.begin();
+			auto end = parallelTasks.end();
+			while (task != end) {
+				bool needToErase = false;
+				try {
+					needToErase = (*task)->update(a_dt);
+				} catch(std::exception &a_e) {
 					handleCallbackException(a_e);
-					removeList.insert(a_task);
+					needToErase = true;
 				} catch (chaiscript::Boxed_Value &bv) {
 					handleChaiscriptException(bv);
-					removeList.insert(a_task);
+					needToErase = true;
 				}
-			});
-
-			parallelTasks.erase(std::remove_if(parallelTasks.begin(), parallelTasks.end(), [&](const std::shared_ptr<Task> &a_task) {
-				return removeList.find(a_task) != removeList.end();
-			}), parallelTasks.end());
+				if (needToErase) {
+					childrenBlockingOurCompletionCount -= static_cast<int>((*task)->blockParentCompletion);
+					parallelTasks.erase(task++);
+				} else {
+					++task;
+				}
+			}
 		}
 
 		bool noChildrenBlockingCompletion() const{
-			return
-				(std::find_if(parallelTasks.cbegin(), parallelTasks.cend(), [](const std::shared_ptr<Task> &a_task){
-					return a_task->blockParentCompletion;
-				}) == parallelTasks.end()) &&
-				(std::find_if(sequentialTasks.cbegin(), sequentialTasks.cend(), [](const std::shared_ptr<Task> &a_task){
-					return a_task->blockParentCompletion;
-				}) == sequentialTasks.end());
+			return childrenBlockingOurCompletionCount == 0;
 		}
 
 		void cancelAllChildren() {
@@ -758,6 +761,7 @@ namespace MV {
 			for(auto&& task = parallelTasksToCancel.rbegin();task != parallelTasksToCancel.rend();++task){
 				(*task)->cancel();
 			}
+			childrenBlockingOurCompletionCount = 0;
 		}
 
 		void finishOurTaskAndChildren() {
@@ -796,6 +800,7 @@ namespace MV {
 			}
 			auto sequentialTasksToFinish = sequentialTasks;
 			sequentialTasks.clear();
+			childrenBlockingOurCompletionCount = 0;
 			for(std::shared_ptr<Task> &task : sequentialTasksToFinish){
 				task->finishOurTaskAndChildren();
 			}
@@ -866,6 +871,8 @@ namespace MV {
 
 		bool blockParentCompletion;
 		bool alwaysRunChildren = false;
+
+		int childrenBlockingOurCompletionCount = 0;
 
 		std::weak_ptr<Task> mostRecentCreated;
 

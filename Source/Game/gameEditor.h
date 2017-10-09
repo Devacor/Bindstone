@@ -15,6 +15,8 @@ public:
 		runLimbo();
 	}
 private:
+	void resumeTitleMusic();
+
 	void runLimbo() {
 		managers.timer.start();
 		done = false;
@@ -31,6 +33,20 @@ private:
 	}
 
 	void runEditor() {
+		auto playlistGame = std::make_shared<MV::AudioPlayList>();
+		playlistGame->addSoundBack("gameintro");
+		playlistGame->addSoundBack("gameloop");
+		playlistGame->addSoundBack("gameloop");
+		playlistGame->addSoundBack("gameloop");
+		playlistGame->addSoundBack("gameloop");
+		playlistGame->addSoundBack("gameloop");
+
+		playlistGame->loopSounds(true);
+
+		game.managers().audio.setMusicPlayList(playlistGame);
+
+		playlistGame->beginPlaying();
+
 		managers.timer.start();
 		managers.timer.delta("tick");
 		while (editor.update(managers.timer.delta("tick"))) {

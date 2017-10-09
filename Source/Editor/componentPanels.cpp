@@ -1290,12 +1290,12 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 
 	makeLabel(grid, *panel.resources().textLibrary, "spawnRate", labelSize, UTF_CHAR_STR("Spawn Rate"));
 	auto maximumSpawnRate = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().maximumSpawnRate = MV::mixIn(0.0f, 1.25f, a_slider->percent(), 3);
-	}, MV::unmixIn(0.0f, 1.25f, controls->elementToEdit->properties().maximumSpawnRate, 3));
+		controls->elementToEdit->properties().maximumSpawnRate = MV::mixIn(0.0f, 1.25f, a_slider->percent(), 2);
+	}, MV::unmixIn(0.0f, 1.25f, controls->elementToEdit->properties().maximumSpawnRate, 2));
 	makeSlider(*panel.resources().mouse, grid, [=](std::shared_ptr<MV::Scene::Slider> a_slider){
-		controls->elementToEdit->properties().minimumSpawnRate = MV::mixIn(0.0f, 1.25f, a_slider->percent(), 3);
+		controls->elementToEdit->properties().minimumSpawnRate = MV::mixIn(0.0f, 1.25f, a_slider->percent(), 2);
 		maximumSpawnRate->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, MV::unmixIn(0.0f, 1.25f, controls->elementToEdit->properties().minimumSpawnRate, 3));
+	}, MV::unmixIn(0.0f, 1.25f, controls->elementToEdit->properties().minimumSpawnRate, 2));
 	grid->add(maximumSpawnRate);
 
 	makeLabel(grid, *panel.resources().textLibrary, "lifeSpan", labelSize, UTF_CHAR_STR("Lifespan"));
@@ -1352,15 +1352,6 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	}, controls->elementToEdit->properties().minimumDirection.x / 360.0f);
 	grid->add(maximumStartTilt);
 
-	auto maximumStartRoll = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider) {
-		controls->elementToEdit->properties().maximumDirection = { controls->elementToEdit->properties().maximumDirection.x, a_slider->percent() * 360.0f, controls->elementToEdit->properties().maximumDirection.z };
-	}, controls->elementToEdit->properties().maximumDirection.y / 360.0f);
-	makeSlider(*panel.resources().mouse, grid, [&, maximumStartRoll](std::shared_ptr<MV::Scene::Slider> a_slider) {
-		controls->elementToEdit->properties().minimumDirection = { controls->elementToEdit->properties().minimumDirection.x, a_slider->percent() * 360.0f, controls->elementToEdit->properties().minimumDirection.z };
-		maximumStartRoll->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, controls->elementToEdit->properties().minimumDirection.y / 360.0f);
-	grid->add(maximumStartRoll);
-
 	makeLabel(grid, *panel.resources().textLibrary, "directionChange", labelSize, UTF_CHAR_STR("Direction Change"));
 	auto maximumDirectionChange = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.directionalChange({ controls->elementToEdit->properties().maximum.directionalChange().x, controls->elementToEdit->properties().maximum.directionalChange().y, MV::mix(-720.0f, 720.0f, a_slider->percent())});
@@ -1379,15 +1370,6 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 		maximumDirectionChangeTilt->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().minimum.directionalChange().x));
 	grid->add(maximumDirectionChangeTilt);
-
-	auto maximumDirectionChangeRoll = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider) {
-		controls->elementToEdit->properties().maximum.directionalChange({ controls->elementToEdit->properties().maximum.directionalChange().x, MV::mix(-720.0f, 720.0f, a_slider->percent()), controls->elementToEdit->properties().maximum.directionalChange().z });
-	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().maximum.directionalChange().y));
-	makeSlider(*panel.resources().mouse, grid, [&, maximumDirectionChangeRoll](std::shared_ptr<MV::Scene::Slider> a_slider) {
-		controls->elementToEdit->properties().minimum.directionalChange({ controls->elementToEdit->properties().minimum.directionalChange().x, MV::mix(-720.0f, 720.0f, a_slider->percent()), controls->elementToEdit->properties().minimum.directionalChange().z });
-		maximumDirectionChangeRoll->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().minimum.directionalChange().y));
-	grid->add(maximumDirectionChangeRoll);
 
 	makeLabel(grid, *panel.resources().textLibrary, "rateOfChange", labelSize, UTF_CHAR_STR("Rate Of Change"));
 	auto maximumRateOfChange = makeSlider(node->renderer(), *panel.resources().mouse, [&](std::shared_ptr<MV::Scene::Slider> a_slider) {

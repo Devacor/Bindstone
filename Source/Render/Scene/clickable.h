@@ -2,6 +2,7 @@
 #define _MV_SCENE_CLICKABLE_H_
 
 #include "sprite.h"
+#include "Utility/stopwatch.h"
 #include "Interface/mouse.h"
 
 #define ClickableComponentDerivedAccessors(ComponentType) \

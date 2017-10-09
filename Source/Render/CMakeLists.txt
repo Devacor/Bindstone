@@ -3,8 +3,7 @@ target_sources(MoonDog PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/boxaabb.h
   ${CMAKE_CURRENT_SOURCE_DIR}/formattedText.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/formattedText.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/matrix.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/matrix.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/matrix.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/points.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/points.h
   ${CMAKE_CURRENT_SOURCE_DIR}/render.cpp

@@ -14,8 +14,8 @@ struct spAtlas;
 
 namespace MV {
 	namespace Scene {
-		void spineAnimationCallback(spAnimationState* state, int trackIndex, spEventType type, spEvent* event, int loopCount);
-		void spineTrackEntryCallback(spAnimationState* state, int trackIndex, spEventType type, spEvent* event, int loopCount);
+		void spineAnimationCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
+		void spineTrackEntryCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 		
 		struct AnimationEventData {
 			AnimationEventData(const std::string &a_name, const std::string & a_stringValue, int a_intValue, float a_floatValue):
@@ -39,7 +39,7 @@ namespace MV {
 			Signal<void(AnimationTrack &, int)> onCompleteSignal;
 			Signal<void(AnimationTrack &, const AnimationEventData &)> onEventSignal;
 
-			friend void spineTrackEntryCallback(spAnimationState* state, int trackIndex, spEventType type, spEvent* event, int loopCount);
+			friend void spineTrackEntryCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 		public:
 			SignalRegister<void(AnimationTrack &)> onStart;
 			SignalRegister<void(AnimationTrack &)> onEnd;
@@ -88,7 +88,7 @@ namespace MV {
 			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 		private:
 			//called from spineTrackEntryCallback
-			void onAnimationStateEvent(int a_trackIndex, spEventType type, spEvent* event, int loopCount);
+			void onAnimationStateEvent(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 
 			int myTrackIndex;
 			spAnimationState *animationState;
@@ -98,7 +98,7 @@ namespace MV {
 		class Spine : public Drawable{
 			friend cereal::access;
 			friend Node;
-			friend void spineAnimationCallback(spAnimationState* state, int trackIndex, spEventType type, spEvent* event, int loopCount);
+			friend void spineAnimationCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 
 			Signal<void(std::shared_ptr<Spine>, int)> onStartSignal;
 			Signal<void(std::shared_ptr<Spine>, int)> onEndSignal;
@@ -189,7 +189,7 @@ namespace MV {
 			virtual BoxAABB<> boundsImplementation() override;
 
 			//called from spineAnimationCallback
-			void onAnimationStateEvent(int trackIndex, spEventType type, spEvent* event, int loopCount);
+			void onAnimationStateEvent(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 
 			virtual bool preDraw();
 			virtual bool postDraw();

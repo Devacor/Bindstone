@@ -70,7 +70,7 @@ public:
 
 	GameInstance* enterGame(const std::shared_ptr<Player> &a_left, const std::shared_ptr<Player> &a_right) {
 		ourInstance = std::make_unique<ClientGameInstance>(a_left, a_right, *this);
-		lastUpdateDelta = 0;// ourGameClient->clientServerTimeDelta();
+		gui().page("Main").hide();
 		return ourInstance.get();
 	}
 
@@ -126,7 +126,6 @@ private:
 	
 	bool done;
 
-	double lastUpdateDelta;
 	MV::Scene::SafeComponent<MV::Scene::Sprite> screenScaler;
 	MV::MouseState ourMouse;
 

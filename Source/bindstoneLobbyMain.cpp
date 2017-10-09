@@ -1,8 +1,5 @@
-#define BINDSTONE_SERVER 1
-#define BINDSTONE_LOBBY_SERVER 1
-
 #include "Game/gameEditor.h"
-#include "Utility/threadPool.h"
+#include "Utility/threadPool.hpp"
 
 #include "ArtificialIntelligence/pathfinding.h"
 #include "Utility/cerealUtility.h"

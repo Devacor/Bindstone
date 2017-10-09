@@ -1,4 +1,4 @@
-﻿/**********************************************************\
+/**********************************************************\
 | Michael Hamilton (maxmike@gmail.com) www.mutedvision.net |
 |----------------------------------------------------------|
 \**********************************************************/
@@ -23,10 +23,11 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
-#include <map>
+#include <unordered_map>
 #include <fstream>
 #include "Render/points.h"
-#include "Render/matrix.h"
+#include "Render/matrix.hpp"
+#include "Utility/generalUtility.h"
 
 #ifdef __APPLE__
 	#import "TargetConditionals.h" 
@@ -299,28 +300,78 @@ namespace MV {
 			initialize();
 		}
 
-		std::string id() const{
+		inline std::string id() const{
 			return stringId;
 		}
 
-		void use(){
+		inline void use(){
 			if (!headless) {
 				glUseProgram(programId);
 			}
 		}
 
-		void set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_texture, GLuint a_textureBindIndex = 0, bool a_errorIfNotPresent = true);
-		void set(std::string a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex = 0, bool a_errorIfNotPresent = true);
-		void set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex = 0, bool a_errorIfNotPresent = true);
+		bool set(const std::string &a_variableName, GLuint a_texture, GLuint a_textureBindIndex = 0, bool a_errorIfNotPresent = true);
+		bool set(const std::string &a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
+		bool set(const std::string &a_variableName, const std::shared_ptr<TextureHandle> &a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
 
-		void set(std::string a_variableName, PointPrecision a_value, bool a_errorIfNotPresent = true);
+		inline bool set(std::string a_variableName, PointPrecision a_value, bool a_errorIfNotPresent = true) {
+			if (!headless) {
+				GLint offset = variableOffset(a_variableName);
+				if (offset >= 0) {
+					glUniform1fv(offset, 1, &a_value);
+					return true;
+				} else if (a_errorIfNotPresent) {
+					std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
+				}
+			}
+			return false;
+		}
 
-		void set(std::string a_variableName, const TransformMatrix &a_matrix, bool a_errorIfNotPresent = true);
+		inline bool setVec2(const std::string &a_variableName, const Point<PointPrecision> &a_point, bool a_errorIfNotPresent = true) {
+			if (!headless) {
+				GLint offset = variableOffset(a_variableName);
+				if (offset >= 0) {
+					glUniform2fv(offset, 1, &a_point.x);
+					return true;
+				} else if (a_errorIfNotPresent) {
+					std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
+				}
+			}
+			return false;
+		}
+		inline bool setVec3(const std::string &a_variableName, const Point<PointPrecision> &a_point, bool a_errorIfNotPresent = true) {
+			if (!headless) {
+				GLint offset = variableOffset(a_variableName);
+				if (offset >= 0) {
+					glUniform3fv(offset, 1, &a_point.x);
+					return true;
+				} else if (a_errorIfNotPresent) {
+					std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
+				}
+			}
+			return false;
+		}
 
-		bool has(std::string a_variableName) {
+		inline bool set(const std::string &a_variableName, const TransformMatrix &a_matrix, bool a_errorIfNotPresent = true) {
+			if (!headless) {
+				GLint offset = variableOffset(a_variableName);
+				if (offset >= 0) {
+					const GLfloat *mat = &((a_matrix.getMatrixArray())[0]);
+					glUniformMatrix4fv(offset, 1, GL_FALSE, mat);
+					return true;
+				} else if (a_errorIfNotPresent) {
+					std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
+				}
+			}
+			return false;
+		}
+
+		inline bool has(std::string a_variableName) {
 			return variableOffset(a_variableName) >= 0;
 		}
 	private:
+		GLuint getDefaultTextureId() const;
+
 		void initialize() {
 			if (!headless) {
 				variables.clear();
@@ -345,7 +396,7 @@ namespace MV {
 			}
 		}
 
-		GLint variableOffset(const std::string &a_variableName){
+		inline GLint variableOffset(const std::string &a_variableName){
 			auto found = variables.find(a_variableName);
 			if(found != variables.end()){
 				return found->second;
@@ -360,7 +411,7 @@ namespace MV {
 		std::string vertexShaderFile;
 		std::string fragmentShaderFile;
 		GLuint programId;
-		std::map<std::string, GLuint> variables;
+		std::unordered_map<std::string, GLuint> variables;
 		bool headless;
 	};
 
@@ -492,10 +543,10 @@ namespace MV {
 
 		MatrixStack contextProjectionMatrix;
 
-		std::map<int32_t, TransformMatrix> ourCameras;
-		std::map<int32_t, TransformMatrix> ourCameraProjectionMatrices;
+		std::unordered_map<int32_t, TransformMatrix> ourCameras;
+		std::unordered_map<int32_t, TransformMatrix> ourCameraProjectionMatrices;
 
-		std::map<std::string, Shader> shaders;
+		std::unordered_map<std::string, Shader> shaders;
 		Shader* defaultShaderPtr = nullptr;
 
 		bool isHeadless = false;

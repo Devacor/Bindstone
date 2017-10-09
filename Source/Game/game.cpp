@@ -25,7 +25,7 @@ void Game::initializeData() {
 }
 
 void Game::initializeClientConnection() {
-	ourLobbyClient = MV::Client::make(MV::Url{ "http://192.168.1.237:22325" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
+	ourLobbyClient = MV::Client::make(MV::Url{ "http://localhost:22325" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
 		auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 		value->execute(*this);
 	}, [&](const std::string &a_dcreason) {
@@ -80,7 +80,6 @@ void Game::initializeWindow(){
 }
 
 bool Game::update(double dt) {
-	lastUpdateDelta = dt;
 	gameData.managers().pool.run();
 	if (ourLobbyClient->state() == MV::Client::DISCONNECTED) {
 		ourLobbyClient->reconnect();
@@ -89,6 +88,11 @@ bool Game::update(double dt) {
 	if (ourGameClient) {
 		ourGameClient->update();
 	}
+
+	if (ourInstance) {
+		ourInstance->update(dt);
+	}
+	rootScene->update(dt);
 
 	if (done) {
 		done = false;
@@ -141,9 +145,8 @@ void Game::render() {
 	gameData.managers().renderer.clearScreen();
 	updateScreenScaler();
 	if (ourInstance) {
-		ourInstance->update(lastUpdateDelta);
+		ourInstance->scene()->draw();
 	}
-	rootScene->update(lastUpdateDelta);
 	rootScene->draw();
 	
 	gameData.managers().renderer.updateScreen();

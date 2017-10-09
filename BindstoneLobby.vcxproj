@@ -125,7 +125,7 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <AdditionalIncludeDirectories>
       </AdditionalIncludeDirectories>
-      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj</AdditionalOptions>
+      <AdditionalOptions>-DBINDSTONE_SERVER -DBINDSTONE_LOBBY_SERVER -D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj</AdditionalOptions>
       <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <CompileAs>CompileAsCpp</CompileAs>
@@ -176,7 +176,7 @@
       <AdditionalIncludeDirectories>
       </AdditionalIncludeDirectories>
       <EnablePREfast>false</EnablePREfast>
-      <AdditionalOptions>-D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj</AdditionalOptions>
+      <AdditionalOptions>-DBINDSTONE_SERVER -DBINDSTONE_LOBBY_SERVER -D_SCL_SECURE_NO_WARNINGS -D_WIN32_WINNT=0x0501 /bigobj</AdditionalOptions>
       <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <DisableLanguageExtensions>false</DisableLanguageExtensions>
@@ -276,6 +276,7 @@
     <ClCompile Include="..\external\spine\Animation.c" />
     <ClCompile Include="..\external\spine\AnimationState.c" />
     <ClCompile Include="..\external\spine\AnimationStateData.c" />
+    <ClCompile Include="..\external\spine\Array.c" />
     <ClCompile Include="..\external\spine\Atlas.c" />
     <ClCompile Include="..\external\spine\AtlasAttachmentLoader.c" />
     <ClCompile Include="..\external\spine\Attachment.c" />
@@ -283,6 +284,8 @@
     <ClCompile Include="..\external\spine\Bone.c" />
     <ClCompile Include="..\external\spine\BoneData.c" />
     <ClCompile Include="..\external\spine\BoundingBoxAttachment.c" />
+    <ClCompile Include="..\external\spine\ClippingAttachment.c" />
+    <ClCompile Include="..\external\spine\Color.c" />
     <ClCompile Include="..\external\spine\Event.c" />
     <ClCompile Include="..\external\spine\EventData.c" />
     <ClCompile Include="..\external\spine\extension.c" />
@@ -293,9 +296,12 @@
     <ClCompile Include="..\external\spine\PathAttachment.c" />
     <ClCompile Include="..\external\spine\PathConstraint.c" />
     <ClCompile Include="..\external\spine\PathConstraintData.c" />
+    <ClCompile Include="..\external\spine\PointAttachment.c" />
     <ClCompile Include="..\external\spine\RegionAttachment.c" />
     <ClCompile Include="..\external\spine\Skeleton.c" />
+    <ClCompile Include="..\external\spine\SkeletonBinary.c" />
     <ClCompile Include="..\external\spine\SkeletonBounds.c" />
+    <ClCompile Include="..\external\spine\SkeletonClipping.c" />
     <ClCompile Include="..\external\spine\SkeletonData.c" />
     <ClCompile Include="..\external\spine\SkeletonJson.c" />
     <ClCompile Include="..\external\spine\Skin.c" />
@@ -303,7 +309,9 @@
     <ClCompile Include="..\external\spine\SlotData.c" />
     <ClCompile Include="..\external\spine\TransformConstraint.c" />
     <ClCompile Include="..\external\spine\TransformConstraintData.c" />
+    <ClCompile Include="..\external\spine\Triangulator.c" />
     <ClCompile Include="..\external\spine\VertexAttachment.c" />
+    <ClCompile Include="..\external\spine\VertexEffect.c" />
     <ClCompile Include="Source\ArtificialIntelligence\pathfinding.cpp" />
     <ClCompile Include="Source\bindstoneLobbyMain.cpp" />
     <ClCompile Include="Source\DiggerGame\diggerGame.cpp" />
@@ -325,6 +333,7 @@
     <ClCompile Include="Source\Game\managers.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\accountActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\clientActions.cpp" />
+    <ClCompile Include="Source\Game\NetworkLayer\gameServer.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\gameServerActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\lobbyServer.cpp" />
     <ClCompile Include="Source\Game\player.cpp" />
@@ -345,7 +354,6 @@
     <ClCompile Include="Source\Render\Scene\grid.cpp" />
     <ClCompile Include="Source\Render\Scene\path.cpp" />
     <ClCompile Include="Source\Render\Scene\node.cpp" />
-    <ClCompile Include="Source\Render\matrix.cpp" />
     <ClCompile Include="Source\Render\points.cpp" />
     <ClCompile Include="Source\Render\render.cpp" />
     <ClCompile Include="Source\Render\Scene\drawable.cpp" />
@@ -359,12 +367,12 @@
     <ClCompile Include="Source\Render\sharedTextures.cpp" />
     <ClCompile Include="Source\Render\texturePacker.cpp" />
     <ClCompile Include="Source\Render\textures.cpp" />
+    <ClCompile Include="Source\Utility\asioThreadPool.cpp" />
     <ClCompile Include="Source\Utility\chaiscriptStdLib.cpp" />
     <ClCompile Include="Source\Utility\generalUtility.cpp" />
     <ClCompile Include="Source\Utility\log.cpp" />
     <ClCompile Include="Source\Utility\sha512.cpp" />
     <ClCompile Include="Source\Utility\stopwatch.cpp" />
-    <ClCompile Include="Source\Utility\threadPool.cpp" />
     <ClCompile Include="Source\Utility\tinyutf8.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -510,6 +518,7 @@
     <ClInclude Include="..\external\spine\Animation.h" />
     <ClInclude Include="..\external\spine\AnimationState.h" />
     <ClInclude Include="..\external\spine\AnimationStateData.h" />
+    <ClInclude Include="..\external\spine\Array.h" />
     <ClInclude Include="..\external\spine\Atlas.h" />
     <ClInclude Include="..\external\spine\AtlasAttachmentLoader.h" />
     <ClInclude Include="..\external\spine\Attachment.h" />
@@ -517,19 +526,26 @@
     <ClInclude Include="..\external\spine\Bone.h" />
     <ClInclude Include="..\external\spine\BoneData.h" />
     <ClInclude Include="..\external\spine\BoundingBoxAttachment.h" />
+    <ClInclude Include="..\external\spine\ClippingAttachment.h" />
+    <ClInclude Include="..\external\spine\Color.h" />
+    <ClInclude Include="..\external\spine\dll.h" />
     <ClInclude Include="..\external\spine\Event.h" />
     <ClInclude Include="..\external\spine\EventData.h" />
     <ClInclude Include="..\external\spine\extension.h" />
     <ClInclude Include="..\external\spine\IkConstraint.h" />
     <ClInclude Include="..\external\spine\IkConstraintData.h" />
     <ClInclude Include="..\external\spine\Json.h" />
+    <ClInclude Include="..\external\spine\kvec.h" />
     <ClInclude Include="..\external\spine\MeshAttachment.h" />
     <ClInclude Include="..\external\spine\PathAttachment.h" />
     <ClInclude Include="..\external\spine\PathConstraint.h" />
     <ClInclude Include="..\external\spine\PathConstraintData.h" />
+    <ClInclude Include="..\external\spine\PointAttachment.h" />
     <ClInclude Include="..\external\spine\RegionAttachment.h" />
     <ClInclude Include="..\external\spine\Skeleton.h" />
+    <ClInclude Include="..\external\spine\SkeletonBinary.h" />
     <ClInclude Include="..\external\spine\SkeletonBounds.h" />
+    <ClInclude Include="..\external\spine\SkeletonClipping.h" />
     <ClInclude Include="..\external\spine\SkeletonData.h" />
     <ClInclude Include="..\external\spine\SkeletonJson.h" />
     <ClInclude Include="..\external\spine\Skin.h" />
@@ -538,7 +554,9 @@
     <ClInclude Include="..\external\spine\spine.h" />
     <ClInclude Include="..\external\spine\TransformConstraint.h" />
     <ClInclude Include="..\external\spine\TransformConstraintData.h" />
+    <ClInclude Include="..\external\spine\Triangulator.h" />
     <ClInclude Include="..\external\spine\VertexAttachment.h" />
+    <ClInclude Include="..\external\spine\VertexEffect.h" />
     <ClInclude Include="Source\ArtificialIntelligence\pathfinding.h" />
     <ClInclude Include="Source\DiggerGame\diggerGame.h" />
     <ClInclude Include="Source\Editor\anchorEditor.h" />
@@ -560,6 +578,7 @@
     <ClInclude Include="Source\Game\managers.h" />
     <ClInclude Include="Source\Game\NetworkLayer\accountActions.h" />
     <ClInclude Include="Source\Game\NetworkLayer\clientActions.h" />
+    <ClInclude Include="Source\Game\NetworkLayer\gameServer.h" />
     <ClInclude Include="Source\Game\NetworkLayer\gameServerActions.h" />
     <ClInclude Include="Source\Game\NetworkLayer\lobbyServer.h" />
     <ClInclude Include="Source\Game\NetworkLayer\networkAction.h" />
@@ -573,6 +592,7 @@
     <ClInclude Include="Source\Physics\collider.h" />
     <ClInclude Include="Source\Physics\package.h" />
     <ClInclude Include="Source\Render\boxaabb.h" />
+    <ClInclude Include="Source\Render\matrix.hpp" />
     <ClInclude Include="Source\Render\Scene\component.h" />
     <ClInclude Include="Source\Render\Scene\emitter.h" />
     <ClInclude Include="Source\Render\Scene\clipped.h" />
@@ -591,7 +611,6 @@
     <ClInclude Include="Source\Render\Scene\path.h" />
     <ClInclude Include="Source\Render\Scene\package.h" />
     <ClInclude Include="Source\Render\Scene\node.h" />
-    <ClInclude Include="Source\Render\matrix.h" />
     <ClInclude Include="Source\Render\package.h" />
     <ClInclude Include="Source\Render\points.h" />
     <ClInclude Include="Source\Render\render.h" />
@@ -605,6 +624,7 @@
     <ClInclude Include="Source\Render\sharedTextures.h" />
     <ClInclude Include="Source\Render\texturePacker.h" />
     <ClInclude Include="Source\Render\textures.h" />
+    <ClInclude Include="Source\Utility\asioThreadPool.h" />
     <ClInclude Include="Source\Utility\cerealUtility.h" />
     <ClInclude Include="Source\Utility\chaiscriptStdLib.h" />
     <ClInclude Include="Source\Utility\chaiscriptUtility.h" />
@@ -618,7 +638,7 @@
     <ClInclude Include="Source\Utility\signal.hpp" />
     <ClInclude Include="Source\Utility\stopwatch.h" />
     <ClInclude Include="Source\Utility\task.hpp" />
-    <ClInclude Include="Source\Utility\threadPool.h" />
+    <ClInclude Include="Source\Utility\threadPool.hpp" />
     <ClInclude Include="Source\Utility\tinyutf8.h" />
     <ClInclude Include="Source\Utility\tupleHelpers.hpp" />
     <ClInclude Include="Source\Utility\visitor.hpp" />
@@ -626,11 +646,7 @@
   <ItemGroup>
     <None Include="..\external\cereal\include\cereal\external\rapidxml\manual.html" />
     <None Include="..\external\spine\LICENSE" />
-    <None Include="..\external\spine\README.md" />
     <None Include="ClassDiagram.cd" />
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="..\external\spine\CMakeLists.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

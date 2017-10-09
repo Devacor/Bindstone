@@ -131,6 +131,21 @@ void GameInstance::removeExpiredMissiles() {
 ClientGameInstance::ClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game) :
 	GameInstance(a_leftPlayer, a_rightPlayer, a_game.root(), a_game.data(), a_game.mouse()),
 	game(a_game) {
+
+
+	auto playlistGame = std::make_shared<MV::AudioPlayList>();
+	playlistGame->addSoundBack("gameintro");
+	playlistGame->addSoundBack("gameloop");
+	playlistGame->addSoundBack("gameloop");
+	playlistGame->addSoundBack("gameloop");
+	playlistGame->addSoundBack("gameloop");
+	playlistGame->addSoundBack("gameloop");
+
+	playlistGame->loopSounds(true);
+
+	game.managers().audio.setMusicPlayList(playlistGame);
+
+	playlistGame->beginPlaying();
 }
 
 void ClientGameInstance::requestUpgrade(const std::shared_ptr<Player> &a_owner, int a_slot, size_t a_upgrade) {

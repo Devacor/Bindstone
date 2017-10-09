@@ -11,7 +11,7 @@ namespace MV {
 		
 		BlockForSeconds(double a_seconds = 0.0) : seconds(a_seconds) {}
 
-		virtual bool update(Task& a_self, double a_dt) override { return a_self.localElapsed() >= seconds; }
+		virtual bool update(Task& a_self, double) override { return a_self.localElapsed() >= seconds; }
 
 	protected:
 		template <class Archive>
@@ -29,7 +29,7 @@ namespace MV {
 
 		BlockForFrames(int a_targetFrames = 1) : targetFrames(a_targetFrames) { }
 
-		bool update(Task& a_self, double a_dt) override { return totalFrames++ >= targetFrames; }
+		bool update(Task&, double) override { return totalFrames++ >= targetFrames; }
 	protected:
 		template <class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/) {

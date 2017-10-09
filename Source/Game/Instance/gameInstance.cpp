@@ -21,7 +21,7 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 	gameData(a_gameData),
 	left(a_leftPlayer, LEFT, *this),
 	right(a_rightPlayer, RIGHT, *this),
-	scriptEngine(MV::create_chaiscript_stdlib(), MV::chaiscript_module_paths(), MV::chaiscript_use_paths()) {
+	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths()) {
 
 	//manually updating this.
 	worldScene->silence().forget()->pause();

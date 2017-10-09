@@ -135,7 +135,7 @@ namespace MV {
 			return matrixArray;
 		}
 		inline std::array<PointPrecision, SizeX * SizeX>& getMatrixArray() {
-			return return matrixArray;;
+			return matrixArray;
 		}
 	protected:
 		std::array<PointPrecision, SizeX * SizeY> matrixArray;
@@ -377,8 +377,8 @@ namespace MV {
 	class MatrixStack {
 	public:
 		MatrixStack(const std::string &a_name = "") :
-			name(a_name),
-			stack(1, TransformMatrix()) {
+			stack(1, TransformMatrix()),
+            name(a_name){
 		}
 
 		TransformMatrix& top() {

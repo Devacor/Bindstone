@@ -1155,7 +1155,7 @@ namespace MV {
 		return SharedTextures::white()->texture()->textureId();
 	}
 
-	bool Shader::set(std::string a_variableName, GLuint a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
+	bool Shader::set(const std::string &a_variableName, GLuint a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
 		if (!headless) {
 			GLuint offset = variableOffset(a_variableName);
 			if (offset >= 0) {
@@ -1174,7 +1174,7 @@ namespace MV {
 		return false;
 	}
 
-	bool Shader::set(std::string a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
+	bool Shader::set(const std::string &a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
 		if (!headless) {
 			GLuint offset = variableOffset(a_variableName);
 			if (offset >= 0) {
@@ -1193,7 +1193,7 @@ namespace MV {
 		return false;
 	}
 
-	bool Shader::set(std::string a_variableName, const std::shared_ptr<TextureHandle> &a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
+	bool Shader::set(const std::string &a_variableName, const std::shared_ptr<TextureHandle> &a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent /*= true*/) {
 		if (!headless) {
 			GLuint offset = variableOffset(a_variableName);
 			if (offset >= 0) {

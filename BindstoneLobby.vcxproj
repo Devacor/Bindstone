@@ -76,7 +76,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\compiler\VisualStudio2010\;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\libpq\9.0\;$(SolutionDir)../external\openssl\include\;$(SolutionDir)../external/libpqxx-4.0.1/include/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include;$(SolutionDir)../external/ChaiScript-5.8.1/include;$(SolutionDir)../external/boost_1_62_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;C:\Program Files\PostgreSQL\9.5\include\</IncludePath>
+    <IncludePath>$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\compiler\VisualStudio2010\;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\libpq\9.0\;$(SolutionDir)../external\openssl\include\;$(SolutionDir)../external/libpqxx-4.0.1/include/;$(SolutionDir)../external/SDL/SDL2-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include;$(SolutionDir)../external/ChaiScript-6.0.0/include;$(SolutionDir)../external/boost_1_62_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;C:\Program Files\PostgreSQL\9.5\include\</IncludePath>
     <LibraryPath>$(SolutionDir)../external/boost_1_62_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL-2.0.4-9583/VisualC/x64/Release/;C:\Program Files\PostgreSQL\9.5\lib\;$(SolutionDir)../external\openssl\lib\;$(LibraryPath)</LibraryPath>
     <SourcePath>$(SolutionDir)../external/boost_1_62_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/libpqxx-4.0.1/src/;$(SolutionDir)../external/spine/spine-c/src/spine/;C:\Program Files\PostgreSQL\9.5\lib\</SourcePath>
     <LibraryWPath>$(WindowsSDK_MetadataPath);</LibraryWPath>
@@ -92,7 +92,7 @@
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\compiler\VisualStudio2010\;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\libpq\9.0\;$(SolutionDir)../external\openssl\include\;$(SolutionDir)../external/libpqxx-4.0.1/include/;$(SolutionDir)../external/SDL\SDL-2.0.4-9583\include;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include;$(SolutionDir)../external/ChaiScript-5.8.5/include;$(SolutionDir)../external/boost_1_62_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;C:\Program Files\PostgreSQL\9.5\include\</IncludePath>
+    <IncludePath>$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\compiler\VisualStudio2010\;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\libpq\9.0\;$(SolutionDir)../external\openssl\include\;$(SolutionDir)../external/libpqxx-4.0.1/include/;$(SolutionDir)../external/SDL\SDL-2.0.4-9583\include;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include;$(SolutionDir)../external/ChaiScript-6.0.0/include;$(SolutionDir)../external/boost_1_62_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;C:\Program Files\PostgreSQL\9.5\include\</IncludePath>
     <LibraryPath>$(SolutionDir)../external/boost_1_62_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL-2.0.4-9583/VisualC/x64/Release/;C:\Program Files\PostgreSQL\9.5\lib\;$(SolutionDir)../external\openssl\lib\;$(LibraryPath)</LibraryPath>
     <SourcePath>$(SolutionDir)../external/boost_1_62_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/libpqxx-4.0.1/src/;$(SolutionDir)../external/spine/spine-c/src/spine/;C:\Program Files\PostgreSQL\9.5\lib\</SourcePath>
     <RunCodeAnalysis>false</RunCodeAnalysis>
@@ -476,43 +476,53 @@
     <ClInclude Include="..\external\cereal\include\cereal\types\utility.hpp" />
     <ClInclude Include="..\external\cereal\include\cereal\types\valarray.hpp" />
     <ClInclude Include="..\external\cereal\include\cereal\types\vector.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\chaiscript.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\chaiscript_defines.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\chaiscript_stdlib.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\chaiscript_threading.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\any.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\bad_boxed_cast.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\bind_first.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\bootstrap.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\bootstrap_stl.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\boxed_cast.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\boxed_cast_helper.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\boxed_number.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\boxed_value.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\callable_traits.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\dispatchkit.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\dynamic_object.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\dynamic_object_detail.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\exception_specification.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\function_call.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\function_call_detail.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\handle_return.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\operators.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\proxy_constructors.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\proxy_functions.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\proxy_functions_detail.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\register_function.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\type_conversions.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\dispatchkit\type_info.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\language\chaiscript_algebraic.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\language\chaiscript_common.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\language\chaiscript_engine.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\language\chaiscript_eval.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\language\chaiscript_parser.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\language\chaiscript_prelude_docs.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\utility\json.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\utility\json_wrap.hpp" />
-    <ClInclude Include="..\external\ChaiScript-5.8.5\include\chaiscript\utility\utility.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript_basic.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript_defines.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript_stdlib.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript_threading.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\any.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\bad_boxed_cast.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\bind_first.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\bootstrap.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\bootstrap_stl.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\boxed_cast.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\boxed_cast_helper.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\boxed_number.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\boxed_value.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\callable_traits.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\dispatchkit.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\dynamic_object.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\dynamic_object_detail.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\exception_specification.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\function_call.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\function_call_detail.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\handle_return.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\operators.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\proxy_constructors.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\proxy_functions.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\proxy_functions_detail.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\register_function.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\short_alloc.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\type_conversions.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\type_info.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_algebraic.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_common.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_engine.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_eval.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_optimizer.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_parser.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_posix.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_prelude.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_prelude_docs.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_tracer.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_unknown.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_windows.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\utility\fnv1a.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\utility\json.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\utility\json_wrap.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\utility\static_string.hpp" />
+    <ClInclude Include="..\external\ChaiScript-6.0.0\include\chaiscript\utility\utility.hpp" />
     <ClInclude Include="..\external\exprtk\exprtk.hpp" />
     <ClInclude Include="..\external\LINQ\boolinq.hpp" />
     <ClInclude Include="..\external\spine\Animation.h" />

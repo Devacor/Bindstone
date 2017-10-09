@@ -9,7 +9,7 @@ void sdl_quit(void){
 Game::Game(Managers& a_managers) :
 	gameData(a_managers),
 	done(false),
-	scriptEngine(MV::create_chaiscript_stdlib(), MV::chaiscript_module_paths(), MV::chaiscript_use_paths()),
+	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths()),
 	onLoginResponse(onLoginResponseSignal){
 
 	MV::initializeFilesystem();

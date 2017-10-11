@@ -8,7 +8,7 @@
 #include "Game/NetworkLayer/lobbyServer.h"
 
 #include "Utility/scopeGuard.hpp"
-#include "chaiscript/chaiscript.hpp"
+#include "Utility/chaiscriptUtility.h"
 
 struct TestObject {
 	TestObject() { std::cout << "\nConstructor\n"; }

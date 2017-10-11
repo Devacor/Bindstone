@@ -15,7 +15,7 @@
 #include <string>
 #include <ctime>
 
-#include "chaiscript/chaiscript.hpp"
+#include "Utility/chaiscriptUtility.h"
 
 class Game {
 	MV::Signal<void(LoginResponse&)> onLoginResponseSignal;

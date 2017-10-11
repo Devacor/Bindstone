@@ -8,7 +8,7 @@
 #include "cereal/cereal.hpp"
 #include "cereal/access.hpp"
 
-#include "chaiscript/chaiscript.hpp"
+#include "Utility/chaiscriptUtility.h"
 
 namespace MV {
 

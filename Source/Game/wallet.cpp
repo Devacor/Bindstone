@@ -1,5 +1,5 @@
 #include "wallet.h"
-#include "chaiscript/chaiscript.hpp"
+#include "Utility/chaiscriptUtility.h"
 #include "Utility/require.hpp"
 
 Wallet::Wallet() :

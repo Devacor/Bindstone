@@ -4,7 +4,7 @@
 #include "Render/package.h"
 #include "Game/wallet.h"
 #include "Game/Interface/guiFactories.h"
-#include "chaiscript/chaiscript.hpp"
+#include "Utility/chaiscriptUtility.h"
 #include "Utility/generalUtility.h"
 #include "Utility/signal.hpp"
 #include <string>

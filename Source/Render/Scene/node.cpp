@@ -2,7 +2,7 @@
 #include "stddef.h"
 #include <numeric>
 #include <regex>
-#include "chaiscript/chaiscript.hpp"
+#include "Utility/chaiscriptUtility.h"
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"

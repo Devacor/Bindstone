@@ -15,7 +15,7 @@
 #include "Utility/signal.hpp"
 #include "Render/points.h"
 
-#include "chaiscript/chaiscript.hpp"
+#include "Utility/chaiscriptUtility.h"
 
 namespace MV {
 

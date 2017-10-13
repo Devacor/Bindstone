@@ -10,10 +10,17 @@ conan_basic_setup(TARGETS)
 include(CMake/PrecompiledHeader.cmake)
 include(CMake/Resources.cmake)
 
-add_resources(TARGET MoonDog SOURCES ${CMAKE_SOURCE_DIR}/Assets DEST .)
+add_resources(TARGET BindStone SOURCES ${CMAKE_SOURCE_DIR}/Assets DEST .)
+if(APPLE)
+  add_resources(TARGET BindStone SOURCES ${CMAKE_SOURCE_DIR}/LaunchScreen DEST .)
+endif()
 
 if(${CMAKE_GENERATOR} MATCHES "^Visual Studio.*$")
   set(GENERATOR_MSVC TRUE)
+endif()
+
+if(${CMAKE_GENERATOR} MATCHES "Xcode")
+  set(XCODE TRUE)
 endif()
 
 set(APP_VERSION 1.0)

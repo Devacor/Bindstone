@@ -1,4 +1,4 @@
-target_sources(MoonDog PRIVATE
+target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/boxaabb.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/boxaabb.h
   ${CMAKE_CURRENT_SOURCE_DIR}/formattedText.cpp

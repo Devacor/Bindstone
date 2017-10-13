@@ -1,4 +1,4 @@
-target_sources(MoonDog PRIVATE
+target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/anchorEditor.h
   ${CMAKE_CURRENT_SOURCE_DIR}/componentPanels.h
   ${CMAKE_CURRENT_SOURCE_DIR}/componentPanels.cpp

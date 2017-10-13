@@ -1,4 +1,4 @@
-target_sources(MoonDog PRIVATE
+target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/download.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/download.h
   ${CMAKE_CURRENT_SOURCE_DIR}/network.cpp

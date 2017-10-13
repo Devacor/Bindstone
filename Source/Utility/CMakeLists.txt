@@ -1,4 +1,4 @@
-target_sources(MoonDog PRIVATE
+target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/chaiscriptStdLib.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/chaiscriptStdLib.h
   ${CMAKE_CURRENT_SOURCE_DIR}/exactType.hpp

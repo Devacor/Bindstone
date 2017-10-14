@@ -278,18 +278,18 @@ namespace MV {
 		return s;
 	}
 
-	inline constexpr float toDegrees(float val){
+	inline float toDegrees(float val){
 		return val*(180.0f / float(PIE));
 	}
-	inline constexpr double toDegrees(double val) {
+	inline double toDegrees(double val) {
 		return val*(180.0 / PIE);
 	}
 
-	inline constexpr float toRadians(float val){
+	inline float toRadians(float val){
 		return val*(float(PIE) / 180.0f);
 	}
 
-	inline constexpr double toRadians(double val) {
+	inline double toRadians(double val) {
 		return val*(PIE / 180.0);
 	}
 

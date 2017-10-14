@@ -18,7 +18,7 @@
 #include "Utility/generalUtility.h"
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
-#include "chaiscript/chaiscript.hpp"
+#include "Utility/chaiscriptUtility.h"
 #include "Utility/log.h"
 
 namespace MV {

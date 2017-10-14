@@ -14,7 +14,7 @@
 #include "Utility/signal.hpp"
 #include "Utility/cerealUtility.h"
 
-#include "chaiscript/chaiscript.hpp"
+#include "Utility/chaiscriptUtility.h"
 
 namespace MV {
 	SDL_Surface* converToPowerOfTwo(SDL_Surface* surface);

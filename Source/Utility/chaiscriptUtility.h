@@ -1,6 +1,10 @@
 #ifndef _MV_CHAISCRIPT_UTILITY_H_
 #define _MV_CHAISCRIPT_UTILITY_H_
 
+#ifndef NOMINMAX
+#define NOMINMAX 1
+#endif
+
 #include <map>
 
 #include "chaiscript/chaiscript.hpp"

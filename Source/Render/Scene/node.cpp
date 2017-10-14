@@ -2,12 +2,12 @@
 #include "stddef.h"
 #include <numeric>
 #include <regex>
-#include "chaiscript/chaiscript.hpp"
+#include "Utility/chaiscriptUtility.h"
 
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
-CEREAL_CLASS_VERSION(MV::Scene::Node, 1);
+CEREAL_CLASS_VERSION(MV::Scene::Node, 2);
 
 namespace MV {
 	namespace Scene {
@@ -458,6 +458,16 @@ namespace MV {
 
 		std::shared_ptr<Node> Node::rotation(const AxisAngles &a_newRotation) {
 			auto self = shared_from_this();
+			auto newRotationRadians = toRadians(a_newRotation);
+			if (newRotationRadians != rotateTo) {
+				rotateTo = newRotationRadians;
+				onTransformChangeSignal(self);
+			}
+			return self;
+		}
+
+		std::shared_ptr<Node> Node::rotationRad(const AxisAngles &a_newRotation) {
+			auto self = shared_from_this();
 			if (a_newRotation != rotateTo) {
 				rotateTo = a_newRotation;
 				onTransformChangeSignal(self);
@@ -609,9 +619,9 @@ namespace MV {
 
 				localMatrixTransform.position(translateTo);
 
-				if (!MV::equals(rotateTo.x, 0.0f)) { localMatrixTransform.rotateX(toRadians(rotateTo.x)); }
-				if (!MV::equals(rotateTo.y, 0.0f)) { localMatrixTransform.rotateY(toRadians(rotateTo.y)); }
-				if (!MV::equals(rotateTo.z, 0.0f)) { localMatrixTransform.rotateZ(toRadians(rotateTo.z)); }
+				if (!MV::equals(rotateTo.x, 0.0f)) { localMatrixTransform.rotateX(rotateTo.x); }
+				if (!MV::equals(rotateTo.y, 0.0f)) { localMatrixTransform.rotateY(rotateTo.y); }
+				if (!MV::equals(rotateTo.z, 0.0f)) { localMatrixTransform.rotateZ(rotateTo.z); }
 
 				if (scaleTo != 1.0f) {
 					localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
@@ -879,9 +889,9 @@ namespace MV {
 			if (!translateTo.atOrigin()) {
 				localMatrixTransform.translate(translateTo.x, translateTo.y, translateTo.z);
 			}
-			if (rotateTo != 0.0f) {
-				localMatrixTransform.rotateX(toRadians(rotateTo.x)).rotateY(toRadians(rotateTo.y)).rotateZ(toRadians(rotateTo.z));
-			}
+			if (!MV::equals(rotateTo.x, 0.0f)) { localMatrixTransform.rotateX(rotateTo.x); }
+			if (!MV::equals(rotateTo.y, 0.0f)) { localMatrixTransform.rotateY(rotateTo.y); }
+			if (!MV::equals(rotateTo.z, 0.0f)) { localMatrixTransform.rotateZ(rotateTo.z); }
 			if (scaleTo != 1.0f) {
 				localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
 			}
@@ -986,7 +996,7 @@ namespace MV {
 			return position(position() + a_newPosition);
 		}
 
-		MV::AxisAngles Node::worldRotation() const {
+		MV::AxisAngles Node::worldRotationRad() const {
 			auto accumulatedRotation = rotateTo;
 			const Node* current = this;
 			while (current = current->myParent) {
@@ -995,13 +1005,21 @@ namespace MV {
 			return accumulatedRotation;
 		}
 
-		std::shared_ptr<Node> Node::worldRotation(const AxisAngles &a_newAngle) {
+		std::shared_ptr<Node> Node::worldRotationRad(const AxisAngles &a_newAngle) {
 			auto accumulatedRotation = a_newAngle;
 			const Node* current = this;
 			while (current = current->myParent) {
 				accumulatedRotation -= current->rotateTo;
 			}
-			return rotation(accumulatedRotation);
+			return rotationRad(accumulatedRotation);
+		}
+
+		MV::AxisAngles Node::worldRotation() const {
+			return toDegrees(worldRotationRad());
+		}
+
+		std::shared_ptr<Node> Node::worldRotation(const AxisAngles &a_newAngle) {
+			return worldRotationRad(toDegrees(a_newAngle));
 		}
 
 		MV::Scale Node::worldScale() const {
@@ -1408,6 +1426,12 @@ namespace MV {
 			a_script.add(chaiscript::fun(static_cast<AxisAngles(Node::*)() const>(&Node::worldRotation)), "worldRotation");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const AxisAngles &)>(&Node::worldRotation)), "worldRotation");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const AxisAngles &)>(&Node::addRotation)), "addRotation");
+
+			a_script.add(chaiscript::fun(static_cast<AxisAngles(Node::*)() const>(&Node::rotationRad)), "rotationRad");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const AxisAngles &)>(&Node::rotationRad)), "rotationRad");
+			a_script.add(chaiscript::fun(static_cast<AxisAngles(Node::*)() const>(&Node::worldRotationRad)), "worldRotationRad");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const AxisAngles &)>(&Node::worldRotationRad)), "worldRotationRad");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const AxisAngles &)>(&Node::addRotationRad)), "addRotationRad");
 			
 			a_script.add(chaiscript::fun(static_cast<Scale(Node::*)() const>(&Node::scale)), "scale");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Scale &)>(&Node::scale)), "scale");

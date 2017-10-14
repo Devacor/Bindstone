@@ -10,7 +10,7 @@
 #include <map>
 #include "Utility/tupleHelpers.hpp"
 #include "Utility/scopeGuard.hpp"
-#include "chaiscript/chaiscript.hpp"
+#include "Utility/chaiscriptUtility.h"
 #include "cereal/cereal.hpp"
 #include "cereal/access.hpp"
 

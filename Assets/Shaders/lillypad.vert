@@ -11,8 +11,8 @@ uniform float time;
 uniform vec2 uvMin;
 uniform vec2 uvMax;
 
-smooth out vec4 color;
-smooth out vec2 uv;
+out vec4 color;
+out vec2 uv;
 
 void main(){
     color = inColor;

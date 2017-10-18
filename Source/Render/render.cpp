@@ -421,7 +421,7 @@ namespace MV {
 		userCanResize = false;
 		if(initialized){
 			if (!renderer.headless()) {
-				SDL_GetWindowSize(window, &windowSize.width, &windowSize.height);
+				SDL_GL_GetDrawableSize(window, &windowSize.width, &windowSize.height);
 			}
 			updateAspectRatio();
 			minSize = Size<int>(windowSize.width, windowSize.height);
@@ -450,21 +450,33 @@ namespace MV {
 		}
 		return *this;
 	}
+    
+    Window& Window::highResolution(){
+        SDLflags = SDLflags | SDL_WINDOW_ALLOW_HIGHDPI;
+        return *this;
+    }
+    
+    Window& Window::normalResolution(){
+        SDLflags = SDLflags & ~ SDL_WINDOW_ALLOW_HIGHDPI;
+        return *this;
+    }
 
-	void Window::fullScreenMode(){
+	Window& Window::fullScreenMode(){
 		SDLflags = SDLflags | SDL_WINDOW_FULLSCREEN;
 		SDLflags = SDLflags & ~ SDL_WINDOW_FULLSCREEN_DESKTOP;
 		if(initialized && !renderer.headless()){
 			SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
 		}
+        return *this;
 	}
 
-	void Window::fullScreenWindowedMode(){
+	Window& Window::fullScreenWindowedMode(){
 		SDLflags = SDLflags | SDL_WINDOW_FULLSCREEN_DESKTOP;
 		SDLflags = SDLflags & ~ SDL_WINDOW_FULLSCREEN;
 		if(initialized && !renderer.headless()){
 			SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
 		}
+        return *this;
 	}
 	
 	Window& Window::borderless(){
@@ -509,6 +521,25 @@ namespace MV {
 
 	bool Window::initialize(){
 		if (!renderer.headless()) {
+#ifdef HAVE_OPENGLES
+            if(SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES)!=0){
+                std::cerr << "Failed to set GL Context to ES" << std::endl;
+            }
+            if(SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3)!=0){
+                std::cerr << "Failed to set GL Major Context to 3!" << std::endl;
+            }
+            if(SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0)!=0){
+                std::cerr << "Failed to set GL Minor Context to 0!" << std::endl;
+            }
+#else
+            if(SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3)!=0){
+                std::cerr << "Failed to set GL Major Context to 3!" << std::endl;
+            }
+            if(SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1)!=0){
+                std::cerr << "Failed to set GL Minor Context to 1!" << std::endl;
+            }
+#endif
+            
 			SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
 			SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
 			SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
@@ -540,7 +571,7 @@ namespace MV {
 				atexit(SDL_Quit); // Quit SDL at exit.
 				return false;
 			}
-			SDL_GetWindowSize(window, &windowSize.width, &windowSize.height);
+			SDL_GL_GetDrawableSize(window, &windowSize.width, &windowSize.height);
 			
 			checkSDLError(__LINE__);
 
@@ -584,7 +615,9 @@ namespace MV {
 				std::cerr << "SDL_GL_MakeCurrent(): " << SDL_GetError() << std::endl;
 				atexit(SDL_Quit);
 			}
+#ifndef HAVE_OPENGLES
 			SDL_GL_SetSwapInterval(vsync);
+#endif
 		}
 	}
 
@@ -684,6 +717,7 @@ namespace MV {
 		if(setupSDL()){
 			setupOpengl();
 			initializeExtensions();
+            summarizeDisplayMode();
 			if(a_summarize){
 				summarizeDisplayMode();
 			}
@@ -716,19 +750,16 @@ namespace MV {
 		if(firstInitializationSDL){
 			firstInitializationSDL = false;
 			if (!headless()) {
-				SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-				SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
-
 				if (SDL_Init(SDL_INIT_EVERYTHING) == -1) {
 					std::cerr << "SDL_Init: " << SDL_GetError();
 				}
-
-				if (SDL_GetNumVideoDrivers() < 1 || SDL_VideoInit(0) < 0) {
+                
+				/*if (SDL_GetNumVideoDrivers() < 1 || SDL_VideoInit(0) < 0) {
 					// Failed, exit
 					std::cerr << "Video initialization failed: " << SDL_GetError() << std::endl;
 					return false;
-				}
-				gl3wInit();
+				}*/
+                gl3wInit();
 			} else {
 				if (SDL_Init(SDL_INIT_EVENTS) == -1) {
 					std::cerr << "SDL_Init [HEADLESS]: " << SDL_GetError();
@@ -748,16 +779,14 @@ namespace MV {
 		sdlWindow.ensureValidGLContext();
 		if (!headless()) {
 			checkSDLError(__LINE__);
-
+#ifndef HAVE_OPENGLES
 			SDL_GL_SetSwapInterval(0);
+#endif
 		}
 		refreshWorldAndWindowSize();
 
 		if (!headless()) {
 			glClearColor(clearBackgroundColor.R, clearBackgroundColor.G, clearBackgroundColor.B, clearBackgroundColor.A);
-
-			//glShadeModel(GL_SMOOTH);
-
 
 			glEnable(GL_BLEND);
 
@@ -941,7 +970,7 @@ namespace MV {
 					std::ifstream fragmentShaderFile(shader.second.fragmentShaderFile);
 					if (!fragmentShaderFile.is_open()) { continue; }
 					std::string fragmentShaderCode((std::istreambuf_iterator<char>(fragmentShaderFile)), std::istreambuf_iterator<char>());
-
+                    
 					auto newId = loadShaderGetProgramId(vertexShaderCode, fragmentShaderCode);
 					glDeleteProgram(shader.second.programId);
 					shader.second.programId = newId;
@@ -953,12 +982,17 @@ namespace MV {
 		}
 	}
 
-	GLuint Draw2D::loadShaderGetProgramId(const std::string & a_vertexShaderCode, const std::string & a_fragmentShaderCode) {
+	GLuint Draw2D::loadShaderGetProgramId(std::string a_vertexShaderCode, std::string a_fragmentShaderCode) {
 		GLuint programId = -1;
 		if (!headless()) {
 			auto vsId = glCreateShader(GL_VERTEX_SHADER);
 			auto fsId = glCreateShader(GL_FRAGMENT_SHADER);
-
+            
+#ifdef HAVE_OPENGLES
+            replaceFirst(a_vertexShaderCode, "#version 330 core", "#version 300 es\nprecision highp float;\n");
+            replaceFirst(a_fragmentShaderCode, "#version 330 core", "#version 300 es\nprecision highp float;\n");
+#endif
+            
 			loadPartOfShader(vsId, a_vertexShaderCode);
 			loadPartOfShader(fsId, a_fragmentShaderCode);
 
@@ -990,23 +1024,27 @@ namespace MV {
 			std::ifstream vertexShaderFile(a_vertexShaderFilename);
 			MV::require<ResourceException>(vertexShaderFile.is_open(), "Failed to load vertex shader: ", a_vertexShaderFilename);
 			std::string vertexShaderCode((std::istreambuf_iterator<char>(vertexShaderFile)), std::istreambuf_iterator<char>());
-
+            
 			std::ifstream fragmentShaderFile(a_fragmentShaderFilename);
 			MV::require<ResourceException>(fragmentShaderFile.is_open(), "Failed to load fragment shader: ", a_fragmentShaderFilename);
 			std::string fragmentShaderCode((std::istreambuf_iterator<char>(fragmentShaderFile)), std::istreambuf_iterator<char>());
-
+            
 			bool makeDefault = shaders.empty();
-			auto programId = loadShaderGetProgramId(vertexShaderCode, fragmentShaderCode);
-
-			auto emplaceResult = shaders.emplace(std::make_pair(a_id, Shader(a_id, programId, headless(), a_vertexShaderFilename, a_fragmentShaderFilename)));
-			MV::require<ResourceException>(emplaceResult.second, "Failed to insert shader to map: ", a_id);
-			Shader* shaderPtr = &emplaceResult.first->second;
-
-			if (makeDefault) {
-				defaultShaderPtr = shaderPtr;
-			}
-
-			return shaderPtr;
+            GLuint programId;
+            try {
+                programId = loadShaderGetProgramId(vertexShaderCode, fragmentShaderCode);
+            }catch(ResourceException &e){
+                e.append("ShaderID: " + a_id);
+                throw;
+            }
+            auto emplaceResult = shaders.emplace(std::make_pair(a_id, Shader(a_id, programId, headless(), a_vertexShaderFilename, a_fragmentShaderFilename)));
+            MV::require<ResourceException>(emplaceResult.second, "Failed to insert shader to map: ", a_id);
+            Shader* shaderPtr = &emplaceResult.first->second;
+                
+            if (makeDefault) {
+                defaultShaderPtr = shaderPtr;
+            }
+            return shaderPtr;
 		} else {
 			return &found->second;
 		}

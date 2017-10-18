@@ -46,8 +46,10 @@
 #define GLX_GLEXT_PROTOTYPES
 
 #ifdef HAVE_OPENGLES
-	#include <SDL_opengl.h>
-	#include <SDL_opengles2.h>
+	//#include <SDL_opengl.h>
+	//#include <SDL_opengles2.h>
+    #include <OpenGLES/ES3/gl.h>
+    #include <OpenGLES/ES3/glext.h>
 	typedef GLfloat GLdouble; //opengles has no GLdouble
 
     inline int gl3wInit(){
@@ -245,8 +247,11 @@ namespace MV {
 		Window& resizeWorldWithWindow(bool a_sizeWorldWithWindow);
 
 		Window& windowedMode();
-		void fullScreenMode();
-		void fullScreenWindowedMode();
+		Window& fullScreenMode();
+		Window& fullScreenWindowedMode();
+        
+        Window& highResolution();
+        Window& normalResolution();
 
 		Window& borderless();
 		Window& bordered();
@@ -525,7 +530,7 @@ namespace MV {
 
 		void draw(GLenum drawType, std::shared_ptr<Scene::Node> a_node);
 	private:
-		GLuint loadShaderGetProgramId(const std::string & a_vertexShaderCode, const std::string & a_fragmentShaderCode);
+		GLuint loadShaderGetProgramId(std::string a_vertexShaderCode, std::string a_fragmentShaderCode);
 
 		void validateShaderStatus(GLuint a_id, bool a_isShader);
 		void loadPartOfShader(GLuint a_id, const std::string &a_code);

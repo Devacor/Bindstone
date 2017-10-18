@@ -749,7 +749,7 @@
                                                                                                     "repeat": false,
                                                                                                     "pixel": false,
                                                                                                     "base": {
-                                                                                                        "name": "Assets/Atlases\\Particles.png",
+                                                                                                        "name": "Assets/Atlases/Particles.png",
                                                                                                         "size": {
                                                                                                             "width": 0,
                                                                                                             "height": 0,

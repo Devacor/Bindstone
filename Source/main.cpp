@@ -12,7 +12,7 @@
 #include "chaiscript/chaiscript.hpp"
 
 //Change this from 1 to 0 or vice versa to either compile the actual game, or the SUPER basic SDL test.
-#if 0
+#if 1
 
 int main(int, char *[]) {
 	GameEditor menu;

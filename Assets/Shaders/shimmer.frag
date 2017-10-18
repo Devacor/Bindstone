@@ -1,18 +1,18 @@
 #version 330 core
 
-smooth in vec4 color;
-smooth in vec2 uv;
+in vec4 color;
+in vec2 uv;
 
 uniform float time;
 
-uniform sampler2D texture;
+uniform sampler2D texture0;
 
 out vec4 colorResult;
 
 float pulse(float sec, float duration) {
     float pulsePercent = mod(sec, duration) / duration;
     float pulseInTermsOfPI = (pulsePercent * 2.0f * 3.1415f) - 3.1415f;
-    return (sin(pulseInTermsOfPI) + 1) / 2;
+    return (sin(pulseInTermsOfPI) + 1.0f) / 2.0f;
 }
  
 void main(){
@@ -45,14 +45,14 @@ void main(){
     uvOffsets[2] = uvOffsets[0];
     uvOffsets[3] = uvOffsets[1];
 
-    textureColors[0] = (texture2D(texture, vec2((uvOffsets[0].s / 2.0f), uvOffsets[0].t / 2.0f)) * color);
+    textureColors[0] = (texture(texture0, vec2((uvOffsets[0].s / 2.0f), uvOffsets[0].t / 2.0f)) * color);
     textureColors[0].rgb *= textureColors[0].a;
-    textureColors[1] = (texture2D(texture, vec2((uvOffsets[1].s / 2.0f) + .5f, (uvOffsets[1].t / 2.0f))) * color);
+    textureColors[1] = (texture(texture0, vec2((uvOffsets[1].s / 2.0f) + .5f, (uvOffsets[1].t / 2.0f))) * color);
 	textureColors[1].rgb *= textureColors[1].a;
 
-	textureColors[2] = (texture2D(texture, vec2((uvOffsets[2].s / 2.0f), (uvOffsets[2].t / 2.0f) + .5f)) * color);
+	textureColors[2] = (texture(texture0, vec2((uvOffsets[2].s / 2.0f), (uvOffsets[2].t / 2.0f) + .5f)) * color);
     textureColors[2].rgb *= textureColors[2].a;
-    textureColors[3] = (texture2D(texture, vec2((uvOffsets[3].s / 2.0f) + .5f, (uvOffsets[3].t / 2.0f))) * color);
+    textureColors[3] = (texture(texture0, vec2((uvOffsets[3].s / 2.0f) + .5f, (uvOffsets[3].t / 2.0f))) * color);
 	textureColors[3].rgb *= textureColors[3].a;
 
     colorResult = (textureColors[offset2] * percent) + (textureColors[offset1] * (1.0f - percent));

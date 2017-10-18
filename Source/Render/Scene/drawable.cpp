@@ -263,12 +263,12 @@ namespace MV {
 			std::set<std::shared_ptr<MV::TextureDefinition>> actuallyRegistered;
 			for (auto&& kv : ourTextures) {
 				if (actuallyRegistered.find(kv.second->texture()) == actuallyRegistered.end()) {
-					cachedTextureList.emplace_back((kv.first > 0 ? "texture" + std::to_string(actuallyRegistered.size() - 1) : "texture"), kv.second->texture());
+					cachedTextureList.emplace_back("texture" + std::to_string(actuallyRegistered.size()), kv.second->texture());
 					actuallyRegistered.insert(kv.second->texture());
 				}
 			}
 			if (actuallyRegistered.empty()) {
-				cachedTextureList.emplace_back("texture", nullptr);
+				cachedTextureList.emplace_back("texture0", nullptr);
 			}
 		}
 

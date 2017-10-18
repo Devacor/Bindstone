@@ -8,8 +8,8 @@ layout(location = 2) in vec4 inColor;
 uniform mat4 transformation;
 uniform float time;
 
-smooth out vec4 color;
-smooth out vec2 uv;
+out vec4 color;
+out vec2 uv;
 
 float pulse(float sec) {
     float pulsePercent = mod(sec, 5.0f) / 5.0f;

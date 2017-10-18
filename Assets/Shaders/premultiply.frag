@@ -1,13 +1,13 @@
 #version 330 core
 
-smooth in vec4 color;
-smooth in vec2 uv;
+in vec4 color;
+in vec2 uv;
 
-uniform sampler2D texture;
+uniform sampler2D texture0;
 
 out vec4 colorResult;
  
 void main(){
-    colorResult = texture2D(texture, uv.st) * color;
+    colorResult = texture(texture0, uv.st) * color;
     colorResult.rgb *= colorResult.a;
 }

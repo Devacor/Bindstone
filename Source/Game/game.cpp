@@ -41,7 +41,8 @@ void Game::initializeWindow(){
 	MV::Size<int> windowSize(960, 640);
 
 	gameData.managers().renderer.//makeHeadless().
-		window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
+		//window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
+        window().fullScreenMode().resizeWorldWithWindow(true);//.highResolution();
 
 	if (!gameData.managers().renderer.initialize(windowSize, worldSize)) {
 		exit(0);

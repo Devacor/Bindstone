@@ -106,6 +106,17 @@ namespace MV {
 			prefixWhat("General Exception: ");
 			return combinedWhat.c_str();
 		}
+        
+        void append(const char *a_extra) {
+            combinedWhat+="\n[";
+            combinedWhat+=a_extra;
+            combinedWhat+="]";
+        }
+        void append(const std::string &a_extra) {
+            combinedWhat+="\n[";
+            combinedWhat+=a_extra;
+            combinedWhat+="]";
+        }
 	protected:
 		void prefixWhat(const char * a_prefix) const{
 			if(combinedWhat.empty()){

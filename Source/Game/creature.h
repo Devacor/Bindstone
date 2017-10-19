@@ -136,6 +136,7 @@ class CreatureCatalog {
 public:
 	CreatureCatalog(const std::string &a_filename) {
 		std::ifstream instream(a_filename);
+        MV::require<MV::ResourceException>(instream, "Failed to load CreatureCatalog: ", a_filename);
 		cereal::JSONInputArchive archive(instream);
 
 		archive(cereal::make_nvp("creatures", creatureList));

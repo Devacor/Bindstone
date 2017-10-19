@@ -123,6 +123,7 @@ class BuildingCatalog {
 public:
 	BuildingCatalog(const std::string &a_filename) {
 		std::ifstream instream(a_filename);
+        MV::require<MV::ResourceException>(instream, "Failed to load BuildingCatalog: ", a_filename);
 		cereal::JSONInputArchive archive(instream);
 
 		archive(cereal::make_nvp("buildings", buildingList));

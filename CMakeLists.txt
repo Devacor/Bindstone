@@ -7,6 +7,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
 
+if(${CMAKE_GENERATOR} MATCHES "Xcode")
+  set(XCODE TRUE)
+endif()
+
 include(CMake/PrecompiledHeader.cmake)
 include(CMake/Resources.cmake)
 
@@ -17,10 +21,6 @@ endif()
 
 if(${CMAKE_GENERATOR} MATCHES "^Visual Studio.*$")
   set(GENERATOR_MSVC TRUE)
-endif()
-
-if(${CMAKE_GENERATOR} MATCHES "Xcode")
-  set(XCODE TRUE)
 endif()
 
 set(APP_VERSION 1.0)

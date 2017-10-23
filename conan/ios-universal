@@ -11,39 +11,39 @@ build_type=Release
 SDKROOT=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
 CC=ccache /usr/bin/clang -arch arm64
 CXX=ccache /usr/bin/clang++ -arch arm64
-CXXFLAGS=-fPIC -DPIC -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk -mios-version-min=10.0 -Os -fembed-bitcode
-CFLAGS=-fPIC -DPIC -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk -mios-version-min=10.0 -Os -fembed-bitcode
-LDFLAGS=-mios-version-min=10.0 -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
+CXXFLAGS=-fPIC -DPIC -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk -mios-version-min=11.0 -Os -fembed-bitcode
+CFLAGS=-fPIC -DPIC -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk -mios-version-min=11.0 -Os -fembed-bitcode
+LDFLAGS=-mios-version-min=11.0 -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
 TRIPLE=arm-apple-darwin
 
 arm64_SDKROOT=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
 arm64_CC=ccache /usr/bin/clang -arch arm64
 arm64_CXX=ccache /usr/bin/clang++ -arch arm64
-arm64_CXXFLAGS=-fPIC -DPIC -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk -mios-version-min=10.0 -Os -fembed-bitcode
-arm64_CFLAGS=-fPIC -DPIC -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk -mios-version-min=10.0 -Os -fembed-bitcode
-arm64_LDFLAGS=-mios-version-min=10.0 -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
+arm64_CXXFLAGS=-fPIC -DPIC -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk -mios-version-min=11.0 -Os -fembed-bitcode
+arm64_CFLAGS=-fPIC -DPIC -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk -mios-version-min=11.0 -Os -fembed-bitcode
+arm64_LDFLAGS=-mios-version-min=11.0 -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
 arm64_TRIPLE=arm-apple-darwin
 
 armv7_SDKROOT=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
 armv7_CC=ccache /usr/bin/clang -arch armv7
 armv7_CXX=ccache /usr/bin/clang++ -arch armv7
-armv7_CXXFLAGS=-fPIC -DPIC -arch armv7 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk -mios-version-min=10.0 -Os -fembed-bitcode
-armv7_CFLAGS=-fPIC -DPIC -arch armv7 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk -mios-version-min=10.0 -Os -fembed-bitcode
-armv7_LDFLAGS=-mios-version-min=10.0 -arch armv7 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
+armv7_CXXFLAGS=-fPIC -DPIC -arch armv7 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk -mios-version-min=11.0 -Os -fembed-bitcode
+armv7_CFLAGS=-fPIC -DPIC -arch armv7 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk -mios-version-min=11.0 -Os -fembed-bitcode
+armv7_LDFLAGS=-mios-version-min=11.0 -arch armv7 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk
 armv7_TRIPLE=arm-apple-darwin
 
 x86_64_SDKROOT=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk
 x86_64_CC=ccache /usr/bin/clang -arch x86_64
 x86_64_CXX=ccache /usr/bin/clang++ -arch x86_64
-x86_64_CXXFLAGS=-fPIC -DPIC -arch x86_64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk -mios-version-min=10.0 -Os -fembed-bitcode
-x86_64_CFLAGS=-fPIC -DPIC -arch x86_64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk -mios-version-min=10.0 -Os -fembed-bitcode
-x86_64_LDFLAGS=-mios-version-min=10.0 -arch x86_64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk
+x86_64_CXXFLAGS=-fPIC -DPIC -arch x86_64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk -mios-version-min=11.0 -Os -fembed-bitcode
+x86_64_CFLAGS=-fPIC -DPIC -arch x86_64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk -mios-version-min=11.0 -Os -fembed-bitcode
+x86_64_LDFLAGS=-mios-version-min=11.0 -arch x86_64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk
 x86_64_TRIPLE=x86_64-apple-darwin
 
 i386_SDKROOT=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk
 i386_CC=ccache /usr/bin/clang -arch i386
 i386_CXX=ccache /usr/bin/clang++ -arch i386
-i386_CXXFLAGS=-fPIC -DPIC -arch i386 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk -mios-version-min=10.0 -Os -fembed-bitcode
-i386_CFLAGS=-fPIC -DPIC -arch i386 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk -mios-version-min=10.0 -Os -fembed-bitcode
-i386_LDFLAGS=-mios-version-min=10.0 -arch i386 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk
+i386_CXXFLAGS=-fPIC -DPIC -arch i386 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk -mios-version-min=11.0 -Os -fembed-bitcode
+i386_CFLAGS=-fPIC -DPIC -arch i386 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk -mios-version-min=11.0 -Os -fembed-bitcode
+i386_LDFLAGS=-mios-version-min=11.0 -arch i386 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk
 i386_TRIPLE=i386-apple-darwin

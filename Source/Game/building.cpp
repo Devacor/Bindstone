@@ -25,7 +25,7 @@ Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const Building
 
 void Building::initialize() {
 	auto newNode = owner()->make(assetPath(), gameInstance.jsonLoadBinder());
-	newNode->component<MV::Scene::Spine>()->animate("idle");
+	//newNode->component<MV::Scene::Spine>()->animate("idle");
 	owner()->scale(owner()->scale() * gameInstance.teamForPlayer(owningPlayer).scale());
 	initializeBuildingButton(newNode);
 }

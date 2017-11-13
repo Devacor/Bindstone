@@ -299,6 +299,48 @@ namespace MV {
 			return *this;
 		}
 
+		inline TransformMatrix& rotateXYZ(AxisAngles a_angles) {
+			return rotateXYZ(a_angles.x, a_angles.y, a_angles.z);
+		}
+
+		inline TransformMatrix& rotateXYZ(PointPrecision a_rX, PointPrecision a_rY, PointPrecision a_rZ) {
+			TransformMatrix rotation;
+			rotation.setRotationXYZ(a_rX, a_rY, a_rZ);
+			*this *= rotation;
+			return *this;
+		}
+
+		inline TransformMatrix& setRotationXYZ(PointPrecision a_rX, PointPrecision a_rY, PointPrecision a_rZ) {
+			auto cosX = std::cos(a_rX);
+			auto sinX = std::sin(a_rX);
+
+			auto cosY = std::cos(a_rY);
+			auto sinY = std::sin(a_rY);
+
+			auto cosZ = std::cos(a_rZ);
+			auto sinZ = std::sin(a_rZ);
+
+			auto cosXsinY = cosX*sinY;
+			auto sinXsinY = sinX*sinY;
+
+			access(0, 0) = cosY * cosZ;
+			access(1, 0) = -cosY * sinZ;
+			access(2, 0) = sinY;
+
+			access(0, 1) = (cosX*sinZ) + (sinXsinY*cosZ);
+			access(1, 1) = (cosX*cosZ) - (sinXsinY*sinZ);
+			access(2, 1) = -sinX*cosY;
+
+			access(0, 2) = (sinX*sinZ) - (cosXsinY*cosZ);
+			access(1, 2) = (sinX*cosZ) + (cosXsinY*sinZ);
+			access(2, 2) = cosX*cosY;
+			return *this;
+		}
+
+		inline TransformMatrix& setRotationXYZ(AxisAngles a_angles) {
+			return setRotationXYZ(a_angles.x, a_angles.y, a_angles.z);
+		}
+
 		inline TransformMatrix& rotateX(PointPrecision a_radian) {
 			return rotateXSupplyCosSin(cos(a_radian), sin(a_radian));
 		}
@@ -409,6 +451,30 @@ namespace MV {
 	private:
 		std::vector<TransformMatrix> stack;
 		std::string name;
+	};
+
+
+	class PointRotator {
+	public:
+		inline PointRotator(MV::AxisAngles angle) : PointRotator(angle.x, angle.y, angle.z) {}
+
+		inline PointRotator(MV::PointPrecision x, MV::PointPrecision y, MV::PointPrecision z) {
+			rotate.setRotationXYZ(x, y, z);
+		}
+		PointRotator(const PointRotator&) = default;
+		PointRotator(PointRotator&&) = default;
+
+		inline void apply(MV::Point<MV::PointPrecision> &a_point) {
+			auto px = a_point.x;
+			auto py = a_point.y;
+			auto pz = a_point.z;
+
+			a_point.x = rotate.access(0, 0)*px + rotate.access(1, 0)*py + rotate.access(2, 0)*pz;
+			a_point.y = rotate.access(0, 1)*px + rotate.access(1, 1)*py + rotate.access(2, 1)*pz;
+			a_point.z = rotate.access(0, 2)*px + rotate.access(1, 2)*py + rotate.access(2, 2)*pz;
+		}
+	private:
+		MV::TransformMatrix rotate;
 	};
 
 }

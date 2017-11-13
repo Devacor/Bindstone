@@ -523,7 +523,7 @@ namespace MV {
 			std::shared_ptr<Collider> observePhysicsAngle(bool a_newValue) {
 				useBodyAngle = a_newValue;
 				if (a_newValue == true) {
-					MV::visit_each(owner()->components<Collider>(), [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
+					MV::visit(owner()->components<Collider>(), [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
 						if (a_collider.self().get() != this) {
 							a_collider->observePhysicsAngle(false);
 						}
@@ -538,7 +538,7 @@ namespace MV {
 			std::shared_ptr<Collider> observePhysicsPosition(bool a_newValue) {
 				useBodyPosition = a_newValue;
 				if (a_newValue == true) {
-					MV::visit_each(owner()->components<Collider>(), [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
+					MV::visit(owner()->components<Collider>(), [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
 						if (a_collider.self().get() != this) {
 							a_collider->observePhysicsPosition(false);
 						}

@@ -219,7 +219,7 @@ void SelectedNodeEditorPanel::updateComponentEditButtons(bool a_attached) {
 	buttonSize = MV::size(110.0f, 27.0f);
 	auto componentList = controls->elementToEdit->components<MV::Scene::Sprite, MV::Scene::Text, MV::Scene::Grid, MV::Scene::Emitter, MV::Scene::Spine, MV::Scene::PathMap, MV::Scene::Button, MV::Scene::Clickable, MV::Scene::Drawable>(true);
 	
-	MV::visit_each(componentList,
+	MV::visit(componentList,
 	[&](const MV::Scene::SafeComponent<MV::Scene::Sprite> &a_sprite) {
 		CreateSpriteComponentButton(a_sprite);
 	},

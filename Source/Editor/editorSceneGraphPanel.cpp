@@ -157,7 +157,7 @@ void SceneGraphPanel::layoutParents(std::shared_ptr<MV::Scene::Node> a_parent) {
 	//a_parent->parent()->childBounds();
 	auto parentGrids = a_parent->componentsInParents<MV::Scene::Grid>(true, true);
 	std::reverse(parentGrids.begin(), parentGrids.end());
-	MV::visit_each(parentGrids, [&](const MV::Scene::SafeComponent<MV::Scene::Grid> &a_grid) {
+	MV::visit(parentGrids, [&](const MV::Scene::SafeComponent<MV::Scene::Grid> &a_grid) {
 		a_grid->layoutCells();
 	});
 }

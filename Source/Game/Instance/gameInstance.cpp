@@ -21,7 +21,7 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 	gameData(a_gameData),
 	left(a_leftPlayer, LEFT, *this),
 	right(a_rightPlayer, RIGHT, *this),
-	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths()) {
+	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), chaiscript::default_options()) {
 
 	//manually updating this.
 	worldScene->silence().forget()->pause();
@@ -43,7 +43,7 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 	worldTimestep.then("update", [&](MV::Task& /*a_self*/, double a_dt) {
 		worldScene->update(static_cast<float>(a_dt), true);
 		return false;
-	}).recent()->interval(1.0 / 30, 15);
+	}).recent()->interval(1.0 / 60, 15);
 }
 
 GameInstance::~GameInstance() {
@@ -149,8 +149,10 @@ ClientGameInstance::ClientGameInstance(const std::shared_ptr<Player> &a_leftPlay
 }
 
 void ClientGameInstance::requestUpgrade(const std::shared_ptr<Player> &a_owner, int a_slot, size_t a_upgrade) {
+	performUpgrade(teamForPlayer(a_owner).side(), a_slot, a_upgrade);
 	GameInstance::requestUpgrade(a_owner, a_slot, a_upgrade);
-	game.gameClient()->send(makeNetworkString<RequestBuildingUpgrade>(teamForPlayer(a_owner).side(), a_slot, a_upgrade));
+	
+	//game.gameClient()->send(makeNetworkString<RequestBuildingUpgrade>(teamForPlayer(a_owner).side(), a_slot, a_upgrade));
 }
 
 void ClientGameInstance::performUpgrade(TeamSide team, int a_slot, size_t a_upgrade) {
@@ -160,6 +162,7 @@ void ClientGameInstance::performUpgrade(TeamSide team, int a_slot, size_t a_upgr
 }
 
 bool ClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const {
+	return true;
 	return a_player == game.player();
 }
 

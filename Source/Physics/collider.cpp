@@ -92,7 +92,7 @@ namespace MV {
 		void Collider::initialize() {
 			Component::initialize();
 			if (!loadedFromJson) {
-				MV::visit_each(owner()->components<Collider>(), [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
+				MV::visit(owner()->components<Collider>(), [&](const MV::Scene::SafeComponent<MV::Scene::Collider> &a_collider) {
 					if (a_collider.self().get() != this) {
 						if (a_collider->observePhysicsAngle()) {
 							useBodyAngle = false;

@@ -327,6 +327,7 @@
     <ClCompile Include="Source\Game\NetworkLayer\accountActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\clientActions.cpp" />
     <ClCompile Include="Source\Game\NetworkLayer\gameServerActions.cpp" />
+    <ClCompile Include="Source\Game\NetworkLayer\networkObject.cpp" />
     <ClCompile Include="Source\Game\player.cpp" />
     <ClCompile Include="Source\Game\state.cpp" />
     <ClCompile Include="Source\Game\wallet.cpp" />
@@ -585,8 +586,8 @@
     <ClInclude Include="Source\Game\NetworkLayer\gameServerActions.h" />
     <ClInclude Include="Source\Game\NetworkLayer\lobbyServer.h" />
     <ClInclude Include="Source\Game\NetworkLayer\networkAction.h" />
+    <ClInclude Include="Source\Game\NetworkLayer\networkObject.h" />
     <ClInclude Include="Source\Game\NetworkLayer\package.h" />
-    <ClInclude Include="Source\Game\NetworkLayer\serverActions.h" />
     <ClInclude Include="Source\Game\player.h" />
     <ClInclude Include="Source\Game\state.h" />
     <ClInclude Include="Source\Game\wallet.h" />

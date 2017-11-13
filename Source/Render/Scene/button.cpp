@@ -162,7 +162,7 @@ namespace MV {
 		void Button::text(const std::shared_ptr<Node> &a_owner, const std::string &a_textString) {
 			if (a_owner) {
 				auto textComponents = a_owner->componentsInChildren<MV::Scene::Text>(false);
-				MV::visit_each(textComponents, [&](const MV::Scene::SafeComponent<MV::Scene::Text> &a_text) {
+				MV::visit(textComponents, [&](const MV::Scene::SafeComponent<MV::Scene::Text> &a_text) {
 					a_text->text(a_textString);
 				});
 			}

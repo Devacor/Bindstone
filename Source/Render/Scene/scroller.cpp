@@ -22,7 +22,7 @@ namespace MV {
 						if (a_clickable->totalDragDistance() > dragStartThreshold) {
 							isDragging = true;
 							auto buttons = contentView->componentsInChildren<MV::Scene::Clickable>(false, false);
-							MV::visit_each(buttons, [&](const MV::Scene::SafeComponent<MV::Scene::Clickable> &a_button) {
+							MV::visit(buttons, [&](const MV::Scene::SafeComponent<MV::Scene::Clickable> &a_button) {
 								a_button->cancelPress();
 							});
 						} else if (a_clickable->dragTime() > cancelTimeThreshold) {

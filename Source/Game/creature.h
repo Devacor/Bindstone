@@ -348,8 +348,10 @@ private:
 			onDeathSignal(self);
 			auto spine = owner()->componentInChildren<MV::Scene::Spine>();
 			spine->animate("die", false);
-			spine->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int /*a_track*/) {
-				owner()->removeFromParent();
+			spine->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
+				if (a_self->track(a_track).name() == "die") {
+					owner()->removeFromParent();
+				}
 			});
 		}
 	}

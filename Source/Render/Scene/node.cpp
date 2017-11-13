@@ -619,9 +619,9 @@ namespace MV {
 
 				localMatrixTransform.position(translateTo);
 
-				if (!MV::equals(rotateTo.x, 0.0f)) { localMatrixTransform.rotateX(rotateTo.x); }
-				if (!MV::equals(rotateTo.y, 0.0f)) { localMatrixTransform.rotateY(rotateTo.y); }
-				if (!MV::equals(rotateTo.z, 0.0f)) { localMatrixTransform.rotateZ(rotateTo.z); }
+				if (rotateTo != 0.0f) {
+					localMatrixTransform.setRotationXYZ(rotateTo);
+				}
 
 				if (scaleTo != 1.0f) {
 					localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
@@ -886,12 +886,11 @@ namespace MV {
 			worldMatrixDirty = false;
 			localMatrixTransform.makeIdentity();
 
-			if (!translateTo.atOrigin()) {
-				localMatrixTransform.translate(translateTo.x, translateTo.y, translateTo.z);
+			localMatrixTransform.position(translateTo);
+
+			if (rotateTo != 0.0f) {
+				localMatrixTransform.setRotationXYZ(rotateTo);
 			}
-			if (!MV::equals(rotateTo.x, 0.0f)) { localMatrixTransform.rotateX(rotateTo.x); }
-			if (!MV::equals(rotateTo.y, 0.0f)) { localMatrixTransform.rotateY(rotateTo.y); }
-			if (!MV::equals(rotateTo.z, 0.0f)) { localMatrixTransform.rotateZ(rotateTo.z); }
 			if (scaleTo != 1.0f) {
 				localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
 			}

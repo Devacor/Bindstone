@@ -2,6 +2,7 @@
 #include "editorControls.h"
 #include "componentPanels.h"
 #include "editorFactories.h"
+#include "Utility/chaiscriptUtility.h"
 
 Editor::Editor(Managers &a_managers):
 	managers(a_managers),

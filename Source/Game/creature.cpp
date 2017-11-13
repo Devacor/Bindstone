@@ -264,7 +264,7 @@ std::shared_ptr<Creature> TargetPolicy::self() const {
 }
 
 bool TargetPolicy::active() const {
-	return selfCreature->alive() && selfCreature->agent()->pathfinding();
+	return selfCreature && selfCreature->alive() && selfCreature->agent()->pathfinding();
 }
 
 void TargetPolicy::update(double a_dt) {

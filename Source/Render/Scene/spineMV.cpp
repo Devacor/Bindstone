@@ -96,6 +96,7 @@ namespace MV{
 			onStart(onStartSignal),
 			onEnd(onEndSignal),
 			onComplete(onCompleteSignal),
+			onDispose(onDisposeSignal),
 			onEvent(onEventSignal) {
 		}
 
@@ -105,6 +106,7 @@ namespace MV{
 			onStart(onStartSignal),
 			onEnd(onEndSignal),
 			onComplete(onCompleteSignal),
+			onDispose(onDisposeSignal),
 			onEvent(onEventSignal) {
 		}
 
@@ -190,9 +192,11 @@ namespace MV{
 			a_script.add(chaiscript::fun(&Spine::unbindNode), "unbindNode");
 			a_script.add(chaiscript::fun(&Spine::unbindAll), "unbindAll");
 
+			SignalRegister<void(Spine*, int)>::hook(a_script);
 			SignalRegister<void(std::shared_ptr<Spine>, int)>::hook(a_script);
 			SignalRegister<void(std::shared_ptr<Spine>, int, int)>::hook(a_script);
 			SignalRegister<void(std::shared_ptr<Spine>, int, const AnimationEventData &)>::hook(a_script);
+			a_script.add(chaiscript::fun(&Spine::onDispose), "onDispose");
 			a_script.add(chaiscript::fun(&Spine::onStart), "onStart");
 			a_script.add(chaiscript::fun(&Spine::onEnd), "onEnd");
 			a_script.add(chaiscript::fun(&Spine::onComplete), "onComplete");
@@ -251,22 +255,34 @@ namespace MV{
 		}
 
 		Spine::~Spine() {
+			destroying = true;
+			for (auto&& animationTrack : tracks) {
+				animationTrack.second->destroying = true;
+			}
 			unloadImplementation();
 		}
 
 		void Spine::updateImplementation(double a_delta) {
 			if (loaded()) {
+				auto liveUntilThisFunctionDies = shared_from_this();
+				inUpdate = true;
 				spSkeleton_update(skeleton, static_cast<float>(a_delta));
 				if (animationState) {
 					spAnimationState_update(animationState, static_cast<float>(a_delta));
 					spAnimationState_apply(animationState, skeleton);
 				}
-				spSkeleton_updateWorldTransform(skeleton);
+				inUpdate = false;
+				if (pendingDelete) {
+					pendingDelete = false;
+					unloadImplementation();
+				} else {
+					spSkeleton_updateWorldTransform(skeleton);
+				}
 			}
 		}
 
 		void Spine::unloadImplementation() {
-			if (loaded()) {
+			if (loaded() && !inUpdate) {
 				tracks.clear();
 				slotsToNodes.clear();
 				points.clear();
@@ -291,10 +307,13 @@ namespace MV{
 					spSkeleton_dispose(skeleton);
 				}
 
+				animationState = nullptr;
 				skeleton = nullptr;
 				atlas = nullptr;
 
 				refreshBounds();
+			} else if (loaded() && inUpdate) {
+				pendingDelete = true;
 			}
 		}
 
@@ -516,8 +535,7 @@ namespace MV{
 			if (slot->attachment->type == SP_ATTACHMENT_REGION) {
 				spRegionAttachment* attachment = reinterpret_cast<spRegionAttachment*>(slot->attachment);
 				return getSpineTexture(attachment);
-			}
-			else if (slot->attachment->type == SP_ATTACHMENT_MESH) {
+			} else if (slot->attachment->type == SP_ATTACHMENT_MESH) {
 				spMeshAttachment* attachment = reinterpret_cast<spMeshAttachment*>(slot->attachment);
 				return getSpineTexture(attachment);
 			}
@@ -593,15 +611,31 @@ namespace MV{
 
 		//log("%d event: %s, %s: %d, %f, %s", trackIndex, animationName, event->data->name, event->intValue, event->floatValue, event->stringValue);
 		void Spine::onAnimationStateEvent(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event) {
-			auto self = std::static_pointer_cast<Spine>(shared_from_this());
-			if(a_type == SP_ANIMATION_START){
-				onStartSignal(self, a_entry->trackIndex);
-			} else if(a_type == SP_ANIMATION_END){
-				onEndSignal(self, a_entry->trackIndex);
-			} else if(a_type == SP_ANIMATION_COMPLETE){
-				onCompleteSignal(self, a_entry->trackIndex, a_entry->timelinesRotationCount);
-			} else if(a_type == SP_ANIMATION_EVENT){
-				onEventSignal(self, a_entry->trackIndex, AnimationEventData((a_event->data && a_event->data->name) ? a_event->data->name : "NULL", (a_event->stringValue) ? a_event->stringValue : "", a_event->intValue, a_event->floatValue));
+			track(a_entry->trackIndex).recentTrack = a_entry;
+			SCOPE_EXIT{ 
+				track(a_entry->trackIndex).recentTrack = nullptr; 
+			};
+			if (a_type == SP_ANIMATION_DISPOSE) {
+				onDisposeSignal(this, a_entry->trackIndex);
+			} else {
+				if (destroying) {
+					return;
+				}
+				auto self = std::static_pointer_cast<Spine>(shared_from_this());
+				if (a_type == SP_ANIMATION_START) {
+					onStartSignal(self, a_entry->trackIndex);
+				} else if (a_type == SP_ANIMATION_END) {
+					onEndSignal(self, a_entry->trackIndex);
+				} else if (a_type == SP_ANIMATION_COMPLETE) {
+					onCompleteSignal(self, a_entry->trackIndex, a_entry->timelinesRotationCount);
+					if (!a_entry->loop) {
+						track(a_entry->trackIndex).stop();
+					}
+				} else if (a_type == SP_ANIMATION_INTERRUPT) {
+					//onCompleteSignal(this, a_entry->trackIndex, -1);
+				} else if (a_type == SP_ANIMATION_EVENT) {
+					onEventSignal(self, a_entry->trackIndex, AnimationEventData((a_event->data && a_event->data->name) ? a_event->data->name : "NULL", (a_event->stringValue) ? a_event->stringValue : "", a_event->intValue, a_event->floatValue));
+				}
 			}
 		}
 
@@ -615,14 +649,31 @@ namespace MV{
 
 		void AnimationTrack::onAnimationStateEvent(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event) {
 			if(a_entry->trackIndex == myTrackIndex){
-				if(a_type == SP_ANIMATION_START){
-					onStartSignal(*this);
-				} else if(a_type == SP_ANIMATION_END){
-					onEndSignal(*this);
-				} else if(a_type == SP_ANIMATION_COMPLETE){
-					onCompleteSignal(*this, a_entry->timelinesRotationCount);
-				} else if(a_type == SP_ANIMATION_EVENT){
-					onEventSignal(*this, AnimationEventData((a_event->data && a_event->data->name) ? a_event->data->name : "NULL", (a_event->stringValue)? a_event->stringValue:"", a_event->intValue, a_event->floatValue));
+				recentTrack = a_entry;
+				SCOPE_EXIT{ 
+					recentTrack = nullptr; 
+				};
+				if (a_type == SP_ANIMATION_DISPOSE) {
+					onDisposeSignal(*this);
+				} else {
+					if (destroying) {
+						return;
+					}
+					if (a_type == SP_ANIMATION_START) {
+						onStartSignal(*this);
+					} else if (a_type == SP_ANIMATION_END) {
+						onEndSignal(*this);
+					} else if (a_type == SP_ANIMATION_COMPLETE) {
+						onCompleteSignal(*this, a_entry->timelinesRotationCount);
+						if (!a_entry->loop) {
+							stop();
+						}
+					} else if (a_type == SP_ANIMATION_INTERRUPT) {
+						//onCompleteSignal(*this, -1);
+					} else if (a_type == SP_ANIMATION_EVENT) {
+						std::cout << "EVENT: " << a_entry->animation->name << ":" << ((a_event->data && a_event->data->name) ? a_event->data->name : "NULL") << "\n";
+						onEventSignal(*this, AnimationEventData((a_event->data && a_event->data->name) ? a_event->data->name : "NULL", (a_event->stringValue) ? a_event->stringValue : "", a_event->intValue, a_event->floatValue));
+					}
 				}
 			}
 		}
@@ -765,6 +816,7 @@ namespace MV{
 			SignalRegister<void(AnimationTrack &)>::hook(a_script);
 			SignalRegister<void(AnimationTrack &, int)>::hook(a_script);
 			SignalRegister<void(AnimationTrack &, const AnimationEventData &)>::hook(a_script);
+			a_script.add(chaiscript::fun(&AnimationTrack::onDispose), "onDispose");
 			a_script.add(chaiscript::fun(&AnimationTrack::onStart), "onStart");
 			a_script.add(chaiscript::fun(&AnimationTrack::onEnd), "onEnd");
 			a_script.add(chaiscript::fun(&AnimationTrack::onComplete), "onComplete");
@@ -776,12 +828,19 @@ namespace MV{
 		}
 
 		std::string AnimationTrack::name() const {
+			if (recentTrack) {
+				std::cout << "RECENT: " << recentTrack->animation->name << "\n";
+				return std::string(recentTrack->animation->name);
+			}
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call name.");
 			auto *currentTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
 			return (currentTrack && currentTrack->animation && currentTrack->animation->name) ? currentTrack->animation->name : "NULL";
 		}
 
 		double AnimationTrack::duration() const {
+			if (recentTrack) {
+				return recentTrack->animation->duration;
+			}
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call duration.");
 			auto *currentTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
 			return (currentTrack && currentTrack->animation && currentTrack->animation->duration) ? currentTrack->animation->duration : 0.0f;

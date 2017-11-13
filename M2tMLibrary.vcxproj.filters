@@ -1114,9 +1114,6 @@
     <ClInclude Include="Source\Game\NetworkLayer\package.h">
       <Filter>Source Files\Game\NetworkLayer</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Game\NetworkLayer\serverActions.h">
-      <Filter>Source Files\Game\NetworkLayer</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Game\NetworkLayer\accountActions.h">
       <Filter>Source Files\Game\NetworkLayer</Filter>
     </ClInclude>

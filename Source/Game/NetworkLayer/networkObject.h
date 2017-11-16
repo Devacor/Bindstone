@@ -1,19 +1,26 @@
 #ifndef __NETWORK_OBJECT_H__
 #define __NETWORK_OBJECT_H__
-/*
+
 #include "Utility/visitor.hpp"
+
+#include <unordered_map>
+#include <vector>
+#include <memory>
+#include <atomic>
 
 #include "cereal/cereal.hpp"
 #include "cereal/types/boost_variant.hpp"
 #include "cereal/archives/portable_binary.hpp"
 #include "cereal/archives/json.hpp"
 
-template <typename T>
+template <typename ...T>
 class NetworkObjectPool;
 
 template <typename T>
 class NetworkObject : std::enable_shared_from_this<NetworkObject<T>> {
-	friend NetworkObjectPool<T>;
+	template <typename...>
+	friend class NetworkObjectPool;
+
 public:
 	NetworkObject(){}
 
@@ -28,10 +35,23 @@ public:
 
 	void destroy() {
 		local.reset();
+		dirty = true;
 	}
 
 	bool destroyed() const {
 		return local;
+	}
+
+	void makeDirty() {
+		dirty = true;
+	}
+
+	bool undirty() {
+		if (dirty) {
+			dirty = false;
+			return true;
+		}
+		return false;
 	}
 
 	void synchronize(const std::shared_ptr<T> &a_other) {
@@ -45,11 +65,20 @@ public:
 	}
 
 	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const ) {
+	void save(Archive & archive, std::uint32_t const ) const {
 		archive(
 			cereal::make_nvp("id", synchronizeId),
 			cereal::make_nvp("local", local)
 		);
+	}
+
+	template <class Archive>
+	void load(Archive & archive, std::uint32_t const) {
+		archive(
+			cereal::make_nvp("id", synchronizeId),
+			cereal::make_nvp("local", local)
+		);
+		dirty = false;
 	}
 
 	//hookup to observe new spawned objects, called on main thread
@@ -63,21 +92,22 @@ private:
 template <typename ...T>
 class NetworkObjectPool {
 public:
-	NetworkObjectPool(std::vector<) {
+	NetworkObjectPool() {
 	}
 
 	template <class V>
 	NetworkObject<V> spawn(const std::shared_ptr<V> &a_newItem) {
 		auto idToMake = ++currentId;
 		NetworkObject<V> item{idToMake, a_newItem};
-		objects.insert({ idToMake, item });
+		objects.insert({ std::make_shared<NetworkObject<V>>(idToMake, item) });
 		NetworkObject<V>::spawned();
 		return item;
 	}
 
-	void synchronize(std::vector<boost::variant<NetworkObject<T>...> a_incoming) {
+	void synchronize(std::vector<boost::variant<std::shared_ptr<NetworkObject<T>>...>> a_incoming) {
 		for (auto&& item : a_incoming) {
-			objects[item.id()]->synchronize(item.local());
+			auto& object{ objects[item.id()] };
+			boost::apply_visitor([&item](auto const& a_object) { a_object->synchronize(item.local); }, object);
 		}
 	}
 
@@ -88,11 +118,19 @@ public:
 		);
 	}
 
-private:
-	std::unordered_map<std::type_index, int>
+	std::vector<boost::variant<std::shared_ptr<NetworkObject<T>>...>> updated() {
+		std::vector<boost::variant<NetworkObject<T>...> results;
+		for (auto&& object : objects) {
+			if (object.second->undirty()) {
+				results.push_back(object);
+			}
+		}
+	}
 
-	std::atomic<uint64_t> currentId = 0;
-	std::map<uint64_t, boost::variant<NetworkObject<T>...>> objects;
+private:
+
+	std::atomic<uint64_t> currentId;
+	std::unordered_map<uint64_t, boost::variant<std::shared_ptr<NetworkObject<T>>...>> objects;
 };
 
 template <typename ...T>
@@ -118,11 +156,11 @@ public:
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const ) {
-		archive(CEREAL_NVP(objects), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+		//archive(CEREAL_NVP(objects), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
 private:
-	std::vector<boost::variant<NetworkObject<T>...> objects;
-};*/
+	//std::vector<boost::variant<NetworkObject<T>...> objects;
+};
 
 #endif

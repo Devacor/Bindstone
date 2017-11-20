@@ -41,14 +41,13 @@ namespace MV {
 		return visitor_type(std::forward<Fs>(fs)...);
 	};
 
-
 	template<class...Vs, class...Fs>
 	auto visit(boost::variant<Vs...> &a_item, Fs&& ...fs) {
-		boost::apply_visitor(compose(std::forward<Fs>(fs)...), a_item);
+		return boost::apply_visitor(compose(std::forward<Fs>(fs)...), a_item);
 	};
 
 	template<class...Vs, class...Fs>
-	auto visit(std::vector<boost::variant<Vs...>> &a_items, Fs&& ...fs) {
+	void visit(std::vector<boost::variant<Vs...>> &a_items, Fs&& ...fs) {
 		auto composedMethods{ compose(std::forward<Fs>(fs)...) };
 		for (auto&& item : a_items) {
 			boost::apply_visitor(composedMethods, item);

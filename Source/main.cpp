@@ -10,8 +10,39 @@
 
 #include "Utility/scopeGuard.hpp"
 #include "chaiscript/chaiscript.hpp"
+#include "Game/NetworkLayer/networkObject.h"
 
 #include <fstream>
+
+class NetTypeA {
+public:
+	void synchronize(std::shared_ptr<NetTypeA> a_other) {
+		std::cout << "A: syncing with: " << a_other->name << "\n";
+	}
+
+	template <class Archive>
+	void serialize(Archive & archive, std::uint32_t const) {
+		archive(CEREAL_NVP(name));
+	}
+
+	std::string name;
+};
+
+class NetTypeB {
+public:
+	void synchronize(std::shared_ptr<NetTypeB> a_other) {
+		std::cout << "B: syncing with: " << a_other->id << "\n";
+	}
+
+	template <class Archive>
+	void serialize(Archive & archive, std::uint32_t const) {
+		archive(CEREAL_NVP(id));
+	}
+
+	int id;
+};
+
+CEREAL_REGISTER_TYPE(SynchronizeAction<NetTypeA, NetTypeB>);
 
 int main(int, char *[]) {
 // 	std::string content = "Hello World";
@@ -74,6 +105,29 @@ int main(int, char *[]) {
 	//auto emailer = MV::Email::make("email-smtp.us-west-2.amazonaws.com", "587", { "AKIAIVINRAMKWEVUT6UQ", "AiUjj1lS/k3g9r0REJ1eCoy/xeYZgLXmB8Nrep36pUVw" });
 	//emailer->send({ "jai", "jackaldurante@gmail.com", "Derv", "maxmike@gmail.com" }, "Testing new Interface", "Does this work too?");
 	
+
+	NetworkObjectPool<NetTypeA, NetTypeB> pool, pool2;
+
+	pool.onSpawn<NetTypeA>([](std::shared_ptr<NetworkObject<NetTypeA>> a_newItem) {
+		std::cout << "1A:" << a_newItem->self()->name << "\n";
+	});
+
+	pool2.onSpawn<NetTypeA>([](std::shared_ptr<NetworkObject<NetTypeA>> a_newItem) {
+		std::cout << "2A:" << a_newItem->self()->name << "\n";
+	});
+
+	auto newItem = std::make_shared<NetTypeA>();
+	newItem->name = "Happy!";
+
+	auto newObject = pool.spawn(newItem);
+	auto testShared = newObject->shared_from_this();
+
+	auto updatedItems = pool.makeNetworkString();
+
+	auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(updatedItems);
+	auto castValue = std::static_pointer_cast<SynchronizeAction<NetTypeA, NetTypeB>>(value);
+	pool2.synchronize(castValue->objects);
+
 	GameEditor menu;
 
 	menu.start();

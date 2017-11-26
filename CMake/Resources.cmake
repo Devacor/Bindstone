@@ -18,10 +18,6 @@ endfunction()
 
 #############################################################
 function(copy_resources target)
-  if(XCODE)
-    return()
-  endif()
-
   get_property(RESOURCE_LIST GLOBAL PROPERTY _${target}_RESOURCE_LIST)
 
   # we read the LOCATION from the target instead of using a generator
@@ -90,10 +86,6 @@ function(add_resources)
         get_filename_component(BD_NAME ${_BDFILE} NAME)
       endif()
       set_property(GLOBAL APPEND PROPERTY _${BD_TARGET}_RESOURCE_LIST "${_BDFILE}|${BD_DEST}/${BD_NAME}")
-      if(XCODE)
-        message(STATUS "${_BDFILE} -> Resources/${BD_DEST}")
-        set_source_files_properties(${_BDFILE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/${BD_DEST})
-      endif()
     endif()
   endforeach()
 endfunction()

@@ -14,7 +14,7 @@ endif()
 include(CMake/PrecompiledHeader.cmake)
 include(CMake/Resources.cmake)
 
-add_resources(TARGET BindStone SOURCES ${CMAKE_SOURCE_DIR}/Assets DEST .)
+add_resources(TARGET BindStone SOURCES ${CMAKE_SOURCE_DIR}/Assets DEST Assets)
 if(APPLE)
   add_resources(TARGET BindStone SOURCES ${CMAKE_SOURCE_DIR}/LaunchScreen DEST .)
 endif()

@@ -1,10 +1,5 @@
 #add_subdirectory(Animation)
 
-if(XCODE)
-  get_resources_source_list(BindStone ALL_RESOURCES)
-  source_group(TREE ${CMAKE_SOURCE_DIR} PREFIX "Resources" FILES ${ALL_RESOURCES})
-endif()
-
 add_executable(BindStone main.cpp StdAfx.cpp ${ALL_RESOURCES})
 copy_resources(BindStone)
 

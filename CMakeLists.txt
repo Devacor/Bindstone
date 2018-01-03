@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
-conan_basic_setup(TARGETS)
+conan_basic_setup(TARGETS NO_OUTPUT_DIRS)
 
 if(${CMAKE_GENERATOR} MATCHES "Xcode")
   set(XCODE TRUE)

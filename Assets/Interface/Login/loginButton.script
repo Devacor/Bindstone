@@ -2,8 +2,14 @@ auto scene = game.gui.page("Login").root();
 auto email = scene.get("EmailInput").componentText().text();
 auto password = scene.get("PasswordInput").componentText().text();
 
+game.testGame();
+game.gui.page("Login").hide();
+
+/* //if doing auth uncomment
 game.client.send(LoginRequest(email, password).toNetworkString());
 game.onLoginResponse.connect("LoginButton", fun[email,password](response){
+  game.testGame();
+  game.gui.page("Login").hide();
   print("Got Message:");
   print(response.success);
   print(response.message);
@@ -15,3 +21,4 @@ game.onLoginResponse.connect("LoginButton", fun[email,password](response){
   }
   game.onLoginResponse.disconnect("LoginButton");
 });
+*/

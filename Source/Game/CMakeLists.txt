@@ -32,7 +32,7 @@ target_sources(MoonDog PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/gameServerActions.h
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/lobbyServer.h
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/networkAction.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/networkObject.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/networkObject.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/synchronizeAction.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/synchronizeAction.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/package.h
 )

@@ -9,7 +9,6 @@
 Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance) :
 	Component(a_owner),
 	statTemplate(a_gameInstance.data().creatures().data(a_id)),
-	health(statTemplate.health),
 	skin(a_skin),
 	owningPlayer(a_player),
 	gameInstance(a_gameInstance),
@@ -21,13 +20,14 @@ Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::str
 	onDeath(onDeathSignal),
 	onFall(onFallSignal),
 	onHealthChange(onHealthChangeSignal),
-	targeting(this){
+	targeting(this),
+	state(a_gameInstance.networkPool().spawn(std::make_shared<Creature::NetworkState>(statTemplate))),
+	isOnServer(true) {
 }
 
-Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance) :
+Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> &a_state, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance) :
 	Component(a_owner),
-	statTemplate(a_stats),
-	health(statTemplate.health),
+	statTemplate(a_gameInstance.data().creatures().data(a_state->self()->creatureTypeId)),
 	skin(a_skin),
 	owningPlayer(a_player),
 	gameInstance(a_gameInstance),
@@ -39,11 +39,13 @@ Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const Creature
 	onDeath(onDeathSignal),
 	onFall(onFallSignal),
 	onHealthChange(onHealthChangeSignal),
-	targeting(this) {
+	targeting(this),
+	state(a_state),
+	isOnServer(false){
 }
 
 std::string Creature::assetPath() const {
-	return "Assets/Prefabs/Creatures/" + statTemplate.id + "/" + (skin.empty() ? statTemplate.id : skin) + ".prefab";
+	return "Assets/Creatures/" + statTemplate.id + "/" + (skin.empty() ? "Default" : skin) + "/unit.prefab";
 }
 
 void Creature::initialize() {
@@ -108,9 +110,6 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 	a_script.add(chaiscript::fun([](Creature &a_self) -> GameInstance& {return a_self.gameInstance; }), "game");
 
 	a_script.add(chaiscript::fun(&Creature::alive), "alive");
-
-	a_script.add(chaiscript::fun([](Creature &a_self) {return a_self.activeInstanceCount(); }), "activeInstanceCount");
-	a_script.add(chaiscript::fun([](Creature &a_self) {return a_self.totalInstanceCount(); }), "totalInstanceCount");
 
 	a_script.add(chaiscript::fun(&Creature::variables), "variables");
 
@@ -178,7 +177,7 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 
 CreatureScriptMethods& CreatureScriptMethods::loadScript(chaiscript::ChaiScript &a_script, const std::string &a_id) {
 	if (scriptContents == "NIL") {
-		scriptContents = MV::fileContents("Assets/Scripts/Creatures/" + a_id + ".script");
+		scriptContents = MV::fileContents("Assets/Creatures/" + a_id + "/main.script");
 		if (!scriptContents.empty()) {
 			auto localVariables = std::map<std::string, chaiscript::Boxed_Value>{
 				{ "self", chaiscript::Boxed_Value(this) }
@@ -187,6 +186,8 @@ CreatureScriptMethods& CreatureScriptMethods::loadScript(chaiscript::ChaiScript 
 			a_script.set_locals(localVariables);
 			SCOPE_EXIT{ a_script.set_locals(resetLocals); };
 			a_script.eval(scriptContents);
+		} else {
+			MV::error("Failed to load script for creature: ", a_id);
 		}
 	}
 	return *this;

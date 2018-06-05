@@ -92,7 +92,7 @@ void CreatePlayer::sendValidationEmail(LobbyUserConnectionState *a_connection, c
 std::string CreatePlayer::makeSaveString() {
 	auto newPlayer = std::make_shared<Player>();
 	newPlayer->handle = handle;
-	newPlayer->loadout.buildings = { "life", "life", "life", "life", "life", "life", "life", "life" };
+	newPlayer->loadout.buildings = { "Life", "Life", "Life", "Life", "Life", "Life", "Life", "Life" };
 	newPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
 
 	newPlayer->wallet.add(Wallet::CurrencyType::SOFT, DEFAULT_SOFT_CURRENCY);

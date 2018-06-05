@@ -118,6 +118,7 @@ namespace MV {
 		input(result);
 		return result;
 	}
+
 }
 
 #endif

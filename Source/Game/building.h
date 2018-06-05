@@ -9,11 +9,11 @@
 #include <string>
 #include <memory>
 #include "ArtificialIntelligence/pathfinding.h"
+#include "Game/creature.h"
+#include "Network/networkObject.h"
 
 class GameInstance;
 struct Player;
-struct CreatureData;
-class Creature;
 
 struct WaveCreature {
 	std::string id;
@@ -151,10 +151,6 @@ private:
 	std::vector<BuildingData> buildingList;
 };
 
-class Gem {
-
-};
-
 class Building : public MV::Scene::Component {
 	friend MV::Scene::Node;
 	friend cereal::access;
@@ -174,8 +170,10 @@ public:
 	void upgrade(size_t a_index);
 	void requestUpgrade(size_t a_index);
 
+	void spawnNetworkCreature(std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> a_synchronizedCreature);
+
 	std::string assetPath() const {
-		return "Assets/Prefabs/Buildings/" + buildingData.id + "/" + (skin.empty() ? buildingData.id : skin) + ".prefab";
+		return "Assets/Buildings/" + buildingData.id + "/" + (skin.empty() ? "Default" : skin) + "/building.prefab";
 	}
 
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& /*gameInstance*/) {

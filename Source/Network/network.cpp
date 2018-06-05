@@ -148,7 +148,7 @@ namespace MV {
 	Server::Server(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase>(const std::shared_ptr<Connection> &)> a_connectionStateFactory) :
 		acceptor(ioService, a_endpoint),
 		connectionStateFactory(a_connectionStateFactory),
-		work(std::make_unique<boost::asio::io_service::work>(ioService)) {
+		work(std::make_unique<boost::asio::io_context::work>(ioService)) {
 
 		acceptClients();
 		worker = std::make_unique<std::thread>([this] { ioService.run(); });

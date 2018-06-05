@@ -64,7 +64,7 @@ namespace MV {
 		}
 
 		//onComplete is called on success or error at the end of the download.
-		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<boost::asio::io_service> &a_ioService, const MV::Url& a_url, const std::shared_ptr<std::ostream> &a_streamOutput, std::function<void (std::shared_ptr<DownloadRequest>)> a_onComplete) {
+		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<boost::asio::io_context> &a_ioService, const MV::Url& a_url, const std::shared_ptr<std::ostream> &a_streamOutput, std::function<void (std::shared_ptr<DownloadRequest>)> a_onComplete) {
 			auto result = std::shared_ptr<DownloadRequest>(new DownloadRequest(a_streamOutput));
 			result->onComplete = a_onComplete;
 			result->ioService = a_ioService;
@@ -105,7 +105,7 @@ namespace MV {
 			(*streamOutput) << &(*response);
 		}
 
-		std::shared_ptr<boost::asio::io_service> ioService;
+		std::shared_ptr<boost::asio::io_context> ioService;
 		std::unique_ptr<boost::asio::ip::tcp::resolver> resolver;
 		std::unique_ptr<boost::asio::ip::tcp::socket> socket;
 
@@ -127,9 +127,9 @@ namespace MV {
 	std::string DownloadString(const MV::Url& a_url);
 
 	HttpHeader DownloadFile(const MV::Url& a_url, const std::string &a_path);
-	void DownloadFile(const std::shared_ptr<boost::asio::io_service> &a_ioService, const MV::Url& a_url, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete = std::function<void(std::shared_ptr<DownloadRequest>)>());
+	void DownloadFile(const std::shared_ptr<boost::asio::io_context> &a_ioService, const MV::Url& a_url, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete = std::function<void(std::shared_ptr<DownloadRequest>)>());
 
 	void DownloadFiles(const std::vector<MV::Url>& a_url, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete = std::function<void(std::shared_ptr<DownloadRequest>)>());
-	void DownloadFiles(const std::shared_ptr<boost::asio::io_service> &a_ioService, const std::vector<MV::Url>& a_url, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete = std::function<void(std::shared_ptr<DownloadRequest>)>(), std::function<void()> a_onAllComplete = std::function<void()>());
+	void DownloadFiles(const std::shared_ptr<boost::asio::io_context> &a_ioService, const std::vector<MV::Url>& a_url, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete = std::function<void(std::shared_ptr<DownloadRequest>)>(), std::function<void()> a_onAllComplete = std::function<void()>());
 }
 #endif

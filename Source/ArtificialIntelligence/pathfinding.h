@@ -449,7 +449,7 @@ namespace MV {
 		}
 
 		Point<PointPrecision> position() const {
-			return ourPosition;
+			return ourPosition - centerOffset;
 		}
 
 		std::vector<PathNode> path(bool a_allowRecalculate = true) {
@@ -502,9 +502,9 @@ namespace MV {
 		std::shared_ptr<NavigationAgent> goal(const Point<> &a_newGoal, PointPrecision a_acceptableDistance) {
 			auto self = shared_from_this();
 			auto potentialNewGoal = a_newGoal + centerOffset;
-			if (ourGoal != potentialNewGoal) {
+			bool wasMoving = pathfinding();
+			if (!wasMoving || ourGoal != potentialNewGoal) {
 				ourGoal = potentialNewGoal;
-				bool wasMoving = pathfinding();
 				acceptableDistance = std::max(a_acceptableDistance, 0.0f);
 				markDirty();
 				if (!pathfinding()) {
@@ -543,8 +543,8 @@ namespace MV {
 			return self;
 		}
 		bool pathfinding() const {
-			auto goalDistance = static_cast<PointPrecision>(distance(ourPosition, ourGoal));
-			return goalDistance > acceptableDistance && !equals(goalDistance, acceptableDistance);
+			auto goalDistance = static_cast<PointPrecision>(distance(cast<int>(ourPosition), cast<int>(ourGoal)));
+			return goalDistance > acceptableDistance;
 		}
 		NavigationAgent() :
 			onArrive(onArriveSignal),

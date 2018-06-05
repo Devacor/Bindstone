@@ -17,7 +17,9 @@ namespace MV{
 		onMiddleMouseUpEnd(onMiddleMouseUpEndSignal),
 		onRightMouseDownEnd(onRightMouseDownEndSignal),
 		onRightMouseUpEnd(onRightMouseUpEndSignal),
-		onMove(onMoveSignal){
+		onMove(onMoveSignal),
+		onPinchZoom(onPinchZoomSignal),
+		onRotate(onRotateSignal){
 		update();
 	}
 
@@ -40,6 +42,23 @@ namespace MV{
 		updateButtonState(right, newRight, onRightMouseDownSignal, onRightMouseUpSignal, onRightMouseDownEndSignal, onRightMouseUpEndSignal);
 
 		runExclusiveActions();
+	}
+
+	void MouseState::updateTouch(SDL_Event a_event, MV::Size<int> a_screenSize) {
+		if (a_event.type == SDL_MULTIGESTURE){
+			bool pinchZoomAboveThreshold = fabs(a_event.mgesture.dDist) > 0.002;
+			bool rotationAboveThreshold = fabs(a_event.mgesture.dTheta) > MV::PIEf / 180.0f;
+			if (pinchZoomAboveThreshold || rotationAboveThreshold)
+			{
+				MV::Point<int> position(a_event.mgesture.x * a_screenSize.width, a_event.mgesture.y * a_screenSize.height);
+				if (pinchZoomAboveThreshold) {
+					onPinchZoomSignal(position, a_event.mgesture.dDist);
+				}
+				if (rotationAboveThreshold) {
+					onRotateSignal(position, a_event.mgesture.dTheta);
+				}
+			}
+		}
 	}
 
 	void MouseState::updateButtonState(bool &oldState, bool newState, Signal<CallbackSignature> &onDown, Signal<CallbackSignature> &onUp, Signal<CallbackSignature> &onDownEnd, Signal<CallbackSignature> &onUpEnd) {

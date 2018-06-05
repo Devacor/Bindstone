@@ -1,0 +1,68 @@
+class VoidElementalCombat {
+	def VoidElementalCombat(){
+	}
+
+	def update(self, dt){
+		if(!self.variables["attacking"]){
+			if(!this.tryToFindAndAttackTarget(self, dt)){
+				this.applyDefaultTarget(self);
+			}
+		}
+	}
+
+	def tryToFindAndAttackTarget(self, dt){
+		var targets = self.enemiesInRange(20);
+		if(!targets.empty()){
+			var target = targets[0];
+//			if(target != self.variables["activeTarget"]){
+//				self.variables["activeTarget"] := target;
+				self.targeting().target(target, 10, fun[target](targeting){
+					targeting.self().variables["attacking"] = true;
+					print("ATTACKING VAR: " + to_string(targeting.self().variables["attacking"]));
+					auto spine = targeting.self().owner().spineComponent();
+					spine.animate("attack", false);
+					spine.onEvent.connect("launch", fun[target, targeting](spine, index, eventData){
+						if(eventData.name == "launch"){
+							print("LAUNCHING");
+							targeting.self().game().spawnMissile(targeting.self(), target, "missile", 300, fun(missile){
+								if(!missile.target().is_var_null()){
+									!missile.target().changeHealth(-5);
+								}
+							});
+							target.reset();
+						}
+					});
+					spine.onEnd.connect("unlock", fun[targeting](spine, index){
+						print("ATTACK" + spine.track(index).name());
+						if(spine.track(index).name() == "attack"){
+							print("ATTACK FALSE");
+							targeting.self().variables["attacking"] = false;
+						}
+					});
+				});
+//			}
+			return true;
+		}
+		return false;
+	}
+
+	def applyDefaultTarget(self){
+		self.targeting.target(self.team.enemyWell, fun(targeting){
+			print(to_string(targeting.self().variables["id"]) + " made it!");
+			targeting.self().fall();
+		});
+	}
+}
+
+self.spawn = fun(self){
+	self.variables["id"] = self.totalInstanceCount();
+	self.variables["attacking"] = false;
+	self.variables["activeTarget"] = nullCreature();
+	self.variables["combat"] = VoidElementalCombat();
+	self.agent.gridSpeed(10);
+	self.variables["combat"].applyDefaultTarget(self);
+};
+
+self.update = fun(self, dt){
+	self.variables["combat"].update(self, dt);
+};

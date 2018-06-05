@@ -43,9 +43,9 @@ private:
 
 		playlistGame->loopSounds(true);
 
-		game.managers().audio.setMusicPlayList(playlistGame);
+		//game.managers().audio.setMusicPlayList(playlistGame);
 
-		playlistGame->beginPlaying();
+		//playlistGame->beginPlaying();
 
 		managers.timer.start();
 		managers.timer.delta("tick");

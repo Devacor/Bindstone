@@ -1,11 +1,11 @@
 {
     "buildings": [
         {
-            "id": "life",
+            "id": "Life",
             "name": "Tree of Life",
             "description": "From the roots of this mighty tree springs life eternal.",
             "skins": [
-                {"id": "vibrant", "name": "Vibrant Tree Of Life", "costs": [{"values":[0,0,325]}]}
+                {"id": "Vibrant", "name": "Vibrant Tree Of Life", "costs": [{"values":[0,0,325]}]}
             ],
             "costs": [
                 {"values": [0,10000,0]},
@@ -13,7 +13,7 @@
                 {"values": [0,6000,325]}
             ],
             "game": {
-                "id": "none",
+                "id": "None",
                 "name": "Tree of Life Foundation",
                 "description": "",
                 "cost": 0,
@@ -24,7 +24,7 @@
                         "ptr_wrapper": {
                             "valid": 1,
                             "data": {
-                                "id": "basic",
+                                "id": "Basic",
                                 "name": "Tree of Life",
                                 "description": "Begin production of life elementals.",
                                 "cost": 75,
@@ -34,7 +34,7 @@
                                     "creatures": [
                                         {
                                             "delay": 10,
-                                            "id": "voidElemental"
+                                            "id": "VoidElemental"
                                         }
                                     ]
                                 }],
@@ -43,7 +43,7 @@
                                         "ptr_wrapper": {
                                             "valid": 1,
                                             "data": {
-                                                "id": "eternal",
+                                                "id": "Eternal",
                                                 "name": "Tree of Eternal Life",
                                                 "description": "Begin production of greater life elementals.",
                                                 "cost": 250,
@@ -54,7 +54,7 @@
                                                         "creatures": [
                                                             {
                                                                 "delay": 10,
-                                                                "id": "voidElemental"
+                                                                "id": "VoidElemental"
                                                             }
                                                         ]
                                                     },
@@ -63,11 +63,11 @@
                                                         "creatures": [
                                                             {
                                                                 "delay": 9.75,
-                                                                "id": "voidElemental"
+                                                                "id": "VoidElemental"
                                                             },
                                                             {
                                                                 "delay": 0.25,
-                                                                "id": "voidElemental"
+                                                                "id": "VoidElemental"
                                                             }
                                                         ]
                                                     }
@@ -80,7 +80,7 @@
                                         "ptr_wrapper": {
                                             "valid": 1,
                                             "data": {
-                                                "id": "overwhelming",
+                                                "id": "Overwhelming",
                                                 "name": "Tree of Overwhelming Life",
                                                 "description": "Begin production of suspended life elementals.",
                                                 "cost": 250,
@@ -89,7 +89,7 @@
                                                     "iterations": 1,
                                                     "creatures": [
                                                         {
-                                                            "id": "voidElemental",
+                                                            "id": "VoidElemental",
                                                             "delay": 10
                                                         }
                                                     ]

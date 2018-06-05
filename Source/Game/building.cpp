@@ -1,5 +1,4 @@
 #include "building.h"
-#include "creature.h"
 #include "Game/Instance/gameInstance.h"
 #include "Game/player.h"
 #include "Utility/generalUtility.h"
@@ -33,6 +32,15 @@ void Building::initialize() {
 void Building::spawnCurrentCreature() {
 	auto creatureNode = gameInstance.creatureContainer()->make(MV::guid(currentCreature().id));
 	creatureNode->worldPosition(owner()->worldFromLocal(spawnPoint));
+	
+	creatureNode->attach<Creature>(currentCreature().id, skin, owningPlayer, gameInstance);
+}
+
+void Building::spawnNetworkCreature(std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> a_synchronizedCreature) {
+	auto creatureNode = gameInstance.creatureContainer()->make(MV::guid(currentCreature().id));
+	creatureNode->worldPosition(owner()->worldFromLocal(spawnPoint));
+
+
 	creatureNode->attach<Creature>(currentCreature().id, skin, owningPlayer, gameInstance);
 }
 

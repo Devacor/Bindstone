@@ -12,13 +12,12 @@
 bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs);
 
 namespace MV {
+	Point<> cast(b2Vec2 a_box2DPoint, PointPrecision a_z = 0.0f);
 	namespace Scene {
 		//Scales units down by 50 when dealing with collisions.
-		const PointPrecision CollisionScale = 50.0;
+		const MV::PointPrecision CollisionScale = 50.0;
 		//This is the time step at which Box2D updates.
 		const Stopwatch::TimeType PhysicsTimeStep = 1.0 / 60.0;
-
-		Point<> cast(b2Vec2 a_box2DPoint, PointPrecision a_z = 0.0f);
 
 		template<typename T>
 		b2Vec2 castToPhysics(Point<T> a_M2RendPoint) {

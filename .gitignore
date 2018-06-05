@@ -34,3 +34,7 @@ BindstoneGameServer/
 *.user
 .vs/VSWorkspaceState.json
 build/
+*.lnk
+*.pdb
+*.idb
+Win32/

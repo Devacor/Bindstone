@@ -4,13 +4,14 @@
 #include <memory>
 #include <string>
 #include "Game/player.h"
+#include "Network/networkObject.h"
+#include "Game/NetworkLayer/synchronizeAction.h"
 
 #ifdef BINDSTONE_SERVER
 #include "Game/NetworkLayer/gameServer.h"
 #endif
 
 #include "Game/Instance/team.h"
-
 
 class Missile;
 class GameInstance {
@@ -89,7 +90,11 @@ public:
 	Team& teamForSide(TeamSide a_side) {
 		return a_side == LEFT ? left : right;
 	}
-private:
+
+	BindstoneNetworkObjectPool& networkPool() {
+		return syncronizedObjects;
+	}
+protected:
 	void removeExpiredMissiles();
 	void handleScroll(int a_amount);
 
@@ -114,6 +119,8 @@ private:
 
 	MV::Task worldTimestep;
 	MV::Task cameraAction;
+
+	BindstoneNetworkObjectPool syncronizedObjects;
 };
 
 class ClientGameInstance : public GameInstance {
@@ -139,6 +146,19 @@ private:
 	GameServer &gameServer;
 };
 #endif
+
+class MockClientGameInstance : public GameInstance {
+public:
+	MockClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game);
+
+	virtual void requestUpgrade(const std::shared_ptr<Player> &a_owner, int a_slot, size_t a_upgrade);
+
+	virtual void performUpgrade(TeamSide team, int a_slot, size_t a_upgrade) override;
+
+	virtual bool canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const override;
+private:
+	Game & game;
+};
 
 class Missile {
 public:

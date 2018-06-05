@@ -10,6 +10,9 @@
 #include <string>
 #include <memory>
 #include "ArtificialIntelligence/pathfinding.h"
+#include "Game/Instance/team.h"
+
+#include "Network/networkObject.h"
 
 class GameInstance;
 struct Player;
@@ -208,10 +211,10 @@ private:
 
 	void registerPathfindingListeners();
 
-	Creature* selfCreature;
-	Creature* targetCreature;
+	Creature* selfCreature = nullptr;
+	Creature* targetCreature = nullptr;
 
-	float range;
+	float range = 0.0f;
 	bool arrived = false;
 	std::function<void(TargetPolicy &)> succeed;
 	std::function<void(TargetPolicy &)> fail;
@@ -227,14 +230,53 @@ private:
 	std::shared_ptr<MV::Receiver<void(std::shared_ptr<Creature>)>> targetDeathReceiver;
 };
 
-class Creature : public MV::Scene::Component, private MV::InstanceCounter<Creature> {
+class Creature : public MV::Scene::Component {
 	friend MV::Scene::Node;
 	friend cereal::access;
 public:
 	typedef void CallbackSignature(std::shared_ptr<Creature>);
 	typedef MV::SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
 
+	struct NetworkState {
+		std::string creatureTypeId;
+		
+		TeamSide team;
+		int buildingSlot;
+
+		int health = 0;
+		bool flaggedForDeath = false;
+
+		NetworkState() {
+		}
+
+		NetworkState(const CreatureData& a_template) :
+			creatureTypeId(a_template.id),
+			health(a_template.health) {
+		}
+
+		void synchronize(std::shared_ptr<NetworkState> a_other) {
+			if (a_other) {
+				health = a_other->health;
+				flaggedForDeath = a_other->flaggedForDeath;
+			} else {
+				flaggedForDeath = true;
+			}
+		}
+
+		template <class Archive>
+		void serialize(Archive & archive, std::uint32_t const /*version*/) {
+			archive(
+				cereal::make_nvp("creatureTypeId", creatureTypeId),
+				cereal::make_nvp("team", team),
+				cereal::make_nvp("slot", buildingSlot),
+				cereal::make_nvp("health", health),
+				cereal::make_nvp("flaggedForDeath", flaggedForDeath)
+			);
+		}
+	};
+
 private:
+
 	MV::Signal<CallbackSignature> onArriveSignal;
 	MV::Signal<CallbackSignature> onBlockedSignal;
 	MV::Signal<CallbackSignature> onStopSignal;
@@ -260,13 +302,10 @@ public:
 	std::string assetPath() const;
 	~Creature() { std::cout << "Creature died!" << std::endl; }
 
-	using InstanceCounter<Creature>::activeInstanceCount;
-	using InstanceCounter<Creature>::totalInstanceCount;
-
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
 
 	bool alive() const {
-		return !flaggedForDeath && health > 0;
+		return !state->self()->flaggedForDeath && state->self()->health > 0;
 	}
 
 	void fall() {
@@ -278,18 +317,19 @@ public:
 
 	//return true if alive
 	bool changeHealth(int amount) {
-		if (!flaggedForDeath) {
+		if (!state->self()->flaggedForDeath) {
+			auto health = state->self()->health;
 			auto newHealth = std::max(std::min(health + amount, statTemplate.health), 0);
-			amount = health - newHealth;
+			amount = state->self()->health - newHealth;
 
 			if (health != newHealth) {
-				health = newHealth;
-
+				state->self()->health = newHealth;
+				state->markDirty();
 				auto self = std::static_pointer_cast<Creature>(shared_from_this());
 				onHealthChangeSignal(self, amount);
 			}
 
-			if (health <= 0) {
+			if (newHealth <= 0) {
 				flagForDeath();
 				return false;
 			}
@@ -305,12 +345,12 @@ public:
 
 protected:
 	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance);
-	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData &a_stats, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance);
+	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> &a_state, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance);
 
 	virtual void initialize() override;
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
-		return cloneHelper(a_parent->attach<Creature>(statTemplate, skin, owningPlayer, gameInstance).self());
+		return cloneHelper(a_parent->attach<Creature>(statTemplate.id, skin, owningPlayer, gameInstance).self());
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
@@ -321,28 +361,12 @@ protected:
 
 private:
 
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			//CEREAL_NVP(shouldDraw),
-			cereal::make_nvp("Component", cereal::base_class<Component>(this))
-		);
-	}
-
-	template <class Archive>
-	static void load_and_construct(Archive & archive, cereal::construct<Creature> &construct) {
-        construct(std::shared_ptr<MV::Scene::Node>());
-		archive(
-			cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
-		);
-		construct->initialize();
-	}
-
 	void flagForDeath() {
-		if (!flaggedForDeath) {
+		if (isOnServer && !state->self()->flaggedForDeath) {
 			auto self = std::static_pointer_cast<Creature>(shared_from_this());
-			health = 0;
-			flaggedForDeath = true;
+			state->self()->health = 0;
+			state->self()->flaggedForDeath = true;
+			state->markDirty();
 
 			agent()->stop();
 			onDeathSignal(self);
@@ -359,11 +383,10 @@ private:
 	virtual void updateImplementation(double a_delta) override;
 
 	const CreatureData& statTemplate;
+	
 	std::string skin;
 
-	int health;
-
-	bool flaggedForDeath = false;
+	bool isOnServer = false;
 
 	std::shared_ptr<Player> owningPlayer;
 	GameInstance& gameInstance;
@@ -374,7 +397,7 @@ private:
 
 	TargetPolicy targeting;
 
-	static size_t idCounter;
+	std::shared_ptr<MV::NetworkObject<NetworkState>> state;
 };
 
 #endif

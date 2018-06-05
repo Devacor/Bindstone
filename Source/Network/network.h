@@ -125,7 +125,7 @@ namespace MV {
 			onMessageGet(a_onMessageGet),
 			onConnectionFail(a_onConnectionFail),
 			onInitialized(a_onInitialized),
-			work(std::make_unique<boost::asio::io_service::work>(ioService)) {
+			work(std::make_unique<boost::asio::io_context::work>(ioService)) {
 		}
 
 		void initialize();
@@ -153,7 +153,7 @@ namespace MV {
 		std::recursive_mutex lock;
 		std::mutex errorLock;
 
-		boost::asio::io_service ioService;
+		boost::asio::io_context ioService;
 		boost::asio::ip::tcp::resolver resolver;
 		std::shared_ptr<boost::asio::ip::tcp::socket> socket;
 
@@ -167,7 +167,7 @@ namespace MV {
 		std::function<void()> onInitialized;
 
 		std::unique_ptr<std::thread> worker;
-		std::unique_ptr<boost::asio::io_service::work> work;
+		std::unique_ptr<boost::asio::io_context::work> work;
 
 		std::vector<double> serverTimeDeltas;
 		std::atomic<ConnectionState> ourConnectionState = DISCONNECTED;
@@ -205,7 +205,7 @@ namespace MV {
 
 	class Connection : public std::enable_shared_from_this<Connection> {
 	public:
-		Connection(Server& a_server, const std::shared_ptr<boost::asio::ip::tcp::socket> &a_socket, boost::asio::io_service& a_ioService) :
+		Connection(Server& a_server, const std::shared_ptr<boost::asio::ip::tcp::socket> &a_socket, boost::asio::io_context& a_ioService) :
 			server(a_server),
 			socket(a_socket),
 			ioService(a_ioService){
@@ -243,7 +243,7 @@ namespace MV {
 		void handleError(const boost::system::error_code &a_err, const std::string &a_section);
 
 		Server& server;
-		boost::asio::io_service& ioService;
+		boost::asio::io_context& ioService;
 
 		std::shared_ptr<boost::asio::ip::tcp::socket> socket;
 		std::vector<std::shared_ptr<NetworkMessage>> inbox;
@@ -274,13 +274,13 @@ namespace MV {
 
 		std::recursive_mutex lock;
 
-		boost::asio::io_service ioService;
+		boost::asio::io_context ioService;
  		boost::asio::ip::tcp::acceptor acceptor;
 
 		std::vector<std::shared_ptr<Connection>> ourConnections;
 
 		std::unique_ptr<std::thread> worker;
-		std::unique_ptr<boost::asio::io_service::work> work;
+		std::unique_ptr<boost::asio::io_context::work> work;
 
 		std::function<std::unique_ptr<ConnectionStateBase> (const std::shared_ptr<Connection> &)> connectionStateFactory;
 	};

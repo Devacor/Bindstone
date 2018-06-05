@@ -62,7 +62,7 @@ namespace MV{
 		return header;
 	}
 
-	void DownloadFile(const std::shared_ptr<boost::asio::io_service> &a_ioService, const MV::Url& a_url, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete) {
+	void DownloadFile(const std::shared_ptr<boost::asio::io_context> &a_ioService, const MV::Url& a_url, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete) {
 		boost::filesystem::create_directories(boost::filesystem::path(a_path).parent_path());
 		auto outFile = std::make_shared<std::ofstream>(a_path, std::ofstream::out | std::ofstream::binary);
 		auto request = DownloadRequest::make(a_ioService, a_url, outFile, [a_path, a_onComplete](std::shared_ptr<DownloadRequest> a_result) {
@@ -74,13 +74,13 @@ namespace MV{
 	}
 
 	void DownloadFiles(const std::vector<MV::Url>& a_urls, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete) {
-		auto service = std::make_shared<boost::asio::io_service>();
+		auto service = std::make_shared<boost::asio::io_context>();
 		for (auto&& url : a_urls) {
 			DownloadFile(service, url, a_path + boost::filesystem::path(url.path()).filename().string(), a_onComplete);
 		}
 		service->run();
 	}
-	void DownloadFiles(const std::shared_ptr<boost::asio::io_service> &a_ioService, const std::vector<MV::Url>& a_urls, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void()> a_onAllComplete) {
+	void DownloadFiles(const std::shared_ptr<boost::asio::io_context> &a_ioService, const std::vector<MV::Url>& a_urls, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void()> a_onAllComplete) {
 		size_t totalFiles = a_urls.size();
 		for (auto&& url : a_urls) {
 			auto counter = std::make_shared<std::atomic<size_t>>(0);
@@ -196,7 +196,7 @@ namespace MV{
 	bool DownloadRequest::initializeSocket() {
 		bool created = false;
 		if (!ioService) {
-			ioService = std::make_shared<boost::asio::io_service>();
+			ioService = std::make_shared<boost::asio::io_context>();
 			created = true;
 		}
 

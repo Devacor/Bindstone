@@ -9,7 +9,7 @@ void GameEditor::resumeTitleMusic() {
 
 	game.managers().audio.setMusicPlayList(playlistGame);
 
-	playlistGame->beginPlaying();
+	//playlistGame->beginPlaying();
 }
 
 GameEditor::GameEditor() :

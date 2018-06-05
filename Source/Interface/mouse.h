@@ -41,7 +41,12 @@ namespace MV{
 		typedef void CallbackSignature(MouseState&);
 		typedef std::shared_ptr<Receiver<CallbackSignature>> SignalType;
 
+		typedef void TouchCallbackSignature(MV::Point<int>, float);
+		typedef std::shared_ptr<Receiver<TouchCallbackSignature>> TouchSignalType;
+
 		void update();
+
+		void updateTouch(SDL_Event a_event, MV::Size<int> screenSize);
 
 		MV::Point<int> position() const;
 		MV::Point<int> oldPosition() const;
@@ -60,6 +65,7 @@ namespace MV{
 		bool right = false;
 		MV::Point<int> mousePosition;
 		MV::Point<int> oldMousePosition;
+		MV::Point<int> touchPosition;
 
 		void updateButtonState(bool &oldState, bool newState, Signal<CallbackSignature> &onDown, Signal<CallbackSignature> &onUp, Signal<CallbackSignature> &onDownEnd, Signal<CallbackSignature> &onUpEnd);
 
@@ -82,6 +88,9 @@ namespace MV{
 		Signal<CallbackSignature> onMiddleMouseUpEndSignal;
 
 		Signal<CallbackSignature> onMoveSignal;
+
+		Signal<TouchCallbackSignature> onPinchZoomSignal;
+		Signal<TouchCallbackSignature> onRotateSignal;
 	public:
 		SignalRegister<CallbackSignature> onLeftMouseDown;
 		SignalRegister<CallbackSignature> onLeftMouseUp;
@@ -102,6 +111,9 @@ namespace MV{
 		SignalRegister<CallbackSignature> onMiddleMouseUpEnd;
 
 		SignalRegister<CallbackSignature> onMove;
+
+		SignalRegister<TouchCallbackSignature> onPinchZoom;
+		SignalRegister<TouchCallbackSignature> onRotate;
 	};
 }
 

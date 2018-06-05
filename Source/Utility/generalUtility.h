@@ -116,7 +116,7 @@ namespace MV {
 		typedef std::array<T, I> type;
 	};
 
-	inline std::string simpleFilter(std::string a_original, const std::string &a_allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789") {
+	inline std::string simpleFilter(std::string a_original, const std::string &a_allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789~!@#$%^&*()-=+/><\\[]{}?") {
 		a_original.erase(std::remove_if(a_original.begin(), a_original.end(), [&](char c) {return a_allowed.find(c) == std::string::npos; }), a_original.end());
 		return a_original;
 	}
@@ -458,7 +458,7 @@ namespace MV {
 
 			std::string result;
 			while (a_length--) {
-				result += a_charset[integer(0, a_charset.size())];
+				result += a_charset[integer(0, a_charset.size() - 1)];
 			}
 			return result;
 		}

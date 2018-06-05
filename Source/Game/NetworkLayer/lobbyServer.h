@@ -299,7 +299,7 @@ class LobbyServer {
 public:
 	LobbyServer(Managers &a_managers) :
 		manager(a_managers),
-		db(std::make_shared<pqxx::connection>("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=5432 dbname=bindstone user=m2tm password=Tinker123")),
+		db(std::make_shared<pqxx::connection>("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=3306 dbname=bindstone user=m2tm password=Tinker123")),
 		emailPool(1), //need to test values greater than 1 to make sure ssh does not break.
 		dbPool(1), //currently locked to 1 as pqxx requires one per thread. We can expand this later with more connections and a different query interface.
 		rankedQueue(*this, "ranked"),
@@ -337,7 +337,7 @@ public:
 	}
 
 	void email(const MV::Email::Addresses &a_addresses, const std::string &a_title, const std::string &a_message) {
-		auto emailer = MV::Email::make(emailPool.service(), "email-smtp.us-west-2.amazonaws.com", "587", { "AKIAIVINRAMKWEVUT6UQ", "AiUjj1lS/k3g9r0REJ1eCoy/xeYZgLXmB8Nrep36pUVw" });
+		auto emailer = MV::Email::make(emailPool.io_context(), "email-smtp.us-west-2.amazonaws.com", "587", { "AKIAIVINRAMKWEVUT6UQ", "AiUjj1lS/k3g9r0REJ1eCoy/xeYZgLXmB8Nrep36pUVw" });
 		emailer->send(a_addresses, a_title, a_message);
 	}
 

@@ -2,6 +2,7 @@
 
 #include "Game/gameEditor.h"
 #include "Utility/threadPool.hpp"
+#include "Utility/services.h"
 
 #include "ArtificialIntelligence/pathfinding.h"
 #include "Utility/cerealUtility.h"
@@ -10,14 +11,16 @@
 
 #include "Utility/scopeGuard.hpp"
 #include "chaiscript/chaiscript.hpp"
-#include "Game/NetworkLayer/networkObject.h"
+#include "Game/NetworkLayer/synchronizeAction.h"
+#include "Network/networkObject.h"
 
 #include <fstream>
 
 class NetTypeA {
 public:
 	void synchronize(std::shared_ptr<NetTypeA> a_other) {
-		std::cout << "A: syncing with: " << a_other->name << "\n";
+		std::cout << "A: " << name << " syncing with: " << a_other->name << "\n";
+		name = a_other->name;
 	}
 
 	template <class Archive>
@@ -31,7 +34,8 @@ public:
 class NetTypeB {
 public:
 	void synchronize(std::shared_ptr<NetTypeB> a_other) {
-		std::cout << "B: syncing with: " << a_other->id << "\n";
+		std::cout << "B: " << id << " syncing with: " << a_other->id << "\n";
+		id = a_other->id;
 	}
 
 	template <class Archive>
@@ -42,7 +46,33 @@ public:
 	int id;
 };
 
-CEREAL_REGISTER_TYPE(SynchronizeAction<NetTypeA, NetTypeB>);
+struct A {
+	virtual void print() {
+		std::cout << "A\n";
+	}
+};
+
+struct B : public A {
+	virtual void print() {
+		std::cout << "A::B\n";
+	}
+};
+
+struct C {
+	virtual void print() {
+		std::cout << "C\n";
+	}
+};
+struct D : public C {
+	virtual void print() {
+		std::cout << "C::D\n";
+	}
+
+	void printd() {
+		std::cout << "C::D\n";
+	}
+};
+
 
 int main(int, char *[]) {
 // 	std::string content = "Hello World";
@@ -104,29 +134,62 @@ int main(int, char *[]) {
 
 	//auto emailer = MV::Email::make("email-smtp.us-west-2.amazonaws.com", "587", { "AKIAIVINRAMKWEVUT6UQ", "AiUjj1lS/k3g9r0REJ1eCoy/xeYZgLXmB8Nrep36pUVw" });
 	//emailer->send({ "jai", "jackaldurante@gmail.com", "Derv", "maxmike@gmail.com" }, "Testing new Interface", "Does this work too?");
+// 	{
+// 		std::ofstream codes("codes.txt");
+// 		std::set<std::string> generated;
+// 		while (generated.size() < 1800) {
+// 			generated.insert("VF18_" + MV::randomString("23456789ABCDEFGHJKLMPQRSTUVWXYZ", 4) + "-" + MV::randomString("23456789ABCDEFGHJKLMPQRSTUVWXYZ", 4) + "-" + MV::randomString("23456789ABCDEFGHJKLMPQRSTUVWXYZ", 4));
+// 		}
+// 		for(auto&& codeString : generated)
+// 		{
+// 			codes << codeString << "\n";
+// 		}
+// 	}
+
+	{
+		MV::Services services;
+		std::unique_ptr<A> a = std::make_unique<A>();
+		std::unique_ptr<A> b = std::make_unique<B>();
+		std::unique_ptr<C> c = std::make_unique<C>();
+		std::unique_ptr<D> d = std::make_unique<D>();
+		services.connect(b.get());
+		services.connect<C>(d.get());
+		services.get<A>()->print();
+		services.get<C, D>()->printd();
+	}
 	
+	MV::NetworkObjectPool<NetTypeA, NetTypeB> pool, pool2;
 
-	NetworkObjectPool<NetTypeA, NetTypeB> pool, pool2;
-
-	pool.onSpawn<NetTypeA>([](std::shared_ptr<NetworkObject<NetTypeA>> a_newItem) {
+	pool.onSpawn<NetTypeA>([](std::shared_ptr<MV::NetworkObject<NetTypeA>> a_newItem) {
 		std::cout << "1A:" << a_newItem->self()->name << "\n";
 	});
-
-	pool2.onSpawn<NetTypeA>([](std::shared_ptr<NetworkObject<NetTypeA>> a_newItem) {
+	pool2.onSpawn<NetTypeA>([&](std::shared_ptr<MV::NetworkObject<NetTypeA>> a_newItem) {
 		std::cout << "2A:" << a_newItem->self()->name << "\n";
+	});
+
+	pool.onSpawn<NetTypeB>([](std::shared_ptr<MV::NetworkObject<NetTypeB>> a_newItem) {
+		std::cout << "1B:" << a_newItem->self()->id << "\n";
+	});
+	pool2.onSpawn<NetTypeB>([&](std::shared_ptr<MV::NetworkObject<NetTypeB>> a_newItem) {
+		std::cout << "2B:" << a_newItem->self()->id << "\n";
 	});
 
 	auto newItem = std::make_shared<NetTypeA>();
 	newItem->name = "Happy!";
 
+	auto newItem2 = std::make_shared<NetTypeB>();
+	newItem2->id = 5;
+
 	auto newObject = pool.spawn(newItem);
+	auto newObject2 = pool.spawn(newItem2);
 	auto testShared = newObject->shared_from_this();
 
-	auto updatedItems = pool.makeNetworkString();
+	pool2.synchronize(pool.updated());
 
-	auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(updatedItems);
-	auto castValue = std::static_pointer_cast<SynchronizeAction<NetTypeA, NetTypeB>>(value);
-	pool2.synchronize(castValue->objects);
+	newObject->self()->name = "Unhappy!";
+	newObject->markDirty();
+
+	pool2.synchronize(pool.updated());
 
 	GameEditor menu;
 

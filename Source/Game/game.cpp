@@ -173,7 +173,7 @@ void Game::hook(chaiscript::ChaiScript &a_script) {
 	a_script.add(chaiscript::fun([&](Game& a_this) {
 		localPlayer = std::make_shared<Player>();
 		localPlayer->handle = "Local";
-		localPlayer->loadout.buildings = { "life", "life", "life", "life", "life", "life", "life", "life" };
+		localPlayer->loadout.buildings = { "Life", "Life", "Life", "Life", "Life", "Life", "Life", "Life" };
 		localPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
 		localPlayer->wallet.add(Wallet::SOFT, 1000000);
 		localPlayer->wallet.add(Wallet::HARD, 1000000);

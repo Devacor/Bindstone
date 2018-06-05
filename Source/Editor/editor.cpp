@@ -129,6 +129,7 @@ void Editor::handleInput(){
 				break;
 			}
 			controlPanel.handleInput(event);
+			mouse.updateTouch(event, managers.renderer.window().size());
 		}
 	}
 	mouse.update();

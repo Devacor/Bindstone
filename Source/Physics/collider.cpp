@@ -12,10 +12,11 @@ CEREAL_REGISTER_TYPE(MV::Scene::Environment);
 }*/
 
 namespace MV {
+	Point<> cast(b2Vec2 a_box2DPoint, PointPrecision a_z) {
+		return Point<>(static_cast<PointPrecision>(a_box2DPoint.x) * MV::Scene::CollisionScale, static_cast<PointPrecision>(a_box2DPoint.y) * MV::Scene::CollisionScale, a_z);
+	}
+
 	namespace Scene {
-		Point<> cast(b2Vec2 a_box2DPoint, PointPrecision a_z) {
-			return Point<>(static_cast<PointPrecision>(a_box2DPoint.x) * CollisionScale, static_cast<PointPrecision>(a_box2DPoint.y) * CollisionScale, a_z);
-		}
 
 		Collider::Collider(const std::weak_ptr<Node> &a_owner, CollisionBodyAttributes a_collisionAttributes, bool a_maintainOwnerPosition):
 			Component(a_owner),

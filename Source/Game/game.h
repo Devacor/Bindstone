@@ -69,7 +69,7 @@ public:
 	}
 
 	GameInstance* enterGame(const std::shared_ptr<Player> &a_left, const std::shared_ptr<Player> &a_right) {
-		ourInstance = std::make_unique<ClientGameInstance>(a_left, a_right, *this);
+		ourInstance = std::make_unique<MockClientGameInstance>(a_left, a_right, *this);
 		gui().page("Main").hide();
 		return ourInstance.get();
 	}
@@ -111,7 +111,7 @@ private:
 
 	GameData gameData;
 	std::unique_ptr<MV::InterfaceManager> ourGui;
-	std::unique_ptr<ClientGameInstance> ourInstance;
+	std::unique_ptr<GameInstance> ourInstance;
 
 	std::shared_ptr<MV::Scene::Node> rootScene;
 

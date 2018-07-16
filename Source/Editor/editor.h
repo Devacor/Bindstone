@@ -23,15 +23,20 @@ public:
 	void sceneUpdated();
 
 	EditorControls& panel(){
-		return controlPanel;
+		return *controlPanel;
 	}
 
 	Managers& getManager() {
 		return managers;
 	}
 
-	MV::MouseState& getMouse() {
+	MV::TapDevice& getMouse() {
 		return mouse;
+	}
+
+	void returnFromBackground() {
+		managers.services.connect(&mouse);
+		managers.services.connect(&chaiScript);
 	}
 
 private:
@@ -62,7 +67,7 @@ private:
 
 	Managers& managers;
 
-	MV::MouseState mouse;
+	MV::TapDevice mouse;
 	chaiscript::ChaiScript chaiScript;
 
 	std::shared_ptr<MV::Scene::Text> fps;
@@ -78,8 +83,8 @@ private:
 
 	bool done = false;
 
-	EditorControls controlPanel;
-	SceneGraphPanel selectorPanel;
+	std::unique_ptr<EditorControls> controlPanel;
+	std::unique_ptr<SceneGraphPanel> selectorPanel;
 };
 
 #endif

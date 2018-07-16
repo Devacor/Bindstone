@@ -23,7 +23,7 @@ Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const Building
 }
 
 void Building::initialize() {
-	auto newNode = owner()->make(assetPath(), gameInstance.jsonLoadBinder());
+	auto newNode = owner()->make(assetPath(), gameInstance.services());
 	//newNode->component<MV::Scene::Spine>()->animate("idle");
 	owner()->scale(owner()->scale() * gameInstance.teamForPlayer(owningPlayer).scale());
 	initializeBuildingButton(newNode);
@@ -37,11 +37,11 @@ void Building::spawnCurrentCreature() {
 }
 
 void Building::spawnNetworkCreature(std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> a_synchronizedCreature) {
-	auto creatureNode = gameInstance.creatureContainer()->make(MV::guid(currentCreature().id));
+	auto creatureNode = gameInstance.creatureContainer()->make(std::to_string(a_synchronizedCreature->id()));
 	creatureNode->worldPosition(owner()->worldFromLocal(spawnPoint));
 
 
-	creatureNode->attach<Creature>(currentCreature().id, skin, owningPlayer, gameInstance);
+	creatureNode->attach<Creature>(a_synchronizedCreature->self()->creatureTypeId, skin, owningPlayer, gameInstance);
 }
 
 void Building::incrementCreatureIndex() {

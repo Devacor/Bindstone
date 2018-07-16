@@ -73,8 +73,13 @@ struct D : public C {
 	}
 };
 
+void PathfindingTest();
 
 int main(int, char *[]) {
+
+	PathfindingTest();
+	return 0;
+
 // 	std::string content = "Hello World";
 // 	auto scriptString = "puts('['); puts(arg_0); puts(']'); puts('['); puts(arg_1); puts(']'); puts('['); puts(arg_2); puts(\"]\n\");";
 // 
@@ -196,6 +201,110 @@ int main(int, char *[]) {
 	menu.start();
 	
 	return 0;
+}
+
+void PathfindingTest() {
+	auto world = MV::Map::make({ 20, 20 }, false);
+
+	for (int i = 0; i < 20; ++i) {
+		world->get({ 8, i }).staticBlock();
+	}
+
+	world->get({ 8, 6 }).staticUnblock();
+	world->get({ 8, 7 }).staticUnblock();
+
+
+	std::vector<std::shared_ptr<MV::NavigationAgent>> agents{
+		MV::NavigationAgent::make(world, MV::Point<int>(2, 2), 2),
+		MV::NavigationAgent::make(world, MV::Point<int>(0, 2), 2),
+		MV::NavigationAgent::make(world, MV::Point<int>(2, 0), 2),
+		MV::NavigationAgent::make(world, MV::Point<int>(0, 0), 2) };
+
+	for (int i = 0; i < agents.size(); ++i) {
+		agents[i]->debugId(i);
+	}
+	MV::Stopwatch timer;
+
+	for (int i = 0; i < agents.size(); ++i) {
+		agents[i]->onStart.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
+			std::cout << (i + 1) << ": START" << std::endl;
+		});
+		agents[i]->onStop.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
+			std::cout << (i + 1) << ": STOP" << std::endl;
+		});
+		agents[i]->onBlocked.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
+			std::cout << (i + 1) << ": BLOCKED" << std::endl;
+		});
+		agents[i]->onArrive.connect("start", [=](std::shared_ptr<MV::NavigationAgent> agent) {
+			std::cout << (i + 1) << ": ARRIVED" << std::endl;
+		});
+		agents[i]->goal(MV::Point<int>(10, 17), 0);
+	}
+
+
+	int i = 0;
+
+	/*
+	for (int i = 0; i < 23; ++i) {
+		for (auto&& agent : agents) {
+			agent->update(1.0f);
+			for (int y = 0; y < world->size().height; ++y) {
+				for (int x = 0; x < world->size().width; ++x) {
+					bool wasAgent = false;
+					for (int i = 0; i < agents.size(); ++i) {
+						if (agents[i]->overlaps({ x, y })) {
+							wasAgent = true;
+							break;
+						}
+					}
+					if (!wasAgent) {
+						if (world->blocked({ x, y })) {
+						} else {
+							world->get({ x, y }).clearance();
+						}
+					}
+				}
+			}
+		}
+	}
+	*/
+
+	while (std::find_if(agents.begin(), agents.end(), [](auto&& agent) {
+		return agent->pathfinding();
+	}) != agents.end()) {
+		char a;
+		while (true) {
+			for (auto&& agent : agents) {
+				agent->update(1.0f);
+			}
+			std::vector<MV::PathNode> pathNodes;
+			for (int y = 0; y < world->size().height; ++y) {
+				for (int x = 0; x < world->size().width; ++x) {
+					bool wasAgent = false;
+					for (int i = 0; i < agents.size(); ++i) {
+						if (agents[i]->overlaps({ x, y })) {
+							std::cout << "[" << (char)(i + 65) << "]";
+							wasAgent = true;
+							break;
+						}
+					}
+					if (!wasAgent) {
+						if (world->blocked({ x, y })) {
+							std::cout << " " << "X" << " ";
+						}
+						else {
+							std::cout << " " << world->get({ x, y }).clearance() << " ";
+						}
+					}
+				}
+				std::cout << std::endl;
+			}
+			std::cout << "\n\n\n" << std::endl;
+			++i;
+			std::cin >> a;
+		}
+	}
+	std::cout << "YO" << std::endl;
 }
 
 #else

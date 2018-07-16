@@ -24,7 +24,7 @@ namespace MV {
 			}
 
 		protected:
-			Scroller(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
+			Scroller(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse);
 
 			void shiftContentByDelta(const MV::Point<int> & deltaPosition);
 
@@ -38,9 +38,8 @@ namespace MV {
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Scroller> &construct, std::uint32_t const /*version*/) {
-				MouseState *mouse = nullptr;
-				archive.extract(cereal::make_nvp("mouse", mouse));
-				MV::require<MV::PointerException>(mouse != nullptr, "Null mouse in Scroller::load_and_construct.");
+				auto& services = cereal::get_user_data<MV::Services>(archive);
+				auto* mouse = services.get<MV::TapDevice>();
 				construct(std::shared_ptr<Node>(), *mouse);
 				archive(
 					cereal::make_nvp("contentView", construct->contentView),

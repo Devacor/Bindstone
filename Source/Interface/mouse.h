@@ -34,11 +34,11 @@ namespace MV{
 		std::function<void()> enabled;
 	};
 
-	class MouseState {
+	class TapDevice {
 	public:
-		MouseState();
+		TapDevice();
 
-		typedef void CallbackSignature(MouseState&);
+		typedef void CallbackSignature(TapDevice&);
 		typedef std::shared_ptr<Receiver<CallbackSignature>> SignalType;
 
 		typedef void TouchCallbackSignature(MV::Point<int>, float);

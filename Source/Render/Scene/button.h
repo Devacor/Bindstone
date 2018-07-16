@@ -36,7 +36,7 @@ namespace MV {
 			virtual void cancelPress(bool a_callCancelCallbacks = true);
 
 		protected:
-			Button(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
+			Button(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse);
 
 			void text(const std::shared_ptr<Node> &a_owner, const std::string &a_newValue);
 
@@ -52,9 +52,8 @@ namespace MV {
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Button> &construct, std::uint32_t const /*version*/) {
-				MouseState *mouse = nullptr;
-				archive.extract(cereal::make_nvp("mouse", mouse));
-                MV::require<MV::PointerException>(mouse != nullptr, "Null mouse in Button::load_and_construct.");
+				auto& services = cereal::get_user_data<MV::Services>(archive);
+				auto* mouse = services.get<MV::TapDevice>();
 				construct(std::shared_ptr<Node>(), *mouse);
 				archive(
 					cereal::make_nvp("activeView", construct->activeView),

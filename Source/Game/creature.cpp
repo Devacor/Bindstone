@@ -49,7 +49,7 @@ std::string Creature::assetPath() const {
 }
 
 void Creature::initialize() {
-	auto newNode = owner()->make(assetPath(), gameInstance.jsonLoadBinder());
+	auto newNode = owner()->make(assetPath(), gameInstance.services());
 	newNode->serializable(false);
 	newNode->componentInChildren<MV::Scene::Spine>()->animate("run");
 	

@@ -106,7 +106,7 @@ class DiggerWorld {
 public:
 	MV::Scene::SafeComponent<MV::Scene::Collider> thing;
 
-	DiggerWorld(const std::shared_ptr<MV::Scene::Node> &a_node, MV::SharedTextures &a_sharedTextures, MV::MouseState &a_mouse) :
+	DiggerWorld(const std::shared_ptr<MV::Scene::Node> &a_node, MV::SharedTextures &a_sharedTextures, MV::TapDevice &a_mouse) :
 		background(a_node->make("Background")->attach<MV::Scene::Grid>()),
 		environment(a_node->make("Environment")->attach<MV::Scene::Grid>()),
 		foreground(a_node->make("Foreground")->attach<MV::Scene::Grid>()),

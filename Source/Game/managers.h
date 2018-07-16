@@ -9,9 +9,17 @@
 #include "Network/package.h"
 #include "Interface/package.h"
 #include "Audio/package.h"
+#include "Utility/services.h"
 
 struct Managers {
-	Managers():textLibrary(renderer), audio(*MV::AudioPlayer::instance()) {}
+	Managers() : textLibrary(renderer), audio(*MV::AudioPlayer::instance()) {
+		services.connect(&timer);
+		services.connect(&pool);
+		services.connect(&renderer);
+		services.connect(&textLibrary);
+		services.connect(&textures);
+		services.connect(&audio);
+	}
 
 	MV::Stopwatch timer;
 	MV::ThreadPool pool;
@@ -19,8 +27,10 @@ struct Managers {
 	MV::TextLibrary textLibrary;
 	MV::SharedTextures textures;
 	MV::AudioPlayer& audio;
+
+	MV::Services services;
 };
 
-void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::MouseState &a_mouseState, MV::ThreadPool &a_pool);
+void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::TapDevice &a_tapDevice, MV::ThreadPool &a_pool);
 
 #endif

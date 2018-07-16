@@ -12,6 +12,8 @@ Game::Game(Managers& a_managers) :
 	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), chaiscript::default_options()),
 	onLoginResponse(onLoginResponseSignal){
 
+	returnFromBackground();
+
 	MV::initializeFilesystem();
 	initializeData();
 	initializeWindow();
@@ -71,7 +73,7 @@ void Game::initializeWindow(){
 		gameData.managers().textures.files("Assets/Map");
 		gameData.managers().textures.files("Assets/Images");
 	}
-	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::MouseState& a_mouse, LocalData& a_data)
+	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::TapDevice& a_mouse, LocalData& a_data)
 
 	hook(scriptEngine);
 	if (!MV::RUNNING_IN_HEADLESS) {

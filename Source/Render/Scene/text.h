@@ -224,9 +224,8 @@ namespace MV{
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Text> &construct, std::uint32_t const /*version*/) {
-				TextLibrary *library = nullptr;
-				archive.extract(cereal::make_nvp("textLibrary", library));
-				MV::require<MV::PointerException>(library != nullptr, "Null TextLibrary in Text::load_and_construct.");
+				auto& services = cereal::get_user_data<MV::Services>(archive);
+				auto* library = services.get<MV::TextLibrary>();
 
 				construct(std::shared_ptr<Node>(), *library);
 

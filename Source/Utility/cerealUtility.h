@@ -11,8 +11,12 @@
 #include "cereal/types/base_class.hpp"
 #include "cereal/types/polymorphic.hpp"
 
+#include "cereal/archives/adapters.hpp"
+
 #include "cereal/archives/portable_binary.hpp"
 #include "cereal/archives/json.hpp"
+
+#include "Utility/services.h"
 
 #include <sstream>
 #include <string>
@@ -61,10 +65,9 @@ namespace MV {
 	}
 
 	template <typename T>
-	T fromBinaryString(const std::string &a_input, std::function<void (cereal::PortableBinaryInputArchive &)> a_binder) {
+	T fromBinaryString(const std::string &a_input, MV::Services& a_services) {
 		std::stringstream messageStream(a_input);
-		cereal::PortableBinaryInputArchive input(messageStream);
-		a_binder(input);
+		cereal::UserDataAdapter<MV::Services, cereal::PortableBinaryInputArchive> input(a_services, messageStream);
 		T result;
 		input(result);
 		return result;
@@ -110,10 +113,9 @@ namespace MV {
 	}
 
 	template <typename T>
-	T fromJson(const std::string &a_input, std::function<void (cereal::JSONInputArchive &)> a_binder) {
+	T fromJson(const std::string &a_input, MV::Services& a_services) {
 		std::stringstream messageStream(a_input);
-		cereal::JSONInputArchive input(messageStream);
-		a_binder(input);
+		cereal::UserDataAdapter<MV::Services, cereal::JSONInputArchive> input(a_services, messageStream);
 		T result;
 		input(result);
 		return result;

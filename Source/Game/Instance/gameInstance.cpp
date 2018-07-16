@@ -15,8 +15,8 @@ void GameInstance::handleScroll(int a_amount) {
 	}
 }
 
-GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::MouseState& a_mouse) :
-	worldScene(a_root->make("Assets/Scenes/map.scene", jsonLoadBinder())->depth(0)),
+GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse) :
+	worldScene(a_root->make("Assets/Scenes/map.scene", services())->depth(0)),
 	ourMouse(a_mouse),
 	gameData(a_gameData),
 	left(a_leftPlayer, LEFT, *this),
@@ -34,7 +34,7 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 	right.ourWellPosition = left.enemyWellPosition;
 	left.ourWellPosition = right.enemyWellPosition;
 
-	mouseSignal = ourMouse.onLeftMouseDown.connect([&](MV::MouseState& /*a_mouse*/) {
+	mouseSignal = ourMouse.onLeftMouseDown.connect([&](MV::TapDevice& /*a_mouse*/) {
 		beginMapDrag();
 	});
 
@@ -53,13 +53,13 @@ GameInstance::~GameInstance() {
 void GameInstance::beginMapDrag() {
 	if (cameraAction.finished()) {
 		ourMouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
-			auto signature = ourMouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse) {
+			auto signature = ourMouse.onMove.connect(MV::guid("inDrag"), [&](MV::TapDevice& a_mouse) {
 				if (worldScene) {
 					worldScene->translate(MV::round<MV::PointPrecision>(a_mouse.position() - a_mouse.oldPosition()));
 				}
 			});
 			auto cancelId = MV::guid("cancelDrag");
-			ourMouse.onLeftMouseUp.connect(cancelId, [=](MV::MouseState& a_mouse2) {
+			ourMouse.onLeftMouseUp.connect(cancelId, [=](MV::TapDevice& a_mouse2) {
 				a_mouse2.onMove.disconnect(signature);
 				a_mouse2.onLeftMouseUp.disconnect(cancelId);
 			});

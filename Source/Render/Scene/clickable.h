@@ -99,7 +99,7 @@ namespace MV {
 
 			bool enabled() const;
 
-			MouseState& mouse() const;
+			TapDevice& mouse() const;
 
 			double dragDelta() const {
 				return lastDragDelta;
@@ -125,18 +125,18 @@ namespace MV {
 				return std::static_pointer_cast<Clickable>(shared_from_this());
 			}
 
-			bool mouseInBounds(const MouseState& a_state);
+			bool mouseInBounds(const TapDevice& a_state);
 			bool mouseInBounds() { return mouseInBounds(ourMouse); }
 
 			void press();
 
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, MouseState &a_mouseState) {
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, TapDevice &a_tapDevice) {
 				a_script.add(chaiscript::user_type<Clickable>(), "Clickable");
 				a_script.add(chaiscript::base_class<Sprite, Clickable>());
 				a_script.add(chaiscript::base_class<Drawable, Clickable>());
 				a_script.add(chaiscript::base_class<Component, Clickable>());
 
-				a_script.add(chaiscript::fun([&](Node &a_self) { return a_self.attach<Clickable>(a_mouseState); }), "attachClickable");
+				a_script.add(chaiscript::fun([&](Node &a_self) { return a_self.attach<Clickable>(a_tapDevice); }), "attachClickable");
 
 				a_script.add(chaiscript::fun([](Node &a_self) { return a_self.componentInChildren<Clickable>(true, false, true); }), "componentClickable");
 
@@ -178,7 +178,7 @@ namespace MV {
 			}
 
 		protected:
-			Clickable(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
+			Clickable(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse);
 
 			virtual void initialize() override;
 
@@ -208,9 +208,8 @@ namespace MV {
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Clickable> &construct, std::uint32_t const /*version*/) {
-				MouseState *mouse = nullptr;
-				archive.extract(cereal::make_nvp("mouse", mouse));
-				MV::require<MV::PointerException>(mouse != nullptr, "Null mouse in Clickable::load_and_construct.");
+				auto& services = cereal::get_user_data<MV::Services>(archive);
+				auto* mouse = services.get<MV::TapDevice>();
 				construct(std::shared_ptr<Node>(), *mouse);
 				archive(
 					cereal::make_nvp("onPress", construct->onPressSignal),
@@ -245,9 +244,9 @@ namespace MV {
 			int64_t globalClickPriority = 100;
 			int64_t appendClickPriority = 0;
 		private:
-			MouseState::SignalType onLeftMouseDownHandle;
-			MouseState::SignalType onLeftMouseUpHandle;
-			MouseState::SignalType onMouseMoveHandle;
+			TapDevice::SignalType onLeftMouseDownHandle;
+			TapDevice::SignalType onLeftMouseUpHandle;
+			TapDevice::SignalType onMouseMoveHandle;
 
 			Point<int> dragStartPosition;
 			Point<int> priorMousePosition;
@@ -257,7 +256,7 @@ namespace MV {
 			Point<> objectLocationBeforeDrag;
 
 			bool isInPressEvent = false;
-			MouseState& ourMouse;
+			TapDevice& ourMouse;
 
 			Stopwatch dragTimer;
 

@@ -25,7 +25,7 @@ namespace MV {
 
 			DrawableDerivedAccessorsNoColor(Palette)
 
-			MouseState& mouse() const;
+			TapDevice& mouse() const;
 
 			std::shared_ptr<Palette> color(const MV::Color &a_newColor);
 
@@ -56,17 +56,17 @@ namespace MV {
 			void stopEatingTouches();
 			bool eatingTouches() const;
 		protected:
-			Palette(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
+			Palette(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse);
 
 			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
 			virtual BoxAABB<> boundsImplementation() override { return Drawable::boundsImplementation(); }
 
 			void innerColorAlphaSelectorNoNotification(const Color& a_left, const Color& a_right);
 
-			bool mouseOverMainColor(const MouseState& a_state);
-			bool mouseOverAlpha(const MouseState& a_state);
-			bool mouseOverSideColor(const MouseState& a_state);
-			bool mouseOverSwatch(const MouseState& a_state);
+			bool mouseOverMainColor(const TapDevice& a_state);
+			bool mouseOverAlpha(const TapDevice& a_state);
+			bool mouseOverSideColor(const TapDevice& a_state);
+			bool mouseOverSwatch(const TapDevice& a_state);
 
 			BoxAABB<> currentSideColorBounds();
 			BoxAABB<> currentAlphaBounds();
@@ -100,9 +100,8 @@ namespace MV {
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Palette> &construct, std::uint32_t const /*version*/) {
-				MouseState *mouse = nullptr;
-				archive.extract(cereal::make_nvp("mouse", mouse));
-				MV::require<MV::PointerException>(mouse != nullptr, "Null mouse in Button::load_and_construct.");
+				auto& services = cereal::get_user_data<MV::Services>(archive);
+				auto* mouse = services.get<MV::TapDevice>();
 				construct(std::shared_ptr<Node>(), *mouse);
 				archive(
 					cereal::make_nvp("color", construct->currentColor),
@@ -134,15 +133,15 @@ namespace MV {
 		private:
 			void applyCurrentColorToPreviewBox();
 
-			MouseState::SignalType onLeftMouseDownHandle;
-			MouseState::SignalType onLeftMouseUpHandle;
-			MouseState::SignalType onMouseMoveHandle;
+			TapDevice::SignalType onLeftMouseDownHandle;
+			TapDevice::SignalType onLeftMouseUpHandle;
+			TapDevice::SignalType onMouseMoveHandle;
 
 			size_t globalClickPriority = 100;
 			std::vector<int64_t> overrideClickPriority;
 			bool eatTouches = true;
 
-			MouseState& ourMouse;
+			TapDevice& ourMouse;
 
 			Size<> selectorPercentSize = { .85f, 0.85f };
 			Size<> selectorPercentPadding = {0.03f, 0.03f};
@@ -151,7 +150,7 @@ namespace MV {
 			Color topRightColor = {1.0f, 0.0f, 0.0f, 1.0f};
 			Color currentColor = {1.0f, 0.0f, 0.0f, 1.0f};
 
-			MV::MouseState::SignalType currentDragSignal;
+			MV::TapDevice::SignalType currentDragSignal;
 			MV::Color::HSV hsv;
 			static const std::vector<Color> colorBarList;
 		};

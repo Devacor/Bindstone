@@ -69,7 +69,7 @@ namespace MV {
 
 	void Interface::initialize() {
 		if (!node) {
-			node = manager.root()->loadChild("Assets/Interface/" + pageId + "/view.scene", JsonNodeLoadBinder(manager.managers(), manager.mouse(), manager.script()), pageId);
+			node = manager.root()->loadChild("Assets/Interface/" + pageId + "/view.scene", manager.managers().services, pageId);
 
 			scriptFileEval("Assets/Interface/" + pageId + "/initialize.script", manager.script(), {
 				{ "self", chaiscript::Boxed_Value(this) }
@@ -84,7 +84,7 @@ namespace MV {
 		}
 	}
 
-	InterfaceManager::InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, MouseState& a_mouse, Managers& a_managers, chaiscript::ChaiScript &a_script, std::string a_scriptName) :
+	InterfaceManager::InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, TapDevice& a_mouse, Managers& a_managers, chaiscript::ChaiScript &a_script, std::string a_scriptName) :
 		ourMouse(a_mouse),
 		ourManagers(a_managers),
 		ourScript(a_script),

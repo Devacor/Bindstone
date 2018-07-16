@@ -9,7 +9,7 @@
 #include "Game/building.h"
 #include "Game/state.h"
 
-namespace MV { class MouseState; }
+namespace MV { class TapDevice; }
 
 struct LoadoutCollection {
 	std::vector<std::string> buildings;

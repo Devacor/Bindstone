@@ -2,7 +2,6 @@
 #define _MV_GAME_EDITOR_H_
 
 #include "Game/game.h"
-#include "DiggerGame/diggerGame.h"
 #include "editor/editor.h"
 #include "Game/managers.h"
 #include "Game/NetworkLayer/package.h"
@@ -33,6 +32,7 @@ private:
 	}
 
 	void runEditor() {
+		editor.returnFromBackground();
 		auto playlistGame = std::make_shared<MV::AudioPlayList>();
 		playlistGame->addSoundBack("gameintro");
 		playlistGame->addSoundBack("gameloop");
@@ -57,6 +57,7 @@ private:
 	}
 
 	void runGame() {
+		game.returnFromBackground();
 		managers.timer.start();
 		managers.timer.delta("tick");
 		while (game.update(managers.timer.delta("tick"))) {
@@ -117,7 +118,7 @@ private:
 	}
 	
 	Managers managers;
-	MV::MouseState mouse;
+	MV::TapDevice mouse;
 
 	bool done = false;
 	std::shared_ptr<MV::Scene::Node> limbo;

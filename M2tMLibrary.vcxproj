@@ -120,7 +120,7 @@
       <AdditionalIncludeDirectories>
       </AdditionalIncludeDirectories>
       <AdditionalOptions>-D_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS -D_SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING -D_SCL_SECURE_NO_WARNINGS -DNOMINMAX -D_WIN32_WINNT=0x0501 /Zc:noexceptTypes- /bigobj</AdditionalOptions>
-      <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>CEREAL_FUTURE_EXPERIMENTAL;_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <CompileAs>CompileAsCpp</CompileAs>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -171,8 +171,8 @@
       <AdditionalIncludeDirectories>
       </AdditionalIncludeDirectories>
       <EnablePREfast>false</EnablePREfast>
-      <AdditionalOptions>-D_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS -D_SCL_SECURE_NO_WARNINGS -DNOMINMAX -DBOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE -D_WIN32_WINNT=0x0501 /Zc:noexceptTypes- /bigobj</AdditionalOptions>
-      <PreprocessorDefinitions>_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>-D_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS -D_SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING -D_SCL_SECURE_NO_WARNINGS -DNOMINMAX -D_WIN32_WINNT=0x0501 /Zc:noexceptTypes- /bigobj</AdditionalOptions>
+      <PreprocessorDefinitions>CEREAL_FUTURE_EXPERIMENTAL;_MBCS;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <DisableLanguageExtensions>false</DisableLanguageExtensions>
       <CompileAs>CompileAsCpp</CompileAs>
@@ -309,7 +309,6 @@
     <ClCompile Include="..\external\spine\VertexAttachment.c" />
     <ClCompile Include="..\external\spine\VertexEffect.c" />
     <ClCompile Include="Source\ArtificialIntelligence\pathfinding.cpp" />
-    <ClCompile Include="Source\DiggerGame\diggerGame.cpp" />
     <ClCompile Include="Source\Editor\editor.cpp" />
     <ClCompile Include="Source\Audio\sound.cpp" />
     <ClCompile Include="Source\Editor\editorControls.cpp" />
@@ -565,7 +564,6 @@
     <ClInclude Include="..\external\spine\VertexAttachment.h" />
     <ClInclude Include="..\external\spine\VertexEffect.h" />
     <ClInclude Include="Source\ArtificialIntelligence\pathfinding.h" />
-    <ClInclude Include="Source\DiggerGame\diggerGame.h" />
     <ClInclude Include="Source\Editor\anchorEditor.h" />
     <ClInclude Include="Source\Editor\editor.h" />
     <ClInclude Include="Source\Editor\editorControls.h" />

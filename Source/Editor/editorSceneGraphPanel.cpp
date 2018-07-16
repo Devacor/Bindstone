@@ -2,7 +2,7 @@
 #include "editor.h"
 
 void SceneGraphPanel::clickedChild(std::shared_ptr<MV::Scene::Node> a_child) {
-	sharedResources.editor->panel().loadPanel<SelectedNodeEditorPanel>(std::make_shared<EditableNode>(a_child, root, sharedResources.mouse));
+	sharedResources.get<Editor>()->panel().loadPanel<SelectedNodeEditorPanel>(std::make_shared<EditableNode>(a_child, root, sharedResources.get<MV::TapDevice>()));
 }
 
 void SceneGraphPanel::loadButtons(std::shared_ptr<MV::Scene::Node> a_grid, std::shared_ptr<MV::Scene::Node> a_node, size_t a_depth /*= 0*/) {
@@ -41,7 +41,7 @@ void SceneGraphPanel::refresh(std::shared_ptr<MV::Scene::Node> a_newScene /*= nu
 	if (!box) {
 		auto size = grid->bounds().size();
 		size.height = 620.0f;
-		box = makeDraggableBox("SceneNodePicker", root, size, *sharedResources.mouse);
+		box = makeDraggableBox("SceneNodePicker", root, size, *sharedResources.get<MV::TapDevice>());
 		box->parent()->position(position);
 		box->position(boxInnerPosition);
 		box->make("CONTAINER");
@@ -64,11 +64,11 @@ void SceneGraphPanel::makeChildButton(std::shared_ptr<MV::Scene::Node> a_node, s
 	MV::Size<> buttonSize(200.0f, 18.0f);
 	auto buttonName = std::string(a_depth * 3, ' ') + a_node->id();
 
-	auto button = makeSceneButton(a_grid, *sharedResources.textLibrary, *sharedResources.mouse, a_node->id(), buttonSize, buttonName);
-	auto expandButton = makeButton(button->owner(), *sharedResources.textLibrary, *sharedResources.mouse, "Expand", MV::Size<>(18.0f, 18.0f), (a_node->empty() ? "" : (expanded[a_node.get()] ? "+" : "-")));
+	auto button = makeSceneButton(a_grid, sharedResources, a_node->id(), buttonSize, buttonName);
+	auto expandButton = makeButton(button->owner(), sharedResources, "Expand", MV::Size<>(18.0f, 18.0f), (a_node->empty() ? "" : (expanded[a_node.get()] ? "+" : "-")));
 
 	expandButton->owner()->position({ 182.0f, 0.0f });
-	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.mouse)->bounds(MV::size(buttonSize.width, 5.0f));
+	auto dragBetween = a_grid->make()->attach<MV::Scene::Clickable>(*sharedResources.get<MV::TapDevice>())->bounds(MV::size(buttonSize.width, 5.0f));
 	dragBetween->onDrop.connect("dropped", [&, a_node](std::shared_ptr<MV::Scene::Clickable> a_clickable, const MV::Point<float> &) {
 		if (activeSelection) {
 			float newDepth = activeSelection->depth();

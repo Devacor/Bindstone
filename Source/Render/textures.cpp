@@ -454,6 +454,10 @@ namespace MV {
 		handlePercent = floatBounds / toScale(textureDefinition->size());
 	}
 
+	MV::SharedTextures* getSharedTextureFromServices(MV::Services& a_services) {
+		return a_services.get<MV::SharedTextures>();
+	}
+
 	void TextureHandle::postLoadInitialize(SharedTextures* a_sharedTextures) {
 		if (a_sharedTextures && !packId.empty()) {
 			auto packFound = a_sharedTextures->pack(packId);

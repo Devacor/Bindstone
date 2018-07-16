@@ -44,9 +44,6 @@
     <Filter Include="Exprtk">
       <UniqueIdentifier>{d16dd761-bb15-4a4b-9f6e-ae35af09da85}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\DiggerGame">
-      <UniqueIdentifier>{bd9f64db-e06b-47fe-b175-e8b6f41cd2fd}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Source Files\Physics">
       <UniqueIdentifier>{54017387-0f64-47d3-b033-1aea69b96745}</UniqueIdentifier>
     </Filter>
@@ -172,9 +169,6 @@
     </ClCompile>
     <ClCompile Include="Source\Render\Scene\path.cpp">
       <Filter>Source Files\Render\Scene</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\DiggerGame\diggerGame.cpp">
-      <Filter>Source Files\DiggerGame</Filter>
     </ClCompile>
     <ClCompile Include="..\external\Box2D\Collision\b2BroadPhase.cpp">
       <Filter>Box2D</Filter>
@@ -729,9 +723,6 @@
     </ClInclude>
     <ClInclude Include="Source\Network\package.h">
       <Filter>Source Files\Network</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\DiggerGame\diggerGame.h">
-      <Filter>Source Files\DiggerGame</Filter>
     </ClInclude>
     <ClInclude Include="..\external\cereal\include\cereal\macros.hpp">
       <Filter>Cereal</Filter>

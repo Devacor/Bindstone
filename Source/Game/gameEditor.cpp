@@ -44,12 +44,12 @@ GameEditor::GameEditor() :
 // 	alignedSprite->texture(textureSheet->makeHandle());
 // 	alignedSprite->anchors().anchor({ MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f) }).usePosition(true).parent(screenScaler.self());
 
-// 	mouse.onLeftMouseDownEnd.connect("TEST", [&](MV::MouseState& a_mouse) {
+// 	mouse.onLeftMouseDownEnd.connect("TEST", [&](MV::TapDevice& a_mouse) {
 // 		std::cout << "PRE: " << screenScaler->bounds() << std::endl;
 // 		screenScaler->bounds({ screenScaler->owner()->localFromScreen(a_mouse.position()), screenScaler->bounds().maxPoint });
 // 		std::cout << "POST: " << screenScaler->bounds() << std::endl;
 // 	});
-// 	mouse.onRightMouseDownEnd.connect("TEST", [&](MV::MouseState& a_mouse) {
+// 	mouse.onRightMouseDownEnd.connect("TEST", [&](MV::TapDevice& a_mouse) {
 // 		std::cout << "PRE: " << screenScaler->bounds() << std::endl;
 // 		screenScaler->bounds({ screenScaler->bounds().minPoint, screenScaler->owner()->localFromScreen(a_mouse.position()) });
 // 		std::cout << "POST: " << screenScaler->bounds() << std::endl;

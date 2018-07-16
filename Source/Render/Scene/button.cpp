@@ -10,7 +10,7 @@ CEREAL_REGISTER_TYPE(MV::Scene::Button);
 namespace MV {
 	namespace Scene {
 
-		Button::Button(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse) :
+		Button::Button(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse) :
 			Clickable(a_owner, a_mouse) {
 			onEnabled.connect(guid(), [&](const std::shared_ptr<Clickable> &a_node) {
 				if (!inPressEvent()) {

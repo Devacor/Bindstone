@@ -41,7 +41,7 @@ public:
 		return gameData.managers();
 	}
 
-	MV::MouseState& mouse() {
+	MV::TapDevice& mouse() {
 		return ourMouse;
 	}
 
@@ -99,6 +99,11 @@ public:
 	std::shared_ptr<Player> player() {
 		return localPlayer;
 	}
+
+	void returnFromBackground() {
+		gameData.managers().services.connect(&ourMouse);
+		gameData.managers().services.connect(&scriptEngine);
+	}
 private:
 	Game(const Game &) = delete;
 	Game& operator=(const Game &) = delete;
@@ -127,7 +132,7 @@ private:
 	bool done;
 
 	MV::Scene::SafeComponent<MV::Scene::Sprite> screenScaler;
-	MV::MouseState ourMouse;
+	MV::TapDevice ourMouse;
 
 	std::string loginId;
 	std::string loginPassword;

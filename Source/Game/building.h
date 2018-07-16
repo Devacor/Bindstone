@@ -244,9 +244,9 @@ private:
 			cereal::make_nvp("slot", slot),
 			cereal::make_nvp("player", playerId)
 		);
-		GameInstance *gameInstance = nullptr;
-		archive.extract(cereal::make_nvp("game", gameInstance));
-		MV::require<MV::PointerException>(gameInstance != nullptr, "Null gameInstance in Building::load_and_construct.");
+
+		auto& services = cereal::get_user_data<MV::Services>(archive);
+		auto* game = services.get<GameInstance>();
 		//gameInstance->data().player()
         //construct(std::shared_ptr<MV::Scene::Node>(), buildingData, skin, slot, player, *gameInstance);
 		archive(

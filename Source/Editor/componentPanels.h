@@ -61,7 +61,7 @@ public:
 		}
 		activeTextbox.reset();
 	}
-	SharedResources resources();
+	MV::Services& services();
 
 	virtual void clearTexturePicker() {
 		picker = nullptr;

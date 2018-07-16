@@ -17,7 +17,7 @@ class Missile;
 class GameInstance {
 	friend Team;
 public:
-	GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::MouseState& a_mouse);
+	GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse);
 	~GameInstance();
 	GameData& data() {
 		return gameData;
@@ -32,6 +32,10 @@ public:
 		return{ gameData.managers(), ourMouse, scriptEngine };
 	}
 
+	MV::Services& services() {
+		return gameData.managers().services;
+	}
+
 	bool update(double dt);
 
 	virtual void requestUpgrade(const std::shared_ptr<Player> &/*a_owner*/, int a_slot, size_t a_upgrade) {
@@ -44,7 +48,7 @@ public:
 
 	bool handleEvent(const SDL_Event &a_event);
 
-	MV::MouseState& mouse() {
+	MV::TapDevice& mouse() {
 		return ourMouse;
 	}
 
@@ -102,7 +106,7 @@ protected:
 
 	GameData& gameData;
 
-	MV::MouseState &ourMouse;
+	MV::TapDevice &ourMouse;
 	std::shared_ptr<MV::Scene::Node> worldScene;
 
 	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
@@ -112,7 +116,7 @@ protected:
 	std::vector<std::unique_ptr<Missile>> missiles;
 	std::vector<Missile*> expiredMissiles;
 
-	MV::MouseState::SignalType mouseSignal;
+	MV::TapDevice::SignalType mouseSignal;
 
 	Team left;
 	Team right;
@@ -180,7 +184,7 @@ public:
 			targetDeathWatcher.reset();
 		});
 
-		missile = gameInstance.missileContainer()->make("Assets/Prefabs/Missiles/" + a_prefab + ".prefab", gameInstance.jsonLoadBinder(), gameInstance.missileContainer()->getUniqueId("missile"));
+		missile = gameInstance.missileContainer()->make("Assets/Prefabs/Missiles/" + a_prefab + ".prefab", gameInstance.services(), gameInstance.missileContainer()->getUniqueId("missile"));
 		missile->position(a_source->owner()->position());
 		missile->serializable(false);
 	}

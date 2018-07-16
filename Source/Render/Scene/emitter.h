@@ -354,9 +354,9 @@ namespace MV {
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Emitter> &construct, std::uint32_t const /*version*/) {
-				ThreadPool *pool = nullptr;
-				archive.extract(cereal::make_nvp("pool", pool));
-				MV::require<MV::PointerException>(pool != nullptr, "Null thread pool in Emitter::load_and_construct.");
+				auto& services = cereal::get_user_data<MV::Services>(archive);
+				auto* pool = services.get<MV::ThreadPool>();
+
 				construct(std::shared_ptr<Node>(), *pool);
 				archive(
 					cereal::make_nvp("spawnProperties", construct->spawnProperties),

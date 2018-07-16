@@ -4,7 +4,7 @@
 
 namespace MV{
 
-	MouseState::MouseState():
+	TapDevice::TapDevice():
 		onLeftMouseDown(onLeftMouseDownSignal),
 		onLeftMouseUp(onLeftMouseUpSignal),
 		onMiddleMouseDown(onMiddleMouseDownSignal),
@@ -23,7 +23,7 @@ namespace MV{
 		update();
 	}
 
-	void MouseState::update() {
+	void TapDevice::update() {
 		MV::Point<int> newPosition;
 		uint32_t state = SDL_GetMouseState(&newPosition.x, &newPosition.y);
 
@@ -44,13 +44,13 @@ namespace MV{
 		runExclusiveActions();
 	}
 
-	void MouseState::updateTouch(SDL_Event a_event, MV::Size<int> a_screenSize) {
+	void TapDevice::updateTouch(SDL_Event a_event, MV::Size<int> a_screenSize) {
 		if (a_event.type == SDL_MULTIGESTURE){
 			bool pinchZoomAboveThreshold = fabs(a_event.mgesture.dDist) > 0.002;
 			bool rotationAboveThreshold = fabs(a_event.mgesture.dTheta) > MV::PIEf / 180.0f;
 			if (pinchZoomAboveThreshold || rotationAboveThreshold)
 			{
-				MV::Point<int> position(a_event.mgesture.x * a_screenSize.width, a_event.mgesture.y * a_screenSize.height);
+				MV::Point<int> position(static_cast<int>(a_event.mgesture.x * a_screenSize.width), static_cast<int>(a_event.mgesture.y * a_screenSize.height));
 				if (pinchZoomAboveThreshold) {
 					onPinchZoomSignal(position, a_event.mgesture.dDist);
 				}
@@ -61,7 +61,7 @@ namespace MV{
 		}
 	}
 
-	void MouseState::updateButtonState(bool &oldState, bool newState, Signal<CallbackSignature> &onDown, Signal<CallbackSignature> &onUp, Signal<CallbackSignature> &onDownEnd, Signal<CallbackSignature> &onUpEnd) {
+	void TapDevice::updateButtonState(bool &oldState, bool newState, Signal<CallbackSignature> &onDown, Signal<CallbackSignature> &onUp, Signal<CallbackSignature> &onDownEnd, Signal<CallbackSignature> &onUpEnd) {
 		if(newState != oldState){
 			oldState = newState;
 			if(newState){
@@ -74,27 +74,27 @@ namespace MV{
 		}
 	}
 
-	MV::Point<int> MouseState::position() const {
+	MV::Point<int> TapDevice::position() const {
 		return mousePosition;
 	}
 
-	MV::Point<int> MouseState::oldPosition() const {
+	MV::Point<int> TapDevice::oldPosition() const {
 		return oldMousePosition;
 	}
 
-	bool MouseState::leftDown() const {
+	bool TapDevice::leftDown() const {
 		return left;
 	}
 
-	bool MouseState::rightDown() const {
+	bool TapDevice::rightDown() const {
 		return right;
 	}
 
-	bool MouseState::middleDown() const {
+	bool TapDevice::middleDown() const {
 		return middle;
 	}
 
-	void MouseState::runExclusiveActions() {
+	void TapDevice::runExclusiveActions() {
 		bool touchesEaten = false;
 		std::sort(nodesToExecute.rbegin(), nodesToExecute.rend());
 		for(auto it = nodesToExecute.begin(); it != nodesToExecute.end(); ++it){
@@ -108,7 +108,7 @@ namespace MV{
 		nodesToExecute.clear();
 	}
 
-	void MouseState::queueExclusiveAction(const ExclusiveMouseAction &a_node) {
+	void TapDevice::queueExclusiveAction(const ExclusiveMouseAction &a_node) {
 		nodesToExecute.push_back(a_node);
 	}
 

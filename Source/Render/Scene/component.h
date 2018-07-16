@@ -10,6 +10,7 @@
 
 #include "cereal/cereal.hpp"
 #include "cereal/access.hpp"
+#include "cereal/archives/adapters.hpp"
 
 #include "Render/render.h"
 #include "Render/textures.h"
@@ -19,6 +20,7 @@
 #include "Utility/signal.hpp"
 #include "Utility/task.hpp"
 #include "Utility/visitor.hpp"
+#include "Utility/services.h"
 
 #define ComponentDerivedAccessors(ComponentType) \
 MV::Scene::SafeComponent<ComponentType> clone(const std::shared_ptr<MV::Scene::Node> &a_parent) { \

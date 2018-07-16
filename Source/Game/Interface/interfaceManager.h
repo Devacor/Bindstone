@@ -61,9 +61,9 @@ namespace MV {
 
 	class InterfaceManager {
 	public:
-		InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, MouseState& a_mouse, Managers& a_managers, chaiscript::ChaiScript &a_script, std::string a_scriptName);
+		InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, TapDevice& a_mouse, Managers& a_managers, chaiscript::ChaiScript &a_script, std::string a_scriptName);
 
-		MouseState& mouse() {
+		TapDevice& mouse() {
 			return ourMouse;
 		}
 
@@ -108,7 +108,7 @@ namespace MV {
 	private:
 		std::vector<Interface> pages;
 
-		MouseState& ourMouse;
+		TapDevice& ourMouse;
 		Managers& ourManagers;
 		chaiscript::ChaiScript& ourScript;
 

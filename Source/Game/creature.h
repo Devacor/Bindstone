@@ -88,6 +88,8 @@ struct CreatureData {
 		a_script.add(chaiscript::fun(&CreatureData::strength), "strength");
 		a_script.add(chaiscript::fun(&CreatureData::ability), "ability");
 
+		//a_script.add([]() {});
+
 		return a_script;
 	}
 
@@ -240,18 +242,23 @@ public:
 	struct NetworkState {
 		std::string creatureTypeId;
 		
-		TeamSide team;
 		int buildingSlot;
 
 		int health = 0;
 		bool flaggedForDeath = false;
 
+		MV::Point<float> gridPosition;
+
+		std::string animationName;
+		float animationTime = 0.0f;
+
 		NetworkState() {
 		}
 
-		NetworkState(const CreatureData& a_template) :
+		NetworkState(const CreatureData& a_template, int a_buildingSlot) :
 			creatureTypeId(a_template.id),
-			health(a_template.health) {
+			health(a_template.health),
+			buildingSlot(a_buildingSlot){
 		}
 
 		void synchronize(std::shared_ptr<NetworkState> a_other) {
@@ -267,9 +274,11 @@ public:
 		void serialize(Archive & archive, std::uint32_t const /*version*/) {
 			archive(
 				cereal::make_nvp("creatureTypeId", creatureTypeId),
-				cereal::make_nvp("team", team),
 				cereal::make_nvp("slot", buildingSlot),
 				cereal::make_nvp("health", health),
+				cereal::make_nvp("position", gridPosition),
+				cereal::make_nvp("animationName", animationName),
+				cereal::make_nvp("animationTime", animationTime),
 				cereal::make_nvp("flaggedForDeath", flaggedForDeath)
 			);
 		}
@@ -303,6 +312,8 @@ public:
 	~Creature() { std::cout << "Creature died!" << std::endl; }
 
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
+
+	std::shared_ptr<Player> player();
 
 	bool alive() const {
 		return !state->self()->flaggedForDeath && state->self()->health > 0;
@@ -344,13 +355,13 @@ public:
 	}
 
 protected:
-	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance);
-	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> &a_state, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance);
+	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, int a_buildingSlot, GameInstance& a_gameInstance);
+	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> &a_state, GameInstance& a_gameInstance);
 
 	virtual void initialize() override;
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
-		return cloneHelper(a_parent->attach<Creature>(statTemplate.id, skin, owningPlayer, gameInstance).self());
+		return cloneHelper(a_parent->attach<Creature>(statTemplate.id, state->self()->buildingSlot, gameInstance).self());
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
@@ -388,7 +399,6 @@ private:
 
 	bool isOnServer = false;
 
-	std::shared_ptr<Player> owningPlayer;
 	GameInstance& gameInstance;
 
 	std::shared_ptr<MV::Scene::PathAgent> pathAgent;

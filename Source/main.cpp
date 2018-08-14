@@ -77,8 +77,8 @@ void PathfindingTest();
 
 int main(int, char *[]) {
 
-	PathfindingTest();
-	return 0;
+	//PathfindingTest();
+	//return 0;
 
 // 	std::string content = "Hello World";
 // 	auto scriptString = "puts('['); puts(arg_0); puts(']'); puts('['); puts(arg_1); puts(']'); puts('['); puts(arg_2); puts(\"]\n\");";

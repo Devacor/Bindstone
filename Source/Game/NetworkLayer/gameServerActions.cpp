@@ -47,5 +47,5 @@ void SuppliedInitialGameState::execute(Game& a_game) {
 }
 
 void RequestBuildingUpgrade::execute(Game &a_game) {
-	a_game.instance()->performUpgrade(side, slot, id);
+	a_game.instance()->performUpgrade(slot, id);
 }

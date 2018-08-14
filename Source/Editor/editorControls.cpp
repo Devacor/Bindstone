@@ -3,7 +3,7 @@
 
 void EditorControls::updateBoxHeader(MV::PointPrecision a_width) {
 	if(!boxHeader){
-		boxHeader = draggableBox->make("ContextMenuHandle")->attach<MV::Scene::Clickable>(*sharedResources.mouse)->bounds(MV::size(a_width, 20.0f))->
+		boxHeader = draggableBox->make("ContextMenuHandle")->attach<MV::Scene::Clickable>(*ourServices.get<MV::TapDevice>())->bounds(MV::size(a_width, 20.0f))->
 			color({BOX_HEADER})->show();
 
 		boxHeader->onDrag.connect("header", [&](std::shared_ptr<MV::Scene::Clickable> boxHeader, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition){
@@ -23,11 +23,11 @@ void EditorControls::handleInput(SDL_Event &a_event) {
 	}
 }
 
-EditorControls::EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::shared_ptr<MV::Scene::Node> a_root, SharedResources a_resources):
-	sharedResources(a_resources),
+EditorControls::EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::shared_ptr<MV::Scene::Node> a_root, MV::Services& a_resources):
+	ourServices(a_resources),
 	editorScene(a_editor),
 	rootScene(a_root),
-	currentSelection(a_editor, *sharedResources.mouse){
+	currentSelection(a_editor, *ourServices.get<MV::TapDevice>()){
 	
 	draggableBox = editorScene->make(MV::guid("ContextMenu"));
 }

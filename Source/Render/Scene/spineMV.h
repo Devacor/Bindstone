@@ -33,7 +33,10 @@ namespace MV {
 			float floatValue;
 		};
 
+		class Spine;
 		class AnimationTrack {
+			friend Spine;
+			Signal<void(AnimationTrack &)> onDisposeSignal;
 			Signal<void(AnimationTrack &)> onStartSignal;
 			Signal<void(AnimationTrack &)> onEndSignal;
 			Signal<void(AnimationTrack &, int)> onCompleteSignal;
@@ -41,6 +44,7 @@ namespace MV {
 
 			friend void spineTrackEntryCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 		public:
+			SignalRegister<void(AnimationTrack &)> onDispose;
 			SignalRegister<void(AnimationTrack &)> onStart;
 			SignalRegister<void(AnimationTrack &)> onEnd;
 			SignalRegister<void(AnimationTrack &, int)> onComplete;
@@ -58,6 +62,7 @@ namespace MV {
                 onStart(onStartSignal),
                 onEnd(onEndSignal),
                 onComplete(onCompleteSignal),
+				onDispose(onDisposeSignal),
                 onEvent(onEventSignal),
 				myTrackIndex(a_trackIndex),
 				animationState(a_animationState),
@@ -90,9 +95,11 @@ namespace MV {
 			//called from spineTrackEntryCallback
 			void onAnimationStateEvent(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 
+			bool destroying = false;
 			int myTrackIndex;
 			spAnimationState *animationState;
 			spSkeleton *skeleton;
+			spTrackEntry *recentTrack = nullptr;
 		};
 		
 		class Spine : public Drawable{
@@ -103,11 +110,13 @@ namespace MV {
 			Signal<void(std::shared_ptr<Spine>, int)> onStartSignal;
 			Signal<void(std::shared_ptr<Spine>, int)> onEndSignal;
 			Signal<void(std::shared_ptr<Spine>, int, int)> onCompleteSignal;
+			Signal<void(Spine*, int)> onDisposeSignal;
 			Signal<void(std::shared_ptr<Spine>, int, const AnimationEventData &)> onEventSignal;
 		public:
 			SignalRegister<void(std::shared_ptr<Spine>, int)> onStart;
 			SignalRegister<void(std::shared_ptr<Spine>, int)> onEnd;
 			SignalRegister<void(std::shared_ptr<Spine>, int, int)> onComplete;
+			SignalRegister<void(Spine*, int)> onDispose;
 			SignalRegister<void(std::shared_ptr<Spine>, int, const AnimationEventData &)> onEvent;
 
 			struct FileBundle {
@@ -252,6 +261,11 @@ namespace MV {
 			static const int MAX_UPDATES = 10;
 			static const double TIME_BETWEEN_UPDATES;
 			bool autoUpdate;
+
+			bool inUpdate = false;
+			bool pendingDelete = false;
+
+			bool destroying = false;
 
 			int defaultTrack = 0;
             std::map<int, std::unique_ptr<AnimationTrack>> tracks;

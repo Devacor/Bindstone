@@ -34,18 +34,9 @@ public:
 
 	std::vector<std::shared_ptr<Creature>> creaturesInRange(const MV::Point<> &a_location, float a_radius);
 
-	void spawn(std::shared_ptr<Creature> &a_registerCreature);
-
-	std::shared_ptr<Building> building(size_t i) {
-		return buildings.at(i);
-	}
-
 	TeamSide side() const { return ourSide; }
 
 private:
-	std::vector<std::shared_ptr<Building>> buildings;
-	std::vector<std::shared_ptr<Creature>> creatures;
-
 	GameInstance& game;
 
 	std::shared_ptr<Player> player;

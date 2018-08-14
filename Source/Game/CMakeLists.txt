@@ -32,5 +32,7 @@ target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/gameServerActions.h
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/lobbyServer.h
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/networkAction.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/synchronizeAction.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/synchronizeAction.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/NetworkLayer/package.h
 )

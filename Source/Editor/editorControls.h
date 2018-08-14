@@ -9,10 +9,10 @@
 
 class EditorControls {
 public:
-	EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::shared_ptr<MV::Scene::Node> a_root, SharedResources a_sharedResources);
+	EditorControls(std::shared_ptr<MV::Scene::Node> a_editor, std::shared_ptr<MV::Scene::Node> a_root, MV::Services& a_service);
 	~EditorControls();
-	SharedResources resources() const{
-		return sharedResources;
+	MV::Services& services() const{
+		return ourServices;
 	}
 
 	std::shared_ptr<MV::Scene::Node> root(){
@@ -72,7 +72,7 @@ public:
 	}
 
 private:
-	SharedResources sharedResources;
+	MV::Services& ourServices;
 
 	std::shared_ptr<MV::Scene::Node> editorScene;
 	std::shared_ptr<MV::Scene::Node> rootScene;

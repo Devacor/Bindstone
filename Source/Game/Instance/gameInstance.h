@@ -4,6 +4,8 @@
 #include <memory>
 #include <string>
 #include "Game/player.h"
+#include "Network/networkObject.h"
+#include "Game/NetworkLayer/synchronizeAction.h"
 
 #ifdef BINDSTONE_SERVER
 #include "Game/NetworkLayer/gameServer.h"
@@ -11,12 +13,11 @@
 
 #include "Game/Instance/team.h"
 
-
 class Missile;
 class GameInstance {
 	friend Team;
 public:
-	GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::MouseState& a_mouse);
+	GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse);
 	~GameInstance();
 	GameData& data() {
 		return gameData;
@@ -31,19 +32,27 @@ public:
 		return{ gameData.managers(), ourMouse, scriptEngine };
 	}
 
+	MV::Services& services() {
+		return gameData.managers().services;
+	}
+
 	bool update(double dt);
 
-	virtual void requestUpgrade(const std::shared_ptr<Player> &/*a_owner*/, int a_slot, size_t a_upgrade) {
+	virtual void requestUpgrade(int a_slot, size_t a_upgrade) {
 		std::cout << "Building Upgrade Request: " << a_slot << ", " << a_upgrade << std::endl;
 	}
 
-	virtual void performUpgrade(TeamSide team, int a_slot, size_t a_upgrade) {
-		teamForSide(team).building(a_slot)->upgrade(a_upgrade);
+	virtual void performUpgrade(int a_slot, size_t a_upgrade) {
+		building(a_slot)->upgrade(a_upgrade);
+	}
+
+	std::shared_ptr<Building> building(int a_slot) {
+		return buildings[a_slot];
 	}
 
 	bool handleEvent(const SDL_Event &a_event);
 
-	MV::MouseState& mouse() {
+	MV::TapDevice& mouse() {
 		return ourMouse;
 	}
 
@@ -89,15 +98,35 @@ public:
 	Team& teamForSide(TeamSide a_side) {
 		return a_side == LEFT ? left : right;
 	}
-private:
+
+	BindstoneNetworkObjectPool& networkPool() {
+		return syncronizedObjects;
+	}
+
+	virtual void spawnCreature(int a_buildingSlot) {
+	}
+
+	void registerCreature(std::shared_ptr<Creature> &a_registerCreature) {
+		if (a_registerCreature->alive()) {
+			creatures.push_back(a_registerCreature);
+			a_registerCreature->onDeath.connect("_RemoveFromTeam", [&](std::shared_ptr<Creature> a_creature) {
+				creatures.erase(std::remove(creatures.begin(), creatures.end(), a_creature), creatures.end());
+			});
+		}
+	}
+protected:
+
 	void removeExpiredMissiles();
 	void handleScroll(int a_amount);
 
 	void hook();
 
+	std::vector<std::shared_ptr<Building>> buildings;
+	std::vector<std::shared_ptr<Creature>> creatures;
+
 	GameData& gameData;
 
-	MV::MouseState &ourMouse;
+	MV::TapDevice &ourMouse;
 	std::shared_ptr<MV::Scene::Node> worldScene;
 
 	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
@@ -107,22 +136,24 @@ private:
 	std::vector<std::unique_ptr<Missile>> missiles;
 	std::vector<Missile*> expiredMissiles;
 
-	MV::MouseState::SignalType mouseSignal;
+	MV::TapDevice::SignalType mouseSignal;
 
 	Team left;
 	Team right;
 
 	MV::Task worldTimestep;
 	MV::Task cameraAction;
+
+	BindstoneNetworkObjectPool syncronizedObjects;
 };
 
 class ClientGameInstance : public GameInstance {
 public:
 	ClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game);
 
-	virtual void requestUpgrade(const std::shared_ptr<Player> &a_owner, int a_slot, size_t a_upgrade);
+	virtual void requestUpgrade(int a_slot, size_t a_upgrade);
 
-	virtual void performUpgrade(TeamSide team, int a_slot, size_t a_upgrade) override;
+	virtual void performUpgrade(int a_slot, size_t a_upgrade) override;
 
 	virtual bool canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const override;
 private:
@@ -135,10 +166,32 @@ class ServerGameInstance : public GameInstance {
 public:
 	ServerGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, GameServer& a_game);
 
+	virtual void spawnCreature(int a_buildingSlot) override {
+		auto spawner = building(a_buildingSlot);
+		auto creatureNode = creatureContainer()->make(MV::guid(spawner->currentCreature().id));
+		creatureNode->worldPosition(spawner->spawnPositionWorld());
+
+		creatureNode->attach<Creature>(spawner->currentCreature().id, spawner->slotIndex(), *this);
+	}
 private:
 	GameServer &gameServer;
 };
 #endif
+
+class MockClientGameInstance : public GameInstance {
+public:
+	MockClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game);
+
+	virtual void requestUpgrade(int a_slot, size_t a_upgrade);
+
+	virtual void performUpgrade(int a_slot, size_t a_upgrade) override;
+
+	virtual bool canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const override;
+
+	virtual void spawnCreature(int a_buildingSlot) override;
+private:
+	Game & game;
+};
 
 class Missile {
 public:
@@ -160,7 +213,7 @@ public:
 			targetDeathWatcher.reset();
 		});
 
-		missile = gameInstance.missileContainer()->make("Assets/Prefabs/Missiles/" + a_prefab + ".prefab", gameInstance.jsonLoadBinder(), gameInstance.missileContainer()->getUniqueId("missile"));
+		missile = gameInstance.missileContainer()->make("Assets/Prefabs/Missiles/" + a_prefab + ".prefab", gameInstance.services(), gameInstance.missileContainer()->getUniqueId("missile"));
 		missile->position(a_source->owner()->position());
 		missile->serializable(false);
 	}

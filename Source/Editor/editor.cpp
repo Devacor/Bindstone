@@ -2,6 +2,7 @@
 #include "editorControls.h"
 #include "componentPanels.h"
 #include "editorFactories.h"
+#include "Utility/chaiscriptUtility.h"
 
 Editor::Editor(Managers &a_managers):
 	managers(a_managers),
@@ -9,10 +10,13 @@ Editor::Editor(Managers &a_managers):
 	scene(visor->make("root")),
 	controls(MV::Scene::Node::make(a_managers.renderer)),
 	chaiScript(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), chaiscript::default_options()),
-	controlPanel(controls, scene, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &mouse, &chaiScript)),
-	selectorPanel(scene, controls, SharedResources(this, &a_managers.pool, &managers.textures, &a_managers.textLibrary, &mouse, &chaiScript)),
 	testNode(MV::Scene::Node::make(a_managers.renderer)){
 	visor->cameraId(1);
+
+	managers.services.connect(this);
+	returnFromBackground();
+	controlPanel = std::make_unique<EditorControls>(controls, scene, managers.services);
+	selectorPanel = std::make_unique<SceneGraphPanel>(scene, controls, managers.services);
 
 	initializeWindow();
 	initializeControls();
@@ -26,19 +30,19 @@ bool Editor::update(double dt){
 	const Uint8* keystate = SDL_GetKeyboardState(NULL);
 	if (keystate[SDL_SCANCODE_LEFT]) {
 		scene->camera().translate(MV::point(speed, 0.0f) * static_cast<float>(dt));
-		controlPanel.onSceneDrag(MV::cast<int>(MV::point(speed, 0.0f) * static_cast<float>(dt)));
+		controlPanel->onSceneDrag(MV::cast<int>(MV::point(speed, 0.0f) * static_cast<float>(dt)));
 	}
 	if (keystate[SDL_SCANCODE_RIGHT]) {
 		scene->camera().translate(MV::point(-speed, 0.0f) * static_cast<float>(dt));
-		controlPanel.onSceneDrag(MV::cast<int>(MV::point(-speed, 0.0f) * static_cast<float>(dt)));
+		controlPanel->onSceneDrag(MV::cast<int>(MV::point(-speed, 0.0f) * static_cast<float>(dt)));
 	}
 	if (keystate[SDL_SCANCODE_UP]) {
 		scene->camera().translate(MV::point(0.0f, speed) * static_cast<float>(dt));
-		controlPanel.onSceneDrag(MV::cast<int>(MV::point(0.0f, speed) * static_cast<float>(dt)));
+		controlPanel->onSceneDrag(MV::cast<int>(MV::point(0.0f, speed) * static_cast<float>(dt)));
 	}
 	if (keystate[SDL_SCANCODE_DOWN]) {
 		scene->camera().translate(MV::point(0.0f, -speed) * static_cast<float>(dt));
-		controlPanel.onSceneDrag(MV::cast<int>(MV::point(0.0f, -speed) * static_cast<float>(dt)));
+		controlPanel->onSceneDrag(MV::cast<int>(MV::point(0.0f, -speed) * static_cast<float>(dt)));
 	}
 	if (keystate[SDL_SCANCODE_V]) {
 		handleScroll(-zoomSpeed * static_cast<float>(dt));
@@ -47,7 +51,7 @@ bool Editor::update(double dt){
 		handleScroll(zoomSpeed * static_cast<float>(dt));
 	}
 	lastUpdateDelta = dt;
-	selectorPanel.update();
+	selectorPanel->update();
 	managers.pool.run();
 	if (done) {
 		done = false;
@@ -57,15 +61,15 @@ bool Editor::update(double dt){
 }
 
 void Editor::sceneUpdated(){
-	selectorPanel.refresh();
+	selectorPanel->refresh();
 }
 
 void Editor::initializeWindow(){
 	mouse.update();
 	
-	mouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::MouseState& a_mouse){
+	mouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::TapDevice& a_mouse){
 		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, {10}, [&](){
-			auto signature = mouse.onMove.connect(MV::guid("inDrag"), [&](MV::MouseState& a_mouse2){
+			auto signature = mouse.onMove.connect(MV::guid("inDrag"), [&](MV::TapDevice& a_mouse2){
 				const Uint8* keystate = SDL_GetKeyboardState(NULL);
 				if (!keystate[SDL_SCANCODE_LSHIFT]) {
 					scene->camera().translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
@@ -73,10 +77,10 @@ void Editor::initializeWindow(){
 				} else {
 					scene->translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
 				}
-				controlPanel.onSceneDrag(a_mouse2.position() - a_mouse2.oldPosition());
+				controlPanel->onSceneDrag(a_mouse2.position() - a_mouse2.oldPosition());
 			});
 			auto cancelId = MV::guid("cancelDrag");
-			mouse.onLeftMouseUp.connect(cancelId, [=](MV::MouseState& a_mouse2){
+			mouse.onLeftMouseUp.connect(cancelId, [=](MV::TapDevice& a_mouse2){
 				a_mouse2.onMove.disconnect(signature);
 				a_mouse2.onLeftMouseUp.disconnect(cancelId);
 			});
@@ -127,7 +131,8 @@ void Editor::handleInput(){
 				handleScroll(static_cast<float>(event.wheel.y));
 				break;
 			}
-			controlPanel.handleInput(event);
+			controlPanel->handleInput(event);
+			mouse.updateTouch(event, managers.renderer.window().size());
 		}
 	}
 	mouse.update();
@@ -136,10 +141,10 @@ void Editor::handleInput(){
 void Editor::render(){
 	managers.renderer.clearScreen();
 	
-	if(controlPanel.root() != scene){
-		scene = controlPanel.root();
+	if(controlPanel->root() != scene){
+		scene = controlPanel->root();
 		scene->id("root");
-		selectorPanel.refresh(scene);
+		selectorPanel->refresh(scene);
 	}
 	auto scaler = visor->component<MV::Scene::Drawable>("ScreenScaler", false);
 	if (!scaler) {
@@ -155,7 +160,7 @@ void Editor::render(){
 }
 
 void Editor::initializeControls(){
-	controlPanel.loadPanel<DeselectedEditorPanel>();
+	controlPanel->loadPanel<DeselectedEditorPanel>();
 }
 
 void Editor::handleScroll(float a_amount) {
@@ -165,6 +170,6 @@ void Editor::handleScroll(float a_amount) {
 		auto originalScreenPosition = scene->localFromScreen(mouse.position()) * (MV::toPoint(screenScale));
 		scene->addScale(screenScale);
 		scene->translate(originalScreenPosition * -1.0f);
-		controlPanel.onSceneZoom();
+		controlPanel->onSceneZoom();
 	}
 }

@@ -102,7 +102,7 @@ namespace MV {
 			return result;
 		}
 
-		static std::shared_ptr<Email> make(const std::shared_ptr<boost::asio::io_service> &a_suppliedService, const std::string &a_host, const std::string &a_port, const Credentials &a_credentials, MainThreadCallback a_onFinish = MainThreadCallback()) {
+		static std::shared_ptr<Email> make(const std::shared_ptr<boost::asio::io_context> &a_suppliedService, const std::string &a_host, const std::string &a_port, const Credentials &a_credentials, MainThreadCallback a_onFinish = MainThreadCallback()) {
 			auto result = std::shared_ptr<Email>(new Email(a_host, a_port, a_credentials));
 			result->onFinish = a_onFinish;
 			result->ioService = a_suppliedService;
@@ -153,12 +153,12 @@ namespace MV {
 		bool initializeSocket() {
 			bool created = false;
 			if (!ioService) {
-				ioService = std::make_shared<boost::asio::io_service>();
+				ioService = std::make_shared<boost::asio::io_context>();
 				created = true;
 			}
 
 			resolver = std::make_unique<boost::asio::ip::tcp::resolver>(*ioService);
-			tlsContext = std::make_unique<boost::asio::ssl::context>(*ioService, boost::asio::ssl::context::tlsv1_client);
+			tlsContext = std::make_unique<boost::asio::ssl::context>(boost::asio::ssl::context::tlsv1_client);
 			socket = std::make_unique<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>(*ioService, *tlsContext);
 
 			return created;
@@ -342,7 +342,7 @@ namespace MV {
 			});
 		}
 
-		std::shared_ptr<boost::asio::io_service> ioService;
+		std::shared_ptr<boost::asio::io_context> ioService;
 		std::unique_ptr<boost::asio::ip::tcp::resolver> resolver;
 		//boost::asio::ip::tcp::socket socket;
 

@@ -9,7 +9,7 @@
 #include <list>
 #include "log.h"
 
-namespace boost { namespace asio { class io_service; } }
+namespace boost { namespace asio { class io_context; } }
 
 namespace MV {
 	struct ThreadPoolDetails;
@@ -120,7 +120,7 @@ namespace MV {
 			return workers.size();
 		}
 
-		std::shared_ptr<boost::asio::io_service> service() const;
+		std::shared_ptr<boost::asio::io_context> io_context() const;
 	private:
 		void exception(std::exception &e) {
 			std::lock_guard<std::mutex> guard(exceptionLock);

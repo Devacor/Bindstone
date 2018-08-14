@@ -41,7 +41,7 @@ namespace MV {
 			return dragHandle;
 		}
 
-		Slider::Slider(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse) :
+		Slider::Slider(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse) :
 			Clickable(a_owner, a_mouse),
 			onPercentChange(onPercentChangeSignal) {
 			shouldDraw = true;

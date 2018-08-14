@@ -9,7 +9,7 @@
 
 class SceneGraphPanel {
 public:
-	SceneGraphPanel(std::shared_ptr<MV::Scene::Node> a_scene, std::shared_ptr<MV::Scene::Node> a_root, SharedResources a_sharedResources):
+	SceneGraphPanel(std::shared_ptr<MV::Scene::Node> a_scene, std::shared_ptr<MV::Scene::Node> a_root, MV::Services& a_sharedResources):
 		root(a_root),
 		scene(a_scene),
 		sharedResources(a_sharedResources){
@@ -34,7 +34,7 @@ private:
 
 	void layoutParents(std::shared_ptr<MV::Scene::Node> a_parent);
 
-	SharedResources sharedResources;
+	MV::Services& sharedResources;
 	std::shared_ptr<MV::Scene::Node> scene;
 	std::shared_ptr<MV::Scene::Node> root;
 	std::shared_ptr<MV::Scene::Node> box;

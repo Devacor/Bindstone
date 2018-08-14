@@ -9,7 +9,7 @@ class EditorPanel;
 
 class EditableNode {
 public:
-	EditableNode(std::shared_ptr<MV::Scene::Node> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+	EditableNode(std::shared_ptr<MV::Scene::Node> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice *a_mouse);
 
 	~EditableNode();
 
@@ -28,7 +28,7 @@ public:
 	std::shared_ptr<MV::Scene::Node> elementToEdit;
 	std::shared_ptr<MV::Scene::Node> controlContainer;
 private:
-	MV::MouseState *mouse;
+	MV::TapDevice *mouse;
 
 	MV::Scene::SafeComponent<MV::Scene::Clickable> positionHandle;
 	MV::Scene::SafeComponent<MV::Scene::Clickable> rotationHandle;
@@ -36,7 +36,7 @@ private:
 
 class ResizeHandles {
 public:
-	ResizeHandles(MV::Scene::SafeComponent<MV::Scene::Component> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+	ResizeHandles(MV::Scene::SafeComponent<MV::Scene::Component> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice *a_mouse);
 	~ResizeHandles() {
 		controlContainer->removeFromParent();
 	}
@@ -60,7 +60,7 @@ protected:
 	virtual void removeHandlesImplementation() {}
 
 	MV::Scene::Node::BasicSharedSignalType nodeMoved;
-	MV::MouseState *mouse;
+	MV::TapDevice *mouse;
 
 	MV::Size<> aspectSize;
 
@@ -76,7 +76,7 @@ protected:
 
 class EditablePoints {
 public:
-	EditablePoints(MV::Scene::SafeComponent<MV::Scene::Drawable> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+	EditablePoints(MV::Scene::SafeComponent<MV::Scene::Drawable> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice *a_mouse);
 
 	~EditablePoints() {
 		controlContainer->removeFromParent();
@@ -96,7 +96,7 @@ private:
 
 	MV::Scene::Node::BasicSharedSignalType nodeMoved;
 
-	MV::MouseState *mouse;
+	MV::TapDevice *mouse;
 
 	std::vector<MV::Scene::SafeComponent<MV::Scene::Clickable>> pointHandles;
 
@@ -105,7 +105,7 @@ private:
 
 class EditableGrid {
 public:
-	EditableGrid(MV::Scene::SafeComponent<MV::Scene::Grid> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+	EditableGrid(MV::Scene::SafeComponent<MV::Scene::Grid> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice *a_mouse);
 
 	~EditableGrid() {
 		controlContainer->removeFromParent();
@@ -120,7 +120,7 @@ private:
 
 	MV::Scene::Node::BasicSharedSignalType nodeMoved;
 
-	MV::MouseState *mouse;
+	MV::TapDevice *mouse;
 
 	MV::Scene::SafeComponent<MV::Scene::Sprite> positionHandle;
 
@@ -129,7 +129,7 @@ private:
 
 class EditableSpine {
 public:
-	EditableSpine(MV::Scene::SafeComponent<MV::Scene::Spine> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+	EditableSpine(MV::Scene::SafeComponent<MV::Scene::Spine> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice *a_mouse);
 
 	~EditableSpine() {
 		controlContainer->removeFromParent();
@@ -146,7 +146,7 @@ private:
 
 	MV::Scene::Node::BasicSharedSignalType nodeMoved;
 
-	MV::MouseState *mouse;
+	MV::TapDevice *mouse;
 
 	MV::Scene::SafeComponent<MV::Scene::Sprite> positionHandle;
 
@@ -156,7 +156,7 @@ private:
 
 class EditableButton : public ResizeHandles {
 public:
-	EditableButton(MV::Scene::SafeComponent<MV::Scene::Button> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+	EditableButton(MV::Scene::SafeComponent<MV::Scene::Button> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice *a_mouse);
 	~EditableButton();
 
 	MV::Scene::SafeComponent<MV::Scene::Button> elementToEdit;
@@ -164,7 +164,7 @@ public:
 
 class EditableClickable : public ResizeHandles {
 public:
-	EditableClickable(MV::Scene::SafeComponent<MV::Scene::Clickable> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+	EditableClickable(MV::Scene::SafeComponent<MV::Scene::Clickable> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice *a_mouse);
 	~EditableClickable();
 
 	MV::Scene::SafeComponent<MV::Scene::Clickable> elementToEdit;
@@ -172,7 +172,7 @@ public:
 
 class EditableRectangle : public ResizeHandles {
 public:
-	EditableRectangle(MV::Scene::SafeComponent<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
+	EditableRectangle(MV::Scene::SafeComponent<MV::Scene::Sprite> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::TapDevice *a_mouse);
 
 	void aspect(MV::Size<> a_newAspect);
 
@@ -181,14 +181,14 @@ public:
 
 class EditableText : public ResizeHandles {
 public:
-	EditableText(MV::Scene::SafeComponent<MV::Scene::Text> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::MouseState *a_mouse);
+	EditableText(MV::Scene::SafeComponent<MV::Scene::Text> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_controlContainer, MV::TapDevice *a_mouse);
 
 	MV::Scene::SafeComponent<MV::Scene::Text> elementToEdit;
 };
 
 class Selection {
 public:
-	Selection(std::shared_ptr<MV::Scene::Node> a_scene, MV::MouseState &a_mouse);
+	Selection(std::shared_ptr<MV::Scene::Node> a_scene, MV::TapDevice &a_mouse);
 
 	void callback(std::function<void(const MV::BoxAABB<int> &)> a_callback);
 	void enable(std::function<void(const MV::BoxAABB<int> &)> a_callback);
@@ -200,14 +200,14 @@ private:
 	std::shared_ptr<MV::Scene::Node> scene;
 
 	MV::Scene::SafeComponent<MV::Scene::Sprite> visibleSelection;
-	MV::MouseState &mouse;
+	MV::TapDevice &mouse;
 	MV::BoxAABB<int> selection;
 	std::function<void(const MV::BoxAABB<int> &)> selectedCallback;
 
-	MV::MouseState::SignalType onMouseDownHandle;
-	MV::MouseState::SignalType onMouseUpHandle;
+	MV::TapDevice::SignalType onMouseDownHandle;
+	MV::TapDevice::SignalType onMouseUpHandle;
 
-	MV::MouseState::SignalType onMouseMoveHandle;
+	MV::TapDevice::SignalType onMouseMoveHandle;
 
 	bool inSelection = false;
 
@@ -217,7 +217,7 @@ private:
 
 class EditableEmitter : public ResizeHandles {
 public:
-	EditableEmitter(MV::Scene::SafeComponent<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+	EditableEmitter(MV::Scene::SafeComponent<MV::Scene::Emitter> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice *a_mouse);
 
 	void position(MV::Point<> a_newPosition);
 	MV::Point<> position() const;
@@ -232,7 +232,7 @@ public:
 
 class EditablePathMap : public ResizeHandles {
 public:
-	EditablePathMap(MV::Scene::SafeComponent<MV::Scene::PathMap> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::MouseState *a_mouse);
+	EditablePathMap(MV::Scene::SafeComponent<MV::Scene::PathMap> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice *a_mouse);
 
 	~EditablePathMap() {
 		elementToEdit->hide();

@@ -5,7 +5,7 @@
 #include "Game/NetworkLayer/package.h"
 
 
-void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::MouseState &a_mouseState, MV::ThreadPool &a_pool) {
+void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::TapDevice &a_tapDevice, MV::ThreadPool &a_pool) {
 	MV::TexturePoint::hook(a_script);
 	MV::Color::hook(a_script);
 	MV::Size<MV::PointPrecision>::hook(a_script);
@@ -39,7 +39,7 @@ void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::MouseState &a_mou
 	MV::Scene::PathMap::hook(a_script);
 	MV::Scene::PathAgent::hook(a_script);
 	MV::Scene::Emitter::hook(a_script, a_pool);
-	MV::Scene::Clickable::hook(a_script, a_mouseState);
+	MV::Scene::Clickable::hook(a_script, a_tapDevice);
 
 	MV::Client::hook(a_script);
 	CreatePlayer::hook(a_script);

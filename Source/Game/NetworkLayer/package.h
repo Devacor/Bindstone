@@ -5,5 +5,6 @@
 #include "Game/NetworkLayer/clientActions.h"
 #include "Game/NetworkLayer/gameServerActions.h"
 #include "Game/NetworkLayer/accountActions.h"
+#include "Game/NetworkLayer/synchronizeAction.h"
 
 #endif

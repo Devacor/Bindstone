@@ -1,16 +1,15 @@
 #include "building.h"
-#include "creature.h"
 #include "Game/Instance/gameInstance.h"
 #include "Game/player.h"
 #include "Utility/generalUtility.h"
 
 #include "chaiscript/chaiscript_stdlib.hpp"
 
-Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const BuildingData &a_data, const std::string &a_skin, int a_slot, const std::shared_ptr<Player> &a_player, GameInstance& a_instance) :
+Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<Player> &a_player, GameInstance& a_instance) :
 	Component(a_owner),
-	buildingData(a_data),
-	skin(a_skin),
+	buildingData(a_instance.data().buildings().data(a_player->loadout.buildings[a_loadoutSlot])),
 	slot(a_slot),
+	loadoutSlot(a_loadoutSlot),
 	owningPlayer(a_player),
 	gameInstance(a_instance),
 	onUpgraded(onUpgradedSignal){
@@ -24,16 +23,21 @@ Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const Building
 }
 
 void Building::initialize() {
-	auto newNode = owner()->make(assetPath(), gameInstance.jsonLoadBinder());
-	newNode->component<MV::Scene::Spine>()->animate("idle");
+	auto newNode = owner()->make(assetPath(), gameInstance.services());
+	//newNode->component<MV::Scene::Spine>()->animate("idle");
 	owner()->scale(owner()->scale() * gameInstance.teamForPlayer(owningPlayer).scale());
 	initializeBuildingButton(newNode);
 }
 
-void Building::spawnCurrentCreature() {
-	auto creatureNode = gameInstance.creatureContainer()->make(MV::guid(currentCreature().id));
+void Building::spawnNetworkCreature(std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> a_synchronizedCreature) {
+	auto creatureNode = gameInstance.creatureContainer()->make(std::to_string(a_synchronizedCreature->id()));
 	creatureNode->worldPosition(owner()->worldFromLocal(spawnPoint));
-	creatureNode->attach<Creature>(currentCreature().id, skin, owningPlayer, gameInstance);
+
+	creatureNode->attach<Creature>(a_synchronizedCreature, gameInstance);
+}
+
+std::string Building::skin() const {
+	return player()->loadout.skins[loadoutSlot];
 }
 
 void Building::incrementCreatureIndex() {
@@ -50,7 +54,7 @@ void Building::incrementCreatureIndex() {
 void Building::updateImplementation(double a_dt) {
 	countdown -= a_dt;
 	if (countdown <= 0 && waveHasCreatures(waveIndex)) {
-		spawnCurrentCreature();
+		gameInstance.spawnCreature(slot);
 		incrementCreatureIndex();
 		countdown = countdown + currentCreature().delay;
 	}
@@ -71,7 +75,7 @@ void Building::upgrade(size_t a_index) {
 }
 
 void Building::requestUpgrade(size_t a_index) {
-	gameInstance.requestUpgrade(owningPlayer, slot, a_index);
+	gameInstance.requestUpgrade(slot, a_index);
 }
 
 const BuildTree* Building::current() const {

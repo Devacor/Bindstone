@@ -25,7 +25,7 @@ namespace MV {
 		friend TemporaryCost;
 		friend cereal::access;
 	public:
-		typedef void CallbackSignature(std::shared_ptr<Map>, const Point<int> &);
+		typedef void CallbackSignature(const std::shared_ptr<Map> &, const Point<int> &);
 		typedef SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
 	private:
 		Signal<CallbackSignature> onBlockSignal;
@@ -51,17 +51,25 @@ namespace MV {
 		float baseCost() const;
 		void baseCost(float a_newCost);
 
-		float totalCost() const;
+		inline float totalCost() const {
+			return travelCost + temporaryCost;
+		}
 
-		void block();
-		void unblock();
-		bool blocked() const;
+		inline void block();
+		inline void unblock();
+		inline bool blocked() const {
+			return staticBlockedSemaphore != 0 || blockedSemaphore != 0;
+		}
+
+		inline bool clearedForSize(int a_unitSize) const {
+			return !blocked() && (a_unitSize <= 1 || clearance() >= a_unitSize);
+		}
 
 		void staticBlock();
 		void staticUnblock();
 		bool staticallyBlocked() const;
 
-		int clearance() const {
+		inline int clearance() const {
 			lazyInitialize();
 			return clearanceAmount;
 		}
@@ -163,40 +171,64 @@ namespace MV {
 			return squares[a_location.x][a_location.y];
 		}
 
-		bool inBounds(Point<int> a_location) const {
+		inline bool inBounds(Point<int> a_location) const {
 			auto ourSize = size();
 			return !squares.empty() && (a_location.x >= 0 && a_location.y >= 0) && (a_location.x < ourSize.width && a_location.y < ourSize.height);
 		}
 
-		Size<int> size() const {
+		inline Size<int> size() const {
 			return Size<int>(static_cast<int>(squares.size()), static_cast<int>((squares.empty() ? 0 : squares[0].size())));
 		}
 
-		bool blocked(Point<int> a_location) const {
+		inline bool blocked(Point<int> a_location) const {
 			return !inBounds(a_location) || squares[a_location.x][a_location.y].blocked();
 		}
 
-		bool staticallyBlocked(Point<int> a_location) const {
+		inline bool staticallyBlocked(Point<int> a_location) const {
 			return !inBounds(a_location) || squares[a_location.x][a_location.y].staticallyBlocked();
 		}
 
-		bool corners() const {
+		inline bool clearedForSize(Point<int> a_location, int a_unitSize) {
+			return inBounds(a_location) && squares[a_location.x][a_location.y].clearedForSize(a_unitSize);
+		}
+
+		inline bool corners() const {
 			return usingCorners;
 		}
 
-		Map();
 	private:
+		Map();
 		Map(const Size<int> &a_size, float a_defaultCost, bool a_useCorners);
+		Map(const Map &) = delete;
+		Map operator=(const Map&) = delete;
 
 		void hookUpObservation();
 
 		template <class Archive>
-		void serialize(Archive & archive, std::uint32_t const version) {
+		void save(Archive & archive, std::uint32_t const version) const {
+			archive(
+				CEREAL_NVP(usingCorners),
+				CEREAL_NVP(squares)
+			);
+		}
+
+		template <class Archive>
+		void load(Archive & archive, std::uint32_t const version) {
 			archive(
 				CEREAL_NVP(usingCorners),
 				CEREAL_NVP(squares)
 			);
 			hookUpObservation();
+		}
+
+		template <class Archive>
+		static void load_and_construct(Archive & archive, cereal::construct<Map> &construct, std::uint32_t const /*version*/) {
+			construct();
+			archive(
+				cereal::make_nvp("usingCorners", construct->usingCorners),
+				cereal::make_nvp("squares", construct->squares)
+			);
+			construct->hookUpObservation();
 		}
 
 		bool usingCorners;
@@ -210,8 +242,9 @@ namespace MV {
 			map(a_map),
 			position(a_position),
 			temporaryCost(a_cost) {
-
-			map->get(position).addTemporaryCost(temporaryCost);
+			if (temporaryCost > 0) {
+				a_map->get(position).addTemporaryCost(temporaryCost);
+			}
 		}
 
 		TemporaryCost(TemporaryCost &&a_rhs):
@@ -219,18 +252,24 @@ namespace MV {
 			position(std::move(a_rhs.position)),
             temporaryCost(std::move(a_rhs.temporaryCost)){
 
+			a_rhs.map.reset();
 			a_rhs.temporaryCost = 0;
 		}
 
 		~TemporaryCost() {
-			if (temporaryCost != 0) {
-				map->get(position).removeTemporaryCost(temporaryCost);
+			if (temporaryCost > 0) {
+				if (auto a_map = map.lock()) {
+					a_map->get(position).removeTemporaryCost(temporaryCost);
+				}
 			}
 		}
 
 	private:
 		TemporaryCost(const TemporaryCost &) = delete;
-		std::shared_ptr<Map> map;
+		TemporaryCost operator=(const TemporaryCost &) = delete;
+		TemporaryCost operator=(TemporaryCost &&) = delete;
+
+		std::weak_ptr<Map> map;
 		Point<int> position;
 		float temporaryCost;
 	};
@@ -415,6 +454,9 @@ namespace MV {
 			return std::shared_ptr<NavigationAgent>(new NavigationAgent(a_map, a_newPosition, a_unitSize, a_offsetCenterByHalf));
 		}
 
+		int debugId() { return ourDebugId; }
+		void debugId(int a_id) { ourDebugId = a_id; }
+
 		~NavigationAgent() {
 			unblockMap();
 		}
@@ -440,6 +482,7 @@ namespace MV {
 			if (footprintDisabled) {
 				footprintDisabled = false;
 				blockMap();
+				markDirty();
 			}
 			return shared_from_this();
 		}
@@ -449,7 +492,7 @@ namespace MV {
 		}
 
 		Point<PointPrecision> position() const {
-			return ourPosition;
+			return ourPosition - centerOffset;
 		}
 
 		std::vector<PathNode> path(bool a_allowRecalculate = true) {
@@ -502,9 +545,9 @@ namespace MV {
 		std::shared_ptr<NavigationAgent> goal(const Point<> &a_newGoal, PointPrecision a_acceptableDistance) {
 			auto self = shared_from_this();
 			auto potentialNewGoal = a_newGoal + centerOffset;
-			if (ourGoal != potentialNewGoal) {
+			bool wasMoving = pathfinding();
+			if (!wasMoving || ourGoal != potentialNewGoal) {
 				ourGoal = potentialNewGoal;
-				bool wasMoving = pathfinding();
 				acceptableDistance = std::max(a_acceptableDistance, 0.0f);
 				markDirty();
 				if (!pathfinding()) {
@@ -543,8 +586,8 @@ namespace MV {
 			return self;
 		}
 		bool pathfinding() const {
-			auto goalDistance = static_cast<PointPrecision>(distance(ourPosition, ourGoal));
-			return goalDistance > acceptableDistance && !equals(goalDistance, acceptableDistance);
+			auto goalDistance = static_cast<PointPrecision>(distance(cast<int>(ourPosition), cast<int>(ourGoal)));
+			return goalDistance > acceptableDistance;
 		}
 		NavigationAgent() :
 			onArrive(onArriveSignal),
@@ -553,6 +596,7 @@ namespace MV {
             onStart(onStartSignal){}
 	private:
 		bool attemptToRecalculate();
+		void incrementPathIndex();
 
 		NavigationAgent(std::shared_ptr<Map> a_map, const Point<int> &a_newPosition, int a_unitSize, bool a_offsetCenterByHalf) :
 			NavigationAgent(a_map, cast<PointPrecision>(a_newPosition), a_unitSize, a_offsetCenterByHalf){
@@ -567,7 +611,13 @@ namespace MV {
 			ourPosition(a_newPosition + centerOffset),
 			ourGoal(a_newPosition + centerOffset),
 			unitSize(a_unitSize) {
-			blockMap();
+			if (canPlaceOnMapAtCurrentPosition()) {
+				blockMap();
+				waitingForPlacement = false;
+			} else {
+				footprintDisabled = true;
+				waitingForPlacement = true;
+			}
 		}
 		NavigationAgent(const NavigationAgent &) = delete;
 		NavigationAgent& operator=(const NavigationAgent&a_rhs) = delete;
@@ -589,7 +639,8 @@ namespace MV {
 				CEREAL_NVP(acceptableDistance),
 				CEREAL_NVP(unitSize),
 				CEREAL_NVP(map),
-				CEREAL_NVP(footprintDisabled)
+				CEREAL_NVP(footprintDisabled),
+				CEREAL_NVP(waitingForPlacement)
 			);
 
 			blockMap();
@@ -599,6 +650,12 @@ namespace MV {
 			costs.clear();
 			recievers.clear();
 			dirtyPath = true;
+		}
+
+		void removeBlockedPathObservers(unsigned int a_pathId) {
+			blockedNodeObservers.erase(std::remove_if(blockedNodeObservers.begin(), blockedNodeObservers.end(), [&](auto&& blockedObserver) {
+				return blockedObserver.pathId == a_pathId;
+			}), blockedNodeObservers.end());
 		}
 
 		void updateObservedNodes();
@@ -617,8 +674,15 @@ namespace MV {
 			dirtyPath = false;
 		}
 
+		bool canPlaceOnMapAtCurrentPosition() {
+			auto topLeft = cast<int>(position());
+			return map->clearedForSize(topLeft, unitSize);
+		}
+
 		void blockMap(){
 			if (!footprintDisabled) {
+				++activeUpdate;
+				SCOPE_EXIT{ --activeUpdate; };
 				auto topLeft = cast<int>(position());
 				for (int x = topLeft.x; x < topLeft.x + size() && x < map->size().width; ++x) {
 					for (int y = topLeft.y; y < topLeft.y + size() && y < map->size().height; ++y) {
@@ -628,8 +692,10 @@ namespace MV {
 			}
 		}
 
-		void unblockMap() {
+		void unblockMap(bool a_notify = true) {
 			if (!footprintDisabled) {
+				++activeUpdate;
+				SCOPE_EXIT{ --activeUpdate; };
 				auto topLeft = cast<int>(position());
 				for (int x = topLeft.x; x < topLeft.x + size() && x < map->size().width; ++x) {
 					for (int y = topLeft.y; y < topLeft.y + size() && y < map->size().height; ++y) {
@@ -638,6 +704,35 @@ namespace MV {
 				}
 			}
 		}
+
+		struct RecentlyBlockedNodeObserver {
+			RecentlyBlockedNodeObserver(NavigationAgent* a_self, const std::shared_ptr<Map> &a_map, const Point<int> &a_position, unsigned int a_pathId):
+				pathId(a_pathId){
+				if (a_self->size() > 1) {
+					reciever = a_map->get(a_position).onClearanceChange.connect([this, a_self](const std::shared_ptr<Map> &a_innerMap, const Point<int> &a_innerPosition) {
+						if (!a_self->activeUpdate && !a_self->overlaps(a_innerPosition) && (a_self->size() >= a_innerMap->get(a_innerPosition).clearance())) {
+							a_self->activeUpdate++;
+							SCOPE_EXIT{ a_self->activeUpdate--; };
+							a_self->markDirty();
+							a_self->removeBlockedPathObservers(pathId);
+						}
+					});
+				} else {
+					reciever = a_map->get(a_position).onUnblock.connect([this, a_self](const std::shared_ptr<Map> &a_innerMap, const Point<int> &a_innerPosition) {
+						if (!a_self->activeUpdate && !a_self->overlaps(a_innerPosition)) {
+							a_self->activeUpdate++;
+							SCOPE_EXIT{ a_self->activeUpdate--; };
+							a_self->markDirty();
+							a_self->removeBlockedPathObservers(pathId);
+						}
+					});
+				}
+			}
+
+			MapNode::SharedRecieverType reciever;
+			int gridMovesLeftUntilExpires = 5;
+			unsigned int pathId;
+		};
 
 		std::shared_ptr<Map> map;
 		Point<PointPrecision> centerOffset;
@@ -648,18 +743,22 @@ namespace MV {
 
 		bool dirtyPath = true;
 		const int64_t maxNodesToSearch = 200;
-		bool activeUpdate = false;
+		int activeUpdate = 0;
 
 		bool footprintDisabled = false;
+		bool waitingForPlacement = true;
 
 		int unitSize = 1;
 
 		std::vector<TemporaryCost> costs;
 		std::vector<MapNode::SharedRecieverType> recievers;
-
+		std::vector<RecentlyBlockedNodeObserver> blockedNodeObservers;
+		
 		size_t currentPathIndex = 0;
 		std::shared_ptr<Path> ourPath;
 		std::vector<PathNode> calculatedPath;
+
+		int ourDebugId = 0;
 	public:
 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 			a_script.add(chaiscript::user_type<NavigationAgent>(), "NavigationAgent");
@@ -698,6 +797,7 @@ namespace MV {
             cereal::make_nvp("map", weakMap)
         );
     }
+
     
     template <class Archive>
     void MapNode::load(Archive & archive) {
@@ -711,6 +811,27 @@ namespace MV {
         );
         map = weakMap.lock().get();
     }
+
+	void MapNode::block() {
+		bool wasBlocked = blocked();
+		blockedSemaphore++;
+		if (!wasBlocked) {
+			auto sharedMap = map->shared_from_this();
+			onBlockSignal(sharedMap, location);
+			if(blocked()){clearanceAmount = 0; onClearanceChangeSignal(sharedMap, location);}
+			else { calculateClearance(); }
+		}
+	}
+
+	void MapNode::unblock() {
+		require<ResourceException>(blockedSemaphore > 0, "Error: Block Semaphore overextended in MapNode, something is unblocking excessively.");
+		blockedSemaphore--;
+		if (!blocked()) {
+			auto sharedMap = map->shared_from_this();
+			onUnblockSignal(sharedMap, location);
+			calculateClearance();
+		}
+	}
 }
 
 #endif

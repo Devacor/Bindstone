@@ -30,22 +30,5 @@ enum InterfaceColors : uint32_t {
 	TOGGLE_BACKGROUND = 0x9fa4b7,
 	TOGGLE_CENTER = 0x3c404f
 };
-class Editor;
-struct SharedResources {
-	SharedResources(Editor* a_editor, MV::ThreadPool *a_pool, MV::SharedTextures *a_textures, MV::TextLibrary *a_textLibrary, MV::MouseState *a_mouse, chaiscript::ChaiScript *a_script):
-		pool(a_pool),
-		textures(a_textures),
-		textLibrary(a_textLibrary),
-		mouse(a_mouse),
-		editor(a_editor),
-		script(a_script){
-	}
-	MV::TextLibrary *textLibrary;
-	MV::MouseState *mouse;
-	MV::ThreadPool *pool;
-	MV::SharedTextures *textures;
-	Editor* editor;
-	chaiscript::ChaiScript *script;
-};
 
 #endif

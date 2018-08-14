@@ -65,7 +65,7 @@ namespace MV {
 			return hitDetectionType == BoundsType::NONE;
 		}
 
-		MouseState & Clickable::mouse() const {
+		TapDevice & Clickable::mouse() const {
 			return ourMouse;
 		}
 
@@ -91,7 +91,7 @@ namespace MV {
 			return overrideClickPriority;
 		}
 
-		Clickable::Clickable(const std::weak_ptr<Node>& a_owner, MouseState & a_mouse) :
+		Clickable::Clickable(const std::weak_ptr<Node>& a_owner, TapDevice & a_mouse) :
 			Sprite(a_owner),
 			ourMouse(a_mouse),
 			onPress(onPressSignal),
@@ -108,7 +108,7 @@ namespace MV {
 
 		void Clickable::initialize() {
 			Sprite::initialize();
-			onLeftMouseDownHandle = ourMouse.onLeftMouseDown.connect([&](MouseState& a_mouse) {
+			onLeftMouseDownHandle = ourMouse.onLeftMouseDown.connect([&](TapDevice& a_mouse) {
 				if (mouseInBounds(a_mouse)) {
 					a_mouse.queueExclusiveAction({ eatTouches, clickPriority(), [&]() {
 						acceptDownClick();
@@ -116,7 +116,7 @@ namespace MV {
 				}
 			});
 
-			onLeftMouseUpHandle = ourMouse.onLeftMouseUp.connect([&](MouseState& a_mouse) {
+			onLeftMouseUpHandle = ourMouse.onLeftMouseUp.connect([&](TapDevice& a_mouse) {
 				acceptUpClick();
 			});
 		}
@@ -169,7 +169,7 @@ namespace MV {
 			lastKnownVelocity.clear();
 			dragTimer.start();
 			accumulatedDragDistance = 0.0f;
-			onMouseMoveHandle = ourMouse.onMove.connect([&](MouseState& a_mouseInner) {
+			onMouseMoveHandle = ourMouse.onMove.connect([&](TapDevice& a_mouseInner) {
 				auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
 				auto dragDeltaPosition = a_mouseInner.position() - priorMousePosition;
 				auto dt = dragTimer.delta();
@@ -182,7 +182,7 @@ namespace MV {
 			});
 		}
 
-		bool Clickable::mouseInBounds(const MouseState & a_state) {
+		bool Clickable::mouseInBounds(const TapDevice & a_state) {
 			if (ownerIsAlive() && owner()->visible() && hitDetectionType != BoundsType::NONE) {
 				BoxAABB<> hitBox;
 				if (hitDetectionType == BoundsType::LOCAL) {

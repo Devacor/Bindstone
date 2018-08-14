@@ -199,6 +199,6 @@ namespace MV {
 	}
 
 	std::string sha512(const std::string &input, const std::string &salt, size_t work) {
-		return sha512(salt.substr(0, salt.size() / 2) + input + salt.substr(salt.size() / 2, salt.size() - salt.size() / 2));
+		return sha512(salt.substr(0, salt.size() / 2) + input + salt.substr(salt.size() / 2, salt.size() - salt.size() / 2), work);
 	}
 }

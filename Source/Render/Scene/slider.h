@@ -26,7 +26,7 @@ namespace MV {
 			std::shared_ptr<Node> handle() const;
 
 		protected:
-			Slider(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse);
+			Slider(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse);
 
 			template <class Archive>
 			void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -39,9 +39,8 @@ namespace MV {
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Slider> &construct, std::uint32_t const /*version*/) {
-				MouseState *mouse = nullptr;
-				archive.extract(cereal::make_nvp("mouse", mouse));
-				MV::require<MV::PointerException>(mouse != nullptr, "Null mouse in Slider::load_and_construct.");
+				auto& services = cereal::get_user_data<MV::Services>(archive);
+				auto* mouse = services.get<MV::TapDevice>();
 				construct(std::shared_ptr<Node>(), *mouse);
 				archive(
 					cereal::make_nvp("dragPercent", construct->dragPercent),

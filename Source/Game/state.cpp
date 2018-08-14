@@ -3,6 +3,7 @@
 
 void JsonNodeLoadBinder::operator()(cereal::JSONInputArchive& a_archive) {
 	a_archive.add(
+		cereal::make_nvp("services", &managers.services),
 		cereal::make_nvp("mouse", &mouse),
 		cereal::make_nvp("renderer", &managers.renderer),
 		cereal::make_nvp("textLibrary", &managers.textLibrary),
@@ -14,6 +15,7 @@ void JsonNodeLoadBinder::operator()(cereal::JSONInputArchive& a_archive) {
 
 void BinaryNodeLoadBinder::operator()(cereal::PortableBinaryInputArchive& a_archive) {
 	a_archive.add(
+		cereal::make_nvp("services", &managers.services),
 		cereal::make_nvp("mouse", &mouse),
 		cereal::make_nvp("renderer", &managers.renderer),
 		cereal::make_nvp("textLibrary", &managers.textLibrary),

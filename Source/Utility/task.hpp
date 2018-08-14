@@ -263,7 +263,7 @@ namespace MV {
 
 		Task& now(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, ExactType<bool> a_blockParentCompletion = true) {
 			now(a_name, [](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }, a_blockParentCompletion);
-			registerActionBase(a_action);
+			recent()->registerActionBase(a_action);
 			return *this;
 		}
 
@@ -293,7 +293,7 @@ namespace MV {
 
 		Task& then(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, ExactType<bool> a_blockParentCompletion = true) {
 			then(a_name, [](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }, a_blockParentCompletion);
-			registerActionBase(a_action);
+			recent()->registerActionBase(a_action);
 			return *this;
 		}
 
@@ -328,7 +328,7 @@ namespace MV {
 
 		Task& thenAlso(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, ExactType<bool> a_blockParentCompletion = true) {
 			thenAlso(a_name, [](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }, a_blockParentCompletion);
-			registerActionBase(a_action);
+			recent()->registerActionBase(a_action);
 			return *this;
 		}
 
@@ -362,7 +362,7 @@ namespace MV {
 
 		Task& also(const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, ExactType<bool> a_blockParentCompletion = true) {
 			also(a_name, [](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }, a_blockParentCompletion);
-			registerActionBase(a_action);
+			recent()->registerActionBase(a_action);
 			return *this;
 		}
 
@@ -399,7 +399,7 @@ namespace MV {
 
 		Task& after(const std::string &a_reference, const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, ExactType<bool> a_blockParentCompletion = true) {
 			after(a_reference, a_name, [](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }, a_blockParentCompletion);
-			registerActionBase(a_action);
+			recent()->registerActionBase(a_action);
 			return *this;
 		}
 
@@ -434,7 +434,7 @@ namespace MV {
 
 		Task& before(const std::string &a_reference, const std::string &a_name, const std::shared_ptr<ActionBase> &a_action, ExactType<bool> a_blockParentCompletion = true) {
 			before(a_reference, a_name, [](Task& a_self, double a_dt) {return a_self.optionalAction->update(a_self, a_dt); }, a_blockParentCompletion);
-			registerActionBase(a_action);
+			recent()->registerActionBase(a_action);
 			return *this;
 		}
 

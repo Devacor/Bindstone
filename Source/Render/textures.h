@@ -17,6 +17,9 @@
 #include "Utility/chaiscriptUtility.h"
 
 namespace MV {
+	class SharedTextures;
+	class TextureHandle;
+
 	SDL_Surface* converToPowerOfTwo(SDL_Surface* surface);
 	GLenum getTextureFormat(SDL_Surface* img);
 	GLenum getInternalTextureFormat(SDL_Surface* img);
@@ -31,6 +34,9 @@ namespace MV {
 	bool loadTextureFromFile(const std::string &file, GLuint &imageLoaded, Size<int> &size, Size<int> &originalSize, bool powerTwo, bool repeat, bool pixel);
 	bool loadTextureFromSurface(SDL_Surface *img, GLuint &imageLoaded, Size<int> &size, Size<int> &originalSize, bool powerTwo, bool repeat, bool pixel);
 
+	//required to allow forward declared MV::SharedTextures
+	MV::SharedTextures* getSharedTextureFromServices(MV::Services& a_services);
+
 	class TextureUnloader {
 	public:
 		static void increment(GLuint a_id);
@@ -40,8 +46,6 @@ namespace MV {
 		static std::map<GLuint, int> handles;
 	};
 
-	class SharedTextures;
-	class TextureHandle;
 	class TextureDefinition : public std::enable_shared_from_this<TextureDefinition> {
 		friend cereal::access;
 	protected:
@@ -184,8 +188,10 @@ namespace MV {
 
 			archive(cereal::make_nvp("powerTwo", powerTwo), cereal::make_nvp("repeat", repeat), cereal::make_nvp("pixel", pixel));
 
+			auto& services = cereal::get_user_data<MV::Services>(archive);
+
 			construct("", powerTwo, repeat, pixel);
-			archive.extract(cereal::make_nvp("texture", construct->textures));
+			construct->textures = services.get<MV::SharedTextures>();
 			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
 		}
 
@@ -454,7 +460,8 @@ namespace MV {
 				}
 				MV::SharedTextures* sharedTextures = nullptr;
 				if (!construct->packId.empty()) {
-					archive.extract(cereal::make_nvp("texture", sharedTextures));
+					auto& services = cereal::get_user_data<MV::Services>(archive);
+					sharedTextures = getSharedTextureFromServices(services);
 				}
 				construct->postLoadInitialize(sharedTextures);
 			}

@@ -18,7 +18,7 @@ namespace MV {
 			{ 1.0f, 0.0f, 0.0f }
 		};
 
-		Palette::Palette(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse) :
+		Palette::Palette(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse) :
 			Drawable(a_owner),
 			onColorChange(onColorChangeSignal),
 			onSwatchClicked(onSwatchClickedSignal),
@@ -79,7 +79,7 @@ namespace MV {
 
 		void Palette::initialize() {
 			Drawable::initialize();
-			onLeftMouseDownHandle = ourMouse.onLeftMouseDown.connect([&](MouseState& a_mouse) {
+			onLeftMouseDownHandle = ourMouse.onLeftMouseDown.connect([&](TapDevice& a_mouse) {
 				if (mouseOverMainColor(a_mouse)) {
 					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority.empty() ? owner()->parentIndexList(globalClickPriority) : overrideClickPriority), [&]() {
 						acceptMainColorClick();
@@ -95,7 +95,7 @@ namespace MV {
 				}
 			});
 
-			onLeftMouseUpHandle = ourMouse.onLeftMouseUp.connect([&](MouseState& a_mouse) {
+			onLeftMouseUpHandle = ourMouse.onLeftMouseUp.connect([&](TapDevice& a_mouse) {
 				currentDragSignal.reset();
 				if (mouseOverSwatch(a_mouse)) {
 					a_mouse.queueExclusiveAction({ eatTouches, (overrideClickPriority.empty() ? owner()->parentIndexList(globalClickPriority) : overrideClickPriority), [&]() {
@@ -110,28 +110,28 @@ namespace MV {
 			onSwatchClickedSignal(self);
 		}
 
-		bool Palette::mouseOverMainColor(const MouseState& a_state) {
+		bool Palette::mouseOverMainColor(const TapDevice& a_state) {
 			if (owner()->active()) {
 				return owner()->screenFromLocal(currentMainColorBounds()).contains(a_state.position());
 			} else {
 				return false;
 			}
 		}
-		bool Palette::mouseOverAlpha(const MouseState& a_state) {
+		bool Palette::mouseOverAlpha(const TapDevice& a_state) {
 			if (owner()->active()) {
 				return owner()->screenFromLocal(currentAlphaBounds()).contains(a_state.position());
 			} else {
 				return false;
 			}
 		}
-		bool Palette::mouseOverSideColor(const MouseState& a_state) {
+		bool Palette::mouseOverSideColor(const TapDevice& a_state) {
 			if (owner()->active()) {
 				return owner()->screenFromLocal(currentSideColorBounds()).contains(a_state.position());
 			} else {
 				return false;
 			}
 		}
-		bool Palette::mouseOverSwatch(const MouseState& a_state) {
+		bool Palette::mouseOverSwatch(const TapDevice& a_state) {
 			if (owner()->active()) {
 				return owner()->screenFromLocal(currentSwatchBounds()).contains(a_state.position());
 			} else {
@@ -191,7 +191,7 @@ namespace MV {
 		}
 
 		void Palette::acceptMainColorClick() {
-			auto updateMainColor = [&](MouseState& a_mouse){
+			auto updateMainColor = [&](TapDevice& a_mouse){
 				selectorCursorPercent = owner()->screenFromLocal(currentMainColorBounds()).percent(a_mouse.position());
 				hsv.S = selectorCursorPercent.x;
 				updateColorForPaletteState();
@@ -201,7 +201,7 @@ namespace MV {
 		}
 
 		void Palette::acceptSideColorClick() {
-			auto updateSideColor = [&](MouseState& a_mouse) {
+			auto updateSideColor = [&](TapDevice& a_mouse) {
 				auto percentPosition = owner()->screenFromLocal(currentSideColorBounds()).percent(a_mouse.position());
 				topRightColor = percentToSliderColor(percentPosition.y);
 				hsv.invertedPercentHue(percentPosition.y);
@@ -212,7 +212,7 @@ namespace MV {
 		}
 
 		void Palette::acceptAlphaClick() {
-			auto updateAlpha = [&](MouseState& a_mouse) {
+			auto updateAlpha = [&](TapDevice& a_mouse) {
 				auto percentPosition = owner()->screenFromLocal(currentAlphaBounds()).percent(a_mouse.position());
 				currentColor.A = percentPosition.x;
 				updateColorForPaletteState();
@@ -242,7 +242,7 @@ namespace MV {
 			return self;
 		}
 
-		MouseState& Palette::mouse() const {
+		TapDevice& Palette::mouse() const {
 			return ourMouse;
 		}
 

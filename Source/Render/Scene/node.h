@@ -11,6 +11,20 @@ namespace MV {
 			friend cereal::access;
 			friend Component;
 
+			struct LoadOptions {
+				LoadOptions(MV::Services &a_services, bool a_doPostLoad) : doPostLoad(a_doPostLoad), services(a_services) {
+					services.connect(this);
+				}
+				~LoadOptions() {
+					services.disconnect<LoadOptions>();
+				}
+				bool doPostLoad;
+			private:
+				MV::Services &services;
+				LoadOptions(const LoadOptions &) = delete;
+				LoadOptions& operator=(const LoadOptions &) = delete;
+			};
+
 		public:
 			typedef void ParentInteractionSignature(const std::shared_ptr<Node> &a_parent, const std::shared_ptr<Node> &a_child);
 			typedef void BasicSignature(const std::shared_ptr<Node> &a_this);
@@ -157,10 +171,10 @@ namespace MV {
 
 			static std::shared_ptr<Node> make(Draw2D& a_draw2d, const std::string &a_id);
 			static std::shared_ptr<Node> make(Draw2D& a_draw2d);
-			static std::shared_ptr<Node> load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, bool a_doPostLoadStep = true);
-			static std::shared_ptr<Node> loadBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, bool a_doPostLoadStep = true);
-			static std::shared_ptr<Node> load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_overrideId, bool a_doPostLoadStep = true);
-			static std::shared_ptr<Node> loadBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_overrideId, bool a_doPostLoadStep = true);
+			static std::shared_ptr<Node> load(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep = true);
+			static std::shared_ptr<Node> loadBinary(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep = true);
+			static std::shared_ptr<Node> load(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId, bool a_doPostLoadStep = true);
+			static std::shared_ptr<Node> loadBinary(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId, bool a_doPostLoadStep = true);
 
 			std::shared_ptr<Node> save(const std::string &a_filename, bool a_renameNodeToFile = true);
 			std::shared_ptr<Node> save(const std::string &a_filename, const std::string &a_overrideId);
@@ -168,10 +182,10 @@ namespace MV {
 			std::shared_ptr<Node> saveBinary(const std::string &a_filename, bool a_renameNodeToFile = true);
 			std::shared_ptr<Node> saveBinary(const std::string &a_filename, const std::string &a_overrideId);
 
-			std::shared_ptr<Node> make(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_overrideId = "");
-			std::shared_ptr<Node> loadChild(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_overrideId = "");
+			std::shared_ptr<Node> make(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId = "");
+			std::shared_ptr<Node> loadChild(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId = "");
 			
-			std::shared_ptr<Node> loadChildBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_overrideId = "");
+			std::shared_ptr<Node> loadChildBinary(const std::string &a_filename, MV::Services& a_services, const std::string &a_overrideId = "");
 
 			std::shared_ptr<Node> make(const std::string &a_id);
 			std::shared_ptr<Node> make();
@@ -267,8 +281,8 @@ namespace MV {
 			}
 
 			template<typename ... ComponentType>
-			std::vector<MV::Variant<SafeComponent<ComponentType>...>> componentsInParents(bool a_exactType = true, bool a_includeSelf = true) const {
-				typedef std::vector<MV::Variant<SafeComponent<ComponentType>...>> ResultType;
+			std::vector<boost::variant<SafeComponent<ComponentType>...>> componentsInParents(bool a_exactType = true, bool a_includeSelf = true) const {
+				typedef std::vector<boost::variant<SafeComponent<ComponentType>...>> ResultType;
 				ResultType results;
 				if (a_includeSelf) {
 					results = components<ComponentType...>(a_exactType);
@@ -276,7 +290,7 @@ namespace MV {
 
 				if (myParent) {
 					auto parentResults = myParent->componentsInParents<ComponentType...>(a_exactType, true);
-					moveAppend(results, parentResults);
+					results.insert(results.end(), parentResults.begin(), parentResults.end());
 				}
 				return results;
 			}
@@ -400,23 +414,23 @@ namespace MV {
 			}
 
 			template<typename ... ComponentType>
-			std::vector<MV::Variant<SafeComponent<ComponentType>...>> components(bool exactType = true) const {
-				std::vector<MV::Variant<SafeComponent<ComponentType>...>> results;
+			std::vector<boost::variant<SafeComponent<ComponentType>...>> components(bool exactType = true) const {
+				std::vector<boost::variant<SafeComponent<ComponentType>...>> results;
 				if (exactType) {
 					for (auto&& item : childComponents) {
-						castAndAddIfExact<Variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
+						castAndAddIfExact<boost::variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
 					}
 				} else {
 					for (auto&& item : childComponents) {
-						castAndAddIfDerived<Variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
+						castAndAddIfDerived<boost::variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
 					}
 				}
 				return results;
 			}
 
 			template<typename ... ComponentType>
-			std::vector<MV::Variant<SafeComponent<ComponentType>...>> componentsInChildren(bool exactType = true, bool includeComponentsInThis = true) const {
-				std::vector<MV::Variant<SafeComponent<ComponentType>...>> results;
+			std::vector<boost::variant<SafeComponent<ComponentType>...>> componentsInChildren(bool exactType = true, bool includeComponentsInThis = true) const {
+				std::vector<boost::variant<SafeComponent<ComponentType>...>> results;
 				componentsInChildrenInternal<ComponentType...>(exactType, includeComponentsInThis, results);
 				return results;
 			}
@@ -804,15 +818,15 @@ namespace MV {
 			}
 
 			template<typename ... ComponentType>
-			void componentsInChildrenInternal(bool exactType, bool includeComponentsInThis, std::vector<MV::Variant<SafeComponent<ComponentType>...>>& results) const {
+			void componentsInChildrenInternal(bool exactType, bool includeComponentsInThis, std::vector<boost::variant<SafeComponent<ComponentType>...>>& results) const {
 				if (includeComponentsInThis) {
 					if (exactType) {
 						for (auto&& item : childComponents) {
-							castAndAddIfExact<Variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
+							castAndAddIfExact<boost::variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
 						}
 					} else {
 						for (auto&& item : childComponents) {
-							castAndAddIfDerived<Variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
+							castAndAddIfDerived<boost::variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
 						}
 					}
 				}
@@ -894,11 +908,10 @@ namespace MV {
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Node> &construct, std::uint32_t const version) {
-				Draw2D *renderer = nullptr;
-				archive.extract(cereal::make_nvp("renderer", renderer));
-				bool doPostLoad = true;
-				archive.extract(cereal::make_nvp("postLoad", doPostLoad));
-				MV::require<MV::PointerException>(renderer != nullptr, "Null renderer in Node::load_and_construct.");
+				auto& services = cereal::get_user_data<MV::Services>(archive);
+				auto* renderer = services.get<MV::Draw2D>();
+				auto* options = services.get<LoadOptions>();
+				bool doPostLoad = options->doPostLoad;
 				std::string nodeId;
 				archive(cereal::make_nvp("nodeId", nodeId));
 				construct(*renderer, nodeId);

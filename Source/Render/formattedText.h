@@ -118,12 +118,6 @@ namespace MV {
 				cereal::make_nvp("style", construct->style)
 			);
 			construct->initializeFromLoad();
-
-            //std::shared_ptr<TextLibrary> textLibrary;
-			//archive.extract(cereal::make_nvp("textLibrary", textLibrary));
-			//if (textLibrary) {
-			//	textLibrary->add(construct->shared_from_this());
-			//}
 		}
 
 		void initializeFromLoad() {
@@ -198,10 +192,9 @@ namespace MV {
 
 		template <class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<TextLibrary> &construct, std::uint32_t const /*version*/){
-			Draw2D *renderer = nullptr;
-			archive.extract(
-				cereal::make_nvp("renderer", renderer)
-			);
+			auto& services = cereal::get_user_data<MV::Services>(archive);
+			auto* renderer = services.get<MV::Draw2D>();
+
 			construct(*renderer);
 			archive.add(cereal::make_nvp("textLibrary", construct.ptr()));
 			std::map<std::string, std::shared_ptr<FontDefinition>> fontLoadScratchPad;
@@ -425,9 +418,8 @@ namespace MV {
 
 		template <class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<FormattedText> &construct, std::uint32_t const a_version) {
-			TextLibrary *library = nullptr;
-			archive.extract(cereal::make_nvp("textLibrary", library));
-			MV::require<MV::PointerException>(library != nullptr, "Null TextLibrary in Text::load_and_construct.");
+			auto& services = cereal::get_user_data<MV::Services>(archive);
+			auto* library = services.get<MV::TextLibrary>();
 
 			std::string defaultStateIdentifier;
 			float textWidth;

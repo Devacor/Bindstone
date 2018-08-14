@@ -9,11 +9,11 @@
 #include <string>
 #include <memory>
 #include "ArtificialIntelligence/pathfinding.h"
+#include "Game/creature.h"
+#include "Network/networkObject.h"
 
 class GameInstance;
 struct Player;
-struct CreatureData;
-class Creature;
 
 struct WaveCreature {
 	std::string id;
@@ -152,10 +152,6 @@ private:
 	std::vector<BuildingData> buildingList;
 };
 
-class Gem {
-
-};
-
 class Building : public MV::Scene::Component {
 	friend MV::Scene::Node;
 	friend cereal::access;
@@ -168,6 +164,8 @@ public:
 
 	std::vector<size_t> buildTreeIndices;
 
+	std::shared_ptr<Player> player() const { return owningPlayer; }
+
 	const BuildTree* current() const;
 
 	bool waveHasCreatures(size_t a_waveIndex = 0, size_t a_creatureIndex = 0) const;
@@ -175,8 +173,20 @@ public:
 	void upgrade(size_t a_index);
 	void requestUpgrade(size_t a_index);
 
+	void spawnNetworkCreature(std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> a_synchronizedCreature);
+
 	std::string assetPath() const {
-		return "Assets/Prefabs/Buildings/" + buildingData.id + "/" + (skin.empty() ? buildingData.id : skin) + ".prefab";
+		return "Assets/Buildings/" + buildingData.id + "/" + (skin().empty() ? "Default" : skin()) + "/building.prefab";
+	}
+
+	std::string skin() const;
+
+	int slotIndex() const {
+		return slot;
+	}
+
+	int loadoutIndex() const {
+		return loadoutSlot;
 	}
 
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& /*gameInstance*/) {
@@ -198,11 +208,17 @@ public:
 
 		return a_script;
 	}
+
+	MV::Point<> spawnPositionWorld() const {
+		return owner()->worldFromLocal(spawnPoint);
+	}
+
+	const WaveCreature& currentCreature();
 protected:
-	Building(const std::weak_ptr<MV::Scene::Node> &a_owner, const BuildingData &a_data, const std::string &a_skin, int a_slot, const std::shared_ptr<Player> &a_player, GameInstance& a_instance);
+	Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<Player> &a_player, GameInstance& a_instance);
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
-		return cloneHelper(a_parent->attach<Building>(buildingData, skin, slot, owningPlayer, gameInstance).self());
+		return cloneHelper(a_parent->attach<Building>(slot, loadoutSlot, owningPlayer, gameInstance).self());
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
@@ -219,15 +235,12 @@ private:
 
 	void incrementCreatureIndex();
 
-	const WaveCreature& currentCreature();
-	void spawnCurrentCreature();
-
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
         std::string implementMe;
 		archive(
 			cereal::make_nvp("data", buildingData),
-			cereal::make_nvp("skin", skin),
+			cereal::make_nvp("loadoutSlot", loadoutSlot),
 			cereal::make_nvp("slot", slot),
 			cereal::make_nvp("player", /*owningPlayer->email*/ implementMe),
 			cereal::make_nvp("Component", cereal::base_class<Component>(this))
@@ -236,20 +249,19 @@ private:
 
 	template <class Archive>
 	static void load_and_construct(Archive & archive, cereal::construct<Building> &construct, std::uint32_t const /*version*/) {
-		std::string skin;
 		BuildingData buildingData;
 		int slot;
 		std::string playerId;
 
 		archive(
 			cereal::make_nvp("data", buildingData),
-			cereal::make_nvp("skin", skin),
+			cereal::make_nvp("loadoutSlot", loadoutSlot),
 			cereal::make_nvp("slot", slot),
 			cereal::make_nvp("player", playerId)
 		);
-		GameInstance *gameInstance = nullptr;
-		archive.extract(cereal::make_nvp("game", gameInstance));
-		MV::require<MV::PointerException>(gameInstance != nullptr, "Null gameInstance in Building::load_and_construct.");
+
+		auto& services = cereal::get_user_data<MV::Services>(archive);
+		auto* game = services.get<GameInstance>();
 		//gameInstance->data().player()
         //construct(std::shared_ptr<MV::Scene::Node>(), buildingData, skin, slot, player, *gameInstance);
 		archive(
@@ -259,13 +271,13 @@ private:
 	}
 
 	BuildingData buildingData;
-	std::string skin;
 
 	double countdown = 0;
 	size_t waveIndex = 0;
 	size_t creatureIndex = 0;
 
 	int slot;
+	int loadoutSlot;
 	MV::Point<> spawnPoint;
 	std::shared_ptr<Player> owningPlayer;
 	GameInstance& gameInstance;

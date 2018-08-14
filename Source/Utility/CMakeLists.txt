@@ -6,6 +6,7 @@ target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/expression.h
   ${CMAKE_CURRENT_SOURCE_DIR}/generalUtility.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/generalUtility.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/services.h
   ${CMAKE_CURRENT_SOURCE_DIR}/log.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/log.h
   ${CMAKE_CURRENT_SOURCE_DIR}/sha512.cpp

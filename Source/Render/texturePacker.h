@@ -129,9 +129,9 @@ namespace MV {
 
 		template <class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<TexturePack> &construct, std::uint32_t const version){
-			Draw2D *renderer = nullptr;
-			archive.extract(cereal::make_nvp("renderer", renderer));
-			MV::require<PointerException>(renderer != nullptr, "Null renderer in Node::load_and_construct.");
+			auto& services = cereal::get_user_data<MV::Services>(archive);
+			auto* renderer = services.get<MV::Draw2D>();
+
 			std::string id;
 			if (version > 0) {
 				archive(cereal::make_nvp("id", id));

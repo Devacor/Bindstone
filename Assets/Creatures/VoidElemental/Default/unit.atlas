@@ -1,0 +1,34 @@
+
+unit.png
+size: 256,256
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+arm
+  rotate: true
+  xy: 2, 2
+  size: 89, 107
+  orig: 89, 107
+  offset: 0, 0
+  index: -1
+backarm
+  rotate: false
+  xy: 173, 149
+  size: 73, 104
+  orig: 73, 104
+  offset: 0, 0
+  index: -1
+body
+  rotate: false
+  xy: 2, 93
+  size: 169, 160
+  orig: 169, 160
+  offset: 0, 0
+  index: -1
+jaw
+  rotate: false
+  xy: 111, 59
+  size: 48, 32
+  orig: 48, 32
+  offset: 0, 0
+  index: -1

@@ -11,7 +11,7 @@ public:
 		root(a_root),
 		target(a_target),
 		panel(a_panel),
-		resources(panel.resources()){
+		resources(panel.services()){
 
 		initializeInterface();
 	}
@@ -30,26 +30,25 @@ private:
 			color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->
 			padding({ 2.0f, 2.0f });
 
-		makeButton(grid->owner(), *(resources.textLibrary), *(resources.mouse), "Close", buttonSize, UTF_CHAR_STR("Close"))->
+		makeButton(grid->owner(), resources, buttonSize, "Close")->
 			onAccept.connect("Close", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				panel.clearAnchorEditor();
-			}
-		);
+			});
 
-		makeLabel(gridNode, *panel.resources().textLibrary, "UsePositionLabel", labelSize, UTF_CHAR_STR("Use Position"));
+		makeLabel(gridNode, resources, "UsePositionLabel", labelSize, UTF_CHAR_STR("Use Position"));
 
-		makeToggle(grid->owner(), *(resources.mouse), "UsePosition", target->anchors().usePosition(), [&]() {
+		makeToggle(grid->owner(), *(resources.get<MV::TapDevice>()), "UsePosition", target->anchors().usePosition(), [&]() {
 			target->anchors().usePosition(true);
 		}, [&]() {
 			target->anchors().usePosition(false);
 		});
 
-		makeLabel(gridNode, *panel.resources().textLibrary, "AnchorsLabel", labelSize, UTF_CHAR_STR("Anchors"));
+		makeLabel(gridNode, *panel.services().get<MV::TextLibrary>(), "AnchorsLabel", labelSize, UTF_CHAR_STR("Anchors"));
 
 		auto currentBoundsMethod = std::make_shared<MV::Scene::Anchors::BoundsToOffset>(MV::Scene::Anchors::BoundsToOffset::Ignore);
 		std::vector<MV::Scene::Anchors::BoundsToOffset> offsetMethod{ MV::Scene::Anchors::BoundsToOffset::Ignore, MV::Scene::Anchors::BoundsToOffset::Apply, MV::Scene::Anchors::BoundsToOffset::Apply_Reposition };
 		std::vector<std::string> offsetMethodStrings{ "Ignore", "Apply", "Apply Reposition" };
-		auto offsetMethodButton = makeButton(gridNode, *panel.resources().textLibrary, *panel.resources().mouse, "WrapMode", buttonSize, offsetMethodStrings[MV::indexOf(offsetMethod, *currentBoundsMethod)]);
+		auto offsetMethodButton = makeButton(gridNode, resources, "WrapMode", buttonSize, offsetMethodStrings[MV::indexOf(offsetMethod, *currentBoundsMethod)]);
 		std::weak_ptr<MV::Scene::Button> weakOffsetMethodButton(offsetMethodButton);
 		offsetMethodButton->onAccept.connect("click", [&, weakOffsetMethodButton, offsetMethod, offsetMethodStrings, currentBoundsMethod](std::shared_ptr<MV::Scene::Clickable>) mutable {
 			auto index = MV::wrap(0, static_cast<int>(offsetMethod.size()), MV::indexOf(offsetMethod, *currentBoundsMethod) + 1);
@@ -57,7 +56,7 @@ private:
 			weakOffsetMethodButton.lock()->text(offsetMethodStrings[index]);
 		});
 
-		anchorParentId = makeInputField(&panel, *(resources.mouse), gridNode, *(resources.textLibrary), "parentName", buttonSize, target->anchors().hasParent() ? target->anchors().parent()->id() : "");
+		anchorParentId = makeInputField(&panel, resources, gridNode, "parentName", buttonSize, target->anchors().hasParent() ? target->anchors().parent()->id() : "");
 		anchorParentId->onEnter.connect("!", [&, currentBoundsMethod](auto&&) {
 			auto foundParent = target->owner()->componentInParents<MV::Scene::Drawable>(anchorParentId->text(), false);
 			if(target->anchors().hasParent() && !foundParent){
@@ -79,11 +78,11 @@ private:
 
 
 		float halfButtonWidth = 52.0f;
-		anchorMinX = makeInputField(&panel, *(resources.mouse), gridNode, *(resources.textLibrary), "minX", MV::size(halfButtonWidth, 27.0f), std::to_string(target->anchors().anchor().minPoint.x));
-		anchorMinY = makeInputField(&panel, *(resources.mouse), gridNode, *(resources.textLibrary), "minY", MV::size(halfButtonWidth, 27.0f), std::to_string(target->anchors().anchor().minPoint.y));
+		anchorMinX = makeInputField(&panel, resources, gridNode, "minX", MV::size(halfButtonWidth, 27.0f), std::to_string(target->anchors().anchor().minPoint.x));
+		anchorMinY = makeInputField(&panel, resources, gridNode, "minY", MV::size(halfButtonWidth, 27.0f), std::to_string(target->anchors().anchor().minPoint.y));
 
-		anchorMaxX = makeInputField(&panel, *(resources.mouse), gridNode, *(resources.textLibrary), "maxX", MV::size(halfButtonWidth, 27.0f), std::to_string(target->anchors().anchor().maxPoint.x));
-		anchorMaxY = makeInputField(&panel, *(resources.mouse), gridNode, *(resources.textLibrary), "maxY", MV::size(halfButtonWidth, 27.0f), std::to_string(target->anchors().anchor().maxPoint.y));
+		anchorMaxX = makeInputField(&panel, resources, gridNode, "maxX", MV::size(halfButtonWidth, 27.0f), std::to_string(target->anchors().anchor().maxPoint.x));
+		anchorMaxY = makeInputField(&panel, resources, gridNode, "maxY", MV::size(halfButtonWidth, 27.0f), std::to_string(target->anchors().anchor().maxPoint.y));
 
 		updateFromInputField(anchorMinX, [&]() {
 			auto updatedAnchors = target->anchors().anchor();
@@ -109,13 +108,13 @@ private:
 			target->anchors().anchor(updatedAnchors);
 		});
 
-		makeLabel(gridNode, *panel.resources().textLibrary, "Offset", labelSize, UTF_CHAR_STR("Offset"));
+		makeLabel(gridNode, resources, "Offset", labelSize, UTF_CHAR_STR("Offset"));
 		
-		offsetMinX = makeInputField(&panel, *(resources.mouse), gridNode, *(resources.textLibrary), "offMinX", MV::size(halfButtonWidth, 27.0f), std::to_string(std::lround(target->anchors().offset().minPoint.x)));
-		offsetMinY = makeInputField(&panel, *(resources.mouse), gridNode, *(resources.textLibrary), "offMinY", MV::size(halfButtonWidth, 27.0f), std::to_string(std::lround(target->anchors().offset().minPoint.y)));
+		offsetMinX = makeInputField(&panel, resources, gridNode, "offMinX", MV::size(halfButtonWidth, 27.0f), std::to_string(std::lround(target->anchors().offset().minPoint.x)));
+		offsetMinY = makeInputField(&panel, resources, gridNode, "offMinY", MV::size(halfButtonWidth, 27.0f), std::to_string(std::lround(target->anchors().offset().minPoint.y)));
 		
-		offsetMaxX = makeInputField(&panel, *(resources.mouse), gridNode, *(resources.textLibrary), "offMaxX", MV::size(halfButtonWidth, 27.0f), std::to_string(std::lround(target->anchors().offset().maxPoint.x)));
-		offsetMaxY = makeInputField(&panel, *(resources.mouse), gridNode, *(resources.textLibrary), "offMaxY", MV::size(halfButtonWidth, 27.0f), std::to_string(std::lround(target->anchors().offset().maxPoint.y)));
+		offsetMaxX = makeInputField(&panel, resources, gridNode, "offMaxX", MV::size(halfButtonWidth, 27.0f), std::to_string(std::lround(target->anchors().offset().maxPoint.x)));
+		offsetMaxY = makeInputField(&panel, resources, gridNode, "offMaxY", MV::size(halfButtonWidth, 27.0f), std::to_string(std::lround(target->anchors().offset().maxPoint.y)));
 
 		updateFromInputField(offsetMinX, [&]() {
 			auto updatedOffset = target->anchors().offset();
@@ -141,7 +140,7 @@ private:
 			target->anchors().offset(updatedOffset);
 		});
 
-		makeButton(grid->owner(), *(resources.textLibrary), *(resources.mouse), "Calculate", { 100.0f, 27.0f }, UTF_CHAR_STR("Calculate"))->
+		makeButton(grid->owner(), resources, "Calculate", { 100.0f, 27.0f }, UTF_CHAR_STR("Calculate"))->
 			onAccept.connect("Calculate", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				target->anchors().applyBoundsToOffset(MV::Scene::Anchors::BoundsToOffset::Apply);
 					
@@ -157,7 +156,7 @@ private:
 		);
 
 		auto pos = box ? box->parent()->position() : MV::Point<>(100.0f, 0.0f);
-		box = makeDraggableBox("AnchorEditor", root, gridNode->bounds().size(), *(resources.mouse));
+		box = makeDraggableBox("AnchorEditor", root, gridNode->bounds().size(), *(resources.get<MV::TapDevice>()));
 		box->parent()->position(pos);
 		box->add(gridNode);
 	}
@@ -195,7 +194,7 @@ private:
 
 	EditorPanel& panel;
 
-	SharedResources resources;
+	MV::Services& resources;
 	bool updatingFields = false;
 };
 

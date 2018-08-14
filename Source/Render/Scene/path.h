@@ -53,11 +53,11 @@ namespace MV {
 			}
 
 			MapNode& nodeFromGrid(const Point<> &a_location) {
-				return map->get(cast<int>(a_location));
+				return map->get(MV::cast<int>(a_location));
 			}
 
 			MapNode& nodeFromLocal(const Point<> &a_location) {
-				auto gridTile = cast<int>((a_location - topLeftOffset) / toPoint(cellDimensions));
+				auto gridTile = MV::cast<int>((a_location - topLeftOffset) / toPoint(cellDimensions));
 				return map->get(gridTile);
 			}
 
@@ -66,7 +66,7 @@ namespace MV {
 			}
 
 			Point<> localFromGrid(const Point<int> &a_location) {
-				return ((cast<PointPrecision>(a_location) + MV::point(0.5f, 0.5f)) * toPoint(cellDimensions)) + topLeftOffset;
+				return ((MV::cast<PointPrecision>(a_location) + MV::point(0.5f, 0.5f)) * toPoint(cellDimensions)) + topLeftOffset;
 			}
 
 			Point<> localFromGrid(const Point<> &a_location) {

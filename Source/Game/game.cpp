@@ -9,8 +9,10 @@ void sdl_quit(void){
 Game::Game(Managers& a_managers) :
 	gameData(a_managers),
 	done(false),
-	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths()),
+	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), chaiscript::default_options()),
 	onLoginResponse(onLoginResponseSignal){
+
+	returnFromBackground();
 
 	MV::initializeFilesystem();
 	initializeData();
@@ -72,7 +74,7 @@ void Game::initializeWindow(){
 		gameData.managers().textures.files("Assets/Map");
 		gameData.managers().textures.files("Assets/Images");
 	}
-	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::MouseState& a_mouse, LocalData& a_data)
+	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::TapDevice& a_mouse, LocalData& a_data)
 
 	hook(scriptEngine);
 	if (!MV::RUNNING_IN_HEADLESS) {
@@ -83,7 +85,7 @@ void Game::initializeWindow(){
 bool Game::update(double dt) {
 	gameData.managers().pool.run();
 	if (ourLobbyClient->state() == MV::Client::DISCONNECTED) {
-		ourLobbyClient->reconnect();
+		//ourLobbyClient->reconnect();
 	}
 	ourLobbyClient->update();
 	if (ourGameClient) {
@@ -170,6 +172,20 @@ void Game::hook(chaiscript::ChaiScript &a_script) {
 
 	MV::SignalRegister<void(LoginResponse&)>::hook(a_script);
 	a_script.add(chaiscript::fun(&Game::onLoginResponse), "onLoginResponse");
+
+	a_script.add(chaiscript::fun([&](Game& a_this) {
+		localPlayer = std::make_shared<Player>();
+		localPlayer->handle = "Local";
+		localPlayer->loadout.buildings = { "Life", "Life", "Life", "Life", "Life", "Life", "Life", "Life" };
+		localPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
+		localPlayer->wallet.add(Wallet::SOFT, 1000000);
+		localPlayer->wallet.add(Wallet::HARD, 1000000);
+
+		auto otherPlayer = MV::fromJson<std::shared_ptr<Player>>(MV::toJson(localPlayer));
+		otherPlayer->handle = "Remote";
+
+		enterGame(localPlayer, otherPlayer);
+	}), "testGame");
 
 	a_script.add_global(chaiscript::var(this), "game");
 }

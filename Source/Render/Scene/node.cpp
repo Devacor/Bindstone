@@ -4,6 +4,7 @@
 #include <regex>
 #include "Utility/chaiscriptUtility.h"
 
+#include "cereal/archives/adapters.hpp"
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
@@ -139,19 +140,18 @@ namespace MV {
 			return make(a_draw2d, guid("root_"));
 		}
 
-		std::shared_ptr<Node> Node::load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, bool a_doPostLoadStep) {
-			return load(a_filename, a_binder, "", a_doPostLoadStep);
+		std::shared_ptr<Node> Node::load(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep) {
+			return load(a_filename, a_services, "", a_doPostLoadStep);
 		}
 
-		std::shared_ptr<Node> Node::load(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_newNodeId, bool a_doPostLoadStep) {
+		std::shared_ptr<Node> Node::load(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId, bool a_doPostLoadStep) {
 			std::ifstream stream(a_filename);
 			require<ResourceException>(stream, "File not found for Node::load: ", a_filename);
-			cereal::JSONInputArchive archive(stream);
-			if (a_binder) {
-				a_binder(archive);
-			}
+			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
+
+			cereal::UserDataAdapter<MV::Services, cereal::JSONInputArchive> archive(a_services, stream);
 			std::shared_ptr<Node> result;
-			archive.add(cereal::make_nvp("postLoad", a_doPostLoadStep));
+			archive.add(cereal::make_nvp("services", a_services));
 			archive(result);
 			if (!a_newNodeId.empty()) {
 				result->id(a_newNodeId);
@@ -159,19 +159,17 @@ namespace MV {
 			return result;
 		}
 
-		std::shared_ptr<Node> Node::loadBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, bool a_doPostLoadStep) {
-			return loadBinary(a_filename, a_binder, "", a_doPostLoadStep);
+		std::shared_ptr<Node> Node::loadBinary(const std::string &a_filename, MV::Services& a_services, bool a_doPostLoadStep) {
+			return loadBinary(a_filename, a_services, "", a_doPostLoadStep);
 		}
 
-		std::shared_ptr<Node> Node::loadBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_newNodeId, bool a_doPostLoadStep) {
+		std::shared_ptr<Node> Node::loadBinary(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId, bool a_doPostLoadStep) {
 			std::ifstream stream(a_filename);
 			require<ResourceException>(stream, "File not found for Node::load: ", a_filename);
-			cereal::PortableBinaryInputArchive archive(stream);
-			if (a_binder) {
-				a_binder(archive);
-			}
+			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
+
+			cereal::UserDataAdapter<MV::Services, cereal::PortableBinaryInputArchive> archive(a_services, stream);
 			std::shared_ptr<Node> result;
-			archive.add(cereal::make_nvp("postLoad", a_doPostLoadStep));
 			archive(result);
 			if (!a_newNodeId.empty()) {
 				result->id(a_newNodeId);
@@ -221,19 +219,19 @@ namespace MV {
 			return self;
 		}
 
-		std::shared_ptr<Node> Node::make(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_newNodeId) {
-			return loadChild(a_filename, a_binder, a_newNodeId);
+		std::shared_ptr<Node> Node::make(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId) {
+			return loadChild(a_filename, a_services, a_newNodeId);
 		}
 
-		std::shared_ptr<Node> Node::loadChild(const std::string &a_filename, const std::function<void(cereal::JSONInputArchive &)> a_binder, const std::string &a_newNodeId) {
-			auto toAdd = Node::load(a_filename, a_binder, a_newNodeId, false);
+		std::shared_ptr<Node> Node::loadChild(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId) {
+			auto toAdd = Node::load(a_filename, a_services, a_newNodeId, false);
 			add(toAdd);
 			toAdd->postLoadStep();
 			return toAdd;
 		}
 
-		std::shared_ptr<Node> Node::loadChildBinary(const std::string &a_filename, const std::function<void(cereal::PortableBinaryInputArchive &)> a_binder, const std::string &a_newNodeId) {
-			auto toAdd = Node::loadBinary(a_filename, a_binder, a_newNodeId, false);
+		std::shared_ptr<Node> Node::loadChildBinary(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId) {
+			auto toAdd = Node::loadBinary(a_filename, a_services, a_newNodeId, false);
 			add(toAdd);
 			toAdd->postLoadStep();
 			return toAdd;
@@ -619,9 +617,9 @@ namespace MV {
 
 				localMatrixTransform.position(translateTo);
 
-				if (!MV::equals(rotateTo.x, 0.0f)) { localMatrixTransform.rotateX(rotateTo.x); }
-				if (!MV::equals(rotateTo.y, 0.0f)) { localMatrixTransform.rotateY(rotateTo.y); }
-				if (!MV::equals(rotateTo.z, 0.0f)) { localMatrixTransform.rotateZ(rotateTo.z); }
+				if (rotateTo != 0.0f) {
+					localMatrixTransform.setRotationXYZ(rotateTo);
+				}
 
 				if (scaleTo != 1.0f) {
 					localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
@@ -886,12 +884,11 @@ namespace MV {
 			worldMatrixDirty = false;
 			localMatrixTransform.makeIdentity();
 
-			if (!translateTo.atOrigin()) {
-				localMatrixTransform.translate(translateTo.x, translateTo.y, translateTo.z);
+			localMatrixTransform.position(translateTo);
+
+			if (rotateTo != 0.0f) {
+				localMatrixTransform.setRotationXYZ(rotateTo);
 			}
-			if (!MV::equals(rotateTo.x, 0.0f)) { localMatrixTransform.rotateX(rotateTo.x); }
-			if (!MV::equals(rotateTo.y, 0.0f)) { localMatrixTransform.rotateY(rotateTo.y); }
-			if (!MV::equals(rotateTo.z, 0.0f)) { localMatrixTransform.rotateZ(rotateTo.z); }
 			if (scaleTo != 1.0f) {
 				localMatrixTransform.scale(scaleTo.x, scaleTo.y, scaleTo.z);
 			}

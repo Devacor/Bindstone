@@ -7,5 +7,6 @@
 #include "Network/url.h"
 #include "Network/network.h"
 #include "Network/download.h"
+#include "Network/networkObject.h"
 
 #endif

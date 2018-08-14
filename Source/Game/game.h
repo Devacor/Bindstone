@@ -41,7 +41,7 @@ public:
 		return gameData.managers();
 	}
 
-	MV::MouseState& mouse() {
+	MV::TapDevice& mouse() {
 		return ourMouse;
 	}
 
@@ -69,7 +69,7 @@ public:
 	}
 
 	GameInstance* enterGame(const std::shared_ptr<Player> &a_left, const std::shared_ptr<Player> &a_right) {
-		ourInstance = std::make_unique<ClientGameInstance>(a_left, a_right, *this);
+		ourInstance = std::make_unique<MockClientGameInstance>(a_left, a_right, *this);
 		gui().page("Main").hide();
 		return ourInstance.get();
 	}
@@ -99,6 +99,11 @@ public:
 	std::shared_ptr<Player> player() {
 		return localPlayer;
 	}
+
+	void returnFromBackground() {
+		gameData.managers().services.connect(&ourMouse);
+		gameData.managers().services.connect(&scriptEngine);
+	}
 private:
 	Game(const Game &) = delete;
 	Game& operator=(const Game &) = delete;
@@ -111,7 +116,7 @@ private:
 
 	GameData gameData;
 	std::unique_ptr<MV::InterfaceManager> ourGui;
-	std::unique_ptr<ClientGameInstance> ourInstance;
+	std::unique_ptr<GameInstance> ourInstance;
 
 	std::shared_ptr<MV::Scene::Node> rootScene;
 
@@ -127,7 +132,7 @@ private:
 	bool done;
 
 	MV::Scene::SafeComponent<MV::Scene::Sprite> screenScaler;
-	MV::MouseState ourMouse;
+	MV::TapDevice ourMouse;
 
 	std::string loginId;
 	std::string loginPassword;

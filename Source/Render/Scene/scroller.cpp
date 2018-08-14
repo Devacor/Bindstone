@@ -10,7 +10,7 @@ CEREAL_REGISTER_TYPE(MV::Scene::Scroller);
 namespace MV {
 	namespace Scene {
 
-		Scroller::Scroller(const std::weak_ptr<Node> &a_owner, MouseState &a_mouse) :
+		Scroller::Scroller(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse) :
 			Clickable(a_owner, a_mouse) {
 			stopEatingTouches();
 			
@@ -22,7 +22,7 @@ namespace MV {
 						if (a_clickable->totalDragDistance() > dragStartThreshold) {
 							isDragging = true;
 							auto buttons = contentView->componentsInChildren<MV::Scene::Clickable>(false, false);
-							MV::visit_each(buttons, [&](const MV::Scene::SafeComponent<MV::Scene::Clickable> &a_button) {
+							MV::visit(buttons, [&](const MV::Scene::SafeComponent<MV::Scene::Clickable> &a_button) {
 								a_button->cancelPress();
 							});
 						} else if (a_clickable->dragTime() > cancelTimeThreshold) {

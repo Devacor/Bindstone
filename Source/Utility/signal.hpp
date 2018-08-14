@@ -167,13 +167,12 @@ namespace MV {
 
 		template <class Archive>
 		void load(Archive & archive, std::uint32_t const /*version*/) {
-			std::vector<std::string> scripts;
 			archive(
 				cereal::make_nvp("parameterNames", orderedParameterNames),
 				cereal::make_nvp("script", scriptCallback)
 			);
-			archive.extract(cereal::make_nvp("script", scriptEnginePointer));
-			id = ++uniqueId;
+			auto& services = cereal::get_user_data<MV::Services>(archive);
+			scriptEnginePointer = services.get<chaiscript::ChaiScript>();
 		}
 
 		Receiver() {
@@ -526,7 +525,8 @@ namespace MV {
 			for (auto&& ownedScriptObserver : ownedScriptObservers) {
 				ownedConnections[ownedScriptObserver.first] = ownedScriptObserver.second;
 			}
-			archive.extract(cereal::make_nvp("script", scriptEnginePointer));
+			auto& services = cereal::get_user_data<MV::Services>(archive);
+			scriptEnginePointer = services.get<chaiscript::ChaiScript>();
 		}
 
 		std::set< std::weak_ptr< Receiver<T> >, std::owner_less<std::weak_ptr<Receiver<T>>> > observers;

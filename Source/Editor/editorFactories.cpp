@@ -8,7 +8,7 @@ void colorTopAndBottom(const std::shared_ptr<MV::Scene::Sprite> &a_rect, const M
 	a_rect->corners(a_top, a_top, a_bot, a_bot);
 }
 
-std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_text, const std::string &a_fontIdentifier /*= MV::DEFAULT_ID*/) {
+std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_library, MV::TapDevice &a_mouse, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_text, const std::string &a_fontIdentifier /*= MV::DEFAULT_ID*/) {
 	static long buttonId = 0;
 	auto button = a_parent->make(MV::to_string(a_text) + std::to_string(buttonId++))->attach<MV::Scene::Button>(a_mouse)->bounds(a_size);	
 	std::vector<MV::Color> boxActiveColors = { { InterfaceColors::BUTTON_TOP_ACTIVE },{ InterfaceColors::BUTTON_BOTTOM_ACTIVE },{ InterfaceColors::BUTTON_BOTTOM_ACTIVE },{ InterfaceColors::BUTTON_TOP_ACTIVE } };
@@ -32,7 +32,15 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 	return button;
 }
 
-std::shared_ptr<MV::Scene::Node> makeToggle(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::MouseState &a_mouse, const std::string &a_name, bool a_defaultValue, const std::function<void()> a_on, const std::function<void()> a_off, const MV::Size<> &a_size) {
+std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::Services &a_services, const MV::Size<> &a_size, const MV::UtfString &a_text, const std::string &a_fontIdentifier /*= MV::DEFAULT_ID*/) {
+	return makeButton(a_parent, *a_services.get<MV::TextLibrary>(), *a_services.get<MV::TapDevice>(), a_text, a_size, a_text, a_fontIdentifier);
+}
+
+std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::Services &a_services, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_text, const std::string &a_fontIdentifier /*= MV::DEFAULT_ID*/) {
+	return makeButton(a_parent, *a_services.get<MV::TextLibrary>(), *a_services.get<MV::TapDevice>(), a_name, a_size, a_text, a_fontIdentifier);
+}
+
+std::shared_ptr<MV::Scene::Node> makeToggle(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TapDevice &a_mouse, const std::string &a_name, bool a_defaultValue, const std::function<void()> a_on, const std::function<void()> a_off, const MV::Size<> &a_size) {
 	auto node = a_parent->make(a_name);
 	auto toggle = node->make("toggle")->attach<MV::Scene::Sprite>()->bounds({ MV::toPoint(a_size / 4.0f), a_size / 2.0f })->color({ InterfaceColors::TOGGLE_CENTER })->owner();
 	if (!a_defaultValue) {
@@ -50,6 +58,10 @@ std::shared_ptr<MV::Scene::Node> makeToggle(const std::shared_ptr<MV::Scene::Nod
 	return node;
 }
 
+std::shared_ptr<MV::Scene::Node> makeToggle(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::Services &a_services, const std::string &a_name, bool a_defaultValue, const std::function<void()> a_on, const std::function<void()> a_off, const MV::Size<> &a_size) {
+	return makeToggle(a_parent, *a_services.get<MV::TapDevice>(), a_name, a_defaultValue, a_on, a_off, a_size);
+}
+
 void applyColorToColorButton(std::shared_ptr<MV::Scene::Button> a_button, const MV::Color& a_color) {
 	std::vector<MV::Color> boxIdleColors = { a_color, a_color / 2.0f, a_color / 2.0f, a_color };
 	std::vector<MV::Color> boxActiveColors = { a_color / 2.0f, a_color / 4.0f, a_color / 4.0f, a_color / 2.0f };
@@ -63,13 +75,19 @@ void applyColorToColorButton(std::shared_ptr<MV::Scene::Button> a_button, const 
 	a_button->activeNode()->component<MV::Scene::Sprite>()->colors(boxActiveColors);
 }
 
-std::shared_ptr<MV::Scene::Button> makeColorButton(const std::shared_ptr<MV::Scene::Node> &a_parent, std::weak_ptr<MV::Scene::Node> a_colorPaletteParent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void (const MV::Color& a_newColor)> a_callback, const MV::UtfString &a_text) {
+std::shared_ptr<MV::Scene::Button> makeColorButton(const std::shared_ptr<MV::Scene::Node> &a_parent, std::weak_ptr<MV::Scene::Node> a_colorPaletteParent, MV::TextLibrary &a_library, MV::TapDevice &a_mouse, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void (const MV::Color& a_newColor)> a_callback, const MV::UtfString &a_text) {
 	auto button = makeColorButton(a_parent->renderer(), a_colorPaletteParent, a_library, a_mouse, a_size, a_color, a_callback, a_text);
 	a_parent->add(button.owner());
 	return button.self();
 }
 
-MV::Scene::SafeComponent<MV::Scene::Button> makeColorButton(MV::Draw2D &a_renderer, std::weak_ptr<MV::Scene::Node> a_colorPaletteParent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void(const MV::Color& a_newColor)> a_callback, const MV::UtfString &a_text) {
+std::shared_ptr<MV::Scene::Button> makeColorButton(const std::shared_ptr<MV::Scene::Node> &a_parent, std::weak_ptr<MV::Scene::Node> a_colorPaletteParent, MV::Services &a_services, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void(const MV::Color& a_newColor)> a_callback, const MV::UtfString &a_text) {
+	auto button = makeColorButton(a_parent->renderer(), a_colorPaletteParent, *a_services.get<MV::TextLibrary>(), *a_services.get<MV::TapDevice>(), a_size, a_color, a_callback, a_text);
+	a_parent->add(button.owner());
+	return button.self();
+}
+
+MV::Scene::SafeComponent<MV::Scene::Button> makeColorButton(MV::Draw2D &a_renderer, std::weak_ptr<MV::Scene::Node> a_colorPaletteParent, MV::TextLibrary &a_library, MV::TapDevice &a_mouse, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void(const MV::Color& a_newColor)> a_callback, const MV::UtfString &a_text) {
 	auto buttonId = MV::guid("color_button");
 	auto button = MV::Scene::Node::make(a_renderer, buttonId)->attach<MV::Scene::Button>(a_mouse)->bounds(a_size)->safe();
 
@@ -111,12 +129,16 @@ MV::Scene::SafeComponent<MV::Scene::Button> makeColorButton(MV::Draw2D &a_render
 	return button;
 }
 
+MV::Scene::SafeComponent<MV::Scene::Button> makeColorButton(MV::Services &a_services, std::weak_ptr<MV::Scene::Node> a_colorPaletteParent, const MV::Size<> &a_size, const MV::Color &a_color, std::function<void(const MV::Color& a_newColor)> a_callback, const MV::UtfString &a_text) {
+	return makeColorButton(*a_services.get<MV::Draw2D>(), a_colorPaletteParent, *a_services.get<MV::TextLibrary>(), *a_services.get<MV::TapDevice>(), a_size, a_color, a_callback, a_text);
+}
+
 void renameButton(const MV::Scene::SafeComponent<MV::Scene::Button> &a_button, const MV::UtfString &a_text) {
 	a_button->activeNode()->componentInChildren<MV::Scene::Text>()->text(a_text);
 	a_button->idleNode()->componentInChildren<MV::Scene::Text>()->text(a_text);
 }
 
-std::shared_ptr<MV::Scene::Button> makeSceneButton(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_text, const std::string &a_fontIdentifier /*= MV::DEFAULT_ID*/) {
+std::shared_ptr<MV::Scene::Button> makeSceneButton(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_library, MV::TapDevice &a_mouse, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_text, const std::string &a_fontIdentifier /*= MV::DEFAULT_ID*/) {
 	static long buttonId = 0;
 	std::vector<MV::Color> boxActiveColors = { { InterfaceColors::BUTTON_TOP_ACTIVE },{ InterfaceColors::BUTTON_BOTTOM_ACTIVE },{ InterfaceColors::BUTTON_BOTTOM_ACTIVE },{ InterfaceColors::BUTTON_TOP_ACTIVE } };
 	std::vector<MV::Color> boxIdleColors = { { InterfaceColors::BUTTON_TOP_IDLE },{ InterfaceColors::BUTTON_BOTTOM_IDLE },{ InterfaceColors::BUTTON_BOTTOM_IDLE },{ InterfaceColors::BUTTON_TOP_IDLE } };
@@ -140,7 +162,11 @@ std::shared_ptr<MV::Scene::Button> makeSceneButton(const std::shared_ptr<MV::Sce
 	return button;
 }
 
-std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::MouseState &a_mouse, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_textLibrary, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_startContents) {
+std::shared_ptr<MV::Scene::Button> makeSceneButton(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::Services &a_services, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_text, const std::string &a_fontIdentifier /*= MV::DEFAULT_ID*/) {
+	return makeSceneButton(a_parent, *a_services.get<MV::TextLibrary>(), *a_services.get<MV::TapDevice>(), a_name, a_size, a_text, a_fontIdentifier);
+}
+
+std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::TapDevice &a_mouse, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_textLibrary, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_startContents) {
 	auto box = a_parent->make(a_name)->
 		attach<MV::Scene::Sprite>()->bounds(a_size)->colors({ {InterfaceColors::TEXTBOX_TOP}, { InterfaceColors::TEXTBOX_BOTTOM }, { InterfaceColors::TEXTBOX_BOTTOM }, { InterfaceColors::TEXTBOX_TOP } })->owner();
 	auto text = box->attach<MV::Scene::Text>(a_textLibrary, "small")->justification(MV::TextJustification::CENTER)->wrapping(MV::TextWrapMethod::NONE, a_size.width)->minimumLineHeight(a_size.height)->text(a_startContents);
@@ -159,6 +185,10 @@ std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::MouseS
 	return text;
 }
 
+std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::Services &a_services, const std::shared_ptr<MV::Scene::Node> &a_parent, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_startContents) {
+	return makeInputField(a_panel, *a_services.get<MV::TapDevice>(), a_parent, *a_services.get<MV::TextLibrary>(), a_name, a_size, a_startContents);
+}
+
 std::shared_ptr<MV::Scene::Text> makeLabel(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_textLibrary, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_startContents){
 	auto box = a_parent->make(a_name)->attach<MV::Scene::Sprite>()->bounds(a_size)->colors({ { InterfaceColors::LABEL_TOP },{ InterfaceColors::LABEL_BOTTOM },{ InterfaceColors::LABEL_BOTTOM },{ InterfaceColors::LABEL_TOP } })->owner();
 	auto text = box->attach<MV::Scene::Text>(a_textLibrary, "small")->justification(MV::TextJustification::CENTER)->minimumLineHeight(a_size.height)->wrapping(MV::TextWrapMethod::NONE, a_size.width)->text(a_startContents);
@@ -166,7 +196,11 @@ std::shared_ptr<MV::Scene::Text> makeLabel(const std::shared_ptr<MV::Scene::Node
 	return text;
 }
 
-std::shared_ptr<MV::Scene::Slider> makeSlider(MV::MouseState &a_mouse, const std::shared_ptr<MV::Scene::Node> &a_parent, const std::function <void(std::shared_ptr<MV::Scene::Slider>)> &a_method, float a_startPercent){
+std::shared_ptr<MV::Scene::Text> makeLabel(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::Services &a_services, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_startContents) {
+	return makeLabel(a_parent, *a_services.get<MV::TextLibrary>(), a_name, a_size, a_startContents);
+}
+
+std::shared_ptr<MV::Scene::Slider> makeSlider(MV::TapDevice &a_mouse, const std::shared_ptr<MV::Scene::Node> &a_parent, const std::function <void(std::shared_ptr<MV::Scene::Slider>)> &a_method, float a_startPercent){
 	auto slider = a_parent->make(MV::guid("slider_"))->attach<MV::Scene::Slider>(a_mouse)->bounds(MV::Size<>(110.0f, 10.0f))->percent(a_startPercent);
 	slider->color({.25f, .25f, .25f, 1.0f});
 	slider->handle(MV::Scene::Node::make(slider->owner()->renderer(), "handle")->attach<MV::Scene::Sprite>()->bounds(MV::size(10.0f, 10.0f))->owner());
@@ -175,7 +209,11 @@ std::shared_ptr<MV::Scene::Slider> makeSlider(MV::MouseState &a_mouse, const std
 	return slider;
 }
 
-std::shared_ptr<MV::Scene::Node> makeSlider(MV::Draw2D &a_renderer, MV::MouseState &a_mouse, const std::function <void(std::shared_ptr<MV::Scene::Slider>)> &a_method, float a_startPercent){
+std::shared_ptr<MV::Scene::Slider> makeSlider(MV::Services &a_services, const std::shared_ptr<MV::Scene::Node> &a_parent, const std::function <void(std::shared_ptr<MV::Scene::Slider>)> &a_method, float a_startPercent) {
+	return makeSlider(*a_services.get<MV::TapDevice>(), a_parent, a_method, a_startPercent);
+}
+
+std::shared_ptr<MV::Scene::Node> makeSlider(MV::Draw2D &a_renderer, MV::TapDevice &a_mouse, const std::function <void(std::shared_ptr<MV::Scene::Slider>)> &a_method, float a_startPercent){
 	auto sliderNode = MV::Scene::Node::make(a_renderer, MV::guid("slider_"));
 	auto slider = sliderNode->attach<MV::Scene::Slider>(a_mouse)->bounds(MV::size(110.0f, 10.0f))->percent(a_startPercent);
 	slider->color({ .25f, .25f, .25f, 1.0f });
@@ -185,7 +223,11 @@ std::shared_ptr<MV::Scene::Node> makeSlider(MV::Draw2D &a_renderer, MV::MouseSta
 	return sliderNode;
 }
 
-std::shared_ptr<MV::Scene::Node> makeSlider(MV::Draw2D &a_renderer, MV::MouseState &a_mouse, float a_startPercent){
+std::shared_ptr<MV::Scene::Node> makeSlider(MV::Services &a_services, const std::function <void(std::shared_ptr<MV::Scene::Slider>)> &a_method, float a_startPercent) {
+	return makeSlider(*a_services.get<MV::Draw2D>(), *a_services.get<MV::TapDevice>(), a_method, a_startPercent);
+}
+
+std::shared_ptr<MV::Scene::Node> makeSlider(MV::Draw2D &a_renderer, MV::TapDevice &a_mouse, float a_startPercent){
 	auto sliderNode = MV::Scene::Node::make(a_renderer, MV::guid("slider_"));
 	auto slider = sliderNode->attach<MV::Scene::Slider>(a_mouse)->bounds(MV::size(110.0f, 10.0f))->percent(a_startPercent);
 	slider->color({ .25f, .25f, .25f, 1.0f });
@@ -194,7 +236,11 @@ std::shared_ptr<MV::Scene::Node> makeSlider(MV::Draw2D &a_renderer, MV::MouseSta
 	return sliderNode;
 }
 
-std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::Size<> a_boxSize, MV::MouseState &a_mouse) {
+std::shared_ptr<MV::Scene::Node> makeSlider(MV::Services &a_services, float a_startPercent) {
+	return makeSlider(*a_services.get<MV::Draw2D>(), *a_services.get<MV::TapDevice>(), a_startPercent);
+}
+
+std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::Size<> a_boxSize, MV::TapDevice &a_mouse) {
 	auto box = a_parent->make(a_id);
 
 	MV::PointPrecision headerSize = 20.0f;
@@ -224,11 +270,4 @@ std::shared_ptr<MV::Scene::Node> makeDraggableBox(const std::string &a_id, const
 		a_boxHeader->owner()->parent()->translate(a_boxHeader->owner()->renderer().worldFromScreen(deltaPosition));
 	});
 	return boxContents;
-}
-
-
-std::shared_ptr<MV::Scene::Node> makeColorPicker(MV::Draw2D &a_renderer, MV::MouseState &a_mouse, const MV::Color &a_startColor) {
-	auto sliderNode = MV::Scene::Node::make(a_renderer, MV::guid("colorpicker_"));
-
-	return sliderNode;
 }

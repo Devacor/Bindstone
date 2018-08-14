@@ -25,7 +25,7 @@ enum GameInterfaceColors : uint32_t {
 	SIDER_HANDLE = 0x516191
 };
 
-std::shared_ptr<MV::Scene::Button> button(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_library, MV::MouseState &a_mouse, const MV::Size<> &a_size, const MV::UtfString &a_text) {
+std::shared_ptr<MV::Scene::Button> button(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_library, MV::TapDevice &a_mouse, const MV::Size<> &a_size, const MV::UtfString &a_text) {
 	auto fontIdentifier = MV::DEFAULT_ID;
 	static long buttonId = 0;
 	auto button = a_parent->make(MV::guid(MV::to_string(a_text)))->attach<MV::Scene::Button>(a_mouse)->bounds(a_size);

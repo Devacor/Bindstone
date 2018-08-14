@@ -113,7 +113,7 @@ CEREAL_REGISTER_TYPE(SuppliedInitialGameState);
 class RequestBuildingUpgrade : public NetworkAction {
 public:
 	RequestBuildingUpgrade() {}
-	RequestBuildingUpgrade(TeamSide a_side, int32_t a_slot, int64_t a_id) : side(a_side), slot(a_slot), id(static_cast<int32_t>(a_id)) {}
+	RequestBuildingUpgrade(int32_t a_slot, int64_t a_id) : slot(a_slot), id(static_cast<int32_t>(a_id)) {}
 
 #ifdef BINDSTONE_SERVER
 	virtual void execute(GameUserConnectionState*a_gameUser, GameServer &a_game) override;
@@ -122,10 +122,9 @@ public:
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(side), CEREAL_NVP(slot), CEREAL_NVP(id), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+		archive(CEREAL_NVP(slot), CEREAL_NVP(id), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
-	TeamSide side;
 	int32_t slot;
 	int32_t id;
 };

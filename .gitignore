@@ -30,7 +30,6 @@ M2tMLibrary.VC.db
 *.db
 *.db-wal
 *.db-shm
-BindstoneGameServer/
 *.user
 .vs/VSWorkspaceState.json
 build/

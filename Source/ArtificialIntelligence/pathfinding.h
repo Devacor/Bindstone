@@ -205,7 +205,15 @@ namespace MV {
 		void hookUpObservation();
 
 		template <class Archive>
-		void serialize(Archive & archive, std::uint32_t const version) {
+		void save(Archive & archive, std::uint32_t const version) const {
+			archive(
+				CEREAL_NVP(usingCorners),
+				CEREAL_NVP(squares)
+			);
+		}
+
+		template <class Archive>
+		void load(Archive & archive, std::uint32_t const version) {
 			archive(
 				CEREAL_NVP(usingCorners),
 				CEREAL_NVP(squares)
@@ -217,8 +225,8 @@ namespace MV {
 		static void load_and_construct(Archive & archive, cereal::construct<Map> &construct, std::uint32_t const /*version*/) {
 			construct();
 			archive(
-				CEREAL_NVP(construct->usingCorners),
-				CEREAL_NVP(construct->squares)
+				cereal::make_nvp("usingCorners", construct->usingCorners),
+				cereal::make_nvp("squares", construct->squares)
 			);
 			construct->hookUpObservation();
 		}

@@ -6,11 +6,10 @@
 
 #include "chaiscript/chaiscript_stdlib.hpp"
 
-Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance) :
+Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, int a_buildingSlot, GameInstance& a_gameInstance) :
 	Component(a_owner),
 	statTemplate(a_gameInstance.data().creatures().data(a_id)),
-	skin(a_skin),
-	owningPlayer(a_player),
+	skin(a_gameInstance.building(a_buildingSlot)->skin()),
 	gameInstance(a_gameInstance),
 	onArrive(onArriveSignal),
 	onBlocked(onBlockedSignal),
@@ -21,15 +20,14 @@ Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::str
 	onFall(onFallSignal),
 	onHealthChange(onHealthChangeSignal),
 	targeting(this),
-	state(a_gameInstance.networkPool().spawn(std::make_shared<Creature::NetworkState>(statTemplate))),
+	state(a_gameInstance.networkPool().spawn(std::make_shared<Creature::NetworkState>(statTemplate, a_buildingSlot))),
 	isOnServer(true) {
 }
 
-Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> &a_state, const std::string &a_skin, const std::shared_ptr<Player> &a_player, GameInstance& a_gameInstance) :
+Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> &a_state, GameInstance& a_gameInstance) :
 	Component(a_owner),
 	statTemplate(a_gameInstance.data().creatures().data(a_state->self()->creatureTypeId)),
-	skin(a_skin),
-	owningPlayer(a_player),
+	skin(a_gameInstance.building(a_state->self()->buildingSlot)->skin()),
 	gameInstance(a_gameInstance),
 	onArrive(onArriveSignal),
 	onBlocked(onBlockedSignal),
@@ -77,9 +75,7 @@ void Creature::initialize() {
 	auto self = std::static_pointer_cast<Creature>(shared_from_this());
 	statTemplate.script(gameInstance.script()).spawn(self);
 
-	owner()->scale(owner()->scale() * gameInstance.teamForPlayer(owningPlayer).scale());
-
-	gameInstance.teamForPlayer(owningPlayer).spawn(self);
+	gameInstance.registerCreature(self);
 }
 
 void Creature::updateImplementation(double a_delta) {
@@ -113,6 +109,10 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 
 	a_script.add(chaiscript::fun(&Creature::variables), "variables");
 
+	a_script.add(chaiscript::fun([&](Creature &a_self) {
+		return a_self.state->id();
+	}), "id");
+
 	a_script.add(chaiscript::fun([](Creature &a_self){
 		a_self.fall();
 	}), "fall");
@@ -122,11 +122,11 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 	}), "changeHealth");
 
 	a_script.add(chaiscript::fun([](Creature &a_self, float a_range) {
-		return a_self.gameInstance.teamAgainstPlayer(a_self.owningPlayer).creaturesInRange(a_self.agent()->gridPosition(), a_range);
+		return a_self.gameInstance.teamAgainstPlayer(a_self.player()).creaturesInRange(a_self.agent()->gridPosition(), a_range);
 	}), "enemiesInRange");
 
 	a_script.add(chaiscript::fun([](Creature &a_self, float a_range) {
-		return a_self.gameInstance.teamForPlayer(a_self.owningPlayer).creaturesInRange(a_self.agent()->gridPosition(), a_range);
+		return a_self.gameInstance.teamForPlayer(a_self.player()).creaturesInRange(a_self.agent()->gridPosition(), a_range);
 	}), "alliesInRange");
 
 	a_script.add(chaiscript::fun([](Creature &a_self) {
@@ -134,7 +134,7 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 	}), "stats");
 	a_script.add(chaiscript::fun(&Creature::skin), "skin");
 	a_script.add(chaiscript::fun(&Creature::pathAgent), "agent");
-	a_script.add(chaiscript::fun(&Creature::owningPlayer), "player");
+	a_script.add(chaiscript::fun(&Creature::player), "player");
 
 	a_script.add(chaiscript::fun(&Creature::assetPath), "assetPath");
 	a_script.add(chaiscript::fun([](Creature &a_self) {
@@ -142,13 +142,13 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 	}), "gameInstance");
 
 	a_script.add(chaiscript::fun([](Creature &a_self) {
-		return a_self.gameInstance.teamForPlayer(a_self.owningPlayer);
+		return a_self.gameInstance.teamForPlayer(a_self.player());
 	}), "team");
 
 	a_script.add(chaiscript::bootstrap::standard_library::vector_type<std::vector<std::shared_ptr<Creature>>>("VectorCreature"));
 
 	a_script.add(chaiscript::fun([](Creature &a_self) {
-		return a_self.gameInstance.teamAgainstPlayer(a_self.owningPlayer);
+		return a_self.gameInstance.teamAgainstPlayer(a_self.player());
 	}), "enemyTeam");
 
 	a_script.add(chaiscript::fun([](std::shared_ptr<Creature> &a_self) {
@@ -173,6 +173,10 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 	TargetPolicy::hook(a_script);
 
 	return a_script;
+}
+
+std::shared_ptr<Player> Creature::player() {
+	return gameInstance.building(state->self()->buildingSlot)->player();
 }
 
 CreatureScriptMethods& CreatureScriptMethods::loadScript(chaiscript::ChaiScript &a_script, const std::string &a_id) {

@@ -1,0 +1,8 @@
+add_subdirectory(Animation)
+add_subdirectory(Utility) 
+add_subdirectory(ArtificialIntelligence)
+add_subdirectory(Render)
+add_subdirectory(Audio)
+add_subdirectory(Interface)
+add_subdirectory(Network)
+add_subdirectory(Physics)

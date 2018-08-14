@@ -1,18 +1,18 @@
 #add_subdirectory(Animation)
 
-add_executable(MoonDog main.cpp StdAfx.cpp)
+add_executable(MoonDog ../SolutionSpecific/BindstoneClient/main.cpp StdAfx.cpp)
 
-add_subdirectory(Utility)
-add_subdirectory(ArtificialIntelligence)
-add_subdirectory(Render)
-add_subdirectory(Audio)
+add_subdirectory(SharedCore/Utility) 
+add_subdirectory(SharedCore/ArtificialIntelligence)
+add_subdirectory(SharedCore/Render)
+add_subdirectory(SharedCore/Audio)
 #add_subdirectory(ClickerGame)
 #add_subdirectory(DiggerGame)
 add_subdirectory(Editor)
 add_subdirectory(Game)
-add_subdirectory(Interface)
-add_subdirectory(Network)
-add_subdirectory(Physics)
+add_subdirectory(SharedCore/Interface)
+add_subdirectory(SharedCore/Network)
+add_subdirectory(SharedCore/Physics)
 
 target_link_libraries(MoonDog
   CONAN_PKG::OpenSSL

@@ -132,7 +132,10 @@ ClientGameInstance::ClientGameInstance(const std::shared_ptr<Player> &a_leftPlay
 	GameInstance(a_leftPlayer, a_rightPlayer, a_game.root(), a_game.data(), a_game.mouse()),
 	game(a_game) {
 
-
+	syncronizedObjects.onSpawn<Creature::NetworkState>([this](std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> a_newItem) {
+		auto creatureState = a_newItem->self();
+		building(creatureState->buildingSlot)->spawnNetworkCreature(a_newItem);
+	});
 
 	auto playlistGame = std::make_shared<MV::AudioPlayList>();
 	playlistGame->addSoundBack("gameintro");
@@ -149,13 +152,13 @@ ClientGameInstance::ClientGameInstance(const std::shared_ptr<Player> &a_leftPlay
 	//playlistGame->beginPlaying();
 }
 
-void ClientGameInstance::requestUpgrade(const std::shared_ptr<Player> &a_owner, int a_slot, size_t a_upgrade) {
+void ClientGameInstance::requestUpgrade(int a_slot, size_t a_upgrade) {
 	std::cout << "Building Upgrade Request: " << a_slot << ", " << a_upgrade << std::endl;
-	game.gameClient()->send(makeNetworkString<RequestBuildingUpgrade>(teamForPlayer(a_owner).side(), a_slot, a_upgrade));
+	game.gameClient()->send(makeNetworkString<RequestBuildingUpgrade>(a_slot, a_upgrade));
 }
 
-void ClientGameInstance::performUpgrade(TeamSide team, int a_slot, size_t a_upgrade) {
-	auto selectedBuilding = teamForSide(team).building(a_slot);
+void ClientGameInstance::performUpgrade(int a_slot, size_t a_upgrade) {
+	auto selectedBuilding = building(a_slot);
 	selectedBuilding->upgrade(a_upgrade);
 	//selectedBuilding->update(game.gameClient()->clientServerTimeDelta());
 }
@@ -178,7 +181,7 @@ MockClientGameInstance::MockClientGameInstance(const std::shared_ptr<Player> &a_
 
 	syncronizedObjects.onSpawn<Creature::NetworkState>([this](std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> a_newItem) {
 		auto creatureState = a_newItem->self();
-		teamForSide(creatureState->team).building(creatureState->buildingSlot)->spawnNetworkCreature(a_newItem);
+		building(creatureState->buildingSlot)->spawnNetworkCreature(a_newItem);
 	});
 	auto playlistGame = std::make_shared<MV::AudioPlayList>();
 	playlistGame->addSoundBack("gameintro");
@@ -195,19 +198,25 @@ MockClientGameInstance::MockClientGameInstance(const std::shared_ptr<Player> &a_
 	//playlistGame->beginPlaying();
 }
 
-void MockClientGameInstance::requestUpgrade(const std::shared_ptr<Player> &a_owner, int a_slot, size_t a_upgrade) {
-	performUpgrade(teamForPlayer(a_owner).side(), a_slot, a_upgrade);
-	GameInstance::requestUpgrade(a_owner, a_slot, a_upgrade);
+void MockClientGameInstance::requestUpgrade(int a_slot, size_t a_upgrade) {
+	performUpgrade(a_slot, a_upgrade);
+	GameInstance::requestUpgrade(a_slot, a_upgrade);
 
 	//game.gameClient()->send(makeNetworkString<RequestBuildingUpgrade>(teamForPlayer(a_owner).side(), a_slot, a_upgrade));
 }
 
-void MockClientGameInstance::performUpgrade(TeamSide team, int a_slot, size_t a_upgrade) {
-	auto selectedBuilding = teamForSide(team).building(a_slot);
+void MockClientGameInstance::performUpgrade(int a_slot, size_t a_upgrade) {
+	auto selectedBuilding = building(a_slot);
 	selectedBuilding->upgrade(a_upgrade);
 	//selectedBuilding->update(game.gameClient()->clientServerTimeDelta());
 }
 
 bool MockClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const {
 	return true; //
+}
+
+void MockClientGameInstance::spawnCreature(int a_buildingSlot) {
+	auto spawner = building(a_buildingSlot);
+	auto creatureStatTemplate = data().creatures().data(spawner->currentCreature().id);
+	networkPool().spawn(std::make_shared<Creature::NetworkState>(creatureStatTemplate, a_buildingSlot));
 }

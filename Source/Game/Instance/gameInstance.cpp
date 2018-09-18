@@ -167,12 +167,10 @@ bool ClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<Player> &a_
 	return a_player == game.player();
 }
 
-#ifdef BINDSTONE_SERVER
 ServerGameInstance::ServerGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, GameServer& a_game) :
 	GameInstance(a_leftPlayer, a_rightPlayer, a_game.root(), a_game.data(), a_game.mouse()),
 	gameServer(a_game){
 }
-#endif
 
 
 MockClientGameInstance::MockClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game) :
@@ -211,7 +209,7 @@ void MockClientGameInstance::performUpgrade(int a_slot, size_t a_upgrade) {
 	//selectedBuilding->update(game.gameClient()->clientServerTimeDelta());
 }
 
-bool MockClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const {
+bool MockClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<Player> &/*a_player*/) const {
 	return true; //
 }
 

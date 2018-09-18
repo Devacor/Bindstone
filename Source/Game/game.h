@@ -10,12 +10,12 @@
 #include "Game/Instance/gameInstance.h"
 #include "Game/Interface/interfaceManager.h"
 #include "Game/NetworkLayer/package.h"
-#include "Network/package.h"
+#include "MV/Network/package.h"
 
 #include <string>
 #include <ctime>
 
-#include "Utility/chaiscriptUtility.h"
+#include "MV/Utility/chaiscriptUtility.h"
 
 class Game {
 	MV::Signal<void(LoginResponse&)> onLoginResponseSignal;

@@ -37,3 +37,4 @@ build/
 *.pdb
 *.idb
 Win32/
+.vs/

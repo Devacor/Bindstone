@@ -1,0 +1,1529 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Bindstone\MVLibrary">
+      <UniqueIdentifier>{e0cfe11c-d085-4eee-acb4-3c022d218e50}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone">
+      <UniqueIdentifier>{b35ae645-088c-4ed1-b281-f6aa32ad6ffe}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\cereal\include\cereal\external\rapidxml">
+      <UniqueIdentifier>{584cc2ff-9b10-4753-a1c0-a687ad9a6a79}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\cereal\include\cereal\external">
+      <UniqueIdentifier>{40d1d1dd-4b07-498b-bce7-f6442ffb98b6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\cereal\include\cereal">
+      <UniqueIdentifier>{1daf53ef-d176-4cdd-b69f-9f6ee8974aea}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\cereal\include">
+      <UniqueIdentifier>{42b71bfb-b237-4a00-ac96-e94e3c9ae34b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\cereal">
+      <UniqueIdentifier>{359b31aa-cba5-435e-ad3a-4d1f2e9c377e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external">
+      <UniqueIdentifier>{901d123b-87aa-4e7d-b801-e132f4143179}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\spine">
+      <UniqueIdentifier>{34f5c3df-c6bb-462d-841c-0ce9b691e98a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\Box2D\Collision">
+      <UniqueIdentifier>{6fed955f-ad2f-4973-908e-ccc3a325595c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\Box2D">
+      <UniqueIdentifier>{d9280c9e-df89-4a01-a436-1ee86374f7eb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\Box2D\Collision\Shapes">
+      <UniqueIdentifier>{ccc08a1f-552a-4679-ad62-176c3eeb2929}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\Box2D\Common">
+      <UniqueIdentifier>{7807c285-69bd-450c-bd46-bc766d2d1193}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\Box2D\Dynamics">
+      <UniqueIdentifier>{f4c51385-0776-40d1-9227-678f085c2070}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\Box2D\Dynamics\Contacts">
+      <UniqueIdentifier>{3018c9b8-d109-4196-bdeb-f632ec1256ae}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\Box2D\Dynamics\Joints">
+      <UniqueIdentifier>{d738c694-8103-44f3-9b31-3db9768851e7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\Box2D\Rope">
+      <UniqueIdentifier>{120e7694-a4bd-4506-befc-e2bd691e8773}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\gl3w\src">
+      <UniqueIdentifier>{915c842a-5ef4-4c5f-9b81-f43a1e7e6750}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\gl3w">
+      <UniqueIdentifier>{10171bdf-4013-4cfe-9c43-afe2ca5b0a6b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libpqxx-4.0.1\src">
+      <UniqueIdentifier>{bc6cffa9-17a7-4178-a3ec-c4d38f24cc82}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\libpqxx-4.0.1">
+      <UniqueIdentifier>{2388081f-130c-40de-8a56-f7ca41d2608e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\Editor">
+      <UniqueIdentifier>{96a80342-cc4c-41cc-9886-87c69c046e36}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source">
+      <UniqueIdentifier>{5f0bf873-dc3c-4447-a3a3-cb35fb94fe01}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\Game">
+      <UniqueIdentifier>{f823c112-7169-435c-89cf-73fd17c08b1a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\Game\Instance">
+      <UniqueIdentifier>{2fccd30e-2f68-40d8-9e51-710f6bce60f3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\Game\Interface">
+      <UniqueIdentifier>{f0c087ac-09e1-43a1-80c6-9599d8b12b82}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\Game\NetworkLayer">
+      <UniqueIdentifier>{2808021d-6e3b-4723-bc21-c64bb5b1e403}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\MV\ArtificialIntelligence">
+      <UniqueIdentifier>{adb71465-f713-42c5-a45b-680d3921c6ab}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\MV">
+      <UniqueIdentifier>{50be59e5-ea3f-447f-b387-afa2839e9dcb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\MV\Audio">
+      <UniqueIdentifier>{cbd4fd6b-65a9-4f24-b8e5-e31b97341a03}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\MV\Interface">
+      <UniqueIdentifier>{30cef0a0-cc08-42e1-ba83-ac5a80cfa318}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\MV\Network">
+      <UniqueIdentifier>{68996380-06c5-47d5-a6ed-7399a42c4b99}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\MV\Physics">
+      <UniqueIdentifier>{1bf6aedd-91f5-4261-9949-e5a02ac1c3d4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\MV\Render">
+      <UniqueIdentifier>{62d4db1a-03cd-4114-bc12-18e4df4d4e72}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\MV\Render\Scene">
+      <UniqueIdentifier>{12c13174-0e2f-43d4-9f42-e75f0948c918}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bindstone\Source\MV\Utility">
+      <UniqueIdentifier>{c2ce836a-3a75-4836-918f-0fc01f28eb65}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\cereal\include\cereal\archives">
+      <UniqueIdentifier>{81fea135-5022-4c19-bb38-b7bc461d4dee}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\cereal\include\cereal\concepts">
+      <UniqueIdentifier>{c3fa7e7f-d618-4e1c-af43-cc5425d081d2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\cereal\include\cereal\details">
+      <UniqueIdentifier>{8c64c1dc-02b4-4d05-affe-c9ca8ce05571}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\cereal\include\cereal\external\rapidjson">
+      <UniqueIdentifier>{c389b3b4-ea7f-4458-9ead-621b8eeccc2e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\cereal\include\cereal\external\rapidjson\internal">
+      <UniqueIdentifier>{3d64c47b-c219-4e07-895c-5beaaf6b0971}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\cereal\include\cereal\types">
+      <UniqueIdentifier>{6831f216-07af-4dfd-a336-334cc33c7f57}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\ChaiScript-6.0.0\include\chaiscript">
+      <UniqueIdentifier>{b0427c4c-5913-4738-af34-686148f5db73}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\ChaiScript-6.0.0\include">
+      <UniqueIdentifier>{e57ca24c-1334-4107-9276-a6d3bf9982cb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\ChaiScript-6.0.0">
+      <UniqueIdentifier>{3c17d462-8fdb-4f62-82f9-76bc7164ac51}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\ChaiScript-6.0.0\include\chaiscript\dispatchkit">
+      <UniqueIdentifier>{b5ac766b-e24d-4533-8aa8-0d78c8e0d13b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\ChaiScript-6.0.0\include\chaiscript\language">
+      <UniqueIdentifier>{d8a97d02-6c09-4355-be88-ca9ed534856c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="external\ChaiScript-6.0.0\include\chaiscript\utility">
+      <UniqueIdentifier>{146e394f-c29a-4b35-ae50-504913e07ccc}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="ClassDiagram.cd">
+      <Filter>Bindstone\MVLibrary</Filter>
+    </None>
+    <None Include="..\..\external\cereal\include\cereal\external\rapidxml\manual.html">
+      <Filter>external\cereal\include\cereal\external\rapidxml</Filter>
+    </None>
+    <None Include="..\..\external\spine\LICENSE">
+      <Filter>external\spine</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\external\Box2D\Collision\b2BroadPhase.cpp">
+      <Filter>external\Box2D\Collision</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Collision\b2CollideCircle.cpp">
+      <Filter>external\Box2D\Collision</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Collision\b2CollideEdge.cpp">
+      <Filter>external\Box2D\Collision</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Collision\b2CollidePolygon.cpp">
+      <Filter>external\Box2D\Collision</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Collision\b2Collision.cpp">
+      <Filter>external\Box2D\Collision</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Collision\b2Distance.cpp">
+      <Filter>external\Box2D\Collision</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Collision\b2DynamicTree.cpp">
+      <Filter>external\Box2D\Collision</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Collision\b2TimeOfImpact.cpp">
+      <Filter>external\Box2D\Collision</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Collision\Shapes\b2ChainShape.cpp">
+      <Filter>external\Box2D\Collision\Shapes</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Collision\Shapes\b2CircleShape.cpp">
+      <Filter>external\Box2D\Collision\Shapes</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Collision\Shapes\b2EdgeShape.cpp">
+      <Filter>external\Box2D\Collision\Shapes</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Collision\Shapes\b2PolygonShape.cpp">
+      <Filter>external\Box2D\Collision\Shapes</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Common\b2BlockAllocator.cpp">
+      <Filter>external\Box2D\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Common\b2Draw.cpp">
+      <Filter>external\Box2D\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Common\b2Math.cpp">
+      <Filter>external\Box2D\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Common\b2Settings.cpp">
+      <Filter>external\Box2D\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Common\b2StackAllocator.cpp">
+      <Filter>external\Box2D\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Common\b2Timer.cpp">
+      <Filter>external\Box2D\Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\b2Body.cpp">
+      <Filter>external\Box2D\Dynamics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\b2ContactManager.cpp">
+      <Filter>external\Box2D\Dynamics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\b2Fixture.cpp">
+      <Filter>external\Box2D\Dynamics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\b2Island.cpp">
+      <Filter>external\Box2D\Dynamics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\b2World.cpp">
+      <Filter>external\Box2D\Dynamics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\b2WorldCallbacks.cpp">
+      <Filter>external\Box2D\Dynamics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2ChainAndCircleContact.cpp">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2ChainAndPolygonContact.cpp">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2CircleContact.cpp">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2Contact.cpp">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2ContactSolver.cpp">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2EdgeAndCircleContact.cpp">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2EdgeAndPolygonContact.cpp">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2PolygonAndCircleContact.cpp">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2PolygonContact.cpp">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2DistanceJoint.cpp">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2FrictionJoint.cpp">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2GearJoint.cpp">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2Joint.cpp">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2MotorJoint.cpp">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2MouseJoint.cpp">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2PrismaticJoint.cpp">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2PulleyJoint.cpp">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2RevoluteJoint.cpp">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2RopeJoint.cpp">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2WeldJoint.cpp">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2WheelJoint.cpp">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\Box2D\Rope\b2Rope.cpp">
+      <Filter>external\Box2D\Rope</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\gl3w\src\gl3w.c">
+      <Filter>external\gl3w\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\binarystring.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\connection.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\connection_base.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\cursor.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\dbtransaction.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\errorhandler.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\except.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\field.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\largeobject.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\nontransaction.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\notification.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\notify-listen.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\pipeline.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\prepared_statement.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\result.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\robusttransaction.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\statement_parameters.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\strconv.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\subtransaction.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\tablereader.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\tablestream.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\tablewriter.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\transaction.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\transaction_base.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\tuple.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\util.cxx">
+      <Filter>external\libpqxx-4.0.1\src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\Animation.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\AnimationState.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\AnimationStateData.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\Array.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\Atlas.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\AtlasAttachmentLoader.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\Attachment.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\AttachmentLoader.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\Bone.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\BoneData.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\BoundingBoxAttachment.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\ClippingAttachment.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\Color.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\Event.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\EventData.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\extension.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\IkConstraint.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\IkConstraintData.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\Json.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\MeshAttachment.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\PathAttachment.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\PathConstraint.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\PathConstraintData.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\PointAttachment.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\RegionAttachment.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\Skeleton.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\SkeletonBinary.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\SkeletonBounds.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\SkeletonClipping.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\SkeletonData.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\SkeletonJson.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\Skin.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\Slot.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\SlotData.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\TransformConstraint.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\TransformConstraintData.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\Triangulator.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\VertexAttachment.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\external\spine\VertexEffect.c">
+      <Filter>external\spine</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Editor\componentPanels.cpp">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Editor\editComponents.cpp">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Editor\editor.cpp">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Editor\editorControls.cpp">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Editor\editorFactories.cpp">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Editor\editorSceneGraphPanel.cpp">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\building.cpp">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\creature.cpp">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\game.cpp">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\gameEditor.cpp">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\Instance\gameInstance.cpp">
+      <Filter>Bindstone\Source\Game\Instance</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\Instance\team.cpp">
+      <Filter>Bindstone\Source\Game\Instance</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\Interface\guiFactories.cpp">
+      <Filter>Bindstone\Source\Game\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\Interface\interfaceManager.cpp">
+      <Filter>Bindstone\Source\Game\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\managers.cpp">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\NetworkLayer\accountActions.cpp">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\NetworkLayer\clientActions.cpp">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\NetworkLayer\gameServer.cpp">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\NetworkLayer\gameServerActions.cpp">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\NetworkLayer\lobbyServer.cpp">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\NetworkLayer\synchronizeAction.cpp">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\player.cpp">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\state.cpp">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Game\wallet.cpp">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\ArtificialIntelligence\pathfinding.cpp">
+      <Filter>Bindstone\Source\MV\ArtificialIntelligence</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Audio\sound.cpp">
+      <Filter>Bindstone\Source\MV\Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Interface\mouse.cpp">
+      <Filter>Bindstone\Source\MV\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Network\download.cpp">
+      <Filter>Bindstone\Source\MV\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Network\network.cpp">
+      <Filter>Bindstone\Source\MV\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Network\url.cpp">
+      <Filter>Bindstone\Source\MV\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Physics\collider.cpp">
+      <Filter>Bindstone\Source\MV\Physics</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\boxaabb.cpp">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\formattedText.cpp">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\points.cpp">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\render.cpp">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\button.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\clickable.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\clipped.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\component.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\drawable.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\emitter.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\grid.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\node.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\palette.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\path.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\scroller.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\slider.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\spineMV.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\sprite.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\stencil.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\Scene\text.cpp">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\sharedTextures.cpp">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\texturePacker.cpp">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Render\textures.cpp">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Utility\asioThreadPool.cpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Utility\chaiscriptStdLib.cpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Utility\generalUtility.cpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Utility\log.cpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Utility\sha512.cpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Utility\stopwatch.cpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\MV\Utility\tinyutf8.cpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\StdAfx.cpp">
+      <Filter>Bindstone\Source</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\external\Box2D\Box2D.h">
+      <Filter>external\Box2D</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Collision\b2BroadPhase.h">
+      <Filter>external\Box2D\Collision</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Collision\b2Collision.h">
+      <Filter>external\Box2D\Collision</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Collision\b2Distance.h">
+      <Filter>external\Box2D\Collision</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Collision\b2DynamicTree.h">
+      <Filter>external\Box2D\Collision</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Collision\b2TimeOfImpact.h">
+      <Filter>external\Box2D\Collision</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Collision\Shapes\b2ChainShape.h">
+      <Filter>external\Box2D\Collision\Shapes</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Collision\Shapes\b2CircleShape.h">
+      <Filter>external\Box2D\Collision\Shapes</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Collision\Shapes\b2EdgeShape.h">
+      <Filter>external\Box2D\Collision\Shapes</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Collision\Shapes\b2PolygonShape.h">
+      <Filter>external\Box2D\Collision\Shapes</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Collision\Shapes\b2Shape.h">
+      <Filter>external\Box2D\Collision\Shapes</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Common\b2BlockAllocator.h">
+      <Filter>external\Box2D\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Common\b2Draw.h">
+      <Filter>external\Box2D\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Common\b2GrowableStack.h">
+      <Filter>external\Box2D\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Common\b2Math.h">
+      <Filter>external\Box2D\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Common\b2Settings.h">
+      <Filter>external\Box2D\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Common\b2StackAllocator.h">
+      <Filter>external\Box2D\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Common\b2Timer.h">
+      <Filter>external\Box2D\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2Body.h">
+      <Filter>external\Box2D\Dynamics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2ContactManager.h">
+      <Filter>external\Box2D\Dynamics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2Fixture.h">
+      <Filter>external\Box2D\Dynamics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2Island.h">
+      <Filter>external\Box2D\Dynamics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2TimeStep.h">
+      <Filter>external\Box2D\Dynamics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2World.h">
+      <Filter>external\Box2D\Dynamics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2WorldCallbacks.h">
+      <Filter>external\Box2D\Dynamics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2ChainAndCircleContact.h">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2ChainAndPolygonContact.h">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2CircleContact.h">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2Contact.h">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2ContactSolver.h">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2EdgeAndCircleContact.h">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2EdgeAndPolygonContact.h">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2PolygonAndCircleContact.h">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2PolygonContact.h">
+      <Filter>external\Box2D\Dynamics\Contacts</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2DistanceJoint.h">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2FrictionJoint.h">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2GearJoint.h">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2Joint.h">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2MotorJoint.h">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2MouseJoint.h">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2PrismaticJoint.h">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2PulleyJoint.h">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2RevoluteJoint.h">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2RopeJoint.h">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2WeldJoint.h">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2WheelJoint.h">
+      <Filter>external\Box2D\Dynamics\Joints</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\Box2D\Rope\b2Rope.h">
+      <Filter>external\Box2D\Rope</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\access.hpp">
+      <Filter>external\cereal\include\cereal</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\archives\adapters.hpp">
+      <Filter>external\cereal\include\cereal\archives</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\archives\binary.hpp">
+      <Filter>external\cereal\include\cereal\archives</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\archives\json.hpp">
+      <Filter>external\cereal\include\cereal\archives</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\archives\portable_binary.hpp">
+      <Filter>external\cereal\include\cereal\archives</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\archives\xml.hpp">
+      <Filter>external\cereal\include\cereal\archives</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\cereal.hpp">
+      <Filter>external\cereal\include\cereal</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\concepts\pair_associative_container.hpp">
+      <Filter>external\cereal\include\cereal\concepts</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\details\helpers.hpp">
+      <Filter>external\cereal\include\cereal\details</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\details\polymorphic_impl.hpp">
+      <Filter>external\cereal\include\cereal\details</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\details\static_object.hpp">
+      <Filter>external\cereal\include\cereal\details</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\details\traits.hpp">
+      <Filter>external\cereal\include\cereal\details</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\details\util.hpp">
+      <Filter>external\cereal\include\cereal\details</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\base64.hpp">
+      <Filter>external\cereal\include\cereal\external</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\document.h">
+      <Filter>external\cereal\include\cereal\external\rapidjson</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\filestream.h">
+      <Filter>external\cereal\include\cereal\external\rapidjson</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\genericstream.h">
+      <Filter>external\cereal\include\cereal\external\rapidjson</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\internal\pow10.h">
+      <Filter>external\cereal\include\cereal\external\rapidjson\internal</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\internal\stack.h">
+      <Filter>external\cereal\include\cereal\external\rapidjson\internal</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\internal\strfunc.h">
+      <Filter>external\cereal\include\cereal\external\rapidjson\internal</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\prettywriter.h">
+      <Filter>external\cereal\include\cereal\external\rapidjson</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\rapidjson.h">
+      <Filter>external\cereal\include\cereal\external\rapidjson</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\reader.h">
+      <Filter>external\cereal\include\cereal\external\rapidjson</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\stringbuffer.h">
+      <Filter>external\cereal\include\cereal\external\rapidjson</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\writer.h">
+      <Filter>external\cereal\include\cereal\external\rapidjson</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidxml\rapidxml.hpp">
+      <Filter>external\cereal\include\cereal\external\rapidxml</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidxml\rapidxml_iterators.hpp">
+      <Filter>external\cereal\include\cereal\external\rapidxml</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidxml\rapidxml_print.hpp">
+      <Filter>external\cereal\include\cereal\external\rapidxml</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidxml\rapidxml_utils.hpp">
+      <Filter>external\cereal\include\cereal\external\rapidxml</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\macros.hpp">
+      <Filter>external\cereal\include\cereal</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\array.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\base_class.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\bitset.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\boost_variant.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\chrono.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\common.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\complex.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\deque.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\forward_list.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\list.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\map.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\memory.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\polymorphic.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\queue.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\set.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\stack.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\string.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\tuple.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\unordered_map.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\unordered_set.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\utility.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\valarray.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\vector.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript_basic.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript_defines.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript_stdlib.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript_threading.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\any.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\bad_boxed_cast.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\bind_first.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\bootstrap.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\bootstrap_stl.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\boxed_cast.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\boxed_cast_helper.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\boxed_number.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\boxed_value.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\callable_traits.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\dispatchkit.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\dynamic_object.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\dynamic_object_detail.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\exception_specification.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\function_call.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\function_call_detail.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\handle_return.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\operators.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\proxy_constructors.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\proxy_functions.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\proxy_functions_detail.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\register_function.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\short_alloc.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\type_conversions.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\type_info.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\dispatchkit</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_algebraic.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\language</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_common.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\language</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_engine.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\language</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_eval.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\language</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_optimizer.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\language</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_parser.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\language</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_posix.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\language</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_prelude.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\language</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_prelude_docs.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\language</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_tracer.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\language</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_unknown.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\language</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_windows.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\language</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\utility\fnv1a.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\utility\json.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\utility\json_wrap.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\utility\static_string.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\utility\utility.hpp">
+      <Filter>external\ChaiScript-6.0.0\include\chaiscript\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\Animation.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\AnimationState.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\AnimationStateData.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\Array.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\Atlas.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\AtlasAttachmentLoader.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\Attachment.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\AttachmentLoader.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\Bone.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\BoneData.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\BoundingBoxAttachment.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\ClippingAttachment.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\Color.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\dll.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\Event.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\EventData.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\extension.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\IkConstraint.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\IkConstraintData.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\Json.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\kvec.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\MeshAttachment.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\PathAttachment.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\PathConstraint.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\PathConstraintData.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\PointAttachment.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\RegionAttachment.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\Skeleton.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\SkeletonBinary.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\SkeletonBounds.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\SkeletonClipping.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\SkeletonData.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\SkeletonJson.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\Skin.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\Slot.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\SlotData.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\spine.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\TransformConstraint.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\TransformConstraintData.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\Triangulator.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\VertexAttachment.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\spine\VertexEffect.h">
+      <Filter>external\spine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Editor\anchorEditor.h">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Editor\componentPanels.h">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Editor\editComponents.h">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Editor\editor.h">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Editor\editorControls.h">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Editor\editorDefines.h">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Editor\editorFactories.h">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Editor\editorSceneGraphPanel.h">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Editor\texturePicker.h">
+      <Filter>Bindstone\Source\Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\building.h">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\creature.h">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\game.h">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\gameEditor.h">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\Instance\gameInstance.h">
+      <Filter>Bindstone\Source\Game\Instance</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\Instance\team.h">
+      <Filter>Bindstone\Source\Game\Instance</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\Interface\guiFactories.h">
+      <Filter>Bindstone\Source\Game\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\Interface\interfaceManager.h">
+      <Filter>Bindstone\Source\Game\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\managers.h">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\NetworkLayer\accountActions.h">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\NetworkLayer\clientActions.h">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\NetworkLayer\gameServer.h">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\NetworkLayer\gameServerActions.h">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\NetworkLayer\lobbyServer.h">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\NetworkLayer\networkAction.h">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\NetworkLayer\package.h">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\NetworkLayer\synchronizeAction.h">
+      <Filter>Bindstone\Source\Game\NetworkLayer</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\player.h">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\state.h">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\wallet.h">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\ArtificialIntelligence\pathfinding.h">
+      <Filter>Bindstone\Source\MV\ArtificialIntelligence</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Audio\package.h">
+      <Filter>Bindstone\Source\MV\Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Audio\sound.h">
+      <Filter>Bindstone\Source\MV\Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Interface\mouse.h">
+      <Filter>Bindstone\Source\MV\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Interface\package.h">
+      <Filter>Bindstone\Source\MV\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Network\download.h">
+      <Filter>Bindstone\Source\MV\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Network\email.h">
+      <Filter>Bindstone\Source\MV\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Network\network.h">
+      <Filter>Bindstone\Source\MV\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Network\networkObject.h">
+      <Filter>Bindstone\Source\MV\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Network\package.h">
+      <Filter>Bindstone\Source\MV\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Network\url.h">
+      <Filter>Bindstone\Source\MV\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Physics\collider.h">
+      <Filter>Bindstone\Source\MV\Physics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Physics\package.h">
+      <Filter>Bindstone\Source\MV\Physics</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\boxaabb.h">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\formattedText.h">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\glext.h">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\matrix.hpp">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\package.h">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\points.h">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\render.h">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\button.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\clickable.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\clipped.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\component.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\drawable.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\emitter.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\grid.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\node.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\package.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\palette.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\path.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\scroller.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\slider.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\spineMV.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\sprite.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\stencil.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\Scene\text.h">
+      <Filter>Bindstone\Source\MV\Render\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\sharedTextures.h">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\texturePacker.h">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Render\textures.h">
+      <Filter>Bindstone\Source\MV\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\asioThreadPool.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\cerealUtility.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\chaiscriptStdLib.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\chaiscriptUtility.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\exactType.hpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\generalUtility.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\log.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\log.hpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\optionalCalls.hpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\package.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\require.hpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\scopeGuard.hpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\services.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\sha512.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\signal.hpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\stopwatch.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\task.hpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\taskActions.hpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\threadPool.hpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\tinyutf8.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\tupleHelpers.hpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\visitor.hpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\StdAfx.h">
+      <Filter>Bindstone\Source</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

@@ -1,8 +1,8 @@
 #ifndef _LOBBYSERVER_MV_H_
 #define _LOBBYSERVER_MV_H_
 
-#include "Utility/package.h"
-#include "Network/package.h"
+#include "MV/Utility/package.h"
+#include "MV/Network/package.h"
 #include "Game/NetworkLayer/package.h"
 #include "Game/managers.h"
 
@@ -17,7 +17,7 @@
 #include <pqxx/pqxx>
 #include <LINQ/boolinq.hpp>
 
-#include "Utility/cerealUtility.h"
+#include "MV/Utility/cerealUtility.h"
 
 class ServerUserAction;
 class LobbyServer;

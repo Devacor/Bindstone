@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ImportGroup Label="PropertySheets" />
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <IncludePath>$(SolutionDir)/Source/;$(SolutionDir)../external/;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\compiler\VisualStudio2010\;$(SolutionDir)../external\libpqxx-4.0.1\config\sample-headers\libpq\9.0\;$(SolutionDir)../external\openssl\include\;$(SolutionDir)../external/libpqxx-4.0.1/include/;$(SolutionDir)../external/SDL\SDL-2.0.4-9583\include;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/include;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/include;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/include;$(SolutionDir)../external/ChaiScript-6.0.0/include;$(SolutionDir)../external/boost_1_67_0/;$(IncludePath);$(SolutionDir)../external/cereal/include/;$(SolutionDir)../external/spine/spine-c/include/;C:\Program Files\PostgreSQL\9.5\include\</IncludePath>
+    <LibraryPath>$(SolutionDir)../external/boost_1_67_0/stage/lib/;$(SolutionDir)../external/SDL/SDL2_ttf-2.0.12/lib/x64/;$(SolutionDir)../external/SDL/SDL2_mixer-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL2_image-2.0.0/lib/x64/;$(SolutionDir)../external/SDL/SDL-2.0.4-9583/VisualC/x64/Release/;C:\Program Files\PostgreSQL\9.5\lib\;$(SolutionDir)../external\openssl\lib\;$(LibraryPath)</LibraryPath>
+    <SourcePath>$(SolutionDir)../external/boost_1_67_0/libs/;$(SolutionDir)../external/libs/;$(SourcePath);$(SolutionDir)../external/gl3w/src;$(SolutionDir)../external/spine/spine-c/src/;$(SolutionDir)../external/libpqxx-4.0.1/src/;$(SolutionDir)../external/spine/spine-c/src/spine/;C:\Program Files\PostgreSQL\9.5\lib\</SourcePath>
+    <OutDir>$(SolutionDir)build\VS\$(ProjectName)\$(Platform)\$(Configuration)\Bin\</OutDir>
+    <IntDir>$(SolutionDir)build\VS\$(ProjectName)\$(Platform)\$(Configuration)\Tmp\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <Link>
+      <AdditionalDependencies>opengl32.lib;glu32.lib;SDL2.lib;SDL2main.lib;SDL2test.lib;SDL2_image.lib;SDL2_ttf.lib;SDL2_mixer.lib;libboost_filesystem-vc141-mt-x64-1_67.lib;libboost_system-vc141-mt-x64-1_67.lib;libpq.lib;ssleay32.lib;libeay32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <ClCompile>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <DisableLanguageExtensions>false</DisableLanguageExtensions>
+      <ConformanceMode>false</ConformanceMode>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <WarningLevel>Level1</WarningLevel>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <StringPooling>true</StringPooling>
+      <MinimalRebuild>
+      </MinimalRebuild>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
+      <OmitDefaultLibName />
+      <AdditionalOptions>-D_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS -DCEREAL_FUTURE_EXPERIMENTAL -D_MBCS -D_CRT_SECURE_NO_DEPRECATE -D_SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING -D_SCL_SECURE_NO_WARNINGS -DNOMINMAX -D_WIN32_WINNT=0x0501 /Zc:noexceptTypes- /bigobj</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup />
+</Project>

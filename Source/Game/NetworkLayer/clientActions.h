@@ -1,8 +1,8 @@
 #ifndef _CLIENTACTIONS_MV_H_
 #define _CLIENTACTIONS_MV_H_
 
-#include "Utility/package.h"
-#include "Network/package.h"
+#include "MV/Utility/package.h"
+#include "MV/Network/package.h"
 #include "Game/managers.h"
 #include "Game/NetworkLayer/networkAction.h"
 

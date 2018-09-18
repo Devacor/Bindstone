@@ -3,8 +3,8 @@
 
 #include "Game/Instance/gameInstance.h"
 
-#include "Utility/package.h"
-#include "Network/package.h"
+#include "MV/Utility/package.h"
+#include "MV/Network/package.h"
 #include "Game/managers.h"
 
 #include "Game/player.h"
@@ -19,7 +19,7 @@
 
 #include "pqxx/pqxx"
 
-#include "Utility/cerealUtility.h"
+#include "MV/Utility/cerealUtility.h"
 
 #include <optional>
 
@@ -90,7 +90,7 @@ public:
 		return gameData;
 	}
 	
-	MV::MouseState& mouse() {
+	MV::TapDevice& mouse() {
 		return nullMouse;
 	}
 
@@ -176,7 +176,7 @@ private:
 
 	std::unique_ptr<ServerGameInstance> ourInstance;
 
-	MV::MouseState nullMouse;
+	MV::TapDevice nullMouse;
 
 	MV::ThreadPool threadPool;
 

@@ -1,4 +1,4 @@
-#include "interfaceManager.h"
+#include "InterfaceManager.h"
 
 namespace MV {
 
@@ -10,7 +10,7 @@ namespace MV {
 	}
 
 	chaiscript::ChaiScript& Interface::hook(chaiscript::ChaiScript &a_script) {
-		a_script.add(chaiscript::user_type<Interface>(), "Interface");
+		a_script.add(chaiscript::user_type<Interface>(), "MV/Interface");
 
 		a_script.add(chaiscript::fun(&Interface::show), "show");
 		a_script.add(chaiscript::fun(&Interface::hide), "hide");
@@ -102,7 +102,7 @@ namespace MV {
 	chaiscript::ChaiScript& InterfaceManager::hook(chaiscript::ChaiScript &a_script) {
 		Interface::hook(a_script);
 
-		a_script.add(chaiscript::user_type<InterfaceManager>(), "InterfaceManager");
+		a_script.add(chaiscript::user_type<InterfaceManager>(), "MV/InterfaceManager");
 
 		//a_script.add(chaiscript::fun([](Interface& a_self) {  }), "make");
 		a_script.add(chaiscript::fun(&InterfaceManager::make), "make");

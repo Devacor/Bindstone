@@ -1,16 +1,16 @@
 #ifndef __MV_BUILDING_H__
 #define __MV_BUILDING_H__
 
-#include "Render/package.h"
+#include "MV/Render/package.h"
 #include "Game/wallet.h"
 #include "Game/Interface/guiFactories.h"
-#include "Utility/chaiscriptUtility.h"
-#include "Utility/signal.hpp"
+#include "MV/Utility/chaiscriptUtility.h"
+#include "MV/Utility/signal.hpp"
 #include <string>
 #include <memory>
-#include "ArtificialIntelligence/pathfinding.h"
+#include "MV/ArtificialIntelligence/pathfinding.h"
 #include "Game/creature.h"
-#include "Network/networkObject.h"
+#include "MV/Network/networkObject.h"
 
 class GameInstance;
 struct Player;
@@ -234,41 +234,6 @@ private:
 	void initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &a_newNode);
 
 	void incrementCreatureIndex();
-
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-        std::string implementMe;
-		archive(
-			cereal::make_nvp("data", buildingData),
-			cereal::make_nvp("loadoutSlot", loadoutSlot),
-			cereal::make_nvp("slot", slot),
-			cereal::make_nvp("player", /*owningPlayer->email*/ implementMe),
-			cereal::make_nvp("Component", cereal::base_class<Component>(this))
-		);
-	}
-
-	template <class Archive>
-	static void load_and_construct(Archive & archive, cereal::construct<Building> &construct, std::uint32_t const /*version*/) {
-		BuildingData buildingData;
-		int slot;
-		std::string playerId;
-
-		archive(
-			cereal::make_nvp("data", buildingData),
-			cereal::make_nvp("loadoutSlot", loadoutSlot),
-			cereal::make_nvp("slot", slot),
-			cereal::make_nvp("player", playerId)
-		);
-
-		auto& services = cereal::get_user_data<MV::Services>(archive);
-		auto* game = services.get<GameInstance>();
-		//gameInstance->data().player()
-        //construct(std::shared_ptr<MV::Scene::Node>(), buildingData, skin, slot, player, *gameInstance);
-		archive(
-			cereal::make_nvp("Component", cereal::base_class<Component>(construct.ptr()))
-		);
-		construct->initialize();
-	}
 
 	BuildingData buildingData;
 

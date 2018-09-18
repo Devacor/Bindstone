@@ -1,20 +1,65 @@
 #if 1
 
 #include "Game/gameEditor.h"
-#include "Utility/threadPool.hpp"
-#include "Utility/services.h"
+#include "MV/Utility/threadPool.hpp"
+#include "MV/Utility/services.h"
 
-#include "ArtificialIntelligence/pathfinding.h"
-#include "Utility/cerealUtility.h"
+#include "MV/ArtificialIntelligence/pathfinding.h"
+#include "MV/Utility/cerealUtility.h"
 //#include "vld.h"
 
 
-#include "Utility/scopeGuard.hpp"
+#include "MV/Utility/scopeGuard.hpp"
 #include "chaiscript/chaiscript.hpp"
 #include "Game/NetworkLayer/synchronizeAction.h"
-#include "Network/networkObject.h"
+#include "MV/Network/networkObject.h"
 
 #include <fstream>
+
+struct Base {
+	virtual ~Base() {}
+
+	template <class Archive>
+	void save(Archive & archive, std::uint32_t const) const {
+		archive(CEREAL_NVP(baseMember));
+	}
+	template <class Archive>
+	void load(Archive & archive, std::uint32_t const /*version*/) {
+		archive(CEREAL_NVP(baseMember));
+	}
+	template <class Archive>
+	static void load_and_construct(Archive & archive, cereal::construct<Base> &construct, std::uint32_t const version) {
+		construct();
+		construct->load(archive, version);
+	}
+
+	int baseMember = 1;
+};
+
+struct Derived1 : public Base {
+	template <class Archive>
+	void save(Archive & archive, std::uint32_t const) const {
+		archive(CEREAL_NVP(derived1Member),
+			cereal::make_nvp("Base", cereal::base_class<Base>(this))
+		);
+	}
+	template <class Archive>
+	void load(Archive & archive, std::uint32_t const /*version*/) {
+		archive(CEREAL_NVP(derived1Member),
+			cereal::make_nvp("Base", cereal::base_class<Base>(this))
+		);
+	}
+	template <class Archive>
+	static void load_and_construct(Archive & archive, cereal::construct<Base> &construct, std::uint32_t const version) {
+		construct();
+		construct->load(archive, version);
+	}
+
+	int derived1Member = 1;
+};
+
+CEREAL_REGISTER_TYPE(Base);
+CEREAL_REGISTER_TYPE(Derived1);
 
 class NetTypeA {
 public:
@@ -76,6 +121,15 @@ struct D : public C {
 void PathfindingTest();
 
 int main(int, char *[]) {
+
+	auto derived = std::make_shared<Derived1>();
+	derived->baseMember = 5;
+	derived->derived1Member = 10;
+
+	auto saved = MV::toJson(derived);
+	auto loaded = MV::fromJson<std::shared_ptr<Derived1>>(saved);
+
+	std::cout << "done saveload test.";
 
 	//PathfindingTest();
 	//return 0;
@@ -281,9 +335,9 @@ void PathfindingTest() {
 			for (int y = 0; y < world->size().height; ++y) {
 				for (int x = 0; x < world->size().width; ++x) {
 					bool wasAgent = false;
-					for (int i = 0; i < agents.size(); ++i) {
-						if (agents[i]->overlaps({ x, y })) {
-							std::cout << "[" << (char)(i + 65) << "]";
+					for (int k = 0; k < agents.size(); ++k) {
+						if (agents[k]->overlaps({ x, y })) {
+							std::cout << "[" << (char)(k + 65) << "]";
 							wasAgent = true;
 							break;
 						}

@@ -3,7 +3,7 @@
 
 #include "componentPanels.h"
 #include "editorFactories.h"
-#include "Utility/generalUtility.h"
+#include "MV/Utility/generalUtility.h"
 
 class AnchorEditor {
 public:

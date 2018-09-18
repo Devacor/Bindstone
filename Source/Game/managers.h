@@ -1,15 +1,14 @@
 #ifndef __MV_MANAGERS_H__
 #define __MV_MANAGERS_H__
 
-#include "Utility/package.h"
-#include "Render/package.h"
-#include "Render/Scene/package.h"
-#include "Audio/package.h"
-#include "Animation/package.h"
-#include "Network/package.h"
-#include "Interface/package.h"
-#include "Audio/package.h"
-#include "Utility/services.h"
+#include "MV/Utility/package.h"
+#include "MV/Render/package.h"
+#include "MV/Render/Scene/package.h"
+#include "MV/Audio/package.h"
+#include "MV/Network/package.h"
+#include "MV/Interface/package.h"
+#include "MV/Audio/package.h"
+#include "MV/Utility/services.h"
 
 struct Managers {
 	Managers() : textLibrary(renderer), audio(*MV::AudioPlayer::instance()) {

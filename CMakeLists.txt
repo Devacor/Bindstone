@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.4 FATAL_ERROR)
-project(BindStone C CXX)
+project(Bindstone C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,9 +14,9 @@ endif()
 include(CMake/PrecompiledHeader.cmake)
 include(CMake/Resources.cmake)
 
-add_resources(TARGET BindStone SOURCES ${CMAKE_SOURCE_DIR}/Assets DEST Assets)
+add_resources(TARGET Bindstone SOURCES ${CMAKE_SOURCE_DIR}/Assets DEST Assets)
 if(APPLE)
-  add_resources(TARGET BindStone SOURCES ${CMAKE_SOURCE_DIR}/LaunchScreen DEST .)
+  add_resources(TARGET Bindstone SOURCES ${CMAKE_SOURCE_DIR}/LaunchScreen DEST .)
 endif()
 
 if(${CMAKE_GENERATOR} MATCHES "^Visual Studio.*$")

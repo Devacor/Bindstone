@@ -18,7 +18,6 @@
 #include <boost/asio.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string.hpp>
-#include <boost/property_tree/ptree.hpp>
 #include <boost/bind.hpp>
 
 #include <chaiscript/chaiscript.hpp>

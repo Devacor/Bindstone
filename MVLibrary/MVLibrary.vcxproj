@@ -1,0 +1,577 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{732BFA09-4C56-4F49-BE0E-1E4A2A129DA4}</ProjectGuid>
+    <RootNamespace>MVLibrary</RootNamespace>
+    <TargetPlatformVersion>8.1</TargetPlatformVersion>
+    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <ProjectName>MVLibrary</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v141</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v141</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+    <Import Project="..\bindstone_vs_properties.props" />
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+    <Import Project="..\bindstone_vs_properties.props" />
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LibraryWPath>$(WindowsSDK_MetadataPath);</LibraryWPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <RunCodeAnalysis>false</RunCodeAnalysis>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <Optimization>Disabled</Optimization>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>
+      </AdditionalIncludeDirectories>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <CompileAs>CompileAsCpp</CompileAs>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <ConformanceMode>false</ConformanceMode>
+      <ProgramDataBaseFileName>$(IntDir)vc$(PlatformToolsetVersion).pdb</ProgramDataBaseFileName>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>DebugFastLink</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+      <Profile>false</Profile>
+      <AdditionalLibraryDirectories>
+      </AdditionalLibraryDirectories>
+      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <Optimization>Full</Optimization>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <AdditionalIncludeDirectories>
+      </AdditionalIncludeDirectories>
+      <EnablePREfast>false</EnablePREfast>
+      <MinimalRebuild>false</MinimalRebuild>
+      <DisableLanguageExtensions>false</DisableLanguageExtensions>
+      <CompileAs>CompileAsCpp</CompileAs>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <ConformanceMode>false</ConformanceMode>
+      <ProgramDataBaseFileName>$(IntDir)vc$(PlatformToolsetVersion).pdb</ProgramDataBaseFileName>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>false</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <SubSystem>Console</SubSystem>
+      <AdditionalLibraryDirectories>
+      </AdditionalLibraryDirectories>
+      <Profile>false</Profile>
+      <LinkStatus>
+      </LinkStatus>
+      <PreventDllBinding>true</PreventDllBinding>
+      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\external\Box2D\Collision\b2BroadPhase.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Collision\b2CollideCircle.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Collision\b2CollideEdge.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Collision\b2CollidePolygon.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Collision\b2Collision.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Collision\b2Distance.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Collision\b2DynamicTree.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Collision\b2TimeOfImpact.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Collision\Shapes\b2ChainShape.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Collision\Shapes\b2CircleShape.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Collision\Shapes\b2EdgeShape.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Collision\Shapes\b2PolygonShape.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Common\b2BlockAllocator.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Common\b2Draw.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Common\b2Math.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Common\b2Settings.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Common\b2StackAllocator.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Common\b2Timer.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\b2Body.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\b2ContactManager.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\b2Fixture.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\b2Island.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\b2World.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\b2WorldCallbacks.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2ChainAndCircleContact.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2ChainAndPolygonContact.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2CircleContact.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2Contact.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2ContactSolver.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2EdgeAndCircleContact.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2EdgeAndPolygonContact.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2PolygonAndCircleContact.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Contacts\b2PolygonContact.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2DistanceJoint.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2FrictionJoint.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2GearJoint.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2Joint.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2MotorJoint.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2MouseJoint.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2PrismaticJoint.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2PulleyJoint.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2RevoluteJoint.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2RopeJoint.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2WeldJoint.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Dynamics\Joints\b2WheelJoint.cpp" />
+    <ClCompile Include="..\..\external\Box2D\Rope\b2Rope.cpp" />
+    <ClCompile Include="..\..\external\gl3w\src\gl3w.c" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\binarystring.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\connection.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\connection_base.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\cursor.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\dbtransaction.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\errorhandler.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\except.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\field.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\largeobject.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\nontransaction.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\notification.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\notify-listen.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\pipeline.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\prepared_statement.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\result.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\robusttransaction.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\statement_parameters.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\strconv.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\subtransaction.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\tablereader.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\tablestream.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\tablewriter.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\transaction.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\transaction_base.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\tuple.cxx" />
+    <ClCompile Include="..\..\external\libpqxx-4.0.1\src\util.cxx" />
+    <ClCompile Include="..\..\external\spine\Animation.c" />
+    <ClCompile Include="..\..\external\spine\AnimationState.c" />
+    <ClCompile Include="..\..\external\spine\AnimationStateData.c" />
+    <ClCompile Include="..\..\external\spine\Array.c" />
+    <ClCompile Include="..\..\external\spine\Atlas.c" />
+    <ClCompile Include="..\..\external\spine\AtlasAttachmentLoader.c" />
+    <ClCompile Include="..\..\external\spine\Attachment.c" />
+    <ClCompile Include="..\..\external\spine\AttachmentLoader.c" />
+    <ClCompile Include="..\..\external\spine\Bone.c" />
+    <ClCompile Include="..\..\external\spine\BoneData.c" />
+    <ClCompile Include="..\..\external\spine\BoundingBoxAttachment.c" />
+    <ClCompile Include="..\..\external\spine\ClippingAttachment.c" />
+    <ClCompile Include="..\..\external\spine\Color.c" />
+    <ClCompile Include="..\..\external\spine\Event.c" />
+    <ClCompile Include="..\..\external\spine\EventData.c" />
+    <ClCompile Include="..\..\external\spine\extension.c" />
+    <ClCompile Include="..\..\external\spine\IkConstraint.c" />
+    <ClCompile Include="..\..\external\spine\IkConstraintData.c" />
+    <ClCompile Include="..\..\external\spine\Json.c" />
+    <ClCompile Include="..\..\external\spine\MeshAttachment.c" />
+    <ClCompile Include="..\..\external\spine\PathAttachment.c" />
+    <ClCompile Include="..\..\external\spine\PathConstraint.c" />
+    <ClCompile Include="..\..\external\spine\PathConstraintData.c" />
+    <ClCompile Include="..\..\external\spine\PointAttachment.c" />
+    <ClCompile Include="..\..\external\spine\RegionAttachment.c" />
+    <ClCompile Include="..\..\external\spine\Skeleton.c" />
+    <ClCompile Include="..\..\external\spine\SkeletonBinary.c" />
+    <ClCompile Include="..\..\external\spine\SkeletonBounds.c" />
+    <ClCompile Include="..\..\external\spine\SkeletonClipping.c" />
+    <ClCompile Include="..\..\external\spine\SkeletonData.c" />
+    <ClCompile Include="..\..\external\spine\SkeletonJson.c" />
+    <ClCompile Include="..\..\external\spine\Skin.c" />
+    <ClCompile Include="..\..\external\spine\Slot.c" />
+    <ClCompile Include="..\..\external\spine\SlotData.c" />
+    <ClCompile Include="..\..\external\spine\TransformConstraint.c" />
+    <ClCompile Include="..\..\external\spine\TransformConstraintData.c" />
+    <ClCompile Include="..\..\external\spine\Triangulator.c" />
+    <ClCompile Include="..\..\external\spine\VertexAttachment.c" />
+    <ClCompile Include="..\..\external\spine\VertexEffect.c" />
+    <ClCompile Include="..\Source\Editor\componentPanels.cpp" />
+    <ClCompile Include="..\Source\Editor\editComponents.cpp" />
+    <ClCompile Include="..\Source\Editor\editor.cpp" />
+    <ClCompile Include="..\Source\Editor\editorControls.cpp" />
+    <ClCompile Include="..\Source\Editor\editorFactories.cpp" />
+    <ClCompile Include="..\Source\Editor\editorSceneGraphPanel.cpp" />
+    <ClCompile Include="..\Source\Game\building.cpp" />
+    <ClCompile Include="..\Source\Game\creature.cpp" />
+    <ClCompile Include="..\Source\Game\game.cpp" />
+    <ClCompile Include="..\Source\Game\gameEditor.cpp" />
+    <ClCompile Include="..\Source\Game\Instance\gameInstance.cpp" />
+    <ClCompile Include="..\Source\Game\Instance\team.cpp" />
+    <ClCompile Include="..\Source\Game\Interface\guiFactories.cpp" />
+    <ClCompile Include="..\Source\Game\Interface\interfaceManager.cpp" />
+    <ClCompile Include="..\Source\Game\managers.cpp" />
+    <ClCompile Include="..\Source\Game\NetworkLayer\accountActions.cpp" />
+    <ClCompile Include="..\Source\Game\NetworkLayer\clientActions.cpp" />
+    <ClCompile Include="..\Source\Game\NetworkLayer\gameServer.cpp" />
+    <ClCompile Include="..\Source\Game\NetworkLayer\gameServerActions.cpp" />
+    <ClCompile Include="..\Source\Game\NetworkLayer\lobbyServer.cpp" />
+    <ClCompile Include="..\Source\Game\NetworkLayer\synchronizeAction.cpp" />
+    <ClCompile Include="..\Source\Game\player.cpp" />
+    <ClCompile Include="..\Source\Game\state.cpp" />
+    <ClCompile Include="..\Source\Game\wallet.cpp" />
+    <ClCompile Include="..\Source\MV\ArtificialIntelligence\pathfinding.cpp" />
+    <ClCompile Include="..\Source\MV\Audio\sound.cpp" />
+    <ClCompile Include="..\Source\MV\Interface\mouse.cpp" />
+    <ClCompile Include="..\Source\MV\Network\download.cpp" />
+    <ClCompile Include="..\Source\MV\Network\network.cpp" />
+    <ClCompile Include="..\Source\MV\Network\url.cpp" />
+    <ClCompile Include="..\Source\MV\Physics\collider.cpp" />
+    <ClCompile Include="..\Source\MV\Render\boxaabb.cpp" />
+    <ClCompile Include="..\Source\MV\Render\formattedText.cpp" />
+    <ClCompile Include="..\Source\MV\Render\points.cpp" />
+    <ClCompile Include="..\Source\MV\Render\render.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\button.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\clickable.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\clipped.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\component.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\drawable.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\emitter.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\grid.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\node.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\palette.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\path.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\scroller.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\slider.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\spineMV.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\sprite.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\stencil.cpp" />
+    <ClCompile Include="..\Source\MV\Render\Scene\text.cpp" />
+    <ClCompile Include="..\Source\MV\Render\sharedTextures.cpp" />
+    <ClCompile Include="..\Source\MV\Render\texturePacker.cpp" />
+    <ClCompile Include="..\Source\MV\Render\textures.cpp" />
+    <ClCompile Include="..\Source\MV\Utility\asioThreadPool.cpp" />
+    <ClCompile Include="..\Source\MV\Utility\chaiscriptStdLib.cpp" />
+    <ClCompile Include="..\Source\MV\Utility\generalUtility.cpp" />
+    <ClCompile Include="..\Source\MV\Utility\log.cpp" />
+    <ClCompile Include="..\Source\MV\Utility\sha512.cpp" />
+    <ClCompile Include="..\Source\MV\Utility\stopwatch.cpp" />
+    <ClCompile Include="..\Source\MV\Utility\tinyutf8.cpp" />
+    <ClCompile Include="..\Source\StdAfx.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\external\Box2D\Box2D.h" />
+    <ClInclude Include="..\..\external\Box2D\Collision\b2BroadPhase.h" />
+    <ClInclude Include="..\..\external\Box2D\Collision\b2Collision.h" />
+    <ClInclude Include="..\..\external\Box2D\Collision\b2Distance.h" />
+    <ClInclude Include="..\..\external\Box2D\Collision\b2DynamicTree.h" />
+    <ClInclude Include="..\..\external\Box2D\Collision\b2TimeOfImpact.h" />
+    <ClInclude Include="..\..\external\Box2D\Collision\Shapes\b2ChainShape.h" />
+    <ClInclude Include="..\..\external\Box2D\Collision\Shapes\b2CircleShape.h" />
+    <ClInclude Include="..\..\external\Box2D\Collision\Shapes\b2EdgeShape.h" />
+    <ClInclude Include="..\..\external\Box2D\Collision\Shapes\b2PolygonShape.h" />
+    <ClInclude Include="..\..\external\Box2D\Collision\Shapes\b2Shape.h" />
+    <ClInclude Include="..\..\external\Box2D\Common\b2BlockAllocator.h" />
+    <ClInclude Include="..\..\external\Box2D\Common\b2Draw.h" />
+    <ClInclude Include="..\..\external\Box2D\Common\b2GrowableStack.h" />
+    <ClInclude Include="..\..\external\Box2D\Common\b2Math.h" />
+    <ClInclude Include="..\..\external\Box2D\Common\b2Settings.h" />
+    <ClInclude Include="..\..\external\Box2D\Common\b2StackAllocator.h" />
+    <ClInclude Include="..\..\external\Box2D\Common\b2Timer.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2Body.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2ContactManager.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2Fixture.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2Island.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2TimeStep.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2World.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\b2WorldCallbacks.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2ChainAndCircleContact.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2ChainAndPolygonContact.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2CircleContact.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2Contact.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2ContactSolver.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2EdgeAndCircleContact.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2EdgeAndPolygonContact.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2PolygonAndCircleContact.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Contacts\b2PolygonContact.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2DistanceJoint.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2FrictionJoint.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2GearJoint.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2Joint.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2MotorJoint.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2MouseJoint.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2PrismaticJoint.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2PulleyJoint.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2RevoluteJoint.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2RopeJoint.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2WeldJoint.h" />
+    <ClInclude Include="..\..\external\Box2D\Dynamics\Joints\b2WheelJoint.h" />
+    <ClInclude Include="..\..\external\Box2D\Rope\b2Rope.h" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\access.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\archives\adapters.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\archives\binary.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\archives\json.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\archives\portable_binary.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\archives\xml.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\cereal.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\concepts\pair_associative_container.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\details\helpers.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\details\polymorphic_impl.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\details\static_object.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\details\traits.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\details\util.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\base64.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\document.h" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\filestream.h" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\genericstream.h" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\internal\pow10.h" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\internal\stack.h" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\internal\strfunc.h" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\prettywriter.h" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\rapidjson.h" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\reader.h" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\stringbuffer.h" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidjson\writer.h" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidxml\rapidxml.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidxml\rapidxml_iterators.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidxml\rapidxml_print.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\external\rapidxml\rapidxml_utils.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\macros.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\array.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\base_class.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\bitset.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\boost_variant.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\chrono.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\common.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\complex.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\deque.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\forward_list.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\list.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\map.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\memory.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\polymorphic.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\queue.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\set.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\stack.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\string.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\tuple.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\unordered_map.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\unordered_set.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\utility.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\valarray.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\vector.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript_basic.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript_defines.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript_stdlib.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript_threading.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\any.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\bad_boxed_cast.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\bind_first.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\bootstrap.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\bootstrap_stl.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\boxed_cast.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\boxed_cast_helper.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\boxed_number.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\boxed_value.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\callable_traits.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\dispatchkit.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\dynamic_object.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\dynamic_object_detail.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\exception_specification.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\function_call.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\function_call_detail.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\handle_return.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\operators.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\proxy_constructors.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\proxy_functions.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\proxy_functions_detail.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\register_function.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\short_alloc.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\type_conversions.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\dispatchkit\type_info.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_algebraic.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_common.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_engine.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_eval.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_optimizer.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_parser.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_posix.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_prelude.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_prelude_docs.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_tracer.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_unknown.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\language\chaiscript_windows.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\utility\fnv1a.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\utility\json.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\utility\json_wrap.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\utility\static_string.hpp" />
+    <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\utility\utility.hpp" />
+    <ClInclude Include="..\..\external\spine\Animation.h" />
+    <ClInclude Include="..\..\external\spine\AnimationState.h" />
+    <ClInclude Include="..\..\external\spine\AnimationStateData.h" />
+    <ClInclude Include="..\..\external\spine\Array.h" />
+    <ClInclude Include="..\..\external\spine\Atlas.h" />
+    <ClInclude Include="..\..\external\spine\AtlasAttachmentLoader.h" />
+    <ClInclude Include="..\..\external\spine\Attachment.h" />
+    <ClInclude Include="..\..\external\spine\AttachmentLoader.h" />
+    <ClInclude Include="..\..\external\spine\Bone.h" />
+    <ClInclude Include="..\..\external\spine\BoneData.h" />
+    <ClInclude Include="..\..\external\spine\BoundingBoxAttachment.h" />
+    <ClInclude Include="..\..\external\spine\ClippingAttachment.h" />
+    <ClInclude Include="..\..\external\spine\Color.h" />
+    <ClInclude Include="..\..\external\spine\dll.h" />
+    <ClInclude Include="..\..\external\spine\Event.h" />
+    <ClInclude Include="..\..\external\spine\EventData.h" />
+    <ClInclude Include="..\..\external\spine\extension.h" />
+    <ClInclude Include="..\..\external\spine\IkConstraint.h" />
+    <ClInclude Include="..\..\external\spine\IkConstraintData.h" />
+    <ClInclude Include="..\..\external\spine\Json.h" />
+    <ClInclude Include="..\..\external\spine\kvec.h" />
+    <ClInclude Include="..\..\external\spine\MeshAttachment.h" />
+    <ClInclude Include="..\..\external\spine\PathAttachment.h" />
+    <ClInclude Include="..\..\external\spine\PathConstraint.h" />
+    <ClInclude Include="..\..\external\spine\PathConstraintData.h" />
+    <ClInclude Include="..\..\external\spine\PointAttachment.h" />
+    <ClInclude Include="..\..\external\spine\RegionAttachment.h" />
+    <ClInclude Include="..\..\external\spine\Skeleton.h" />
+    <ClInclude Include="..\..\external\spine\SkeletonBinary.h" />
+    <ClInclude Include="..\..\external\spine\SkeletonBounds.h" />
+    <ClInclude Include="..\..\external\spine\SkeletonClipping.h" />
+    <ClInclude Include="..\..\external\spine\SkeletonData.h" />
+    <ClInclude Include="..\..\external\spine\SkeletonJson.h" />
+    <ClInclude Include="..\..\external\spine\Skin.h" />
+    <ClInclude Include="..\..\external\spine\Slot.h" />
+    <ClInclude Include="..\..\external\spine\SlotData.h" />
+    <ClInclude Include="..\..\external\spine\spine.h" />
+    <ClInclude Include="..\..\external\spine\TransformConstraint.h" />
+    <ClInclude Include="..\..\external\spine\TransformConstraintData.h" />
+    <ClInclude Include="..\..\external\spine\Triangulator.h" />
+    <ClInclude Include="..\..\external\spine\VertexAttachment.h" />
+    <ClInclude Include="..\..\external\spine\VertexEffect.h" />
+    <ClInclude Include="..\Source\Editor\anchorEditor.h" />
+    <ClInclude Include="..\Source\Editor\componentPanels.h" />
+    <ClInclude Include="..\Source\Editor\editComponents.h" />
+    <ClInclude Include="..\Source\Editor\editor.h" />
+    <ClInclude Include="..\Source\Editor\editorControls.h" />
+    <ClInclude Include="..\Source\Editor\editorDefines.h" />
+    <ClInclude Include="..\Source\Editor\editorFactories.h" />
+    <ClInclude Include="..\Source\Editor\editorSceneGraphPanel.h" />
+    <ClInclude Include="..\Source\Editor\texturePicker.h" />
+    <ClInclude Include="..\Source\Game\building.h" />
+    <ClInclude Include="..\Source\Game\creature.h" />
+    <ClInclude Include="..\Source\Game\game.h" />
+    <ClInclude Include="..\Source\Game\gameEditor.h" />
+    <ClInclude Include="..\Source\Game\Instance\gameInstance.h" />
+    <ClInclude Include="..\Source\Game\Instance\team.h" />
+    <ClInclude Include="..\Source\Game\Interface\guiFactories.h" />
+    <ClInclude Include="..\Source\Game\Interface\interfaceManager.h" />
+    <ClInclude Include="..\Source\Game\managers.h" />
+    <ClInclude Include="..\Source\Game\NetworkLayer\accountActions.h" />
+    <ClInclude Include="..\Source\Game\NetworkLayer\clientActions.h" />
+    <ClInclude Include="..\Source\Game\NetworkLayer\gameServer.h" />
+    <ClInclude Include="..\Source\Game\NetworkLayer\gameServerActions.h" />
+    <ClInclude Include="..\Source\Game\NetworkLayer\lobbyServer.h" />
+    <ClInclude Include="..\Source\Game\NetworkLayer\networkAction.h" />
+    <ClInclude Include="..\Source\Game\NetworkLayer\package.h" />
+    <ClInclude Include="..\Source\Game\NetworkLayer\synchronizeAction.h" />
+    <ClInclude Include="..\Source\Game\player.h" />
+    <ClInclude Include="..\Source\Game\state.h" />
+    <ClInclude Include="..\Source\Game\wallet.h" />
+    <ClInclude Include="..\Source\MV\ArtificialIntelligence\pathfinding.h" />
+    <ClInclude Include="..\Source\MV\Audio\package.h" />
+    <ClInclude Include="..\Source\MV\Audio\sound.h" />
+    <ClInclude Include="..\Source\MV\Interface\mouse.h" />
+    <ClInclude Include="..\Source\MV\Interface\package.h" />
+    <ClInclude Include="..\Source\MV\Network\download.h" />
+    <ClInclude Include="..\Source\MV\Network\email.h" />
+    <ClInclude Include="..\Source\MV\Network\network.h" />
+    <ClInclude Include="..\Source\MV\Network\networkObject.h" />
+    <ClInclude Include="..\Source\MV\Network\package.h" />
+    <ClInclude Include="..\Source\MV\Network\url.h" />
+    <ClInclude Include="..\Source\MV\Physics\collider.h" />
+    <ClInclude Include="..\Source\MV\Physics\package.h" />
+    <ClInclude Include="..\Source\MV\Render\boxaabb.h" />
+    <ClInclude Include="..\Source\MV\Render\formattedText.h" />
+    <ClInclude Include="..\Source\MV\Render\glext.h" />
+    <ClInclude Include="..\Source\MV\Render\matrix.hpp" />
+    <ClInclude Include="..\Source\MV\Render\package.h" />
+    <ClInclude Include="..\Source\MV\Render\points.h" />
+    <ClInclude Include="..\Source\MV\Render\render.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\button.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\clickable.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\clipped.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\component.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\drawable.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\emitter.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\grid.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\node.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\package.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\palette.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\path.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\scroller.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\slider.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\spineMV.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\sprite.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\stencil.h" />
+    <ClInclude Include="..\Source\MV\Render\Scene\text.h" />
+    <ClInclude Include="..\Source\MV\Render\sharedTextures.h" />
+    <ClInclude Include="..\Source\MV\Render\texturePacker.h" />
+    <ClInclude Include="..\Source\MV\Render\textures.h" />
+    <ClInclude Include="..\Source\MV\Utility\asioThreadPool.h" />
+    <ClInclude Include="..\Source\MV\Utility\cerealUtility.h" />
+    <ClInclude Include="..\Source\MV\Utility\chaiscriptStdLib.h" />
+    <ClInclude Include="..\Source\MV\Utility\chaiscriptUtility.h" />
+    <ClInclude Include="..\Source\MV\Utility\exactType.hpp" />
+    <ClInclude Include="..\Source\MV\Utility\generalUtility.h" />
+    <ClInclude Include="..\Source\MV\Utility\log.h" />
+    <ClInclude Include="..\Source\MV\Utility\log.hpp" />
+    <ClInclude Include="..\Source\MV\Utility\optionalCalls.hpp" />
+    <ClInclude Include="..\Source\MV\Utility\package.h" />
+    <ClInclude Include="..\Source\MV\Utility\require.hpp" />
+    <ClInclude Include="..\Source\MV\Utility\scopeGuard.hpp" />
+    <ClInclude Include="..\Source\MV\Utility\services.h" />
+    <ClInclude Include="..\Source\MV\Utility\sha512.h" />
+    <ClInclude Include="..\Source\MV\Utility\signal.hpp" />
+    <ClInclude Include="..\Source\MV\Utility\stopwatch.h" />
+    <ClInclude Include="..\Source\MV\Utility\task.hpp" />
+    <ClInclude Include="..\Source\MV\Utility\taskActions.hpp" />
+    <ClInclude Include="..\Source\MV\Utility\threadPool.hpp" />
+    <ClInclude Include="..\Source\MV\Utility\tinyutf8.h" />
+    <ClInclude Include="..\Source\MV\Utility\tupleHelpers.hpp" />
+    <ClInclude Include="..\Source\MV\Utility\visitor.hpp" />
+    <ClInclude Include="..\Source\StdAfx.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\external\cereal\include\cereal\external\rapidxml\manual.html" />
+    <None Include="..\..\external\spine\LICENSE" />
+    <None Include="ClassDiagram.cd" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

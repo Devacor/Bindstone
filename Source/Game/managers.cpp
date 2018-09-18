@@ -1,7 +1,7 @@
 #include "managers.h"
 #include "player.h"
 #include "Instance/gameInstance.h"
-#include "Interface/interfaceManager.h"
+#include "Game/Interface/interfaceManager.h"
 #include "Game/NetworkLayer/package.h"
 
 

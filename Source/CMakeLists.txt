@@ -1,17 +1,9 @@
-#add_subdirectory(Animation)
-
-add_executable(BindStone main.cpp StdAfx.cpp ${ALL_RESOURCES})
+add_executable(BindStone SolutionSpecific/BindstoneClient/main.cpp StdAfx.cpp ${ALL_RESOURCES})
 copy_resources(BindStone)
 
-add_subdirectory(Utility)
-add_subdirectory(ArtificialIntelligence)
-add_subdirectory(Render)
-add_subdirectory(Audio)
+add_subdirectory(MV)
 add_subdirectory(Editor)
 add_subdirectory(Game)
-add_subdirectory(Interface)
-add_subdirectory(Network)
-add_subdirectory(Physics)
 
 # Group source files
 file(GLOB_RECURSE TREE_SOURCES LIST_DIRECTORIES false *.cpp *.c)

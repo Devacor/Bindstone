@@ -2,7 +2,7 @@
 #include "editorDefines.h"
 #include "componentPanels.h"
 
-#include "Render/package.h"
+#include "MV/Render/package.h"
 
 void colorTopAndBottom(const std::shared_ptr<MV::Scene::Sprite> &a_rect, const MV::Color &a_top, const MV::Color &a_bot){
 	a_rect->corners(a_top, a_top, a_bot, a_bot);

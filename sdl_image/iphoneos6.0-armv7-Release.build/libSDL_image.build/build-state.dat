@@ -1,443 +1,0 @@
-TlibSDL_image
-v5
-r1
-cCheck dependencies
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_bmp.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_gif.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_ImageIO.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m normal armv7 objective-c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_jpg.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_lbm.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pcx.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_png.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pnm.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tga.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tif.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_webp.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xpm.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xcf.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xv.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xxx.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-cLibtool /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release/libSDL2_image.a normal armv7
-
-N/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk
-c00000000503C83D40000000000000132
-t1346143188
-s306
-
-N/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk/usr/include/stdio.h
-c0000000050AB0DB30000000000004523
-t1353387443
-s17699
-
-N/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk/usr/include/string.h
-c0000000050AB0DB30000000000001A3A
-t1353387443
-s6714
-
-N/Users/michael/git/SDL/include/SDL_endian.h
-c0000000050C2EE600000000000001898
-t1354952288
-s6296
-
-N/Users/michael/git/SDL/include/SDL_error.h
-c0000000050F743820000000000000891
-t1358381954
-s2193
-
-N/Users/michael/git/SDL/include/SDL_video.h
-c0000000050F74382000000000000767C
-t1358381954
-s30332
-
-N/Users/michael/git/SDL_image/SDL_image.h
-c0000000050F743A1000000000000171B
-t1358381985
-s5915
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_ImageIO.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_bmp.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_gif.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_jpg.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_lbm.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pcx.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_png.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pnm.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tga.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tif.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_webp.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xcf.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xpm.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xv.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xxx.o
-t2
-s0
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/SDL2_image.LinkFileList
-c0000000050FB46130000000000000750
-t1358644755
-s1872
-
-N/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release/libSDL2_image.a
-t2
-s0
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG.c
-c0000000050F743A1000000000000190C
-t1358381985
-s6412
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m
-c0000000050F743A1000000000000683D
-t1358381985
-s26685
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c
-c0000000050F743A100000000000053C1
-t1358381985
-s21441
-i<stdio.h>
-i<string.h>
-i"SDL_image.h"
-i"SDL_error.h"
-i"SDL_video.h"
-i"SDL_endian.h"
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.c
-c0000000050F743A10000000000003A71
-t1358381985
-s14961
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.c
-c0000000050F743A100000000000037C7
-t1358381985
-s14279
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.c
-c0000000050F743A100000000000031AF
-t1358381985
-s12719
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.c
-c0000000050F743A10000000000001A67
-t1358381985
-s6759
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c
-c0000000050F743A100000000000044DE
-t1358381985
-s17630
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.c
-c0000000050F743A1000000000000178A
-t1358381985
-s6026
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.c
-c0000000050F743A10000000000001EF2
-t1358381985
-s7922
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.c
-c0000000050F743A10000000000001C3E
-t1358381985
-s7230
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c
-c0000000050F743A10000000000001BF3
-t1358381985
-s7155
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.c
-c0000000050F743A1000000000000482A
-t1358381985
-s18474
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.c
-c0000000050F743A10000000000009638
-t1358381985
-s38456
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.c
-c0000000050F743A10000000000000E34
-t1358381985
-s3636
-
-N/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.c
-c0000000050F743A1000000000000082C
-t1358381985
-s2092
-
-CCheck dependencies
-r0
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection18"Check dependencies0404e3937dabb641^9752f3937dabb641^---0#1#0#--18"Check dependencies36"895AC71B-DB49-4040-8C2E-56D51474C96F-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337556.112359
-e380337556.185324
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection55"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG.c10ec1c947dabb641^b9712f947dabb641^---0#0#0#-19%DVTDocumentLocation2@63"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG.c0000000000000000^2650"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG.o ../IMG.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG.o36"E30E55E8-1566-4100-BCA5-47C7E3D51310-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_ImageIO.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m normal armv7 objective-c com.apple.compilers.llvm.clang.1_0.compiler
-s380337555.955476
-e380337556.244108
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_ImageIO.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m
-xnormal
-xarmv7
-xobjective-c
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection63"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m06d7f4937dabb641^317e3e947dabb641^---0#0#0#-19%DVTDocumentLocation2@71"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m0000000000000000^3044"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_ImageIO.o ../IMG_ImageIO.m normal armv7 objective-c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x objective-c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wno-implicit-atomic-properties -Wno-receiver-is-weak -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -Wno-selector -Wno-strict-selector-match -Wno-undeclared-selector -Wno-deprecated-implementations -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wprotocol -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion "-DIBOutlet=__attribute__((iboutlet))" "-DIBOutletCollection(ClassName)=__attribute__((iboutletcollection(ClassName)))" "-DIBAction=void)__attribute__((ibaction)" -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_ImageIO.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_ImageIO.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_ImageIO.m -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_ImageIO.o36"203B50E6-8159-444A-848C-3D5995B37613-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_bmp.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337555.955454
-e380337556.167591
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_bmp.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c34d8f4937dabb641^60e72a947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c0000000000000000^2674"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_bmp.o ../IMG_bmp.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_bmp.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_bmp.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_bmp.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_bmp.o36"97789F07-A57C-4557-A280-F443CB1C4265-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_gif.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337555.955460
-e380337556.004811
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_gif.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.c9ed3f4937dabb641^064b01947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.c0000000000000000^2674"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_gif.o ../IMG_gif.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_gif.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_gif.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_gif.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_gif.o36"E2C44E7F-C8C0-4A78-83F4-0B05F8889707-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_jpg.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337555.955489
-e380337556.004873
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_jpg.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.c39d3f4937dabb641^404d01947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.c0000000000000000^2674"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_jpg.o ../IMG_jpg.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_jpg.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_jpg.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_jpg.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_jpg.o36"D4F0747A-0B56-489F-A0C3-F88CA82BEEE6-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_lbm.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337555.955523
-e380337556.135539
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_lbm.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.c78d0f4937dabb641^e1b222947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.c0000000000000000^2674"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_lbm.o ../IMG_lbm.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_lbm.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_lbm.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_lbm.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_lbm.o36"5B78FC56-A3BF-44C7-9A77-7762055864A7-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pcx.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337555.955549
-e380337556.110901
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pcx.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.cd0d3f4937dabb641^c3661c947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.c0000000000000000^2674"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pcx.o ../IMG_pcx.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pcx.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pcx.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pcx.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pcx.o36"7A823E7B-6C0F-408B-8736-9F9F1ADD8276-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_png.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337555.955583
-e380337556.004802
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_png.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c8dd3f4937dabb641^043c01947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c0000000000000000^2674"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_png.o ../IMG_png.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_png.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_png.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_png.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_png.o36"6FE5189C-D32C-4B75-92C3-A61CBC772824-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pnm.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337555.956435
-e380337556.111896
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pnm.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.c3f00f5937dabb641^18b01c947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.c0000000000000000^2674"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pnm.o ../IMG_pnm.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pnm.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pnm.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_pnm.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_pnm.o36"096634EB-3DC2-4C7B-B4C0-30DA535997A0-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tga.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337556.006283
-e380337556.024562
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tga.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.ce1d201947dabb641^2a5506947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.c0000000000000000^2674"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tga.o ../IMG_tga.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tga.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tga.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tga.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tga.o36"0BC99248-1DE4-43C4-B457-E06D3437E483-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tif.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337556.006285
-e380337556.024504
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tif.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.c00c801947dabb641^c25106947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.c0000000000000000^2674"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tif.o ../IMG_tif.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tif.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tif.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_tif.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tif.o36"5040AF79-3F2D-42DA-9A1E-2094820BD14C-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_webp.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337556.006372
-e380337556.093078
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_webp.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection60"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c85cc01947dabb641^39d417947dabb641^---0#0#0#-19%DVTDocumentLocation2@68"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c0000000000000000^2680"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_webp.o ../IMG_webp.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_webp.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_webp.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_webp.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_webp.o36"E34EA57C-5D5F-42BD-B395-7D05665FCD04-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xcf.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337556.025784
-e380337556.092137
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xcf.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.ce4bd06947dabb641^6aa217947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.c0000000000000000^2674"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xcf.o ../IMG_xcf.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xcf.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xcf.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xcf.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xcf.o36"1631A638-2C08-4396-9723-84F813BEF5F9-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xpm.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337556.025780
-e380337556.156898
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xpm.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.cd3bd06947dabb641^522b28947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.c0000000000000000^2674"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xpm.o ../IMG_xpm.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xpm.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xpm.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xpm.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xpm.o36"99AE8FAE-48C6-4832-BB89-B8FC3AF346C0-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xv.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337556.093311
-e380337556.166859
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xv.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection58"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.c1c0918947dabb641^52b82a947dabb641^---0#0#0#-19%DVTDocumentLocation2@66"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.c0000000000000000^2668"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xv.o ../IMG_xv.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xv.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xv.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xv.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xv.o36"065314F4-32FE-42B8-9D83-784550009B0A-
-
-CCompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xxx.o /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler
-s380337556.093519
-e380337556.152932
-r1
-xCompileC
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xxx.o
-x/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.c
-xnormal
-xarmv7
-xc
-xcom.apple.compilers.llvm.clang.1_0.compiler
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection59"Compile /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.c161618947dabb641^a24427947dabb641^---0#0#0#-19%DVTDocumentLocation2@67"file://localhost/Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.c0000000000000000^2674"CompileC /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xxx.o ../IMG_xxx.c normal armv7 c com.apple.compilers.llvm.clang.1_0.compiler    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv LANG en_US.US-ASCII    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -x c -arch armv7 -fmessage-length=0 -Wno-trigraphs -fpascal-strings -Os -Wno-missing-field-initializers -Wno-missing-prototypes -Wno-return-type -Wformat -Wno-missing-braces -Wparentheses -Wswitch -Wno-unused-function -Wno-unused-label -Wno-unused-parameter -Wno-unused-variable -Wunused-value -Wno-empty-body -Wno-uninitialized -Wno-unknown-pragmas -Wno-shadow -Wno-four-char-constants -Wno-conversion -Wno-shorten-64-to-32 -Wpointer-sign -Wno-newline-eof -DLOAD_BMP -DLOAD_GIF -DLOAD_JPG -DLOAD_LBM -DLOAD_PCX -DLOAD_PNG -DLOAD_PNM -DLOAD_TGA -DLOAD_TIF -DLOAD_XPM -DLOAD_XV -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Wdeprecated-declarations -fvisibility=hidden -Wno-sign-conversion -miphoneos-version-min=3.0 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/SDL2_image.hmap -Ibuild/include -I/Users/michael/git/sdl_image/Xcode-iOS/../../SDL/include -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources/armv7 -I/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/DerivedSources -Fbuild -MMD -MT dependencies -MF /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xxx.d --serialize-diagnostics /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xxx.dia -c /Users/michael/git/sdl_image/Xcode-iOS/../IMG_xxx.c -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_xxx.o36"FD1D0E71-1902-4687-B505-153EE24D1378-
-
-CLibtool /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release/libSDL2_image.a normal armv7
-s380337556.251140
-e380337556.262283
-r1
-xLibtool
-x/Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release/libSDL2_image.a
-xnormal
-xarmv7
-o/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_gif.o has no symbols
-o/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_jpg.o has no symbols
-o/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_png.o has no symbols
-o/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tga.o has no symbols
-o/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tif.o has no symbols
-lSLF05#21%IDEActivityLogSection1@2#32"com.apple.dt.IDE.BuildLogSection97"Libtool /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release/libSDL2_image.a normal armv7007040947dabb641^d42943947dabb641^-1170"/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_gif.o has no symbols/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_jpg.o has no symbols/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_png.o has no symbols/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tga.o has no symbols/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool: file: /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/IMG_tif.o has no symbols-0#0#0#--1312"Libtool /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release/libSDL2_image.a normal armv7    cd /Users/michael/git/sdl_image/Xcode-iOS    setenv IPHONEOS_DEPLOYMENT_TARGET 3.0    setenv PATH "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin:/Applications/Xcode.app/Contents/Developer/usr/bin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/opt/local/bin:/opt/local/sbin:/usr/local/ant/bin:/Users/michael/Code/sdk/android-ndk-r8b:/Users/michael/Code/sdk/android-sdk-macosx:/Users/michael/Code/sdk/android-sdk-macosx/platform-tools:/Users/michael/Code/sdk/android-sdk-macosx/tools:/Users/michael/Code/sdk/android-ndk-r8b/toolchains/arm-linux-androideabi-4.4.3/prebuilt/darwin-x86/bin/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/git/bin"    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool -static -arch_only armv7 -syslibroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS6.0.sdk -Lbuild -filelist /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release.build/libSDL_image.build/Objects-normal/armv7/SDL2_image.LinkFileList -o /Users/michael/git/build/sdl_image/iphoneos6.0-armv7-Release/libSDL2_image.a36"0377E8B9-6FFF-44F4-A144-5E1833D974A2-
-

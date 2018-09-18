@@ -1,16 +1,13 @@
 #include "gameServerActions.h"
 #include "clientActions.h"
 
-#ifdef BINDSTONE_SERVER
 #include "lobbyServer.h"
 #include "Game/NetworkLayer/gameServer.h"
-#endif
 
 #include "Game/player.h"
-#include "Utility/cerealUtility.h"
+#include "MV/Utility/cerealUtility.h"
 #include "Game/game.h"
 
-#ifdef BINDSTONE_SERVER
 void GameServerAvailable::execute(LobbyGameConnectionState* a_connection) {
 	a_connection->setEndpoint(ourUrl, ourPort);
 }
@@ -29,14 +26,13 @@ void GetInitialGameState::execute(GameUserConnectionState* a_connection, GameSer
 }
 
 void RequestBuildingUpgrade::execute(GameUserConnectionState* /*a_gameUser*/, GameServer &a_game) {
-	a_game.instance()->performUpgrade(side, slot, id);
-	a_game.server()->sendAll(makeNetworkString<RequestBuildingUpgrade>(side, slot, id));
+	a_game.instance()->performUpgrade(slot, id);
+	a_game.server()->sendAll(makeNetworkString<RequestBuildingUpgrade>(slot, id));
 }
 
 void RequestFullGameState::execute(GameUserConnectionState* a_gameUser, GameServer &a_game) {
 	//a_gameUser->connection()->send(makeNetworkString<RequestBuildingUpgrade>(a_game.data));
 }
-#endif
 
 void RequestFullGameState::execute(Game &a_game) {
 

@@ -173,7 +173,7 @@ void Game::hook(chaiscript::ChaiScript &a_script) {
 	MV::SignalRegister<void(LoginResponse&)>::hook(a_script);
 	a_script.add(chaiscript::fun(&Game::onLoginResponse), "onLoginResponse");
 
-	a_script.add(chaiscript::fun([&](Game& a_this) {
+	a_script.add(chaiscript::fun([&](Game& /*a_this*/) {
 		localPlayer = std::make_shared<Player>();
 		localPlayer->handle = "Local";
 		localPlayer->loadout.buildings = { "Life", "Life", "Life", "Life", "Life", "Life", "Life", "Life" };

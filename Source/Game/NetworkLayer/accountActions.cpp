@@ -1,14 +1,11 @@
 #include "accountActions.h"
 #include "clientActions.h"
 
-#ifdef BINDSTONE_SERVER
 #include "lobbyServer.h"
-#endif
 
 #include "Game/player.h"
-#include "Utility/cerealUtility.h"
+#include "MV/Utility/cerealUtility.h"
 
-#ifdef BINDSTONE_SERVER
 std::string CreatePlayer::createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt) {
 	static int work = 12;
 	std::stringstream query;
@@ -169,4 +166,3 @@ void FindMatchRequest::execute(LobbyUserConnectionState* a_connection) {
 void ExpectedPlayersNoted::execute(LobbyGameConnectionState* a_connection) {
 	a_connection->notifyPlayersOfGameServer();
 }
-#endif

@@ -3,16 +3,14 @@
 
 #include "Game/Instance/team.h"
 #include "Game/NetworkLayer/networkAction.h"
-#include "Utility/chaiscriptUtility.h"
+#include "MV/Utility/chaiscriptUtility.h"
 
 class GameServerAvailable : public NetworkAction {
 public:
 	GameServerAvailable() {}
 	GameServerAvailable(const std::string &a_url, uint16_t a_port) : ourUrl(a_url), ourPort(a_port) {}
 
-#ifdef BINDSTONE_SERVER
 	virtual void execute(LobbyGameConnectionState* a_connection) override;
-#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -52,9 +50,7 @@ public:
 	AssignPlayersToGame() {}
 	AssignPlayersToGame(const AssignedPlayer &a_left, const AssignedPlayer &a_right, const std::string &a_matchQueueId) : left(a_left), right(a_right), matchQueueId(a_matchQueueId) {}
 
-#ifdef BINDSTONE_SERVER
 	virtual void execute(GameServer& a_connection) override;
-#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -77,9 +73,7 @@ public:
 	GetInitialGameState() {}
 	GetInitialGameState(int64_t a_secret) : secret(a_secret) {}
 
-#ifdef BINDSTONE_SERVER
 	virtual void execute(GameUserConnectionState*, GameServer &) override;
-#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -115,9 +109,7 @@ public:
 	RequestBuildingUpgrade() {}
 	RequestBuildingUpgrade(int32_t a_slot, int64_t a_id) : slot(a_slot), id(static_cast<int32_t>(a_id)) {}
 
-#ifdef BINDSTONE_SERVER
 	virtual void execute(GameUserConnectionState*a_gameUser, GameServer &a_game) override;
-#endif
 	virtual void execute(Game &a_game) override;
 
 	template <class Archive>
@@ -136,9 +128,7 @@ public:
 	RequestFullGameState() {}
 	RequestFullGameState(const std::shared_ptr<Player> &a_left, const std::shared_ptr<Player> &a_right) : left(a_left), right(a_right) {}
 
-#ifdef BINDSTONE_SERVER
 	virtual void execute(GameUserConnectionState*, GameServer &) override;
-#endif
 	virtual void execute(Game& a_connection) override;
 
 	template <class Archive>

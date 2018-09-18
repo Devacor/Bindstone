@@ -1,0 +1,181 @@
+
+jaidev.png
+size: 2048,512
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+Bodies
+  rotate: true
+  xy: 2, 58
+  size: 452, 560
+  orig: 452, 560
+  offset: 0, 0
+  index: -1
+Derv Left Arm
+  rotate: false
+  xy: 1740, 314
+  size: 162, 196
+  orig: 162, 196
+  offset: 0, 0
+  index: -1
+Derv Left Ear
+  rotate: false
+  xy: 923, 71
+  size: 109, 110
+  orig: 109, 110
+  offset: 0, 0
+  index: -1
+Derv Left Foot
+  rotate: false
+  xy: 1428, 154
+  size: 110, 139
+  orig: 110, 139
+  offset: 0, 0
+  index: -1
+Derv Left Hand
+  rotate: true
+  xy: 1904, 260
+  size: 74, 107
+  orig: 74, 107
+  offset: 0, 0
+  index: -1
+Derv Left Leg
+  rotate: false
+  xy: 1904, 336
+  size: 107, 174
+  orig: 107, 174
+  offset: 0, 0
+  index: -1
+Derv Right Arm
+  rotate: false
+  xy: 748, 79
+  size: 173, 102
+  orig: 173, 102
+  offset: 0, 0
+  index: -1
+Derv Right Foot
+  rotate: true
+  xy: 564, 11
+  size: 68, 135
+  orig: 68, 135
+  offset: 0, 0
+  index: -1
+Derv Right Hand
+  rotate: true
+  xy: 1271, 203
+  size: 90, 155
+  orig: 90, 155
+  offset: 0, 0
+  index: -1
+Derv Right Leg
+  rotate: false
+  xy: 1034, 57
+  size: 146, 135
+  orig: 146, 135
+  offset: 0, 0
+  index: -1
+Jai Left Arm
+  rotate: false
+  xy: 564, 81
+  size: 182, 100
+  orig: 182, 100
+  offset: 0, 0
+  index: -1
+Jai Left Foot
+  rotate: true
+  xy: 1740, 233
+  size: 79, 145
+  orig: 79, 145
+  offset: 0, 0
+  index: -1
+Jai Left Hand
+  rotate: true
+  xy: 1540, 89
+  size: 104, 155
+  orig: 104, 155
+  offset: 0, 0
+  index: -1
+Jai Left Leg
+  rotate: false
+  xy: 1697, 97
+  size: 117, 134
+  orig: 117, 134
+  offset: 0, 0
+  index: -1
+Jai Right Ear
+  rotate: false
+  xy: 1282, 98
+  size: 87, 103
+  orig: 87, 103
+  offset: 0, 0
+  index: -1
+Jai Right Foot
+  rotate: true
+  xy: 1182, 71
+  size: 121, 98
+  orig: 121, 98
+  offset: 0, 0
+  index: -1
+Jai Right Forearm
+  rotate: true
+  xy: 701, 2
+  size: 75, 133
+  orig: 75, 133
+  offset: 0, 0
+  index: -1
+Jai Right Hand
+  rotate: false
+  xy: 1924, 156
+  size: 74, 102
+  orig: 74, 102
+  offset: 0, 0
+  index: -1
+Jai Right Leg
+  rotate: true
+  xy: 1028, 194
+  size: 88, 170
+  orig: 88, 170
+  offset: 0, 0
+  index: -1
+Jai Right Shoulder
+  rotate: true
+  xy: 1816, 108
+  size: 123, 106
+  orig: 123, 106
+  offset: 0, 0
+  index: -1
+b light
+  rotate: true
+  xy: 1540, 195
+  size: 107, 154
+  orig: 107, 154
+  offset: 0, 0
+  index: -1
+g light
+  rotate: true
+  xy: 1271, 295
+  size: 215, 235
+  orig: 215, 235
+  offset: 0, 0
+  index: -1
+heads
+  rotate: true
+  xy: 564, 183
+  size: 327, 462
+  orig: 327, 462
+  offset: 0, 0
+  index: -1
+r light
+  rotate: false
+  xy: 1508, 304
+  size: 230, 206
+  orig: 230, 206
+  offset: 0, 0
+  index: -1
+y light
+  rotate: false
+  xy: 1028, 284
+  size: 241, 226
+  orig: 241, 226
+  offset: 0, 0
+  index: -1

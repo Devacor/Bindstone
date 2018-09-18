@@ -1,9 +1,9 @@
 #ifndef _MV_EDITOR_DEFINES_H_
 #define _MV_EDITOR_DEFINES_H_
 
-#include "Render/package.h"
-#include "Utility/package.h"
-#include "Interface/package.h"
+#include "MV/Render/package.h"
+#include "MV/Utility/package.h"
+#include "MV/Interface/package.h"
 
 enum InterfaceColors : uint32_t {
 	POSITION_HANDLE_CENTER = 0xFFFFFFFF,

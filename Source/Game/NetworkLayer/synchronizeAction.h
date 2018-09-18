@@ -3,7 +3,7 @@
 
 #include "Game/building.h"
 #include "Game/NetworkLayer/networkAction.h"
-#include "Network/networkObject.h"
+#include "MV/Network/networkObject.h"
 
 typedef MV::NetworkObjectPool<Creature::NetworkState> BindstoneNetworkObjectPool;
 

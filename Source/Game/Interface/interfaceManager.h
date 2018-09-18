@@ -1,10 +1,10 @@
 #ifndef _MV_INTERFACE_MANAGER_H_
 #define _MV_INTERFACE_MANAGER_H_
 
-#include "Render/package.h"
+#include "MV/Render/package.h"
 #include "Game/state.h"
-#include "Utility/chaiscriptUtility.h"
-#include "Interface/mouse.h"
+#include "MV/Utility/chaiscriptUtility.h"
+#include "MV/Interface/mouse.h"
 
 namespace MV {
 	class InterfaceManager;

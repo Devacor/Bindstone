@@ -4,12 +4,10 @@
 #include <memory>
 #include <string>
 #include "Game/player.h"
-#include "Network/networkObject.h"
+#include "MV/Network/networkObject.h"
 #include "Game/NetworkLayer/synchronizeAction.h"
 
-#ifdef BINDSTONE_SERVER
 #include "Game/NetworkLayer/gameServer.h"
-#endif
 
 #include "Game/Instance/team.h"
 
@@ -103,7 +101,7 @@ public:
 		return syncronizedObjects;
 	}
 
-	virtual void spawnCreature(int a_buildingSlot) {
+	virtual void spawnCreature(int /*a_buildingSlot*/) {
 	}
 
 	void registerCreature(std::shared_ptr<Creature> &a_registerCreature) {
@@ -160,7 +158,6 @@ private:
 	Game &game;
 };
 
-#ifdef BINDSTONE_SERVER
 class GameServer;
 class ServerGameInstance : public GameInstance {
 public:
@@ -176,7 +173,6 @@ public:
 private:
 	GameServer &gameServer;
 };
-#endif
 
 class MockClientGameInstance : public GameInstance {
 public:

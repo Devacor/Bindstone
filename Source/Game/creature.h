@@ -1,18 +1,18 @@
 #ifndef __MV_CREATURE_H__
 #define __MV_CREATURE_H__
 
-#include "Render/package.h"
+#include "MV/Render/package.h"
 #include "Game/wallet.h"
 #include "Game/Interface/guiFactories.h"
-#include "Utility/chaiscriptUtility.h"
-#include "Utility/generalUtility.h"
-#include "Utility/signal.hpp"
+#include "MV/Utility/chaiscriptUtility.h"
+#include "MV/Utility/generalUtility.h"
+#include "MV/Utility/signal.hpp"
 #include <string>
 #include <memory>
-#include "ArtificialIntelligence/pathfinding.h"
+#include "MV/ArtificialIntelligence/pathfinding.h"
 #include "Game/Instance/team.h"
 
-#include "Network/networkObject.h"
+#include "MV/Network/networkObject.h"
 
 class GameInstance;
 struct Player;
@@ -94,24 +94,7 @@ struct CreatureData {
 	}
 
 	template <class Archive>
-	void save(Archive & archive) const {
-		archive(
-			CEREAL_NVP(id),
-			CEREAL_NVP(name),
-			CEREAL_NVP(description),
-			CEREAL_NVP(moveSpeed),
-			CEREAL_NVP(actionSpeed),
-			CEREAL_NVP(castSpeed),
-			CEREAL_NVP(health),
-			CEREAL_NVP(defense),
-			CEREAL_NVP(will),
-			CEREAL_NVP(strength),
-			CEREAL_NVP(ability)
-		);
-	}
-
-	template <class Archive>
-	void load(Archive & archive) {
+	void serialize(Archive & archive) {
 		archive(
 			CEREAL_NVP(id),
 			CEREAL_NVP(name),

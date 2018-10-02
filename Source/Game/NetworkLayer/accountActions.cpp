@@ -13,7 +13,7 @@ std::string CreatePlayer::createPlayerQueryString(pqxx::work &transaction, const
 	query << "VALUES(" << transaction.quote(email) << ", " << transaction.quote(handle) << ", ";
 	query << transaction.quote(MV::sha512(password, a_salt, work)) << ", " << transaction.quote(a_salt) << ", " << work << ", ";
 	query << DEFAULT_SOFT_CURRENCY << ", " << DEFAULT_HARD_CURRENCY << ", ";
-	query << transaction.quote(makeSaveString()) << ", " << transaction.quote(makeServerSaveString()) << ")";
+	query << transaction.quote(makeSaveString(handle)) << ", " << transaction.quote(makeServerSaveString()) << ")";
 	return query.str();
 }
 
@@ -86,9 +86,9 @@ void CreatePlayer::sendValidationEmail(LobbyUserConnectionState *a_connection, c
 	a_connection->server().email(MV::Email::Addresses("mike@m2tm.net", email), "Bindstone Account Activation", "This will be a link to activate your account, for now... Check this out: https://www.youtube.com/watch?v=VAZsBEELqPw \n" + a_passSalt);
 }
 
-std::string CreatePlayer::makeSaveString() {
+std::string CreatePlayer::makeSaveString(const std::string &a_handle) {
 	auto newPlayer = std::make_shared<Player>();
-	newPlayer->handle = handle;
+	newPlayer->handle = a_handle;
 	newPlayer->loadout.buildings = { "Life", "Life", "Life", "Life", "Life", "Life", "Life", "Life" };
 	newPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
 

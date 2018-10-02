@@ -8,10 +8,14 @@
 
 class GameEditor {
 public:
-	GameEditor();
+	GameEditor(std::string a_username, std::string a_password);
 
 	void start() {
-		runLimbo();
+		if (autoStartGame) {
+			runGame();
+		} else {
+			runLimbo();
+		}
 	}
 private:
 	void resumeTitleMusic();
@@ -130,6 +134,8 @@ private:
 
 	Game game;
 	Editor editor;
+
+	bool autoStartGame = false;
 
 	MV::Scene::SafeComponent<MV::Scene::Sprite> screenScaler;
 };

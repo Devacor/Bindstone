@@ -528,26 +528,6 @@ namespace MV {
 		a_src.clear();
 	}
 
-	class atomic_cout {
-		std::ostringstream stream;
-
-	public:
-		template <typename T>
-		atomic_cout& operator<<(T const& t) {
-			stream << t;
-			return *this;
-		}
-		atomic_cout& operator<<(std::ostream& (*f)(std::ostream& o)) {
-			stream << f;
-			return *this;
-		}
-		~atomic_cout() {
-			static std::mutex mutex;
-			std::lock_guard<std::mutex> lock(mutex);
-			std::cout << stream.str();
-		} 
-	};
-
 	template<typename T>
 	class InstanceCounter {
 	public:

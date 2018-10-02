@@ -10,11 +10,20 @@
 #include "MV/Audio/package.h"
 #include "MV/Utility/services.h"
 
+struct StandardMessages {
+	MV::Signal<void()> lobbyConnected;
+	MV::Signal<void(const std::string &)> lobbyDisconnect;
+	MV::Signal<void(bool, const std::string &)> lobbyAuthenticated;
+
+	void hook(chaiscript::ChaiScript& a_script);
+};
+
 struct Managers {
 	Managers() : textLibrary(renderer), audio(*MV::AudioPlayer::instance()) {
 		services.connect(&timer);
 		services.connect(&pool);
 		services.connect(&renderer);
+		services.connect(&messages);
 		services.connect(&textLibrary);
 		services.connect(&textures);
 		services.connect(&audio);
@@ -23,6 +32,7 @@ struct Managers {
 	MV::Stopwatch timer;
 	MV::ThreadPool pool;
 	MV::Draw2D renderer;
+	StandardMessages messages;
 	MV::TextLibrary textLibrary;
 	MV::SharedTextures textures;
 	MV::AudioPlayer& audio;

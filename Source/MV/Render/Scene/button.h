@@ -35,6 +35,38 @@ namespace MV {
 
 			virtual void cancelPress(bool a_callCancelCallbacks = true);
 
+			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, TapDevice &a_tapDevice) {
+				a_script.add(chaiscript::user_type<Button>(), "Button");
+				a_script.add(chaiscript::base_class<Clickable, Button>());
+				a_script.add(chaiscript::base_class<Sprite, Button>());
+				a_script.add(chaiscript::base_class<Drawable, Button>());
+				a_script.add(chaiscript::base_class<Component, Button>());
+
+				a_script.add(chaiscript::fun([&](Node &a_self) { return a_self.attach<Button>(a_tapDevice); }), "attachButton");
+
+				a_script.add(chaiscript::fun([](Node &a_self) { return a_self.componentInChildren<Button>(true, false, true); }), "componentButton");
+
+				a_script.add(chaiscript::fun([](Button &a_self, const std::string &a_newValue) { return a_self.text(a_newValue); }), "text");
+				a_script.add(chaiscript::fun([](Button &a_self) { return a_self.text(); }), "text");
+
+				a_script.add(chaiscript::fun([](Button &a_self, const std::shared_ptr<Node> &a_activeView) { return a_self.activeNode(a_activeView); }), "activeNode");
+				a_script.add(chaiscript::fun([](Button &a_self) { return a_self.activeNode(); }), "activeNode");
+
+				a_script.add(chaiscript::fun([](Button &a_self, const std::shared_ptr<Node> &a_disabledView) { return a_self.disabledNode(a_disabledView); }), "disabledNode");
+				a_script.add(chaiscript::fun([](Button &a_self) { return a_self.disabledNode(); }), "disabledNode");
+
+				a_script.add(chaiscript::fun([](Button &a_self, const std::shared_ptr<Node> &a_idleView) { return a_self.idleNode(a_idleView); }), "idleNode");
+				a_script.add(chaiscript::fun([](Button &a_self) { return a_self.idleNode(); }), "idleNode");
+
+				a_script.add(chaiscript::type_conversion<SafeComponent<Button>, std::shared_ptr<Button>>([](const SafeComponent<Button> &a_item) { return a_item.self(); }));
+				a_script.add(chaiscript::type_conversion<SafeComponent<Button>, std::shared_ptr<Clickable>>([](const SafeComponent<Button> &a_item) { return std::static_pointer_cast<Clickable>(a_item.self()); }));
+				a_script.add(chaiscript::type_conversion<SafeComponent<Button>, std::shared_ptr<Sprite>>([](const SafeComponent<Button> &a_item) { return std::static_pointer_cast<Sprite>(a_item.self()); }));
+				a_script.add(chaiscript::type_conversion<SafeComponent<Button>, std::shared_ptr<Drawable>>([](const SafeComponent<Button> &a_item) { return std::static_pointer_cast<Drawable>(a_item.self()); }));
+				a_script.add(chaiscript::type_conversion<SafeComponent<Button>, std::shared_ptr<Component>>([](const SafeComponent<Button> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
+
+				return a_script;
+			}
+
 		protected:
 			Button(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse);
 

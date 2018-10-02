@@ -109,13 +109,15 @@ namespace MV {
 
 			a_script.add(chaiscript::fun(&Client::send), "send");
 			a_script.add(chaiscript::fun(&Client::connected), "connected");
+			a_script.add(chaiscript::fun([](Client& a_self) { a_self.disconnect(); }), "disconnect");
 			a_script.add(chaiscript::fun([](Client& a_self) { a_self.reconnect(); }), "reconnect");
-			a_script.add(chaiscript::fun([](Client& a_self, const std::function<void()> &a_onInitialized) { a_self.reconnect(a_onInitialized); }), "reconnect");
 		}
 
 		void disconnect() {
 			ourConnectionState = DISCONNECTED;
 			info("client.disconnect();");
+			std::unique_lock<std::mutex> guard(errorLock);
+			failMessage = "Disconnect Requested";
 		}
 
 	private:

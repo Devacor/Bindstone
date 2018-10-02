@@ -28,6 +28,21 @@ TestObject::TestObject(TestObject&) {
 #include <fstream>
 
 int main(int, char *[]) {
+	auto localSaveString = CreatePlayer::makeSaveString("Jai");
+	auto serverSaveString = CreatePlayer::makeServerSaveString();
+
+	{
+		std::ofstream o("ServerSaveString.txt");
+		o << serverSaveString;
+		std::cout << "[\n" << serverSaveString << "]\n";
+	}
+
+	{
+		std::ofstream o("LocalSaveString.txt");
+		o << localSaveString;
+		std::cout << "[\n" << localSaveString << "]\n";
+	}
+
 	Managers managers;
 	managers.timer.start();
 	bool done = false;

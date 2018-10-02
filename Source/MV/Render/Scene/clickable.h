@@ -160,13 +160,17 @@ namespace MV {
 				a_script.add(chaiscript::fun(&Clickable::dragDelta), "dragDelta");
 				a_script.add(chaiscript::fun(&Clickable::totalDragDistance), "totalDragDistance");
 
+				a_script.add(chaiscript::fun(&Clickable::press), "press");
 				a_script.add(chaiscript::fun(&Clickable::cancelPress), "cancelPress");
 
+				SignalRegister<ButtonSignalSignature>::hook(a_script);
 				a_script.add(chaiscript::fun(&Clickable::onPress), "onPress");
 				a_script.add(chaiscript::fun(&Clickable::onRelease), "onRelease");
 				a_script.add(chaiscript::fun(&Clickable::onAccept), "onAccept");
 				a_script.add(chaiscript::fun(&Clickable::onCancel), "onCancel");
+				SignalRegister<DragSignalSignature>::hook(a_script);
 				a_script.add(chaiscript::fun(&Clickable::onDrag), "onDrag");
+				SignalRegister<DropSignalSignature>::hook(a_script);
 				a_script.add(chaiscript::fun(&Clickable::onDrop), "onDrop");
 
 				a_script.add(chaiscript::type_conversion<SafeComponent<Clickable>, std::shared_ptr<Clickable>>([](const SafeComponent<Clickable> &a_item) { return a_item.self(); }));

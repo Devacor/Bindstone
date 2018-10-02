@@ -38,3 +38,4 @@ build/
 *.idb
 Win32/
 .vs/
+bfg.jar

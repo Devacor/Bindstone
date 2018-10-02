@@ -30,15 +30,15 @@ public:
 		a_script.add(chaiscript::constructor<CreatePlayer(const std::string &a_email, const std::string &a_identifier, const std::string &a_password)>(), "CreatePlayer");
 	}
 
+	static std::string makeSaveString(const std::string &a_handle);
+	static std::string makeServerSaveString();
+
 private:
 	void sendValidationEmail(LobbyUserConnectionState *a_connection, const std::string &a_passSalt);
 
 	bool validateHandle(const std::string &a_handle) {
 		return a_handle.size() > 3 && MV::simpleFilter(a_handle) == a_handle;
 	}
-
-	std::string makeSaveString();
-	std::string makeServerSaveString();
 
 	std::string createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt);
 	pqxx::result selectUser(pqxx::work* a_transaction);
@@ -48,8 +48,8 @@ private:
 	std::string email;
 	std::string password;
 
-	const int DEFAULT_HARD_CURRENCY = 150;
-	const int DEFAULT_SOFT_CURRENCY = 500;
+	static const int DEFAULT_HARD_CURRENCY = 150;
+	static const int DEFAULT_SOFT_CURRENCY = 500;
 };
 
 CEREAL_REGISTER_TYPE(CreatePlayer);

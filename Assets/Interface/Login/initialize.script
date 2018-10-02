@@ -1,3 +1,19 @@
 self.initialize = fun(self){
-  //self.root.get("");
+ 	self.root.get("EmailInput").componentText().text(DefaultLoginId);
+ 	self.root.get("PasswordInput").componentText().text(DefaultPassword);
 };
+
+if(!DefaultLoginId.empty() && !DefaultPassword.empty()){
+	print("Not Empty!");
+	if(game.client.connected){
+		print("CHAISCRIPT: Already Connected And Trying Login!");
+		self.root.get("LoginButton").componentButton().press();
+	}else{
+		print("CHAISCRIPT: Not Connected And Trying Login!");
+		messages.lobbyConnected.connect("LoginScreen", fun[self](){
+			messages.lobbyConnected.disconnect("LoginScreen");
+			print("CHAISCRIPT: Connection Callback And Trying Login!");
+			self.root.get("LoginButton").componentButton().press();
+		});
+	}
+}

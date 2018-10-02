@@ -120,8 +120,18 @@ struct D : public C {
 
 void PathfindingTest();
 
-int main(int, char *[]) {
-
+int main(int argc, char *argv[]) {
+	std::string name;
+	std::string pass;
+	for (int i = 0; i < argc-1; ++i) {
+		if (strcmp(argv[i], "-n") == 0) {
+			name = argv[i + 1];
+			std::cout << "Got name: " << name << std::endl;
+		} else if (strcmp(argv[i], "-p") == 0) {
+			pass = argv[i + 1];
+			std::cout << "Got pass: " << pass << std::endl;
+		}
+	}
 	auto derived = std::make_shared<Derived1>();
 	derived->baseMember = 5;
 	derived->derived1Member = 10;
@@ -250,7 +260,7 @@ int main(int, char *[]) {
 
 	pool2.synchronize(pool.updated());
 
-	GameEditor menu;
+	GameEditor menu(name, pass);
 
 	menu.start();
 	

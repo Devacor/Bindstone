@@ -16,8 +16,8 @@ namespace MV {
 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 
 		void show();
-
 		void hide();
+		bool visible() const;
 
 		void update(double a_dt) {
 			if (scriptUpdate) {
@@ -25,7 +25,7 @@ namespace MV {
 			}
 		}
 
-		std::string id() {
+		std::string id() const {
 			return pageId;
 		}
 
@@ -62,7 +62,7 @@ namespace MV {
 	class InterfaceManager {
 	public:
 		InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, TapDevice& a_mouse, Managers& a_managers, chaiscript::ChaiScript &a_script, std::string a_scriptName);
-
+		InterfaceManager& initialize();
 		TapDevice& mouse() {
 			return ourMouse;
 		}
@@ -78,6 +78,14 @@ namespace MV {
 
 		chaiscript::ChaiScript& script() {
 			return ourScript;
+		}
+
+		void update(double a_dt) {
+			for (auto&& p : pages) {
+				if (p.visible()) {
+					p.update(a_dt);
+				}
+			}
 		}
 
 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);

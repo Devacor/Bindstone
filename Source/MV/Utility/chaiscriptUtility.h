@@ -28,6 +28,21 @@ namespace MV {
 		script.set_locals(localVariables);
 		script.eval_file(scriptFile);
 	}
+
+	template <typename Callable>
+	inline bool scriptExceptionWrapper(const std::string &a_entryPointName, Callable a_callable) {
+		try {
+			a_callable();
+			return true;
+		} catch (chaiscript::Boxed_Value &bv) {
+			error(a_entryPointName, " Exception [", chaiscript::boxed_cast<chaiscript::exception::eval_error&>(bv).what(), "]");
+		} catch (const std::exception& e) {
+			error(a_entryPointName, " Exception [", e.what(), "]");
+		} catch (...) {
+			error(a_entryPointName, " Unknown Exception");
+		}
+		return false;
+	}
 }
 
 #endif

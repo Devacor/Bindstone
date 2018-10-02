@@ -18,11 +18,8 @@
 #include "MV/Utility/chaiscriptUtility.h"
 
 class Game {
-	MV::Signal<void(LoginResponse&)> onLoginResponseSignal;
 public:
-	MV::SignalRegister<void(LoginResponse&)> onLoginResponse;
-
-	Game(Managers &a_managers);
+	Game(Managers &a_managers, std::string a_defaultLoginId, std::string a_defaultLoginPassword);
 
 	//return true if we're still good to go
 	bool update(double dt);
@@ -85,7 +82,7 @@ public:
 		if (a_response.hasPlayerState()) {
 			localPlayer = a_response.loadedPlayer();
 		}
-		onLoginResponseSignal(a_response);
+		managers().messages.lobbyAuthenticated(a_response.success, a_response.message);
 	}
 
 	std::shared_ptr<MV::Client> lobbyClient() {
@@ -136,6 +133,8 @@ private:
 
 	std::string loginId;
 	std::string loginPassword;
+	std::string defaultLoginId;
+	std::string defaultPassword;
 };
 
 void sdl_quit(void);

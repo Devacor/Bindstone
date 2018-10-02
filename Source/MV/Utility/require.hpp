@@ -11,6 +11,10 @@
 
 namespace MV {
 
+	inline std::string to_string(bool a_type) {
+		return a_type ? std::string("1") : std::string("0");
+	}
+
 	inline std::string to_string(int a_type){
 		return std::to_string(a_type);
 	}
@@ -23,14 +27,14 @@ namespace MV {
 	inline std::string to_string(unsigned long a_type){
 		return std::to_string(a_type);
 	}
-  #ifndef __GNUC__
+#ifndef __GNUC__
 	inline std::string to_string(int64_t a_type){
 		return std::to_string(a_type);
 	}
 	inline std::string to_string(uint64_t a_type){
 		return std::to_string(a_type);
 	}
-  #endif
+#endif
 	inline std::string to_string(long double a_type){
 		return std::to_string(a_type);
 	}

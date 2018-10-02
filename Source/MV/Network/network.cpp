@@ -25,19 +25,23 @@ namespace MV {
 	}
 
 	void Client::handleConnect(const boost::system::error_code& a_err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
-		if (!a_err) {
-			//socket->set_option(boost::asio::ip::tcp::no_delay(true));
-			ourConnectionState = CONNECTING_SUCCESS;
-			initiateRead();
-		} else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
-			// Try the next endpoint in the list.
-			info("Trying next endpoint: ", a_err.message());
-			socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
-			auto endpoint = *endpoint_iterator;
-			auto self = shared_from_this();
-			socket->async_connect(endpoint, boost::bind(&Client::handleConnect, self, boost::asio::placeholders::error, ++endpoint_iterator));
-		} else {
-			handleError(a_err, "connect");
+		if (ourConnectionState == CONNECTING) {
+			if (!a_err) {
+				//socket->set_option(boost::asio::ip::tcp::no_delay(true));
+				ourConnectionState = CONNECTING_SUCCESS;
+				initiateRead();
+			}
+			else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
+				// Try the next endpoint in the list.
+				info("Trying next endpoint: ", a_err.message());
+				socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
+				auto endpoint = *endpoint_iterator;
+				auto self = shared_from_this();
+				socket->async_connect(endpoint, boost::bind(&Client::handleConnect, self, boost::asio::placeholders::error, ++endpoint_iterator));
+			}
+			else {
+				handleError(a_err, "connect");
+			}
 		}
 	}
 

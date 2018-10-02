@@ -299,7 +299,8 @@ class LobbyServer {
 public:
 	LobbyServer(Managers &a_managers) :
 		manager(a_managers),
-		db(std::make_shared<pqxx::connection>("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=3306 dbname=bindstone user=m2tm password=Tinker123")),
+		//db(std::make_shared<pqxx::connection>("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=3306 dbname=bindstone user=m2tm password=Tinker123")),
+		db(std::make_shared<pqxx::connection>("host=localhost port=5432 dbname=bindstone user=m2tm password=Tinker123")),
 		emailPool(1), //need to test values greater than 1 to make sure ssh does not break.
 		dbPool(1), //currently locked to 1 as pqxx requires one per thread. We can expand this later with more connections and a different query interface.
 		rankedQueue(*this, "ranked"),

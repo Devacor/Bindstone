@@ -6,20 +6,21 @@ void sdl_quit(void){
 	TTF_Quit();
 }
 
-Game::Game(Managers& a_managers) :
+Game::Game(Managers& a_managers, std::string a_defaultLoginId, std::string a_defaultLoginPassword) :
 	gameData(a_managers),
+	defaultLoginId(a_defaultLoginId),
+	defaultPassword(a_defaultLoginPassword),
 	done(false),
-	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), chaiscript::default_options()),
-	onLoginResponse(onLoginResponseSignal){
+	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), chaiscript::default_options()){
 
 	returnFromBackground();
 
 	MV::initializeFilesystem();
-	initializeData();
-	initializeWindow();
 	if (!MV::RUNNING_IN_HEADLESS) {
 		initializeClientConnection();
 	}
+	initializeData();
+	initializeWindow();
 }
 
 void Game::initializeData() {
@@ -32,8 +33,10 @@ void Game::initializeClientConnection() {
 		value->execute(*this);
 	}, [&](const std::string &a_dcreason) {
 		std::cout << "Disconnected: " << a_dcreason << std::endl;
-		killGame();
-	}, [=] {});
+		gameData.managers().messages.lobbyDisconnect(a_dcreason);
+	}, [=] {
+		gameData.managers().messages.lobbyConnected();
+	});
 }
 
 void Game::initializeWindow(){
@@ -79,6 +82,7 @@ void Game::initializeWindow(){
 	hook(scriptEngine);
 	if (!MV::RUNNING_IN_HEADLESS) {
 		ourGui = std::make_unique<MV::InterfaceManager>(rootScene, ourMouse, gameData.managers(), scriptEngine, "./Assets/Interface/interfaceManager.script");
+		ourGui->initialize();
 	}
 }
 
@@ -158,6 +162,8 @@ void Game::render() {
 void Game::hook(chaiscript::ChaiScript &a_script) {
 	bindstoneScriptHook(a_script, ourMouse, gameData.managers().pool);
 
+	gameData.managers().messages.hook(a_script);
+
 	a_script.add(chaiscript::user_type<Game>(), "Game");
 	a_script.add(chaiscript::fun(&Game::gui), "gui");
 	a_script.add(chaiscript::fun(&Game::instance), "instance");
@@ -169,23 +175,8 @@ void Game::hook(chaiscript::ChaiScript &a_script) {
 	a_script.add(chaiscript::fun(&Game::ourLobbyClient), "client");
 	a_script.add(chaiscript::fun(&Game::loginId), "loginId");
 	a_script.add(chaiscript::fun(&Game::loginPassword), "loginPassword");
-
-	MV::SignalRegister<void(LoginResponse&)>::hook(a_script);
-	a_script.add(chaiscript::fun(&Game::onLoginResponse), "onLoginResponse");
-
-	a_script.add(chaiscript::fun([&](Game& /*a_this*/) {
-		localPlayer = std::make_shared<Player>();
-		localPlayer->handle = "Local";
-		localPlayer->loadout.buildings = { "Life", "Life", "Life", "Life", "Life", "Life", "Life", "Life" };
-		localPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
-		localPlayer->wallet.add(Wallet::SOFT, 1000000);
-		localPlayer->wallet.add(Wallet::HARD, 1000000);
-
-		auto otherPlayer = MV::fromJson<std::shared_ptr<Player>>(MV::toJson(localPlayer));
-		otherPlayer->handle = "Remote";
-
-		enterGame(localPlayer, otherPlayer);
-	}), "testGame");
+	a_script.add_global_const(chaiscript::const_var(defaultLoginId), "DefaultLoginId");
+	a_script.add_global_const(chaiscript::const_var(defaultPassword), "DefaultPassword");
 
 	a_script.add_global(chaiscript::var(this), "game");
 }

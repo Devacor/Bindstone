@@ -40,6 +40,7 @@ void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::TapDevice &a_tapD
 	MV::Scene::PathAgent::hook(a_script);
 	MV::Scene::Emitter::hook(a_script, a_pool);
 	MV::Scene::Clickable::hook(a_script, a_tapDevice);
+	MV::Scene::Button::hook(a_script, a_tapDevice);
 
 	MV::Client::hook(a_script);
 	CreatePlayer::hook(a_script);
@@ -54,4 +55,15 @@ void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::TapDevice &a_tapD
 	a_script.add(chaiscript::fun([](size_t a_from) {return MV::to_string(a_from); }), "to_string");
 	a_script.add(chaiscript::fun([](float a_from) {return MV::to_string(a_from); }), "to_string");
 	a_script.add(chaiscript::fun([](double a_from) {return MV::to_string(a_from); }), "to_string");
+	a_script.add(chaiscript::fun([](bool a_from) {return MV::to_string(a_from); }), "to_string");
+}
+
+void StandardMessages::hook(chaiscript::ChaiScript& a_script) {
+	a_script.add_global(chaiscript::var(this), "messages");
+	MV::SignalRegister<void()>::hook(a_script);
+	MV::SignalRegister<void(const std::string &)>::hook(a_script);
+	MV::SignalRegister<void(bool, const std::string &)>::hook(a_script);
+	a_script.add(chaiscript::fun(&StandardMessages::lobbyConnected), "lobbyConnected");
+	a_script.add(chaiscript::fun(&StandardMessages::lobbyDisconnect), "lobbyDisconnect");
+	a_script.add(chaiscript::fun(&StandardMessages::lobbyAuthenticated), "lobbyAuthenticated");
 }

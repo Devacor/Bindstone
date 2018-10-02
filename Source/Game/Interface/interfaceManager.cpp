@@ -14,6 +14,7 @@ namespace MV {
 
 		a_script.add(chaiscript::fun(&Interface::show), "show");
 		a_script.add(chaiscript::fun(&Interface::hide), "hide");
+		a_script.add(chaiscript::fun(&Interface::visible), "visible");
 
 		a_script.add(chaiscript::fun([](Interface& a_self) {return a_self.manager;}), "manager");
 
@@ -34,6 +35,8 @@ namespace MV {
 		if (!node->active()) {
 			initialize();
 			node->active(true);
+			node->depth(static_cast<MV::PointPrecision>(node->parent()->size())+1.0f);
+			node->parent()->normalizeDepth();
 			if (scriptShow) {
 				scriptShow(*this);
 			}
@@ -48,6 +51,10 @@ namespace MV {
 			}
 			node->active(false);
 		}
+	}
+
+	bool Interface::visible() const {
+		return node && node->active();
 	}
 
 	void Interface::focus(std::shared_ptr<MV::Scene::Text> a_textbox) {
@@ -71,16 +78,19 @@ namespace MV {
 		if (!node) {
 			node = manager.root()->loadChild("Assets/Interface/" + pageId + "/view.scene", manager.managers().services, pageId);
 
-			scriptFileEval("Assets/Interface/" + pageId + "/initialize.script", manager.script(), {
-				{ "self", chaiscript::Boxed_Value(this) }
-			});
-
-			if (scriptInitialize) {
-				scriptInitialize(*this);
-			}
-
 			manager.root()->add(node);
 			node->active(false);
+
+			scriptExceptionWrapper("InterfaceManager::initialize", [&] {
+				scriptFileEval("Assets/Interface/" + pageId + "/initialize.script", manager.script(), {
+					{ "self", chaiscript::Boxed_Value(this) }
+				});
+			});
+			if (scriptInitialize) {
+				scriptExceptionWrapper("InterfaceManager::initialize", [&] {
+					scriptInitialize(*this);
+				});
+			}
 		}
 	}
 
@@ -89,14 +99,20 @@ namespace MV {
 		ourManagers(a_managers),
 		ourScript(a_script),
 		node(a_root->make(a_scriptName)->depth(1)) {
+	}
 
-		scriptFileEval(a_scriptName, ourScript, {
-			{ "self", chaiscript::Boxed_Value(this) }
+	InterfaceManager& InterfaceManager::initialize() {
+		scriptExceptionWrapper("InterfaceManager::initialize", [&]{
+			scriptFileEval(node->id(), ourScript, {
+				{ "self", chaiscript::Boxed_Value(this) }
+			});
 		});
-
 		if (scriptInitialize) {
-			scriptInitialize(*this);
+			scriptExceptionWrapper("InterfaceManager::initialize", [&] {
+				scriptInitialize(*this);
+			});
 		}
+		return *this;
 	}
 
 	chaiscript::ChaiScript& InterfaceManager::hook(chaiscript::ChaiScript &a_script) {
@@ -114,8 +130,6 @@ namespace MV {
 		a_script.add(chaiscript::fun(&InterfaceManager::node), "root");
 
 		a_script.add(chaiscript::fun(&InterfaceManager::scriptInitialize), "initialize");
-
-		//a_script.add(chaiscript::fun(&InterfaceManager::scriptUpdate), "update");
 
 		return a_script;
 	}

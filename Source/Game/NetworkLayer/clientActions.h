@@ -77,11 +77,12 @@ public:
 	std::shared_ptr<Player> loadedPlayer();
 
 	bool hasPlayerState() const { return !player.empty(); }
-private:
-	std::string message;
-	std::string player;
 
+	std::string message;
 	bool success = false;
+
+private:
+	std::string player;
 };
 
 CEREAL_REGISTER_TYPE(LoginResponse);

@@ -12,8 +12,9 @@ void GameEditor::resumeTitleMusic() {
 	//playlistGame->beginPlaying();
 }
 
-GameEditor::GameEditor() :
-	game(managers),
+GameEditor::GameEditor(std::string a_username, std::string a_password) :
+	game(managers, a_username, a_password),
+	autoStartGame(!a_username.empty() && !a_password.empty()),
 	editor(managers),
 	limbo(MV::Scene::Node::make(managers.renderer))
 {

@@ -14,9 +14,6 @@
 #include "cereal/cereal.hpp"
 #include "cereal/access.hpp"
 
-//change to [[nodiscard]] when we get support.
-#define MV_NODISCARD
-
 namespace MV {
 
 	template <typename T>
@@ -138,7 +135,10 @@ namespace MV {
 				a_script.add(chaiscript::fun(&Receiver<T>::block), "block");
 				a_script.add(chaiscript::fun(&Receiver<T>::blocked), "blocked");
 				a_script.add(chaiscript::fun(&Receiver::unblock), "unblock");
+				a_script.add(chaiscript::fun(&Receiver::hasScript), "hasScript");
 				a_script.add(chaiscript::fun(&Receiver::script), "script");
+
+				a_script.add(chaiscript::fun([](Receiver<T>::SharedType &a_pointer) {a_pointer.reset(); }), "reset");
 			}
 			return a_script;
 		}
@@ -271,33 +271,23 @@ namespace MV {
 		typedef std::weak_ptr<Receiver<T>> WeakRecieverType;
 
 		//No protection against duplicates.
-		MV_NODISCARD std::shared_ptr<Receiver<T>> connect(std::function<T> a_callback){
-			if(observerLimit == std::numeric_limits<size_t>::max() || cullDeadObservers() < observerLimit){
-				auto signal = Receiver<T>::make(a_callback);
-				observers.insert(signal);
-				return signal;
-			} else {
-				return nullptr;
-			}
+		[[nodiscard]]
+		std::shared_ptr<Receiver<T>> connect(std::function<T> a_callback){
+			auto signal = Receiver<T>::make(a_callback);
+			observers.insert(signal);
+			return signal;
 		}
-		MV_NODISCARD std::shared_ptr<Receiver<T>> connect(const std::string &a_callback) {
-			if (observerLimit == std::numeric_limits<size_t>::max() || cullDeadObservers() < observerLimit) {
-				auto signal = Receiver<T>::make(a_callback, scriptEnginePointer, orderedParameterNames);
-				observers.insert(signal);
-				return signal;
-			} else {
-				return nullptr;
-			}
+		[[nodiscard]]
+		std::shared_ptr<Receiver<T>> connect(const std::string &a_callback) {
+			auto signal = Receiver<T>::make(a_callback, scriptEnginePointer, orderedParameterNames);
+			observers.insert(signal);
+			return signal;
 		}
 
 		//Duplicate Recievers will not be added. If std::function ever becomes comparable this can all be much safer.
 		bool connect(std::shared_ptr<Receiver<T>> a_value){
-			if(observerLimit == std::numeric_limits<size_t>::max() || cullDeadObservers() < observerLimit){
-				observers.insert(a_value);
-				return true;
-			}else{
-				return false;
-			}
+			observers.insert(a_value);
+			return true;
 		}
 
 		//Add owned connections. Note: these should be disconnected via ID instead of by the receiver.
@@ -440,16 +430,6 @@ namespace MV {
 			}
 		}
 
-		void setObserverLimit(size_t a_newLimit){
-			observerLimit = a_newLimit;
-		}
-		void clearObserverLimit(){
-			observerLimit = std::numeric_limits<size_t>::max();
-		}
-		int getObserverLimit(){
-			return observerLimit;
-		}
-
 		size_t cullDeadObservers(){
 			for(auto i = observers.begin();!observers.empty() && i != observers.end();) {
 				if(i->expired()) {
@@ -530,7 +510,7 @@ namespace MV {
 		}
 
 		std::set< std::weak_ptr< Receiver<T> >, std::owner_less<std::weak_ptr<Receiver<T>>> > observers;
-		size_t observerLimit = std::numeric_limits<size_t>::max();
+
 		bool inCall = false;
 		int isBlocked = 0;
 		std::function<T> blockedCallback;
@@ -563,10 +543,12 @@ namespace MV {
 		}
 
 		//no protection against duplicates
-		MV_NODISCARD std::shared_ptr<Receiver<T>> connect(std::function<T> a_callback){
+		[[nodiscard]]
+		std::shared_ptr<Receiver<T>> connect(std::function<T> a_callback){
 			return signal.connect(a_callback);
 		}
-		MV_NODISCARD std::shared_ptr<Receiver<T>> connect(const std::string &a_callbackScript) {
+		[[nodiscard]]
+		std::shared_ptr<Receiver<T>> connect(const std::string &a_callbackScript) {
 			return signal.connect(a_callbackScript);
 		}
 		//duplicate shared_ptr's will not be added
@@ -620,6 +602,13 @@ namespace MV {
 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 			if (!scriptHookedUp[reinterpret_cast<size_t>(&a_script)]) {
 				scriptHookedUp[reinterpret_cast<size_t>(&a_script)] = true;
+
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Receiver<T>>(Signal<T>::*)(const std::string &, std::function<T>)>(&Signal<T>::connect)), "connect");
+				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Receiver<T>>(Signal<T>::*)(const std::string &, const std::string &)>(&Signal<T>::connect)), "connect");
+				a_script.add(chaiscript::fun(static_cast<void(Signal<T>::*)(const std::string &)>(&Signal<T>::disconnect)), "disconnect");
+				a_script.add(chaiscript::fun(static_cast<void(Signal<T>::*)(std::shared_ptr<Receiver<T>>)>(&Signal<T>::disconnect)), "disconnect");
+				a_script.add(chaiscript::fun(&Signal<T>::connection), "connection");
+				a_script.add(chaiscript::fun(&Signal<T>::connected), "connected");
 
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Receiver<T>>(SignalRegister<T>::*)(const std::string &, std::function<T>)>(&SignalRegister<T>::connect)), "connect");
 				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Receiver<T>>(SignalRegister<T>::*)(const std::string &, const std::string &)>(&SignalRegister<T>::connect)), "connect");

@@ -70,6 +70,8 @@ void GameInstance::beginMapDrag() {
 void GameInstance::hook() {
 	bindstoneScriptHook(scriptEngine, ourMouse, gameData.managers().pool);
 
+	gameData.managers().messages.hook(scriptEngine);
+
 	Building::hook(scriptEngine, *this);
 	Creature::hook(scriptEngine, *this);
 	Missile::hook(scriptEngine);

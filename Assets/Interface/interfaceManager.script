@@ -3,3 +3,7 @@ self.initialize = fun(self){
 	self.make("Main");
 	test.show();
 };
+
+messages.lobbyDisconnect.connect("LoginScreen", fun(){
+	game.gui().get("Login").show();
+});

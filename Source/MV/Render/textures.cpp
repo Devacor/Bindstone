@@ -21,6 +21,10 @@ CEREAL_REGISTER_TYPE(MV::SurfaceTextureDefinition);
 
 CEREAL_REGISTER_TYPE(MV::TextureHandle);
 
+CEREAL_CLASS_VERSION(MV::TextureHandle, 2);
+
+CEREAL_REGISTER_DYNAMIC_INIT(mv_scenetextures);
+
 namespace MV {
 
 	/**************************************\

@@ -50,8 +50,6 @@ private:
 	std::string message;
 };
 
-CEREAL_REGISTER_TYPE(MessageAction);
-
 class LoginResponse : public NetworkAction {
 public:
 	LoginResponse(const std::string& a_message, const std::string& a_player = "", bool a_success = false) : message(a_message), player(a_player), success(a_success) {}
@@ -85,8 +83,6 @@ private:
 	std::string player;
 };
 
-CEREAL_REGISTER_TYPE(LoginResponse);
-
 class IllegalResponse : public NetworkAction {
 public:
 	IllegalResponse(const std::string& a_message) : message(a_message) {}
@@ -109,8 +105,6 @@ private:
 	std::string message;
 };
 
-CEREAL_REGISTER_TYPE(IllegalResponse);
-
 class ServerDetails : public NetworkAction {
 public:
 	virtual void execute(Game&) override {
@@ -132,8 +126,6 @@ public:
 	std::map<std::string, std::string> configurationHashes;
 };
 
-CEREAL_REGISTER_TYPE(ServerDetails);
-
 class MatchedResponse : public NetworkAction {
 public:
 	MatchedResponse(const std::string& a_gameServer, uint16_t a_port, int64_t a_secret) : gameServer(a_gameServer), port(a_port), secret(a_secret) {}
@@ -151,6 +143,6 @@ public:
 	int64_t secret;
 };
 
-CEREAL_REGISTER_TYPE(MatchedResponse);
+CEREAL_FORCE_DYNAMIC_INIT(mv_clientactions);
 
 #endif

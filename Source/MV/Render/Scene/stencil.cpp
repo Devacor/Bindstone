@@ -5,6 +5,7 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Stencil);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_scenestencil);
 
 namespace MV {
 	namespace Scene {

@@ -52,9 +52,6 @@ private:
 	static const int DEFAULT_SOFT_CURRENCY = 500;
 };
 
-CEREAL_REGISTER_TYPE(CreatePlayer);
-
-
 class LoginRequest : public NetworkAction {
 public:
 	LoginRequest() {}
@@ -90,8 +87,6 @@ private:
 	std::string saveHash;
 };
 
-CEREAL_REGISTER_TYPE(LoginRequest);
-
 class FindMatchRequest : public NetworkAction {
 public:
 	FindMatchRequest() {}
@@ -117,8 +112,6 @@ private:
 	std::string type;
 };
 
-CEREAL_REGISTER_TYPE(FindMatchRequest);
-
 class ExpectedPlayersNoted : public NetworkAction {
 public:
 	ExpectedPlayersNoted() {}
@@ -131,6 +124,6 @@ public:
 	}
 };
 
-CEREAL_REGISTER_TYPE(ExpectedPlayersNoted);
+CEREAL_FORCE_DYNAMIC_INIT(mv_accountactions);
 
 #endif

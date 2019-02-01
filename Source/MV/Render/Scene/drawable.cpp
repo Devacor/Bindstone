@@ -7,6 +7,7 @@
 
 CEREAL_REGISTER_TYPE(MV::Scene::Drawable);
 CEREAL_CLASS_VERSION(MV::Scene::Drawable, 4);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_scenedrawable);
 
 namespace MV {
 	namespace Scene {

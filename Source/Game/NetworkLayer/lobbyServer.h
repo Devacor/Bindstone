@@ -137,6 +137,10 @@ public:
 
 	void state(const State a_newState) {
 		activeState = a_newState;
+		if (activeState == AVAILABLE) {
+			leftPlayer = nullptr;
+			rightPlayer = nullptr;
+		}
 	}
 
 	bool available() const {
@@ -152,19 +156,10 @@ public:
 	}
 
 	void setEndpoint(const std::string &a_url, uint16_t a_port) {
-		activeState = AVAILABLE;
+		state(AVAILABLE);
 		ourUrl = a_url;
 		ourPort = a_port;
 		std::cout << "GameServer Connected: " << a_url << ":" << a_port << std::endl;
-	}
-
-	void matchMade(const std::vector<std::shared_ptr<MatchSeeker>> a_team1, const std::vector<std::shared_ptr<MatchSeeker>> a_team2) {
-		activeState = OCCUPIED;
-		for (auto&& seeker : a_team1) {
-			seeker->lifespan.lock()->send(
-				makeNetworkString<MessageAction>("User created, woot!")
-			);
-		}
 	}
 
 	void notifyPlayersOfGameServer();
@@ -253,6 +248,8 @@ public:
 					continue;
 				}
 			}
+
+			//If we get here it means the seeker is expired, so just remove. Note: continue; above.
 			it = seekers.erase(it);
 		}
 		return pairs;

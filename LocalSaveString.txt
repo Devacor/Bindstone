@@ -1,0 +1,1 @@
+{"value0":{"ptr_wrapper":{"id":2147483649,"data":{"cereal_class_version":1,"email":"","handle":"Jai","experience":0,"wallet":{"cereal_class_version":0,"values":[0,500,150]},"unlocked":[],"loadout":{"cereal_class_version":0,"buildings":["Life","Life","Life","Life","Life","Life","Life","Life"],"skins":["","","","","","","",""]}}}}}

@@ -8,17 +8,13 @@
 #include <vector>
 #include <memory>
 
-#include "cereal/cereal.hpp"
-#include "cereal/access.hpp"
-#include "cereal/archives/adapters.hpp"
-
 #include "MV/Render/render.h"
 #include "MV/Render/textures.h"
 #include "MV/Render/points.h"
 #include "MV/Render/boxaabb.h"
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/signal.hpp"
-#include "MV/Utility/task.hpp"
+#include "MV/Utility/task.h"
 #include "MV/Utility/visitor.hpp"
 #include "MV/Utility/services.h"
 
@@ -158,7 +154,7 @@ namespace MV {
 				accumulatedDelta += a_delta;
 				updateImplementation(a_delta);
 				if (rootTask) {
-					if (rootTask->update(a_delta)) {
+					if (!rootTask->update(a_delta)) {
 						rootTask.reset();
 					}
 				}
@@ -317,5 +313,7 @@ namespace MV {
 		};
 	}
 }
+
+CEREAL_FORCE_DYNAMIC_INIT(mv_scenecomponent);
 
 #endif

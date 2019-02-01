@@ -10,10 +10,17 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Source\SolutionSpecific\KingdomCome\diggerGame.cpp" />
+    <ClCompile Include="..\Source\SolutionSpecific\KingdomCome\main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Source\SolutionSpecific\KingdomCome\diggerGame.h" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>
-    <ProjectGuid>{9A8FCAEE-02C5-452D-AAFC-E130DE800148}</ProjectGuid>
-    <RootNamespace>BindstoneClient</RootNamespace>
+    <ProjectGuid>{2C83C3C3-14BA-4627-B89D-7DB52FF580DC}</ProjectGuid>
+    <RootNamespace>KingdomCome</RootNamespace>
     <WindowsTargetPlatformVersion>10.0.16299.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -89,9 +96,6 @@
     </Link>
     <Xdcmake />
   </ItemDefinitionGroup>
-  <ItemGroup>
-    <ClCompile Include="..\Source\SolutionSpecific\BindstoneClient\main.cpp" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

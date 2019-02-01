@@ -172,7 +172,7 @@ namespace MV {
 				cereal::make_nvp("script", scriptCallback)
 			);
 			auto& services = cereal::get_user_data<MV::Services>(archive);
-			scriptEnginePointer = services.get<chaiscript::ChaiScript>();
+			scriptEnginePointer = services.get<chaiscript::ChaiScript>(false);
 		}
 
 		Receiver() {
@@ -506,7 +506,7 @@ namespace MV {
 				ownedConnections[ownedScriptObserver.first] = ownedScriptObserver.second;
 			}
 			auto& services = cereal::get_user_data<MV::Services>(archive);
-			scriptEnginePointer = services.get<chaiscript::ChaiScript>();
+			scriptEnginePointer = services.get<chaiscript::ChaiScript>(false);
 		}
 
 		std::set< std::weak_ptr< Receiver<T> >, std::owner_less<std::weak_ptr<Receiver<T>>> > observers;

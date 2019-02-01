@@ -25,7 +25,27 @@ private:
 	uint16_t ourPort;
 };
 
-CEREAL_REGISTER_TYPE(GameServerAvailable);
+class GameServerStateChange : public NetworkAction {
+public:
+	enum State { 
+		OCCUPIED,
+		AVAILABLE
+	};
+	GameServerStateChange() {}
+	GameServerStateChange(State a_state) : ourState(a_state) {}
+
+	virtual void execute(LobbyGameConnectionState* a_connection) override;
+
+	template <class Archive>
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
+		archive(
+			CEREAL_NVP(ourState),
+			cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+	}
+
+private:
+	State ourState;
+};
 
 struct AssignedPlayer {
 	AssignedPlayer() {}
@@ -66,8 +86,6 @@ private:
 	std::string matchQueueId;
 };
 
-CEREAL_REGISTER_TYPE(AssignPlayersToGame);
-
 class GetInitialGameState : public NetworkAction {
 public:
 	GetInitialGameState() {}
@@ -82,8 +100,6 @@ public:
 private:
 	int64_t secret;
 };
-
-CEREAL_REGISTER_TYPE(GetInitialGameState);
 
 class SuppliedInitialGameState : public NetworkAction {
 public:
@@ -102,8 +118,6 @@ private:
 	std::shared_ptr<Player> right;
 };
 
-CEREAL_REGISTER_TYPE(SuppliedInitialGameState);
-
 class RequestBuildingUpgrade : public NetworkAction {
 public:
 	RequestBuildingUpgrade() {}
@@ -120,8 +134,6 @@ public:
 	int32_t slot;
 	int32_t id;
 };
-
-CEREAL_REGISTER_TYPE(RequestBuildingUpgrade);
 
 class RequestFullGameState : public NetworkAction {
 public:
@@ -141,6 +153,6 @@ private:
 	std::shared_ptr<Player> right;
 };
 
-CEREAL_REGISTER_TYPE(RequestFullGameState);
+CEREAL_FORCE_DYNAMIC_INIT(mv_gameserveractions);
 
 #endif

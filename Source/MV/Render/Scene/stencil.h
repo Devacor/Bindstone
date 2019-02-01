@@ -66,4 +66,6 @@ namespace MV {
 	}
 }
 
+CEREAL_FORCE_DYNAMIC_INIT(mv_scenestencil);
+
 #endif

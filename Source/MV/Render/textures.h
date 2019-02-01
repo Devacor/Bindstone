@@ -587,6 +587,6 @@ namespace MV {
 	};
 }
 
-CEREAL_CLASS_VERSION(MV::TextureHandle, 2);
+CEREAL_FORCE_DYNAMIC_INIT(mv_scenetextures);
 
 #endif

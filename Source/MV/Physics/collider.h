@@ -105,12 +105,17 @@ namespace MV {
 			}
 		protected:
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const /*version*/) {
+			void save(Archive & archive, std::uint32_t const /*version*/) const {
 				archive(
 					cereal::make_nvp("gravityX", world.GetGravity().x),
 					cereal::make_nvp("gravityY", world.GetGravity().y),
 					cereal::make_nvp("Component", cereal::base_class<Component>(this))
 				);
+			}
+
+			template <class Archive>
+			void load(Archive & archive, std::uint32_t const /*version*/) {
+				MV::require(false, "Cannot properly load an environment, must load_and_construct. This might happen if you derive from environment wrongly.");
 			}
 
 			template <class Archive>
@@ -238,7 +243,7 @@ namespace MV {
 				);
 			}
 		private:
-			void syncronize();
+			void syncronize() const;
 
 			std::weak_ptr<Collider> parent;
 			b2BodyDef details;
@@ -461,7 +466,7 @@ namespace MV {
 				return collisionAttributes;
 			}
 
-			std::shared_ptr<Collider> attach(const Size<> &a_size, const Point<> &a_position = Point<>(), PointPrecision a_rotation = 0.0f, CollisionPartAttributes a_attributes = CollisionPartAttributes());
+			std::shared_ptr<Collider> attach(const BoxAABB<> &a_bounds, PointPrecision a_rotation = 0.0f, CollisionPartAttributes a_attributes = CollisionPartAttributes());
 			std::shared_ptr<Collider> attach(PointPrecision a_diameter, const Point<> &a_position = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 			std::shared_ptr<Collider> attach(const std::vector<Point<>> &a_points, const Point<> &a_offset = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 
@@ -572,7 +577,7 @@ namespace MV {
 			void attachInternal(const std::vector<Point<>> &a_points, const Point<> &a_offset = Point<>(), CollisionPartAttributes a_attributes = CollisionPartAttributes());
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const /*version*/) {
+			void save(Archive & archive, std::uint32_t const /*version*/) const {
 				collisionAttributes.syncronize();
 				archive(
 					cereal::make_nvp("world", world),
@@ -585,6 +590,11 @@ namespace MV {
 					cereal::make_nvp("rotationJoints", rotationJoints),
 					cereal::make_nvp("Component", cereal::base_class<Component>(this))
 				);
+			}
+
+			template <class Archive>
+			void load(Archive & archive, std::uint32_t const /*version*/) {
+				MV::require(false, "Cannot properly load a collider with load... Must be load_and_construct. Might implement if ever derived from.");
 			}
 
 			template <class Archive>
@@ -763,5 +773,7 @@ namespace MV {
 		}
 	}
 }
+
+CEREAL_FORCE_DYNAMIC_INIT(mv_scenecollider);
 
 #endif

@@ -31,6 +31,6 @@ inline std::string makeSynchronizeNetworkString(BindstoneNetworkObjectPool &a_ne
 	makeNetworkString<SynchronizeAction>(a_networkObjectPool.updated());
 }
 
-CEREAL_REGISTER_TYPE(SynchronizeAction);
+CEREAL_FORCE_DYNAMIC_INIT(mv_synchronizeaction);
 
 #endif

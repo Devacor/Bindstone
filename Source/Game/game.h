@@ -66,14 +66,15 @@ public:
 	}
 
 	GameInstance* enterGame(const std::shared_ptr<Player> &a_left, const std::shared_ptr<Player> &a_right) {
-		ourInstance = std::make_unique<MockClientGameInstance>(a_left, a_right, *this);
+		ourInstance = std::make_unique<ClientGameInstance>(a_left, a_right, *this);
 		gui().page("Main").hide();
 		return ourInstance.get();
 	}
 
 	void killGame() {
 		ourInstance = nullptr;
-		gui().page("Login").show();
+		ourGameClient = nullptr;
+		gui().page("Main").show();
 	}
 
 	void hook(chaiscript::ChaiScript &a_script);

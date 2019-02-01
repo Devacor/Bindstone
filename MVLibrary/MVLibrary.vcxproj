@@ -14,7 +14,7 @@
     <ProjectGuid>{732BFA09-4C56-4F49-BE0E-1E4A2A129DA4}</ProjectGuid>
     <RootNamespace>MVLibrary</RootNamespace>
     <TargetPlatformVersion>8.1</TargetPlatformVersion>
-    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.16299.0</WindowsTargetPlatformVersion>
     <ProjectName>MVLibrary</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -73,6 +73,7 @@
       <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
       <OptimizeReferences>true</OptimizeReferences>
     </Link>
+    <Xdcmake />
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -106,6 +107,7 @@
       <PreventDllBinding>true</PreventDllBinding>
       <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
     </Link>
+    <Xdcmake />
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\external\Box2D\Collision\b2BroadPhase.cpp" />
@@ -280,6 +282,7 @@
     <ClCompile Include="..\Source\MV\Utility\log.cpp" />
     <ClCompile Include="..\Source\MV\Utility\sha512.cpp" />
     <ClCompile Include="..\Source\MV\Utility\stopwatch.cpp" />
+    <ClCompile Include="..\Source\MV\Utility\task.cpp" />
     <ClCompile Include="..\Source\MV\Utility\tinyutf8.cpp" />
     <ClCompile Include="..\Source\StdAfx.cpp" />
   </ItemGroup>
@@ -558,7 +561,7 @@
     <ClInclude Include="..\Source\MV\Utility\sha512.h" />
     <ClInclude Include="..\Source\MV\Utility\signal.hpp" />
     <ClInclude Include="..\Source\MV\Utility\stopwatch.h" />
-    <ClInclude Include="..\Source\MV\Utility\task.hpp" />
+    <ClInclude Include="..\Source\MV\Utility\task.h" />
     <ClInclude Include="..\Source\MV\Utility\taskActions.hpp" />
     <ClInclude Include="..\Source\MV\Utility\threadPool.hpp" />
     <ClInclude Include="..\Source\MV\Utility\tinyutf8.h" />

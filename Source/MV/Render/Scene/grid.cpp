@@ -6,6 +6,8 @@
 #include "MV/Utility/generalUtility.h"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Grid);
+CEREAL_CLASS_VERSION(MV::Scene::Grid, 2)
+CEREAL_REGISTER_DYNAMIC_INIT(mv_scenegrid);
 
 namespace MV {
 	namespace Scene {

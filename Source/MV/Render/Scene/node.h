@@ -910,8 +910,8 @@ namespace MV {
 			static void load_and_construct(Archive & archive, cereal::construct<Node> &construct, std::uint32_t const version) {
 				auto& services = cereal::get_user_data<MV::Services>(archive);
 				auto* renderer = services.get<MV::Draw2D>();
-				auto* options = services.get<LoadOptions>();
-				bool doPostLoad = options->doPostLoad;
+				LoadOptions* options = services.get<LoadOptions>(false);
+				bool doPostLoad = options ? options->doPostLoad : true;
 				std::string nodeId;
 				archive(cereal::make_nvp("nodeId", nodeId));
 				construct(*renderer, nodeId);

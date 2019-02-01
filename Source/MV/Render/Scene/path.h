@@ -511,7 +511,6 @@ namespace MV {
 	}
 }
 
-CEREAL_CLASS_VERSION(MV::Scene::PathAgent, 1);
-CEREAL_CLASS_VERSION(MV::Scene::PathMap, 1);
+CEREAL_FORCE_DYNAMIC_INIT(mv_scenepath);
 
 #endif

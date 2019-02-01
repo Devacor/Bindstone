@@ -680,6 +680,9 @@
     <ClCompile Include="..\Source\StdAfx.cpp">
       <Filter>Bindstone\Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\MV\Utility\task.cpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\external\Box2D\Box2D.h">
@@ -1504,9 +1507,6 @@
     <ClInclude Include="..\Source\MV\Utility\stopwatch.h">
       <Filter>Bindstone\Source\MV\Utility</Filter>
     </ClInclude>
-    <ClInclude Include="..\Source\MV\Utility\task.hpp">
-      <Filter>Bindstone\Source\MV\Utility</Filter>
-    </ClInclude>
     <ClInclude Include="..\Source\MV\Utility\taskActions.hpp">
       <Filter>Bindstone\Source\MV\Utility</Filter>
     </ClInclude>
@@ -1524,6 +1524,9 @@
     </ClInclude>
     <ClInclude Include="..\Source\StdAfx.h">
       <Filter>Bindstone\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\task.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

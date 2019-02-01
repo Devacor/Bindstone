@@ -6,6 +6,7 @@
 #include "text.h"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Button);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_scenebutton);
 
 namespace MV {
 	namespace Scene {

@@ -11,6 +11,7 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Spine);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_scenespine);
 
 
 std::map<std::string, std::pair<MV::FileTextureDefinition*, size_t>> SHARED_SPINE_TEXTURES;

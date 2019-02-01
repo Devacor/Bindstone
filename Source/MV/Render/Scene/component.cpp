@@ -5,6 +5,7 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Component);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_scenecomponent);
 
 namespace MV {
 	namespace Scene {

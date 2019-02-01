@@ -49,17 +49,14 @@ namespace MV {
 				} catch (boost::bad_any_cast&) {
 					auto message = std::string("Error: Tried to get service [") + i->second.type().name() + "] as [" + typeid(T).name() + "]\n";
 					if (a_throwOnFail) {
-						throw MV::ResourceException(message);
+						throw MV::ResourceException(std::string("Error: Tried to get service [") + i->second.type().name() + "] as [" + typeid(T).name() + "]\n");
 					} else {
 						MV::warning(message);
 					}
 				}
 			}
-			auto message = std::string("Error: Failed to find service [") + typeid(T).name() + "]\n";
 			if (a_throwOnFail) {
-				throw MV::ResourceException(message);
-			} else {
-				MV::warning(message);
+				throw MV::ResourceException(std::string("Error: Failed to find service [") + typeid(T).name() + "]\n");
 			}
 			return nullptr;
 		}
@@ -82,11 +79,8 @@ namespace MV {
 				}
 			}
 
-			auto message = std::string("Error: Failed to find service [") + i->second.type().name() + "] as [" + typeid(T).name() + "]\n";
 			if (a_throwOnFail) {
-				throw MV::ResourceException(message);
-			} else {
-				MV::warning(message);
+				throw MV::ResourceException(std::string("Error: Failed to find service [") + i->second.type().name() + "] as [" + typeid(T).name() + "]\n");
 			}
 			return nullptr;
 		}

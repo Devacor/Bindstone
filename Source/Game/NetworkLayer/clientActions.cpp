@@ -3,6 +3,13 @@
 #include "Game/player.h"
 #include "MV/Utility/cerealUtility.h"
 
+CEREAL_REGISTER_TYPE(MatchedResponse);
+CEREAL_REGISTER_TYPE(ServerDetails);
+CEREAL_REGISTER_TYPE(IllegalResponse);
+CEREAL_REGISTER_TYPE(LoginResponse);
+CEREAL_REGISTER_TYPE(MessageAction);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_clientactions);
+
 void LoginResponse::execute(Game& a_game) {
 	std::cout << "Login: [" << message << "] Success: [" << (success ? "true" : "false") << "]" << std::endl;
 	a_game.authenticate(*this);

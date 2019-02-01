@@ -1,7 +1,7 @@
 #ifndef _MV_TASK_ACTIONS_H_
 #define _MV_TASK_ACTIONS_H_
 
-#include "task.hpp"
+#include "task.h"
 
 namespace MV {
 	class BlockForSeconds : public ActionBase {
@@ -11,7 +11,7 @@ namespace MV {
 		
 		BlockForSeconds(double a_seconds = 0.0) : seconds(a_seconds) {}
 
-		virtual bool update(Task& a_self, double) override { return a_self.localElapsed() >= seconds; }
+		virtual bool update(Task& a_self, double) override { return a_self.localElapsed() < seconds; }
 
 	protected:
 		template <class Archive>
@@ -29,7 +29,7 @@ namespace MV {
 
 		BlockForFrames(int a_targetFrames = 1) : targetFrames(a_targetFrames) { }
 
-		bool update(Task&, double) override { return totalFrames++ >= targetFrames; }
+		bool update(Task&, double) override { return totalFrames++ < targetFrames; }
 	protected:
 		template <class Archive>
 		void serialize(Archive & archive, std::uint32_t const /*version*/) {

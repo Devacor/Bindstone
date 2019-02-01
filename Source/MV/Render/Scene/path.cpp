@@ -5,6 +5,9 @@
 
 CEREAL_REGISTER_TYPE(MV::Scene::PathMap);
 CEREAL_REGISTER_TYPE(MV::Scene::PathAgent);
+CEREAL_CLASS_VERSION(MV::Scene::PathAgent, 1);
+CEREAL_CLASS_VERSION(MV::Scene::PathMap, 1);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_scenepath);
 
 namespace MV {
 	namespace Scene {

@@ -6,6 +6,12 @@
 #include "Game/player.h"
 #include "MV/Utility/cerealUtility.h"
 
+CEREAL_REGISTER_TYPE(CreatePlayer);
+CEREAL_REGISTER_TYPE(LoginRequest);
+CEREAL_REGISTER_TYPE(FindMatchRequest);
+CEREAL_REGISTER_TYPE(ExpectedPlayersNoted);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_accountactions);
+
 std::string CreatePlayer::createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt) {
 	static int work = 12;
 	std::stringstream query;

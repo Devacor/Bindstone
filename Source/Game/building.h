@@ -189,25 +189,7 @@ public:
 		return loadoutSlot;
 	}
 
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& /*gameInstance*/) {
-		a_script.add(chaiscript::user_type<Building>(), "Building");
-		a_script.add(chaiscript::base_class<Component, Building>());
-
-		a_script.add(chaiscript::fun(&Building::current), "current");
-		a_script.add(chaiscript::fun(&Building::upgrade), "upgrade");
-
-		a_script.add(chaiscript::fun(&Building::buildingData), "data");
-		a_script.add(chaiscript::fun(&Building::skin), "skin");
-		a_script.add(chaiscript::fun(&Building::slot), "slot");
-		a_script.add(chaiscript::fun(&Building::owningPlayer), "player");
-
-		a_script.add(chaiscript::fun(&Building::assetPath), "assetPath");
-
-		a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Building>, std::shared_ptr<Building>>([](const MV::Scene::SafeComponent<Building> &a_item) { return a_item.self(); }));
-		a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Building>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<Building> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
-
-		return a_script;
-	}
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& /*gameInstance*/);
 
 	MV::Point<> spawnPositionWorld() const {
 		return owner()->worldFromLocal(spawnPoint);

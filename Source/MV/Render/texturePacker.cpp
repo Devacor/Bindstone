@@ -10,6 +10,8 @@
 
 CEREAL_REGISTER_TYPE(MV::PackedTextureDefinition);
 CEREAL_CLASS_VERSION(MV::PackedTextureDefinition, 1);
+CEREAL_CLASS_VERSION(MV::TexturePack::ShapeDefinition, 1);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_scenetexturepacker);
 
 namespace MV{
 

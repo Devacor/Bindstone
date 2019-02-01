@@ -6,6 +6,7 @@
 CEREAL_REGISTER_TYPE(MV::Scene::Emitter);
 CEREAL_CLASS_VERSION(MV::Scene::ParticleChangeValues, 1);
 CEREAL_CLASS_VERSION(MV::Scene::EmitterSpawnProperties, 1);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_sceneemitter);
 
 namespace MV {
 	namespace Scene {

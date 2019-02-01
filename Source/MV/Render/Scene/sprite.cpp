@@ -6,6 +6,7 @@
 
 CEREAL_REGISTER_TYPE(MV::Scene::Sprite);
 CEREAL_CLASS_VERSION(MV::Scene::Sprite, 1);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_scenesprite);
 
 namespace MV {
 	namespace Scene {

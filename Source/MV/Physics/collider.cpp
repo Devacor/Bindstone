@@ -6,10 +6,12 @@
 
 CEREAL_REGISTER_TYPE(MV::Scene::Collider);
 CEREAL_REGISTER_TYPE(MV::Scene::Environment);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_scenecollider);
 
-/*bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs) {
+
+bool operator!=(const b2Vec2 &a_lhs, const b2Vec2 &a_rhs) {
 	return !(a_lhs == a_rhs);
-}*/
+}
 
 namespace MV {
 	Point<> cast(b2Vec2 a_box2DPoint, PointPrecision a_z) {
@@ -77,7 +79,7 @@ namespace MV {
 				if (attribute.shapeType == FixtureParameters::CIRCLE) {
 					colliderClone->attach(attribute.diameter, attribute.position, attribute.attributes);
 				} else if(attribute.shapeType == FixtureParameters::RECTANGLE) {
-					colliderClone->attach(attribute.size, attribute.position, attribute.rotation, attribute.attributes);
+					colliderClone->attach(MV::BoxAABB<>(attribute.position, attribute.size), attribute.rotation, attribute.attributes);
 				} else if (attribute.shapeType == FixtureParameters::POLYGON) {
 					colliderClone->attach(attribute.points, attribute.position, attribute.attributes);
 				}
@@ -170,8 +172,8 @@ namespace MV {
 			}
 		}
 
-		std::shared_ptr<Collider> Collider::attach(const Size<> &a_size, const Point<> &a_position /*= Point<>()*/, PointPrecision a_rotation /*= 0.0f*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
-			attachInternal(a_size, a_position, a_rotation, a_attributes);
+		std::shared_ptr<Collider> Collider::attach(const BoxAABB<> &a_bounds, PointPrecision a_rotation /*= 0.0f*/, CollisionPartAttributes a_attributes /*= CollisionPartAttributes()*/) {
+			attachInternal(a_bounds.size(), a_bounds.topLeftPoint(), a_rotation, a_attributes);
 			return std::static_pointer_cast<Collider>(shared_from_this());
 		}
 
@@ -481,22 +483,23 @@ namespace MV {
 			return *this;
 		}
 
-		void CollisionBodyAttributes::syncronize() {
+		void CollisionBodyAttributes::syncronize() const {
 			if (auto lockedParent = parent.lock()) {
 				b2Body* body = lockedParent->physicsBody;
-				details.position = body->GetPosition();
-				details.angle = body->GetAngle();
-				details.linearVelocity = body->GetLinearVelocity();
-				details.angularVelocity = body->GetAngularVelocity();
-				details.linearDamping = body->GetLinearDamping();
-				details.angularDamping = body->GetAngularDamping();
-				details.allowSleep = body->IsSleepingAllowed();
-				details.awake = body->IsAwake();
-				details.fixedRotation = body->IsFixedRotation();
-				details.bullet = body->IsBullet();
-				details.type = body->GetType();
-				details.active = body->IsActive();
-				details.gravityScale = body->GetGravityScale();
+				auto& mutableDetails = const_cast<b2BodyDef&>(details);
+				mutableDetails.position = body->GetPosition();
+				mutableDetails.angle = body->GetAngle();
+				mutableDetails.linearVelocity = body->GetLinearVelocity();
+				mutableDetails.angularVelocity = body->GetAngularVelocity();
+				mutableDetails.linearDamping = body->GetLinearDamping();
+				mutableDetails.angularDamping = body->GetAngularDamping();
+				mutableDetails.allowSleep = body->IsSleepingAllowed();
+				mutableDetails.awake = body->IsAwake();
+				mutableDetails.fixedRotation = body->IsFixedRotation();
+				mutableDetails.bullet = body->IsBullet();
+				mutableDetails.type = body->GetType();
+				mutableDetails.active = body->IsActive();
+				mutableDetails.gravityScale = body->GetGravityScale();
 			}
 		}
 

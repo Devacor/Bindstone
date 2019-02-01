@@ -164,6 +164,6 @@ namespace MV {
 	}
 }
 
-CEREAL_CLASS_VERSION(MV::Scene::Grid, 2)
+CEREAL_FORCE_DYNAMIC_INIT(mv_scenegrid);
 
 #endif

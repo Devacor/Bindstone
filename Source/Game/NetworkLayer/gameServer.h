@@ -151,16 +151,18 @@ private:
 				value->execute(*this);
 			} catch (std::exception &e) {
 				MV::error("Failed to execute NetworkAction: ", e.what());
-				makeUsAvailableToTheLobby();
+				ourLobbyClient->send(makeNetworkString<GameServerStateChange>(GameServerStateChange::AVAILABLE));
 			}
 		}, [&](const std::string &a_dcreason) {
 			std::cout << "Disconnected: " << a_dcreason << std::endl;
+			ourLobbyClient = nullptr;
 		}, [=] {
 			makeUsAvailableToTheLobby();
 		});
 	}
 
 	void makeUsAvailableToTheLobby() {
+		if (!ourLobbyClient) { return; }
 		ourLobbyClient->send(makeNetworkString<GameServerAvailable>("http://localhost", ourUserServer->port()));
 	}
 
@@ -186,5 +188,7 @@ private:
 	std::optional<AssignedPlayer> left;
 	std::optional<AssignedPlayer> right;
 	std::string queueId;
+
+	MV::Task rootTask;
 };
 #endif

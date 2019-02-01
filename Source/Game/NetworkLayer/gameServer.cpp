@@ -66,8 +66,20 @@ GameServer::GameServer(Managers &a_managers, unsigned short a_port) :
 }
 
 void GameServer::update(double dt) {
+	rootTask.update(dt);
+	if (ourLobbyClient) {
+		ourLobbyClient->update();
+	}else{
+		if (rootTask.get("reconnect", false) == nullptr) {
+			rootTask.now("reconnect").recent()->
+				then(std::make_shared<MV::BlockForSeconds>(.5f)).
+				then("reconnecting", [&](MV::Task&, double) {
+					initializeClientToLobbyServer();
+					return false;
+				});
+		}
+	}
 	ourUserServer->update(dt);
-	ourLobbyClient->update();
 	threadPool.run();
 
 	if (ourInstance) {

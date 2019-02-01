@@ -98,6 +98,9 @@ void LobbyGameConnectionState::matchMade(std::shared_ptr<MatchSeeker> a_leftPlay
 
 	leftPlayer->secret = MV::randomInteger(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
 	rightPlayer->secret = MV::randomInteger(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
+	while (rightPlayer->secret == leftPlayer->secret) {
+		rightPlayer->secret = MV::randomInteger(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max());
+	}
 
 	notifyGameServerOfPlayers();
 }
@@ -153,16 +156,12 @@ void MatchQueue::update(double a_dt) {
 		if (!gameServer) {
 			break;
 		}
-		if (auto firstConnection = match.first->lifespan.lock()) {
-			if (auto secondConnection = match.second->lifespan.lock()) {
-				try {
-					gameServer->matchMade(match.first, match.second);
-				} catch (...) {
-					std::cerr << "Failed to match!" << std::endl;
-				}
-				gameServer = server->availableGameServer(); //find the next available game server.
-			}
+		try {
+			gameServer->matchMade(match.first, match.second);
+		} catch (...) {
+			std::cerr << "Failed to match!" << std::endl;
 		}
+		gameServer = server->availableGameServer(); //find the next available game server.
 	}
 }
 

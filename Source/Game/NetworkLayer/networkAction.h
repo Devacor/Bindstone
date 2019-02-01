@@ -17,7 +17,6 @@ class GameServer;
 class LobbyUserConnectionState;
 class LobbyGameConnectionState;
 class GameUserConnectionState;
-struct Player;
 
 class NetworkAction : public std::enable_shared_from_this<NetworkAction> {
 public:

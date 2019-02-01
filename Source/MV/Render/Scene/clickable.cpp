@@ -6,6 +6,7 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Clickable);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_sceneclickable);
 
 namespace MV {
 	namespace Scene {

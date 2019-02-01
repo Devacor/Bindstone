@@ -114,7 +114,7 @@ namespace MV {
 					childNodes[i]->update(a_delta);
 				}
 				if (rootTask) {
-					if (rootTask->update(a_delta)) {
+					if (!rootTask->update(a_delta)) {
 						rootTask.reset();
 					}
 				}

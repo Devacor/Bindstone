@@ -186,6 +186,6 @@ namespace MV {
 	};
 }
 
-CEREAL_CLASS_VERSION(MV::TexturePack::ShapeDefinition, 1);
+CEREAL_FORCE_DYNAMIC_INIT(mv_scenetexturepacker);
 
 #endif

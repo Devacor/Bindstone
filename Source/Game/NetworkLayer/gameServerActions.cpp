@@ -8,8 +8,20 @@
 #include "MV/Utility/cerealUtility.h"
 #include "Game/game.h"
 
+CEREAL_REGISTER_TYPE(RequestFullGameState);
+CEREAL_REGISTER_TYPE(RequestBuildingUpgrade);
+CEREAL_REGISTER_TYPE(SuppliedInitialGameState);
+CEREAL_REGISTER_TYPE(GetInitialGameState);
+CEREAL_REGISTER_TYPE(AssignPlayersToGame);
+CEREAL_REGISTER_TYPE(GameServerAvailable);
+CEREAL_REGISTER_TYPE(GameServerStateChange);
+CEREAL_REGISTER_DYNAMIC_INIT(mv_gameserveractions);
+
 void GameServerAvailable::execute(LobbyGameConnectionState* a_connection) {
 	a_connection->setEndpoint(ourUrl, ourPort);
+}
+void GameServerStateChange::execute(LobbyGameConnectionState* a_connection) {
+	a_connection->state(ourState == AVAILABLE ? LobbyGameConnectionState::AVAILABLE : LobbyGameConnectionState::OCCUPIED);
 }
 
 void AssignPlayersToGame::execute(GameServer& a_server) {
@@ -21,6 +33,7 @@ void GetInitialGameState::execute(GameUserConnectionState* a_connection, GameSer
 	auto player = a_game.userConnected(secret);
 	a_connection->authenticate(player, secret);
 	if (a_game.allUsersConnected()) {
+		a_game.lobby()->send(makeNetworkString<GameServerStateChange>(GameServerStateChange::OCCUPIED));
 		a_game.server()->sendAll(makeNetworkString<SuppliedInitialGameState>(a_game.leftPlayer(), a_game.rightPlayer()));
 	}
 }
@@ -30,7 +43,7 @@ void RequestBuildingUpgrade::execute(GameUserConnectionState* /*a_gameUser*/, Ga
 	a_game.server()->sendAll(makeNetworkString<RequestBuildingUpgrade>(slot, id));
 }
 
-void RequestFullGameState::execute(GameUserConnectionState* a_gameUser, GameServer &a_game) {
+void RequestFullGameState::execute(GameUserConnectionState* /*a_gameUser*/, GameServer &/*a_game*/) {
 	//a_gameUser->connection()->send(makeNetworkString<RequestBuildingUpgrade>(a_game.data));
 }
 

@@ -91,32 +91,6 @@ public:
 	int id;
 };
 
-struct A {
-	virtual void print() {
-		std::cout << "A\n";
-	}
-};
-
-struct B : public A {
-	virtual void print() {
-		std::cout << "A::B\n";
-	}
-};
-
-struct C {
-	virtual void print() {
-		std::cout << "C\n";
-	}
-};
-struct D : public C {
-	virtual void print() {
-		std::cout << "C::D\n";
-	}
-
-	void printd() {
-		std::cout << "C::D\n";
-	}
-};
 
 void PathfindingTest();
 
@@ -214,18 +188,6 @@ int main(int argc, char *argv[]) {
 // 			codes << codeString << "\n";
 // 		}
 // 	}
-
-	{
-		MV::Services services;
-		std::unique_ptr<A> a = std::make_unique<A>();
-		std::unique_ptr<A> b = std::make_unique<B>();
-		std::unique_ptr<C> c = std::make_unique<C>();
-		std::unique_ptr<D> d = std::make_unique<D>();
-		services.connect(b.get());
-		services.connect<C>(d.get());
-		services.get<A>()->print();
-		services.get<C, D>()->printd();
-	}
 	
 	MV::NetworkObjectPool<NetTypeA, NetTypeB> pool, pool2;
 

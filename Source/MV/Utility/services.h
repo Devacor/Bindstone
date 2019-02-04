@@ -68,9 +68,16 @@ namespace MV {
 				try {
 					if (V* result = dynamic_cast<V*>(boost::any_cast<Service<T>>(i->second).self())) {
 						return result;
+					} else {
+						auto message = std::string("Error [DynamicCast]: Tried to get service [") + i->second.type().name() + "] as [" + typeid(T).name() + "]\n";
+						if (a_throwOnFail) {
+							throw MV::ResourceException(message);
+						} else {
+							MV::warning(message);
+						}
 					}
 				} catch (boost::bad_any_cast&) {
-					auto message = std::string("Error: Tried to get service [") + i->second.type().name() + "] as [" + typeid(T).name() + "]\n";
+					auto message = std::string("Error [AnyCast]: Tried to get service [") + i->second.type().name() + "] as [" + typeid(T).name() + "]\n";
 					if (a_throwOnFail) {
 						throw MV::ResourceException(message);
 					} else {
@@ -85,31 +92,6 @@ namespace MV {
 			return nullptr;
 		}
 
-		template<typename T>
-		T* tryGet() {
-			auto i = types.find(typeid(T));
-			if (i != types.end()) {
-				try {
-					return boost::any_cast<Service<T>>(i->second).self();
-				} catch (boost::bad_any_cast&) {
-				}
-			}
-			return nullptr;
-		}
-
-		template<typename T, typename V>
-		V* tryGet() {
-			auto i = types.find(typeid(T));
-			if (i != types.end()) {
-				try {
-					if (V* result = dynamic_cast<V*>(boost::any_cast<Service<T>>(i->second).self())) {
-						return result;
-					}
-				} catch (boost::bad_any_cast&) {
-				}
-			}
-			return nullptr;
-		}
 	private:
 
 		std::unordered_map<std::type_index, boost::any> types;

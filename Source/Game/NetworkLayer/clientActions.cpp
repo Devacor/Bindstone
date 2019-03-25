@@ -15,10 +15,11 @@ void LoginResponse::execute(Game& a_game) {
 	a_game.authenticate(*this);
 }
 
-std::shared_ptr<Player> LoginResponse::loadedPlayer() {
-	return player.empty() ? 
-		std::shared_ptr<Player>() : 
-		MV::fromJson<std::shared_ptr<Player>>(player);
+std::shared_ptr<LocalPlayer> LoginResponse::loadedPlayer() {
+	if (!playerObject && !player.empty()) {
+		playerObject = MV::fromJson<std::shared_ptr<LocalPlayer>>(player);
+	}
+	return playerObject;
 }
 
 void IllegalResponse::execute(Game& /*a_game*/) {

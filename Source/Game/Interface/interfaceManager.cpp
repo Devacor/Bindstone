@@ -110,7 +110,7 @@ namespace MV {
 		if (scriptInitialize) {
 			scriptExceptionWrapper("InterfaceManager::initialize", [&] {
 				scriptInitialize(*this);
-			});
+			}); 
 		}
 		return *this;
 	}

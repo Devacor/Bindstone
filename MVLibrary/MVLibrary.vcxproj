@@ -14,7 +14,7 @@
     <ProjectGuid>{732BFA09-4C56-4F49-BE0E-1E4A2A129DA4}</ProjectGuid>
     <RootNamespace>MVLibrary</RootNamespace>
     <TargetPlatformVersion>8.1</TargetPlatformVersion>
-    <WindowsTargetPlatformVersion>10.0.16299.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
     <ProjectName>MVLibrary</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -546,18 +546,19 @@
     <ClInclude Include="..\Source\MV\Render\texturePacker.h" />
     <ClInclude Include="..\Source\MV\Render\textures.h" />
     <ClInclude Include="..\Source\MV\Utility\asioThreadPool.h" />
+    <ClInclude Include="..\Source\MV\Utility\cerealInlineExtension.hpp" />
     <ClInclude Include="..\Source\MV\Utility\cerealUtility.h" />
     <ClInclude Include="..\Source\MV\Utility\chaiscriptStdLib.h" />
     <ClInclude Include="..\Source\MV\Utility\chaiscriptUtility.h" />
     <ClInclude Include="..\Source\MV\Utility\exactType.hpp" />
     <ClInclude Include="..\Source\MV\Utility\generalUtility.h" />
+    <ClInclude Include="..\Source\MV\Utility\localization.hpp" />
     <ClInclude Include="..\Source\MV\Utility\log.h" />
-    <ClInclude Include="..\Source\MV\Utility\log.hpp" />
     <ClInclude Include="..\Source\MV\Utility\optionalCalls.hpp" />
     <ClInclude Include="..\Source\MV\Utility\package.h" />
     <ClInclude Include="..\Source\MV\Utility\require.hpp" />
     <ClInclude Include="..\Source\MV\Utility\scopeGuard.hpp" />
-    <ClInclude Include="..\Source\MV\Utility\services.h" />
+    <ClInclude Include="..\Source\MV\Utility\services.hpp" />
     <ClInclude Include="..\Source\MV\Utility\sha512.h" />
     <ClInclude Include="..\Source\MV\Utility\signal.hpp" />
     <ClInclude Include="..\Source\MV\Utility\stopwatch.h" />

@@ -12,7 +12,7 @@
 #include <memory>
 
 class Game;
-struct Player;
+struct LocalPlayer;
 
 class MessageAction : public NetworkAction {
 public:
@@ -72,7 +72,7 @@ public:
 	}
 
 	//useful to do in C++.
-	std::shared_ptr<Player> loadedPlayer();
+	std::shared_ptr<LocalPlayer> loadedPlayer();
 
 	bool hasPlayerState() const { return !player.empty(); }
 
@@ -80,6 +80,7 @@ public:
 	bool success = false;
 
 private:
+	std::shared_ptr<LocalPlayer> playerObject;
 	std::string player;
 };
 

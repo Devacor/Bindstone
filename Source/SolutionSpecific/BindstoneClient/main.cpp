@@ -2,7 +2,7 @@
 
 #include "Game/gameEditor.h"
 #include "MV/Utility/threadPool.hpp"
-#include "MV/Utility/services.h"
+#include "MV/Utility/services.hpp"
 
 #include "MV/ArtificialIntelligence/pathfinding.h"
 #include "MV/Utility/cerealUtility.h"
@@ -63,8 +63,12 @@ CEREAL_REGISTER_TYPE(Derived1);
 
 class NetTypeA {
 public:
-	void synchronize(std::shared_ptr<NetTypeA> a_other) {
-		std::cout << "A: " << name << " syncing with: " << a_other->name << "\n";
+	void synchronize(std::shared_ptr<NetTypeA> a_other, bool a_destroying) {
+		if (a_destroying) {
+			std::cout << "A: DESTROY " << name << "\n";
+		} else {
+			std::cout << "A: " << name << " syncing with: " << a_other->name << "\n";
+		}
 		name = a_other->name;
 	}
 
@@ -78,8 +82,12 @@ public:
 
 class NetTypeB {
 public:
-	void synchronize(std::shared_ptr<NetTypeB> a_other) {
-		std::cout << "B: " << id << " syncing with: " << a_other->id << "\n";
+	void synchronize(std::shared_ptr<NetTypeB> a_other, bool a_destroying) {
+		if (a_destroying) {
+			std::cout << "B: DESTROY " << id << "\n";
+		} else {
+			std::cout << "B: " << id << " syncing with: " << a_other->id << "\n";
+		}
 		id = a_other->id;
 	}
 
@@ -214,11 +222,15 @@ int main(int argc, char *argv[]) {
 	auto newObject = pool.spawn(newItem);
 	auto newObject2 = pool.spawn(newItem2);
 	auto testShared = newObject->shared_from_this();
+	
+
+	pool2.synchronize(MV::fromJson<decltype(pool.updated())>(MV::toJson(pool.updated())));
+
+	newObject->modify()->name = "Unhappy!";
 
 	pool2.synchronize(pool.updated());
 
-	newObject->self()->name = "Unhappy!";
-	newObject->markDirty();
+	newObject->destroy();
 
 	pool2.synchronize(pool.updated());
 

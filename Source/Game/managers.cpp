@@ -22,7 +22,7 @@ void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::TapDevice &a_tapD
 	MV::SharedTextures::hook(a_script);
 
 	Wallet::hook(a_script);
-	Player::hook(a_script);
+	InGamePlayer::hook(a_script);
 	Team::hook(a_script);
 	MV::Task::hook(a_script);
 	GameData::hook(a_script);

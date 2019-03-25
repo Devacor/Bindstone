@@ -12,21 +12,6 @@
 
 #include "MV/Utility/taskActions.hpp"
 
-struct TestObject {
-	TestObject() { std::cout << "\nConstructor\n"; }
-	~TestObject() { std::cout << "\nDestructor\n"; }
-	TestObject(TestObject&);
-	TestObject(TestObject&&) { std::cout << "\nMove\n"; }
-	TestObject& operator=(const TestObject&) { std::cout << "\nAssign\n"; }
-
-	int payload = 0;
-};
-
-TestObject::TestObject(TestObject&) {
-	std::cout << "\nCopy\n";
-	payload++;
-}
-
 #include <fstream>
 
 int main(int, char *[]) {

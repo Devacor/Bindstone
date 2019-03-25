@@ -8,7 +8,7 @@
 #include "MV/Network/package.h"
 #include "MV/Interface/package.h"
 #include "MV/Audio/package.h"
-#include "MV/Utility/services.h"
+#include "MV/Utility/services.hpp"
 
 struct StandardMessages {
 	MV::Signal<void()> lobbyConnected;

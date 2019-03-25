@@ -75,7 +75,7 @@ public:
 		return loggedIn;
 	}
 
-	bool authenticate(const std::string& a_email, const std::string& a_name, const std::string &a_newState, const std::string &a_serverState);
+	bool authenticate(int64_t a_id, const std::string& a_email, const std::string& a_name, const std::string &a_newState, const std::string &a_serverState);
 
 	std::string state() const {
 		return activeState;
@@ -236,7 +236,7 @@ public:
 
 						if (opponent && (currentBest <= current->tolerance())) {
 							if (auto opponentLifespan = opponent->lifespan.lock()) {
-								std::cout << "Matching [" << current->player()->client->email << "] vs [" << opponent->player()->client->email << "]" << std::endl;
+								std::cout << "Matching [" << current->player()->client->handle << "] vs [" << opponent->player()->client->handle << "]" << std::endl;
 								current->matching = true;
 								opponent->matching = true;
 								pairs.emplace_back(current, opponent);

@@ -50,11 +50,11 @@ private:
 struct AssignedPlayer {
 	AssignedPlayer() {}
 	AssignedPlayer(const AssignedPlayer &a_rhs) = default;
-	AssignedPlayer(const std::shared_ptr<Player> &a_player, int64_t a_secret) : player(a_player), secret(a_secret) {}
+	AssignedPlayer(const std::shared_ptr<LocalPlayer> &a_player, int64_t a_secret) : player(std::make_shared<InGamePlayer>(*a_player)), secret(a_secret) {}
 
 	AssignedPlayer& operator=(const AssignedPlayer &a_rhs) = default;
 
-	std::shared_ptr<Player> player;
+	std::shared_ptr<InGamePlayer> player;
 	int64_t secret;
 
 	template <class Archive>
@@ -104,7 +104,7 @@ private:
 class SuppliedInitialGameState : public NetworkAction {
 public:
 	SuppliedInitialGameState() {}
-	SuppliedInitialGameState(const std::shared_ptr<Player> &a_left, const std::shared_ptr<Player> &a_right) : left(a_left), right(a_right) {}
+	SuppliedInitialGameState(const std::shared_ptr<InGamePlayer> &a_left, const std::shared_ptr<InGamePlayer> &a_right) : left(a_left), right(a_right) {}
 
 	virtual void execute(Game& a_connection) override;
 
@@ -114,8 +114,8 @@ public:
 	}
 
 private:
-	std::shared_ptr<Player> left;
-	std::shared_ptr<Player> right;
+	std::shared_ptr<InGamePlayer> left;
+	std::shared_ptr<InGamePlayer> right;
 };
 
 class RequestBuildingUpgrade : public NetworkAction {
@@ -138,7 +138,7 @@ public:
 class RequestFullGameState : public NetworkAction {
 public:
 	RequestFullGameState() {}
-	RequestFullGameState(const std::shared_ptr<Player> &a_left, const std::shared_ptr<Player> &a_right) : left(a_left), right(a_right) {}
+	RequestFullGameState(const std::shared_ptr<InGamePlayer> &a_left, const std::shared_ptr<InGamePlayer> &a_right) : left(a_left), right(a_right) {}
 
 	virtual void execute(GameUserConnectionState*, GameServer &) override;
 	virtual void execute(Game& a_connection) override;
@@ -149,8 +149,8 @@ public:
 	}
 
 private:
-	std::shared_ptr<Player> left;
-	std::shared_ptr<Player> right;
+	std::shared_ptr<InGamePlayer> left;
+	std::shared_ptr<InGamePlayer> right;
 };
 
 CEREAL_FORCE_DYNAMIC_INIT(mv_gameserveractions);

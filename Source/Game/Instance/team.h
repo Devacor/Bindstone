@@ -5,25 +5,27 @@
 #include <memory>
 #include "MV/Render/points.h"
 
-enum TeamSide { LEFT, RIGHT };
+enum TeamSide { NEUTRAL, LEFT, RIGHT };
 
-inline TeamSide operator!(TeamSide a_side) { return (a_side == LEFT) ? RIGHT : LEFT; }
+inline TeamSide operator!(TeamSide a_side) { return (a_side == LEFT) ? RIGHT : (a_side == RIGHT) ? LEFT : NEUTRAL; }
 
-inline std::string sideToString(TeamSide a_side) { return (a_side == LEFT) ? "left" : "right"; }
+inline std::string sideToString(TeamSide a_side) { return (a_side == LEFT) ? "left" : (a_side == RIGHT) ? "right" : "neutral"; }
 
 struct Constants;
 class GameInstance;
 class Building;
 class Creature;
 class Game;
-struct Player;
+struct InGamePlayer;
+struct LocalPlayer;
 
 namespace chaiscript { class ChaiScript; }
 
 class Team {
 	friend GameInstance;
 public:
-	Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_game);
+	Team(std::shared_ptr<InGamePlayer> a_player, TeamSide a_side, GameInstance& a_game);
+	void initialize();
 
 	MV::Point<> ourWell() const { return ourWellPosition; }
 	MV::Point<> enemyWell() const { return enemyWellPosition; }
@@ -39,7 +41,7 @@ public:
 private:
 	GameInstance& game;
 
-	std::shared_ptr<Player> player;
+	std::shared_ptr<InGamePlayer> player;
 	int health;
 	TeamSide ourSide;
 

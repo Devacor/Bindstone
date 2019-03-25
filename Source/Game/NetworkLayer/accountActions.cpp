@@ -15,19 +15,18 @@ CEREAL_REGISTER_DYNAMIC_INIT(mv_accountactions);
 std::string CreatePlayer::createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt) {
 	static int work = 12;
 	std::stringstream query;
-	query << "INSERT INTO players(email, handle, passhash, passsalt, passiterations, softcurrency, hardcurrency, state, serverstate)";
+	query << "INSERT INTO players(email, handle, passhash, passsalt, passiterations, state, serverstate)";
 	query << "VALUES(" << transaction.quote(email) << ", " << transaction.quote(handle) << ", ";
 	query << transaction.quote(MV::sha512(password, a_salt, work)) << ", " << transaction.quote(a_salt) << ", " << work << ", ";
-	query << DEFAULT_SOFT_CURRENCY << ", " << DEFAULT_HARD_CURRENCY << ", ";
-	query << transaction.quote(makeSaveString(handle)) << ", " << transaction.quote(makeServerSaveString()) << ")";
+	query << transaction.quote(makeSaveString()) << ", " << transaction.quote(makeServerSaveString()) << ");";
 	return query.str();
 }
 
 pqxx::result CreatePlayer::selectUser(pqxx::work* a_transaction) {
-	std::string activeQuery = "SELECT verified, passhash, passsalt, passiterations, state, serverstate, email, handle FROM players WHERE ";
+	std::string activeQuery = "SELECT verified, passhash, passsalt, passiterations, state, serverstate, email, handle, id FROM players WHERE ";
 	activeQuery += "email = " + a_transaction->quote(email);
 	activeQuery += " OR ";
-	activeQuery += "handle = " + a_transaction->quote(handle);
+	activeQuery += "handle = " + a_transaction->quote(handle) + ";";
 
 	return a_transaction->exec(activeQuery);
 }
@@ -53,21 +52,21 @@ void CreatePlayer::execute(LobbyUserConnectionState* a_connection) {
 				a_connection->connection()->send(makeNetworkString<LoginResponse>("Failed to supply a valid email/handle and password."));
 			} else {
 				auto database = a_connection->server().database();
-				auto transaction = std::make_unique<pqxx::work>(*database);
+				pqxx::work transaction(*database);
 
-				auto result = selectUser(transaction.get());
+				auto result = selectUser(&transaction);
 
 				if (result.empty()) {
-					result = createPlayer(transaction.get(), a_connection);
+					result = createPlayer(&transaction, a_connection);
 				} else if (!result[0][0].as<bool>()) {
 					a_connection->connection()->send(makeNetworkString<LoginResponse>("Player not email validated yet."));
-					sendValidationEmail(a_connection, result[0][2].c_str());
+					sendValidationEmail(a_connection, result[0][2].as<std::string>());
 					MV::info("Need Validation: [", email, "]");
 				} else {
-					auto hashedPassword = MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>());
-					if (hashedPassword == result[0][1].c_str()) {
-						std::string playerStateJson = result[0][4].c_str();
-						if (a_connection->authenticate(result[0][6].c_str(), result[0][7].c_str(), playerStateJson, result[0][5].c_str())) {
+					auto hashedPassword = MV::sha512(password, result[0][2].as<std::string>(), result[0][3].as<int>());
+					if (hashedPassword == result[0][1].as<std::string>()) {
+						std::string playerStateJson = result[0][4].as<std::string>();
+						if (a_connection->authenticate(result[0][8].as<int64_t>(), result[0][6].as<std::string>(), result[0][7].as<std::string>(), playerStateJson, result[0][5].as<std::string>())) {
 							a_connection->connection()->send(makeNetworkString<LoginResponse>("Successful login.", playerStateJson, true));
 							MV::info("Login Success: [", email, "]");
 						} else {
@@ -80,7 +79,7 @@ void CreatePlayer::execute(LobbyUserConnectionState* a_connection) {
 					}
 				}
 
-				transaction->commit();
+				transaction.commit();
 			}
 		} catch (std::exception& e) {
 			MV::error("Failed to execute CreatePlayer: [", email, "]\nWHAT: [", e.what(), "]");
@@ -92,24 +91,24 @@ void CreatePlayer::sendValidationEmail(LobbyUserConnectionState *a_connection, c
 	a_connection->server().email(MV::Email::Addresses("mike@m2tm.net", email), "Bindstone Account Activation", "This will be a link to activate your account, for now... Check this out: https://www.youtube.com/watch?v=VAZsBEELqPw \n" + a_passSalt);
 }
 
-std::string CreatePlayer::makeSaveString(const std::string &a_handle) {
-	auto newPlayer = std::make_shared<Player>();
-	newPlayer->handle = a_handle;
-	newPlayer->loadout.buildings = { "Life", "Life", "Life", "Life", "Life", "Life", "Life", "Life" };
-	newPlayer->loadout.skins = { "", "", "", "", "", "", "", "" };
+std::string CreatePlayer::makeSaveString() {
+	IntermediateDbPlayer newPlayer;
+	newPlayer.loadouts["Default"].buildings = { "Life", "Life", "Life", "Life", "Life", "Life", "Life", "Life" };
+	newPlayer.loadouts["Default"].skins = { "", "", "", "", "", "", "", "" };
+	newPlayer.selectedLoadout = "";
 
-	newPlayer->wallet.add(Wallet::CurrencyType::SOFT, DEFAULT_SOFT_CURRENCY);
-	newPlayer->wallet.add(Wallet::CurrencyType::HARD, DEFAULT_HARD_CURRENCY);
-	return MV::toJson(newPlayer);
+	newPlayer.wallet.add(Wallet::CurrencyType::SOFT, DEFAULT_SOFT_CURRENCY);
+	newPlayer.wallet.add(Wallet::CurrencyType::HARD, DEFAULT_HARD_CURRENCY);
+	return MV::toJsonInline(newPlayer);
 }
 
 std::string CreatePlayer::makeServerSaveString() {
-	auto newServerPlayer = std::make_shared<ServerPlayer>();
-	return MV::toJson(newServerPlayer);
+	ServerPlayer newPlayer;
+	return MV::toJsonInline(newPlayer);
 }
 
 pqxx::result LoginRequest::selectUser(pqxx::work* a_transaction) {
-	std::string activeQuery = "SELECT verified, passhash, passsalt, passiterations, state, serverstate, email, handle FROM players WHERE ";
+	std::string activeQuery = "SELECT verified, passhash, passsalt, passiterations, state, serverstate, email, handle, id FROM players WHERE ";
 	activeQuery += "email = " + a_transaction->quote(identifier);
 	activeQuery += " OR ";
 	activeQuery += "handle = " + a_transaction->quote(identifier);
@@ -140,11 +139,16 @@ void LoginRequest::execute(LobbyUserConnectionState* a_connection) {
 					a_connection->connection()->send(makeNetworkString<LoginResponse>("Player not email validated yet."));
 					MV::info("Need Validation: [", identifier, "]");
 				} else {
-					auto hashedPassword = MV::sha512(password, result[0][2].c_str(), result[0][3].as<int>());
-					if (hashedPassword == result[0][1].c_str()) {
-						std::string playerStateJson = result[0][4].c_str();
-						if (a_connection->authenticate(result[0][6].c_str(), result[0][7].c_str(), playerStateJson, result[0][5].c_str())) {
-							a_connection->connection()->send(makeNetworkString<LoginResponse>("Successful login.", MV::sha512(playerStateJson) == saveHash ? "" : playerStateJson, true));
+					auto hashedPassword = MV::sha512(password, result[0][2].as<std::string>(), result[0][3].as<int>());
+					if (hashedPassword == result[0][1].as<std::string>()) {
+						std::string playerStateJson = result[0][4].as<std::string>();
+						if (a_connection->authenticate(result[0][8].as<int64_t>(), result[0][6].as<std::string>(), result[0][7].as<std::string>(), playerStateJson, result[0][5].as<std::string>())) {
+							std::string clientJson = MV::toJson(a_connection->player()->client);
+							a_connection->connection()->send(
+								makeNetworkString<LoginResponse>("Successful login.", 
+								(!saveHash.empty() && MV::sha512(clientJson) == saveHash ? std::string() : clientJson),
+								true)
+							);
 							MV::info("Login Success: [", identifier, "]");
 						} else {
 							a_connection->connection()->send(makeNetworkString<LoginResponse>("Load Player Parse Fail: Contact Support"));
@@ -152,7 +156,7 @@ void LoginRequest::execute(LobbyUserConnectionState* a_connection) {
 						}
 					} else {
 						a_connection->connection()->send(makeNetworkString<LoginResponse>("Failed to authenticate."));
-						MV::info("Failed to authenticate: [", identifier, "] credential mismatch for existing user!\n[", hashedPassword, "]\n[", result[0][1].c_str(), "]");
+						MV::info("Failed to authenticate: [", identifier, "] credential mismatch for existing user!\n[", hashedPassword, "]\n[", result[0][1].as<std::string>(), "]");
 					}
 				}
 

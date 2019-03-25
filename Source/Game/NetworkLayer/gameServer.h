@@ -38,12 +38,12 @@ public:
 		return ourServer;
 	}
 
-	void authenticate(const std::shared_ptr<Player> &a_player, int64_t a_secret) {
+	void authenticate(const std::shared_ptr<InGamePlayer> &a_player, int64_t a_secret) {
 		ourPlayer = a_player;
 		ourSecret = a_secret;
 	}
 
-	std::shared_ptr<Player> player() const {
+	std::shared_ptr<InGamePlayer> player() const {
 		return ourPlayer;
 	}
 
@@ -55,7 +55,7 @@ private:
 	std::string queueType;
 	GameServer& ourServer;
 	int64_t ourSecret = 0;
-	std::shared_ptr<Player> ourPlayer;
+	std::shared_ptr<InGamePlayer> ourPlayer;
 };
 
 class GameServer {
@@ -98,13 +98,13 @@ public:
 		return ourInstance.get();
 	}
 
-	std::shared_ptr<Player> userConnected(int64_t a_secret) {
+	std::shared_ptr<InGamePlayer> userConnected(int64_t a_secret) {
 		if (left->secret == a_secret) {
 			return left->player;
 		} else if (right->secret == a_secret) {
 			return right->player;
 		}
-		return std::shared_ptr<Player>();
+		return std::shared_ptr<InGamePlayer>();
 	}
 
 	bool allUsersConnected() {
@@ -131,11 +131,11 @@ public:
 		makeUsAvailableToTheLobby();
 	}
 
-	std::shared_ptr<Player> leftPlayer() const {
+	std::shared_ptr<InGamePlayer> leftPlayer() const {
 		return left->player;
 	}
 
-	std::shared_ptr<Player> rightPlayer() const {
+	std::shared_ptr<InGamePlayer> rightPlayer() const {
 		return right->player;
 	}
 
@@ -154,7 +154,7 @@ private:
 				ourLobbyClient->send(makeNetworkString<GameServerStateChange>(GameServerStateChange::AVAILABLE));
 			}
 		}, [&](const std::string &a_dcreason) {
-			std::cout << "Disconnected: " << a_dcreason << std::endl;
+			MV::info("Disconnected: ", a_dcreason);
 			ourLobbyClient = nullptr;
 		}, [=] {
 			makeUsAvailableToTheLobby();

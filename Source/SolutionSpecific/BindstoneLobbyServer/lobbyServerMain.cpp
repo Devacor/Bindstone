@@ -28,8 +28,55 @@ TestObject::TestObject(TestObject&) {
 #include <fstream>
 
 int main(int, char *[]) {
-	auto localSaveString = CreatePlayer::makeSaveString("Jai");
+	auto localSaveString = CreatePlayer::makeSaveString();
 	auto serverSaveString = CreatePlayer::makeServerSaveString();
+
+	auto testDeserialize = MV::fromJsonInline<LocalPlayer>(R"DONE({
+    "flair": "",
+    "avatar": "",
+    "wallet": {
+        "values": [
+            0,
+            500,
+            150
+        ],
+        "cereal_class_version": 0
+    },
+    "loadouts": [
+        {
+            "key": "Default",
+            "value": {
+                "skins": [
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    ""
+                ],
+                "buildings": [
+                    "Life",
+                    "Life",
+                    "Life",
+                    "Life",
+                    "Life",
+                    "Life",
+                    "Life",
+                    "Life"
+                ],
+                "cereal_class_version": 0
+            }
+        }
+    ],
+    "friendlyRating": [],
+    "selectedLoadout": "",
+    "cereal_class_version": 2,
+	"email": "test@somewhere.com",
+	"id": 4,
+	"handle": "test"
+})DONE");
 
 	{
 		std::ofstream o("ServerSaveString.txt");

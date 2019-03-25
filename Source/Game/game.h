@@ -56,17 +56,17 @@ public:
 			auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 			value->execute(*this);
 		}, [&](const std::string &a_dcreason) {
-			std::cout << "Disconnected: " << a_dcreason << std::endl;
+			MV::info("Disconnected: ", a_dcreason);
 			killGame();
 		}, [=] {
-			std::cout << "Connection Initialized" << std::endl;
+			MV::info("Connection Initialized");
 
 			ourGameClient->send(makeNetworkString<GetInitialGameState>(secret));
 		});
 	}
 
-	GameInstance* enterGame(const std::shared_ptr<Player> &a_left, const std::shared_ptr<Player> &a_right) {
-		ourInstance = std::make_unique<ClientGameInstance>(a_left, a_right, *this);
+	GameInstance* enterGame(const std::shared_ptr<InGamePlayer> &a_left, const std::shared_ptr<InGamePlayer> &a_right) {
+		ourInstance = ClientGameInstance::make(a_left, a_right, *this);
 		gui().page("Main").hide();
 		return ourInstance.get();
 	}
@@ -83,6 +83,9 @@ public:
 		if (a_response.hasPlayerState()) {
 			localPlayer = a_response.loadedPlayer();
 		}
+		if (a_response.success) {
+			managers().renderer.window().setTitle("Bindstone [" + localPlayer->handle + "] ["+std::to_string(localPlayer->id)+"]");
+		}
 		managers().messages.lobbyAuthenticated(a_response.success, a_response.message);
 	}
 
@@ -94,7 +97,7 @@ public:
 		return ourGameClient;
 	}
 
-	std::shared_ptr<Player> player() {
+	std::shared_ptr<LocalPlayer> player() {
 		return localPlayer;
 	}
 
@@ -120,7 +123,7 @@ private:
 
 	chaiscript::ChaiScript scriptEngine;
 
-	std::shared_ptr<Player> localPlayer;
+	std::shared_ptr<LocalPlayer> localPlayer;
 
 	std::shared_ptr<MV::Client> ourLobbyClient;
 	std::shared_ptr<MV::Client> ourGameClient;
@@ -136,6 +139,10 @@ private:
 	std::string loginPassword;
 	std::string defaultLoginId;
 	std::string defaultPassword;
+
+	const double START_BACKOFF_RECONNECT_TIME = .25;
+	const double MAX_BACKOFF_RECONNECT_TIME = 10.0;
+	double backoffLobbyReconnect = .25;
 };
 
 void sdl_quit(void);

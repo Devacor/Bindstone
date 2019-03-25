@@ -28,7 +28,12 @@ public:
 };
 
 inline std::string makeSynchronizeNetworkString(BindstoneNetworkObjectPool &a_networkObjectPool) {
-	makeNetworkString<SynchronizeAction>(a_networkObjectPool.updated());
+	auto updated = a_networkObjectPool.updated();
+	if (!updated.empty()) { 
+		return makeNetworkString<SynchronizeAction>(updated);
+	} else {
+		return "";
+	}
 }
 
 CEREAL_FORCE_DYNAMIC_INIT(mv_synchronizeaction);

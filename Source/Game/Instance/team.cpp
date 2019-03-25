@@ -1,18 +1,20 @@
 #include "team.h"
 #include "gameInstance.h"
 
-Team::Team(std::shared_ptr<Player> a_player, TeamSide a_side, GameInstance& a_game) :
+Team::Team(std::shared_ptr<InGamePlayer> a_player, TeamSide a_side, GameInstance& a_game) :
 	player(a_player),
 	game(a_game),
 	ourSide(a_side),
 	health(a_game.data().constants().startHealth) {
+}
 
-	int startIndex = a_side * 8;
+void Team::initialize() {
+	int startIndex = (static_cast<int>(ourSide) - 1) * 8;
 	auto sideString = sideToString(ourSide);
 	for (int i = startIndex; i < (startIndex + 8); ++i) {
 		auto buildingNode = game.worldScene->get("1v1_" + std::to_string(i));
 
-		a_game.buildings.push_back(buildingNode->attach<Building>(i, i - startIndex, a_player, game).self());
+		game.buildings.push_back(buildingNode->attach<Building>(i, i - startIndex, player, game).self());
 	}
 }
 

@@ -16,7 +16,7 @@
 #include "MV/Utility/signal.hpp"
 #include "MV/Utility/task.h"
 #include "MV/Utility/visitor.hpp"
-#include "MV/Utility/services.h"
+#include "MV/Utility/services.hpp"
 
 #define ComponentDerivedAccessors(ComponentType) \
 MV::Scene::SafeComponent<ComponentType> clone(const std::shared_ptr<MV::Scene::Node> &a_parent) { \

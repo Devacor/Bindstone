@@ -94,6 +94,12 @@ namespace MV {
 		}
 	};
 
+	template<class Tuple>
+	struct TupleStringHelper<Tuple, 0> {
+		static void to_string_combiner(const Tuple& t, std::stringstream &a_stream) {
+		}
+	};
+
 	template<class... Args>
 	std::string to_string(const std::tuple<Args...>& t){
 		std::stringstream stream;

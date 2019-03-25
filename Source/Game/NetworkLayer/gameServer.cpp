@@ -56,6 +56,13 @@ GameServer::GameServer(Managers &a_managers, unsigned short a_port) :
 	MV::FontDefinition::make(gameData.managers().textLibrary, "small", "Assets/Fonts/Verdana.ttf", 9);
 	MV::FontDefinition::make(gameData.managers().textLibrary, "big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 	if (!gameData.managers().renderer.headless()) {
+		gameData.managers().renderer.loadShader("vortex", "Assets/Shaders/default.vert", "Assets/Shaders/vortex.frag");
+		gameData.managers().renderer.loadShader("lillypad", "Assets/Shaders/lillypad.vert", "Assets/Shaders/default.frag");
+		gameData.managers().renderer.loadShader("wave", "Assets/Shaders/wave.vert", "Assets/Shaders/wave.frag");
+		gameData.managers().renderer.loadShader("waterfall", "Assets/Shaders/default.vert", "Assets/Shaders/waterfall.frag");
+		gameData.managers().renderer.loadShader("pool", "Assets/Shaders/default.vert", "Assets/Shaders/pool.frag");
+		gameData.managers().renderer.loadShader("shimmer", "Assets/Shaders/default.vert", "Assets/Shaders/shimmer.frag");
+
 		gameData.managers().textures.assemblePacks("Assets/Atlases", &gameData.managers().renderer);
 		gameData.managers().textures.files("Assets/Map");
 		gameData.managers().textures.files("Assets/Images");
@@ -84,7 +91,9 @@ void GameServer::update(double dt) {
 
 	if (ourInstance) {
 		ourInstance->update(dt);
-		ourInstance->scene()->draw();
+		if (!MV::RUNNING_IN_HEADLESS) {
+			ourInstance->scene()->draw();
+		}
 	}
 
 	gameData.managers().renderer.updateScreen();
@@ -114,5 +123,5 @@ void GameServer::assign(const AssignedPlayer &a_left, const AssignedPlayer &a_ri
 	left = a_left;
 	right = a_right;
 	queueId = a_queueId;
-	ourInstance = std::make_unique<ServerGameInstance>(left->player, right->player, *this);
+	ourInstance = ServerGameInstance::make(left->player, right->player, *this);
 }

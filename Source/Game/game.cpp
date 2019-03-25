@@ -32,9 +32,16 @@ void Game::initializeClientConnection() {
 		auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 		value->execute(*this);
 	}, [&](const std::string &a_dcreason) {
-		std::cout << "Disconnected: " << a_dcreason << std::endl;
+		MV::info("Disconnected: ", a_dcreason);
 		gameData.managers().messages.lobbyDisconnect(a_dcreason);
+		task.also("LobbyReconnect").recent()->
+			then("Wait", std::make_shared<MV::BlockForSeconds>(backoffLobbyReconnect)).
+			then("Reconnect", [&](MV::Task&) {
+				initializeClientConnection();
+			});
+		backoffLobbyReconnect = std::min(2.0 * backoffLobbyReconnect, MAX_BACKOFF_RECONNECT_TIME);
 	}, [=] {
+		backoffLobbyReconnect = START_BACKOFF_RECONNECT_TIME;
 		gameData.managers().messages.lobbyConnected();
 	});
 }
@@ -53,6 +60,8 @@ void Game::initializeWindow(){
 		exit(0);
 	}
 	atexit(sdl_quit);
+
+	managers().renderer.window().setTitle("Bindstone");
 
 	MV::AudioPlayer::instance()->initAudio();
 	ourMouse.update();
@@ -88,9 +97,7 @@ void Game::initializeWindow(){
 
 bool Game::update(double dt) {
 	gameData.managers().pool.run();
-	if (ourLobbyClient->state() == MV::Client::DISCONNECTED) {
-		//ourLobbyClient->reconnect();
-	}
+	task.update(dt);
 	ourLobbyClient->update();
 	if (ourGameClient) {
 		ourGameClient->update();

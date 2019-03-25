@@ -54,24 +54,12 @@ namespace MV {
 		}
 
 		void destroy() {
-			local.reset();
+			destroying = true;
 			dirty = true;
 		}
 
 		bool destroyed() const {
-			return local == nullptr;
-		}
-
-		void markDirty() {
-			dirty = true;
-		}
-
-		bool undirty() {
-			if (dirty) {
-				dirty = false;
-				return true;
-			}
-			return false;
+			return destroying;
 		}
 
 		T* operator*() const {
@@ -82,11 +70,17 @@ namespace MV {
 			return local;
 		}
 
+		const std::shared_ptr<T> & modify() {
+			dirty = true;
+			return local;
+		}
+
 		void synchronize(const std::shared_ptr<NetworkObject<T>> &a_other) {
+			destroying = a_other->destroying;
 			if (!local && a_other->local) {
 				local = a_other->local;
 			} else if(local) {
-				local->synchronize(a_other->local);
+				local->synchronize(a_other->local, a_other->destroying);
 			}
 			dirty = false;
 		}
@@ -95,7 +89,8 @@ namespace MV {
 		void save(Archive & archive, std::uint32_t const ) const {
 			archive(
 				cereal::make_nvp("id", synchronizeId),
-				cereal::make_nvp("local", local)
+				cereal::make_nvp("local", local),
+				cereal::make_nvp("destroy", destroying)
 			);
 		}
 
@@ -103,23 +98,25 @@ namespace MV {
 		void load(Archive & archive, std::uint32_t const) {
 			archive(
 				cereal::make_nvp("id", synchronizeId),
-				cereal::make_nvp("local", local)
+				cereal::make_nvp("local", local),
+				cereal::make_nvp("destroy", destroying)
 			);
 			dirty = false;
-		}
-
-		std::shared_ptr<NetworkObject<T>> localCopy() const {
-			return std::make_shared<NetworkObject<T>>(synchronizeId, nullptr);
-		}
-
-		std::shared_ptr<NetworkObject<T>> remoteCopy() const {
-			return std::make_shared<NetworkObject<T>>(synchronizeId, local);
 		}
 
 		//hookup to observe new spawned objects, called on main thread
 		static std::function<void (std::shared_ptr<NetworkObject<T>>)> spawned;
 	private:
+		bool undirty() {
+			if (dirty) {
+				dirty = false;
+				return true;
+			}
+			return false;
+		}
+
 		bool dirty = true;
+		bool destroying = false;
 		uint64_t synchronizeId = 0;
 		std::shared_ptr<T> local;
 	};
@@ -153,14 +150,14 @@ namespace MV {
 				boost::apply_visitor([&](auto &a_item) {
 					auto found = objects.find(a_item->id());
 					if (found == objects.end()) {
-						objects.insert({ a_item->id(), { a_item } });
+						found = objects.insert({ a_item->id(), { a_item } }).first;
 						callSpawnCallback(a_item);
+						//Handle same frame creation and destruction:
+						if (a_item->destroyed()) {
+							synchronizeItem(a_item, found->second);
+						}
 					} else {
-						boost::apply_visitor([&a_item](auto &a_found){
-							if constexpr(std::is_same<decltype(a_found), decltype(a_item)>::value) {
-								a_found->synchronize(a_item);
-							}
-						}, found->second);
+						synchronizeItem(a_item, found->second);
 					}
 					if (a_item->destroyed()) {
 						removeList.push_back(a_item->id());
@@ -181,9 +178,14 @@ namespace MV {
 
 		std::vector<VariantType> updated() {
 			std::vector<VariantType> results;
-			for (auto&& object : objects) {
-				if (boost::apply_visitor([](const auto &a_object) { return a_object->undirty(); }, object.second)) {
-					results.push_back(object.second);
+			for (auto object = objects.begin(); object != objects.end();) {
+				if (boost::apply_visitor([](const auto &a_object) { return a_object->undirty(); }, object->second)) {
+					results.push_back(object->second);
+				}
+				if (boost::apply_visitor([](const auto &a_object) { return a_object->destroyed(); }, object->second)) {
+					object = objects.erase(object);
+				} else {
+					++object;
 				}
 			}
 			return results;
@@ -196,6 +198,15 @@ namespace MV {
 			if (onSpawnCallable) {
 				onSpawnCallable(a_item);
 			}
+		}
+
+		template <typename T>
+		void synchronizeItem(T& a_item, VariantType& found) {
+			boost::apply_visitor([&a_item](auto &a_found) {
+				if constexpr (std::is_same<decltype(a_found), decltype(a_item)>::value) {
+					a_found->synchronize(a_item);
+				}
+			}, found);
 		}
 
 		std::unordered_map<std::type_index, boost::any> spawnCallbacks;

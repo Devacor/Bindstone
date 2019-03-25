@@ -4,6 +4,8 @@ self.initialize = fun(self){
 	test.show();
 };
 
-messages.lobbyDisconnect.connect("LoginScreen", fun(){
-	game.gui().get("Login").show();
+print("TEST");
+messages.lobbyDisconnect.connect("LoginScreen", fun(message){
+	print("Disconnected From Lobby: " + message);
+	game.gui().page("Login").show();
 });

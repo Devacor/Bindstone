@@ -40,6 +40,9 @@ Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::sha
 	targeting(this),
 	state(a_state),
 	isOnServer(false){
+	state->self()->onNetworkDeath = [&]() {
+		animateDeathAndRemove();
+	};
 }
 
 std::string Creature::assetPath() const {
@@ -175,7 +178,7 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 	return a_script;
 }
 
-std::shared_ptr<Player> Creature::player() {
+std::shared_ptr<InGamePlayer> Creature::player() {
 	return gameInstance.building(state->self()->buildingSlot)->player();
 }
 

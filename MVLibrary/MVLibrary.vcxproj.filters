@@ -1480,9 +1480,6 @@
     <ClInclude Include="..\Source\MV\Utility\log.h">
       <Filter>Bindstone\Source\MV\Utility</Filter>
     </ClInclude>
-    <ClInclude Include="..\Source\MV\Utility\log.hpp">
-      <Filter>Bindstone\Source\MV\Utility</Filter>
-    </ClInclude>
     <ClInclude Include="..\Source\MV\Utility\optionalCalls.hpp">
       <Filter>Bindstone\Source\MV\Utility</Filter>
     </ClInclude>
@@ -1493,9 +1490,6 @@
       <Filter>Bindstone\Source\MV\Utility</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\MV\Utility\scopeGuard.hpp">
-      <Filter>Bindstone\Source\MV\Utility</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Source\MV\Utility\services.h">
       <Filter>Bindstone\Source\MV\Utility</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\MV\Utility\sha512.h">
@@ -1526,6 +1520,15 @@
       <Filter>Bindstone\Source</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\MV\Utility\task.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\localization.hpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\services.hpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\cerealInlineExtension.hpp">
       <Filter>Bindstone\Source\MV\Utility</Filter>
     </ClInclude>
   </ItemGroup>

@@ -15,7 +15,7 @@
 #include "MV/Network/networkObject.h"
 
 class GameInstance;
-struct Player;
+struct InGamePlayer;
 struct CreatureData;
 class Creature;
 
@@ -224,12 +224,15 @@ public:
 	typedef MV::SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
 
 	struct NetworkState {
+		uint64_t netId;
+
+		std::function<void()> onNetworkDeath;
 		std::string creatureTypeId;
 		
 		int buildingSlot;
 
 		int health = 0;
-		bool flaggedForDeath = false;
+		bool dying = false;
 
 		MV::Point<float> gridPosition;
 
@@ -245,12 +248,22 @@ public:
 			buildingSlot(a_buildingSlot){
 		}
 
-		void synchronize(std::shared_ptr<NetworkState> a_other) {
-			if (a_other) {
-				health = a_other->health;
-				flaggedForDeath = a_other->flaggedForDeath;
+		void synchronize(std::shared_ptr<NetworkState> a_other, bool destroying) {
+			health = a_other->health;
+			//gridPosition = a_other->gridPosition;
+			animationName = a_other->animationName;
+			animationTime = a_other->animationTime;
+
+			if(destroying){
+				std::cout << "Killing: " << creatureTypeId << std::endl;
+				dying = true;
+				if (onNetworkDeath) {
+					onNetworkDeath();
+				} else {
+					MV::warning("Failed to call onNetworkDeath for [", creatureTypeId, "]!");
+				}
 			} else {
-				flaggedForDeath = true;
+				std::cout << "Syncing: " << creatureTypeId << std::endl;
 			}
 		}
 
@@ -262,8 +275,7 @@ public:
 				cereal::make_nvp("health", health),
 				cereal::make_nvp("position", gridPosition),
 				cereal::make_nvp("animationName", animationName),
-				cereal::make_nvp("animationTime", animationTime),
-				cereal::make_nvp("flaggedForDeath", flaggedForDeath)
+				cereal::make_nvp("animationTime", animationTime)
 			);
 		}
 	};
@@ -297,10 +309,10 @@ public:
 
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
 
-	std::shared_ptr<Player> player();
+	std::shared_ptr<InGamePlayer> player();
 
 	bool alive() const {
-		return !state->self()->flaggedForDeath && state->self()->health > 0;
+		return !state->self()->dying;
 	}
 
 	void fall() {
@@ -312,14 +324,13 @@ public:
 
 	//return true if alive
 	bool changeHealth(int amount) {
-		if (!state->self()->flaggedForDeath) {
+		if (alive()) {
 			auto health = state->self()->health;
 			auto newHealth = std::max(std::min(health + amount, statTemplate.health), 0);
 			amount = state->self()->health - newHealth;
 
 			if (health != newHealth) {
-				state->self()->health = newHealth;
-				state->markDirty();
+				state->modify()->health = newHealth;
 				auto self = std::static_pointer_cast<Creature>(shared_from_this());
 				onHealthChangeSignal(self, amount);
 			}
@@ -357,22 +368,29 @@ protected:
 private:
 
 	void flagForDeath() {
-		if (isOnServer && !state->self()->flaggedForDeath) {
+		if (isOnServer && !state->destroyed()) {
 			auto self = std::static_pointer_cast<Creature>(shared_from_this());
 			state->self()->health = 0;
-			state->self()->flaggedForDeath = true;
-			state->markDirty();
+			state->self()->dying = true;
+			state->self()->animationName = "die";
+			state->self()->animationTime = 0;
+			state->destroy();
 
-			agent()->stop();
-			onDeathSignal(self);
-			auto spine = owner()->componentInChildren<MV::Scene::Spine>();
-			spine->animate("die", false);
-			spine->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
-				if (a_self->track(a_track).name() == "die") {
-					owner()->removeFromParent();
-				}
-			});
+			animateDeathAndRemove();
 		}
+	}
+
+	void animateDeathAndRemove() {
+		auto self = std::static_pointer_cast<Creature>(shared_from_this());
+		agent()->stop();
+		onDeathSignal(self);
+		auto spine = owner()->componentInChildren<MV::Scene::Spine>();
+		spine->animate(state->self()->animationName, false);
+		spine->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
+			if (a_self->track(a_track).name() == "die") {
+				owner()->removeFromParent();
+			}
+		});
 	}
 
 	virtual void updateImplementation(double a_delta) override;

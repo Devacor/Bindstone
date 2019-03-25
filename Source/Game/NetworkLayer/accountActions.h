@@ -30,7 +30,7 @@ public:
 		a_script.add(chaiscript::constructor<CreatePlayer(const std::string &a_email, const std::string &a_identifier, const std::string &a_password)>(), "CreatePlayer");
 	}
 
-	static std::string makeSaveString(const std::string &a_handle);
+	static std::string makeSaveString();
 	static std::string makeServerSaveString();
 
 private:

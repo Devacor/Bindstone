@@ -18,12 +18,10 @@ void LobbyUserConnectionState::message(const std::string &a_message) {
 	action->execute(this);
 }
 
-bool LobbyUserConnectionState::authenticate(const std::string& a_email, const std::string& a_name, const std::string &a_newState, const std::string &a_serverState) {
+bool LobbyUserConnectionState::authenticate(int64_t a_id, const std::string& a_email, const std::string& a_name, const std::string &a_newState, const std::string &a_serverState) {
 	try {
-		ourPlayer = MV::fromJson<std::shared_ptr<ServerPlayer>>(a_serverState);
-		ourPlayer->client = MV::fromJson<std::shared_ptr<Player>>(a_newState);
-		ourPlayer->client->email = a_email;
-		ourPlayer->client->handle = a_name;
+		ourPlayer = std::make_shared<ServerPlayer>(MV::fromJsonInline<ServerPlayer>(a_serverState));
+		ourPlayer->client = std::make_shared<LocalPlayer>(a_id, a_email, a_name, MV::fromJsonInline<IntermediateDbPlayer>(a_newState));
 		auto lockedConnection = connection();
 		auto connectionList = ourServer.server()->connections();
 		for (auto&& c : connectionList) {
@@ -87,8 +85,8 @@ void LobbyGameConnectionState::notifyGameServerOfPlayers() {
 	activeState = CONNECTING_PLAYERS;
 
 	connection()->send(makeNetworkString<AssignPlayersToGame>(
-		AssignedPlayer(leftPlayer->player()->client, leftPlayer->secret),
-		AssignedPlayer(rightPlayer->player()->client, rightPlayer->secret),
+		AssignedPlayer{ leftPlayer->player()->client, leftPlayer->secret },
+		AssignedPlayer{ rightPlayer->player()->client, rightPlayer->secret },
 		rightPlayer->queue.id()));
 }
 

@@ -16,7 +16,10 @@
 #include "cereal/archives/portable_binary.hpp"
 #include "cereal/archives/json.hpp"
 
-#include "MV/Utility/services.h"
+#include "cereal/details/traits.hpp"
+
+#include "MV/Utility/services.hpp"
+#include "cerealInlineExtension.hpp"
 
 #include <sstream>
 #include <string>
@@ -98,6 +101,14 @@ namespace MV {
 		return messageStream.str();
 	}
 
+	template <typename T>
+	std::string toJsonInline(const T& a_input) {
+		auto result = toJson(a_input);
+		//{"value0": == 10
+		result = result.substr(10, result.size() - 11); //strip the first 10 and last 1 characters.
+		return result;
+	}
+
 	template <typename C, typename T>
 	std::string toJsonCast(const std::shared_ptr<T> &a_input) {
 		return toJson(std::static_pointer_cast<C>(a_input));
@@ -110,6 +121,11 @@ namespace MV {
 		T result;
 		input(result);
 		return result;
+	}
+
+	template <typename T>
+	T fromJsonInline(const std::string &a_input) {
+		return fromJson<T>("{\"value0\":" + a_input + "}");
 	}
 
 	template <typename T>

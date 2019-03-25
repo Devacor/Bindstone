@@ -10,7 +10,7 @@ struct BuildingData;
 struct CreatureData;
 class BuildingCatalog;
 class CreatureCatalog;
-struct Player;
+struct InGamePlayer;
 
 struct Constants {
 	int startHealth = 20;

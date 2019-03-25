@@ -388,6 +388,9 @@ namespace MV {
 
 	void Window::setTitle(const std::string &a_title){
 		title = a_title;
+		if (window) {
+			SDL_SetWindowTitle(window, title.c_str());
+		}
 	}
 
 	MV::Size<int> Window::resize(const Size<int> &a_size){
@@ -564,12 +567,18 @@ namespace MV {
 			SDL_GL_SetAttribute(SDL_GL_RETAINED_BACKING, 1);
 
 			SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+			if (SDL_GL_SetSwapInterval(-1) == -1) { //set adaptave vsync, but if it fails it returns -1
+				SDL_GL_SetSwapInterval(1); //set vsync
+			}
 
 			window = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowSize.width, windowSize.height, SDLflags);
 			if (!window) {
 				std::cerr << "Window creation failed: " << SDL_GetError() << std::endl;
 				atexit(SDL_Quit); // Quit SDL at exit.
 				return false;
+			}
+			if (!title.empty()) {
+				SDL_SetWindowTitle(window, title.c_str());
 			}
 			SDL_GL_GetDrawableSize(window, &windowSize.width, &windowSize.height);
 			

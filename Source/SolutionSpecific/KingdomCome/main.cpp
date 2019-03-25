@@ -1,6 +1,6 @@
 #include "diggerGame.h"
 #include "MV/Utility/threadPool.hpp"
-#include "MV/Utility/services.h"
+#include "MV/Utility/services.hpp"
 
 #include "MV/ArtificialIntelligence/pathfinding.h"
 #include "MV/Utility/cerealUtility.h"

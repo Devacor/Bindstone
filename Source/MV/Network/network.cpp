@@ -95,7 +95,7 @@ namespace MV {
 			if (onConnectionFail) {
 				onConnectionFail(failMessageCached);
 			}
-			disconnect();
+			ourConnectionState = DISCONNECTED;
 		}
 	}
 

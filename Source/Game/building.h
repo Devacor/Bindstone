@@ -13,7 +13,7 @@
 #include "MV/Network/networkObject.h"
 
 class GameInstance;
-struct Player;
+struct InGamePlayer;
 
 struct WaveCreature {
 	std::string id;
@@ -164,7 +164,7 @@ public:
 
 	std::vector<size_t> buildTreeIndices;
 
-	std::shared_ptr<Player> player() const { return owningPlayer; }
+	std::shared_ptr<InGamePlayer> player() const { return owningPlayer; }
 
 	const BuildTree* current() const;
 
@@ -197,7 +197,7 @@ public:
 
 	const WaveCreature& currentCreature();
 protected:
-	Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<Player> &a_player, GameInstance& a_instance);
+	Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<InGamePlayer> &a_player, GameInstance& a_instance);
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
 		return cloneHelper(a_parent->attach<Building>(slot, loadoutSlot, owningPlayer, gameInstance).self());
@@ -226,7 +226,7 @@ private:
 	int slot;
 	int loadoutSlot;
 	MV::Point<> spawnPoint;
-	std::shared_ptr<Player> owningPlayer;
+	std::shared_ptr<InGamePlayer> owningPlayer;
 	GameInstance& gameInstance;
 };
 

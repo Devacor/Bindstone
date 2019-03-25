@@ -15,24 +15,28 @@ void GameInstance::handleScroll(int a_amount) {
 	}
 }
 
-GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse) :
+GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse) :
 	worldScene(a_root->make("Assets/Scenes/map.scene", services())->depth(0)),
 	ourMouse(a_mouse),
 	gameData(a_gameData),
-	left(a_leftPlayer, LEFT, *this),
-	right(a_rightPlayer, RIGHT, *this),
 	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), chaiscript::default_options()) {
+}
 
+void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer, const std::shared_ptr<InGamePlayer> &a_rightPlayer) {
+	left = std::make_unique<Team>(a_leftPlayer, LEFT, *this);
+	right = std::make_unique<Team>(a_rightPlayer, RIGHT, *this);
+	left->initialize();
+	right->initialize();
 	//manually updating this.
 	worldScene->silence().forget()->pause();
 
 	pathMap = worldScene->get("PathMap")->component<MV::Scene::PathMap>();
 
-	right.enemyWellPosition = path()->gridFromLocal(path()->owner()->localFromWorld(scene()->get(sideToString(LEFT) + "Goal")->worldFromLocal(MV::Point<>())));
-	left.enemyWellPosition = path()->gridFromLocal(path()->owner()->localFromWorld(scene()->get(sideToString(RIGHT) + "Goal")->worldFromLocal(MV::Point<>())));
+	right->enemyWellPosition = path()->gridFromLocal(path()->owner()->localFromWorld(scene()->get(sideToString(LEFT) + "Goal")->worldFromLocal(MV::Point<>())));
+	left->enemyWellPosition = path()->gridFromLocal(path()->owner()->localFromWorld(scene()->get(sideToString(RIGHT) + "Goal")->worldFromLocal(MV::Point<>())));
 
-	right.ourWellPosition = left.enemyWellPosition;
-	left.ourWellPosition = right.enemyWellPosition;
+	right->ourWellPosition = left->enemyWellPosition;
+	left->ourWellPosition = right->enemyWellPosition;
 
 	mouseSignal = ourMouse.onLeftMouseDown.connect([&](MV::TapDevice& /*a_mouse*/) {
 		beginMapDrag();
@@ -41,8 +45,8 @@ GameInstance::GameInstance(const std::shared_ptr<Player> &a_leftPlayer, const st
 	hook();
 
 	worldTimestep.then("update", [&](MV::Task& /*a_self*/, double a_dt) {
-		worldScene->update(static_cast<float>(a_dt), true);
-		return false;
+		fixedUpdate(a_dt);
+		return true;
 	}).recent()->interval(1.0 / 60, 15);
 }
 
@@ -82,13 +86,19 @@ void GameInstance::hook() {
 	}), "spawnMissile");
 }
 
-bool GameInstance::update(double a_dt) {
+void GameInstance::fixedUpdate(double a_dt) {
 	for (auto&& missile : missiles) {
 		missile->update(a_dt);
 	}
 	removeExpiredMissiles();
+	worldScene->update(static_cast<float>(a_dt), true);
+	fixedUpdateImplementation(a_dt);
+}
+
+bool GameInstance::update(double a_dt) {
 	worldTimestep.update(a_dt);
 	cameraAction.update(a_dt);
+	updateImplementation(a_dt);
 	return false;
 }
 
@@ -130,12 +140,13 @@ void GameInstance::removeExpiredMissiles() {
 	expiredMissiles.clear();
 }
 
-ClientGameInstance::ClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game) :
-	GameInstance(a_leftPlayer, a_rightPlayer, a_game.root(), a_game.data(), a_game.mouse()),
+ClientGameInstance::ClientGameInstance(Game& a_game) :
+	GameInstance(a_game.root(), a_game.data(), a_game.mouse()),
 	game(a_game) {
 
 	syncronizedObjects.onSpawn<Creature::NetworkState>([this](std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> a_newItem) {
 		auto creatureState = a_newItem->self();
+		creatureState->netId = a_newItem->id();
 		building(creatureState->buildingSlot)->spawnNetworkCreature(a_newItem);
 	});
 
@@ -165,58 +176,24 @@ void ClientGameInstance::performUpgrade(int a_slot, size_t a_upgrade) {
 	//selectedBuilding->update(game.gameClient()->clientServerTimeDelta());
 }
 
-bool ClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<Player> &a_player) const {
+bool ClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &a_player) const {
 	return a_player == game.player();
 }
 
-ServerGameInstance::ServerGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, GameServer& a_game) :
-	GameInstance(a_leftPlayer, a_rightPlayer, a_game.root(), a_game.data(), a_game.mouse()),
+ServerGameInstance::ServerGameInstance(GameServer& a_game) :
+	GameInstance(a_game.root(), a_game.data(), a_game.mouse()),
 	gameServer(a_game){
-}
-
-
-MockClientGameInstance::MockClientGameInstance(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, Game& a_game) :
-	GameInstance(a_leftPlayer, a_rightPlayer, a_game.root(), a_game.data(), a_game.mouse()),
-	game(a_game) {
-
 	syncronizedObjects.onSpawn<Creature::NetworkState>([this](std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> a_newItem) {
-		auto creatureState = a_newItem->self();
-		building(creatureState->buildingSlot)->spawnNetworkCreature(a_newItem);
+		a_newItem->self()->netId = a_newItem->id();
 	});
-	auto playlistGame = std::make_shared<MV::AudioPlayList>();
-	playlistGame->addSoundBack("gameintro");
-	playlistGame->addSoundBack("gameloop");
-	playlistGame->addSoundBack("gameloop");
-	playlistGame->addSoundBack("gameloop");
-	playlistGame->addSoundBack("gameloop");
-	playlistGame->addSoundBack("gameloop");
-
-	playlistGame->loopSounds(true);
-
-	//game.managers().audio.setMusicPlayList(playlistGame);
-
-	//playlistGame->beginPlaying();
 }
 
-void MockClientGameInstance::requestUpgrade(int a_slot, size_t a_upgrade) {
-	performUpgrade(a_slot, a_upgrade);
-	GameInstance::requestUpgrade(a_slot, a_upgrade);
-
-	//game.gameClient()->send(makeNetworkString<RequestBuildingUpgrade>(teamForPlayer(a_owner).side(), a_slot, a_upgrade));
-}
-
-void MockClientGameInstance::performUpgrade(int a_slot, size_t a_upgrade) {
-	auto selectedBuilding = building(a_slot);
-	selectedBuilding->upgrade(a_upgrade);
-	//selectedBuilding->update(game.gameClient()->clientServerTimeDelta());
-}
-
-bool MockClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<Player> &/*a_player*/) const {
-	return true; //
-}
-
-void MockClientGameInstance::spawnCreature(int a_buildingSlot) {
-	auto spawner = building(a_buildingSlot);
-	auto creatureStatTemplate = data().creatures().data(spawner->currentCreature().id);
-	networkPool().spawn(std::make_shared<Creature::NetworkState>(creatureStatTemplate, a_buildingSlot));
+void ServerGameInstance::updateImplementation(double /*a_dt*/) {
+	auto updated = makeSynchronizeNetworkString(networkPool());
+	if (!updated.empty()) {
+		MV::info("----------------------");
+		MV::info(updated);
+		MV::info("----------------------");
+		gameServer.server()->sendAll(updated);
+	}
 }

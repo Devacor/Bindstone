@@ -110,6 +110,10 @@ namespace MV {
 			Task(a_name, Receiver<bool(Task&, double)>::make(a_task), a_blocking, a_blockParentCompletion) {
 		}
 
+		Task(const std::string &a_name, std::function<void(Task&)> a_task, ExactType<bool> a_blocking = true, ExactType<bool> a_blockParentCompletion = true) :
+			Task(a_name, Receiver<bool(Task&, double)>::make([a_task](Task& a_self, double a_dt) {a_task(a_self); return false;}), a_blocking, a_blockParentCompletion) {
+		}
+
 		Task(const std::string &a_name, const Receiver<bool(Task&, double)>::SharedType &a_task, ExactType<bool> a_blocking = true, ExactType<bool> a_blockParentCompletion = true) :
 			taskName(a_name),
 			task(a_task),
@@ -250,6 +254,10 @@ namespace MV {
 			return now(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
 		}
 
+		Task& now(const std::string &a_name, std::function<void(Task&)> a_task, ExactType<bool> a_blockParentCompletion = true) {
+			return now(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+		}
+
 		Task& now(const std::string &a_name, ExactType<bool> a_blockParentCompletion = true){
 			return now(a_name, std::make_shared<BasicAction>(false), a_blockParentCompletion);
 		}
@@ -277,6 +285,10 @@ namespace MV {
 		}
 
 		Task& then(const std::string &a_name, std::function<bool(Task&, double)> a_task, ExactType<bool> a_blockParentCompletion = true) {
+			return then(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+		}
+
+		Task& then(const std::string &a_name, std::function<void(Task&)> a_task, ExactType<bool> a_blockParentCompletion = true) {
 			return then(std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
 		}
 
@@ -345,6 +357,10 @@ namespace MV {
 			return also(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
 		}
 
+		Task& also(const std::string &a_name, std::function<void(Task&)> a_task, ExactType<bool> a_blockParentCompletion = true) {
+			return also(std::make_shared<Task>(a_name, a_task, false, a_blockParentCompletion));
+		}
+
 		Task& also(const std::string &a_name, ExactType<bool> a_infinite = false, ExactType<bool> a_blockParentCompletion = true) {
 			also(a_name, std::make_shared<BasicAction>(a_infinite), a_blockParentCompletion);
 			if (a_infinite) {
@@ -386,6 +402,10 @@ namespace MV {
 			return after(a_reference, std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
 		}
 
+		Task& after(const std::string &a_reference, const std::string &a_name, std::function<void(Task&)> a_task, ExactType<bool> a_blockParentCompletion = true) {
+			return after(a_reference, std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+		}
+
 		Task& after(const std::string &a_reference, const std::string &a_name, ExactType<bool> a_blockParentCompletion = true) {
 			return after(a_reference, a_name, std::make_shared<BasicAction>(false), a_blockParentCompletion);
 		}
@@ -418,6 +438,10 @@ namespace MV {
 		}
 
 		Task& before(const std::string &a_reference, const std::string &a_name, std::function<bool(Task&, double)> a_task, ExactType<bool> a_blockParentCompletion = true) {
+			return before(a_reference, std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
+		}
+
+		Task& before(const std::string &a_reference, const std::string &a_name, std::function<void(Task&)> a_task, ExactType<bool> a_blockParentCompletion = true) {
 			return before(a_reference, std::make_shared<Task>(a_name, a_task, true, a_blockParentCompletion));
 		}
 

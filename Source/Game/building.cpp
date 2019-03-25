@@ -7,7 +7,7 @@
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
-Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<Player> &a_player, GameInstance& a_instance) :
+Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<InGamePlayer> &a_player, GameInstance& a_instance) :
 	Component(a_owner),
 	buildingData(a_instance.data().buildings().data(a_player->loadout.buildings[a_loadoutSlot])),
 	slot(a_slot),
@@ -141,7 +141,7 @@ void Building::initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &
 				auto upgradeButton = button(dialog, gameInstance.data().managers().textLibrary, gameInstance.mouse(), MV::size(256.0f, 20.0f), currentUpgrade->name + ": " + MV::to_string(currentUpgrade->cost));
 				auto* upgradePointer = currentUpgrade.get();
 				upgradeButton->onAccept.connect("tryToBuy", [&, i, upgradePointer](std::shared_ptr<MV::Scene::Clickable> a_self) {
-					if (owningPlayer->wallet.remove(Wallet::CurrencyType::SOFT, upgradePointer->cost)) {
+					if (owningPlayer->gameWallet.remove(Wallet::CurrencyType::GAME, upgradePointer->cost)) {
 						requestUpgrade(i);
 						//upgrade(i);
 					}

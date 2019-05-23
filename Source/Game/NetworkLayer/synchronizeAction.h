@@ -5,7 +5,7 @@
 #include "Game/NetworkLayer/networkAction.h"
 #include "MV/Network/networkObject.h"
 
-typedef MV::NetworkObjectPool<Creature::NetworkState> BindstoneNetworkObjectPool;
+typedef MV::NetworkObjectPool<CreatureNetworkState, BattleEffectNetworkState> BindstoneNetworkObjectPool;
 
 class SynchronizeAction : public NetworkAction {
 public:

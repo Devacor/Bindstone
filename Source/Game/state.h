@@ -6,10 +6,9 @@
 #include "creature.h"
 #include "Game/managers.h"
 
-struct BuildingData;
 struct CreatureData;
-class BuildingCatalog;
-class CreatureCatalog;
+struct BuildingData;
+struct BattleEffectData;
 struct InGamePlayer;
 
 struct Constants {
@@ -58,14 +57,18 @@ private:
 
 class GameData {
 public:
-	GameData(Managers& a_managers);
+	GameData(Managers& a_managers, bool a_isServer);
 
-	BuildingCatalog& buildings() {
+	Catalog<BuildingData>& buildings() {
 		return *(buildingCatalog.get());
 	}
 
-	CreatureCatalog& creatures() {
+	Catalog<CreatureData>& creatures() {
 		return *(creatureCatalog.get());
+	}
+
+	Catalog<BattleEffectData>& battleEffects() {
+		return *(battleEffectCatalog.get());
 	}
 
 	Constants& constants() {
@@ -78,8 +81,9 @@ public:
 
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 private:
-	std::unique_ptr<BuildingCatalog> buildingCatalog;
-	std::unique_ptr<CreatureCatalog> creatureCatalog;
+	std::unique_ptr<Catalog<BuildingData>> buildingCatalog;
+	std::unique_ptr<Catalog<CreatureData>> creatureCatalog;
+	std::unique_ptr<Catalog<BattleEffectData>> battleEffectCatalog;
 	Constants metadataConstants;
 	Managers& allManagers;
 };

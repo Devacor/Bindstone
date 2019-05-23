@@ -15,6 +15,8 @@ void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::TapDevice &a_tapD
 	MV::BoxAABB<MV::PointPrecision>::hook(a_script);
 	MV::BoxAABB<int>::hook(a_script, "i");
 
+	MV::hookDynamicVariable(a_script);
+
 	MV::TexturePack::hook(a_script);
 	MV::TextureDefinition::hook(a_script);
 	MV::FileTextureDefinition::hook(a_script);

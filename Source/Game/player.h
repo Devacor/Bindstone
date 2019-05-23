@@ -5,8 +5,8 @@
 #include <cmath>
 #include <map>
 #include "Game/wallet.h"
-#include "cereal/cereal.hpp"
 #include "Game/building.h"
+#include "Game/battleEffect.h"
 #include "Game/state.h"
 
 namespace MV { class TapDevice; }

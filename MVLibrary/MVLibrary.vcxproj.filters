@@ -683,6 +683,9 @@
     <ClCompile Include="..\Source\MV\Utility\task.cpp">
       <Filter>Bindstone\Source\MV\Utility</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\MV\Network\dynamicVariable.cpp">
+      <Filter>Bindstone\Source\MV\Network</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\external\Box2D\Box2D.h">
@@ -1528,8 +1531,14 @@
     <ClInclude Include="..\Source\MV\Utility\services.hpp">
       <Filter>Bindstone\Source\MV\Utility</Filter>
     </ClInclude>
-    <ClInclude Include="..\Source\MV\Utility\cerealInlineExtension.hpp">
-      <Filter>Bindstone\Source\MV\Utility</Filter>
+    <ClInclude Include="..\Source\MV\Network\dynamicVariable.h">
+      <Filter>Bindstone\Source\MV\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\battleEffect.h">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Game\standardScriptMethods.h">
+      <Filter>Bindstone\Source\Game</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

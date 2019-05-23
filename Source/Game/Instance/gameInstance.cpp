@@ -15,10 +15,11 @@ void GameInstance::handleScroll(int a_amount) {
 	}
 }
 
-GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse) :
+GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse, float a_timeStep) :
 	worldScene(a_root->make("Assets/Scenes/map.scene", services())->depth(0)),
 	ourMouse(a_mouse),
 	gameData(a_gameData),
+	timeStep(a_timeStep),
 	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), chaiscript::default_options()) {
 }
 
@@ -47,7 +48,7 @@ void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer,
 	worldTimestep.then("update", [&](MV::Task& /*a_self*/, double a_dt) {
 		fixedUpdate(a_dt);
 		return true;
-	}).recent()->interval(1.0 / 60, 15);
+	}).recent()->interval(timeStep, 1);
 }
 
 GameInstance::~GameInstance() {
@@ -77,13 +78,15 @@ void GameInstance::hook() {
 	gameData.managers().messages.hook(scriptEngine);
 
 	Building::hook(scriptEngine, *this);
-	Creature::hook(scriptEngine, *this);
+	ServerCreature::hook(scriptEngine, *this);
 	Missile::hook(scriptEngine);
 
 	scriptEngine.add(chaiscript::user_type<GameInstance>(), "GameInstance");
-	scriptEngine.add(chaiscript::fun([](GameInstance& a_self, std::shared_ptr<Creature> a_source, std::shared_ptr<Creature> a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive) { 
+	scriptEngine.add(chaiscript::fun([](GameInstance& a_self, std::shared_ptr<ServerCreature> a_source, int64_t a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive) { 
 		a_self.spawnMissile(a_source, a_target, a_prefab, a_speed, a_onArrive);
 	}), "spawnMissile");
+
+	scriptEngine.add(chaiscript::fun(&GameInstance::creature), "creature");
 }
 
 void GameInstance::fixedUpdate(double a_dt) {
@@ -125,8 +128,10 @@ void GameInstance::moveCamera(MV::Point<> endPosition, MV::Scale endScale) {
 	});
 }
 
-void GameInstance::spawnMissile(std::shared_ptr<Creature> a_source, std::shared_ptr<Creature> a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive) {
-	missiles.push_back(std::make_unique<Missile>(*this, a_source, a_target, a_prefab, a_speed, a_onArrive));
+void GameInstance::spawnMissile(std::shared_ptr<ServerCreature> a_source, int64_t a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive) {
+	if (auto targetCreature = creature(a_target)) {
+		missiles.push_back(std::make_unique<Missile>(*this, a_source, targetCreature, a_prefab, a_speed, a_onArrive));
+	}
 }
 
 void GameInstance::removeMissile(Missile* a_toRemove) {
@@ -141,10 +146,16 @@ void GameInstance::removeExpiredMissiles() {
 }
 
 ClientGameInstance::ClientGameInstance(Game& a_game) :
-	GameInstance(a_game.root(), a_game.data(), a_game.mouse()),
+	GameInstance(a_game.root(), a_game.data(), a_game.mouse(), 1.0f / 60.0f),
 	game(a_game) {
 
-	syncronizedObjects.onSpawn<Creature::NetworkState>([this](std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> a_newItem) {
+	syncronizedObjects.onSpawn<CreatureNetworkState>([this](std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_newItem) {
+		auto creatureState = a_newItem->self();
+		creatureState->netId = a_newItem->id();
+		building(creatureState->buildingSlot)->spawnNetworkCreature(a_newItem);
+	});
+
+	syncronizedObjects.onSpawn<BattleEffectNetworkState>([this](std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_newItem) {
 		auto creatureState = a_newItem->self();
 		creatureState->netId = a_newItem->id();
 		building(creatureState->buildingSlot)->spawnNetworkCreature(a_newItem);
@@ -181,9 +192,9 @@ bool ClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<InGamePlaye
 }
 
 ServerGameInstance::ServerGameInstance(GameServer& a_game) :
-	GameInstance(a_game.root(), a_game.data(), a_game.mouse()),
+	GameInstance(a_game.root(), a_game.data(), a_game.mouse(), 1.0f / 10.0f),
 	gameServer(a_game){
-	syncronizedObjects.onSpawn<Creature::NetworkState>([this](std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> a_newItem) {
+	syncronizedObjects.onSpawn<CreatureNetworkState>([this](std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_newItem) {
 		a_newItem->self()->netId = a_newItem->id();
 	});
 }
@@ -191,9 +202,6 @@ ServerGameInstance::ServerGameInstance(GameServer& a_game) :
 void ServerGameInstance::updateImplementation(double /*a_dt*/) {
 	auto updated = makeSynchronizeNetworkString(networkPool());
 	if (!updated.empty()) {
-		MV::info("----------------------");
-		MV::info(updated);
-		MV::info("----------------------");
 		gameServer.server()->sendAll(updated);
 	}
 }

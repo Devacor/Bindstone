@@ -250,6 +250,7 @@
     <ClCompile Include="..\Source\MV\Audio\sound.cpp" />
     <ClCompile Include="..\Source\MV\Interface\mouse.cpp" />
     <ClCompile Include="..\Source\MV\Network\download.cpp" />
+    <ClCompile Include="..\Source\MV\Network\dynamicVariable.cpp" />
     <ClCompile Include="..\Source\MV\Network\network.cpp" />
     <ClCompile Include="..\Source\MV\Network\url.cpp" />
     <ClCompile Include="..\Source\MV\Physics\collider.cpp" />
@@ -485,6 +486,7 @@
     <ClInclude Include="..\Source\Editor\editorFactories.h" />
     <ClInclude Include="..\Source\Editor\editorSceneGraphPanel.h" />
     <ClInclude Include="..\Source\Editor\texturePicker.h" />
+    <ClInclude Include="..\Source\Game\battleEffect.h" />
     <ClInclude Include="..\Source\Game\building.h" />
     <ClInclude Include="..\Source\Game\creature.h" />
     <ClInclude Include="..\Source\Game\game.h" />
@@ -503,6 +505,7 @@
     <ClInclude Include="..\Source\Game\NetworkLayer\package.h" />
     <ClInclude Include="..\Source\Game\NetworkLayer\synchronizeAction.h" />
     <ClInclude Include="..\Source\Game\player.h" />
+    <ClInclude Include="..\Source\Game\standardScriptMethods.h" />
     <ClInclude Include="..\Source\Game\state.h" />
     <ClInclude Include="..\Source\Game\wallet.h" />
     <ClInclude Include="..\Source\MV\ArtificialIntelligence\pathfinding.h" />
@@ -511,6 +514,7 @@
     <ClInclude Include="..\Source\MV\Interface\mouse.h" />
     <ClInclude Include="..\Source\MV\Interface\package.h" />
     <ClInclude Include="..\Source\MV\Network\download.h" />
+    <ClInclude Include="..\Source\MV\Network\dynamicVariable.h" />
     <ClInclude Include="..\Source\MV\Network\email.h" />
     <ClInclude Include="..\Source\MV\Network\network.h" />
     <ClInclude Include="..\Source\MV\Network\networkObject.h" />
@@ -546,7 +550,6 @@
     <ClInclude Include="..\Source\MV\Render\texturePacker.h" />
     <ClInclude Include="..\Source\MV\Render\textures.h" />
     <ClInclude Include="..\Source\MV\Utility\asioThreadPool.h" />
-    <ClInclude Include="..\Source\MV\Utility\cerealInlineExtension.hpp" />
     <ClInclude Include="..\Source\MV\Utility\cerealUtility.h" />
     <ClInclude Include="..\Source\MV\Utility\chaiscriptStdLib.h" />
     <ClInclude Include="..\Source\MV\Utility\chaiscriptUtility.h" />

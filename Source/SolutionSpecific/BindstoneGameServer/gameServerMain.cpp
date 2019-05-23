@@ -19,10 +19,20 @@ int main(int, char *[]) {
 	managers.timer.start();
 	bool done = false;
 	auto server = std::make_shared<GameServer>(managers);
+	MV::Task statDisplay;
+	statDisplay.also("PrintBandwidth", [&](MV::Task&, double) {
+		if (server->server()) {
+			auto sent = static_cast<double>(server->server()->bytesPerSecondSent()) / 1024.0;
+			auto received = static_cast<double>(server->server()->bytesPerSecondReceived()) / 1024.0;
+			MV::info("Server Sent: [", sent, "]kbs Received: [", received, "]kbs");
+		}
+		return true;
+	}).recent()->localInterval(1.0);
 	while (!done) {
 		managers.pool.run();
 		auto tick = managers.timer.delta("tick");
 		server->update(tick);
+		statDisplay.update(tick);
 		std::this_thread::yield();
 	}
 

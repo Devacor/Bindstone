@@ -25,10 +25,11 @@ void BinaryNodeLoadBinder::operator()(cereal::PortableBinaryInputArchive& a_arch
 	);
 }
 
-GameData::GameData(Managers& a_managers) :
+GameData::GameData(Managers& a_managers, bool a_isServer) :
 	allManagers(a_managers) {
-	buildingCatalog = std::make_unique<BuildingCatalog>("Assets/Configuration/buildings.json");
-	creatureCatalog = std::make_unique<CreatureCatalog>("Assets/Configuration/creatures.json");
+	buildingCatalog = std::make_unique<Catalog<BuildingData>>("Buildings", a_isServer, BUILDING_CATALOG_VERSION);
+	creatureCatalog = std::make_unique<Catalog<CreatureData>>("Creatures", a_isServer, CREATURE_CATALOG_VERSION);
+	battleEffectCatalog = std::make_unique<Catalog<BattleEffectData>>("BattleEffects", a_isServer, BATTLE_EFFECT_CATALOG_VERSION);
 }
 
 chaiscript::ChaiScript& GameData::hook(chaiscript::ChaiScript &a_script) {

@@ -205,6 +205,14 @@ namespace MV {
 			return *this;
 		}
 
+		Task& cancel(const std::string &a_id) {
+			auto found = get(a_id, false);
+			if (found) {
+				found->cancel();
+			}
+			return *this;
+		}
+
 		Task& cancel() {
 			cancelAllChildren();
 			if(!cancelled){
@@ -379,10 +387,6 @@ namespace MV {
 			return also(a_action->name(), a_action, a_blockParentCompletion);
 		}
 
-		bool sequenceContains(const std::string &a_reference) const {
-			return std::find_if(sequentialTasks.begin(), sequentialTasks.end(), [&](const std::shared_ptr<Task> &a_item) {return a_item->name() == a_reference; }) != sequentialTasks.end();
-		}
-
 		Task& after(const std::string &a_reference, const std::shared_ptr<Task> &a_other) {
 			auto found = std::find_if(sequentialTasks.begin(), sequentialTasks.end(), [&](const std::shared_ptr<Task> &a_item) {return a_item->name() == a_reference; });
 			require<ResourceException>(found != sequentialTasks.end(), "Task::after missing [", a_reference, "]");
@@ -457,6 +461,18 @@ namespace MV {
 
 		Task& before(const std::string &a_reference, std::shared_ptr<ActionBase> &a_action, ExactType<bool> a_blockParentCompletion = true) {
 			return before(a_reference, a_action->name(), a_action, a_blockParentCompletion);
+		}
+
+		bool sequenceContains(const std::string &a_reference) const {
+			return std::find_if(sequentialTasks.begin(), sequentialTasks.end(), [&](const std::shared_ptr<Task> &a_item) {return a_item->name() == a_reference; }) != sequentialTasks.end();
+		}
+
+		bool parallelContains(const std::string &a_reference) const {
+			return std::find_if(parallelTasks.begin(), parallelTasks.end(), [&](const std::shared_ptr<Task> &a_item) {return a_item->name() == a_reference; }) != parallelTasks.end();
+		}
+
+		bool contains(const std::string &a_reference) const {
+			return sequenceContains(a_reference) || parallelContains(a_reference);
 		}
 
 		Task* get(const std::string &a_name, bool a_throwOnNotFound = true){
@@ -643,11 +659,19 @@ namespace MV {
 				totalUpdateStep(0.0);
 			}
 
+			bool exceededSteps = false;
 			size_t steps = static_cast<size_t>((totalTime - lastCalledInterval) / deltaInterval);
-			for (size_t i = 0; i < steps && !suspended && !finished() && (maxUpdates == 0 || i < maxUpdates); ++i) {
+			if (steps > maxUpdates) {
+				steps = maxUpdates;
+				exceededSteps = true;
+			}
+			for (size_t i = 0; i < steps && !suspended && !finished(); ++i) {
 				++currentStep;
 				lastCalledInterval += deltaInterval;
 				totalUpdateStep(deltaInterval);
+			}
+			if (exceededSteps) {
+				lastCalledInterval = totalTime;
 			}
 		}
 

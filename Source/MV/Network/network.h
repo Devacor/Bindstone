@@ -14,6 +14,7 @@
 #include <memory>
 #include <set>
 #include <utility>
+#include <atomic>
 #include "MV/Network/url.h"
 #include "MV/Utility/generalUtility.h"
 #include <boost/asio.hpp>
@@ -226,7 +227,7 @@ namespace MV {
 		void send(const std::string &a_content);
 
 		void initiateRead();
-		void update(double a_dt);
+		size_t update(double a_dt);
 
 		ConnectionStateBase* state() const {
 			return ourState.get();
@@ -253,6 +254,33 @@ namespace MV {
 		std::unique_ptr<ConnectionStateBase> ourState = nullptr;
 	};
 
+	class DataSentAggregate {
+	public:
+		inline void add(double a_timeStamp, size_t a_sent) {
+			packets.push_back({ a_timeStamp, a_sent });
+			dirty = true;
+		}
+
+		inline size_t bytesPerSecond() {
+			if (dirty && packets.size() > 1) {
+				auto last = packets.back();
+				while (!packets.empty() && (last.first - packets.front().first) > 1.0) {
+					packets.pop_front();
+				}
+				currentAmount = 0;
+				for(auto&& packet : packets){
+					currentAmount+=packet.second;
+				}
+				dirty = false;
+			}
+			return currentAmount;
+		}
+	private:
+		bool dirty = false;
+		size_t currentAmount = 0;
+		std::deque<std::pair<double, size_t>> packets;
+	};
+
 	class Server {
 		friend Connection;
 	public:
@@ -271,6 +299,14 @@ namespace MV {
 		uint16_t port() {
 			return acceptor.local_endpoint().port();
 		}
+
+		size_t bytesPerSecondSent() {
+			return sent.bytesPerSecond();
+		}
+
+		size_t bytesPerSecondReceived() {
+			return received.bytesPerSecond();
+		}
 	private:
 		void acceptClients();
 
@@ -285,8 +321,11 @@ namespace MV {
 		std::unique_ptr<boost::asio::io_context::work> work;
 
 		std::function<std::unique_ptr<ConnectionStateBase> (const std::shared_ptr<Connection> &)> connectionStateFactory;
-	};
+		double accumulatedTime = 0.0;
 
+		DataSentAggregate sent;
+		DataSentAggregate received;
+	};
 };
 
 #endif

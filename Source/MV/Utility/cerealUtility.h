@@ -19,7 +19,6 @@
 #include "cereal/details/traits.hpp"
 
 #include "MV/Utility/services.hpp"
-#include "cerealInlineExtension.hpp"
 
 #include <sstream>
 #include <string>

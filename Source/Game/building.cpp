@@ -31,11 +31,11 @@ void Building::initialize() {
 	initializeBuildingButton(newNode);
 }
 
-void Building::spawnNetworkCreature(std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> a_synchronizedCreature) {
+void Building::spawnNetworkCreature(std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_synchronizedCreature) {
 	auto creatureNode = gameInstance.creatureContainer()->make(std::to_string(a_synchronizedCreature->id()));
 	creatureNode->worldPosition(owner()->worldFromLocal(spawnPoint));
 
-	creatureNode->attach<Creature>(a_synchronizedCreature, gameInstance);
+	creatureNode->attach<ClientCreature>(a_synchronizedCreature, gameInstance);
 }
 
 std::string Building::skin() const {

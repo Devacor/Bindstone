@@ -317,17 +317,17 @@ namespace MV {
 			return pathNodes;
 		}
 
-		Point<int> start() const {
+		const Point<int>& start() const {
 			return startPosition;
 		}
 
 		//Desired Target
-		Point<int> goal() const {
+		const Point<int>& goal() const {
 			return goalPosition;
 		}
 
 		//End of Path
-		Point<int> end() const {
+		const Point<int>& end() const {
 			return endPosition;
 		}
 
@@ -615,7 +615,6 @@ namespace MV {
 				blockMap();
 				waitingForPlacement = false;
 			} else {
-				footprintDisabled = true;
 				waitingForPlacement = true;
 			}
 		}
@@ -631,7 +630,7 @@ namespace MV {
 		}
 
 		template <class Archive>
-		void serialize(Archive & archive, std::uint32_t const version) {
+		void save(Archive & archive, std::uint32_t const version) const {
 			archive(
 				CEREAL_NVP(ourPosition),
 				CEREAL_NVP(ourGoal),
@@ -642,8 +641,22 @@ namespace MV {
 				CEREAL_NVP(footprintDisabled),
 				CEREAL_NVP(waitingForPlacement)
 			);
+		}
 
+		template <class Archive>
+		void load(Archive & archive, std::uint32_t const version) {
 			blockMap();
+			archive(
+				CEREAL_NVP(ourPosition),
+				CEREAL_NVP(ourGoal),
+				CEREAL_NVP(ourSpeed),
+				CEREAL_NVP(acceptableDistance),
+				CEREAL_NVP(unitSize),
+				CEREAL_NVP(map),
+				CEREAL_NVP(footprintDisabled),
+				CEREAL_NVP(waitingForPlacement)
+			);
+			unblockMap();
 		}
 
 		void markDirty() {
@@ -681,6 +694,14 @@ namespace MV {
 
 		void blockMap(){
 			if (!footprintDisabled) {
+				if (isBlocking) {
+					return;
+				}
+				if (!canPlaceOnMapAtCurrentPosition()) {
+					waitingForPlacement = true;
+					return;
+				}
+				isBlocking = true;
 				++activeUpdate;
 				SCOPE_EXIT{ --activeUpdate; };
 				auto topLeft = cast<int>(position());
@@ -694,6 +715,10 @@ namespace MV {
 
 		void unblockMap(bool a_notify = true) {
 			if (!footprintDisabled) {
+				if (!isBlocking) {
+					return;
+				}
+				isBlocking = false;
 				++activeUpdate;
 				SCOPE_EXIT{ --activeUpdate; };
 				auto topLeft = cast<int>(position());
@@ -749,6 +774,8 @@ namespace MV {
 		bool waitingForPlacement = true;
 
 		int unitSize = 1;
+
+		bool isBlocking = false;
 
 		std::vector<TemporaryCost> costs;
 		std::vector<MapNode::SharedRecieverType> recievers;

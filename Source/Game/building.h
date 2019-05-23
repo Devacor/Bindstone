@@ -118,40 +118,6 @@ struct BuildingData {
 	}
 };
 
-class BuildingCatalog {
-	friend cereal::access;
-public:
-	BuildingCatalog(const std::string &a_filename) {
-		std::ifstream instream(a_filename);
-        MV::require<MV::ResourceException>(instream, "Failed to load BuildingCatalog: ", a_filename);
-		cereal::JSONInputArchive archive(instream);
-
-		archive(cereal::make_nvp("buildings", buildingList));
-	}
-
-	BuildingData data(const std::string &a_id) const {
-		for (auto&& building : buildingList) {
-			if (building.id == a_id) {
-				return building;
-			}
-		}
-		MV::require<MV::ResourceException>(false, "Failed to locate building: ", a_id);
-		return BuildingData();
-	}
-private:
-	BuildingCatalog() {
-	}
-
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			cereal::make_nvp("buildings", buildingList)
-		);
-	}
-
-	std::vector<BuildingData> buildingList;
-};
-
 class Building : public MV::Scene::Component {
 	friend MV::Scene::Node;
 	friend cereal::access;
@@ -173,7 +139,7 @@ public:
 	void upgrade(size_t a_index);
 	void requestUpgrade(size_t a_index);
 
-	void spawnNetworkCreature(std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> a_synchronizedCreature);
+	void spawnNetworkCreature(std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_synchronizedCreature);
 
 	std::string assetPath() const {
 		return "Assets/Buildings/" + buildingData.id + "/" + (skin().empty() ? "Default" : skin()) + "/building.prefab";

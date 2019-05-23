@@ -16,6 +16,7 @@
 #include <cctype>
 #include <algorithm>
 #include <set>
+#include <deque>
 
 #include "MV/Utility/require.hpp"
 #include <boost/uuid/uuid.hpp>
@@ -103,6 +104,21 @@ namespace MV {
 				return a_rhs.expired();
 			}
 		}), a_item);
+	}
+
+	template<typename InputIterator, typename OutputIterator, typename Predicate, typename TransformFunc>
+	OutputIterator transform_if(
+		InputIterator&& begin,
+		InputIterator&& end,
+		OutputIterator&& out,
+		Predicate&& predicate,
+		TransformFunc&& transformer
+	) {
+		for (; begin != end; ++begin, ++out) {
+			if (predicate(*begin))
+				*out = transformer(*begin);
+		}
+		return out;
 	}
 
 	template <class T, size_t I, size_t... J>
@@ -638,6 +654,35 @@ namespace MV {
 	private:
 		std::shared_ptr<CallbackQueue> queue;
 		std::function<void()> boundCallback;
+	};
+
+	class TimeDeltaAggregate {
+	public:
+		inline void add(double a_timeStamp) {
+			frames.push_back(a_timeStamp);
+			if (frames.size() > MAX_TIMESTAMPS) {
+				frames.pop_front();
+			}
+			dirty = true;
+		}
+
+		inline double delta() {
+			if (dirty && frames.size() > 1) {
+				auto first = frames.front();
+				currentDelta = 0;
+				for (auto frameTime : frames) {
+					currentDelta += frameTime - first;
+				}
+				currentDelta /= frames.size() - 1;
+				dirty = false;
+			}
+			return currentDelta;
+		}
+	private:
+		size_t MAX_TIMESTAMPS = 4;
+		bool dirty = false;
+		double currentDelta = 1;
+		std::deque<double> frames;
 	};
 }
 #endif

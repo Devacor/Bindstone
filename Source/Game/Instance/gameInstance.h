@@ -19,7 +19,7 @@ class GameInstance {
 	GameInstance& operator=(const GameInstance &) = delete;
 protected:
 	virtual void initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer, const std::shared_ptr<InGamePlayer> &a_rightPlayer);
-	GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse);
+	GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse, float a_timeStep);
 
 public:
 	~GameInstance();
@@ -93,7 +93,7 @@ public:
 	void moveCamera(MV::Point<> a_startPosition, MV::Scale a_scale);
 	void moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale);
 
-	void spawnMissile(std::shared_ptr<Creature> a_source, std::shared_ptr<Creature> a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive);
+	void spawnMissile(std::shared_ptr<ServerCreature> a_source, uint64_t a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive);
 
 	void removeMissile(Missile* a_toRemove);
 
@@ -110,12 +110,22 @@ public:
 	virtual void spawnCreature(int /*a_buildingSlot*/) {
 	}
 
-	void registerCreature(std::shared_ptr<Creature> &a_registerCreature) {
+	void registerCreature(std::shared_ptr<ServerCreature> &a_registerCreature) {
 		if (a_registerCreature->alive()) {
-			creatures.push_back(a_registerCreature);
+			creatures[a_registerCreature->netId()] = a_registerCreature;
 			a_registerCreature->onDeath.connect("_RemoveFromTeam", [&](std::shared_ptr<Creature> a_creature) {
-				creatures.erase(std::remove(creatures.begin(), creatures.end(), a_creature), creatures.end());
+				creatures.erase(a_creature->netId());
 			});
+		}
+	}
+
+	const std::shared_ptr<ServerCreature> &creature(uint64_t a_id) {
+		static std::shared_ptr<ServerCreature> nullCreature;
+		auto found = creatures.find(a_id);
+		if (found != creatures.end()) {
+			return found->second;
+		} else {
+			return nullCreature;
 		}
 	}
 protected:
@@ -129,7 +139,7 @@ protected:
 	void hook();
 
 	std::vector<std::shared_ptr<Building>> buildings;
-	std::vector<std::shared_ptr<Creature>> creatures;
+	std::map<uint64_t, std::shared_ptr<ServerCreature>> creatures;
 
 	GameData& gameData;
 
@@ -150,6 +160,8 @@ protected:
 
 	MV::Task worldTimestep;
 	MV::Task cameraAction;
+
+	float timeStep = 0.0f;
 
 	BindstoneNetworkObjectPool syncronizedObjects;
 };
@@ -188,7 +200,7 @@ public:
 		auto creatureNode = creatureContainer()->make(MV::guid(spawner->currentCreature().id));
 		creatureNode->worldPosition(spawner->spawnPositionWorld());
 
-		creatureNode->attach<Creature>(spawner->currentCreature().id, spawner->slotIndex(), *this);
+		creatureNode->attach<ServerCreature>(spawner->currentCreature().id, spawner->slotIndex(), *this);
 	}
 
 	virtual bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &/*a_player*/) const override {
@@ -267,8 +279,8 @@ private:
 	std::function<void(Missile&)> onArrive;
 	GameInstance &gameInstance;
 
-	Creature::SharedRecieverType targetDeathWatcher;
-	Creature::SharedRecieverType sourceDeathWatcher;
+	ServerCreature::SharedRecieverType targetDeathWatcher;
+	ServerCreature::SharedRecieverType sourceDeathWatcher;
 };
 
 #endif

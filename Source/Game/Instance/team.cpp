@@ -52,12 +52,15 @@ chaiscript::ChaiScript& Team::hook(chaiscript::ChaiScript &a_script) {
 	return a_script;
 }
 
-std::vector<std::shared_ptr<Creature>> Team::creaturesInRange(const MV::Point<> &a_location, float a_radius) {
-	std::vector<std::shared_ptr<Creature>> result;
-	std::copy_if(game.creatures.begin(), game.creatures.end(), std::back_inserter(result), [&](std::shared_ptr<Creature> &a_creature) {
-		return (game.teamForPlayer(a_creature->player()).side() == ourSide) && a_creature->alive() && MV::distance(a_location, a_creature->agent()->gridPosition()) <= a_radius;
-	});
-	std::sort(result.begin(), result.end(), [&](std::shared_ptr<Creature> &a_lhs, std::shared_ptr<Creature> &a_rhs) {
+std::vector<std::shared_ptr<ServerCreature>> Team::creaturesInRange(const MV::Point<> &a_location, float a_radius) {
+	std::vector<std::shared_ptr<ServerCreature>> result;
+	for (auto&& kv : game.creatures) {
+		auto a_creature = kv.second;
+		if ((game.teamForPlayer(a_creature->player()).side() == ourSide) && a_creature->alive() && MV::distance(a_location, a_creature->agent()->gridPosition()) <= a_radius){
+			result.push_back(a_creature);
+		}
+	}
+	std::sort(result.begin(), result.end(), [&](std::shared_ptr<ServerCreature> &a_lhs, std::shared_ptr<ServerCreature> &a_rhs) {
 		return MV::distance(a_location, a_lhs->agent()->gridPosition()) < MV::distance(a_location, a_rhs->agent()->gridPosition());
 	});
 	return result;

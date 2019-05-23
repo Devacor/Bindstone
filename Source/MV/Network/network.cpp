@@ -166,6 +166,7 @@ namespace MV {
 
 	void Server::sendAll(const std::string &a_message) {
 		std::lock_guard<std::recursive_mutex> guard(lock);
+		sent.add(accumulatedTime, (a_message.size() + 4) * ourConnections.size());
 		for (auto&& connection : ourConnections) {
 			connection->send(a_message);
 		}
@@ -173,6 +174,9 @@ namespace MV {
 
 	void Server::sendExcept(const std::string &a_message, Connection* a_exceptConnection) {
 		std::lock_guard<std::recursive_mutex> guard(lock);
+		if (!ourConnections.empty()) {
+			sent.add(accumulatedTime, (a_message.size() + 4) * (ourConnections.size() - 1));
+		}
 		for (auto&& connection : ourConnections) {
 			if (connection.get() != a_exceptConnection) {
 				connection->send(a_message);
@@ -200,11 +204,12 @@ namespace MV {
 
 	void Server::update(double a_dt) {
 		std::lock_guard<std::recursive_mutex> guard(lock);
+		accumulatedTime += a_dt;
 		auto startSize = ourConnections.size();
 		ourConnections.erase(std::remove_if(ourConnections.begin(), ourConnections.end(), [&](auto c) {
 			if (!c) { return true; }
 			try {
-				c->update(a_dt);
+				received.add(accumulatedTime, c->update(a_dt));
 			} catch (std::exception &e) {
 				error("Exception for connection update: ", e.what());
 			} catch (...) {
@@ -254,25 +259,29 @@ namespace MV {
 		});
 	}
 
-	void Connection::update(double a_dt) {
+	size_t Connection::update(double a_dt) {
+		size_t receivedAmount = 0;
 		if (ourState->disconnected()) {
+			std::lock_guard<std::recursive_mutex> guard(lock);
 			closeSocket(socket);
 			inbox.clear();
-			return;
+			return receivedAmount;
 		}
 		std::lock_guard<std::recursive_mutex> guard(lock);
 		auto self = shared_from_this();
 		for (auto&& message : inbox) {
 			try {
+				receivedAmount += message->headerAndContentSize();
 				ourState->message(message->content);
 			} catch (std::exception &e) {
 				error("Caught an exception in Connection::update: ", e.what());
 				disconnect();
-				return;
+				return receivedAmount;
 			}
 		}
 		inbox.clear();
 		ourState->update(a_dt);
+		return receivedAmount;
 	}
 
 	void Connection::handleError(const boost::system::error_code &a_err, const std::string &a_section) {

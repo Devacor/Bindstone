@@ -95,7 +95,8 @@ namespace MV {
 		a_script.add(chaiscript::fun(&Task::blocking), "blocking");
 		a_script.add(chaiscript::fun(&Task::name), "name");
 		a_script.add(chaiscript::fun(&Task::finished), "finished");
-		a_script.add(chaiscript::fun(&Task::cancel), "cancel");
+		a_script.add(chaiscript::fun([](Task &a_self) {a_self.cancel(); }), "cancel");
+		a_script.add(chaiscript::fun([](Task &a_self, const std::string &a_id) {a_self.cancel(a_id); }), "cancel");
 		a_script.add(chaiscript::fun(&Task::localElapsed), "localElapsed");
 		a_script.add(chaiscript::fun(&Task::elapsed), "elapsed");
 		a_script.add(chaiscript::fun(&Task::unblockChildren), "unblockChildren");

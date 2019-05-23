@@ -7,7 +7,7 @@ void sdl_quit(void){
 }
 
 Game::Game(Managers& a_managers, std::string a_defaultLoginId, std::string a_defaultLoginPassword) :
-	gameData(a_managers),
+	gameData(a_managers, false),
 	defaultLoginId(a_defaultLoginId),
 	defaultPassword(a_defaultLoginPassword),
 	done(false),

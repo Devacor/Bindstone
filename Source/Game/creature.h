@@ -11,46 +11,15 @@
 #include <memory>
 #include "MV/ArtificialIntelligence/pathfinding.h"
 #include "Game/Instance/team.h"
+#include "Game/standardScriptMethods.h"
 
+#include "MV/Network/dynamicVariable.h"
 #include "MV/Network/networkObject.h"
 
 class GameInstance;
 struct InGamePlayer;
 struct CreatureData;
 class Creature;
-
-struct CreatureScriptMethods {
-	friend CreatureData;
-
-	void spawn(std::shared_ptr<Creature> a_creature) const {
-		if (scriptSpawn) { scriptSpawn(a_creature); }
-	}
-
-	void update(std::shared_ptr<Creature> a_creature, double a_dt) const {
-		if (scriptUpdate) { scriptUpdate(a_creature, a_dt); }
-	}
-
-	void death(std::shared_ptr<Creature> a_creature) const {
-		if (scriptDeath) { scriptDeath(a_creature); }
-	}
-
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-		a_script.add(chaiscript::user_type<CreatureScriptMethods>(), "CreatureScriptMethods");
-
-		a_script.add(chaiscript::fun(&CreatureScriptMethods::scriptSpawn), "spawn");
-		a_script.add(chaiscript::fun(&CreatureScriptMethods::scriptUpdate), "update");
-		a_script.add(chaiscript::fun(&CreatureScriptMethods::scriptDeath), "death");
-		return a_script;
-	}
-
-	CreatureScriptMethods& loadScript(chaiscript::ChaiScript &a_script, const std::string &a_id);
-private:
-	std::function<void(std::shared_ptr<Creature>)> scriptSpawn;
-	std::function<void(std::shared_ptr<Creature>, double)> scriptUpdate;
-	std::function<void(std::shared_ptr<Creature>)> scriptDeath;
-
-	std::string scriptContents = "NIL";
-};
 
 struct CreatureData {
 	std::string id;
@@ -68,8 +37,10 @@ struct CreatureData {
 	float strength;
 	float ability;
 
+	bool isServer;
+
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-		CreatureScriptMethods::hook(a_script);
+		StandardScriptMethods<Creature>::hook(a_script, "Creature");
 
 		a_script.add(chaiscript::user_type<CreatureData>(), "CreatureData");
 
@@ -87,6 +58,8 @@ struct CreatureData {
 		a_script.add(chaiscript::fun(&CreatureData::will), "will");
 		a_script.add(chaiscript::fun(&CreatureData::strength), "strength");
 		a_script.add(chaiscript::fun(&CreatureData::ability), "ability");
+
+		a_script.add(chaiscript::fun(&CreatureData::isServer), "isServer");
 
 		//a_script.add([]() {});
 
@@ -110,62 +83,68 @@ struct CreatureData {
 		);
 	}
 
-	CreatureScriptMethods& script(chaiscript::ChaiScript &a_script) const {
-		return scriptMethods.loadScript(a_script, id);
+	StandardScriptMethods<Creature>& script(chaiscript::ChaiScript &a_script) const {
+		return scriptMethods.loadScript(a_script, "Creatures", id, isServer);
 	}
 
 private:
-	mutable CreatureScriptMethods scriptMethods;
+	mutable StandardScriptMethods<Creature> scriptMethods;
 };
 
+#define CREATURE_CATALOG_VERSION 0
+#define BUILDING_CATALOG_VERSION 0
 
-class CreatureCatalog {
+template <typename DataType>
+class Catalog {
 	friend cereal::access;
 public:
-	CreatureCatalog(const std::string &a_filename) {
-		std::ifstream instream(a_filename);
-        MV::require<MV::ResourceException>(instream, "Failed to load CreatureCatalog: ", a_filename);
+	Catalog<DataType>(const std::string &a_catalogType, bool a_isServer, std::uint32_t a_serializeVersion = 0) :
+		isServer(a_isServer) {
+		std::ifstream instream("Assets/Catalogs/" + a_catalogType + ".json");
+        MV::require<MV::ResourceException>(instream, "Failed to load Catalog: ", a_catalogType);
 		cereal::JSONInputArchive archive(instream);
 
-		archive(cereal::make_nvp("creatures", creatureList));
+		serialize(archive, a_serializeVersion);
 	}
 
-	const CreatureData& data(const std::string &a_id) const {
-		for (auto&& creature : creatureList) {
-			if (creature.id == a_id) {
-				return creature;
+	const DataType& data(const std::string &a_id) const {
+		for (auto&& item : dataCollection) {
+			if (item.id == a_id) {
+				return item;
 			}
 		}
 
-		MV::require<MV::ResourceException>(false, "Failed to locate creature: ", a_id);
-		return nullResult; //avoid warnings/errors
+		MV::require<MV::ResourceException>(false, "Failed to locate : ", a_id);
 	}
 private:
-	CreatureCatalog() {
+	Catalog< DataType>() {
 	}
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(
-			cereal::make_nvp("creatures", creatureList)
+			cereal::make_nvp("data", dataCollection)
 		);
+		for (auto&& item : dataCollection) {
+			item.isServer = isServer;
+		}
 	}
-	CreatureData nullResult;
-	std::vector<CreatureData> creatureList;
+	bool isServer;
+	std::vector<DataType> dataCollection;
 };
 
-class Creature;
+class ServerCreature;
 class TargetPolicy {
 public:
-	TargetPolicy(Creature *a_self);
+	TargetPolicy(ServerCreature *a_self);
 
 	~TargetPolicy();
 
-	void target(Creature* a_target, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail = std::function<void(TargetPolicy &)>());
+	void target(uint64_t a_target, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail = std::function<void(TargetPolicy &)>());
 
 	void target(const MV::Point<> &a_location, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail = std::function<void(TargetPolicy &)>());
 
-	std::shared_ptr<Creature> self() const;
+	std::shared_ptr<ServerCreature> self() const;
 
 	bool active() const;
 
@@ -197,8 +176,8 @@ private:
 
 	void registerPathfindingListeners();
 
-	Creature* selfCreature = nullptr;
-	Creature* targetCreature = nullptr;
+	ServerCreature* selfCreature = nullptr;
+	ServerCreature* targetCreature = nullptr;
 
 	float range = 0.0f;
 	bool arrived = false;
@@ -216,87 +195,82 @@ private:
 	std::shared_ptr<MV::Receiver<void(std::shared_ptr<Creature>)>> targetDeathReceiver;
 };
 
+
+struct CreatureNetworkState {
+	uint64_t netId;
+
+	std::function<void()> onNetworkDeath;
+	std::function<void()> onNetworkSynchronize;
+	std::string creatureTypeId;
+
+	std::map<std::string, MV::DynamicVariable> variables;
+
+	int32_t buildingSlot;
+
+	int32_t health = 0;
+	bool dying = false;
+
+	MV::Point<MV::PointPrecision> position;
+
+	std::string animationName;
+	float animationTime = 0.0f;
+
+	CreatureNetworkState() {
+	}
+
+	CreatureNetworkState(const CreatureData& a_template, int32_t a_buildingSlot) :
+		creatureTypeId(a_template.id),
+		health(a_template.health),
+		buildingSlot(a_buildingSlot) {
+	}
+
+	void synchronize(std::shared_ptr<CreatureNetworkState> a_other, bool destroying) {
+		health = a_other->health;
+		position = a_other->position;
+		animationName = a_other->animationName;
+		animationTime = a_other->animationTime;
+
+		if (destroying) {
+			std::cout << "Killing: " << creatureTypeId << std::endl;
+			dying = true;
+			if (onNetworkDeath) {
+				onNetworkDeath();
+			} else {
+				MV::warning("Failed to call onNetworkDeath for [", creatureTypeId, "]!");
+			}
+		} else {
+			if (onNetworkSynchronize) {
+				onNetworkSynchronize();
+			}
+		}
+	}
+
+	template <class Archive>
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
+		archive(
+			cereal::make_nvp("creatureTypeId", creatureTypeId),
+			cereal::make_nvp("slot", buildingSlot),
+			cereal::make_nvp("health", health),
+			cereal::make_nvp("position", position),
+			cereal::make_nvp("animationName", animationName),
+			cereal::make_nvp("animationTime", animationTime),
+			cereal::make_nvp("variables", variables)
+		);
+	}
+};
+
 class Creature : public MV::Scene::Component {
-	friend MV::Scene::Node;
-	friend cereal::access;
 public:
 	typedef void CallbackSignature(std::shared_ptr<Creature>);
 	typedef MV::SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
 
-	struct NetworkState {
-		uint64_t netId;
-
-		std::function<void()> onNetworkDeath;
-		std::string creatureTypeId;
-		
-		int buildingSlot;
-
-		int health = 0;
-		bool dying = false;
-
-		MV::Point<float> gridPosition;
-
-		std::string animationName;
-		float animationTime = 0.0f;
-
-		NetworkState() {
-		}
-
-		NetworkState(const CreatureData& a_template, int a_buildingSlot) :
-			creatureTypeId(a_template.id),
-			health(a_template.health),
-			buildingSlot(a_buildingSlot){
-		}
-
-		void synchronize(std::shared_ptr<NetworkState> a_other, bool destroying) {
-			health = a_other->health;
-			//gridPosition = a_other->gridPosition;
-			animationName = a_other->animationName;
-			animationTime = a_other->animationTime;
-
-			if(destroying){
-				std::cout << "Killing: " << creatureTypeId << std::endl;
-				dying = true;
-				if (onNetworkDeath) {
-					onNetworkDeath();
-				} else {
-					MV::warning("Failed to call onNetworkDeath for [", creatureTypeId, "]!");
-				}
-			} else {
-				std::cout << "Syncing: " << creatureTypeId << std::endl;
-			}
-		}
-
-		template <class Archive>
-		void serialize(Archive & archive, std::uint32_t const /*version*/) {
-			archive(
-				cereal::make_nvp("creatureTypeId", creatureTypeId),
-				cereal::make_nvp("slot", buildingSlot),
-				cereal::make_nvp("health", health),
-				cereal::make_nvp("position", gridPosition),
-				cereal::make_nvp("animationName", animationName),
-				cereal::make_nvp("animationTime", animationTime)
-			);
-		}
-	};
-
-private:
-
-	MV::Signal<CallbackSignature> onArriveSignal;
-	MV::Signal<CallbackSignature> onBlockedSignal;
-	MV::Signal<CallbackSignature> onStopSignal;
-	MV::Signal<CallbackSignature> onStartSignal;
-
+protected:
 	MV::Signal<CallbackSignature> onStatusSignal;
 	MV::Signal<void(std::shared_ptr<Creature>, int)> onHealthChangeSignal;
 	MV::Signal<CallbackSignature> onDeathSignal;
 	MV::Signal<CallbackSignature> onFallSignal;
-public:
-	MV::SignalRegister<CallbackSignature> onArrive;
-	MV::SignalRegister<CallbackSignature> onBlocked;
-	MV::SignalRegister<CallbackSignature> onStop;
-	MV::SignalRegister<CallbackSignature> onStart;
 
+public:
 	MV::SignalRegister<CallbackSignature> onStatus;
 	MV::SignalRegister<void(std::shared_ptr<Creature>, int)> onHealthChange;
 	MV::SignalRegister<CallbackSignature> onDeath;
@@ -304,26 +278,72 @@ public:
 
 	ComponentDerivedAccessors(Creature)
 
-	std::string assetPath() const;
-	~Creature() { std::cout << "Creature died!" << std::endl; }
+	~Creature() { MV::info("Creature Died: [", netId(), "]"); }
 
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
 
 	std::shared_ptr<InGamePlayer> player();
 
+	std::string assetPath() const;
+
 	bool alive() const {
 		return !state->self()->dying;
 	}
 
+	virtual bool changeHealth(int amount) = 0;
+
+	uint64_t netId() const {
+		return state->id();
+	}
+
+	MV::Point<MV::PointPrecision> gridPosition() const {
+		return state->self()->position;
+	}
+
+protected:
+	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, GameInstance& a_gameInstance, const std::string& a_skin, const CreatureData& a_statTemplate, std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_state);
+
+	std::string skin;
+
+	GameInstance& gameInstance;
+
+	const CreatureData& statTemplate;
+
+	std::map<std::string, chaiscript::Boxed_Value> localVariables;
+
+	std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> state;
+};
+
+class ServerCreature : public Creature {
+	friend MV::Scene::Node;
+	friend cereal::access;
+	friend TargetPolicy;
+private:
+
+	MV::Signal<CallbackSignature> onArriveSignal;
+	MV::Signal<CallbackSignature> onBlockedSignal;
+	MV::Signal<CallbackSignature> onStopSignal;
+	MV::Signal<CallbackSignature> onStartSignal;
+
+public:
+	MV::SignalRegister<CallbackSignature> onArrive;
+	MV::SignalRegister<CallbackSignature> onBlocked;
+	MV::SignalRegister<CallbackSignature> onStop;
+	MV::SignalRegister<CallbackSignature> onStart;
+
+	ComponentDerivedAccessors(ServerCreature)
+
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
+
 	void fall() {
-		auto self = std::static_pointer_cast<Creature>(shared_from_this());
+		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 		
 		onFallSignal(self);
 		flagForDeath();
 	}
 
 	//return true if alive
-	bool changeHealth(int amount) {
+	virtual bool changeHealth(int amount) override {
 		if (alive()) {
 			auto health = state->self()->health;
 			auto newHealth = std::max(std::min(health + amount, statTemplate.health), 0);
@@ -331,7 +351,7 @@ public:
 
 			if (health != newHealth) {
 				state->modify()->health = newHealth;
-				auto self = std::static_pointer_cast<Creature>(shared_from_this());
+				auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 				onHealthChangeSignal(self, amount);
 			}
 
@@ -350,26 +370,25 @@ public:
 	}
 
 protected:
-	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, int a_buildingSlot, GameInstance& a_gameInstance);
-	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<Creature::NetworkState>> &a_state, GameInstance& a_gameInstance);
-
+	ServerCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, int a_buildingSlot, GameInstance& a_gameInstance);
+	ServerCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData& a_statTemplate, int a_buildingSlot, GameInstance& a_gameInstance);
 	virtual void initialize() override;
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
-		return cloneHelper(a_parent->attach<Creature>(statTemplate.id, state->self()->buildingSlot, gameInstance).self());
+		return cloneHelper(a_parent->attach<ServerCreature>(statTemplate.id, state->self()->buildingSlot, gameInstance).self());
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
 		Component::cloneHelper(a_clone);
-		auto creatureClone = std::static_pointer_cast<Creature>(a_clone);
+		auto creatureClone = std::static_pointer_cast<ServerCreature>(a_clone);
 		return a_clone;
 	}
 
 private:
 
 	void flagForDeath() {
-		if (isOnServer && !state->destroyed()) {
-			auto self = std::static_pointer_cast<Creature>(shared_from_this());
+		if (!state->destroyed()) {
+			auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 			state->self()->health = 0;
 			state->self()->dying = true;
 			state->self()->animationName = "die";
@@ -381,7 +400,7 @@ private:
 	}
 
 	void animateDeathAndRemove() {
-		auto self = std::static_pointer_cast<Creature>(shared_from_this());
+		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 		agent()->stop();
 		onDeathSignal(self);
 		auto spine = owner()->componentInChildren<MV::Scene::Spine>();
@@ -395,21 +414,76 @@ private:
 
 	virtual void updateImplementation(double a_delta) override;
 
-	const CreatureData& statTemplate;
-	
-	std::string skin;
-
-	bool isOnServer = false;
-
-	GameInstance& gameInstance;
-
 	std::shared_ptr<MV::Scene::PathAgent> pathAgent;
 
-	std::map<std::string, chaiscript::Boxed_Value> variables;
-
 	TargetPolicy targeting;
+};
 
-	std::shared_ptr<MV::NetworkObject<NetworkState>> state;
+class ClientCreature : public Creature {
+	friend MV::Scene::Node;
+	friend cereal::access;
+public:
+	ComponentDerivedAccessors(ClientCreature)
+
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
+
+	//return true if alive
+	virtual bool changeHealth(int amount) override {
+		if (alive()) {
+			auto health = state->self()->health;
+			auto newHealth = std::max(std::min(health + amount, statTemplate.health), 0);
+			amount = state->self()->health - newHealth;
+
+			if (health != newHealth) {
+				state->modify()->health = newHealth;
+				auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
+				onHealthChangeSignal(self, amount);
+			}
+
+			if (newHealth <= 0) {
+				return false;
+			}
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+protected:
+	ClientCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> &a_state, GameInstance& a_gameInstance);
+
+	virtual void initialize() override;
+
+	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
+		return cloneHelper(a_parent->attach<ClientCreature>(state, gameInstance).self());
+	}
+
+	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
+		Component::cloneHelper(a_clone);
+		auto creatureClone = std::static_pointer_cast<ClientCreature>(a_clone);
+		return a_clone;
+	}
+
+private:
+	void animateDeathAndRemove() {
+		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
+		onDeathSignal(self);
+		auto spine = owner()->componentInChildren<MV::Scene::Spine>();
+		spine->animate(state->self()->animationName, false);
+		spine->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
+			if (a_self->track(a_track).name() == "die") {
+				owner()->removeFromParent();
+			}
+		});
+	}
+
+	void onNetworkSynchronize();
+
+	virtual void updateImplementation(double a_delta) override;
+
+	MV::Point<> startClientPosition;
+	double accumulatedDuration = 0.0f;
+	MV::TimeDeltaAggregate networkDelta;
 };
 
 #endif

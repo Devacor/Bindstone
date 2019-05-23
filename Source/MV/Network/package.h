@@ -8,5 +8,6 @@
 #include "MV/Network/network.h"
 #include "MV/Network/download.h"
 #include "MV/Network/networkObject.h"
+#include "MV/Network/dynamicVariable.h"
 
 #endif

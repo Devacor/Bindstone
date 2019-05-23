@@ -14,7 +14,7 @@ inline std::string sideToString(TeamSide a_side) { return (a_side == LEFT) ? "le
 struct Constants;
 class GameInstance;
 class Building;
-class Creature;
+class ServerCreature;
 class Game;
 struct InGamePlayer;
 struct LocalPlayer;
@@ -34,7 +34,7 @@ public:
 
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 
-	std::vector<std::shared_ptr<Creature>> creaturesInRange(const MV::Point<> &a_location, float a_radius);
+	std::vector<std::shared_ptr<ServerCreature>> creaturesInRange(const MV::Point<> &a_location, float a_radius);
 
 	TeamSide side() const { return ourSide; }
 

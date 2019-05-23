@@ -16,6 +16,17 @@
 
 namespace MV {
 
+	namespace NetworkDetail {
+		template<class T>
+		constexpr auto supportsPostSend(T* x) -> decltype(x->postSend(), std::true_type{}) {
+			return {};
+		}
+		template<class T>
+		constexpr auto supportsPostSend(...) -> std::false_type {
+			return {};
+		}
+	}
+
 	template <typename ...T>
 	class NetworkObjectPool;
 
@@ -92,6 +103,12 @@ namespace MV {
 				cereal::make_nvp("local", local),
 				cereal::make_nvp("destroy", destroying)
 			);
+
+			if constexpr (NetworkDetail::supportsPostSend<T>(nullptr)) {
+				if (local) {
+					const_cast<T*>(local.get())->postSend();
+				}
+			}
 		}
 
 		template <class Archive>

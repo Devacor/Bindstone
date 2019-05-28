@@ -224,24 +224,24 @@ struct CreatureNetworkState {
 		buildingSlot(a_buildingSlot) {
 	}
 
-	void synchronize(std::shared_ptr<CreatureNetworkState> a_other, bool destroying) {
+	void synchronize(std::shared_ptr<CreatureNetworkState> a_other) {
 		health = a_other->health;
 		position = a_other->position;
 		animationName = a_other->animationName;
 		animationTime = a_other->animationTime;
 
-		if (destroying) {
-			std::cout << "Killing: " << creatureTypeId << std::endl;
-			dying = true;
-			if (onNetworkDeath) {
-				onNetworkDeath();
-			} else {
-				MV::warning("Failed to call onNetworkDeath for [", creatureTypeId, "]!");
-			}
+		if (onNetworkSynchronize) {
+			onNetworkSynchronize();
+		}
+	}
+
+	void destroy(std::shared_ptr<CreatureNetworkState> a_other) {
+		std::cout << "Killing: " << creatureTypeId << std::endl;
+		dying = true;
+		if (onNetworkDeath) {
+			onNetworkDeath();
 		} else {
-			if (onNetworkSynchronize) {
-				onNetworkSynchronize();
-			}
+			MV::warning("Failed to call onNetworkDeath for [", creatureTypeId, "]!");
 		}
 	}
 

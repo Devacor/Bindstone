@@ -156,10 +156,13 @@ void ServerCreature::initialize() {
 
 void ServerCreature::updateImplementation(double a_delta) {
 	if (alive()) {
-		state->modify()->position = owner()->position();
 		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 		statTemplate.script(gameInstance.script()).update(self, a_delta);
 		targeting.update(a_delta);
+
+		if (state->self()->position != owner()->position()) {
+			state->modify()->position = owner()->position();
+		}
 	}
 }
 
@@ -403,10 +406,8 @@ void ClientCreature::initialize() {
 	auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 	statTemplate.script(gameInstance.script()).spawn(self);
 
-	startClientPosition = owner()->position();
-	networkDelta.add(MV::Stopwatch::systemTime());
-
 	gameInstance.registerCreature(self);
+	onNetworkSynchronize();
 }
 
 chaiscript::ChaiScript& ClientCreature::hook(chaiscript::ChaiScript &a_script, GameInstance& a_gameInstance) {
@@ -429,12 +430,14 @@ void ClientCreature::onNetworkSynchronize() {
 
 void ClientCreature::updateImplementation(double a_delta) {
 	if (alive()) {
-		auto self = std::static_pointer_cast<ClientCreature>(shared_from_this());
-		statTemplate.script(gameInstance.script()).update(self, a_delta);
 		accumulatedDuration = std::min(networkDelta.delta(), accumulatedDuration + a_delta);
 		double percentNetTimestep = accumulatedDuration / networkDelta.delta();
 		MV::info("NetStep: ", percentNetTimestep, "% ==> [", accumulatedDuration, " / ", networkDelta.delta(), "]");
 		owner()->position(mix(startClientPosition, state->self()->position, static_cast<MV::PointPrecision>(percentNetTimestep)));
+
+		auto self = std::static_pointer_cast<ClientCreature>(shared_from_this());
+		statTemplate.script(gameInstance.script()).update(self, a_delta);
+
 		owner()->depth(owner()->position().y);
 	}
 }

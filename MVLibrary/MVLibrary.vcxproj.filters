@@ -686,6 +686,9 @@
     <ClCompile Include="..\Source\MV\Network\dynamicVariable.cpp">
       <Filter>Bindstone\Source\MV\Network</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Game\battleEffect.cpp">
+      <Filter>Bindstone\Source\Game</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\external\Box2D\Box2D.h">

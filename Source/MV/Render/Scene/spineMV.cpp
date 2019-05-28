@@ -195,6 +195,8 @@ namespace MV{
 			a_script.add(chaiscript::fun(&Spine::unbindNode), "unbindNode");
 			a_script.add(chaiscript::fun(&Spine::unbindAll), "unbindAll");
 
+			a_script.add(chaiscript::fun(&Spine::slotPosition), "slotPosition");
+
 			SignalRegister<void(Spine*, int)>::hook(a_script);
 			SignalRegister<void(std::shared_ptr<Spine>, int)>::hook(a_script);
 			SignalRegister<void(std::shared_ptr<Spine>, int, int)>::hook(a_script);
@@ -338,6 +340,19 @@ namespace MV{
 			} else {
 				return {};
 			}
+		}
+
+		MV::Point<> Spine::slotPosition(const std::string &a_slotId) const {
+			if (!owner()->renderer().headless() && loaded()) {
+				for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
+					spSlot* slot = skeleton->drawOrder[i];
+					if (slot->data->name == a_slotId) {
+						return { slot->bone->worldX, slot->bone->worldY, 0.0 };
+					}
+				}
+			}
+
+			return {};
 		}
 
 		AnimationTrack& Spine::track(int a_index) {

@@ -228,6 +228,7 @@
     <ClCompile Include="..\Source\Editor\editorControls.cpp" />
     <ClCompile Include="..\Source\Editor\editorFactories.cpp" />
     <ClCompile Include="..\Source\Editor\editorSceneGraphPanel.cpp" />
+    <ClCompile Include="..\Source\Game\battleEffect.cpp" />
     <ClCompile Include="..\Source\Game\building.cpp" />
     <ClCompile Include="..\Source\Game\creature.cpp" />
     <ClCompile Include="..\Source\Game\game.cpp" />

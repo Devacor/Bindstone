@@ -63,13 +63,13 @@ CEREAL_REGISTER_TYPE(Derived1);
 
 class NetTypeA {
 public:
-	void synchronize(std::shared_ptr<NetTypeA> a_other, bool a_destroying) {
-		if (a_destroying) {
-			std::cout << "A: DESTROY " << name << "\n";
-		} else {
-			std::cout << "A: " << name << " syncing with: " << a_other->name << "\n";
-		}
+	void synchronize(std::shared_ptr<NetTypeA> a_other) {
+		std::cout << "A: " << name << " syncing with: " << a_other->name << "\n";
 		name = a_other->name;
+	}
+
+	void destroy(std::shared_ptr<NetTypeA> a_other){
+		std::cout << "A: DESTROY " << name << "\n";
 	}
 
 	template <class Archive>
@@ -82,12 +82,13 @@ public:
 
 class NetTypeB {
 public:
-	void synchronize(std::shared_ptr<NetTypeB> a_other, bool a_destroying) {
-		if (a_destroying) {
-			std::cout << "B: DESTROY " << id << "\n";
-		} else {
-			std::cout << "B: " << id << " syncing with: " << a_other->id << "\n";
-		}
+	void synchronize(std::shared_ptr<NetTypeB> a_other) {
+		std::cout << "B: " << id << " syncing with: " << a_other->id << "\n";
+		id = a_other->id;
+	}
+
+	void destroy(std::shared_ptr<NetTypeB> a_other) {
+		std::cout << "B: DESTROY " << id << "\n";
 		id = a_other->id;
 	}
 

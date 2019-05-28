@@ -62,12 +62,8 @@ public:
 		return ourMouse;
 	}
 
-	std::shared_ptr<MV::Scene::Node> creatureContainer() const {
-		return pathMap->owner()->makeOrGet("Creatures");
-	}
-
-	std::shared_ptr<MV::Scene::Node> missileContainer() const {
-		return pathMap->owner()->makeOrGet("Missiles");
+	std::shared_ptr<MV::Scene::Node> gameObjectContainer() const {
+		return pathMap->owner()->makeOrGet("Objects");
 	}
 
 	std::shared_ptr<MV::Scene::Node> scene() const {
@@ -104,7 +100,7 @@ public:
 	}
 
 	BindstoneNetworkObjectPool& networkPool() {
-		return syncronizedObjects;
+		return synchronizedObjects;
 	}
 
 	virtual void spawnCreature(int /*a_buildingSlot*/) {
@@ -136,7 +132,7 @@ protected:
 	void removeExpiredMissiles();
 	void handleScroll(int a_amount);
 
-	void hook();
+	virtual void hook();
 
 	std::vector<std::shared_ptr<Building>> buildings;
 	std::map<uint64_t, std::shared_ptr<ServerCreature>> creatures;
@@ -163,7 +159,7 @@ protected:
 
 	float timeStep = 0.0f;
 
-	BindstoneNetworkObjectPool syncronizedObjects;
+	BindstoneNetworkObjectPool synchronizedObjects;
 };
 
 class ClientGameInstance : public GameInstance {
@@ -181,6 +177,9 @@ public:
 
 	virtual bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &a_player) const override;
 
+protected:
+	void hook() override;
+
 private:
 	Game &game;
 };
@@ -197,7 +196,7 @@ public:
 
 	virtual void spawnCreature(int a_buildingSlot) override {
 		auto spawner = building(a_buildingSlot);
-		auto creatureNode = creatureContainer()->make(MV::guid(spawner->currentCreature().id));
+		auto creatureNode = gameObjectContainer()->make(MV::guid(spawner->currentCreature().id));
 		creatureNode->worldPosition(spawner->spawnPositionWorld());
 
 		creatureNode->attach<ServerCreature>(spawner->currentCreature().id, spawner->slotIndex(), *this);
@@ -206,8 +205,10 @@ public:
 	virtual bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &/*a_player*/) const override {
 		return true;
 	}
+
 protected:
 	virtual void updateImplementation(double dt) override;
+	void hook() override;
 
 private:
 	GameServer &gameServer;
@@ -233,7 +234,7 @@ public:
 			targetDeathWatcher.reset();
 		});
 
-		missile = gameInstance.missileContainer()->make("Assets/Prefabs/Missiles/" + a_prefab + ".prefab", gameInstance.services(), gameInstance.missileContainer()->getUniqueId("missile"));
+		missile = gameInstance.gameObjectContainer()->make("Assets/Prefabs/Missiles/" + a_prefab + ".prefab", gameInstance.services(), gameInstance.gameObjectContainer()->getUniqueId("missile"));
 		missile->position(a_source->owner()->position());
 		missile->serializable(false);
 	}

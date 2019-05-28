@@ -156,6 +156,8 @@ namespace MV {
 				return slotsToNodes;
 			}
 
+			MV::Point<> slotPosition(const std::string &a_slotId) const;
+
 			std::shared_ptr<Spine> timeScale(double a_timeScale);
 			double timeScale() const;
 

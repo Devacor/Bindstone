@@ -58,12 +58,12 @@ namespace MV {
 
 	template< typename T >
 	typename std::vector<std::shared_ptr<T>>::iterator insertSorted(std::vector<std::shared_ptr<T>> & a_vec, const std::shared_ptr<T>& a_item){
-		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::shared_ptr<T>& a_lhs, const std::shared_ptr<T> &a_rhs){return *a_lhs < *a_rhs; }), a_item);
+		return a_vec.insert(std::upper_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::shared_ptr<T>& a_lhs, const std::shared_ptr<T> &a_rhs){return *a_lhs < *a_rhs; }), a_item);
 	}
 
 	template< typename T >
 	typename std::vector<std::weak_ptr<T>>::iterator insertSorted(std::vector<std::weak_ptr<T>> & a_vec, const std::weak_ptr<T>& a_item) {
-		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::weak_ptr<T>& a_lhs, const std::weak_ptr<T> &a_rhs) {
+		return a_vec.insert(std::upper_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::weak_ptr<T>& a_lhs, const std::weak_ptr<T> &a_rhs) {
 			if (auto lhsLocked = a_lhs.lock()) {
 				if (auto rhsLocked = a_rhs.lock()) {
 					return *lhsLocked < *rhsLocked;
@@ -78,22 +78,22 @@ namespace MV {
 
 	template< typename T >
 	typename std::vector<T>::iterator insertSorted(std::vector<T> & a_vec, const T& a_item) {
-		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const T& a_lhs, const T &a_rhs) {return a_lhs < a_rhs; }), a_item);
+		return a_vec.insert(std::upper_bound(a_vec.begin(), a_vec.end(), a_item, [](const T& a_lhs, const T &a_rhs) {return a_lhs < a_rhs; }), a_item);
 	}
 
 	template< typename T >
 	typename std::vector<std::shared_ptr<T>>::iterator insertReverseSorted(std::vector<std::shared_ptr<T>> & a_vec, const std::shared_ptr<T>& a_item) {
-		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::shared_ptr<T>& a_lhs, const std::shared_ptr<T> &a_rhs) {return !(*a_lhs < *a_rhs); }), a_item);
+		return a_vec.insert(std::upper_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::shared_ptr<T>& a_lhs, const std::shared_ptr<T> &a_rhs) {return !(*a_lhs < *a_rhs); }), a_item);
 	}
 
 	template< typename T >
 	typename std::vector<T>::iterator insertReverseSorted(std::vector<T> & a_vec, const T& a_item) {
-		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const T& a_lhs, const T &a_rhs) {return !(a_lhs < a_rhs); }), a_item);
+		return a_vec.insert(std::upper_bound(a_vec.begin(), a_vec.end(), a_item, [](const T& a_lhs, const T &a_rhs) {return !(a_lhs < a_rhs); }), a_item);
 	}
 
 	template< typename T >
 	typename std::vector<std::weak_ptr<T>>::iterator insertReverseSorted(std::vector<std::weak_ptr<T>> & a_vec, const std::weak_ptr<T>& a_item) {
-		return a_vec.insert(std::lower_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::weak_ptr<T>& a_lhs, const std::weak_ptr<T> &a_rhs) {
+		return a_vec.insert(std::upper_bound(a_vec.begin(), a_vec.end(), a_item, [](const std::weak_ptr<T>& a_lhs, const std::weak_ptr<T> &a_rhs) {
 			if (auto lhsLocked = a_lhs.lock()) {
 				if (auto rhsLocked = a_rhs.lock()) {
 					return !(*lhsLocked < *rhsLocked);
@@ -104,6 +104,11 @@ namespace MV {
 				return a_rhs.expired();
 			}
 		}), a_item);
+	}
+
+	template< typename T, typename Pred >
+	typename std::vector<T>::iterator insertSorted(std::vector<T> & a_vec, T const& a_item, Pred a_pred) {
+		return a_vec.insert(std::upper_bound(a_vec.begin(), a_vec.end(), a_item, a_pred), a_item);
 	}
 
 	template<typename InputIterator, typename OutputIterator, typename Predicate, typename TransformFunc>

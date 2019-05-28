@@ -91,7 +91,14 @@ namespace MV {
 			if (!local && a_other->local) {
 				local = a_other->local;
 			} else if(local) {
-				local->synchronize(a_other->local, a_other->destroying);
+				if (!a_other->destroying) {
+					local->synchronize(a_other->local);
+				} else {
+					local->destroy(a_other->local);
+				}
+			}
+			if (!a_other->destroying) {
+				local->destroy(a_other->local);
 			}
 			dirty = false;
 		}
@@ -203,6 +210,17 @@ namespace MV {
 					object = objects.erase(object);
 				} else {
 					++object;
+				}
+			}
+			return results;
+		}
+
+		//Used for a full synchronize of alive objects
+		std::vector<VariantType> all() {
+			std::vector<VariantType> results;
+			for (auto object = objects.begin(); object != objects.end();++object) {
+				if (!boost::apply_visitor([](const auto &a_object) { return a_object->destroyed(); }, object->second)) {
+					results.push_back(object->second);
 				}
 			}
 			return results;

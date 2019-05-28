@@ -322,8 +322,13 @@ namespace MV {
 			return Point<PointPrecision>(static_cast<PointPrecision>(x) / length, static_cast<PointPrecision>(y) / length, static_cast<PointPrecision>(z) / length);
 		}
 
+		//useful for sorting where you don't care exactly about the distance, just the relative distance.
+		PointPrecision preSquareMagnitude() const {
+			static_cast<PointPrecision>((x * x) + (y * y) + (z * z));
+		}
+
 		PointPrecision magnitude() const {
-			return sqrt(static_cast<PointPrecision>((x * x) + (y * y) + (z * z)));
+			return sqrt(preSquareMagnitude());
 		}
 
 		T x, y, z;
@@ -1403,6 +1408,11 @@ namespace MV {
 	template<typename T>
 	PointPrecision distance(const Point<T> &a_lhs, const Point<T> &a_rhs) {
 		return (a_lhs - a_rhs).magnitude();
+	}
+
+	template<typename T>
+	PointPrecision preSquareDistance(const Point<T> &a_lhs, const Point<T> &a_rhs) {
+		return (a_lhs - a_rhs).preSquareMagnitude();
 	}
 
 	template <typename T>

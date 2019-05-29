@@ -52,6 +52,9 @@ enum class TargetType { NONE, CREATURE, GROUND };
 
 class BattleEffectNetworkState {
 public:
+	BattleEffectNetworkState() {}
+	BattleEffectNetworkState(GameInstance& a_gameInstance, const std::string &a_effectTypeId, uint64_t a_creatureOwnerId, const std::string &a_creatureAttachPosition = "");
+
 	uint64_t creatureOwnerId = 0;
 
 	std::function<void()> onNetworkDeath;
@@ -65,9 +68,8 @@ public:
 	std::map<std::string, MV::DynamicVariable> variables;
 
 	TargetType targetType = TargetType::NONE;
-	uint64_t targetCreature = 0;
+	uint64_t targetCreatureId = 0;
 	MV::Point<> targetPosition;
-
 
 	uint64_t netId = 0;
 	bool dying = false;
@@ -76,8 +78,9 @@ public:
 		position = a_other->position;
 		variables = a_other->variables;
 		targetType = a_other->targetType;
-		targetCreature = a_other->targetCreature;
+		targetCreatureId = a_other->targetCreatureId;
 		targetPosition = a_other->targetPosition;
+		buildingSlot = a_other->buildingSlot;
 
 		if (onNetworkSynchronize) {
 			onNetworkSynchronize();
@@ -103,6 +106,8 @@ public:
 			cereal::make_nvp("variables", variables)
 		);
 	}
+
+	static void hook(chaiscript::ChaiScript &a_script);
 };
 
 class BattleEffect : public MV::Scene::Component {
@@ -166,6 +171,7 @@ public:
 protected:
 	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, int a_buildingSlot, GameInstance& a_gameInstance);
 	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const BattleEffectData& a_statTemplate, int a_buildingSlot, GameInstance& a_gameInstance);
+	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> &a_suppliedState, GameInstance& a_gameInstance);
 	virtual void initialize() override;
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {

@@ -91,9 +91,14 @@ void ServerGameInstance::hook() {
 	ServerCreature::hook(scriptEngine, *this);
 	ServerBattleEffect::hook(scriptEngine, *this);
 
-	scriptEngine.add(chaiscript::fun([](GameInstance& a_self, std::shared_ptr<ServerCreature> a_source, int64_t a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive) {
-		a_self.spawnMissile(a_source, a_target, a_prefab, a_speed, a_onArrive);
-	}), "spawnEffect");
+	scriptEngine.add(chaiscript::fun([&](std::shared_ptr<BattleEffectNetworkState> a_effect) {
+		auto networkBattleEffect = networkPool().spawn(a_effect);
+
+		auto recentlyCreatedBattleEffect = gameObjectContainer()->make("E_" + std::to_string(networkBattleEffect->id()));
+		recentlyCreatedBattleEffect->position(networkBattleEffect->self()->position);
+
+		return recentlyCreatedBattleEffect->attach<ServerBattleEffect>(networkBattleEffect, *this);
+	}), "spawnBattleEffect");
 }
 
 void ClientGameInstance::hook() {
@@ -202,6 +207,10 @@ ServerGameInstance::ServerGameInstance(GameServer& a_game) :
 	GameInstance(a_game.root(), a_game.data(), a_game.mouse(), 1.0f / 10.0f),
 	gameServer(a_game){
 	synchronizedObjects.onSpawn<CreatureNetworkState>([this](std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_newItem) {
+		a_newItem->self()->netId = a_newItem->id();
+	});
+
+	synchronizedObjects.onSpawn<BattleEffectNetworkState>([this](std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> a_newItem) {
 		a_newItem->self()->netId = a_newItem->id();
 	});
 }

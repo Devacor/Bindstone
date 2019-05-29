@@ -29,8 +29,24 @@ std::shared_ptr<InGamePlayer> Creature::player() {
 	return gameInstance.building(state->self()->buildingSlot)->player();
 }
 
+void CreatureNetworkState::hook(chaiscript::ChaiScript &a_script) {
+	a_script.add(chaiscript::user_type<CreatureNetworkState>(), "CreatureNetworkState");
+
+	a_script.add(chaiscript::fun(&CreatureNetworkState::dying), "dying");
+	a_script.add(chaiscript::fun(&CreatureNetworkState::health), "health");
+	a_script.add(chaiscript::fun(&CreatureNetworkState::position), "position");
+	a_script.add(chaiscript::fun(&CreatureNetworkState::buildingSlot), "buildingSlot");
+	a_script.add(chaiscript::fun(&CreatureNetworkState::animationName), "animationName");
+	a_script.add(chaiscript::fun(&CreatureNetworkState::animationTime), "animationTime");
+
+	a_script.add(chaiscript::fun([](CreatureNetworkState &a_self, const std::string &a_key) {
+		return a_self.variables[a_key];
+	}), "[]");
+}
+
 chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameInstance& /*gameInstance*/) {
 	CreatureData::hook(a_script);
+	CreatureNetworkState::hook(a_script);
 	a_script.add(chaiscript::user_type<Creature>(), "Creature");
 	a_script.add(chaiscript::base_class<Component, Creature>());
 
@@ -130,7 +146,8 @@ ServerCreature::ServerCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, co
 void ServerCreature::initialize() {
 	auto newNode = owner()->make(assetPath(), gameInstance.services());
 	newNode->serializable(false);
-	newNode->componentInChildren<MV::Scene::Spine>()->animate("run");
+	spineAnimator = newNode->componentInChildren<MV::Scene::Spine>().get();
+	spineAnimator->animate("run");
 	
 	pathAgent = owner()->attach<MV::Scene::PathAgent>(gameInstance.path().self(), gameInstance.path()->gridFromLocal(gameInstance.path()->owner()->localFromWorld(owner()->worldPosition())), 3)->
 		gridSpeed(statTemplate.moveSpeed);
@@ -401,7 +418,8 @@ ClientCreature::ClientCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, co
 void ClientCreature::initialize() {
 	auto newNode = owner()->make(assetPath(), gameInstance.services());
 	newNode->serializable(false);
-	newNode->componentInChildren<MV::Scene::Spine>()->animate("run");
+	spineAnimator = newNode->componentInChildren<MV::Scene::Spine>().get();
+	spineAnimator->animate("run");
 
 	auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 	statTemplate.script(gameInstance.script()).spawn(self);

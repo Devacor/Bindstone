@@ -257,6 +257,8 @@ struct CreatureNetworkState {
 			cereal::make_nvp("variables", variables)
 		);
 	}
+
+	static void hook(chaiscript::ChaiScript &a_script);
 };
 
 class Creature : public MV::Scene::Component {
@@ -300,6 +302,14 @@ public:
 		return state->self()->position;
 	}
 
+	std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> networkState() const {
+		return state;
+	}
+
+	std::shared_ptr<MV::Scene::Spine> spine() {
+		return spineAnimator;
+	}
+
 protected:
 	Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, GameInstance& a_gameInstance, const std::string& a_skin, const CreatureData& a_statTemplate, std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_state);
 
@@ -312,6 +322,8 @@ protected:
 	std::map<std::string, chaiscript::Boxed_Value> localVariables;
 
 	std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> state;
+
+	std::shared_ptr<MV::Scene::Spine> spineAnimator;
 };
 
 class ServerCreature : public Creature {
@@ -403,9 +415,8 @@ private:
 		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 		agent()->stop();
 		onDeathSignal(self);
-		auto spine = owner()->componentInChildren<MV::Scene::Spine>();
-		spine->animate(state->self()->animationName, false);
-		spine->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
+		spineAnimator->animate(state->self()->animationName, false);
+		spineAnimator->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
 			if (a_self->track(a_track).name() == "die") {
 				owner()->removeFromParent();
 			}
@@ -468,9 +479,8 @@ private:
 	void animateDeathAndRemove() {
 		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 		onDeathSignal(self);
-		auto spine = owner()->componentInChildren<MV::Scene::Spine>();
-		spine->animate(state->self()->animationName, false);
-		spine->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
+		spineAnimator->animate(state->self()->animationName, false);
+		spineAnimator->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
 			if (a_self->track(a_track).name() == "die") {
 				owner()->removeFromParent();
 			}

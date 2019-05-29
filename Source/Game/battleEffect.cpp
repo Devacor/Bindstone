@@ -3,6 +3,34 @@
 #include "Game/Instance/gameInstance.h"
 #include "Game/player.h"
 
+BattleEffectNetworkState::BattleEffectNetworkState(GameInstance& a_gameInstance, const std::string &a_effectTypeId, uint64_t a_creatureOwnerId, const std::string &a_creatureAttachPosition) :
+	creatureOwnerId(a_creatureOwnerId),
+	effectTypeId(a_effectTypeId){
+
+	auto ourOwner = a_gameInstance.creature(a_creatureOwnerId);
+	if (ourOwner) {
+		position = ourOwner->owner()->position() + ourOwner->spine()->slotPosition(a_creatureAttachPosition);
+		auto state = ourOwner->networkState();
+		if (state) {
+			buildingSlot = state->self()->buildingSlot;
+		}
+	}
+}
+
+void BattleEffectNetworkState::hook(chaiscript::ChaiScript &a_script) {
+	a_script.add(chaiscript::user_type<BattleEffectNetworkState>(), "BattleEffectNetworkState");
+	a_script.add(chaiscript::constructor<BattleEffectNetworkState(GameInstance&, const std::string &, uint64_t, const std::string &)>(), "BattleEffectNetworkState");
+	a_script.add(chaiscript::constructor<BattleEffectNetworkState(GameInstance&, const std::string &, uint64_t)>(), "BattleEffectNetworkState");
+
+	a_script.add(chaiscript::fun(&BattleEffectNetworkState::dying), "dying");
+	a_script.add(chaiscript::fun(&BattleEffectNetworkState::position), "position");
+	a_script.add(chaiscript::fun(&BattleEffectNetworkState::buildingSlot), "buildingSlot");
+
+	a_script.add(chaiscript::fun([](BattleEffectNetworkState &a_self, const std::string &a_key) {
+		return a_self.variables[a_key];
+	}), "[]");
+}
+
 std::string BattleEffect::assetPath() const {
 	return "Assets/BattleEffects/" + statTemplate.id + "/" + (skin.empty() ? "Default" : skin) + "/unit.prefab";
 }
@@ -24,7 +52,9 @@ chaiscript::ChaiScript& BattleEffect::hook(chaiscript::ChaiScript &a_script, Gam
 		{ TargetType::GROUND, "TargetType_GROUND" }
 	});
 
+	BattleEffectNetworkState::hook(a_script);
 	BattleEffectData::hook(a_script);
+
 	a_script.add(chaiscript::user_type<BattleEffect>(), "BattleEffect");
 	a_script.add(chaiscript::base_class<Component, BattleEffect>());
 
@@ -89,6 +119,10 @@ ServerBattleEffect::ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_o
 
 ServerBattleEffect::ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const BattleEffectData &a_statTemplate, int a_buildingSlot, GameInstance& a_gameInstance) :
 	BattleEffect(a_owner, a_gameInstance, a_gameInstance.building(a_buildingSlot)->skin(), a_statTemplate, a_gameInstance.networkPool().spawn(std::make_shared<BattleEffectNetworkState>(a_statTemplate, a_buildingSlot))) {
+}
+
+ServerBattleEffect::ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> &a_suppliedState, GameInstance& a_gameInstance) :
+	BattleEffect(a_owner, a_gameInstance, a_gameInstance.building(a_suppliedState->self()->buildingSlot)->skin(), a_gameInstance.data().battleEffects().data(a_suppliedState->self()->effectTypeId), a_suppliedState)) {
 }
 
 void ServerBattleEffect::initialize() {

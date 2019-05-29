@@ -343,7 +343,7 @@ namespace MV{
 		}
 
 		MV::Point<> Spine::slotPosition(const std::string &a_slotId) const {
-			if (!owner()->renderer().headless() && loaded()) {
+			if (!owner()->renderer().headless() && loaded() && !a_slotId.empty()) {
 				for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
 					spSlot* slot = skeleton->drawOrder[i];
 					if (slot->data->name == a_slotId) {

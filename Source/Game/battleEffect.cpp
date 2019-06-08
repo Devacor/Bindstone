@@ -10,10 +10,7 @@ BattleEffectNetworkState::BattleEffectNetworkState(GameInstance& a_gameInstance,
 	auto ourOwner = a_gameInstance.creature(a_creatureOwnerId);
 	if (ourOwner) {
 		position = ourOwner->owner()->position() + ourOwner->spine()->slotPosition(a_creatureAttachPosition);
-		auto state = ourOwner->networkState();
-		if (state) {
-			buildingSlot = state->self()->buildingSlot;
-		}
+		buildingSlot = ourOwner->buildingSlot();
 	}
 }
 
@@ -25,6 +22,12 @@ void BattleEffectNetworkState::hook(chaiscript::ChaiScript &a_script) {
 	a_script.add(chaiscript::fun(&BattleEffectNetworkState::dying), "dying");
 	a_script.add(chaiscript::fun(&BattleEffectNetworkState::position), "position");
 	a_script.add(chaiscript::fun(&BattleEffectNetworkState::buildingSlot), "buildingSlot");
+
+	a_script.add(chaiscript::fun(&BattleEffectNetworkState::creatureOwnerId), "creatureOwnerId");
+	a_script.add(chaiscript::fun(&BattleEffectNetworkState::targetCreatureId), "targetCreatureId");
+	a_script.add(chaiscript::fun(&BattleEffectNetworkState::targetPosition), "targetPosition");
+	a_script.add(chaiscript::fun(&BattleEffectNetworkState::targetType), "targetType");
+	a_script.add(chaiscript::fun(&BattleEffectNetworkState::duration), "duration");
 
 	a_script.add(chaiscript::fun([](BattleEffectNetworkState &a_self, const std::string &a_key) {
 		return a_self.variables[a_key];
@@ -42,15 +45,34 @@ BattleEffect::BattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, GameIn
 	onFizzle(onFizzleSignal),
 	skin(a_skin),
 	statTemplate(a_statTemplate),
-	state(a_state) {
+	state(a_state),
+	sourceCreature(a_gameInstance.creature(a_state->self()->creatureOwnerId)),
+	targetCreature(a_gameInstance.creature(a_state->self()->targetCreatureId)){
+	
+	if (sourceCreature) {
+		sourceDeathWatcher = sourceCreature->onDeath.connect([&](std::shared_ptr<Creature> a_self) {
+			sourceCreature.reset();
+			sourceDeathWatcher.reset();
+		});
+	}
+
+	if (targetCreature) {
+		targetDeathWatcher = targetCreature->onDeath.connect([&](std::shared_ptr<Creature> a_self) {
+			targetCreature.reset();
+			targetDeathWatcher.reset();
+		});
+	}
+}
+
+void BattleEffect::initialize() {
+	Component::initialize();
 }
 
 chaiscript::ChaiScript& BattleEffect::hook(chaiscript::ChaiScript &a_script, GameInstance& /*gameInstance*/) {
-	chaiscript::utility::add_class<TargetType>(a_script, "TargetType", {
-		{ TargetType::NONE, "TargetType_NONE" },
-		{ TargetType::CREATURE, "TargetType_CREATURE" },
-		{ TargetType::GROUND, "TargetType_GROUND" }
-	});
+	a_script.add(chaiscript::user_type<TargetType>(), "TargetType");
+	a_script.add(chaiscript::const_var(TargetType::NONE), "TargetType_NONE");
+	a_script.add(chaiscript::const_var(TargetType::CREATURE), "TargetType_CREATURE");
+	a_script.add(chaiscript::const_var(TargetType::GROUND), "TargetType_GROUND");
 
 	BattleEffectNetworkState::hook(a_script);
 	BattleEffectData::hook(a_script);
@@ -62,6 +84,11 @@ chaiscript::ChaiScript& BattleEffect::hook(chaiscript::ChaiScript &a_script, Gam
 	a_script.add(chaiscript::fun(&BattleEffect::onArrive), "onArrive");
 	a_script.add(chaiscript::fun(&BattleEffect::onFizzle), "onFizzle");
 
+	a_script.add(chaiscript::fun(&BattleEffect::sourceCreature), "sourceCreature");
+	a_script.add(chaiscript::fun(&BattleEffect::targetCreature), "targetCreature");
+
+	a_script.add(chaiscript::fun(&BattleEffect::ourElapsedTime), "ourElapsedTime");
+
 	a_script.add(chaiscript::fun([](BattleEffect &a_self) -> GameInstance& {return a_self.gameInstance; }), "game");
 
 	a_script.add(chaiscript::fun(&BattleEffect::alive), "alive");
@@ -69,6 +96,14 @@ chaiscript::ChaiScript& BattleEffect::hook(chaiscript::ChaiScript &a_script, Gam
 	a_script.add(chaiscript::fun([](BattleEffect &a_self, const std::string &a_key) {
 		return a_self.localVariables[a_key];
 	}), "[]");
+
+	a_script.add(chaiscript::fun([&](BattleEffect &a_self) -> decltype(auto) {
+		return a_self.state->self();
+	}), "viewNetState");
+
+	a_script.add(chaiscript::fun([&](BattleEffect &a_self) -> decltype(auto) {
+		return a_self.state->modify();
+	}), "modifyNetState");
 
 	a_script.add(chaiscript::fun([&](BattleEffect &a_self) -> decltype(auto) {
 		return a_self.state->modify()->variables;
@@ -113,19 +148,20 @@ chaiscript::ChaiScript& BattleEffect::hook(chaiscript::ChaiScript &a_script, Gam
 	return a_script;
 }
 
-ServerBattleEffect::ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, int a_buildingSlot, GameInstance& a_gameInstance) :
-	ServerBattleEffect(a_owner, a_gameInstance.data().battleEffects().data(a_id), a_buildingSlot, a_gameInstance) {
+ServerBattleEffect::ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, uint64_t a_creatureId, const std::string &a_creatureBoneAttachment, GameInstance& a_gameInstance) :
+	ServerBattleEffect(a_owner, a_gameInstance.data().battleEffects().data(a_id), a_creatureId, a_creatureBoneAttachment, a_gameInstance) {
 }
 
-ServerBattleEffect::ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const BattleEffectData &a_statTemplate, int a_buildingSlot, GameInstance& a_gameInstance) :
-	BattleEffect(a_owner, a_gameInstance, a_gameInstance.building(a_buildingSlot)->skin(), a_statTemplate, a_gameInstance.networkPool().spawn(std::make_shared<BattleEffectNetworkState>(a_statTemplate, a_buildingSlot))) {
+ServerBattleEffect::ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const BattleEffectData &a_statTemplate, uint64_t a_creatureId, const std::string &a_creatureBoneAttachment, GameInstance& a_gameInstance) :
+	BattleEffect(a_owner, a_gameInstance, a_gameInstance.building(a_gameInstance.creature(a_creatureId)->buildingSlot())->skin(), a_statTemplate, a_gameInstance.networkPool().spawn(std::make_shared<BattleEffectNetworkState>(a_gameInstance, a_statTemplate.id, a_creatureId, a_creatureBoneAttachment))) {
 }
 
 ServerBattleEffect::ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> &a_suppliedState, GameInstance& a_gameInstance) :
-	BattleEffect(a_owner, a_gameInstance, a_gameInstance.building(a_suppliedState->self()->buildingSlot)->skin(), a_gameInstance.data().battleEffects().data(a_suppliedState->self()->effectTypeId), a_suppliedState)) {
+	BattleEffect(a_owner, a_gameInstance, a_gameInstance.building(a_suppliedState->self()->buildingSlot)->skin(), a_gameInstance.data().battleEffects().data(a_suppliedState->self()->effectTypeId), a_suppliedState) {
 }
 
 void ServerBattleEffect::initialize() {
+	BattleEffect::initialize();
 	auto newNode = owner()->make(assetPath(), gameInstance.services());
 	newNode->serializable(false);
 
@@ -135,11 +171,21 @@ void ServerBattleEffect::initialize() {
 
 void ServerBattleEffect::updateImplementation(double a_delta) {
 	if (alive()) {
+		ourElapsedTime += a_delta;
+		bool expiring = state->self()->duration > 0 && ourElapsedTime >= state->self()->duration;
+		if (expiring) {
+			ourElapsedTime = state->self()->duration;
+		}
+
 		auto self = std::static_pointer_cast<ServerBattleEffect>(shared_from_this());
 		statTemplate.script(gameInstance.script()).update(self, a_delta);
 
 		if (state->self()->targetType == TargetType::NONE && state->self()->position != owner()->position()) {
 			state->modify()->position = owner()->position();
+		}
+
+		if (expiring) {
+			animateDeathAndRemove();
 		}
 	}
 }
@@ -153,8 +199,6 @@ chaiscript::ChaiScript& ServerBattleEffect::hook(chaiscript::ChaiScript &a_scrip
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ServerBattleEffect>, std::shared_ptr<BattleEffect>>([](const MV::Scene::SafeComponent<ServerBattleEffect> &a_item) { return std::static_pointer_cast<BattleEffect>(a_item.self()); }));
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ServerBattleEffect>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<ServerBattleEffect> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
 
-	TargetPolicy::hook(a_script);
-
 	return a_script;
 }
 
@@ -165,15 +209,20 @@ ClientBattleEffect::ClientBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_o
 		a_gameInstance.data().battleEffects().data(a_state->self()->effectTypeId),
 		a_state
 	) {
-	state->self()->onNetworkDeath = [&]() {
-		animateDeathAndRemove();
-	};
+	if (state->self()->targetType == TargetType::NONE) {
+		state->self()->onNetworkDeath = [&]() {
+			animateExplodeAndRemove();
+		};
+	} else if (state->self()->targetType == TargetType::CREATURE && targetCreature) {
+		activeTargetPosition = targetCreature->networkPosition();
+	}
 	state->self()->onNetworkSynchronize = [&] {
 		onNetworkSynchronize();
 	};
 }
 
 void ClientBattleEffect::initialize() {
+	BattleEffect::initialize();
 	offsetDepth = owner()->componentInParents<MV::Scene::PathMap>()->cellSize().height / 2.0f;
 
 	auto newNode = owner()->make(assetPath(), gameInstance.services());
@@ -201,6 +250,7 @@ chaiscript::ChaiScript& ClientBattleEffect::hook(chaiscript::ChaiScript &a_scrip
 void ClientBattleEffect::onNetworkSynchronize() {
 	networkDelta.add(MV::Stopwatch::systemTime());
 	startClientPosition = owner()->position();
+	discardedDuration += accumulatedDuration;
 	accumulatedDuration = 0;
 }
 
@@ -211,6 +261,18 @@ void ClientBattleEffect::updateImplementation(double a_delta) {
 			double percentNetTimestep = accumulatedDuration / networkDelta.delta();
 			MV::info("NetStep: ", percentNetTimestep, "% ==> [", accumulatedDuration, " / ", networkDelta.delta(), "]");
 			owner()->position(mix(startClientPosition, state->self()->position, static_cast<MV::PointPrecision>(percentNetTimestep)));
+		} else {
+			auto targetTotalTime = state->self()->duration - discardedDuration;
+			if (state->self()->targetType == TargetType::CREATURE && targetCreature) {
+				activeTargetPosition = targetCreature->networkPosition();
+			} else if (state->self()->targetType == TargetType::GROUND) {
+				activeTargetPosition = state->self()->targetPosition;
+			}
+			accumulatedDuration = std::min(targetTotalTime, accumulatedDuration + a_delta);
+			owner()->position(mix(startClientPosition, activeTargetPosition, static_cast<MV::PointPrecision>(accumulatedDuration / targetTotalTime)));
+			if (accumulatedDuration == state->self()->duration) {
+				animateExplodeAndRemove();
+			}
 		}
 
 		auto self = std::static_pointer_cast<ClientBattleEffect>(shared_from_this());

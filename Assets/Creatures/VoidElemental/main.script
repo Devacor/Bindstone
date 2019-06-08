@@ -15,11 +15,21 @@ self.spawn = fun(self){
 					spine.onEvent.connect("launch", fun[target, targeting](spine, index, eventData){
 						if(eventData.name == "launch"){
 							print("LAUNCHING");
-							targeting.self().game().spawnMissile(targeting.self(), target, "missile", 300, fun(missile){
-								if(!missile.target().is_var_null()){
-									missile.target().changeHealth(-5);
+							var newMissile = BattleEffectNetworkState(targeting.self().game(), "Missile", targeting.self().id());
+							print("L2");
+							newMissile.duration = 1.25;
+							newMissile.targetType = TargetType_CREATURE;
+							print("L3");
+							newMissile.targetCreatureId = target;
+							auto effect = targeting.self().game().spawnBattleEffect(newMissile);
+							print("L4");
+							effect.onArrive.connect("Arrive", fun(battleEffect) {
+								if(!battleEffect.targetCreature().is_var_null()){
+									print("Damage!");
+									battleEffect.targetCreature().changeHealth(-5);
 								}
 							});
+							print("L5");
 						}
 					});
 					spine.onEnd.connect("unlock", fun[targeting](spine, index){

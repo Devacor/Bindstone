@@ -82,11 +82,11 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 	}), "changeHealth");
 
 	a_script.add(chaiscript::fun([](Creature &a_self, float a_range) {
-		return a_self.gameInstance.teamAgainstPlayer(a_self.player()).creaturesInRange(a_self.gridPosition(), a_range);
+		return a_self.gameInstance.teamAgainstPlayer(a_self.player()).creaturesInRange(a_self.networkPosition(), a_range);
 	}), "enemiesInRange");
 
 	a_script.add(chaiscript::fun([](Creature &a_self, float a_range) {
-		return a_self.gameInstance.teamForPlayer(a_self.player()).creaturesInRange(a_self.gridPosition(), a_range);
+		return a_self.gameInstance.teamForPlayer(a_self.player()).creaturesInRange(a_self.networkPosition(), a_range);
 	}), "alliesInRange");
 
 	a_script.add(chaiscript::fun([](Creature &a_self) {
@@ -173,13 +173,15 @@ void ServerCreature::initialize() {
 
 void ServerCreature::updateImplementation(double a_delta) {
 	if (alive()) {
+		state->modify()->position = owner()->position();
 		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 		statTemplate.script(gameInstance.script()).update(self, a_delta);
 		targeting.update(a_delta);
 
-		if (state->self()->position != owner()->position()) {
-			state->modify()->position = owner()->position();
-		}
+		//prefer this after getting all to work
+// 		if (state->self()->position != owner()->position()) {
+// 			state->modify()->position = owner()->position();
+// 		}
 	}
 }
 
@@ -204,6 +206,8 @@ chaiscript::ChaiScript& ServerCreature::hook(chaiscript::ChaiScript &a_script, G
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ServerCreature>, std::shared_ptr<ServerCreature>>([](const MV::Scene::SafeComponent<ServerCreature> &a_item) { return a_item.self(); }));
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ServerCreature>, std::shared_ptr<Creature>>([](const MV::Scene::SafeComponent<ServerCreature> &a_item) { return std::static_pointer_cast<Creature>(a_item.self()); }));
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ServerCreature>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<ServerCreature> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
+
+	a_script.add(chaiscript::bootstrap::standard_library::vector_type<std::vector<std::shared_ptr<ServerCreature>>>("VectorServerCreature"));
 
 	TargetPolicy::hook(a_script);
 
@@ -436,6 +440,8 @@ chaiscript::ChaiScript& ClientCreature::hook(chaiscript::ChaiScript &a_script, G
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ClientCreature>, std::shared_ptr<ServerCreature>>([](const MV::Scene::SafeComponent<ClientCreature> &a_item) { return a_item.self(); }));
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ClientCreature>, std::shared_ptr<Creature>>([](const MV::Scene::SafeComponent<ClientCreature> &a_item) { return std::static_pointer_cast<Creature>(a_item.self()); }));
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ClientCreature>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<ClientCreature> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
+
+	a_script.add(chaiscript::bootstrap::standard_library::vector_type<std::vector<std::shared_ptr<ClientCreature>>>("VectorClientCreature"));
 
 	return a_script;
 }

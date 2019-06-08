@@ -16,6 +16,8 @@
 #include "MV/Network/dynamicVariable.h"
 #include "MV/Network/networkObject.h"
 
+#include "creature.h"
+
 #define BATTLE_EFFECT_CATALOG_VERSION 0
 
 class BattleEffect;
@@ -70,6 +72,7 @@ public:
 	TargetType targetType = TargetType::NONE;
 	uint64_t targetCreatureId = 0;
 	MV::Point<> targetPosition;
+	double duration = 0.0;
 
 	uint64_t netId = 0;
 	bool dying = false;
@@ -81,6 +84,7 @@ public:
 		targetCreatureId = a_other->targetCreatureId;
 		targetPosition = a_other->targetPosition;
 		buildingSlot = a_other->buildingSlot;
+		duration = a_other->duration;
 
 		if (onNetworkSynchronize) {
 			onNetworkSynchronize();
@@ -102,6 +106,11 @@ public:
 		archive(
 			cereal::make_nvp("effectTypeId", effectTypeId),
 			cereal::make_nvp("creatureOwnerId", creatureOwnerId),
+			cereal::make_nvp("targetCreatureId", targetCreatureId),
+			cereal::make_nvp("buildingSlot", buildingSlot),
+			cereal::make_nvp("targetPosition", targetPosition),
+			cereal::make_nvp("duration", duration),
+			cereal::make_nvp("targetType", targetType),
 			cereal::make_nvp("position", position),
 			cereal::make_nvp("variables", variables)
 		);
@@ -145,6 +154,7 @@ public:
 
 protected:
 	BattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, GameInstance& a_gameInstance, const std::string& a_skin, const BattleEffectData& a_statTemplate, std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> a_state);
+	virtual void initialize() override;
 
 	std::string skin;
 
@@ -152,16 +162,23 @@ protected:
 
 	const BattleEffectData& statTemplate;
 
+	double ourElapsedTime = 0.0;
+
 	std::map<std::string, chaiscript::Boxed_Value> localVariables;
 
 	std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> state;
+
+	std::shared_ptr<Creature> sourceCreature;
+	std::shared_ptr<Creature> targetCreature;
+
+	ServerCreature::SharedRecieverType targetDeathWatcher;
+	ServerCreature::SharedRecieverType sourceDeathWatcher;
 };
 
 
 class ServerBattleEffect : public BattleEffect {
 	friend MV::Scene::Node;
 	friend cereal::access;
-	friend TargetPolicy;
 
 public:
 	ComponentDerivedAccessors(ServerBattleEffect)
@@ -169,13 +186,14 @@ public:
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
 
 protected:
-	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, int a_buildingSlot, GameInstance& a_gameInstance);
-	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const BattleEffectData& a_statTemplate, int a_buildingSlot, GameInstance& a_gameInstance);
+	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, uint64_t a_creatureId, const std::string &a_creatureBoneAttachment, GameInstance& a_gameInstance);
+	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const BattleEffectData& a_statTemplate, uint64_t a_creatureId, const std::string &a_creatureBoneAttachment, GameInstance& a_gameInstance);
 	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> &a_suppliedState, GameInstance& a_gameInstance);
 	virtual void initialize() override;
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
-		return cloneHelper(a_parent->attach<ServerBattleEffect>(statTemplate.id, state->self()->buildingSlot, gameInstance).self());
+		MV::require<MV::LogicException>(false, "CloneImplementation not implemented for ServerBattleEffect");
+		return cloneHelper(a_parent->attach<ServerBattleEffect>(statTemplate.id, state->self()->creatureOwnerId, "", gameInstance).self());
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
@@ -222,12 +240,12 @@ protected:
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
 		Component::cloneHelper(a_clone);
-		auto creatureClone = std::static_pointer_cast<ClientCreature>(a_clone);
+		auto creatureClone = std::static_pointer_cast<ClientBattleEffect>(a_clone);
 		return a_clone;
 	}
 
 private:
-	void animateDeathAndRemove() {
+	void animateExplodeAndRemove() {
 		owner()->removeFromParent();
 	}
 
@@ -236,6 +254,8 @@ private:
 	virtual void updateImplementation(double a_delta) override;
 
 	MV::Point<> startClientPosition;
+	MV::Point<> activeTargetPosition;
+	double discardedDuration = 0.0f;
 	double accumulatedDuration = 0.0f;
 	MV::TimeDeltaAggregate networkDelta;
 	MV::PointPrecision offsetDepth = 0.0f;

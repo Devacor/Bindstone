@@ -2,6 +2,8 @@
 #define _SYNCHRONIZE_ACTION_H
 
 #include "Game/building.h"
+#include "Game/creature.h"
+#include "Game/battleEffect.h"
 #include "Game/NetworkLayer/networkAction.h"
 #include "MV/Network/networkObject.h"
 

@@ -298,7 +298,11 @@ public:
 		return state->id();
 	}
 
-	MV::Point<MV::PointPrecision> gridPosition() const {
+	int32_t buildingSlot() const {
+		return state->self()->buildingSlot;
+	}
+
+	virtual MV::Point<MV::PointPrecision> networkPosition() const {
 		return state->self()->position;
 	}
 
@@ -379,6 +383,10 @@ public:
 
 	std::shared_ptr<MV::Scene::PathAgent> agent() {
 		return pathAgent;
+	}
+
+	MV::Point<MV::PointPrecision> networkPosition() const override {
+		return pathAgent->gridPosition();
 	}
 
 protected:

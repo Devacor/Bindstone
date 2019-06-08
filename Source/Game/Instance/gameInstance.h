@@ -63,7 +63,9 @@ public:
 	}
 
 	std::shared_ptr<MV::Scene::Node> gameObjectContainer() const {
-		return pathMap->owner()->makeOrGet("Objects");
+		auto result = pathMap->owner()->makeOrGet("Creatures");
+		auto result2 = pathMap->owner()->makeOrGet("Objects");
+		return result;
 	}
 
 	std::shared_ptr<MV::Scene::Node> scene() const {
@@ -89,10 +91,6 @@ public:
 	void moveCamera(MV::Point<> a_startPosition, MV::Scale a_scale);
 	void moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale);
 
-	void spawnMissile(std::shared_ptr<ServerCreature> a_source, uint64_t a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive);
-
-	void removeMissile(Missile* a_toRemove);
-
 	virtual bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &) const = 0;
 
 	Team& teamForSide(TeamSide a_side) {
@@ -117,6 +115,9 @@ public:
 
 	const std::shared_ptr<ServerCreature> &creature(uint64_t a_id) {
 		static std::shared_ptr<ServerCreature> nullCreature;
+		if (a_id == 0) {
+			return nullCreature;
+		}
 		auto found = creatures.find(a_id);
 		if (found != creatures.end()) {
 			return found->second;
@@ -129,7 +130,6 @@ protected:
 	virtual void fixedUpdateImplementation(double /*a_dt*/) {}
 	virtual void updateImplementation(double /*a_dt*/) {}
 
-	void removeExpiredMissiles();
 	void handleScroll(int a_amount);
 
 	virtual void hook();
@@ -145,9 +145,6 @@ protected:
 	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
 
 	chaiscript::ChaiScript scriptEngine;
-
-	std::vector<std::unique_ptr<Missile>> missiles;
-	std::vector<Missile*> expiredMissiles;
 
 	MV::TapDevice::SignalType mouseSignal;
 
@@ -212,76 +209,6 @@ protected:
 
 private:
 	GameServer &gameServer;
-};
-
-class Missile {
-public:
-	Missile(GameInstance &a_gameInstance, std::shared_ptr<Creature> a_source, std::shared_ptr<Creature> a_target, std::string a_prefab, float a_speed, std::function<void (Missile&)> a_onArrive):
-		gameInstance(a_gameInstance),
-		speed(a_speed),
-		sourceCreature(a_source),
-		targetCreature(a_target),
-		groundLocation(a_target->owner()->position()),
-		onArrive(a_onArrive){
-
-		sourceDeathWatcher = sourceCreature->onDeath.connect([&](std::shared_ptr<Creature> a_self){
-			sourceCreature.reset();
-			sourceDeathWatcher.reset();
-		});
-
-		targetDeathWatcher = targetCreature->onDeath.connect([&](std::shared_ptr<Creature> a_self){
-			targetCreature.reset();
-			targetDeathWatcher.reset();
-		});
-
-		missile = gameInstance.gameObjectContainer()->make("Assets/Prefabs/Missiles/" + a_prefab + ".prefab", gameInstance.services(), gameInstance.gameObjectContainer()->getUniqueId("missile"));
-		missile->position(a_source->owner()->position());
-		missile->serializable(false);
-	}
-
-	std::shared_ptr<Creature> source() {
-		return sourceCreature;
-	}
-
-	std::shared_ptr<Creature> target() {
-		return targetCreature;
-	}
-
-
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-		a_script.add(chaiscript::user_type<Missile>(), "Missile");
-
-		a_script.add(chaiscript::fun(&Missile::source), "source");
-		a_script.add(chaiscript::fun(&Missile::target), "target");
-
-		return a_script;
-	}
-
-	void update(double a_dt) {
-		if(targetCreature && targetCreature->alive()){
-			groundLocation = targetCreature->owner()->position();
-		}
-		auto nextMissileLocation = MV::moveToward(missile->position(), groundLocation, speed * static_cast<float>(a_dt));
-		if (nextMissileLocation != groundLocation) {
-			missile->position(nextMissileLocation);
-		} else {
-			if (onArrive) { onArrive(*this); }
-			gameInstance.removeMissile(this);
-			missile->removeFromParent();
-		}
-	}
-private:
-	std::shared_ptr<MV::Scene::Node> missile;
-	std::shared_ptr<Creature> sourceCreature;
-	std::shared_ptr<Creature> targetCreature;
-	MV::Point<> groundLocation;
-	float speed;
-
-	std::function<void(Missile&)> onArrive;
-	GameInstance &gameInstance;
-
-	ServerCreature::SharedRecieverType targetDeathWatcher;
-	ServerCreature::SharedRecieverType sourceDeathWatcher;
 };
 
 #endif

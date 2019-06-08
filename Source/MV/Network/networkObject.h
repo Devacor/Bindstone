@@ -77,7 +77,7 @@ namespace MV {
 			return *local;
 		}
 
-		std::shared_ptr<T> self() const {
+		const std::shared_ptr<T> &self() const {
 			return local;
 		}
 

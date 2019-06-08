@@ -105,6 +105,8 @@ struct BuildingData {
 
 	std::vector<Wallet> costs;
 
+	bool isServer = false;
+
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(

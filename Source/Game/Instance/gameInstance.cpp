@@ -109,10 +109,6 @@ void ClientGameInstance::hook() {
 }
 
 void GameInstance::fixedUpdate(double a_dt) {
-	for (auto&& missile : missiles) {
-		missile->update(a_dt);
-	}
-	removeExpiredMissiles();
 	worldScene->update(static_cast<float>(a_dt), true);
 	fixedUpdateImplementation(a_dt);
 }
@@ -147,12 +143,6 @@ void GameInstance::moveCamera(MV::Point<> endPosition, MV::Scale endScale) {
 	});
 }
 
-void GameInstance::spawnMissile(std::shared_ptr<ServerCreature> a_source, uint64_t a_target, std::string a_prefab, float a_speed, std::function<void(Missile&)> a_onArrive) {
-	if (auto targetCreature = creature(a_target)) {
-		missiles.push_back(std::make_unique<Missile>(*this, a_source, targetCreature, a_prefab, a_speed, a_onArrive));
-	}
-}
-
 ClientGameInstance::ClientGameInstance(Game& a_game) :
 	GameInstance(a_game.root(), a_game.data(), a_game.mouse(), 1.0f / 60.0f),
 	game(a_game) {
@@ -170,7 +160,7 @@ ClientGameInstance::ClientGameInstance(Game& a_game) :
 		auto battleEffectNode = gameObjectContainer()->make("E_" + std::to_string(battleEffectState->netId));
 		battleEffectNode->position(battleEffectState->position);
 
-		battleEffectNode->attach<ClientBattleEffect>(battleEffectState, *this);
+		battleEffectNode->attach<ClientBattleEffect>(a_newItem, *this);
 	});
 
 	auto playlistGame = std::make_shared<MV::AudioPlayList>();

@@ -119,6 +119,6 @@ namespace MV {
 		}), "string");
 
 		a_script.add(chaiscript::bootstrap::standard_library::map_type<std::map<std::string, DynamicVariable>>("MapDynamicVariable"));
-		a_script.add(chaiscript::bootstrap::standard_library::map_type<std::vector<DynamicVariable>>("VectorDynamicVariable"));
+		a_script.add(chaiscript::bootstrap::standard_library::vector_type<std::vector<DynamicVariable>>("VectorDynamicVariable"));
 	}
 }

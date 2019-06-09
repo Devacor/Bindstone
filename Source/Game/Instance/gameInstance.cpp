@@ -98,7 +98,7 @@ void ServerGameInstance::hook() {
 		recentlyCreatedBattleEffect->position(networkBattleEffect->self()->position);
 
 		return recentlyCreatedBattleEffect->attach<ServerBattleEffect>(networkBattleEffect, *this);
-	}), "spawnBattleEffect");
+	}), "spawnOnNetwork");
 }
 
 void ClientGameInstance::hook() {

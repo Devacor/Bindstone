@@ -33,7 +33,7 @@ void Building::initialize() {
 
 void Building::spawnNetworkCreature(std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_synchronizedCreature) {
 	auto creatureNode = gameInstance.gameObjectContainer()->make("C_" + std::to_string(a_synchronizedCreature->id()));
-	creatureNode->worldPosition(owner()->worldFromLocal(spawnPoint));
+	creatureNode->worldPosition(spawnPositionWorld());
 
 	creatureNode->attach<ClientCreature>(a_synchronizedCreature, gameInstance);
 }

@@ -255,59 +255,59 @@ namespace MV {
 		Point():x(0),y(0),z(0){}
 		Point(T a_xPos, T a_yPos, T a_zPos = 0):x(a_xPos),y(a_yPos),z(a_zPos){}
 
-		void clear();
+		inline void clear();
 
-		Point<T>& set(T a_xPos, T a_yPos) {
+		inline Point<T>& set(T a_xPos, T a_yPos) {
 			x = a_xPos;
 			y = a_yPos;
 			return *this;
 		}
-		Point<T>& set(T a_xPos, T a_yPos, T a_zPos) {
+		inline Point<T>& set(T a_xPos, T a_yPos, T a_zPos) {
 			x = a_xPos;
 			y = a_yPos;
 			z = a_zPos;
 			return *this;
 		}
 
-		Point<T>& scale(T a_amount);
-		Point<T>& locate(T a_xPos, T a_yPos, T a_zPos);
-		Point<T>& locate(T a_xPos, T a_yPos);
-		Point<T>& translate(T a_xAmount, T a_yAmount, T a_zAmount);
-		Point<T>& translate(T a_xAmount, T a_yAmount);
+		inline Point<T>& scale(T a_amount);
+		inline Point<T>& locate(T a_xPos, T a_yPos, T a_zPos);
+		inline Point<T>& locate(T a_xPos, T a_yPos);
+		inline Point<T>& translate(T a_xAmount, T a_yAmount, T a_zAmount);
+		inline Point<T>& translate(T a_xAmount, T a_yAmount);
 
-		bool atOrigin() const{ return equals<T>(x, 0) && equals<T>(y, 0) && equals<T>(z, 0); }
+		inline bool atOrigin() const { return equals<T>(x, 0) && equals<T>(y, 0) && equals<T>(z, 0); }
 
-		Point<T> ignoreZ() const {
+		inline Point<T> ignoreZ() const {
 			return Point<T>(x, y);
 		}
 
-		Point<T>& operator+=(const Point<T>& a_other);
-		Point<T>& operator-=(const Point<T>& a_other);
-		Point<T>& operator*=(const Point<T>& a_other);
-		Point<T>& operator/=(const Point<T>& a_other);
-		Point<T>& operator*=(const T& a_other);
-		Point<T>& operator/=(const T& a_other);
-		Point<T>& operator*=(const Scale& a_other);
-		Point<T>& operator/=(const Scale& a_other);
+		inline Point<T>& operator+=(const Point<T>& a_other);
+		inline Point<T>& operator-=(const Point<T>& a_other);
+		inline Point<T>& operator*=(const Point<T>& a_other);
+		inline Point<T>& operator/=(const Point<T>& a_other);
+		inline Point<T>& operator*=(const T& a_other);
+		inline Point<T>& operator/=(const T& a_other);
+		inline Point<T>& operator*=(const Scale& a_other);
+		inline Point<T>& operator/=(const Scale& a_other);
 
-		bool operator==(const Point<T>& a_other) const{
+		inline bool operator==(const Point<T>& a_other) const{
 			return equals(x, a_other.x) && equals(y, a_other.y) && equals(z, a_other.z);
 		}
-		bool operator==(const T &a_other) const{
+		inline bool operator==(const T &a_other) const{
 			return equals(x, a_other) && equals(y, a_other) && equals(z, a_other);
 		}
 
-		bool operator!=(const Point<T>& a_other) const{
+		inline bool operator!=(const Point<T>& a_other) const{
 			return !(*this == a_other);
 		}
-		bool operator!=(const T &a_other) const{
+		inline bool operator!=(const T &a_other) const{
 			return !(*this == a_other);
 		}
 
-		bool operator<(const Point<T>& a_other) const{
+		inline bool operator<(const Point<T>& a_other) const{
 			return (x + y) < (a_other.x + a_other.y);
 		}
-		bool operator>(const Point<T>& a_other) const{
+		inline bool operator>(const Point<T>& a_other) const{
 			return (x + y) > (a_other.x + a_other.y);
 		}
 
@@ -316,18 +316,18 @@ namespace MV {
 			archive(CEREAL_NVP(x), CEREAL_NVP(y), CEREAL_NVP(z));
 		}
 
-		Point<PointPrecision> normalized() const {
+		inline Point<PointPrecision> normalized() const {
 			PointPrecision length = magnitude();
 			if (length == 0) { length = 1; }
 			return Point<PointPrecision>(static_cast<PointPrecision>(x) / length, static_cast<PointPrecision>(y) / length, static_cast<PointPrecision>(z) / length);
 		}
 
 		//useful for sorting where you don't care exactly about the distance, just the relative distance.
-		PointPrecision preSquareMagnitude() const {
-			static_cast<PointPrecision>((x * x) + (y * y) + (z * z));
+		inline PointPrecision preSquareMagnitude() const {
+			return static_cast<PointPrecision>((x * x) + (y * y) + (z * z));
 		}
 
-		PointPrecision magnitude() const {
+		inline PointPrecision magnitude() const {
 			return sqrt(preSquareMagnitude());
 		}
 

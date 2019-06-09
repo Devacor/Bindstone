@@ -37,7 +37,7 @@ void CreatureNetworkState::hook(chaiscript::ChaiScript &a_script) {
 	a_script.add(chaiscript::fun(&CreatureNetworkState::position), "position");
 	a_script.add(chaiscript::fun(&CreatureNetworkState::buildingSlot), "buildingSlot");
 	a_script.add(chaiscript::fun(&CreatureNetworkState::animationName), "animationName");
-	a_script.add(chaiscript::fun(&CreatureNetworkState::animationTime), "animationTime");
+	a_script.add(chaiscript::fun(&CreatureNetworkState::animationLoops), "animationLoops");
 
 	a_script.add(chaiscript::fun([](CreatureNetworkState &a_self, const std::string &a_key) {
 		return a_self.variables[a_key];
@@ -56,6 +56,7 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 	a_script.add(chaiscript::fun(&Creature::onHealthChange), "onHealthChange");
 	a_script.add(chaiscript::fun(&Creature::onDeath), "onDeath");
 	a_script.add(chaiscript::fun(&Creature::onFall), "onFall");
+	a_script.add(chaiscript::fun(&Creature::spineAnimator), "spine");
 
 	a_script.add(chaiscript::fun([](Creature &a_self) -> GameInstance& {return a_self.gameInstance; }), "game");
 
@@ -75,19 +76,11 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 
 	a_script.add(chaiscript::fun([&](Creature &a_self) {
 		return a_self.state->id();
-	}), "id");
+	}), "networkId");
 
 	a_script.add(chaiscript::fun([](Creature &a_self, int a_amount) {
 		return a_self.changeHealth(a_amount);
 	}), "changeHealth");
-
-	a_script.add(chaiscript::fun([](Creature &a_self, float a_range) {
-		return a_self.gameInstance.teamAgainstPlayer(a_self.player()).creaturesInRange(a_self.networkPosition(), a_range);
-	}), "enemiesInRange");
-
-	a_script.add(chaiscript::fun([](Creature &a_self, float a_range) {
-		return a_self.gameInstance.teamForPlayer(a_self.player()).creaturesInRange(a_self.networkPosition(), a_range);
-	}), "alliesInRange");
 
 	a_script.add(chaiscript::fun([](Creature &a_self) {
 		return a_self.statTemplate;
@@ -173,15 +166,20 @@ void ServerCreature::initialize() {
 
 void ServerCreature::updateImplementation(double a_delta) {
 	if (alive()) {
-		state->modify()->position = owner()->position();
 		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 		statTemplate.script(gameInstance.script()).update(self, a_delta);
 		targeting.update(a_delta);
 
-		//prefer this after getting all to work
-// 		if (state->self()->position != owner()->position()) {
-// 			state->modify()->position = owner()->position();
-// 		}
+ 		if (state->self()->position != owner()->position()) {
+ 			state->modify()->position = owner()->position();
+ 		}
+		if (!state->destroyed()) {
+			if (state->self()->animationName != spine()->track().name()) {
+				state->modify()->animationName = spine()->track().name();
+				state->modify()->animationLoops = spine()->track().looping();
+			}
+			state->modify()->animationTime = spine()->track().time();
+		}
 	}
 }
 
@@ -189,6 +187,7 @@ chaiscript::ChaiScript& ServerCreature::hook(chaiscript::ChaiScript &a_script, G
 	Creature::hook(a_script, a_gameInstance);
 	a_script.add(chaiscript::user_type<ServerCreature>(), "ServerCreature");
 	a_script.add(chaiscript::base_class<Creature, ServerCreature>());
+	a_script.add(chaiscript::base_class<Component, ServerCreature>());
 
 	a_script.add(chaiscript::fun(&ServerCreature::onArrive), "onArrive");
 	a_script.add(chaiscript::fun(&ServerCreature::onBlocked), "onBlocked");
@@ -198,6 +197,14 @@ chaiscript::ChaiScript& ServerCreature::hook(chaiscript::ChaiScript &a_script, G
 	a_script.add(chaiscript::fun(&ServerCreature::pathAgent), "agent");
 
 	a_script.add(chaiscript::fun(&ServerCreature::targeting), "targeting");
+
+	a_script.add(chaiscript::fun([](ServerCreature &a_self, float a_range) {
+		return a_self.gameInstance.teamAgainstPlayer(a_self.player()).creaturesInRange(a_self.agent()->gridPosition(), a_range);
+	}), "enemiesInRange");
+
+	a_script.add(chaiscript::fun([](ServerCreature &a_self, float a_range) {
+		return a_self.gameInstance.teamForPlayer(a_self.player()).creaturesInRange(a_self.agent()->gridPosition(), a_range);
+	}), "alliesInRange");
 
 	a_script.add(chaiscript::fun([](ServerCreature &a_self) {
 		a_self.fall();
@@ -228,7 +235,10 @@ TargetPolicy::~TargetPolicy() {
 	clearTarget();
 }
 
-void TargetPolicy::target(uint64_t a_targetId, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail /*= std::function<void(TargetPolicy &)>()*/) {
+void TargetPolicy::target(int64_t a_targetId, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail /*= std::function<void(TargetPolicy &)>()*/) {
+	if (!selfCreature->alive()) {
+		a_fail(*this);
+	}
 	auto a_target = self()->gameInstance.creature(a_targetId);
 
 	if (a_target.get() == targetCreature) { return; }
@@ -236,6 +246,9 @@ void TargetPolicy::target(uint64_t a_targetId, float a_range, std::function<void
 	clearTarget();
 	if (!stunDuration && selfCreature) {
 		if (MV::distance(selfCreature->agent()->gridPosition(), a_target->agent()->gridPosition()) <= a_range) {
+			if (selfCreature->agent()->pathfinding()) {
+				selfCreature->agent()->stop();
+			}
 			if (a_succeed) {
 				a_succeed(*this);
 			}
@@ -320,13 +333,13 @@ void TargetPolicy::root(float a_duration) {
 chaiscript::ChaiScript& TargetPolicy::hook(chaiscript::ChaiScript &a_script) {
 	a_script.add(chaiscript::user_type<TargetPolicy>(), "TargetPolicy");
 
-	a_script.add(chaiscript::fun([](TargetPolicy& a_self, uint64_t a_target, std::function<void(TargetPolicy &)> a_succeed) {
+	a_script.add(chaiscript::fun([](TargetPolicy& a_self, int64_t a_target, std::function<void(TargetPolicy &)> a_succeed) {
 		a_self.target(a_target, 0.0f, a_succeed);
 	}), "target");
-	a_script.add(chaiscript::fun([](TargetPolicy& a_self, uint64_t a_target, float a_range, std::function<void(TargetPolicy &)> a_succeed) {
+	a_script.add(chaiscript::fun([](TargetPolicy& a_self, int64_t a_target, float a_range, std::function<void(TargetPolicy &)> a_succeed) {
 		a_self.target(a_target, a_range, a_succeed);
 	}), "target");
-	a_script.add(chaiscript::fun([](TargetPolicy& a_self, uint64_t a_target, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail) {
+	a_script.add(chaiscript::fun([](TargetPolicy& a_self, int64_t a_target, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail) {
 		a_self.target(a_target, a_range, a_succeed, a_fail);
 	}), "target");
 
@@ -417,18 +430,21 @@ ClientCreature::ClientCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, co
 	state->self()->onNetworkSynchronize = [&] {
 		onNetworkSynchronize();
 	};
+	state->self()->onAnimationChanged = [&] {
+		onAnimationChanged();
+	};
 }
 
 void ClientCreature::initialize() {
 	auto newNode = owner()->make(assetPath(), gameInstance.services());
 	newNode->serializable(false);
 	spineAnimator = newNode->componentInChildren<MV::Scene::Spine>().get();
-	spineAnimator->animate("run");
 
 	auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 	statTemplate.script(gameInstance.script()).spawn(self);
 
 	gameInstance.registerCreature(self);
+	onAnimationChanged();
 	onNetworkSynchronize();
 }
 
@@ -436,6 +452,7 @@ chaiscript::ChaiScript& ClientCreature::hook(chaiscript::ChaiScript &a_script, G
 	Creature::hook(a_script, a_gameInstance);
 	a_script.add(chaiscript::user_type<ClientCreature>(), "ClientCreature");
 	a_script.add(chaiscript::base_class<Creature, ClientCreature>());
+	a_script.add(chaiscript::base_class<Component, ClientCreature>());
 
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ClientCreature>, std::shared_ptr<ServerCreature>>([](const MV::Scene::SafeComponent<ClientCreature> &a_item) { return a_item.self(); }));
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ClientCreature>, std::shared_ptr<Creature>>([](const MV::Scene::SafeComponent<ClientCreature> &a_item) { return std::static_pointer_cast<Creature>(a_item.self()); }));
@@ -450,6 +467,11 @@ void ClientCreature::onNetworkSynchronize() {
 	networkDelta.add(MV::Stopwatch::systemTime());
 	startClientPosition = owner()->position();
 	accumulatedDuration = 0;
+	spine()->track().time(state->self()->animationTime);
+}
+
+void ClientCreature::onAnimationChanged() {
+	spine()->animate(state->self()->animationName, state->self()->animationLoops);
 }
 
 void ClientCreature::updateImplementation(double a_delta) {

@@ -738,33 +738,43 @@ namespace MV{
 
 		AnimationTrack& AnimationTrack::time(double a_newTime){
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call time.");
-			spAnimationState_getCurrent(animationState, myTrackIndex)->trackTime = static_cast<float>(a_newTime);
+			auto *foundTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
+			if (foundTrack) {
+				foundTrack->trackTime = static_cast<float>(a_newTime);
+			}
 			return *this;
 		}
 		double AnimationTrack::time() const{
-			return static_cast<double>(spAnimationState_getCurrent(animationState, myTrackIndex)->trackTime);
+			auto *foundTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
+			return foundTrack ? static_cast<double>(foundTrack->trackTime) : 0.0;
 		}
 
 		AnimationTrack& AnimationTrack::crossfade(double a_newTime){
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call crossfade.");
 			auto *trackState = spAnimationState_getCurrent(animationState, myTrackIndex);
-			trackState->mixDuration = static_cast<float>(a_newTime);
-
+			if (trackState) {
+				trackState->mixDuration = static_cast<float>(a_newTime);
+			}
 			return *this;
 		}
 		double AnimationTrack::crossfade() const{
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call crossfade.");
-			return static_cast<double>(spAnimationState_getCurrent(animationState, myTrackIndex)->mixDuration);
+			auto *foundTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
+			return foundTrack ? static_cast<double>(foundTrack->mixDuration) : 0.0;
 		}
 
 		AnimationTrack& AnimationTrack::timeScale(double a_newTime){
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call timescale.");
-			spAnimationState_getCurrent(animationState, myTrackIndex)->timeScale = static_cast<float>(a_newTime);
+			auto *foundTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
+			if (foundTrack) {
+				foundTrack->timeScale = static_cast<float>(a_newTime);
+			}
 			return *this;
 		}
 		double AnimationTrack::timeScale() const{
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call timescale.");
-			return static_cast<double>(spAnimationState_getCurrent(animationState, myTrackIndex)->timeScale);
+			auto *foundTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
+			return foundTrack ? static_cast<double>(foundTrack->timeScale) : 1.0;
 		}
 
 		chaiscript::ChaiScript& AnimationEventData::hook(chaiscript::ChaiScript &a_script) {
@@ -847,7 +857,6 @@ namespace MV{
 
 		std::string AnimationTrack::name() const {
 			if (recentTrack) {
-				std::cout << "RECENT: " << recentTrack->animation->name << "\n";
 				return std::string(recentTrack->animation->name);
 			}
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call name.");
@@ -861,7 +870,16 @@ namespace MV{
 			}
 			require<ResourceException>(animationState, "Spine asset not loaded, cannot call duration.");
 			auto *currentTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
-			return (currentTrack && currentTrack->animation && currentTrack->animation->duration) ? currentTrack->animation->duration : 0.0f;
+			return (currentTrack && currentTrack->animation) ? currentTrack->animation->duration : 0.0f;
+		}
+
+		bool AnimationTrack::looping() const {
+			if (recentTrack) {
+				return recentTrack->loop;
+			}
+			require<ResourceException>(animationState, "Spine asset not loaded, cannot call name.");
+			auto *currentTrack = spAnimationState_getCurrent(animationState, myTrackIndex);
+			return currentTrack && currentTrack->loop;
 		}
 
 	}

@@ -58,7 +58,7 @@ std::vector<std::shared_ptr<ServerCreature>> Team::creaturesInRange(const MV::Po
 	for (auto&& kv : game.creatures) {
 		auto a_creature = kv.second;
 		if ((game.teamForPlayer(a_creature->player()).side() == ourSide) && a_creature->alive()){
-			auto ourDistance = MV::preSquareDistance(a_location, a_creature->agent()->gridPosition());
+			auto ourDistance = MV::distance(a_location, a_creature->agent()->gridPosition());
 			distances[kv.second.get()] = ourDistance;
 			if (ourDistance <= a_radius) {
 				MV::insertSorted(result, a_creature, [&](const std::shared_ptr<ServerCreature> &a_lhs, const std::shared_ptr<ServerCreature> &a_rhs) {

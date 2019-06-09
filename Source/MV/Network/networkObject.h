@@ -39,11 +39,11 @@ namespace MV {
 
 		NetworkObject(){}
 
-		NetworkObject(uint64_t a_id) :
+		NetworkObject(int64_t a_id) :
 			synchronizeId(a_id) {
 		}
 
-		NetworkObject(uint64_t a_id, const std::shared_ptr<T> &a_local):
+		NetworkObject(int64_t a_id, const std::shared_ptr<T> &a_local):
 			synchronizeId(a_id),
 			local(a_local){
 		}
@@ -60,7 +60,7 @@ namespace MV {
 			}
 		}
 
-		uint64_t id() const {
+		int64_t id() const {
 			return synchronizeId;
 		}
 
@@ -93,11 +93,9 @@ namespace MV {
 			} else if(local) {
 				if (!a_other->destroying) {
 					local->synchronize(a_other->local);
-				} else {
-					local->destroy(a_other->local);
 				}
 			}
-			if (!a_other->destroying) {
+			if (a_other->destroying) {
 				local->destroy(a_other->local);
 			}
 			dirty = false;
@@ -141,7 +139,7 @@ namespace MV {
 
 		bool dirty = true;
 		bool destroying = false;
-		uint64_t synchronizeId = 0;
+		int64_t synchronizeId = 0;
 		std::shared_ptr<T> local;
 	};
 
@@ -169,7 +167,7 @@ namespace MV {
 		}
 
 		void synchronize(std::vector<VariantType> a_incoming) {
-			std::vector<uint64_t> removeList;
+			std::vector<int64_t> removeList;
 			for (auto&& item : a_incoming) {
 				boost::apply_visitor([&](auto &a_item) {
 					auto found = objects.find(a_item->id());
@@ -246,8 +244,8 @@ namespace MV {
 
 		std::unordered_map<std::type_index, boost::any> spawnCallbacks;
 
-		std::atomic<uint64_t> currentId;
-		std::unordered_map<uint64_t, VariantType> objects;
+		std::atomic<int64_t> currentId;
+		std::unordered_map<int64_t, VariantType> objects;
 	};
 
 }

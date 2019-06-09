@@ -74,6 +74,10 @@ GameEditor::GameEditor(std::string a_username, std::string a_password) :
 		done = true;
 	});
 
+	if (autoStartGame) {
+		gameButton->press();
+	}
+
 // 	auto sendButton = makeButton(grid, game.managers().textLibrary, mouse, "Send", { 100.0f, 20.0f }, UTF_CHAR_STR("Send"));
 // 	sendButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 // 		if (client) {

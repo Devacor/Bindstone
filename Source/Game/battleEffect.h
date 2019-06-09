@@ -55,9 +55,9 @@ enum class TargetType { NONE, CREATURE, GROUND };
 class BattleEffectNetworkState {
 public:
 	BattleEffectNetworkState() {}
-	BattleEffectNetworkState(GameInstance& a_gameInstance, const std::string &a_effectTypeId, uint64_t a_creatureOwnerId, const std::string &a_creatureAttachPosition = "");
+	BattleEffectNetworkState(GameInstance& a_gameInstance, const std::string &a_effectTypeId, int64_t a_creatureOwnerId, const std::string &a_creatureAttachPosition = "");
 
-	uint64_t creatureOwnerId = 0;
+	int64_t creatureOwnerId = 0;
 
 	std::function<void()> onNetworkDeath;
 	std::function<void()> onNetworkSynchronize;
@@ -70,11 +70,11 @@ public:
 	std::map<std::string, MV::DynamicVariable> variables;
 
 	TargetType targetType = TargetType::NONE;
-	uint64_t targetCreatureId = 0;
+	int64_t targetCreatureId = 0;
 	MV::Point<> targetPosition;
 	double duration = 0.0;
 
-	uint64_t netId = 0;
+	int64_t netId = 0;
 	bool dying = false;
 
 	void synchronize(std::shared_ptr<BattleEffectNetworkState> a_other) {
@@ -144,7 +144,7 @@ public:
 		return !state->self()->dying;
 	}
 
-	uint64_t netId() const {
+	int64_t netId() const {
 		return state->id();
 	}
 	 
@@ -186,8 +186,8 @@ public:
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
 
 protected:
-	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, uint64_t a_creatureId, const std::string &a_creatureBoneAttachment, GameInstance& a_gameInstance);
-	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const BattleEffectData& a_statTemplate, uint64_t a_creatureId, const std::string &a_creatureBoneAttachment, GameInstance& a_gameInstance);
+	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, int64_t a_creatureId, const std::string &a_creatureBoneAttachment, GameInstance& a_gameInstance);
+	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const BattleEffectData& a_statTemplate, int64_t a_creatureId, const std::string &a_creatureBoneAttachment, GameInstance& a_gameInstance);
 	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> &a_suppliedState, GameInstance& a_gameInstance);
 	virtual void initialize() override;
 

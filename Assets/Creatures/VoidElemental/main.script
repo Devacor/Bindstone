@@ -2,43 +2,45 @@ self.spawn = fun(self){
 	self["tryToFindAndAttackTarget"] = fun(self, dt){
 		var targets = self.enemiesInRange(20);
 		if(!targets.empty()){
-			var target = targets[0].id;
+			var target = targets[0].networkId;
 			print("Target Id:");
 			print(target);
-			if(target != self.getNetValue["activeTarget"]){
-				self.setNetValue["activeTarget"] = target;
+			var activeTarget = self["activeTarget"];
+			print(activeTarget);
+			if(activeTarget != target){
+				print("ComparisonDone");
+				self["activeTarget"] = target;
 				self.targeting().target(target, 10, fun[target](targeting){
-					targeting.self().setNetValue["attacking"] = true;
-					print("ATTACKING VAR: " + to_string(targeting.self().getNetValue["attacking"]));
-					auto spine = targeting.self().owner().spineComponent();
+					targeting.self()["activeTarget"] = 0;
+					targeting.self()["attacking"] = true;
+					print("ATTACKING VAR: " + to_string(targeting.self()["attacking"]));
+					auto spine = targeting.self().spine();
 					spine.animate("attack", false);
 					spine.onEvent.connect("launch", fun[target, targeting](spine, index, eventData){
 						if(eventData.name == "launch"){
 							print("LAUNCHING");
-							var newMissile = BattleEffectNetworkState(targeting.self().game(), "Missile", targeting.self().id());
-							print("L2");
+							var newMissile = BattleEffectNetworkState(targeting.self().game(), "Missile", targeting.self().networkId);
 							newMissile.duration = 1.25;
 							newMissile.targetType = TargetType_CREATURE;
-							print("L3");
 							newMissile.targetCreatureId = target;
-							auto effect = targeting.self().game().spawnBattleEffect(newMissile);
-							print("L4");
+							auto effect = spawnOnNetwork(newMissile);
 							effect.onArrive.connect("Arrive", fun(battleEffect) {
 								if(!battleEffect.targetCreature().is_var_null()){
 									print("Damage!");
 									battleEffect.targetCreature().changeHealth(-5);
 								}
 							});
-							print("L5");
 						}
 					});
 					spine.onEnd.connect("unlock", fun[targeting](spine, index){
 						print("ATTACK" + spine.track(index).name());
 						if(spine.track(index).name() == "attack"){
 							print("ATTACK FALSE");
-							targeting.self().setNetValue["attacking"] = false;
+							targeting.self()["attacking"] = false;
 						}
 					});
+				}, fun(targeting){
+					targeting.self()["activeTarget"] = 0;
 				});
 			}
 			return true;
@@ -48,21 +50,22 @@ self.spawn = fun(self){
 
 	self["applyDefaultTarget"] = fun(self){
 		self.targeting.target(self.team.enemyWell, fun(targeting){
-			print(to_string(targeting.self().id()) + " made it!");
+			print(to_string(targeting.self().networkId()) + " made it!");
 			targeting.self().fall();
 		});
 	};
 
-	self.setNetValue["attacking"] = false;
-	self.setNetValue["activeTarget"] = 0;
+	self["attacking"] = false;
+	self["activeTarget"] = 0;
 	self.agent.gridSpeed(10);
-	self["applyDefaultTarget"](self);
 };
 
 self.update = fun(self, dt){
-	if(!self.getNetValue["attacking"].bool){
+	if(!self["attacking"]){
 		if(!self["tryToFindAndAttackTarget"](self, dt)){
 			self["applyDefaultTarget"](self);
 		}
+	}else{
+		print("Attacking: " + to_string(self["activeTarget"]));
 	}
 };

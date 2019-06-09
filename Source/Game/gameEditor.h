@@ -11,11 +11,7 @@ public:
 	GameEditor(std::string a_username, std::string a_password);
 
 	void start() {
-		if (autoStartGame) {
-			runGame();
-		} else {
-			runLimbo();
-		}
+		runLimbo();
 	}
 private:
 	void resumeTitleMusic();
@@ -68,6 +64,10 @@ private:
 			game.handleInput();
 			game.render();
 			std::this_thread::yield();
+		}
+		const Uint8 *state = SDL_GetKeyboardState(NULL);
+		if (state[SDL_SCANCODE_LSHIFT] || state[SDL_SCANCODE_RSHIFT]) {
+			runLimbo();
 		}
 	}
 

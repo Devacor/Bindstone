@@ -115,6 +115,7 @@ public:
 		}
 
 		MV::require<MV::ResourceException>(false, "Failed to locate : ", a_id);
+		throw; //suppress no return warning.
 	}
 private:
 	Catalog< DataType>() {
@@ -140,7 +141,7 @@ public:
 
 	~TargetPolicy();
 
-	void target(uint64_t a_target, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail = std::function<void(TargetPolicy &)>());
+	void target(int64_t a_target, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail = std::function<void(TargetPolicy &)>());
 
 	void target(const MV::Point<> &a_location, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail = std::function<void(TargetPolicy &)>());
 
@@ -197,10 +198,12 @@ private:
 
 
 struct CreatureNetworkState {
-	uint64_t netId;
+	int64_t netId;
 
 	std::function<void()> onNetworkDeath;
 	std::function<void()> onNetworkSynchronize;
+	std::function<void()> onAnimationChanged;
+
 	std::string creatureTypeId;
 
 	std::map<std::string, MV::DynamicVariable> variables;
@@ -213,7 +216,8 @@ struct CreatureNetworkState {
 	MV::Point<MV::PointPrecision> position;
 
 	std::string animationName;
-	float animationTime = 0.0f;
+	bool animationLoops = false;
+	double animationTime = 0.0;
 
 	CreatureNetworkState() {
 	}
@@ -227,8 +231,15 @@ struct CreatureNetworkState {
 	void synchronize(std::shared_ptr<CreatureNetworkState> a_other) {
 		health = a_other->health;
 		position = a_other->position;
-		animationName = a_other->animationName;
+		bool newAnimationBasedOnTime = a_other->animationTime < animationTime;
 		animationTime = a_other->animationTime;
+		if (animationName != a_other->animationName || animationLoops != a_other->animationLoops || newAnimationBasedOnTime) {
+			animationName = a_other->animationName;
+			animationLoops = a_other->animationLoops;
+			if (onAnimationChanged) {
+				onAnimationChanged();
+			}
+		}
 
 		if (onNetworkSynchronize) {
 			onNetworkSynchronize();
@@ -238,6 +249,10 @@ struct CreatureNetworkState {
 	void destroy(std::shared_ptr<CreatureNetworkState> a_other) {
 		std::cout << "Killing: " << creatureTypeId << std::endl;
 		dying = true;
+		position = a_other->position;
+		animationName = a_other->animationName;
+		animationLoops = a_other->animationLoops;
+		animationTime = a_other->animationTime;
 		if (onNetworkDeath) {
 			onNetworkDeath();
 		} else {
@@ -253,6 +268,7 @@ struct CreatureNetworkState {
 			cereal::make_nvp("health", health),
 			cereal::make_nvp("position", position),
 			cereal::make_nvp("animationName", animationName),
+			cereal::make_nvp("animationLoops", animationLoops),
 			cereal::make_nvp("animationTime", animationTime),
 			cereal::make_nvp("variables", variables)
 		);
@@ -294,16 +310,12 @@ public:
 
 	virtual bool changeHealth(int amount) = 0;
 
-	uint64_t netId() const {
+	int64_t netId() const {
 		return state->id();
 	}
 
 	int32_t buildingSlot() const {
 		return state->self()->buildingSlot;
-	}
-
-	virtual MV::Point<MV::PointPrecision> networkPosition() const {
-		return state->self()->position;
 	}
 
 	std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> networkState() const {
@@ -385,10 +397,6 @@ public:
 		return pathAgent;
 	}
 
-	MV::Point<MV::PointPrecision> networkPosition() const override {
-		return pathAgent->gridPosition();
-	}
-
 protected:
 	ServerCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, int a_buildingSlot, GameInstance& a_gameInstance);
 	ServerCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, const CreatureData& a_statTemplate, int a_buildingSlot, GameInstance& a_gameInstance);
@@ -412,7 +420,8 @@ private:
 			state->self()->health = 0;
 			state->self()->dying = true;
 			state->self()->animationName = "die";
-			state->self()->animationTime = 0;
+			state->self()->animationLoops = false;
+			state->self()->animationTime = 0.0;
 			state->destroy();
 
 			animateDeathAndRemove();
@@ -425,7 +434,7 @@ private:
 		onDeathSignal(self);
 		spineAnimator->animate(state->self()->animationName, false);
 		spineAnimator->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
-			if (a_self->track(a_track).name() == "die") {
+			if (a_self->track(a_track).name() == state->self()->animationName) {
 				owner()->removeFromParent();
 			}
 		});
@@ -487,16 +496,26 @@ private:
 	void animateDeathAndRemove() {
 		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 		onDeathSignal(self);
-		spineAnimator->animate(state->self()->animationName, false);
-		spineAnimator->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
-			if (a_self->track(a_track).name() == "die") {
-				owner()->removeFromParent();
-			}
+		task().cancel();
+		if (owner()->position() != state->self()->position) {
+			task().now("Tween", [&](MV::Task&, double a_dt) {
+				owner()->position(MV::moveToward(owner()->position(), state->self()->position, static_cast<MV::PointPrecision>(a_dt) * 200.0f));
+				return owner()->position() != state->self()->position;
+			});
+		}
+		task().then("animateAway", [&](MV::Task&) {
+			spineAnimator->animate(state->self()->animationName, false);
+			spineAnimator->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
+				if (a_self->track(a_track).name() == state->self()->animationName) {
+					owner()->removeFromParent();
+				}
+			});
 		});
 	}
 
 	void onNetworkSynchronize();
-
+	void onAnimationChanged();
+	
 	virtual void updateImplementation(double a_delta) override;
 
 	MV::Point<> startClientPosition;

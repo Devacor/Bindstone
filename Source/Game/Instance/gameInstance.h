@@ -63,9 +63,7 @@ public:
 	}
 
 	std::shared_ptr<MV::Scene::Node> gameObjectContainer() const {
-		auto result = pathMap->owner()->makeOrGet("Creatures");
-		auto result2 = pathMap->owner()->makeOrGet("Objects");
-		return result;
+		return pathMap->owner();
 	}
 
 	std::shared_ptr<MV::Scene::Node> scene() const {
@@ -113,7 +111,7 @@ public:
 		}
 	}
 
-	const std::shared_ptr<ServerCreature> &creature(uint64_t a_id) {
+	const std::shared_ptr<ServerCreature> &creature(int64_t a_id) {
 		static std::shared_ptr<ServerCreature> nullCreature;
 		if (a_id == 0) {
 			return nullCreature;
@@ -135,7 +133,7 @@ protected:
 	virtual void hook();
 
 	std::vector<std::shared_ptr<Building>> buildings;
-	std::map<uint64_t, std::shared_ptr<ServerCreature>> creatures;
+	std::map<int64_t, std::shared_ptr<ServerCreature>> creatures;
 
 	GameData& gameData;
 
@@ -168,11 +166,11 @@ public:
 		return result;
 	}
 
-	virtual void requestUpgrade(int a_slot, size_t a_upgrade);
+	void requestUpgrade(int a_slot, size_t a_upgrade) override;
 
-	virtual void performUpgrade(int a_slot, size_t a_upgrade) override;
+	void performUpgrade(int a_slot, size_t a_upgrade) override;
 
-	virtual bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &a_player) const override;
+	bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &a_player) const override;
 
 protected:
 	void hook() override;
@@ -203,8 +201,12 @@ public:
 		return true;
 	}
 
+	void requestUpgrade(int a_slot, size_t a_upgrade) override {
+		performUpgrade(a_slot, a_upgrade);
+	}
+
 protected:
-	virtual void updateImplementation(double dt) override;
+	void updateImplementation(double dt) override;
 	void hook() override;
 
 private:

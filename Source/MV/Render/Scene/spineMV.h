@@ -79,6 +79,7 @@ namespace MV {
 
 			std::string name() const;
 			double duration() const;
+			bool looping() const;
 
 			AnimationTrack& stop();
 			AnimationTrack& time(double a_newTime);

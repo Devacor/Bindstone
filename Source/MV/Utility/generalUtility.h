@@ -22,7 +22,7 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 
-#define UTF_CHAR_STR(stringVal) u8##stringVal
+#define U8_STR(stringVal) reinterpret_cast<const char *>(u8##stringVal)
 
 namespace MV {
 	typedef char UtfChar;

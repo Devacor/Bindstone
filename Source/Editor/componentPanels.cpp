@@ -70,17 +70,17 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 		panel.services().get<Editor>()->sceneUpdated();
 	});
 
-	auto deselectButton = makeButton(grid, panel.services(), "De-Select", buttonSize, UTF_CHAR_STR("Deselect"));
+	auto deselectButton = makeButton(grid, panel.services(), "De-Select", buttonSize, U8_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		panel.loadPanel<DeselectedEditorPanel>();
 	});
 
-	auto saveButton = makeButton(grid, panel.services(), "Save", buttonSize, UTF_CHAR_STR("Save"));
+	auto saveButton = makeButton(grid, panel.services(), "Save", buttonSize, U8_STR("Save"));
 	saveButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		controls->elementToEdit->save("Assets/Prefabs/" + controls->elementToEdit->id() + ".prefab");
 	});
 
-	auto loadButton = makeButton(grid, panel.services(), "Load", buttonSize, UTF_CHAR_STR("Load"));
+	auto loadButton = makeButton(grid, panel.services(), "Load", buttonSize, U8_STR("Load"));
 	loadButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		if (MV::fileExists("Assets/Prefabs/" + controls->elementToEdit->id() + ".prefab")) {
 			auto newNode = controls->elementToEdit->parent()->make("Assets/Prefabs/" + controls->elementToEdit->id() + ".prefab", panel.services());
@@ -92,14 +92,14 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 		}
 	});
 
-	auto copyButton = makeButton(grid, panel.services(), "Copy", buttonSize, UTF_CHAR_STR("Copy"));
+	auto copyButton = makeButton(grid, panel.services(), "Copy", buttonSize, U8_STR("Copy"));
 	copyButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		controls->elementToEdit->clone();
 		panel.services().get<Editor>()->sceneUpdated();
 		panel.loadPanel<DeselectedEditorPanel>();
 	});
 
-	auto childCreateButton = makeButton(grid, panel.services(), "Create", buttonSize, UTF_CHAR_STR("Create"));
+	auto childCreateButton = makeButton(grid, panel.services(), "Create", buttonSize, U8_STR("Create"));
 	childCreateButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		auto newNode = controls->elementToEdit->make();
 
@@ -109,7 +109,7 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 		panel.loadPanel<SelectedNodeEditorPanel>(editableNode);
 	});
 
-	auto deleteButton = makeButton(grid, panel.services(), "Delete", buttonSize, UTF_CHAR_STR("Delete"));
+	auto deleteButton = makeButton(grid, panel.services(), "Delete", buttonSize, U8_STR("Delete"));
 	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		controls->elementToEdit->removeFromParent();
 		panel.services().get<Editor>()->sceneUpdated();
@@ -118,17 +118,17 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 
 	const MV::Size<> labelSize{ buttonSize.width, 20.0f };
 
-	makeLabel(grid, panel.services(), "Position", labelSize, UTF_CHAR_STR("Position"));
+	makeLabel(grid, panel.services(), "Position", labelSize, U8_STR("Position"));
 	float textboxWidth = 52.0f;
 	posX = makeInputField(this, panel.services(), grid, "posX", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->position().x)));
 	posY = makeInputField(this, panel.services(), grid, "posY", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->position().y)));
 
-	makeLabel(grid, panel.services(), "Rotate", MV::size(textboxWidth, 27.0f), UTF_CHAR_STR("Rotate"));
+	makeLabel(grid, panel.services(), "Rotate", MV::size(textboxWidth, 27.0f), U8_STR("Rotate"));
 	rotate = makeInputField(this, panel.services(), grid, "rotateZ", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->elementToEdit->rotation().z)));
 	rotateX = makeInputField(this, panel.services(), grid, "rotateX", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->elementToEdit->rotation().x)));
 	rotateY = makeInputField(this, panel.services(), grid, "rotateY", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->elementToEdit->rotation().y)));
 
-	makeLabel(grid, panel.services(), "Scale", labelSize, UTF_CHAR_STR("Scale"));
+	makeLabel(grid, panel.services(), "Scale", labelSize, U8_STR("Scale"));
 	scaleX = makeInputField(this, panel.services(), grid, "scaleX", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->elementToEdit->scale().x)));
 	scaleY = makeInputField(this, panel.services(), grid, "scaleY", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->elementToEdit->scale().y)));
 
@@ -185,7 +185,7 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 		};
 	}
 	
-	auto attachComponentButton = makeButton(grid, panel.services(), "Attach", buttonSize, UTF_CHAR_STR("Attach"));
+	auto attachComponentButton = makeButton(grid, panel.services(), "Attach", buttonSize, U8_STR("Attach"));
 	attachComponentButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) mutable {
 		componentPanel->loadPanel<ChooseElementCreationType>(controls->elementToEdit, this);
 	});
@@ -422,12 +422,12 @@ SelectedDrawableEditorPanel::SelectedDrawableEditorPanel(EditorControls &a_panel
 		color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->
 		padding({ 2.0f, 2.0f })->owner();
 	auto buttonSize = MV::size(gridWidth, 27.0f);
-	auto deselectButton = makeButton(grid, *panel.services().get<MV::TextLibrary>(), *panel.services().get<MV::TapDevice>(), "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
+	auto deselectButton = makeButton(grid, *panel.services().get<MV::TextLibrary>(), *panel.services().get<MV::TapDevice>(), "Deselect", buttonSize, U8_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		panel.deleteFullScene();
 	});
 
-	auto deleteButton = makeButton(grid, *panel.services().get<MV::TextLibrary>(), *panel.services().get<MV::TapDevice>(), "Delete", buttonSize, UTF_CHAR_STR("Delete"));
+	auto deleteButton = makeButton(grid, *panel.services().get<MV::TextLibrary>(), *panel.services().get<MV::TapDevice>(), "Delete", buttonSize, U8_STR("Delete"));
 	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		controls->elementToEdit->detach();
 		panel.deleteFullScene();
@@ -462,12 +462,12 @@ SelectedDrawableEditorPanel::SelectedDrawableEditorPanel(EditorControls &a_panel
 
 	float textboxWidth = 52.0f;
 
-	makeButton(grid, *a_panel.services().get<MV::TextLibrary>(), *a_panel.services().get<MV::TapDevice>(), "Texture", buttonSize, UTF_CHAR_STR("Texture"))->
+	makeButton(grid, *a_panel.services().get<MV::TextLibrary>(), *a_panel.services().get<MV::TapDevice>(), "Texture", buttonSize, U8_STR("Texture"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		openTexturePicker();
 	});
 
-	makeButton(grid, *a_panel.services().get<MV::TextLibrary>(), *a_panel.services().get<MV::TapDevice>(), "Texture1", buttonSize, UTF_CHAR_STR("Texture1"))->
+	makeButton(grid, *a_panel.services().get<MV::TextLibrary>(), *a_panel.services().get<MV::TapDevice>(), "Texture1", buttonSize, U8_STR("Texture1"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		openTexturePicker(1);
 	});
@@ -794,12 +794,12 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 		color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->
 		padding({ 2.0f, 2.0f })->owner();
 	auto buttonSize = MV::size(110.0f, 27.0f);
-	auto deselectButton = makeButton(grid, panel.services(), "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
+	auto deselectButton = makeButton(grid, panel.services(), "Deselect", buttonSize, U8_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		panel.deleteFullScene();
 	});
 
-	auto deleteButton = makeButton(grid, panel.services(), "Delete", buttonSize, UTF_CHAR_STR("Delete"));
+	auto deleteButton = makeButton(grid, panel.services(), "Delete", buttonSize, U8_STR("Delete"));
 	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		controls->elementToEdit->detach();
 		panel.deleteFullScene();
@@ -814,15 +814,15 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 	});
 
 	float textboxWidth = 52.0f;
-	makeLabel(grid, panel.services(), "Width/Columns", buttonSize, UTF_CHAR_STR("Width|Column"));
+	makeLabel(grid, panel.services(), "Width/Columns", buttonSize, U8_STR("Width|Column"));
 	width = makeInputField(this, panel.services(), grid, "width", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->elementToEdit->gridWidth())));
 	columns = makeInputField(this, panel.services(), grid, "columns", MV::size(textboxWidth, 27.0f), std::to_string(a_controls->elementToEdit->columns()));
 
-	makeLabel(grid, panel.services(), "Padding", buttonSize, UTF_CHAR_STR("Padding X|Y"));
+	makeLabel(grid, panel.services(), "Padding", buttonSize, U8_STR("Padding X|Y"));
 	paddingX = makeInputField(this, panel.services(), grid, "paddingX", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->elementToEdit->padding().first.x)));
 	paddingY = makeInputField(this, panel.services(), grid, "paddingY", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->elementToEdit->padding().first.y)));
 
-	makeLabel(grid, panel.services(), "Margins", buttonSize, UTF_CHAR_STR("Margins X|Y"));
+	makeLabel(grid, panel.services(), "Margins", buttonSize, U8_STR("Margins X|Y"));
 	marginsX = makeInputField(this, panel.services(), grid, "marginsX", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->elementToEdit->margin().first.x)));
 	marginsY = makeInputField(this, panel.services(), grid, "marginsY", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->elementToEdit->margin().first.y)));
 
@@ -860,7 +860,7 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 	}
 	auto deselectLocalAABB = deselectButton->bounds();
 
-	auto anchorsButton = makeButton(grid, panel.services(), "Anchors", buttonSize, UTF_CHAR_STR("Anchors"));
+	auto anchorsButton = makeButton(grid, panel.services(), "Anchors", buttonSize, U8_STR("Anchors"));
 	anchorsButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) mutable {
 		openAnchorEditor(controls->elementToEdit.self());
 	});
@@ -896,12 +896,12 @@ SelectedSpineEditorPanel::SelectedSpineEditorPanel(EditorControls &a_panel, std:
 		color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->
 		padding({ 2.0f, 2.0f })->owner();
 	auto buttonSize = MV::size(110.0f, 27.0f);
-	auto deselectButton = makeButton(grid, panel.services(), "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
+	auto deselectButton = makeButton(grid, panel.services(), "Deselect", buttonSize, U8_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		panel.deleteFullScene();
 	});
 
-	auto deleteButton = makeButton(grid, panel.services(), "Delete", buttonSize, UTF_CHAR_STR("Delete"));
+	auto deleteButton = makeButton(grid, panel.services(), "Delete", buttonSize, U8_STR("Delete"));
 	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		controls->elementToEdit->detach();
 		panel.deleteFullScene();
@@ -916,22 +916,22 @@ SelectedSpineEditorPanel::SelectedSpineEditorPanel(EditorControls &a_panel, std:
 	});
 
 	float textboxWidth = 52.0f;
-	makeLabel(grid, panel.services(), "Json", buttonSize, UTF_CHAR_STR("Json"));
+	makeLabel(grid, panel.services(), "Json", buttonSize, U8_STR("Json"));
 	assetJson = makeInputField(this, panel.services(), grid, "json", buttonSize, a_controls->elementToEdit->bundle().skeletonFile);
-	makeLabel(grid, panel.services(), "Atlas", buttonSize, UTF_CHAR_STR("Atlas"));
+	makeLabel(grid, panel.services(), "Atlas", buttonSize, U8_STR("Atlas"));
 	assetAtlas = makeInputField(this, panel.services(), grid, "atlas", buttonSize, a_controls->elementToEdit->bundle().atlasFile);
 	
-	makeLabel(grid, panel.services(), "Scale", buttonSize, UTF_CHAR_STR("Scale"));
+	makeLabel(grid, panel.services(), "Scale", buttonSize, U8_STR("Scale"));
 	scale = makeInputField(this, panel.services(), grid, "scale", buttonSize, std::to_string(a_controls->elementToEdit->bundle().loadScale));
 
-	makeLabel(grid, panel.services(), "Animation", buttonSize, UTF_CHAR_STR("Animation"));
-	animationPreview = makeInputField(this, panel.services(), grid, "preview", buttonSize, UTF_CHAR_STR(""));
+	makeLabel(grid, panel.services(), "Animation", buttonSize, U8_STR("Animation"));
+	animationPreview = makeInputField(this, panel.services(), grid, "preview", buttonSize, U8_STR(""));
 
-	auto addAttachment = makeButton(grid, panel.services(), "Add", buttonSize, UTF_CHAR_STR("Add Binding"));
+	auto addAttachment = makeButton(grid, panel.services(), "Add", buttonSize, U8_STR("Add Binding"));
 	std::weak_ptr<MV::Scene::Node> weakGrid = grid;
 	addAttachment->onAccept.connect("click", [&, weakGrid](std::shared_ptr<MV::Scene::Clickable>) { handleMakeButton(weakGrid.lock()); });
 
-	auto clearAttachments = makeButton(grid, panel.services(), "Clear", buttonSize, UTF_CHAR_STR("Clear Bindings"));
+	auto clearAttachments = makeButton(grid, panel.services(), "Clear", buttonSize, U8_STR("Clear Bindings"));
 	clearAttachments->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		controls->elementToEdit->unbindAll();
 		for (auto&& socket : linkedSockets) {
@@ -1040,12 +1040,12 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 		color({BOX_BACKGROUND})->margin({4.0f, 4.0f})->
 		padding({2.0f, 2.0f})->owner();
 	auto buttonSize = MV::size(110.0f, 27.0f);
-	auto deselectButton = makeButton(grid, panel.services(), "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
+	auto deselectButton = makeButton(grid, panel.services(), "Deselect", buttonSize, U8_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>){
 		panel.deleteFullScene();
 	});
 
-	auto deleteButton = makeButton(grid, panel.services(), "Delete", buttonSize, UTF_CHAR_STR("Delete"));
+	auto deleteButton = makeButton(grid, panel.services(), "Delete", buttonSize, U8_STR("Delete"));
 	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		controls->elementToEdit->detach();
 		panel.deleteFullScene();
@@ -1075,7 +1075,7 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	width = makeInputField(this, panel.services(), grid, "width", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->size().width)));
 	height = makeInputField(this, panel.services(), grid, "height", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->size().height)));
 
-	makeButton(grid, panel.services(), "Texture", buttonSize, UTF_CHAR_STR("Texture"))->
+	makeButton(grid, panel.services(), "Texture", buttonSize, U8_STR("Texture"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
 			openTexturePicker();
 		});
@@ -1083,7 +1083,7 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	aspectX = makeInputField(this, panel.services(), grid, "AspectX", MV::size(textboxWidth, 27.0f));
 	aspectY = makeInputField(this, panel.services(), grid, "AspectY", MV::size(textboxWidth, 27.0f));
 
-	makeButton(grid, panel.services(), "SetAspect", buttonSize, UTF_CHAR_STR("Snap Aspect"))->
+	makeButton(grid, panel.services(), "SetAspect", buttonSize, U8_STR("Snap Aspect"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
 			if (controls->elementToEdit->texture()) {
 				auto size = controls->elementToEdit->texture()->bounds().size();
@@ -1093,7 +1093,7 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 			}
 		});
 
-	makeButton(grid, panel.services(), "SetSize", buttonSize, UTF_CHAR_STR("Snap Size"))->
+	makeButton(grid, panel.services(), "SetSize", buttonSize, U8_STR("Snap Size"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
 			if (controls->elementToEdit->texture()) {
 				auto size = controls->elementToEdit->texture()->bounds().size();
@@ -1103,14 +1103,14 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 			}
 		});
 
-	makeButton(grid, panel.services(), "FlipX", buttonSize, UTF_CHAR_STR("Flip X"))->
+	makeButton(grid, panel.services(), "FlipX", buttonSize, U8_STR("Flip X"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>) {
 			if (controls->elementToEdit->texture()) {
 				controls->elementToEdit->texture()->flipX(!controls->elementToEdit->texture()->flipX());
 			}
 		});
 
-	makeButton(grid, panel.services(), "FlipY", buttonSize, UTF_CHAR_STR("Flip Y"))->
+	makeButton(grid, panel.services(), "FlipY", buttonSize, U8_STR("Flip Y"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>) {
 			if (controls->elementToEdit->texture()) {
 				controls->elementToEdit->texture()->flipY(!controls->elementToEdit->texture()->flipY());
@@ -1165,7 +1165,7 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	}
 	auto deselectLocalAABB = deselectButton->bounds();
 
-	auto anchorsButton = makeButton(grid, panel.services(), "Anchors", buttonSize, UTF_CHAR_STR("Anchors"));
+	auto anchorsButton = makeButton(grid, panel.services(), "Anchors", buttonSize, U8_STR("Anchors"));
 	anchorsButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) mutable {
 		openAnchorEditor(controls->elementToEditBase.self());
 	});
@@ -1184,7 +1184,7 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 		} catch (std::invalid_argument&) {} catch (std::out_of_range&) {}
 	});
 
-	makeLabel(grid, panel.services(), "subDivideLabel", MV::size(textboxWidth, 23.0f), UTF_CHAR_STR("Subdivisions"));
+	makeLabel(grid, panel.services(), "subDivideLabel", MV::size(textboxWidth, 23.0f), U8_STR("Subdivisions"));
 	subdivided = makeInputField(this, panel.services(), grid, "Subdivided", MV::size(textboxWidth, 27.0f))->
 		text(std::to_string(controls->elementToEdit->subdivisions()));
 	auto subClick = subdivided->owner()->component<MV::Scene::Clickable>();
@@ -1236,12 +1236,12 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 		color({InterfaceColors::BOX_BACKGROUND})->margin({4.0f, 4.0f})->
 		padding({2.0f, 2.0f})->owner();
 	auto buttonSize = MV::size(226.0f, 27.0f);
-	auto deselectButton = makeButton(grid, panel.services(), "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
+	auto deselectButton = makeButton(grid, panel.services(), "Deselect", buttonSize, U8_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>){
 		panel.deleteFullScene();
 	});
 
-	auto deleteButton = makeButton(grid, panel.services(), "Delete", buttonSize, UTF_CHAR_STR("Delete"));
+	auto deleteButton = makeButton(grid, panel.services(), "Delete", buttonSize, U8_STR("Delete"));
 	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		controls->elementToEdit->detach();
 		panel.deleteFullScene();
@@ -1263,14 +1263,14 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	width = makeInputField(this, panel.services(), grid, "width", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->size().width)));
 	height = makeInputField(this, panel.services(), grid, "height", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(a_controls->size().height)));
 
-	makeButton(grid, panel.services(), "Texture", buttonSize, UTF_CHAR_STR("Texture"))->
+	makeButton(grid, panel.services(), "Texture", buttonSize, U8_STR("Texture"))->
 		onAccept.connect("openTexture", [&](std::shared_ptr<MV::Scene::Clickable>){
 			openTexturePicker();
 		});
 
 	const MV::Size<> labelSize{226.0f, 20.0f};
 
-	makeLabel(grid, panel.services(), "spawnRate", labelSize, UTF_CHAR_STR("Spawn Rate"));
+	makeLabel(grid, panel.services(), "spawnRate", labelSize, U8_STR("Spawn Rate"));
 	auto maximumSpawnRate = makeSlider(node->renderer(), *panel.services().get<MV::TapDevice>(), [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximumSpawnRate = MV::mixIn(0.0f, 1.25f, a_slider->percent(), 2);
 	}, MV::unmixIn(0.0f, 1.25f, controls->elementToEdit->properties().maximumSpawnRate, 2));
@@ -1280,7 +1280,7 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	}, MV::unmixIn(0.0f, 1.25f, controls->elementToEdit->properties().minimumSpawnRate, 2));
 	grid->add(maximumSpawnRate);
 
-	makeLabel(grid, panel.services(), "lifeSpan", labelSize, UTF_CHAR_STR("Lifespan"));
+	makeLabel(grid, panel.services(), "lifeSpan", labelSize, U8_STR("Lifespan"));
 	auto maximumLifespan = makeSlider(node->renderer(), *panel.services().get<MV::TapDevice>(), [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.maxLifespan = MV::mixIn(0.01f, 60.0f, a_slider->percent(), 2);
 	}, MV::unmixIn(0.01f, 60.0f, controls->elementToEdit->properties().maximum.maxLifespan, 2));
@@ -1299,7 +1299,7 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 		maximumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, MV::unmixInOut(-maxSpeedFloat, maxSpeedFloat, controls->elementToEdit->properties().minimum.endSpeed, 2));
 
-	makeLabel(grid, panel.services(), "initialSpeed", labelSize, UTF_CHAR_STR("Start Speed"));
+	makeLabel(grid, panel.services(), "initialSpeed", labelSize, U8_STR("Start Speed"));
 	auto startSpeed = makeSlider(panel.services(), [&, maximumEndSpeed,maxSpeedFloat](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginSpeed = MV::mixInOut(-maxSpeedFloat, maxSpeedFloat, a_slider->percent(), 2);
 		maximumEndSpeed->component<MV::Scene::Slider>()->percent(a_slider->percent());
@@ -1311,11 +1311,11 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	}, MV::unmixInOut(-maxSpeedFloat, maxSpeedFloat, controls->elementToEdit->properties().minimum.beginSpeed, 2));
 	grid->add(startSpeed);
 
-	makeLabel(grid, panel.services(), "speedChange", labelSize, UTF_CHAR_STR("End Speed"));
+	makeLabel(grid, panel.services(), "speedChange", labelSize, U8_STR("End Speed"));
 	grid->add(minimumEndSpeed);
 	grid->add(maximumEndSpeed);
 
-	makeLabel(grid, panel.services(), "initialDirection", labelSize, UTF_CHAR_STR("Start Direction"));
+	makeLabel(grid, panel.services(), "initialDirection", labelSize, U8_STR("Start Direction"));
 
 	auto maximumStartTilt = makeSlider(panel.services(), [&](std::shared_ptr<MV::Scene::Slider> a_slider) {
 		controls->elementToEdit->properties().maximumDirectionDeg({ a_slider->percent() * 360.0f, controls->elementToEdit->properties().maximumDirectionDeg().y, controls->elementToEdit->properties().maximumDirectionDeg().z });
@@ -1344,7 +1344,7 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	}, controls->elementToEdit->properties().minimumDirectionDeg().z / 360.0f);
 	grid->add(maximumStartDirection);
 
-	makeLabel(grid, panel.services(), "directionChange", labelSize, UTF_CHAR_STR("Direction Change"));
+	makeLabel(grid, panel.services(), "directionChange", labelSize, U8_STR("Direction Change"));
 
 	auto maximumDirectionChangeTilt = makeSlider(node->renderer(), *panel.services().get<MV::TapDevice>(), [&](std::shared_ptr<MV::Scene::Slider> a_slider) {
 		controls->elementToEdit->properties().maximum.directionalChangeDeg({ MV::mix(-720.0f, 720.0f, a_slider->percent()), controls->elementToEdit->properties().maximum.directionalChangeDeg().y, controls->elementToEdit->properties().maximum.directionalChangeDeg().z });
@@ -1373,7 +1373,7 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().minimum.directionalChangeDeg().z));
 	grid->add(maximumDirectionChange);
 
-	makeLabel(grid, panel.services(), "rateOfChange", labelSize, UTF_CHAR_STR("Rate Of Change"));
+	makeLabel(grid, panel.services(), "rateOfChange", labelSize, U8_STR("Rate Of Change"));
 	auto maximumRateOfTilt = makeSlider(node->renderer(), *panel.services().get<MV::TapDevice>(), [&](std::shared_ptr<MV::Scene::Slider> a_slider) {
 		controls->elementToEdit->properties().maximum.rateOfChangeDeg({ MV::mix(-1480.0f, 1480.0f, a_slider->percent()), controls->elementToEdit->properties().maximum.rateOfChangeDeg().y, controls->elementToEdit->properties().maximum.rateOfChangeDeg().z });
 	}, MV::unmix(-1480.0f, 1480.0f, controls->elementToEdit->properties().maximum.rateOfChangeDeg().x));
@@ -1409,7 +1409,7 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 		maximumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
 	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().minimum.endScale.x));
 
-	makeLabel(grid, panel.services(), "startSize", labelSize, UTF_CHAR_STR("Start Size"));
+	makeLabel(grid, panel.services(), "startSize", labelSize, U8_STR("Start Size"));
 	auto startSize = makeSlider(node->renderer(), *panel.services().get<MV::TapDevice>(), [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.beginScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		maximumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
@@ -1421,11 +1421,11 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().minimum.beginScale.x));
 	grid->add(startSize);
 	
-	makeLabel(grid, panel.services(), "endSize", labelSize, UTF_CHAR_STR("End Size"));
+	makeLabel(grid, panel.services(), "endSize", labelSize, U8_STR("End Size"));
 	grid->add(minimumEndSize);
 	grid->add(maximumEndSize);
 
-	makeLabel(grid, panel.services(), "initialRotation", labelSize, UTF_CHAR_STR("Initialize Rotation"));
+	makeLabel(grid, panel.services(), "initialRotation", labelSize, U8_STR("Initialize Rotation"));
 	auto maximumRotation = makeSlider(panel.services(), [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximumRotation = {0.0f, 0.0f, a_slider->percent() * 360.0f};
 	}, controls->elementToEdit->properties().maximumRotation.z / 360.0f);
@@ -1435,7 +1435,7 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	}, controls->elementToEdit->properties().minimumRotation.z / 360.0f);
 	grid->add(maximumRotation);
 
-	makeLabel(grid, panel.services(), "rotationChange", labelSize, UTF_CHAR_STR("Rotation Change"));
+	makeLabel(grid, panel.services(), "rotationChange", labelSize, U8_STR("Rotation Change"));
 	auto maximumRotationChange = makeSlider(node->renderer(), *panel.services().get<MV::TapDevice>(), [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum.rotationalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
 	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().maximum.rotationalChange.z));
@@ -1447,19 +1447,19 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 
 	auto maxEndColor = makeColorButton(panel.services(), panel.content(), buttonSize, controls->elementToEdit->properties().maximum.endColor, [&](const MV::Color &a_color) {
 		controls->elementToEdit->properties().maximum.endColor = a_color;
-	}, UTF_CHAR_STR("End Max"));
+	}, U8_STR("End Max"));
 
 	auto maxStartColor = makeColorButton(panel.services(), panel.content(), buttonSize, controls->elementToEdit->properties().maximum.beginColor, [&, maxEndColor](const MV::Color &a_color) {
 		controls->elementToEdit->properties().maximum.beginColor = a_color;
 		controls->elementToEdit->properties().maximum.endColor = a_color;
 		applyColorToColorButton(maxEndColor.self(), a_color);
-	}, UTF_CHAR_STR("Start Max"));
+	}, U8_STR("Start Max"));
 
 	auto minEndColor = makeColorButton(panel.services(), panel.content(), buttonSize, controls->elementToEdit->properties().minimum.endColor, [&, maxEndColor](const MV::Color &a_color) {
 		controls->elementToEdit->properties().minimum.endColor = a_color;
 		controls->elementToEdit->properties().maximum.endColor = a_color;
 		applyColorToColorButton(maxEndColor.self(), a_color);
-	}, UTF_CHAR_STR("End Min"));
+	}, U8_STR("End Min"));
 
 	auto minStartColor = makeColorButton(panel.services(), panel.content(), buttonSize, controls->elementToEdit->properties().minimum.beginColor, [&, maxEndColor, minEndColor, maxStartColor](const MV::Color &a_color) {
 		controls->elementToEdit->properties().minimum.beginColor = a_color;
@@ -1469,7 +1469,7 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 		applyColorToColorButton(maxEndColor.self(), a_color);
 		applyColorToColorButton(minEndColor.self(), a_color);
 		applyColorToColorButton(maxStartColor.self(), a_color);
-	}, UTF_CHAR_STR("Start Min"));
+	}, U8_STR("Start Min"));
 
 	makeInputField(this, panel.services(), grid, "Shader", buttonSize)->
 		text(std::to_string(static_cast<int>(controls->elementToEdit->blend())))->
@@ -1565,12 +1565,12 @@ SelectedPathMapEditorPanel::SelectedPathMapEditorPanel(EditorControls &a_panel, 
 		color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f })->
 		padding({ 2.0f, 2.0f })->owner();
 	auto buttonSize = MV::size(110.0f, 27.0f);
-	auto deselectButton = makeButton(grid, panel.services(), "Deselect", buttonSize, UTF_CHAR_STR("Deselect"));
+	auto deselectButton = makeButton(grid, panel.services(), "Deselect", buttonSize, U8_STR("Deselect"));
 	deselectButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		panel.deleteFullScene();
 	});
 
-	auto deleteButton = makeButton(grid, panel.services(), "Delete", buttonSize, UTF_CHAR_STR("Delete"));
+	auto deleteButton = makeButton(grid, panel.services(), "Delete", buttonSize, U8_STR("Delete"));
 	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		controls->elementToEdit->detach();
 		panel.deleteFullScene();
@@ -1681,13 +1681,13 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	auto gridComponent = grid->position({ 0.0f, 20.0f })->attach<MV::Scene::Grid>()->gridWidth(116.0f)->
 		color({InterfaceColors::BOX_BACKGROUND})->margin({4.0f, 4.0f})->
 		padding({2.0f, 2.0f});
-	auto createButton = makeButton(grid, panel.services(), "Create", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Create"));
+	auto createButton = makeButton(grid, panel.services(), "Create", MV::size(110.0f, 27.0f), U8_STR("Create"));
 	fileName = makeInputField(this, panel.services(), grid, "Filename", MV::size(110.0f, 27.0f), previousFileName);
 	fileName->onChange.connect("!!!", [&](std::shared_ptr<MV::Scene::Text>) {
 		previousFileName = fileName->text();
 	});
-	auto saveButton = makeButton(grid, panel.services(), "Save", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Save"));
-	auto loadButton = makeButton(grid, panel.services(), "Load", MV::size(110.0f, 27.0f), UTF_CHAR_STR("Load"));
+	auto saveButton = makeButton(grid, panel.services(), "Save", MV::size(110.0f, 27.0f), U8_STR("Save"));
+	auto loadButton = makeButton(grid, panel.services(), "Load", MV::size(110.0f, 27.0f), U8_STR("Load"));
 	panel.updateBoxHeader(grid->bounds().width());
 	//panel.updateBoxHeader(grid->component<MV::Scene::Grid>()->bounds().width());
 
@@ -1977,14 +1977,14 @@ SelectedTextEditorPanel::SelectedTextEditorPanel(EditorControls &a_panel, std::s
 	offsetX = makeInputField(this, panel.services(), grid, "posX", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(controlBounds.minPoint.x)));
 	offsetY = makeInputField(this, panel.services(), grid, "posY", MV::size(textboxWidth, 27.0f), std::to_string(std::lround(controlBounds.minPoint.y)));
 
-	makeLabel(grid, panel.services(), "HeightBoundsLabel", buttonSize, UTF_CHAR_STR("Height Bounds"));
+	makeLabel(grid, panel.services(), "HeightBoundsLabel", buttonSize, U8_STR("Height Bounds"));
 	makeToggle(grid, panel.services(), "HeightBounds", a_controls->elementToEdit->useBoundsForLineHeight(), [&] {
 		controls->elementToEdit->useBoundsForLineHeight(true);
 	}, [&] {
 		controls->elementToEdit->useBoundsForLineHeight(false);
 	}, buttonSize);
 
-	makeLabel(grid, panel.services(), "PasswordToggleLabel", buttonSize, UTF_CHAR_STR("Password"));
+	makeLabel(grid, panel.services(), "PasswordToggleLabel", buttonSize, U8_STR("Password"));
 	makeToggle(grid, panel.services(), "PasswordToggle", a_controls->elementToEdit->passwordField(), [&]{
 		controls->elementToEdit->passwordField(true);
 	}, [&]{
@@ -2082,7 +2082,7 @@ SelectedButtonEditorPanel::SelectedButtonEditorPanel(EditorControls &a_panel, st
 		panel.deleteFullScene();
 	});
 
-	auto deleteButton = makeButton(grid, panel.services(), buttonSize, UTF_CHAR_STR("Delete"));
+	auto deleteButton = makeButton(grid, panel.services(), buttonSize, U8_STR("Delete"));
 	deleteButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
 		controls->elementToEdit->detach();
 		panel.deleteFullScene();

@@ -11,6 +11,9 @@ namespace MV {
 
 	class Interface {
 	public:
+		Interface() = delete;
+		Interface(const Interface&) = delete;
+		Interface& operator=(const Interface&) = delete;
 		Interface(const std::string &a_pageId, InterfaceManager& a_manager);
 
 		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
@@ -68,8 +71,8 @@ namespace MV {
 		}
 
 		Interface& make(const std::string &a_pageId) {
-			pages.emplace_back(a_pageId, *this);
-			return pages.back();
+			pages.push_back(std::make_unique<Interface>(a_pageId, *this));
+			return *pages.back();
 		}
 
 		Managers& managers() {
@@ -82,8 +85,8 @@ namespace MV {
 
 		void update(double a_dt) {
 			for (auto&& p : pages) {
-				if (p.visible()) {
-					p.update(a_dt);
+				if (p->visible()) {
+					p->update(a_dt);
 				}
 			}
 		}
@@ -96,12 +99,12 @@ namespace MV {
 
 		Interface& page(const std::string &a_pageId) {
 			for (auto&& p : pages) {
-				if (p.id() == a_pageId) {
-					return p;
+				if (p->id() == a_pageId) {
+					return *p;
 				}
 			}
 			require<ResourceException>(false, "Failed to find page [", a_pageId, "]");
-			return pages[0]; //never hit in reality
+			return *pages[0]; //never hit in reality
 		}
 
 		bool handleInput(SDL_Event &a_event) {
@@ -114,7 +117,7 @@ namespace MV {
 		void setActiveText(Interface* a_current);
 		void removeActiveText(Interface* a_current);
 	private:
-		std::vector<Interface> pages;
+		std::vector<std::unique_ptr<Interface>> pages;
 
 		TapDevice& ourMouse;
 		Managers& ourManagers;

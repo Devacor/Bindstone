@@ -16,7 +16,7 @@ namespace MV {
 		a_script.add(chaiscript::fun(&Interface::hide), "hide");
 		a_script.add(chaiscript::fun(&Interface::visible), "visible");
 
-		a_script.add(chaiscript::fun([](Interface& a_self) {return a_self.manager;}), "manager");
+		a_script.add(chaiscript::fun([](Interface& a_self) -> auto& {return a_self.manager;}), "manager");
 
 		a_script.add(chaiscript::fun(&Interface::node), "root");
 		a_script.add(chaiscript::fun(&Interface::scriptInitialize), "initialize");
@@ -33,7 +33,6 @@ namespace MV {
 
 	void Interface::show() {
 		if (!node->active()) {
-			initialize();
 			node->active(true);
 			node->depth(static_cast<MV::PointPrecision>(node->parent()->size())+1.0f);
 			node->parent()->normalizeDepth();
@@ -76,8 +75,9 @@ namespace MV {
 
 	void Interface::initialize() {
 		if (!node) {
-			node = manager.root()->loadChild("Assets/Interface/" + pageId + "/view.scene", manager.managers().services, pageId);
-
+			std::string nodePath = "Assets/Interface/" + pageId + "/view.scene";
+			node = manager.root()->loadChild(nodePath, manager.managers().services, pageId);
+			MV::require<MV::ResourceException>(node, "Node failed to load from: ", nodePath);
 			manager.root()->add(node);
 			node->active(false);
 

@@ -35,7 +35,7 @@ private:
 				panel.clearAnchorEditor();
 			});
 
-		makeLabel(gridNode, resources, "UsePositionLabel", labelSize, UTF_CHAR_STR("Use Position"));
+		makeLabel(gridNode, resources, "UsePositionLabel", labelSize, U8_STR("Use Position"));
 
 		makeToggle(grid->owner(), *(resources.get<MV::TapDevice>()), "UsePosition", target->anchors().usePosition(), [&]() {
 			target->anchors().usePosition(true);
@@ -43,7 +43,7 @@ private:
 			target->anchors().usePosition(false);
 		});
 
-		makeLabel(gridNode, *panel.services().get<MV::TextLibrary>(), "AnchorsLabel", labelSize, UTF_CHAR_STR("Anchors"));
+		makeLabel(gridNode, *panel.services().get<MV::TextLibrary>(), "AnchorsLabel", labelSize, U8_STR("Anchors"));
 
 		auto currentBoundsMethod = std::make_shared<MV::Scene::Anchors::BoundsToOffset>(MV::Scene::Anchors::BoundsToOffset::Ignore);
 		std::vector<MV::Scene::Anchors::BoundsToOffset> offsetMethod{ MV::Scene::Anchors::BoundsToOffset::Ignore, MV::Scene::Anchors::BoundsToOffset::Apply, MV::Scene::Anchors::BoundsToOffset::Apply_Reposition };
@@ -108,7 +108,7 @@ private:
 			target->anchors().anchor(updatedAnchors);
 		});
 
-		makeLabel(gridNode, resources, "Offset", labelSize, UTF_CHAR_STR("Offset"));
+		makeLabel(gridNode, resources, "Offset", labelSize, U8_STR("Offset"));
 		
 		offsetMinX = makeInputField(&panel, resources, gridNode, "offMinX", MV::size(halfButtonWidth, 27.0f), std::to_string(std::lround(target->anchors().offset().minPoint.x)));
 		offsetMinY = makeInputField(&panel, resources, gridNode, "offMinY", MV::size(halfButtonWidth, 27.0f), std::to_string(std::lround(target->anchors().offset().minPoint.y)));
@@ -140,7 +140,7 @@ private:
 			target->anchors().offset(updatedOffset);
 		});
 
-		makeButton(grid->owner(), resources, "Calculate", { 100.0f, 27.0f }, UTF_CHAR_STR("Calculate"))->
+		makeButton(grid->owner(), resources, "Calculate", { 100.0f, 27.0f }, U8_STR("Calculate"))->
 			onAccept.connect("Calculate", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				target->anchors().applyBoundsToOffset(MV::Scene::Anchors::BoundsToOffset::Apply);
 					

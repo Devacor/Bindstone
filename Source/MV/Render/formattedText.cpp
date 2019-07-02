@@ -224,7 +224,7 @@ namespace MV {
 
 	void FormattedCharacter::applyState(const std::shared_ptr<FormattedState> &a_state, bool a_isPassword) {
 		state = a_state;
-		character = a_isPassword ? a_state->font->characterDefinition(u8"●") : state->font->characterDefinition(textCharacter);
+		character = a_isPassword ? a_state->font->characterDefinition(U8_STR("●")) : state->font->characterDefinition(textCharacter);
 		auto silencedShape = shape->silence();
 		auto sprite = shape->component<Scene::Sprite>();
 		sprite->bounds(cast<PointPrecision>(character->characterSize()) * characterScale);
@@ -259,7 +259,7 @@ namespace MV {
 	FormattedCharacter::FormattedCharacter(const std::shared_ptr<Scene::Node> &parent, const std::string &a_character, const std::shared_ptr<FormattedState> &a_state, bool a_isPassword):
 		textCharacter(a_character),
 		state(a_state),
-		character(a_isPassword ? a_state->font->characterDefinition(u8"●") : a_state->font->characterDefinition(a_character)) {
+		character(a_isPassword ? a_state->font->characterDefinition(U8_STR("●")) : a_state->font->characterDefinition(a_character)) {
 
 		shape = parent->silence()->make(guid(character->character()))->
 			attach<Scene::Sprite>()->

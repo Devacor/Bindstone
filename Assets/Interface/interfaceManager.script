@@ -10,7 +10,7 @@ print(testStuff["v2"].int);
 print("success");
 
 self.initialize = fun(self){
-	auto& test = self.make("Login");
+	auto test := self.make("Login");
 	self.make("Main");
 	test.show();
 };

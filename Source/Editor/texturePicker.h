@@ -33,11 +33,11 @@ private:
 	void initializeRootPicker() {
 		auto gridNode = MV::Scene::Node::make(root->renderer());
 		grid = gridNode->attach<MV::Scene::Grid>()->cellSize(MV::size(100.0f, 27.0f))->padding({ 2.0f, 2.0f })->columns(6)->margin({ 4.0f, 4.0f })->color({ BOX_BACKGROUND });
-		makeButton(grid->owner(), *sharedResources.get<MV::TextLibrary>(), *sharedResources.get<MV::TapDevice>(), "Close", { 100.0f, 27.0f }, UTF_CHAR_STR("Close"))->
+		makeButton(grid->owner(), *sharedResources.get<MV::TextLibrary>(), *sharedResources.get<MV::TapDevice>(), "Close", { 100.0f, 27.0f }, U8_STR("Close"))->
 			onAccept.connect("Close", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				setter(nullptr, false);
 			});
-		makeButton(grid->owner(), *sharedResources.get<MV::TextLibrary>(), *sharedResources.get<MV::TapDevice>(), "Null", { 100.0f, 27.0f }, UTF_CHAR_STR("Clear"))->
+		makeButton(grid->owner(), *sharedResources.get<MV::TextLibrary>(), *sharedResources.get<MV::TapDevice>(), "Null", { 100.0f, 27.0f }, U8_STR("Clear"))->
 			onAccept.connect("Null", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				setter(nullptr, true);
 			});
@@ -69,7 +69,7 @@ private:
 		auto cellSize = MV::size(64.0f, 64.0f);
 		auto gridNode = MV::Scene::Node::make(root->renderer());
 		grid = gridNode->attach<MV::Scene::Grid>()->cellSize(cellSize)->padding({ 2.0f, 2.0f })->columns(6)->color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f });
-		makeButton(grid->owner(), *sharedResources.get<MV::TextLibrary>(), *sharedResources.get<MV::TapDevice>(), "Back", cellSize, UTF_CHAR_STR("Back"))->
+		makeButton(grid->owner(), *sharedResources.get<MV::TextLibrary>(), *sharedResources.get<MV::TapDevice>(), "Back", cellSize, U8_STR("Back"))->
 			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 			initializeRootPicker();
 		});
@@ -94,7 +94,7 @@ private:
 		auto cellSize = MV::size(64.0f, 64.0f);
 		auto gridNode = MV::Scene::Node::make(root->renderer());
 		grid = gridNode->attach<MV::Scene::Grid>()->cellSize(cellSize)->padding({ 2.0f, 2.0f })->columns(6)->color({ BOX_BACKGROUND })->margin({ 4.0f, 4.0f });
-		makeButton(grid->owner(), *sharedResources.get<MV::TextLibrary>(), *sharedResources.get<MV::TapDevice>(), "Back", cellSize, UTF_CHAR_STR("Back"))->
+		makeButton(grid->owner(), *sharedResources.get<MV::TextLibrary>(), *sharedResources.get<MV::TapDevice>(), "Back", cellSize, U8_STR("Back"))->
 			onAccept.connect("Back", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 			initializeRootPicker();
 		});

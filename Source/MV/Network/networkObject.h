@@ -236,10 +236,19 @@ namespace MV {
 		template <typename T>
 		void synchronizeItem(T& a_item, VariantType& found) {
 			boost::apply_visitor([&a_item](auto &a_found) {
-				if constexpr (std::is_same<decltype(a_found), decltype(a_item)>::value) {
-					a_found->synchronize(a_item);
-				}
+				synchronizeItemImplementation(a_item, a_found);
 			}, found);
+		}
+
+		template <typename T, typename V,
+			std::enable_if_t<std::is_same<T, V>::value>* = nullptr>
+		void synchronizeItemImplementation(T & a_item, V & a_found) {
+			a_found->synchronize(a_item);
+		}
+
+		template <typename T, typename V,
+			std::enable_if_t<!std::is_same<T, V>::value>* = nullptr>
+		void synchronizeItemImplementation(T & a_item, V & a_found) {
 		}
 
 		std::unordered_map<std::type_index, boost::any> spawnCallbacks;

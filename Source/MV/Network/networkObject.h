@@ -235,7 +235,7 @@ namespace MV {
 
 		template <typename T>
 		void synchronizeItem(T& a_item, VariantType& found) {
-			boost::apply_visitor([&a_item](auto &a_found) {
+			boost::apply_visitor([&](auto &a_found) {
 				synchronizeItemImplementation(a_item, a_found);
 			}, found);
 		}

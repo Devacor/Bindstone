@@ -59,23 +59,25 @@ private:
 
 class ExampleWorld {
 public:
-	MV::Scene::SafeComponent<MV::Scene::Sprite> playerVisual;
+	ExampleWorld(const std::shared_ptr<MV::Scene::Node> &a_node, Managers& a_managers, MV::TapDevice &a_mouse);
 
-	ExampleWorld(const std::shared_ptr<MV::Scene::Node> &a_node, MV::SharedTextures &a_sharedTextures, MV::TapDevice &a_mouse);
-
-	void controlPlayer();
+	void update(double dt);
 private:
 	void loadTextures() {
-		tileset = std::make_shared<ExampleTileSet>(sharedTextures);
+		tileset = std::make_shared<ExampleTileSet>(managers.textures);
 	}
 
 	std::shared_ptr<ExampleTileSet> tileset;
 
-	MV::SharedTextures &sharedTextures;
+	Managers &managers;
 
-	MV::Scene::SafeComponent<MV::Scene::Node> background;
-	MV::Scene::SafeComponent<MV::Scene::Node> environment;
-	MV::Scene::SafeComponent<MV::Scene::Node> foreground;
+	std::shared_ptr<MV::Scene::Node> background;
+	std::shared_ptr<MV::Scene::Node> environment;
+	std::shared_ptr<MV::Scene::Node> foreground;
+
+	std::shared_ptr<MV::Scene::Node> playerContainer;
+
+	double accumulatedTime = 0.0;
 
 	MV::TapDevice &mouse;
 };

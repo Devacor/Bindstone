@@ -54,7 +54,7 @@ void ExampleGame::initializeWindow() {
 void ExampleGame::InitializeWorldScene() {
 	worldScene = MV::Scene::Node::make(managers.renderer);
 	worldScene->scale(1.0f);
-	world = std::make_shared<ExampleWorld>(worldScene, managers.textures, mouse);
+	world = std::make_shared<ExampleWorld>(worldScene, managers, mouse);
 }
 
 bool ExampleGame::update(double dt) {
@@ -65,6 +65,9 @@ bool ExampleGame::update(double dt) {
 		done = false;
 		return false;
 	}
+
+	world->update(dt);
+
 	return true;
 }
 
@@ -89,7 +92,6 @@ void ExampleGame::handleInput() {
 			}
 		}
 	}
-	world->controlPlayer();
 	mouse.update();
 }
 
@@ -109,32 +111,52 @@ void ExampleGame::render() {
 	managers.renderer.updateScreen();
 }
 
-ExampleWorld::ExampleWorld(const std::shared_ptr<MV::Scene::Node>& a_node, MV::SharedTextures& a_sharedTextures, MV::TapDevice& a_mouse) :
+ExampleWorld::ExampleWorld(const std::shared_ptr<MV::Scene::Node>& a_node, Managers& a_managers, MV::TapDevice& a_mouse) :
 	background(a_node->make("Background")),
 	environment(a_node->make("Environment")),
 	foreground(a_node->make("Foreground")),
 	mouse(a_mouse),
-	sharedTextures(a_sharedTextures) {
+	managers(a_managers) {
 
 	loadTextures();
 
 	//add background texture here.
+	managers.renderer.backgroundColor({1.0f, 1.0f, 1.0f, 1.0f});
 
 	//load player here
+	playerContainer = environment->make("player");
+	auto playerSprite = playerContainer->attach<MV::Scene::Sprite>()->bounds(MV::BoxAABB(MV::Size<>(100.0f, 100.0f)));
+	//How to load a single part of an atlas (check out how it gets loaded in ExampleTileSet with manual positions)
+	playerSprite->texture(tileset->randomBreakable());
+	
+	//How to load a full image (makeHandle just returns 0,0 to 1,1 for coordinates)
+	//playerSprite->texture(managers.textures.file("Assets/Pixel/Levels/ground.png", false, true)->makeHandle());
 }
 
-void ExampleWorld::controlPlayer() {
+void ExampleWorld::update(double dt) {
+	accumulatedTime += dt;
+	if (accumulatedTime > 0.15) {
+		accumulatedTime = 0;
+		playerContainer->component<MV::Scene::Sprite>()->texture(tileset->randomBreakable());
+	}
 	const Uint8* state = SDL_GetKeyboardState(NULL);
+	MV::Point<> direction;
 	if (state[SDL_SCANCODE_RIGHT]) {
-
+		direction += {1.0f, 0.0f};
 	}
 	if (state[SDL_SCANCODE_LEFT]) {
-
+		direction -= {1.0f, 0.0f};
 	}
 	if (state[SDL_SCANCODE_UP]) {
-
+		direction -= {0.0f, 1.0f};
 	}
 	if (state[SDL_SCANCODE_DOWN]) {
-
+		direction += {0.0f, 1.0f};
 	}
+	const float playerSpeed = 100.0f; //move 100 pixels a second
+	direction *= playerSpeed * static_cast<MV::PointPrecision>(dt);
+	playerContainer->translate(direction);
+
+	//this returns the max size of the world. If the player is < 0, 0 or > worldSize then you know you are out of bounds.
+	//MV::Size<> worldSize = managers.renderer.world().size();
 }

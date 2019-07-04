@@ -1,4 +1,4 @@
-#include "diggerGame.h"
+#include "bankProject.h"
 #include "MV/Utility/threadPool.hpp"
 #include "MV/Utility/services.hpp"
 
@@ -14,7 +14,7 @@
 
 int main(int argc, char *argv[]) {
 	Managers managers;
-	DiggerGame game(managers);
+	ExampleGame game(managers);
 
 	managers.timer.start();
 	managers.timer.delta("tick");

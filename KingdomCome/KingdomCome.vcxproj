@@ -11,17 +11,18 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\Source\SolutionSpecific\KingdomCome\diggerGame.cpp" />
+    <ClCompile Include="..\Source\SolutionSpecific\KingdomCome\bankProject.cpp" />
     <ClCompile Include="..\Source\SolutionSpecific\KingdomCome\main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\Source\SolutionSpecific\KingdomCome\diggerGame.h" />
+    <ClInclude Include="..\Source\SolutionSpecific\KingdomCome\bankProject.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>
     <ProjectGuid>{2C83C3C3-14BA-4627-B89D-7DB52FF580DC}</ProjectGuid>
     <RootNamespace>KingdomCome</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>BlankProject</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">

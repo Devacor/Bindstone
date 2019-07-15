@@ -10,7 +10,6 @@
 #include "MV/Network/url.h"
 #include "MV/Utility/generalUtility.h"
 #include <boost/asio.hpp>
-#include <boost/bind.hpp>
 
 namespace MV {
 	struct HttpHeader {

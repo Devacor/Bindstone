@@ -1,9 +1,9 @@
 #ifndef _MV_DYNAMIC_VARIABLE_H_
 #define _MV_DYNAMIC_VARIABLE_H_
 
-#include <boost/variant.hpp>
 #include <string>
 #include <tuple>
+#include <variant>
 
 namespace chaiscript { class ChaiScript; }
 
@@ -13,171 +13,145 @@ namespace MV {
 		DynamicVariable() {}
 		DynamicVariable(const DynamicVariable& a_value) = default;
 		explicit DynamicVariable(bool a_value):
-			boolVal(a_value),
-			isEmpty(false){
+			value(a_value) {
 		}
 		explicit DynamicVariable(int64_t a_value) :
-			intVal(a_value),
-			isEmpty(false) {
+			value(a_value) {
 		}
 		explicit DynamicVariable(size_t a_value) :
-			intVal(static_cast<int64_t>(a_value)),
-			isEmpty(false) {
+			value(static_cast<int64_t>(a_value)) {
 		}
 		explicit DynamicVariable(int a_value) :
-			intVal(a_value),
-			isEmpty(false) {
+			value(static_cast<int64_t>(a_value)) {
 		}
 		explicit DynamicVariable(double a_value) :
-			doubleVal(a_value),
-			isEmpty(false) {
+			value(a_value) {
 		}
 		explicit DynamicVariable(const std::string &a_value) :
-			stringVal(a_value),
-			isEmpty(false) {
+			value(a_value) {
 		}
 
 		DynamicVariable& operator=(bool a_rhs) {
-			boolVal = a_rhs;
-			intVal = 0;
-			doubleVal = 0.0;
-			stringVal.clear();
-			isEmpty = false;
+			value = a_rhs;
 			return *this;
 		}
 
 		DynamicVariable& operator=(int64_t a_rhs) {
-			boolVal = false;
-			intVal = a_rhs;
-			doubleVal = 0.0;
-			stringVal.clear();
-			isEmpty = false;
+			value = a_rhs;
 			return *this;
 		}
 		DynamicVariable& operator=(size_t a_rhs) {
-			boolVal = false;
-			intVal = static_cast<int64_t>(a_rhs);
-			doubleVal = 0.0;
-			stringVal.clear();
-			isEmpty = false;
+			value = static_cast<int64_t>(a_rhs);
 			return *this;
 		}
 		DynamicVariable& operator=(int a_rhs) {
-			boolVal = false;
-			intVal = a_rhs;
-			doubleVal = 0.0;
-			stringVal.clear();
-			isEmpty = false;
+			value = static_cast<int64_t>(a_rhs);
 			return *this;
 		}
 
 		DynamicVariable& operator=(double a_rhs) {
-			boolVal = false;
-			intVal = 0;
-			doubleVal = a_rhs;
-			stringVal.clear();
-			isEmpty = false;
+			value = a_rhs;
 			return *this;
 		}
 
 		DynamicVariable& operator=(const std::string &a_rhs) {
-			boolVal = false;
-			intVal = 0;
-			doubleVal = 0.0;
-			stringVal = a_rhs;
-			isEmpty = false;
+			value = a_rhs;
 			return *this;
 		}
 
 		DynamicVariable& operator=(const DynamicVariable &a_rhs) {
-			boolVal = a_rhs.boolVal;
-			intVal = a_rhs.intVal;
-			doubleVal = a_rhs.doubleVal;
-			stringVal = a_rhs.stringVal;
-			isEmpty = a_rhs.isEmpty;
+			value = a_rhs.value;
 			return *this;
 		}
 
 		bool operator<(const DynamicVariable &a_rhs) const {
-			return std::tie(isEmpty, boolVal, intVal, doubleVal, stringVal) < std::tie(a_rhs.isEmpty, a_rhs.boolVal, a_rhs.intVal, a_rhs.doubleVal, a_rhs.stringVal);
+			return value < a_rhs.value;
 		}
 
 		bool operator==(bool a_rhs) const {
-			return !isEmpty && boolVal == a_rhs;
+			try { 
+				return std::get<bool>(value) == a_rhs; 
+			} catch (...) { 
+				return false; 
+			}
 		}
 		bool operator==(int64_t a_rhs) const {
-			return !isEmpty && intVal == a_rhs;
+			try {
+				return std::get<int64_t>(value) == a_rhs;
+			} catch (...) {
+				return false;
+			}
 		}
 		bool operator==(size_t a_rhs) const {
-			return !isEmpty && intVal == static_cast<int64_t>(a_rhs);
+			return *this == static_cast<int64_t>(a_rhs);
 		}
 		bool operator==(int a_rhs) const {
-			return !isEmpty && intVal == a_rhs;
+			return *this == static_cast<int64_t>(a_rhs);
 		}
 		bool operator==(double a_rhs) const {
-			return !isEmpty && doubleVal == a_rhs;
+			try { 
+				return std::get<double>(value) == a_rhs;
+			} catch (...) { 
+				return false; 
+			}
 		}
 		bool operator==(const std::string &a_rhs) const {
-			return !isEmpty && stringVal == a_rhs;
+			try { 
+				return std::get<std::string>(value) == a_rhs;
+			} catch (...) { 
+				return false; 
+			}
 		}
 
 		bool operator!=(bool a_rhs) const {
-			return isEmpty || boolVal != a_rhs;
+			return !(*this == a_rhs);
 		}
 		bool operator!=(int64_t a_rhs) const {
-			return isEmpty || intVal != a_rhs;
+			return !(*this == a_rhs);
 		}
 		bool operator!=(size_t a_rhs) const {
-			return isEmpty || intVal != static_cast<int64_t>(a_rhs);
+			return !(*this == a_rhs);
 		}
 		bool operator!=(int a_rhs) const {
-			return isEmpty || intVal != a_rhs;
+			return !(*this == a_rhs);
 		}
 		bool operator!=(double a_rhs) const {
-			return isEmpty || doubleVal != a_rhs;
+			return !(*this == a_rhs);
 		}
 		bool operator!=(const std::string &a_rhs) const {
-			return isEmpty || stringVal != a_rhs;
+			return !(*this == a_rhs);
 		}
 
 		bool getBool() const {
-			return boolVal;
+			return std::get<bool>(value);
 		}
 
 		int64_t getInt() const {
-			return intVal;
+			return std::get<int64_t>(value);
 		}
 
 		double getDouble() const {
-			return doubleVal;
+			return std::get<double>(value);
 		}
 
-		std::string getString() const {
-			return stringVal;
+		const std::string& getString() const {
+			return std::get<std::string>(value);
 		}
 
 		void clear() {
-			boolVal = false;
-			intVal = 0;
-			doubleVal = 0.0;
-			stringVal.clear();
-			isEmpty = true;
+			value = std::monostate{};
 		}
 
 		bool empty() const {
-			return isEmpty;
+			return value.index() == 0;
 		}
 
 		template <class Archive>
 		void serialize(Archive & archive) {
-			archive(CEREAL_NVP(isEmpty), CEREAL_NVP(boolVal), CEREAL_NVP(intVal), CEREAL_NVP(doubleVal), CEREAL_NVP(stringVal));
+			archive(CEREAL_NVP(value));
 		}
 	private:
-		bool boolVal = false;
-		int64_t intVal = 0;
-		double doubleVal = 0.0;
-		std::string stringVal;
-		bool isEmpty = true;
+		std::variant<std::monostate, bool, int64_t, double, std::string> value;
 	};
 
 	inline bool operator==(bool a_lhs, const DynamicVariable &a_rhs) {
@@ -218,8 +192,8 @@ namespace MV {
 		return a_rhs != a_lhs;
 	}
 
-	//I needed more debuggability and boost was throwing a lot within Cereal. :<
-	//typedef boost::variant<bool, int64_t, double, std::string> DynamicVariable;
+	//I needed more debuggability and std::variant was throwing a lot within Cereal. :<
+	//typedef std::variant<bool, int64_t, double, std::string> DynamicVariable;
 	void hookDynamicVariable(chaiscript::ChaiScript &a_script);
 }
 

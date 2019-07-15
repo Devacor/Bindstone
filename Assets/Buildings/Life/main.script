@@ -1,0 +1,33 @@
+self.spawn = fun(self){
+	self["nextSpawn"] = 5.0;
+
+	self["None"] = fun(self, dt){};
+
+	self["Basic"] = fun(self, dt){
+		self["nextSpawn"] -= dt;
+		if(self["nextSpawn"] <= 0){
+			self["nextSpawn"] = 5.0;
+			self.spawn("Life_T1");
+		}
+	};
+
+	self["Eternal"] = fun(self, dt){
+		self["nextSpawn"] -= dt;
+		if(self["nextSpawn"] <= 0){
+			self["nextSpawn"] = 5.0;
+			self.spawn("Life_T1");
+		}
+	};
+
+	self["Overwhelming"] = fun(self, dt){
+		self["nextSpawn"] -= dt;
+		if(self["nextSpawn"] <= 0){
+			self["nextSpawn"] = 5.0;
+			self.spawn("Life_T1");
+		}
+	};
+};
+
+self.update = fun(self, dt){
+	self[self.current().id](self, dt);
+};

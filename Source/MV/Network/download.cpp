@@ -121,7 +121,7 @@ namespace MV{
 					readResponseToStream();
 				}
 				if (amountLeftToRead > 0) {
-					boost::asio::async_read(*socket, *response, boost::asio::transfer_at_least(amountLeftToRead), boost::bind(&DownloadRequest::handleReadContent, shared_from_this(), boost::asio::placeholders::error));
+					boost::asio::async_read(*socket, *response, boost::asio::transfer_at_least(amountLeftToRead), std::bind(&DownloadRequest::handleReadContent, shared_from_this(), std::placeholders::_1));
 				} else {
 					if (onComplete) { onComplete(shared_from_this()); }
 				}
@@ -136,7 +136,7 @@ namespace MV{
 
 	void DownloadRequest::handleWriteRequest(const boost::system::error_code& err) {
 		if (!err) {
-			boost::asio::async_read_until(*socket, *response, "\r\n\r\n", boost::bind(&DownloadRequest::handleReadHeaders, shared_from_this(), boost::asio::placeholders::error));
+			boost::asio::async_read_until(*socket, *response, "\r\n\r\n", std::bind(&DownloadRequest::handleReadHeaders, shared_from_this(), std::placeholders::_1));
 		} else {
 			headerData.success = false;
 			headerData.errorMessage = "Download Write Failure: " + err.message();
@@ -148,12 +148,12 @@ namespace MV{
 	void DownloadRequest::handleConnect(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
 		if (!err) {
 			// The connection was successful. Send the request.
-			boost::asio::async_write(*socket, *request, boost::bind(&DownloadRequest::handleWriteRequest, shared_from_this(), boost::asio::placeholders::error));
+			boost::asio::async_write(*socket, *request, std::bind(&DownloadRequest::handleWriteRequest, shared_from_this(), std::placeholders::_1));
 		} else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
 			// The connection failed. Try the next endpoint in the list.
 			socket->close();
 			boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-			socket->async_connect(endpoint, boost::bind(&DownloadRequest::handleConnect, shared_from_this(), boost::asio::placeholders::error, ++endpoint_iterator));
+			socket->async_connect(endpoint, std::bind(&DownloadRequest::handleConnect, shared_from_this(), std::placeholders::_1, ++endpoint_iterator));
 		} else {
 			headerData.success = false;
 			headerData.errorMessage = "Download Connection Failure: " + err.message();
@@ -167,7 +167,7 @@ namespace MV{
 			// Attempt a connection to the first endpoint in the list. Each endpoint
 			// will be tried until we successfully establish a connection.
 			boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-			socket->async_connect(endpoint, boost::bind(&DownloadRequest::handleConnect, shared_from_this(), boost::asio::placeholders::error, ++endpoint_iterator));
+			socket->async_connect(endpoint, std::bind(&DownloadRequest::handleConnect, shared_from_this(), std::placeholders::_1, ++endpoint_iterator));
 		} else {
 			headerData.success = false;
 			headerData.errorMessage = "Download Resolve Failure: " + err.message();
@@ -190,7 +190,7 @@ namespace MV{
 		requestStream << "Connection: close\r\n\r\n";
 
 		tcp::resolver::query query(a_url.host(), "http");
-		resolver->async_resolve(query, boost::bind(&DownloadRequest::handleResolve, shared_from_this(), boost::asio::placeholders::error, boost::asio::placeholders::iterator));
+		resolver->async_resolve(query, std::bind(&DownloadRequest::handleResolve, shared_from_this(), std::placeholders::_1, std::placeholders::_2));
 	}
 
 	bool DownloadRequest::initializeSocket() {

@@ -16,28 +16,25 @@ namespace MV {
 		class Job {
 			friend Worker;
 		public:
+			enum class Continue {
+				MAIN_THREAD,
+				POOL,
+				IMMEDIATE
+			};
+
 			Job(const std::function<void()> &a_action) :
 				action(a_action) {
 			}
-			Job(const std::function<void()> &a_action, const std::function<void()> &a_onFinish) :
-				action(a_action),
-				onFinish(a_onFinish) {
-			}
-			Job(const std::function<void()> &a_action, const std::function<void()> &a_onFinish, const std::shared_ptr<std::atomic<size_t>> &a_groupCounter, const std::shared_ptr<std::function<void()>> &a_onGroupFinish) :
+			Job(const std::function<void()> &a_action, const std::function<void()> &a_onFinish, Continue a_continueMethod = Continue::POOL) :
 				action(a_action),
 				onFinish(a_onFinish),
-				groupCounter(a_groupCounter),
-				onGroupFinish(a_onGroupFinish) {
-			}
-			Job(const std::function<void()> &a_action, const std::shared_ptr<std::atomic<size_t>> &a_groupCounter, const std::shared_ptr<std::function<void()>> &a_onGroupFinish) :
-				action(a_action),
-				groupCounter(a_groupCounter),
-				onGroupFinish(a_onGroupFinish) {
+				onFinishContinue(a_continueMethod){
 			}
 			Job(Job&& a_rhs) = default;
 			Job(const Job& a_rhs) = default;
 
-			void group(const std::shared_ptr<std::atomic<size_t>> &a_groupCounter, const std::shared_ptr<std::function<void()>> &a_onGroupFinish) {
+			void group(const std::shared_ptr<std::atomic<size_t>> &a_groupCounter, const std::shared_ptr<std::function<void()>> &a_onGroupFinish, Continue a_continueMethod = Continue::POOL) {
+				onGroupFinishContinue = a_continueMethod;
 				groupCounter = a_groupCounter;
 				onGroupFinish = a_onGroupFinish;
 			}
@@ -45,22 +42,35 @@ namespace MV {
 			void operator()() noexcept {
 				try { action(); } catch (std::exception &e) { parent->exception(e); }
 				bool groupFinished = groupCounter && --(*groupCounter) == 0 && onGroupFinish && *onGroupFinish;
-				if (onFinish && !groupFinished) {
-					parent->task(onFinish);
-				}
-				else if (onFinish && groupFinished) {
-					parent->task([=] {
+				if (onFinish && groupFinished && onFinishContinue == onGroupFinishContinue) {
+					continueMethod([=](){
 						try { onFinish(); } catch (std::exception &e) { parent->exception(e); }
 						try { (*onGroupFinish)(); } catch (std::exception &e) { parent->exception(e); }
-					});
-				}
-				else if (groupFinished) {
-					parent->task((*onGroupFinish));
+					}, onFinishContinue);
+				}else{
+					if (onFinish) { continueMethod(onFinish, onFinishContinue); }
+					if (groupFinished) { continueMethod(*onGroupFinish, onGroupFinishContinue); }
 				}
 			}
 		private:
+			const void continueMethod(const std::function<void()> &a_method, Continue a_plan){
+				switch(a_plan){
+					case Continue::IMMEDIATE:
+						try { a_method(); } catch (std::exception &e) { parent->exception(e); }
+					break;
+					case Continue::MAIN_THREAD:
+						parent->schedule(a_method);
+					break;
+					case Continue::POOL:
+						parent->task(a_method);
+					break;
+				}
+			}
+
 			ThreadPool* parent;
 
+			Continue onFinishContinue = Continue::MAIN_THREAD;
+			Continue onGroupFinishContinue = Continue::MAIN_THREAD;
 			std::function<void()> action;
 			std::function<void()> onFinish;
 			std::shared_ptr<std::atomic<size_t>> groupCounter;
@@ -77,10 +87,18 @@ namespace MV {
 			~Worker() { if (thread && thread->joinable()) { thread->join(); } }
 
 			void cleanup() {
-				while (!finished) {}
+				const double cleanupTimeout = 5.0;
+				auto start = std::chrono::high_resolution_clock::now();
+				while (!finished && std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count() < cleanupTimeout) {
+					std::this_thread::yield();
+				}
+				if(!finished){
+					MV::error("Cleanup Timeout Exceeded in MV::ThreadPool::Worker!");
+				}
 			}
 		private:
 			void work() {
+				finished = false;
 				while (!parent->stopped) {
 					std::unique_lock<std::mutex> guard(parent->lock);
 					parent->notify.wait(guard, [=] {return parent->jobs.size() > 0 || parent->stopped; });
@@ -92,11 +110,12 @@ namespace MV {
 
 					job.parent = parent;
 					job();
+					--parent->active;
 				}
 				finished = true;
 			}
 			ThreadPool* parent;
-			bool finished = false;
+			bool finished = true;
 			std::unique_ptr<std::thread> thread;
 		};
 		friend Worker;
@@ -125,6 +144,7 @@ namespace MV {
 		}
 
 		void task(const Job &a_newWork) {
+			++active;
 			{
 				std::lock_guard<std::mutex> guard(lock);
 				jobs.emplace_back(std::move(a_newWork));
@@ -132,6 +152,7 @@ namespace MV {
 			notify.notify_one();
 		}
 		void task(const std::function<void()> &a_task) {
+			++active;
 			{
 				std::lock_guard<std::mutex> guard(lock);
 				jobs.emplace_back(a_task);
@@ -139,6 +160,7 @@ namespace MV {
 			notify.notify_one();
 		}
 		void task(const std::function<void()> &a_task, const std::function<void()> &a_onComplete) {
+			++active;
 			{
 				std::lock_guard<std::mutex> guard(lock);
 				jobs.emplace_back(a_task, a_onComplete);
@@ -146,15 +168,31 @@ namespace MV {
 			notify.notify_one();
 		}
 
-		void tasks(const std::vector<Job> &a_tasks, const std::function<void()> &a_onGroupComplete) {
+		void tasks(std::vector<Job> &&a_tasks, const std::function<void()> &a_onGroupComplete, Job::Continue a_continueCompletionCallback = Job::Continue::POOL) {
+			active+=static_cast<int>(a_tasks.size());
+			std::shared_ptr<std::atomic<size_t>> counter = std::make_shared<std::atomic<size_t>>(a_tasks.size());
+			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(std::move(a_onGroupComplete));
+			for (auto&& job : a_tasks)
+			{
+				{
+					job.group(counter, sharedGroupComplete, a_continueCompletionCallback);
+					std::lock_guard<std::mutex> guard(lock);
+					jobs.push_back(std::move(job));
+				}
+				notify.notify_one();
+			}
+		}
+
+		void tasks(const std::vector<Job> &a_tasks, const std::function<void()> &a_onGroupComplete, Job::Continue a_continueCompletionCallback = Job::Continue::POOL) {
+			active+=static_cast<int>(a_tasks.size());
 			std::shared_ptr<std::atomic<size_t>> counter = std::make_shared<std::atomic<size_t>>(a_tasks.size());
 			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(std::move(a_onGroupComplete));
 			for (auto&& job : a_tasks)
 			{
 				{
 					std::lock_guard<std::mutex> guard(lock);
-					jobs.emplace_back(std::move(job));
-					jobs.back().group(counter, sharedGroupComplete);
+					jobs.push_back(job);
+					jobs.back().group(counter, sharedGroupComplete, a_continueCompletionCallback);
 				}
 				notify.notify_one();
 			}
@@ -165,8 +203,10 @@ namespace MV {
 			scheduled.push_back(a_method);
 		}
 
-		void run() {
-			for (auto i = scheduled.begin(); i != scheduled.end();) {
+		bool run() {
+			auto wasActive = active > 0;
+			auto endNode = scheduled.end();
+			for (auto i = scheduled.begin(); i != endNode;) {
 				try {
 					(*i)();
 				} catch (std::exception &e) {
@@ -176,6 +216,7 @@ namespace MV {
 				std::lock_guard<std::mutex> guard(scheduleLock);
 				scheduled.erase(i++);
 			}
+			return wasActive;
 		}
 
 		void exceptionHandler(std::function<void(std::exception &e)> a_onException) {
@@ -206,6 +247,7 @@ namespace MV {
 		std::list<std::function<void()>> scheduled;
 		std::deque<std::string> exceptionMessages;
 		std::function<void(std::exception &e)> onException;
+		std::atomic<int> active;
 	};
 }
 

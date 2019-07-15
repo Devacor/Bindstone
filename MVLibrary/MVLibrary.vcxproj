@@ -378,6 +378,7 @@
     <ClInclude Include="..\..\external\cereal\include\cereal\types\list.hpp" />
     <ClInclude Include="..\..\external\cereal\include\cereal\types\map.hpp" />
     <ClInclude Include="..\..\external\cereal\include\cereal\types\memory.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\optional.hpp" />
     <ClInclude Include="..\..\external\cereal\include\cereal\types\polymorphic.hpp" />
     <ClInclude Include="..\..\external\cereal\include\cereal\types\queue.hpp" />
     <ClInclude Include="..\..\external\cereal\include\cereal\types\set.hpp" />
@@ -388,6 +389,7 @@
     <ClInclude Include="..\..\external\cereal\include\cereal\types\unordered_set.hpp" />
     <ClInclude Include="..\..\external\cereal\include\cereal\types\utility.hpp" />
     <ClInclude Include="..\..\external\cereal\include\cereal\types\valarray.hpp" />
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\variant.hpp" />
     <ClInclude Include="..\..\external\cereal\include\cereal\types\vector.hpp" />
     <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript.hpp" />
     <ClInclude Include="..\..\external\ChaiScript-6.0.0\include\chaiscript\chaiscript_basic.hpp" />

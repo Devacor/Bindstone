@@ -99,7 +99,7 @@ public:
 		return synchronizedObjects;
 	}
 
-	virtual void spawnCreature(int /*a_buildingSlot*/) {
+	virtual void spawnCreature(int /*a_buildingSlot*/, const std::string &/*a_creatureId*/) {
 	}
 
 	void registerCreature(std::shared_ptr<ServerCreature> &a_registerCreature) {
@@ -189,12 +189,12 @@ public:
 		return result;
 	}
 
-	virtual void spawnCreature(int a_buildingSlot) override {
+	virtual void spawnCreature(int a_buildingSlot, const std::string& a_creatureId) override {
 		auto spawner = building(a_buildingSlot);
-		auto creatureNode = gameObjectContainer()->make(MV::guid(spawner->currentCreature().id));
+		auto creatureNode = gameObjectContainer()->make(MV::guid(a_creatureId));
 		creatureNode->worldPosition(spawner->spawnPositionWorld());
 
-		creatureNode->attach<ServerCreature>(spawner->currentCreature().id, spawner->slotIndex(), *this);
+		creatureNode->attach<ServerCreature>(a_creatureId, spawner->slotIndex(), *this);
 	}
 
 	virtual bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &/*a_player*/) const override {

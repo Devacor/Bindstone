@@ -8,6 +8,8 @@
 #include "cereal/types/vector.hpp"
 #include "cereal/types/memory.hpp"
 #include "cereal/types/string.hpp"
+#include "cereal/types/variant.hpp"
+#include "cereal/types/optional.hpp"
 #include "cereal/types/base_class.hpp"
 #include "cereal/types/polymorphic.hpp"
 
@@ -44,7 +46,7 @@ namespace MV {
     
 	template <typename T>
 	std::string toBinaryString(const T& a_input) {
-		std::stringstream messageStream;
+		std::ostringstream messageStream(std::ios_base::out | std::ios_base::binary);
 		{
 			cereal::PortableBinaryOutputArchive output(messageStream);
 			output(a_input);
@@ -59,7 +61,7 @@ namespace MV {
 
 	template <typename T>
 	T fromBinaryString(const std::string &a_input) {
-		std::stringstream messageStream(a_input);
+		std::istringstream messageStream(a_input, std::ios_base::in | std::ios_base::binary);
 		cereal::PortableBinaryInputArchive input(messageStream);
 		T result;
 		input(result);
@@ -68,7 +70,7 @@ namespace MV {
 
 	template <typename T>
 	T fromBinaryString(const std::string &a_input, MV::Services& a_services) {
-		std::stringstream messageStream(a_input);
+		std::stringstream messageStream(a_input, std::ios_base::in | std::ios_base::binary);
 		cereal::UserDataAdapter<MV::Services, cereal::PortableBinaryInputArchive> input(a_services, messageStream);
 		T result;
 		input(result);

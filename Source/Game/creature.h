@@ -229,6 +229,7 @@ struct CreatureNetworkState {
 	}
 
 	void synchronize(std::shared_ptr<CreatureNetworkState> a_other) {
+		variables = a_other->variables;
 		health = a_other->health;
 		position = a_other->position;
 		bool newAnimationBasedOnTime = a_other->animationTime < animationTime;
@@ -253,6 +254,7 @@ struct CreatureNetworkState {
 		animationName = a_other->animationName;
 		animationLoops = a_other->animationLoops;
 		animationTime = a_other->animationTime;
+		variables = a_other->variables;
 		if (onNetworkDeath) {
 			onNetworkDeath();
 		} else {

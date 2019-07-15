@@ -10,7 +10,6 @@
 #include <boost/asio.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/ssl/stream.hpp>
-#include <boost/bind.hpp>
 
 namespace MV {
 	
@@ -189,7 +188,7 @@ namespace MV {
 			using boost::asio::ip::tcp;
 
 			tcp::resolver::query query(host, port);
-			resolver->async_resolve(query, boost::bind(&Email::handleResolve, shared_from_this(), boost::asio::placeholders::error, boost::asio::placeholders::iterator));
+			resolver->async_resolve(query, std::bind(&Email::handleResolve, shared_from_this(), std::placeholders::_1, std::placeholders::_2));
 		}
 
 		void handleResolve(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
@@ -197,7 +196,7 @@ namespace MV {
 				// Attempt a connection to the first endpoint in the list. Each endpoint
 				// will be tried until we successfully establish a connection.
 				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-				socket->lowest_layer().async_connect(endpoint, boost::bind(&Email::handleConnect, shared_from_this(), boost::asio::placeholders::error, ++endpoint_iterator));
+				socket->lowest_layer().async_connect(endpoint, std::bind(&Email::handleConnect, shared_from_this(), std::placeholders::_1, ++endpoint_iterator));
 			} else {
 				activeResponse.message = err.message();
 				alertFailure();
@@ -211,7 +210,7 @@ namespace MV {
 				// The connection failed. Try the next endpoint in the list.
 				socket->lowest_layer().close();
 				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-				socket->lowest_layer().async_connect(endpoint, boost::bind(&Email::handleConnect, shared_from_this(), boost::asio::placeholders::error, ++endpoint_iterator));
+				socket->lowest_layer().async_connect(endpoint, std::bind(&Email::handleConnect, shared_from_this(), std::placeholders::_1, ++endpoint_iterator));
 			} else {
 				activeResponse.message = err.message();
 				alertFailure();

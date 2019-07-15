@@ -27,8 +27,7 @@ GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameD
 void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer, const std::shared_ptr<InGamePlayer> &a_rightPlayer) {
 	left = std::make_unique<Team>(a_leftPlayer, LEFT, *this);
 	right = std::make_unique<Team>(a_rightPlayer, RIGHT, *this);
-	left->initialize();
-	right->initialize();
+
 	//manually updating this.
 	worldScene->silence().forget()->pause();
 
@@ -45,6 +44,9 @@ void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer,
 	});
 
 	hook();
+
+	left->initialize();
+	right->initialize();
 
 	worldTimestep.then("update", [&](MV::Task& /*a_self*/, double a_dt) {
 		fixedUpdate(a_dt);
@@ -83,6 +85,7 @@ void GameInstance::hook() {
 	scriptEngine.add(chaiscript::user_type<GameInstance>(), "GameInstance");
 
 	scriptEngine.add(chaiscript::fun(&GameInstance::creature), "creature");
+	scriptEngine.add(chaiscript::fun(&GameInstance::spawnCreature), "spawnCreature");
 }
 
 void ServerGameInstance::hook() {

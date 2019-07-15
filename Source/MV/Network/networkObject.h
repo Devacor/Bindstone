@@ -10,7 +10,7 @@
 #include <type_traits>
 
 #include "cereal/cereal.hpp"
-#include "cereal/types/boost_variant.hpp"
+#include "cereal/types/variant.hpp"
 #include "cereal/archives/portable_binary.hpp"
 #include "cereal/archives/json.hpp"
 
@@ -149,7 +149,7 @@ namespace MV {
 	template <typename ...T>
 	class NetworkObjectPool {
 	public:
-		typedef boost::variant<std::shared_ptr<NetworkObject<T>>...> VariantType;
+		typedef std::variant<std::shared_ptr<NetworkObject<T>>...> VariantType;
 
 		template <class V>
 		std::shared_ptr<NetworkObject<V>> spawn(const std::shared_ptr<V> &a_newItem) {
@@ -169,7 +169,7 @@ namespace MV {
 		void synchronize(std::vector<VariantType> a_incoming) {
 			std::vector<int64_t> removeList;
 			for (auto&& item : a_incoming) {
-				boost::apply_visitor([&](auto &a_item) {
+				std::visit([&](auto &a_item) {
 					auto found = objects.find(a_item->id());
 					if (found == objects.end()) {
 						found = objects.insert({ a_item->id(), { a_item } }).first;
@@ -201,10 +201,10 @@ namespace MV {
 		std::vector<VariantType> updated() {
 			std::vector<VariantType> results;
 			for (auto object = objects.begin(); object != objects.end();) {
-				if (boost::apply_visitor([](const auto &a_object) { return a_object->undirty(); }, object->second)) {
+				if (std::visit([](const auto &a_object) { return a_object->undirty(); }, object->second)) {
 					results.push_back(object->second);
 				}
-				if (boost::apply_visitor([](const auto &a_object) { return a_object->destroyed(); }, object->second)) {
+				if (std::visit([](const auto &a_object) { return a_object->destroyed(); }, object->second)) {
 					object = objects.erase(object);
 				} else {
 					++object;
@@ -217,7 +217,7 @@ namespace MV {
 		std::vector<VariantType> all() {
 			std::vector<VariantType> results;
 			for (auto object = objects.begin(); object != objects.end();++object) {
-				if (!boost::apply_visitor([](const auto &a_object) { return a_object->destroyed(); }, object->second)) {
+				if (!std::visit([](const auto &a_object) { return a_object->destroyed(); }, object->second)) {
 					results.push_back(object->second);
 				}
 			}
@@ -235,7 +235,7 @@ namespace MV {
 
 		template <typename T>
 		void synchronizeItem(T& a_item, VariantType& found) {
-			boost::apply_visitor([&](auto &a_found) {
+			std::visit([&](auto &a_found) {
 				synchronizeItemImplementation(a_item, a_found);
 			}, found);
 		}

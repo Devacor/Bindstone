@@ -7,6 +7,17 @@
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
+chaiscript::ChaiScript& BuildTree::hook(chaiscript::ChaiScript& a_script) {
+	a_script.add(chaiscript::user_type<BuildTree>(), "BuildTree");
+
+	a_script.add(chaiscript::fun(&BuildTree::id), "id");
+	a_script.add(chaiscript::fun(&BuildTree::cost), "cost");
+	a_script.add(chaiscript::fun(&BuildTree::income), "income");
+	a_script.add(chaiscript::fun(&BuildTree::upgrades), "upgrades");
+
+	return a_script;
+}
+
 Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<InGamePlayer> &a_player, GameInstance& a_instance) :
 	Component(a_owner),
 	buildingData(a_instance.data().buildings().data(a_player->loadout.buildings[a_loadoutSlot])),
@@ -29,6 +40,9 @@ void Building::initialize() {
 	//newNode->component<MV::Scene::Spine>()->animate("idle");
 	owner()->scale(owner()->scale() * gameInstance.teamForPlayer(owningPlayer).scale());
 	initializeBuildingButton(newNode);
+
+	auto self = std::static_pointer_cast<Building>(shared_from_this());
+	buildingData.script(gameInstance.script()).spawn(self);
 }
 
 void Building::spawnNetworkCreature(std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_synchronizedCreature) {
@@ -42,38 +56,16 @@ std::string Building::skin() const {
 	return player()->loadout.skins[loadoutSlot];
 }
 
-void Building::incrementCreatureIndex() {
-	++creatureIndex;
-	if (creatureIndex >= current()->waves[waveIndex].creatures.size()) {
-		creatureIndex = 0;
-		++waveIndex;
-		if (waveIndex >= current()->waves.size()) {
-			waveIndex = 0;
-		}
-	}
-}
-
 void Building::updateImplementation(double a_dt) {
-	countdown -= a_dt;
-	if (countdown <= 0 && waveHasCreatures(waveIndex)) {
-		gameInstance.spawnCreature(slot);
-		incrementCreatureIndex();
-		countdown = countdown + currentCreature().delay;
-	}
-}
-
-bool Building::waveHasCreatures(size_t a_waveIndex /*= 0*/, size_t a_creatureIndex /*= 0*/) const {
-	auto* currentUpgrade = current();
-	return (currentUpgrade->waves.size() > a_waveIndex && currentUpgrade->waves[a_waveIndex].creatures.size() > a_creatureIndex);
+	auto self = std::static_pointer_cast<Building>(shared_from_this());
+	buildingData.script(gameInstance.script()).update(self, a_dt);
 }
 
 void Building::upgrade(size_t a_index) {
 	buildTreeIndices.push_back(a_index);
 	onUpgradedSignal(std::static_pointer_cast<Building>(shared_from_this()));
 
-	waveIndex = 0;
 	creatureIndex = 0;
-	countdown = waveHasCreatures() ? 0 : current()->waves[0].creatures[0].delay;
 }
 
 void Building::requestUpgrade(size_t a_index) {
@@ -88,7 +80,11 @@ const BuildTree* Building::current() const {
 	return currentBuildTree;
 }
 
-chaiscript::ChaiScript& Building::hook(chaiscript::ChaiScript &a_script, GameInstance& /*gameInstance*/) {
+chaiscript::ChaiScript& Building::hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance) {
+	BuildTree::hook(a_script);
+
+	StandardScriptMethods<Building>::hook(a_script, "Building");
+
 	a_script.add(chaiscript::user_type<Building>(), "Building");
 	a_script.add(chaiscript::base_class<Component, Building>());
 
@@ -102,14 +98,18 @@ chaiscript::ChaiScript& Building::hook(chaiscript::ChaiScript &a_script, GameIns
 
 	a_script.add(chaiscript::fun(&Building::assetPath), "assetPath");
 
+	a_script.add(chaiscript::fun([](Building& a_self, const std::string& a_key) {
+		return a_self.localVariables[a_key];
+	}), "[]");
+
+	a_script.add(chaiscript::fun([&](Building& a_self, const std::string& a_key) {
+		gameInstance.spawnCreature(a_self.slotIndex(), a_key);
+	}), "spawn");
+
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Building>, std::shared_ptr<Building>>([](const MV::Scene::SafeComponent<Building> &a_item) { return a_item.self(); }));
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Building>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<Building> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
 
 	return a_script;
-}
-
-const WaveCreature& Building::currentCreature() {
-	return current()->waves[waveIndex].creatures[creatureIndex];
 }
 
 void Building::initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &a_newNode) {

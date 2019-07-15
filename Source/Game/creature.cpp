@@ -464,7 +464,7 @@ chaiscript::ChaiScript& ClientCreature::hook(chaiscript::ChaiScript &a_script, G
 }
 
 void ClientCreature::onNetworkSynchronize() {
-	networkDelta.add(MV::Stopwatch::systemTime());
+	networkDelta.add(MV::Stopwatch::programTime());
 	startClientPosition = owner()->position();
 	accumulatedDuration = 0;
 	spine()->track().time(state->self()->animationTime);

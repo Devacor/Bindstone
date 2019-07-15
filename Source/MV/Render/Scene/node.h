@@ -49,7 +49,7 @@ namespace MV {
 					node->silenceInternal();
 				}
 
-				Quiet(const Quiet && a_other) : 
+				Quiet(const Quiet && a_other) noexcept : 
 					node(std::move(a_other.node)) {
 				}
 
@@ -281,8 +281,8 @@ namespace MV {
 			}
 
 			template<typename ... ComponentType>
-			std::vector<boost::variant<SafeComponent<ComponentType>...>> componentsInParents(bool a_exactType = true, bool a_includeSelf = true) const {
-				typedef std::vector<boost::variant<SafeComponent<ComponentType>...>> ResultType;
+			std::vector<std::variant<SafeComponent<ComponentType>...>> componentsInParents(bool a_exactType = true, bool a_includeSelf = true) const {
+				typedef std::vector<std::variant<SafeComponent<ComponentType>...>> ResultType;
 				ResultType results;
 				if (a_includeSelf) {
 					results = components<ComponentType...>(a_exactType);
@@ -414,23 +414,23 @@ namespace MV {
 			}
 
 			template<typename ... ComponentType>
-			std::vector<boost::variant<SafeComponent<ComponentType>...>> components(bool exactType = true) const {
-				std::vector<boost::variant<SafeComponent<ComponentType>...>> results;
+			std::vector<std::variant<SafeComponent<ComponentType>...>> components(bool exactType = true) const {
+				std::vector<std::variant<SafeComponent<ComponentType>...>> results;
 				if (exactType) {
 					for (auto&& item : childComponents) {
-						castAndAddIfExact<boost::variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
+						castAndAddIfExact<std::variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
 					}
 				} else {
 					for (auto&& item : childComponents) {
-						castAndAddIfDerived<boost::variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
+						castAndAddIfDerived<std::variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
 					}
 				}
 				return results;
 			}
 
 			template<typename ... ComponentType>
-			std::vector<boost::variant<SafeComponent<ComponentType>...>> componentsInChildren(bool exactType = true, bool includeComponentsInThis = true) const {
-				std::vector<boost::variant<SafeComponent<ComponentType>...>> results;
+			std::vector<std::variant<SafeComponent<ComponentType>...>> componentsInChildren(bool exactType = true, bool includeComponentsInThis = true) const {
+				std::vector<std::variant<SafeComponent<ComponentType>...>> results;
 				componentsInChildrenInternal<ComponentType...>(exactType, includeComponentsInThis, results);
 				return results;
 			}
@@ -818,15 +818,15 @@ namespace MV {
 			}
 
 			template<typename ... ComponentType>
-			void componentsInChildrenInternal(bool exactType, bool includeComponentsInThis, std::vector<boost::variant<SafeComponent<ComponentType>...>>& results) const {
+			void componentsInChildrenInternal(bool exactType, bool includeComponentsInThis, std::vector<std::variant<SafeComponent<ComponentType>...>>& results) const {
 				if (includeComponentsInThis) {
 					if (exactType) {
 						for (auto&& item : childComponents) {
-							castAndAddIfExact<boost::variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
+							castAndAddIfExact<std::variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
 						}
 					} else {
 						for (auto&& item : childComponents) {
-							castAndAddIfDerived<boost::variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
+							castAndAddIfDerived<std::variant<SafeComponent<ComponentType>...>, ComponentType...>(item, results);
 						}
 					}
 				}

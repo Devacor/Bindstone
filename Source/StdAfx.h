@@ -18,12 +18,10 @@
 #include <boost/asio.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string.hpp>
-#include <boost/bind.hpp>
-
-#include <chaiscript/chaiscript.hpp>
 
 #pragma warning(push, 0)
-#include <Exprtk/exprtk.hpp>
+#include <chaiscript/chaiscript.hpp>
+
 #include <cereal/cereal.hpp>
 #include <cereal/access.hpp>
 #include <cereal/archives/json.hpp>

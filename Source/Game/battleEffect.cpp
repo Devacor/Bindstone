@@ -254,7 +254,7 @@ chaiscript::ChaiScript& ClientBattleEffect::hook(chaiscript::ChaiScript &a_scrip
 }
 
 void ClientBattleEffect::onNetworkSynchronize() {
-	networkDelta.add(MV::Stopwatch::systemTime());
+	networkDelta.add(MV::Stopwatch::programTime());
 	startClientPosition = owner()->position();
 	discardedDuration += accumulatedDuration;
 	accumulatedDuration = 0;

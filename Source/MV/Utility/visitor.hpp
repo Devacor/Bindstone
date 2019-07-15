@@ -1,7 +1,7 @@
 #ifndef _MV_VISITOR_H_
 #define _MV_VISITOR_H_
 
-#include <boost/variant.hpp>
+#include <variant>
 #include <type_traits>
 
 namespace MV {
@@ -42,15 +42,15 @@ namespace MV {
 	};
 
 	template<class...Vs, class...Fs>
-	auto visit(boost::variant<Vs...> &a_item, Fs&& ...fs) {
-		return boost::apply_visitor(compose(std::forward<Fs>(fs)...), a_item);
+	auto visit(std::variant<Vs...> &a_item, Fs&& ...fs) {
+		return std::visit(compose(std::forward<Fs>(fs)...), a_item);
 	};
 
 	template<class...Vs, class...Fs>
-	void visit(std::vector<boost::variant<Vs...>> &a_items, Fs&& ...fs) {
+	void visit(std::vector<std::variant<Vs...>> &a_items, Fs&& ...fs) {
 		auto composedMethods{ compose(std::forward<Fs>(fs)...) };
 		for (auto&& item : a_items) {
-			boost::apply_visitor(composedMethods, item);
+			std::visit(composedMethods, item);
 		}
 	};
 }

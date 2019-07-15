@@ -1543,5 +1543,11 @@
     <ClInclude Include="..\Source\Game\standardScriptMethods.h">
       <Filter>Bindstone\Source\Game</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\variant.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\external\cereal\include\cereal\types\optional.hpp">
+      <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

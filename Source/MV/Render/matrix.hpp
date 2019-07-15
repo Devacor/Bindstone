@@ -19,17 +19,19 @@ namespace MV {
 	class Matrix;
 
 	template<size_t SizeX, size_t SizeY>
-	inline const Matrix<SizeX, SizeY> operator-(const Matrix<SizeX, SizeY> &a_left, const Matrix<SizeX, SizeY> &a_right);
+	inline Matrix<SizeX, SizeY> operator-(const Matrix<SizeX, SizeY> &a_left, const Matrix<SizeX, SizeY> &a_right);
 	template<size_t SizeX, size_t SizeY>
-	inline const Matrix<SizeX, SizeY> operator+(const Matrix<SizeX, SizeY> &a_left, const Matrix<SizeX, SizeY> &a_right);
+	inline Matrix<SizeX, SizeY> operator+(const Matrix<SizeX, SizeY> &a_left, const Matrix<SizeX, SizeY> &a_right);
 
 	template<size_t SizeX, size_t SizeY, size_t ResultY>
-	inline const Matrix<SizeX, ResultY> operator*(const Matrix<SizeX, SizeY> &a_left, const Matrix<ResultY, SizeY> &a_right);
+	inline Matrix<SizeX, ResultY> operator*(const Matrix<SizeX, SizeY> &a_left, const Matrix<ResultY, SizeY> &a_right);
 	template<size_t SizeX, size_t SizeY>
-	inline const Matrix<SizeX, SizeY> operator*(const Matrix<SizeX, SizeY> &a_left, const PointPrecision &a_right);
+	inline Matrix<SizeX, SizeY> operator*(const Matrix<SizeX, SizeY> &a_left, const PointPrecision &a_right);
 
 	template<size_t SizeX, size_t SizeY>
-	inline const Matrix<SizeX, SizeY> operator/(const Matrix<SizeX, SizeY> &a_left, const PointPrecision &a_right);
+	inline Matrix<SizeX, SizeY> operator/(const Matrix<SizeX, SizeY> &a_left, const PointPrecision &a_right);
+
+	enum MatrixInitialize {NoFill};
 
 	template<size_t SizeX, size_t SizeY>
 	class Matrix {
@@ -41,6 +43,10 @@ namespace MV {
 
 		Matrix() {
 			matrixArray.fill(0.0f);
+		}
+
+		//nofill
+		Matrix(MatrixInitialize) {
 		}
 
 		Matrix(const Matrix<SizeX, SizeY>& a_other) = default;
@@ -60,21 +66,21 @@ namespace MV {
 		constexpr PointPrecision& operator() (size_t a_x, size_t a_y) {
 			return (matrixArray)[(SizeX * a_x) + (a_y)];
 		}
-		constexpr const PointPrecision operator() (size_t a_x, size_t a_y) const {
+		constexpr const PointPrecision& operator() (size_t a_x, size_t a_y) const {
 			return (matrixArray)[(SizeX * a_x) + (a_y)];
 		}
 
 		constexpr PointPrecision& access(size_t a_x, size_t a_y) {
 			return (matrixArray)[(SizeX * a_x) + (a_y)];
 		}
-		constexpr const PointPrecision access(size_t a_x, size_t a_y) const {
+		constexpr const PointPrecision& access(size_t a_x, size_t a_y) const {
 			return (matrixArray)[(SizeX * a_x) + (a_y)];
 		}
 
 		constexpr PointPrecision& accessTransposed(size_t a_x, size_t a_y) {
 			return (matrixArray)[(a_x)+(a_y * SizeY)];
 		}
-		constexpr const PointPrecision accessTransposed(size_t a_x, size_t a_y) const {
+		constexpr const PointPrecision& accessTransposed(size_t a_x, size_t a_y) const {
 			return (matrixArray)[(a_x)+(a_y * SizeY)];
 		}
 
@@ -142,18 +148,18 @@ namespace MV {
 	};
 
 	template<size_t SizeX, size_t SizeY>
-	inline const Matrix<SizeX, SizeY> operator-(const Matrix<SizeX, SizeY> &a_left, const Matrix<SizeX, SizeY> &a_right) {
+	inline Matrix<SizeX, SizeY> operator-(const Matrix<SizeX, SizeY> &a_left, const Matrix<SizeX, SizeY> &a_right) {
 		Matrix<SizeX, SizeY> result{ a_left };
 		return result -= a_right;
 	}
 	template<size_t SizeX, size_t SizeY>
-	inline const Matrix<SizeX, SizeY> operator+(const Matrix<SizeX, SizeY> &a_left, const Matrix<SizeX, SizeY> &a_right) {
+	inline Matrix<SizeX, SizeY> operator+(const Matrix<SizeX, SizeY> &a_left, const Matrix<SizeX, SizeY> &a_right) {
 		Matrix<SizeX, SizeY> result{ a_left };
 		return result += a_right;
 	}
 
 	template<size_t SizeX, size_t SizeY, size_t ResultY>
-	inline const Matrix<SizeX, ResultY> operator*(const Matrix<SizeX, SizeY> &a_left, const Matrix<ResultY, SizeY> &a_right) {
+	inline Matrix<SizeX, ResultY> operator*(const Matrix<SizeX, SizeY> &a_left, const Matrix<ResultY, SizeY> &a_right) {
 		Matrix<SizeX, ResultY> result;
 
 		for (size_t x = 0; x < SizeX; ++x) {
@@ -166,14 +172,37 @@ namespace MV {
 
 		return result;
 	}
+
+	//unrolled for speed
+	inline MV::Matrix<4, 4> unrolledMultiply(const MV::Matrix<4, 4> & a_left, const MV::Matrix<4, 4> & a_right) {
+		MV::Matrix<4, 4> dest(MV::MatrixInitialize::NoFill);
+		dest(0, 0) = a_right(0, 0) * a_left(0, 0) + a_right(0, 1) * a_left(1, 0) + a_right(0, 2) * a_left(2, 0) + a_right(0, 3) * a_left(3, 0);
+		dest(0, 1) = a_right(0, 0) * a_left(0, 1) + a_right(0, 1) * a_left(1, 1) + a_right(0, 2) * a_left(2, 1) + a_right(0, 3) * a_left(3, 1);
+		dest(0, 2) = a_right(0, 0) * a_left(0, 2) + a_right(0, 1) * a_left(1, 2) + a_right(0, 2) * a_left(2, 2) + a_right(0, 3) * a_left(3, 2);
+		dest(0, 3) = a_right(0, 0) * a_left(0, 3) + a_right(0, 1) * a_left(1, 3) + a_right(0, 2) * a_left(2, 3) + a_right(0, 3) * a_left(3, 3);
+		dest(1, 0) = a_right(1, 0) * a_left(0, 0) + a_right(1, 1) * a_left(1, 0) + a_right(1, 2) * a_left(2, 0) + a_right(1, 3) * a_left(3, 0);
+		dest(1, 1) = a_right(1, 0) * a_left(0, 1) + a_right(1, 1) * a_left(1, 1) + a_right(1, 2) * a_left(2, 1) + a_right(1, 3) * a_left(3, 1);
+		dest(1, 2) = a_right(1, 0) * a_left(0, 2) + a_right(1, 1) * a_left(1, 2) + a_right(1, 2) * a_left(2, 2) + a_right(1, 3) * a_left(3, 2);
+		dest(1, 3) = a_right(1, 0) * a_left(0, 3) + a_right(1, 1) * a_left(1, 3) + a_right(1, 2) * a_left(2, 3) + a_right(1, 3) * a_left(3, 3);
+		dest(2, 0) = a_right(2, 0) * a_left(0, 0) + a_right(2, 1) * a_left(1, 0) + a_right(2, 2) * a_left(2, 0) + a_right(2, 3) * a_left(3, 0);
+		dest(2, 1) = a_right(2, 0) * a_left(0, 1) + a_right(2, 1) * a_left(1, 1) + a_right(2, 2) * a_left(2, 1) + a_right(2, 3) * a_left(3, 1);
+		dest(2, 2) = a_right(2, 0) * a_left(0, 2) + a_right(2, 1) * a_left(1, 2) + a_right(2, 2) * a_left(2, 2) + a_right(2, 3) * a_left(3, 2);
+		dest(2, 3) = a_right(2, 0) * a_left(0, 3) + a_right(2, 1) * a_left(1, 3) + a_right(2, 2) * a_left(2, 3) + a_right(2, 3) * a_left(3, 3);
+		dest(3, 0) = a_right(3, 0) * a_left(0, 0) + a_right(3, 1) * a_left(1, 0) + a_right(3, 2) * a_left(2, 0) + a_right(3, 3) * a_left(3, 0);
+		dest(3, 1) = a_right(3, 0) * a_left(0, 1) + a_right(3, 1) * a_left(1, 1) + a_right(3, 2) * a_left(2, 1) + a_right(3, 3) * a_left(3, 1);
+		dest(3, 2) = a_right(3, 0) * a_left(0, 2) + a_right(3, 1) * a_left(1, 2) + a_right(3, 2) * a_left(2, 2) + a_right(3, 3) * a_left(3, 2);
+		dest(3, 3) = a_right(3, 0) * a_left(0, 3) + a_right(3, 1) * a_left(1, 3) + a_right(3, 2) * a_left(2, 3) + a_right(3, 3) * a_left(3, 3);
+		return dest;
+	}
+
 	template<size_t SizeX, size_t SizeY>
-	inline const Matrix<SizeX, SizeY> operator*(const Matrix<SizeX, SizeY> &a_left, const PointPrecision &a_right) {
+	inline Matrix<SizeX, SizeY> operator*(const Matrix<SizeX, SizeY> &a_left, const PointPrecision &a_right) {
 		Matrix<SizeX, SizeY> result{ a_left };
 		return result *= a_right;
 	}
 
 	template<size_t SizeX, size_t SizeY>
-	inline const Matrix<SizeX, SizeY> operator/(const Matrix<SizeX, SizeY> &a_left, const PointPrecision &a_right) {
+	inline Matrix<SizeX, SizeY> operator/(const Matrix<SizeX, SizeY> &a_left, const PointPrecision &a_right) {
 		Matrix<SizeX, SizeY> result{ a_left };
 		return result /= a_right;
 	}
@@ -196,11 +225,14 @@ namespace MV {
 		TransformMatrix(const TransformMatrix &a_matrix) :Matrix<4, 4>(a_matrix) {}
 		TransformMatrix(const Matrix<4, 4> &a_matrix) :Matrix<4, 4>(a_matrix) {}
 
-		TransformMatrix(const TransformMatrix &&a_matrix) :Matrix<4, 4>(std::move(a_matrix)) {}
-		TransformMatrix(const Matrix<4, 4> &&a_matrix) :Matrix<4, 4>(std::move(a_matrix)) {}
+		TransformMatrix(const TransformMatrix &&a_matrix) noexcept :Matrix<4, 4>(std::move(a_matrix)) {}
+		TransformMatrix(const Matrix<4, 4> &&a_matrix) noexcept :Matrix<4, 4>(std::move(a_matrix)) {}
 
 		TransformMatrix() : Matrix<4, 4>() {
 			makeIdentity();
+		}
+
+		TransformMatrix(MatrixInitialize noFill) noexcept : Matrix<4, 4>(noFill) {
 		}
 
 		TransformMatrix& operator=(const TransformMatrix& a_other) = default;

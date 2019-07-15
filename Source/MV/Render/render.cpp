@@ -213,10 +213,11 @@ namespace MV {
 		const char *error = SDL_GetError();
 		while (*error != '\0')
 		{
-			std::cerr << "SDL Error: " << error << std::endl;
+			std::cerr << "SDL Error: " << error;
 			if (line != -1){
-				std::cerr << "Line: " << line << std::endl;
+				std::cerr << " Line: " << line;
 			}
+			std::cerr << std::endl;
 			SDL_ClearError();
 			error = SDL_GetError();
 		}
@@ -567,9 +568,7 @@ namespace MV {
 			SDL_GL_SetAttribute(SDL_GL_RETAINED_BACKING, 1);
 
 			SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-			if (SDL_GL_SetSwapInterval(-1) == -1) { //set adaptave vsync, but if it fails it returns -1
-				SDL_GL_SetSwapInterval(1); //set vsync
-			}
+			checkSDLError(__LINE__);
 
 			window = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, windowSize.width, windowSize.height, SDLflags);
 			if (!window) {
@@ -580,8 +579,9 @@ namespace MV {
 			if (!title.empty()) {
 				SDL_SetWindowTitle(window, title.c_str());
 			}
+			checkSDLError(__LINE__);
+
 			SDL_GL_GetDrawableSize(window, &windowSize.width, &windowSize.height);
-			
 			checkSDLError(__LINE__);
 
 			SDL_DisplayMode displayMode;
@@ -596,6 +596,7 @@ namespace MV {
 			checkSDLError(__LINE__);
 
 			SDL_ShowWindow(window);
+			checkSDLError(__LINE__);
 		}
 		updateAspectRatio();
 		initialized = true;
@@ -624,8 +625,13 @@ namespace MV {
 				std::cerr << "SDL_GL_MakeCurrent(): " << SDL_GetError() << std::endl;
 				atexit(SDL_Quit);
 			}
+
 #ifndef HAVE_OPENGLES
-			SDL_GL_SetSwapInterval(vsync);
+			if (vsync && SDL_GL_SetSwapInterval(-1) == -1) { //set adaptave vsync (-1), but if it fails it returns -1
+				SDL_GL_SetSwapInterval(1); //on
+			} else {
+				SDL_GL_SetSwapInterval(0); //off
+			}
 #endif
 		}
 	}

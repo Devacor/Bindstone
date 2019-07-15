@@ -16,7 +16,7 @@ namespace MV {
 			resolver.async_resolve(query, [=](const boost::system::error_code& a_err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
 				if (!a_err && socket) {
 					boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
-					socket->async_connect(endpoint, boost::bind(&Client::handleConnect, self, boost::asio::placeholders::error, ++endpoint_iterator));
+					socket->async_connect(endpoint, std::bind(&Client::handleConnect, self, std::placeholders::_1, ++endpoint_iterator));
 				} else {
 					handleError(a_err, "resolve");
 				}
@@ -37,7 +37,7 @@ namespace MV {
 				socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
 				auto endpoint = *endpoint_iterator;
 				auto self = shared_from_this();
-				socket->async_connect(endpoint, boost::bind(&Client::handleConnect, self, boost::asio::placeholders::error, ++endpoint_iterator));
+				socket->async_connect(endpoint, std::bind(&Client::handleConnect, self, std::placeholders::_1, ++endpoint_iterator));
 			}
 			else {
 				handleError(a_err, "connect");

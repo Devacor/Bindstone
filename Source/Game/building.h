@@ -14,34 +14,9 @@
 
 class GameInstance;
 struct InGamePlayer;
-
-struct WaveCreature {
-	std::string id;
-	double delay;
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			CEREAL_NVP(delay),
-			CEREAL_NVP(id)
-		);
-	}
-};
-
-struct WaveData {
-	int iterations;
-	std::vector<WaveCreature> creatures;
-
-	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(
-			CEREAL_NVP(iterations),
-			CEREAL_NVP(creatures)
-		);
-	}
-};
+class Building;
 
 struct BuildTree {
-	std::vector<WaveData> waves;
 	std::string id;
 
 	std::string name;
@@ -54,7 +29,6 @@ struct BuildTree {
 
 	BuildTree(){}
 	BuildTree(const BuildTree& a_rhs) {
-		waves = a_rhs.waves;
 		id = a_rhs.id;
 		name = a_rhs.name;
 		description = a_rhs.description;
@@ -72,10 +46,11 @@ struct BuildTree {
 			CEREAL_NVP(description),
 			CEREAL_NVP(cost),
 			CEREAL_NVP(income),
-			CEREAL_NVP(waves),
 			CEREAL_NVP(upgrades)
 		);
 	}
+
+	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript& a_script);
 };
 
 struct SkinData {
@@ -118,6 +93,68 @@ struct BuildingData {
 			CEREAL_NVP(game)
 		);
 	}
+
+	StandardScriptMethods<Building>& script(chaiscript::ChaiScript& a_script) const {
+		return scriptMethods.loadScript(a_script, "Buildings", id, isServer);
+	}
+
+private:
+	mutable StandardScriptMethods<Building> scriptMethods;
+};
+
+struct BuildingNetworkState {
+	int64_t netId;
+
+	std::function<void()> onNetworkSynchronize;
+	std::function<void()> onAnimationChanged;
+
+	std::string buildingTypeId;
+	int32_t buildingSlot;
+
+	std::map<std::string, MV::DynamicVariable> variables;
+
+	std::string animationName;
+	bool animationLoops = false;
+
+	BuildingNetworkState() {
+	}
+
+	BuildingNetworkState(const BuildingData& a_template, int32_t a_buildingSlot) :
+		buildingTypeId(a_template.id),
+		buildingSlot(a_buildingSlot) {
+	}
+
+	void synchronize(std::shared_ptr<CreatureNetworkState> a_other) {
+		variables = a_other->variables;
+		if (animationName != a_other->animationName || animationLoops != a_other->animationLoops) {
+			animationName = a_other->animationName;
+			animationLoops = a_other->animationLoops;
+			if (onAnimationChanged) {
+				onAnimationChanged();
+			}
+		}
+
+		if (onNetworkSynchronize) {
+			onNetworkSynchronize();
+		}
+	}
+
+	void destroy(std::shared_ptr<CreatureNetworkState> a_other) {
+		std::cout << "Buildings don't die... >.>;" << std::endl;
+	}
+
+	template <class Archive>
+	void serialize(Archive & archive, std::uint32_t const /*version*/) {
+		archive(
+			cereal::make_nvp("creatureTypeId", buildingTypeId),
+			cereal::make_nvp("slot", buildingSlot),
+			cereal::make_nvp("animationName", animationName),
+			cereal::make_nvp("animationLoops", animationLoops),
+			cereal::make_nvp("variables", variables)
+		);
+	}
+
+	static void hook(chaiscript::ChaiScript &a_script);
 };
 
 class Building : public MV::Scene::Component {
@@ -135,8 +172,6 @@ public:
 	std::shared_ptr<InGamePlayer> player() const { return owningPlayer; }
 
 	const BuildTree* current() const;
-
-	bool waveHasCreatures(size_t a_waveIndex = 0, size_t a_creatureIndex = 0) const;
 
 	void upgrade(size_t a_index);
 	void requestUpgrade(size_t a_index);
@@ -163,7 +198,6 @@ public:
 		return owner()->worldFromLocal(spawnPoint);
 	}
 
-	const WaveCreature& currentCreature();
 protected:
 	Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<InGamePlayer> &a_player, GameInstance& a_instance);
 
@@ -183,7 +217,7 @@ private:
 
 	void initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &a_newNode);
 
-	void incrementCreatureIndex();
+	std::map<std::string, chaiscript::Boxed_Value> localVariables;
 
 	BuildingData buildingData;
 

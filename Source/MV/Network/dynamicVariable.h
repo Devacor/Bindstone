@@ -4,10 +4,13 @@
 #include <string>
 #include <tuple>
 #include <variant>
+#include "cereal/cereal.hpp"
+#include "MV/Utility/exactType.hpp"
 
 namespace chaiscript { class ChaiScript; }
 
 namespace MV {
+	//I needed more debuggability and std::variant was throwing a lot within Cereal. This is a wrapper around a variant which plays better in scripts.
 	class DynamicVariable {
 	public:
 		DynamicVariable() {}
@@ -192,9 +195,174 @@ namespace MV {
 		return a_rhs != a_lhs;
 	}
 
-	//I needed more debuggability and std::variant was throwing a lot within Cereal. :<
-	//typedef std::variant<bool, int64_t, double, std::string> DynamicVariable;
-	void hookDynamicVariable(chaiscript::ChaiScript &a_script);
+	void hookDynamicVariable(chaiscript::ChaiScript& a_script);
+
+	//Used similarly to optional during network serialization.
+	template <typename T>
+	struct DeltaVariable {
+		DeltaVariable() = default;
+		DeltaVariable(const T& a_value) :value(a_value) {}
+		DeltaVariable(T&& a_value) :value(std::move(a_value)) {}
+		DeltaVariable(const DeltaVariable<T>& a_value) :value(a_value.value), modified(true) {}
+		DeltaVariable(DeltaVariable<T>&& a_value) : value(std::move(a_value.value)), modified(true) {}
+		DeltaVariable& operator=(const T& a_rhs) {
+			value = a_rhs;
+			modified = true;
+			return *this;
+		}
+		DeltaVariable<T>& operator=(const DeltaVariable<T>& a_rhs) {
+			if (a_rhs.modified) {
+				value = a_rhs.value;
+				modified = true;
+			}
+			return *this;
+		}
+
+		const T& operator*() {
+			return value;
+		}
+		const T* operator->() {
+			return &value;
+		}
+		const T& view() const {
+			return value;
+		}
+		T& modify() {
+			modified = true;
+			return value;
+		}
+
+		template <typename ArchiveType,
+			typename std::enable_if_t<std::is_base_of<cereal::detail::OutputArchiveBase, ArchiveType>::value>* = nullptr>
+			ArchiveType & serialize(ArchiveType & a_archive, const std::string & a_archivedName, bool a_force = false) {
+			bool hasValue = modified || a_force;
+			a_archive(cereal::make_nvp(a_archivedName + "_has_value", hasValue));
+			if (hasValue) {
+				a_archive(cereal::make_nvp(a_archivedName, value));
+			}
+			modified = false;
+			return a_archive;
+		}
+
+		template <typename ArchiveType,
+			typename std::enable_if_t<std::is_base_of<cereal::detail::InputArchiveBase, ArchiveType>::value>* = nullptr>
+			ArchiveType & serialize(ArchiveType & a_archive, const std::string & a_archivedName, bool a_doNothing = false) {
+			a_archive(cereal::make_nvp(a_archivedName + "_has_value", modified));
+			if (modified) {
+				a_archive(cereal::make_nvp(a_archivedName, value));
+			}
+			return a_archive;
+		}
+
+		template <typename ArchiveType,
+			typename std::enable_if_t<std::is_base_of<cereal::detail::OutputArchiveBase, ArchiveType>::value>* = nullptr>
+			ArchiveType & serialize(ArchiveType & a_archive, MV::ExactType<bool> a_force = false) {
+			bool hasValue = modified || a_force;
+			a_archive(hasValue);
+			if (hasValue) {
+				a_archive(value);
+			}
+			modified = false;
+			return a_archive;
+		}
+
+		template <typename ArchiveType,
+			typename std::enable_if_t<std::is_base_of<cereal::detail::InputArchiveBase, ArchiveType>::value>* = nullptr>
+			ArchiveType & serialize(ArchiveType & a_archive, MV::ExactType<bool> a_doNothing = false) {
+			a_archive(modified);
+			if (modified) {
+				a_archive(value);
+			}
+			return a_archive;
+		}
+
+		static void hook(chaiscript::ChaiScript& a_script);
+	private:
+		static inline std::map<size_t, bool> scriptHookedUp = std::map<size_t, bool>();
+		bool modified = true;
+		T value;
+	};
+
+	template <typename T>
+	std::ostream& operator<<(std::ostream& a_os, const DeltaVariable<T>& a_dt) {
+		a_os << a_dt.view();
+		return a_os;
+	}
+
+	template <typename T>
+	std::istream& operator>>(std::istream& a_is, const DeltaVariable<T>& a_dt) {
+		a_is >> a_dt.view();
+		return a_is;
+	}
+
+	template <typename T>
+	bool operator==(const DeltaVariable<T>& a_rhs, const DeltaVariable<T>& a_lhs) { return a_rhs.view() == a_lhs.view(); }
+
+	template <typename T>
+	bool operator!=(const DeltaVariable<T>& a_rhs, const DeltaVariable<T>& a_lhs) { return a_rhs.view() != a_lhs.view(); }
+
+	template <typename T>
+	bool operator<(const DeltaVariable<T>& a_rhs, const DeltaVariable<T>& a_lhs) { return a_rhs.view() < a_lhs.view(); }
+
+	template <typename T>
+	bool operator>(const DeltaVariable<T>& a_rhs, const DeltaVariable<T>& a_lhs) { return a_rhs.view() > a_lhs.view(); }
+
+	template <typename T>
+	bool operator==(const T& a_rhs, const DeltaVariable<T>& a_lhs) { return a_rhs == a_lhs.view(); }
+
+	template <typename T>
+	bool operator!=(const T& a_rhs, const DeltaVariable<T>& a_lhs) { return a_rhs != a_lhs.view(); }
+
+	template <typename T>
+	bool operator<(const T& a_rhs, const DeltaVariable<T>& a_lhs) { return a_rhs < a_lhs.view(); }
+
+	template <typename T>
+	bool operator>(const T& a_rhs, const DeltaVariable<T>& a_lhs) { return a_rhs > a_lhs.view(); }
+
+	template <typename T>
+	bool operator==(const DeltaVariable<T>& a_rhs, const T& a_lhs) { return a_rhs.view() == a_lhs; }
+
+	template <typename T>
+	bool operator!=(const DeltaVariable<T>& a_rhs, const T& a_lhs) { return a_rhs.view() != a_lhs; }
+
+	template <typename T>
+	bool operator<(const DeltaVariable<T>& a_rhs, const T& a_lhs) { return a_rhs.view() < a_lhs; }
+
+	template <typename T>
+	bool operator>(const DeltaVariable<T>& a_rhs, const T& a_lhs) { return a_rhs.view() > a_lhs; }
+
+	template<typename T>
+	void DeltaVariable<T>::hook(chaiscript::ChaiScript& a_script) {
+		if (!scriptHookedUp[reinterpret_cast<size_t>(&a_script)]) {
+			a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self, const T &a_value) -> decltype(auto) {
+				return a_self = a_value;
+			}), "=");
+			a_script.add(chaiscript::fun([&](T& a_self, const DeltaVariable<T> &a_value) -> decltype(auto) {
+				return a_self = a_value.view();
+			}), "=");
+
+			a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self, const T& a_value) -> decltype(auto) {
+				return a_self == a_value;
+			}), "==");
+			a_script.add(chaiscript::fun([&](T& a_self, const DeltaVariable<T>& a_value) -> decltype(auto) {
+				return a_self == a_value.view();
+			}), "==");
+
+			a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self, const T& a_value) -> decltype(auto) {
+				return a_self != a_value;
+			}), "!=");
+			a_script.add(chaiscript::fun([&](T& a_self, const DeltaVariable<T>& a_value) -> decltype(auto) {
+				return a_self != a_value.view();
+			}), "!=");
+
+			a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self) -> decltype(auto) {
+				return a_self.view();
+			}), "view");
+			a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self) -> decltype(auto) {
+				return a_self.modify();
+			}), "modify");
+		}
+	}
 }
 
 #endif

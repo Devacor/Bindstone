@@ -14,7 +14,7 @@ void Team::initialize() {
 	for (int i = startIndex; i < (startIndex + 8); ++i) {
 		auto buildingNode = game.worldScene->get("1v1_" + std::to_string(i));
 
-		game.buildings.push_back(buildingNode->attach<Building>(i, i - startIndex, player, game).self());
+		game.initializeBuilding(buildingNode->attach<Building>(i, i - startIndex, player, game).self());
 	}
 }
 

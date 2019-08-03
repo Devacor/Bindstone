@@ -196,36 +196,35 @@ private:
 	std::shared_ptr<MV::Receiver<void(std::shared_ptr<Creature>)>> targetDeathReceiver;
 };
 
-
 struct CreatureNetworkState {
 	int64_t netId;
+	bool dying = false;
 
 	std::function<void()> onNetworkDeath;
 	std::function<void()> onNetworkSynchronize;
 	std::function<void()> onAnimationChanged;
 
-	std::string creatureTypeId;
+	MV::DeltaVariable<std::string> creatureTypeId;
+	MV::DeltaVariable<int32_t> buildingSlot;
 
-	std::map<std::string, MV::DynamicVariable> variables;
+	MV::DeltaVariable<int32_t> health = 0;
 
-	int32_t buildingSlot;
+	MV::DeltaVariable<MV::Point<MV::PointPrecision>> position;
 
-	int32_t health = 0;
-	bool dying = false;
+	MV::DeltaVariable<std::string> animationName;
 
-	MV::Point<MV::PointPrecision> position;
-
-	std::string animationName;
 	bool animationLoops = false;
 	double animationTime = 0.0;
+
+	MV::DeltaVariable<std::map<std::string, MV::DynamicVariable>> variables;
 
 	CreatureNetworkState() {
 	}
 
 	CreatureNetworkState(const CreatureData& a_template, int32_t a_buildingSlot) :
 		creatureTypeId(a_template.id),
-		health(a_template.health),
-		buildingSlot(a_buildingSlot) {
+		buildingSlot(a_buildingSlot),
+		health(a_template.health){
 	}
 
 	void synchronize(std::shared_ptr<CreatureNetworkState> a_other) {
@@ -263,17 +262,17 @@ struct CreatureNetworkState {
 	}
 
 	template <class Archive>
-	void serialize(Archive & archive, std::uint32_t const /*version*/) {
+	void serialize(Archive& archive, std::uint32_t const /*version*/) {
+		creatureTypeId.serialize(archive, "creatureTypeId");
+		health.serialize(archive, "health");
+		animationName.serialize(archive, "animationName");
 		archive(
-			cereal::make_nvp("creatureTypeId", creatureTypeId),
-			cereal::make_nvp("slot", buildingSlot),
-			cereal::make_nvp("health", health),
-			cereal::make_nvp("position", position),
-			cereal::make_nvp("animationName", animationName),
-			cereal::make_nvp("animationLoops", animationLoops),
 			cereal::make_nvp("animationTime", animationTime),
-			cereal::make_nvp("variables", variables)
+			cereal::make_nvp("animationLoops", animationLoops)
 		);
+		buildingSlot.serialize(archive, "slot");
+		position.serialize(archive, "position");
+		variables.serialize(archive, "variables");
 	}
 
 	static void hook(chaiscript::ChaiScript &a_script);
@@ -317,7 +316,7 @@ public:
 	}
 
 	int32_t buildingSlot() const {
-		return state->self()->buildingSlot;
+		return *state->self()->buildingSlot;
 	}
 
 	std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> networkState() const {
@@ -376,8 +375,8 @@ public:
 	virtual bool changeHealth(int amount) override {
 		if (alive()) {
 			auto health = state->self()->health;
-			auto newHealth = std::max(std::min(health + amount, statTemplate.health), 0);
-			amount = state->self()->health - newHealth;
+			auto newHealth = std::max(std::min(*health + amount, statTemplate.health), 0);
+			amount = *state->self()->health - newHealth;
 
 			if (health != newHealth) {
 				state->modify()->health = newHealth;
@@ -405,7 +404,7 @@ protected:
 	virtual void initialize() override;
 
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
-		return cloneHelper(a_parent->attach<ServerCreature>(statTemplate.id, state->self()->buildingSlot, gameInstance).self());
+		return cloneHelper(a_parent->attach<ServerCreature>(statTemplate.id, buildingSlot(), gameInstance).self());
 	}
 
 	virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<MV::Scene::Component> &a_clone) {
@@ -434,7 +433,7 @@ private:
 		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 		agent()->stop();
 		onDeathSignal(self);
-		spineAnimator->animate(state->self()->animationName, false);
+		spineAnimator->animate(*state->self()->animationName, false);
 		spineAnimator->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
 			if (a_self->track(a_track).name() == state->self()->animationName) {
 				owner()->removeFromParent();
@@ -461,10 +460,10 @@ public:
 	virtual bool changeHealth(int amount) override {
 		if (alive()) {
 			auto health = state->self()->health;
-			auto newHealth = std::max(std::min(health + amount, statTemplate.health), 0);
-			amount = state->self()->health - newHealth;
+			auto newHealth = std::max(std::min(*health + amount, statTemplate.health), 0);
+			amount = *state->self()->health - newHealth;
 
-			if (health != newHealth) {
+			if (*health != newHealth) {
 				state->modify()->health = newHealth;
 				auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 				onHealthChangeSignal(self, amount);
@@ -499,14 +498,14 @@ private:
 		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
 		onDeathSignal(self);
 		task().cancel();
-		if (owner()->position() != state->self()->position) {
+		if (owner()->position() != *state->self()->position) {
 			task().now("Tween", [&](MV::Task&, double a_dt) {
-				owner()->position(MV::moveToward(owner()->position(), state->self()->position, static_cast<MV::PointPrecision>(a_dt) * 200.0f));
-				return owner()->position() != state->self()->position;
+				owner()->position(MV::moveToward(owner()->position(), *state->self()->position, static_cast<MV::PointPrecision>(a_dt) * 200.0f));
+				return owner()->position() != *state->self()->position;
 			});
 		}
 		task().then("animateAway", [&](MV::Task&) {
-			spineAnimator->animate(state->self()->animationName, false);
+			spineAnimator->animate(*state->self()->animationName, false);
 			spineAnimator->onEnd.connect("!", [&](std::shared_ptr<MV::Scene::Spine> a_self, int a_track) {
 				if (a_self->track(a_track).name() == state->self()->animationName) {
 					owner()->removeFromParent();

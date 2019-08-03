@@ -65,8 +65,8 @@ public:
 		});
 	}
 
-	GameInstance* enterGame(const std::shared_ptr<InGamePlayer> &a_left, const std::shared_ptr<InGamePlayer> &a_right) {
-		ourInstance = ClientGameInstance::make(a_left, a_right, *this);
+	GameInstance* enterGame(const std::shared_ptr<InGamePlayer> &a_left, const std::shared_ptr<InGamePlayer> &a_right, const std::vector<BindstoneNetworkObjectPool::VariantType> &a_poolObjects) {
+		ourInstance = ClientGameInstance::make(a_left, a_right, a_poolObjects, *this);
 		gui().page("Main").hide();
 		return ourInstance.get();
 	}

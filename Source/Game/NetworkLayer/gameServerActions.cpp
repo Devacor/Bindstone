@@ -34,20 +34,16 @@ void GetInitialGameState::execute(GameUserConnectionState* a_connection, GameSer
 	a_connection->authenticate(player, secret);
 	if (a_game.allUsersConnected()) {
 		a_game.lobby()->send(makeNetworkString<GameServerStateChange>(GameServerStateChange::OCCUPIED));
-		a_game.server()->sendAll(makeNetworkString<SuppliedInitialGameState>(a_game.leftPlayer(), a_game.rightPlayer()));
+		a_game.server()->sendAll(makeNetworkString<SuppliedInitialGameState>(a_game.leftPlayer(), a_game.rightPlayer(), a_game.instance()->networkPool()));
 	}
 }
 
 void RequestBuildingUpgrade::execute(GameUserConnectionState* /*a_gameUser*/, GameServer &a_game) {
 	a_game.instance()->performUpgrade(slot, id);
-	a_game.server()->sendAll(makeNetworkString<RequestBuildingUpgrade>(slot, id));
 }
 
-void RequestBuildingUpgrade::execute(Game &a_game) {
-	a_game.instance()->performUpgrade(slot, id);
-}
-
-void RequestFullGameState::execute(GameUserConnectionState* /*a_gameUser*/, GameServer &/*a_game*/) {
+void RequestFullGameState::execute(GameUserConnectionState* a_gameUser, GameServer &a_game) {
+	a_gameUser->connection()->send(makeNetworkString<SynchronizeAction>(a_game.instance()->networkPool().all()));
 	//a_gameUser->connection()->send(makeNetworkString<RequestBuildingUpgrade>(a_game.data));
 }
 
@@ -56,5 +52,5 @@ void RequestFullGameState::execute(Game &a_game) {
 }
 
 void SuppliedInitialGameState::execute(Game& a_game) {
-	a_game.enterGame(left, right);
+	a_game.enterGame(left, right, pool);
 }

@@ -1,0 +1,20 @@
+[
+	{"buildings.void.name": {
+		"english": "Void Portal"
+	}},
+	{"buildings.void.description": {
+		"english": "Void Elementals emerge from the mysterious Void Realm."
+	}},
+	{"buildings.void.t0_name": {
+		"english": "Inactive Void Portal"
+	}},
+	{"buildings.void.t1_name": {
+		"english": "Voidling Portal"
+	}},
+	{"buildings.void.t2_0_name": {
+		"english": "Void Dragon Portal"
+	}},
+	{"buildings.void.t2_1_name": {
+		"english": "Void Chomper Portal"
+	}}
+]

@@ -44,11 +44,11 @@ public:
 	void fixedUpdate(double dt);
 	bool update(double dt);
 
-	virtual void requestUpgrade(int a_slot, size_t a_upgrade) {
+	virtual void requestUpgrade(int a_slot, int a_upgrade) {
 		std::cout << "Building Upgrade Request: " << a_slot << ", " << a_upgrade << std::endl;
 	}
 
-	virtual void performUpgrade(int a_slot, size_t a_upgrade) {
+	virtual void performUpgrade(int a_slot, int a_upgrade) {
 		building(a_slot)->upgrade(a_upgrade);
 	}
 
@@ -123,6 +123,11 @@ public:
 			return nullCreature;
 		}
 	}
+
+	virtual void initializeBuilding(std::shared_ptr<Building> a_building) {
+		buildings.push_back(a_building);
+	}
+
 protected:
 
 	virtual void fixedUpdateImplementation(double /*a_dt*/) {}
@@ -160,15 +165,16 @@ protected:
 class ClientGameInstance : public GameInstance {
 	ClientGameInstance(Game& a_game);
 public:
-	static std::unique_ptr<ClientGameInstance> make(const std::shared_ptr<InGamePlayer> &a_leftPlayer, const std::shared_ptr<InGamePlayer> &a_rightPlayer, Game& a_game) {
+	static std::unique_ptr<ClientGameInstance> make(const std::shared_ptr<InGamePlayer> &a_leftPlayer, const std::shared_ptr<InGamePlayer> &a_rightPlayer, const std::vector<BindstoneNetworkObjectPool::VariantType>& a_poolObjects, Game& a_game) {
 		auto result = std::unique_ptr<ClientGameInstance>(new ClientGameInstance(a_game));
 		result->initialize(a_leftPlayer, a_rightPlayer);
+		result->networkPool().synchronize(a_poolObjects);
 		return result;
 	}
 
-	void requestUpgrade(int a_slot, size_t a_upgrade) override;
+	void requestUpgrade(int a_slot, int a_upgrade) override;
 
-	void performUpgrade(int a_slot, size_t a_upgrade) override;
+	void performUpgrade(int a_slot, int a_upgrade) override;
 
 	bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &a_player) const override;
 
@@ -189,6 +195,11 @@ public:
 		return result;
 	}
 
+	virtual void initializeBuilding(std::shared_ptr<Building> a_building) override {
+		a_building->initializeNetworkState(networkPool().spawn(std::make_shared<BuildingNetworkState>(static_cast<int32_t>(buildings.size()))));
+		buildings.push_back(a_building);
+	}
+
 	virtual void spawnCreature(int a_buildingSlot, const std::string& a_creatureId) override {
 		auto spawner = building(a_buildingSlot);
 		auto creatureNode = gameObjectContainer()->make(MV::guid(a_creatureId));
@@ -201,7 +212,7 @@ public:
 		return true;
 	}
 
-	void requestUpgrade(int a_slot, size_t a_upgrade) override {
+	void requestUpgrade(int a_slot, int a_upgrade) override {
 		performUpgrade(a_slot, a_upgrade);
 	}
 

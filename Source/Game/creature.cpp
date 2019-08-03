@@ -26,21 +26,28 @@ std::string Creature::assetPath() const {
 }
 
 std::shared_ptr<InGamePlayer> Creature::player() {
-	return gameInstance.building(state->self()->buildingSlot)->player();
+	return gameInstance.building(buildingSlot())->player();
 }
 
 void CreatureNetworkState::hook(chaiscript::ChaiScript &a_script) {
 	a_script.add(chaiscript::user_type<CreatureNetworkState>(), "CreatureNetworkState");
 
+	MV::DeltaVariable<int32_t>::hook(a_script);
+	MV::DeltaVariable<std::string>::hook(a_script);
+	MV::DeltaVariable<MV::Point<MV::PointPrecision>>::hook(a_script);
+	MV::DeltaVariable<bool>::hook(a_script);
+	MV::DeltaVariable<double>::hook(a_script);
+
 	a_script.add(chaiscript::fun(&CreatureNetworkState::dying), "dying");
 	a_script.add(chaiscript::fun(&CreatureNetworkState::health), "health");
-	a_script.add(chaiscript::fun(&CreatureNetworkState::position), "position");
-	a_script.add(chaiscript::fun(&CreatureNetworkState::buildingSlot), "buildingSlot");
-	a_script.add(chaiscript::fun(&CreatureNetworkState::animationName), "animationName");
-	a_script.add(chaiscript::fun(&CreatureNetworkState::animationLoops), "animationLoops");
+	a_script.add(chaiscript::fun(&CreatureNetworkState::health), "position");
+	a_script.add(chaiscript::fun(&CreatureNetworkState::health), "animationName");
+	a_script.add(chaiscript::fun(&CreatureNetworkState::health), "animationTime");
+	a_script.add(chaiscript::fun(&CreatureNetworkState::health), "animationLoops");
+	a_script.add(chaiscript::fun(&CreatureNetworkState::health), "buildingSlot");
 
-	a_script.add(chaiscript::fun([](CreatureNetworkState &a_self, const std::string &a_key) {
-		return a_self.variables[a_key];
+	a_script.add(chaiscript::fun([](CreatureNetworkState &a_self, const std::string &a_key) -> decltype(auto) {
+		return a_self.variables.modify()[a_key];
 	}), "[]");
 }
 
@@ -62,16 +69,16 @@ chaiscript::ChaiScript& Creature::hook(chaiscript::ChaiScript &a_script, GameIns
 
 	a_script.add(chaiscript::fun(&Creature::alive), "alive");
 
-	a_script.add(chaiscript::fun([](Creature &a_self, const std::string &a_key){
+	a_script.add(chaiscript::fun([](Creature &a_self, const std::string &a_key) -> decltype(auto) {
 		return a_self.localVariables[a_key];
 	}), "[]");
 
 	a_script.add(chaiscript::fun([&](Creature &a_self) -> decltype(auto) {
-		return a_self.state->modify()->variables;
+		return a_self.state->modify()->variables.modify();
 	}), "setNetValue");
 
 	a_script.add(chaiscript::fun([&](Creature &a_self) -> decltype(auto) {
-		return a_self.state->self()->variables;
+		return a_self.state->self()->variables.view();
 	}), "getNetValue");
 
 	a_script.add(chaiscript::fun([&](Creature &a_self) {
@@ -420,8 +427,8 @@ void TargetPolicy::registerPathfindingListeners() {
 
 ClientCreature::ClientCreature(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> &a_state, GameInstance& a_gameInstance) :
 	Creature(a_owner, a_gameInstance, 
-		a_gameInstance.building(a_state->self()->buildingSlot)->skin(), 
-		a_gameInstance.data().creatures().data(a_state->self()->creatureTypeId), 
+		a_gameInstance.building(*a_state->self()->buildingSlot)->skin(),
+		a_gameInstance.data().creatures().data(*a_state->self()->creatureTypeId),
 		a_state
 	){
 	state->self()->onNetworkDeath = [&]() {
@@ -471,15 +478,14 @@ void ClientCreature::onNetworkSynchronize() {
 }
 
 void ClientCreature::onAnimationChanged() {
-	spine()->animate(state->self()->animationName, state->self()->animationLoops);
+	spine()->animate(*state->self()->animationName, state->self()->animationLoops);
 }
 
 void ClientCreature::updateImplementation(double a_delta) {
 	if (alive()) {
 		accumulatedDuration = std::min(networkDelta.delta(), accumulatedDuration + a_delta);
 		double percentNetTimestep = accumulatedDuration / networkDelta.delta();
-		MV::info("NetStep: ", percentNetTimestep, "% ==> [", accumulatedDuration, " / ", networkDelta.delta(), "]");
-		owner()->position(mix(startClientPosition, state->self()->position, static_cast<MV::PointPrecision>(percentNetTimestep)));
+		owner()->position(mix(startClientPosition, *state->self()->position, static_cast<MV::PointPrecision>(percentNetTimestep)));
 
 		auto self = std::static_pointer_cast<ClientCreature>(shared_from_this());
 		statTemplate.script(gameInstance.script()).update(self, a_delta);

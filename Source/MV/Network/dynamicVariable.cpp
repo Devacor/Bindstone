@@ -1,6 +1,7 @@
 #include "DynamicVariable.h"
 #include "chaiscript/chaiscript.hpp"
 #include "chaiscript/chaiscript_stdlib.hpp"
+#include "MV/Utility/exactType.hpp"
 
 namespace MV {
 	void hookDynamicVariable(chaiscript::ChaiScript &a_script) {

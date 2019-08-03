@@ -150,10 +150,14 @@ ClientGameInstance::ClientGameInstance(Game& a_game) :
 	GameInstance(a_game.root(), a_game.data(), a_game.mouse(), 1.0f / 60.0f),
 	game(a_game) {
 
+	synchronizedObjects.onSpawn<BuildingNetworkState>([this](std::shared_ptr<MV::NetworkObject<BuildingNetworkState>> a_newItem) {
+		building(a_newItem->self()->buildingSlot)->initializeNetworkState(a_newItem);
+	});
+
 	synchronizedObjects.onSpawn<CreatureNetworkState>([this](std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_newItem) {
 		auto creatureState = a_newItem->self();
 		creatureState->netId = a_newItem->id();
-		building(creatureState->buildingSlot)->spawnNetworkCreature(a_newItem);
+		building(*creatureState->buildingSlot)->spawnNetworkCreature(a_newItem);
 	});
 
 	synchronizedObjects.onSpawn<BattleEffectNetworkState>([this](std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> a_newItem) {
@@ -181,12 +185,12 @@ ClientGameInstance::ClientGameInstance(Game& a_game) :
 	//playlistGame->beginPlaying();
 }
 
-void ClientGameInstance::requestUpgrade(int a_slot, size_t a_upgrade) {
+void ClientGameInstance::requestUpgrade(int a_slot, int a_upgrade) {
 	std::cout << "Building Upgrade Request: " << a_slot << ", " << a_upgrade << std::endl;
 	game.gameClient()->send(makeNetworkString<RequestBuildingUpgrade>(a_slot, a_upgrade));
 }
 
-void ClientGameInstance::performUpgrade(int a_slot, size_t a_upgrade) {
+void ClientGameInstance::performUpgrade(int a_slot, int a_upgrade) {
 	auto selectedBuilding = building(a_slot);
 	selectedBuilding->upgrade(a_upgrade);
 	//selectedBuilding->update(game.gameClient()->clientServerTimeDelta());

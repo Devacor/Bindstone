@@ -18,10 +18,6 @@ class Building;
 
 struct BuildTree {
 	std::string id;
-
-	std::string name;
-	std::string description;
-
 	int64_t cost = 0;
 	int64_t income = 0;
 
@@ -30,20 +26,21 @@ struct BuildTree {
 	BuildTree(){}
 	BuildTree(const BuildTree& a_rhs) {
 		id = a_rhs.id;
-		name = a_rhs.name;
-		description = a_rhs.description;
 		cost = a_rhs.cost;
+		income = a_rhs.income;
 		for (auto&& upgrade : a_rhs.upgrades) {
 			upgrades.emplace_back(std::make_unique<BuildTree>(*upgrade));
 		}
+	}
+
+	std::string name() const {
+		return id;
 	}
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(
 			CEREAL_NVP(id),
-			CEREAL_NVP(name),
-			CEREAL_NVP(description),
 			CEREAL_NVP(cost),
 			CEREAL_NVP(income),
 			CEREAL_NVP(upgrades)
@@ -55,14 +52,12 @@ struct BuildTree {
 
 struct SkinData {
 	std::string id;
-	std::string name;
 	std::vector<Wallet> costs;
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(
 			CEREAL_NVP(id),
-			CEREAL_NVP(name),
 			CEREAL_NVP(costs)
 		);
 	}
@@ -70,12 +65,7 @@ struct SkinData {
 
 struct BuildingData {
 	std::string id;
-
 	BuildTree game;
-
-	std::string name;
-	std::string description;
-
 	std::vector<SkinData> skins;
 
 	std::vector<Wallet> costs;
@@ -86,8 +76,6 @@ struct BuildingData {
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(
 			CEREAL_NVP(id),
-			CEREAL_NVP(name),
-			CEREAL_NVP(description),
 			CEREAL_NVP(skins),
 			CEREAL_NVP(costs),
 			CEREAL_NVP(game)
@@ -103,12 +91,10 @@ private:
 };
 
 struct BuildingNetworkState {
-	int64_t netId;
-
 	std::function<void()> onNetworkSynchronize;
+	std::function<void()> onUpgrade;
 	std::function<void()> onAnimationChanged;
 
-	std::string buildingTypeId;
 	int32_t buildingSlot;
 
 	std::map<std::string, MV::DynamicVariable> variables;
@@ -116,16 +102,23 @@ struct BuildingNetworkState {
 	std::string animationName;
 	bool animationLoops = false;
 
+	std::vector<uint32_t> buildTreeIndices;
+
 	BuildingNetworkState() {
 	}
 
-	BuildingNetworkState(const BuildingData& a_template, int32_t a_buildingSlot) :
-		buildingTypeId(a_template.id),
+	BuildingNetworkState(int32_t a_buildingSlot) :
 		buildingSlot(a_buildingSlot) {
 	}
 
-	void synchronize(std::shared_ptr<CreatureNetworkState> a_other) {
+	void synchronize(std::shared_ptr<BuildingNetworkState> a_other) {
 		variables = a_other->variables;
+		if (buildTreeIndices.size() != a_other->buildTreeIndices.size()){
+			buildTreeIndices = a_other->buildTreeIndices;
+			if (onUpgrade) {
+				onUpgrade();
+			}
+		}
 		if (animationName != a_other->animationName || animationLoops != a_other->animationLoops) {
 			animationName = a_other->animationName;
 			animationLoops = a_other->animationLoops;
@@ -139,18 +132,18 @@ struct BuildingNetworkState {
 		}
 	}
 
-	void destroy(std::shared_ptr<CreatureNetworkState> a_other) {
+	void destroy(std::shared_ptr<BuildingNetworkState> a_other) {
 		std::cout << "Buildings don't die... >.>;" << std::endl;
 	}
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(
-			cereal::make_nvp("creatureTypeId", buildingTypeId),
 			cereal::make_nvp("slot", buildingSlot),
 			cereal::make_nvp("animationName", animationName),
 			cereal::make_nvp("animationLoops", animationLoops),
-			cereal::make_nvp("variables", variables)
+			cereal::make_nvp("variables", variables),
+			cereal::make_nvp("buildTreeIndices", buildTreeIndices)
 		);
 	}
 
@@ -167,16 +160,24 @@ public:
 
 	ComponentDerivedAccessors(Building)
 
-	std::vector<size_t> buildTreeIndices;
-
 	std::shared_ptr<InGamePlayer> player() const { return owningPlayer; }
 
 	const BuildTree* current() const;
 
-	void upgrade(size_t a_index);
-	void requestUpgrade(size_t a_index);
+	void upgrade(int a_index);
+	void requestUpgrade(int a_index);
 
 	void spawnNetworkCreature(std::shared_ptr<MV::NetworkObject<CreatureNetworkState>> a_synchronizedCreature);
+
+	void initializeNetworkState(std::shared_ptr<MV::NetworkObject<BuildingNetworkState>> a_networkState) {
+		state = a_networkState;
+		state->self()->onUpgrade = [&]() {
+			buildingUpgraded();
+		};
+		state->self()->onAnimationChanged = [&] {
+			spine()->animate(state->self()->animationName, state->self()->animationLoops);
+		};
+	}
 
 	std::string assetPath() const {
 		return "Assets/Buildings/" + buildingData.id + "/" + (skin().empty() ? "Default" : skin()) + "/building.prefab";
@@ -201,6 +202,10 @@ public:
 protected:
 	Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<InGamePlayer> &a_player, GameInstance& a_instance);
 
+	void buildingUpgraded() {
+		onUpgradedSignal(std::static_pointer_cast<Building>(shared_from_this()));
+	}
+
 	virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<MV::Scene::Node> &a_parent) {
 		return cloneHelper(a_parent->attach<Building>(slot, loadoutSlot, owningPlayer, gameInstance).self());
 	}
@@ -212,24 +217,27 @@ protected:
 	}
 
 	virtual void updateImplementation(double a_dt) override;
+
+	std::shared_ptr<MV::Scene::Spine> spine() {
+		return spineAnimator;
+	}
 private:
 	virtual void initialize() override;
 
 	void initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &a_newNode);
 
 	std::map<std::string, chaiscript::Boxed_Value> localVariables;
+	std::shared_ptr<MV::NetworkObject<BuildingNetworkState>> state;
 
 	BuildingData buildingData;
-
-	double countdown = 0;
-	size_t waveIndex = 0;
-	size_t creatureIndex = 0;
 
 	int slot;
 	int loadoutSlot;
 	MV::Point<> spawnPoint;
 	std::shared_ptr<InGamePlayer> owningPlayer;
 	GameInstance& gameInstance;
+
+	std::shared_ptr<MV::Scene::Spine> spineAnimator;
 };
 
 

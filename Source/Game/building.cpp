@@ -37,6 +37,10 @@ Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, in
 
 void Building::initialize() {
 	auto newNode = owner()->make(assetPath(), gameInstance.services());
+
+	newNode->serializable(false);
+	spineAnimator = newNode->componentInChildren<MV::Scene::Spine>(true, false).get();
+
 	//newNode->component<MV::Scene::Spine>()->animate("idle");
 	owner()->scale(owner()->scale() * gameInstance.teamForPlayer(owningPlayer).scale());
 	initializeBuildingButton(newNode);
@@ -59,22 +63,25 @@ std::string Building::skin() const {
 void Building::updateImplementation(double a_dt) {
 	auto self = std::static_pointer_cast<Building>(shared_from_this());
 	buildingData.script(gameInstance.script()).update(self, a_dt);
+
+	if (spine() && state->self()->animationName != spine()->track().name()) {
+		state->modify()->animationName = spine()->track().name();
+		state->modify()->animationLoops = spine()->track().looping();
+	}
 }
 
-void Building::upgrade(size_t a_index) {
-	buildTreeIndices.push_back(a_index);
-	onUpgradedSignal(std::static_pointer_cast<Building>(shared_from_this()));
-
-	creatureIndex = 0;
+void Building::upgrade(int a_index) {
+	state->modify()->buildTreeIndices.push_back(static_cast<int32_t>(a_index));
+	buildingUpgraded();
 }
 
-void Building::requestUpgrade(size_t a_index) {
+void Building::requestUpgrade(int a_index) {
 	gameInstance.requestUpgrade(slot, a_index);
 }
 
 const BuildTree* Building::current() const {
 	const BuildTree* currentBuildTree = &buildingData.game;
-	for (auto& index : buildTreeIndices) {
+	for (auto& index : state->self()->buildTreeIndices) {
 		currentBuildTree = currentBuildTree->upgrades[index].get();
 	}
 	return currentBuildTree;
@@ -102,9 +109,21 @@ chaiscript::ChaiScript& Building::hook(chaiscript::ChaiScript &a_script, GameIns
 		return a_self.localVariables[a_key];
 	}), "[]");
 
+	a_script.add(chaiscript::fun([&](Building& a_self) -> decltype(auto) {
+		return a_self.state->modify()->variables;
+	}), "setNetValue");
+
+	a_script.add(chaiscript::fun([&](Building& a_self) -> decltype(auto) {
+		return a_self.state->self()->variables;
+	}), "getNetValue");
+
 	a_script.add(chaiscript::fun([&](Building& a_self, const std::string& a_key) {
 		gameInstance.spawnCreature(a_self.slotIndex(), a_key);
 	}), "spawn");
+
+	a_script.add(chaiscript::fun([&](Building& a_self) {
+		return a_self.state->id();
+	}), "networkId");
 
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Building>, std::shared_ptr<Building>>([](const MV::Scene::SafeComponent<Building> &a_item) { return a_item.self(); }));
 	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Building>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<Building> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
@@ -138,11 +157,11 @@ void Building::initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &
 
 			for (size_t i = 0; i < current()->upgrades.size(); ++i) {
 				auto&& currentUpgrade = current()->upgrades[i];
-				auto upgradeButton = button(dialog, gameInstance.data().managers().textLibrary, gameInstance.mouse(), MV::size(256.0f, 20.0f), currentUpgrade->name + ": " + MV::to_string(currentUpgrade->cost));
+				auto upgradeButton = button(dialog, gameInstance.data().managers().textLibrary, gameInstance.mouse(), MV::size(256.0f, 20.0f), currentUpgrade->name() + ": " + MV::to_string(currentUpgrade->cost));
 				auto* upgradePointer = currentUpgrade.get();
 				upgradeButton->onAccept.connect("tryToBuy", [&, i, upgradePointer](std::shared_ptr<MV::Scene::Clickable> a_self) {
 					if (owningPlayer->gameWallet.remove(Wallet::CurrencyType::GAME, upgradePointer->cost)) {
-						requestUpgrade(i);
+						requestUpgrade(static_cast<int>(i));
 						//upgrade(i);
 					}
 					gameInstance.scene()->get("modal")->removeFromParent();

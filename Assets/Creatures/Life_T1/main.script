@@ -3,22 +3,16 @@ self.spawn = fun(self){
 		var targets = self.enemiesInRange(20);
 		if(!targets.empty()){
 			var target = targets[0].networkId;
-			print("Target Id:");
-			print(target);
 			var activeTarget = self["activeTarget"];
-			print(activeTarget);
 			if(activeTarget != target){
-				print("ComparisonDone");
 				self["activeTarget"] = target;
 				self.targeting().target(target, 10, fun[target](targeting){
 					targeting.self()["activeTarget"] = 0;
 					targeting.self()["attacking"] = true;
-					print("ATTACKING VAR: " + to_string(targeting.self()["attacking"]));
 					auto spine = targeting.self().spine();
 					spine.animate("attack", false);
 					spine.onEvent.connect("launch", fun[target, targeting](spine, index, eventData){
 						if(eventData.name == "launch"){
-							print("LAUNCHING");
 							var newMissile = BattleEffectNetworkState(targeting.self().game(), "Missile", targeting.self().networkId);
 							newMissile.duration = 1.25;
 							newMissile.targetType = TargetType_CREATURE;
@@ -26,14 +20,12 @@ self.spawn = fun(self){
 							auto effect = spawnOnNetwork(newMissile);
 							effect.onArrive.connect("Arrive", fun(battleEffect) {
 								if(!battleEffect.targetCreature().is_var_null()){
-									print("Damage!");
 									battleEffect.targetCreature().changeHealth(-5);
 								}
 							});
 						}
 					});
 					spine.onEnd.connect("unlock", fun[targeting](spine, index){
-						print("ATTACK" + spine.track(index).name());
 						if(spine.track(index).name() == "attack"){
 							print("ATTACK FALSE");
 							targeting.self()["attacking"] = false;

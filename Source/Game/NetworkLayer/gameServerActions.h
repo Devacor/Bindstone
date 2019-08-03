@@ -2,7 +2,7 @@
 #define _GAMESERVERACTIONS_MV_H_
 
 #include "Game/Instance/team.h"
-#include "Game/NetworkLayer/networkAction.h"
+#include "Game/NetworkLayer/synchronizeAction.h"
 #include "MV/Utility/chaiscriptUtility.h"
 
 class GameServerAvailable : public NetworkAction {
@@ -104,18 +104,23 @@ private:
 class SuppliedInitialGameState : public NetworkAction {
 public:
 	SuppliedInitialGameState() {}
-	SuppliedInitialGameState(const std::shared_ptr<InGamePlayer> &a_left, const std::shared_ptr<InGamePlayer> &a_right) : left(a_left), right(a_right) {}
-
+	SuppliedInitialGameState(const std::shared_ptr<InGamePlayer> &a_left, const std::shared_ptr<InGamePlayer> &a_right, const BindstoneNetworkObjectPool &a_pool) : 
+		left(a_left), 
+		right(a_right), 
+		pool(a_pool.all()) {
+	}
+	
 	virtual void execute(Game& a_connection) override;
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
-		archive(CEREAL_NVP(left), CEREAL_NVP(right), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
+		archive(CEREAL_NVP(left), CEREAL_NVP(right), CEREAL_NVP(pool), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
 private:
 	std::shared_ptr<InGamePlayer> left;
 	std::shared_ptr<InGamePlayer> right;
+	std::vector<BindstoneNetworkObjectPool::VariantType> pool;
 };
 
 class RequestBuildingUpgrade : public NetworkAction {
@@ -124,7 +129,6 @@ public:
 	RequestBuildingUpgrade(int32_t a_slot, int64_t a_id) : slot(a_slot), id(static_cast<int32_t>(a_id)) {}
 
 	virtual void execute(GameUserConnectionState*a_gameUser, GameServer &a_game) override;
-	virtual void execute(Game &a_game) override;
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {

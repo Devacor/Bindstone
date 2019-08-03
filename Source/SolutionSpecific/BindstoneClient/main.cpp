@@ -100,7 +100,6 @@ public:
 	int id;
 };
 
-
 void PathfindingTest();
 
 int main(int argc, char *argv[]) {
@@ -121,6 +120,22 @@ int main(int argc, char *argv[]) {
 
 	auto saved = MV::toJson(derived);
 	auto loaded = MV::fromJson<std::shared_ptr<Derived1>>(saved);
+
+	CreatureNetworkState stateSizeTest;
+	stateSizeTest.animationName = "idle";
+	stateSizeTest.creatureTypeId = "Life_T1";
+	stateSizeTest.position = MV::Point<>(0, 0, 0);
+	MV::info("Creature NetworkA DELTA SIZE: ", MV::toBinaryString(stateSizeTest).size());
+
+	stateSizeTest.animationTime = 10.0;
+	stateSizeTest.position = MV::Point<>(0, 0, 0);
+	MV::info("Creature NetworkA DELTA SIZE POS: ", MV::toBinaryString(stateSizeTest).size());
+
+	stateSizeTest.animationTime = 10.0;
+	MV::info("Creature NetworkA DELTA SIZE POS: ", MV::toBinaryString(stateSizeTest).size());
+
+	stateSizeTest.animationLoops = true;
+	MV::info("Creature NetworkA DELTA SIZE NONE: ", MV::toBinaryString(stateSizeTest).size());
 
 	std::cout << "done saveload test.";
 

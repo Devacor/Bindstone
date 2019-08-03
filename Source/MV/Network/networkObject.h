@@ -214,7 +214,7 @@ namespace MV {
 		}
 
 		//Used for a full synchronize of alive objects
-		std::vector<VariantType> all() {
+		std::vector<VariantType> all() const {
 			std::vector<VariantType> results;
 			for (auto object = objects.begin(); object != objects.end();++object) {
 				if (!std::visit([](const auto &a_object) { return a_object->destroyed(); }, object->second)) {

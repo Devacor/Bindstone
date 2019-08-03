@@ -252,11 +252,8 @@ namespace MV {
 		long long id;
 		static long long uniqueId;
 
-		static std::map<size_t, bool> scriptHookedUp;
+		static inline std::map<size_t, bool> scriptHookedUp = std::map<size_t, bool>();
 	};
-
-	template <typename T>
-	std::map<size_t, bool> Receiver<T>::scriptHookedUp = std::map<size_t, bool>();
 
 	template <typename T>
 	long long Receiver<T>::uniqueId = 0;
@@ -626,11 +623,8 @@ namespace MV {
 	private:
 		Signal<T> &signal;
 
-		static std::map<size_t, bool> scriptHookedUp;
+		static inline std::map<size_t, bool> scriptHookedUp = std::map<size_t, bool>();
 	};
-
-	template <typename T>
-	std::map<size_t, bool> SignalRegister<T>::scriptHookedUp = std::map<size_t, bool>();
 }
 
 #endif

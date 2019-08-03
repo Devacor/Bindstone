@@ -1,11 +1,9 @@
 {
     "data": [
         {
-            "id": "Life",
-            "name": "Tree of Life",
-            "description": "From the roots of this mighty tree springs life eternal.",
+            "id": "life",
             "skins": [
-                {"id": "Vibrant", "name": "Vibrant Tree Of Life", "costs": [{"values":[0,0,325]}]}
+                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
             ],
             "costs": [
                 {"values": [0,10000,0]},
@@ -13,52 +11,288 @@
                 {"values": [0,6000,325]}
             ],
             "game": {
-                "id": "None",
-                "name": "Tree of Life Foundation",
-                "description": "",
+                "id": "T0",
                 "cost": 0,
                 "income": 0,
-                "upgrades": [
-                    {
-                        "ptr_wrapper": {
-                            "valid": 1,
-                            "data": {
-                                "id": "Basic",
-                                "name": "Tree of Life",
-                                "description": "Begin production of life elementals.",
-                                "cost": 75,
-                                "income": 30,
-                                "upgrades": [
-                                    {
-                                        "ptr_wrapper": {
-                                            "valid": 1,
-                                            "data": {
-                                                "id": "Eternal",
-                                                "name": "Tree of Eternal Life",
-                                                "description": "Begin production of greater life elementals.",
-                                                "cost": 250,
-                                                "income": 60,
-                                                "upgrades": []
-                                            }
-                                        }
-                                    },
-                                    {
-                                        "ptr_wrapper": {
-                                            "valid": 1,
-                                            "data": {
-                                                "id": "Overwhelming",
-                                                "name": "Tree of Overwhelming Life",
-                                                "description": "Begin production of suspended life elementals.",
-                                                "cost": 250,
-                                                "income": 60,
-                                                "upgrades": []
-                                            }
-                                        }
-                                    }
-                                ]
-                            }
-                        }
-                    }
+                "upgrades": [ 
+                    {"ptr_wrapper": { "valid": 1, "data": {
+                        "id": "T1",
+                        "cost": 75,
+                        "income": 30,
+                        "upgrades": [
+                            {"ptr_wrapper": {"valid": 1, "data": {
+                                "id": "T2_0",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }},
+                            {"ptr_wrapper": {"valid": 1,"data": {
+                                "id": "T2_1",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }}
+                        ]
+                    }}} 
+                ]
+            }
+        },
+        {
+            "id": "decay",
+            "skins": [
+                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+            ],
+            "costs": [
+                {"values": [0,10000,0]},
+                {"values": [0,0,475]},
+                {"values": [0,6000,325]}
+            ],
+            "game": {
+                "id": "T0",
+                "cost": 0,
+                "income": 0,
+                "upgrades": [ 
+                    {"ptr_wrapper": { "valid": 1, "data": {
+                        "id": "T1",
+                        "cost": 75,
+                        "income": 30,
+                        "upgrades": [
+                            {"ptr_wrapper": {"valid": 1, "data": {
+                                "id": "T2_0",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }},
+                            {"ptr_wrapper": {"valid": 1,"data": {
+                                "id": "T2_1",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }}
+                        ]
+                    }}} 
+                ]
+            }
+        },
+        {
+            "id": "void",
+            "skins": [
+                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+            ],
+            "costs": [
+                {"values": [0,10000,0]},
+                {"values": [0,0,475]},
+                {"values": [0,6000,325]}
+            ],
+            "game": {
+                "id": "T0",
+                "cost": 0,
+                "income": 0,
+                "upgrades": [ 
+                    {"ptr_wrapper": { "valid": 1, "data": {
+                        "id": "T1",
+                        "cost": 75,
+                        "income": 30,
+                        "upgrades": [
+                            {"ptr_wrapper": {"valid": 1, "data": {
+                                "id": "T2_0",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }},
+                            {"ptr_wrapper": {"valid": 1,"data": {
+                                "id": "T2_1",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }}
+                        ]
+                    }}} 
+                ]
+            }
+        },
+        {
+            "id": "earth",
+            "skins": [
+                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+            ],
+            "costs": [
+                {"values": [0,10000,0]},
+                {"values": [0,0,475]},
+                {"values": [0,6000,325]}
+            ],
+            "game": {
+                "id": "T0",
+                "cost": 0,
+                "income": 0,
+                "upgrades": [ 
+                    {"ptr_wrapper": { "valid": 1, "data": {
+                        "id": "T1",
+                        "cost": 75,
+                        "income": 30,
+                        "upgrades": [
+                            {"ptr_wrapper": {"valid": 1, "data": {
+                                "id": "T2_0",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }},
+                            {"ptr_wrapper": {"valid": 1,"data": {
+                                "id": "T2_1",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }}
+                        ]
+                    }}} 
+                ]
+            }
+        },
+        {
+            "id": "fire",
+            "skins": [
+                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+            ],
+            "costs": [
+                {"values": [0,10000,0]},
+                {"values": [0,0,475]},
+                {"values": [0,6000,325]}
+            ],
+            "game": {
+                "id": "T0",
+                "cost": 0,
+                "income": 0,
+                "upgrades": [ 
+                    {"ptr_wrapper": { "valid": 1, "data": {
+                        "id": "T1",
+                        "cost": 75,
+                        "income": 30,
+                        "upgrades": [
+                            {"ptr_wrapper": {"valid": 1, "data": {
+                                "id": "T2_0",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }},
+                            {"ptr_wrapper": {"valid": 1,"data": {
+                                "id": "T2_1",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }}
+                        ]
+                    }}} 
+                ]
+            }
+        },
+        {
+            "id": "water",
+            "skins": [
+                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+            ],
+            "costs": [
+                {"values": [0,10000,0]},
+                {"values": [0,0,475]},
+                {"values": [0,6000,325]}
+            ],
+            "game": {
+                "id": "T0",
+                "cost": 0,
+                "income": 0,
+                "upgrades": [ 
+                    {"ptr_wrapper": { "valid": 1, "data": {
+                        "id": "T1",
+                        "cost": 75,
+                        "income": 30,
+                        "upgrades": [
+                            {"ptr_wrapper": {"valid": 1, "data": {
+                                "id": "T2_0",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }},
+                            {"ptr_wrapper": {"valid": 1,"data": {
+                                "id": "T2_1",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }}
+                        ]
+                    }}} 
+                ]
+            }
+        },
+        {
+            "id": "air",
+            "skins": [
+                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+            ],
+            "costs": [
+                {"values": [0,10000,0]},
+                {"values": [0,0,475]},
+                {"values": [0,6000,325]}
+            ],
+            "game": {
+                "id": "T0",
+                "cost": 0,
+                "income": 0,
+                "upgrades": [ 
+                    {"ptr_wrapper": { "valid": 1, "data": {
+                        "id": "T1",
+                        "cost": 75,
+                        "income": 30,
+                        "upgrades": [
+                            {"ptr_wrapper": {"valid": 1, "data": {
+                                "id": "T2_0",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }},
+                            {"ptr_wrapper": {"valid": 1,"data": {
+                                "id": "T2_1",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }}
+                        ]
+                    }}} 
+                ]
+            }
+        },
+        {
+            "id": "lightning",
+            "skins": [
+                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+            ],
+            "costs": [
+                {"values": [0,10000,0]},
+                {"values": [0,0,475]},
+                {"values": [0,6000,325]}
+            ],
+            "game": {
+                "id": "T0",
+                "cost": 0,
+                "income": 0,
+                "upgrades": [ 
+                    {"ptr_wrapper": { "valid": 1, "data": {
+                        "id": "T1",
+                        "cost": 75,
+                        "income": 30,
+                        "upgrades": [
+                            {"ptr_wrapper": {"valid": 1, "data": {
+                                "id": "T2_0",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }},
+                            {"ptr_wrapper": {"valid": 1,"data": {
+                                "id": "T2_1",
+                                "cost": 250,
+                                "income": 60,
+                                "upgrades": []
+                            } }}
+                        ]
+                    }}} 
                 ]
             }
         }

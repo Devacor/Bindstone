@@ -88,7 +88,7 @@ struct ServerPlayer {
 			lastResult = a_result;
 			auto score = scoreForResult(a_result);
 			rating += volatility * (score - a_expected);
-			volatility = MV::clamp(volatility + (streak * 2) - 3, 7.5, 40.0);
+			volatility = MV::clamp(volatility + (streak * 2.0) - 3.0, 7.5, 40.0);
 		}
 
 		double getQ() const {

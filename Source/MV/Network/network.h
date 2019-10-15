@@ -15,6 +15,7 @@
 #include <set>
 #include <utility>
 #include <atomic>
+#include <string>
 #include "MV/Network/url.h"
 #include "MV/Utility/generalUtility.h"
 #include <boost/asio.hpp>
@@ -43,7 +44,7 @@ namespace MV {
 		uint32_t headerAndContentSize() const;
 
 		boost::asio::streambuf buffer;
-		uint8_t headerBuffer[4];
+		uint8_t headerBuffer[4] = {0, 0, 0, 0};
 
 		std::string content;
 	};

@@ -89,9 +89,9 @@ namespace MV {
 		}
 
 		std::string path;
-		bool powerTwo;
-		bool repeat;
-		bool pixel;
+		bool powerTwo = true;
+		bool repeat = false;
+		bool pixel = false;
 
 		bool cleared = false;
 	};
@@ -124,7 +124,7 @@ namespace MV {
 	class LoadedTexture {
 	public:
 		LoadedTexture(TextureParameters a_parameters);
-		LoadedTexture(LoadedTexture&& a_rhs) :
+		LoadedTexture(LoadedTexture&& a_rhs) noexcept :
 			loadedData(a_rhs.loadedData),
 			ourParameters(a_rhs.ourParameters){
 			a_rhs.loadedData.textureId = 0;

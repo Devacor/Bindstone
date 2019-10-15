@@ -175,7 +175,8 @@ namespace MV {
 			scriptEnginePointer = services.get<chaiscript::ChaiScript>(false);
 		}
 
-		Receiver() {
+		Receiver() :
+			id(0) {
 		}
 		Receiver(std::function<T> a_callback, long long a_id):
 			callback(a_callback),

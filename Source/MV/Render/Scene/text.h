@@ -293,7 +293,7 @@ namespace MV{
 			bool usingBoundsForLineHeight = false;
 
 			bool displayCursor = false;
-			size_t cursor;
+			size_t cursor = 0;
 			std::shared_ptr<MV::Scene::Sprite> cursorSprite;
 
 			std::string fontIdentifier;

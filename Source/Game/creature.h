@@ -27,17 +27,17 @@ struct CreatureData {
 	std::string name;
 	std::string description;
 
-	float moveSpeed;
-	float actionSpeed;
-	float castSpeed;
+	float moveSpeed = 0.0f;
+	float actionSpeed = 0.0f;
+	float castSpeed = 0.0f;
 
-	int health;
-	float defense;
-	float will;
-	float strength;
-	float ability;
+	int health = 0;
+	float defense = 0.0f;
+	float will = 0.0f;
+	float strength = 0.0f;
+	float ability = 0.0f;
 
-	bool isServer;
+	bool isServer = false;
 
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 		StandardScriptMethods<Creature>::hook(a_script, "Creature");
@@ -197,7 +197,7 @@ private:
 };
 
 struct CreatureNetworkState {
-	int64_t netId;
+	int64_t netId = 0;
 	bool dying = false;
 
 	std::function<void()> onNetworkDeath;

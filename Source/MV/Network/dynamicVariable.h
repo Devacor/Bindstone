@@ -280,7 +280,7 @@ namespace MV {
 	private:
 		static inline std::map<size_t, bool> scriptHookedUp = std::map<size_t, bool>();
 		bool modified = true;
-		T value;
+		T value = {};
 	};
 
 	template <typename T>

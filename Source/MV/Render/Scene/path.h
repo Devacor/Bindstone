@@ -150,8 +150,8 @@ namespace MV {
 			}
 
 			void resizeNumberOfDebugDrawPoints() {
-				auto totalMapNodes = (map->size().width * map->size().height);
-				points.resize(4 * totalMapNodes);
+				size_t totalMapNodes = static_cast<size_t>(map->size().width * map->size().height);
+				points.resize(static_cast<size_t>(4) * totalMapNodes);
 				clearTexturePoints(points);
 
 				vertexIndices.clear();

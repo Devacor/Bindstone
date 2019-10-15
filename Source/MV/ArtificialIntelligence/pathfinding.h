@@ -247,7 +247,7 @@ namespace MV {
 			}
 		}
 
-		TemporaryCost(TemporaryCost &&a_rhs):
+		TemporaryCost(TemporaryCost &&a_rhs) noexcept:
             map(std::move(a_rhs.map)),
 			position(std::move(a_rhs.position)),
             temporaryCost(std::move(a_rhs.temporaryCost)){

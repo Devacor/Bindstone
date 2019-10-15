@@ -56,7 +56,7 @@ struct MatchSeeker : public std::enable_shared_from_this<MatchSeeker> {
 	bool matching = false;
 	LobbyUserConnectionState* state;
 	MatchQueue& queue;
-	int64_t secret;
+	int64_t secret = 0;
 };
 
 bool operator<(MatchSeeker &a_lhs, MatchSeeker &a_rhs);
@@ -175,7 +175,7 @@ private:
 	LobbyServer& ourServer;
 
 	std::string ourUrl;
-	uint16_t ourPort;
+	uint16_t ourPort = 0;
 
 	std::shared_ptr<MatchSeeker> leftPlayer;
 	std::shared_ptr<MatchSeeker> rightPlayer;
@@ -378,9 +378,9 @@ private:
 	MatchQueue normalQueue;
 
 	Managers &manager;
-	bool done;
+	bool done = false;
 
-	double lastUpdateDelta;
+	double lastUpdateDelta = 0.0;
 };
 
 #endif

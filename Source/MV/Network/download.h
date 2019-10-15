@@ -23,7 +23,7 @@ namespace MV {
 		bool success = false;
 		std::string errorMessage;
 
-		size_t contentLength;
+		size_t contentLength = 0;
 
 		HttpHeader() {
 		}

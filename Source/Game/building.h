@@ -95,7 +95,7 @@ struct BuildingNetworkState {
 	std::function<void()> onUpgrade;
 	std::function<void()> onAnimationChanged;
 
-	int32_t buildingSlot;
+	int32_t buildingSlot = 0;
 
 	std::map<std::string, MV::DynamicVariable> variables;
 

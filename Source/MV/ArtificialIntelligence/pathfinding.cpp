@@ -305,7 +305,8 @@ namespace MV {
 		onStaticBlock(onStaticBlockSignal),
 		onStaticUnblock(onStaticUnblockSignal),
 		onCostChange(onCostChangeSignal),
-		onClearanceChange(onClearanceChangeSignal) {
+		onClearanceChange(onClearanceChangeSignal),
+		usingCorners(true) {
 	}
 
 	Map::Map(const Size<int> &a_size, float a_defaultCost, bool a_useCorners) :

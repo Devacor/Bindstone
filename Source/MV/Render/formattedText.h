@@ -87,13 +87,13 @@ namespace MV {
 		}
 	private:
 		std::string file;
-		TTF_Font* font;
+		TTF_Font* font = nullptr;
 		std::string identifier;
-		int size;
-		FontStyle style;
-		PointPrecision lineHeight;
-		PointPrecision baseLine;
-		TextLibrary *textLibrary;
+		int size = 0;
+		FontStyle style = FontStyle::NORMAL;
+		PointPrecision lineHeight = 0;
+		PointPrecision baseLine = 0;
+		TextLibrary *textLibrary = nullptr;
 
 		typedef std::map<std::string, std::shared_ptr<CharacterDefinition>> CachedGlyphs;
 		CachedGlyphs cachedGlyphs;
@@ -421,7 +421,7 @@ namespace MV {
 
 			std::string defaultStateIdentifier;
 			float textWidth;
-			PointPrecision minimumTextLineHeight;
+			PointPrecision minimumTextLineHeight = 0.0f;
 			TextJustification textJustification;
 			TextWrapMethod textWrapping;
 			std::string stringContents;

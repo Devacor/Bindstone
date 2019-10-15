@@ -31,7 +31,7 @@ namespace MV {
 	template<size_t SizeX, size_t SizeY>
 	inline Matrix<SizeX, SizeY> operator/(const Matrix<SizeX, SizeY> &a_left, const PointPrecision &a_right);
 
-	enum MatrixInitialize {NoFill};
+	enum class MatrixInitialize {NoFill};
 
 	template<size_t SizeX, size_t SizeY>
 	class Matrix {
@@ -225,8 +225,8 @@ namespace MV {
 		TransformMatrix(const TransformMatrix &a_matrix) :Matrix<4, 4>(a_matrix) {}
 		TransformMatrix(const Matrix<4, 4> &a_matrix) :Matrix<4, 4>(a_matrix) {}
 
-		TransformMatrix(const TransformMatrix &&a_matrix) noexcept :Matrix<4, 4>(std::move(a_matrix)) {}
-		TransformMatrix(const Matrix<4, 4> &&a_matrix) noexcept :Matrix<4, 4>(std::move(a_matrix)) {}
+		TransformMatrix(TransformMatrix &&a_matrix) noexcept :Matrix<4, 4>(std::move(a_matrix)) {}
+		TransformMatrix(Matrix<4, 4> &&a_matrix) noexcept :Matrix<4, 4>(std::move(a_matrix)) {}
 
 		TransformMatrix() : Matrix<4, 4>() {
 			makeIdentity();

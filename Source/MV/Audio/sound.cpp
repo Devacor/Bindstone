@@ -18,6 +18,7 @@ namespace MV {
 	}
 
 	AudioPlayer::AudioPlayer() {
+		channelLastPlayed = 0;
 		audio_rate = 44100;
 		audio_format = AUDIO_S16SYS;
 		audio_channels = 2;

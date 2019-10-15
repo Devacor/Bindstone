@@ -713,6 +713,7 @@ namespace MV {
 		glExtensions(this),
 		clearBackgroundColor(0x3d3d3d),
 		initialized(0),
+		sdlRenderer(nullptr),
 		sdlWindow(*this),
 		mvWorld(*this){
 

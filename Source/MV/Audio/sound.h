@@ -49,13 +49,13 @@ namespace MV {
 	class MusicIdentity {
 	public:
 		std::string fileName;
-		Mix_Music * musicHandle;
+		Mix_Music * musicHandle = nullptr;
 	};
 
 	class SoundIdentity {
 	public:
 		std::string fileName;
-		Mix_Chunk * soundHandle;
+		Mix_Chunk * soundHandle = nullptr;
 	};
 
 	void AudioMusicHook();

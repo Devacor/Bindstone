@@ -49,8 +49,9 @@ namespace MV {
 					node->silenceInternal();
 				}
 
-				Quiet(const Quiet && a_other) noexcept : 
-					node(std::move(a_other.node)) {
+				Quiet(Quiet && a_other) noexcept : 
+					node(std::move(a_other.node)),
+					callBatchedAfterUnsilence(a_other.callBatchedAfterUnsilence){
 				}
 
 				Quiet& forget() {

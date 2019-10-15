@@ -25,7 +25,7 @@ class BattleEffect;
 struct BattleEffectData {
 	std::string id;
 
-	bool isServer;
+	bool isServer = false;
 
 	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
 		StandardScriptMethods<BattleEffect>::hook(a_script, "BattleEffect");

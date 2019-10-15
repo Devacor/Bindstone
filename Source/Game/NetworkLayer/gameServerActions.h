@@ -22,7 +22,7 @@ public:
 
 private:
 	std::string ourUrl;
-	uint16_t ourPort;
+	uint16_t ourPort = 0;
 };
 
 class GameServerStateChange : public NetworkAction {
@@ -44,7 +44,7 @@ public:
 	}
 
 private:
-	State ourState;
+	State ourState = AVAILABLE;
 };
 
 struct AssignedPlayer {
@@ -55,7 +55,7 @@ struct AssignedPlayer {
 	AssignedPlayer& operator=(const AssignedPlayer &a_rhs) = default;
 
 	std::shared_ptr<InGamePlayer> player;
-	int64_t secret;
+	int64_t secret = 0;
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -98,7 +98,7 @@ public:
 		archive(CEREAL_NVP(secret), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 private:
-	int64_t secret;
+	int64_t secret = 0;
 };
 
 class SuppliedInitialGameState : public NetworkAction {
@@ -135,8 +135,8 @@ public:
 		archive(CEREAL_NVP(slot), CEREAL_NVP(id), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
-	int32_t slot;
-	int32_t id;
+	int32_t slot = 0;
+	int32_t id = 0;
 };
 
 class RequestFullGameState : public NetworkAction {

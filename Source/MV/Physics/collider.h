@@ -561,14 +561,14 @@ namespace MV {
 			struct ContactInformation {
 				struct ContactInformationData {
 					b2Vec2 normal;
-					CollisionPartAttributes* A;
-					CollisionPartAttributes* B;
+					CollisionPartAttributes* A = nullptr;
+					CollisionPartAttributes* B = nullptr;
 				};
 				std::map<size_t, ContactInformationData> fixtureContacts;
 			};
 			typedef std::map<Collider*, ContactInformation> ContactMap;
 			ContactMap contacts;
-			b2Body *physicsBody;
+			b2Body *physicsBody = nullptr;
 
 			std::shared_ptr<Environment> world;
 
@@ -641,7 +641,7 @@ namespace MV {
 		private:
 			struct FixtureParameters {
 				enum ShapeType {CIRCLE, RECTANGLE, POLYGON};
-				int shapeType;
+				ShapeType shapeType = CIRCLE;
 				Size<> size; //Rect
 				PointPrecision rotation = 0.0f; //Rect
 				PointPrecision diameter = 0.0f; //Circle

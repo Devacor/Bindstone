@@ -286,6 +286,7 @@ namespace MV {
 		text(a_text),
 		lineIndex(a_lineIndex),
 		lineHeight(0),
+		baseLine(0),
 		linePosition(a_text.positionForLine(a_lineIndex)){
 	}
 

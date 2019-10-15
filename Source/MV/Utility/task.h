@@ -38,7 +38,8 @@ namespace MV {
 		virtual void onResume(Task& a_self) {}
 
 		virtual void onCancel(Task& a_self) {}
-		virtual void onCancelUpdate(Task& a_self) {}
+		virtual void onCancelAll(Task& a_self) {}
+		virtual void onCancelPrestart(Task& a_self) {}
 
 		virtual void onException(Task& a_self, std::exception& e) {}
 
@@ -90,7 +91,8 @@ namespace MV {
 		Signal<void(Task&)> onSuspendSignal;
 		Signal<void(Task&)> onResumeSignal;
 		Signal<void(Task&)> onCancelSignal;
-		Signal<void(Task&)> onCancelUpdateSignal;
+		Signal<void(Task&)> onCancelAllSignal;
+		Signal<void(Task&)> onCancelPrestartSignal;
 
 		Signal<void(Task&, std::exception &)> onExceptionSignal;
 
@@ -123,7 +125,8 @@ namespace MV {
 			onFinishAll(onFinishAllSignal),
 			onFinish(onFinishSignal),
 			onCancel(onCancelSignal),
-			onCancelUpdate(onCancelUpdateSignal),
+			onCancelAll(onCancelAllSignal),
+			onCancelPrestart(onCancelPrestartSignal),
 			onSuspend(onSuspendSignal),
 			onResume(onResumeSignal),
 			onException(onExceptionSignal) {
@@ -139,17 +142,33 @@ namespace MV {
 			registerActionBase(a_action);
 		}
 
-		~Task() {
-			if (!cancelled) {
-				if (!ourTaskComplete) {
-					onCancelUpdateSignal(*this);
-				}
-				onCancelSignal(*this);
+		Task* recent() const {
+			if (auto locked = mostRecentCreated.lock()) {
+				return locked.get();
 			}
+			return nullptr;
 		}
 
-		Task* recent() {
-			return (!mostRecentCreated.expired()) ? mostRecentCreated.lock().get() : nullptr;
+		Task* parent(const std::string& a_name, bool a_throwOnNotFound = true) {
+			Task* current = ourParent;
+			for (; current != nullptr; current = current->ourParent) {
+				if (current->name() == a_name) {
+					return current;
+				}
+			}
+			require<ResourceException>(!a_throwOnNotFound, "Failed to find parent: [", a_name, "] above task: [", taskName, "]");
+			return nullptr;
+		}
+
+		Task* parent() const {
+			return ourParent;
+		}
+
+		int parentCount() const {
+			Task* current = ourParent;
+			int i = 0;
+			for (; current != nullptr; ++i, current = current->ourParent) {}
+			return i;
 		}
 
 		Task& localInterval(double a_dt, size_t a_maxUpdates = 0) {
@@ -214,27 +233,41 @@ namespace MV {
 		}
 
 		Task& cancel() {
-			cancelAllChildren();
-			if(!cancelled){
+			if (!cancelled) {
 				cancelled = true;
 				if (ourTaskStarted) {
 					if (!ourTaskComplete) {
 						ourTaskComplete = true;
-						try { onCancelUpdateSignal(*this); }
-						catch (std::exception &a_e) {
+						try { onCancelSignal(*this); }
+						catch (std::exception & a_e) {
 							handleCallbackException(a_e);
-						} catch (chaiscript::Boxed_Value &bv) {
+						} catch (chaiscript::Boxed_Value & bv) {
 							handleChaiscriptException(bv);
 						}
 					}
 
-					try { onCancelSignal(*this); }
-					catch (std::exception &a_e) {
+					cancelAllChildren();
+
+					try { onCancelAllSignal(*this); }
+					catch (std::exception & a_e) {
 						handleCallbackException(a_e);
-					} catch (chaiscript::Boxed_Value &bv) {
+					} catch (chaiscript::Boxed_Value & bv) {
 						handleChaiscriptException(bv);
 					}
 				}
+				else {
+					try { onCancelPrestartSignal(*this); }
+					catch (std::exception & a_e) {
+						handleCallbackException(a_e);
+					} catch (chaiscript::Boxed_Value & bv) {
+						handleChaiscriptException(bv);
+					}
+
+					cancelAllChildren();
+				}
+			}
+			else {
+				cancelAllChildren();
 			}
 			return *this;
 		}
@@ -249,8 +282,7 @@ namespace MV {
 			}
 			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.push_front(a_other);
-			mostRecentCreated = a_other;
-			resetFinishState();
+			registerCreatedTask(a_other);
 			return *this;
 		}
 
@@ -283,8 +315,7 @@ namespace MV {
 		Task& then(const std::shared_ptr<Task> &a_other) {
 			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.push_back(a_other);
-			mostRecentCreated = a_other;
-			resetFinishState();
+			registerCreatedTask(a_other);
 			return *this;
 		}
 
@@ -318,8 +349,7 @@ namespace MV {
 			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.push_back(a_other);
 			a_other->block = false;
-			mostRecentCreated = a_other;
-			resetFinishState();
+			registerCreatedTask(a_other);
 			return *this;
 		}
 
@@ -352,8 +382,7 @@ namespace MV {
 		Task& also(const std::shared_ptr<Task> &a_other) {
 			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			parallelTasks.push_back(a_other);
-			resetFinishState();
-			mostRecentCreated = parallelTasks.back();
+			registerCreatedTask(a_other);
 			return *this;
 		}
 
@@ -393,8 +422,7 @@ namespace MV {
 			++found;
 			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.insert(found, a_other);
-			mostRecentCreated = a_other;
-			resetFinishState();
+			registerCreatedTask(a_other);
 			return *this;
 		}
 
@@ -432,8 +460,7 @@ namespace MV {
 			}
 			childrenBlockingOurCompletionCount += static_cast<int>(a_other->blockParentCompletion);
 			sequentialTasks.insert(found, a_other);
-			mostRecentCreated = a_other;
-			resetFinishState();
+			registerCreatedTask(a_other);
 			return *this;
 		}
 
@@ -524,7 +551,8 @@ namespace MV {
 		SignalRegister<void(Task&)> onSuspend;
 		SignalRegister<void(Task&)> onResume;
 		SignalRegister<void(Task&)> onCancel;
-		SignalRegister<void(Task&)> onCancelUpdate;
+		SignalRegister<void(Task&)> onCancelAll;
+		SignalRegister<void(Task&)> onCancelPrestart;
 		SignalRegister<void(Task&, std::exception &)> onException;
 
         static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
@@ -630,6 +658,12 @@ namespace MV {
 			optionalAction = a_base;
 		}
 
+		void registerCreatedTask(const std::shared_ptr<Task>& a_newTask) {
+			a_newTask->ourParent = this;
+			mostRecentCreated = a_newTask;
+			resetFinishState();
+		}
+
 		void startIfNeeded() {
 			if (!ourTaskStarted) {
 				ourTaskStarted = true;
@@ -675,22 +709,18 @@ namespace MV {
 			}
 		}
 
-		void totalUpdateStep(double a_dt){
-			try {
-				if (!cancelled) {
-					startIfNeeded();
+		void totalUpdateStep(double a_dt) {
+			if (!cancelled) {
+				startIfNeeded();
+				updateLocalTask(a_dt);
 
-					updateLocalTask(a_dt);
+				if (!cancelled) {
 					updateParallelTasks(a_dt);
+
 					if ((ourTaskComplete || alwaysRunChildren) && updateChildTasks(a_dt)) {
-						onFinishAllSignal(*this);
-						onFinishAllSignal.block();
+						callOnFinishAll();
 					}
 				}
-			} catch (std::exception &a_e) {
-				handleCallbackException(a_e);
-			} catch (chaiscript::Boxed_Value &bv) {
-				handleChaiscriptException(bv);
 			}
 		}
 
@@ -724,7 +754,7 @@ namespace MV {
 		void localTaskUpdateStep(double a_dt) {
 			if (!ourTaskComplete) {
 				try {
-					if (!task->predicate(*this, a_dt)) {
+					if (!task->predicate(*this, a_dt) && !cancelled) {
 						ourTaskComplete = true;
 						try { onFinishSignal(*this); }
 						catch (std::exception &a_e) {
@@ -823,13 +853,7 @@ namespace MV {
 			}
 			finishAllChildTasks();
 			if (!allFinished && finished()) {
-				try { onFinishAllSignal(*this); }
-				catch (std::exception &a_e) {
-					handleCallbackException(a_e);
-				} catch (chaiscript::Boxed_Value &bv) {
-					handleChaiscriptException(bv);
-				}
-				onFinishAllSignal.block();
+				callOnFinishAll();
 			}
 		}
 
@@ -887,6 +911,16 @@ namespace MV {
 			}
 		}
 
+		void callOnFinishAll() {
+			try { onFinishAllSignal(*this); }
+			catch (std::exception & a_e) {
+				handleCallbackException(a_e);
+			} catch (chaiscript::Boxed_Value & bv) {
+				handleChaiscriptException(bv);
+			}
+			onFinishAllSignal.block();
+		}
+
 		Receiver<bool(Task&, double)>::SharedType task;
 
 		std::list<std::shared_ptr<Task>> parallelTasks;
@@ -915,6 +949,7 @@ namespace MV {
 
 		int childrenBlockingOurCompletionCount = 0;
 
+		Task* ourParent = nullptr;
 		std::weak_ptr<Task> mostRecentCreated;
 
 		std::shared_ptr<ActionBase> optionalAction;
@@ -927,7 +962,8 @@ namespace MV {
 		a_ourTask->onSuspend.connect("onSuspend", [&](Task& a_self) {onSuspend(a_self); });
 		a_ourTask->onResume.connect("onResume", [&](Task& a_self) {onResume(a_self); });
 		a_ourTask->onCancel.connect("onCancel", [&](Task& a_self) {onCancel(a_self); });
-		a_ourTask->onCancelUpdate.connect("onCancelUpdate", [&](Task& a_self) {onCancelUpdate(a_self); });
+		a_ourTask->onCancelAll.connect("onCancelAll", [&](Task& a_self) {onCancelAll(a_self); });
+		a_ourTask->onCancelPrestart.connect("onCancelPrestart", [&](Task& a_self) {onCancelPrestart(a_self); });
 
 		//If we register onException it will trap exceptions even if the ActionBase does nothing with it, so this needs to conditionally register.
 		if (handleExceptions()) {

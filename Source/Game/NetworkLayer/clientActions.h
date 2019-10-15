@@ -140,8 +140,8 @@ public:
 	}
 
 	std::string gameServer;
-	uint16_t port;
-	int64_t secret;
+	uint16_t port = 0;
+	int64_t secret = 0;
 };
 
 CEREAL_FORCE_DYNAMIC_INIT(mv_clientactions);

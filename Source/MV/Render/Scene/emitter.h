@@ -154,7 +154,7 @@ namespace MV {
 			}
 
 			Point<> position;
-			float speed;
+			float speed = 0;
 			AxisAngles direction;
 			AxisAngles rotation;
 			Scale scale;
@@ -166,7 +166,7 @@ namespace MV {
 
 			ParticleChangeValues change;
 
-			size_t textureCount;
+			size_t textureCount = 0;
 
 			void setGravity(float a_magnitude, const AxisAngles &a_direction = AxisAngles(0.0f, 0.0f, toRadians(180.0f))) {
 				gravityConstant.locate(0.0f, a_magnitude, 0.0f);

@@ -67,7 +67,7 @@ namespace MV {
 				}
 			}
 
-			ThreadPool* parent;
+			ThreadPool* parent = nullptr;
 
 			Continue onFinishContinue = Continue::MAIN_THREAD;
 			Continue onGroupFinishContinue = Continue::MAIN_THREAD;
@@ -143,11 +143,19 @@ namespace MV {
 			}
 		}
 
-		void task(const Job &a_newWork) {
+		void task(Job&& a_newWork) {
 			++active;
 			{
 				std::lock_guard<std::mutex> guard(lock);
 				jobs.emplace_back(std::move(a_newWork));
+			}
+			notify.notify_one();
+		}
+		void task(const Job &a_newWork) {
+			++active;
+			{
+				std::lock_guard<std::mutex> guard(lock);
+				jobs.emplace_back(a_newWork);
 			}
 			notify.notify_one();
 		}
@@ -171,7 +179,7 @@ namespace MV {
 		void tasks(std::vector<Job> &&a_tasks, const std::function<void()> &a_onGroupComplete, Job::Continue a_continueCompletionCallback = Job::Continue::POOL) {
 			active+=static_cast<int>(a_tasks.size());
 			std::shared_ptr<std::atomic<size_t>> counter = std::make_shared<std::atomic<size_t>>(a_tasks.size());
-			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(std::move(a_onGroupComplete));
+			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(a_onGroupComplete);
 			for (auto&& job : a_tasks)
 			{
 				{
@@ -186,7 +194,7 @@ namespace MV {
 		void tasks(const std::vector<Job> &a_tasks, const std::function<void()> &a_onGroupComplete, Job::Continue a_continueCompletionCallback = Job::Continue::POOL) {
 			active+=static_cast<int>(a_tasks.size());
 			std::shared_ptr<std::atomic<size_t>> counter = std::make_shared<std::atomic<size_t>>(a_tasks.size());
-			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(std::move(a_onGroupComplete));
+			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(a_onGroupComplete);
 			for (auto&& job : a_tasks)
 			{
 				{

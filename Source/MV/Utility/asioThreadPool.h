@@ -60,7 +60,7 @@ namespace MV {
 				}
 			}
 		private:
-			AsioThreadPool* parent;
+			AsioThreadPool* parent = nullptr;
 
 			std::function<void()> action;
 			std::function<void()> onFinish;
@@ -87,7 +87,7 @@ namespace MV {
 
 		void tasks(const std::vector<Job> &a_tasks, const std::function<void()> &a_onGroupComplete) {
 			std::shared_ptr<std::atomic<size_t>> counter = std::make_shared<std::atomic<size_t>>(a_tasks.size());
-			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(std::move(a_onGroupComplete));
+			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(a_onGroupComplete);
 			for (auto&& job : a_tasks) {
 				task(Job{job.action, job.onFinish, counter, sharedGroupComplete});
 			}

@@ -284,6 +284,7 @@
     <ClCompile Include="..\Source\MV\Utility\log.cpp" />
     <ClCompile Include="..\Source\MV\Utility\sha512.cpp" />
     <ClCompile Include="..\Source\MV\Utility\stopwatch.cpp" />
+    <ClCompile Include="..\Source\MV\Utility\stringUtility.cpp" />
     <ClCompile Include="..\Source\MV\Utility\task.cpp" />
     <ClCompile Include="..\Source\MV\Utility\tinyutf8.cpp" />
     <ClCompile Include="..\Source\StdAfx.cpp" />
@@ -568,6 +569,7 @@
     <ClInclude Include="..\Source\MV\Utility\sha512.h" />
     <ClInclude Include="..\Source\MV\Utility\signal.hpp" />
     <ClInclude Include="..\Source\MV\Utility\stopwatch.h" />
+    <ClInclude Include="..\Source\MV\Utility\stringUtility.h" />
     <ClInclude Include="..\Source\MV\Utility\task.h" />
     <ClInclude Include="..\Source\MV\Utility\taskActions.hpp" />
     <ClInclude Include="..\Source\MV\Utility\threadPool.hpp" />

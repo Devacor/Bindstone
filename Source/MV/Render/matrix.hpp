@@ -46,7 +46,7 @@ namespace MV {
 		}
 
 		//nofill
-		Matrix(MatrixInitialize) {
+		Matrix(MatrixInitialize) : matrixArray() {
 		}
 
 		Matrix(const Matrix<SizeX, SizeY>& a_other) = default;

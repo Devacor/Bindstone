@@ -1,9 +1,9 @@
 ﻿#include "formattedText.h"
 #include "MV/Render/Scene/sprite.h"
 #include <algorithm>
-#include <boost/algorithm/string.hpp>
 #include "MV/Utility/log.h"
 #include "MV/Utility/tinyutf8.h"
+#include "MV/Utility/stringUtility.h"
 
 namespace MV {
 
@@ -292,8 +292,7 @@ namespace MV {
 
 	Color parseColorString(const std::string &a_colorString){
 		if(a_colorString.empty()){ return Color(); }
-		std::vector<std::string> colorStrings;
-		boost::split(colorStrings, a_colorString, boost::is_any_of(":|"));
+		std::vector<std::string> colorStrings = explode(a_colorString, StringContains(":|"));
 		Color result;
 		if(!colorStrings.empty()){
 			if(colorStrings.size() >= 1){

@@ -1,6 +1,7 @@
 #include "sharedTextures.h"
 #include <algorithm>
-#include <boost/algorithm/string.hpp>
+#include "MV/Utility/generalUtility.h"
+#include "MV/Utility/stringUtility.h"
 
 using namespace boost::filesystem;
 
@@ -122,7 +123,7 @@ namespace MV {
 		for(auto&& imagePath = directory_iterator(path(a_packPath)); imagePath != directory_iterator(); ++imagePath){
 			if(exists(*imagePath) && is_regular_file(*imagePath)){
 				std::string lowerCaseImageExtension = imagePath->path().extension().string();
-				boost::algorithm::to_lower(lowerCaseImageExtension);
+				toLowerInPlace(lowerCaseImageExtension);
 				if(std::find(validExtensions.begin(), validExtensions.end(), lowerCaseImageExtension) != validExtensions.end()){
 					std::ifstream stream(path(*imagePath).replace_extension("slc").string());
 					BoxAABB<float> sliceBounds;

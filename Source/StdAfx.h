@@ -17,7 +17,6 @@
 
 #include <boost/asio.hpp>
 #include <boost/filesystem.hpp>
-#include <boost/algorithm/string.hpp>
 
 #pragma warning(push, 0)
 #include <chaiscript/chaiscript.hpp>

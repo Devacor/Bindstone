@@ -282,23 +282,6 @@ namespace MV {
 
 	bool isPowerOfTwo(int num);
 
-	std::string toString(wchar_t wc);
-	wchar_t toWide(char c);
-
-	std::string to_string(wchar_t wc);
-	wchar_t to_wide(char c);
-
-	std::string toString(const std::wstring& ws);
-	std::wstring toWide(const std::string& s);
-
-	std::string to_string(const std::wstring& ws);
-	std::wstring to_wide(const std::string& s);
-
-	inline std::string toLower(std::string s) {
-		std::transform(s.begin(), s.end(), s.begin(), [](char c) { return std::tolower(c); });
-		return s;
-	}
-
 	inline float toDegrees(float val){
 		return val*(180.0f / float(PIE));
 	}
@@ -313,22 +296,6 @@ namespace MV {
 	inline double toRadians(double val) {
 		return val*(PIE / 180.0);
 	}
-    
-    inline bool replaceFirst(std::string& str, const std::string& from, const std::string& to) {
-        size_t start_pos = str.find(from);
-        if(start_pos == std::string::npos)
-            return false;
-        str.replace(start_pos, from.length(), to);
-        return true;
-    }
-    
-    inline bool replaceAll(std::string& str, const std::string& from, const std::string& to) {
-        bool replaced = false;
-        while(replaceFirst(str, from, to)){
-            replaced = true;
-        }
-        return replaced;
-    }
 
 	double distance(const double &x1, const double &y1, const double &x2, const double &y2);
 

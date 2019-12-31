@@ -689,6 +689,9 @@
     <ClCompile Include="..\Source\Game\battleEffect.cpp">
       <Filter>Bindstone\Source\Game</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\MV\Utility\stringUtility.cpp">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\external\Box2D\Box2D.h">
@@ -1548,6 +1551,9 @@
     </ClInclude>
     <ClInclude Include="..\..\external\cereal\include\cereal\types\optional.hpp">
       <Filter>external\cereal\include\cereal\types</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\MV\Utility\stringUtility.h">
+      <Filter>Bindstone\Source\MV\Utility</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

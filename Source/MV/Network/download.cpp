@@ -1,6 +1,7 @@
 #include "download.h"
 #include <boost/filesystem.hpp>
 #include <atomic>
+#include "MV/Utility/stringUtility.h"
 
 namespace MV{
 	void HttpHeader::read(std::istream& response_stream) {

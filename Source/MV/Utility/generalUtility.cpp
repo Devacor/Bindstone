@@ -5,6 +5,18 @@
 #include <map>
 #include <algorithm>
 #include <fstream>
+#include "SDL.h"
+#include "scopeGuard.hpp"
+#include <boost/filesystem.hpp>
+#include "stringUtility.h"
+
+#ifndef APPLICATION_ORG
+#define APPLICATION_ORG "MutedVision"
+#endif
+
+#ifndef APPLICATION_NAME
+#define APPLICATION_NAME "Bindstone"
+#endif
 
 #ifdef __APPLE__
 	#include "CoreFoundation/CoreFoundation.h"
@@ -130,18 +142,97 @@ namespace MV {
 		return a_path;
 	}
 
-	bool fileExists(const std::string& name) {
-		if (FILE *file = fopen(name.c_str(), "r")) {
-			fclose(file);
-			return true;
-		} else {
-			return false;
-		}
+	const std::string& playerPreferencesPath() {
+		static const std::string path = std::string("/") + SDL_GetPrefPath(APPLICATION_ORG, APPLICATION_NAME);
+		return path;
 	}
 
-	std::string fileContents(const std::string& a_path) {
-		std::ifstream stream(a_path);
-		return stream ? std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>()) : "";
+	bool fileExistsAbsolute(const std::string& a_path) {
+		if (a_path.empty()) {
+			return false;
+		}
+#ifdef __ANDROID__ || __APPLE__
+		SDL_RWops* sdlIO = SDL_RWFromFile(a_path.c_str(), "rb");
+		if (sdlIO != NULL)
+		{
+			SDL_RWclose(sdlIO);
+			return true;
+		}
+		return false;
+#else
+		return boost::filesystem::exists(a_path);
+#endif
+	}
+
+	bool fileExistsInSearchPaths(const std::string& a_path) {
+		std::string userPrefPath = playerPreferencesPath() + a_path;
+		return fileExistsAbsolute(a_path) || fileExistsAbsolute(userPrefPath);
+	}
+
+	SDL_RWops* sdlFileHandle(const std::string& a_path) {
+		if (a_path.empty()) {
+			return {};
+		}
+		std::string userPrefPath = playerPreferencesPath() + a_path;
+#ifdef __ANDROID__ || __APPLE__
+		SDL_RWops* sdlIO = SDL_RWFromFile(fileExistsAbsolute(userPrefPath) ? userPrefPath.c_str() : a_path.c_str(), "rb");
+#else
+		SDL_RWops* sdlIO = SDL_RWFromFile(fileExistsAbsolute(userPrefPath) ? userPrefPath.c_str() : ("Assets/" + a_path).c_str(), "rb");
+#endif
+		return sdlIO;
+	}
+
+	std::string fileContents(const std::string& a_path, bool a_throwOnMissing) {
+		SDL_RWops* sdlIO = sdlFileHandle(a_path);
+		if (sdlIO == nullptr) {
+			if (a_throwOnMissing) {
+				throw MV::ResourceException("Missing file at path: "s + a_path);
+			}
+			return {};
+		}
+
+		auto totalSize = SDL_RWsize(sdlIO);
+
+		std::string data;
+		data.resize(totalSize);
+		SDL_RWread(sdlIO, &data[0], totalSize, sizeof(data[0]));
+
+		return data;
+	}
+
+	bool writeToFile(const std::string& a_path, const std::string& a_contents) {
+		std::string finalPath = playerPreferencesPath() + a_path;
+		boost::filesystem::create_directories(boost::filesystem::path(finalPath).parent_path());
+#ifdef __ANDROID__ || __APPLE__
+		SDL_RWops* rw = SDL_RWFromFile(finalPath.c_str(), "wb");
+		if (rw != NULL) {
+			SCOPE_EXIT{ SDL_RWclose(rw); };
+			if (SDL_RWwrite(rw, a_contents.c_str(), 1, a_contents.size()) == a_contents.size()) {
+				return true;
+			}
+		}
+		return false;
+#else
+		boost::filesystem::save_string_file(finalPath, a_contents);
+		return true; //assume success.
+#endif
+	}
+
+	bool deleteFile(const std::string& a_path) {
+		return boost::filesystem::remove(playerPreferencesPath() + a_path);
+	}
+
+	time_t lastFileWriteTime(const std::string& a_path) {
+		std::string userPrefPath = playerPreferencesPath() + a_path;
+
+		boost::system::error_code errorCode;
+		return fileExistsAbsolute(userPrefPath) ? boost::filesystem::last_write_time(userPrefPath, errorCode) :
+#ifdef __ANDROID__
+			0
+#else
+			fileExistsAbsolute(a_path) ? boost::filesystem::last_write_time(a_path, errorCode) : 0
+#endif
+			;
 	}
 
 	Random* Random::instance = nullptr;

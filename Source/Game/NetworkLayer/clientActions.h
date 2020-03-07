@@ -22,10 +22,11 @@ public:
 	virtual void execute(Game& /*a_game*/) override {
 		std::cout << "Message Got: " << message << std::endl;
 	}
-	virtual void execute(GameServer&) override {
+#ifdef BINDSTONE_SERVER
+	virtual void execute(GameUserConnectionState*, GameServer&) override {
 		std::cout << "Message Got: " << message << std::endl;
 	}
-	virtual void execute(GameUserConnectionState*, GameServer&) override {
+	virtual void execute(GameServer&) override {
 		std::cout << "Message Got: " << message << std::endl;
 	}
 	virtual void execute(LobbyUserConnectionState* /*a_game*/) override {
@@ -34,7 +35,7 @@ public:
 	virtual void execute(LobbyGameConnectionState*) override {
 		std::cout << "Message Got: " << message << std::endl;
 	}
-
+#endif
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
 		archive(CEREAL_NVP(message), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
@@ -111,12 +112,14 @@ public:
 	virtual void execute(Game&) override {
 		std::cout << "Connected and expecting client version: " << forceClientVersion << std::endl;
 	}
+#ifdef BINDSTONE_SERVER
 	virtual void execute(GameServer&) override {
 		std::cout << "Connected and expecting client version: " << forceClientVersion << std::endl;
 	}
 	virtual void execute(GameUserConnectionState*, GameServer&) override {
 		std::cout << "Connected and expecting client version: " << forceClientVersion << std::endl;
 	}
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {

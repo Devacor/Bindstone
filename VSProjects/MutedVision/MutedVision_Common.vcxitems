@@ -1,0 +1,128 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Globals">
+    <MSBuildAllProjects>$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <ItemsProjectGuid>{b2e0b593-79fd-432c-aa7b-1eca70a96271}</ItemsProjectGuid>
+    <ItemsProjectName>MutedVision_Common</ItemsProjectName>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(MSBuildThisFileDirectory)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ProjectCapability Include="SourceItemsFromImports" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Audio\sound.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\mouse.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\dynamicVariable.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\network.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\url.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Physics\collider.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\boxaabb.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\formattedText.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\points.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\render.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\button.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clickable.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clipped.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\component.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\drawable.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\emitter.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\grid.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\node.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\palette.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\path.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\scroller.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\slider.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\spineMV.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\sprite.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\stencil.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\text.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\sharedTextures.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\texturePacker.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\textures.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\chaiscriptStdLib.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\generalUtility.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\log.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\sha512.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\stopwatch.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\stringUtility.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\task.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\tinyutf8.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Audio\package.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Audio\sound.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\mouse.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\package.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\dynamicVariable.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\email.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\network.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkObject.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\package.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\url.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Physics\collider.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Physics\package.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\precompiled.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\boxaabb.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\formattedText.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\glext.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\matrix.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\package.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\points.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\render.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\button.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clickable.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\clipped.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\component.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\drawable.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\emitter.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\grid.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\node.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\package.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\palette.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\path.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\scroller.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\slider.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\spineMV.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\sprite.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\stencil.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\text.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\sharedTextures.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\texturePacker.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\textures.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\cerealUtility.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\chaiscriptStdLib.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\chaiscriptUtility.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\exactType.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\generalUtility.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\localization.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\log.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\messenger.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\optionalCalls.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\package.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\require.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\scopeGuard.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\services.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\sha512.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\signal.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\stopwatch.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\stringUtility.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\task.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\taskActions.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\threadPool.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\tinyutf8.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\tupleHelpers.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\typestring.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\visitor.hpp" />
+  </ItemGroup>
+</Project>

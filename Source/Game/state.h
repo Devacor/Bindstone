@@ -25,36 +25,6 @@ struct Constants {
 	}
 };
 
-class JsonNodeLoadBinder {
-public:
-	JsonNodeLoadBinder(Managers& a_managers, MV::TapDevice& a_mouse, chaiscript::ChaiScript &a_script) :
-		managers(a_managers),
-		mouse(a_mouse),
-		script(a_script){
-	}
-
-	void operator()(cereal::JSONInputArchive& a_archive);
-private:
-	Managers& managers;
-	MV::TapDevice& mouse;
-	chaiscript::ChaiScript &script;
-};
-
-class BinaryNodeLoadBinder {
-public:
-	BinaryNodeLoadBinder(Managers& a_managers, MV::TapDevice& a_mouse, chaiscript::ChaiScript &a_script) :
-		managers(a_managers),
-		mouse(a_mouse),
-		script(a_script){
-	}
-
-	void operator()(cereal::PortableBinaryInputArchive& a_archive);
-private:
-	Managers& managers;
-	MV::TapDevice& mouse;
-	chaiscript::ChaiScript &script;
-};
-
 class GameData {
 public:
 	GameData(Managers& a_managers, bool a_isServer);

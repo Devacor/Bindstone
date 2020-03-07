@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<project>
+  <SOLibPaths>C:\git\CrossPlatformSDL\Builds\Android\x64\Debug\libs\libSDL2.so;C:\Microsoft\AndroidNDK64\android-ndk-r16b\prebuilt\android-x86_64\gdbserver\gdbserver;C:\Microsoft\AndroidNDK64\android-ndk-r16b\sources\cxx-stl\llvm-libc++\libs\x86_64\libandroid_support.a;C:\Microsoft\AndroidNDK64\android-ndk-r16b\sources\cxx-stl\llvm-libc++\libs\x86_64\libc++_static.a;C:\Microsoft\AndroidNDK64\android-ndk-r16b\sources\cxx-stl\llvm-libc++\libs\x86_64\libc++abi.a</SOLibPaths>
+  <AndroidLibPaths />
+  <OObjPaths>C:\git\CrossPlatformSDL\Builds\Intermediate\Android\SDL2\x64\Debug</OObjPaths>
+  <Configuration>Debug</Configuration>
+  <Platform>x64</Platform>
+  <AndroidArchitecture>x86_64</AndroidArchitecture>
+  <!--links to other recipe files-->
+  <RecipeFiles />
+</project>

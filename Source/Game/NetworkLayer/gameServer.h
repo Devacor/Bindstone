@@ -1,6 +1,6 @@
 #ifndef _GAMESERVER_MV_H_
 #define _GAMESERVER_MV_H_
-
+#ifdef BINDSTONE_SERVER
 #include "Game/Instance/gameInstance.h"
 
 #include "MV/Utility/package.h"
@@ -10,6 +10,7 @@
 #include "Game/player.h"
 
 #include "Game/NetworkLayer/gameServerActions.h"
+#include "MV/Utility/stringUtility.h"
 
 #include <string>
 #include <vector>
@@ -144,8 +145,9 @@ private:
 
 	void handleInput();
 
-	void initializeClientToLobbyServer() {
-		ourLobbyClient = MV::Client::make(MV::Url{ "http://localhost:22326" /*"http://54.218.22.3:22325"*/ }, [=](const std::string &a_message) {
+	void initializeClientToLobbyServer() {\
+		auto localHostServerAddress = MV::explode(MV::fileContents("ServerConfig/lobbyServerAddress.config"), [](char c) {return c == '\n'; })[0];
+		ourLobbyClient = MV::Client::make(MV::Url{ localHostServerAddress }, [=](const std::string &a_message) {
 			auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 			try {
 				value->execute(*this);
@@ -163,7 +165,12 @@ private:
 
 	void makeUsAvailableToTheLobby() {
 		if (!ourLobbyClient) { return; }
-		ourLobbyClient->send(makeNetworkString<GameServerAvailable>("http://localhost", ourUserServer->port()));
+		auto gameServerAddressNoPort = MV::explode(MV::fileContents("ServerConfig/gameServerAddress.config"), [](char c) {return c == '\n'; })[0];
+		auto found = gameServerAddressNoPort.rfind(':');
+		if (found != std::string::npos && found < (gameServerAddressNoPort.length() - 1) && gameServerAddressNoPort[found + 1] != '/') {
+			gameServerAddressNoPort = gameServerAddressNoPort.substr(0, found);
+		}
+		ourLobbyClient->send(makeNetworkString<GameServerAvailable>(gameServerAddressNoPort, ourUserServer->port()));
 	}
 
 	GameServer& operator=(const GameServer &) = delete;
@@ -191,4 +198,5 @@ private:
 
 	MV::Task rootTask;
 };
+#endif
 #endif

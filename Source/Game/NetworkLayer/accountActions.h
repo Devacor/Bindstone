@@ -3,7 +3,9 @@
 
 #include "Game/NetworkLayer/networkAction.h"
 
+#ifdef BINDSTONE_SERVER
 #include "pqxx/pqxx"
+#endif
 
 #include "MV/Utility/chaiscriptUtility.h"
 
@@ -17,7 +19,15 @@ public:
 		password(a_password) {
 	}
 
+
+#ifdef BINDSTONE_SERVER
+private:
+	std::string createPlayerQueryString(pqxx::work& transaction, const std::string& a_salt);
+	pqxx::result selectUser(pqxx::work* a_transaction);
+	pqxx::result createPlayer(pqxx::work* transaction, LobbyUserConnectionState* a_connection);
+public:
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -40,10 +50,6 @@ private:
 		return a_handle.size() > 3 && MV::simpleFilter(a_handle) == a_handle;
 	}
 
-	std::string createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt);
-	pqxx::result selectUser(pqxx::work* a_transaction);
-	pqxx::result createPlayer(pqxx::work* transaction, LobbyUserConnectionState *a_connection);
-
 	std::string handle;
 	std::string email;
 	std::string password;
@@ -65,7 +71,12 @@ public:
 		saveHash(a_saveHash) {
 	}
 
+#ifdef BINDSTONE_SERVER
+private:
+	pqxx::result selectUser(pqxx::work* a_transaction);
+public:
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -80,7 +91,6 @@ public:
 	}
 
 private:
-	pqxx::result selectUser(pqxx::work* a_transaction);
 
 	std::string identifier;
 	std::string password;
@@ -91,8 +101,10 @@ class FindMatchRequest : public NetworkAction {
 public:
 	FindMatchRequest() {}
 	FindMatchRequest(const std::string &a_type) : type(a_type) {}
-	
+
+#ifdef BINDSTONE_SERVER
 	virtual void execute(LobbyUserConnectionState* a_connection) override;
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {
@@ -116,7 +128,9 @@ class ExpectedPlayersNoted : public NetworkAction {
 public:
 	ExpectedPlayersNoted() {}
 
+#ifdef BINDSTONE_SERVER
 	virtual void execute(LobbyGameConnectionState* a_connection) override;
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {

@@ -75,14 +75,14 @@ namespace MV {
 
 	void Interface::initialize() {
 		if (!node) {
-			std::string nodePath = "Assets/Interface/" + pageId + "/view.scene";
+			std::string nodePath = "Interface/" + pageId + "/view.scene";
 			node = manager.root()->loadChild(nodePath, manager.managers().services, pageId);
 			MV::require<MV::ResourceException>(node, "Node failed to load from: ", nodePath);
 			manager.root()->add(node);
 			node->active(false);
 
 			scriptExceptionWrapper("InterfaceManager::initialize", [&] {
-				scriptFileEval("Assets/Interface/" + pageId + "/initialize.script", manager.script(), {
+				scriptFileEval("Interface/" + pageId + "/initialize.script", manager.script(), {
 					{ "self", chaiscript::Boxed_Value(this) }
 				});
 			});

@@ -103,6 +103,11 @@ public:
 void PathfindingTest();
 
 int main(int argc, char *argv[]) {
+	MV::info("Hello world!");
+	MV::debug(":D :D :D");
+	MV::warning(":C :C :C");
+	MV::error("Whoopse!");
+
 	std::string name;
 	std::string pass;
 	for (int i = 0; i < argc-1; ++i) {

@@ -1,5 +1,7 @@
 #include "emitter.h"
 
+#include "MV/Utility/cerealUtility.h"
+#include "MV/Utility/generalUtility.h"
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
@@ -383,12 +385,7 @@ namespace MV {
 
 		MV::Scene::EmitterSpawnProperties loadEmitterProperties(const std::string &a_file) {
 			try {
-				std::ifstream file(a_file);
-				std::shared_ptr<MV::Scene::Node> saveScene;
-				cereal::JSONInputArchive archive(file);
-				EmitterSpawnProperties EmitterProperties;
-				archive(CEREAL_NVP(EmitterProperties));
-				return EmitterProperties;
+				return MV::fromJson<EmitterSpawnProperties>(MV::fileContents(a_file));
 			} catch (::cereal::RapidJSONException &a_exception) {
 				std::cerr << "Failed to load emitter: " << a_exception.what() << std::endl;
 				return{};

@@ -6,8 +6,7 @@
 #include <variant>
 #include "cereal/cereal.hpp"
 #include "MV/Utility/exactType.hpp"
-
-namespace chaiscript { class ChaiScript; }
+#include "chaiscript/chaiscript.hpp"
 
 namespace MV {
 	//I needed more debuggability and std::variant was throwing a lot within Cereal. This is a wrapper around a variant which plays better in scripts.

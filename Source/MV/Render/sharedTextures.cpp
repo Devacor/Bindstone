@@ -125,7 +125,8 @@ namespace MV {
 				std::string lowerCaseImageExtension = imagePath->path().extension().string();
 				toLowerInPlace(lowerCaseImageExtension);
 				if(std::find(validExtensions.begin(), validExtensions.end(), lowerCaseImageExtension) != validExtensions.end()){
-					std::ifstream stream(path(*imagePath).replace_extension("slc").string());
+					std::string contents = fileContents(path(*imagePath).replace_extension("slc").string());
+					std::stringstream stream(contents);
 					BoxAABB<float> sliceBounds;
 					if (stream) {
 						stream >> sliceBounds.minPoint.x >> sliceBounds.minPoint.y >> sliceBounds.maxPoint.x >> sliceBounds.maxPoint.y;

@@ -124,12 +124,6 @@ namespace MV {
 	class LoadedTexture {
 	public:
 		LoadedTexture(TextureParameters a_parameters);
-		LoadedTexture(LoadedTexture&& a_rhs) noexcept :
-			loadedData(a_rhs.loadedData),
-			ourParameters(a_rhs.ourParameters){
-			a_rhs.loadedData.textureId = 0;
-			a_rhs.ourParameters.clear();
-		}
 		~LoadedTexture();
 
 		LoadedTextureData& Data() {
@@ -147,6 +141,7 @@ namespace MV {
 	private:
 		LoadedTexture(const LoadedTexture &) = delete;
 		LoadedTexture operator=(const LoadedTexture &) = delete;
+		LoadedTexture(LoadedTexture&&) = delete;
 
 		LoadedTextureData loadedData;
 		TextureParameters ourParameters;
@@ -273,9 +268,9 @@ namespace MV {
 	protected:
 		FileTextureDefinition(const std::string &a_filename, bool a_powerTwo, bool a_repeat, bool a_pixel, bool a_isShared = true):
 			TextureDefinition(a_filename, a_isShared),
+			powerTwo(a_powerTwo),
 			repeat(a_repeat),
-			pixel(a_pixel),
-			powerTwo(a_powerTwo){
+			pixel(a_pixel){
 		}
 
 		void reloadImplementation() override;
@@ -296,7 +291,7 @@ namespace MV {
 
 			archive(cereal::make_nvp("powerTwo", powerTwo), cereal::make_nvp("repeat", repeat), cereal::make_nvp("pixel", pixel));
 
-			auto& services = cereal::get_user_data<MV::Services>(archive);
+			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 
 			construct("", powerTwo, repeat, pixel);
 			construct->textures = services.get<MV::SharedTextures>();
@@ -568,7 +563,7 @@ namespace MV {
 				}
 				MV::SharedTextures* sharedTextures = nullptr;
 				if (!construct->packId.empty()) {
-					auto& services = cereal::get_user_data<MV::Services>(archive);
+					MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 					sharedTextures = getSharedTextureFromServices(services);
 				}
 				construct->postLoadInitialize(sharedTextures);

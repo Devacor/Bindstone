@@ -11,6 +11,10 @@
 	#define GL_BGR 0x80E0
 #endif
 
+#ifndef GL_BGRA
+	#define GL_BGRA 0x80E1
+#endif
+
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
@@ -100,10 +104,15 @@ namespace MV {
 			return found;
 		}
 
-		std::cout << "Loading: " << a_parameters.path << std::endl;
-		SDL_Surface *img = IMG_Load(a_parameters.path.c_str());
+		MV::info("Loading Image: ", a_parameters.path);
+		SDL_RWops* sdlIO = sdlFileHandle(a_parameters.path);
+		if (!sdlIO) {
+			MV::warning("Failed to load image [", a_parameters.path, "]");
+			return found;
+		}
+		SDL_Surface *img = IMG_Load_RW(sdlIO, 1);
 		if (!img) {
-			std::cerr << "Failed to load texture: (" << a_parameters.path << ") " << SDL_GetError() << std::endl;
+			MV::error("Failed to load image [", a_parameters.path, "] [",SDL_GetError(),"]");
 			return found;
 		}
 

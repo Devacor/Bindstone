@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<projectDescription>
+	<name>BindstoneClient_AndroidGradle</name>
+	<comment></comment>
+	<projects>
+	</projects>
+	<buildSpec>
+		<buildCommand>
+			<name>org.eclipse.jdt.core.javabuilder</name>
+			<arguments>
+			</arguments>
+		</buildCommand>
+	</buildSpec>
+	<natures>
+		<nature>org.eclipse.jdt.core.javanature</nature>
+	</natures>
+	<linkedResources>
+		<link>
+			<name>src0</name>
+			<type>2</type>
+			<location>C:/git/CrossPlatformSDL/VSProjects/BindstoneClient_AndroidGradle/app/src/main/java</location>
+		</link>
+		<link>
+			<name>src1</name>
+			<type>2</type>
+			<location>C:/git/CrossPlatformSDL/VSProjects/BindstoneClient_AndroidGradle/app/build/generated/source/r/x86-64/debug</location>
+		</link>
+	</linkedResources>
+</projectDescription>

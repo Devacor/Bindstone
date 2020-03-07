@@ -1,5 +1,4 @@
 #include "editComponents.h"
-#include "componentPanels.h"
 #include "MV/Utility/generalUtility.h"
 
 long Selection::gid = 0;

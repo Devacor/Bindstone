@@ -1,3 +1,4 @@
+#ifdef BINDSTONE_SERVER
 #include "gameServer.h"
 #include "networkAction.h"
 #include "clientActions.h"
@@ -40,32 +41,32 @@ GameServer::GameServer(Managers &a_managers, unsigned short a_port) :
 	MV::Size<> worldSize(960, 640);
 	MV::Size<int> windowSize(960, 640);
 
-	gameData.managers().renderer.//makeHeadless().
+	gameData.managers().renderer.makeHeadless().
 		window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
 
 	if (!gameData.managers().renderer.initialize(windowSize, worldSize)) {
 		exit(0);
 	}
 	atexit(sdl_quit_gameserver);
-	MV::AudioPlayer::instance()->initAudio();
+	//MV::AudioPlayer::instance()->initAudio();
 	nullMouse.update();
 
 	rootScene = MV::Scene::Node::make(gameData.managers().renderer);
 
-	MV::FontDefinition::make(gameData.managers().textLibrary, "default", "Assets/Fonts/Verdana.ttf", 14);
-	MV::FontDefinition::make(gameData.managers().textLibrary, "small", "Assets/Fonts/Verdana.ttf", 9);
-	MV::FontDefinition::make(gameData.managers().textLibrary, "big", "Assets/Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
+	MV::FontDefinition::make(gameData.managers().textLibrary, "default", "Fonts/Verdana.ttf", 14);
+	MV::FontDefinition::make(gameData.managers().textLibrary, "small", "Fonts/Verdana.ttf", 9);
+	MV::FontDefinition::make(gameData.managers().textLibrary, "big", "Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 	if (!gameData.managers().renderer.headless()) {
-		gameData.managers().renderer.loadShader("vortex", "Assets/Shaders/default.vert", "Assets/Shaders/vortex.frag");
-		gameData.managers().renderer.loadShader("lillypad", "Assets/Shaders/lillypad.vert", "Assets/Shaders/default.frag");
-		gameData.managers().renderer.loadShader("wave", "Assets/Shaders/wave.vert", "Assets/Shaders/wave.frag");
-		gameData.managers().renderer.loadShader("waterfall", "Assets/Shaders/default.vert", "Assets/Shaders/waterfall.frag");
-		gameData.managers().renderer.loadShader("pool", "Assets/Shaders/default.vert", "Assets/Shaders/pool.frag");
-		gameData.managers().renderer.loadShader("shimmer", "Assets/Shaders/default.vert", "Assets/Shaders/shimmer.frag");
+		gameData.managers().renderer.loadShader("vortex", "Shaders/default.vert", "Shaders/vortex.frag");
+		gameData.managers().renderer.loadShader("lillypad", "Shaders/lillypad.vert", "Shaders/default.frag");
+		gameData.managers().renderer.loadShader("wave", "Shaders/wave.vert", "Shaders/wave.frag");
+		gameData.managers().renderer.loadShader("waterfall", "Shaders/default.vert", "Shaders/waterfall.frag");
+		gameData.managers().renderer.loadShader("pool", "Shaders/default.vert", "Shaders/pool.frag");
+		gameData.managers().renderer.loadShader("shimmer", "Shaders/default.vert", "Shaders/shimmer.frag");
 
-		gameData.managers().textures.assemblePacks("Assets/Atlases", &gameData.managers().renderer);
-		gameData.managers().textures.files("Assets/Map");
-		gameData.managers().textures.files("Assets/Images");
+		gameData.managers().textures.assemblePacks("Atlases", &gameData.managers().renderer);
+		gameData.managers().textures.files("Map");
+		gameData.managers().textures.files("Images");
 	}
 	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::TapDevice& a_mouse, LocalData& a_data)
 
@@ -125,3 +126,4 @@ void GameServer::assign(const AssignedPlayer &a_left, const AssignedPlayer &a_ri
 	queueId = a_queueId;
 	ourInstance = ServerGameInstance::make(left->player, right->player, *this);
 }
+#endif

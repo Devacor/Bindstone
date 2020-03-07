@@ -1,0 +1,63 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Globals">
+    <MSBuildAllProjects>$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <ItemsProjectGuid>{7d0090a3-d938-4e0e-8411-dab035c8e641}</ItemsProjectGuid>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(MSBuildThisFileDirectory)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ProjectCapability Include="SourceItemsFromImports" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(MSBuildThisFileDirectory)include\SDL_ttf.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\autofit\autofit.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftbase.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftbbox.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftbdf.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftbitmap.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftcid.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftdebug.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftfstype.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftgasp.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftglyph.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftgxval.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftinit.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftmm.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftotval.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftpatent.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftpfr.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftstroke.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftsynth.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftsystem.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\fttype1.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\base\ftwinfnt.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\bdf\bdf.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\bzip2\ftbzip2.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\cache\ftcache.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\cff\cff.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\cid\type1cid.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\gzip\ftgzip.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\lzw\ftlzw.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\pcf\pcf.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\pfr\pfr.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\psaux\psaux.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\pshinter\pshinter.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\psnames\psmodule.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\raster\raster.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\sfnt\sfnt.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\smooth\smooth.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\tools\apinames.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\truetype\truetype.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\type1\type1.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\type42\type42.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\freetype\winfonts\winfnt.c" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)src\SDL_ttf.c" />
+  </ItemGroup>
+</Project>

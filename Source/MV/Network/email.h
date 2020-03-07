@@ -157,7 +157,7 @@ namespace MV {
 			}
 
 			resolver = std::make_unique<boost::asio::ip::tcp::resolver>(*ioService);
-			tlsContext = std::make_unique<boost::asio::ssl::context>(boost::asio::ssl::context::tlsv1_client);
+			tlsContext = std::make_unique<boost::asio::ssl::context>(boost::asio::ssl::context::tlsv13_client);
 			socket = std::make_unique<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>(*ioService, *tlsContext);
 
 			return created;

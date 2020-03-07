@@ -3,7 +3,7 @@
 
 #include <memory>
 #include <functional>
-#include <boost/filesystem.hpp>
+#include "MV/Utility/generalUtility.h"
 
 namespace chaiscript { class ChaiScript; }
 
@@ -34,10 +34,11 @@ struct StandardScriptMethods {
 	}
 
 	StandardScriptMethods<DataType>& loadScript(chaiscript::ChaiScript &a_script, const std::string &a_assetType, const std::string &a_id, bool a_isServer) {
-		std::string filePath = "Assets/" + a_assetType + "/" + a_id + (a_isServer ? "/main.script" : "/mainClient.script");
-		boost::system::error_code errorCode;
-		time_t currentWriteTime = boost::filesystem::last_write_time(filePath, errorCode);
+		MV::error("LOADSCRIPT BEGIN 1");
+		std::string filePath = "" + a_assetType + "/" + a_id + (a_isServer ? "/main.script" : "/mainClient.script");
+		time_t currentWriteTime = MV::lastFileWriteTime(filePath);
 		if (loadedFileTimestamp == 0 || loadedFileTimestamp != currentWriteTime) {
+			MV::error("LOADSCRIPT CONTENTS 2");
 			scriptContents = MV::fileContents(filePath);
 			if (!scriptContents.empty()) {
 				loadedFileTimestamp = currentWriteTime;
@@ -53,6 +54,7 @@ struct StandardScriptMethods {
 				MV::error("Failed to load script for ", a_assetType, ": ", a_id);
 			}
 		}
+		MV::error("LOADSCRIPT END 3");
 		return *this;
 	}
 private:

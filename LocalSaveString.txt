@@ -1,1 +1,43 @@
-{"cereal_class_version":0,"avatar":"","flair":"","wallet":{"cereal_class_version":0,"values":[0,500,150]},"friendlyRating":[],"loadouts":[{"key":"Default","value":{"cereal_class_version":0,"buildings":["Life","Life","Life","Life","Life","Life","Life","Life"],"skins":["","","","","","","",""]}}],"selectedLoadout":""}
+ue0": {
+        "cereal_class_version": 0,
+        "avatar": "",
+        "flair": "",
+        "wallet": {
+            "cereal_class_version": 0,
+            "values": [
+                0,
+                500,
+                150
+            ]
+        },
+        "friendlyRating": [],
+        "loadouts": [
+            {
+                "key": "Default",
+                "value": {
+                    "cereal_class_version": 0,
+                    "buildings": [
+                        "Life",
+                        "Life",
+                        "Life",
+                        "Life",
+                        "Life",
+                        "Life",
+                        "Life",
+                        "Life"
+                    ],
+                    "skins": [
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        ""
+                    ]
+                }
+            }
+        ],
+        "selectedLoadout": ""
+    }

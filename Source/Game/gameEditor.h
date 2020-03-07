@@ -2,9 +2,9 @@
 #define _MV_GAME_EDITOR_H_
 
 #include "Game/game.h"
-#include "editor/editor.h"
 #include "Game/managers.h"
 #include "Game/NetworkLayer/package.h"
+#include "Editor/editor.h"
 
 class GameEditor {
 public:
@@ -32,7 +32,7 @@ private:
 	}
 
 	void runEditor() {
-		editor.returnFromBackground();
+		/*
 		auto playlistGame = std::make_shared<MV::AudioPlayList>();
 		playlistGame->addSoundBack("gameintro");
 		playlistGame->addSoundBack("gameloop");
@@ -42,11 +42,12 @@ private:
 		playlistGame->addSoundBack("gameloop");
 
 		playlistGame->loopSounds(true);
-
+		*/
 		//game.managers().audio.setMusicPlayList(playlistGame);
 
 		//playlistGame->beginPlaying();
 
+		editor.returnFromBackground();
 		managers.timer.start();
 		managers.timer.delta("tick");
 		while (editor.update(managers.timer.delta("tick"))) {

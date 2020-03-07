@@ -49,10 +49,10 @@ namespace MV {
 		auto message = std::make_shared<NetworkMessage>();
 		auto self = shared_from_this();
 		auto copiedSocket = socket;
-		boost::asio::async_read(*copiedSocket, boost::asio::buffer(message->headerBuffer, 4), boost::asio::transfer_exactly(4), [&, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
+		boost::asio::async_read(*copiedSocket, boost::asio::buffer(message->headerBuffer, 4), boost::asio::transfer_exactly(4), [this, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
 			if (!a_err && socket) {
 				message->readHeaderFromBuffer();
-				boost::asio::async_read(*copiedSocket, message->buffer, boost::asio::transfer_exactly(message->content.size()), [&, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
+				boost::asio::async_read(*copiedSocket, message->buffer, boost::asio::transfer_exactly(message->content.size()), [this, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
 					if (!a_err && socket) {
 						if (ourConnectionState != DISCONNECTED) {
 							message->readContentFromBuffer();
@@ -153,11 +153,12 @@ namespace MV {
 		acceptor(ioService, a_endpoint),
 		connectionStateFactory(a_connectionStateFactory),
 		work(std::make_unique<boost::asio::io_context::work>(ioService)) {
-
+		info("Server Startup");
 		acceptClients();
+		info("Accept Clients");
 		worker = std::make_unique<std::thread>([this] { ioService.run(); });
 	}
-
+	
 	Server::~Server() {
 		info("Server::~Server");
 		ioService.stop();
@@ -206,7 +207,7 @@ namespace MV {
 		std::lock_guard<std::recursive_mutex> guard(lock);
 		accumulatedTime += a_dt;
 		auto startSize = ourConnections.size();
-		ourConnections.erase(std::remove_if(ourConnections.begin(), ourConnections.end(), [&](auto c) {
+		ourConnections.erase(std::remove_if(ourConnections.begin(), ourConnections.end(), [this, a_dt](auto c) {
 			if (!c) { return true; }
 			try {
 				received.add(accumulatedTime, c->update(a_dt));
@@ -224,7 +225,7 @@ namespace MV {
 
 	void Connection::send(const std::string &a_content) {
 		auto self = shared_from_this();
-		ioService.post([&, self, a_content] {
+		ioService.post([this, self, a_content] {
 			auto message = std::make_shared<NetworkMessage>(a_content);
 			boost::asio::async_write(*socket, boost::asio::buffer(message->headerAndContent(), message->headerAndContentSize()), [self, message](boost::system::error_code a_err, size_t a_amount) {
 				if (a_err) {
@@ -238,10 +239,10 @@ namespace MV {
 		auto message = std::make_shared<NetworkMessage>();
 		auto self = shared_from_this();
 		auto copiedSocket = socket;
-		boost::asio::async_read(*copiedSocket, boost::asio::buffer(message->headerBuffer, 4), boost::asio::transfer_exactly(4), [&, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
+		boost::asio::async_read(*copiedSocket, boost::asio::buffer(message->headerBuffer), boost::asio::transfer_exactly(4), [this, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
 			if (!a_err && socket) {
 				message->readHeaderFromBuffer();
-				boost::asio::async_read(*copiedSocket, message->buffer, boost::asio::transfer_exactly(message->content.size()), [&, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
+				boost::asio::async_read(*copiedSocket, message->buffer, boost::asio::transfer_exactly(message->content.size()), [this, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
 					if (!a_err && socket) {
 						message->readContentFromBuffer();
 						{
@@ -290,11 +291,13 @@ namespace MV {
 	}
 
 	uint32_t NetworkMessage::sizeFromHeaderBuffer() {
-		return *reinterpret_cast<uint32_t*>(headerBuffer);
+		uint32_t headerSizeResult = 0;
+		memcpy(&headerSizeResult, &headerBuffer[0], 4);
+		return headerSizeResult;
 	}
 
 	void NetworkMessage::readHeaderFromBuffer() {
-		swapBytesForNetwork<4>(headerBuffer);
+		swapBytesForNetwork<4>(&headerBuffer[0]);
 		content.resize(sizeFromHeaderBuffer());
 	}
 

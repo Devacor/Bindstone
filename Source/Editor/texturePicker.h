@@ -2,7 +2,6 @@
 #define __MV_EDITOR_TEXTURE_PICKER_H__
 
 #include <memory>
-#include "editorDefines.h"
 #include "editorFactories.h"
 
 class TexturePicker {

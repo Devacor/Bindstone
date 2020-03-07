@@ -1,0 +1,174 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="src">
+      <UniqueIdentifier>{a60261b9-2377-4892-af58-749e6d9900cd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\audio">
+      <UniqueIdentifier>{cfc774dc-9cf8-4ca1-a700-3067a5665dc7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\audio\android">
+      <UniqueIdentifier>{2aca93df-c526-432f-9d62-68ca5c51a2d4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\core">
+      <UniqueIdentifier>{9a5e8abe-30e6-4db0-acec-f3b15ee42747}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\core\android">
+      <UniqueIdentifier>{5a43c9e3-62cb-48c7-a739-b393fe483484}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\filesystem">
+      <UniqueIdentifier>{62e03ce9-d67a-47a5-8b4c-55d57ef0b676}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\filesystem\android">
+      <UniqueIdentifier>{95aeb74e-f1a1-4789-b76d-47eaf9aebd74}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\haptic">
+      <UniqueIdentifier>{53d6844a-c9c9-46b6-86fd-3f977e19e764}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\haptic\android">
+      <UniqueIdentifier>{b16aedb4-3d08-4e25-be3c-8c573186f880}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\hidapi">
+      <UniqueIdentifier>{1d2b8ed5-18d6-47a0-b484-eedc9f79b97a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\hidapi\android">
+      <UniqueIdentifier>{93659c0a-45cd-47ac-83a3-175118bfb8d2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\joystick">
+      <UniqueIdentifier>{4d8244d1-7bc9-4fbc-b460-e8fda5f15350}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\joystick\android">
+      <UniqueIdentifier>{be468ad6-5d38-4f22-99a3-56a8fa2b2886}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\loadso">
+      <UniqueIdentifier>{c63bb7b9-c083-47a7-ad54-9567a8ad6a7b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\loadso\dlopen">
+      <UniqueIdentifier>{d96e9384-baf0-417d-a3fc-a3a6c56a7d0b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\power">
+      <UniqueIdentifier>{f140fce6-e39a-4899-a1ca-3dc831242436}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\power\android">
+      <UniqueIdentifier>{ec9f14c6-57e0-41b8-8882-97771c72d8d8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\sensor">
+      <UniqueIdentifier>{2bae343e-3366-4bba-88dd-e083567ed0f8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\sensor\android">
+      <UniqueIdentifier>{7da7a983-6723-4761-a693-34c9f404e3d7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\thread">
+      <UniqueIdentifier>{0b838e35-5e99-4203-a7c8-d95238c4e04b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\thread\pthread">
+      <UniqueIdentifier>{e1295166-34d2-4fe7-8450-9c1d24c6e542}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\timer">
+      <UniqueIdentifier>{3bc596cc-63c2-4b5f-bdc4-8a7d5b08ef02}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\timer\unix">
+      <UniqueIdentifier>{27d2a4c6-b3d0-4e6d-aa3e-c3d236459d64}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\video">
+      <UniqueIdentifier>{49afed2c-a461-4ecd-b04b-6c34157e73a9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\video\android">
+      <UniqueIdentifier>{81ece835-cab6-46c5-8425-9c955e11ec18}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\androidcpufeatures">
+      <UniqueIdentifier>{d1079e8a-25b2-48e4-8bf7-b7f7d8d4372f}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\audio\android\SDL_androidaudio.c">
+      <Filter>src\audio\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\android\SDL_android.c">
+      <Filter>src\core\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\filesystem\android\SDL_sysfilesystem.c">
+      <Filter>src\filesystem\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\haptic\android\SDL_syshaptic.c">
+      <Filter>src\haptic\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\hidapi\android\hid.cpp">
+      <Filter>src\hidapi\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\joystick\android\SDL_sysjoystick.c">
+      <Filter>src\joystick\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\loadso\dlopen\SDL_sysloadso.c">
+      <Filter>src\loadso\dlopen</Filter>
+    </ClCompile>
+    <ClCompile Include="src\power\android\SDL_syspower.c">
+      <Filter>src\power\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\sensor\android\SDL_androidsensor.c">
+      <Filter>src\sensor\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\thread\pthread\SDL_systls.c">
+      <Filter>src\thread\pthread</Filter>
+    </ClCompile>
+    <ClCompile Include="src\thread\pthread\SDL_syscond.c">
+      <Filter>src\thread\pthread</Filter>
+    </ClCompile>
+    <ClCompile Include="src\thread\pthread\SDL_sysmutex.c">
+      <Filter>src\thread\pthread</Filter>
+    </ClCompile>
+    <ClCompile Include="src\thread\pthread\SDL_syssem.c">
+      <Filter>src\thread\pthread</Filter>
+    </ClCompile>
+    <ClCompile Include="src\thread\pthread\SDL_systhread.c">
+      <Filter>src\thread\pthread</Filter>
+    </ClCompile>
+    <ClCompile Include="src\timer\unix\SDL_systimer.c">
+      <Filter>src\timer\unix</Filter>
+    </ClCompile>
+    <ClCompile Include="src\video\android\SDL_androidwindow.c">
+      <Filter>src\video\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\video\android\SDL_androidclipboard.c">
+      <Filter>src\video\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\video\android\SDL_androidevents.c">
+      <Filter>src\video\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\video\android\SDL_androidgl.c">
+      <Filter>src\video\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\video\android\SDL_androidkeyboard.c">
+      <Filter>src\video\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\video\android\SDL_androidmessagebox.c">
+      <Filter>src\video\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\video\android\SDL_androidmouse.c">
+      <Filter>src\video\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\video\android\SDL_androidtouch.c">
+      <Filter>src\video\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\video\android\SDL_androidvideo.c">
+      <Filter>src\video\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\video\android\SDL_androidvulkan.c">
+      <Filter>src\video\android</Filter>
+    </ClCompile>
+    <ClCompile Include="src\androidcpufeatures\cpu-features.c">
+      <Filter>src\androidcpufeatures</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\audio\android\SDL_androidaudio.h">
+      <Filter>src\audio\android</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\android\keyinfotable.h">
+      <Filter>src\core\android</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\android\SDL_android.h">
+      <Filter>src\core\android</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

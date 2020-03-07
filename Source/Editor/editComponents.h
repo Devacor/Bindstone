@@ -3,14 +3,15 @@
 
 #include <memory>
 #include <map>
-#include "MV/Render/package.h"
 #include "editorDefines.h"
+
 class EditorPanel;
 
 class EditableNode {
 public:
 	EditableNode(std::shared_ptr<MV::Scene::Node> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice *a_mouse);
 
+	
 	~EditableNode();
 
 	void removeHandles();
@@ -37,7 +38,7 @@ private:
 class ResizeHandles {
 public:
 	ResizeHandles(MV::Scene::SafeComponent<MV::Scene::Component> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice *a_mouse);
-	~ResizeHandles() {
+	virtual ~ResizeHandles() {
 		controlContainer->removeFromParent();
 	}
 

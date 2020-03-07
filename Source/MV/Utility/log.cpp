@@ -2,13 +2,13 @@
 #include "services.hpp"
 
 namespace MV {
-	Logger* MV::Logger::instance() {
+	Logger* Logger::instance() {
 		static Logger logger;
-		Logger* found = MV::Services::instance().get<Logger>(false);
+		Logger* found = Services::instance().get<Logger>(false);
 		if (found) {
 			return found;
 		}
-		MV::Services::instance().connect(&logger);
+		Services::instance().connect(&logger);
 		return &logger;
 	}
 }

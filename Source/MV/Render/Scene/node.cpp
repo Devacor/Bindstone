@@ -145,14 +145,11 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::load(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId, bool a_doPostLoadStep) {
-			std::ifstream stream(a_filename);
-			require<ResourceException>(stream, "File not found for Node::load: ", a_filename);
-			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
+			auto contents = fileContents(a_filename);
+			require<ResourceException>(!contents.empty(), "File not found for Node::load: ", a_filename);
 
-			cereal::UserDataAdapter<MV::Services, cereal::JSONInputArchive> archive(a_services, stream);
-			std::shared_ptr<Node> result;
-			archive.add(cereal::make_nvp("services", a_services));
-			archive(result);
+			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
+			std::shared_ptr<Node> result = MV::fromJson<std::shared_ptr<Node>>(contents, a_services);
 			if (!a_newNodeId.empty()) {
 				result->id(a_newNodeId);
 			}
@@ -164,13 +161,11 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::loadBinary(const std::string &a_filename, MV::Services& a_services, const std::string &a_newNodeId, bool a_doPostLoadStep) {
-			std::ifstream stream(a_filename);
-			require<ResourceException>(stream, "File not found for Node::load: ", a_filename);
+			auto contents = fileContents(a_filename);
+			require<ResourceException>(!contents.empty(), "File not found for Node::load: ", a_filename);
 			LoadOptions nodeOptions(a_services, a_doPostLoadStep);
 
-			cereal::UserDataAdapter<MV::Services, cereal::PortableBinaryInputArchive> archive(a_services, stream);
-			std::shared_ptr<Node> result;
-			archive(result);
+			std::shared_ptr<Node> result = MV::fromBinaryString<std::shared_ptr<Node>>(contents, a_services);
 			if (!a_newNodeId.empty()) {
 				result->id(a_newNodeId);
 			}
@@ -182,7 +177,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::save(const std::string &a_filename, const std::string &a_newId) {
-			std::ofstream stream(a_filename);
+			std::stringstream stream(fileContents(a_filename));
 
 			std::string oldId = nodeId;
 			auto oldParent = myParent;
@@ -195,6 +190,7 @@ namespace MV {
 				cereal::JSONOutputArchive archive(stream);
 				archive(self);
 			}
+			writeToFile(a_filename, stream.str());
 			return self;
 		}
 
@@ -203,7 +199,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::saveBinary(const std::string &a_filename, const std::string &a_newId) {
-			std::ofstream stream(a_filename);
+			std::stringstream stream(fileContents(a_filename));
 
 			std::string oldId = nodeId;
 			auto oldParent = myParent;
@@ -216,6 +212,7 @@ namespace MV {
 				cereal::PortableBinaryOutputArchive archive(stream);
 				archive(self);
 			}
+			writeToFile(a_filename, stream.str());
 			return self;
 		}
 
@@ -996,7 +993,7 @@ namespace MV {
 		MV::AxisAngles Node::worldRotationRad() const {
 			auto accumulatedRotation = rotateTo;
 			const Node* current = this;
-			while (current = current->myParent) {
+			while ( (current = current->myParent) ) {
 				accumulatedRotation += current->rotateTo;
 			}
 			return accumulatedRotation;
@@ -1005,7 +1002,7 @@ namespace MV {
 		std::shared_ptr<Node> Node::worldRotationRad(const AxisAngles &a_newAngle) {
 			auto accumulatedRotation = a_newAngle;
 			const Node* current = this;
-			while (current = current->myParent) {
+			while ( (current = current->myParent) ) {
 				accumulatedRotation -= current->rotateTo;
 			}
 			return rotationRad(accumulatedRotation);
@@ -1022,7 +1019,7 @@ namespace MV {
 		MV::Scale Node::worldScale() const {
 			auto accumulatedScale = scaleTo;
 			const Node* current = this;
-			while (current = current->myParent) {
+			while ( (current = current->myParent) ) {
 				accumulatedScale *= current->scaleTo;
 			}
 			return accumulatedScale;
@@ -1031,7 +1028,7 @@ namespace MV {
 		std::shared_ptr<Node> Node::worldScale(const Scale &a_newScale) {
 			auto accumulatedScale = a_newScale;
 			const Node* current = this;
-			while (current = current->myParent) {
+			while ( (current = current->myParent) ) {
 				accumulatedScale /= current->scaleTo;
 			}
 			return scale(accumulatedScale);

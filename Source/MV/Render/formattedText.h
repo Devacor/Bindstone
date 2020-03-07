@@ -6,8 +6,10 @@
 #include <math.h>
 #include <memory>
 #include "MV/Utility/generalUtility.h"
+#include "MV/Utility/services.hpp"
 #include "SDL_ttf.h"
 #include "MV/Render/points.h"
+#include "cereal/archives/adapters.hpp"
 
 namespace MV {
 	namespace Scene{
@@ -192,7 +194,7 @@ namespace MV {
 
 		template <class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<TextLibrary> &construct, std::uint32_t const version){
-			auto& services = cereal::get_user_data<MV::Services>(archive);
+			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 			auto* renderer = services.get<MV::Draw2D>();
 
 			construct(*renderer);
@@ -416,7 +418,7 @@ namespace MV {
 
 		template <class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<FormattedText> &construct, std::uint32_t const a_version) {
-			auto& services = cereal::get_user_data<MV::Services>(archive);
+			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 			auto* library = services.get<MV::TextLibrary>();
 
 			std::string defaultStateIdentifier;

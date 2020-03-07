@@ -42,12 +42,12 @@ namespace MV {
 	};
 
 	template<class...Vs, class...Fs>
-	auto visit(std::variant<Vs...> &a_item, Fs&& ...fs) {
+	auto visit(const std::variant<Vs...> &a_item, Fs&& ...fs) {
 		return std::visit(compose(std::forward<Fs>(fs)...), a_item);
 	};
 
 	template<class...Vs, class...Fs>
-	void visit(std::vector<std::variant<Vs...>> &a_items, Fs&& ...fs) {
+	void visit(const std::vector<std::variant<Vs...>> &a_items, Fs&& ...fs) {
 		auto composedMethods{ compose(std::forward<Fs>(fs)...) };
 		for (auto&& item : a_items) {
 			std::visit(composedMethods, item);

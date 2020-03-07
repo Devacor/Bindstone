@@ -9,6 +9,8 @@ void SynchronizeAction::execute(Game& a_game) {
 		a_game.instance()->networkPool().synchronize(objects);
 	}
 }
+
+#ifdef BINDSTONE_SERVER
 void SynchronizeAction::execute(GameServer&) {
 
 }
@@ -21,3 +23,4 @@ void SynchronizeAction::execute(LobbyUserConnectionState*) {
 void SynchronizeAction::execute(LobbyGameConnectionState*) {
 
 }
+#endif

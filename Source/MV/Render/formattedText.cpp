@@ -13,15 +13,21 @@ namespace MV {
 			require<ResourceException>(exists->equivalent(a_identifier, a_file, a_size, a_style), "Found an existing definition that doesn't match: ", exists);
 			return exists;
 		} else {
-			TTF_Font* newFont = TTF_OpenFont(a_file.c_str(), a_size);
-			if (newFont) {
-				TTF_SetFontHinting(newFont, TTF_HINTING_NORMAL);
-				TTF_SetFontStyle(newFont, static_cast<int>(a_style));
-				auto fontDefinitionToAdd = std::shared_ptr<FontDefinition>(new FontDefinition(&a_library, a_file, a_size, newFont, a_style, a_identifier));
-				a_library.add(fontDefinitionToAdd);
-				return fontDefinitionToAdd;
+			SDL_RWops* fileHandle = sdlFileHandle(a_file);
+			if (fileHandle) {
+				TTF_Font* newFont = TTF_OpenFontRW(fileHandle, 1, a_size);
+				if (newFont) {
+					TTF_SetFontHinting(newFont, TTF_HINTING_NORMAL);
+					TTF_SetFontStyle(newFont, static_cast<int>(a_style));
+					auto fontDefinitionToAdd = std::shared_ptr<FontDefinition>(new FontDefinition(&a_library, a_file, a_size, newFont, a_style, a_identifier));
+					a_library.add(fontDefinitionToAdd);
+					return fontDefinitionToAdd;
+				}
+				else {
+					require<ResourceException>(false, "Error loading font [", a_identifier, "]: ", TTF_GetError());
+				}
 			} else {
-				require<ResourceException>(false, "Error loading font [", a_identifier, "]: ", TTF_GetError());
+				require<ResourceException>(false, "Error loading font [file missing]: ");
 			}
 		}
 		return nullptr;
@@ -101,7 +107,6 @@ namespace MV {
 
 	TextLibrary::TextLibrary(Draw2D &a_rendering):
 		render(a_rendering){
-		SDL_StartTextInput();
 		white.r = 255; white.g = 255; white.b = 255; white.a = 0;
 		if(!TTF_WasInit()){
 			TTF_Init();

@@ -11,8 +11,9 @@ struct spAnimationState;
 struct spBone;
 struct spAtlas;
 
-
 namespace MV {
+	void initializeSpineBindings();
+
 	namespace Scene {
 		void spineAnimationCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
 		void spineTrackEntryCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);

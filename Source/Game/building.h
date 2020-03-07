@@ -180,7 +180,7 @@ public:
 	}
 
 	std::string assetPath() const {
-		return "Assets/Buildings/" + buildingData.id + "/" + (skin().empty() ? "Default" : skin()) + "/building.prefab";
+		return "Buildings/" + buildingData.id + "/" + (skin().empty() ? "Default" : skin()) + "/building.prefab";
 	}
 
 	std::string skin() const;

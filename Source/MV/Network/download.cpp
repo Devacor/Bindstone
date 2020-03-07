@@ -1,6 +1,7 @@
 #include "download.h"
 #include <boost/filesystem.hpp>
 #include <atomic>
+#include <sstream>
 #include "MV/Utility/stringUtility.h"
 
 namespace MV{
@@ -41,7 +42,7 @@ namespace MV{
 	}
 
 	std::string DownloadString(const Url& a_url) {
-		auto result = std::make_shared<std::stringstream>();
+		auto result = std::make_shared<std::ostringstream>(std::ofstream::out | std::ofstream::binary);
 		if (DownloadRequest::make(a_url, result)->header().success) {
 			return result->str();
 		} else {
@@ -52,8 +53,7 @@ namespace MV{
 	MV::HttpHeader DownloadFile(const Url& a_url, const std::string &a_path) {
 		HttpHeader header;
 		{
-			boost::filesystem::create_directories(boost::filesystem::path(a_path).parent_path());
-			auto outFile = std::make_shared<std::ofstream>(a_path, std::ofstream::out | std::ofstream::binary);
+			auto outFile = std::make_shared<std::ostringstream>(std::ofstream::out | std::ofstream::binary);
 			auto request = DownloadRequest::make(a_url, outFile);
 			header = request->header();
 		}
@@ -64,11 +64,10 @@ namespace MV{
 	}
 
 	void DownloadFile(const std::shared_ptr<boost::asio::io_context> &a_ioService, const MV::Url& a_url, const std::string &a_path, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete) {
-		boost::filesystem::create_directories(boost::filesystem::path(a_path).parent_path());
-		auto outFile = std::make_shared<std::ofstream>(a_path, std::ofstream::out | std::ofstream::binary);
-		auto request = DownloadRequest::make(a_ioService, a_url, outFile, [a_path, a_onComplete](std::shared_ptr<DownloadRequest> a_result) {
-			if (!a_result->header().success) {
-				std::remove(a_path.c_str());
+		auto outStream = std::make_shared<std::ostringstream >(std::ofstream::out | std::ofstream::binary);
+		auto request = DownloadRequest::make(a_ioService, a_url, outStream, [a_path, a_onComplete, outStream](std::shared_ptr<DownloadRequest> a_result) {
+			if (a_result->header().success) {
+				writeToFile(a_path, outStream->str());
 			}
 			if (a_onComplete) { a_onComplete(a_result); }
 		});

@@ -1,6 +1,7 @@
 {
     "data": [
         {
+        	"cereal_class_version": 0,
             "id": "Missile"
         }
     ]

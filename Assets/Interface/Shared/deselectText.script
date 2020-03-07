@@ -1,0 +1,2 @@
+game.gui.page(pageId).removeFocus();
+print(arg_0.owner().componentText().text());

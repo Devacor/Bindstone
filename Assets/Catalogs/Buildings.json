@@ -1,9 +1,10 @@
 {
     "data": [
         {
+            "cereal_class_version": 0,
             "id": "life",
             "skins": [
-                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+                {"cereal_class_version": 0, "id": "tmp", "costs": [{"values":[0,0,325]}]}
             ],
             "costs": [
                 {"values": [0,10000,0]},
@@ -11,6 +12,7 @@
                 {"values": [0,6000,325]}
             ],
             "game": {
+                "cereal_class_version": 0,
                 "id": "T0",
                 "cost": 0,
                 "income": 0,
@@ -38,9 +40,10 @@
             }
         },
         {
+            "cereal_class_version": 0,
             "id": "decay",
             "skins": [
-                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+                {"cereal_class_version": 0, "id": "tmp", "costs": [{"values":[0,0,325]}]}
             ],
             "costs": [
                 {"values": [0,10000,0]},
@@ -75,9 +78,10 @@
             }
         },
         {
+            "cereal_class_version": 0,
             "id": "void",
             "skins": [
-                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+                {"cereal_class_version": 0, "id": "tmp", "costs": [{"values":[0,0,325]}]}
             ],
             "costs": [
                 {"values": [0,10000,0]},
@@ -112,9 +116,10 @@
             }
         },
         {
+            "cereal_class_version": 0,
             "id": "earth",
             "skins": [
-                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+                {"cereal_class_version": 0,"id": "tmp", "costs": [{"values":[0,0,325]}]}
             ],
             "costs": [
                 {"values": [0,10000,0]},
@@ -149,9 +154,10 @@
             }
         },
         {
+            "cereal_class_version": 0,
             "id": "fire",
             "skins": [
-                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+                {"cereal_class_version": 0,"id": "tmp", "costs": [{"values":[0,0,325]}]}
             ],
             "costs": [
                 {"values": [0,10000,0]},
@@ -159,6 +165,7 @@
                 {"values": [0,6000,325]}
             ],
             "game": {
+                "cereal_class_version": 0,
                 "id": "T0",
                 "cost": 0,
                 "income": 0,
@@ -186,9 +193,10 @@
             }
         },
         {
+            "cereal_class_version": 0,
             "id": "water",
             "skins": [
-                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+                {"cereal_class_version": 0,"id": "tmp", "costs": [{"values":[0,0,325]}]}
             ],
             "costs": [
                 {"values": [0,10000,0]},
@@ -196,6 +204,7 @@
                 {"values": [0,6000,325]}
             ],
             "game": {
+                "cereal_class_version": 0,
                 "id": "T0",
                 "cost": 0,
                 "income": 0,
@@ -223,9 +232,10 @@
             }
         },
         {
+            "cereal_class_version": 0,
             "id": "air",
             "skins": [
-                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+                {"cereal_class_version": 0,"id": "tmp", "costs": [{"values":[0,0,325]}]}
             ],
             "costs": [
                 {"values": [0,10000,0]},
@@ -233,6 +243,7 @@
                 {"values": [0,6000,325]}
             ],
             "game": {
+                "cereal_class_version": 0,
                 "id": "T0",
                 "cost": 0,
                 "income": 0,
@@ -260,9 +271,10 @@
             }
         },
         {
+            "cereal_class_version": 0,
             "id": "lightning",
             "skins": [
-                {"id": "tmp", "costs": [{"values":[0,0,325]}]}
+                {"cereal_class_version": 0,"id": "tmp", "costs": [{"values":[0,0,325]}]}
             ],
             "costs": [
                 {"values": [0,10000,0]},
@@ -270,6 +282,7 @@
                 {"values": [0,6000,325]}
             ],
             "game": {
+                "cereal_class_version": 0,
                 "id": "T0",
                 "cost": 0,
                 "income": 0,

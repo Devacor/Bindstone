@@ -9,7 +9,7 @@ Editor::Editor(Managers &a_managers):
 	visor(MV::Scene::Node::make(a_managers.renderer, "visor")),
 	scene(visor->make("root")),
 	controls(MV::Scene::Node::make(a_managers.renderer)),
-	chaiScript(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), chaiscript::default_options()),
+	chaiScript(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), [](const std::string& a_file) {return MV::fileContents(a_file); }, chaiscript::default_options()),
 	testNode(MV::Scene::Node::make(a_managers.renderer)){
 	visor->cameraId(1);
 
@@ -87,9 +87,9 @@ void Editor::initializeWindow(){
 		}, [](){}, "ControlPanelDrag"));
 	});
 
-	//managers.textures.assemblePacks("Assets/Atlases", &managers.renderer);
-	managers.textures.files("Assets/Map");
-	managers.textures.files("Assets/Images");
+	//managers.textures.assemblePacks("Atlases", &managers.renderer);
+	managers.textures.files("Map");
+	managers.textures.files("Images");
 
 	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->set(0.0f)->position({960.0f - 50.0f, 0.0f});
 	fps = controls->make("FPS")->

@@ -2,10 +2,8 @@
 #define __MV_EDITOR_SCENE_GRAPH_PANEL_H__
 
 #include <memory>
-#include "editComponents.h"
+#include <map>
 #include "editorDefines.h"
-#include "componentPanels.h"
-#include "editorFactories.h"
 
 class SceneGraphPanel {
 public:

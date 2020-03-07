@@ -93,13 +93,18 @@ int main(int, char *[]) {
 	Managers managers;
 	managers.timer.start();
 	bool done = false;
-	auto server = std::make_shared<LobbyServer>(managers);
-	while (!done) {
-		managers.pool.run();
-		auto tick = managers.timer.delta("tick");
-		server->update(tick);
-		std::this_thread::yield();
-	}
+    try {
+        auto server = std::make_shared<LobbyServer>(managers);
+        std::cout << "Made server\n";
+        while (!done) {
+            managers.pool.run();
+            auto tick = managers.timer.delta("tick");
+            server->update(tick);
+            std::this_thread::yield();
+        }
+    } catch (std::exception & e) {
+        MV::error("Exception Toasted the Server: ", e.what());
+    }
 
 	return 0;
 }

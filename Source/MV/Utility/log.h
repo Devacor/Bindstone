@@ -10,14 +10,11 @@
 #include <any>
 #include "require.hpp"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 namespace MV {
-	enum class Severity {Debug, Info, Warning, Error, Silence, Count = Silence};
-
-	inline const std::string &to_string(const Severity &a_severity) {
-		static std::array<std::string, 5> names{ "Debug", "Info", "Warning", "Error", "Silence"};
-		return names[static_cast<int>(a_severity)];
-	}
-
 	struct LogData {
 	public:
 		LogData(const std::any &a_value) :value(a_value) {}
@@ -27,7 +24,7 @@ namespace MV {
 		}
 		template <typename T>
 		const T* get() const {
-			if (!value.empty()) {
+			if (value.has_value()) {
 				try {
 					return &std::any_cast<const T&>(value);
 				} catch (const std::bad_any_cast& e) {
@@ -51,6 +48,18 @@ namespace MV {
 			std::cerr << message << std::endl;
 		}
 	};
+
+#ifdef __ANDROID__
+	struct AndroidLogReciever : public LogReciever {
+		AndroidLogReciever(int a_android_LogPriority, const std::string &a_prefix) : errorLevel(a_android_LogPriority), prefix(a_prefix) {}
+		int errorLevel = 0;
+		const std::string prefix;
+		virtual void log(Severity severity, const LogData&, const std::string& message) override {
+			__android_log_print(errorLevel, prefix.c_str(), "%s", message.c_str());
+		}
+	};
+#endif
+
 	class Logger {
 	public:
 		//Makes use of Service, must Services::instance().connect(logger) to allow this to work.
@@ -60,8 +69,8 @@ namespace MV {
 				addDefaultListeners();
 			}
 		}
-		void filter(Severity level) {
-			level = level;
+		void filter(Severity a_level) {
+			level = a_level;
 		}
 		virtual Severity filter() const {
 			return level;
@@ -163,10 +172,10 @@ namespace MV {
 			}
 		}
 		void addDefaultListeners() {
-			listen(Severity::Debug, &defaultReceiver);
-			listen(Severity::Info, &defaultReceiver);
-			listen(Severity::Warning, &defaultReceiver);
-			listen(Severity::Error, &defaultErrorReceiver);
+			listen(Severity::Debug, &debugReceiver);
+			listen(Severity::Info, &infoReceiver);
+			listen(Severity::Warning, &errorReceiver);
+			listen(Severity::Error, &warningReceiver);
 		}
 	protected:
 		virtual void broadcastLog(Severity a_level, const LogData &a_data, const std::string& a_message) {
@@ -176,8 +185,17 @@ namespace MV {
 			}
 		}
 	private:
-		CoutLogReciever defaultReceiver;
-		CerrLogReciever defaultErrorReceiver;
+#ifdef __ANDROID__
+		AndroidLogReciever debugReceiver = AndroidLogReciever(ANDROID_LOG_DEBUG, "MV_DEBUG");
+		AndroidLogReciever infoReceiver = AndroidLogReciever(ANDROID_LOG_INFO, "MV_INFO");
+		AndroidLogReciever errorReceiver = AndroidLogReciever(ANDROID_LOG_ERROR, "MV_ERROR");
+		AndroidLogReciever warningReceiver = AndroidLogReciever(ANDROID_LOG_WARN, "MV_WARN");
+#else
+		CoutLogReciever debugReceiver;
+		CoutLogReciever infoReceiver;
+		CoutLogReciever warningReceiver;
+		CerrLogReciever errorReceiver;
+#endif
 		std::array<std::vector<std::function<void(Severity, const LogData &, const std::string&)>>, static_cast<int>(Severity::Count)> listeners;
 		Severity level;
 		std::mutex m;

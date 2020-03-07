@@ -77,13 +77,13 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 
 	auto saveButton = makeButton(grid, panel.services(), "Save", buttonSize, U8_STR("Save"));
 	saveButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
-		controls->elementToEdit->save("Assets/Prefabs/" + controls->elementToEdit->id() + ".prefab");
+		controls->elementToEdit->save("Prefabs/" + controls->elementToEdit->id() + ".prefab");
 	});
 
 	auto loadButton = makeButton(grid, panel.services(), "Load", buttonSize, U8_STR("Load"));
 	loadButton->onAccept.connect("click", [&](std::shared_ptr<MV::Scene::Clickable>) {
-		if (MV::fileExists("Assets/Prefabs/" + controls->elementToEdit->id() + ".prefab")) {
-			auto newNode = controls->elementToEdit->parent()->make("Assets/Prefabs/" + controls->elementToEdit->id() + ".prefab", panel.services());
+		if (MV::fileExistsAbsolute("Prefabs/" + controls->elementToEdit->id() + ".prefab")) {
+			auto newNode = controls->elementToEdit->parent()->make("Prefabs/" + controls->elementToEdit->id() + ".prefab", panel.services());
 
 			auto editableNode = std::make_shared<EditableNode>(newNode, panel.editor(), panel.services().get<MV::TapDevice>());
 
@@ -197,8 +197,6 @@ SelectedNodeEditorPanel::SelectedNodeEditorPanel(EditorControls &a_panel, std::s
 	});
 
 	panel.updateBoxHeader(grid->bounds().width());
-
-	SDL_StartTextInput();
 }
 
 //BUTTON MASTER LIST [HERE]
@@ -209,7 +207,7 @@ void SelectedNodeEditorPanel::updateComponentEditButtons(bool a_attached) {
 	componentEditButtons.clear();
 	buttonSize = MV::size(110.0f, 27.0f);
 	auto componentList = controls->elementToEdit->components<MV::Scene::Sprite, MV::Scene::Text, MV::Scene::Grid, MV::Scene::Emitter, MV::Scene::Spine, MV::Scene::PathMap, MV::Scene::Button, MV::Scene::Clickable, MV::Scene::Drawable>(true);
-	
+	/*
 	MV::visit(componentList,
 	[&](const MV::Scene::SafeComponent<MV::Scene::Sprite> &a_sprite) {
 		CreateSpriteComponentButton(a_sprite);
@@ -238,6 +236,7 @@ void SelectedNodeEditorPanel::updateComponentEditButtons(bool a_attached) {
 	[&](const MV::Scene::SafeComponent<MV::Scene::Drawable> &a_drawable) {
 		CreateDrawableComponentButton(a_drawable);
 	});
+	*/
 }
 
 MV::Scene::SafeComponent<MV::Scene::Button> SelectedNodeEditorPanel::CreateSpriteComponentButton(const MV::Scene::SafeComponent<MV::Scene::Sprite> & a_sprite) {
@@ -362,7 +361,7 @@ void SelectedNodeEditorPanel::handleInput(SDL_Event &a_event) {
 
 	if (a_event.type == SDL_DROPFILE) {
 		std::cout << a_event.drop.file << std::endl;
-		if (MV::fileExists(a_event.drop.file)) {
+		if (MV::fileExistsAbsolute(a_event.drop.file)) {
 			auto newNode = controls->elementToEdit->make(a_event.drop.file, panel.services());
 
 			//auto editableNode = std::make_shared<EditableNode>(newNode, panel.editor(), panel.services().get<MV::TapDevice>());
@@ -489,8 +488,6 @@ SelectedDrawableEditorPanel::SelectedDrawableEditorPanel(EditorControls &a_panel
 	auto deselectLocalAABB = deselectButton->bounds();
 
 	panel.updateBoxHeader(grid->bounds().width());
-
-	SDL_StartTextInput();
 }
 
 void SelectedDrawableEditorPanel::openTexturePicker(size_t a_textureId) {
@@ -866,8 +863,6 @@ SelectedGridEditorPanel::SelectedGridEditorPanel(EditorControls &a_panel, std::s
 	});
 
 	panel.updateBoxHeader(grid->bounds().width());
-
-	SDL_StartTextInput();
 }
 
 void SelectedGridEditorPanel::handleInput(SDL_Event &a_event) {
@@ -946,13 +941,13 @@ SelectedSpineEditorPanel::SelectedSpineEditorPanel(EditorControls &a_panel, std:
 
 	if (controls) {
 		auto bundleChange = [&](std::shared_ptr<MV::Scene::Text> a_clickable) {
-			if (MV::fileExists(assetJson->text()) && MV::fileExists(assetAtlas->text())) {
+			if (MV::fileExistsAbsolute(assetJson->text()) && MV::fileExistsAbsolute(assetAtlas->text())) {
 				try { controls->elementToEdit->load({ assetJson->text(), assetAtlas->text(), scale->number() }); }
 				catch (...) {}
 			}
 		};
 		auto bundleChangeClick = [&](std::shared_ptr<MV::Scene::Clickable>) {
-			if (MV::fileExists(assetJson->text()) && MV::fileExists(assetAtlas->text())) {
+			if (MV::fileExistsAbsolute(assetJson->text()) && MV::fileExistsAbsolute(assetAtlas->text())) {
 				try { controls->elementToEdit->load({ assetJson->text(), assetAtlas->text(), scale->number() }); }
 				catch (...) {}
 			}
@@ -983,8 +978,6 @@ SelectedSpineEditorPanel::SelectedSpineEditorPanel(EditorControls &a_panel, std:
 	auto deselectLocalAABB = deselectButton->bounds();
 
 	panel.updateBoxHeader(grid->bounds().width());
-
-	SDL_StartTextInput();
 }
 
 void SelectedSpineEditorPanel::handleMakeButton(std::shared_ptr<MV::Scene::Node> a_grid, const std::string &a_socket, const std::string &a_node) {
@@ -1196,8 +1189,6 @@ SelectedRectangleEditorPanel::SelectedRectangleEditorPanel(EditorControls &a_pan
 	});
 
 	panel.updateBoxHeader(grid->bounds().width());
-
-	SDL_StartTextInput();
 }
 
 void SelectedRectangleEditorPanel::openTexturePicker(size_t a_textureId) {
@@ -1526,8 +1517,6 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	auto deselectLocalAABB = deselectButton->bounds();
 
 	panel.updateBoxHeader(grid->bounds().width());
-
-	SDL_StartTextInput();
 }
 
 void SelectedEmitterEditorPanel::openTexturePicker(size_t a_textureId) {
@@ -1654,8 +1643,6 @@ SelectedPathMapEditorPanel::SelectedPathMapEditorPanel(EditorControls &a_panel, 
 	auto deselectLocalAABB = deselectButton->bounds();
 
 	panel.updateBoxHeader(grid->bounds().width());
-
-	SDL_StartTextInput();
 }
 
 void SelectedPathMapEditorPanel::handleInput(SDL_Event &a_event) {
@@ -1729,7 +1716,7 @@ void DeselectedEditorPanel::handleInput(SDL_Event &a_event) {
 	}
 }
 
-std::string DeselectedEditorPanel::previousFileName = "Assets/Scenes/map.scene";
+std::string DeselectedEditorPanel::previousFileName = "Scenes/map.scene";
 
 ChooseElementCreationType::ChooseElementCreationType(EditorControls &a_panel, const std::shared_ptr<MV::Scene::Node> &a_nodeToAttachTo, SelectedNodeEditorPanel *a_editorPanel):
 	EditorPanel(a_panel),
@@ -2037,8 +2024,6 @@ SelectedTextEditorPanel::SelectedTextEditorPanel(EditorControls &a_panel, std::s
 	});
 
 	panel.updateBoxHeader(grid->bounds().width());
-
-	SDL_StartTextInput();
 }
 
 
@@ -2123,7 +2108,7 @@ SelectedButtonEditorPanel::SelectedButtonEditorPanel(EditorControls &a_panel, st
 			if (a_text->text().empty()) {
 				controls->elementToEdit->onAccept.disconnect("script");
 			} else {
-				auto content = MV::fileContents("Assets/Scripts/" + a_text->text());
+				auto content = MV::fileContents("Scripts/" + a_text->text());
 				if (content.empty()) {
 					content = a_text->text();
 				}
@@ -2197,8 +2182,6 @@ SelectedButtonEditorPanel::SelectedButtonEditorPanel(EditorControls &a_panel, st
 	});
 
 	panel.updateBoxHeader(grid->bounds().width());
-
-	SDL_StartTextInput();
 }
 
 
@@ -2258,7 +2241,7 @@ SelectedClickableEditorPanel::SelectedClickableEditorPanel(EditorControls &a_pan
 			controls->elementToEdit->onAccept.disconnect("script");
 		}
 		else {
-			auto content = MV::fileContents("Assets/Scripts/" + a_text->text());
+			auto content = MV::fileContents("Scripts/" + a_text->text());
 			if (content.empty()) {
 				content = a_text->text();
 			}
@@ -2332,8 +2315,6 @@ SelectedClickableEditorPanel::SelectedClickableEditorPanel(EditorControls &a_pan
 	});
 
 	panel.updateBoxHeader(grid->bounds().width());
-
-	SDL_StartTextInput();
 }
 
 

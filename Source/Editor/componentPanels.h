@@ -4,7 +4,6 @@
 #include <memory>
 #include <map>
 #include "editorDefines.h"
-#include "MV/Render/package.h"
 
 class EditorControls;
 class EditableNode;
@@ -54,12 +53,14 @@ public:
 			activeTextbox = lockedNewAT;
 			lockedNewAT->enableCursor();
 		}
+		SDL_StartTextInput();
 	}
 	void deactivateText() {
 		if (auto lockedAT = activeTextbox.lock()) {
 			lockedAT->disableCursor();
 		}
 		activeTextbox.reset();
+		SDL_StopTextInput();
 	}
 	MV::Services& services();
 

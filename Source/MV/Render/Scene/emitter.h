@@ -356,7 +356,7 @@ namespace MV {
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Emitter> &construct, std::uint32_t const version) {
-				auto& services = cereal::get_user_data<MV::Services>(archive);
+				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 				auto* pool = services.get<MV::ThreadPool>();
 
 				construct(std::shared_ptr<Node>(), *pool);

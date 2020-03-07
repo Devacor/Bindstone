@@ -94,7 +94,7 @@ namespace MV {
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Button> &construct, std::uint32_t const version) {
-				auto& services = cereal::get_user_data<MV::Services>(archive);
+				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 				auto* mouse = services.get<MV::TapDevice>();
 				construct(std::shared_ptr<Node>(), *mouse);
 				construct->load(archive, version);

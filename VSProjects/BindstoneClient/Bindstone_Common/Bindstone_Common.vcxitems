@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Globals">
+    <MSBuildAllProjects>$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <ItemsProjectGuid>{8e980497-3531-4455-8290-5491c08a9385}</ItemsProjectGuid>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(MSBuildThisFileDirectory)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ProjectCapability Include="SourceItemsFromImports" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(SolutionDir)Source\Editor\componentPanels.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editComponents.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editor.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editorControls.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editorFactories.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editorSceneGraphPanel.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\battleEffect.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\building.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\creature.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\game.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\gameEditor.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\Instance\gameInstance.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\Instance\team.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\Interface\guiFactories.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\Interface\interfaceManager.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\managers.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\accountActions.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\clientActions.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\gameServer.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\gameServerActions.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\lobbyServer.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\synchronizeAction.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\player.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\state.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\wallet.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(SolutionDir)Source\Editor\anchorEditor.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\componentPanels.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editComponents.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editor.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorControls.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorDefines.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorFactories.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorSceneGraphPanel.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\texturePicker.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\battleEffect.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\building.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\creature.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\game.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\gameEditor.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\Instance\gameInstance.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\Instance\team.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\Interface\guiFactories.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\Interface\interfaceManager.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\managers.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\accountActions.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\clientActions.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\gameServer.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\gameServerActions.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\lobbyServer.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\networkAction.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\package.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\synchronizeAction.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\player.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\standardScriptMethods.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\state.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\wallet.h" />
+  </ItemGroup>
+</Project>

@@ -8,10 +8,12 @@
 #include <set>
 #include <string>
 #include <map>
+#include "MV/Utility/services.hpp"
 #include "MV/Utility/tupleHelpers.hpp"
 #include "MV/Utility/scopeGuard.hpp"
 #include "MV/Utility/chaiscriptUtility.h"
 #include "cereal/cereal.hpp"
+#include "cereal/archives/adapters.hpp"
 #include "cereal/access.hpp"
 
 namespace MV {
@@ -171,7 +173,7 @@ namespace MV {
 				cereal::make_nvp("parameterNames", orderedParameterNames),
 				cereal::make_nvp("script", scriptCallback)
 			);
-			auto& services = cereal::get_user_data<MV::Services>(archive);
+			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 			scriptEnginePointer = services.get<chaiscript::ChaiScript>(false);
 		}
 
@@ -503,7 +505,7 @@ namespace MV {
 			for (auto&& ownedScriptObserver : ownedScriptObservers) {
 				ownedConnections[ownedScriptObserver.first] = ownedScriptObserver.second;
 			}
-			auto& services = cereal::get_user_data<MV::Services>(archive);
+			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 			scriptEnginePointer = services.get<chaiscript::ChaiScript>(false);
 		}
 

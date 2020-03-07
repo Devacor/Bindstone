@@ -17,11 +17,11 @@ void GameInstance::handleScroll(int a_amount) {
 }
 
 GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse, float a_timeStep) :
-	worldScene(a_root->make("Assets/Scenes/map.scene", services())->depth(0)),
+	worldScene(a_root->make("Scenes/map.scene", services())->depth(0)),
 	ourMouse(a_mouse),
 	gameData(a_gameData),
 	timeStep(a_timeStep),
-	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), chaiscript::default_options()) {
+	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), [](const std::string& a_file) {return MV::fileContents(a_file, true); }, chaiscript::default_options()) {
 }
 
 void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer, const std::shared_ptr<InGamePlayer> &a_rightPlayer) {
@@ -86,22 +86,6 @@ void GameInstance::hook() {
 
 	scriptEngine.add(chaiscript::fun(&GameInstance::creature), "creature");
 	scriptEngine.add(chaiscript::fun(&GameInstance::spawnCreature), "spawnCreature");
-}
-
-void ServerGameInstance::hook() {
-	GameInstance::hook();
-
-	ServerCreature::hook(scriptEngine, *this);
-	ServerBattleEffect::hook(scriptEngine, *this);
-
-	scriptEngine.add(chaiscript::fun([&](std::shared_ptr<BattleEffectNetworkState> a_effect) {
-		auto networkBattleEffect = networkPool().spawn(a_effect);
-
-		auto recentlyCreatedBattleEffect = gameObjectContainer()->make("E_" + std::to_string(networkBattleEffect->id()));
-		recentlyCreatedBattleEffect->position(networkBattleEffect->self()->position);
-
-		return recentlyCreatedBattleEffect->attach<ServerBattleEffect>(networkBattleEffect, *this);
-	}), "spawnOnNetwork");
 }
 
 void ClientGameInstance::hook() {
@@ -170,15 +154,15 @@ ClientGameInstance::ClientGameInstance(Game& a_game) :
 		battleEffectNode->attach<ClientBattleEffect>(a_newItem, *this);
 	});
 
-	auto playlistGame = std::make_shared<MV::AudioPlayList>();
+	/*auto playlistGame = std::make_shared<MV::AudioPlayList>();
 	playlistGame->addSoundBack("gameintro");
 	playlistGame->addSoundBack("gameloop");
 	playlistGame->addSoundBack("gameloop");
 	playlistGame->addSoundBack("gameloop");
 	playlistGame->addSoundBack("gameloop");
-	playlistGame->addSoundBack("gameloop");
+	playlistGame->addSoundBack("gameloop");*/
 
-	playlistGame->loopSounds(true);
+	//playlistGame->loopSounds(true);
 
 	//game.managers().audio.setMusicPlayList(playlistGame);
 
@@ -200,6 +184,23 @@ bool ClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<InGamePlaye
 	return a_player == game.player();
 }
 
+#ifdef BINDSTONE_SERVER
+void ServerGameInstance::hook() {
+	GameInstance::hook();
+
+	ServerCreature::hook(scriptEngine, *this);
+	ServerBattleEffect::hook(scriptEngine, *this);
+
+	scriptEngine.add(chaiscript::fun([&](std::shared_ptr<BattleEffectNetworkState> a_effect) {
+		auto networkBattleEffect = networkPool().spawn(a_effect);
+
+		auto recentlyCreatedBattleEffect = gameObjectContainer()->make("E_" + std::to_string(networkBattleEffect->id()));
+		recentlyCreatedBattleEffect->position(networkBattleEffect->self()->position);
+
+		return recentlyCreatedBattleEffect->attach<ServerBattleEffect>(networkBattleEffect, *this);
+		}), "spawnOnNetwork");
+}
+
 ServerGameInstance::ServerGameInstance(GameServer& a_game) :
 	GameInstance(a_game.root(), a_game.data(), a_game.mouse(), 1.0f / 10.0f),
 	gameServer(a_game){
@@ -218,3 +219,4 @@ void ServerGameInstance::updateImplementation(double /*a_dt*/) {
 		gameServer.server()->sendAll(updated);
 	}
 }
+#endif

@@ -129,7 +129,7 @@ namespace MV {
 
 		template <class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<TexturePack> &construct, std::uint32_t const version){
-			auto& services = cereal::get_user_data<MV::Services>(archive);
+			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 			auto* renderer = services.get<MV::Draw2D>();
 
 			std::string id;

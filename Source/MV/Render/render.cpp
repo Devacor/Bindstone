@@ -3,6 +3,7 @@
 #include "textures.h"
 #include "sharedTextures.h"
 #include "MV/Utility/generalUtility.h"
+#include "MV/Utility/stringUtility.h"
 
 
 namespace MESA {
@@ -283,7 +284,8 @@ namespace MV {
 		require<ResourceException>(renderer->headless() || (initialized && !a_framebuffer.expired()), "StartUsingFramebuffer failed because the extension could not be loaded");
 
 		savedClearColor = renderer->backgroundColor();
-		renderer->backgroundColor(a_framebuffer.lock()->background);
+		auto sharedFramebuffer = a_framebuffer.lock();
+		renderer->backgroundColor(sharedFramebuffer->background);
 
 		if(a_push){
 			activeFramebuffers.push_back(a_framebuffer);
@@ -291,11 +293,11 @@ namespace MV {
 		if (!renderer->headless()) {
 //#ifdef WIN32
         
-			glBindFramebuffer(GL_FRAMEBUFFER, a_framebuffer.lock()->framebuffer);
-			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, a_framebuffer.lock()->texture, 0);
-			glBindRenderbuffer(GL_RENDERBUFFER, a_framebuffer.lock()->renderbuffer);
+			glBindFramebuffer(GL_FRAMEBUFFER, sharedFramebuffer->framebuffer);
+			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, sharedFramebuffer->texture, 0);
+			glBindRenderbuffer(GL_RENDERBUFFER, sharedFramebuffer->renderbuffer);
 
-			glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT_DEFAULT, roundUpPowerOfTwo(a_framebuffer.lock()->frameSize.width), roundUpPowerOfTwo(a_framebuffer.lock()->frameSize.height));
+			glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT_DEFAULT, roundUpPowerOfTwo(sharedFramebuffer->frameSize.width), roundUpPowerOfTwo(sharedFramebuffer->frameSize.height));
 
 /*#else
 			int width = roundUpPowerOfTwo(a_framebuffer.frameSize.width);
@@ -317,10 +319,11 @@ namespace MV {
 				std::cout << "Start Using Framebuffer failure: " << glCheckFramebufferStatusOES(GL_FRAMEBUFFER_OES) << std::endl;
 			}
 #endif*/
-			glViewport(a_framebuffer.lock()->framePosition.x, a_framebuffer.lock()->framePosition.y, a_framebuffer.lock()->frameSize.width, a_framebuffer.lock()->frameSize.height);
+			glViewport(sharedFramebuffer->framePosition.x, sharedFramebuffer->framePosition.y, sharedFramebuffer->frameSize.width, sharedFramebuffer->frameSize.height);
 			glGetIntegerv(GL_VIEWPORT, viewport);
 		}
-		renderer->projectionMatrix().push().makeOrtho(0, static_cast<PointPrecision>(a_framebuffer.lock()->frameSize.width), 0, static_cast<PointPrecision>(a_framebuffer.lock()->frameSize.height), -128.0f, 128.0f);
+		//.makeOrtho(0, mvWorld.width(), mvWorld.height(), 0, -1.0, 1.0);
+		renderer->projectionMatrix().push().makeOrtho(static_cast<PointPrecision>(sharedFramebuffer->framePosition.x), static_cast<PointPrecision>(sharedFramebuffer->framePosition.x + sharedFramebuffer->frameSize.width), static_cast<PointPrecision>(sharedFramebuffer->framePosition.y), static_cast<PointPrecision>(sharedFramebuffer->framePosition.y + sharedFramebuffer->frameSize.height), -128.0f, 128.0f);
 
 		GLenum buffers[] = {GL_COLOR_ATTACHMENT0};
 		//pglDrawBuffersEXT(1, buffers);
@@ -389,9 +392,12 @@ namespace MV {
 
 	void Window::setTitle(const std::string &a_title){
 		title = a_title;
+		//seems to mess up Android applications and possibly not good on iOS so let's ifdef this out for anything but Windows for now.
+#ifdef WIN32
 		if (window) {
 			SDL_SetWindowTitle(window, title.c_str());
 		}
+#endif
 	}
 
 	MV::Size<int> Window::resize(const Size<int> &a_size){
@@ -979,13 +985,11 @@ namespace MV {
 				try {
 					if (shader.second.vertexShaderFile.empty() || shader.second.fragmentShaderFile.empty()) { continue; }
 
-					std::ifstream vertexShaderFile(shader.second.vertexShaderFile);
-					if (!vertexShaderFile.is_open()) { continue; }
-					std::string vertexShaderCode((std::istreambuf_iterator<char>(vertexShaderFile)), std::istreambuf_iterator<char>());
+					std::string vertexShaderCode = fileContents(shader.second.vertexShaderFile);
+					if (vertexShaderCode.empty()) { continue; }
 
-					std::ifstream fragmentShaderFile(shader.second.fragmentShaderFile);
-					if (!fragmentShaderFile.is_open()) { continue; }
-					std::string fragmentShaderCode((std::istreambuf_iterator<char>(fragmentShaderFile)), std::istreambuf_iterator<char>());
+					std::string fragmentShaderCode = fileContents(shader.second.fragmentShaderFile);
+					if (fragmentShaderCode.empty()) { continue; }
                     
 					auto newId = loadShaderGetProgramId(vertexShaderCode, fragmentShaderCode);
 					glDeleteProgram(shader.second.programId);
@@ -1028,23 +1032,21 @@ namespace MV {
 	}
 
 	void Draw2D::loadDefaultShaders() {
-		loadShader(MV::DEFAULT_ID, "Assets/Shaders/default.vert", "Assets/Shaders/default.frag");
-		loadShader(MV::PREMULTIPLY_ID, "Assets/Shaders/default.vert", "Assets/Shaders/premultiply.frag");
-		loadShader(MV::ALPHA_FILTER_ID, "Assets/Shaders/default.vert", "Assets/Shaders/alphaFilter.frag");
-		loadShader(MV::COLOR_PICKER_ID, "Assets/Shaders/default.vert", "Assets/Shaders/colorPicker.frag");
+		loadShader(MV::DEFAULT_ID, "Shaders/default.vert", "Shaders/default.frag");
+		loadShader(MV::PREMULTIPLY_ID, "Shaders/default.vert", "Shaders/premultiply.frag");
+		loadShader(MV::ALPHA_FILTER_ID, "Shaders/default.vert", "Shaders/alphaFilter.frag");
+		loadShader(MV::COLOR_PICKER_ID, "Shaders/default.vert", "Shaders/colorPicker.frag");
 	}
 
 	Shader* Draw2D::loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename) {
 		auto found = shaders.find(a_id);
 		if(found == shaders.end()){
-			std::ifstream vertexShaderFile(a_vertexShaderFilename);
-			MV::require<ResourceException>(vertexShaderFile.is_open(), "Failed to load vertex shader: ", a_vertexShaderFilename);
-			std::string vertexShaderCode((std::istreambuf_iterator<char>(vertexShaderFile)), std::istreambuf_iterator<char>());
-            
-			std::ifstream fragmentShaderFile(a_fragmentShaderFilename);
-			MV::require<ResourceException>(fragmentShaderFile.is_open(), "Failed to load fragment shader: ", a_fragmentShaderFilename);
-			std::string fragmentShaderCode((std::istreambuf_iterator<char>(fragmentShaderFile)), std::istreambuf_iterator<char>());
-            
+			std::string vertexShaderCode = fileContents(a_vertexShaderFilename);
+			MV::require<ResourceException>(!vertexShaderCode.empty(), "Failed to load vertex shader: ", a_vertexShaderFilename);
+
+			std::string fragmentShaderCode = fileContents(a_fragmentShaderFilename);
+			MV::require<ResourceException>(!fragmentShaderCode.empty(), "Failed to load fragment shader: ", a_fragmentShaderFilename);
+
 			bool makeDefault = shaders.empty();
             GLuint programId;
             try {

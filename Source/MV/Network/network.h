@@ -44,7 +44,7 @@ namespace MV {
 		uint32_t headerAndContentSize() const;
 
 		boost::asio::streambuf buffer;
-		uint8_t headerBuffer[4] = {0, 0, 0, 0};
+		std::array<uint8_t, 4> headerBuffer = {0, 0, 0, 0};
 
 		std::string content;
 	};

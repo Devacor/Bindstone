@@ -8,6 +8,8 @@
 #include <sstream>
 #include <stdint.h>
 #include <iomanip>
+#include <iostream>
+#include <array>
 
 namespace MV {
 
@@ -58,18 +60,34 @@ namespace MV {
 	}
 	inline std::string to_string(long double toCast, unsigned precision) {
 		std::ostringstream result;
-		result << std::setprecision(precision) << toCast;
+		std::streamsize originalPrecision = result.precision();
+		result << std::setprecision(precision) << toCast << std::setprecision(originalPrecision);
 		return result.str();
 	}
 	inline std::string to_string(double toCast, unsigned precision) {
 		std::ostringstream result;
-		result << std::setprecision(precision) << toCast;
+		std::streamsize originalPrecision = result.precision();
+		result << std::setprecision(precision) << toCast << std::setprecision(originalPrecision);
 		return result.str();
 	}
 	inline std::string to_string(float toCast, unsigned precision) {
 		std::ostringstream result;
-		result << std::setprecision(precision) << toCast;
+		std::streamsize originalPrecision = result.precision();
+		result << std::setprecision(precision) << toCast << std::setprecision(originalPrecision);
 		return result.str();
+	}
+
+	enum class Severity { Debug, Info, Warning, Error, Silence, Count = Silence };
+
+	inline const std::string &to_string(const Severity& a_severity) {
+		static std::array<std::string, 5> names = { 
+			std::string("Debug"), 
+			std::string("Info"), 
+			std::string("Warning"), 
+			std::string("Error"), 
+			std::string("Silence")
+		};
+		return names[static_cast<int>(a_severity)];
 	}
 
 	template<typename T>

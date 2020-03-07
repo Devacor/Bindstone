@@ -8,6 +8,7 @@
 #include <memory>
 #include <atomic>
 #include <type_traits>
+#include <any>
 
 #include "cereal/cereal.hpp"
 #include "cereal/types/variant.hpp"
@@ -52,9 +53,9 @@ namespace MV {
 			return typeid(T);
 		}
 
-		std::function<void(std::shared_ptr<NetworkObject<T>>)> spawnCallbackCast(const boost::any &a_any) {
+		std::function<void(std::shared_ptr<NetworkObject<T>>)> spawnCallbackCast(const std::any &a_any) {
 			try {
-				return boost::any_cast<std::function<void(std::shared_ptr<NetworkObject<T>>)>>(a_any);
+				return std::any_cast<std::function<void(std::shared_ptr<NetworkObject<T>>)>>(a_any);
 			} catch (...) {
 				return std::function<void(std::shared_ptr<NetworkObject<T>>)>();
 			}
@@ -225,33 +226,33 @@ namespace MV {
 		}
 
 	private:
-		template <typename T>
-		void callSpawnCallback(T& a_item) {
+		template <typename V>
+		void callSpawnCallback(V& a_item) {
 			auto onSpawnCallable = a_item->spawnCallbackCast(spawnCallbacks[a_item->typeIndex()]);
 			if (onSpawnCallable) {
 				onSpawnCallable(a_item);
 			}
 		}
 
-		template <typename T>
-		void synchronizeItem(T& a_item, VariantType& found) {
+		template <typename V>
+		void synchronizeItem(V& a_item, VariantType& found) {
 			std::visit([&](auto &a_found) {
 				synchronizeItemImplementation(a_item, a_found);
 			}, found);
 		}
 
-		template <typename T, typename V,
-			std::enable_if_t<std::is_same<T, V>::value>* = nullptr>
-		void synchronizeItemImplementation(T & a_item, V & a_found) {
+		template <typename C, typename V,
+			std::enable_if_t<std::is_same<C, V>::value>* = nullptr>
+		void synchronizeItemImplementation(C & a_item, V & a_found) {
 			a_found->synchronize(a_item);
 		}
 
-		template <typename T, typename V,
-			std::enable_if_t<!std::is_same<T, V>::value>* = nullptr>
-		void synchronizeItemImplementation(T & a_item, V & a_found) {
+		template <typename C, typename V,
+			std::enable_if_t<!std::is_same<C, V>::value>* = nullptr>
+		void synchronizeItemImplementation(C & a_item, V & a_found) {
 		}
 
-		std::unordered_map<std::type_index, boost::any> spawnCallbacks;
+		std::unordered_map<std::type_index, std::any> spawnCallbacks;
 
 		std::atomic<int64_t> currentId;
 		std::unordered_map<int64_t, VariantType> objects;

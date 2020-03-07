@@ -1,8 +1,10 @@
 #include "gameServerActions.h"
 #include "clientActions.h"
 
-#include "lobbyServer.h"
+#ifdef BINDSTONE_SERVER
+#include "Game/NetworkLayer/lobbyServer.h"
 #include "Game/NetworkLayer/gameServer.h"
+#endif
 
 #include "Game/player.h"
 #include "MV/Utility/cerealUtility.h"
@@ -17,6 +19,7 @@ CEREAL_REGISTER_TYPE(GameServerAvailable);
 CEREAL_REGISTER_TYPE(GameServerStateChange);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_gameserveractions);
 
+#ifdef BINDSTONE_SERVER
 void GameServerAvailable::execute(LobbyGameConnectionState* a_connection) {
 	a_connection->setEndpoint(ourUrl, ourPort);
 }
@@ -46,6 +49,7 @@ void RequestFullGameState::execute(GameUserConnectionState* a_gameUser, GameServ
 	a_gameUser->connection()->send(makeNetworkString<SynchronizeAction>(a_game.instance()->networkPool().all()));
 	//a_gameUser->connection()->send(makeNetworkString<RequestBuildingUpgrade>(a_game.data));
 }
+#endif
 
 void RequestFullGameState::execute(Game &a_game) {
 

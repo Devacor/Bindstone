@@ -3,6 +3,8 @@
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
+#include "MV/Utility/visitor.hpp"
+
 #include "text.h"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Button);

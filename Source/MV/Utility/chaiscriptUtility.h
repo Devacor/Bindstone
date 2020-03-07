@@ -10,6 +10,7 @@
 #include "chaiscript/chaiscript.hpp"
 #include "chaiscript/utility/utility.hpp"
 #include "generalUtility.h"
+#include "log.h"
 #include "scopeGuard.hpp"
 
 namespace MV {

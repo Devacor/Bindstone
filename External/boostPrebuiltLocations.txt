@@ -1,0 +1,4 @@
+Android: https://github.com/dec1/Boost-for-Android/releases  (maybe try https://github.com/moritz-wundke/Boost-for-Android)
+Windows: https://boost.teeks99.com/
+
+Currently built with NDK 19

@@ -909,7 +909,7 @@ namespace MV {
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Node> &construct, std::uint32_t const version) {
-				auto& services = cereal::get_user_data<MV::Services>(archive);
+				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 				auto* renderer = services.get<MV::Draw2D>();
 				LoadOptions* options = services.get<LoadOptions>(false);
 				bool doPostLoad = options ? options->doPostLoad : true;

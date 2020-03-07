@@ -1,3 +1,4 @@
+#ifdef BINDSTONE_SERVER
 #include "lobbyServer.h"
 #include "networkAction.h"
 #include "clientActions.h"
@@ -189,6 +190,28 @@ void MatchQueue::print() const {
 	}
 }
 
+LobbyServer::LobbyServer(Managers& a_managers) :
+	manager(a_managers),
+	//db(std::make_shared<pqxx::connection>("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=3306 dbname=bindstone user=m2tm password=Tinker123")),
+	//db(std::make_shared<pqxx::connection>("host=localhost port=3306 dbname=bindstone user=m2tm password=Tinker123")),
+	emailPool(1), //need to test values greater than 1 to make sure ssh does not break.
+	dbPool(1), //currently locked to 1 as pqxx requires one per thread. We can expand this later with more connections and a different query interface.
+	rankedQueue(*this, "ranked"),
+	normalQueue(*this, "normal"),
+	ourUserServer(std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325),
+		[this](const std::shared_ptr<MV::Connection>& a_connection) {
+			return std::make_unique<LobbyUserConnectionState>(a_connection, *this);
+		})),
+	ourGameServer(std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22326),
+		[this](const std::shared_ptr<MV::Connection>& a_connection) {
+			return std::make_unique<LobbyGameConnectionState>(a_connection, *this);
+		})) {
+
+	MV::info("Initialize DB");
+	db = std::make_shared<pqxx::connection>("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=3306 dbname=bindstone user=m2tm password=Tinker123");
+	MV::info("DB Connected");
+}
+
 void LobbyServer::update(double dt) {
 	ourUserServer->update(dt);
 	ourGameServer->update(dt);
@@ -218,3 +241,4 @@ void LobbyServer::update(double dt) {
 		}
 	}
 }
+#endif

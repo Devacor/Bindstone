@@ -30,13 +30,6 @@ public:
 
 	void beginMapDrag();
 
-	JsonNodeLoadBinder jsonLoadBinder() {
-		return { gameData.managers(), ourMouse, scriptEngine };
-	}
-	BinaryNodeLoadBinder binaryLoadBinder() {
-		return{ gameData.managers(), ourMouse, scriptEngine };
-	}
-
 	MV::Services& services() {
 		return gameData.managers().services;
 	}
@@ -185,6 +178,7 @@ private:
 	Game &game;
 };
 
+#ifdef BINDSTONE_SERVER
 class GameServer;
 class ServerGameInstance : public GameInstance {
 	ServerGameInstance(GameServer& a_game);
@@ -223,5 +217,6 @@ protected:
 private:
 	GameServer &gameServer;
 };
+#endif
 
 #endif

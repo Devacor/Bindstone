@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="src">
+      <UniqueIdentifier>{6cd0dd2b-a1a4-4fac-8170-eaf20e2e4ab3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\jpeg">
+      <UniqueIdentifier>{85b48904-bf6b-40fc-ac62-e93682b7cc3c}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\jpeg\jmem-android.c">
+      <Filter>src\jpeg</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

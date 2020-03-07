@@ -1,6 +1,5 @@
 #include "MV/Render/Scene/spineMV.h"
-#include "spine/spine.h"
-#include "spine/extension.h"
+#include "MVAdapters/spineBinder.h" //externally bind spine customization points
 
 #include "MV/Render/Scene/sprite.h"
 
@@ -14,54 +13,48 @@ CEREAL_REGISTER_TYPE(MV::Scene::Spine);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_scenespine);
 
 
-std::map<std::string, std::pair<MV::FileTextureDefinition*, size_t>> SHARED_SPINE_TEXTURES;
-std::mutex SHARED_SPINE_TEXTURES_MUTEX;
-
-//these implementations are required for spine!
-void _spAtlasPage_createTexture(spAtlasPage* self, const char* path){
-	std::lock_guard<std::mutex> guard(SHARED_SPINE_TEXTURES_MUTEX);
-	std::pair<MV::FileTextureDefinition*, size_t>& texturePair = SHARED_SPINE_TEXTURES[path];
-	if (texturePair.second == 0) {
-		texturePair.first = MV::FileTextureDefinition::makeUnmanaged(path).release();
-		texturePair.first->load();
-	}
-	++texturePair.second;
-	self->width = texturePair.first->size().width;
-	self->height = texturePair.first->size().height;
-	self->rendererObject = texturePair.first;
-}
-
-void _spAtlasPage_disposeTexture(spAtlasPage* self){
-	std::lock_guard<std::mutex> guard(SHARED_SPINE_TEXTURES_MUTEX);
-	auto* texture = static_cast<MV::FileTextureDefinition*>(self->rendererObject);
-	std::pair<MV::FileTextureDefinition*, size_t>& texturePair = SHARED_SPINE_TEXTURES[texture->name()];
-	if (--texturePair.second == 0) {
-		SCOPE_EXIT{ delete texturePair.first; };
-		texturePair.first->unload();
-	}
-}
-
-char* _spUtil_readFile(const char* path, int* length){
-	*length = 0;
-	std::ifstream in(path);
-
-	if(in){
-		in.seekg(0, std::ios::end);
-		*length = static_cast<int>(in.tellg());
-		char* contents = new char[*length];
-
-		in.seekg(0, std::ios::beg);
-		in.read(&contents[0], *length);
-
-		return contents;
-	} else{
-		std::cerr << "Could not load file: " << path << std::endl;
-	}
-
-	return nullptr;
-}
-
 namespace MV{
+	void initializeSpineBindings() {
+		static std::map<std::string, std::pair<MV::FileTextureDefinition*, size_t>> SHARED_SPINE_TEXTURES;
+		static std::mutex SHARED_SPINE_TEXTURES_MUTEX;
+
+		//these implementations are required for spine!
+		Spine_CreateTextureHandler = [&](spAtlasPage* self, const char* path) {
+			std::lock_guard<std::mutex> guard(SHARED_SPINE_TEXTURES_MUTEX);
+			std::pair<MV::FileTextureDefinition*, size_t>& texturePair = SHARED_SPINE_TEXTURES[path];
+			if (texturePair.second == 0) {
+				texturePair.first = MV::FileTextureDefinition::makeUnmanaged(path).release();
+				texturePair.first->load();
+			}
+			++texturePair.second;
+			self->width = texturePair.first->size().width;
+			self->height = texturePair.first->size().height;
+			self->rendererObject = texturePair.first;
+		};
+
+		Spine_DisposeTextureHandler = [&](spAtlasPage* self) {
+			std::lock_guard<std::mutex> guard(SHARED_SPINE_TEXTURES_MUTEX);
+			auto* texture = static_cast<MV::FileTextureDefinition*>(self->rendererObject);
+			std::pair<MV::FileTextureDefinition*, size_t>& texturePair = SHARED_SPINE_TEXTURES[texture->name()];
+			if (--texturePair.second == 0) {
+				SCOPE_EXIT{ delete texturePair.first; };
+				texturePair.first->unload();
+			}
+		};
+
+		Spine_ReadFileHandler = [&](const char* path, int* length) -> char* {
+			std::string result = MV::fileContents(path);
+			if (result.empty()) {
+				return nullptr;
+			}
+
+			char* ptr = new char[result.size() + 1];
+			strcpy(ptr, result.c_str());
+
+			return ptr;
+		};
+	}
+
 	namespace Scene {
 
 		void spineAnimationCallback(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event) {

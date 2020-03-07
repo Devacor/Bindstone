@@ -15,10 +15,12 @@ public:
 	SynchronizeAction() {}
 
 	virtual void execute(Game&) override;
+#ifdef BINDSTONE_SERVER
 	virtual void execute(GameServer&) override;
 	virtual void execute(GameUserConnectionState*, GameServer&) override;
 	virtual void execute(LobbyUserConnectionState*) override;
 	virtual void execute(LobbyGameConnectionState*) override;
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const) {

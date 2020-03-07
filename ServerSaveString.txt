@@ -1,1 +1,6 @@
-{"cereal_class_version":0,"detailedRating":[],"gamesChatRestricted":0,"timesRestricted":0}
+ue0": {
+        "cereal_class_version": 0,
+        "detailedRating": [],
+        "gamesChatRestricted": 0,
+        "timesRestricted": 0
+    }

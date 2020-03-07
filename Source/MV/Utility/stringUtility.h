@@ -34,6 +34,11 @@ namespace MV {
 		return s;
 	}
 
+	inline bool startsWith(const std::string& a_str, const std::string& a_prefix) {
+		if (a_prefix.size() > a_str.size()) { return false; }
+		return a_str.compare(0, a_prefix.size(), a_prefix);
+	}
+
 
 	inline void toLowerInPlace(std::string& s) {
 		std::transform(s.begin(), s.end(), s.begin(), [](char c) { return std::tolower(c); });

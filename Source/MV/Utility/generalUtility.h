@@ -23,7 +23,8 @@
 #include <boost/uuid/uuid_generators.hpp>
 
 #define U8_STR(stringVal) reinterpret_cast<const char *>(u8##stringVal)
-
+using namespace std::string_literals; //for convenience to enable ""s
+struct SDL_RWops;
 namespace MV {
 	typedef char UtfChar;
 	typedef std::string UtfString;
@@ -302,10 +303,17 @@ namespace MV {
 	float distance(const float &x1, const float &y1, const float &x2, const float &y2);
 
 	std::string fileNameFromPath(std::string a_path, bool a_includeExtension = false);
+	const std::string& playerPreferencesPath();
 
-	bool fileExists(const std::string& a_name);
+	bool fileExistsAbsolute(const std::string& a_path);
+	bool fileExistsInSearchPaths(const std::string& a_path);
+	bool writeToFile(const std::string& a_path, const std::string& a_contents);
+	bool deleteFile(const std::string& a_path);
+	time_t lastFileWriteTime(const std::string& a_path);
 
-	std::string fileContents(const std::string& a_path);
+	SDL_RWops* sdlFileHandle(const std::string& a_path);
+	//returns a blank string if a_throwOnMissing is false.
+	std::string fileContents(const std::string& a_path, bool a_throwOnMissing = false);
 
 	inline float angle2D(int x1, int y1, int x2, int y2) {
 		return wrap(toDegrees(atan2(static_cast<float>(y2 - y1), static_cast<float>(x2 - y2))), 0.0f, 360.0f);

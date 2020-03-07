@@ -1,5 +1,6 @@
 #ifndef _LOBBYSERVER_MV_H_
 #define _LOBBYSERVER_MV_H_
+#ifdef BINDSTONE_SERVER
 
 #include "MV/Utility/package.h"
 #include "MV/Network/package.h"
@@ -294,23 +295,7 @@ private:
 
 class LobbyServer {
 public:
-	LobbyServer(Managers &a_managers) :
-		manager(a_managers),
-		//db(std::make_shared<pqxx::connection>("host=mutedvision.cqki4syebn0a.us-west-2.rds.amazonaws.com port=3306 dbname=bindstone user=m2tm password=Tinker123")),
-		db(std::make_shared<pqxx::connection>("host=localhost port=5432 dbname=bindstone user=m2tm password=Tinker123")),
-		emailPool(1), //need to test values greater than 1 to make sure ssh does not break.
-		dbPool(1), //currently locked to 1 as pqxx requires one per thread. We can expand this later with more connections and a different query interface.
-		rankedQueue(*this, "ranked"),
-		normalQueue(*this, "normal"),
-		ourUserServer( std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325),
-			[this](const std::shared_ptr<MV::Connection> &a_connection) {
-				return std::make_unique<LobbyUserConnectionState>(a_connection, *this);
-			})),
-		ourGameServer(std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22326),
-			[this](const std::shared_ptr<MV::Connection> &a_connection) {
-				return std::make_unique<LobbyGameConnectionState>(a_connection, *this);
-			})) {
-	}
+	LobbyServer(Managers& a_managers);
 
 	void update(double dt);
 
@@ -382,5 +367,5 @@ private:
 
 	double lastUpdateDelta = 0.0;
 };
-
+#endif
 #endif

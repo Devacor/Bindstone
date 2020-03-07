@@ -23,11 +23,13 @@ public:
 	virtual ~NetworkAction() = default;
 
 	virtual void execute(Game&) { MV::require<MV::ResourceException>(false, "Unimplemented NetworkAction::execute(Game);"); }
-	virtual void execute(GameServer&) { MV::require<MV::ResourceException>(false, "Unimplemented NetworkAction::execute(GameServer);"); }
 
+#ifdef BINDSTONE_SERVER
+	virtual void execute(GameServer&) { MV::require<MV::ResourceException>(false, "Unimplemented NetworkAction::execute(GameServer);"); }
 	virtual void execute(GameUserConnectionState*, GameServer&) { MV::require<MV::ResourceException>(false, "Unimplemented NetworkAction::execute(GameUserConnectionState, GameServer);"); }
 	virtual void execute(LobbyUserConnectionState*) { MV::require<MV::ResourceException>(false, "Unimplemented NetworkAction::execute(LobbyUserConnectionState);"); }
 	virtual void execute(LobbyGameConnectionState*) { MV::require<MV::ResourceException>(false, "Unimplemented NetworkAction::execute(LobbyGameConnectionState);"); }
+#endif
 
 	template <class Archive>
 	void serialize(Archive & archive, std::uint32_t const /*version*/) {

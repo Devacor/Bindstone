@@ -27,11 +27,14 @@ namespace MV {
 
 				texture(clippedTexture->makeHandle(textureSize));
 				{
-					auto framebuffer = owner()->renderer().makeFramebuffer(round<int>(pointAABB.minPoint), textureSize, clippedTexture->textureId())->start();
+					//todo: Why doesn't the framebuffer work with non-zero x, y values?
+					auto framebuffer = owner()->renderer().makeFramebuffer(MV::Point<int>(), textureSize, clippedTexture->textureId())->start();
 
 					SCOPE_EXIT{ owner()->renderer().defaultBlendFunction(); };
 
-					owner()->drawChildren(TransformMatrix());
+					TransformMatrix renderOrigin;
+					renderOrigin.translate(pointAABB.minPoint * -1.0f);
+					owner()->drawChildren(renderOrigin);
 				}
 				notifyParentOfComponentChange();
 			}

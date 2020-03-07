@@ -1,7 +1,9 @@
 #include "accountActions.h"
 #include "clientActions.h"
 
+#ifdef BINDSTONE_SERVER
 #include "lobbyServer.h"
+#endif
 
 #include "Game/player.h"
 #include "MV/Utility/cerealUtility.h"
@@ -12,6 +14,7 @@ CEREAL_REGISTER_TYPE(FindMatchRequest);
 CEREAL_REGISTER_TYPE(ExpectedPlayersNoted);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_accountactions);
 
+#ifdef BINDSTONE_SERVER
 std::string CreatePlayer::createPlayerQueryString(pqxx::work &transaction, const std::string &a_salt) {
 	static int work = 12;
 	std::stringstream query;
@@ -90,6 +93,7 @@ void CreatePlayer::execute(LobbyUserConnectionState* a_connection) {
 void CreatePlayer::sendValidationEmail(LobbyUserConnectionState *a_connection, const std::string &a_passSalt) {
 	a_connection->server().email(MV::Email::Addresses("mike@m2tm.net", email), "Bindstone Account Activation", "This will be a link to activate your account, for now... Check this out: https://www.youtube.com/watch?v=VAZsBEELqPw \n" + a_passSalt);
 }
+#endif
 
 std::string CreatePlayer::makeSaveString() {
 	IntermediateDbPlayer newPlayer;
@@ -107,6 +111,7 @@ std::string CreatePlayer::makeServerSaveString() {
 	return MV::toJsonInline(newPlayer);
 }
 
+#ifdef BINDSTONE_SERVER
 pqxx::result LoginRequest::selectUser(pqxx::work* a_transaction) {
 	std::string activeQuery = "SELECT verified, passhash, passsalt, passiterations, state, serverstate, email, handle, id FROM players WHERE ";
 	activeQuery += "email = " + a_transaction->quote(identifier);
@@ -117,6 +122,7 @@ pqxx::result LoginRequest::selectUser(pqxx::work* a_transaction) {
 }
 
 void LoginRequest::execute(LobbyUserConnectionState* a_connection) {
+
 	auto self = std::static_pointer_cast<LoginRequest>(shared_from_this());
 	auto connectionLifespan = a_connection->connection();
 	a_connection->server().databasePool().task([=]() mutable {
@@ -176,3 +182,4 @@ void FindMatchRequest::execute(LobbyUserConnectionState* a_connection) {
 void ExpectedPlayersNoted::execute(LobbyGameConnectionState* a_connection) {
 	a_connection->notifyPlayersOfGameServer();
 }
+#endif

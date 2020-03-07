@@ -19,14 +19,14 @@ struct StandardMessages {
 };
 
 struct Managers {
-	Managers() : textLibrary(renderer), audio(*MV::AudioPlayer::instance()) {
+	Managers() : textLibrary(renderer)/*, audio(*MV::AudioPlayer::instance())*/ {
 		services.connect(&timer);
 		services.connect(&pool);
 		services.connect(&renderer);
 		services.connect(&messages);
 		services.connect(&textLibrary);
 		services.connect(&textures);
-		services.connect(&audio);
+		//services.connect(&audio);
 	}
 
 	MV::Stopwatch timer;
@@ -35,7 +35,7 @@ struct Managers {
 	StandardMessages messages;
 	MV::TextLibrary textLibrary;
 	MV::SharedTextures textures;
-	MV::AudioPlayer& audio;
+	//MV::AudioPlayer& audio;
 
 	MV::Services services;
 };

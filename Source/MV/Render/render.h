@@ -46,11 +46,11 @@
 #define GLX_GLEXT_PROTOTYPES
 
 #ifdef HAVE_OPENGLES
-	#include <SDL_opengl.h>
+	//#include <SDL_opengl.h>
 	#include <SDL_opengles2.h>
     //#include <OpenGLES/ES3/gl.h>
     //#include <OpenGLES/ES3/glext.h>
-	typedef GLfloat GLdouble; //opengles has no GLdouble
+	//typedef GLfloat GLdouble; //opengles has no GLdouble
 
     inline int gl3wInit(){
         return 0;

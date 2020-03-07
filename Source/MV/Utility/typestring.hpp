@@ -1,0 +1,97 @@
+//Typestring by Jordi Espada: https://stackoverflow.com/users/2713470/jordi-espada
+//Answered on StackOverflow: https://stackoverflow.com/questions/1826464/c-style-strings-as-template-arguments
+//Unnecessary in C++20 due to std::fixed_string : http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0259r0.pdf
+
+#include <vector>
+#include <string>
+
+#define MV_MAX_STATIC_STRING_LENGTH 64
+
+#define MV_PREPROCESSOR_MIN(a,b) (a)<(b)?(a):(b)
+
+#define MV_MAKE_CHAR_SEQUENCE(s)\
+MV_TYPESTRING_GET_CHAR(s,0),\
+MV_TYPESTRING_GET_CHAR(s,1),\
+MV_TYPESTRING_GET_CHAR(s,2),\
+MV_TYPESTRING_GET_CHAR(s,3),\
+MV_TYPESTRING_GET_CHAR(s,4),\
+MV_TYPESTRING_GET_CHAR(s,5),\
+MV_TYPESTRING_GET_CHAR(s,6),\
+MV_TYPESTRING_GET_CHAR(s,7),\
+MV_TYPESTRING_GET_CHAR(s,8),\
+MV_TYPESTRING_GET_CHAR(s,9),\
+MV_TYPESTRING_GET_CHAR(s,10),\
+MV_TYPESTRING_GET_CHAR(s,11),\
+MV_TYPESTRING_GET_CHAR(s,12),\
+MV_TYPESTRING_GET_CHAR(s,13),\
+MV_TYPESTRING_GET_CHAR(s,14),\
+MV_TYPESTRING_GET_CHAR(s,15),\
+MV_TYPESTRING_GET_CHAR(s,16),\
+MV_TYPESTRING_GET_CHAR(s,17),\
+MV_TYPESTRING_GET_CHAR(s,18),\
+MV_TYPESTRING_GET_CHAR(s,19),\
+MV_TYPESTRING_GET_CHAR(s,20),\
+MV_TYPESTRING_GET_CHAR(s,21),\
+MV_TYPESTRING_GET_CHAR(s,22),\
+MV_TYPESTRING_GET_CHAR(s,23),\
+MV_TYPESTRING_GET_CHAR(s,24),\
+MV_TYPESTRING_GET_CHAR(s,25),\
+MV_TYPESTRING_GET_CHAR(s,26),\
+MV_TYPESTRING_GET_CHAR(s,27),\
+MV_TYPESTRING_GET_CHAR(s,28),\
+MV_TYPESTRING_GET_CHAR(s,29),\
+MV_TYPESTRING_GET_CHAR(s,30),\
+MV_TYPESTRING_GET_CHAR(s,31),\
+MV_TYPESTRING_GET_CHAR(s,32),\
+MV_TYPESTRING_GET_CHAR(s,33),\
+MV_TYPESTRING_GET_CHAR(s,34),\
+MV_TYPESTRING_GET_CHAR(s,35),\
+MV_TYPESTRING_GET_CHAR(s,36),\
+MV_TYPESTRING_GET_CHAR(s,37),\
+MV_TYPESTRING_GET_CHAR(s,38),\
+MV_TYPESTRING_GET_CHAR(s,39),\
+MV_TYPESTRING_GET_CHAR(s,40),\
+MV_TYPESTRING_GET_CHAR(s,41),\
+MV_TYPESTRING_GET_CHAR(s,42),\
+MV_TYPESTRING_GET_CHAR(s,43),\
+MV_TYPESTRING_GET_CHAR(s,44),\
+MV_TYPESTRING_GET_CHAR(s,45),\
+MV_TYPESTRING_GET_CHAR(s,46),\
+MV_TYPESTRING_GET_CHAR(s,47),\
+MV_TYPESTRING_GET_CHAR(s,48),\
+MV_TYPESTRING_GET_CHAR(s,49),\
+MV_TYPESTRING_GET_CHAR(s,50),\
+MV_TYPESTRING_GET_CHAR(s,51),\
+MV_TYPESTRING_GET_CHAR(s,52),\
+MV_TYPESTRING_GET_CHAR(s,53),\
+MV_TYPESTRING_GET_CHAR(s,54),\
+MV_TYPESTRING_GET_CHAR(s,55),\
+MV_TYPESTRING_GET_CHAR(s,56),\
+MV_TYPESTRING_GET_CHAR(s,57),\
+MV_TYPESTRING_GET_CHAR(s,58),\
+MV_TYPESTRING_GET_CHAR(s,59),\
+MV_TYPESTRING_GET_CHAR(s,60),\
+MV_TYPESTRING_GET_CHAR(s,61),\
+MV_TYPESTRING_GET_CHAR(s,62),\
+MV_TYPESTRING_GET_CHAR(s,63),\
+MV_TYPESTRING_GET_CHAR(s,64)
+
+#define MV_TYPESTRING_GET_CHAR(name, ii) ((MV_PREPROCESSOR_MIN(ii,MV_MAX_STATIC_STRING_LENGTH))<sizeof(name)/sizeof(*name)?name[ii]:0)
+
+template <char... Chars_>
+class mv_static_string_key {
+public:
+	static const std::string& value() {
+		if (cachedValue.empty()) {
+			std::vector<char> charVec{ Chars_... };
+			auto stringEnd = std::find(charVec.begin(), charVec.end(), '\0');
+			cachedValue = std::string(charVec.begin(), stringEnd);
+		}
+		return cachedValue;
+	}
+
+private:
+	inline static std::string cachedValue = {};
+};
+
+#define MV_KEY(x) mv_static_string_key<MV_MAKE_CHAR_SEQUENCE(x)>

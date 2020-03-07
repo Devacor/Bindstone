@@ -100,10 +100,13 @@ class Catalog {
 public:
 	Catalog<DataType>(const std::string &a_catalogType, bool a_isServer, std::uint32_t a_serializeVersion = 0) :
 		isServer(a_isServer) {
-		std::ifstream instream("Assets/Catalogs/" + a_catalogType + ".json");
-        MV::require<MV::ResourceException>(instream, "Failed to load Catalog: ", a_catalogType);
-		cereal::JSONInputArchive archive(instream);
 
+		std::string path = "Catalogs/"s + a_catalogType + ".json"s;
+		std::string contents = MV::fileContents(path);
+        MV::require<MV::ResourceException>(!contents.empty(), "Failed to load Catalog: ", a_catalogType);
+
+		std::stringstream stream(contents);
+		cereal::JSONInputArchive archive(stream);
 		serialize(archive, a_serializeVersion);
 	}
 

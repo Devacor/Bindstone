@@ -1,9 +1,11 @@
 #ifndef _COLLISIONOBJECTS_H_
 #define _COLLISIONOBJECTS_H_
 
+#include "MV/Utility/require.hpp"
 #include "MV/Render/package.h"
 #include "MV/Utility/stopwatch.h"
 #include "MV/Utility/signal.hpp"
+#include "MV/Utility/visitor.hpp"
 #include "Box2D/Box2D.h"
 #include <list>
 #include <map>
@@ -115,7 +117,7 @@ namespace MV {
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const /*version*/) {
-				MV::require(false, "Cannot properly load an environment, must load_and_construct. This might happen if you derive from environment wrongly.");
+				MV::require<MV::ResourceException>(false, "Cannot properly load an environment, must load_and_construct. This might happen if you derive from environment wrongly.");
 			}
 
 			template <class Archive>
@@ -594,7 +596,7 @@ namespace MV {
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const /*version*/) {
-				MV::require(false, "Cannot properly load a collider with load... Must be load_and_construct. Might implement if ever derived from.");
+				MV::require<MV::ResourceException>(false, "Cannot properly load a collider with load... Must be load_and_construct. Might implement if ever derived from.");
 			}
 
 			template <class Archive>

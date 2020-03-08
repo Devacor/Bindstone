@@ -1,3 +1,6 @@
+#ifndef _MV_STRING_UTILITY_H_
+#define _MV_STRING_UTILITY_H_
+
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -34,14 +37,22 @@ namespace MV {
 		return s;
 	}
 
+	inline std::string toUpper(std::string s) {
+		std::transform(s.begin(), s.end(), s.begin(), [](char c) { return std::toupper(c); });
+		return s;
+	}
+
 	inline bool startsWith(const std::string& a_str, const std::string& a_prefix) {
 		if (a_prefix.size() > a_str.size()) { return false; }
 		return a_str.compare(0, a_prefix.size(), a_prefix);
 	}
 
-
 	inline void toLowerInPlace(std::string& s) {
 		std::transform(s.begin(), s.end(), s.begin(), [](char c) { return std::tolower(c); });
+	}
+
+	inline void toUpperInPlace(std::string& s) {
+		std::transform(s.begin(), s.end(), s.begin(), [](char c) { return std::toupper(c); });
 	}
 
 	inline bool replaceFirst(std::string& str, const std::string& from, const std::string& to) {
@@ -60,6 +71,18 @@ namespace MV {
 		return replaced;
 	}
 
+	inline std::string filenameFromPath(const std::string& a_path) {
+		auto backslashLoc = a_path.rfind("\\");
+		auto forwardslashLoc = a_path.rfind("/");
+		size_t slashLoc = 0;
+		if (backslashLoc != std::string::npos && forwardslashLoc != std::string::npos) {
+			slashLoc = std::max(backslashLoc, forwardslashLoc) + 1;
+		}
+		else if (backslashLoc != std::string::npos || forwardslashLoc != std::string::npos) {
+			slashLoc = std::min(backslashLoc, forwardslashLoc) + 1;
+		}
+		return a_path.substr(slashLoc, a_path.length() - slashLoc);
+	}
 
 	std::string toString(wchar_t wc);
 	wchar_t toWide(char c);
@@ -72,4 +95,8 @@ namespace MV {
 
 	std::string to_string(const std::wstring& ws);
 	std::wstring to_wide(const std::string& s);
+
+	std::istream& getline_platform_agnostic(std::istream& is, std::string& t);
 }
+
+#endif

@@ -18,175 +18,63 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\battleEffect.cpp">
-      <Filter>Game</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\building.cpp">
-      <Filter>Game</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\creature.cpp">
-      <Filter>Game</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\game.cpp">
-      <Filter>Game</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\gameEditor.cpp">
-      <Filter>Game</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\managers.cpp">
-      <Filter>Game</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\player.cpp">
-      <Filter>Game</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\state.cpp">
-      <Filter>Game</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\wallet.cpp">
-      <Filter>Game</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\accountActions.cpp">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\clientActions.cpp">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\gameServer.cpp">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\gameServerActions.cpp">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\lobbyServer.cpp">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\synchronizeAction.cpp">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\Interface\guiFactories.cpp">
-      <Filter>Game\Interface</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\Interface\interfaceManager.cpp">
-      <Filter>Game\Interface</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\Instance\gameInstance.cpp">
-      <Filter>Game\Instance</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Game\Instance\team.cpp">
-      <Filter>Game\Instance</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\componentPanels.cpp">
-      <Filter>Editor</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\editComponents.cpp">
-      <Filter>Editor</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\editor.cpp">
-      <Filter>Editor</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\editorControls.cpp">
-      <Filter>Editor</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\editorFactories.cpp">
-      <Filter>Editor</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\editorSceneGraphPanel.cpp">
-      <Filter>Editor</Filter>
-    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Editor\componentPanels.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editComponents.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editor.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editorControls.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editorFactories.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Editor\editorSceneGraphPanel.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\battleEffect.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\building.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\creature.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\game.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\gameEditor.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\Instance\gameInstance.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\Instance\team.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\Interface\guiFactories.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\Interface\interfaceManager.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\managers.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\accountActions.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\clientActions.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\gameServer.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\gameServerActions.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\lobbyServer.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\synchronizeAction.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\player.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\state.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\wallet.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\battleEffect.h">
-      <Filter>Game</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\building.h">
-      <Filter>Game</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\creature.h">
-      <Filter>Game</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\game.h">
-      <Filter>Game</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\gameEditor.h">
-      <Filter>Game</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\managers.h">
-      <Filter>Game</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\player.h">
-      <Filter>Game</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\standardScriptMethods.h">
-      <Filter>Game</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\state.h">
-      <Filter>Game</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\wallet.h">
-      <Filter>Game</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\synchronizeAction.h">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\accountActions.h">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\clientActions.h">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\gameServer.h">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\gameServerActions.h">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\lobbyServer.h">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\networkAction.h">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\NetworkLayer\package.h">
-      <Filter>Game\NetworkLayer</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\Interface\interfaceManager.h">
-      <Filter>Game\Interface</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\Interface\guiFactories.h">
-      <Filter>Game\Interface</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\Instance\team.h">
-      <Filter>Game\Instance</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Game\Instance\gameInstance.h">
-      <Filter>Game\Instance</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\anchorEditor.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\componentPanels.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\editComponents.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\editor.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\editorControls.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\editorDefines.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\editorFactories.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\editorSceneGraphPanel.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\Editor\texturePicker.h">
-      <Filter>Editor</Filter>
-    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Source\Editor\anchorEditor.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\componentPanels.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editComponents.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editor.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorControls.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorDefines.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorFactories.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\editorSceneGraphPanel.h" />
+    <ClInclude Include="$(SolutionDir)Source\Editor\texturePicker.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\battleEffect.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\building.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\creature.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\game.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\gameEditor.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\Instance\gameInstance.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\Instance\team.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\Interface\guiFactories.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\Interface\interfaceManager.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\managers.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\accountActions.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\clientActions.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\gameServer.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\gameServerActions.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\lobbyServer.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\networkAction.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\package.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\NetworkLayer\synchronizeAction.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\player.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\standardScriptMethods.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\state.h" />
+    <ClInclude Include="$(SolutionDir)Source\Game\wallet.h" />
   </ItemGroup>
 </Project>

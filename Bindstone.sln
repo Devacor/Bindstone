@@ -89,13 +89,13 @@ Global
 		VSProjects\MutedVision\MutedVision_Common.vcxitems*{46b19b64-8cd7-424c-969e-2cdc234da7a5}*SharedItemsImports = 4
 		External\VSProjects\External_Common\External_Common.vcxitems*{62d1ae53-e46d-4cd1-91a9-1f1e3efcf064}*SharedItemsImports = 4
 		External\VSProjects\WolfSSL_Common\WolfSSL_Common.vcxitems*{73973223-5ee8-41ca-8e88-1d60e89a237b}*SharedItemsImports = 4
-		VSProjects\Bindstone_Common\Bindstone_Common.vcxitems*{77966753-df43-4201-b7f4-7b184be77fad}*SharedItemsImports = 4
+		VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems*{77966753-df43-4201-b7f4-7b184be77fad}*SharedItemsImports = 4
 		VSProjects\SDL2_ttf\SDL2_ttf_Common.vcxitems*{7d0090a3-d938-4e0e-8411-dab035c8e641}*SharedItemsImports = 9
 		External\VSProjects\WolfSSL_Common\WolfSSL_Common.vcxitems*{8474958a-b1d8-4dfb-aad4-e819a4cc2b53}*SharedItemsImports = 9
 		VSProjects\SDL2_ttf\SDL2_ttf_Common.vcxitems*{8572235c-b335-40dd-ba5f-9954bedc4bfc}*SharedItemsImports = 4
 		VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems*{8e980497-3531-4455-8290-5491c08a9385}*SharedItemsImports = 9
 		External\VSProjects\External_Common\External_Common.vcxitems*{a362b2c9-3629-4701-be16-fb7e28a51cc6}*SharedItemsImports = 9
-		VSProjects\Bindstone_Common\Bindstone_Common.vcxitems*{add84207-f5b2-46f0-9bd9-ce302ae95b45}*SharedItemsImports = 4
+		VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems*{add84207-f5b2-46f0-9bd9-ce302ae95b45}*SharedItemsImports = 4
 		VSProjects\MutedVision\MutedVision_Common.vcxitems*{b2e0b593-79fd-432c-aa7b-1eca70a96271}*SharedItemsImports = 9
 		VSProjects\SDL2\SDL2_Common.vcxitems*{b7be417c-b6c5-4a69-a056-e0cb0c6a344c}*SharedItemsImports = 4
 		VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems*{b7f3a6f1-0359-4427-925d-4a6d1c979b61}*SharedItemsImports = 4

@@ -7,14 +7,9 @@
 *.exe
 *.log
 *.PVS-Studio.cfg
-*.i
-*.i-*
 Microsoft.DTfW.DHL.manifest
 output.txt
 sceneSave.txt
-/Debug/*
-/Release/*
-/x64/*
 .DS_Store
 /Assets/Atlases/*.png
 runsdvui.cmd
@@ -36,7 +31,6 @@ build/
 *.lnk
 *.pdb
 *.idb
-Win32/
 .vs/
 bfg.jar
 Builds/*

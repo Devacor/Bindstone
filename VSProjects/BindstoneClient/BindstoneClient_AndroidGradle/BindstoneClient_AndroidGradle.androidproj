@@ -218,6 +218,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\External\VSProjects\WolfSSL_Android\WolfSSL_Android.vcxproj" />
+    <ProjectReference Include="..\..\MutedVision\MutedVision_Android\MutedVision_Android.vcxproj" />
     <ProjectReference Include="..\BindstoneClient_Android\BindstoneClient_Android.vcxproj" />
     <ProjectReference Include="..\SDL2\SDL2_Android.vcxproj" />
     <ProjectReference Include="..\SDL2_image\SDL2_image_Android.vcxproj" />

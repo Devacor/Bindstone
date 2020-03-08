@@ -37,8 +37,8 @@ Builds/*
 *.gradle/
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libbindstonemain.so
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libexternal.a
-VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libmutedvision.a
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libSDL2.so
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libSDL2_Image.so
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libSDL2_ttf.so
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libwolfssl.so
+VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libmutedvision.so

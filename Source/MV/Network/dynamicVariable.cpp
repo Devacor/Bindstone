@@ -1,4 +1,4 @@
-#include "DynamicVariable.h"
+#include "dynamicVariable.h"
 #include "chaiscript/chaiscript_stdlib.hpp"
 #include "MV/Utility/exactType.hpp"
 

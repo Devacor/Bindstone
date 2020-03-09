@@ -992,7 +992,7 @@ namespace cereal
           std::uint32_t version;
           try {
               process(make_nvp<ArchiveType>("cereal_class_version", version));
-          }catch(...){}
+          } catch (...) { version = 0; }
           itsVersionedTypes.emplace_hint( lookupResult, hash, version );
 
           return version;

@@ -133,7 +133,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <Optimization>Disabled</Optimization>
+      <Optimization>Full</Optimization>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(ProjectDir)../SDL2_image/src/jpeg;$(ProjectDir)../SDL2_image/src/png;$(ProjectDir)../SDL2_image/src/webp/examples;$(ProjectDir)../SDL2_image/src/webp/extras;$(ProjectDir)../SDL2_image/src/webp/imageio;$(ProjectDir)../SDL2_image/src/webp/src;$(ProjectDir)../SDL2_image/src/webp;$(ProjectDir)../SDL2_image/src/zlib;$(ProjectDir)../SDL2_image/include;$(ProjectDir)../SDL2_ttf/include;$(ProjectDir)../SDL2_ttf/src/freetype;$(ProjectDir)../SDL2_ttf/src/freetype/include;$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -159,7 +159,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <Optimization>Disabled</Optimization>
+      <Optimization>Full</Optimization>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(ProjectDir)../SDL2_image/src/jpeg;$(ProjectDir)../SDL2_image/src/png;$(ProjectDir)../SDL2_image/src/webp/examples;$(ProjectDir)../SDL2_image/src/webp/extras;$(ProjectDir)../SDL2_image/src/webp/imageio;$(ProjectDir)../SDL2_image/src/webp/src;$(ProjectDir)../SDL2_image/src/webp;$(ProjectDir)../SDL2_image/src/zlib;$(ProjectDir)../SDL2_image/include;$(ProjectDir)../SDL2_ttf/include;$(ProjectDir)../SDL2_ttf/src/freetype;$(ProjectDir)../SDL2_ttf/src/freetype/include;$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -185,7 +185,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <Optimization>Disabled</Optimization>
+      <Optimization>Full</Optimization>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(ProjectDir)../SDL2_image/src/jpeg;$(ProjectDir)../SDL2_image/src/png;$(ProjectDir)../SDL2_image/src/webp/examples;$(ProjectDir)../SDL2_image/src/webp/extras;$(ProjectDir)../SDL2_image/src/webp/imageio;$(ProjectDir)../SDL2_image/src/webp/src;$(ProjectDir)../SDL2_image/src/webp;$(ProjectDir)../SDL2_image/src/zlib;$(ProjectDir)../SDL2_image/include;$(ProjectDir)../SDL2_ttf/include;$(ProjectDir)../SDL2_ttf/src/freetype;$(ProjectDir)../SDL2_ttf/src/freetype/include;$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>

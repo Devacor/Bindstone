@@ -45,9 +45,10 @@ namespace MV{
 		Spine_ReadFileHandler = [&](const char* path, int* length) -> char* {
 			std::string result = MV::fileContents(path);
 			if (result.empty()) {
+				*length = 0;
 				return nullptr;
 			}
-
+			*length = static_cast<int>(result.size() + 1);
 			char* ptr = new char[result.size() + 1];
 			strcpy(ptr, result.c_str());
 

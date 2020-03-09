@@ -145,7 +145,7 @@ private:
 
 	void handleInput();
 
-	void initializeClientToLobbyServer() {\
+	void initializeClientToLobbyServer() {
 		auto localHostServerAddress = MV::explode(MV::fileContents("ServerConfig/lobbyServerAddress.config"), [](char c) {return c == '\n'; })[0];
 		ourLobbyClient = MV::Client::make(MV::Url{ localHostServerAddress }, [=](const std::string &a_message) {
 			auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);

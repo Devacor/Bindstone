@@ -749,7 +749,7 @@
                                                                                                     "repeat": false,
                                                                                                     "pixel": false,
                                                                                                     "base": {
-                                                                                                        "name": "Assets/Atlases/Particles.png",
+                                                                                                        "name": "Atlases/Particles.png",
                                                                                                         "size": {
                                                                                                             "width": 0,
                                                                                                             "height": 0,
@@ -1025,8 +1025,8 @@
                             "id": 2147483661,
                             "data": {
                                 "fileBundle": {
-                                    "skeletonFile": "Assets/Spine/Tree/life.json",
-                                    "atlasFile": "Assets/Spine/Tree/life.atlas",
+                                    "skeletonFile": "Spine/Tree/life.json",
+                                    "atlasFile": "Spine/Tree/life.atlas",
                                     "loadScale": 0.375
                                 },
                                 "slotsToNodes": [

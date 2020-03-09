@@ -1,9 +1,8 @@
 self.spawn = fun(self){
 	self["nextSpawn"] = 5.0;
+	self["T0"] = fun(self, dt){};
 
-	self["None"] = fun(self, dt){};
-
-	self["Basic"] = fun(self, dt){
+	self["T1"] = fun(self, dt){
 		self["nextSpawn"] -= dt;
 		if(self["nextSpawn"] <= 0){
 			self["nextSpawn"] = 5.0;
@@ -11,7 +10,7 @@ self.spawn = fun(self){
 		}
 	};
 
-	self["Eternal"] = fun(self, dt){
+	self["T2_0"] = fun(self, dt){
 		self["nextSpawn"] -= dt;
 		if(self["nextSpawn"] <= 0){
 			self["nextSpawn"] = 5.0;
@@ -19,7 +18,7 @@ self.spawn = fun(self){
 		}
 	};
 
-	self["Overwhelming"] = fun(self, dt){
+	self["T2_1"] = fun(self, dt){
 		self["nextSpawn"] -= dt;
 		if(self["nextSpawn"] <= 0){
 			self["nextSpawn"] = 5.0;

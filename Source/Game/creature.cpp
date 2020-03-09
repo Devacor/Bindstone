@@ -22,7 +22,7 @@ Creature::Creature(const std::weak_ptr<MV::Scene::Node> &a_owner, GameInstance& 
 }
 
 std::string Creature::assetPath() const {
-	return "Creatures/" + statTemplate.id + "/" + (skin.empty() ? "Default" : skin) + "/unit.prefab";
+	return "Creatures/" + MV::toUpperFirstChar(statTemplate.id) + "/" + (skin.empty() ? "Default" : skin) + "/unit.prefab";
 }
 
 std::shared_ptr<InGamePlayer> Creature::player() {

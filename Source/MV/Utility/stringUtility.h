@@ -55,6 +55,12 @@ namespace MV {
 		std::transform(s.begin(), s.end(), s.begin(), [](char c) { return std::toupper(c); });
 	}
 
+	inline std::string toUpperFirstChar(std::string s) {
+		if (s.empty()) { return {}; }
+		s[0] = std::toupper(s[0]);
+		return s;
+	}
+
 	inline bool replaceFirst(std::string& str, const std::string& from, const std::string& to) {
 		size_t start_pos = str.find(from);
 		if (start_pos == std::string::npos)

@@ -11,6 +11,7 @@
 #include "MV/ArtificialIntelligence/pathfinding.h"
 #include "Game/creature.h"
 #include "MV/Network/networkObject.h"
+#include "MV/Utility/stringUtility.h"
 
 class GameInstance;
 struct InGamePlayer;
@@ -180,7 +181,7 @@ public:
 	}
 
 	std::string assetPath() const {
-		return "Buildings/" + buildingData.id + "/" + (skin().empty() ? "Default" : skin()) + "/building.prefab";
+		return "Buildings/" + MV::toUpperFirstChar(buildingData.id) + "/" + (skin().empty() ? "Default" : skin()) + "/building.prefab";
 	}
 
 	std::string skin() const;

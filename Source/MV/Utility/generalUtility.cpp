@@ -151,7 +151,7 @@ namespace MV {
 		if (a_path.empty()) {
 			return false;
 		}
-#ifdef __ANDROID__ || __APPLE__
+#if defined(__ANDROID__) || defined(__APPLE__)
 		SDL_RWops* sdlIO = SDL_RWFromFile(a_path.c_str(), "rb");
 		if (sdlIO != NULL)
 		{
@@ -174,7 +174,7 @@ namespace MV {
 			return {};
 		}
 		std::string userPrefPath = playerPreferencesPath() + a_path;
-#ifdef __ANDROID__ || __APPLE__
+#if defined(__ANDROID__) || defined(__APPLE__)
 		SDL_RWops* sdlIO = SDL_RWFromFile(fileExistsAbsolute(userPrefPath) ? userPrefPath.c_str() : a_path.c_str(), "rb");
 #else
 		SDL_RWops* sdlIO = SDL_RWFromFile(fileExistsAbsolute(userPrefPath) ? userPrefPath.c_str() : ("Assets/" + a_path).c_str(), "rb");
@@ -203,7 +203,7 @@ namespace MV {
 	bool writeToFile(const std::string& a_path, const std::string& a_contents) {
 		std::string finalPath = playerPreferencesPath() + a_path;
 		boost::filesystem::create_directories(boost::filesystem::path(finalPath).parent_path());
-#ifdef __ANDROID__ || __APPLE__
+#if defined(__ANDROID__) || defined(__APPLE__)
 		SDL_RWops* rw = SDL_RWFromFile(finalPath.c_str(), "wb");
 		if (rw != NULL) {
 			SCOPE_EXIT{ SDL_RWclose(rw); };
@@ -230,7 +230,7 @@ namespace MV {
 #ifdef __ANDROID__
 			0
 #else
-			fileExistsAbsolute(a_path) ? boost::filesystem::last_write_time(a_path, errorCode) : 0
+			fileExistsAbsolute("Assets/" + a_path) ? boost::filesystem::last_write_time("Assets/" + a_path, errorCode) : 0
 #endif
 			;
 	}

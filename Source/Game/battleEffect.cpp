@@ -35,7 +35,7 @@ void BattleEffectNetworkState::hook(chaiscript::ChaiScript &a_script) {
 }
 
 std::string BattleEffect::assetPath() const {
-	return "BattleEffects/" + statTemplate.id + "/" + (skin.empty() ? "Default" : skin) + "/unit.prefab";
+	return "BattleEffects/" + MV::toUpperFirstChar(statTemplate.id) + "/" + (skin.empty() ? "Default" : skin) + "/unit.prefab";
 }
 
 BattleEffect::BattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, GameInstance& a_gameInstance, const std::string& a_skin, const BattleEffectData& a_statTemplate, std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> a_state) :

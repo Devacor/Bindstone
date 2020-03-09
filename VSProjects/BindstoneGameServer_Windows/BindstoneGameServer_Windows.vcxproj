@@ -101,7 +101,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <Optimization>Disabled</Optimization>
+      <Optimization>Full</Optimization>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\wolfssl-4.3.0;$(SolutionDir)External\wolfssl-4.3.0\wolfssl;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\wolfssl-4.3.0\IDE\WIN</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -110,6 +110,8 @@
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -120,7 +122,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <Optimization>Disabled</Optimization>
+      <Optimization>Full</Optimization>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\wolfssl-4.3.0;$(SolutionDir)External\wolfssl-4.3.0\wolfssl;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\wolfssl-4.3.0\IDE\WIN</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -129,6 +131,8 @@
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -150,6 +154,7 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -173,6 +178,7 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

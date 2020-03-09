@@ -72,8 +72,10 @@ int main(int, char *[]) {
 		}
 	}
 
-	multiplyTestShit("Basic", a2, b2);
-	multiplyTest("StaticFor", a1, b1);
+	//multiplyTestShit("Basic", a2, b2);
+	//multiplyTest("StaticFor", a1, b1);
+
+	MV::initializeSpineBindings();
 
 	bool done = false;
 	auto server = std::make_shared<GameServer>(managers);

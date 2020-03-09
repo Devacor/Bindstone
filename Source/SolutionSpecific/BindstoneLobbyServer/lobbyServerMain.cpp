@@ -57,14 +57,14 @@ int main(int, char *[]) {
                     ""
                 ],
                 "buildings": [
-                    "Life",
-                    "Life",
-                    "Life",
-                    "Life",
-                    "Life",
-                    "Life",
-                    "Life",
-                    "Life"
+                    "life",
+                    "life",
+                    "life",
+                    "life",
+                    "life",
+                    "life",
+                    "life",
+                    "life"
                 ],
                 "cereal_class_version": 0
             }

@@ -56,7 +56,7 @@ public:
 			auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 			value->execute(*this);
 		}, [&](const std::string &a_dcreason) {
-			MV::info("Disconnected: ", a_dcreason);
+			MV::info("Disconnected: [", gameServer,"] ", a_dcreason);
 			killGame();
 		}, [=] {
 			MV::info("Connection Initialized");

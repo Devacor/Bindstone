@@ -25,7 +25,7 @@ public class SDL2_GradleApp extends SDLActivity
             "SDL2",
             "SDL2_Image",
             "SDL2_ttf",
-            "mutedvision",
+            //"mutedvision",
             //"external",
             "bindstonemain"
         };

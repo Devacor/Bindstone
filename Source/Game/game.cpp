@@ -36,7 +36,7 @@ void Game::initializeClientConnection() {
 		auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 		value->execute(*this);
 	}, [&](const std::string &a_dcreason) {
-		MV::info("Disconnected: ", a_dcreason);
+		MV::info("Disconnected [", gameServerAddress, "]: ", a_dcreason);
 		gameData.managers().messages.lobbyDisconnect(a_dcreason);
 		task.also("LobbyReconnect").recent()->
 			then("Wait", std::make_shared<MV::BlockForSeconds>(backoffLobbyReconnect)).

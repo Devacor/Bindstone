@@ -1,14 +1,3 @@
-print("INITIALIZEEEEEE");
-var testStuff = MapDynamicVariable();
-print("f1");
-testStuff["v1"] = false;
-print("f2");
-print(testStuff["v1"].bool);
-testStuff["v2"] = 0;
-print("f3");
-print(testStuff["v2"].int);
-print("success");
-
 self.initialize = fun(self){
 	auto test := self.make("Login");
 	self.make("Main");

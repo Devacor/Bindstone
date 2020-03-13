@@ -1,10 +1,16 @@
 #include "dynamicVariable.h"
-#include "chaiscript/chaiscript_stdlib.hpp"
 #include "MV/Utility/exactType.hpp"
 
 namespace MV {
-	void hookDynamicVariable(chaiscript::ChaiScript &a_script) {
+	void DynamicVariable::hook(chaiscript::ChaiScript &a_script) {
 		a_script.add(chaiscript::user_type<DynamicVariable>(), "DynamicVariable");
+		a_script.add(chaiscript::constructor<DynamicVariable()>(), "DynamicVariable");
+		a_script.add(chaiscript::constructor<DynamicVariable(bool)>(), "DynamicVariable");
+		a_script.add(chaiscript::constructor<DynamicVariable(int64_t)>(), "DynamicVariable");
+		a_script.add(chaiscript::constructor<DynamicVariable(int)>(), "DynamicVariable");
+		a_script.add(chaiscript::constructor<DynamicVariable(size_t)>(), "DynamicVariable");
+		a_script.add(chaiscript::constructor<DynamicVariable(double)>(), "DynamicVariable");
+		a_script.add(chaiscript::constructor<DynamicVariable(const std::string &)>(), "DynamicVariable");
 
 		a_script.add(chaiscript::fun([&](DynamicVariable &a_self, bool a_value) -> decltype(auto) {
 			return a_self = a_value;
@@ -118,7 +124,7 @@ namespace MV {
 			return a_self.clear();
 		}), "clear");
 
-		a_script.add(chaiscript::bootstrap::standard_library::map_type<std::map<std::string, DynamicVariable>>("MapDynamicVariable"));
-		a_script.add(chaiscript::bootstrap::standard_library::vector_type<std::vector<DynamicVariable>>("VectorDynamicVariable"));
+		a_script.add(chaiscript::bootstrap::standard_library::map_type<std::map<std::string, DynamicVariable>>("DynamicVariableMap"));
+		a_script.add(chaiscript::bootstrap::standard_library::vector_type<std::vector<DynamicVariable>>("DynamicVariableVector"));
 	}
 }

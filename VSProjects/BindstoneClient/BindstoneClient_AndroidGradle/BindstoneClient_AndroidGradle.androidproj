@@ -217,15 +217,15 @@
     <Content Include="app\src\main\res\values\styles.xml" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\External\VSProjects\WolfSSL_Android\WolfSSL_Android.vcxproj" />
-    <ProjectReference Include="..\..\MutedVision\MutedVision_Android\MutedVision_Android.vcxproj" />
-    <ProjectReference Include="..\BindstoneClient_Android\BindstoneClient_Android.vcxproj" />
-    <ProjectReference Include="..\SDL2\SDL2_Android.vcxproj" />
-    <ProjectReference Include="..\SDL2_image\SDL2_image_Android.vcxproj" />
-    <ProjectReference Include="..\SDL2_ttf\SDL2_ttf_Android.vcxproj" />
+    <Folder Include="app\src\main\assets\" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="app\src\main\assets\" />
+    <ProjectReference Include="..\..\..\External\VSProjects\External_Android\External_Android.vcxproj" />
+    <ProjectReference Include="..\..\..\External\VSProjects\WolfSSL_Android\WolfSSL_Android.vcxproj" />
+    <ProjectReference Include="..\..\SDL2\SDL2_Android.vcxproj" />
+    <ProjectReference Include="..\..\SDL2_image\SDL2_image_Android.vcxproj" />
+    <ProjectReference Include="..\..\SDL2_ttf\SDL2_ttf_Android.vcxproj" />
+    <ProjectReference Include="..\BindstoneClient_Android\BindstoneClient_Android.vcxproj" />
   </ItemGroup>
   <Import Project="$(AndroidTargetsPath)\Android.targets" />
   <ImportGroup Label="ExtensionTargets" />

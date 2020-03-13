@@ -66,6 +66,8 @@ namespace MV {
 			return *this;
 		}
 
+		static void hook(chaiscript::ChaiScript& a_script);
+
 		bool operator<(const DynamicVariable &a_rhs) const {
 			return value < a_rhs.value;
 		}
@@ -193,8 +195,6 @@ namespace MV {
 	inline bool operator!=(const std::string &a_lhs, const DynamicVariable &a_rhs) {
 		return a_rhs != a_lhs;
 	}
-
-	void hookDynamicVariable(chaiscript::ChaiScript& a_script);
 
 	//Used similarly to optional during network serialization.
 	template <typename T>

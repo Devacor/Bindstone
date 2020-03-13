@@ -283,8 +283,8 @@ namespace chaiscript
                      const std::vector<chaiscript::Options> &t_opts = chaiscript::default_options())
       : m_module_paths(ensure_minimum_path_vec(std::move(t_module_paths))),
         m_use_paths(ensure_minimum_path_vec(std::move(t_use_paths))),
-        m_parser(std::move(parser)),
         m_load_file_custom(t_load_file_custom),
+        m_parser(std::move(parser)),
         m_engine(*m_parser)
     {
 #if !defined(CHAISCRIPT_NO_DYNLOAD) && defined(_POSIX_VERSION) && !defined(__CYGWIN__)

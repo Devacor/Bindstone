@@ -38,11 +38,23 @@
     <ClCompile Include="$(SolutionDir)Source\SolutionSpecific\BindstoneClient\main.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\..\External\VSProjects\External_Android\External_Android.vcxproj">
+      <Project>{62d1ae53-e46d-4cd1-91a9-1f1e3efcf064}</Project>
+    </ProjectReference>
     <ProjectReference Include="..\..\..\External\VSProjects\WolfSSL_Android\WolfSSL_Android.vcxproj">
       <Project>{c0414840-3914-4781-947b-9262e5ba2138}</Project>
     </ProjectReference>
     <ProjectReference Include="..\..\MutedVision\MutedVision_Android\MutedVision_Android.vcxproj">
       <Project>{46b19b64-8cd7-424c-969e-2cdc234da7a5}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\SDL2\SDL2_Android.vcxproj">
+      <Project>{b7be417c-b6c5-4a69-a056-e0cb0c6a344c}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\SDL2_image\SDL2_image_Android.vcxproj">
+      <Project>{03a9401d-ceff-4f5e-a7b4-fc2a0d9f6c95}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\SDL2_ttf\SDL2_ttf_Android.vcxproj">
+      <Project>{8572235c-b335-40dd-ba5f-9954bedc4bfc}</Project>
     </ProjectReference>
   </ItemGroup>
   <PropertyGroup Label="Globals">
@@ -300,14 +312,16 @@
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);CEREAL_FUTURE_EXPERIMENTAL;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);CHAISCRIPT_NO_THREADS;CEREAL_FUTURE_EXPERIMENTAL;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>CompileAsCpp</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
+      <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName)</AdditionalLibraryDirectories>
       <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem;mutedvision;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
+      <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -316,14 +330,16 @@
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);CEREAL_FUTURE_EXPERIMENTAL;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);CHAISCRIPT_NO_THREADS;CEREAL_FUTURE_EXPERIMENTAL;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>CompileAsCpp</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
+      <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName)</AdditionalLibraryDirectories>
       <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem;mutedvision;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
+      <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
@@ -332,14 +348,16 @@
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);CEREAL_FUTURE_EXPERIMENTAL;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);CHAISCRIPT_NO_THREADS;CEREAL_FUTURE_EXPERIMENTAL;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>CompileAsCpp</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
+      <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName)</AdditionalLibraryDirectories>
       <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem;mutedvision;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
+      <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
@@ -348,14 +366,16 @@
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
-      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);CEREAL_FUTURE_EXPERIMENTAL;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__ANDROID_API__=$(AndroidAPILevelNumber);CHAISCRIPT_NO_THREADS;CEREAL_FUTURE_EXPERIMENTAL;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_JNI;WOLFSSL_DTLS;HAVE_CRL;HAVE_CRL_MONITOR;HAVE_OCSP;PERSIST_SEASON_CACHE;PERSIST_CERT_CACHE;ATOMIC_USER;HAVE_ECC;TFM_ECC356;HAVE_PK_CALLBACKS;HAVE_DH;USE_FAST_MATH;TFM_TIMING_RESISTANT;ECC_TIMING_RESISTANT;WC_RSA_BLINDING;TFM_NO_ASM;HAVE_TLS_EXTENSIONS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CompileAs>CompileAsCpp</CompileAs>
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
+      <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName)</AdditionalLibraryDirectories>
       <LibraryDependencies>c++_shared;m;dl;z;wolfssl;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem;mutedvision;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
+      <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

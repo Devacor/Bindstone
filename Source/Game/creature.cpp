@@ -4,8 +4,6 @@
 #include "Game/player.h"
 #include "MV/Utility/generalUtility.h"
 
-#include "chaiscript/chaiscript_stdlib.hpp"
-
 CEREAL_CLASS_VERSION(Catalog<CreatureData>, CREATURE_CATALOG_VERSION);
 CEREAL_CLASS_VERSION(Catalog<BuildingData>, BUILDING_CATALOG_VERSION);
 

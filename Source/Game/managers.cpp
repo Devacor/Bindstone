@@ -6,6 +6,17 @@
 
 
 void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::TapDevice &a_tapDevice, MV::ThreadPool &a_pool) {
+	a_script.add(chaiscript::fun([](int a_from) {return MV::to_string(a_from); }), "to_string");
+	a_script.add(chaiscript::fun([](size_t a_from) {return MV::to_string(a_from); }), "to_string");
+	a_script.add(chaiscript::fun([](float a_from) {return MV::to_string(a_from); }), "to_string");
+	a_script.add(chaiscript::fun([](double a_from) {return MV::to_string(a_from); }), "to_string");
+	a_script.add(chaiscript::fun([](bool a_from) {return MV::to_string(a_from); }), "to_string");
+	
+	a_script.add(chaiscript::fun([](const std::string& a_output) {
+		MV::info("CHAISCRIPT: ", a_output);
+	}), "log_chaiscript_output");
+	a_script.eval("global print = fun(x){ log_chaiscript_output(to_string(x)); };");
+	
 	MV::TexturePoint::hook(a_script);
 	MV::Color::hook(a_script);
 	MV::Size<MV::PointPrecision>::hook(a_script);
@@ -15,7 +26,7 @@ void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::TapDevice &a_tapD
 	MV::BoxAABB<MV::PointPrecision>::hook(a_script);
 	MV::BoxAABB<int>::hook(a_script, "i");
 
-	MV::hookDynamicVariable(a_script);
+	MV::DynamicVariable::hook(a_script);
 
 	MV::TexturePack::hook(a_script);
 	MV::TextureDefinition::hook(a_script);
@@ -52,12 +63,6 @@ void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::TapDevice &a_tapD
 	FindMatchRequest::hook(a_script);
 
 	MV::InterfaceManager::hook(a_script);
-
-	a_script.add(chaiscript::fun([](int a_from) {return MV::to_string(a_from); }), "to_string");
-	a_script.add(chaiscript::fun([](size_t a_from) {return MV::to_string(a_from); }), "to_string");
-	a_script.add(chaiscript::fun([](float a_from) {return MV::to_string(a_from); }), "to_string");
-	a_script.add(chaiscript::fun([](double a_from) {return MV::to_string(a_from); }), "to_string");
-	a_script.add(chaiscript::fun([](bool a_from) {return MV::to_string(a_from); }), "to_string");
 }
 
 void StandardMessages::hook(chaiscript::ChaiScript& a_script) {

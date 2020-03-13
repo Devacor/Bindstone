@@ -379,6 +379,13 @@ void PathfindingTest() {
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "MV/Utility/chaiscriptStdLib.h"
+#include "MV/Utility/chaiscriptUtility.h"
+#include "MV/Utility/log.h"
+
+#include "MV/Network/dynamicVariable.h"
+
+
 using namespace std;
 
 /*
@@ -447,6 +454,143 @@ void render(SDL_Renderer *renderer) {
     SDL_RenderPresent(renderer);
 }
 
+struct PointTest {
+	int x;
+	void display() {
+		MV::info("Bindstone: PointTest Display");
+	}
+};
+
+void customPrint(const std::string& string) {
+	MV::info("Bindstone: " + string);
+}
+
+void hookDynamicVariable2(chaiscript::ChaiScript& a_script) {
+	a_script.add(chaiscript::user_type<MV::DynamicVariable>(), "DynamicVariable");
+	a_script.add(chaiscript::constructor<MV::DynamicVariable()>(), "DynamicVariable");
+	a_script.add(chaiscript::constructor<MV::DynamicVariable(bool)>(), "DynamicVariable");
+	a_script.add(chaiscript::constructor<MV::DynamicVariable(int64_t)>(), "DynamicVariable");
+	a_script.add(chaiscript::constructor<MV::DynamicVariable(int)>(), "DynamicVariable");
+	a_script.add(chaiscript::constructor<MV::DynamicVariable(size_t)>(), "DynamicVariable");
+	a_script.add(chaiscript::constructor<MV::DynamicVariable(double)>(), "DynamicVariable");
+	a_script.add(chaiscript::constructor<MV::DynamicVariable(const std::string&)>(), "DynamicVariable");
+
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, bool a_value) -> decltype(auto) {
+		return a_self = a_value;
+		}), "=");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, int64_t a_value) -> decltype(auto) {
+		return a_self = a_value;
+		}), "=");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, size_t a_value) -> decltype(auto) {
+		return a_self = a_value;
+		}), "=");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, int a_value) -> decltype(auto) {
+		return a_self = a_value;
+		}), "=");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, double a_value) -> decltype(auto) {
+		return a_self = a_value;
+		}), "=");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, std::string a_value) -> decltype(auto) {
+		return a_self = a_value;
+		}), "=");
+
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, bool a_value) -> decltype(auto) {
+		return a_self == a_value;
+		}), "==");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, int64_t a_value) -> decltype(auto) {
+		return a_self == a_value;
+		}), "==");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, size_t a_value) -> decltype(auto) {
+		return a_self == a_value;
+		}), "==");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, int a_value) -> decltype(auto) {
+		return a_self == a_value;
+		}), "==");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, double a_value) -> decltype(auto) {
+		return a_self == a_value;
+		}), "==");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, std::string a_value) -> decltype(auto) {
+		return a_self == a_value;
+		}), "==");
+
+	a_script.add(chaiscript::fun([&](bool a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
+		return a_self == a_value;
+		}), "==");
+	a_script.add(chaiscript::fun([&](int64_t a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
+		return a_self == a_value;
+		}), "==");
+	a_script.add(chaiscript::fun([&](size_t a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
+		return a_self == a_value;
+		}), "==");
+	a_script.add(chaiscript::fun([&](int a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
+		return a_self == a_value;
+		}), "==");
+	a_script.add(chaiscript::fun([&](double a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
+		return a_self == a_value;
+		}), "==");
+	a_script.add(chaiscript::fun([&](std::string a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
+		return a_self == a_value;
+		}), "==");
+
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, bool a_value) -> decltype(auto) {
+		return a_self != a_value;
+		}), "!=");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, int64_t a_value) -> decltype(auto) {
+		return a_self != a_value;
+		}), "!=");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, size_t a_value) -> decltype(auto) {
+		return a_self != a_value;
+		}), "!=");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, int a_value) -> decltype(auto) {
+		return a_self != a_value;
+		}), "!=");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, double a_value) -> decltype(auto) {
+		return a_self != a_value;
+		}), "!=");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self, std::string a_value) -> decltype(auto) {
+		return a_self != a_value;
+		}), "!=");
+
+	a_script.add(chaiscript::fun([&](bool a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
+		return a_self != a_value;
+		}), "!=");
+	a_script.add(chaiscript::fun([&](int64_t a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
+		return a_self != a_value;
+		}), "!=");
+	a_script.add(chaiscript::fun([&](size_t a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
+		return a_self != a_value;
+		}), "!=");
+	a_script.add(chaiscript::fun([&](int a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
+		return a_self != a_value;
+		}), "!=");
+	a_script.add(chaiscript::fun([&](double a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
+		return a_self != a_value;
+		}), "!=");
+	a_script.add(chaiscript::fun([&](std::string a_value, MV::DynamicVariable& a_self) -> decltype(auto) {
+		return a_self != a_value;
+		}), "!=");
+
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self) {
+		return a_self.getBool();
+		}), "bool");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self) {
+		return a_self.getInt();
+		}), "int");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self) {
+		return a_self.getDouble();
+		}), "double");
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self) {
+		return a_self.getString();
+		}), "string");
+
+	a_script.add(chaiscript::fun([&](MV::DynamicVariable& a_self) {
+		return a_self.clear();
+		}), "clear");
+
+	a_script.add(chaiscript::bootstrap::standard_library::map_type<std::map<std::string, MV::DynamicVariable>>("DynamicVariableMap"));
+	a_script.add(chaiscript::bootstrap::standard_library::vector_type<std::vector<MV::DynamicVariable>>("DynamicVariableVector"));
+}
+
 int main(int argc, char *argv[]) {
     
     SDL_Window *window;
@@ -481,6 +625,45 @@ int main(int argc, char *argv[]) {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
     
+	chaiscript::ChaiScript script;
+	script.add(chaiscript::fun([](const std::string& a_output) {
+		MV::info("CHAISCRIPT: ", a_output);
+	}), "log_chaiscript_output");
+	script.eval("global print = fun(x){ log_chaiscript_output(to_string(x)); };");
+	script.add(chaiscript::user_type<PointTest>(), "PointTest");
+	script.add(chaiscript::constructor<PointTest()>(), "PointTest");
+	script.add(chaiscript::fun(&PointTest::display), "display");
+	script.add(chaiscript::fun(&PointTest::x), "x");
+	script.add(chaiscript::fun(&customPrint), "log_chaiscript_output");
+	script.add(chaiscript::bootstrap::standard_library::map_type<std::map<std::string, PointTest>>("PointTestMap"));
+	MV::DynamicVariable::hook(script);
+	script.eval(R"(
+		print("Trying PointTest");
+		var testStuff = PointTest();
+		print("Trying PrintVar");
+		print(testStuff.x);
+		testStuff.x = 5;
+		print(testStuff.x);
+		testStuff.display();
+	)");
+
+	script.eval(R"(
+		print("TRYING DYNAMIC VARIABLE");
+		var v = DynamicVariable(10);
+		print(v.int);
+		var v2 = DynamicVariable("Test");
+		print(v2.string);
+		print("TEST SUCCESS");
+
+		var testStuff2 = DynamicVariableMap();
+		print("f1");
+		testStuff2["v1"] = false;
+		print("f2");
+		print(testStuff2["v1"].bool);
+		testStuff2["v2"] = 0;
+		print("f3");
+		print(testStuff2["v2"].int);
+		)");
     /* Enter render loop, waiting for user to quit */
     done = 0;
     while (!done) {

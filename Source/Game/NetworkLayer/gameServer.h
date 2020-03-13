@@ -156,7 +156,7 @@ private:
 				ourLobbyClient->send(makeNetworkString<GameServerStateChange>(GameServerStateChange::AVAILABLE));
 			}
 		}, [&](const std::string &a_dcreason) {
-			MV::info("Disconnected: ", a_dcreason);
+			MV::info("Disconnected [", localHostServerAddress, "]: ", a_dcreason);
 			ourLobbyClient = nullptr;
 		}, [=] {
 			makeUsAvailableToTheLobby();

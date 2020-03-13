@@ -41,3 +41,5 @@ VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libSDL2_ttf.so
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libwolfssl.so
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libmutedvision.so
+VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libmutedvision.a
+.workspace/

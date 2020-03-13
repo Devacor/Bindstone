@@ -1,18 +1,21 @@
+print("~~Login Initialize 0");
 self.initialize = fun(self){
+	print("~~Login Initialize 1");
 	var emailInput := self.root.get("EmailInput").componentText();
 	var passwordInput := self.root.get("PasswordInput").componentText();
+	print("~~Login Initialize 2");
  	emailInput.text(DefaultLoginId);
  	passwordInput.text(DefaultPassword);
-
+	print("~~Login Initialize 3");
  	emailInput.onEnter.connect("Deselect", fun(textElement){
 		game.gui.page("Login").removeFocus();
 	});
 	passwordInput.onEnter.connect("Deselect", fun(textElement){
 		game.gui.page("Login").removeFocus();
 	});
-
+	print("~~Login Initialize 4");
  	if(!DefaultLoginId.empty() && !DefaultPassword.empty()){
-		print("Not Empty!");
+		print("~~Login Initialize 5");
 		if(game.client.connected){
 			print("CHAISCRIPT: Already Connected And Trying Login!");
 			self.root.get("LoginButton").componentButton().press();
@@ -24,5 +27,7 @@ self.initialize = fun(self){
 				self.root.get("LoginButton").componentButton().press();
 			});
 		}
+		print("~~Login Initialize 6");
 	}
+	print("~~Login Initialize 7");
 };

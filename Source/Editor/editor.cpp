@@ -148,11 +148,11 @@ void Editor::render(){
 	}
 	auto scaler = visor->component<MV::Scene::Drawable>("ScreenScaler", false);
 	if (!scaler) {
-		scaler = visor->attach<MV::Scene::Drawable>()->id("ScreenScaler")->screenBounds({ MV::Point<int>(0, 0), managers.renderer.window().size() });
+		scaler = visor->attach<MV::Scene::Drawable>()->id("ScreenScaler")->bounds({ MV::Point<>(0, 0), managers.renderer.world().size() });
 		fps->anchors().anchor(MV::point(1.0f, 0.0f)).parent(scaler.get());
 		fps->anchors().offset({ { -50.0f, 15.0f }, MV::point(0.0f, 0.0f)});
 	} else {
-		scaler->screenBounds({ MV::Point<int>(0, 0), managers.renderer.window().size() });
+		scaler->bounds({ MV::Point<>(0, 0), managers.renderer.world().size() });
 	}
 	scene->drawUpdate(lastUpdateDelta);
 	controls->drawUpdate(lastUpdateDelta);

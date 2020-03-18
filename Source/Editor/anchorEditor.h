@@ -45,25 +45,22 @@ private:
 
 		makeLabel(gridNode, *panel.services().get<MV::TextLibrary>(), "AnchorsLabel", labelSize, U8_STR("Anchors"));
 
-		auto currentBoundsMethod = std::make_shared<MV::Scene::Anchors::BoundsToOffset>(MV::Scene::Anchors::BoundsToOffset::Ignore);
-		std::vector<MV::Scene::Anchors::BoundsToOffset> offsetMethod{ MV::Scene::Anchors::BoundsToOffset::Ignore, MV::Scene::Anchors::BoundsToOffset::Apply, MV::Scene::Anchors::BoundsToOffset::Apply_Reposition };
-		std::vector<std::string> offsetMethodStrings{ "Ignore", "Apply", "Apply Reposition" };
-		auto offsetMethodButton = makeButton(gridNode, resources, "WrapMode", buttonSize, offsetMethodStrings[MV::indexOf(offsetMethod, *currentBoundsMethod)]);
+		auto calculateOffsetAndPivot = std::make_shared<bool>(false);
+		auto offsetMethodButton = makeButton(gridNode, resources, "WrapMode", buttonSize, *calculateOffsetAndPivot ? "Calculate" : "Ignore");
 		std::weak_ptr<MV::Scene::Button> weakOffsetMethodButton(offsetMethodButton);
-		offsetMethodButton->onAccept.connect("click", [&, weakOffsetMethodButton, offsetMethod, offsetMethodStrings, currentBoundsMethod](std::shared_ptr<MV::Scene::Clickable>) mutable {
-			auto index = MV::wrap(0, static_cast<int>(offsetMethod.size()), MV::indexOf(offsetMethod, *currentBoundsMethod) + 1);
-			*currentBoundsMethod = offsetMethod[index];
-			weakOffsetMethodButton.lock()->text(offsetMethodStrings[index]);
+		offsetMethodButton->onAccept.connect("click", [&, weakOffsetMethodButton, calculateOffsetAndPivot](std::shared_ptr<MV::Scene::Clickable>) mutable {
+			*calculateOffsetAndPivot = !*calculateOffsetAndPivot;
+			weakOffsetMethodButton.lock()->text(*calculateOffsetAndPivot ? "Calculate" : "Ignore");
 		});
 
 		anchorParentId = makeInputField(&panel, resources, gridNode, "parentName", buttonSize, target->anchors().hasParent() ? target->anchors().parent()->id() : "");
-		anchorParentId->onEnter.connect("!", [&, currentBoundsMethod](auto&&) {
+		anchorParentId->onEnter.connect("!", [&, calculateOffsetAndPivot](auto&&) {
 			auto foundParent = target->owner()->componentInParents<MV::Scene::Drawable>(anchorParentId->text(), false);
 			if(target->anchors().hasParent() && !foundParent){
 				target->anchors().removeFromParent();
 				MV::info("Removing anchors from parent.");
 			} else if(foundParent != target->anchors().parent()){
-				target->anchors().parent(foundParent.self(), *currentBoundsMethod);
+				target->anchors().parent(foundParent.self(), *calculateOffsetAndPivot);
 				MV::info("Applied anchors for Component Id: ", anchorParentId->text(), " On Node: ", anchorParentId->owner()->id());
 				auto offset = target->anchors().offset();
 				updatingFields = true;
@@ -142,7 +139,7 @@ private:
 
 		makeButton(grid->owner(), resources, "Calculate", { 100.0f, 27.0f }, U8_STR("Calculate"))->
 			onAccept.connect("Calculate", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
-				target->anchors().applyBoundsToOffset(MV::Scene::Anchors::BoundsToOffset::Apply);
+				target->anchors().calculateOffsetAndPivot();
 					
 				auto offset = target->anchors().offset();
 				updatingFields = true;

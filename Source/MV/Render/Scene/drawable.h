@@ -64,14 +64,12 @@ namespace MV {
 			Anchors(Drawable *a_self);
 			~Anchors();
 
-			enum class BoundsToOffset { Ignore, Apply, Apply_Reposition };
-
 			bool hasParent() const {
 				return !parentReference.expired();
 			}
 			std::shared_ptr<Drawable> parent() const;
 
-			Anchors& parent(const std::weak_ptr<Drawable> &a_parent, BoundsToOffset a_offsetFromBounds = BoundsToOffset::Ignore);
+			Anchors& parent(const std::weak_ptr<Drawable> &a_parent, bool a_calculateOffsetAndPivot = false);
 			Anchors& removeFromParent();
 
 			Anchors& anchor(const BoxAABB<> &a_anchor);
@@ -86,9 +84,8 @@ namespace MV {
 			BoxAABB<> offset() const {
 				return ourOffset;
 			}
-			//NOTE: not currently implemented
+
 			Anchors& pivot(const Point<> &a_pivot);
-			//NOTE: not currently implemented
 			Point<> pivot() const {
 				return pivotPercent;
 			}
@@ -101,7 +98,7 @@ namespace MV {
 				return applyingPosition;
 			}
 
-			Anchors& applyBoundsToOffset(BoundsToOffset a_offsetFromBounds = BoundsToOffset::Apply);
+			Anchors& calculateOffsetAndPivot();
 
 		private:
 			Anchors(const Anchors& a_rhs);

@@ -1681,7 +1681,7 @@ DeselectedEditorPanel::DeselectedEditorPanel(EditorControls &a_panel):
 	createButton->onAccept.connect("create", [&](std::shared_ptr<MV::Scene::Clickable>){
 		//panel.loadPanel<ChooseElementCreationType>();
 		auto& renderer = panel.root()->renderer();
-		auto node = panel.root()->make(MV::guid("node"))->screenPosition(MV::toPoint(renderer.window().size() / 2));
+		auto node = panel.root()->make(MV::guid("node"))->worldPosition(MV::toPoint(renderer.world().size() / 2.0f));
 
 		auto editableNode = std::make_shared<EditableNode>(node, panel.editor(), panel.services().get<MV::TapDevice>());
 		

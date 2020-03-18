@@ -240,7 +240,7 @@ namespace MV {
 		void setTitle(const std::string &a_title);
 
 		MV::Size<int> resize(const Size<int> &a_size);
-		Window& allowUserResize(bool a_maintainProportions = true, const Size<int> &a_minSize = Size<int>(1, 1), const Size<int> &a_maxSize = Size<int>(1000000, 1000000));
+		Window& allowUserResize(bool a_maintainProportions = true, const Size<int> &a_minSize = Size<int>(1, 1), const Size<int> &a_maxSize = Size<int>(16384, 16384));
 		Window& lockUserResize();
 
 		bool resizeWorldWithWindow() const;
@@ -527,7 +527,7 @@ namespace MV {
 		}
 
 		void resetViewport();
-
+		MV::Size<int> monitorSize();
 		void draw(GLenum drawType, std::shared_ptr<Scene::Node> a_node);
 	private:
 		GLuint loadShaderGetProgramId(std::string a_vertexShaderCode, std::string a_fragmentShaderCode);

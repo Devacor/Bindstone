@@ -91,6 +91,11 @@ namespace MV {
 			maxPoint += a_offset;
 			return *this;
 		}
+		BoxAABB<T>& operator+=(const std::pair<Point<T>, Point<T>> &a_offsets) {
+			minPoint += a_offsets.first;
+			maxPoint += a_offsets.second;
+			return *this;
+		}
 
 		BoxAABB<T>& operator-=(const BoxAABB<T> &a_offset) {
 			minPoint -= a_offset.minPoint;
@@ -102,15 +107,20 @@ namespace MV {
 			maxPoint -= a_offset;
 			return *this;
 		}
-
-		BoxAABB<T>& operator*=(const Scale &a_offset){
-			minPoint *= a_offset;
-			maxPoint *= a_offset;
+		BoxAABB<T>& operator-=(const std::pair<Point<T>, Point<T>> &a_offsets) {
+			minPoint -= a_offsets.first;
+			maxPoint -= a_offsets.second;
 			return *this;
 		}
-		BoxAABB<T>& operator/=(const Scale &a_offset){
-			minPoint /= a_offset;
-			maxPoint /= a_offset;
+
+		BoxAABB<T>& operator*=(const Scale &a_scaleBy){
+			minPoint *= a_scaleBy;
+			maxPoint *= a_scaleBy;
+			return *this;
+		}
+		BoxAABB<T>& operator/=(const Scale &a_scaleBy){
+			minPoint /= a_scaleBy;
+			maxPoint /= a_scaleBy;
 			return *this;
 		}
 
@@ -169,6 +179,12 @@ namespace MV {
 	}
 
 	template <typename T>
+	BoxAABB<T> operator+(const BoxAABB<T>& a_lhs, const std::pair<Point<T>, Point<T>>& a_rhs) {
+		auto result = a_lhs;
+		return result += a_rhs;
+	}
+
+	template <typename T>
 	BoxAABB<T> operator-(const BoxAABB<T> &a_lhs, const BoxAABB<T> &a_rhs) {
 		auto result = a_lhs;
 		return result -= a_rhs;
@@ -176,6 +192,12 @@ namespace MV {
 
 	template <typename T>
 	BoxAABB<T> operator-(const BoxAABB<T> &a_lhs, const Point<T> &a_rhs){
+		auto result = a_lhs;
+		return result -= a_rhs;
+	}
+
+	template <typename T>
+	BoxAABB<T> operator-(const BoxAABB<T>& a_lhs, const std::pair<Point<T>, Point<T>>& a_rhs) {
 		auto result = a_lhs;
 		return result -= a_rhs;
 	}
@@ -214,14 +236,13 @@ namespace MV {
 
 	template <typename T>
 	void BoxAABB<T>::initialize(const Point<T> &a_startPoint, const Point<T> &a_endPoint){
-		initialize(a_startPoint);
-		expandWith(a_endPoint);
+		minPoint = a_startPoint;
+		maxPoint = a_endPoint;
 	}
 
 	template <typename T>
 	void BoxAABB<T>::initialize(const Point<T> &a_startPoint, const Size<T> &a_size){
-		initialize(a_startPoint);
-		expandWith(a_startPoint + toPoint(a_size));
+		minPoint = a_startPoint; maxPoint = a_startPoint + toPoint(a_size);
 	}
 
 	template <typename T>

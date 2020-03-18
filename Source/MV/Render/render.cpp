@@ -748,6 +748,19 @@ namespace MV {
 		}
 		return false;
 	}
+
+	MV::Size<int> Draw2D::monitorSize() {
+		if (headless()) {
+			return MV::size<int>(1920, 1080);
+		}
+		if (setupSDL()) {
+			SDL_DisplayMode DM;
+			SDL_GetCurrentDisplayMode(0, &DM);
+			auto Width = DM.w;
+			auto Height = DM.h;
+			return MV::Size<int>(DM.w, DM.h);
+		}
+	}
 	
 	void Draw2D::summarizeDisplayMode() const{
 		SDL_DisplayMode mode;

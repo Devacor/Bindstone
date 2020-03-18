@@ -50,15 +50,39 @@ void Game::initializeClientConnection() {
 	});
 }
 
+float getScaledDpi(int displayIndex) {
+	const float kSysDefaultDpi =
+#if defined(__APPLE__) || defined(__ANDROID__)
+		72.0f;
+#elif defined(_WIN32)
+		96.0f;
+#endif
+	float dpiResult;
+	if (SDL_GetDisplayDPI(displayIndex, NULL, &dpiResult, NULL) != 0) {
+		dpiResult = kSysDefaultDpi;
+	}
+
+	return dpiResult / kSysDefaultDpi;
+}
+
 void Game::initializeWindow(){
 	srand(static_cast<unsigned int>(time(0)));
 	//RENDERER SETUP:::::::::::::::::::::::::::::::::
-	MV::Size<> worldSize(1920, 1080);
-	MV::Size<int> windowSize(1920, 1080);
 
 	gameData.managers().renderer.//makeHeadless().
-		//window().windowedMode().allowUserResize(false).resizeWorldWithWindow(true);
-        window().fullScreenMode().borderless().resizeWorldWithWindow(true).highResolution();//.highResolution();
+#ifdef WIN32
+		window().windowedMode().allowUserResize(false, MV::Size(800, 600)).resizeWorldWithWindow(true).highResolution();
+#else
+        window().fullScreenMode().borderless().resizeWorldWithWindow(true).highResolution();
+#endif
+
+	MV::Size<int> windowSize = gameData.managers().renderer.monitorSize();
+	auto aspectX = static_cast<float>(windowSize.width) / windowSize.height;
+	MV::Size<> worldSize(1080 * aspectX, 1080);
+	MV::info("PRE-SCALE: ", windowSize);
+	//windowSize /= getScaledDpi(0);
+	MV::info("POST-SCALE: ", windowSize);
+
 
 	if (!gameData.managers().renderer.initialize(windowSize, worldSize)) {
 		exit(0);
@@ -74,7 +98,9 @@ void Game::initializeWindow(){
 
 	screenScaler = rootScene->attach<MV::Scene::Sprite>();
 	screenScaler->hide()->id("ScreenScaler");
-	screenScaler->bounds({ MV::point(0.0f, 0.0f), gameData.managers().renderer.world().size() });
+	auto scaledDpi = getScaledDpi(0);
+	screenScaler->bounds({ MV::point(0.0f, 0.0f), gameData.managers().renderer.world().size() / scaledDpi });
+	rootScene->scale(scaledDpi);
 
 	gameData.managers().renderer.loadShader("vortex", "Shaders/default.vert", "Shaders/vortex.frag");
 	gameData.managers().renderer.loadShader("lillypad", "Shaders/lillypad.vert", "Shaders/default.frag");
@@ -196,7 +222,7 @@ void Game::hook(chaiscript::ChaiScript &a_script) {
 void Game::updateScreenScaler() {
 	auto scaler = rootScene->component<MV::Scene::Drawable>("ScreenScaler", false);
 	if (!scaler) {
-		rootScene->attach<MV::Scene::Drawable>()->id("ScreenScaler")->screenBounds({ MV::Point<int>(0, 0), gameData.managers().renderer.window().size() });
+		rootScene->attach<MV::Scene::Drawable>()->id("ScreenScaler")->worldBounds({ MV::Point<>(0, 0), gameData.managers().renderer.world().size() });
 	} else {
 		scaler->screenBounds({ MV::Point<int>(0, 0), gameData.managers().renderer.window().size() });
 	}

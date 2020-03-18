@@ -413,24 +413,26 @@ namespace MV {
 	//good up to 64 bit floating point types.
 	template<typename T>
 	bool equals(T lhs, T rhs){
-		if(std::numeric_limits<T>::epsilon() == 0){ //integral type
+		if constexpr (std::is_integral<T>::value){
 			return lhs == rhs;
-		} else if(lhs == rhs){ //handle simple case equality
-			return true;
-		} else if(!floatingPointRangeCompareCheck(lhs, rhs) || (lhs < 0 && rhs > 0) || (lhs > 0 && rhs < 0)){
-			return false;
-		} else{
-			int maxUlps = 1; //precision required
-			if(sizeof(T) == sizeof(int8_t)){
-				return floatEqualImplementation(lhs, rhs, static_cast<int8_t>(maxUlps));
-			} else if(sizeof(T) == sizeof(int16_t)){
-				return floatEqualImplementation(lhs, rhs, static_cast<int16_t>(maxUlps));
-			} else if(sizeof(T) == sizeof(int32_t)){
-				return floatEqualImplementation(lhs, rhs, static_cast<int32_t>(maxUlps));
-			} else if(sizeof(T) == sizeof(int64_t)){
-				return floatEqualImplementation(lhs, rhs, static_cast<int64_t>(maxUlps));
+		} else {
+			if(lhs == rhs){ //handle simple case equality
+				return true;
+			} else if(!floatingPointRangeCompareCheck(lhs, rhs) || (lhs < 0 && rhs > 0) || (lhs > 0 && rhs < 0)){
+				return false;
 			} else{
-				require<RangeException>(0, "Function 'equals' had too big a type to check!");
+				int maxUlps = 1; //precision required
+				if(sizeof(T) == sizeof(int8_t)){
+					return floatEqualImplementation(lhs, rhs, static_cast<int8_t>(maxUlps));
+				} else if(sizeof(T) == sizeof(int16_t)){
+					return floatEqualImplementation(lhs, rhs, static_cast<int16_t>(maxUlps));
+				} else if(sizeof(T) == sizeof(int32_t)){
+					return floatEqualImplementation(lhs, rhs, static_cast<int32_t>(maxUlps));
+				} else if(sizeof(T) == sizeof(int64_t)){
+					return floatEqualImplementation(lhs, rhs, static_cast<int64_t>(maxUlps));
+				} else{
+					require<RangeException>(0, "Function 'equals' had too big a type to check!");
+				}
 			}
 		}
 	}

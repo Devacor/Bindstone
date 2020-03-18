@@ -6,6 +6,26 @@
 
 
 void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::TapDevice &a_tapDevice, MV::ThreadPool &a_pool) {
+	//Helps cereal performance for basic conversions to list them explicitly in here:
+	a_script.add(chaiscript::type_conversion<int, float>());
+	a_script.add(chaiscript::type_conversion<int, double>());
+	a_script.add(chaiscript::type_conversion<int, long>());
+	a_script.add(chaiscript::type_conversion<float, double>());
+	a_script.add(chaiscript::type_conversion<int, int32_t>());
+	a_script.add(chaiscript::type_conversion<int, int64_t>());
+	a_script.add(chaiscript::type_conversion<int16_t, int32_t>());
+	a_script.add(chaiscript::type_conversion<int16_t, int64_t>());
+	a_script.add(chaiscript::type_conversion<int32_t, int64_t>());
+
+	//Narrowing conversions added too, because they'll still happen in the language but at lest we can make them more efficient:
+	a_script.add(chaiscript::type_conversion<double, float>());
+	a_script.add(chaiscript::type_conversion<long, int>());
+	a_script.add(chaiscript::type_conversion<int32_t, int>());
+	a_script.add(chaiscript::type_conversion<int64_t, int>());
+	a_script.add(chaiscript::type_conversion<int32_t, int16_t>());
+	a_script.add(chaiscript::type_conversion<int64_t, int16_t>());
+	a_script.add(chaiscript::type_conversion<int64_t, int32_t>());
+
 	a_script.add(chaiscript::fun([](int a_from) {return MV::to_string(a_from); }), "to_string");
 	a_script.add(chaiscript::fun([](size_t a_from) {return MV::to_string(a_from); }), "to_string");
 	a_script.add(chaiscript::fun([](float a_from) {return MV::to_string(a_from); }), "to_string");

@@ -357,11 +357,14 @@ namespace MV {
 			removeFromParent();
 		}
 
-		Anchors& Anchors::parent(const std::weak_ptr<Drawable> &a_parent, BoundsToOffset a_offsetFromBounds) {
+		Anchors& Anchors::parent(const std::weak_ptr<Drawable>& a_parent, bool a_calculateOffsetAndPivot) {
 			removeFromParent();
 			parentReference = a_parent;
 
-			applyBoundsToOffset(a_offsetFromBounds);
+			if (a_calculateOffsetAndPivot) {
+				applyingPosition = true;
+				calculateOffsetAndPivot();
+			}
 
 			registerWithParent();
 			return *this;
@@ -402,8 +405,8 @@ namespace MV {
 
 					BoxAABB<> childBounds{ (parentAnchors * toScale(parentSize)) + ourOffset + parentBounds.minPoint };
 					if (applyingPosition) {
-						selfReference->owner()->worldPosition(childBounds.minPoint);
-						selfReference->bounds({ Point<>(), childBounds.size() / selfReference->owner()->worldScale() });
+						selfReference->owner()->worldPosition(childBounds.minPoint + (toPoint(childBounds.size()) * pivotPercent));
+						selfReference->worldBounds(childBounds);
 					} else {
 						selfReference->worldBounds(childBounds);
 					}
@@ -418,8 +421,8 @@ namespace MV {
 			return *this;
 		}
 
-		Anchors& Anchors::applyBoundsToOffset(BoundsToOffset a_offsetFromBounds) {
-			if (!applying && a_offsetFromBounds != BoundsToOffset::Ignore) {
+		Anchors& Anchors::calculateOffsetAndPivot() {
+			if (!applying) {
 				if (auto lockedParent = parentReference.lock()) {
 					auto childBounds = selfReference->worldBounds();
 					auto parentBounds = lockedParent->worldBounds();
@@ -427,9 +430,8 @@ namespace MV {
 
 					auto scaledParentAnchors = parentAnchors * toScale(parentSize);
 
-					if (a_offsetFromBounds == BoundsToOffset::Apply_Reposition) {
-						childBounds += scaledParentAnchors - selfReference->owner()->worldPosition();
-					}
+					auto ourPosition = selfReference->owner()->worldPosition();
+					pivotPercent = (ourPosition - childBounds.minPoint) / toPoint(childBounds.size());
 
 					ourOffset = childBounds - (scaledParentAnchors + parentBounds.minPoint);
 				}

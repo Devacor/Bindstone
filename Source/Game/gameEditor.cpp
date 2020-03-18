@@ -13,6 +13,61 @@ void GameEditor::resumeTitleMusic() {
 	//playlistGame->beginPlaying();
 }
 
+void GameEditor::handleInput(){
+	SDL_Event event;
+	while (SDL_PollEvent(&event)) {
+		if (!game.managers().renderer.handleEvent(event)) {
+			switch (event.type) {
+			case SDL_QUIT:
+				done = true;
+				break;
+			case SDL_KEYDOWN:
+				switch (event.key.keysym.sym) {
+				case SDLK_ESCAPE:
+					done = true;
+					break;
+				case SDLK_UP:
+
+					break;
+				case SDLK_LEFT:
+					break;
+				case SDLK_DOWN:
+
+					break;
+				case SDLK_SPACE:
+
+					break;
+				case SDLK_RIGHT:
+					break;
+				}
+				break;
+			case SDL_WINDOWEVENT:
+				break;
+			case SDL_MOUSEWHEEL:
+				break;
+			}
+		} else {
+			screenScaler->bounds({ MV::point(0.0f, 0.0f), game.managers().renderer.world().size() / screenScaler->owner()->scale() });
+		}
+	}
+	mouse.update();
+}
+
+float getScaledDpi2(int displayIndex) {
+	const float kSysDefaultDpi =
+#if defined(__APPLE__) || defined(__ANDROID__)
+		72.0f;
+#elif defined(_WIN32)
+		96.0f;
+#endif
+	float dpiResult;
+	if (SDL_GetDisplayDPI(displayIndex, NULL, &dpiResult, NULL) != 0) {
+		dpiResult = kSysDefaultDpi;
+	}
+
+	return dpiResult / kSysDefaultDpi;
+}
+
 GameEditor::GameEditor(std::string a_username, std::string a_password) :
 	game(managers, a_username, a_password),
 	autoStartGame(!a_username.empty() && !a_password.empty()),
@@ -38,27 +93,36 @@ GameEditor::GameEditor(std::string a_username, std::string a_password) :
 	// 		};
 	// 		spineTestNode->loadChild("simple.scene", populateArchive);
 	// 		spineTestNode->loadChild("tree_particle.scene", populateArchive);
+	auto scale = getScaledDpi2(0);
 	screenScaler = limbo->attach<MV::Scene::Sprite>();
 	screenScaler->hide();
-	screenScaler->bounds({ MV::point(0.0f, 0.0f), game.managers().renderer.world().size() });
-//	auto textureSheet = MV::FileTextureDefinition::make("Images/slice.png");
-// 	auto alignedSprite = limbo->make("repositionNode")->attach<MV::Scene::Sprite>();
-// 	alignedSprite->texture(textureSheet->makeHandle());
-// 	alignedSprite->anchors().anchor({ MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f) }).usePosition(true).parent(screenScaler.self());
+	screenScaler->bounds({ MV::point(0.0f, 0.0f), game.managers().renderer.world().size() / scale});
+	limbo->scale(scale);
 
-// 	mouse.onLeftMouseDownEnd.connect("TEST", [&](MV::TapDevice& a_mouse) {
-// 		std::cout << "PRE: " << screenScaler->bounds() << std::endl;
-// 		screenScaler->bounds({ screenScaler->owner()->localFromScreen(a_mouse.position()), screenScaler->bounds().maxPoint });
-// 		std::cout << "POST: " << screenScaler->bounds() << std::endl;
-// 	});
-// 	mouse.onRightMouseDownEnd.connect("TEST", [&](MV::TapDevice& a_mouse) {
-// 		std::cout << "PRE: " << screenScaler->bounds() << std::endl;
-// 		screenScaler->bounds({ screenScaler->bounds().minPoint, screenScaler->owner()->localFromScreen(a_mouse.position()) });
-// 		std::cout << "POST: " << screenScaler->bounds() << std::endl;
-// 	});
+	auto child = limbo->make("child");
+	auto screenBounds = screenScaler->worldBounds();
 
+
+	// 	auto alignedSprite = limbo->make("repositionNode")->attach<MV::Scene::Sprite>();
+	// 	alignedSprite->texture(textureSheet->makeHandle());
+	// 	alignedSprite->anchors().anchor({ MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f) }).usePosition(true).parent(screenScaler.self());
+
+	// 	mouse.onLeftMouseDownEnd.connect("TEST", [&](MV::TapDevice& a_mouse) {
+	// 		std::cout << "PRE: " << screenScaler->bounds() << std::endl;
+	// 		screenScaler->bounds({ screenScaler->owner()->localFromScreen(a_mouse.position()), screenScaler->bounds().maxPoint });
+	// 		std::cout << "POST: " << screenScaler->bounds() << std::endl;
+	// 	});
+	// 	mouse.onRightMouseDownEnd.connect("TEST", [&](MV::TapDevice& a_mouse) {
+	// 		std::cout << "PRE: " << screenScaler->bounds() << std::endl;
+	// 		screenScaler->bounds({ screenScaler->bounds().minPoint, screenScaler->owner()->localFromScreen(a_mouse.position()) });
+	// 		std::cout << "POST: " << screenScaler->bounds() << std::endl;
+	// 	});
+
+	MV::Point worldCenter{ screenScaler->worldBounds().width() / 2.0f, screenScaler->worldBounds().height() / 2.0f };
+	MV::Point localCenter{ screenScaler->bounds().width() / 2.0f, screenScaler->bounds().height() / 2.0f };
+	MV::Point halfSize{ screenScaler->worldBounds().width() / 2.0f - 10.0f, screenScaler->worldBounds().height() / 2.0f - 10.0f };
 	
-	auto grid = limbo->make("Grid")->position({ (static_cast<float>(game.managers().renderer.window().width()) - 108.0f) / 2.0f, 200.0f })->
+	auto grid = limbo->make("Grid")->position({ screenScaler->bounds().width() / 2.0f, screenScaler->bounds().height() / 2.0f })->
 		attach<MV::Scene::Grid>()->columns(1)->padding({ 2.0f, 2.0f })->margin({ 4.0f, 4.0f })->color({ BOX_BACKGROUND })->owner();
 
 	auto editorButton = makeButton(grid, game.managers().textLibrary, mouse, "Editor", { 100.0f, 20.0f }, U8_STR("Editor"));
@@ -76,10 +140,12 @@ GameEditor::GameEditor(std::string a_username, std::string a_password) :
 		done = true;
 	});
 
+	grid->position(grid->position() - MV::toPoint(grid->bounds().size()) / 2.0f);
+
 	if (autoStartGame) {
 		gameButton->press();
 	}
-
+	
 // 	auto sendButton = makeButton(grid, game.managers().textLibrary, mouse, "Send", { 100.0f, 20.0f }, UTF_CHAR_STR("Send"));
 // 	sendButton->onAccept.connect("Swap", [&](const std::shared_ptr<MV::Scene::Clickable>&) {
 // 		if (client) {
@@ -87,5 +153,5 @@ GameEditor::GameEditor(std::string a_username, std::string a_password) :
 // 		}
 // 	});
 
-	grid->component<MV::Scene::Grid>()->anchors().anchor({ MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f) }).usePosition(true).parent(screenScaler.self(), MV::Scene::Anchors::BoundsToOffset::Apply);
+	grid->component<MV::Scene::Grid>()->anchors().anchor({ MV::point(0.5f, 0.5f), MV::point(0.5f, 0.5f) }).parent(screenScaler.self(), true);
 }

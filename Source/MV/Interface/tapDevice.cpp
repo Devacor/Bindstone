@@ -1,4 +1,4 @@
-#include "mouse.h"
+#include "tapDevice.h"
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
@@ -18,8 +18,7 @@ namespace MV{
 		onRightMouseDownEnd(onRightMouseDownEndSignal),
 		onRightMouseUpEnd(onRightMouseUpEndSignal),
 		onMove(onMoveSignal),
-		onPinchZoom(onPinchZoomSignal),
-		onRotate(onRotateSignal){
+		onPinchZoom(onPinchZoomSignal){
 		update();
 	}
 
@@ -46,18 +45,8 @@ namespace MV{
 
 	void TapDevice::updateTouch(SDL_Event a_event, MV::Size<int> a_screenSize) {
 		if (a_event.type == SDL_MULTIGESTURE){
-			bool pinchZoomAboveThreshold = fabs(a_event.mgesture.dDist) > 0.002;
-			bool rotationAboveThreshold = fabs(a_event.mgesture.dTheta) > MV::PIEf / 180.0f;
-			if (pinchZoomAboveThreshold || rotationAboveThreshold)
-			{
-				MV::Point<int> position(static_cast<int>(a_event.mgesture.x * a_screenSize.width), static_cast<int>(a_event.mgesture.y * a_screenSize.height));
-				if (pinchZoomAboveThreshold) {
-					onPinchZoomSignal(position, a_event.mgesture.dDist);
-				}
-				if (rotationAboveThreshold) {
-					onRotateSignal(position, a_event.mgesture.dTheta);
-				}
-			}
+			MV::Point<int> position(static_cast<int>(a_event.mgesture.x * a_screenSize.width), static_cast<int>(a_event.mgesture.y * a_screenSize.height));
+			onPinchZoomSignal(position, a_event.mgesture.dDist, a_event.mgesture.dTheta);
 		}
 	}
 
@@ -108,7 +97,7 @@ namespace MV{
 		nodesToExecute.clear();
 	}
 
-	void TapDevice::queueExclusiveAction(const ExclusiveMouseAction &a_node) {
+	void TapDevice::queueExclusiveAction(const ExclusiveTapAction &a_node) {
 		nodesToExecute.push_back(a_node);
 	}
 

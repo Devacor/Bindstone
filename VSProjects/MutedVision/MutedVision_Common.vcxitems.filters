@@ -36,9 +36,6 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Audio\sound.cpp">
       <Filter>MV\Audio</Filter>
     </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\mouse.cpp">
-      <Filter>MV\Interface</Filter>
-    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.cpp">
       <Filter>MV\Network</Filter>
     </ClCompile>
@@ -150,6 +147,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\tinyutf8.cpp">
       <Filter>MV\Utility</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.h">
@@ -160,9 +158,6 @@
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Audio\sound.h">
       <Filter>MV\Audio</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\mouse.h">
-      <Filter>MV\Interface</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\package.h">
       <Filter>MV\Interface</Filter>
@@ -353,5 +348,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\precompiled.h">
       <Filter>MV</Filter>
     </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.h" />
   </ItemGroup>
 </Project>

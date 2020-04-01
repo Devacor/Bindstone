@@ -4,153 +4,7 @@
 #include "sharedTextures.h"
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/stringUtility.h"
-
-
-namespace MESA {
-	void gluMultMatrixVecf(const GLfloat matrix[16], const GLfloat in[4], GLfloat out[4]) {
-		for (int i=0; i<4; i++) {
-			out[i] = 
-				in[0] * matrix[0*4+i] +
-				in[1] * matrix[1*4+i] +
-				in[2] * matrix[2*4+i] +
-				in[3] * matrix[3*4+i];
-		}
-	}
-
-	int gluInvertMatrixf(const GLfloat m[16], GLfloat invOut[16]) {
-		GLfloat inv[16], det;
-
-		inv[0] =   m[5]*m[10]*m[15] - m[5]*m[11]*m[14] - m[9]*m[6]*m[15]
-				 + m[9]*m[7]*m[14] + m[13]*m[6]*m[11] - m[13]*m[7]*m[10];
-		inv[4] =  -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15]
-				 - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
-		inv[8] =   m[4]*m[9]*m[15] - m[4]*m[11]*m[13] - m[8]*m[5]*m[15]
-				 + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
-		inv[12] = -m[4]*m[9]*m[14] + m[4]*m[10]*m[13] + m[8]*m[5]*m[14]
-				 - m[8]*m[6]*m[13] - m[12]*m[5]*m[10] + m[12]*m[6]*m[9];
-		inv[1] =  -m[1]*m[10]*m[15] + m[1]*m[11]*m[14] + m[9]*m[2]*m[15]
-				 - m[9]*m[3]*m[14] - m[13]*m[2]*m[11] + m[13]*m[3]*m[10];
-		inv[5] =   m[0]*m[10]*m[15] - m[0]*m[11]*m[14] - m[8]*m[2]*m[15]
-				 + m[8]*m[3]*m[14] + m[12]*m[2]*m[11] - m[12]*m[3]*m[10];
-		inv[9] =  -m[0]*m[9]*m[15] + m[0]*m[11]*m[13] + m[8]*m[1]*m[15]
-				 - m[8]*m[3]*m[13] - m[12]*m[1]*m[11] + m[12]*m[3]*m[9];
-		inv[13] =  m[0]*m[9]*m[14] - m[0]*m[10]*m[13] - m[8]*m[1]*m[14]
-				 + m[8]*m[2]*m[13] + m[12]*m[1]*m[10] - m[12]*m[2]*m[9];
-		inv[2] =   m[1]*m[6]*m[15] - m[1]*m[7]*m[14] - m[5]*m[2]*m[15]
-				 + m[5]*m[3]*m[14] + m[13]*m[2]*m[7] - m[13]*m[3]*m[6];
-		inv[6] =  -m[0]*m[6]*m[15] + m[0]*m[7]*m[14] + m[4]*m[2]*m[15]
-				 - m[4]*m[3]*m[14] - m[12]*m[2]*m[7] + m[12]*m[3]*m[6];
-		inv[10] =  m[0]*m[5]*m[15] - m[0]*m[7]*m[13] - m[4]*m[1]*m[15]
-				 + m[4]*m[3]*m[13] + m[12]*m[1]*m[7] - m[12]*m[3]*m[5];
-		inv[14] = -m[0]*m[5]*m[14] + m[0]*m[6]*m[13] + m[4]*m[1]*m[14]
-				 - m[4]*m[2]*m[13] - m[12]*m[1]*m[6] + m[12]*m[2]*m[5];
-		inv[3] =  -m[1]*m[6]*m[11] + m[1]*m[7]*m[10] + m[5]*m[2]*m[11]
-				 - m[5]*m[3]*m[10] - m[9]*m[2]*m[7] + m[9]*m[3]*m[6];
-		inv[7] =   m[0]*m[6]*m[11] - m[0]*m[7]*m[10] - m[4]*m[2]*m[11]
-				 + m[4]*m[3]*m[10] + m[8]*m[2]*m[7] - m[8]*m[3]*m[6];
-		inv[11] = -m[0]*m[5]*m[11] + m[0]*m[7]*m[9] + m[4]*m[1]*m[11]
-				 - m[4]*m[3]*m[9] - m[8]*m[1]*m[7] + m[8]*m[3]*m[5];
-		inv[15] =  m[0]*m[5]*m[10] - m[0]*m[6]*m[9] - m[4]*m[1]*m[10]
-				 + m[4]*m[2]*m[9] + m[8]*m[1]*m[6] - m[8]*m[2]*m[5];
-
-		det = m[0]*inv[0] + m[1]*inv[4] + m[2]*inv[8] + m[3]*inv[12];
-		if (det == 0){
-			return GL_FALSE;
-		}
-		det = 1.0f / det;
-
-		for (int i = 0; i < 16; i++){
-			invOut[i] = inv[i] * det;
-		}
-		return GL_TRUE;
-	}
-
-	void gluMultMatricesf(const GLfloat a[16], const GLfloat b[16], GLfloat r[16]){
-		for (int i = 0; i < 4; i++) {
-			for (int j = 0; j < 4; j++) {
-				r[i*4+j] = 
-				a[i*4+0]*b[0*4+j] +
-				a[i*4+1]*b[1*4+j] +
-				a[i*4+2]*b[2*4+j] +
-				a[i*4+3]*b[3*4+j];
-			}
-		}
-	}
-
-	GLint gluProject(GLfloat objx, GLfloat objy, GLfloat objz,
-		const GLfloat modelMatrix[16], const GLfloat projMatrix[16], const GLint viewport[4],
-		GLfloat *winx, GLfloat *winy, GLfloat *winz){
-
-		GLfloat in[4];
-		GLfloat out[4];
-
-		in[0]=objx;
-		in[1]=objy;
-		in[2]=objz;
-		in[3]=1.0f;
-		gluMultMatrixVecf(modelMatrix, in, out);
-		gluMultMatrixVecf(projMatrix, out, in);
-		if (MV::equals(in[3], 0.0f)){
-			return(GL_FALSE);
-		}
-		in[0] /= in[3];
-		in[1] /= in[3];
-		in[2] /= in[3];
-		/* Map x, y and z to range 0-1 */
-		in[0] = in[0] * 0.5f + 0.5f;
-		in[1] = in[1] * 0.5f + 0.5f;
-		in[2] = in[2] * 0.5f + 0.5f;
-
-		/* Map x,y to viewport */
-		in[0] = in[0] * viewport[2] + viewport[0];
-		in[1] = in[1] * viewport[3] + viewport[1];
-
-		*winx=in[0];
-		*winy=in[1];
-		*winz=in[2];
-		return(GL_TRUE);
-	}
-
-	GLint gluUnProject(GLfloat winx, GLfloat winy, GLfloat winz,
-		const GLfloat modelMatrix[16], const GLfloat projMatrix[16], const GLint viewport[4],
-		GLfloat *objx, GLfloat *objy, GLfloat *objz) {
-
-		GLfloat finalMatrix[16];
-		GLfloat in[4];
-		GLfloat out[4];
-
-		gluMultMatricesf(modelMatrix, projMatrix, finalMatrix);
-		if (!gluInvertMatrixf(finalMatrix, finalMatrix)){
-			return(GL_FALSE);
-		}
-
-		in[0]=winx;
-		in[1]=winy;
-		in[2]=winz;
-		in[3]=1.0f;
-
-		/* Map x and y from window coordinates */
-		in[0] = (in[0] - viewport[0]) / viewport[2];
-		in[1] = (in[1] - viewport[1]) / viewport[3];
-
-		/* Map to range -1 to 1 */
-		in[0] = in[0] * 2.0f - 1.0f;
-		in[1] = in[1] * 2.0f - 1.0f;
-		in[2] = in[2] * 2.0f - 1.0f;
-
-		gluMultMatrixVecf(finalMatrix, in, out);
-		if (MV::equals(out[3], 0.0f)){
-			return(GL_FALSE);
-		}
-		out[0] /= out[3];
-		out[1] /= out[3];
-		out[2] /= out[3];
-		*objx = out[0];
-		*objy = out[1];
-		*objz = out[2];
-		return(GL_TRUE);
-	}
-}
+#include "MV/Utility/stopwatch.h"
 
 namespace MV {
 	const std::string DEFAULT_ID = "default";
@@ -168,45 +22,80 @@ namespace MV {
 	GLint glExtensionFramebufferObject::originalFramebufferId = 0;
 	GLint glExtensionFramebufferObject::originalRenderbufferId = 0;
 
-	Point<> ProjectionDetails::projectScreenRaw(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview) {
-		Point<> result;
-
-		if (MESA::gluProject(a_point.x, a_point.y, a_point.z, &(a_modelview.getMatrixArray())[0], &(renderer.cameraProjectionMatrix(a_cameraId).getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE) {
-			std::cerr << "gluProject failure!" << std::endl;
+	Point<> ProjectionDetails::projectScreenRaw(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview, const MV::Point<>& a_viewOffset, const MV::Size<>& a_viewSize) {
+		auto v4Result = renderer.cameraProjectionMatrix(a_cameraId) * fullMatrixPointMultiply(a_modelview, a_point);
+		if (MV::equals(v4Result[3], 0.0f)) {
+			MV::error("projectScreen projection failure, point is exactly at the clip pane.");
+			return {};
 		}
-		result.y = renderer.window().height() - result.y;
-		result.z = a_point.z;//restore original z since we're just 2d.
-		//std::cout << "project: " << a_point << result << "\n" << a_modelview << "_____________________" << std::endl;
+		Point<> result(v4Result[0] / v4Result[3], v4Result[1] / v4Result[3], v4Result[2] / v4Result[3]);
+
+		// Map x, y and z to range 0-1 (was -1 to +1)
+		result.x = result.x * .5f + .5f;
+		result.y = result.y * .5f + .5f;
+		result.z = result.z * .5f + .5f;
+
+		// Map x,y to viewport
+		result.x = (result.x * a_viewSize.width) + a_viewOffset.x;
+		result.y = a_viewSize.height - ((result.y * a_viewSize.height) + a_viewOffset.y); //invert y
+
+		// Return z to original (for 2D points, remove for 3D)!
+		result.z = a_point.z;
+
 		return result;
 	}
 
 	Point<int> ProjectionDetails::projectScreen(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview){
-		return round<int>(projectScreenRaw(a_point, a_cameraId, a_modelview));
+		return round<int>(projectScreenRaw(a_point, a_cameraId, a_modelview, 
+			{ static_cast<PointPrecision>(viewport[0]), static_cast<PointPrecision>(viewport[1]) }, 
+			{ static_cast<PointPrecision>(viewport[2]), static_cast<PointPrecision>(viewport[3]) }));
 	}
 
 	Point<> ProjectionDetails::projectWorld(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview){
-		return renderer.worldFromScreenRaw(projectScreenRaw(a_point, a_cameraId, a_modelview));
+		return projectScreenRaw(a_point, a_cameraId, a_modelview, 
+			{ 0.0f, 0.0f }, { renderer.world().width(), renderer.world().height() });
 	}
 
-	Point<> ProjectionDetails::unProjectScreenRaw(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview){
-		Point<> result;
+	Point<> ProjectionDetails::unProjectScreenRaw(const Point<>& a_point, int32_t a_cameraId, const TransformMatrix& a_modelview, const MV::Point<>& a_viewOffset, const MV::Size<>& a_viewSize) {
+		auto result = a_point;
 
-		auto inputPoint = a_point;
-		inputPoint.y = renderer.window().height() - inputPoint.y;
-		if(MESA::gluUnProject(inputPoint.x, inputPoint.y, .5, &(a_modelview.getMatrixArray())[0], &(renderer.cameraProjectionMatrix(a_cameraId).getMatrixArray())[0], viewport, &result.x, &result.y, &result.z) == GL_FALSE){
-			std::cerr << "gluUnProject failure!" << std::endl;
+		float det;
+		auto conversionMatrix = inverse(renderer.cameraProjectionMatrix(a_cameraId) * a_modelview, det);
+		if (MV::equals(det, 0.0f)) {
+			MV::error("unProjectScreen failure, point is exactly at the clip pane.");
+			result.clear();
+		} else {
+			// Map x and y from window coordinates 
+			result.x = (result.x - a_viewOffset.x) / a_viewSize.width;
+			result.y = ((a_viewSize.height - result.y) - a_viewOffset.y) / a_viewSize.height;
+
+			// Map to range -1 to 1 
+			result.x = result.x * 2.0f - 1.0f;
+			result.y = result.y * 2.0f - 1.0f;
+			result.z = result.z * 2.0f - 1.0f;
+
+			PointPrecision w;
+			result = fullMatrixPointMultiply(conversionMatrix, result, w);
+			if (MV::equals(w, 0.0f)) {
+				MV::error("unProjectScreen	failure, point is exactly at the clip pane.");
+				result.clear();
+			} else {
+				result /= w;
+				result.z = a_point.z; //restore original z since we're just 2d.
+			}
 		}
-		result.z = static_cast<PointPrecision>(a_point.z);//restore original z since we're just 2d.
-		//std::cout << "unproj: " << inputPoint << result << "\n" << a_modelview << "_____________________" << std::endl;
 		return result;
 	}
 
 	Point<> ProjectionDetails::unProjectScreen(const Point<int> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview) {
-		return unProjectScreenRaw(cast<PointPrecision>(a_point), a_cameraId, a_modelview);
+		return unProjectScreenRaw(cast<PointPrecision>(a_point), a_cameraId, a_modelview, 
+			{ static_cast<PointPrecision>(viewport[0]), static_cast<PointPrecision>(viewport[1]) }, 
+			{ static_cast<PointPrecision>(viewport[2]), static_cast<PointPrecision>(viewport[3]) });
 	}
 
 	Point<> ProjectionDetails::unProjectWorld(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview){
-		return renderer.screenFromWorldRaw(unProjectScreenRaw(a_point, a_cameraId, a_modelview));
+		return unProjectScreenRaw(a_point, a_cameraId, a_modelview, 
+			{ 0.0f, 0.0f }, { renderer.world().width(), renderer.world().height() });
 	}
 
 	void checkSDLError(int line)
@@ -371,13 +260,7 @@ namespace MV {
 	\*************************/
 
 	Window::Window(Draw2D &a_renderer):
-        glcontext(0),
-		initialized(false),
-		maintainProportions(true),
-		sizeWorldWithWindow(false),
         SDLflags(SDL_WINDOW_OPENGL|SDL_WINDOW_SHOWN|SDL_WINDOW_RESIZABLE),
-		vsync(false),
-		userCanResize(false),
         renderer(a_renderer){
 		
 		updateAspectRatio();
@@ -404,7 +287,7 @@ namespace MV {
 		auto sizeDelta = windowSize - a_size;
 		windowSize = a_size;
 		updateAspectRatio();
-		if(initialized){
+		if(window){
 			if (!renderer.headless()) {
 				SDL_SetWindowSize(window, windowSize.width, windowSize.height);
 			}
@@ -421,7 +304,7 @@ namespace MV {
 		minSize = a_minSize;
 		maxSize = a_maxSize;
 		userCanResize = true;
-		if(initialized){
+		if(window){
 			updateWindowResizeLimits();
 		}
 		return *this;
@@ -429,7 +312,7 @@ namespace MV {
 
 	Window& Window::lockUserResize(){
 		userCanResize = false;
-		if(initialized){
+		if(window){
 			if (!renderer.headless()) {
 				SDL_GL_GetDrawableSize(window, &windowSize.width, &windowSize.height);
 			}
@@ -445,7 +328,7 @@ namespace MV {
 	}
 
 	void Window::updateWindowResizeLimits(){
-		if(initialized && !renderer.headless()){
+		if(window && !renderer.headless()){
 			SDL_SetWindowMinimumSize(window, std::max(minSize.width, 1), std::max(minSize.height, 1));
 			SDL_SetWindowMaximumSize(window, std::max(maxSize.width, 1), std::max(maxSize.height, 1));
 			checkSDLError(__LINE__);
@@ -455,7 +338,7 @@ namespace MV {
 	Window& Window::windowedMode(){
 		SDLflags = SDLflags & ~ SDL_WINDOW_FULLSCREEN;
 		SDLflags = SDLflags & ~ SDL_WINDOW_FULLSCREEN_DESKTOP;
-		if(initialized && !renderer.headless()){
+		if(window && !renderer.headless()){
 			SDL_SetWindowFullscreen(window, 0);
 		}
 		return *this;
@@ -474,7 +357,7 @@ namespace MV {
 	Window& Window::fullScreenMode(){
 		SDLflags = SDLflags | SDL_WINDOW_FULLSCREEN;
 		SDLflags = SDLflags & ~ SDL_WINDOW_FULLSCREEN_DESKTOP;
-		if(initialized && !renderer.headless()){
+		if(window && !renderer.headless()){
 			SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
 		}
         return *this;
@@ -483,7 +366,7 @@ namespace MV {
 	Window& Window::fullScreenWindowedMode(){
 		SDLflags = SDLflags | SDL_WINDOW_FULLSCREEN_DESKTOP;
 		SDLflags = SDLflags & ~ SDL_WINDOW_FULLSCREEN;
-		if(initialized && !renderer.headless()){
+		if(window && !renderer.headless()){
 			SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
 		}
         return *this;
@@ -491,7 +374,7 @@ namespace MV {
 	
 	Window& Window::borderless(){
 		SDLflags = SDLflags | SDL_WINDOW_BORDERLESS;
-		if(initialized && !renderer.headless()){
+		if(window && !renderer.headless()){
 			SDL_SetWindowBordered(window, SDL_FALSE);
 		}
 		return *this;
@@ -499,7 +382,7 @@ namespace MV {
 
 	Window& Window::bordered(){
 		SDLflags = SDLflags & ~ SDL_WINDOW_BORDERLESS;
-		if(initialized && !renderer.headless()){
+		if(window && !renderer.headless()){
 			SDL_SetWindowBordered(window, SDL_TRUE);
 		}
 		return *this;
@@ -530,7 +413,7 @@ namespace MV {
 	}
 
 	bool Window::initialize(){
-		if (!renderer.headless()) {
+		if (!window && !renderer.headless()) {
 #ifdef HAVE_OPENGLES
             if(SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES)!=0){
                 std::cerr << "Failed to set GL Context to ES" << std::endl;
@@ -605,9 +488,7 @@ namespace MV {
 			checkSDLError(__LINE__);
 		}
 		updateAspectRatio();
-		initialized = true;
 
-		//must happen after we flag initialized as true.
 		if(!userCanResize){
 			lockUserResize();
 		}
@@ -642,23 +523,54 @@ namespace MV {
 		}
 	}
 
+	constexpr float Window::systemDefaultDpi() const {
+#if defined(__APPLE__)
+#	if TARGET_OS_MAC
+			return 72.0f;
+#	else
+			return 132.0f
+#	endif
+#elif defined(__ANDROID__)
+			return 160.0f;
+#elif defined(_WIN32)
+			return 96.0f;
+#endif
+		return 0;
+	}
+
+	float Window::windowDpi() const {
+		float dpiResult;
+
+		if (SDL_GetDisplayDPI(SDL_GetWindowDisplayIndex(window), NULL, &dpiResult, NULL) != 0) {
+			dpiResult = systemDefaultDpi();
+		}
+
+		return dpiResult;
+	}
+
+	float Window::uiScale() const {
+		return windowDpi() / systemDefaultDpi();
+	}
+
 	bool Window::handleEvent(const SDL_Event &a_event, RenderWorld &a_world){
-		if(a_event.type == SDL_WINDOWEVENT && a_event.window.event == SDL_WINDOWEVENT_RESIZED){
-			std::cout << "Window Resized!" << std::endl;
-			auto worldScreenDelta = cast<PointPrecision>(windowSize) / a_world.size();
-			Size<int> newSize(a_event.window.data1, a_event.window.data2);
-			MV::PointPrecision oldRatio = aspectRatio;
-			if(maintainProportions){
-				conformToAspectRatio(newSize.width, newSize.height);
-			}
-			auto screenSizeDelta = resize(newSize);
-			if (sizeWorldWithWindow) {
-				auto worldSizeDelta = cast<PointPrecision>(screenSizeDelta) / worldScreenDelta;
-				std::cout << "Screen Resize: " << screenSizeDelta << " World Resize: " << worldSizeDelta << std::endl;
-				a_world.resize(a_world.size() - worldSizeDelta);
-			}
-			if(maintainProportions){
-				aspectRatio = oldRatio; //just prevent resize from mucking with this.
+		if(a_event.type == SDL_WINDOWEVENT){
+			if (a_event.window.event == SDL_WINDOWEVENT_RESIZED) {
+				MV::info("Window Resized!");
+				auto worldScreenDelta = cast<PointPrecision>(windowSize) / a_world.size();
+				Size<int> newSize(std::min(std::max(a_event.window.data1, minSize.width), maxSize.width), std::min(std::max(a_event.window.data2, minSize.height), maxSize.height));
+				MV::PointPrecision oldRatio = aspectRatio;
+				if (maintainProportions) {
+					conformToAspectRatio(newSize.width, newSize.height);
+				}
+				auto screenSizeDelta = resize(newSize);
+				if (sizeWorldWithWindow) {
+					auto worldSizeDelta = cast<PointPrecision>(screenSizeDelta) / worldScreenDelta;
+					MV::info("Screen Resize: ", screenSizeDelta, " World Resize: ", worldSizeDelta);
+					a_world.resize(a_world.size() - worldSizeDelta);
+				}
+				if (maintainProportions) {
+					aspectRatio = oldRatio; //just prevent resize from mucking with this.
+				}
 			}
 			return true;
 		}
@@ -668,7 +580,7 @@ namespace MV {
 	void Window::refreshContext(){
 		ensureValidGLContext();
 		if(!renderer.headless() && SDL_GL_MakeCurrent(window, glcontext)){
-			std::cerr << "Problem with refreshContext()." << SDL_GetError() << std::endl;
+			MV::error("Problem with refreshContext(): ", SDL_GetError());
 		}
 	}
 
@@ -756,8 +668,7 @@ namespace MV {
 		if (setupSDL()) {
 			SDL_DisplayMode DM;
 			SDL_GetCurrentDisplayMode(0, &DM);
-			auto Width = DM.w;
-			auto Height = DM.h;
+			MV::info("Monitor Size: ", DM.w, "x", DM.h);
 			return MV::Size<int>(DM.w, DM.h);
 		}
 	}
@@ -766,19 +677,21 @@ namespace MV {
 		SDL_DisplayMode mode;
 		SDL_GetCurrentDisplayMode(0, &mode);
 
-		std::cout << "\\/==================================================\\/" << std::endl;
-		std::cout << "Window	  : (" << sdlWindow.width() << " x " << sdlWindow.height() << ")" << std::endl;
+		std::stringstream summary;
+		summary << "\\/==================================================\\/" << std::endl;
+		summary << "Window	  : (" << sdlWindow.width() << " x " << sdlWindow.height() << ")" << std::endl;
 		if (!headless()) {
-			std::cout << "Driver	  : " << SDL_GetCurrentVideoDriver() << std::endl;
-			std::cout << "Screen bpp : " << SDL_BITSPERPIXEL(mode.format) << std::endl;
-			std::cout << "Vendor	  : " << glGetString(GL_VENDOR) << std::endl;
-			std::cout << "Renderer	: " << glGetString(GL_RENDERER) << std::endl;
-			std::cout << "Version	 : " << glGetString(GL_VERSION) << std::endl;
-			std::cout << "Extensions : " << glGetString(GL_EXTENSIONS) << std::endl;
+			summary << "Driver	  : " << SDL_GetCurrentVideoDriver() << std::endl;
+			summary << "Screen bpp : " << SDL_BITSPERPIXEL(mode.format) << std::endl;
+			summary << "Vendor	  : " << glGetString(GL_VENDOR) << std::endl;
+			summary << "Renderer	: " << glGetString(GL_RENDERER) << std::endl;
+			summary << "Version	 : " << glGetString(GL_VERSION) << std::endl;
+			summary << "Extensions : " << glGetString(GL_EXTENSIONS) << std::endl;
 		} else {
-			std::cout << "HEADLESS" << std::endl;
+			summary << "HEADLESS" << std::endl;
 		}
-		std::cout << "/\\==================================================/\\" << std::endl;
+		summary << "/\\==================================================/\\" << std::endl;
+		MV::info(summary.str());
 	}
 
 	bool Draw2D::setupSDL(){
@@ -786,7 +699,7 @@ namespace MV {
 			firstInitializationSDL = false;
 			if (!headless()) {
 				if (SDL_Init(SDL_INIT_EVERYTHING) == -1) {
-					std::cerr << "SDL_Init: " << SDL_GetError();
+					MV::error("SDL_Init: ", SDL_GetError());
 				}
                 
 				/*if (SDL_GetNumVideoDrivers() < 1 || SDL_VideoInit(0) < 0) {
@@ -797,12 +710,12 @@ namespace MV {
                 gl3wInit();
 			} else {
 				if (SDL_Init(SDL_INIT_EVENTS) == -1) {
-					std::cerr << "SDL_Init [HEADLESS]: " << SDL_GetError();
+					MV::error("SDL_Init [HEADLESS]: ", SDL_GetError());
 				}
 			}
 		}
 		if(!sdlWindow.initialize()){
-			std::cerr << "Window initialization failed!" << std::endl;
+			MV::error("Window initialization failed: ", SDL_GetError());
 			return false;
 		}
 		
@@ -1105,8 +1018,16 @@ namespace MV {
 	}
 
 	void Draw2D::resetViewport() {
-		glViewport(0, 0, window().width(), window().height());
-		glGetIntegerv(GL_VIEWPORT, viewport);
+		if (!headless()) {
+			glViewport(0, 0, sdlWindow.width(), sdlWindow.height());
+			glGetIntegerv(GL_VIEWPORT, viewport);
+			MV::info("ResetViewport: Window:(", sdlWindow.width(), ", ", sdlWindow.height() ,") | ViewPort:(", viewport[0], ", ", viewport[1], ") -> (", viewport[2], ", ", viewport[3], ")");
+		} else {
+			viewport[0] = 0;
+			viewport[1] = 0;
+			viewport[2] = static_cast<GLint>(sdlWindow.width());
+			viewport[3] = static_cast<GLint>(sdlWindow.height());
+		}
 	}
 
 // 	void Draw2D::registerShader(std::shared_ptr<Scene::Node> a_node) {
@@ -1157,15 +1078,7 @@ namespace MV {
 	}
 
 	void Draw2D::refreshWorldAndWindowSize() {
-		if (!headless()) {
-			glViewport(0, 0, sdlWindow.width(), sdlWindow.height());
-			glGetIntegerv(GL_VIEWPORT, viewport);
-		} else {
-			viewport[0] = 0;
-			viewport[1] = 0;
-			viewport[2] = static_cast<GLint>(sdlWindow.width());
-			viewport[3] = static_cast<GLint>(sdlWindow.height());
-		}
+		resetViewport();
 
 		projectionMatrix().clear(); //ensure nothing else has trampled on us.
 		projectionMatrix().top().makeOrtho(0, mvWorld.width(), mvWorld.height(), 0, -1.0, 1.0);

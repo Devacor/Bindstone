@@ -4,7 +4,7 @@
 #include "MV/Render/package.h"
 #include "Game/state.h"
 #include "MV/Utility/chaiscriptUtility.h"
-#include "MV/Interface/mouse.h"
+#include "MV/Interface/tapDevice.h"
 
 namespace MV {
 	class InterfaceManager;

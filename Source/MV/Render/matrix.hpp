@@ -23,8 +23,8 @@ namespace MV {
 	template<size_t SizeX, size_t SizeY>
 	inline Matrix<SizeX, SizeY> operator+(const Matrix<SizeX, SizeY> &a_left, const Matrix<SizeX, SizeY> &a_right);
 
-	template<size_t SizeX, size_t SizeY, size_t ResultY>
-	inline Matrix<SizeX, ResultY> operator*(const Matrix<SizeX, SizeY> &a_left, const Matrix<ResultY, SizeY> &a_right);
+	template<size_t N, size_t M, size_t P>
+	inline Matrix<P, N> operator*(const Matrix<M, N>& a_lhs, const Matrix<P, M>& a_rhs);
 	template<size_t SizeX, size_t SizeY>
 	inline Matrix<SizeX, SizeY> operator*(const Matrix<SizeX, SizeY> &a_left, const PointPrecision &a_right);
 
@@ -54,34 +54,37 @@ namespace MV {
 		inline Matrix<SizeX, SizeY>& operator=(const Matrix<SizeX, SizeY>& a_other) = default;
 		inline Matrix<SizeX, SizeY>& operator=(Matrix<SizeX, SizeY>&& a_other) = default;
 
-		void print() {
-			for (size_t y = 0; y < SizeY; ++y) {
-				for (size_t x = 0; x < SizeX; ++x) {
-					std::cout << "(" << (x*SizeX) + (y) << ":" << (*this).access(x, y) << ") ";
-				}
-				std::cout << "\n";
-			}
+		constexpr size_t index(size_t a_x, size_t a_y) const {
+			return (SizeY * a_x) + (a_y);
+		}
+
+		constexpr PointPrecision& operator[](size_t a_index) {
+			return (matrixArray)[a_index];
+		}
+
+		constexpr const PointPrecision& operator[](size_t a_index) const {
+			return (matrixArray)[a_index];
 		}
 
 		constexpr PointPrecision& operator() (size_t a_x, size_t a_y) {
-			return (matrixArray)[(SizeX * a_x) + (a_y)];
+			return (matrixArray)[(SizeY * a_x) + (a_y)];
 		}
 		constexpr const PointPrecision& operator() (size_t a_x, size_t a_y) const {
-			return (matrixArray)[(SizeX * a_x) + (a_y)];
+			return (matrixArray)[(SizeY * a_x) + (a_y)];
 		}
 
 		constexpr PointPrecision& access(size_t a_x, size_t a_y) {
-			return (matrixArray)[(SizeX * a_x) + (a_y)];
+			return (matrixArray)[(SizeY * a_x) + (a_y)];
 		}
 		constexpr const PointPrecision& access(size_t a_x, size_t a_y) const {
-			return (matrixArray)[(SizeX * a_x) + (a_y)];
+			return (matrixArray)[(SizeY * a_x) + (a_y)];
 		}
 
 		constexpr PointPrecision& accessTransposed(size_t a_x, size_t a_y) {
-			return (matrixArray)[(a_x)+(a_y * SizeY)];
+			return (matrixArray)[(a_x)+(a_y * SizeX)];
 		}
 		constexpr const PointPrecision& accessTransposed(size_t a_x, size_t a_y) const {
-			return (matrixArray)[(a_x)+(a_y * SizeY)];
+			return (matrixArray)[(a_x)+(a_y * SizeX)];
 		}
 
 		inline Matrix<SizeY, SizeX> transpose() const {
@@ -158,41 +161,74 @@ namespace MV {
 		return result += a_right;
 	}
 
-	template<size_t SizeX, size_t SizeY, size_t ResultY>
-	inline Matrix<SizeX, ResultY> operator*(const Matrix<SizeX, SizeY> &a_left, const Matrix<ResultY, SizeY> &a_right) {
-		Matrix<SizeX, ResultY> result;
-
-		for (size_t x = 0; x < SizeX; ++x) {
-			for (size_t common = 0; common < SizeX; ++common) {
-				for (size_t y = 0; y < ResultY; ++y) {
-					result.access(x, y) += a_left(common, y) * a_right(x, common);
+	template<size_t N, size_t M, size_t P>
+	inline Matrix<P, N> operator*(const Matrix<M, N>& a_lhs, const Matrix<P, M>& a_rhs) {
+		Matrix<P, N> result;
+		for (size_t n = 0; n < N; ++n) {
+			for (size_t p = 0; p < P; ++p) {
+				for (size_t m = 0; m < M; ++m) {
+					result(p, n) += a_lhs(m, n) * a_rhs(p, m);
 				}
 			}
 		}
-
 		return result;
 	}
 
-	//unrolled for speed
-	inline MV::Matrix<4, 4> unrolledMultiply(const MV::Matrix<4, 4> & a_left, const MV::Matrix<4, 4> & a_right) {
-		MV::Matrix<4, 4> dest(MV::MatrixInitialize::NoFill);
-		dest(0, 0) = a_right(0, 0) * a_left(0, 0) + a_right(0, 1) * a_left(1, 0) + a_right(0, 2) * a_left(2, 0) + a_right(0, 3) * a_left(3, 0);
-		dest(0, 1) = a_right(0, 0) * a_left(0, 1) + a_right(0, 1) * a_left(1, 1) + a_right(0, 2) * a_left(2, 1) + a_right(0, 3) * a_left(3, 1);
-		dest(0, 2) = a_right(0, 0) * a_left(0, 2) + a_right(0, 1) * a_left(1, 2) + a_right(0, 2) * a_left(2, 2) + a_right(0, 3) * a_left(3, 2);
-		dest(0, 3) = a_right(0, 0) * a_left(0, 3) + a_right(0, 1) * a_left(1, 3) + a_right(0, 2) * a_left(2, 3) + a_right(0, 3) * a_left(3, 3);
-		dest(1, 0) = a_right(1, 0) * a_left(0, 0) + a_right(1, 1) * a_left(1, 0) + a_right(1, 2) * a_left(2, 0) + a_right(1, 3) * a_left(3, 0);
-		dest(1, 1) = a_right(1, 0) * a_left(0, 1) + a_right(1, 1) * a_left(1, 1) + a_right(1, 2) * a_left(2, 1) + a_right(1, 3) * a_left(3, 1);
-		dest(1, 2) = a_right(1, 0) * a_left(0, 2) + a_right(1, 1) * a_left(1, 2) + a_right(1, 2) * a_left(2, 2) + a_right(1, 3) * a_left(3, 2);
-		dest(1, 3) = a_right(1, 0) * a_left(0, 3) + a_right(1, 1) * a_left(1, 3) + a_right(1, 2) * a_left(2, 3) + a_right(1, 3) * a_left(3, 3);
-		dest(2, 0) = a_right(2, 0) * a_left(0, 0) + a_right(2, 1) * a_left(1, 0) + a_right(2, 2) * a_left(2, 0) + a_right(2, 3) * a_left(3, 0);
-		dest(2, 1) = a_right(2, 0) * a_left(0, 1) + a_right(2, 1) * a_left(1, 1) + a_right(2, 2) * a_left(2, 1) + a_right(2, 3) * a_left(3, 1);
-		dest(2, 2) = a_right(2, 0) * a_left(0, 2) + a_right(2, 1) * a_left(1, 2) + a_right(2, 2) * a_left(2, 2) + a_right(2, 3) * a_left(3, 2);
-		dest(2, 3) = a_right(2, 0) * a_left(0, 3) + a_right(2, 1) * a_left(1, 3) + a_right(2, 2) * a_left(2, 3) + a_right(2, 3) * a_left(3, 3);
-		dest(3, 0) = a_right(3, 0) * a_left(0, 0) + a_right(3, 1) * a_left(1, 0) + a_right(3, 2) * a_left(2, 0) + a_right(3, 3) * a_left(3, 0);
-		dest(3, 1) = a_right(3, 0) * a_left(0, 1) + a_right(3, 1) * a_left(1, 1) + a_right(3, 2) * a_left(2, 1) + a_right(3, 3) * a_left(3, 1);
-		dest(3, 2) = a_right(3, 0) * a_left(0, 2) + a_right(3, 1) * a_left(1, 2) + a_right(3, 2) * a_left(2, 2) + a_right(3, 3) * a_left(3, 2);
-		dest(3, 3) = a_right(3, 0) * a_left(0, 3) + a_right(3, 1) * a_left(1, 3) + a_right(3, 2) * a_left(2, 3) + a_right(3, 3) * a_left(3, 3);
+	template <>
+	inline Matrix<4, 4> operator*(const Matrix<4, 4>& a_lhs, const Matrix<4, 4>& a_rhs) {
+		Matrix<4, 4> dest(MatrixInitialize::NoFill);
+		dest(0, 0) = a_rhs(0, 0) * a_lhs(0, 0) + a_rhs(0, 1) * a_lhs(1, 0) + a_rhs(0, 2) * a_lhs(2, 0) + a_rhs(0, 3) * a_lhs(3, 0);
+		dest(0, 1) = a_rhs(0, 0) * a_lhs(0, 1) + a_rhs(0, 1) * a_lhs(1, 1) + a_rhs(0, 2) * a_lhs(2, 1) + a_rhs(0, 3) * a_lhs(3, 1);
+		dest(0, 2) = a_rhs(0, 0) * a_lhs(0, 2) + a_rhs(0, 1) * a_lhs(1, 2) + a_rhs(0, 2) * a_lhs(2, 2) + a_rhs(0, 3) * a_lhs(3, 2);
+		dest(0, 3) = a_rhs(0, 0) * a_lhs(0, 3) + a_rhs(0, 1) * a_lhs(1, 3) + a_rhs(0, 2) * a_lhs(2, 3) + a_rhs(0, 3) * a_lhs(3, 3);
+		dest(1, 0) = a_rhs(1, 0) * a_lhs(0, 0) + a_rhs(1, 1) * a_lhs(1, 0) + a_rhs(1, 2) * a_lhs(2, 0) + a_rhs(1, 3) * a_lhs(3, 0);
+		dest(1, 1) = a_rhs(1, 0) * a_lhs(0, 1) + a_rhs(1, 1) * a_lhs(1, 1) + a_rhs(1, 2) * a_lhs(2, 1) + a_rhs(1, 3) * a_lhs(3, 1);
+		dest(1, 2) = a_rhs(1, 0) * a_lhs(0, 2) + a_rhs(1, 1) * a_lhs(1, 2) + a_rhs(1, 2) * a_lhs(2, 2) + a_rhs(1, 3) * a_lhs(3, 2);
+		dest(1, 3) = a_rhs(1, 0) * a_lhs(0, 3) + a_rhs(1, 1) * a_lhs(1, 3) + a_rhs(1, 2) * a_lhs(2, 3) + a_rhs(1, 3) * a_lhs(3, 3);
+		dest(2, 0) = a_rhs(2, 0) * a_lhs(0, 0) + a_rhs(2, 1) * a_lhs(1, 0) + a_rhs(2, 2) * a_lhs(2, 0) + a_rhs(2, 3) * a_lhs(3, 0);
+		dest(2, 1) = a_rhs(2, 0) * a_lhs(0, 1) + a_rhs(2, 1) * a_lhs(1, 1) + a_rhs(2, 2) * a_lhs(2, 1) + a_rhs(2, 3) * a_lhs(3, 1);
+		dest(2, 2) = a_rhs(2, 0) * a_lhs(0, 2) + a_rhs(2, 1) * a_lhs(1, 2) + a_rhs(2, 2) * a_lhs(2, 2) + a_rhs(2, 3) * a_lhs(3, 2);
+		dest(2, 3) = a_rhs(2, 0) * a_lhs(0, 3) + a_rhs(2, 1) * a_lhs(1, 3) + a_rhs(2, 2) * a_lhs(2, 3) + a_rhs(2, 3) * a_lhs(3, 3);
+		dest(3, 0) = a_rhs(3, 0) * a_lhs(0, 0) + a_rhs(3, 1) * a_lhs(1, 0) + a_rhs(3, 2) * a_lhs(2, 0) + a_rhs(3, 3) * a_lhs(3, 0);
+		dest(3, 1) = a_rhs(3, 0) * a_lhs(0, 1) + a_rhs(3, 1) * a_lhs(1, 1) + a_rhs(3, 2) * a_lhs(2, 1) + a_rhs(3, 3) * a_lhs(3, 1);
+		dest(3, 2) = a_rhs(3, 0) * a_lhs(0, 2) + a_rhs(3, 1) * a_lhs(1, 2) + a_rhs(3, 2) * a_lhs(2, 2) + a_rhs(3, 3) * a_lhs(3, 2);
+		dest(3, 3) = a_rhs(3, 0) * a_lhs(0, 3) + a_rhs(3, 1) * a_lhs(1, 3) + a_rhs(3, 2) * a_lhs(2, 3) + a_rhs(3, 3) * a_lhs(3, 3);
 		return dest;
+	}
+
+	inline MV::Point<> operator*(const MV::Matrix<4, 4>& a_lhs, const MV::Point<>& a_rhs) {
+		return {
+			a_lhs(0, 0) * a_rhs(0) + a_lhs(1, 0) * a_rhs(1) + a_lhs(2, 0) * a_rhs(2) + a_lhs(3, 0),
+			a_lhs(0, 1) * a_rhs(0) + a_lhs(1, 1) * a_rhs(1) + a_lhs(2, 1) * a_rhs(2) + a_lhs(3, 1),
+			a_lhs(0, 2) * a_rhs(0) + a_lhs(1, 2) * a_rhs(1) + a_lhs(2, 2) * a_rhs(2) + a_lhs(3, 2)
+		};
+	}
+
+	inline std::array<PointPrecision, 4> fullMatrixPointMultiply(const MV::Matrix<4, 4>& a_lhs, const MV::Point<>& a_rhs) {
+		return {
+			a_lhs(0, 0) * a_rhs(0) + a_lhs(1, 0) * a_rhs(1) + a_lhs(2, 0) * a_rhs(2) + a_lhs(3, 0),
+			a_lhs(0, 1) * a_rhs(0) + a_lhs(1, 1) * a_rhs(1) + a_lhs(2, 1) * a_rhs(2) + a_lhs(3, 1),
+			a_lhs(0, 2) * a_rhs(0) + a_lhs(1, 2) * a_rhs(1) + a_lhs(2, 2) * a_rhs(2) + a_lhs(3, 2),
+			a_lhs(0, 3) * a_rhs(0) + a_lhs(1, 3) * a_rhs(1) + a_lhs(2, 3) * a_rhs(2) + a_lhs(3, 3)
+		};
+	}
+
+	inline MV::Point<> fullMatrixPointMultiply(const MV::Matrix<4, 4>& a_lhs, const MV::Point<>& a_rhs, PointPrecision &w) {
+		w = a_lhs(0, 3) * a_rhs(0) + a_lhs(1, 3) * a_rhs(1) + a_lhs(2, 3) * a_rhs(2) + a_lhs(3, 3);
+		return {
+			a_lhs(0, 0) * a_rhs(0) + a_lhs(1, 0) * a_rhs(1) + a_lhs(2, 0) * a_rhs(2) + a_lhs(3, 0),
+			a_lhs(0, 1) * a_rhs(0) + a_lhs(1, 1) * a_rhs(1) + a_lhs(2, 1) * a_rhs(2) + a_lhs(3, 1),
+			a_lhs(0, 2) * a_rhs(0) + a_lhs(1, 2) * a_rhs(1) + a_lhs(2, 2) * a_rhs(2) + a_lhs(3, 2)
+		};
+	}
+
+	inline std::array<PointPrecision, 4> operator*(const MV::Matrix<4, 4>& a_lhs, const std::array<PointPrecision, 4>& a_rhs) {
+		return {
+			a_lhs(0, 0) * a_rhs[0] + a_lhs(1, 0) * a_rhs[1] + a_lhs(2, 0) * a_rhs[2] + a_lhs(3, 0) * a_rhs[3],
+			a_lhs(0, 1) * a_rhs[0] + a_lhs(1, 1) * a_rhs[1] + a_lhs(2, 1) * a_rhs[2] + a_lhs(3, 1) * a_rhs[3],
+			a_lhs(0, 2) * a_rhs[0] + a_lhs(1, 2) * a_rhs[1] + a_lhs(2, 2) * a_rhs[2] + a_lhs(3, 2) * a_rhs[3],
+			a_lhs(0, 3) * a_rhs[0] + a_lhs(1, 3) * a_rhs[1] + a_lhs(2, 3) * a_rhs[2] + a_lhs(3, 3) * a_rhs[3]
+		};
 	}
 
 	template<size_t SizeX, size_t SizeY>
@@ -446,7 +482,61 @@ namespace MV {
 		inline MV::Point<PointPrecision> position() const {
 			return MV::Point<PointPrecision>{access(3, 0), access(3, 1), access(3, 2)};
 		}
+
 	};
+
+	inline TransformMatrix inverse(const Matrix<4, 4> &a_in, float& det) {
+		float A2323 = a_in(2, 2) * a_in(3, 3) - a_in(2, 3) * a_in(3, 2);
+		float A1323 = a_in(2, 1) * a_in(3, 3) - a_in(2, 3) * a_in(3, 1);
+		float A1223 = a_in(2, 1) * a_in(3, 2) - a_in(2, 2) * a_in(3, 1);
+		float A0323 = a_in(2, 0) * a_in(3, 3) - a_in(2, 3) * a_in(3, 0);
+		float A0223 = a_in(2, 0) * a_in(3, 2) - a_in(2, 2) * a_in(3, 0);
+		float A0123 = a_in(2, 0) * a_in(3, 1) - a_in(2, 1) * a_in(3, 0);
+		float A2313 = a_in(1, 2) * a_in(3, 3) - a_in(1, 3) * a_in(3, 2);
+		float A1313 = a_in(1, 1) * a_in(3, 3) - a_in(1, 3) * a_in(3, 1);
+		float A1213 = a_in(1, 1) * a_in(3, 2) - a_in(1, 2) * a_in(3, 1);
+		float A2312 = a_in(1, 2) * a_in(2, 3) - a_in(1, 3) * a_in(2, 2);
+		float A1312 = a_in(1, 1) * a_in(2, 3) - a_in(1, 3) * a_in(2, 1);
+		float A1212 = a_in(1, 1) * a_in(2, 2) - a_in(1, 2) * a_in(2, 1);
+		float A0313 = a_in(1, 0) * a_in(3, 3) - a_in(1, 3) * a_in(3, 0);
+		float A0213 = a_in(1, 0) * a_in(3, 2) - a_in(1, 2) * a_in(3, 0);
+		float A0312 = a_in(1, 0) * a_in(2, 3) - a_in(1, 3) * a_in(2, 0);
+		float A0212 = a_in(1, 0) * a_in(2, 2) - a_in(1, 2) * a_in(2, 0);
+		float A0113 = a_in(1, 0) * a_in(3, 1) - a_in(1, 1) * a_in(3, 0);
+		float A0112 = a_in(1, 0) * a_in(2, 1) - a_in(1, 1) * a_in(2, 0);
+		det = a_in(0, 0) * (a_in(1, 1) * A2323 - a_in(1, 2) * A1323 + a_in(1, 3) * A1223)
+			- a_in(0, 1) * (a_in(1, 0) * A2323 - a_in(1, 2) * A0323 + a_in(1, 3) * A0223)
+			+ a_in(0, 2) * (a_in(1, 0) * A1323 - a_in(1, 1) * A0323 + a_in(1, 3) * A0123)
+			- a_in(0, 3) * (a_in(1, 0) * A1223 - a_in(1, 1) * A0223 + a_in(1, 2) * A0123);
+		TransformMatrix out(MatrixInitialize::NoFill);
+		if (det != 0) {
+			det = 1 / det;
+			out(0, 0) = det * (a_in(1, 1) * A2323 - a_in(1, 2) * A1323 + a_in(1, 3) * A1223);
+			out(0, 1) = det * -(a_in(0, 1) * A2323 - a_in(0, 2) * A1323 + a_in(0, 3) * A1223);
+			out(0, 2) = det * (a_in(0, 1) * A2313 - a_in(0, 2) * A1313 + a_in(0, 3) * A1213);
+			out(0, 3) = det * -(a_in(0, 1) * A2312 - a_in(0, 2) * A1312 + a_in(0, 3) * A1212);
+			out(1, 0) = det * -(a_in(1, 0) * A2323 - a_in(1, 2) * A0323 + a_in(1, 3) * A0223);
+			out(1, 1) = det * (a_in(0, 0) * A2323 - a_in(0, 2) * A0323 + a_in(0, 3) * A0223);
+			out(1, 2) = det * -(a_in(0, 0) * A2313 - a_in(0, 2) * A0313 + a_in(0, 3) * A0213);
+			out(1, 3) = det * (a_in(0, 0) * A2312 - a_in(0, 2) * A0312 + a_in(0, 3) * A0212);
+			out(2, 0) = det * (a_in(1, 0) * A1323 - a_in(1, 1) * A0323 + a_in(1, 3) * A0123);
+			out(2, 1) = det * -(a_in(0, 0) * A1323 - a_in(0, 1) * A0323 + a_in(0, 3) * A0123);
+			out(2, 2) = det * (a_in(0, 0) * A1313 - a_in(0, 1) * A0313 + a_in(0, 3) * A0113);
+			out(2, 3) = det * -(a_in(0, 0) * A1312 - a_in(0, 1) * A0312 + a_in(0, 3) * A0112);
+			out(3, 0) = det * -(a_in(1, 0) * A1223 - a_in(1, 1) * A0223 + a_in(1, 2) * A0123);
+			out(3, 1) = det * (a_in(0, 0) * A1223 - a_in(0, 1) * A0223 + a_in(0, 2) * A0123);
+			out(3, 2) = det * -(a_in(0, 0) * A1213 - a_in(0, 1) * A0213 + a_in(0, 2) * A0113);
+			out(3, 3) = det * (a_in(0, 0) * A1212 - a_in(0, 1) * A0212 + a_in(0, 2) * A0112);
+		}
+		return out;
+	}
+
+	inline TransformMatrix inverse(const Matrix<4, 4>& a_in) {
+		float det;
+		auto result = inverse(a_in, det);
+		MV::require<MV::LogicException>(det != 0.0f, "Failed to invert matrix due to 0 determinant (in line with the clipping pane).");
+		return result;
+	}
 
 	class MatrixStack {
 	public:
@@ -483,30 +573,6 @@ namespace MV {
 	private:
 		std::vector<TransformMatrix> stack;
 		std::string name;
-	};
-
-
-	class PointRotator {
-	public:
-		inline PointRotator(MV::AxisAngles angle) : PointRotator(angle.x, angle.y, angle.z) {}
-
-		inline PointRotator(MV::PointPrecision x, MV::PointPrecision y, MV::PointPrecision z) {
-			rotate.setRotationXYZ(x, y, z);
-		}
-		PointRotator(const PointRotator&) = default;
-		PointRotator(PointRotator&&) = default;
-
-		inline void apply(MV::Point<MV::PointPrecision> &a_point) {
-			auto px = a_point.x;
-			auto py = a_point.y;
-			auto pz = a_point.z;
-
-			a_point.x = rotate.access(0, 0)*px + rotate.access(1, 0)*py + rotate.access(2, 0)*pz;
-			a_point.y = rotate.access(0, 1)*px + rotate.access(1, 1)*py + rotate.access(2, 1)*pz;
-			a_point.z = rotate.access(0, 2)*px + rotate.access(1, 2)*py + rotate.access(2, 2)*pz;
-		}
-	private:
-		MV::TransformMatrix rotate;
 	};
 
 }

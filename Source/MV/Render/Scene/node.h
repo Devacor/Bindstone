@@ -535,7 +535,8 @@ namespace MV {
 			std::shared_ptr<Node> translate(const Point<> &a_newPosition);
 			std::shared_ptr<Node> worldPosition(const Point<> &a_newPosition);
 			std::shared_ptr<Node> screenPosition(const Point<int> &a_newPosition);
-			std::shared_ptr<Node> nodePosition(const std::shared_ptr<Node> &a_newPosition);
+			std::shared_ptr<Node> worldTranslate(const Point<>& a_newPosition);
+			std::shared_ptr<Node> screenTranslate(const Point<int>& a_newPosition);
 
 			AxisAngles worldRotation() const;
 			std::shared_ptr<Node> worldRotation(const AxisAngles &a_newAngle);

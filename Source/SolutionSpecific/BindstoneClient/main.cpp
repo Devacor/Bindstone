@@ -16,6 +16,8 @@
 
 #include <fstream>
 
+#include "glm/mat4x4.hpp"
+
 struct Base {
 	virtual ~Base() {}
 
@@ -102,11 +104,60 @@ public:
 
 void PathfindingTest();
 
+
+template<size_t SizeX, size_t SizeY, size_t Common>
+MV::Matrix<SizeX, Common> M_1(const MV::Matrix<SizeX, SizeY>& a_lhs, const MV::Matrix<SizeY, Common>& a_rhs) {
+	MV::Matrix<SizeX, Common> result;
+	for (size_t x = 0; x != SizeX; ++x) {
+		for (size_t c = 0; c != Common; c++) {
+			for (size_t y = 0; y != SizeY; y++) {
+				result(x, c) += a_lhs(x, y) * a_rhs(y, c);
+			}
+		}
+	}
+	return result;
+}
+
+template<size_t sizeAX, size_t sizeAY, size_t sizeBY>
+MV::Matrix<sizeAX, sizeBY> M_2(const MV::Matrix<sizeAX, sizeAY>& A, const MV::Matrix<sizeAY, sizeBY>& B) {
+	MV::Matrix<sizeAX, sizeBY> result;
+	for (int i = 0; i < sizeAX; i++) {
+		for (int j = 0; j < sizeBY; j++) {
+			for (int k = 0; k < sizeAY; k++) {
+				result(i, j) += A(i, k) * B(k, j);
+			}
+		}
+	}
+	return result;
+}
+
+
 int main(int argc, char *argv[]) {
 	MV::info("Hello world!");
 	MV::debug(":D :D :D");
 	MV::warning(":C :C :C");
 	MV::error("Whoopse!");
+
+	MV::Matrix<3, 1> m1;
+	MV::Matrix<1, 3> m2;
+	for (int i = 0; i < 3; ++i) {
+		m1(i, 0) = i + 3;
+		m2(0, i) = i;
+	}
+
+	auto ra = M_1(m2, m1);
+	auto rb = M_2(m2, m1);
+	//auto rc = M_3(m2, m1);
+	MV::info("RESULT 1 a: ", ra);
+	MV::info("RESULT 1 b: ", ra);
+	//MV::info("RESULT 1 b: ", rc);
+
+	auto r2a = M_1(m1, m2);
+	MV::info("RESULT 2 a: ", r2a);
+	auto r2b = M_2(m1, m2);
+	MV::info("RESULT 2 b: ", r2b);
+	//auto r2c = M_3(m1, m2);
+	//MV::info("RESULT 2 c: ", r2c);
 
 	std::string name;
 	std::string pass;

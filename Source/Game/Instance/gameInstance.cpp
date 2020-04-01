@@ -17,7 +17,7 @@ void GameInstance::handleScroll(int a_amount) {
 }
 
 GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse, float a_timeStep) :
-	worldScene(a_root->make("Scenes/map.scene", services())->depth(0)),
+	worldScene(a_root->make("Scenes/map.scene", services())->depth(0)->cameraId(GameCameraId)),
 	ourMouse(a_mouse),
 	gameData(a_gameData),
 	timeStep(a_timeStep),
@@ -43,6 +43,16 @@ void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer,
 		beginMapDrag();
 	});
 
+	zoomSignal = ourMouse.onPinchZoom.connect([&](MV::Point<int> a_point, float a_zoomAmount, float a_rotateAmount) {
+		if (cameraAction.finished()) {
+			auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_zoomAmount);
+
+			auto originalScreenPosition = worldScene->localFromScreen(a_point) * (MV::toPoint(screenScale));
+			worldScene->addScale(screenScale);
+			worldScene->translate(originalScreenPosition * -1.0f);
+		}
+	});
+
 	hook();
 
 	left->initialize();
@@ -60,16 +70,15 @@ GameInstance::~GameInstance() {
 
 void GameInstance::beginMapDrag() {
 	if (cameraAction.finished()) {
-		ourMouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, { 10 }, [&]() {
-			auto signature = ourMouse.onMove.connect(MV::guid("inDrag"), [&](MV::TapDevice& a_mouse) {
+		ourMouse.queueExclusiveAction(MV::ExclusiveTapAction(true, { 10 }, [&]() {
+			auto dragSignature = ourMouse.onMove.connect([&](MV::TapDevice& a_mouse) {
 				if (worldScene) {
-					worldScene->translate(MV::round<MV::PointPrecision>(a_mouse.position() - a_mouse.oldPosition()));
+					worldScene->camera().translate(MV::round<MV::PointPrecision>(a_mouse.position() - a_mouse.oldPosition()));
 				}
 			});
-			auto cancelId = MV::guid("cancelDrag");
-			ourMouse.onLeftMouseUp.connect(cancelId, [=](MV::TapDevice& a_mouse2) {
-				a_mouse2.onMove.disconnect(signature);
-				a_mouse2.onLeftMouseUp.disconnect(cancelId);
+			ourMouse.onLeftMouseUp.connect("cancelDrag", [=](MV::TapDevice& a_mouse2) {
+				a_mouse2.onMove.disconnect(dragSignature);
+				a_mouse2.onLeftMouseUp.disconnect("cancelDrag");
 			});
 		}, []() {}, "MapDrag"));
 	}

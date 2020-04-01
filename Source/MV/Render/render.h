@@ -214,8 +214,8 @@ namespace MV {
 
 		const Draw2D &renderer;
 	private:
-		Point<> projectScreenRaw(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview);
-		Point<> unProjectScreenRaw(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview);
+		inline Point<> projectScreenRaw(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview, const MV::Point<> &a_viewOffset, const MV::Size<> &a_viewSize);
+		inline Point<> unProjectScreenRaw(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview, const MV::Point<>& a_viewOffset, const MV::Size<>& a_viewSize);
 	};
 
 	class RenderWorld {
@@ -261,6 +261,10 @@ namespace MV {
 		Size<int> size() const;
 
 		bool handleEvent(const SDL_Event &event, RenderWorld &a_world);
+
+		float windowDpi() const;
+		float uiScale() const;
+		constexpr float systemDefaultDpi() const;
 	private:
 		Window(Draw2D &a_renderer);
 		bool initialize();
@@ -270,23 +274,22 @@ namespace MV {
 		void updateWindowResizeLimits();
 		void conformToAspectRatio(int &a_width, int &a_height) const;
 
-		SDL_GLContext glcontext;
-		bool initialized;
+		SDL_GLContext glcontext = 0;
 
 		void updateAspectRatio();
-		bool maintainProportions;
-		bool sizeWorldWithWindow;
+		bool maintainProportions = true;
+		bool sizeWorldWithWindow = false;
 		Size<int> windowSize;
 		PointPrecision aspectRatio;
 		uint32_t SDLflags;
 		std::string title;
 
-		bool vsync;
-		bool userCanResize;
+		bool vsync = false;
+		bool userCanResize = false;
 		Size<int> minSize;
 		Size<int> maxSize;
 
-		SDL_Window *window;
+		SDL_Window *window = nullptr;
 		Draw2D &renderer;
 	};
 

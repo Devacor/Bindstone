@@ -140,7 +140,9 @@ namespace MV {
 				color = mix(change.beginColor, change.endColor, mixValue);
 
 				Point<> distance(0.0f, speed * timeScale, 0.0f);
-				PointRotator(direction).apply(distance);
+				TransformMatrix rotator;
+				rotator.rotateXYZ(direction);
+				distance = rotator * distance;
 				position += distance;
 				position += gravityConstant * timeScale;
 				
@@ -170,7 +172,9 @@ namespace MV {
 
 			void setGravity(float a_magnitude, const AxisAngles &a_direction = AxisAngles(0.0f, 0.0f, toRadians(180.0f))) {
 				gravityConstant.locate(0.0f, a_magnitude, 0.0f);
-				PointRotator(a_direction).apply(gravityConstant);
+				TransformMatrix rotator;
+				rotator.rotateXYZ(direction);
+				gravityConstant = rotator * gravityConstant;
 			}
 		private:
 			Point<> gravityConstant;

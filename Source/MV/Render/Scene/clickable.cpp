@@ -170,15 +170,16 @@ namespace MV {
 			lastKnownVelocity.clear();
 			dragTimer.start();
 			accumulatedDragDistance = 0.0f;
-			onMouseMoveHandle = ourMouse.onMove.connect([&](TapDevice& a_mouseInner) {
-				auto protectFromDismissal = std::static_pointer_cast<Clickable>(shared_from_this());
+			onMouseMoveHandle = ourMouse.onMove.connect([this, protectFromDismissal](TapDevice& a_mouseInner) {
 				auto dragDeltaPosition = a_mouseInner.position() - priorMousePosition;
 				auto dt = dragTimer.delta();
 				lastDragDelta = dt;
 				accumulatedDragDistance += dragDeltaPosition.magnitude();
-				auto previousLastVelocity = lastKnownVelocity;
-				lastKnownVelocity = (lastKnownVelocity + (round<MV::PointPrecision>(dragDeltaPosition) * static_cast<MV::PointPrecision>(dt))) / 2.0f;
-				onDragSignal(protectFromDismissal, dragStartPosition, dragDeltaPosition);
+				if (dragDeltaPosition.x != 0 || dragDeltaPosition.y != 0) {
+					auto previousLastVelocity = lastKnownVelocity;
+					lastKnownVelocity = (lastKnownVelocity + (cast<MV::PointPrecision>(dragDeltaPosition) * static_cast<MV::PointPrecision>(dt))) / 2.0f;
+					onDragSignal(protectFromDismissal, dragStartPosition, dragDeltaPosition);
+				}
 				priorMousePosition = a_mouseInner.position();
 			});
 		}
@@ -212,7 +213,7 @@ namespace MV {
 					}
 				}
 
-				return owner()->screenFromLocal(hitBox).contains(a_state.position());
+				return hitBox.contains(owner()->localFromScreen(a_state.position()));
 			} else {
 				return false;
 			}

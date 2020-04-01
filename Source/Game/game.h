@@ -55,7 +55,7 @@ public:
 		ourGameClient = MV::Client::make(MV::Url{ gameServer }, [=](const std::string &a_message) {
 			auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 			value->execute(*this);
-		}, [&](const std::string &a_dcreason) {
+		}, [=](const std::string &a_dcreason) {
 			MV::info("Disconnected: [", gameServer,"] ", a_dcreason);
 			killGame();
 		}, [=] {

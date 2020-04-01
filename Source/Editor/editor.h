@@ -63,7 +63,7 @@ private:
 
 	void initializeWindow();
 	void initializeControls();
-	void handleScroll(float a_amount);
+	void handleScroll(float a_amount, const MV::Point<int> &a_position);
 
 	Managers& managers;
 

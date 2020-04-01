@@ -7,8 +7,8 @@
 #include "MV/Utility/signal.hpp"
 
 namespace MV{
-	struct ExclusiveMouseAction{
-		ExclusiveMouseAction(bool a_exclusive, const std::vector<int64_t> &a_fitness, const std::function<void()> &a_enabledCallback, const std::function<void()> &a_disableCallback, const std::string &a_name = ""):
+	struct ExclusiveTapAction{
+		ExclusiveTapAction(bool a_exclusive, const std::vector<int64_t> &a_fitness, const std::function<void()> &a_enabledCallback, const std::function<void()> &a_disableCallback, const std::string &a_name = ""):
 			exclusive(a_exclusive),
 			fitness(a_fitness),
 			disabled(a_disableCallback),
@@ -16,7 +16,7 @@ namespace MV{
 			name(a_name){
 		}
 
-		bool operator<(const ExclusiveMouseAction &a_rhs) const{
+		bool operator<(const ExclusiveTapAction &a_rhs) const{
 			for(size_t i = 0; i < fitness.size() && i < a_rhs.fitness.size(); ++i){
 				if(fitness[i] < a_rhs.fitness[i]){
 					return true;
@@ -41,7 +41,7 @@ namespace MV{
 		typedef void CallbackSignature(TapDevice&);
 		typedef std::shared_ptr<Receiver<CallbackSignature>> SignalType;
 
-		typedef void TouchCallbackSignature(MV::Point<int>, float);
+		typedef void TouchCallbackSignature(const MV::Point<int> &center, float zoom, float radians);
 		typedef std::shared_ptr<Receiver<TouchCallbackSignature>> TouchSignalType;
 
 		void update();
@@ -55,11 +55,11 @@ namespace MV{
 		bool rightDown() const;
 		bool middleDown() const;
 
-		void queueExclusiveAction(const ExclusiveMouseAction &a_node);
+		void queueExclusiveAction(const ExclusiveTapAction &a_node);
 
 		void runExclusiveActions();
 	private:
-		std::vector<ExclusiveMouseAction> nodesToExecute;
+		std::vector<ExclusiveTapAction> nodesToExecute;
 		bool left = false;
 		bool middle = false;
 		bool right = false;
@@ -90,7 +90,6 @@ namespace MV{
 		Signal<CallbackSignature> onMoveSignal;
 
 		Signal<TouchCallbackSignature> onPinchZoomSignal;
-		Signal<TouchCallbackSignature> onRotateSignal;
 	public:
 		SignalRegister<CallbackSignature> onLeftMouseDown;
 		SignalRegister<CallbackSignature> onLeftMouseUp;
@@ -113,7 +112,6 @@ namespace MV{
 		SignalRegister<CallbackSignature> onMove;
 
 		SignalRegister<TouchCallbackSignature> onPinchZoom;
-		SignalRegister<TouchCallbackSignature> onRotate;
 	};
 }
 

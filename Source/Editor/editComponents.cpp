@@ -14,7 +14,7 @@ void Selection::enable(std::function<void(const MV::BoxAABB<int> &)> a_callback)
 
 void Selection::enable(){
 	onMouseDownHandle = mouse.onLeftMouseDown.connect([&](MV::TapDevice &mouse){
-		mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, {10000}, [&](){
+		mouse.queueExclusiveAction(MV::ExclusiveTapAction(true, {10000}, [&](){
 			inSelection = true;
 			selection.initialize(mouse.position());
 			visibleSelection = scene->make("Selection_" + std::to_string(id))->position(scene->localFromScreen(selection.minPoint))->attach<MV::Scene::Sprite>()->color(MV::Color(1.0f, 1.0f, 0.0f, .25f))->safe();
@@ -86,10 +86,10 @@ void EditableNode::resetHandles() {
 	EditableNode* self = this;
 	positionHandle = controlContainer->make("EditControls")->serializable(false)->attach<MV::Scene::Clickable>(*mouse);
 	positionHandle->bounds({ MV::size(7.0f, 7.0f), true })->show()->color({ POSITION_HANDLE })->globalPriority(positionHandle->globalPriority() + 100);
-	positionHandle->owner()->nodePosition(elementToEdit)->attach<MV::Scene::Sprite>()->bounds({MV::size(1.0f, 1.0f ), true})->color({ POSITION_HANDLE_CENTER });
-	positionHandle->onDrag.connect("position", [&, self](std::shared_ptr<MV::Scene::Clickable> handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
+	positionHandle->owner()->worldPosition(elementToEdit->worldPosition())->attach<MV::Scene::Sprite>()->bounds({MV::size(1.0f, 1.0f ), true})->color({ POSITION_HANDLE_CENTER });
+	positionHandle->onDrag.connect("position", [&, self](const std::shared_ptr<MV::Scene::Clickable> &handle, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) {
 		handle->owner()->translate(elementToEdit->renderer().worldFromScreen(deltaPosition));
-		elementToEdit->nodePosition(handle->owner());
+		elementToEdit->worldPosition(handle->owner()->worldPosition());
 		onChange(self);
 	});
 

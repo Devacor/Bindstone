@@ -311,6 +311,13 @@ namespace MV {
 			return (x + y) > (a_other.x + a_other.y);
 		}
 
+		inline float& operator()(size_t a_index) {
+			return *(&x + a_index);
+		}
+		inline float operator()(size_t a_index) const {
+			return *(&x + a_index);
+		}
+
 		template <class Archive>
 		void serialize(Archive & archive){
 			archive(CEREAL_NVP(x), CEREAL_NVP(y), CEREAL_NVP(z));

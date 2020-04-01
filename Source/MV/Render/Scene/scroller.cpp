@@ -19,7 +19,7 @@ namespace MV {
 
 			onDrag.connect("_INTERNAL_SCROLL", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable, const MV::Point<int> &startPosition, const MV::Point<int> &deltaPosition) mutable {
 				if(contentView){
-					if (!isDragging) {
+					if (!isDragging && a_clickable->dragTime() <= cancelTimeThreshold) {
 						if (a_clickable->totalDragDistance() > dragStartThreshold) {
 							isDragging = true;
 							auto buttons = contentView->componentsInChildren<MV::Scene::Clickable>(false, false);
@@ -38,54 +38,94 @@ namespace MV {
 			});
 		}
 
+		/*
+		template <class T>
+		std::vector <std::vector<T>> Multiply(std::vector <std::vector<T>>& a, std::vector <std::vector<T>>& b)
+		{
+			const int n = a.size();     // a rows
+			const int m = a[0].size();  // a cols
+			const int p = b[0].size();  // b cols
+
+			std::vector <std::vector<T>> c(n, std::vector<T>(p, 0));
+			for (auto j = 0; j < p; ++j)
+			{
+				for (auto k = 0; k < m; ++k)
+				{
+					for (auto i = 0; i < n; ++i)
+					{
+						c[i][j] += a[i][k] * b[k][j];
+					}
+				}
+			}
+			return c;
+		}*/
+		/*
+		Matrix operator*(const Matrix& other) const {
+
+			assert(cols() == other.rows());
+
+			Matrix out(rows(), other.cols());
+
+			for (std::size_t i = 0; i < rows(); ++i) {
+				for (std::size_t j = 0; j < other.cols(); ++j) {
+					double sum{ 0 };
+					for (std::size_t k = 0; k < cols(); ++k) {
+						sum += (*this)(i, k) * other(k, j);
+					}
+					out(i, j) = sum;
+				}
+			}
+			return out;
+		}*/
+
+		template<size_t N, size_t M, size_t K>
+		Matrix<N, K> MULT(const Matrix<N, M>& a_lhs, const Matrix<M, K>& a_rhs) {
+			Matrix<N, K> result;
+			for (size_t n = 0; n != N; n++) {
+				for (size_t k = 0; k != K; k++) {
+					for (size_t m = 0; m != M; m++) {
+						result(n, k) += a_lhs(n, m) * a_rhs(m, k);
+					}
+				}
+			}
+			return result;
+		}
+
 		void Scroller::shiftContentByDelta(const MV::Point<int> & deltaPosition) {
-			auto localContentPosition = owner()->localFromWorld(contentView->worldPosition());
-			auto localContentBounds = owner()->localFromWorld(contentView->worldBounds());
-			auto contentBoundsToPositionDelta = localContentPosition - localContentBounds.minPoint;
-			auto localDelta = owner()->localFromScreen(deltaPosition) - owner()->localFromScreen(MV::Point<int>());
-			if (!horizontalAllowed) {
-				localDelta.x = 0;
+			if (deltaPosition.x == 0 && deltaPosition.y == 0) {
+				return;
 			}
-			if (!verticalAllowed) {
-				localDelta.y = 0;
-			}
-
-			localContentPosition += localDelta;
-			localContentBounds += localDelta;
-			auto ourBounds = bounds();
+			auto self = owner();
 			
-			if (horizontalAllowed) {
-				if (localContentBounds.width() < ourBounds.width()) {
-					if (localContentBounds.minPoint.x < ourBounds.minPoint.x) {
-						localContentPosition.x = ourBounds.minPoint.x + contentBoundsToPositionDelta.x;
-					} else if (localContentBounds.maxPoint.x > ourBounds.maxPoint.x) {
-						localContentPosition.x = ourBounds.maxPoint.x - localContentBounds.width() + contentBoundsToPositionDelta.x;
-					}
-				} else {
-					if (localContentBounds.minPoint.x > ourBounds.minPoint.x) {
-						localContentPosition.x = ourBounds.minPoint.x + contentBoundsToPositionDelta.x;
-					} else if (localContentBounds.maxPoint.x < ourBounds.maxPoint.x) {
-						localContentPosition.x = ourBounds.maxPoint.x - localContentBounds.width() + contentBoundsToPositionDelta.x;
-					}
-				}
+			auto worldDelta = self->renderer().worldFromScreen(deltaPosition) - self->renderer().worldFromScreen(MV::Point<int>());
+			auto contentBounds = contentView->worldBounds();
+			auto ourBounds = worldBounds();
+
+			if (!horizontalAllowed || contentBounds.width() >= ourBounds.width()) {
+				worldDelta.x = 0;
 			}
-			if (verticalAllowed) {
-				if (localContentBounds.height() < ourBounds.height()) {
-					if (localContentBounds.minPoint.y < ourBounds.minPoint.y) {
-						localContentPosition.y = ourBounds.minPoint.y + contentBoundsToPositionDelta.y;
-					} else if (localContentBounds.maxPoint.y > ourBounds.maxPoint.y) {
-						localContentPosition.y = ourBounds.maxPoint.y - localContentBounds.height() + contentBoundsToPositionDelta.y;
-					}
-				} else {
-					if (localContentBounds.minPoint.y > ourBounds.minPoint.y) {
-						localContentPosition.y = ourBounds.minPoint.y + contentBoundsToPositionDelta.y;
-					} else if (localContentBounds.maxPoint.y < ourBounds.maxPoint.y) {
-						localContentPosition.y = ourBounds.maxPoint.y - localContentBounds.height() + contentBoundsToPositionDelta.y;
-					}
-				}
+			if (!verticalAllowed || contentBounds.height() >= ourBounds.height()) {
+				worldDelta.y = 0;
 			}
 
-			contentView->worldPosition(owner()->worldFromLocal(localContentPosition));
+			contentBounds += worldDelta;
+
+			if (worldDelta.x != 0) {
+				if (contentBounds.minPoint.x < ourBounds.minPoint.x) {
+					worldDelta.x += ourBounds.minPoint.x - contentBounds.minPoint.x;
+				} else if (contentBounds.maxPoint.x > ourBounds.maxPoint.x) {
+					worldDelta.x -= contentBounds.maxPoint.x - ourBounds.maxPoint.x;
+				}
+			}
+			if (worldDelta.y != 0) {
+				if (contentBounds.minPoint.y < ourBounds.minPoint.y) {
+					worldDelta.y += ourBounds.minPoint.y - contentBounds.minPoint.y;
+				}
+				else if (contentBounds.maxPoint.y > ourBounds.maxPoint.y) {
+					worldDelta.y -= contentBounds.maxPoint.y - ourBounds.maxPoint.y;
+				}
+			}
+			contentView->translate(self->localFromWorld(self->worldPosition() + worldDelta));
 		}
 
 		std::shared_ptr<Scroller> Scroller::content(const std::shared_ptr<Node> &a_content) {

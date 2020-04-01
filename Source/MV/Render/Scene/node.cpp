@@ -975,19 +975,25 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Node::screenPosition(const Point<int> &a_newPosition) {
-			return position((myParent != nullptr) ? parent()->localFromScreen(a_newPosition) : renderer().worldFromScreen(a_newPosition));
-		}
-
-		std::shared_ptr<Node> Node::nodePosition(const std::shared_ptr<Node> &a_newPosition) {
-			return worldPosition(a_newPosition->worldPosition());
+			return position((myParent != nullptr) ? myParent->localFromScreen(a_newPosition) : renderer().worldFromScreen(a_newPosition));
 		}
 
 		std::shared_ptr<Node> Node::worldPosition(const Point<> &a_newPosition) {
-			return position((myParent != nullptr) ? parent()->localFromWorld(a_newPosition) : a_newPosition);
+			return position((myParent != nullptr) ? myParent->localFromWorld(a_newPosition) : a_newPosition);
 		}
 
 		std::shared_ptr<Node> Node::translate(const Point<> &a_newPosition) {
 			return position(position() + a_newPosition);
+		}
+
+		std::shared_ptr<Node> Node::worldTranslate(const Point<>& a_newPosition) {
+			auto localDelta = (myParent != nullptr) ? myParent->localFromWorld(a_newPosition) : a_newPosition;
+			return position(position() + localDelta);
+		}
+
+		std::shared_ptr<Node> Node::screenTranslate(const Point<int>& a_newPosition) {
+			auto localDelta = (myParent != nullptr) ? myParent->localFromScreen(a_newPosition) : renderer().worldFromScreen(a_newPosition);
+			return position(position() + localDelta);
 		}
 
 		MV::AxisAngles Node::worldRotationRad() const {
@@ -1396,7 +1402,6 @@ namespace MV {
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Point<> &)>(&Node::worldPosition)), "worldPosition");
 			a_script.add(chaiscript::fun(static_cast<Point<int>(Node::*)()>(&Node::screenPosition)), "screenPosition");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Point<int> &)>(&Node::screenPosition)), "screenPosition");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const std::shared_ptr<Node> &)>(&Node::nodePosition)), "nodePosition");
 			
 			a_script.add(chaiscript::fun(static_cast<Point<>(Node::*)(const Point<> &)>(&Node::worldFromLocal)), "worldFromLocal");
 			a_script.add(chaiscript::fun(static_cast<Point<int>(Node::*)(const Point<> &)>(&Node::screenFromLocal)), "screenFromLocal");
@@ -1414,6 +1419,8 @@ namespace MV {
 			a_script.add(chaiscript::fun(static_cast<BoxAABB<>(Node::*)(const BoxAABB<> &)>(&Node::localFromWorld)), "localFromWorld");
 
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Point<> &)>(&Node::translate)), "translate");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Point<>&)>(&Node::worldTranslate)), "worldTranslate");
+			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Point<int>&)>(&Node::screenTranslate)), "screenTranslate");
 
 			a_script.add(chaiscript::fun(static_cast<AxisAngles(Node::*)() const>(&Node::rotation)), "rotation");
 			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const AxisAngles &)>(&Node::rotation)), "rotation");

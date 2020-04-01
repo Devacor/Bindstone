@@ -144,7 +144,7 @@ void Building::initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &
 		});
 		buildingButton->onAccept.connect("AcceptedBuilding", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
 			//gameInstance.moveCamera(a_self->owner(), 1.0f);
-			auto modal = gameInstance.scene()->make("modal")->nodePosition(a_self->owner());
+			auto modal = gameInstance.scene()->make("modal")->worldPosition(a_self->owner()->worldPosition());
 			modal->attach<MV::Scene::Clickable>(gameInstance.mouse())->clickDetectionType(MV::Scene::Clickable::BoundsType::LOCAL)->bounds({ MV::point(-10000.0f, -10000.0f), MV::point(10000.0f, 10000.0f) })->onAccept.connect("dismiss", [&](std::shared_ptr<MV::Scene::Clickable> a_self) {
 				gameInstance.scene()->get("modal")->removeFromParent();
 			});

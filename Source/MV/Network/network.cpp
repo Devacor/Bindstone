@@ -100,6 +100,7 @@ namespace MV {
 	}
 
 	void Client::update() {
+		auto keepAlive = shared_from_this();
 		disconnectIfFailed();
 
 		if (ourConnectionState == DISCONNECTED) {

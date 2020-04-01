@@ -22,6 +22,8 @@ protected:
 	GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse, float a_timeStep);
 
 public:
+	static const int GameCameraId = 1;
+
 	~GameInstance();
 
 	GameData& data() {
@@ -143,6 +145,7 @@ protected:
 	chaiscript::ChaiScript scriptEngine;
 
 	MV::TapDevice::SignalType mouseSignal;
+	MV::TapDevice::TouchSignalType zoomSignal;
 
 	std::unique_ptr<Team> left;
 	std::unique_ptr<Team> right;

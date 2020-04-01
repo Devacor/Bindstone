@@ -3,7 +3,7 @@
 
 #include "sprite.h"
 #include "MV/Utility/stopwatch.h"
-#include "MV/Interface/mouse.h"
+#include "MV/Interface/tapDevice.h"
 
 #define ClickableComponentDerivedAccessors(ComponentType) \
 	SpriteDerivedAccessors(ComponentType) \
@@ -39,9 +39,9 @@ namespace MV {
 			friend cereal::access;
 			friend Node;
 		public:
-			typedef void ButtonSignalSignature(std::shared_ptr<Clickable>);
-			typedef void DragSignalSignature(std::shared_ptr<Clickable>, const Point<int> &startPosition, const Point<int> &deltaPosition);
-			typedef void DropSignalSignature(std::shared_ptr<Clickable>, const Point<MV::PointPrecision> &velocity);
+			typedef void ButtonSignalSignature(const std::shared_ptr<Clickable> &);
+			typedef void DragSignalSignature(const std::shared_ptr<Clickable> &, const Point<int> &startPosition, const Point<int> &deltaPosition);
+			typedef void DropSignalSignature(const std::shared_ptr<Clickable> &, const Point<MV::PointPrecision> &velocity);
 
 			enum class BoundsType { LOCAL, NODE, CHILDREN, NODE_CHILDREN, NONE };
 		private:

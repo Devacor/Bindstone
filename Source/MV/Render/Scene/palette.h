@@ -2,7 +2,7 @@
 #define _MV_SCENE_PALETTE_H_
 
 #include "drawable.h"
-#include "MV/Interface/mouse.h"
+#include "MV/Interface/tapDevice.h"
 
 namespace MV {
 	namespace Scene {

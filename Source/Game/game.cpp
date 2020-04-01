@@ -35,7 +35,7 @@ void Game::initializeClientConnection() {
 	ourLobbyClient = MV::Client::make(MV::Url{ gameServerAddress }, [=](const std::string &a_message) {
 		auto value = MV::fromBinaryString<std::shared_ptr<NetworkAction>>(a_message);
 		value->execute(*this);
-	}, [&](const std::string &a_dcreason) {
+	}, [=](const std::string &a_dcreason) {
 		MV::info("Disconnected [", gameServerAddress, "]: ", a_dcreason);
 		gameData.managers().messages.lobbyDisconnect(a_dcreason);
 		task.also("LobbyReconnect").recent()->
@@ -48,21 +48,6 @@ void Game::initializeClientConnection() {
 		backoffLobbyReconnect = START_BACKOFF_RECONNECT_TIME;
 		gameData.managers().messages.lobbyConnected();
 	});
-}
-
-float getScaledDpi(int displayIndex) {
-	const float kSysDefaultDpi =
-#if defined(__APPLE__) || defined(__ANDROID__)
-		72.0f;
-#elif defined(_WIN32)
-		96.0f;
-#endif
-	float dpiResult;
-	if (SDL_GetDisplayDPI(displayIndex, NULL, &dpiResult, NULL) != 0) {
-		dpiResult = kSysDefaultDpi;
-	}
-
-	return dpiResult / kSysDefaultDpi;
 }
 
 void Game::initializeWindow(){
@@ -80,9 +65,6 @@ void Game::initializeWindow(){
 	auto aspectX = static_cast<float>(windowSize.width) / windowSize.height;
 	MV::Size<> worldSize(1080 * aspectX, 1080);
 	MV::info("PRE-SCALE: ", windowSize);
-	//windowSize /= getScaledDpi(0);
-	MV::info("POST-SCALE: ", windowSize);
-
 
 	if (!gameData.managers().renderer.initialize(windowSize, worldSize)) {
 		exit(0);
@@ -96,9 +78,9 @@ void Game::initializeWindow(){
 
 	rootScene = MV::Scene::Node::make(gameData.managers().renderer);
 
-	screenScaler = rootScene->attach<MV::Scene::Sprite>();
+	screenScaler = rootScene->make("UI")->cameraId(1)->attach<MV::Scene::Sprite>();
 	screenScaler->hide()->id("ScreenScaler");
-	auto scaledDpi = getScaledDpi(0);
+	auto scaledDpi = gameData.managers().renderer.window().uiScale();
 	screenScaler->bounds({ MV::point(0.0f, 0.0f), gameData.managers().renderer.world().size() / scaledDpi });
 	rootScene->scale(scaledDpi);
 
@@ -180,7 +162,9 @@ void Game::handleInput() {
 				break;
 			}
 		} else if (windowResized) {
-			screenScaler->bounds({ MV::point(0.0f, 0.0f), gameData.managers().renderer.world().size() });
+			auto scale = gameData.managers().renderer.window().uiScale();
+			screenScaler->bounds({ MV::point(0.0f, 0.0f), gameData.managers().renderer.world().size() / scale });
+			screenScaler->owner()->scale(scale);
 		}
 	}
 	ourMouse.update();
@@ -222,9 +206,9 @@ void Game::hook(chaiscript::ChaiScript &a_script) {
 void Game::updateScreenScaler() {
 	auto scaler = rootScene->component<MV::Scene::Drawable>("ScreenScaler", false);
 	if (!scaler) {
-		rootScene->attach<MV::Scene::Drawable>()->id("ScreenScaler")->worldBounds({ MV::Point<>(0, 0), gameData.managers().renderer.world().size() });
-	} else {
-		scaler->screenBounds({ MV::Point<int>(0, 0), gameData.managers().renderer.window().size() });
+		auto scale = gameData.managers().renderer.window().uiScale();
+		rootScene->attach<MV::Scene::Drawable>()->id("ScreenScaler")->worldBounds({ MV::Point<>(0, 0), gameData.managers().renderer.world().size() / scale });
+		rootScene->scale(scale);
 	}
 }
 

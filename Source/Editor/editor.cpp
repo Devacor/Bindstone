@@ -45,10 +45,10 @@ bool Editor::update(double dt){
 		controlPanel->onSceneDrag(MV::cast<int>(MV::point(0.0f, -speed) * static_cast<float>(dt)));
 	}
 	if (keystate[SDL_SCANCODE_V]) {
-		handleScroll(-zoomSpeed * static_cast<float>(dt));
+		handleScroll(-zoomSpeed * static_cast<float>(dt), mouse.position());
 	}
 	if (keystate[SDL_SCANCODE_B]) {
-		handleScroll(zoomSpeed * static_cast<float>(dt));
+		handleScroll(zoomSpeed * static_cast<float>(dt), mouse.position());
 	}
 	lastUpdateDelta = dt;
 	selectorPanel->update();
@@ -67,9 +67,9 @@ void Editor::sceneUpdated(){
 void Editor::initializeWindow(){
 	mouse.update();
 	
-	mouse.onLeftMouseDown.connect(MV::guid("initDrag"), [&](MV::TapDevice& a_mouse){
-		a_mouse.queueExclusiveAction(MV::ExclusiveMouseAction(true, {10}, [&](){
-			auto signature = mouse.onMove.connect(MV::guid("inDrag"), [&](MV::TapDevice& a_mouse2){
+	mouse.onLeftMouseDown.connect("initDrag", [&](MV::TapDevice& a_mouse){
+		a_mouse.queueExclusiveAction(MV::ExclusiveTapAction(true, {10}, [&](){
+			auto signature = mouse.onMove.connect("inDrag", [&](MV::TapDevice& a_mouse2){
 				const Uint8* keystate = SDL_GetKeyboardState(NULL);
 				if (!keystate[SDL_SCANCODE_LSHIFT]) {
 					scene->camera().translate(MV::round<MV::PointPrecision>(a_mouse2.position() - a_mouse2.oldPosition()));
@@ -79,12 +79,16 @@ void Editor::initializeWindow(){
 				}
 				controlPanel->onSceneDrag(a_mouse2.position() - a_mouse2.oldPosition());
 			});
-			auto cancelId = MV::guid("cancelDrag");
-			mouse.onLeftMouseUp.connect(cancelId, [=](MV::TapDevice& a_mouse2){
+			mouse.onLeftMouseUp.connect("cancelDrag", [=](MV::TapDevice& a_mouse2){
 				a_mouse2.onMove.disconnect(signature);
-				a_mouse2.onLeftMouseUp.disconnect(cancelId);
+				a_mouse2.onLeftMouseUp.disconnect("cancelDrag");
 			});
 		}, [](){}, "ControlPanelDrag"));
+	});
+
+	mouse.onPinchZoom.connect("initZoom", [&](const MV::Point<int> &a_position, float a_zoom, float a_rotate) {
+		mouse.onMove.disconnect("inDrag");
+		handleScroll(a_zoom * 20.0f, a_position);
 	});
 
 	//managers.textures.assemblePacks("Atlases", &managers.renderer);
@@ -128,7 +132,7 @@ void Editor::handleInput(){
 			case SDL_WINDOWEVENT:
 				break;
 			case SDL_MOUSEWHEEL:
-				handleScroll(static_cast<float>(event.wheel.y));
+				handleScroll(static_cast<float>(event.wheel.y), mouse.position());
 				break;
 			}
 			controlPanel->handleInput(event);
@@ -163,11 +167,11 @@ void Editor::initializeControls(){
 	controlPanel->loadPanel<DeselectedEditorPanel>();
 }
 
-void Editor::handleScroll(float a_amount) {
+void Editor::handleScroll(float a_amount, const MV::Point<int> &a_position) {
 	const Uint8* keystate = SDL_GetKeyboardState(NULL);
-	auto screenScale = MV::Scale(.05f, .05f, .05f) * a_amount + (scene->scale() / 20.0f * a_amount);
-	if (scene->scale().x + screenScale.x > .05f) {
-		auto originalScreenPosition = scene->localFromScreen(mouse.position()) * (MV::toPoint(screenScale));
+	auto screenScale = MV::Scale(.05f, .05f, .05f) * a_amount + (scene->scale() / 10.0f * a_amount);
+	if (scene->scale().x + screenScale.x > .001f) {
+		auto originalScreenPosition = scene->localFromScreen(a_position) * (MV::toPoint(screenScale));
 		scene->addScale(screenScale);
 		scene->translate(originalScreenPosition * -1.0f);
 		controlPanel->onSceneZoom();

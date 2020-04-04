@@ -46,7 +46,7 @@ void GameEditor::handleInput(){
 			case SDL_MOUSEWHEEL:
 				break;
 			}
-			mouse.updateTouch(event, managers.renderer.window().size());
+			mouse.updateTouch(event, managers.renderer.window().drawableSize());
 		} else {
 			auto scale = game.managers().renderer.window().uiScale();
 			screenScaler->bounds({ MV::point(0.0f, 0.0f), game.managers().renderer.world().size() / scale });

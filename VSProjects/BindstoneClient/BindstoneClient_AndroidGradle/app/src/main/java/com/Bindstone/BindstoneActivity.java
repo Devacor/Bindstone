@@ -1,10 +1,10 @@
 
-package com.SDL2_GradleApp;
+package com.snapjaw.bindstone;
 
 import android.os.Bundle;
 import org.libsdl.app.SDLActivity;
 
-public class SDL2_GradleApp extends SDLActivity
+public class BindstoneActivity extends SDLActivity
 {
     /** Called when the activity is first created. */
     @Override

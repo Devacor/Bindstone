@@ -160,7 +160,7 @@
     <GradleTemplate Include="gradle\wrapper\gradle-wrapper.properties.template" />
   </ItemGroup>
   <ItemGroup>
-    <JavaCompile Include="app\src\main\java\com\SDL2_GradleApp\SDL2_GradleApp.java" />
+    <JavaCompile Include="app\src\main\java\com\Bindstone\BindstoneActivity.java" />
     <JavaCompile Include="app\src\main\java\com\wolfssl\wolfcrypt\ECC.java" />
     <JavaCompile Include="app\src\main\java\com\wolfssl\wolfcrypt\EccKey.java" />
     <JavaCompile Include="app\src\main\java\com\wolfssl\wolfcrypt\RSA.java" />
@@ -212,9 +212,7 @@
     <Content Include="app\src\main\res\mipmap-xhdpi\ic_launcher.png" />
     <Content Include="app\src\main\res\mipmap-xxhdpi\ic_launcher.png" />
     <Content Include="app\src\main\res\mipmap-xxxhdpi\ic_launcher.png" />
-    <Content Include="app\src\main\res\values\colors.xml" />
     <Content Include="app\src\main\res\values\strings.xml" />
-    <Content Include="app\src\main\res\values\styles.xml" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="app\src\main\assets\" />

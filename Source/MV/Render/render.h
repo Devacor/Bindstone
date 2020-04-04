@@ -223,9 +223,7 @@ namespace MV {
 	public:
 		void resize(const Size<> &a_size);
 
-		PointPrecision height() const;
-		PointPrecision width() const;
-		Size<> size() const;
+		const Size<> &size() const;
 	private:
 		RenderWorld(Draw2D& a_renderer);
 		Size<> worldSize;
@@ -256,9 +254,8 @@ namespace MV {
 		Window& borderless();
 		Window& bordered();
 
-		int height() const;
-		int width() const;
-		Size<int> size() const;
+		const Size<int>& drawableSize() const;
+		const Size<int>& windowSize() const;
 
 		bool handleEvent(const SDL_Event &event, RenderWorld &a_world);
 
@@ -279,7 +276,8 @@ namespace MV {
 		void updateAspectRatio();
 		bool maintainProportions = true;
 		bool sizeWorldWithWindow = false;
-		Size<int> windowSize;
+		Size<int> ourWindowSize;
+		Size<int> ourDrawableSize;
 		PointPrecision aspectRatio;
 		uint32_t SDLflags;
 		std::string title;
@@ -538,7 +536,8 @@ namespace MV {
 		void validateShaderStatus(GLuint a_id, bool a_isShader);
 		void loadPartOfShader(GLuint a_id, const std::string &a_code);
 
-		bool setupSDL();
+		void setInitialSDLAttributes();
+		void setupSDL();
 		void setupOpengl();
 
 		void refreshWorldAndWindowSize();

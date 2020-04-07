@@ -26,4 +26,5 @@ void main(){
     v.x += sin(time) * inUV.y * 10.0f * cos(time * 0.25f) * (sin(time * 1.0f) * 0.5f);
     v.y += cos(time) * inUV.y * 10.0f * cos(time * 0.5f);
     gl_Position = transformation * v;
+    gl_Position.z = 0.0;
 }

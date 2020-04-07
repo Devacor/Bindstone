@@ -132,6 +132,7 @@ private:
 	
 	bool done;
 
+	std::shared_ptr<MV::Scene::Node> uiRoot;
 	MV::Scene::SafeComponent<MV::Scene::Sprite> screenScaler;
 	MV::TapDevice ourMouse;
 

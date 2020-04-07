@@ -98,29 +98,13 @@ namespace MV {
 
 		std::shared_ptr<Component> Component::worldBounds(const BoxAABB<> &a_worldBounds) {
 			auto self = shared_from_this();
-			auto ourOwner = owner();
-			if (ourOwner->parent()) {
-				boundsImplementation(ourOwner->parent()->localFromWorld((a_worldBounds - ourOwner->worldPosition()) / ourOwner->scale()));
-			} else {
-				TransformMatrix identity;
-				identity.makeIdentity();
-				boundsImplementation({ ourOwner->renderer().localFromWorld(a_worldBounds.minPoint, ourOwner->cameraId(), identity),
-					ourOwner->renderer().localFromWorld(a_worldBounds.maxPoint, ourOwner->cameraId(), identity) });
-			}
+			boundsImplementation(owner()->localFromWorld(a_worldBounds));
 			return self;
 		}
 
 		std::shared_ptr<Component> Component::screenBounds(const BoxAABB<int> &a_screenBounds) {
 			auto self = shared_from_this();
-			auto ourOwner = owner();
-			if (ourOwner->parent()) {
-				boundsImplementation(ourOwner->parent()->localFromScreen((a_screenBounds - ourOwner->screenPosition()) / ourOwner->scale()));
-			} else {
-				TransformMatrix identity;
-				identity.makeIdentity();
-				boundsImplementation({ ourOwner->renderer().localFromScreen(a_screenBounds.minPoint, ourOwner->cameraId(), identity),
-					ourOwner->renderer().localFromScreen(a_screenBounds.maxPoint, ourOwner->cameraId(), identity) });
-			}
+			boundsImplementation(owner()->localFromScreen(a_screenBounds));
 			return self;
 		}
 

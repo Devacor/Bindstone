@@ -137,7 +137,7 @@ private:
 			target->anchors().offset(updatedOffset);
 		});
 
-		makeButton(grid->owner(), resources, "Calculate", { 100.0f, 27.0f }, U8_STR("Calculate"))->
+		makeButton(grid->owner(), resources, "Calculate", buttonSize, U8_STR("Calculate"))->
 			onAccept.connect("Calculate", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
 				target->anchors().calculateOffsetAndPivot();
 					
@@ -151,6 +151,11 @@ private:
 				updatingFields = false;
 			}
 		);
+
+		makeButton(grid->owner(), resources, buttonSize, "Apply")->
+			onAccept.connect("Apply", [&](std::shared_ptr<MV::Scene::Clickable> a_clickable) {
+			target->anchors().apply();
+		});
 
 		auto pos = box ? box->parent()->position() : MV::Point<>(100.0f, 0.0f);
 		box = makeDraggableBox("AnchorEditor", root, gridNode->bounds().size(), *(resources.get<MV::TapDevice>()));

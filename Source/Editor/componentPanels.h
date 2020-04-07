@@ -62,6 +62,9 @@ public:
 		activeTextbox.reset();
 		SDL_StopTextInput();
 	}
+	bool hasActiveText() const {
+		return !activeTextbox.expired();
+	}
 	MV::Services& services();
 
 	virtual void clearTexturePicker() {

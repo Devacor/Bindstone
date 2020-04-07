@@ -1,5 +1,7 @@
 //Note: BINDSTONE_SERVER is actually a project-wide define, but we put it manually in here for VS Intellisense to work.
+#ifndef BINDSTONE_SERVER
 #define BINDSTONE_SERVER
+#endif
 #include "Game/gameEditor.h"
 #include "MV/Utility/threadPool.hpp"
 
@@ -185,7 +187,7 @@ auto performanceTestInvert(std::string name, MV::TransformMatrix& a) {
 	MV::Stopwatch timer;
 	timer.start();
 	for (int i = 0; i < 1000000; ++i) {
-		a = a.inverse();
+		a = MV::inverse(a);
 	}
 	auto elapsed = timer.stop();
 	std::cout << "[" << name << "] == " << elapsed << "s\n";

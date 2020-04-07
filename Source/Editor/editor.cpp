@@ -8,10 +8,11 @@ Editor::Editor(Managers &a_managers):
 	managers(a_managers),
 	visor(MV::Scene::Node::make(a_managers.renderer, "visor")),
 	scene(visor->make("root")),
+
 	controls(MV::Scene::Node::make(a_managers.renderer)),
 	chaiScript(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), [](const std::string& a_file) {return MV::fileContents(a_file); }, chaiscript::default_options()),
 	testNode(MV::Scene::Node::make(a_managers.renderer)){
-	visor->cameraId(1);
+	visor->cameraId(99);
 
 	managers.services.connect(this);
 	returnFromBackground();
@@ -22,11 +23,9 @@ Editor::Editor(Managers &a_managers):
 	initializeControls();
 }
 
-//return true if we're still good to go
-bool Editor::update(double dt){
+void Editor::updateCameraWithKeyboardState(double dt) {
 	const static float speed = 175.0f;
 	const static float zoomSpeed = 7.5f;
-	updateFps(dt);
 	const Uint8* keystate = SDL_GetKeyboardState(NULL);
 	if (keystate[SDL_SCANCODE_LEFT]) {
 		scene->camera().translate(MV::point(speed, 0.0f) * static_cast<float>(dt));
@@ -49,6 +48,22 @@ bool Editor::update(double dt){
 	}
 	if (keystate[SDL_SCANCODE_B]) {
 		handleScroll(zoomSpeed * static_cast<float>(dt), mouse.position());
+	}
+	if (keystate[SDL_SCANCODE_C]) {
+		scene->camera().position({ 0.0f, 0.0f, 0.0f });
+	}
+	if (keystate[SDL_SCANCODE_SPACE]) {
+		scene->camera().position(MV::point(0.0f, 0.0f));
+		scene->scale({ 1.0f, 1.0f, 1.0f });
+		scene->position(MV::point(0.0f, 0.0f));
+	}
+}
+
+//return true if we're still good to go
+bool Editor::update(double dt){
+	updateFps(dt);
+	if (controlPanel->activePanel() == nullptr || !controlPanel->activePanel()->hasActiveText()) {
+		updateCameraWithKeyboardState(dt);
 	}
 	lastUpdateDelta = dt;
 	selectorPanel->update();

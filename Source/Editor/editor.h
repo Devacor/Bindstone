@@ -64,6 +64,7 @@ private:
 	void initializeWindow();
 	void initializeControls();
 	void handleScroll(float a_amount, const MV::Point<int> &a_position);
+	void updateCameraWithKeyboardState(double dt);
 
 	Managers& managers;
 

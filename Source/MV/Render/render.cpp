@@ -735,6 +735,8 @@ namespace MV {
 			defaultBlendFunction();
 			setBlendEquation(GL_FUNC_ADD, GL_FUNC_ADD);
 
+
+			//No depth testing
 			glDepthMask(GL_FALSE);
 			glDisable(GL_DEPTH_TEST);
 			glDepthFunc(GL_LEQUAL);
@@ -753,7 +755,10 @@ namespace MV {
             glHint(GL_TEXTURE_COMPRESSION_HINT, GL_NICEST);
             glHint(GL_POLYGON_SMOOTH_HINT, GL_NICEST);
             
-            glEnable(GL_DEPTH_CLAMP);
+			//GL_DEPTH_CLAMP: Just avoid doing this, no support on GLES anyway, just set z to 0 in shaders or scale z within 0-1.
+			//In 2D we don't really want to clip anything and partially transparent sprites don't mix well with depth testing
+			//so setting Z to 0 and rendering in order works.
+            //glEnable(GL_DEPTH_CLAMP);
 #endif
 			glClearStencil(0);
 

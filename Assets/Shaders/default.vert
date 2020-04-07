@@ -15,4 +15,5 @@ void main(){
     uv = inUV;
 
     gl_Position = transformation * vec4(inPosition, 1.0);
+    gl_Position.z = 0.0;
 }

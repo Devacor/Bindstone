@@ -82,7 +82,7 @@ GameEditor::GameEditor(std::string a_username, std::string a_password) :
 	// 		spineTestNode->loadChild("simple.scene", populateArchive);
 	// 		spineTestNode->loadChild("tree_particle.scene", populateArchive);
 	screenScaler = limbo->attach<MV::Scene::Sprite>();
-	screenScaler->hide();
+	screenScaler->hide()->id("ScreenScaler");
 
 	auto scale = game.managers().renderer.window().uiScale();
 	screenScaler->bounds({ MV::point(0.0f, 0.0f), game.managers().renderer.world().size() / scale });

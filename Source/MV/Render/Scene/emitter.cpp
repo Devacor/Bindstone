@@ -176,13 +176,15 @@ namespace MV {
 				texturePoints.emplace_back( 1.0f, 1.0f );
 				texturePoints.emplace_back( 1.0f, 0.0f );
 			}
+
 			threadData[a_groupIndex].points.reserve(threadData[a_groupIndex].particles.size() * 4);
 			threadData[a_groupIndex].vertexIndices.reserve(threadData[a_groupIndex].particles.size() * 6);
 			for (auto &&particle : threadData[a_groupIndex].particles) {
-				BoxAABB<> bounds(toPoint(particle.scale / 2.0f), toPoint(particle.scale / -2.0f));
-				
+				BoxAABB<> bounds(MV::Point<>(particle.scale.x / -2.0f, particle.scale.y / -2.0f, 0.0f), MV::Point<>(particle.scale.x / 2.0f, particle.scale.y / 2.0f, 0.0f));
+				bounds.sanitize();
+
 				appendQuadVertexIndices(threadData[a_groupIndex].vertexIndices, static_cast<GLuint>(threadData[a_groupIndex].points.size()));
-				
+
 				auto c = cos(particle.rotation.z);
 				auto s = sin(particle.rotation.z);
 				for (size_t i = 0; i < 4; ++i) {

@@ -62,8 +62,14 @@ void Game::initializeWindow(){
 #endif
 
 	MV::Size<int> windowSize = gameData.managers().renderer.monitorSize();
+
 	auto aspectX = static_cast<float>(windowSize.width) / windowSize.height;
 	MV::Size<> worldSize(1080 * aspectX, 1080);
+
+#ifdef WIN32
+	windowSize /= 2;
+#endif
+
 	MV::info("PRE-SCALE: ", windowSize);
 
 	if (!gameData.managers().renderer.initialize(windowSize, worldSize)) {
@@ -78,7 +84,8 @@ void Game::initializeWindow(){
 
 	rootScene = MV::Scene::Node::make(gameData.managers().renderer);
 
-	screenScaler = rootScene->make("UI")->cameraId(1)->attach<MV::Scene::Sprite>();
+	uiRoot = rootScene->make("UI")->cameraId(1);
+	screenScaler = rootScene->attach<MV::Scene::Sprite>();
 	screenScaler->hide()->id("ScreenScaler");
 	auto scaledDpi = gameData.managers().renderer.window().uiScale();
 	screenScaler->bounds({ MV::point(0.0f, 0.0f), gameData.managers().renderer.world().size() / scaledDpi });
@@ -103,7 +110,7 @@ void Game::initializeWindow(){
 
 	hook(scriptEngine);
 	if (!MV::RUNNING_IN_HEADLESS) {
-		ourGui = std::make_unique<MV::InterfaceManager>(rootScene, ourMouse, gameData.managers(), scriptEngine, "Interface/interfaceManager.script"s);
+		ourGui = std::make_unique<MV::InterfaceManager>(uiRoot, ourMouse, gameData.managers(), scriptEngine, "Interface/interfaceManager.script"s);
 		ourGui->initialize();
 	}
 }

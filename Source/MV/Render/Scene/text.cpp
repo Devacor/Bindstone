@@ -125,17 +125,21 @@ namespace MV{
 					return true;
 				} else if (event.key.keysym.sym == SDLK_c && SDL_GetModState() & KMOD_CTRL) {
 					SDL_SetClipboardText(text().c_str());
+					return true;
 				} else if (event.key.keysym.sym == SDLK_LEFT) {
 					if (cursor > 0) {
 						incrementCursor(-1);
 					}
+					return true;
 				} else if (event.key.keysym.sym == SDLK_RIGHT) {
 					if (cursor < formattedText->size()) {
 						incrementCursor(1);
 					}
+					return true;
 				} else if (event.key.keysym.sym == SDLK_RETURN) {
 					auto self = std::static_pointer_cast<Text>(shared_from_this());
 					onEnterSignal(self);
+					return true;
 				}
 			}
 			return false;

@@ -107,7 +107,7 @@
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
       </AdditionalOptions>
       <GradleVersion>4.4</GradleVersion>
-      <ApplicationName>com.mutedvision.bindstone</ApplicationName>
+      <ApplicationName>com.snapjaw.bindstone</ApplicationName>
       <ApkFileName Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">all\$(Configuration)\app-all-$(Configuration).apk</ApkFileName>
       <ApkFileName Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">all\$(Configuration)\app-all-$(Configuration).apk</ApkFileName>
       <ApkFileName Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">all\$(Configuration)\app-all-$(Configuration).apk</ApkFileName>
@@ -127,6 +127,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <OutDir>$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)Builds\Intermediate\Android\$(RootNamespace)\$(Platform)\$(Configuration)\</IntDir>
+    <TargetExt>.apk</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
     <OutDir>$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</OutDir>
@@ -135,6 +136,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
     <OutDir>$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)Builds\Intermediate\Android\$(RootNamespace)\$(Platform)\$(Configuration)\</IntDir>
+    <TargetExt>.apk</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</OutDir>
@@ -143,6 +145,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)Builds\Intermediate\Android\$(RootNamespace)\$(Platform)\$(Configuration)\</IntDir>
+    <TargetExt>.apk</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
     <OutDir>$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</OutDir>
@@ -151,11 +154,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
     <OutDir>$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)Builds\Intermediate\Android\$(RootNamespace)\$(Platform)\$(Configuration)\</IntDir>
+    <TargetExt>.apk</TargetExt>
   </PropertyGroup>
   <ItemGroup>
     <GradleTemplate Include="app\build.gradle.template" />
     <GradleTemplate Include="app\src\main\AndroidManifest.xml.template" />
     <GradleTemplate Include="build.gradle.template" />
+    <GradleTemplate Include="gradle.properties.template" />
     <GradleTemplate Include="settings.gradle.template" />
     <GradleTemplate Include="gradle\wrapper\gradle-wrapper.properties.template" />
   </ItemGroup>
@@ -199,6 +204,7 @@
     <Content Include="app\jni\Android.mk" />
     <Content Include="app\jni\Application.mk" />
     <Content Include="app\jni\src\Android.mk" />
+    <Content Include="app\proguard-rules.pro" />
     <Content Include="app\src\main\jniLibs\arm64-v8a\libboost_filesystem.so" />
     <Content Include="app\src\main\jniLibs\arm64-v8a\libboost_system.so" />
     <Content Include="app\src\main\jniLibs\armeabi-v7a\libboost_filesystem.so" />
@@ -207,11 +213,20 @@
     <Content Include="app\src\main\jniLibs\x86\libboost_system.so" />
     <Content Include="app\src\main\jniLibs\x86_64\libboost_filesystem.so" />
     <Content Include="app\src\main\jniLibs\x86_64\libboost_system.so" />
+    <Content Include="app\src\main\res\drawable\icon_back.png" />
+    <Content Include="app\src\main\res\drawable\icon_foreground.png" />
+    <Content Include="app\src\main\res\mipmap-anydpi-v26\ic_launcher.xml" />
+    <Content Include="app\src\main\res\mipmap-anydpi-v26\ic_launcher_round.xml" />
     <Content Include="app\src\main\res\mipmap-hdpi\ic_launcher.png" />
+    <Content Include="app\src\main\res\mipmap-hdpi\ic_launcher_round.png" />
     <Content Include="app\src\main\res\mipmap-mdpi\ic_launcher.png" />
+    <Content Include="app\src\main\res\mipmap-mdpi\ic_launcher_round.png" />
     <Content Include="app\src\main\res\mipmap-xhdpi\ic_launcher.png" />
+    <Content Include="app\src\main\res\mipmap-xhdpi\ic_launcher_round.png" />
     <Content Include="app\src\main\res\mipmap-xxhdpi\ic_launcher.png" />
+    <Content Include="app\src\main\res\mipmap-xxhdpi\ic_launcher_round.png" />
     <Content Include="app\src\main\res\mipmap-xxxhdpi\ic_launcher.png" />
+    <Content Include="app\src\main\res\mipmap-xxxhdpi\ic_launcher_round.png" />
     <Content Include="app\src\main\res\values\strings.xml" />
   </ItemGroup>
   <ItemGroup>

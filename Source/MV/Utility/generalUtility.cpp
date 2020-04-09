@@ -177,7 +177,8 @@ namespace MV {
 #if defined(__ANDROID__) || defined(__APPLE__)
 		SDL_RWops* sdlIO = SDL_RWFromFile(fileExistsAbsolute(userPrefPath) ? userPrefPath.c_str() : a_path.c_str(), "rb");
 #else
-		SDL_RWops* sdlIO = SDL_RWFromFile(fileExistsAbsolute(userPrefPath) ? userPrefPath.c_str() : ("Assets/" + a_path).c_str(), "rb");
+		//supports absolute paths too.
+		SDL_RWops* sdlIO = SDL_RWFromFile(fileExistsAbsolute(a_path) ? a_path.c_str() : fileExistsAbsolute(userPrefPath) ? userPrefPath.c_str() : ("Assets/" + a_path).c_str(), "rb");
 #endif
 		return sdlIO;
 	}
@@ -223,16 +224,15 @@ namespace MV {
 	}
 
 	time_t lastFileWriteTime(const std::string& a_path) {
+#if defined(__ANDROID__) || defined(__APPLE__)
+		return sdlFileHandle(a_path) == nullptr ? 0 : 1;
+#else
 		std::string userPrefPath = playerPreferencesPath() + a_path;
 
 		boost::system::error_code errorCode;
 		return fileExistsAbsolute(userPrefPath) ? boost::filesystem::last_write_time(userPrefPath, errorCode) :
-#ifdef __ANDROID__
-			0
-#else
-			fileExistsAbsolute("Assets/" + a_path) ? boost::filesystem::last_write_time("Assets/" + a_path, errorCode) : 0
+			fileExistsAbsolute("Assets/" + a_path) ? boost::filesystem::last_write_time("Assets/" + a_path, errorCode) : 0;
 #endif
-			;
 	}
 
 	Random* Random::instance = nullptr;

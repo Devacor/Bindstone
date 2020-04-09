@@ -105,6 +105,7 @@ namespace MV {
 		}
 
 		void Node::update(double a_delta, bool a_force) {
+			auto selfReference = shared_from_this(); //keep us alive no matter the update step
 			allowChangeCallNeeded = true;
 			if (allowUpdate || a_force) {
 				for (size_t i = 0; i < childComponents.size(); ++i) {
@@ -122,7 +123,7 @@ namespace MV {
 			if (onChangeCallNeeded) {
 				onChangeCallNeeded = false;
 				allowChangeCallNeeded = false;
-				onChangeSignal(shared_from_this());
+				onChangeSignal(selfReference);
 			}
 		}
 

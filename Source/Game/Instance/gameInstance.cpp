@@ -58,10 +58,17 @@ void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer,
 	left->initialize();
 	right->initialize();
 
+#ifdef BINDSTONE_SERVER
 	worldTimestep.then("update", [&](MV::Task& /*a_self*/, double a_dt) {
 		fixedUpdate(a_dt);
 		return true;
 	}).recent()->interval(timeStep, 1);
+#else
+	worldTimestep.then("update", [&](MV::Task& /*a_self*/, double a_dt) {
+		fixedUpdate(a_dt);
+		return true;
+	});
+#endif
 }
 
 GameInstance::~GameInstance() {

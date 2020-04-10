@@ -11,7 +11,7 @@
 #include "stringUtility.h"
 
 #ifndef APPLICATION_ORG
-#define APPLICATION_ORG "MutedVision"
+#define APPLICATION_ORG "SnapJaw"
 #endif
 
 #ifndef APPLICATION_NAME
@@ -166,7 +166,11 @@ namespace MV {
 
 	bool fileExistsInSearchPaths(const std::string& a_path) {
 		std::string userPrefPath = playerPreferencesPath() + a_path;
+#if defined(__ANDROID__) || defined(__APPLE__)
 		return fileExistsAbsolute(a_path) || fileExistsAbsolute(userPrefPath);
+#else
+		return fileExistsAbsolute(a_path) || fileExistsAbsolute(userPrefPath) || fileExistsAbsolute("Assets/" + a_path);
+#endif
 	}
 
 	SDL_RWops* sdlFileHandle(const std::string& a_path) {
@@ -191,7 +195,7 @@ namespace MV {
 			}
 			return {};
 		}
-
+		SCOPE_EXIT{ SDL_RWclose(sdlIO); };
 		auto totalSize = SDL_RWsize(sdlIO);
 
 		std::string data;
@@ -225,12 +229,13 @@ namespace MV {
 
 	time_t lastFileWriteTime(const std::string& a_path) {
 #if defined(__ANDROID__) || defined(__APPLE__)
-		return sdlFileHandle(a_path) == nullptr ? 0 : 1;
+		return fileExistsInSearchPaths(a_path) ? 1 : 0;
 #else
 		std::string userPrefPath = playerPreferencesPath() + a_path;
 
 		boost::system::error_code errorCode;
-		return fileExistsAbsolute(userPrefPath) ? boost::filesystem::last_write_time(userPrefPath, errorCode) :
+		return fileExistsAbsolute(a_path) ? boost::filesystem::last_write_time(a_path) :
+			fileExistsAbsolute(userPrefPath) ? boost::filesystem::last_write_time(userPrefPath, errorCode) :
 			fileExistsAbsolute("Assets/" + a_path) ? boost::filesystem::last_write_time("Assets/" + a_path, errorCode) : 0;
 #endif
 	}

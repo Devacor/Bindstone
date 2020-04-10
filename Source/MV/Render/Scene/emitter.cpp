@@ -232,12 +232,14 @@ namespace MV {
 		}
 
 		void Emitter::loadPointsFromBufferAndAllowUpdate() {
-			std::lock_guard<std::recursive_mutex> guard(lock);
-			points.clear();
-			vertexIndices.clear();
-			std::swap(points, pointBuffer);
-			std::swap(vertexIndices, vertexIndexBuffer);
-			dirtyVertexBuffer = true;
+			{
+				std::lock_guard<std::recursive_mutex> guard(lock);
+				points.clear();
+				vertexIndices.clear();
+				std::swap(points, pointBuffer);
+				std::swap(vertexIndices, vertexIndexBuffer);
+				dirtyVertexBuffer = true;
+			}
 			updateInProgress.store(false);
 		}
 

@@ -9,6 +9,7 @@
 #include "scopeGuard.hpp"
 #include <boost/filesystem.hpp>
 #include "stringUtility.h"
+#include "log.h"
 
 #ifndef APPLICATION_ORG
 #define APPLICATION_ORG "SnapJaw"
@@ -143,7 +144,7 @@ namespace MV {
 	}
 
 	const std::string& playerPreferencesPath() {
-		static const std::string path = std::string("/") + SDL_GetPrefPath(APPLICATION_ORG, APPLICATION_NAME);
+		static const std::string path = SDL_GetPrefPath(APPLICATION_ORG, APPLICATION_NAME);
 		return path;
 	}
 
@@ -206,19 +207,22 @@ namespace MV {
 	}
 
 	bool writeToFile(const std::string& a_path, const std::string& a_contents) {
-		std::string finalPath = playerPreferencesPath() + a_path;
-		boost::filesystem::create_directories(boost::filesystem::path(finalPath).parent_path());
+		boost::filesystem::path finalPath = boost::filesystem::path(a_path).is_absolute() ? a_path : playerPreferencesPath() + a_path;
+		boost::filesystem::create_directories(finalPath.parent_path());
 #if defined(__ANDROID__) || defined(__APPLE__)
 		SDL_RWops* rw = SDL_RWFromFile(finalPath.c_str(), "wb");
 		if (rw != NULL) {
 			SCOPE_EXIT{ SDL_RWclose(rw); };
 			if (SDL_RWwrite(rw, a_contents.c_str(), 1, a_contents.size()) == a_contents.size()) {
+				MV::info("Saving File: ", finalPath);
 				return true;
 			}
 		}
+		MV::error("Failed to Save File: ", finalPath);
 		return false;
 #else
 		boost::filesystem::save_string_file(finalPath, a_contents);
+		MV::info("Saving File: ", finalPath);
 		return true; //assume success.
 #endif
 	}

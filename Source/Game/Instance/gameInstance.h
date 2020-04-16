@@ -29,12 +29,12 @@ public:
 	GameData& data() {
 		return gameData;
 	}
-
-	void beginMapDrag();
-
+	
 	MV::Services& services() {
 		return gameData.managers().services;
 	}
+
+	void beginMapDrag();
 
 	void fixedUpdate(double dt);
 	bool update(double dt);
@@ -81,8 +81,8 @@ public:
 		return left->player == a_player ? *right : *left;
 	}
 
-	void moveCamera(MV::Point<> a_startPosition, MV::Scale a_scale);
-	void moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale);
+	void moveCamera(MV::Point<> a_startPosition, MV::Scale a_scale, bool interruptable = false);
+	void moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale, bool interruptable = false);
 
 	virtual bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &) const = 0;
 
@@ -128,7 +128,13 @@ protected:
 	virtual void fixedUpdateImplementation(double /*a_dt*/) {}
 	virtual void updateImplementation(double /*a_dt*/) {}
 
-	void handleScroll(int a_amount);
+	bool cameraIsFree() const;
+	bool requestCamera(); //returns the result of cameraIsFree and cancels any interruptable camera action.
+
+	void handleScroll(float a_amount, const MV::Point<int> &a_position);
+	void rawScaleAroundCenter(float a_amount);
+	void rawScaleAroundScreenPoint(float a_amount, const MV::Point<int>& a_position);
+	void easeToBoundsIfExceeded(const MV::Point<int>& a_pointerCenter);
 
 	virtual void hook();
 
@@ -144,7 +150,8 @@ protected:
 
 	chaiscript::ChaiScript scriptEngine;
 
-	MV::TapDevice::SignalType mouseSignal;
+	MV::TapDevice::SignalType activeDrag;
+
 	MV::TapDevice::TouchSignalType zoomSignal;
 
 	std::unique_ptr<Team> left;
@@ -154,6 +161,14 @@ protected:
 	MV::Task cameraAction;
 
 	float timeStep = 0.0f;
+
+	bool hasActiveTouch = false;
+
+	const MV::PointPrecision maxScaleHard = 3.5f;
+	const MV::PointPrecision maxScaleSoft = 3.0f;
+
+	const MV::PointPrecision minScaleHard = .675f;
+	const MV::PointPrecision minScaleSoft = .725f;
 
 	BindstoneNetworkObjectPool synchronizedObjects;
 };

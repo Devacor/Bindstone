@@ -183,7 +183,6 @@ void Editor::initializeControls(){
 }
 
 void Editor::handleScroll(float a_amount, const MV::Point<int> &a_position) {
-	const Uint8* keystate = SDL_GetKeyboardState(NULL);
 	auto screenScale = MV::Scale(.05f, .05f, .05f) * a_amount + (scene->scale() / 10.0f * a_amount);
 	if (scene->scale().x + screenScale.x > .001f) {
 		auto originalScreenPosition = scene->localFromScreen(a_position) * (MV::toPoint(screenScale));

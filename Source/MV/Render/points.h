@@ -399,6 +399,16 @@ namespace MV {
 	Scale operator/(Scale a_lhs, PointPrecision a_rhs);
 	Scale operator/(PointPrecision a_lhs, Scale a_rhs);
 
+	inline std::ostream& operator<<(std::ostream& os, const Scale& a_scale) {
+		os << "(x: " << a_scale.x << ", y: " << a_scale.y << ", z: " << a_scale.z << ")";
+		return os;
+	}
+
+	inline std::istream& operator>>(std::istream& is, Scale& a_scale) {
+		is >> a_scale.x >> a_scale.y >> a_scale.z;
+		return is;
+	}
+
 	inline Scale mix(Scale a_start, Scale a_end, float a_percent) {
 		return {
 			mix(static_cast<float>(a_start.x), static_cast<float>(a_end.x), a_percent),

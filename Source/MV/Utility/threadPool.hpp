@@ -180,13 +180,14 @@ namespace MV {
 			active+=static_cast<int>(a_tasks.size());
 			std::shared_ptr<std::atomic<size_t>> counter = std::make_shared<std::atomic<size_t>>(a_tasks.size());
 			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(a_onGroupComplete);
-			for (auto&& job : a_tasks)
 			{
-				{
+				std::lock_guard<std::mutex> guard(lock);
+				for (auto&& job : a_tasks) {
 					job.group(counter, sharedGroupComplete, a_continueCompletionCallback);
-					std::lock_guard<std::mutex> guard(lock);
 					jobs.push_back(std::move(job));
 				}
+			}
+			for (size_t i = 0; i < a_tasks.size(); ++i) {
 				notify.notify_one();
 			}
 		}
@@ -195,13 +196,14 @@ namespace MV {
 			active+=static_cast<int>(a_tasks.size());
 			std::shared_ptr<std::atomic<size_t>> counter = std::make_shared<std::atomic<size_t>>(a_tasks.size());
 			std::shared_ptr<std::function<void()>> sharedGroupComplete = std::make_shared<std::function<void()>>(a_onGroupComplete);
-			for (auto&& job : a_tasks)
 			{
-				{
-					std::lock_guard<std::mutex> guard(lock);
+				std::lock_guard<std::mutex> guard(lock);
+				for (auto&& job : a_tasks) {
 					jobs.push_back(job);
 					jobs.back().group(counter, sharedGroupComplete, a_continueCompletionCallback);
 				}
+			}
+			for (size_t i = 0; i < a_tasks.size(); ++i) {
 				notify.notify_one();
 			}
 		}

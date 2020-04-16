@@ -35,12 +35,21 @@ struct StandardScriptMethods {
 
 	StandardScriptMethods<DataType>& loadScript(chaiscript::ChaiScript &a_script, const std::string &a_assetType, const std::string &a_id, bool a_isServer) {
 		std::string filePath = a_assetType + "/" + a_id + (a_isServer ? "/main.script" : "/mainClient.script");
+#ifdef WIN32
+//#define MV_SCRIPT_HOTLOAD
+#endif
+#ifdef MV_SCRIPT_HOTLOAD
 		time_t currentWriteTime = MV::lastFileWriteTime(filePath);
-		if (loadedFileTimestamp == 0 || loadedFileTimestamp != currentWriteTime) {
+		bool shouldLoad = loadedFileTimestamp == 0 || loadedFileTimestamp != currentWriteTime;
+		loadedFileTimestamp = currentWriteTime;
+#else
+		bool shouldLoad = loadedFileTimestamp == 0;
+		loadedFileTimestamp = 1;
+#endif
+		if (shouldLoad) {
 			scriptContents = MV::fileContents(filePath);
 			if (!scriptContents.empty()) {
 				MV::info("Loaded Script: [", filePath, "]");
-				loadedFileTimestamp = currentWriteTime;
 				auto localVariables = std::map<std::string, chaiscript::Boxed_Value>{
 					{ "self", chaiscript::Boxed_Value(this) }
 				};
@@ -49,7 +58,6 @@ struct StandardScriptMethods {
 				SCOPE_EXIT{ a_script.set_locals(resetLocals); };
 				a_script.eval(scriptContents);
 			} else {
-				loadedFileTimestamp = 1;
 				MV::error("Failed to load script for ", a_assetType, ": ", a_id);
 			}
 		}

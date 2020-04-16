@@ -228,11 +228,14 @@ namespace MV {
 				auto self = shared_from_this();
 				std::vector<std::shared_ptr<Component>>::const_iterator foundComponent = componentIterator<ComponentType>(a_exactType, a_throwIfNotFound);
 				if (foundComponent != childComponents.end()) {
-					(*foundComponent)->detachImplementation();
 					auto sharedComponent = (*foundComponent);
+					auto originalOwner = sharedComponent->componentOwner;
+					sharedComponent->detachImplementation();
 					childComponents.erase(foundComponent);
 					onDetachSignal(sharedComponent);
-					(*foundComponent)->componentOwner.reset();
+					if (sharedComponent->componentOwner.lock() == originalOwner.lock()) {
+						sharedComponent->componentOwner.reset();
+					}
 				}
 				return self;
 			}
@@ -242,10 +245,14 @@ namespace MV {
 				auto self = shared_from_this();
 				auto found = std::find(childComponents.begin(), childComponents.end(), a_component);
 				if (found != childComponents.end()) {
-					(*found)->detachImplementation();
+					auto sharedComponent = *found;
+					auto originalOwner = sharedComponent->componentOwner;
+					sharedComponent->detachImplementation();
 					childComponents.erase(found);
 					onDetachSignal(a_component);
-					(*found)->componentOwner.reset();
+					if (sharedComponent->componentOwner.lock() == originalOwner.lock()) {
+						sharedComponent->componentOwner.reset();
+					}
 				}
 				return self;
 			}
@@ -261,11 +268,14 @@ namespace MV {
 					return a_component->id() == a_componentId;
 				});
 				if (found != childComponents.end()) {
-					(*found)->detachImplementation();
-					auto foundComponent = *found;
+					auto sharedComponent = *found;
+					auto originalOwner = sharedComponent->componentOwner;
+					sharedComponent->detachImplementation();
 					childComponents.erase(found);
-					onDetachSignal(foundComponent);
-					(*found)->componentOwner.reset();
+					onDetachSignal(sharedComponent);
+					if (sharedComponent->componentOwner.lock() == originalOwner.lock()) {
+						sharedComponent->componentOwner.reset();
+					}
 				} else if (a_throwIfNotFound) {
 					require<ResourceException>(false, "Component with id [", a_componentId, "] not found in node [", id(), "]");
 				}

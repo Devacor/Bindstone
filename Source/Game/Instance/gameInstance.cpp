@@ -3,17 +3,36 @@
 #include "Game/creature.h"
 #include "Game/game.h"
 #include "Game/battleEffect.h"
+#include <cmath>
 #include <iostream>
 
-void GameInstance::handleScroll(int a_amount) {
-	if (cameraAction.finished()) {
-		auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_amount);
-		if (worldScene->scale().x + screenScale.x > .2f) {
-			auto originalScreenPosition = worldScene->localFromScreen(ourMouse.position()) * (MV::toPoint(screenScale));
-			worldScene->addScale(screenScale);
-			worldScene->translate(originalScreenPosition * -1.0f);
+void GameInstance::handleScroll(float a_amount, const MV::Point<int>& a_position) {
+	if (requestCamera()) {
+		auto screenScale = .05f * a_amount + (worldScene->scale().x / 10.0f * a_amount);
+		auto finalScale = screenScale + worldScene->scale().x;
+
+		if (finalScale > maxScaleHard) {
+			screenScale -= finalScale - maxScaleHard;
 		}
+		if (finalScale < minScaleHard) {
+			screenScale -= finalScale - minScaleHard;
+		}
+		if (std::abs(screenScale) > 0.00000001f) {
+			rawScaleAroundScreenPoint(worldScene->scale().x + screenScale, a_position);
+		}
+		easeToBoundsIfExceeded(a_position);
 	}
+}
+
+void GameInstance::rawScaleAroundCenter(float a_scale) {
+	rawScaleAroundScreenPoint(a_scale, MV::toPoint(gameData.managers().renderer.window().drawableSize() / 2));
+}
+
+void GameInstance::rawScaleAroundScreenPoint(float a_scale, const MV::Point<int>& a_position) {
+	auto originalScreenPosition = worldScene->localFromScreen(a_position) * (MV::toPoint(a_scale - worldScene->scale()));
+	worldScene->scale(a_scale);
+	worldScene->translate(originalScreenPosition * -1.0f);
+	MV::info("CurrentScale: ", worldScene->scale());
 }
 
 GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameData& a_gameData, MV::TapDevice& a_mouse, float a_timeStep) :
@@ -39,18 +58,17 @@ void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer,
 	right->ourWellPosition = left->enemyWellPosition;
 	left->ourWellPosition = right->enemyWellPosition;
 
-	mouseSignal = ourMouse.onLeftMouseDown.connect([&](MV::TapDevice& /*a_mouse*/) {
+	ourMouse.onLeftMouseDown.connect("beginDragObserver", [this](MV::TapDevice& /*a_mouse*/) {
 		beginMapDrag();
 	});
 
-	zoomSignal = ourMouse.onPinchZoom.connect([&](MV::Point<int> a_point, float a_zoomAmount, float a_rotateAmount) {
-		if (cameraAction.finished()) {
-			auto screenScale = MV::Scale(.05f, .05f, .05f) * static_cast<float>(a_zoomAmount);
+	ourMouse.onLeftMouseUp.connect("cancelDragObserver", [this](MV::TapDevice& a_mouse2) {
+		activeDrag.reset();
+		easeToBoundsIfExceeded(ourMouse.position());
+	});
 
-			auto originalScreenPosition = worldScene->localFromScreen(a_point) * (MV::toPoint(screenScale));
-			worldScene->addScale(screenScale);
-			worldScene->translate(originalScreenPosition * -1.0f);
-		}
+	zoomSignal = ourMouse.onPinchZoom.connect([&](MV::Point<int> a_point, float a_zoomAmount, float a_rotateAmount) {
+		handleScroll(a_zoomAmount * 22.5f, a_point);
 	});
 
 	hook();
@@ -76,16 +94,12 @@ GameInstance::~GameInstance() {
 }
 
 void GameInstance::beginMapDrag() {
-	if (cameraAction.finished()) {
+	if (requestCamera()) {
 		ourMouse.queueExclusiveAction(MV::ExclusiveTapAction(true, { 10 }, [&]() {
-			auto dragSignature = ourMouse.onMove.connect([&](MV::TapDevice& a_mouse) {
+			activeDrag = ourMouse.onMove.connect([this](MV::TapDevice& a_mouse) {
 				if (worldScene) {
 					worldScene->camera().translate(MV::round<MV::PointPrecision>(a_mouse.position() - a_mouse.oldPosition()));
 				}
-			});
-			ourMouse.onLeftMouseUp.connect("cancelDrag", [=](MV::TapDevice& a_mouse2) {
-				a_mouse2.onMove.disconnect(dragSignature);
-				a_mouse2.onLeftMouseUp.disconnect("cancelDrag");
 			});
 		}, []() {}, "MapDrag"));
 	}
@@ -125,25 +139,59 @@ bool GameInstance::update(double a_dt) {
 
 bool GameInstance::handleEvent(const SDL_Event &a_event) {
 	if (a_event.type == SDL_MOUSEWHEEL) {
-		handleScroll(a_event.wheel.y);
+		handleScroll(static_cast<MV::PointPrecision>(a_event.wheel.y), mouse().position());
 	}
+	ourMouse.updateTouch(a_event, gameData.managers().renderer.window().drawableSize());
 	return false;
 }
 
-void GameInstance::moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale) {
+void GameInstance::moveCamera(std::shared_ptr<MV::Scene::Node> a_targetNode, MV::Scale a_scale, bool interruptable) {
 	moveCamera(((worldScene->worldPosition() - a_targetNode->worldPosition()) / a_targetNode->worldScale()) + MV::toPoint(gameData.managers().renderer.world().size() / 2.0f), a_scale);
 }
 
-void GameInstance::moveCamera(MV::Point<> endPosition, MV::Scale endScale) {
+void GameInstance::moveCamera(MV::Point<> endPosition, MV::Scale endScale, bool interruptable) {
 	auto startPosition = worldScene->position();
 	auto startScale = worldScene->scale();
 	cameraAction.cancel();
-	cameraAction.then("zoomAndPan", [&, startPosition, endPosition, startScale, endScale](MV::Task &a_self, double /*a_dt*/) {
-        float percent = std::min(static_cast<MV::PointPrecision>(a_self.elapsed() / 0.5f), 1.0f);
-		worldScene->position(MV::mix(startPosition, endPosition, percent, 2.0f));
-		worldScene->scale(MV::mix(startScale, endScale, percent, 2.0f));
-		return percent == 1.0f;
+	cameraAction.then(interruptable ? "interruptable" : "force", [&, startPosition, endPosition, startScale, endScale](MV::Task &a_self, double /*a_dt*/) {
+        float percent = std::min(static_cast<MV::PointPrecision>(a_self.localElapsed() / 0.5f), 1.0f);
+		worldScene->silence()->
+			position(MV::mix(startPosition, endPosition, percent, 2.0f))->
+			scale(MV::mix(startScale, endScale, percent, 2.0f));
+		return percent != 1.0f;
 	});
+}
+
+void GameInstance::easeToBoundsIfExceeded(const MV::Point<int> &a_pointerCenter) {
+	if (!cameraIsFree()) {
+		return;
+	}
+	if (worldScene->scale().x < minScaleSoft || worldScene->scale().x > maxScaleSoft) {
+		auto startScale = worldScene->scale().x;
+		auto endScale = worldScene->scale().x > maxScaleSoft ? maxScaleSoft : minScaleSoft;
+		cameraAction.cancel();
+		cameraAction.then(std::make_shared<MV::BlockForSeconds>(0.15f));
+
+		cameraAction.thenAlso("interruptable", [this, startScale, endScale, a_pointerCenter](MV::Task& a_self, double /*a_dt*/) {
+			float percent = std::min(static_cast<MV::PointPrecision>(a_self.localElapsed() * 3.0f), 1.0f);
+			rawScaleAroundScreenPoint(MV::mixOut(startScale, endScale, percent, 2.0f), a_pointerCenter);
+			MV::info("WorldBounds: ", worldScene->screenBounds(), " BasicBounds: ", worldScene->bounds(), " DrawableBounds: ", worldScene->renderer().window().drawableSize());
+			return percent != 1.0f;
+		});
+	}
+}
+
+bool GameInstance::cameraIsFree() const {
+	return !cameraAction.contains("force");
+}
+
+bool GameInstance::requestCamera() {
+	if (cameraIsFree()) {
+		activeDrag.reset();
+		cameraAction.cancel();
+		return true;
+	}
+	return false;
 }
 
 ClientGameInstance::ClientGameInstance(Game& a_game) :

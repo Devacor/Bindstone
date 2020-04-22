@@ -203,7 +203,6 @@
   <ItemGroup>
     <Content Include="app\jni\Android.mk" />
     <Content Include="app\jni\Application.mk" />
-    <Content Include="app\jni\src\Android.mk" />
     <Content Include="app\proguard-rules.pro" />
     <Content Include="app\src\main\jniLibs\arm64-v8a\libboost_filesystem.so" />
     <Content Include="app\src\main\jniLibs\arm64-v8a\libboost_system.so" />

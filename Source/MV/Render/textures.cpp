@@ -47,6 +47,9 @@ namespace MV {
 	}
 
 	GLenum getTextureFormat(SDL_Surface* img) {
+		if (img->format->format == SDL_PIXELFORMAT_ABGR8888) {
+			return GL_RGBA;
+		}
 		int nOfColors = img->format->BytesPerPixel;
 		if (nOfColors == 4) {	  // contains an alpha channel
 			if (img->format->Rmask == 0x000000ff) {
@@ -65,6 +68,9 @@ namespace MV {
 	}
 
 	GLenum getInternalTextureFormat(SDL_Surface* img) {
+		if (img->format->format == SDL_PIXELFORMAT_ABGR8888) {
+			return GL_RGBA;
+		}
 		int nOfColors = img->format->BytesPerPixel;
 		if (nOfColors == 4) {	  // contains an alpha channel
 			return GL_RGBA;
@@ -83,6 +89,25 @@ namespace MV {
 			Uint32 Rmask, Gmask, Bmask, Amask;
 			SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_ABGR8888, &bpp, &Rmask, &Gmask, &Bmask, &Amask);
 			SDL_Surface *surface = SDL_CreateRGBSurface(0, widthPowerOfTwo, heightPowerOfTwo, bpp, Rmask, Gmask, Bmask, Amask);
+
+			SDL_SetSurfaceBlendMode(a_img, SDL_BLENDMODE_NONE);
+			require<ResourceException>(SDL_BlitSurface(a_img, 0, surface, 0) == 0, "SDL_BlitSurface failed to copy!");
+
+			return surface;
+		}
+#ifdef __ANDROID__
+		return convertToAABGRSurface(a_img);
+#else
+		return a_img;
+#endif
+	}
+
+	SDL_Surface* convertToAABGRSurface(SDL_Surface* a_img) {
+		if (a_img != nullptr && a_img->format->format != SDL_PIXELFORMAT_ABGR8888) {
+			int bpp;
+			Uint32 Rmask, Gmask, Bmask, Amask;
+			SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_ABGR8888, &bpp, &Rmask, &Gmask, &Bmask, &Amask);
+			SDL_Surface* surface = SDL_CreateRGBSurface(0, a_img->w, a_img->h, bpp, Rmask, Gmask, Bmask, Amask);
 
 			SDL_SetSurfaceBlendMode(a_img, SDL_BLENDMODE_NONE);
 			require<ResourceException>(SDL_BlitSurface(a_img, 0, surface, 0) == 0, "SDL_BlitSurface failed to copy!");
@@ -155,6 +180,11 @@ namespace MV {
 		if (a_parameters.powerTwo) {
 			surfaceToWorkWith = convertToPowerOfTwoSurface(a_img);
 		}
+#ifdef __ANDROID__
+		else {
+			surfaceToWorkWith = convertToAABGRSurface(a_img);
+		}
+#endif
 		SCOPE_EXIT{ if (surfaceToWorkWith != a_img) { SDL_FreeSurface(surfaceToWorkWith); } };
 
 		if (!RUNNING_IN_HEADLESS) {

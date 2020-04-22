@@ -32,6 +32,7 @@ namespace MV {
 
 	//converting to a power of two surface may free the original surface, but returns an unfreed surface.
 	SDL_Surface* convertToPowerOfTwoSurface(SDL_Surface *a_img);
+	SDL_Surface* convertToAABGRSurface(SDL_Surface* a_img);
 	LoadedTextureData loadTextureFromSurface(SDL_Surface *img, const TextureParameters &file);
 
 	//required to allow forward declared MV::SharedTextures

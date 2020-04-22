@@ -16,11 +16,11 @@ public class BindstoneActivity extends SDLActivity
 	@Override
 	protected String[] getLibraries() {
         return new String[] {
-            "c++_shared",
-            "m",
-            "wolfssl",
-            "boost_system",
-            "boost_filesystem",
+            //"c++_shared",
+            //"m",
+            //"wolfssl",
+            //"boost_system",
+            //"boost_filesystem",
             //"hidapi", //I'm just compiling this directly into the app.
             "SDL2",
             "SDL2_Image",

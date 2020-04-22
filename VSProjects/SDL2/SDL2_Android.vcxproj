@@ -241,8 +241,9 @@
       <ExceptionHandling>Enabled</ExceptionHandling>
     </ClCompile>
     <Link>
-      <LibraryDependencies>c++_shared;OpenSLES;m;dl;GLESv1_CM;GLESv2;log;android</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
@@ -255,8 +256,9 @@
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <LibraryDependencies>c++_shared;OpenSLES;m;dl;GLESv1_CM;GLESv2;log;android</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
@@ -268,8 +270,9 @@
       <ExceptionHandling>Enabled</ExceptionHandling>
     </ClCompile>
     <Link>
-      <LibraryDependencies>c++_shared;OpenSLES;m;dl;GLESv1_CM;GLESv2;log;android</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
@@ -282,8 +285,9 @@
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <LibraryDependencies>c++_shared;OpenSLES;m;dl;GLESv1_CM;GLESv2;log;android</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
@@ -295,8 +299,9 @@
       <ExceptionHandling>Enabled</ExceptionHandling>
     </ClCompile>
     <Link>
-      <LibraryDependencies>c++_shared;OpenSLES;m;dl;GLESv1_CM;GLESv2;log;android</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
@@ -309,8 +314,9 @@
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <LibraryDependencies>c++_shared;OpenSLES;m;dl;GLESv1_CM;GLESv2;log;android</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -323,10 +329,11 @@
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <LibraryDependencies>c++_shared;OpenSLES;m;dl;GLESv1_CM;GLESv2;log;android</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <IgnoreSpecificDefaultLibraries>
       </IgnoreSpecificDefaultLibraries>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -339,8 +346,9 @@
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <LibraryDependencies>c++_shared;OpenSLES;m;dl;GLESv1_CM;GLESv2;log;android</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

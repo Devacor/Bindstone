@@ -207,8 +207,9 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>android;m;log;</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -224,8 +225,9 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>android;m;log;</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
@@ -241,8 +243,9 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>android;m;log;</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
@@ -258,8 +261,9 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>android;m;log;</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
@@ -275,8 +279,9 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>android;m;log;</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -292,8 +297,9 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>android;m;log;</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
@@ -309,8 +315,9 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>android;m;log;</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
@@ -326,8 +333,9 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>android;m;log;</LibraryDependencies>
+      <LibraryDependencies>GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
+      <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

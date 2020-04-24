@@ -30,10 +30,31 @@ namespace MV {
 	//Requires a 4 point vector. IE: Shrink to 4 before calling this if you use 9-slicing etc.
 	bool clearTexturePoints(std::vector<DrawPoint> &a_points);
 
+	struct OwnedSurface {
+	public:
+		static std::shared_ptr<OwnedSurface> make(SDL_Surface* a_surface) {
+			return std::shared_ptr<OwnedSurface>(new OwnedSurface(a_surface));
+		}
+		~OwnedSurface() {
+			if (ourSurface != nullptr) {
+				SDL_FreeSurface(ourSurface);
+			}
+		}
+		SDL_Surface* get() {
+			return ourSurface;
+		}
+	private:
+		SDL_Surface* ourSurface;
+		OwnedSurface(SDL_Surface* a_surface) :ourSurface(a_surface) {}
+		OwnedSurface() = delete;
+		OwnedSurface(const OwnedSurface&) = delete;
+		OwnedSurface& operator=(const OwnedSurface&) = delete;
+	};
+
 	//converting to a power of two surface may free the original surface, but returns an unfreed surface.
-	SDL_Surface* convertToPowerOfTwoSurface(SDL_Surface *a_img);
-	SDL_Surface* convertToAABGRSurface(SDL_Surface* a_img);
-	LoadedTextureData loadTextureFromSurface(SDL_Surface *img, const TextureParameters &file);
+	std::shared_ptr<OwnedSurface> convertToPowerOfTwoSurface(const std::shared_ptr<OwnedSurface> &a_img);
+	std::shared_ptr<OwnedSurface> convertToBGRSurface(const std::shared_ptr<OwnedSurface> &a_img);
+	LoadedTextureData loadTextureFromSurface(const std::shared_ptr<OwnedSurface> &img, const TextureParameters &file);
 
 	//required to allow forward declared MV::SharedTextures
 	MV::SharedTextures* getSharedTextureFromServices(MV::Services& a_services);
@@ -353,13 +374,13 @@ namespace MV {
 	class SurfaceTextureDefinition : public TextureDefinition {
 		friend cereal::access;
 	public:
-		static std::shared_ptr<SurfaceTextureDefinition> make(const std::string &a_name, std::function<SDL_Surface*()> a_surfaceGenerator){
+		static std::shared_ptr<SurfaceTextureDefinition> make(const std::string &a_name, std::function<std::shared_ptr<OwnedSurface> ()> a_surfaceGenerator){
 			return std::shared_ptr<SurfaceTextureDefinition>(new SurfaceTextureDefinition(a_name, a_surfaceGenerator));
 		}
 
 		Size<int> surfaceSize() const;
 
-		void setSurfaceGenerator(std::function<SDL_Surface*()> a_surfaceGenerator){
+		void setSurfaceGenerator(std::function<std::shared_ptr<OwnedSurface> ()> a_surfaceGenerator){
 			surfaceGenerator = a_surfaceGenerator;
 			if(!handles.empty()){
 				load();
@@ -377,7 +398,7 @@ namespace MV {
 			return a_script;
 		}
 	protected:
-		SurfaceTextureDefinition(const std::string &a_name, std::function<SDL_Surface*()> a_surfaceGenerator):
+		SurfaceTextureDefinition(const std::string &a_name, std::function<std::shared_ptr<OwnedSurface> ()> a_surfaceGenerator):
 			TextureDefinition(a_name),
 			surfaceGenerator(a_surfaceGenerator){
 		}
@@ -393,11 +414,11 @@ namespace MV {
 
 		template <class Archive>
 		static void load_and_construct(Archive & archive, cereal::construct<SurfaceTextureDefinition> &construct, std::uint32_t const /*version*/){
-			construct("", std::function<SDL_Surface*()>());
+			construct("", std::function<std::shared_ptr<OwnedSurface> ()>());
 			archive(cereal::make_nvp("base", cereal::base_class<TextureDefinition>(construct.ptr())));
 		}
 
-		std::function<SDL_Surface*()> surfaceGenerator;
+		std::function<std::shared_ptr<OwnedSurface> ()> surfaceGenerator;
 		Size<int> generatedSurfaceSize;
 	};
 

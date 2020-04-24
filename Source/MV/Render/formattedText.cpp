@@ -41,10 +41,10 @@ namespace MV {
 		std::shared_ptr<CharacterDefinition> &character = cachedGlyphs[renderChar];
 		if(!character){
 			character = CharacterDefinition::make(
-				SurfaceTextureDefinition::make(renderChar, [=]() -> SDL_Surface* {
+				SurfaceTextureDefinition::make(renderChar, [=]() -> std::shared_ptr<OwnedSurface> {
 					if (textLibrary->renderer().headless()) { return nullptr; }
 					
-					return TTF_RenderUTF8_Blended(font, renderChar.c_str(), {255, 255, 255, 255});
+					return OwnedSurface::make(TTF_RenderUTF8_Blended(font, renderChar.c_str(), {255, 255, 255, 255}));
 				}),
 				renderChar,
 				shared_from_this()

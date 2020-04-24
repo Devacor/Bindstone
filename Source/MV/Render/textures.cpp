@@ -47,17 +47,17 @@ namespace MV {
 	}
 
 	GLenum getTextureFormat(SDL_Surface* img) {
-		if (img->format->format == SDL_PIXELFORMAT_ABGR8888) {
+		if (img->format->format == SDL_PIXELFORMAT_ABGR8888 && img->format->BytesPerPixel == 4) {
 			return GL_RGBA;
 		}
-		int nOfColors = img->format->BytesPerPixel;
-		if (nOfColors == 4) {	  // contains an alpha channel
+
+		if (img->format->BytesPerPixel == 4) {	  // contains an alpha channel
 			if (img->format->Rmask == 0x000000ff) {
 				return GL_RGBA;
 			} else {
 				return GL_BGRA;
 			}
-		} else if (nOfColors == 3) {	  // no alpha channel
+		} else if (img->format->BytesPerPixel == 3) {	  // no alpha channel
 			if (img->format->Rmask == 0x000000ff) {
 				return GL_RGB;
 			} else {
@@ -68,49 +68,50 @@ namespace MV {
 	}
 
 	GLenum getInternalTextureFormat(SDL_Surface* img) {
-		if (img->format->format == SDL_PIXELFORMAT_ABGR8888) {
+		if (img->format->BytesPerPixel == 4) {	  // contains an alpha channel
 			return GL_RGBA;
-		}
-		int nOfColors = img->format->BytesPerPixel;
-		if (nOfColors == 4) {	  // contains an alpha channel
-			return GL_RGBA;
-		} else if (nOfColors == 3) {	  // no alpha channel
+		} else if (img->format->BytesPerPixel == 3) {	  // no alpha channel
 			return GL_RGB;
 		}
 		return 0;
 	}
 
-	SDL_Surface* convertToPowerOfTwoSurface(SDL_Surface *a_img) {
-		if (a_img != nullptr && (!isPowerOfTwo(a_img->w) || !isPowerOfTwo(a_img->h))) {
-			int widthPowerOfTwo = roundUpPowerOfTwo(a_img->w);
-			int heightPowerOfTwo = roundUpPowerOfTwo(a_img->h);
+	std::shared_ptr<OwnedSurface> normalizeSurface(const std::shared_ptr<OwnedSurface> &a_img, bool convertPowerOfTwo) {
+		if (convertPowerOfTwo) {
+			return convertToPowerOfTwoSurface(a_img);
+		} else {
+			return convertToBGRSurface(a_img);
+		}
+	}
 
+	std::shared_ptr<OwnedSurface> convertToPowerOfTwoSurface(const std::shared_ptr<OwnedSurface>& a_img) {
+		static const auto FORMAT = SDL_PIXELFORMAT_ABGR8888;
+		if (a_img != nullptr && a_img->get() != nullptr && (!isPowerOfTwo(a_img->get()->w) || !isPowerOfTwo(a_img->get()->h) || a_img->get()->format->format != FORMAT)) {
+			int widthPowerOfTwo = roundUpPowerOfTwo(a_img->get()->w);
+			int heightPowerOfTwo = roundUpPowerOfTwo(a_img->get()->h);
 			int bpp;
 			Uint32 Rmask, Gmask, Bmask, Amask;
-			SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_ABGR8888, &bpp, &Rmask, &Gmask, &Bmask, &Amask);
-			SDL_Surface *surface = SDL_CreateRGBSurface(0, widthPowerOfTwo, heightPowerOfTwo, bpp, Rmask, Gmask, Bmask, Amask);
-
-			SDL_SetSurfaceBlendMode(a_img, SDL_BLENDMODE_NONE);
-			require<ResourceException>(SDL_BlitSurface(a_img, 0, surface, 0) == 0, "SDL_BlitSurface failed to copy!");
+			SDL_PixelFormatEnumToMasks(FORMAT, &bpp, &Rmask, &Gmask, &Bmask, &Amask);
+			auto surface = OwnedSurface::make(SDL_CreateRGBSurface(0, widthPowerOfTwo, heightPowerOfTwo, bpp, Rmask, Gmask, Bmask, Amask));
+			
+			SDL_SetSurfaceBlendMode(a_img->get(), SDL_BLENDMODE_NONE);
+			require<ResourceException>(SDL_BlitSurface(a_img->get(), 0, surface->get(), 0) == 0, "SDL_BlitSurface failed to copy!");
 
 			return surface;
 		}
-#ifdef __ANDROID__
-		return convertToAABGRSurface(a_img);
-#else
 		return a_img;
-#endif
 	}
 
-	SDL_Surface* convertToAABGRSurface(SDL_Surface* a_img) {
-		if (a_img != nullptr && a_img->format->format != SDL_PIXELFORMAT_ABGR8888) {
+	std::shared_ptr<OwnedSurface> convertToBGRSurface(const std::shared_ptr<OwnedSurface>& a_img) {
+		static const auto FORMAT = SDL_PIXELFORMAT_ABGR8888;
+		if (a_img != nullptr && a_img->get() != nullptr && a_img->get()->format->format != FORMAT) {
 			int bpp;
 			Uint32 Rmask, Gmask, Bmask, Amask;
-			SDL_PixelFormatEnumToMasks(SDL_PIXELFORMAT_ABGR8888, &bpp, &Rmask, &Gmask, &Bmask, &Amask);
-			SDL_Surface* surface = SDL_CreateRGBSurface(0, a_img->w, a_img->h, bpp, Rmask, Gmask, Bmask, Amask);
+			SDL_PixelFormatEnumToMasks(FORMAT, &bpp, &Rmask, &Gmask, &Bmask, &Amask);
+			auto surface = OwnedSurface::make(SDL_CreateRGBSurface(0, a_img->get()->w, a_img->get()->h, bpp, Rmask, Gmask, Bmask, Amask));
 
-			SDL_SetSurfaceBlendMode(a_img, SDL_BLENDMODE_NONE);
-			require<ResourceException>(SDL_BlitSurface(a_img, 0, surface, 0) == 0, "SDL_BlitSurface failed to copy!");
+			SDL_SetSurfaceBlendMode(a_img->get(), SDL_BLENDMODE_NONE);
+			require<ResourceException>(SDL_BlitSurface(a_img->get(), 0, surface->get(), 0) == 0, "SDL_BlitSurface failed to copy!");
 
 			return surface;
 		}
@@ -141,8 +142,7 @@ namespace MV {
 			return found;
 		}
 
-		found = loadTextureFromSurface(img, a_parameters);
-		SDL_FreeSurface(img);
+		found = loadTextureFromSurface(OwnedSurface::make(img), a_parameters);
 		return found;
 	}
 
@@ -160,32 +160,23 @@ namespace MV {
 	}
 
 	//Load an opengl texture
-	LoadedTextureData loadTextureFromSurface(SDL_Surface *a_img, const TextureParameters &a_parameters) {
-		if (a_img == nullptr) {
+	LoadedTextureData loadTextureFromSurface(const std::shared_ptr<OwnedSurface> &a_img, const TextureParameters &a_parameters) {
+		if (a_img == nullptr || a_img->get() == nullptr) {
 			std::cerr << "ERROR: loadTextureFromSurface was provided a null SDL_Surface!" << std::endl;
 			return {};
 		}
 
-		GLenum textureFormat = getTextureFormat(a_img);
+		GLenum textureFormat = getTextureFormat(a_img->get());
 		if (!textureFormat) {
 			std::cerr << "Unable to determine texture format!" << std::endl;
 			return {};
 		}
 
 		LoadedTextureData results;
-		results.originalSize.width = a_img->w;
-		results.originalSize.height = a_img->h;
+		results.originalSize.width = a_img->get()->w;
+		results.originalSize.height = a_img->get()->h;
 
-		SDL_Surface* surfaceToWorkWith = a_img;
-		if (a_parameters.powerTwo) {
-			surfaceToWorkWith = convertToPowerOfTwoSurface(a_img);
-		}
-#ifdef __ANDROID__
-		else {
-			surfaceToWorkWith = convertToAABGRSurface(a_img);
-		}
-#endif
-		SCOPE_EXIT{ if (surfaceToWorkWith != a_img) { SDL_FreeSurface(surfaceToWorkWith); } };
+		auto surfaceToWorkWith = normalizeSurface(a_img, a_parameters.powerTwo);
 
 		if (!RUNNING_IN_HEADLESS) {
 			glGenTextures(1, &results.textureId);		// Generate texture ID
@@ -198,11 +189,11 @@ namespace MV {
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (a_parameters.repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (a_parameters.repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
 
-			glTexImage2D(GL_TEXTURE_2D, 0, getInternalTextureFormat(surfaceToWorkWith), surfaceToWorkWith->w, surfaceToWorkWith->h, 0, textureFormat, GL_UNSIGNED_BYTE, surfaceToWorkWith->pixels);
+			glTexImage2D(GL_TEXTURE_2D, 0, getInternalTextureFormat(surfaceToWorkWith->get()), surfaceToWorkWith->get()->w, surfaceToWorkWith->get()->h, 0, getTextureFormat(surfaceToWorkWith->get()), GL_UNSIGNED_BYTE, surfaceToWorkWith->get()->pixels);
 		}
 
-		results.size.width = surfaceToWorkWith->w;
-		results.size.height = surfaceToWorkWith->h;
+		results.size.width = surfaceToWorkWith->get()->w;
+		results.size.height = surfaceToWorkWith->get()->h;
 
 		return results;
 	}
@@ -416,18 +407,16 @@ namespace MV {
 	\********************************/
 
 	void SurfaceTextureDefinition::reloadImplementation() {
-		SDL_Surface* newSurface = surfaceGenerator();
-		require<PointerException>(newSurface != nullptr, "SurfaceTextureDefinition::reloadImplementation was passed a null SDL_Surface pointer.");
+		auto newSurface = surfaceGenerator();
+		require<PointerException>(newSurface != nullptr && newSurface->get() != nullptr, "SurfaceTextureDefinition::reloadImplementation was passed a null SDL_Surface pointer.");
 
-		generatedSurfaceSize = Size<int>(newSurface->w, newSurface->h);
+		generatedSurfaceSize = Size<int>(newSurface->get()->w, newSurface->get()->h);
 
 		//loads and frees
 		auto results = loadTextureFromSurface(newSurface, TextureParameters(true, false, false));
 		texture = results.textureId;
 		textureSize = results.size;
 		desiredSize = results.originalSize;
-
-		SDL_FreeSurface(newSurface);
 	}
 
 	Size<int> SurfaceTextureDefinition::surfaceSize() const {

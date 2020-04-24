@@ -56,13 +56,22 @@ namespace MV{
 		int64_t bestSpaceLeft = cast<int64_t>(maximumExtent).area();
 		auto bestContainer = containers.end();
 		bool bestRequiresExpansion = true;
+		bool bestRequiresSquareExpansion = true;
+
+		int squarePower2Size = MV::roundUpPowerOfTwo(std::max(contentExtent.width, contentExtent.height));
+		const MV::Size<int> squarePower2ContentExtent { squarePower2Size, squarePower2Size };
 
 		for(auto container = containers.begin(); container != containers.end(); ++container){
 			auto spaceLeft = container->size().area() - a_shape.area(); //goofy but intentional overflow.
 			auto newExtent = toSize(container->minPoint) + a_shape;
 			bool requiresExpansion = !contentExtent.contains(newExtent);
-			bool expansionCondition = (bestRequiresExpansion && (spaceLeft < bestSpaceLeft || !requiresExpansion)) || 
-								 (!bestRequiresExpansion && !requiresExpansion && spaceLeft < bestSpaceLeft);
+			bool requiresSquareExpansion = !squarePower2ContentExtent.contains(newExtent);
+			bool expansionCondition = 
+				(bestRequiresExpansion && (spaceLeft < bestSpaceLeft || !requiresExpansion)) ||
+				(bestRequiresSquareExpansion && (spaceLeft < bestSpaceLeft || !requiresSquareExpansion)) ||
+				(!bestRequiresExpansion && !requiresExpansion && spaceLeft < bestSpaceLeft) ||
+				(!bestRequiresSquareExpansion && !requiresSquareExpansion && spaceLeft < bestSpaceLeft);
+
 			if (maximumExtent.contains(newExtent) && expansionCondition && container->size().contains(a_shape)) {
 				bestShape = {container->minPoint, a_shape};
 				bestSpaceLeft = spaceLeft;

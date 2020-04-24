@@ -106,9 +106,11 @@ void Editor::initializeWindow(){
 		handleScroll(a_zoom * 20.0f, a_position);
 	});
 
-	//managers.textures.assemblePacks("Atlases", &managers.renderer);
-	managers.textures.files("Map");
-	managers.textures.files("Images");
+#ifndef __ANDROID__
+	managers.textures.assemblePacks("Assets/Atlases", &managers.renderer);
+#endif
+	managers.textures.files("Assets/Map");
+	managers.textures.files("Assets/Images");
 
 	//fps = controls->make<MV::Scene::Text>("FPS", &textLibrary, MV::size(50.0f, 15.0f))->set(0.0f)->position({960.0f - 50.0f, 0.0f});
 	fps = controls->make("FPS")->

@@ -22,7 +22,7 @@ namespace MV {
 		std::shared_ptr<TexturePack> pack(const std::string &a_name, Draw2D* a_renderer);
 		std::shared_ptr<FileTextureDefinition> file(const std::string &a_filename, bool a_repeat = false, bool a_pixel = false);
 		std::shared_ptr<DynamicTextureDefinition> dynamic(const std::string &a_identifier, const Size<int> &a_size);
-		std::shared_ptr<SurfaceTextureDefinition> surface(const std::string &a_identifier, std::function<SDL_Surface*()> a_surfaceGenerator);
+		std::shared_ptr<SurfaceTextureDefinition> surface(const std::string &a_identifier, std::function<std::shared_ptr<OwnedSurface>()> a_surfaceGenerator);
 
 		void files(const std::string &a_rootDirectory, bool a_repeat = false, bool a_pixel = false);
 

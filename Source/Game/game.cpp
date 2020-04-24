@@ -102,9 +102,9 @@ void Game::initializeWindow(){
 	MV::FontDefinition::make(gameData.managers().textLibrary, "small", "Fonts/Verdana.ttf", 9);
 	MV::FontDefinition::make(gameData.managers().textLibrary, "big", "Fonts/Verdana.ttf", 18, MV::FontStyle::BOLD | MV::FontStyle::UNDERLINE);
 	if (!gameData.managers().renderer.headless()) {
-		gameData.managers().textures.assemblePacks("Atlases", &gameData.managers().renderer);
-		gameData.managers().textures.files("Map");
-		gameData.managers().textures.files("Images");
+		//gameData.managers().textures.assemblePacks("Assets/Atlases", &gameData.managers().renderer);
+		//gameData.managers().textures.files("Map");
+		//gameData.managers().textures.files("Images");
 	}
 	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::TapDevice& a_mouse, LocalData& a_data)
 

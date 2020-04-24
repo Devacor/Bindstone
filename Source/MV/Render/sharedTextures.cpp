@@ -46,7 +46,7 @@ namespace MV {
 	}
 
 	void SharedTextures::files(const std::string &a_rootDirectory, bool a_repeat, bool a_pixel) {
-		std::vector<std::string> validExtensions{ ".jpg", ".png", ".bmp", ".tga", ".gif" };
+		std::vector<std::string> validExtensions{ ".jpg", ".png", ".bmp", ".tga", ".gif", ".webp" };
 		path directory(a_rootDirectory);
 		if (exists(directory)) {
 			for (auto&& imagePath = directory_iterator(directory); imagePath != directory_iterator(); ++imagePath) {
@@ -72,7 +72,7 @@ namespace MV {
 		}
 	}
 
-	std::shared_ptr<SurfaceTextureDefinition> SharedTextures::surface(const std::string &a_identifier, std::function<SDL_Surface*()> a_surfaceGenerator) {
+	std::shared_ptr<SurfaceTextureDefinition> SharedTextures::surface(const std::string &a_identifier, std::function<std::shared_ptr<OwnedSurface>()> a_surfaceGenerator) {
 		auto foundDefinition = surfaceDefinitions.find(a_identifier);
 		if(foundDefinition == surfaceDefinitions.end()){
 			std::shared_ptr<SurfaceTextureDefinition> newDefinition = SurfaceTextureDefinition::make(a_identifier, a_surfaceGenerator);
@@ -118,22 +118,27 @@ namespace MV {
 	std::shared_ptr<TexturePack> SharedTextures::assemblePack(const std::string &a_packPath, Draw2D* a_renderer) {
 		auto newPack = pack(path(a_packPath).filename().string(), a_renderer);
 
-		std::vector<std::string> validExtensions{".jpg", ".png", ".bmp", ".tga", ".gif"};
-
-		for(auto&& imagePath = directory_iterator(path(a_packPath)); imagePath != directory_iterator(); ++imagePath){
-			if(exists(*imagePath) && is_regular_file(*imagePath)){
+		std::vector<std::string> validExtensions{".jpg", ".png", ".bmp", ".tga", ".gif", ".webp"};
+		std::vector<std::string> images;
+		for (auto&& imagePath = directory_iterator(path(a_packPath)); imagePath != directory_iterator(); ++imagePath) {
+			if (exists(*imagePath) && is_regular_file(*imagePath)) {
 				std::string lowerCaseImageExtension = imagePath->path().extension().string();
 				toLowerInPlace(lowerCaseImageExtension);
-				if(std::find(validExtensions.begin(), validExtensions.end(), lowerCaseImageExtension) != validExtensions.end()){
-					std::string contents = fileContents(path(*imagePath).replace_extension("slc").string());
-					std::stringstream stream(contents);
-					BoxAABB<float> sliceBounds;
-					if (stream) {
-						stream >> sliceBounds.minPoint.x >> sliceBounds.minPoint.y >> sliceBounds.maxPoint.x >> sliceBounds.maxPoint.y;
-					}
-					newPack->add(imagePath->path().filename().string(), FileTextureDefinition::make(imagePath->path().string(), true, false), sliceBounds);
+				if (std::find(validExtensions.begin(), validExtensions.end(), lowerCaseImageExtension) != validExtensions.end()) {
+					images.push_back(imagePath->path().string());
 				}
 			}
+		}
+		std::sort(images.begin(), images.end());
+
+		for(auto&& filePath : images){
+			std::string contents = fileContents(path(filePath).replace_extension("slc").string());
+			std::stringstream stream(contents);
+			BoxAABB<float> sliceBounds;
+			if (stream) {
+				stream >> sliceBounds.minPoint.x >> sliceBounds.minPoint.y >> sliceBounds.maxPoint.x >> sliceBounds.maxPoint.y;
+			}
+			newPack->add(path(filePath).filename().string(), FileTextureDefinition::make(filePath, true, false), sliceBounds);
 		}
 
 		auto combinedSavePath = a_packPath;

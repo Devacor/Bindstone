@@ -44,6 +44,13 @@ namespace MV {
 		A(static_cast<float>(a_Alpha) / 255.0f) {
 	}
 
+	Color::Color(int64_t a_Red, int64_t a_Green, int64_t a_Blue, int64_t a_Alpha /*= 255*/) :
+		R(static_cast<float>(a_Red) / 255.0f),
+		G(static_cast<float>(a_Green) / 255.0f),
+		B(static_cast<float>(a_Blue) / 255.0f),
+		A(static_cast<float>(a_Alpha) / 255.0f) {
+	}
+
 	Color& Color::operator=( const Color& a_other ){
 		R = a_other.R; G = a_other.G; B = a_other.B; A = a_other.A;
 		return *this;
@@ -118,6 +125,14 @@ namespace MV {
 	}
 
 	Color& Color::set(int a_Red, int a_Green, int a_Blue, int a_Alpha) {
+		R = static_cast<float>(a_Red) / 255.0f;
+		G = static_cast<float>(a_Green) / 255.0f;
+		B = static_cast<float>(a_Blue) / 255.0f;
+		A = static_cast<float>(a_Alpha) / 255.0f;
+		return *this;
+	}
+
+	Color& Color::set(int64_t a_Red, int64_t a_Green, int64_t a_Blue, int64_t a_Alpha) {
 		R = static_cast<float>(a_Red) / 255.0f;
 		G = static_cast<float>(a_Green) / 255.0f;
 		B = static_cast<float>(a_Blue) / 255.0f;

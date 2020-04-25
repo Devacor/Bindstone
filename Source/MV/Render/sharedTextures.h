@@ -18,6 +18,21 @@ namespace MV {
 	class SharedTextures {
 		friend FileTextureDefinition;
 	public:
+		inline static const std::vector<std::string> validExtensions { ".jpg", ".png", ".bmp", ".tga", ".gif", ".webp" };
+		struct PackItem {
+			std::string id;
+			std::shared_ptr<FileTextureDefinition> texture;
+			BoxAABB<float> sliceBounds;
+
+			bool operator<(const PackItem& a_rhs) const {
+				return texture->size().area() > a_rhs.texture->size().area();
+			}
+
+			bool operator>(const PackItem& a_rhs) const {
+				return texture->size().area() > a_rhs.texture->size().area();
+			}
+		};
+
 		std::shared_ptr<TexturePack> pack(const std::string &a_name);
 		std::shared_ptr<TexturePack> pack(const std::string &a_name, Draw2D* a_renderer);
 		std::shared_ptr<FileTextureDefinition> file(const std::string &a_filename, bool a_repeat = false, bool a_pixel = false);
@@ -71,6 +86,9 @@ namespace MV {
 			return a_script;
 		}
 	private:
+		std::vector<std::string> getImagesInFolder(const std::string& a_packPath) const;
+		std::vector<SharedTextures::PackItem> getSortedPackItems(std::vector<std::string> imagePaths) const;
+
 		std::map<std::string, std::shared_ptr<TexturePack>> texturePacks;
 		std::map<std::string, std::shared_ptr<FileTextureDefinition>> fileDefinitions;
 		std::map<std::string, std::shared_ptr<DynamicTextureDefinition>> dynamicDefinitions;

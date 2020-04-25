@@ -60,6 +60,7 @@ namespace MV {
 
 		Color(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0f);
 		Color(int a_Red, int a_Green, int a_Blue, int a_Alpha = 255);
+		Color(int64_t a_Red, int64_t a_Green, int64_t a_Blue, int64_t a_Alpha = 255);
 
 		~Color(){}
 
@@ -117,6 +118,7 @@ namespace MV {
 		Color& set(uint32_t a_hex, bool a_allowFullAlpha = false); //option to get back a Color&
 		Color& set(float a_Red, float a_Green, float a_Blue, float a_Alpha = 1.0f);
 		Color& set(int a_Red, int a_Green, int a_Blue, int a_Alpha = 255);
+		Color& set(int64_t a_Red, int64_t a_Green, int64_t a_Blue, int64_t a_Alpha = 255);
 		Color& set(HSV a_hsv);
 
 		float R, G, B, A;

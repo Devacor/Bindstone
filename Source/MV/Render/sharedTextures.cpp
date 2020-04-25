@@ -46,7 +46,6 @@ namespace MV {
 	}
 
 	void SharedTextures::files(const std::string &a_rootDirectory, bool a_repeat, bool a_pixel) {
-		std::vector<std::string> validExtensions{ ".jpg", ".png", ".bmp", ".tga", ".gif", ".webp" };
 		path directory(a_rootDirectory);
 		if (exists(directory)) {
 			for (auto&& imagePath = directory_iterator(directory); imagePath != directory_iterator(); ++imagePath) {
@@ -115,30 +114,43 @@ namespace MV {
 		}
 	}
 
-	std::shared_ptr<TexturePack> SharedTextures::assemblePack(const std::string &a_packPath, Draw2D* a_renderer) {
-		auto newPack = pack(path(a_packPath).filename().string(), a_renderer);
-
-		std::vector<std::string> validExtensions{".jpg", ".png", ".bmp", ".tga", ".gif", ".webp"};
-		std::vector<std::string> images;
+	std::vector<std::string> SharedTextures::getImagesInFolder(const std::string &a_packPath) const {
+		std::vector<std::string> imageFiles;
 		for (auto&& imagePath = directory_iterator(path(a_packPath)); imagePath != directory_iterator(); ++imagePath) {
 			if (exists(*imagePath) && is_regular_file(*imagePath)) {
 				std::string lowerCaseImageExtension = imagePath->path().extension().string();
 				toLowerInPlace(lowerCaseImageExtension);
 				if (std::find(validExtensions.begin(), validExtensions.end(), lowerCaseImageExtension) != validExtensions.end()) {
-					images.push_back(imagePath->path().string());
+					imageFiles.push_back(imagePath->path().string());
 				}
 			}
 		}
-		std::sort(images.begin(), images.end());
+		return imageFiles;
+	}
 
-		for(auto&& filePath : images){
+	std::vector<SharedTextures::PackItem> SharedTextures::getSortedPackItems(std::vector<std::string> imagePaths) const {
+		std::vector<PackItem> packItems;
+		for (auto&& filePath : imagePaths) {
 			std::string contents = fileContents(path(filePath).replace_extension("slc").string());
 			std::stringstream stream(contents);
 			BoxAABB<float> sliceBounds;
 			if (stream) {
 				stream >> sliceBounds.minPoint.x >> sliceBounds.minPoint.y >> sliceBounds.maxPoint.x >> sliceBounds.maxPoint.y;
 			}
-			newPack->add(path(filePath).filename().string(), FileTextureDefinition::make(filePath, true, false), sliceBounds);
+			packItems.push_back({ path(filePath).filename().string(), FileTextureDefinition::make(filePath, true, false), sliceBounds });
+		}
+
+		std::sort(packItems.begin(), packItems.end(), std::greater<>());
+		return packItems;
+	}
+
+	std::shared_ptr<TexturePack> SharedTextures::assemblePack(const std::string &a_packPath, Draw2D* a_renderer) {
+		auto newPack = pack(path(a_packPath).filename().string(), a_renderer);
+
+		std::vector<PackItem> packItems = getSortedPackItems(getImagesInFolder(a_packPath));
+
+		for (auto&& packItem : packItems) {
+			newPack->add(packItem.id, packItem.texture, packItem.sliceBounds);
 		}
 
 		auto combinedSavePath = a_packPath;

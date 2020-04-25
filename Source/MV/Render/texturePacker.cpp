@@ -49,7 +49,82 @@ namespace MV{
 		return false;
 	}
 
+	class ContainerComparer {
+	public:
+		ContainerComparer(const BoxAABB<int>& a_container, const Size<int> & a_maximumExtent, const Size<int>& a_shape, const MV::Size<int> &a_currentExtent, const MV::Size<int> &a_currentPower2Extent) :
+			ourContainer(a_container),
+			spaceLeft(a_container.size().area() - a_shape.area()) {
+			auto newExtent = toSize(a_container.minPoint) + a_shape;
+			isValid = a_maximumExtent.contains(newExtent) && a_container.size().contains(a_shape);
+
+			if (isValid) {
+				requiresExpansion = !a_currentExtent.contains(newExtent);
+				requiresSquareExpansion = !a_currentPower2Extent.contains(newExtent);
+
+				expandsMaxDimension = requiresExpansion &&
+					((a_currentExtent.width < a_currentExtent.height && newExtent.height > a_currentExtent.height) ||
+						(a_currentExtent.width > a_currentExtent.height && newExtent.width > a_currentExtent.width));
+			}
+		}
+
+		bool valid() const {
+			return isValid;
+		}
+
+		BoxAABB<int> container() const {
+			return ourContainer;
+		}
+
+		bool operator<(const ContainerComparer& a_rhs) const {
+			if (!requiresSquareExpansion && a_rhs.requiresSquareExpansion) {
+				return true;
+			}
+			if (!expandsMaxDimension && a_rhs.expandsMaxDimension) {
+				return true;
+			}
+			if (!requiresExpansion && a_rhs.requiresExpansion) {
+				return true;
+			}
+			if (requiresSquareExpansion && !a_rhs.requiresSquareExpansion) {
+				return false;
+			}
+			if (expandsMaxDimension && !a_rhs.expandsMaxDimension) {
+				return false;
+			}
+			if (requiresExpansion && !a_rhs.requiresExpansion) {
+				return false;
+			}
+			return spaceLeft < a_rhs.spaceLeft;
+		}
+	private:
+		BoxAABB<int> ourContainer;
+		int spaceLeft = std::numeric_limits<int>::max();
+		bool requiresExpansion = true;
+		bool requiresSquareExpansion = true;
+		bool expandsMaxDimension = true;
+		bool isValid = false;
+	};
+
 	BoxAABB<int> TexturePack::positionShape(const Size<int> &a_shape) {
+		int squarePower2Size = MV::roundUpPowerOfTwo(std::max(contentExtent.width, contentExtent.height));
+		const MV::Size<int> squarePower2ContentExtent{ squarePower2Size, squarePower2Size };
+
+		std::vector<ContainerComparer> comparers;
+		for (auto&& container : containers) {
+			ContainerComparer comparer(container, maximumExtent, a_shape, contentExtent, squarePower2ContentExtent);
+			if (comparer.valid()) {
+				MV::insertSorted(comparers, comparer);
+			}
+		}
+
+		if (comparers.empty()) {
+			BoxAABB<int> emptyShape;
+			emptyShape.minPoint.x = -1;
+			return emptyShape;
+		} else {
+			return { comparers.front().container().minPoint, a_shape };
+		}
+		/*
 		BoxAABB<int> bestShape;
 		bestShape.minPoint.x = -1;
 
@@ -58,8 +133,6 @@ namespace MV{
 		bool bestRequiresExpansion = true;
 		bool bestRequiresSquareExpansion = true;
 
-		int squarePower2Size = MV::roundUpPowerOfTwo(std::max(contentExtent.width, contentExtent.height));
-		const MV::Size<int> squarePower2ContentExtent { squarePower2Size, squarePower2Size };
 
 		for(auto container = containers.begin(); container != containers.end(); ++container){
 			auto spaceLeft = container->size().area() - a_shape.area(); //goofy but intentional overflow.
@@ -67,9 +140,9 @@ namespace MV{
 			bool requiresExpansion = !contentExtent.contains(newExtent);
 			bool requiresSquareExpansion = !squarePower2ContentExtent.contains(newExtent);
 			bool expansionCondition = 
-				(bestRequiresExpansion && (spaceLeft < bestSpaceLeft || !requiresExpansion)) ||
 				(bestRequiresSquareExpansion && (spaceLeft < bestSpaceLeft || !requiresSquareExpansion)) ||
-				(!bestRequiresExpansion && !requiresExpansion && spaceLeft < bestSpaceLeft) ||
+				//(bestRequiresExpansion && (spaceLeft < bestSpaceLeft || !requiresExpansion)) ||
+				//(!bestRequiresExpansion && !requiresExpansion && spaceLeft < bestSpaceLeft) ||
 				(!bestRequiresSquareExpansion && !requiresSquareExpansion && spaceLeft < bestSpaceLeft);
 
 			if (maximumExtent.contains(newExtent) && expansionCondition && container->size().contains(a_shape)) {
@@ -83,7 +156,7 @@ namespace MV{
 			}
 		}
 
-		return bestShape;
+		return bestShape;*/
 	}
 
 	std::string TexturePack::print() const{

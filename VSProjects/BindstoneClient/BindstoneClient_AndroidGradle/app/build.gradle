@@ -1,13 +1,14 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion = 29
+    compileSdkVersion = 23
     buildToolsVersion = "29.0.2"
 
     defaultConfig.with {
         applicationId = "com.snapjaw.bindstone"
         minSdkVersion = 21
-        targetSdkVersion = 29
+        targetSdkVersion = 23
+        compileSdkVersion = 29
         multiDexEnabled true
     }
     
@@ -43,7 +44,7 @@ android {
     flavorDimensions "default"
     productFlavors {
 	    create("arm7") {
-            ndk.abiFilters 'armeabi-v7a'
+            ndk.abiFilters 'armeabi-v7a', 'armeabi'
         }
         create("arm8") {
             ndk.abiFilters 'arm64-v8a'

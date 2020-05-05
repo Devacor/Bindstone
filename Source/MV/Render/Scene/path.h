@@ -97,40 +97,6 @@ namespace MV {
 				return map->corners();
 			}
 
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-				a_script.add(chaiscript::user_type<PathMap>(), "PathMap");
-				a_script.add(chaiscript::base_class<Drawable, PathMap>());
-				a_script.add(chaiscript::base_class<Component, PathMap>());
-
-				a_script.add(chaiscript::fun([](Node &a_self, const Size<int> &a_gridSize, bool a_useCorners) { return a_self.attach<PathMap>(a_gridSize, a_useCorners); }), "attachPathMap");
-				a_script.add(chaiscript::fun([](Node &a_self, const Size<> &a_size, const Size<int> &a_gridSize, bool a_useCorners) { return a_self.attach<PathMap>(a_size, a_gridSize, a_useCorners); }), "attachPathMap");
-
-				a_script.add(chaiscript::fun(&PathMap::inBounds), "inBounds");
-				a_script.add(chaiscript::fun(&PathMap::traverseCorners), "traverseCorners");
-				a_script.add(chaiscript::fun(&PathMap::resizeGrid), "resizeGrid");
-				a_script.add(chaiscript::fun(&PathMap::gridSize), "gridSize");
-				a_script.add(chaiscript::fun(&PathMap::blocked), "blocked");
-				a_script.add(chaiscript::fun(&PathMap::staticallyBlocked), "staticallyBlocked");
-
-				a_script.add(chaiscript::fun(static_cast<Size<>(PathMap::*)() const>(&PathMap::cellSize)), "cellSize");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathMap>(PathMap::*)(const Size<> &)>(&PathMap::cellSize)), "cellSize");
-
-				a_script.add(chaiscript::fun(static_cast<MapNode&(PathMap::*)(const Point<int> &)>(&PathMap::nodeFromGrid)), "nodeFromGrid");
-				a_script.add(chaiscript::fun(static_cast<MapNode&(PathMap::*)(const Point<> &)>(&PathMap::nodeFromGrid)), "nodeFromGrid");
-
-				a_script.add(chaiscript::fun(static_cast<MapNode&(PathMap::*)(const Point<> &)>(&PathMap::nodeFromLocal)), "nodeFromLocal");
-
-				a_script.add(chaiscript::fun(static_cast<Point<>(PathMap::*)(const Point<> &)>(&PathMap::gridFromLocal)), "gridFromLocal");
-
-				a_script.add(chaiscript::fun(static_cast<Point<>(PathMap::*)(const Point<> &)>(&PathMap::localFromGrid)), "localFromGrid");
-				a_script.add(chaiscript::fun(static_cast<Point<>(PathMap::*)(const Point<int> &)>(&PathMap::localFromGrid)), "localFromGrid");
-
-				a_script.add(chaiscript::type_conversion<SafeComponent<PathMap>, std::shared_ptr<PathMap>>([](const SafeComponent<PathMap> &a_item) { return a_item.self(); }));
-				a_script.add(chaiscript::type_conversion<SafeComponent<PathMap>, std::shared_ptr<Drawable>>([](const SafeComponent<PathMap> &a_item) { return std::static_pointer_cast<Drawable>(a_item.self()); }));
-				a_script.add(chaiscript::type_conversion<SafeComponent<PathMap>, std::shared_ptr<Component>>([](const SafeComponent<PathMap> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
-
-				return a_script;
-			}
 		protected:
 			PathMap(const std::weak_ptr<Node> &a_owner, const Size<int> &a_gridSize, bool a_useCorners = true) :
 				PathMap(a_owner, Size<>(1.0f, 1.0f), a_gridSize, a_useCorners) {
@@ -231,7 +197,7 @@ namespace MV {
 			friend cereal::access;
 		public:
 			typedef void CallbackSignature(std::shared_ptr<PathAgent>);
-			typedef SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
+			typedef SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
 		private:
 			Signal<CallbackSignature> onArriveSignal;
 			Signal<CallbackSignature> onBlockedSignal;
@@ -504,7 +470,7 @@ namespace MV {
 				onStop(onStopSignal),
 				onStart(onStartSignal) {
 			}
-			std::vector<NavigationAgent::SharedRecieverType> agentPassthroughSignals;
+			std::vector<NavigationAgent::SharedReceiverType> agentPassthroughSignals;
 			std::shared_ptr<PathMap> map;
 			std::shared_ptr<NavigationAgent> agent;
 		};

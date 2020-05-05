@@ -660,6 +660,7 @@ namespace MV {
 			onAlphaChange(onAlphaChangeSignal),
 			onChildOrderChange(onChildOrderChangeSignal),
 			onChange(onChangeSignal),
+			onMatrixDirty(onMatrixDirtySignal),
 			onComponentUpdate(onComponentUpdateSignal),
 			onAttach(onAttachSignal),
 			onDetach(onDetachSignal){
@@ -1052,6 +1053,7 @@ namespace MV {
 			for (auto&& child : *this) {
 				child->markMatrixDirty(false);
 			}
+			onMatrixDirtySignal(shared_from_this());
 		}
 
 		std::string Node::getUniqueId(const std::string &a_original) const {
@@ -1365,105 +1367,6 @@ namespace MV {
 				safeOnChange();
 			}
 		}
-
-		chaiscript::ChaiScript& Node::hook(chaiscript::ChaiScript &a_script) {
-			a_script.add(chaiscript::user_type<Node>(), "Node");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node> (Node::*)()>(&Node::make)), "make");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const std::string &)>(&Node::make)), "make");
-			a_script.add(chaiscript::fun(&Node::makeOrGet), "makeOrGet");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const std::string &, bool)>(&Node::remove)), "remove");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const std::shared_ptr<Node> &, bool)>(&Node::remove)), "remove");
-			a_script.add(chaiscript::fun(&Node::removeFromParent), "removeFromParent");
-			a_script.add(chaiscript::fun(&Node::clear), "clear");
-			a_script.add(chaiscript::fun(&Node::root), "root");
-			a_script.add(chaiscript::fun(&Node::hasImmediate), "hasImmediate");
-			a_script.add(chaiscript::fun(&Node::has), "has");
-			a_script.add(chaiscript::fun(&Node::hasParent), "hasParent");
-			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id) {return a_self.getParent(a_id); }), "getParent");
-			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id, bool a_throw) {return a_self.getParent(a_id, a_throw); }), "getParent");
-			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id) {return a_self.getImmediate(a_id); }), "getImmediate");
-			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id, bool a_throw) {return a_self.getImmediate(a_id, a_throw); }), "getImmediate");
-			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id) {return a_self.get(a_id); }), "get");
-			a_script.add(chaiscript::fun([](Node& a_self, const std::string& a_id, bool a_throw) {return a_self.get(a_id, a_throw); }), "get");
-			a_script.add(chaiscript::fun([](Node &a_self, const std::string &a_componentId) { return a_self.componentInChildren<Component>(a_componentId, false, true); }), "component");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node> (Node::*)() const>(&Node::parent)), "parent");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node> (Node::*)(const std::shared_ptr<Node> &)>(&Node::parent)), "parent");
-			a_script.add(chaiscript::fun(&Node::operator[]), "[]");
-			a_script.add(chaiscript::fun(&Node::size), "size");
-			a_script.add(chaiscript::fun(&Node::empty), "empty");
-			a_script.add(chaiscript::fun(&Node::task), "task");
-			a_script.add(chaiscript::fun(static_cast<std::string (Node::*)() const>(&Node::id)), "id");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node> (Node::*)(const std::string &)>(&Node::id)), "id");
-			a_script.add(chaiscript::fun(static_cast<PointPrecision(Node::*)() const>(&Node::depth)), "depth");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(PointPrecision)>(&Node::depth)), "depth");
-
-			a_script.add(chaiscript::fun(static_cast<Point<>(Node::*)() const>(&Node::position)), "position");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Point<> &)>(&Node::position)), "position");
-			a_script.add(chaiscript::fun(static_cast<Point<>(Node::*)()>(&Node::worldPosition)), "worldPosition");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Point<> &)>(&Node::worldPosition)), "worldPosition");
-			a_script.add(chaiscript::fun(static_cast<Point<int>(Node::*)()>(&Node::screenPosition)), "screenPosition");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Point<int> &)>(&Node::screenPosition)), "screenPosition");
-			
-			a_script.add(chaiscript::fun(static_cast<Point<>(Node::*)(const Point<> &)>(&Node::worldFromLocal)), "worldFromLocal");
-			a_script.add(chaiscript::fun(static_cast<Point<int>(Node::*)(const Point<> &)>(&Node::screenFromLocal)), "screenFromLocal");
-			a_script.add(chaiscript::fun(static_cast<Point<>(Node::*)(const Point<int> &)>(&Node::localFromScreen)), "localFromScreen");
-			a_script.add(chaiscript::fun(static_cast<Point<>(Node::*)(const Point<> &)>(&Node::localFromWorld)), "localFromWorld");
-
-			a_script.add(chaiscript::fun(static_cast<std::vector<Point<>>(Node::*)(std::vector<Point<>>)>(&Node::worldFromLocal)), "worldFromLocal");
-			a_script.add(chaiscript::fun(static_cast<std::vector<Point<int>>(Node::*)(const std::vector<Point<>> &)>(&Node::screenFromLocal)), "screenFromLocal");
-			a_script.add(chaiscript::fun(static_cast<std::vector<Point<>>(Node::*)(const std::vector<Point<int>> &)>(&Node::localFromScreen)), "localFromScreen");
-			a_script.add(chaiscript::fun(static_cast<std::vector<Point<>>(Node::*)(std::vector<Point<>>)>(&Node::localFromWorld)), "localFromWorld");
-			
-			a_script.add(chaiscript::fun(static_cast<BoxAABB<>(Node::*)(const BoxAABB<> &)>(&Node::worldFromLocal)), "worldFromLocal");
-			a_script.add(chaiscript::fun(static_cast<BoxAABB<int>(Node::*)(const BoxAABB<> &)>(&Node::screenFromLocal)), "screenFromLocal");
-			a_script.add(chaiscript::fun(static_cast<BoxAABB<>(Node::*)(const BoxAABB<int> &)>(&Node::localFromScreen)), "localFromScreen");
-			a_script.add(chaiscript::fun(static_cast<BoxAABB<>(Node::*)(const BoxAABB<> &)>(&Node::localFromWorld)), "localFromWorld");
-
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Point<> &)>(&Node::translate)), "translate");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Point<>&)>(&Node::worldTranslate)), "worldTranslate");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Point<int>&)>(&Node::screenTranslate)), "screenTranslate");
-
-			a_script.add(chaiscript::fun(static_cast<AxisAngles(Node::*)() const>(&Node::rotation)), "rotation");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const AxisAngles &)>(&Node::rotation)), "rotation");
-			a_script.add(chaiscript::fun(static_cast<AxisAngles(Node::*)() const>(&Node::worldRotation)), "worldRotation");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const AxisAngles &)>(&Node::worldRotation)), "worldRotation");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const AxisAngles &)>(&Node::addRotation)), "addRotation");
-
-			a_script.add(chaiscript::fun(static_cast<AxisAngles(Node::*)() const>(&Node::rotationRad)), "rotationRad");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const AxisAngles &)>(&Node::rotationRad)), "rotationRad");
-			a_script.add(chaiscript::fun(static_cast<AxisAngles(Node::*)() const>(&Node::worldRotationRad)), "worldRotationRad");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const AxisAngles &)>(&Node::worldRotationRad)), "worldRotationRad");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const AxisAngles &)>(&Node::addRotationRad)), "addRotationRad");
-			
-			a_script.add(chaiscript::fun(static_cast<Scale(Node::*)() const>(&Node::scale)), "scale");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Scale &)>(&Node::scale)), "scale");
-			a_script.add(chaiscript::fun(static_cast<Scale(Node::*)() const>(&Node::worldScale)), "worldScale");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Scale &)>(&Node::worldScale)), "worldScale");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(const Scale &)>(&Node::addScale)), "addScale");
-
-			a_script.add(chaiscript::fun(static_cast<bool(Node::*)() const>(&Node::visible)), "visible");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(bool)>(&Node::visible)), "visible");
-			a_script.add(chaiscript::fun(static_cast<bool(Node::*)() const>(&Node::visible)), "updating");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(bool)>(&Node::visible)), "updating");
-			a_script.add(chaiscript::fun(static_cast<bool(Node::*)() const>(&Node::visible)), "active");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Node>(Node::*)(bool)>(&Node::visible)), "active");
-
-			a_script.add(chaiscript::fun(&Node::show), "show");
-			a_script.add(chaiscript::fun(&Node::hide), "hide");
-			a_script.add(chaiscript::fun(&Node::pause), "pause");
-			a_script.add(chaiscript::fun(&Node::resume), "resume");
-			a_script.add(chaiscript::fun(&Node::disable), "disable");
-			a_script.add(chaiscript::fun(&Node::enable), "enable");
-
-			a_script.add(chaiscript::fun(&Node::bounds), "bounds");
-			a_script.add(chaiscript::fun(&Node::worldBounds), "worldBounds");
-			a_script.add(chaiscript::fun(&Node::screenBounds), "screenBounds");
-
-			a_script.add(chaiscript::fun(&Node::clone), "clone");
-
-			return a_script;
-		}
-
 
 		std::ostream& operator<<(std::ostream& os, const std::shared_ptr<Node>& a_node) {
 			std::string spacing(a_node->parentIndexList().size(), ' ');

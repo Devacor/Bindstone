@@ -266,9 +266,9 @@ namespace MV {
 		friend cereal::access;
 	public:
 		typedef std::function<T> FunctionType;
-		typedef Receiver<T> RecieverType;
-		typedef std::shared_ptr<Receiver<T>> SharedRecieverType;
-		typedef std::weak_ptr<Receiver<T>> WeakRecieverType;
+		typedef Receiver<T> ReceiverType;
+		typedef std::shared_ptr<Receiver<T>> SharedReceiverType;
+		typedef std::weak_ptr<Receiver<T>> WeakReceiverType;
 
 		//No protection against duplicates.
 		[[nodiscard]]
@@ -284,7 +284,7 @@ namespace MV {
 			return signal;
 		}
 
-		//Duplicate Recievers will not be added. If std::function ever becomes comparable this can all be much safer.
+		//Duplicate Receivers will not be added. If std::function ever becomes comparable this can all be much safer.
 		bool connect(std::shared_ptr<Receiver<T>> a_value){
 			observers.insert(a_value);
 			return true;
@@ -303,7 +303,7 @@ namespace MV {
 			if (foundConnection != ownedConnections.end()) {
 				return foundConnection->second;
 			}
-			return SharedRecieverType();
+			return SharedReceiverType();
 		}
 
 		void disconnect(std::shared_ptr<Receiver<T>> a_value){
@@ -521,7 +521,7 @@ namespace MV {
 
 		chaiscript::ChaiScript *scriptEnginePointer = nullptr;
 
-		std::map<std::string, SharedRecieverType> ownedConnections;
+		std::map<std::string, SharedReceiverType> ownedConnections;
 	};
 
 	//Can be used as a public SignalRegister member for connecting signals to a private Signal member.
@@ -530,9 +530,9 @@ namespace MV {
 	class SignalRegister {
 	public:
 		typedef std::function<T> FunctionType;
-		typedef Receiver<T> RecieverType;
-		typedef std::shared_ptr<Receiver<T>> SharedRecieverType;
-		typedef std::weak_ptr<Receiver<T>> WeakRecieverType;
+		typedef Receiver<T> ReceiverType;
+		typedef std::shared_ptr<Receiver<T>> SharedReceiverType;
+		typedef std::weak_ptr<Receiver<T>> WeakReceiverType;
 
 		SignalRegister(Signal<T> &a_signal) :
 			signal(a_signal){

@@ -101,7 +101,7 @@ namespace MV {
 			Point<> capturedOffset;
 			bool dirtyTexture = true;
 			bool forceRefreshEveryFrame = false;
-			Node::BasicSharedSignalType dirtyObserveSignal;
+			Node::BasicReceiverType dirtyObserveSignal;
 		};
 	}
 }

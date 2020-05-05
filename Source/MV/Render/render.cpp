@@ -575,6 +575,7 @@ namespace MV {
 	\*************************/
 
 	Draw2D::Draw2D() :
+		onCameraUpdated(onCameraUpdatedSignal),
 		glExtensions(this),
 		clearBackgroundColor(0x3d3d3d),
 		initialized(0),

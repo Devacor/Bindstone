@@ -201,6 +201,9 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\..\External\VSProjects\External_Windows\External_Windows.vcxproj">
+      <Project>{cf1fc4ef-e11d-40a8-9107-a1148411b280}</Project>
+    </ProjectReference>
     <ProjectReference Include="..\..\..\External\wolfssl-4.3.0\wolfssl.vcxproj">
       <Project>{73973223-5ee8-41ca-8e88-1d60e89a237b}</Project>
     </ProjectReference>

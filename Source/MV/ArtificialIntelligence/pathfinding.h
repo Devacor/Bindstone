@@ -26,7 +26,7 @@ namespace MV {
 		friend cereal::access;
 	public:
 		typedef void CallbackSignature(const std::shared_ptr<Map> &, const Point<int> &);
-		typedef SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
+		typedef SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
 	private:
 		Signal<CallbackSignature> onBlockSignal;
 		Signal<CallbackSignature> onUnblockSignal;
@@ -120,7 +120,7 @@ namespace MV {
 		mutable std::array<MapNode*, 8> edges;
 		mutable int clearanceAmount = 0;
 
-		mutable std::vector<MapNode::SharedRecieverType> clearanceRecievers;
+		mutable std::vector<MapNode::SharedReceiverType> clearanceReceivers;
 
 		bool useCorners;
 		Point<int> location;
@@ -134,7 +134,7 @@ namespace MV {
 		friend cereal::access;
 	public:
 		typedef void CallbackSignature(std::shared_ptr<Map>, const Point<int> &);
-		typedef SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
+		typedef SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
 	private:
 		Signal<CallbackSignature> onBlockSignal;
 		Signal<CallbackSignature> onUnblockSignal;
@@ -433,7 +433,7 @@ namespace MV {
 		friend cereal::access;
 	public:
 		typedef void CallbackSignature(std::shared_ptr<NavigationAgent>);
-		typedef SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
+		typedef SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
 	private:
 		Signal<CallbackSignature> onArriveSignal;
 		Signal<CallbackSignature> onBlockedSignal;
@@ -661,7 +661,7 @@ namespace MV {
 
 		void markDirty() {
 			costs.clear();
-			recievers.clear();
+			receivers.clear();
 			dirtyPath = true;
 		}
 
@@ -674,7 +674,7 @@ namespace MV {
 		void updateObservedNodes();
 
 		void recalculate() {
-			recievers.clear();
+			receivers.clear();
 			costs.clear();
 
 			unblockMap();
@@ -734,7 +734,7 @@ namespace MV {
 			RecentlyBlockedNodeObserver(NavigationAgent* a_self, const std::shared_ptr<Map> &a_map, const Point<int> &a_position, unsigned int a_pathId):
 				pathId(a_pathId){
 				if (a_self->size() > 1) {
-					reciever = a_map->get(a_position).onClearanceChange.connect([this, a_self](const std::shared_ptr<Map> &a_innerMap, const Point<int> &a_innerPosition) {
+					receiver = a_map->get(a_position).onClearanceChange.connect([this, a_self](const std::shared_ptr<Map> &a_innerMap, const Point<int> &a_innerPosition) {
 						if (!a_self->activeUpdate && !a_self->overlaps(a_innerPosition) && (a_self->size() >= a_innerMap->get(a_innerPosition).clearance())) {
 							a_self->activeUpdate++;
 							SCOPE_EXIT{ a_self->activeUpdate--; };
@@ -743,7 +743,7 @@ namespace MV {
 						}
 					});
 				} else {
-					reciever = a_map->get(a_position).onUnblock.connect([this, a_self](const std::shared_ptr<Map> &a_innerMap, const Point<int> &a_innerPosition) {
+					receiver = a_map->get(a_position).onUnblock.connect([this, a_self](const std::shared_ptr<Map> &a_innerMap, const Point<int> &a_innerPosition) {
 						if (!a_self->activeUpdate && !a_self->overlaps(a_innerPosition)) {
 							a_self->activeUpdate++;
 							SCOPE_EXIT{ a_self->activeUpdate--; };
@@ -754,7 +754,7 @@ namespace MV {
 				}
 			}
 
-			MapNode::SharedRecieverType reciever;
+			MapNode::SharedReceiverType receiver;
 			int gridMovesLeftUntilExpires = 5;
 			unsigned int pathId;
 		};
@@ -778,7 +778,7 @@ namespace MV {
 		bool isBlocking = false;
 
 		std::vector<TemporaryCost> costs;
-		std::vector<MapNode::SharedRecieverType> recievers;
+		std::vector<MapNode::SharedReceiverType> receivers;
 		std::vector<RecentlyBlockedNodeObserver> blockedNodeObservers;
 		
 		size_t currentPathIndex = 0;

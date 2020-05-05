@@ -284,7 +284,7 @@ struct CreatureNetworkState {
 class Creature : public MV::Scene::Component {
 public:
 	typedef void CallbackSignature(std::shared_ptr<Creature>);
-	typedef MV::SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
+	typedef MV::SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
 
 protected:
 	MV::Signal<CallbackSignature> onStatusSignal;

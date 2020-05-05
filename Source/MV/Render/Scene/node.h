@@ -30,17 +30,9 @@ namespace MV {
 			typedef void BasicSignature(const std::shared_ptr<Node> &a_this);
 			typedef void ComponentSignature(const std::shared_ptr<Component> &a_this);
 
-			typedef Signal<BasicSignature>::WeakRecieverType BasicWeakSignalType;
-			typedef Signal<BasicSignature>::SharedRecieverType BasicSharedSignalType;
-			typedef Signal<BasicSignature>::RecieverType BasicSignalType;
-			
-			typedef Signal<ParentInteractionSignature>::WeakRecieverType ParentInteractionWeakSignalType;
-			typedef Signal<ParentInteractionSignature>::SharedRecieverType ParentInteractionSharedSignalType;
-			typedef Signal<ParentInteractionSignature>::RecieverType ParentInteractionSignalType;
-
-			typedef Signal<ComponentSignature>::WeakRecieverType ComponentWeakSignalType;
-			typedef Signal<ComponentSignature>::SharedRecieverType ComponentSharedSignalType;
-			typedef Signal<ComponentSignature>::RecieverType ComponentSignalType;
+			typedef Signal<BasicSignature>::SharedReceiverType BasicReceiverType;
+			typedef Signal<ParentInteractionSignature>::SharedReceiverType ParentInteractionReceiverType;
+			typedef Signal<ComponentSignature>::SharedReceiverType ComponentReceiverType;
 
 			class Quiet {
 			public:
@@ -105,7 +97,9 @@ namespace MV {
 
 			Signal<BasicSignature> onChangeSignal;
 
-			Signal<BasicSignature>::SharedRecieverType onParentAlphaChangeSignal;
+			Signal<BasicSignature> onMatrixDirtySignal;
+
+			Signal<BasicSignature>::SharedReceiverType onParentAlphaChangeSignal;
 
 			class ReSort {
 			public:
@@ -155,6 +149,8 @@ namespace MV {
 			SignalRegister<ComponentSignature> onDetach;
 			SignalRegister<ComponentSignature> onAttach;
 			SignalRegister<ComponentSignature> onComponentUpdate;
+
+			SignalRegister<BasicSignature> onMatrixDirty;
 
 			void draw();
 			void drawChildren();
@@ -696,8 +692,6 @@ namespace MV {
 				}
 				return *rootTask;
 			}
-
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 
 			//use this to suppress messages when you know what the fuck you're doing.
 			void quietLocalAndChildMatrixFix();

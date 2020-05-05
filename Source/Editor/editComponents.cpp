@@ -393,6 +393,36 @@ void EditableSpine::resetHandles() {
 	positionHandle->bounds(currentDimensions)->color({ 0x11FFFFFF });
 }
 
+EditableParallax::EditableParallax(MV::Scene::SafeComponent<MV::Scene::Parallax> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice* a_mouse) :
+	elementToEdit(a_elementToEdit),
+	controlContainer(a_rootContainer->make("Editable")->depth(-100.0f)),
+	mouse(a_mouse) {
+
+	resetHandles();
+
+	nodeMoved = elementToEdit->owner()->onTransformChange.connect([&](const std::shared_ptr<MV::Scene::Node>& a_this) {
+		resetHandles();
+	});
+}
+
+void EditableParallax::removeHandles() {
+	if (positionHandle) {
+		controlContainer->remove(positionHandle->owner());
+	}
+	positionHandle.reset();
+}
+
+void EditableParallax::resetHandles() {
+	removeHandles();
+	auto rectBox = MV::round<MV::PointPrecision>(elementToEdit->screenBounds());
+
+	auto currentDimensions = MV::Size<>(std::max(rectBox.size().width, 5.0f), std::max(rectBox.size().height, 5.0f));
+
+	EditableParallax* self = this;
+	positionHandle = controlContainer->make(MV::guid("position"))->position(rectBox.minPoint)->attach<MV::Scene::Sprite>();
+	positionHandle->bounds(currentDimensions)->color({ 0x11FFFFFF });
+}
+
 EditableButton::EditableButton(MV::Scene::SafeComponent<MV::Scene::Button> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice *a_mouse) :
 	ResizeHandles(a_elementToEdit.cast<MV::Scene::Component>(), a_rootContainer, a_mouse),
 	elementToEdit(a_elementToEdit) {

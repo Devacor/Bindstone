@@ -234,7 +234,7 @@ namespace MV {
 	}
 
 	void MapNode::registerCalculateClearanceCallbacks() const {
-		clearanceRecievers.clear();
+		clearanceReceivers.clear();
 		std::vector<Point<int>> locations { location + Point<int>(0, 1), location + Point<int>(1, 1), location + Point<int>(1, 0) };
 		locations.erase(std::remove_if(locations.begin(), locations.end(), [&](const Point<int> &a_item){
 			return !map->inBounds(a_item);
@@ -242,7 +242,7 @@ namespace MV {
 
 		for(auto&& offsetLocation : locations){
 			if(map->inBounds(offsetLocation)){
-				auto reciever = map->get(offsetLocation).onClearanceChange.connect([&, locations](std::shared_ptr<Map> a_map, const Point<int> &a_location) {
+				auto receiver = map->get(offsetLocation).onClearanceChange.connect([&, locations](std::shared_ptr<Map> a_map, const Point<int> &a_location) {
 					int oldClearance = clearanceAmount;
 					if(!blocked()){
 						if (locations.size() < 3) {
@@ -260,7 +260,7 @@ namespace MV {
 					}
 					if (oldClearance != clearanceAmount) { onClearanceChangeSignal(a_map, location); }
 				});
-				clearanceRecievers.push_back(reciever);
+				clearanceReceivers.push_back(receiver);
 			}
 		}
 	}
@@ -471,7 +471,7 @@ namespace MV {
 			}
 
 			if (!pathfinding()) {
-				recievers.clear();
+				receivers.clear();
 				auto self = shared_from_this();
 				onArriveSignal(self);
 			}
@@ -510,7 +510,7 @@ namespace MV {
 
 	void NavigationAgent::updateObservedNodes() {
 		static unsigned int pathId = 0;
-		recievers.clear();
+		receivers.clear();
 		costs.clear();
 		pathId++;
 		for (auto i = currentPathIndex; i < calculatedPath.size(); ++i) {
@@ -524,21 +524,21 @@ namespace MV {
 			auto& mapNode = map->get(calculatedPath[i].position());
 
 			if(unitSize <= 1) {
-				auto reciever = mapNode.onBlock.connect([=](const std::shared_ptr<Map> &a_map, const Point<int> &a_position) {
+				auto receiver = mapNode.onBlock.connect([=](const std::shared_ptr<Map> &a_map, const Point<int> &a_position) {
 					if (!activeUpdate && !overlaps(a_position)) {
 						blockedNodeObservers.emplace_back(this, a_map, a_position, pathId);
 						markDirty();
 					}
 				});
-				recievers.push_back(reciever);
+				receivers.push_back(receiver);
 			} else {
-				auto reciever = mapNode.onClearanceChange.connect([=](const std::shared_ptr<Map> &a_map, const Point<int> &a_position) {
+				auto receiver = mapNode.onClearanceChange.connect([=](const std::shared_ptr<Map> &a_map, const Point<int> &a_position) {
 					if (!activeUpdate && size() <= a_map->get(a_position).clearance() && !overlaps(a_position)) {
 						blockedNodeObservers.emplace_back(this, a_map, a_position, pathId);
 						markDirty();
 					}
 				});
-				recievers.push_back(reciever);
+				receivers.push_back(receiver);
 			}
 		}
 	}

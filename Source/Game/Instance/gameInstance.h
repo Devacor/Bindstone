@@ -167,8 +167,8 @@ protected:
 	const MV::PointPrecision maxScaleHard = 3.5f;
 	const MV::PointPrecision maxScaleSoft = 3.0f;
 
-	const MV::PointPrecision minScaleHard = .675f;
-	const MV::PointPrecision minScaleSoft = .725f;
+	const MV::PointPrecision minScaleHard = .625f;
+	const MV::PointPrecision minScaleSoft = .675f;
 
 	BindstoneNetworkObjectPool synchronizedObjects;
 };

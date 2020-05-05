@@ -7,6 +7,7 @@
 #include <string>
 #include <functional>
 #include <memory>
+#include <atomic>
 
 #include "render.h"
 #include "boxaabb.h"
@@ -54,7 +55,7 @@ namespace MV {
 	//converting to a power of two surface may free the original surface, but returns an unfreed surface.
 	std::shared_ptr<OwnedSurface> convertToPowerOfTwoSurface(const std::shared_ptr<OwnedSurface> &a_img);
 	std::shared_ptr<OwnedSurface> convertToBGRSurface(const std::shared_ptr<OwnedSurface> &a_img);
-	LoadedTextureData loadTextureFromSurface(const std::shared_ptr<OwnedSurface> &img, const TextureParameters &file);
+	std::unique_ptr<LoadedTextureData> loadTextureFromSurface(const std::shared_ptr<OwnedSurface> &img, const TextureParameters &file);
 
 	//required to allow forward declared MV::SharedTextures
 	MV::SharedTextures* getSharedTextureFromServices(MV::Services& a_services);
@@ -104,10 +105,10 @@ namespace MV {
 		}
 
 		bool operator==(const TextureParameters &a_rhs) const {
-			return tie() == a_rhs.tie();
+			return cleared ? false : tie() == a_rhs.tie();
 		}
 		bool operator!=(const TextureParameters &a_rhs) const {
-			return tie() != a_rhs.tie();
+			return cleared ? true : tie() != a_rhs.tie();
 		}
 
 		std::string path;
@@ -118,56 +119,114 @@ namespace MV {
 		bool cleared = false;
 	};
 
-	struct LoadedTextureData {
-		operator bool() {
-			return textureId != 0;
+	class OpenGlTextureId {
+	public:
+		OpenGlTextureId() {
+			glGenTextures(1, &textureId);
 		}
+		OpenGlTextureId(GLuint a_textureId) :
+			textureId(a_textureId) {
+		}
+		OpenGlTextureId(OpenGlTextureId&& a_rhs) :
+			textureId(a_rhs.textureId){
+			a_rhs.textureId = 0;
+		}
+		~OpenGlTextureId() {
+			if (textureId != 0) {
+				glDeleteTextures(1, &textureId);
+			}
+		}
+
+		operator GLuint() const {
+			return textureId;
+		}
+		inline GLuint id() const {
+			return textureId;
+		}
+	private:
+		OpenGlTextureId(const OpenGlTextureId& a_rhs) = delete;
+		OpenGlTextureId& operator=(const OpenGlTextureId& a_rhs) = delete;
 
 		GLuint textureId = 0;
+	};
+
+	class LoadedTexture;
+	struct LoadedTextureData {
+		friend LoadedTexture;
+	public:
+		LoadedTextureData() {}
+		LoadedTextureData(GLuint a_textureId) : textureId(a_textureId){}
+		LoadedTextureData(LoadedTextureData&& a_rhs) = default;
+
+		operator GLuint() const {
+			return textureId;
+		}
+
+		OpenGlTextureId textureId;
 		Size<int> size;
 		Size<int> originalSize;
-		int useCount = 0;
-	};
 
-	class TextureIndex {
-	public:
-		static void increment(GLuint a_id);
-		static bool decrement(GLuint a_id);
-
-		static LoadedTextureData& loadFile(const TextureParameters &a_parameters);
-		static void releaseFile(const TextureParameters &a_parameters);
 	private:
-		static std::recursive_mutex lock;
-		static std::map<GLuint, int> handles;
-		static std::map<TextureParameters, LoadedTextureData> data;
+		LoadedTextureData(const LoadedTextureData& a_rhs) = delete;
+		LoadedTextureData& operator=(const LoadedTextureData& a_rhs) = delete;
+
+		std::atomic<int> useCount = 0;
 	};
 
-	//RAII handle for loading textures. Relies on TextureIndex and locks.
 	class LoadedTexture {
 	public:
-		LoadedTexture(TextureParameters a_parameters);
-		~LoadedTexture();
-
-		LoadedTextureData& Data() {
-			return loadedData;
+		LoadedTexture(const TextureParameters& a_parameters) {
+			if (a_parameters.cleared) {
+				locallyOwnedParametersValue = std::make_unique<TextureParameters>(a_parameters);
+				locallyOwnedDataValue = std::make_unique<LoadedTextureData>();
+			} else {
+				std::scoped_lock guard(lock);
+				auto found = globalLookup.find(a_parameters);
+				if (found != globalLookup.end()) {
+					++found->second->useCount;
+				} else {
+					bool success = false;
+					std::tie(found, success) = globalLookup.insert({ a_parameters, std::move(loadFile(a_parameters)) });
+				}
+				dataValue = found->second.get();
+				parametersValue = &found->first;
+			}
+		}
+		LoadedTexture(std::unique_ptr<LoadedTextureData> a_locallyOwnedDataValue) :
+			locallyOwnedDataValue(a_locallyOwnedDataValue.release()){
+		}
+		LoadedTexture(LoadedTexture&&) = default;
+		~LoadedTexture() {
+			if (--dataValue->useCount == 0) {
+				std::scoped_lock guard(lock);
+				globalLookup.erase(parameters());
+			}
 		}
 
-		TextureParameters& Parameters() {
-			return ourParameters;
+		const TextureParameters& parameters() const {
+			return locallyOwnedParametersValue ? *locallyOwnedParametersValue : *parametersValue;
 		}
-
-		LoadedTextureData& operator*() {
-			return loadedData;
+		LoadedTextureData& data() {
+			return locallyOwnedDataValue ? *locallyOwnedDataValue : *dataValue;
 		}
-
+		GLuint id() const {
+			return locallyOwnedDataValue ? locallyOwnedDataValue->textureId : dataValue->textureId;
+		}
 	private:
-		LoadedTexture(const LoadedTexture &) = delete;
-		LoadedTexture operator=(const LoadedTexture &) = delete;
-		LoadedTexture(LoadedTexture&&) = delete;
+		LoadedTexture(const LoadedTexture&) = delete;
+		LoadedTexture& operator=(const LoadedTexture&) = delete;
 
-		LoadedTextureData loadedData;
-		TextureParameters ourParameters;
+		std::unique_ptr<LoadedTextureData> loadFile(const TextureParameters& a_parameters);
+		//static void releaseFile(const TextureParameters& a_parameters);
+		
+		LoadedTextureData* dataValue;
+		const TextureParameters* parametersValue;
+		std::unique_ptr<LoadedTextureData> locallyOwnedDataValue;
+		std::unique_ptr<TextureParameters> locallyOwnedParametersValue;
+		static std::mutex lock;
+		static std::map<TextureParameters, std::unique_ptr<LoadedTextureData>> globalLookup;
 	};
+
 
 	class TextureDefinition : public std::enable_shared_from_this<TextureDefinition> {
 		friend cereal::access;
@@ -207,32 +266,6 @@ namespace MV {
 
 		void save(const std::string &a_fileName);
 
-		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-			a_script.add(chaiscript::user_type<TextureDefinition>(), "TextureDefinition");
-			
-			a_script.add(chaiscript::fun(&TextureDefinition::textureId), "textureId");
-			a_script.add(chaiscript::fun(&TextureDefinition::name), "name");
-			a_script.add(chaiscript::fun(&TextureDefinition::loaded), "loaded");
-			a_script.add(chaiscript::fun(&TextureDefinition::load), "load");
-			a_script.add(chaiscript::fun(&TextureDefinition::reload), "reload");
-			a_script.add(chaiscript::fun(&TextureDefinition::save), "save");
-
-			a_script.add(chaiscript::fun(static_cast<Size<int>(TextureDefinition::*)()>(&TextureDefinition::size)), "size");
-			a_script.add(chaiscript::fun(static_cast<Size<int>(TextureDefinition::*)()>(&TextureDefinition::contentSize)), "contentSize");
-
-			a_script.add(chaiscript::fun(static_cast<Scale(TextureDefinition::*)() const>(&TextureDefinition::scale)), "scale");
-			a_script.add(chaiscript::fun(static_cast<void(TextureDefinition::*)(const Scale &)>(&TextureDefinition::scale)), "scale");
-
-			a_script.add(chaiscript::fun(static_cast<void(TextureDefinition::*)()>(&TextureDefinition::unload)), "unload");
-			a_script.add(chaiscript::fun(static_cast<void(TextureDefinition::*)(TextureHandle*)>(&TextureDefinition::unload)), "unload");
-
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureDefinition::*)()>(&TextureDefinition::makeHandle)), "makeHandle");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureDefinition::*)(const BoxAABB<int> &)>(&TextureDefinition::makeHandle)), "makeHandle");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureDefinition::*)(const BoxAABB<PointPrecision> &)>(&TextureDefinition::makeHandle)), "makeHandle");
-			a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureDefinition::*)(const BoxAABB<PointPrecision> &)>(&TextureDefinition::makeRawHandle)), "makeRawHandle");
-
-			return a_script;
-		}
 	protected:
 		virtual void cleanupOpenglTexture();
 		TextureDefinition(const std::string &a_name, bool a_isShared = true);
@@ -241,7 +274,6 @@ namespace MV {
 		Size<int> textureSize;
 		Size<int> desiredSize;
 		Scale logicalScale;
-		GLuint texture;
 
 		std::vector< std::weak_ptr<TextureHandle> > handles;
 		bool isShared;
@@ -265,7 +297,6 @@ namespace MV {
 		}
 
 		virtual void reloadImplementation() = 0;
-		virtual void cleanupImplementation(){}
 	};
 
 	class FileTextureDefinition : public TextureDefinition {
@@ -296,7 +327,6 @@ namespace MV {
 		}
 
 		void reloadImplementation() override;
-		void cleanupOpenglTexture() override;
 
 	private:
 

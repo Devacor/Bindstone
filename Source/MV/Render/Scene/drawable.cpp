@@ -274,8 +274,13 @@ namespace MV {
 		}
 
 		void Drawable::initialize() {
-			hookupTextureSizeWatchers();
-			rebuildTextureCache();
+			for (auto&& kv : ourTextures) {
+				texture(kv.second, kv.first);
+			}
+			if (ourTextures.empty()) {
+				hookupTextureSizeWatchers();
+				rebuildTextureCache();
+			}
 		}
 
 		void Drawable::hookupTextureSizeWatchers() {

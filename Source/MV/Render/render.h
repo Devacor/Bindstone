@@ -28,6 +28,7 @@
 #include "MV/Render/points.h"
 #include "MV/Render/matrix.hpp"
 #include "MV/Utility/generalUtility.h"
+#include "MV/Utility/signal.hpp"
 
 #ifdef __APPLE__
 	#import "TargetConditionals.h" 
@@ -426,9 +427,15 @@ namespace MV {
 	class Draw2D : public glExtensions {
 		friend Window;
 		friend RenderWorld;
+
+		MV::Signal<void(int32_t)> onCameraUpdatedSignal;
 	public:
 		Draw2D();
 		~Draw2D();
+
+		MV::SignalRegister<void(int32_t)> onCameraUpdated;
+
+		typedef MV::Signal<void(int32_t)>::SharedReceiverType CameraRecieveType;
 
 		Window& window();
 		const Window& window() const;
@@ -445,6 +452,7 @@ namespace MV {
 		}
 
 		TransformMatrix& camera(int32_t a_index) {
+			cameraAccessedThisFrame[a_index] = true;
 			return ourCameras[a_index];
 		}
 
@@ -465,6 +473,12 @@ namespace MV {
 			ourCameraProjectionMatrices.clear();
 			for (auto&& kv : ourCameras) {
 				ourCameraProjectionMatrices.emplace(kv.first, projectionMatrix().top() * kv.second);
+			}
+			for (auto&& kv : cameraAccessedThisFrame) {
+				if (kv.second) {
+					onCameraUpdatedSignal(kv.first);
+					kv.second = false;
+				}
 			}
 		}
 
@@ -550,6 +564,7 @@ namespace MV {
 
 		MatrixStack contextProjectionMatrix;
 
+		std::unordered_map<int32_t, bool> cameraAccessedThisFrame;
 		std::unordered_map<int32_t, TransformMatrix> ourCameras;
 		std::unordered_map<int32_t, TransformMatrix> ourCameraProjectionMatrices;
 

@@ -118,70 +118,51 @@ namespace MV {
 		return a_img;
 	}
 
-	LoadedTextureData& TextureIndex::loadFile(const TextureParameters &a_parameters) {
+	std::unique_ptr<LoadedTextureData> LoadedTexture::loadFile(const TextureParameters &a_parameters) {
 		if (a_parameters.cleared) {
-			std::cerr << "Warning: Passing in a cleared texture parameter! [" << a_parameters.path << "]" << std::endl;
-		}
-
-		std::lock_guard<std::recursive_mutex> guard(lock);
-		auto& found = data[a_parameters];
-		found.useCount++;
-		if (found.textureId != 0) {
-			return found;
+			warning("Warning: Passing in a cleared texture parameter! [", a_parameters.path, "]");
 		}
 
 		MV::info("Loading Image: ", a_parameters.path);
 		SDL_RWops* sdlIO = sdlFileHandle(a_parameters.path);
 		if (!sdlIO) {
 			MV::warning("Failed to load image [", a_parameters.path, "]");
-			return found;
+			return {};
 		}
 		SDL_Surface *img = IMG_Load_RW(sdlIO, 1);
 		if (!img) {
 			MV::error("Failed to load image [", a_parameters.path, "] [",SDL_GetError(),"]");
-			return found;
+			return {};
 		}
 
-		found = loadTextureFromSurface(OwnedSurface::make(img), a_parameters);
-		return found;
-	}
-
-	void TextureIndex::releaseFile(const TextureParameters &a_parameters) {
-		if (a_parameters.cleared) { return; }
-
-		auto& found = data[a_parameters];
-		if (--found.useCount == 0 && found.textureId != 0) {
-			decrement(found.textureId);
-			found.textureId = 0;
-		}
-		if (found.useCount < 0) {
-			std::cerr << "TextureIndex::releaseFile underflow: (" << a_parameters.path << ")" << std::endl;
-		}
+		return loadTextureFromSurface(OwnedSurface::make(img), a_parameters);
 	}
 
 	//Load an opengl texture
-	LoadedTextureData loadTextureFromSurface(const std::shared_ptr<OwnedSurface> &a_img, const TextureParameters &a_parameters) {
+	std::unique_ptr<LoadedTextureData> loadTextureFromSurface(const std::shared_ptr<OwnedSurface> &a_img, const TextureParameters &a_parameters) {
 		if (a_img == nullptr || a_img->get() == nullptr) {
-			std::cerr << "ERROR: loadTextureFromSurface was provided a null SDL_Surface!" << std::endl;
+			error("ERROR: loadTextureFromSurface was provided a null SDL_Surface!");
 			return {};
 		}
 
 		GLenum textureFormat = getTextureFormat(a_img->get());
 		if (!textureFormat) {
-			std::cerr << "Unable to determine texture format!" << std::endl;
+			error("Unable to determine texture format!");
 			return {};
 		}
-
-		LoadedTextureData results;
-		results.originalSize.width = a_img->get()->w;
-		results.originalSize.height = a_img->get()->h;
-
+		Size<int> originalSize{ a_img->get()->w, a_img->get()->h };
 		auto surfaceToWorkWith = normalizeSurface(a_img, a_parameters.powerTwo);
 
+		auto results = RUNNING_IN_HEADLESS ? std::make_unique<LoadedTextureData>(0) : std::make_unique<LoadedTextureData>();
+
+		results->originalSize.width = a_img->get()->w;
+		results->originalSize.height = a_img->get()->h;
+
+		results->size.width = surfaceToWorkWith->get()->w;
+		results->size.height = surfaceToWorkWith->get()->h;
+
 		if (!RUNNING_IN_HEADLESS) {
-			glGenTextures(1, &results.textureId);		// Generate texture ID
-			TextureIndex::increment(results.textureId);
-			glBindTexture(GL_TEXTURE_2D, results.textureId);
+			glBindTexture(GL_TEXTURE_2D, results->textureId);
 
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (a_parameters.pixel) ? GL_NEAREST : GL_LINEAR);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (a_parameters.pixel) ? GL_NEAREST : GL_LINEAR);
@@ -191,10 +172,6 @@ namespace MV {
 
 			glTexImage2D(GL_TEXTURE_2D, 0, getInternalTextureFormat(surfaceToWorkWith->get()), surfaceToWorkWith->get()->w, surfaceToWorkWith->get()->h, 0, getTextureFormat(surfaceToWorkWith->get()), GL_UNSIGNED_BYTE, surfaceToWorkWith->get()->pixels);
 		}
-
-		results.size.width = surfaceToWorkWith->get()->w;
-		results.size.height = surfaceToWorkWith->get()->h;
-
 		return results;
 	}
 
@@ -205,8 +182,7 @@ namespace MV {
 	TextureDefinition::TextureDefinition(const std::string &a_name, bool a_isShared) :
 		isShared(a_isShared),
 		onReload(onReloadAction),
-		textureName(a_name),
-		texture(0) {
+		textureName(a_name) {
 	}
 
 	void TextureDefinition::load() {
@@ -219,16 +195,20 @@ namespace MV {
 	}
 
 	GLuint TextureDefinition::textureId() const {
-		return texture;
+		return loadedTexture ? loadedTexture->id() : 0;
 	}
 
 	bool TextureDefinition::loaded() const {
-		return texture != 0;
+		return textureId() != 0;
 	}
 
 	Size<int> TextureDefinition::size() const {
 		require<ResourceException>(loaded(), "size:: The texture hasn't actually loaded yet.  You may need to create a handle to implicitly force a texture load.");
 		return textureSize;
+	}
+
+	void TextureDefinition::cleanupOpenglTexture() {
+		loadedTexture.release();
 	}
 
 	Size<int> TextureDefinition::size() {
@@ -319,15 +299,6 @@ namespace MV {
 
 	TextureDefinition::~TextureDefinition() {
 		handles.clear();
-		cleanupOpenglTexture();
-	}
-
-	void TextureDefinition::cleanupOpenglTexture() {
-		if (texture) {
-			TextureIndex::decrement(texture);
-			texture = 0;
-			cleanupImplementation();
-		}
 	}
 
 	void TextureDefinition::save(const std::string &a_fileName) {
@@ -335,10 +306,10 @@ namespace MV {
 
 		if (!loaded()) {
 			load();
-			saveLoadedTexture(a_fileName, texture, textureSize.width, textureSize.height);
+			saveLoadedTexture(a_fileName, textureId(), textureSize.width, textureSize.height);
 			cleanupOpenglTexture();
 		} else {
-			saveLoadedTexture(a_fileName, texture, textureSize.width, textureSize.height);
+			saveLoadedTexture(a_fileName, textureId(), textureSize.width, textureSize.height);
 		}
 	}
 
@@ -346,7 +317,6 @@ namespace MV {
 		if (RUNNING_IN_HEADLESS) { return; }
 
 		if (loaded()) {
-			cleanupOpenglTexture();
 			load();
 		}
 	}
@@ -358,14 +328,12 @@ namespace MV {
 
 	void FileTextureDefinition::reloadImplementation() {
 		loadedTexture = std::make_unique<LoadedTexture>(TextureParameters{ textureName, powerTwo, repeat, pixel });
-		textureSize = loadedTexture->Data().size;
-		desiredSize = loadedTexture->Data().originalSize;
-		texture = loadedTexture->Data().textureId;
-	}
-
-	void FileTextureDefinition::cleanupOpenglTexture() {
-		loadedTexture.release();
-		texture = 0;
+		if (loadedTexture->id() != 0) {
+			textureSize = loadedTexture->data().size;
+			desiredSize = loadedTexture->data().originalSize;
+		} else {
+			loadedTexture.reset();
+		}
 	}
 
 	/********************************\
@@ -375,25 +343,25 @@ namespace MV {
 	void DynamicTextureDefinition::reloadImplementation() {
 		textureSize.width = roundUpPowerOfTwo(textureSize.width);
 		textureSize.height = roundUpPowerOfTwo(textureSize.height);
-
 		if (RUNNING_IN_HEADLESS) { return; }
-		unsigned int* data;						// Stored Data
-		unsigned int imageSize = (textureSize.width * textureSize.height) * 4 * sizeof(unsigned int);
+		loadedTexture = std::make_unique<LoadedTexture>(TextureParameters());
+		loadedTexture->data().originalSize.width = desiredSize.width;
+		loadedTexture->data().originalSize.width = desiredSize.height;
+		loadedTexture->data().size.width = textureSize.width;
+		loadedTexture->data().size.width = textureSize.height;
+
 		// Create Storage Space For Texture Data (128x128x4)
-		data = (unsigned int*)new GLuint[(imageSize)];
-		memset(data, backgroundColor.hex(), (imageSize));
-		glGenTextures(1, &texture);					// Create 1 Texture
-		TextureIndex::increment(texture);
-		glBindTexture(GL_TEXTURE_2D, texture);			// Bind The Texture
+		std::vector<unsigned char> pixels(static_cast<size_t>(textureSize.width) * textureSize.height * 4);
+		memset(pixels.data(), backgroundColor.hex(), pixels.size() * sizeof(unsigned char));
+		
+		glBindTexture(GL_TEXTURE_2D, loadedTexture->id());			// Bind The Texture
 		// Build Texture Using Information In data
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureSize.width, textureSize.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-
-		delete[] data;							// Release data
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureSize.width, textureSize.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
 	}
 
 	void DynamicTextureDefinition::resize(const Size<int> &a_size) {
@@ -412,11 +380,13 @@ namespace MV {
 
 		generatedSurfaceSize = Size<int>(newSurface->get()->w, newSurface->get()->h);
 
-		//loads and frees
-		auto results = loadTextureFromSurface(newSurface, TextureParameters(true, false, false));
-		texture = results.textureId;
-		textureSize = results.size;
-		desiredSize = results.originalSize;
+		loadedTexture = std::make_unique<LoadedTexture>(loadTextureFromSurface(newSurface, TextureParameters(true, false, false)));
+		if (loadedTexture->id() != 0) {
+			textureSize = loadedTexture->data().size;
+			desiredSize = loadedTexture->data().originalSize;
+		} else {
+			loadedTexture.reset();
+		}
 	}
 
 	Size<int> SurfaceTextureDefinition::surfaceSize() const {
@@ -562,7 +532,7 @@ namespace MV {
 		1 10  11  2
 	\*Vertex Indices*/
 	bool TextureHandle::apply(std::vector<DrawPoint> &a_points) const {
-		if(a_points.size() == 4 || a_points.size() == 16){
+		if(a_points.size() >= 4){
 			a_points[0].textureX = handlePercent.minPoint.x; a_points[0].textureY = handlePercent.minPoint.y;
 			a_points[1].textureX = handlePercent.minPoint.x; a_points[1].textureY = handlePercent.maxPoint.y;
 			a_points[2].textureX = handlePercent.maxPoint.x; a_points[2].textureY = handlePercent.maxPoint.y;
@@ -697,7 +667,7 @@ namespace MV {
 		glGenFramebuffers(1, &fbo);
 		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
-		std::vector<char> pixels(a_width*a_height * 4);
+		std::vector<uint8_t> pixels(a_width*a_height * 4);
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, a_texture, 0);
 		GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 		if (status != GL_FRAMEBUFFER_COMPLETE) {
@@ -712,35 +682,7 @@ namespace MV {
 		SDL_FreeSurface(surf);
 	}
 
-	void TextureIndex::increment(GLuint a_id) {
-		MV::require<MV::ResourceException>(a_id != 0, "Null texture attempted to increment in TextureUnloader!");
-		std::lock_guard<std::recursive_mutex> guard(lock);
-		handles[a_id]++;
-	}
-
-	bool TextureIndex::decrement(GLuint a_id) {
-		MV::require<MV::ResourceException>(a_id != 0, "Null texture attempted to decrement in TextureUnloader!");
-		std::lock_guard<std::recursive_mutex> guard(lock);
-		auto handleCount = --handles[a_id];
-		MV::require<MV::ResourceException>(handleCount >= 0, "TextureUnloader: Handle underflow for GLuint id: ", a_id);
-		if (handleCount == 0) {
-			glDeleteTextures(1, &a_id);
-			return true;
-		}
-		return false;
-	}
-
-	std::recursive_mutex TextureIndex::lock;
-	std::map<GLuint, int> TextureIndex::handles;
-	std::map<MV::TextureParameters, MV::LoadedTextureData> TextureIndex::data;
-
-	LoadedTexture::LoadedTexture(TextureParameters a_parameters) :
-		ourParameters(a_parameters),
-		loadedData(TextureIndex::loadFile(a_parameters)){
-	}
-
-	LoadedTexture::~LoadedTexture() {
-		TextureIndex::releaseFile(ourParameters);
-	}
+	std::mutex LoadedTexture::lock;
+	std::map<MV::TextureParameters, std::unique_ptr<LoadedTextureData>> LoadedTexture::globalLookup;
 
 }

@@ -138,8 +138,6 @@ namespace MV {
 		}
 
 		Point<T> minPoint, maxPoint;
-
-		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix = "");
 	};
 
 	template <typename T>
@@ -434,67 +432,6 @@ namespace MV {
 	};
 
 	AxisAngles angle(PointPrecision a_angle);
-
-	template <class T>
-	chaiscript::ChaiScript& BoxAABB<T>::hook(chaiscript::ChaiScript &a_script, const std::string &a_postfix) {
-		a_script.add(chaiscript::user_type<BoxAABB<T>>(), "BoxAABB" + a_postfix);
-		a_script.add(chaiscript::constructor<BoxAABB<T>()>(), "BoxAABB" + a_postfix);
-		a_script.add(chaiscript::constructor<BoxAABB<T>(const Point<T> &)>(), "BoxAABB" + a_postfix);
-		a_script.add(chaiscript::constructor<BoxAABB<T>(const Size<T> &)>(), "BoxAABB" + a_postfix);
-		a_script.add(chaiscript::constructor<BoxAABB<T>(const Size<T> &, bool)>(), "BoxAABB" + a_postfix);
-		a_script.add(chaiscript::constructor<BoxAABB<T>(const Point<T> &, const Point<T> &)>(), "BoxAABB" + a_postfix);
-		a_script.add(chaiscript::constructor<BoxAABB<T>(const Point<T> &, const Size<T> &)>(), "BoxAABB" + a_postfix);
-
-		a_script.add(chaiscript::fun(&BoxAABB<T>::removeFromBounds), "removeFromBounds");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::set), "set");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::width), "width");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::height), "height");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::clear), "clear");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::empty), "empty");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::flatWidth), "flatWidth");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::flatHeight), "flatHeight");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::size), "size");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::percent), "percent");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::centerPoint), "centerPoint");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::topLeftPoint), "topLeftPoint");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::bottomLeftPoint), "bottomLeftPoint");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::bottomRightPoint), "bottomRightPoint");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::operator[]), "[]");
-		a_script.add(chaiscript::fun([](BoxAABB<T> &a_self, const Point<T> &a_amount) {
-			return a_self -= a_amount;
-		}), "-=");
-		a_script.add(chaiscript::fun([](BoxAABB<T> &a_self, const BoxAABB<T> &a_amount) {
-			return a_self -= a_amount;
-		}), "-=");
-		a_script.add(chaiscript::fun([](BoxAABB<T> &a_self, const Point<T> &a_amount) {
-			return a_self += a_amount;
-		}), "+=");
-		a_script.add(chaiscript::fun([](BoxAABB<T> &a_self, const BoxAABB<T> &a_amount) {
-			return a_self += a_amount;
-		}), "+=");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::operator*=), "*=");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::operator/=), "/=");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::operator==), "==");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::operator!=), "!=");
-
-		a_script.add(chaiscript::fun(&BoxAABB<T>::minPoint), "minPoint");
-		a_script.add(chaiscript::fun(&BoxAABB<T>::maxPoint), "maxPoint");
-
-		a_script.add(chaiscript::fun(static_cast<void(BoxAABB<T>::*)(const Point<T> &)>(&BoxAABB<T>::initialize)), "initialize");
-		a_script.add(chaiscript::fun(static_cast<void(BoxAABB<T>::*)(const Size<T> &)>(&BoxAABB<T>::initialize)), "initialize");
-		a_script.add(chaiscript::fun(static_cast<void(BoxAABB<T>::*)(const Size<T> &, bool)>(&BoxAABB<T>::initialize)), "initialize");
-		a_script.add(chaiscript::fun(static_cast<void(BoxAABB<T>::*)(const BoxAABB<T> &)>(&BoxAABB<T>::initialize)), "initialize");
-		a_script.add(chaiscript::fun(static_cast<void(BoxAABB<T>::*)(const Point<T> &, const Point<T> &)>(&BoxAABB<T>::initialize)), "initialize");
-		a_script.add(chaiscript::fun(static_cast<void(BoxAABB<T>::*)(const Point<T> &, const Size<T> &)>(&BoxAABB<T>::initialize)), "initialize");
-
-		a_script.add(chaiscript::fun(static_cast<BoxAABB<T>(*)(const BoxAABB<T> &, const Point<T> &)>(MV::operator+<T>)), "+");
-		a_script.add(chaiscript::fun(static_cast<BoxAABB<T>(*)(const BoxAABB<T> &, const Point<T> &)>(MV::operator-<T>)), "-");
-
-		a_script.add(chaiscript::fun(static_cast<BoxAABB<T>(*)(const BoxAABB<T> &, const Scale &)>(MV::operator*<T>)), "*");
-		a_script.add(chaiscript::fun(static_cast<BoxAABB<T>(*)(const BoxAABB<T> &, const Scale &)>(MV::operator/<T>)), "/");
-
-		return a_script;
-	}
 
 	template <typename T>
 	void makeBounds(const Point<T> &a_startPoint) {

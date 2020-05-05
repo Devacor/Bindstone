@@ -3,6 +3,8 @@
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/stringUtility.h"
 
+#include "MV/Utility/stopwatch.h"
+
 using namespace boost::filesystem;
 
 namespace MV {
@@ -145,20 +147,26 @@ namespace MV {
 	}
 
 	std::shared_ptr<TexturePack> SharedTextures::assemblePack(const std::string &a_packPath, Draw2D* a_renderer) {
-		auto newPack = pack(path(a_packPath).filename().string(), a_renderer);
+		Stopwatch timer;
+		timer.start();
 
 		std::vector<PackItem> packItems = getSortedPackItems(getImagesInFolder(a_packPath));
+		if (packItems.empty()) {
+			MV::error("Texture Pack Directory Is Empty: [", a_packPath, "]");
+			return {};
+		}
 
+		auto newPack = pack(path(a_packPath).filename().string(), a_renderer);
 		for (auto&& packItem : packItems) {
 			newPack->add(packItem.id, packItem.texture, packItem.sliceBounds);
 		}
-
 		auto combinedSavePath = a_packPath;
 		if(a_packPath.back() == '\\' || a_packPath.back() == '/'){
 			combinedSavePath.pop_back();
 		}
 		combinedSavePath += ".png";
 		newPack->consolidate(combinedSavePath, this);
+		MV::info("Texture Pack Saved [", a_packPath, "]: ", timer.stop());
 
 		return newPack;
 	}

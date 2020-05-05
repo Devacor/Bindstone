@@ -18,11 +18,6 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\..\..\External\VSProjects\External_Windows\External_Windows.vcxproj">
-      <Project>{cf1fc4ef-e11d-40a8-9107-a1148411b280}</Project>
-    </ProjectReference>
-  </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
     <ProjectGuid>{31BF8318-85D5-4E81-98D3-04BFD30F062B}</ProjectGuid>

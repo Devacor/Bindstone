@@ -18,6 +18,7 @@ class AnchorEditor;
 class EditableButton;
 class EditableClickable;
 class EditablePoints;
+class EditableParallax;
 
 class EditorPanel {
 protected:
@@ -93,15 +94,16 @@ public:
 	virtual void onSceneDrag(const MV::Point<int> &a_delta) override;
 	virtual void onSceneZoom() override;
 
-	MV::Scene::SafeComponent<MV::Scene::Button> CreateSpriteComponentButton(const MV::Scene::SafeComponent<MV::Scene::Sprite> & a_sprite);
-	MV::Scene::SafeComponent<MV::Scene::Button> CreateGridComponentButton(const MV::Scene::SafeComponent<MV::Scene::Grid> & a_grid);
-	MV::Scene::SafeComponent<MV::Scene::Button> CreateSpineComponentButton(const MV::Scene::SafeComponent<MV::Scene::Spine> & a_grid);
-	MV::Scene::SafeComponent<MV::Scene::Button> CreateEmitterComponentButton(const MV::Scene::SafeComponent<MV::Scene::Emitter> & a_emitter);
-	MV::Scene::SafeComponent<MV::Scene::Button> CreatePathMapComponentButton(const MV::Scene::SafeComponent<MV::Scene::PathMap> & a_pathMap);
-	MV::Scene::SafeComponent<MV::Scene::Button> CreateTextComponentButton(const MV::Scene::SafeComponent<MV::Scene::Text> & a_text);
-	MV::Scene::SafeComponent<MV::Scene::Button> CreateButtonComponentButton(const MV::Scene::SafeComponent<MV::Scene::Button> & a_button);
-	MV::Scene::SafeComponent<MV::Scene::Button> CreateClickableComponentButton(const MV::Scene::SafeComponent<MV::Scene::Clickable> & a_clickable);
-	MV::Scene::SafeComponent<MV::Scene::Button> CreateDrawableComponentButton(const MV::Scene::SafeComponent<MV::Scene::Drawable> & a_drawable);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateComponentButton(const MV::Scene::SafeComponent<MV::Scene::Sprite> & a_sprite);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateComponentButton(const MV::Scene::SafeComponent<MV::Scene::Grid> & a_grid);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateComponentButton(const MV::Scene::SafeComponent<MV::Scene::Spine> & a_grid);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateComponentButton(const MV::Scene::SafeComponent<MV::Scene::Emitter> & a_emitter);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateComponentButton(const MV::Scene::SafeComponent<MV::Scene::PathMap> & a_pathMap);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateComponentButton(const MV::Scene::SafeComponent<MV::Scene::Text> & a_text);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateComponentButton(const MV::Scene::SafeComponent<MV::Scene::Button> & a_button);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateComponentButton(const MV::Scene::SafeComponent<MV::Scene::Clickable> & a_clickable);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateComponentButton(const MV::Scene::SafeComponent<MV::Scene::Drawable> & a_drawable);
+	MV::Scene::SafeComponent<MV::Scene::Button> CreateComponentButton(const MV::Scene::SafeComponent<MV::Scene::Parallax>& a_drawable);
 private:
 	void updateComponentEditButtons(bool a_attached);
 
@@ -123,8 +125,8 @@ private:
 
 	std::shared_ptr<MV::Scene::Node> grid;
 
-	MV::Scene::Node::ComponentSharedSignalType attachSignal;
-	MV::Scene::Node::ComponentSharedSignalType detachSignal;
+	MV::Scene::Node::ComponentReceiverType attachSignal;
+	MV::Scene::Node::ComponentReceiverType detachSignal;
 
 	std::vector<std::shared_ptr<MV::Scene::Node>> componentEditButtons;
 };
@@ -346,6 +348,32 @@ private:
 	std::shared_ptr<MV::Scene::Text> height;
 };
 
+class SelectedParallaxEditorPanel : public EditorPanel {
+public:
+	SelectedParallaxEditorPanel(EditorControls& a_panel, std::shared_ptr<EditableParallax> a_controls, std::shared_ptr<MV::Scene::Button> a_associatedButton);
+
+	virtual void handleInput(SDL_Event& a_event) override;
+
+	virtual void onSceneDrag(const MV::Point<int>& a_delta) override;
+	virtual void onSceneZoom() override;
+
+protected:
+	std::shared_ptr<MV::Scene::Component> getEditingComponent() override;
+
+private:
+	std::shared_ptr<EditableParallax> controls;
+	std::shared_ptr<MV::Scene::Text> active;
+	std::shared_ptr<MV::Scene::Text> idle;
+	std::shared_ptr<MV::Scene::Text> disabled;
+
+	std::shared_ptr<MV::Scene::Text> zoomOffsetY;
+	std::shared_ptr<MV::Scene::Text> zoomOffsetX;
+	std::shared_ptr<MV::Scene::Text> offsetY;
+	std::shared_ptr<MV::Scene::Text> offsetX;
+	std::shared_ptr<MV::Scene::Text> ratioY;
+	std::shared_ptr<MV::Scene::Text> ratioX;
+};
+
 class DeselectedEditorPanel : public EditorPanel {
 public:
 	DeselectedEditorPanel(EditorControls &a_panel);
@@ -371,6 +399,7 @@ private:
 	void createButton(const MV::BoxAABB<int> &a_selected);
 	void createClickable(const MV::BoxAABB<int> &a_selected);
 	void createDrawable();
+	void createParallax();
 
 	SelectedNodeEditorPanel* editorPanel;
 };

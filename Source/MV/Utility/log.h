@@ -35,23 +35,23 @@ namespace MV {
 	private:
 		std::any value;
 	};
-	struct LogReciever {
+	struct LogReceiver {
 		virtual void log(Severity, const LogData &, const std::string &) = 0;
 	};
-	struct CoutLogReciever : public LogReciever {
+	struct CoutLogReceiver : public LogReceiver {
 		virtual void log(Severity severity, const LogData &, const std::string & message) override {
 			std::cout << message << std::endl;
 		}
 	};
-	struct CerrLogReciever : public LogReciever {
+	struct CerrLogReceiver : public LogReceiver {
 		virtual void log(Severity severity, const LogData &, const std::string & message) override {
 			std::cerr << message << std::endl;
 		}
 	};
 
 #ifdef __ANDROID__
-	struct AndroidLogReciever : public LogReciever {
-		AndroidLogReciever(int a_android_LogPriority, const std::string &a_prefix) : errorLevel(a_android_LogPriority), prefix(a_prefix) {}
+	struct AndroidLogReceiver : public LogReceiver {
+		AndroidLogReceiver(int a_android_LogPriority, const std::string &a_prefix) : errorLevel(a_android_LogPriority), prefix(a_prefix) {}
 		int errorLevel = 0;
 		const std::string prefix;
 		virtual void log(Severity severity, const LogData&, const std::string& message) override {
@@ -147,10 +147,10 @@ namespace MV {
 		//This override provides an easy to declare non-owning interface wrapper for the std::function interface.
 		//Mostly this is to avoid accidental copies and to allow for a descriptively named "log" function to be used.
 		//Caller owns the lifespan of the receiver, be aware not to dangle! :)
-		void listen(Severity level, LogReciever* receiver) {
+		void listen(Severity level, LogReceiver* receiver) {
 			listen(level, [receiver](Severity level, const LogData& data, const std::string &message) {receiver->log(level, data, message); });
 		}
-		void listen(LogReciever* receiver) {
+		void listen(LogReceiver* receiver) {
 			listen([receiver](Severity level, const LogData& data, const std::string &message) {receiver->log(level, data, message); });
 		}
 		void listen(Severity a_level, std::function<void(Severity, const LogData &, const std::string&)> a_receiver) {
@@ -186,15 +186,15 @@ namespace MV {
 		}
 	private:
 #ifdef __ANDROID__
-		AndroidLogReciever debugReceiver = AndroidLogReciever(ANDROID_LOG_DEBUG, "MV_DEBUG");
-		AndroidLogReciever infoReceiver = AndroidLogReciever(ANDROID_LOG_INFO, "MV_INFO");
-		AndroidLogReciever errorReceiver = AndroidLogReciever(ANDROID_LOG_ERROR, "MV_ERROR");
-		AndroidLogReciever warningReceiver = AndroidLogReciever(ANDROID_LOG_WARN, "MV_WARN");
+		AndroidLogReceiver debugReceiver = AndroidLogReceiver(ANDROID_LOG_DEBUG, "MV_DEBUG");
+		AndroidLogReceiver infoReceiver = AndroidLogReceiver(ANDROID_LOG_INFO, "MV_INFO");
+		AndroidLogReceiver errorReceiver = AndroidLogReceiver(ANDROID_LOG_ERROR, "MV_ERROR");
+		AndroidLogReceiver warningReceiver = AndroidLogReceiver(ANDROID_LOG_WARN, "MV_WARN");
 #else
-		CoutLogReciever debugReceiver;
-		CoutLogReciever infoReceiver;
-		CoutLogReciever warningReceiver;
-		CerrLogReciever errorReceiver;
+		CoutLogReceiver debugReceiver;
+		CoutLogReceiver infoReceiver;
+		CoutLogReceiver warningReceiver;
+		CerrLogReceiver errorReceiver;
 #endif
 		std::array<std::vector<std::function<void(Severity, const LogData &, const std::string&)>>, static_cast<int>(Severity::Count)> listeners;
 		Severity level;

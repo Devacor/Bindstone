@@ -60,7 +60,7 @@ public:
 protected:
 	virtual void removeHandlesImplementation() {}
 
-	MV::Scene::Node::BasicSharedSignalType nodeMoved;
+	MV::Scene::Node::BasicReceiverType nodeMoved;
 	MV::TapDevice *mouse;
 
 	MV::Size<> aspectSize;
@@ -95,7 +95,7 @@ private:
 
 	void hookupSignals(MV::Scene::SafeComponent<MV::Scene::Clickable> pointHandle, int pointIndex);
 
-	MV::Scene::Node::BasicSharedSignalType nodeMoved;
+	MV::Scene::Node::BasicReceiverType nodeMoved;
 
 	MV::TapDevice *mouse;
 
@@ -119,7 +119,7 @@ public:
 	MV::Scene::SafeComponent<MV::Scene::Grid> elementToEdit;
 private:
 
-	MV::Scene::Node::BasicSharedSignalType nodeMoved;
+	MV::Scene::Node::BasicReceiverType nodeMoved;
 
 	MV::TapDevice *mouse;
 
@@ -145,9 +145,35 @@ public:
 	MV::Scene::SafeComponent<MV::Scene::Spine> elementToEdit;
 private:
 
-	MV::Scene::Node::BasicSharedSignalType nodeMoved;
+	MV::Scene::Node::BasicReceiverType nodeMoved;
 
 	MV::TapDevice *mouse;
+
+	MV::Scene::SafeComponent<MV::Scene::Sprite> positionHandle;
+
+	std::shared_ptr<MV::Scene::Node> controlContainer;
+};
+
+class EditableParallax {
+public:
+	EditableParallax(MV::Scene::SafeComponent<MV::Scene::Parallax> a_elementToEdit, std::shared_ptr<MV::Scene::Node> a_rootContainer, MV::TapDevice* a_mouse);
+
+	~EditableParallax() {
+		controlContainer->removeFromParent();
+	}
+
+	void removeHandles();
+
+	void resetHandles();
+
+	std::function<void(EditableParallax*)> onChange;
+
+	MV::Scene::SafeComponent<MV::Scene::Parallax> elementToEdit;
+private:
+
+	MV::Scene::Node::BasicReceiverType nodeMoved;
+
+	MV::TapDevice* mouse;
 
 	MV::Scene::SafeComponent<MV::Scene::Sprite> positionHandle;
 

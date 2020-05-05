@@ -78,8 +78,6 @@ namespace MV {
 
 		void consolidate(const std::string &a_fileName, SharedTextures *a_shared);
 
-        static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
-
 		std::string identifier() const{
 			return id;
 		}

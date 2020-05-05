@@ -122,7 +122,7 @@ public:
 class BattleEffect : public MV::Scene::Component {
 public:
 	typedef void CallbackSignature(std::shared_ptr<BattleEffect>);
-	typedef MV::SignalRegister<CallbackSignature>::SharedRecieverType SharedRecieverType;
+	typedef MV::SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
 
 protected:
 	MV::Signal<CallbackSignature> onArriveSignal;
@@ -171,8 +171,8 @@ protected:
 	std::shared_ptr<Creature> sourceCreature;
 	std::shared_ptr<Creature> targetCreature;
 
-	ServerCreature::SharedRecieverType targetDeathWatcher;
-	ServerCreature::SharedRecieverType sourceDeathWatcher;
+	ServerCreature::SharedReceiverType targetDeathWatcher;
+	ServerCreature::SharedReceiverType sourceDeathWatcher;
 };
 
 

@@ -145,8 +145,8 @@ namespace MV {
 
 			int gridYIndexForCoordinate(const Point<> &a_coordinate, bool a_throwOnFail);
 
-			std::list<Node::BasicSharedSignalType> basicSignals;
-			std::list<Node::ParentInteractionSharedSignalType> parentInteractionSignals;
+			std::list<Node::BasicReceiverType> basicSignals;
+			std::list<Node::ParentInteractionReceiverType> parentInteractionSignals;
 
 			PointPrecision maximumWidth;
 			Size<> cellDimensions;

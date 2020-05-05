@@ -71,27 +71,6 @@ namespace MV {
 
 			float animationFramesPerSecond = 10.0f;
 
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-				a_script.add(chaiscript::user_type<ParticleChangeValues>(), "ParticleChangeValues");
-
-				a_script.add(chaiscript::fun(&ParticleChangeValues::rateOfChange), "rateOfChange");
-				a_script.add(chaiscript::fun(&ParticleChangeValues::directionalChangeTemplate), "directionalChange");
-				a_script.add(chaiscript::fun(&ParticleChangeValues::rotationalChange), "rotationalChange");
-
-				a_script.add(chaiscript::fun(&ParticleChangeValues::beginSpeed), "beginSpeed");
-				a_script.add(chaiscript::fun(&ParticleChangeValues::endSpeed), "endSpeed");
-
-				a_script.add(chaiscript::fun(&ParticleChangeValues::beginColor), "beginColor");
-				a_script.add(chaiscript::fun(&ParticleChangeValues::endColor), "endColor");
-
-				a_script.add(chaiscript::fun(&ParticleChangeValues::maxLifespan), "maxLifespan");
-
-				a_script.add(chaiscript::fun(&ParticleChangeValues::gravityMagnitude), "gravityMagnitude");
-				a_script.add(chaiscript::fun(&ParticleChangeValues::gravityDirection), "gravityDirection");
-
-				return a_script;
-			}
-
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
 				archive(CEREAL_NVP(rateOfChange), cereal::make_nvp("directionalChange", directionalChangeTemplate), CEREAL_NVP(rotationalChange),

@@ -178,47 +178,6 @@ namespace MV {
 			std::shared_ptr<Drawable> clearTextures();
 			std::shared_ptr<Drawable> clearTexture(size_t a_textureId = 0);
 
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-				a_script.add(chaiscript::user_type<Drawable>(), "Drawable");
-				a_script.add(chaiscript::base_class<Component, Drawable>());
-
-				a_script.add(chaiscript::fun(&Drawable::visible), "visible");
-				a_script.add(chaiscript::fun(&Drawable::hide), "hide");
-				a_script.add(chaiscript::fun(&Drawable::show), "show");
-
-				a_script.add(chaiscript::fun(&Drawable::point), "point");
-				a_script.add(chaiscript::fun(&Drawable::pointSize), "pointSize");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(size_t a_index, const DrawPoint& a_value)>(&Drawable::setPoint)), "setPoint");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(size_t a_index, const Color& a_value)>(&Drawable::setPoint)), "setPoint");
-				a_script.add(chaiscript::fun(&Drawable::getPoints), "getPoints");
-
-				a_script.add(chaiscript::fun(&Drawable::setPoints), "setPoints");
-
-				a_script.add(chaiscript::fun(&Drawable::pointIndices), "pointIndices");
-
-				a_script.add(chaiscript::fun(&Drawable::materialSettings), "materialSettings");
-
-				a_script.add(chaiscript::fun(static_cast<Color(Drawable::*)() const>(&Drawable::color)), "color");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(const Color &)>(&Drawable::color)), "color");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(const std::vector<Color> &)>(&Drawable::colors)), "colors");
-
-				a_script.add(chaiscript::fun([](Drawable &a_self, std::shared_ptr<TextureHandle> a_texture, size_t a_textureId) {return a_self.texture(a_texture, a_textureId); }), "texture");
-				a_script.add(chaiscript::fun([](Drawable &a_self, std::shared_ptr<TextureHandle> a_texture) {return a_self.texture(a_texture); }), "texture");
-				a_script.add(chaiscript::fun([](Drawable &a_self, size_t a_textureId) {return a_self.texture(a_textureId); }), "texture");
-				a_script.add(chaiscript::fun([](Drawable &a_self) {return a_self.texture(); }), "texture");
-				a_script.add(chaiscript::fun([](Drawable &a_self, size_t a_textureId) {return a_self.clearTexture(a_textureId); }), "clearTexture");
-				a_script.add(chaiscript::fun([](Drawable &a_self) {return a_self.clearTexture(); }), "clearTexture");
-				a_script.add(chaiscript::fun([](Drawable &a_self) {return a_self.clearTextures(); }), "clearTextures");
-
-				a_script.add(chaiscript::fun(static_cast<std::string(Drawable::*)() const>(&Drawable::shader)), "shader");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Drawable>(Drawable::*)(const std::string &)>(&Drawable::shader)), "shader");
-
-				a_script.add(chaiscript::type_conversion<SafeComponent<Drawable>, std::shared_ptr<Drawable>>([](const SafeComponent<Drawable> &a_item) { return a_item.self(); }));
-				a_script.add(chaiscript::type_conversion<SafeComponent<Drawable>, std::shared_ptr<Component>>([](const SafeComponent<Drawable> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
-
-				return a_script;
-			}
-
 			//encapsulated to enforce bounds refreshing.
 			const DrawPoint &point(size_t a_index) const {
 				return points[a_index];

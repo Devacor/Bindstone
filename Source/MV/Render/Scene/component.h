@@ -219,30 +219,6 @@ namespace MV {
 				return allowSerialize;
 			}
 
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-				a_script.add(chaiscript::user_type<Component>(), "Component");
-
-				a_script.add(chaiscript::fun(&Component::task), "task");
-
-				a_script.add(chaiscript::fun(&Component::detach), "detach");
-				a_script.add(chaiscript::fun(&Component::clone), "clone");
-				a_script.add(chaiscript::fun(&Component::owner), "owner");
-
-				a_script.add(chaiscript::fun(static_cast<std::string(Component::*)() const>(&Component::id)), "id");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Component>(Component::*)(const std::string &)>(&Component::id)), "id");
-
-				a_script.add(chaiscript::fun(static_cast<bool(Component::*)() const>(&Component::serializable)), "serializable");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Component>(Component::*)(bool)>(&Component::serializable)), "serializable");
-
-				a_script.add(chaiscript::fun(static_cast<BoxAABB<>(Component::*)()>(&Component::bounds)), "bounds");
-				a_script.add(chaiscript::fun(static_cast<BoxAABB<int>(Component::*)()>(&Component::screenBounds)), "screenBounds");
-				a_script.add(chaiscript::fun(static_cast<BoxAABB<>(Component::*)()>(&Component::worldBounds)), "worldBounds");
-
-				a_script.add(chaiscript::type_conversion<SafeComponent<Component>, std::shared_ptr<Component>>([](const SafeComponent<Component> &a_item) { return a_item.self(); }));
-
-				return a_script;
-			}
-
 			//owner death *can* occur before node death in cases where a button deletes itself.
 			//In known cases where callback order can cause this to occur it's best we have an explicit query.
 			bool ownerIsAlive() const;
@@ -270,7 +246,7 @@ namespace MV {
 			virtual void boundsImplementation(const BoxAABB<> &) {
 				//requires implementation in child class
 			}
-
+			
 			virtual void initialize() {} //called after creation by node
 
 			Component(const Component& a_rhs) = delete;

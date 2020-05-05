@@ -1,8 +1,8 @@
 #ifndef _MV_SPINE_MV_
 #define _MV_SPINE_MV_
 
-#include "MV/Render/Scene/node.h"
-#include "MV/Render/Scene/drawable.h"
+#include "node.h"
+#include "drawable.h"
 #include "spine/AnimationState.h"
 
 struct spSlot;
@@ -25,8 +25,6 @@ namespace MV {
 				intValue(a_intValue),
 				floatValue(a_floatValue){
 			}
-
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 
 			std::string name;
 			std::string stringValue;
@@ -51,9 +49,9 @@ namespace MV {
 			SignalRegister<void(AnimationTrack &, int)> onComplete;
 			SignalRegister<void(AnimationTrack &, const AnimationEventData &)> onEvent;
 
-			typedef Signal<void(AnimationTrack &)>::SharedRecieverType BasicSignal;
-			typedef Signal<void(AnimationTrack &, int)>::SharedRecieverType LoopSignal;
-			typedef Signal<void(AnimationTrack &, const AnimationEventData &)>::SharedRecieverType EventSignal;
+			typedef Signal<void(AnimationTrack &)>::SharedReceiverType BasicSignal;
+			typedef Signal<void(AnimationTrack &, int)>::SharedReceiverType LoopSignal;
+			typedef Signal<void(AnimationTrack &, const AnimationEventData &)>::SharedReceiverType EventSignal;
 
 			std::map<std::string, BasicSignal> basicSignals;
 			std::map<std::string, LoopSignal> loopSignals;
@@ -91,8 +89,6 @@ namespace MV {
 
 			AnimationTrack& timeScale(double a_newTime);
 			double timeScale() const;
-
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 		private:
 			//called from spineTrackEntryCallback
 			void onAnimationStateEvent(spAnimationState* a_state, spEventType a_type, spTrackEntry* a_entry, spEvent* a_event);
@@ -129,16 +125,6 @@ namespace MV {
 				std::string skeletonFile;
 				std::string atlasFile;
 				float loadScale;
-
-				static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-					a_script.add(chaiscript::user_type<FileBundle>(), "FileBundle");
-
-					a_script.add(chaiscript::fun(&FileBundle::skeletonFile), "skeletonFile");
-					a_script.add(chaiscript::fun(&FileBundle::atlasFile), "atlasFile");
-					a_script.add(chaiscript::fun(&FileBundle::loadScale), "loadScale");
-
-					return a_script;
-				}
 			private:
 				friend cereal::access;
 				template <class Archive>
@@ -182,8 +168,6 @@ namespace MV {
 			FileBundle bundle() const {
 				return fileBundle;
 			}
-
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 		protected:
 			virtual void initialize() override;
 

@@ -3,13 +3,13 @@
 
 #include <memory>
 #include <functional>
+#include "MV/Script/script.h"
 #include "MV/Utility/generalUtility.h"
-
-namespace chaiscript { class ChaiScript; }
 
 template <typename DataType>
 struct StandardScriptMethods {
 	friend DataType;
+	friend MV::Script;
 
 	void spawn(std::shared_ptr<DataType> a_object) const {
 		if (scriptSpawn) { scriptSpawn(a_object); }
@@ -23,17 +23,7 @@ struct StandardScriptMethods {
 		if (scriptDeath) { scriptDeath(a_object); }
 	}
 
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, const std::string &a_name) {
-		a_script.add(chaiscript::user_type<StandardScriptMethods<DataType>>(), a_name + "ScriptMethods");
-
-		a_script.add(chaiscript::fun(&StandardScriptMethods<DataType>::scriptSpawn), "spawn");
-		a_script.add(chaiscript::fun(&StandardScriptMethods<DataType>::scriptUpdate), "update");
-		a_script.add(chaiscript::fun(&StandardScriptMethods<DataType>::scriptDeath), "death");
-
-		return a_script;
-	}
-
-	StandardScriptMethods<DataType>& loadScript(chaiscript::ChaiScript &a_script, const std::string &a_assetType, const std::string &a_id, bool a_isServer) {
+	StandardScriptMethods<DataType>& loadScript(MV::Script &a_script, const std::string &a_assetType, const std::string &a_id, bool a_isServer) {
 		std::string filePath = a_assetType + "/" + a_id + (a_isServer ? "/main.script" : "/mainClient.script");
 #ifdef WIN32
 //#define MV_SCRIPT_HOTLOAD
@@ -53,10 +43,7 @@ struct StandardScriptMethods {
 				auto localVariables = std::map<std::string, chaiscript::Boxed_Value>{
 					{ "self", chaiscript::Boxed_Value(this) }
 				};
-				auto resetLocals = a_script.get_locals();
-				a_script.set_locals(localVariables);
-				SCOPE_EXIT{ a_script.set_locals(resetLocals); };
-				a_script.eval(scriptContents);
+				a_script.eval(filePath, scriptContents, localVariables);
 			} else {
 				MV::error("Failed to load script for ", a_assetType, ": ", a_id);
 			}

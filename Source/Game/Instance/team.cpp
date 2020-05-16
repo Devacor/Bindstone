@@ -18,40 +18,6 @@ void Team::initialize() {
 	}
 }
 
-chaiscript::ChaiScript& Team::hook(chaiscript::ChaiScript &a_script) {
-	a_script.add(chaiscript::user_type<Team>(), "Team");
-
-	a_script.add(chaiscript::fun([](Team &a_self) {
-		return &a_self.game;
-	}), "game");
-
-	a_script.add(chaiscript::fun([](Team &a_self) {
-		return a_self.enemyWellPosition;
-	}), "enemyWell");
-
-	a_script.add(chaiscript::fun([](Team &a_self) {
-		return a_self.ourWellPosition;
-	}), "ourWell");
-
-	a_script.add(chaiscript::fun([](Team &a_self) {
-		return a_self.health;
-	}), "health");
-
-	a_script.add(chaiscript::fun([](Team &a_self) {
-		return a_self.game.buildings;
-	}), "buildings");
-
-	a_script.add(chaiscript::fun([](Team &a_self) {
-		return a_self.game.creatures;
-	}), "creatures");
-
-	a_script.add(chaiscript::fun([](Team &a_self, const MV::Point<> &a_location, float a_radius) {
-		return a_self.creaturesInRange(a_location, a_radius);
-	}), "creaturesInRange");
-
-	return a_script;
-}
-
 std::vector<std::shared_ptr<ServerCreature>> Team::creaturesInRange(const MV::Point<> &a_location, float a_radius) {
 	std::vector<std::shared_ptr<ServerCreature>> result;
 	std::unordered_map<ServerCreature*, double> distances;

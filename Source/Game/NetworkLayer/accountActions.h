@@ -7,8 +7,6 @@
 #include "pqxx/pqxx"
 #endif
 
-#include "MV/Utility/chaiscriptUtility.h"
-
 class CreatePlayer : public NetworkAction {
 public:
 	CreatePlayer() {}
@@ -34,21 +32,8 @@ public:
 		archive(CEREAL_NVP(handle), CEREAL_NVP(email), CEREAL_NVP(password), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
-	static void hook(chaiscript::ChaiScript& a_script) {
-		a_script.add(chaiscript::user_type<CreatePlayer>(), "CreatePlayer");
-		a_script.add(chaiscript::base_class<NetworkAction, CreatePlayer>());
-		a_script.add(chaiscript::constructor<CreatePlayer(const std::string &a_email, const std::string &a_identifier, const std::string &a_password)>(), "CreatePlayer");
-	}
-
 	static std::string makeSaveString();
 	static std::string makeServerSaveString();
-
-private:
-	void sendValidationEmail(LobbyUserConnectionState *a_connection, const std::string &a_passSalt);
-
-	bool validateHandle(const std::string &a_handle) {
-		return a_handle.size() > 3 && MV::simpleFilter(a_handle) == a_handle;
-	}
 
 	std::string handle;
 	std::string email;
@@ -56,6 +41,13 @@ private:
 
 	static const int DEFAULT_HARD_CURRENCY = 150;
 	static const int DEFAULT_SOFT_CURRENCY = 500;
+
+private:
+	void sendValidationEmail(LobbyUserConnectionState *a_connection, const std::string &a_passSalt);
+
+	bool validateHandle(const std::string &a_handle) {
+		return a_handle.size() > 3 && MV::simpleFilter(a_handle) == a_handle;
+	}
 };
 
 class LoginRequest : public NetworkAction {
@@ -83,15 +75,6 @@ public:
 		archive(CEREAL_NVP(identifier), CEREAL_NVP(password), CEREAL_NVP(saveHash), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
-	static void hook(chaiscript::ChaiScript& a_script) {
-		a_script.add(chaiscript::user_type<LoginRequest>(), "LoginRequest");
-		a_script.add(chaiscript::base_class<NetworkAction, LoginRequest>());
-		a_script.add(chaiscript::constructor<LoginRequest(const std::string &a_identifier, const std::string &a_password)>(), "LoginRequest");
-		a_script.add(chaiscript::constructor<LoginRequest(const std::string &a_identifier, const std::string &a_password, const std::string &a_saveHash)>(), "LoginRequest");
-	}
-
-private:
-
 	std::string identifier;
 	std::string password;
 	std::string saveHash;
@@ -113,14 +96,6 @@ public:
 			cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
-	static void hook(chaiscript::ChaiScript& a_script) {
-		a_script.add(chaiscript::user_type<FindMatchRequest>(), "FindMatchRequest");
-		a_script.add(chaiscript::base_class<NetworkAction, FindMatchRequest>());
-		a_script.add(chaiscript::constructor<FindMatchRequest(const std::string &a_type)>(), "FindMatchRequest");
-		a_script.add(chaiscript::fun(&FindMatchRequest::type), "type");
-	}
-
-private:
 	std::string type;
 };
 

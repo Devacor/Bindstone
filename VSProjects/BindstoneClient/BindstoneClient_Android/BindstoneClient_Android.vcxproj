@@ -56,6 +56,9 @@
     <ProjectReference Include="..\..\SDL2_ttf\SDL2_ttf_Android.vcxproj">
       <Project>{8572235c-b335-40dd-ba5f-9954bedc4bfc}</Project>
     </ProjectReference>
+    <ProjectReference Include="..\BindstoneCommon_Android\BindstoneCommon_Android.vcxproj">
+      <Project>{56c44de2-76fd-49ac-a41a-c1145e7737d9}</Project>
+    </ProjectReference>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{b7f3a6f1-0359-4427-925d-4a6d1c979b61}</ProjectGuid>
@@ -125,9 +128,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" />
-  <ImportGroup Label="Shared">
-    <Import Project="..\Bindstone_Common\Bindstone_Common.vcxitems" Label="Shared" />
-  </ImportGroup>
+  <ImportGroup Label="Shared" />
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
@@ -254,7 +255,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;c++_shared;c++abi;</LibraryDependencies>
+      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;external;mutedvision;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
@@ -271,7 +272,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;c++_shared;c++abi;</LibraryDependencies>
+      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;external;mutedvision;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
@@ -288,7 +289,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;c++_shared;c++abi;</LibraryDependencies>
+      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;external;mutedvision;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
@@ -305,7 +306,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
+      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;external;mutedvision;unwind;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a -Wl,--exclude-libs,libexternal.a -Wl,--exclude-libs,libmutedvision.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
@@ -322,7 +323,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;c++_shared;c++abi;</LibraryDependencies>
+      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;external;mutedvision;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
@@ -339,7 +340,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;c++_shared;c++abi;</LibraryDependencies>
+      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;external;mutedvision;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
@@ -356,7 +357,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;c++_shared;c++abi;</LibraryDependencies>
+      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;external;mutedvision;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>
@@ -373,7 +374,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName)</AdditionalLibraryDirectories>
-      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;unwind;c++_shared;c++abi;</LibraryDependencies>
+      <LibraryDependencies>boost_system;boost_filesystem;GLESv1_CM;GLESv2;android;log;OpenSLES;m;z;external;mutedvision;unwind;c++_shared;c++abi;</LibraryDependencies>
       <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-Wl,--exclude-libs,libgcc.a -Wl,--exclude-libs,libgcc_real.a -Wl,--exclude-libs,libunwind.a %(AdditionalOptions)</AdditionalOptions>
     </Link>

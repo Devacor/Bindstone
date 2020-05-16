@@ -105,7 +105,7 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\wolfssl-4.3.0;$(SolutionDir)External\wolfssl-4.3.0\wolfssl;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\wolfssl-4.3.0\IDE\WIN</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;BINDSTONE_SERVER;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;BOOST_ASIO_USE_WOLFSSL;ASIO_USE_WOLFSSL;OPENSSL_NO_SSL3;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;BINDSTONE_SERVER;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;BOOST_ASIO_USE_WOLFSSL;ASIO_USE_WOLFSSL;OPENSSL_NO_SSL3;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT;NOMINMAX</PreprocessorDefinitions>
       <AdditionalOptions>/bigobj /Bt+ -D_CRT_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <BufferSecurityCheck>false</BufferSecurityCheck>
@@ -126,7 +126,7 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\wolfssl-4.3.0;$(SolutionDir)External\wolfssl-4.3.0\wolfssl;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\wolfssl-4.3.0\IDE\WIN</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;BINDSTONE_SERVER;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;BOOST_ASIO_USE_WOLFSSL;ASIO_USE_WOLFSSL;OPENSSL_NO_SSL3;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;BINDSTONE_SERVER;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;BOOST_ASIO_USE_WOLFSSL;ASIO_USE_WOLFSSL;OPENSSL_NO_SSL3;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT;NOMINMAX</PreprocessorDefinitions>
       <AdditionalOptions>/bigobj /Bt+ -D_CRT_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <BufferSecurityCheck>false</BufferSecurityCheck>
@@ -149,7 +149,7 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\wolfssl-4.3.0;$(SolutionDir)External\wolfssl-4.3.0\wolfssl;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\wolfssl-4.3.0\IDE\WIN</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;BINDSTONE_SERVER;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;BOOST_ASIO_USE_WOLFSSL;ASIO_USE_WOLFSSL;OPENSSL_NO_SSL3;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;BINDSTONE_SERVER;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;BOOST_ASIO_USE_WOLFSSL;ASIO_USE_WOLFSSL;OPENSSL_NO_SSL3;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT;NOMINMAX</PreprocessorDefinitions>
       <AdditionalOptions>/bigobj /Bt+ -D_CRT_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <BufferSecurityCheck>false</BufferSecurityCheck>
@@ -173,7 +173,7 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\wolfssl-4.3.0;$(SolutionDir)External\wolfssl-4.3.0\wolfssl;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\wolfssl-4.3.0\IDE\WIN</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;BINDSTONE_SERVER;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;BOOST_ASIO_USE_WOLFSSL;ASIO_USE_WOLFSSL;OPENSSL_NO_SSL3;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;BINDSTONE_SERVER;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;BOOST_ASIO_USE_WOLFSSL;ASIO_USE_WOLFSSL;OPENSSL_NO_SSL3;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT;NOMINMAX</PreprocessorDefinitions>
       <AdditionalOptions>/bigobj /Bt+ -D_CRT_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <BufferSecurityCheck>false</BufferSecurityCheck>
@@ -205,6 +205,34 @@
   <ItemGroup>
     <ClCompile Include="..\..\External\gl3w\src\gl3w.c" />
     <ClCompile Include="..\..\Source\SolutionSpecific\BindstoneGameServer\gameServerMain.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\BindstoneClient\Bindstone_Common\..\..\..\Source\Game\gameHooks.i">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\BindstoneClient\Bindstone_Common\..\..\..\Source\Game\gameHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\BindstoneClient\Bindstone_Common\..\..\..\Source\Game\Interface\interfaceHooks.i">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\BindstoneClient\Bindstone_Common\..\..\..\Source\Game\Interface\interfaceHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\BindstoneClient\Bindstone_Common\..\..\..\Source\Game\managers.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\BindstoneClient\Bindstone_Common\..\..\..\Source\Game\standardHooks.i">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\BindstoneClient\Bindstone_Common\..\..\..\Source\Game\standardHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="C:\git\Bindstone\VSProjects\BindstoneClient\Bindstone_Common\..\..\..\Source\Game\NetworkLayer\gameNetworkHooks.i">
+      <FileType>Document</FileType>
+    </None>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

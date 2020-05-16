@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -104,7 +104,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions);NOMINMAX</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <AdditionalIncludeDirectories>$(ProjectDir);$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\wolfssl-4.3.0;$(SolutionDir)External\wolfssl-4.3.0\wolfssl;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\wolfssl-4.3.0\IDE\WIN</AdditionalIncludeDirectories>
@@ -126,7 +126,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions);NOMINMAX</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <AdditionalIncludeDirectories>$(ProjectDir);$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\wolfssl-4.3.0;$(SolutionDir)External\wolfssl-4.3.0\wolfssl;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\wolfssl-4.3.0\IDE\WIN</AdditionalIncludeDirectories>
@@ -149,7 +149,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions);NOMINMAX</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <AdditionalIncludeDirectories>$(ProjectDir);$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\wolfssl-4.3.0;$(SolutionDir)External\wolfssl-4.3.0\wolfssl;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\wolfssl-4.3.0\IDE\WIN</AdditionalIncludeDirectories>
@@ -172,7 +172,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;OPENSSL_NO_SSL3;OPENSSL_NO_SSL2;ASIO_USE_WOLFSSL;BOOST_ASIO_USE_WOLFSSL;OPENSSL_ALL;WOLFSSL_LIB;WOLFSSL_USER_SETTINGS;CYASSL_USER_SETTINGS;TFM_TIMING_RESISTANT;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;%(PreprocessorDefinitions);NOMINMAX</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <AdditionalIncludeDirectories>$(ProjectDir);$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\wolfssl-4.3.0;$(SolutionDir)External\wolfssl-4.3.0\wolfssl;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\wolfssl-4.3.0\IDE\WIN</AdditionalIncludeDirectories>
@@ -192,4 +192,65 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <ItemGroup>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Network\networkHooks.i">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Network\networkHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\Scene\buttonHook.inline">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\Scene\buttonHook.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\Scene\sceenHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\Scene\sceneHooks.cpp">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\Scene\sceneHooks.i">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\Scene\sceneHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Script\chaiscriptHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Script\engineHooks.i">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Script\engineHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Script\script.i">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Script\script.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Utility\utilityHooks.i">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Utility\utilityHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\..\Source\MV\ArtificialIntelligence\artificialIntelligenceHooks.ixx">
+      <FileType>Document</FileType>
+    </None>
+    <None Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\ArtificialIntelligence\artificialIntelligenceHooks.i">
+      <FileType>Document</FileType>
+    </None>
+    <None Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\renderHooks.i">
+      <FileType>Document</FileType>
+    </None>
+    <None Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\renderHooks.ixx">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
 </Project>

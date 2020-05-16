@@ -6,17 +6,6 @@
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"
 
-chaiscript::ChaiScript& BuildTree::hook(chaiscript::ChaiScript& a_script) {
-	a_script.add(chaiscript::user_type<BuildTree>(), "BuildTree");
-
-	a_script.add(chaiscript::fun(&BuildTree::id), "id");
-	a_script.add(chaiscript::fun(&BuildTree::cost), "cost");
-	a_script.add(chaiscript::fun(&BuildTree::income), "income");
-	a_script.add(chaiscript::fun(&BuildTree::upgrades), "upgrades");
-
-	return a_script;
-}
-
 Building::Building(const std::weak_ptr<MV::Scene::Node> &a_owner, int a_slot, int a_loadoutSlot, const std::shared_ptr<InGamePlayer> &a_player, GameInstance& a_instance) :
 	Component(a_owner),
 	buildingData(a_instance.data().buildings().data(a_player->loadout.buildings[a_loadoutSlot])),
@@ -84,50 +73,6 @@ const BuildTree* Building::current() const {
 		currentBuildTree = currentBuildTree->upgrades[index].get();
 	}
 	return currentBuildTree;
-}
-
-chaiscript::ChaiScript& Building::hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance) {
-	BuildTree::hook(a_script);
-
-	StandardScriptMethods<Building>::hook(a_script, "Building");
-
-	a_script.add(chaiscript::user_type<Building>(), "Building");
-	a_script.add(chaiscript::base_class<Component, Building>());
-
-	a_script.add(chaiscript::fun(&Building::current), "current");
-	a_script.add(chaiscript::fun(&Building::upgrade), "upgrade");
-
-	a_script.add(chaiscript::fun(&Building::buildingData), "data");
-	a_script.add(chaiscript::fun(&Building::skin), "skin");
-	a_script.add(chaiscript::fun(&Building::slot), "slot");
-	a_script.add(chaiscript::fun(&Building::owningPlayer), "player");
-
-	a_script.add(chaiscript::fun(&Building::assetPath), "assetPath");
-
-	a_script.add(chaiscript::fun([](Building& a_self, const std::string& a_key) {
-		return a_self.localVariables[a_key];
-	}), "[]");
-
-	a_script.add(chaiscript::fun([&](Building& a_self) -> decltype(auto) {
-		return a_self.state->modify()->variables;
-	}), "setNetValue");
-
-	a_script.add(chaiscript::fun([&](Building& a_self) -> decltype(auto) {
-		return a_self.state->self()->variables;
-	}), "getNetValue");
-
-	a_script.add(chaiscript::fun([&](Building& a_self, const std::string& a_key) {
-		gameInstance.spawnCreature(a_self.slotIndex(), a_key);
-	}), "spawn");
-
-	a_script.add(chaiscript::fun([&](Building& a_self) {
-		return a_self.state->id();
-	}), "networkId");
-
-	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Building>, std::shared_ptr<Building>>([](const MV::Scene::SafeComponent<Building> &a_item) { return a_item.self(); }));
-	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<Building>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<Building> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
-
-	return a_script;
 }
 
 void Building::initializeBuildingButton(const std::shared_ptr<MV::Scene::Node> &a_newNode) {

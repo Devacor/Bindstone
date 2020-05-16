@@ -10,22 +10,26 @@
 #include "MV/Audio/package.h"
 #include "MV/Utility/services.hpp"
 
+struct DefaultLogin {
+	std::string id;
+	std::string password;
+};
+
 struct StandardMessages {
 	MV::Signal<void()> lobbyConnected;
 	MV::Signal<void(const std::string &)> lobbyDisconnect;
 	MV::Signal<void(bool, const std::string &)> lobbyAuthenticated;
-
-	void hook(chaiscript::ChaiScript& a_script);
 };
 
 struct Managers {
-	Managers() : textLibrary(renderer)/*, audio(*MV::AudioPlayer::instance())*/ {
+	Managers(const DefaultLogin &a_login) : defaultLogin(a_login), textLibrary(renderer)/*, audio(*MV::AudioPlayer::instance())*/ {
 		services.connect(&timer);
 		services.connect(&pool);
 		services.connect(&renderer);
 		services.connect(&messages);
 		services.connect(&textLibrary);
 		services.connect(&textures);
+		services.connect(&defaultLogin);
 		//services.connect(&audio);
 	}
 
@@ -35,11 +39,10 @@ struct Managers {
 	StandardMessages messages;
 	MV::TextLibrary textLibrary;
 	MV::SharedTextures textures;
+	DefaultLogin defaultLogin;
 	//MV::AudioPlayer& audio;
 
 	MV::Services services;
 };
-
-void bindstoneScriptHook(chaiscript::ChaiScript &a_script, MV::TapDevice &a_tapDevice, MV::ThreadPool &a_pool);
 
 #endif

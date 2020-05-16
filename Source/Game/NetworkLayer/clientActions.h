@@ -41,13 +41,6 @@ public:
 		archive(CEREAL_NVP(message), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
-	static void hook(chaiscript::ChaiScript& a_script) {
-		a_script.add(chaiscript::user_type<MessageAction>(), "MessageResponse");
-		a_script.add(chaiscript::base_class<NetworkAction, MessageAction>());
-
-		a_script.add(chaiscript::fun(&MessageAction::message), "message");
-	}
-private:
 	std::string message;
 };
 
@@ -63,15 +56,6 @@ public:
 		archive(CEREAL_NVP(message), CEREAL_NVP(player), CEREAL_NVP(success), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
-	//Response actually happens in chaiscript anyway, so we just expose these in script and move on.
-	static void hook(chaiscript::ChaiScript& a_script) {
-		a_script.add(chaiscript::user_type<LoginResponse>(), "LoginResponse");
-		a_script.add(chaiscript::base_class<NetworkAction, LoginResponse>());
-
-		a_script.add(chaiscript::fun(&LoginResponse::message), "message");
-		a_script.add(chaiscript::fun(&LoginResponse::success), "success");
-	}
-
 	//useful to do in C++.
 	std::shared_ptr<LocalPlayer> loadedPlayer();
 
@@ -80,7 +64,6 @@ public:
 	std::string message;
 	bool success = false;
 
-private:
 	std::shared_ptr<LocalPlayer> playerObject;
 	std::string player;
 };
@@ -97,13 +80,6 @@ public:
 		archive(CEREAL_NVP(message), cereal::make_nvp("NetworkAction", cereal::base_class<NetworkAction>(this)));
 	}
 
-	static void hook(chaiscript::ChaiScript& a_script) {
-		a_script.add(chaiscript::user_type<IllegalResponse>(), "IllegalResponse");
-		a_script.add(chaiscript::base_class<NetworkAction, IllegalResponse>());
-
-		a_script.add(chaiscript::fun(&IllegalResponse::message), "message");
-	}
-private:
 	std::string message;
 };
 

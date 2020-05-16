@@ -1,11 +1,3 @@
-#include "MV/Utility/generalUtility.h"
-#include "MV/Utility/scopeGuard.hpp"
-#include "chaiscript/chaiscript.hpp"
-#include "chaiscript/utility/utility.hpp"
-
-#include "MV/Utility/chaiscriptStdLib.h"
-#include "chaiscript/chaiscript_stdlib.hpp"
-
 #include "boxaabb.h"
 #include "sharedTextures.h"
 
@@ -69,7 +61,12 @@ namespace MV {
 		a_script.add(chaiscript::fun(static_cast<BoxAABB<T>(*)(const BoxAABB<T> &, const Scale &)>(MV::operator/<T>)), "/");
 	}
 
-	void hookTexturePoint(chaiscript::ChaiScript &a_script) {
+	Script::Registrar<BoxAABB<MV::PointPrecision>> _hookBoxAABB([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
+		hookBoxAABB<MV::PointPrecision>(a_script, "");
+		hookBoxAABB<int>(a_script, "i");
+	});
+
+	Script::Registrar<TexturePoint> _hookTexturePoint([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
 		a_script.add(chaiscript::user_type<TexturePoint>(), "TexturePoint");
 		a_script.add(chaiscript::constructor<TexturePoint()>(), "TexturePoint");
 		a_script.add(chaiscript::constructor<TexturePoint(PointPrecision, PointPrecision)>(), "TexturePoint");
@@ -77,9 +74,9 @@ namespace MV {
 		a_script.add(chaiscript::fun(&TexturePoint::textureY), "textureY");
 		a_script.add(chaiscript::fun(&TexturePoint::operator==), "==");
 		a_script.add(chaiscript::fun(&TexturePoint::operator!=), "!=");
-	}
+	});
 
-	void hookColor(chaiscript::ChaiScript &a_script) {
+	Script::Registrar<Color> _hookColor([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
 		a_script.add(chaiscript::user_type<Color::HSV>(), "HSV");
 		a_script.add(chaiscript::constructor<Color::HSV(float, float, float, float)>(), "HSV");
 		a_script.add(chaiscript::constructor<Color::HSV(float, float, float)>(), "HSV");
@@ -137,7 +134,7 @@ namespace MV {
 
 		a_script.add(chaiscript::fun(static_cast<Color&(Color::*)(int, int, int, int)>(&Color::set)), "set");
 		a_script.add(chaiscript::fun([](Color & a_self, int a_R, int a_G, int a_B) {return a_self.set(a_R, a_G, a_B); }), "set");
-	}
+	});
 
 	template <class T>
 	void hookPoint(chaiscript::ChaiScript &a_script, const std::string &a_postfix) {
@@ -204,6 +201,11 @@ namespace MV {
 		a_script.add(chaiscript::fun([](const Point<T> &a_point) {return to_string(a_point); }), "toString");
 	}
 
+	Script::Registrar<Point<MV::PointPrecision>> _hookPoint([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
+		hookPoint<MV::PointPrecision>(a_script, "");
+		hookPoint<int>(a_script, "i");
+	});
+
 	template <class T>
 	void hookSize(chaiscript::ChaiScript &a_script, const std::string &a_postfix){
 		a_script.add(chaiscript::user_type<Size<T>>(), "Size" + a_postfix);
@@ -260,11 +262,14 @@ namespace MV {
 
 		a_script.add(chaiscript::fun([](const Size<T> &a_size) {return to_string(a_size); }), "to_string");
 		a_script.add(chaiscript::fun([](const Size<T> &a_size) {return to_string(a_size); }), "toString");
-
-		return a_script;
 	}
 
-	void hookSharedTextures(chaiscript::ChaiScript& a_script) {
+	Script::Registrar<Size<MV::PointPrecision>> _hookSize([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
+		hookSize<MV::PointPrecision>(a_script, "");
+		hookSize<int>(a_script, "i");
+	});
+
+	Script::Registrar<SharedTextures> _hookSharedTextures([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
 		a_script.add(chaiscript::user_type<SharedTextures>(), "SharedTextures");
 
 		a_script.add(chaiscript::fun(&SharedTextures::assemblePacks), "assemblePacks");
@@ -280,9 +285,9 @@ namespace MV {
 
 		a_script.add(chaiscript::fun([](SharedTextures& a_self, const std::string& a_name, Draw2D* a_renderer) {return a_self.pack(a_name, a_renderer); }), "pack");
 		a_script.add(chaiscript::fun([](SharedTextures& a_self, const std::string& a_name) {return a_self.pack(a_name); }), "pack");
-	}
+	});
 
-	void hookTexturePack(chaiscript::ChaiScript& a_script) {
+	Script::Registrar<TexturePack> _hookTexturePack([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
 		a_script.add(chaiscript::user_type<TexturePack>(), "TexturePack");
 
 		a_script.add(chaiscript::fun(&TexturePack::print), "print");
@@ -301,9 +306,9 @@ namespace MV {
 
 		a_script.add(chaiscript::fun([](TexturePack& a_self, size_t a_index) {return a_self.handle(a_index); }), "handle");
 		a_script.add(chaiscript::fun([](TexturePack& a_self, const std::string& a_id) {return a_self.handle(a_id); }), "handle");
-	}
+	});
 
-	void hookTextureDefinition(chaiscript::ChaiScript& a_script) {
+	Script::Registrar<TextureDefinition> _hookTextureDefinition([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
 		a_script.add(chaiscript::user_type<TextureDefinition>(), "TextureDefinition");
 
 		a_script.add(chaiscript::fun(&TextureDefinition::textureId), "textureId");
@@ -326,18 +331,66 @@ namespace MV {
 		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureDefinition::*)(const BoxAABB<int>&)>(&TextureDefinition::makeHandle)), "makeHandle");
 		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureDefinition::*)(const BoxAABB<PointPrecision>&)>(&TextureDefinition::makeHandle)), "makeHandle");
 		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureDefinition::*)(const BoxAABB<PointPrecision>&)>(&TextureDefinition::makeRawHandle)), "makeRawHandle");
-	}
+	});
 
-	void hookRenderFolder(chaiscript::ChaiScript &a_script){
-		hookBoxAABB<MV::PointPrecision>(a_script, "");
-		hookBoxAABB<int>(a_script, "i");
-		hookTexturePoint(a_script);
-		hookPoint<MV::PointPrecision>(a_script, "");
-		hookPoint<int>(a_script, "i");
-		hookSize<MV::PointPrecision>(a_script, "");
-		hookSize<int>(a_script, "i");
-		hookSharedTextures(a_script);
-		hookTexturePack(a_script);
-		hookTextureDefinition(a_script);
-	}
+
+	Script::Registrar<FileTextureDefinition> _hookFileTextureDefinition([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
+		a_script.add(chaiscript::user_type<FileTextureDefinition>(), "FileTextureDefinition");
+		a_script.add(chaiscript::base_class<TextureDefinition, FileTextureDefinition>());
+
+		a_script.add(chaiscript::fun(&FileTextureDefinition::make), "FileTextureDefinition_make");
+		a_script.add(chaiscript::fun(&FileTextureDefinition::makeUnmanaged), "FileTextureDefinition_makeUnmanaged");
+	});
+
+	Script::Registrar<DynamicTextureDefinition> _hookDynamicTextureDefinition([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
+		a_script.add(chaiscript::user_type<DynamicTextureDefinition>(), "DynamicTextureDefinition");
+		a_script.add(chaiscript::base_class<TextureDefinition, DynamicTextureDefinition>());
+
+		a_script.add(chaiscript::fun(&DynamicTextureDefinition::make), "DynamicTextureDefinition_make");
+		a_script.add(chaiscript::fun(&DynamicTextureDefinition::resize), "resize");
+	});
+
+	Script::Registrar<SurfaceTextureDefinition> _hookSurfaceTextureDefinition([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
+		a_script.add(chaiscript::user_type<SurfaceTextureDefinition>(), "SurfaceTextureDefinition");
+		a_script.add(chaiscript::base_class<TextureDefinition, SurfaceTextureDefinition>());
+
+		a_script.add(chaiscript::fun(&SurfaceTextureDefinition::make), "SurfaceTextureDefinition_make");
+		a_script.add(chaiscript::fun(&SurfaceTextureDefinition::surfaceSize), "surfaceSize");
+		a_script.add(chaiscript::fun(&SurfaceTextureDefinition::setSurfaceGenerator), "setSurfaceGenerator");
+	});
+
+	Script::Registrar<TextureHandle> _hookTextureHandle([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
+		a_script.add(chaiscript::user_type<TextureHandle>(), "TextureHandle");
+
+		a_script.add(chaiscript::fun(&TextureHandle::apply), "apply");
+		a_script.add(chaiscript::fun([](TextureHandle& a_self) { return a_self.name(); }), "name");
+		a_script.add(chaiscript::fun([](TextureHandle& a_self, const std::string& a_name) { return a_self.name(a_name); }), "name");
+		a_script.add(chaiscript::fun(&TextureHandle::texture), "texture");
+		a_script.add(chaiscript::fun(&TextureHandle::clone), "clone");
+
+		a_script.add(chaiscript::fun(&TextureHandle::clearSlice), "clearSlice");
+		a_script.add(chaiscript::fun(&TextureHandle::hasSlice), "hasSlice");
+
+		a_script.add(chaiscript::fun(&TextureHandle::hasSlice), "logicalSize");
+		a_script.add(chaiscript::fun(&TextureHandle::hasSlice), "logicalSlice");
+
+		a_script.add(chaiscript::fun(&TextureHandle::sizeChange), "sizeChange");
+
+		a_script.add(chaiscript::fun(static_cast<BoxAABB<int>(TextureHandle::*)() const>(&TextureHandle::bounds)), "bounds");
+		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<int>&)>(&TextureHandle::bounds)), "bounds");
+		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<PointPrecision>&)>(&TextureHandle::bounds)), "bounds");
+
+		a_script.add(chaiscript::fun(static_cast<BoxAABB<PointPrecision>(TextureHandle::*)() const>(&TextureHandle::slice)), "slice");
+		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<int>&)>(&TextureHandle::slice)), "slice");
+		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(const BoxAABB<PointPrecision>&)>(&TextureHandle::slice)), "slice");
+
+		a_script.add(chaiscript::fun([](TextureHandle& a_self) { return a_self.rawPercent(); }), "rawPercent");
+		a_script.add(chaiscript::fun([](TextureHandle& a_self, const BoxAABB<PointPrecision>& a_rawPercent) { return a_self.rawPercent(a_rawPercent); }), "rawPercent");
+
+		a_script.add(chaiscript::fun(static_cast<bool(TextureHandle::*)() const>(&TextureHandle::flipX)), "flipX");
+		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(bool)>(&TextureHandle::flipX)), "flipX");
+
+		a_script.add(chaiscript::fun(static_cast<bool(TextureHandle::*)() const>(&TextureHandle::flipY)), "flipY");
+		a_script.add(chaiscript::fun(static_cast<std::shared_ptr<TextureHandle>(TextureHandle::*)(bool)>(&TextureHandle::flipY)), "flipY");
+	});
 }

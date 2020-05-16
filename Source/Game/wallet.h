@@ -48,9 +48,6 @@ public:
 			CEREAL_NVP(values)
 		);
 	}
-
-	//only attach game hooks
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 private:
 	std::vector<int64_t> values = { 0, 0, 0 };
 	std::array<std::string, TOTAL> names = { "Gold", "Sweat", "Blood" };

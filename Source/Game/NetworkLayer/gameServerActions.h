@@ -3,7 +3,6 @@
 
 #include "Game/Instance/team.h"
 #include "Game/NetworkLayer/synchronizeAction.h"
-#include "MV/Utility/chaiscriptUtility.h"
 
 class GameServerAvailable : public NetworkAction {
 public:

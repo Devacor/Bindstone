@@ -15,11 +15,12 @@
 #include <string>
 #include <ctime>
 
-#include "MV/Utility/chaiscriptUtility.h"
+#include "MV/Script/script.h"
 
 class Game {
+	friend MV::Script;
 public:
-	Game(Managers &a_managers, std::string a_defaultLoginId, std::string a_defaultLoginPassword);
+	Game(Managers &a_managers);
 
 	//return true if we're still good to go
 	bool update(double dt);
@@ -77,8 +78,6 @@ public:
 		gui().page("Main").show();
 	}
 
-	void hook(chaiscript::ChaiScript &a_script);
-
 	void authenticate(LoginResponse& a_response) {
 		if (a_response.hasPlayerState()) {
 			localPlayer = a_response.loadedPlayer();
@@ -121,7 +120,7 @@ private:
 
 	std::shared_ptr<MV::Scene::Node> rootScene;
 
-	chaiscript::ChaiScript scriptEngine;
+	MV::Script scriptEngine;
 
 	std::shared_ptr<LocalPlayer> localPlayer;
 
@@ -138,8 +137,6 @@ private:
 
 	std::string loginId;
 	std::string loginPassword;
-	std::string defaultLoginId;
-	std::string defaultPassword;
 
 	const double START_BACKOFF_RECONNECT_TIME = .25;
 	const double MAX_BACKOFF_RECONNECT_TIME = 10.0;

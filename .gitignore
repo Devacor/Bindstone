@@ -45,3 +45,4 @@ VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/
 .workspace/
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/gdbserver
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libc++_shared.so
+VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libbindstonecommon.a

@@ -40,7 +40,7 @@ namespace MV {
 			types.erase(typeid(T));
 		}
 		template<typename T>
-		T* get(bool a_throwOnFail = true) {
+		T* get(bool a_throwOnFail = true) const {
 			auto i = types.find(typeid(T));
 			if (i != types.end()) {
 				try {
@@ -60,7 +60,7 @@ namespace MV {
 			return nullptr;
 		}
 		template<typename T, typename V>
-		V* get(bool a_throwOnFail = true) {
+		V* get(bool a_throwOnFail = true) const {
 			auto i = types.find(typeid(T));
 			if (i != types.end()) {
 				try {

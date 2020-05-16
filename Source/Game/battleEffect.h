@@ -4,7 +4,6 @@
 #include "MV/Render/package.h"
 #include "Game/wallet.h"
 #include "Game/Interface/guiFactories.h"
-#include "MV/Utility/chaiscriptUtility.h"
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/signal.hpp"
 #include <string>
@@ -27,14 +26,6 @@ struct BattleEffectData {
 
 	bool isServer = false;
 
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-		StandardScriptMethods<BattleEffect>::hook(a_script, "BattleEffect");
-
-		a_script.add(chaiscript::fun(&BattleEffectData::id), "id");
-
-		return a_script;
-	}
-
 	template <class Archive>
 	void serialize(Archive & archive) {
 		archive(
@@ -42,7 +33,7 @@ struct BattleEffectData {
 		);
 	}
 
-	StandardScriptMethods<BattleEffect>& script(chaiscript::ChaiScript &a_script) const {
+	StandardScriptMethods<BattleEffect>& script(MV::Script&a_script) const {
 		return scriptMethods.loadScript(a_script, "BattleEffects", id, isServer);
 	}
 
@@ -115,11 +106,10 @@ public:
 			cereal::make_nvp("variables", variables)
 		);
 	}
-
-	static void hook(chaiscript::ChaiScript &a_script);
 };
 
 class BattleEffect : public MV::Scene::Component {
+	friend MV::Script;
 public:
 	typedef void CallbackSignature(std::shared_ptr<BattleEffect>);
 	typedef MV::SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
@@ -136,8 +126,6 @@ public:
 		
 	~BattleEffect() { MV::info("Battle Effect Died: [", netId(), "]"); }
 
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
-
 	std::string assetPath() const;
 
 	bool alive() const {
@@ -150,6 +138,10 @@ public:
 	 
 	MV::Point<MV::PointPrecision> gridPosition() const {
 		return state->self()->position;
+	}
+
+	GameInstance& game() {
+		return gameInstance;
 	}
 
 protected:
@@ -182,8 +174,6 @@ class ServerBattleEffect : public BattleEffect {
 
 public:
 	ComponentDerivedAccessors(ServerBattleEffect)
-
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
 
 protected:
 	ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, int64_t a_creatureId, const std::string &a_creatureBoneAttachment, GameInstance& a_gameInstance);
@@ -226,8 +216,6 @@ class ClientBattleEffect : public BattleEffect {
 	friend cereal::access;
 public:
 	ComponentDerivedAccessors(ClientBattleEffect)
-
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
 
 protected:
 	ClientBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> &a_state, GameInstance& a_gameInstance);

@@ -4,7 +4,6 @@
 #include "MV/Render/package.h"
 #include "Game/wallet.h"
 #include "Game/Interface/guiFactories.h"
-#include "MV/Utility/chaiscriptUtility.h"
 #include "MV/Utility/signal.hpp"
 #include <string>
 #include <memory>
@@ -47,8 +46,6 @@ struct BuildTree {
 			CEREAL_NVP(upgrades)
 		);
 	}
-
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript& a_script);
 };
 
 struct SkinData {
@@ -83,7 +80,7 @@ struct BuildingData {
 		);
 	}
 
-	StandardScriptMethods<Building>& script(chaiscript::ChaiScript& a_script) const {
+	StandardScriptMethods<Building>& script(MV::Script& a_script) const {
 		return scriptMethods.loadScript(a_script, "Buildings", id, isServer);
 	}
 
@@ -147,12 +144,11 @@ struct BuildingNetworkState {
 			cereal::make_nvp("buildTreeIndices", buildTreeIndices)
 		);
 	}
-
-	static void hook(chaiscript::ChaiScript &a_script);
 };
 
 class Building : public MV::Scene::Component {
 	friend MV::Scene::Node;
+	friend MV::Script;
 	friend cereal::access;
 	MV::Signal<void(std::shared_ptr<Building>)> onUpgradedSignal;
 
@@ -193,8 +189,6 @@ public:
 	int loadoutIndex() const {
 		return loadoutSlot;
 	}
-
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& /*gameInstance*/);
 
 	MV::Point<> spawnPositionWorld() const {
 		return owner()->worldFromLocal(spawnPoint);

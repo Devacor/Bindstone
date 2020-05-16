@@ -7,12 +7,10 @@ void sdl_quit(void){
 	TTF_Quit();
 }
 
-Game::Game(Managers& a_managers, std::string a_defaultLoginId, std::string a_defaultLoginPassword) :
+Game::Game(Managers& a_managers) :
 	gameData(a_managers, false),
-	defaultLoginId(a_defaultLoginId),
-	defaultPassword(a_defaultLoginPassword),
 	done(false),
-	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), [](const std::string& a_file) {return MV::fileContents(a_file, true); }, chaiscript::default_options()){
+	scriptEngine(a_managers.services){
 
 	returnFromBackground();
 
@@ -108,7 +106,6 @@ void Game::initializeWindow(){
 	}
 	//(const std::shared_ptr<Player> &a_leftPlayer, const std::shared_ptr<Player> &a_rightPlayer, const std::shared_ptr<MV::Scene::Node> &a_scene, MV::TapDevice& a_mouse, LocalData& a_data)
 
-	hook(scriptEngine);
 	if (!MV::RUNNING_IN_HEADLESS) {
 		ourGui = std::make_unique<MV::InterfaceManager>(uiRoot, ourMouse, gameData.managers(), scriptEngine, "Interface/interfaceManager.script"s);
 		ourGui->initialize();
@@ -186,28 +183,6 @@ void Game::render() {
 	rootScene->draw();
 	
 	gameData.managers().renderer.updateScreen();
-}
-
-void Game::hook(chaiscript::ChaiScript &a_script) {
-	bindstoneScriptHook(a_script, ourMouse, gameData.managers().pool);
-
-	gameData.managers().messages.hook(a_script);
-
-	a_script.add(chaiscript::user_type<Game>(), "Game");
-	a_script.add(chaiscript::fun(&Game::gui), "gui");
-	a_script.add(chaiscript::fun(&Game::instance), "instance");
-	a_script.add(chaiscript::fun(&Game::root), "root");
-	a_script.add(chaiscript::fun(&Game::localPlayer), "localPlayer");
-	a_script.add(chaiscript::fun(&Game::ourMouse), "mouse");
-	a_script.add(chaiscript::fun(&Game::enterGame), "enterGame");
-	a_script.add(chaiscript::fun(&Game::killGame), "killGame");
-	a_script.add(chaiscript::fun(&Game::ourLobbyClient), "client");
-	a_script.add(chaiscript::fun(&Game::loginId), "loginId");
-	a_script.add(chaiscript::fun(&Game::loginPassword), "loginPassword");
-	a_script.add_global_const(chaiscript::const_var(defaultLoginId), "DefaultLoginId");
-	a_script.add_global_const(chaiscript::const_var(defaultPassword), "DefaultPassword");
-
-	a_script.add_global(chaiscript::var(this), "game");
 }
 
 void Game::updateScreenScaler() {

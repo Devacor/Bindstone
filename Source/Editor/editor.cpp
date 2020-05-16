@@ -2,7 +2,6 @@
 #include "editorControls.h"
 #include "componentPanels.h"
 #include "editorFactories.h"
-#include "MV/Utility/chaiscriptUtility.h"
 
 Editor::Editor(Managers &a_managers):
 	managers(a_managers),
@@ -10,7 +9,7 @@ Editor::Editor(Managers &a_managers):
 	scene(visor->make("root")),
 
 	controls(MV::Scene::Node::make(a_managers.renderer)),
-	chaiScript(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), [](const std::string& a_file) {return MV::fileContents(a_file); }, chaiscript::default_options()),
+	script(managers.services),
 	testNode(MV::Scene::Node::make(a_managers.renderer)){
 	visor->cameraId(99);
 

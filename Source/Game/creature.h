@@ -4,7 +4,6 @@
 #include "MV/Render/package.h"
 #include "Game/wallet.h"
 #include "Game/Interface/guiFactories.h"
-#include "MV/Utility/chaiscriptUtility.h"
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/signal.hpp"
 #include <string>
@@ -39,33 +38,6 @@ struct CreatureData {
 
 	bool isServer = false;
 
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-		StandardScriptMethods<Creature>::hook(a_script, "Creature");
-
-		a_script.add(chaiscript::user_type<CreatureData>(), "CreatureData");
-
-		a_script.add(chaiscript::fun(&CreatureData::id), "id");
-		a_script.add(chaiscript::fun(&CreatureData::name), "name");
-
-		a_script.add(chaiscript::fun(&CreatureData::description), "description");
-
-		a_script.add(chaiscript::fun(&CreatureData::moveSpeed), "moveSpeed");
-		a_script.add(chaiscript::fun(&CreatureData::actionSpeed), "actionSpeed");
-		a_script.add(chaiscript::fun(&CreatureData::castSpeed), "castSpeed");
-
-		a_script.add(chaiscript::fun(&CreatureData::health), "health");
-		a_script.add(chaiscript::fun(&CreatureData::defense), "defense");
-		a_script.add(chaiscript::fun(&CreatureData::will), "will");
-		a_script.add(chaiscript::fun(&CreatureData::strength), "strength");
-		a_script.add(chaiscript::fun(&CreatureData::ability), "ability");
-
-		a_script.add(chaiscript::fun(&CreatureData::isServer), "isServer");
-
-		//a_script.add([]() {});
-
-		return a_script;
-	}
-
 	template <class Archive>
 	void serialize(Archive & archive) {
 		archive(
@@ -83,7 +55,7 @@ struct CreatureData {
 		);
 	}
 
-	StandardScriptMethods<Creature>& script(chaiscript::ChaiScript &a_script) const {
+	StandardScriptMethods<Creature>& script(MV::Script&a_script) const {
 		return scriptMethods.loadScript(a_script, "Creatures", id, isServer);
 	}
 
@@ -97,6 +69,7 @@ private:
 template <typename DataType>
 class Catalog {
 	friend cereal::access;
+	friend MV::Script;
 public:
 	Catalog<DataType>(const std::string &a_catalogType, bool a_isServer, std::uint32_t a_serializeVersion = 0) :
 		isServer(a_isServer) {
@@ -139,6 +112,7 @@ private:
 
 class ServerCreature;
 class TargetPolicy {
+	friend MV::Script;
 public:
 	TargetPolicy(ServerCreature *a_self);
 
@@ -165,8 +139,6 @@ public:
 	bool rooted() const {
 		return rootDuration > 0.0f;
 	}
-
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 private:
 	void clearTarget();
 
@@ -277,11 +249,10 @@ struct CreatureNetworkState {
 		position.serialize(archive, "position");
 		variables.serialize(archive, "variables");
 	}
-
-	static void hook(chaiscript::ChaiScript &a_script);
 };
 
 class Creature : public MV::Scene::Component {
+	friend MV::Script;
 public:
 	typedef void CallbackSignature(std::shared_ptr<Creature>);
 	typedef MV::SignalRegister<CallbackSignature>::SharedReceiverType SharedReceiverType;
@@ -301,8 +272,6 @@ public:
 	ComponentDerivedAccessors(Creature)
 
 	~Creature() { MV::info("Creature Died: [", netId(), "]"); }
-
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
 
 	std::shared_ptr<InGamePlayer> player();
 
@@ -350,6 +319,7 @@ class ServerCreature : public Creature {
 	friend MV::Scene::Node;
 	friend cereal::access;
 	friend TargetPolicy;
+	friend MV::Script;
 private:
 
 	MV::Signal<CallbackSignature> onArriveSignal;
@@ -364,8 +334,6 @@ public:
 	MV::SignalRegister<CallbackSignature> onStart;
 
 	ComponentDerivedAccessors(ServerCreature)
-
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
 
 	void fall() {
 		auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
@@ -454,10 +422,9 @@ private:
 class ClientCreature : public Creature {
 	friend MV::Scene::Node;
 	friend cereal::access;
+	friend MV::Script;
 public:
 	ComponentDerivedAccessors(ClientCreature)
-
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, GameInstance& gameInstance);
 
 	//return true if alive
 	virtual bool changeHealth(int amount) override {

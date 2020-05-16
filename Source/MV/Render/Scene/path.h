@@ -330,62 +330,6 @@ namespace MV {
 				return !agent->hasFootprint();
 			}
 
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-				a_script.add(chaiscript::user_type<PathAgent>(), "PathAgent");
-				a_script.add(chaiscript::base_class<Component, PathAgent>());
-
-				a_script.add(chaiscript::fun([](Node &a_self, const std::shared_ptr<PathMap> &a_map, const Point<> &a_gridPosition) { return a_self.attach<PathAgent>(a_map, a_gridPosition); }), "attachPathAgent");
-				a_script.add(chaiscript::fun([](Node &a_self, const std::shared_ptr<PathMap> &a_map, const Point<int> &a_gridPosition) { return a_self.attach<PathAgent>(a_map, a_gridPosition); }), "attachPathAgent");
-
-				a_script.add(chaiscript::fun([](Node &a_self, const std::shared_ptr<PathMap> &a_map, const Point<> &a_gridPosition, int a_unitSize) { return a_self.attach<PathAgent>(a_map, a_gridPosition, a_unitSize); }), "attachPathAgent");
-				a_script.add(chaiscript::fun([](Node &a_self, const std::shared_ptr<PathMap> &a_map, const Point<int> &a_gridPosition, int a_unitSize) { return a_self.attach<PathAgent>(a_map, a_gridPosition, a_unitSize); }), "attachPathAgent");
-
-				a_script.add(chaiscript::fun(&PathAgent::pathfinding), "pathfinding");
-				a_script.add(chaiscript::fun(&PathAgent::path), "path");
-
-				a_script.add(chaiscript::fun(&PathAgent::stop), "stop");
-				a_script.add(chaiscript::fun(&PathAgent::gridOverlaps), "gridOverlaps");
-				a_script.add(chaiscript::fun(&PathAgent::localOverlaps), "localOverlaps");
-
-				a_script.add(chaiscript::fun(&PathAgent::hasFootprint), "hasFootprint");
-				a_script.add(chaiscript::fun(&PathAgent::disableFootprint), "disableFootprint");
-				a_script.add(chaiscript::fun(&PathAgent::enableFootprint), "enableFootprint");
-
-				a_script.add(chaiscript::fun(static_cast<PointPrecision (PathAgent::*)() const>(&PathAgent::gridSpeed)), "gridSpeed");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent> (PathAgent::*)(PointPrecision)>(&PathAgent::gridSpeed)), "gridSpeed");
-				
-				a_script.add(chaiscript::fun(static_cast<PointPrecision(PathAgent::*)() const>(&PathAgent::localSpeed)), "localSpeed");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(PointPrecision)>(&PathAgent::localSpeed)), "localSpeed");
-
-				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::gridGoal)), "gridGoal");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&, PointPrecision)>(&PathAgent::gridGoal)), "gridGoal");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&, PointPrecision)>(&PathAgent::gridGoal)), "gridGoal");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::gridGoal)), "gridGoal");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&)>(&PathAgent::gridGoal)), "gridGoal");
-
-				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::localGoal)), "localGoal");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&, PointPrecision)>(&PathAgent::localGoal)), "localGoal");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::localGoal)), "localGoal");
-
-				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::gridPosition)), "gridPosition");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::gridPosition)), "gridPosition");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<int>&)>(&PathAgent::gridPosition)), "gridPosition");
-
-				a_script.add(chaiscript::fun(static_cast<Point<PointPrecision>(PathAgent::*)() const>(&PathAgent::localPosition)), "localPosition");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<PathAgent>(PathAgent::*)(const Point<PointPrecision>&)>(&PathAgent::localPosition)), "localPosition");
-
-				MV::SignalRegister<CallbackSignature>::hook(a_script);
-				a_script.add(chaiscript::fun(&PathAgent::onArrive), "onArrive");
-				a_script.add(chaiscript::fun(&PathAgent::onBlocked), "onBlocked");
-				a_script.add(chaiscript::fun(&PathAgent::onStop), "onStop");
-				a_script.add(chaiscript::fun(&PathAgent::onStart), "onStart");
-
-				a_script.add(chaiscript::type_conversion<SafeComponent<PathAgent>, std::shared_ptr<PathAgent>>([](const SafeComponent<PathAgent> &a_item) { return a_item.self(); }));
-				a_script.add(chaiscript::type_conversion<SafeComponent<PathAgent>, std::shared_ptr<Component>>([](const SafeComponent<PathAgent> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
-
-				return a_script;
-			}
-
 		protected:
 			PathAgent(const std::weak_ptr<Node> &a_owner, const std::shared_ptr<PathMap> &a_map, const Point<> &a_gridPosition, int a_unitSize = 1) :
 				Component(a_owner),

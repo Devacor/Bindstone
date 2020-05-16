@@ -23,36 +23,6 @@ namespace MV {
 			template<typename PointAssign>
 			std::shared_ptr<Sprite> corners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight);
 
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-				a_script.add(chaiscript::user_type<Sprite>(), "Sprite");
-				a_script.add(chaiscript::base_class<Drawable, Sprite>());
-				a_script.add(chaiscript::base_class<Component, Sprite>());
-
-				a_script.add(chaiscript::fun([](Node &a_self) { 
-					return a_self.attach<Sprite>(); 
-				}), "attachSprite");
-
-				a_script.add(chaiscript::fun([](Node &a_self) {
-					return a_self.componentInChildren<Sprite>();
-				}), "spriteComponent");
-
-				a_script.add(chaiscript::fun([](const std::shared_ptr<Sprite> &a_self, uint16_t a_subdivisions) {
-					return a_self->subdivide(a_subdivisions);
-				}), "subdivide");
-				a_script.add(chaiscript::fun([](const std::shared_ptr<Sprite> &a_self) {
-					return a_self->subdivisions();
-				}), "subdivisions");
-
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Point<> &, const Point<> &, const Point<> &, const Point<> &)>(&Sprite::corners<Point<>>)), "corners");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Sprite>(Sprite::*)(const Color &, const Color &, const Color &, const Color &)>(&Sprite::corners<Color>)), "corners");
-
-				a_script.add(chaiscript::type_conversion<SafeComponent<Sprite>, std::shared_ptr<Sprite>>([](const SafeComponent<Sprite> &a_item) { return a_item.self(); }));
-				a_script.add(chaiscript::type_conversion<SafeComponent<Sprite>, std::shared_ptr<Drawable>>([](const SafeComponent<Sprite> &a_item) { return std::static_pointer_cast<Drawable>(a_item.self()); }));
-				a_script.add(chaiscript::type_conversion<SafeComponent<Sprite>, std::shared_ptr<Component>>([](const SafeComponent<Sprite> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
-				
-				return a_script;
-			}
-
 			std::shared_ptr<Sprite> subdivide(uint16_t a_subdivisions) {
 				if (ourSubdivisions != a_subdivisions) {
 					ourSubdivisions = a_subdivisions;

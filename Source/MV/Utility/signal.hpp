@@ -11,10 +11,10 @@
 #include "MV/Utility/services.hpp"
 #include "MV/Utility/tupleHelpers.hpp"
 #include "MV/Utility/scopeGuard.hpp"
-#include "MV/Utility/chaiscriptUtility.h"
 #include "cereal/cereal.hpp"
 #include "cereal/archives/adapters.hpp"
 #include "cereal/access.hpp"
+#include "MV/Script/script.h"
 
 namespace MV {
 
@@ -29,7 +29,7 @@ namespace MV {
 		static std::shared_ptr< Receiver<T> > make(std::function<T> a_callback){
 			return std::shared_ptr< Receiver<T> >(new Receiver<T>(a_callback, ++uniqueId));
 		}
-		static std::shared_ptr< Receiver<T> > make(const std::string &a_script, chaiscript::ChaiScript *a_engine, const std::shared_ptr<std::vector<std::string>> &a_parameterNames = nullptr) {
+		static std::shared_ptr< Receiver<T> > make(const std::string &a_script, MV::Script *a_engine, const std::shared_ptr<std::vector<std::string>> &a_parameterNames = nullptr) {
 			return std::shared_ptr< Receiver<T> >(new Receiver<T>(a_script, a_engine, a_parameterNames, ++uniqueId));
 		}
 
@@ -130,21 +130,6 @@ namespace MV {
 			return id != a_rhs.id;
 		}
 
-		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-			if (!scriptHookedUp[reinterpret_cast<size_t>(&a_script)]) {
-				scriptHookedUp[reinterpret_cast<size_t>(&a_script)] = true;
-
-				a_script.add(chaiscript::fun(&Receiver<T>::block), "block");
-				a_script.add(chaiscript::fun(&Receiver<T>::blocked), "blocked");
-				a_script.add(chaiscript::fun(&Receiver::unblock), "unblock");
-				a_script.add(chaiscript::fun(&Receiver::hasScript), "hasScript");
-				a_script.add(chaiscript::fun(&Receiver::script), "script");
-
-				a_script.add(chaiscript::fun([](Receiver<T>::SharedType &a_pointer) {a_pointer.reset(); }), "reset");
-			}
-			return a_script;
-		}
-
 		std::string script() const {
 			return scriptCallback;
 		}
@@ -152,10 +137,10 @@ namespace MV {
 			return !scriptCallback.empty();
 		}
 
-		void scriptEngine(chaiscript::ChaiScript *a_scriptEnginePointer) {
+		void scriptEngine(MV::Script* a_scriptEnginePointer) {
 			scriptEnginePointer = a_scriptEnginePointer;
 		}
-		chaiscript::ChaiScript* scriptEngine() const {
+		MV::Script* scriptEngine() const {
 			return scriptEnginePointer;
 		}
 	private:
@@ -174,7 +159,7 @@ namespace MV {
 				cereal::make_nvp("script", scriptCallback)
 			);
 			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-			scriptEnginePointer = services.get<chaiscript::ChaiScript>(false);
+			scriptEnginePointer = services.get<MV::Script>(false);
 		}
 
 		Receiver() :
@@ -184,7 +169,7 @@ namespace MV {
 			callback(a_callback),
             id(a_id){
 		}
-		Receiver(const std::string& a_callback, chaiscript::ChaiScript* a_scriptEngine, const std::shared_ptr<std::vector<std::string>> &a_parameterNames, long long a_id) :
+		Receiver(const std::string& a_callback, MV::Script* a_scriptEngine, const std::shared_ptr<std::vector<std::string>> &a_parameterNames, long long a_id) :
 			id(a_id),
 			scriptCallback(a_callback),
 			scriptEnginePointer(a_scriptEngine),
@@ -202,10 +187,7 @@ namespace MV {
 						(orderedParameterNames && i < orderedParameterNames->size()) ? (*orderedParameterNames)[i] : "arg_" + std::to_string(i),
 						parameterValues[i]);
 				}
-				auto resetLocals = scriptEnginePointer->get_locals();
-				SCOPE_EXIT{ scriptEnginePointer->set_locals(resetLocals); };
-				scriptEnginePointer->set_locals(localVariables);
-				scriptEnginePointer->eval(scriptCallback);
+				scriptEnginePointer->eval("Signal", scriptCallback);
 			} else if (!scriptCallback.empty()) {
 				std::cerr << "Failed to run script in receiver, you need to supply a chaiscript engine handle!\n";
 			}
@@ -222,10 +204,7 @@ namespace MV {
 						(orderedParameterNames && i < orderedParameterNames->size()) ? (*orderedParameterNames)[i] : "arg_" + std::to_string(i),
 						parameterValues[i]);
 				}
-				auto resetLocals = scriptEnginePointer->get_locals();
-				SCOPE_EXIT{ scriptEnginePointer->set_locals(resetLocals); };
-				scriptEnginePointer->set_locals(localVariables);
-				return chaiscript::boxed_cast<bool>(scriptEnginePointer->eval(scriptCallback));
+				return scriptEnginePointer->eval<bool>("signal", scriptCallback, localVariables).value_or(false);
 			} else if (!scriptCallback.empty()) {
 				std::cerr << "Failed to run script in receiver, you need to supply a chaiscript engine handle!\n";
 				return false;
@@ -236,11 +215,7 @@ namespace MV {
 		template <class ...Arg>
 		void callScript() {
 			if (scriptEnginePointer && !scriptCallback.empty()) {
-				std::map<std::string, chaiscript::Boxed_Value> localVariables;
-				auto resetLocals = scriptEnginePointer->get_locals();
-				SCOPE_EXIT{ scriptEnginePointer->set_locals(resetLocals); };
-				scriptEnginePointer->set_locals(localVariables);
-				scriptEnginePointer->eval(scriptCallback);
+				scriptEnginePointer->eval("signal", scriptCallback);
 			} else if (!scriptCallback.empty()) {
 				std::cerr << "Failed to run script in receiver, you need to supply a chaiscript engine handle!\n";
 			}
@@ -250,16 +225,14 @@ namespace MV {
 		std::function< T > callback;
 		std::string scriptCallback;
 		std::shared_ptr<std::vector<std::string>> orderedParameterNames;
-		chaiscript::ChaiScript *scriptEnginePointer = nullptr;
+		MV::Script*scriptEnginePointer = nullptr;
 
-		long long id;
-		static long long uniqueId;
-
-		static inline std::map<size_t, bool> scriptHookedUp = std::map<size_t, bool>();
+		int64_t id;
+		static int64_t uniqueId;
 	};
 
 	template <typename T>
-	long long Receiver<T>::uniqueId = 0;
+	int64_t Receiver<T>::uniqueId = 0;
 
 	template <typename T>
 	class Signal {
@@ -441,7 +414,7 @@ namespace MV {
 			return observers.size();
 		}
 
-		Signal<T>& scriptEngine(chaiscript::ChaiScript *a_scriptEngine) {
+		Signal<T>& scriptEngine(MV::Script *a_scriptEngine) {
 			scriptEnginePointer = a_scriptEngine;
 			for (auto&& observer : observers) {
 				if (auto lockedObserver = observer.lock()) {
@@ -450,7 +423,7 @@ namespace MV {
 			}
 			return *this;
 		}
-		chaiscript::ChaiScript* scriptEngine() const{
+		MV::Script* scriptEngine() const{
 			return scriptEnginePointer;
 		}
 
@@ -506,7 +479,7 @@ namespace MV {
 				ownedConnections[ownedScriptObserver.first] = ownedScriptObserver.second;
 			}
 			MV::Services& services = cereal::get_user_data<MV::Services>(archive);
-			scriptEnginePointer = services.get<chaiscript::ChaiScript>(false);
+			scriptEnginePointer = services.get<MV::Script>(false);
 		}
 
 		std::set< std::weak_ptr< Receiver<T> >, std::owner_less<std::weak_ptr<Receiver<T>>> > observers;
@@ -519,7 +492,7 @@ namespace MV {
 
 		std::shared_ptr<std::vector<std::string>> orderedParameterNames;
 
-		chaiscript::ChaiScript *scriptEnginePointer = nullptr;
+		MV::Script *scriptEnginePointer = nullptr;
 
 		std::map<std::string, SharedReceiverType> ownedConnections;
 	};
@@ -580,10 +553,10 @@ namespace MV {
 		}
 
 		//script support
-		void scriptEngine(chaiscript::ChaiScript *a_scriptEngine) {
+		void scriptEngine(MV::Script *a_scriptEngine) {
 			signal.scriptEngine(a_scriptEngine);
 		}
-		chaiscript::ChaiScript* scriptEngine() const {
+		MV::Script* scriptEngine() const {
 			return signal.scriptEngine();
 		}
 
@@ -599,34 +572,8 @@ namespace MV {
 			return signal.hasParameterNames();
 		}
 
-		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-			if (!scriptHookedUp[reinterpret_cast<size_t>(&a_script)]) {
-				scriptHookedUp[reinterpret_cast<size_t>(&a_script)] = true;
-
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Receiver<T>>(Signal<T>::*)(const std::string &, std::function<T>)>(&Signal<T>::connect)), "connect");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Receiver<T>>(Signal<T>::*)(const std::string &, const std::string &)>(&Signal<T>::connect)), "connect");
-				a_script.add(chaiscript::fun(static_cast<void(Signal<T>::*)(const std::string &)>(&Signal<T>::disconnect)), "disconnect");
-				a_script.add(chaiscript::fun(static_cast<void(Signal<T>::*)(std::shared_ptr<Receiver<T>>)>(&Signal<T>::disconnect)), "disconnect");
-				a_script.add(chaiscript::fun(&Signal<T>::connection), "connection");
-				a_script.add(chaiscript::fun(&Signal<T>::connected), "connected");
-
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Receiver<T>>(SignalRegister<T>::*)(const std::string &, std::function<T>)>(&SignalRegister<T>::connect)), "connect");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Receiver<T>>(SignalRegister<T>::*)(const std::string &, const std::string &)>(&SignalRegister<T>::connect)), "connect");
-				a_script.add(chaiscript::fun(static_cast<void(SignalRegister<T>::*)(const std::string &)>(&SignalRegister<T>::disconnect)), "disconnect");
-				a_script.add(chaiscript::fun(static_cast<void(SignalRegister<T>::*)(std::shared_ptr<Receiver<T>>)>(&SignalRegister<T>::disconnect)), "disconnect");
-				a_script.add(chaiscript::fun(&SignalRegister<T>::connection), "connection");
-				a_script.add(chaiscript::fun(&SignalRegister<T>::connected), "connected");
-			}
-
-			Receiver<T>::hook(a_script);
-
-			return a_script;
-		}
-
 	private:
 		Signal<T> &signal;
-
-		static inline std::map<size_t, bool> scriptHookedUp = std::map<size_t, bool>();
 	};
 }
 

@@ -57,7 +57,8 @@ void GameEditor::handleInput(){
 }
 
 GameEditor::GameEditor(std::string a_username, std::string a_password) :
-	game(managers, a_username, a_password),
+	managers({ a_username, a_password }),
+	game(managers),
 	autoStartGame(!a_username.empty() && !a_password.empty()),
 	editor(managers),
 	limbo(MV::Scene::Node::make(managers.renderer))

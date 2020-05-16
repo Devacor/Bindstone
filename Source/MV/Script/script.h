@@ -4,35 +4,58 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <optional>
 
+#include "MV/Utility/services.hpp"
 #include "chaiscript/dispatchkit/boxed_cast.hpp"
 
 namespace MV {
 	class Script {
 	public:
+		template <typename T>
+		class Registrar;
+
 		struct IScriptImplementation {
-			virtual chaiscript::Boxed_Value eval(const std::string& scriptContents, const std::map<std::string, chaiscript::Boxed_Value>& localVariables) = 0;
-			virtual chaiscript::Boxed_Value fileEval(const std::string& scriptContents, const std::map<std::string, chaiscript::Boxed_Value>& localVariables) = 0;
+			virtual chaiscript::Boxed_Value eval(const std::string& a_scriptIdentifier, const std::string& scriptContents, const std::map<std::string, chaiscript::Boxed_Value>& localVariables) = 0;
+			virtual chaiscript::Boxed_Value fileEval(const std::string& a_scriptIdentifier, const std::string& scriptContents, const std::map<std::string, chaiscript::Boxed_Value>& localVariables) = 0;
 		};
 
-		Script(const std::vector<std::string> &a_paths = { "", "Interface/", "Scripts/" });
+		Script(const MV::Services &a_services, const std::vector<std::string>& a_paths = { "", "Interface/", "Scripts/" });
 
 		template <typename T>
-		T eval(const std::string& a_scriptContents, const std::map<std::string, chaiscript::Boxed_Value>& a_localVariables) {
-			return chaiscript::boxed_cast<T>(guts->eval(a_scriptContents, a_localVariables));
+		std::optional<T> eval(const std::string& a_scriptIdentifier, const std::string& a_scriptContents, const std::map<std::string, chaiscript::Boxed_Value>& a_localVariables = {}) {
+			try {
+				return chaiscript::boxed_cast<T>(guts->eval(a_scriptIdentifier, a_scriptContents, a_localVariables));
+			} catch (...) {
+				return {};
+			}
 		}
 
 		template <typename T>
-		T fileEval(const std::string& a_scriptFile, const std::map<std::string, chaiscript::Boxed_Value>& a_localVariables) {
-			return chaiscript::boxed_cast<T>(guts->fileEval(a_scriptFile, a_localVariables));
+		std::optional<T> fileEval(const std::string& a_scriptIdentifier, const std::string& a_scriptFile, const std::map<std::string, chaiscript::Boxed_Value>& a_localVariables = {}) {
+			try {
+				return chaiscript::boxed_cast<T>(guts->fileEval(a_scriptIdentifier, a_scriptFile, a_localVariables));
+			} catch (...) {
+				return {};
+			}
 		}
 
-		void eval(const std::string& a_scriptContents, const std::map<std::string, chaiscript::Boxed_Value>& a_localVariables) {
-			guts->eval(a_scriptContents, a_localVariables);
+		bool eval(const std::string& a_scriptIdentifier, const std::string& a_scriptContents, const std::map<std::string, chaiscript::Boxed_Value>& a_localVariables = {}) {
+			try {
+				guts->eval(a_scriptIdentifier, a_scriptContents, a_localVariables);
+				return true;
+			} catch (...) {
+				return false;
+			}
 		}
 
-		void fileEval(const std::string& a_scriptFile, const std::map<std::string, chaiscript::Boxed_Value>& a_localVariables) {
-			guts->fileEval(a_scriptFile, a_localVariables);
+		bool fileEval(const std::string& a_scriptIdentifier, const std::string& a_scriptFile, const std::map<std::string, chaiscript::Boxed_Value>& a_localVariables = {}) {
+			try {
+				guts->fileEval(a_scriptIdentifier, a_scriptFile, a_localVariables);
+				return true;
+			} catch (...) {
+				return false;
+			}
 		}
 	private:
 		std::unique_ptr<IScriptImplementation> guts;

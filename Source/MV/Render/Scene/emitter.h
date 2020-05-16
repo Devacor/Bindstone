@@ -203,31 +203,6 @@ namespace MV {
 
 			bool dirty = true;
 
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-				a_script.add(chaiscript::user_type<EmitterSpawnProperties>(), "EmitterSpawnProperties");
-
-				a_script.add(chaiscript::fun(&EmitterSpawnProperties::maximumParticles), "maximumParticles");
-
-				a_script.add(chaiscript::fun(&EmitterSpawnProperties::minimumSpawnRate), "minimumSpawnRate");
-				a_script.add(chaiscript::fun(&EmitterSpawnProperties::maximumSpawnRate), "maximumSpawnRate");
-
-				a_script.add(chaiscript::fun(&EmitterSpawnProperties::minimumPosition), "minimumPosition");
-				a_script.add(chaiscript::fun(&EmitterSpawnProperties::maximumPosition), "maximumPosition");
-
-				a_script.add(chaiscript::fun(&EmitterSpawnProperties::minimumDirection), "minimumDirection");
-				a_script.add(chaiscript::fun(&EmitterSpawnProperties::maximumDirection), "maximumDirection");
-
-				a_script.add(chaiscript::fun(&EmitterSpawnProperties::minimumRotation), "minimumRotation");
-				a_script.add(chaiscript::fun(&EmitterSpawnProperties::maximumRotation), "maximumRotation");
-
-				a_script.add(chaiscript::fun(&EmitterSpawnProperties::minimum), "minimum");
-				a_script.add(chaiscript::fun(&EmitterSpawnProperties::maximum), "maximum");
-
-				ParticleChangeValues::hook(a_script);
-
-				return a_script;
-			}
-
 			template <class Archive>
 			void serialize(Archive & archive, std::uint32_t const version) {
 				archive(CEREAL_NVP(maximumParticles),
@@ -273,38 +248,6 @@ namespace MV {
 			std::shared_ptr<Emitter> disable();
 
 			~Emitter();
-
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script, ThreadPool &a_pool) {
-				a_script.add(chaiscript::user_type<Emitter>(), "Emitter");
-				a_script.add(chaiscript::base_class<Drawable, Emitter>());
-				a_script.add(chaiscript::base_class<Component, Emitter>());
-
-				a_script.add(chaiscript::fun([&](Node &a_self) {
-					return a_self.attach<Emitter>(a_pool);
-				}), "attachEmitter");
-
-				a_script.add(chaiscript::fun([](Node &a_self) {
-					return a_self.componentInChildren<Emitter>();
-				}), "emitterComponent");
-
-				a_script.add(chaiscript::fun(&Emitter::enabled), "enabled");
-				a_script.add(chaiscript::fun(&Emitter::disabled), "disabled");
-
-				a_script.add(chaiscript::fun(&Emitter::enable), "enable");
-				a_script.add(chaiscript::fun(&Emitter::disable), "disable");
-
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Emitter>(Emitter::*)(const EmitterSpawnProperties &a_emitterProperties)>(&Emitter::properties)), "properties");
-				a_script.add(chaiscript::fun(static_cast<EmitterSpawnProperties&(Emitter::*)()>(&Emitter::properties)), "properties");
-				a_script.add(chaiscript::fun(static_cast<const EmitterSpawnProperties&(Emitter::*)() const>(&Emitter::properties)), "properties");
-
-				a_script.add(chaiscript::type_conversion<SafeComponent<Emitter>, std::shared_ptr<Emitter>>([](const SafeComponent<Emitter> &a_item) { return a_item.self(); }));
-				a_script.add(chaiscript::type_conversion<SafeComponent<Emitter>, std::shared_ptr<Drawable>>([](const SafeComponent<Emitter> &a_item) { return std::static_pointer_cast<Drawable>(a_item.self()); }));
-				a_script.add(chaiscript::type_conversion<SafeComponent<Emitter>, std::shared_ptr<Component>>([](const SafeComponent<Emitter> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
-
-				EmitterSpawnProperties::hook(a_script);
-
-				return a_script;
-			}
 
 		protected:
 			Emitter(const std::weak_ptr<Node> &a_owner, ThreadPool &a_pool);

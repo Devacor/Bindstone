@@ -19,7 +19,6 @@
 #include "MV/Network/url.h"
 #include "MV/Utility/generalUtility.h"
 #include <boost/asio.hpp>
-#include "MV/Utility/chaiscriptUtility.h"
 #include "MV/Utility/log.h"
 
 namespace MV {
@@ -103,15 +102,6 @@ namespace MV {
 		}
 		bool disconnected() const {
 			return ourConnectionState == DISCONNECTED;
-		}
-
-		static void hook(chaiscript::ChaiScript& a_script) {
-			a_script.add(chaiscript::user_type<Client>(), "Client");
-
-			a_script.add(chaiscript::fun(&Client::send), "send");
-			a_script.add(chaiscript::fun(&Client::connected), "connected");
-			a_script.add(chaiscript::fun([](Client& a_self) { a_self.disconnect(); }), "disconnect");
-			a_script.add(chaiscript::fun([](Client& a_self) { a_self.reconnect(); }), "reconnect");
 		}
 
 		void disconnect() {

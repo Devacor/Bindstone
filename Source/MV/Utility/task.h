@@ -17,12 +17,15 @@
 #include "cereal/archives/adapters.hpp"
 #include "cereal/types/polymorphic.hpp"
 
+#include "MV/Script/script.h"
+
 namespace MV {
 
 	class Task;
 
 	class ActionBase {
 		friend Task;
+		friend MV::Script;
 		friend ::cereal::access;
 	public:
 		virtual std::string name() const { 
@@ -241,8 +244,6 @@ namespace MV {
 						try { onCancelSignal(*this); }
 						catch (std::exception & a_e) {
 							handleCallbackException(a_e);
-						} catch (chaiscript::Boxed_Value & bv) {
-							handleChaiscriptException(bv);
 						}
 					}
 
@@ -251,16 +252,12 @@ namespace MV {
 					try { onCancelAllSignal(*this); }
 					catch (std::exception & a_e) {
 						handleCallbackException(a_e);
-					} catch (chaiscript::Boxed_Value & bv) {
-						handleChaiscriptException(bv);
 					}
 				}
 				else {
 					try { onCancelPrestartSignal(*this); }
 					catch (std::exception & a_e) {
 						handleCallbackException(a_e);
-					} catch (chaiscript::Boxed_Value & bv) {
-						handleChaiscriptException(bv);
 					}
 
 					cancelAllChildren();
@@ -555,8 +552,6 @@ namespace MV {
 		SignalRegister<void(Task&)> onCancelPrestart;
 		SignalRegister<void(Task&, std::exception &)> onException;
 
-        static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
-        
 		template <class Archive>
 		void load(Archive & archive, std::uint32_t const /*version*/) {
 			archive(
@@ -644,15 +639,6 @@ namespace MV {
 			onExceptionSignal(*this, a_e);
 		}
 
-		void handleChaiscriptException(chaiscript::Boxed_Value & bv) {
-			const char* whatContents = chaiscript::boxed_cast<chaiscript::exception::eval_error&>(bv).what();
-			std::cerr << "Task [" << name() << "] script: " << chaiscript::boxed_cast<chaiscript::exception::eval_error&>(bv).what() << std::endl;
-			if (onExceptionSignal.cullDeadObservers() == 0) { throw; }
-            auto errorWithContents = std::runtime_error(whatContents);
-            std::exception &toThrow = errorWithContents;
-			onExceptionSignal(*this, toThrow);
-		}
-
 		void registerActionBase(const std::shared_ptr<ActionBase> &a_base) {
 			a_base->initialize(this);
 			optionalAction = a_base;
@@ -671,8 +657,6 @@ namespace MV {
 				try { onStartSignal(*this); }
 				catch (std::exception &a_e) {
 					handleCallbackException(a_e);
-				}catch (chaiscript::Boxed_Value &bv) {
-					handleChaiscriptException(bv);
 				}
 			}
 		}
@@ -759,15 +743,11 @@ namespace MV {
 						try { onFinishSignal(*this); }
 						catch (std::exception &a_e) {
 							handleCallbackException(a_e);
-						} catch (chaiscript::Boxed_Value &bv) {
-							handleChaiscriptException(bv);
 						}
 						onFinishSignal.block();
 					}
 				} catch (std::exception &a_e) {
 					handleCallbackException(a_e);
-				} catch (chaiscript::Boxed_Value &bv) {
-					handleChaiscriptException(bv);
 				}
 			}
 		}
@@ -803,9 +783,6 @@ namespace MV {
 					needToErase = !(*task)->update(a_dt);
 				} catch(std::exception &a_e) {
 					handleCallbackException(a_e);
-					needToErase = true;
-				} catch (chaiscript::Boxed_Value &bv) {
-					handleChaiscriptException(bv);
 					needToErase = true;
 				}
 				if (needToErase) {
@@ -845,8 +822,6 @@ namespace MV {
 					try { onFinishSignal(*this); }
 					catch (std::exception &a_e) {
 						handleCallbackException(a_e);
-					} catch (chaiscript::Boxed_Value &bv) {
-						handleChaiscriptException(bv);
 					}
 					onFinishSignal.block();
 				}
@@ -893,8 +868,6 @@ namespace MV {
 				try { onResumeSignal(*this); }
 				catch (std::exception &a_e) {
 					handleCallbackException(a_e);
-				} catch (chaiscript::Boxed_Value &bv) {
-					handleChaiscriptException(bv);
 				}
 			}
 		}
@@ -905,8 +878,6 @@ namespace MV {
 				try { onSuspendSignal(*this); }
 				catch (std::exception &a_e) {
 					handleCallbackException(a_e);
-				} catch (chaiscript::Boxed_Value &bv) {
-					handleChaiscriptException(bv);
 				}
 			}
 		}
@@ -915,8 +886,6 @@ namespace MV {
 			try { onFinishAllSignal(*this); }
 			catch (std::exception & a_e) {
 				handleCallbackException(a_e);
-			} catch (chaiscript::Boxed_Value & bv) {
-				handleChaiscriptException(bv);
 			}
 			onFinishAllSignal.block();
 		}

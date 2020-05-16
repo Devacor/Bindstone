@@ -28,6 +28,9 @@
     <Filter Include="MV\Utility">
       <UniqueIdentifier>{53630d64-b2b3-4995-b5e0-0e563d87d126}</UniqueIdentifier>
     </Filter>
+    <Filter Include="MV\Script">
+      <UniqueIdentifier>{2cb5aa89-9fd4-4faa-9e46-a7a43db39c3e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.cpp">
@@ -37,9 +40,6 @@
       <Filter>MV\Audio</Filter>
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.cpp">
-      <Filter>MV\Network</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\dynamicVariable.cpp">
       <Filter>MV\Network</Filter>
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\network.cpp">
@@ -121,9 +121,6 @@
       <Filter>MV\Render\Scene</Filter>
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.cpp">
-      <Filter>MV\Utility</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\chaiscriptStdLib.cpp">
       <Filter>MV\Utility</Filter>
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\generalUtility.cpp">
@@ -279,12 +276,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\cerealUtility.h">
       <Filter>MV\Utility</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\chaiscriptStdLib.h">
-      <Filter>MV\Utility</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\chaiscriptUtility.h">
-      <Filter>MV\Utility</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\exactType.hpp">
       <Filter>MV\Utility</Filter>
     </ClInclude>
@@ -355,5 +346,14 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\parallax.h">
       <Filter>MV\Render\Scene</Filter>
     </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Script\script.h">
+      <Filter>MV\Script</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\utilityHooks.i">
+      <Filter>MV\Utility</Filter>
+    </None>
+    <None Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\artificialIntelligenceHooks.i" />
   </ItemGroup>
 </Project>

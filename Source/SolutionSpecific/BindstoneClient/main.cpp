@@ -430,8 +430,7 @@ void PathfindingTest() {
 #include <stdlib.h>
 #include <stdio.h>
 
-#include "MV/Utility/chaiscriptStdLib.h"
-#include "MV/Utility/chaiscriptUtility.h"
+#include "MV/Script/script.h"
 #include "MV/Utility/log.h"
 
 #include "MV/Network/dynamicVariable.h"
@@ -687,7 +686,7 @@ int main(int argc, char *argv[]) {
 	script.add(chaiscript::fun(&PointTest::x), "x");
 	script.add(chaiscript::fun(&customPrint), "log_chaiscript_output");
 	script.add(chaiscript::bootstrap::standard_library::map_type<std::map<std::string, PointTest>>("PointTestMap"));
-	MV::DynamicVariable::hook(script);
+	
 	script.eval(R"(
 		print("Trying PointTest");
 		var testStuff = PointTest();

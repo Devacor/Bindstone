@@ -1,7 +1,9 @@
 #ifndef __MV_NETWORK_PACKAGE__
 #define __MV_NETWORK_PACKAGE__
 
-#define OPENSSL_NO_SSL2
+#ifndef OPENSSL_NO_SSL2
+	#define OPENSSL_NO_SSL2
+#endif
 
 #include "MV/Network/email.h"
 #include "MV/Network/url.h"

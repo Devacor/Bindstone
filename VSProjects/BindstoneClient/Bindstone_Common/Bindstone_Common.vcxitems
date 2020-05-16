@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Label="Globals">
     <MSBuildAllProjects>$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
@@ -14,6 +14,7 @@
     <ProjectCapability Include="SourceItemsFromImports" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="$(SolutionDir)Source\Game\Script\script.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Editor\componentPanels.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Editor\editComponents.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Editor\editor.cpp" />
@@ -29,7 +30,6 @@
     <ClCompile Include="$(SolutionDir)Source\Game\Instance\team.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Game\Interface\guiFactories.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Game\Interface\interfaceManager.cpp" />
-    <ClCompile Include="$(SolutionDir)Source\Game\managers.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\accountActions.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\clientActions.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\gameServer.cpp" />

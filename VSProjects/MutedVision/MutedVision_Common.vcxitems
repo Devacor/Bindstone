@@ -19,7 +19,6 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Audio\sound.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.cpp" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\dynamicVariable.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\network.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\url.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Physics\collider.cpp" />
@@ -48,7 +47,6 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\texturePacker.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\textures.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.cpp" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\chaiscriptStdLib.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\generalUtility.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\log.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\sha512.cpp" />
@@ -101,10 +99,9 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\sharedTextures.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\texturePacker.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\textures.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Script\script.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\cerealUtility.h" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\chaiscriptStdLib.h" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\chaiscriptUtility.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\exactType.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\generalUtility.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\localization.hpp" />
@@ -126,5 +123,9 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\tupleHelpers.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\typestring.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\visitor.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\artificialIntelligenceHooks.i" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\utilityHooks.i" />
   </ItemGroup>
 </Project>

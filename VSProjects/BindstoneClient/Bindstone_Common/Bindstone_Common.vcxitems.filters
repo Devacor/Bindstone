@@ -16,6 +16,9 @@
     <Filter Include="Editor">
       <UniqueIdentifier>{1d2b999a-0310-4eb4-823e-c84d0095c683}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Game\Script">
+      <UniqueIdentifier>{80a48338-8672-4827-8666-942d83862250}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\gameServer.cpp">
@@ -75,9 +78,6 @@
     <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\lobbyServer.cpp">
       <Filter>Game\NetworkLayer</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Source\Game\managers.cpp">
-      <Filter>Game</Filter>
-    </ClCompile>
     <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\synchronizeAction.cpp">
       <Filter>Game\NetworkLayer</Filter>
     </ClCompile>
@@ -92,6 +92,9 @@
     </ClCompile>
     <ClCompile Include="$(SolutionDir)Source\Game\wallet.cpp">
       <Filter>Game</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)Source\Game\Script\script.cpp">
+      <Filter>Game\Script</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

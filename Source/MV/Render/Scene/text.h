@@ -161,41 +161,6 @@ namespace MV{
 				}
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
-
-			static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script) {
-				a_script.add(chaiscript::user_type<Text>(), "Text");
-				a_script.add(chaiscript::base_class<Drawable, Text>());
-				a_script.add(chaiscript::base_class<Component, Text>());
-
-				a_script.add(chaiscript::fun([](Node &a_self, TextLibrary& a_textLibrary) { return a_self.attach<Text>(a_textLibrary); }), "attachText");
-				a_script.add(chaiscript::fun([](Node &a_self, TextLibrary& a_textLibrary, const std::string &a_defaultFontIdentifier) { return a_self.attach<Text>(a_textLibrary, a_defaultFontIdentifier); }), "attachText");
-
-				a_script.add(chaiscript::fun([](Node &a_self) { return a_self.componentInChildren<Text>(true, false, true); }), "componentText");
-
-				a_script.add(chaiscript::fun(&Text::enableCursor), "enableCursor");
-				a_script.add(chaiscript::fun(&Text::disableCursor), "disableCursor");
-
-				MV::SignalRegister<TextSignalSignature>::hook(a_script);
-				a_script.add(chaiscript::fun(&Text::onEnter), "onEnter");
-				a_script.add(chaiscript::fun(&Text::onChange), "onChange");
-
-				a_script.add(chaiscript::fun(static_cast<UtfString(Text::*)() const>(&Text::text)), "text");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(const UtfString &)>(&Text::text)), "text");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(UtfChar)>(&Text::text)), "text");
-
-				a_script.add(chaiscript::fun(static_cast<PointPrecision(Text::*)() const>(&Text::number)), "number");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(PointPrecision)>(&Text::number)), "number");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(int)>(&Text::number)), "number");
-
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(const UtfString &)>(&Text::append)), "append");
-				a_script.add(chaiscript::fun(static_cast<std::shared_ptr<Text>(Text::*)(UtfChar a_char)>(&Text::append)), "append");
-
-				a_script.add(chaiscript::type_conversion<SafeComponent<Text>, std::shared_ptr<Text>>([](const SafeComponent<Text> &a_item) { return a_item.self(); }));
-				a_script.add(chaiscript::type_conversion<SafeComponent<Text>, std::shared_ptr<Drawable>>([](const SafeComponent<Text> &a_item) { return std::static_pointer_cast<Drawable>(a_item.self()); }));
-				a_script.add(chaiscript::type_conversion<SafeComponent<Text>, std::shared_ptr<Component>>([](const SafeComponent<Text> &a_item) { return std::static_pointer_cast<Component>(a_item.self()); }));
-
-				return a_script;
-			}
 		protected:
 			virtual void detachImplementation() override;
 			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;

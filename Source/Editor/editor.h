@@ -36,7 +36,7 @@ public:
 
 	void returnFromBackground() {
 		managers.services.connect(&mouse);
-		managers.services.connect(&chaiScript);
+		managers.services.connect(&script);
 	}
 
 private:
@@ -69,7 +69,7 @@ private:
 	Managers& managers;
 
 	MV::TapDevice mouse;
-	chaiscript::ChaiScript chaiScript;
+	MV::Script script;
 
 	std::shared_ptr<MV::Scene::Text> fps;
 	std::shared_ptr<MV::Scene::Node> visor; //scene parent

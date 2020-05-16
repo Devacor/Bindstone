@@ -11,7 +11,6 @@
 
 
 #include "MV/Utility/scopeGuard.hpp"
-#include "chaiscript/chaiscript.hpp"
 #include "Game/NetworkLayer/gameServer.h"
 
 #include "MV/Utility/taskActions.hpp"
@@ -217,7 +216,7 @@ std::ostream& operator<<(std::ostream& os, const glm::mat4x4& a_matrix) {
 }
 
 int main(int, char *[]) {
-	Managers managers;
+	Managers managers({"", ""});
 	managers.timer.start();
 	/*
 	MV::TransformMatrix a1, b1, a2, b2, a3, b3;

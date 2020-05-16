@@ -14,26 +14,6 @@ BattleEffectNetworkState::BattleEffectNetworkState(GameInstance& a_gameInstance,
 	}
 }
 
-void BattleEffectNetworkState::hook(chaiscript::ChaiScript &a_script) {
-	a_script.add(chaiscript::user_type<BattleEffectNetworkState>(), "BattleEffectNetworkState");
-	a_script.add(chaiscript::constructor<BattleEffectNetworkState(GameInstance&, const std::string &, int64_t, const std::string &)>(), "BattleEffectNetworkState");
-	a_script.add(chaiscript::constructor<BattleEffectNetworkState(GameInstance&, const std::string &, int64_t)>(), "BattleEffectNetworkState");
-
-	a_script.add(chaiscript::fun(&BattleEffectNetworkState::dying), "dying");
-	a_script.add(chaiscript::fun(&BattleEffectNetworkState::position), "position");
-	a_script.add(chaiscript::fun(&BattleEffectNetworkState::buildingSlot), "buildingSlot");
-
-	a_script.add(chaiscript::fun(&BattleEffectNetworkState::creatureOwnerId), "creatureOwnerId");
-	a_script.add(chaiscript::fun(&BattleEffectNetworkState::targetCreatureId), "targetCreatureId");
-	a_script.add(chaiscript::fun(&BattleEffectNetworkState::targetPosition), "targetPosition");
-	a_script.add(chaiscript::fun(&BattleEffectNetworkState::targetType), "targetType");
-	a_script.add(chaiscript::fun(&BattleEffectNetworkState::duration), "duration");
-
-	a_script.add(chaiscript::fun([](BattleEffectNetworkState &a_self, const std::string &a_key) {
-		return a_self.variables[a_key];
-	}), "[]");
-}
-
 std::string BattleEffect::assetPath() const {
 	return "BattleEffects/" + MV::toUpperFirstChar(statTemplate.id) + "/" + (skin.empty() ? "Default" : skin) + "/unit.prefab";
 }
@@ -66,89 +46,6 @@ BattleEffect::BattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, GameIn
 
 void BattleEffect::initialize() {
 	Component::initialize();
-}
-
-chaiscript::ChaiScript& BattleEffect::hook(chaiscript::ChaiScript &a_script, GameInstance& /*gameInstance*/) {
-	a_script.add(chaiscript::user_type<TargetType>(), "TargetType");
-	a_script.add_global_const(chaiscript::const_var(TargetType::NONE), "TargetType_NONE");
-	a_script.add_global_const(chaiscript::const_var(TargetType::CREATURE), "TargetType_CREATURE");
-	a_script.add_global_const(chaiscript::const_var(TargetType::GROUND), "TargetType_GROUND");
-	a_script.add(chaiscript::fun([](TargetType &a_lhs, const TargetType &a_rhs) { return a_lhs = a_rhs; }), "=");
-	a_script.add(chaiscript::fun([](const TargetType &a_lhs, const TargetType &a_rhs) { return a_lhs == a_rhs; }), "==");
-	a_script.add(chaiscript::fun([](const TargetType &a_lhs, const TargetType &a_rhs) { return a_lhs != a_rhs; }), "!=");
-
-	BattleEffectNetworkState::hook(a_script);
-	BattleEffectData::hook(a_script);
-
-	a_script.add(chaiscript::user_type<BattleEffect>(), "BattleEffect");
-	a_script.add(chaiscript::base_class<Component, BattleEffect>());
-
-	MV::SignalRegister<CallbackSignature>::hook(a_script);
-	a_script.add(chaiscript::fun(&BattleEffect::onArrive), "onArrive");
-	a_script.add(chaiscript::fun(&BattleEffect::onFizzle), "onFizzle");
-
-	a_script.add(chaiscript::fun(&BattleEffect::sourceCreature), "sourceCreature");
-	a_script.add(chaiscript::fun(&BattleEffect::targetCreature), "targetCreature");
-
-	a_script.add(chaiscript::fun(&BattleEffect::ourElapsedTime), "ourElapsedTime");
-
-	a_script.add(chaiscript::fun([](BattleEffect &a_self) -> GameInstance& {return a_self.gameInstance; }), "game");
-
-	a_script.add(chaiscript::fun(&BattleEffect::alive), "alive");
-	
-	a_script.add(chaiscript::fun([](BattleEffect &a_self, const std::string &a_key) {
-		return a_self.localVariables[a_key];
-	}), "[]");
-
-	a_script.add(chaiscript::fun([&](BattleEffect &a_self) -> decltype(auto) {
-		return a_self.state->self();
-	}), "viewNetState");
-
-	a_script.add(chaiscript::fun([&](BattleEffect &a_self) -> decltype(auto) {
-		return a_self.state->modify();
-	}), "modifyNetState");
-
-	a_script.add(chaiscript::fun([&](BattleEffect &a_self) -> decltype(auto) {
-		return a_self.state->modify()->variables;
-	}), "setNetValue");
-
-	a_script.add(chaiscript::fun([&](BattleEffect &a_self) -> decltype(auto) {
-		return a_self.state->self()->variables;
-	}), "getNetValue");
-
-	a_script.add(chaiscript::fun([&](BattleEffect &a_self) {
-		return a_self.state->id();
-	}), "id");
-
-	a_script.add(chaiscript::fun([](BattleEffect &a_self) {
-		return a_self.statTemplate;
-	}), "stats");
-	a_script.add(chaiscript::fun(&BattleEffect::skin), "skin");
-
-	a_script.add(chaiscript::fun(&BattleEffect::assetPath), "assetPath");
-	a_script.add(chaiscript::fun([](BattleEffect &a_self) {
-		return &a_self.gameInstance;
-	}), "gameInstance");
-
-	a_script.add(chaiscript::fun([](std::shared_ptr<BattleEffect> &a_self) {
-		a_self.reset();
-	}), "reset");
-
-	a_script.add(chaiscript::fun([](std::shared_ptr<BattleEffect> &a_lhs, std::shared_ptr<BattleEffect> &a_rhs) {
-		return a_lhs.get() == a_rhs.get();
-	}), "==");
-	a_script.add(chaiscript::fun([](std::shared_ptr<BattleEffect> &a_lhs, std::shared_ptr<BattleEffect> &a_rhs) {
-		return a_lhs.get() != a_rhs.get();
-	}), "!=");
-	a_script.add(chaiscript::fun([]() {
-		return std::shared_ptr<BattleEffect>();
-	}), "nullEffect");
-
-	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<BattleEffect>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<BattleEffect> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
-
-	a_script.add(chaiscript::bootstrap::standard_library::vector_type<std::vector<std::shared_ptr<BattleEffect>>>("VectorBattleEffect"));
-
-	return a_script;
 }
 
 ServerBattleEffect::ServerBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::string &a_id, int64_t a_creatureId, const std::string &a_creatureBoneAttachment, GameInstance& a_gameInstance) :
@@ -197,18 +94,6 @@ void ServerBattleEffect::updateImplementation(double a_delta) {
 	}
 }
 
-chaiscript::ChaiScript& ServerBattleEffect::hook(chaiscript::ChaiScript &a_script, GameInstance& a_gameInstance) {
-	BattleEffect::hook(a_script, a_gameInstance);
-	a_script.add(chaiscript::user_type<ServerBattleEffect>(), "ServerBattleEffect");
-	a_script.add(chaiscript::base_class<BattleEffect, ServerBattleEffect>());
-
-	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ServerBattleEffect>, std::shared_ptr<ServerBattleEffect>>([](const MV::Scene::SafeComponent<ServerBattleEffect> &a_item) { return a_item.self(); }));
-	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ServerBattleEffect>, std::shared_ptr<BattleEffect>>([](const MV::Scene::SafeComponent<ServerBattleEffect> &a_item) { return std::static_pointer_cast<BattleEffect>(a_item.self()); }));
-	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ServerBattleEffect>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<ServerBattleEffect> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
-
-	return a_script;
-}
-
 
 ClientBattleEffect::ClientBattleEffect(const std::weak_ptr<MV::Scene::Node> &a_owner, const std::shared_ptr<MV::NetworkObject<BattleEffectNetworkState>> &a_state, GameInstance& a_gameInstance) :
 	BattleEffect (a_owner, a_gameInstance,
@@ -239,18 +124,6 @@ void ClientBattleEffect::initialize() {
 	statTemplate.script(gameInstance.script()).spawn(self);
 	
 	onNetworkSynchronize();
-}
-
-chaiscript::ChaiScript& ClientBattleEffect::hook(chaiscript::ChaiScript &a_script, GameInstance& a_gameInstance) {
-	BattleEffect::hook(a_script, a_gameInstance);
-	a_script.add(chaiscript::user_type<ClientCreature>(), "ClientBattleEffect");
-	a_script.add(chaiscript::base_class<BattleEffect, ClientBattleEffect>());
-
-	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ClientBattleEffect>, std::shared_ptr<ClientBattleEffect>>([](const MV::Scene::SafeComponent<ClientBattleEffect> &a_item) { return a_item.self(); }));
-	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ClientBattleEffect>, std::shared_ptr<BattleEffect>>([](const MV::Scene::SafeComponent<ClientBattleEffect> &a_item) { return std::static_pointer_cast<BattleEffect>(a_item.self()); }));
-	a_script.add(chaiscript::type_conversion<MV::Scene::SafeComponent<ClientBattleEffect>, std::shared_ptr<MV::Scene::Component>>([](const MV::Scene::SafeComponent<ClientBattleEffect> &a_item) { return std::static_pointer_cast<MV::Scene::Component>(a_item.self()); }));
-
-	return a_script;
 }
 
 void ClientBattleEffect::onNetworkSynchronize() {

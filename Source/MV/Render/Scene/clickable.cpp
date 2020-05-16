@@ -154,8 +154,6 @@ namespace MV {
 				}
 			} catch (const std::exception& e) {
 				std::cerr << "Clickable::acceptUpClick Exception [" << e.what() << "]" << std::endl;
-			} catch (chaiscript::Boxed_Value &bv) {
-				std::cerr << "Clickable::acceptUpClick Exception [" << chaiscript::boxed_cast<chaiscript::exception::eval_error&>(bv).what() << "]" << std::endl;
 			}
 		}
 

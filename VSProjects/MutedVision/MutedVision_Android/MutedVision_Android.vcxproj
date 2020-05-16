@@ -34,20 +34,6 @@
       <Platform>x86</Platform>
     </ProjectConfiguration>
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\..\..\External\VSProjects\External_Android\External_Android.vcxproj">
-      <Project>{62d1ae53-e46d-4cd1-91a9-1f1e3efcf064}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\..\SDL2\SDL2_Android.vcxproj">
-      <Project>{b7be417c-b6c5-4a69-a056-e0cb0c6a344c}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\..\SDL2_image\SDL2_image_Android.vcxproj">
-      <Project>{03a9401d-ceff-4f5e-a7b4-fc2a0d9f6c95}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\..\SDL2_ttf\SDL2_ttf_Android.vcxproj">
-      <Project>{8572235c-b335-40dd-ba5f-9954bedc4bfc}</Project>
-    </ProjectReference>
-  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{46B19B64-8CD7-424C-969E-2CDC234DA7A5}</ProjectGuid>
     <Keyword>Android</Keyword>
@@ -367,4 +353,65 @@
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
+  <ItemGroup>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Network\networkHooks.i">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Network\networkHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\Scene\buttonHook.inline">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\Scene\buttonHook.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\Scene\sceenHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\Scene\sceneHooks.cpp">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\Scene\sceneHooks.i">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\Scene\sceneHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Script\chaiscriptHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Script\engineHooks.i">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Script\engineHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Script\script.i">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Script\script.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Utility\utilityHooks.i">
+      <FileType>Document</FileType>
+    </ClCompile>
+    <ClCompile Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Utility\utilityHooks.ixx">
+      <FileType>Document</FileType>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\..\Source\MV\ArtificialIntelligence\artificialIntelligenceHooks.ixx">
+      <FileType>Document</FileType>
+    </None>
+    <None Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\ArtificialIntelligence\artificialIntelligenceHooks.i">
+      <FileType>Document</FileType>
+    </None>
+    <None Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\renderHooks.i">
+      <FileType>Document</FileType>
+    </None>
+    <None Update="C:\git\Bindstone\VSProjects\MutedVision\..\..\Source\MV\Render\renderHooks.ixx">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
 </Project>

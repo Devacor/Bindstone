@@ -4,9 +4,9 @@
 #include <string>
 #include <tuple>
 #include <variant>
+#include <map>
 #include "cereal/cereal.hpp"
 #include "MV/Utility/exactType.hpp"
-#include "chaiscript/chaiscript.hpp"
 
 namespace MV {
 	//I needed more debuggability and std::variant was throwing a lot within Cereal. This is a wrapper around a variant which plays better in scripts.
@@ -65,8 +65,6 @@ namespace MV {
 			value = a_rhs.value;
 			return *this;
 		}
-
-		static void hook(chaiscript::ChaiScript& a_script);
 
 		bool operator<(const DynamicVariable &a_rhs) const {
 			return value < a_rhs.value;
@@ -274,8 +272,6 @@ namespace MV {
 			}
 			return a_archive;
 		}
-
-		static void hook(chaiscript::ChaiScript& a_script);
 	private:
 		static inline std::map<size_t, bool> scriptHookedUp = std::map<size_t, bool>();
 		bool modified = true;
@@ -329,39 +325,6 @@ namespace MV {
 
 	template <typename T>
 	bool operator>(const DeltaVariable<T>& a_rhs, const T& a_lhs) { return a_rhs.view() > a_lhs; }
-
-	template<typename T>
-	void DeltaVariable<T>::hook(chaiscript::ChaiScript& a_script) {
-		if (!scriptHookedUp[reinterpret_cast<size_t>(&a_script)]) {
-			a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self, const T &a_value) -> decltype(auto) {
-				return a_self = a_value;
-			}), "=");
-			a_script.add(chaiscript::fun([&](T& a_self, const DeltaVariable<T> &a_value) -> decltype(auto) {
-				return a_self = a_value.view();
-			}), "=");
-
-			a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self, const T& a_value) -> decltype(auto) {
-				return a_self == a_value;
-			}), "==");
-			a_script.add(chaiscript::fun([&](T& a_self, const DeltaVariable<T>& a_value) -> decltype(auto) {
-				return a_self == a_value.view();
-			}), "==");
-
-			a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self, const T& a_value) -> decltype(auto) {
-				return a_self != a_value;
-			}), "!=");
-			a_script.add(chaiscript::fun([&](T& a_self, const DeltaVariable<T>& a_value) -> decltype(auto) {
-				return a_self != a_value.view();
-			}), "!=");
-
-			a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self) -> decltype(auto) {
-				return a_self.view();
-			}), "view");
-			a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self) -> decltype(auto) {
-				return a_self.modify();
-			}), "modify");
-		}
-	}
 }
 
 #endif

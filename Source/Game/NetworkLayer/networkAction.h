@@ -39,11 +39,6 @@ public:
 	std::string toNetworkString() {
 		return MV::toBinaryStringCast<NetworkAction>(shared_from_this());
 	}
-
-	static void hook(chaiscript::ChaiScript& a_script) {
-		a_script.add(chaiscript::user_type<NetworkAction>(), "NetworkAction");
-		a_script.add(chaiscript::fun(&NetworkAction::toNetworkString), "toNetworkString");
-	}
 };
 
 template <typename T, typename ... Args>

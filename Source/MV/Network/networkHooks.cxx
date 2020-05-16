@@ -1,8 +1,8 @@
 #include "dynamicVariable.h"
-#include "MV/Utility/exactType.hpp"
+#include "network.h"
 
 namespace MV {
-	void DynamicVariable::hook(chaiscript::ChaiScript &a_script) {
+	Script::Registrar<DynamicVariable> _hookDynamicVariable([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
 		a_script.add(chaiscript::user_type<DynamicVariable>(), "DynamicVariable");
 		a_script.add(chaiscript::constructor<DynamicVariable()>(), "DynamicVariable");
 		a_script.add(chaiscript::constructor<DynamicVariable(bool)>(), "DynamicVariable");
@@ -126,5 +126,54 @@ namespace MV {
 
 		a_script.add(chaiscript::bootstrap::standard_library::map_type<std::map<std::string, DynamicVariable>>("DynamicVariableMap"));
 		a_script.add(chaiscript::bootstrap::standard_library::vector_type<std::vector<DynamicVariable>>("DynamicVariableVector"));
+	});
+
+
+	template<typename T>
+	void hookDeltaVariable(chaiscript::ChaiScript& a_script) {
+		a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self, const T &a_value) -> decltype(auto) {
+			return a_self = a_value;
+		}), "=");
+		a_script.add(chaiscript::fun([&](T& a_self, const DeltaVariable<T> &a_value) -> decltype(auto) {
+			return a_self = a_value.view();
+		}), "=");
+
+		a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self, const T& a_value) -> decltype(auto) {
+			return a_self == a_value;
+		}), "==");
+		a_script.add(chaiscript::fun([&](T& a_self, const DeltaVariable<T>& a_value) -> decltype(auto) {
+			return a_self == a_value.view();
+		}), "==");
+
+		a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self, const T& a_value) -> decltype(auto) {
+			return a_self != a_value;
+		}), "!=");
+		a_script.add(chaiscript::fun([&](T& a_self, const DeltaVariable<T>& a_value) -> decltype(auto) {
+			return a_self != a_value.view();
+		}), "!=");
+
+		a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self) -> decltype(auto) {
+			return a_self.view();
+		}), "view");
+		a_script.add(chaiscript::fun([&](DeltaVariable<T>& a_self) -> decltype(auto) {
+			return a_self.modify();
+		}), "modify");
 	}
+
+	Script::Registrar<DeltaVariable<int32_t>> _hookDeltaVariable([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
+		hookDeltaVariable<int32_t>(a_script);
+		hookDeltaVariable<std::string>(a_script);
+		hookDeltaVariable<MV::Point<MV::PointPrecision>>(a_script);
+		hookDeltaVariable<bool>(a_script);
+		hookDeltaVariable<double>(a_script);
+	});
+
+	Script::Registrar<Client> _hookClient([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
+		a_script.add(chaiscript::user_type<Client>(), "Client");
+
+		a_script.add(chaiscript::fun(&Client::send), "send");
+		a_script.add(chaiscript::fun(&Client::connected), "connected");
+		a_script.add(chaiscript::fun([](Client& a_self) { a_self.disconnect(); }), "disconnect");
+		a_script.add(chaiscript::fun([](Client& a_self) { a_self.reconnect(); }), "reconnect");
+	});
 }

@@ -8,8 +8,6 @@
 #include "cereal/cereal.hpp"
 #include "cereal/access.hpp"
 
-#include "MV/Utility/chaiscriptUtility.h"
-
 namespace MV {
 
 	typedef float PointPrecision;

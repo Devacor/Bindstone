@@ -40,7 +40,7 @@ GameInstance::GameInstance(const std::shared_ptr<MV::Scene::Node> &a_root, GameD
 	ourMouse(a_mouse),
 	gameData(a_gameData),
 	timeStep(a_timeStep),
-	scriptEngine(MV::chaiscript_module_paths(), MV::chaiscript_use_paths(), [](const std::string& a_file) {return MV::fileContents(a_file, true); }, chaiscript::default_options()) {
+	scriptEngine(a_gameData.managers().services) {
 }
 
 void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer, const std::shared_ptr<InGamePlayer> &a_rightPlayer) {
@@ -70,8 +70,6 @@ void GameInstance::initialize(const std::shared_ptr<InGamePlayer> &a_leftPlayer,
 	zoomSignal = ourMouse.onPinchZoom.connect([&](MV::Point<int> a_point, float a_zoomAmount, float a_rotateAmount) {
 		handleScroll(a_zoomAmount * 22.5f, a_point);
 	});
-
-	hook();
 
 	left->initialize();
 	right->initialize();
@@ -103,26 +101,6 @@ void GameInstance::beginMapDrag() {
 			});
 		}, []() {}, "MapDrag"));
 	}
-}
-
-void GameInstance::hook() {
-	bindstoneScriptHook(scriptEngine, ourMouse, gameData.managers().pool);
-
-	gameData.managers().messages.hook(scriptEngine);
-
-	Building::hook(scriptEngine, *this);
-
-	scriptEngine.add(chaiscript::user_type<GameInstance>(), "GameInstance");
-
-	scriptEngine.add(chaiscript::fun(&GameInstance::creature), "creature");
-	scriptEngine.add(chaiscript::fun(&GameInstance::spawnCreature), "spawnCreature");
-}
-
-void ClientGameInstance::hook() {
-	GameInstance::hook();
-
-	ClientCreature::hook(scriptEngine, *this);
-	ClientBattleEffect::hook(scriptEngine, *this);
 }
 
 void GameInstance::fixedUpdate(double a_dt) {
@@ -249,22 +227,6 @@ bool ClientGameInstance::canUpgradeBuildingFor(const std::shared_ptr<InGamePlaye
 }
 
 #ifdef BINDSTONE_SERVER
-void ServerGameInstance::hook() {
-	GameInstance::hook();
-
-	ServerCreature::hook(scriptEngine, *this);
-	ServerBattleEffect::hook(scriptEngine, *this);
-
-	scriptEngine.add(chaiscript::fun([&](std::shared_ptr<BattleEffectNetworkState> a_effect) {
-		auto networkBattleEffect = networkPool().spawn(a_effect);
-
-		auto recentlyCreatedBattleEffect = gameObjectContainer()->make("E_" + std::to_string(networkBattleEffect->id()));
-		recentlyCreatedBattleEffect->position(networkBattleEffect->self()->position);
-
-		return recentlyCreatedBattleEffect->attach<ServerBattleEffect>(networkBattleEffect, *this);
-		}), "spawnOnNetwork");
-}
-
 ServerGameInstance::ServerGameInstance(GameServer& a_game) :
 	GameInstance(a_game.root(), a_game.data(), a_game.mouse(), 1.0f / 10.0f),
 	gameServer(a_game){

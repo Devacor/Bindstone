@@ -9,28 +9,6 @@ namespace MV {
 		initialize();
 	}
 
-	chaiscript::ChaiScript& Interface::hook(chaiscript::ChaiScript &a_script) {
-		a_script.add(chaiscript::user_type<Interface>(), "MV/Interface");
-
-		a_script.add(chaiscript::fun(&Interface::show), "show");
-		a_script.add(chaiscript::fun(&Interface::hide), "hide");
-		a_script.add(chaiscript::fun(&Interface::visible), "visible");
-
-		a_script.add(chaiscript::fun([](Interface& a_self) -> auto& {return a_self.manager;}), "manager");
-
-		a_script.add(chaiscript::fun(&Interface::node), "root");
-		a_script.add(chaiscript::fun(&Interface::scriptInitialize), "initialize");
-		a_script.add(chaiscript::fun(&Interface::scriptShow), "onShow");
-		a_script.add(chaiscript::fun(&Interface::scriptHide), "onHide");
-		a_script.add(chaiscript::fun(&Interface::scriptUpdate), "update");
-		a_script.add(chaiscript::fun(&Interface::pageId), "id");
-
-		a_script.add(chaiscript::fun(&Interface::focus), "focus");
-		a_script.add(chaiscript::fun(&Interface::removeFocus), "removeFocus");
-
-		return a_script;
-	}
-
 	void Interface::show() {
 		if (!node->active()) {
 			node->active(true);
@@ -81,20 +59,14 @@ namespace MV {
 			manager.root()->add(node);
 			node->active(false);
 
-			scriptExceptionWrapper("InterfaceManager::initialize", [&] {
-				scriptFileEval("Interface/" + pageId + "/initialize.script", manager.script(), {
-					{ "self", chaiscript::Boxed_Value(this) }
-				});
-			});
+			manager.script().fileEval("InterfaceManager::initialize", "Interface/" + pageId + "/initialize.script", { { "self", chaiscript::Boxed_Value(this) } });
 			if (scriptInitialize) {
-				scriptExceptionWrapper("InterfaceManager::initialize", [&] {
-					scriptInitialize(*this);
-				});
+				scriptInitialize(*this);
 			}
 		}
 	}
 
-	InterfaceManager::InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, TapDevice& a_mouse, Managers& a_managers, chaiscript::ChaiScript &a_script, std::string a_scriptName) :
+	InterfaceManager::InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, TapDevice& a_mouse, Managers& a_managers, MV::Script &a_script, std::string a_scriptName) :
 		ourMouse(a_mouse),
 		ourManagers(a_managers),
 		ourScript(a_script),
@@ -102,36 +74,11 @@ namespace MV {
 	}
 
 	InterfaceManager& InterfaceManager::initialize() {
-		scriptExceptionWrapper("InterfaceManager::initialize", [&]{
-			scriptFileEval(node->id(), ourScript, {
-				{ "self", chaiscript::Boxed_Value(this) }
-			});
-		});
+		ourScript.fileEval("InterfaceManager::initialize", node->id(), { { "self", chaiscript::Boxed_Value(this) } });
 		if (scriptInitialize) {
-			scriptExceptionWrapper("InterfaceManager::initialize", [&] {
-				scriptInitialize(*this);
-			}); 
+			scriptInitialize(*this); 
 		}
 		return *this;
-	}
-
-	chaiscript::ChaiScript& InterfaceManager::hook(chaiscript::ChaiScript &a_script) {
-		Interface::hook(a_script);
-
-		a_script.add(chaiscript::user_type<InterfaceManager>(), "MV/InterfaceManager");
-
-		//a_script.add(chaiscript::fun([](Interface& a_self) {  }), "make");
-		a_script.add(chaiscript::fun(&InterfaceManager::make), "make");
-		a_script.add(chaiscript::fun(&InterfaceManager::mouse), "mouse");
-		a_script.add(chaiscript::fun(&InterfaceManager::script), "script");
-
-		a_script.add(chaiscript::fun(&InterfaceManager::page), "page");
-
-		a_script.add(chaiscript::fun(&InterfaceManager::node), "root");
-
-		a_script.add(chaiscript::fun(&InterfaceManager::scriptInitialize), "initialize");
-
-		return a_script;
 	}
 
 	void InterfaceManager::setActiveText(Interface* a_current) {

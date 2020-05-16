@@ -265,8 +265,6 @@ struct InGamePlayer {
 	bool operator==(const InGamePlayer& a_rhs) const {
 		return id == a_rhs.id;
 	}
-
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 };
 
 inline bool operator==(const InGamePlayer& a_lhs, const InGamePlayer& a_rhs) {

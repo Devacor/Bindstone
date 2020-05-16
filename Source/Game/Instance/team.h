@@ -19,10 +19,11 @@ class Game;
 struct InGamePlayer;
 struct LocalPlayer;
 
-namespace chaiscript { class ChaiScript; }
+namespace MV { class Script; }
 
 class Team {
 	friend GameInstance;
+	friend MV::Script;
 public:
 	Team(std::shared_ptr<InGamePlayer> a_player, TeamSide a_side, GameInstance& a_game);
 	void initialize();
@@ -31,8 +32,6 @@ public:
 	MV::Point<> enemyWell() const { return enemyWellPosition; }
 
 	MV::Scale scale() const { return ourSide == TeamSide::LEFT ? MV::Scale(1, 1) : MV::Scale(-1, 1); }
-
-	static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 
 	std::vector<std::shared_ptr<ServerCreature>> creaturesInRange(const MV::Point<> &a_location, float a_radius);
 

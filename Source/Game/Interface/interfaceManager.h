@@ -3,20 +3,20 @@
 
 #include "MV/Render/package.h"
 #include "Game/state.h"
-#include "MV/Utility/chaiscriptUtility.h"
+#include "MV/Script/script.h"
 #include "MV/Interface/tapDevice.h"
 
 namespace MV {
 	class InterfaceManager;
+	class Script;
 
 	class Interface {
+		friend MV::Script;
 	public:
 		Interface() = delete;
 		Interface(const Interface&) = delete;
 		Interface& operator=(const Interface&) = delete;
 		Interface(const std::string &a_pageId, InterfaceManager& a_manager);
-
-		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 
 		void show();
 		void hide();
@@ -63,8 +63,9 @@ namespace MV {
 	};
 
 	class InterfaceManager {
+		friend MV::Script;
 	public:
-		InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, TapDevice& a_mouse, Managers& a_managers, chaiscript::ChaiScript &a_script, std::string a_scriptName);
+		InterfaceManager(std::shared_ptr<MV::Scene::Node> a_root, TapDevice& a_mouse, Managers& a_managers, MV::Script &a_script, std::string a_scriptName);
 		InterfaceManager& initialize();
 		TapDevice& mouse() {
 			return ourMouse;
@@ -79,7 +80,7 @@ namespace MV {
 			return ourManagers;
 		}
 
-		chaiscript::ChaiScript& script() {
+		MV::Script& script() {
 			return ourScript;
 		}
 
@@ -90,8 +91,6 @@ namespace MV {
 				}
 			}
 		}
-
-		static chaiscript::ChaiScript& hook(chaiscript::ChaiScript &a_script);
 
 		std::shared_ptr<MV::Scene::Node> root() {
 			return node;
@@ -121,7 +120,7 @@ namespace MV {
 
 		TapDevice& ourMouse;
 		Managers& ourManagers;
-		chaiscript::ChaiScript& ourScript;
+		MV::Script& ourScript;
 
 		std::shared_ptr<MV::Scene::Node> node;
 

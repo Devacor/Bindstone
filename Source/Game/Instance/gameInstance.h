@@ -14,6 +14,7 @@
 class Missile;
 class GameInstance {
 	friend Team;
+	friend MV::Script;
 
 	GameInstance(const GameInstance &) = delete;
 	GameInstance& operator=(const GameInstance &) = delete;
@@ -69,7 +70,7 @@ public:
 		return pathMap;
 	}
 
-	chaiscript::ChaiScript& script() {
+	MV::Script& script() {
 		return scriptEngine;
 	}
 
@@ -136,8 +137,6 @@ protected:
 	void rawScaleAroundScreenPoint(float a_amount, const MV::Point<int>& a_position);
 	void easeToBoundsIfExceeded(const MV::Point<int>& a_pointerCenter);
 
-	virtual void hook();
-
 	std::vector<std::shared_ptr<Building>> buildings;
 	std::map<int64_t, std::shared_ptr<ServerCreature>> creatures;
 
@@ -148,7 +147,7 @@ protected:
 
 	MV::Scene::SafeComponent<MV::Scene::PathMap> pathMap;
 
-	chaiscript::ChaiScript scriptEngine;
+	MV::Script scriptEngine;
 
 	MV::TapDevice::SignalType activeDrag;
 
@@ -174,6 +173,7 @@ protected:
 };
 
 class ClientGameInstance : public GameInstance {
+	friend MV::Script;
 	ClientGameInstance(Game& a_game);
 public:
 	static std::unique_ptr<ClientGameInstance> make(const std::shared_ptr<InGamePlayer> &a_leftPlayer, const std::shared_ptr<InGamePlayer> &a_rightPlayer, const std::vector<BindstoneNetworkObjectPool::VariantType>& a_poolObjects, Game& a_game) {
@@ -189,9 +189,6 @@ public:
 
 	bool canUpgradeBuildingFor(const std::shared_ptr<InGamePlayer> &a_player) const override;
 
-protected:
-	void hook() override;
-
 private:
 	Game &game;
 };
@@ -199,6 +196,7 @@ private:
 #ifdef BINDSTONE_SERVER
 class GameServer;
 class ServerGameInstance : public GameInstance {
+	friend MV::Script;
 	ServerGameInstance(GameServer& a_game);
 public:
 	static std::unique_ptr<ServerGameInstance> make(const std::shared_ptr<InGamePlayer> &a_leftPlayer, const std::shared_ptr<InGamePlayer> &a_rightPlayer, GameServer& a_game) {
@@ -230,7 +228,6 @@ public:
 
 protected:
 	void updateImplementation(double dt) override;
-	void hook() override;
 
 private:
 	GameServer &gameServer;

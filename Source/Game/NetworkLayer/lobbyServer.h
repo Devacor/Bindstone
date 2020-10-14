@@ -18,7 +18,7 @@
 #include <pqxx/pqxx>
 #include <LINQ/boolinq.hpp>
 
-#include "MV/Utility/cerealUtility.h"
+#include "MV/Serialization/serialize.h"
 
 class ServerUserAction;
 class LobbyServer;

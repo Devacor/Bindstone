@@ -6,8 +6,11 @@
 #endif
 
 #include <vector>
+#include <map>
 #include <string>
 #include <sstream>
+
+#include "MV/Utility/stringUtility.h"
 
 namespace MV {
 
@@ -244,6 +247,39 @@ namespace MV {
 		/// If set to true, error messages in place of former throw-s will be shown
 		/// using printf-s.
 		void setPrintErrors(bool in);
+		
+		static std::string makeQueryString(const std::map<std::string, std::string> &a_postParams, const std::string & a_prefix="?"){
+			std::string result;
+			std::string separator = a_prefix;
+			for(auto&& kv : a_postParams){
+				result+=separator;
+				Url::encode(kv.first, "", result);
+				result+="=";
+				Url::encode(kv.second, "", result);
+				separator = '&';
+			}
+			return result;
+		}
+
+		static std::map<std::string, std::string> parseQueryString(const std::string& a_postParams) {
+			if (a_postParams.empty()) { return {}; }
+			auto pairs = MV::explode(a_postParams[0] == '?' ? a_postParams.substr(1) : a_postParams, [](char c) {
+				return c == '&';
+			});
+
+			std::map<std::string, std::string> results;
+			for (auto&& p : pairs) {
+				MV::replaceAll(p, "+", " ");
+				auto separator = p.find("=");
+				if (separator != std::string::npos) {
+					std::string key, value;
+					Url::decode(p.substr(0, separator), key, 0);
+					Url::decode(separator + 1 < p.size() ? p.substr(separator + 1) : "", value, 0);
+					results[key] = value;
+				}
+			}
+			return results;
+		}
 
 	protected:
 

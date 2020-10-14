@@ -6,7 +6,7 @@
 #endif
 
 #include "Game/player.h"
-#include "MV/Utility/cerealUtility.h"
+#include "MV/Serialization/serialize.h"
 
 CEREAL_REGISTER_TYPE(CreatePlayer);
 CEREAL_REGISTER_TYPE(LoginRequest);

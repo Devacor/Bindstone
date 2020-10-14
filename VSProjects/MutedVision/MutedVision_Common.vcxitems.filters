@@ -31,6 +31,9 @@
     <Filter Include="MV\Script">
       <UniqueIdentifier>{2cb5aa89-9fd4-4faa-9e46-a7a43db39c3e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="MV\Serialization">
+      <UniqueIdentifier>{b3ddf901-4fda-4459-9297-cf276e8880f5}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.cpp">
@@ -147,6 +150,12 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\parallax.cpp">
       <Filter>MV\Render\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Serialization\serialize.cpp">
+      <Filter>MV\Serialization</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\webServer.cpp">
+      <Filter>MV\Network</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -273,9 +282,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.h">
       <Filter>MV\Utility</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\cerealUtility.h">
-      <Filter>MV\Utility</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\exactType.hpp">
       <Filter>MV\Utility</Filter>
     </ClInclude>
@@ -348,6 +354,15 @@
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Script\script.h">
       <Filter>MV\Script</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Serialization\makeNvp.h">
+      <Filter>MV\Serialization</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Serialization\serialize.h">
+      <Filter>MV\Serialization</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\webServer.h">
+      <Filter>MV\Network</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

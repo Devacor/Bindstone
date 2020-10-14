@@ -21,6 +21,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\network.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\url.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\webServer.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Physics\collider.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\boxaabb.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\formattedText.cpp" />
@@ -46,6 +47,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\sharedTextures.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\texturePacker.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\textures.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Serialization\serialize.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\generalUtility.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\log.cpp" />
@@ -68,6 +70,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkObject.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\package.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\url.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\webServer.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Physics\collider.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Physics\package.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\precompiled.h" />
@@ -100,8 +103,9 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\texturePacker.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\textures.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Script\script.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Serialization\makeNvp.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Serialization\serialize.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\asioThreadPool.h" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\cerealUtility.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\exactType.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\generalUtility.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\localization.hpp" />

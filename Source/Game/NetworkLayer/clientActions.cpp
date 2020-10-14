@@ -1,7 +1,7 @@
 #include "clientActions.h"
 #include "Game/game.h"
 #include "Game/player.h"
-#include "MV/Utility/cerealUtility.h"
+#include "MV/Serialization/serialize.h"
 
 CEREAL_REGISTER_TYPE(MatchedResponse);
 CEREAL_REGISTER_TYPE(ServerDetails);

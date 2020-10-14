@@ -1,6 +1,6 @@
 #include "emitter.h"
 
-#include "MV/Utility/cerealUtility.h"
+#include "MV/Serialization/serialize.h"
 #include "MV/Utility/generalUtility.h"
 #include "cereal/archives/json.hpp"
 #include "cereal/archives/portable_binary.hpp"

@@ -455,7 +455,7 @@ MV::Script::Registrar<ServerGameInstance> _hookServerGameInstance([](chaiscript:
 			auto recentlyCreatedBattleEffect = serverGame->gameObjectContainer()->make("E_" + std::to_string(networkBattleEffect->id()));
 			recentlyCreatedBattleEffect->position(networkBattleEffect->self()->position);
 
-			return recentlyCreatedBattleEffect->attach<ServerBattleEffect>(networkBattleEffect, *this);
+			return recentlyCreatedBattleEffect->attach<ServerBattleEffect>(networkBattleEffect, *serverGame);
 		}), "spawnOnNetwork");
 	}
 });

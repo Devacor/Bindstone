@@ -13,7 +13,7 @@
 #include "boxaabb.h"
 
 #include "MV/Utility/signal.hpp"
-#include "MV/Utility/cerealUtility.h"
+#include "MV/Serialization/serialize.h"
 
 namespace MV {
 	class SharedTextures;

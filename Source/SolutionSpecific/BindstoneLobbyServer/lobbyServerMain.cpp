@@ -2,12 +2,14 @@
 #include "MV/Utility/threadPool.hpp"
 
 #include "MV/ArtificialIntelligence/pathfinding.h"
-#include "MV/Utility/cerealUtility.h"
+#include "MV/Serialization/serialize.h"
 //#include "vld.h"
 
 #include "Game/NetworkLayer/lobbyServer.h"
 
 #include "MV/Utility/scopeGuard.hpp"
+
+#include "webServer.h"
 
 struct TestObject {
 	TestObject() { std::cout << "\nConstructor\n"; }
@@ -26,72 +28,50 @@ TestObject::TestObject(TestObject&) {
 
 #include <fstream>
 
+class TestWebConnection : public MV::WebConnectionStateBase {
+public:
+	using WebConnectionStateBase::WebConnectionStateBase;
+
+	void processRequest(const MV::HttpRequest& a_recieve) override {
+		std::ostringstream output;
+		auto postParams = a_recieve.parsePostParameters();
+		output << "<html><body>Hello World!<br/>I see your name is " << postParams["name"] << " and you enjoy " << postParams["food"] << "!</body></html>";
+		connection()->send(MV::HttpResponse::make200(output.str()));
+	}
+};
+
 int main(int, char *[]) {
-	auto localSaveString = CreatePlayer::makeSaveString();
-	auto serverSaveString = CreatePlayer::makeServerSaveString();
+	//auto result = MV::DownloadRequest::make({ MV::Url{"https://ptsv2.com/t/snapjaw" }, { {"param1", "value1"}, {"param2", "value2"} } });
+	auto result = MV::DownloadRequest::make({ MV::Url{"http://www.snapjaw.net/test.php?g1=v1" }, {{"p1", "v1"}, {"p2", "v2"}} });
 
-	auto testDeserialize = MV::fromJsonInline<LocalPlayer>(R"DONE({
-    "flair": "",
-    "avatar": "",
-    "wallet": {
-        "values": [
-            0,
-            500,
-            150
-        ],
-        "cereal_class_version": 0
-    },
-    "loadouts": [
-        {
-            "key": "Default",
-            "value": {
-                "skins": [
-                    "",
-                    "",
-                    "",
-                    "",
-                    "",
-                    "",
-                    "",
-                    ""
-                ],
-                "buildings": [
-                    "life",
-                    "life",
-                    "life",
-                    "life",
-                    "life",
-                    "life",
-                    "life",
-                    "life"
-                ],
-                "cereal_class_version": 0
-            }
-        }
-    ],
-    "friendlyRating": [],
-    "selectedLoadout": "",
-    "cereal_class_version": 2,
-	"email": "test@somewhere.com",
-	"id": 4,
-	"handle": "test"
-})DONE");
+	//std::cout << "Response:[" <<result->response() << "]\n";
 
-	{
-		std::ofstream o("ServerSaveString.txt");
-		o << serverSaveString;
-		std::cout << "[\n" << serverSaveString << "]\n";
+
+	try {
+		auto webServer = std::make_shared<MV::WebServer>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 80),
+			[](const std::shared_ptr<MV::WebConnection>& a_connection) {
+				return std::make_unique<TestWebConnection>(a_connection);
+			});
+
+		//auto result = MV::DownloadRequest::make({ MV::Url{"http://localhost:80/test.php?g1=v1" }, {{"p1", "v1"}, {"p2", "v2"}} });
+
+		//std::cout << result->response();
+
+		bool done = false;
+		while (!done) {
+			std::this_thread::yield();
+		}
+	}
+	catch (std::exception& e) {
+		MV::error("Exception Toasted the Server: ", e.what());
 	}
 
-	{
-		std::ofstream o("LocalSaveString.txt");
-		o << localSaveString;
-		std::cout << "[\n" << localSaveString << "]\n";
-	}
+	return 0;
 
-	Managers managers;
+    Managers managers({});
 	managers.timer.start();
 	bool done = false;
+
     try {
         auto server = std::make_shared<LobbyServer>(managers);
         std::cout << "Made server\n";

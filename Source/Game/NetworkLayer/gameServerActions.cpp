@@ -7,7 +7,7 @@
 #endif
 
 #include "Game/player.h"
-#include "MV/Utility/cerealUtility.h"
+#include "MV/Serialization/serialize.h"
 #include "Game/game.h"
 
 CEREAL_REGISTER_TYPE(RequestFullGameState);

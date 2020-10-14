@@ -103,6 +103,7 @@ namespace MV {
 	std::wstring to_wide(const std::string& s);
 
 	std::istream& getline_platform_agnostic(std::istream& is, std::string& t);
+	std::istream& getline_platform_agnostic(std::istream& is, std::string& t, size_t& a_maxAmount);
 }
 
 #endif

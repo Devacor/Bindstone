@@ -12,7 +12,7 @@
 
 #include "texturePacker.h"
 
-#include "MV/Utility/cerealUtility.h"
+#include "MV/Serialization/serialize.h"
 
 namespace MV {
 	class SharedTextures {

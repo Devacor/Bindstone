@@ -166,31 +166,6 @@
   </ItemGroup>
   <ItemGroup>
     <JavaCompile Include="app\src\main\java\com\Bindstone\BindstoneActivity.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\wolfcrypt\ECC.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\wolfcrypt\EccKey.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\wolfcrypt\RSA.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSL.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLContext.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLDecryptVerifyCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLEccSharedSecretCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLEccSignCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLEccVerifyCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLException.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLGenCookieCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLIORecvCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLIOSendCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLJNIException.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLLoggingCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLMacEncryptCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLMissingCRLCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLPskClientCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLPskServerCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLRsaDecCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLRsaEncCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLRsaSignCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLRsaVerifyCallback.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLSession.java" />
-    <JavaCompile Include="app\src\main\java\com\wolfssl\WolfSSLVerifyCallback.java" />
     <JavaCompile Include="app\src\main\java\org\libsdl\app\HIDDevice.java" />
     <JavaCompile Include="app\src\main\java\org\libsdl\app\HIDDeviceBLESteamController.java" />
     <JavaCompile Include="app\src\main\java\org\libsdl\app\HIDDeviceManager.java" />
@@ -233,7 +208,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\External\VSProjects\External_Android\External_Android.vcxproj" />
-    <ProjectReference Include="..\..\..\External\VSProjects\WolfSSL_Android\WolfSSL_Android.vcxproj" />
     <ProjectReference Include="..\..\MutedVision\MutedVision_Android\MutedVision_Android.vcxproj" />
     <ProjectReference Include="..\..\SDL2\SDL2_Android.vcxproj" />
     <ProjectReference Include="..\..\SDL2_image\SDL2_image_Android.vcxproj" />

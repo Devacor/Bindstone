@@ -1,8 +1,6 @@
 #ifndef _MV_EMAIL_H_
 #define _MV_EMAIL_H_
 
-#define OPENSSL_NO_SSL2
-
 #include <iostream>
 #include <string>
 #include <memory>

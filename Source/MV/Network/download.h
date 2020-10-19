@@ -22,20 +22,17 @@
 #include <wincrypt.h>
 #include <tchar.h>
 
-inline void add_root_certs(boost::asio::ssl::context& ctx)
-{
+inline void add_root_certs(boost::asio::ssl::context& ctx) {
 	HCERTSTORE hStore = CertOpenSystemStore(0, _T("ROOT"));
-	if (hStore == NULL) {
+	if (!hStore) {
 		return;
 	}
 
 	X509_STORE* store = X509_STORE_new();
 	PCCERT_CONTEXT pContext = NULL;
 	while ((pContext = CertEnumCertificatesInStore(hStore, pContext)) != NULL) {
-		X509* x509 = d2i_X509(NULL,
-			(const unsigned char**)&pContext->pbCertEncoded,
-			pContext->cbCertEncoded);
-		if (x509 != NULL) {
+		X509* x509 = d2i_X509(NULL, (const unsigned char**)&pContext->pbCertEncoded, pContext->cbCertEncoded);
+		if (x509) {
 			X509_STORE_add_cert(store, x509);
 			X509_free(x509);
 		}
@@ -185,6 +182,10 @@ namespace MV {
 			return result;
 		}
 
+		static std::shared_ptr<DownloadRequest> make(const MV::Url& a_url) {
+			return make(HttpRequest{ a_url });
+		}
+
 		//onComplete is called on success or error at the end of the download.
 		//onProgress(totalBytes, percentBytesDownloaded) is called after each chunk arrives.
 		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<boost::asio::io_context>& a_ioService, const HttpRequest& a_target, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void(size_t, float)> a_onProgress = {}, bool a_delayStart = false) {
@@ -196,6 +197,10 @@ namespace MV {
 				result->start();
 			}
 			return result;
+		}
+
+		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<boost::asio::io_context>& a_ioService, const MV::Url& a_url, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void(size_t, float)> a_onProgress = {}, bool a_delayStart = false) {
+			return make(a_ioService, HttpRequest{ a_url }, a_onComplete, a_onProgress, a_delayStart);
 		}
 		
 		bool success() const {
@@ -354,9 +359,9 @@ namespace MV {
 			return ioService;
 		}
 		
-		std::shared_ptr<DownloadRequest> make(const MV::Url& a_url, std::function<void (std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void (size_t, float)> a_onProgress = {}) {
+		std::shared_ptr<DownloadRequest> make(const HttpRequest& a_target, std::function<void (std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void (size_t, float)> a_onProgress = {}) {
 			auto self = shared_from_this();
-			auto newRequest = DownloadRequest::make(ioService, a_url, [this, self, a_onComplete](std::shared_ptr<DownloadRequest> a_requestSelf){
+			auto newRequest = DownloadRequest::make(ioService, a_target, [this, self, a_onComplete](std::shared_ptr<DownloadRequest> a_requestSelf){
 				{
 					std::scoped_lock<std::mutex> lock(activeRequestsMutex);
 					activeRequests.erase(a_requestSelf);
@@ -372,6 +377,10 @@ namespace MV {
 			newRequest->start();
 			
 			return newRequest;
+		}
+
+		std::shared_ptr<DownloadRequest> make(const MV::Url& a_url, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void(size_t, float)> a_onProgress = {}) {
+			return make(HttpRequest{ a_url }, a_onComplete, a_onProgress);
 		}
 		
 		void cancelAll(){

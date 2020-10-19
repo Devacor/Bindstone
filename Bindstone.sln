@@ -43,12 +43,6 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "External_Android", "Externa
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Bindstone_Common", "VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems", "{8E980497-3531-4455-8290-5491C08A9385}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "wolfssl", "External\wolfssl-4.3.0\wolfssl.vcxproj", "{73973223-5EE8-41CA-8E88-1D60E89A237B}"
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WolfSSL_Common", "External\VSProjects\WolfSSL_Common\WolfSSL_Common.vcxitems", "{8474958A-B1D8-4DFB-AAD4-E819A4CC2B53}"
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WolfSSL_Android", "External\VSProjects\WolfSSL_Android\WolfSSL_Android.vcxproj", "{C0414840-3914-4781-947B-9262E5BA2138}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{8C48B08C-1F87-4C7E-A9CF-32656D522830}"
 	ProjectSection(SolutionItems) = preProject
 		android.natvis = android.natvis
@@ -59,8 +53,6 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "External_Windows", "External\VSProjects\External_Windows\External_Windows.vcxproj", "{CF1FC4EF-E11D-40A8-9107-A1148411B280}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Library", "Library", "{47EC381C-D753-4F84-970C-FB4726FB0BC7}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "WolfSSL", "WolfSSL", "{C0D7FB0B-1BE7-4B83-AFE5-6AABD74318A2}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "MV", "MV", "{14A0E709-3AC6-42AF-AD2A-9EEEDA8DC5E3}"
 EndProject
@@ -91,17 +83,14 @@ Global
 		VSProjects\MutedVision\MutedVision_Common.vcxitems*{46b19b64-8cd7-424c-969e-2cdc234da7a5}*SharedItemsImports = 4
 		VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems*{56c44de2-76fd-49ac-a41a-c1145e7737d9}*SharedItemsImports = 4
 		External\VSProjects\External_Common\External_Common.vcxitems*{62d1ae53-e46d-4cd1-91a9-1f1e3efcf064}*SharedItemsImports = 4
-		External\VSProjects\WolfSSL_Common\WolfSSL_Common.vcxitems*{73973223-5ee8-41ca-8e88-1d60e89a237b}*SharedItemsImports = 4
 		VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems*{77966753-df43-4201-b7f4-7b184be77fad}*SharedItemsImports = 4
 		VSProjects\SDL2_ttf\SDL2_ttf_Common.vcxitems*{7d0090a3-d938-4e0e-8411-dab035c8e641}*SharedItemsImports = 9
-		External\VSProjects\WolfSSL_Common\WolfSSL_Common.vcxitems*{8474958a-b1d8-4dfb-aad4-e819a4cc2b53}*SharedItemsImports = 9
 		VSProjects\SDL2_ttf\SDL2_ttf_Common.vcxitems*{8572235c-b335-40dd-ba5f-9954bedc4bfc}*SharedItemsImports = 4
 		VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems*{8e980497-3531-4455-8290-5491c08a9385}*SharedItemsImports = 9
 		External\VSProjects\External_Common\External_Common.vcxitems*{a362b2c9-3629-4701-be16-fb7e28a51cc6}*SharedItemsImports = 9
 		VSProjects\BindstoneClient\Bindstone_Common\Bindstone_Common.vcxitems*{add84207-f5b2-46f0-9bd9-ce302ae95b45}*SharedItemsImports = 4
 		VSProjects\MutedVision\MutedVision_Common.vcxitems*{b2e0b593-79fd-432c-aa7b-1eca70a96271}*SharedItemsImports = 9
 		VSProjects\SDL2\SDL2_Common.vcxitems*{b7be417c-b6c5-4a69-a056-e0cb0c6a344c}*SharedItemsImports = 4
-		External\VSProjects\WolfSSL_Common\WolfSSL_Common.vcxitems*{c0414840-3914-4781-947b-9262e5ba2138}*SharedItemsImports = 4
 		External\VSProjects\External_Common\External_Common.vcxitems*{cf1fc4ef-e11d-40a8-9107-a1148411b280}*SharedItemsImports = 4
 	EndGlobalSection
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -258,34 +247,6 @@ Global
 		{62D1AE53-E46D-4CD1-91A9-1F1E3EFCF064}.Release|x64.Build.0 = Release|x64
 		{62D1AE53-E46D-4CD1-91A9-1F1E3EFCF064}.Release|x86.ActiveCfg = Release|x86
 		{62D1AE53-E46D-4CD1-91A9-1F1E3EFCF064}.Release|x86.Build.0 = Release|x86
-		{73973223-5EE8-41CA-8E88-1D60E89A237B}.Debug|ARM.ActiveCfg = Debug|Win32
-		{73973223-5EE8-41CA-8E88-1D60E89A237B}.Debug|ARM64.ActiveCfg = Debug|Win32
-		{73973223-5EE8-41CA-8E88-1D60E89A237B}.Debug|x64.ActiveCfg = Debug|x64
-		{73973223-5EE8-41CA-8E88-1D60E89A237B}.Debug|x64.Build.0 = Debug|x64
-		{73973223-5EE8-41CA-8E88-1D60E89A237B}.Debug|x86.ActiveCfg = Debug|Win32
-		{73973223-5EE8-41CA-8E88-1D60E89A237B}.Debug|x86.Build.0 = Debug|Win32
-		{73973223-5EE8-41CA-8E88-1D60E89A237B}.Release|ARM.ActiveCfg = Release|Win32
-		{73973223-5EE8-41CA-8E88-1D60E89A237B}.Release|ARM64.ActiveCfg = Release|Win32
-		{73973223-5EE8-41CA-8E88-1D60E89A237B}.Release|x64.ActiveCfg = Release|x64
-		{73973223-5EE8-41CA-8E88-1D60E89A237B}.Release|x64.Build.0 = Release|x64
-		{73973223-5EE8-41CA-8E88-1D60E89A237B}.Release|x86.ActiveCfg = Release|Win32
-		{73973223-5EE8-41CA-8E88-1D60E89A237B}.Release|x86.Build.0 = Release|Win32
-		{C0414840-3914-4781-947B-9262E5BA2138}.Debug|ARM.ActiveCfg = Debug|ARM
-		{C0414840-3914-4781-947B-9262E5BA2138}.Debug|ARM.Build.0 = Debug|ARM
-		{C0414840-3914-4781-947B-9262E5BA2138}.Debug|ARM64.ActiveCfg = Debug|ARM64
-		{C0414840-3914-4781-947B-9262E5BA2138}.Debug|ARM64.Build.0 = Debug|ARM64
-		{C0414840-3914-4781-947B-9262E5BA2138}.Debug|x64.ActiveCfg = Debug|x64
-		{C0414840-3914-4781-947B-9262E5BA2138}.Debug|x64.Build.0 = Debug|x64
-		{C0414840-3914-4781-947B-9262E5BA2138}.Debug|x86.ActiveCfg = Debug|x86
-		{C0414840-3914-4781-947B-9262E5BA2138}.Debug|x86.Build.0 = Debug|x86
-		{C0414840-3914-4781-947B-9262E5BA2138}.Release|ARM.ActiveCfg = Release|ARM
-		{C0414840-3914-4781-947B-9262E5BA2138}.Release|ARM.Build.0 = Release|ARM
-		{C0414840-3914-4781-947B-9262E5BA2138}.Release|ARM64.ActiveCfg = Release|ARM64
-		{C0414840-3914-4781-947B-9262E5BA2138}.Release|ARM64.Build.0 = Release|ARM64
-		{C0414840-3914-4781-947B-9262E5BA2138}.Release|x64.ActiveCfg = Release|x64
-		{C0414840-3914-4781-947B-9262E5BA2138}.Release|x64.Build.0 = Release|x64
-		{C0414840-3914-4781-947B-9262E5BA2138}.Release|x86.ActiveCfg = Release|x86
-		{C0414840-3914-4781-947B-9262E5BA2138}.Release|x86.Build.0 = Release|x86
 		{31BF8318-85D5-4E81-98D3-04BFD30F062B}.Debug|ARM.ActiveCfg = Debug|Win32
 		{31BF8318-85D5-4E81-98D3-04BFD30F062B}.Debug|ARM64.ActiveCfg = Debug|Win32
 		{31BF8318-85D5-4E81-98D3-04BFD30F062B}.Debug|x64.ActiveCfg = Debug|x64
@@ -381,12 +342,8 @@ Global
 		{46B19B64-8CD7-424C-969E-2CDC234DA7A5} = {14A0E709-3AC6-42AF-AD2A-9EEEDA8DC5E3}
 		{A362B2C9-3629-4701-BE16-FB7E28A51CC6} = {14A0E709-3AC6-42AF-AD2A-9EEEDA8DC5E3}
 		{62D1AE53-E46D-4CD1-91A9-1F1E3EFCF064} = {14A0E709-3AC6-42AF-AD2A-9EEEDA8DC5E3}
-		{73973223-5EE8-41CA-8E88-1D60E89A237B} = {C0D7FB0B-1BE7-4B83-AFE5-6AABD74318A2}
-		{8474958A-B1D8-4DFB-AAD4-E819A4CC2B53} = {C0D7FB0B-1BE7-4B83-AFE5-6AABD74318A2}
-		{C0414840-3914-4781-947B-9262E5BA2138} = {C0D7FB0B-1BE7-4B83-AFE5-6AABD74318A2}
 		{31BF8318-85D5-4E81-98D3-04BFD30F062B} = {14A0E709-3AC6-42AF-AD2A-9EEEDA8DC5E3}
 		{CF1FC4EF-E11D-40A8-9107-A1148411B280} = {14A0E709-3AC6-42AF-AD2A-9EEEDA8DC5E3}
-		{C0D7FB0B-1BE7-4B83-AFE5-6AABD74318A2} = {47EC381C-D753-4F84-970C-FB4726FB0BC7}
 		{14A0E709-3AC6-42AF-AD2A-9EEEDA8DC5E3} = {47EC381C-D753-4F84-970C-FB4726FB0BC7}
 		{ADD84207-F5B2-46F0-9BD9-CE302AE95B45} = {24CBDE04-4782-464E-A002-6D38808A220B}
 		{77966753-DF43-4201-B7F4-7B184BE77FAD} = {24CBDE04-4782-464E-A002-6D38808A220B}

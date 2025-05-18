@@ -184,7 +184,7 @@ namespace MV {
 		auto& mapRef = *map;
 		return !mapRef.blocked({ location.x + a_offset.y, location.y }) && !mapRef.blocked({ location.x, location.y + a_offset.y }) && !mapRef.blocked({ location.x + a_offset.x, location.y + a_offset.y });
 	}
-    const int MapNode::MAXIMUM_CLEARANCE;
+    	const int MapNode::MAXIMUM_CLEARANCE;
 
 	void MapNode::lazyInitialize() const {
 		if (!initialized) {
@@ -451,39 +451,39 @@ namespace MV {
 					++currentPathIndex;
 				}
 			}
-                        while (pathfinding() && totalDistanceToTravel > 0.0f) {
-                                auto previousGridSquare = cast<int>(ourPosition);
-                                auto desiredPosition = desiredPositionFromCalculatedPathIndex(currentPathIndex);
-                                PointPrecision distanceToNextNode = static_cast<PointPrecision>(distance(ourPosition, desiredPosition));
-                                PointPrecision maxDistance = std::min(totalDistanceToTravel, distanceToNextNode);
+			while (pathfinding() && totalDistanceToTravel > 0.0f) {
+				auto previousGridSquare = cast<int>(ourPosition);
+				auto desiredPosition = desiredPositionFromCalculatedPathIndex(currentPathIndex);
+				PointPrecision distanceToNextNode = static_cast<PointPrecision>(distance(ourPosition, desiredPosition));
+				PointPrecision maxDistance = std::min(totalDistanceToTravel, distanceToNextNode);
 
-                                auto movement = (desiredPosition - ourPosition).normalized() * maxDistance;
-                                auto newPosition = ourPosition + movement;
-                                auto newGridSquare = cast<int>(newPosition);
+				auto movement = (desiredPosition - ourPosition).normalized() * maxDistance;
+				auto newPosition = ourPosition + movement;
+				auto newGridSquare = cast<int>(newPosition);
 
-                                if (newGridSquare != previousGridSquare) {
-                                        unblockMap();
-                                        if (!map->clearedForSize(newGridSquare, unitSize)) {
-                                                blockMap();
-                                                markDirty();
-                                                auto self = shared_from_this();
-                                                onBlockedSignal(self);
-                                                break;
-                                        }
-                                        ourPosition = newPosition;
-                                        ourPosition.z = 0;
-                                        blockMap();
-                                } else {
-                                        ourPosition = newPosition;
-                                        ourPosition.z = 0;
-                                }
+				if (newGridSquare != previousGridSquare) {
+					unblockMap();
+					if (!map->clearedForSize(newGridSquare, unitSize)) {
+						blockMap();
+						markDirty();
+						auto self = shared_from_this();
+						onBlockedSignal(self);
+						break;
+					}
+					ourPosition = newPosition;
+					ourPosition.z = 0;
+					blockMap();
+				} else {
+					ourPosition = newPosition;
+					ourPosition.z = 0;
+				}
 
-                                totalDistanceToTravel -= maxDistance;
-                                if (totalDistanceToTravel > 0.0f && currentPathIndex < calculatedPath.size()) {
-                                        ++currentPathIndex;
-                                }
-                                if (!attemptToRecalculate()) { break; }
-                        }
+				totalDistanceToTravel -= maxDistance;
+				if (totalDistanceToTravel > 0.0f && currentPathIndex < calculatedPath.size()) {
+					++currentPathIndex;
+				}
+				if (!attemptToRecalculate()) { break; }
+			}
 			if (originalPathIndex != currentPathIndex) {
 				updateObservedNodes();
 			}

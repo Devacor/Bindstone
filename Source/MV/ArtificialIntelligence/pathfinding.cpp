@@ -451,21 +451,39 @@ namespace MV {
 					++currentPathIndex;
 				}
 			}
-			while (pathfinding() && totalDistanceToTravel > 0.0f) {
-				auto previousGridSquare = cast<int>(ourPosition);
-				auto desiredPosition = desiredPositionFromCalculatedPathIndex(currentPathIndex);
-				PointPrecision distanceToNextNode = static_cast<PointPrecision>(distance(ourPosition, desiredPosition));
-				PointPrecision maxDistance = std::min(totalDistanceToTravel, distanceToNextNode);
-				unblockMap();
-				ourPosition += (desiredPosition - ourPosition).normalized() * maxDistance;
-				ourPosition.z = 0;
-				blockMap();
-				totalDistanceToTravel -= maxDistance;
-				if (totalDistanceToTravel > 0.0f && currentPathIndex < calculatedPath.size()) {
-					++currentPathIndex;
-				}
-				if (!attemptToRecalculate()) { break; }
-			}
+                        while (pathfinding() && totalDistanceToTravel > 0.0f) {
+                                auto previousGridSquare = cast<int>(ourPosition);
+                                auto desiredPosition = desiredPositionFromCalculatedPathIndex(currentPathIndex);
+                                PointPrecision distanceToNextNode = static_cast<PointPrecision>(distance(ourPosition, desiredPosition));
+                                PointPrecision maxDistance = std::min(totalDistanceToTravel, distanceToNextNode);
+
+                                auto movement = (desiredPosition - ourPosition).normalized() * maxDistance;
+                                auto newPosition = ourPosition + movement;
+                                auto newGridSquare = cast<int>(newPosition);
+
+                                if (newGridSquare != previousGridSquare) {
+                                        unblockMap();
+                                        if (!map->clearedForSize(newGridSquare, unitSize)) {
+                                                blockMap();
+                                                markDirty();
+                                                auto self = shared_from_this();
+                                                onBlockedSignal(self);
+                                                break;
+                                        }
+                                        ourPosition = newPosition;
+                                        ourPosition.z = 0;
+                                        blockMap();
+                                } else {
+                                        ourPosition = newPosition;
+                                        ourPosition.z = 0;
+                                }
+
+                                totalDistanceToTravel -= maxDistance;
+                                if (totalDistanceToTravel > 0.0f && currentPathIndex < calculatedPath.size()) {
+                                        ++currentPathIndex;
+                                }
+                                if (!attemptToRecalculate()) { break; }
+                        }
 			if (originalPathIndex != currentPathIndex) {
 				updateObservedNodes();
 			}

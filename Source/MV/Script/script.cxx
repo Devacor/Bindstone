@@ -87,7 +87,11 @@ namespace MV {
 			});
 		}
 		Registrar(const std::function<void(chaiscript::ChaiScript&, const MV::Services&)>& a_method) {
-			ScriptImplementation::addRegistrationMethod<T>([&](chaiscript::ChaiScript& scriptEngine, const MV::Services& services){
+			if (!a_method)
+			{
+				std::cout << "wtf";
+			}
+			ScriptImplementation::addRegistrationMethod<T>([=](chaiscript::ChaiScript& scriptEngine, const MV::Services& services){
 				a_method(scriptEngine, services);
 				privateAccess(scriptEngine, services);
 			});

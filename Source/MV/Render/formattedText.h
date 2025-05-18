@@ -170,7 +170,7 @@ namespace MV {
 		std::string glyphCharacter;
 		std::shared_ptr<SurfaceTextureDefinition> glyphTexture;
 		std::shared_ptr<TextureHandle> glyphHandle;
-		std::shared_ptr<FontDefinition> fontDefinition;
+		std::weak_ptr<FontDefinition> fontDefinition;
 	};
 
 	///////////////////////////////////

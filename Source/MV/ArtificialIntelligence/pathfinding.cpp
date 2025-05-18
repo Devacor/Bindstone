@@ -468,11 +468,11 @@ namespace MV {
 						markDirty();
 						auto self = shared_from_this();
 						onBlockedSignal(self);
-						break;
+					}else{
+						ourPosition = newPosition;
+						ourPosition.z = 0;
+						blockMap();
 					}
-					ourPosition = newPosition;
-					ourPosition.z = 0;
-					blockMap();
 				} else {
 					ourPosition = newPosition;
 					ourPosition.z = 0;

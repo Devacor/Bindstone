@@ -346,9 +346,9 @@ namespace MV {
 		if (RUNNING_IN_HEADLESS) { return; }
 		loadedTexture = std::make_unique<LoadedTexture>(TextureParameters());
 		loadedTexture->data().originalSize.width = desiredSize.width;
-		loadedTexture->data().originalSize.width = desiredSize.height;
+		loadedTexture->data().originalSize.height = desiredSize.height;
 		loadedTexture->data().size.width = textureSize.width;
-		loadedTexture->data().size.width = textureSize.height;
+		loadedTexture->data().size.height = textureSize.height;
 
 		// Create Storage Space For Texture Data (128x128x4)
 		std::vector<unsigned char> pixels(static_cast<size_t>(textureSize.width) * textureSize.height * 4);

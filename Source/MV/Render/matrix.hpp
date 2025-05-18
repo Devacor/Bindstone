@@ -422,37 +422,29 @@ namespace MV {
 		}
 
 		inline TransformMatrix& translate(const MV::Point<PointPrecision> &a_point) {
-			TransformMatrix translation;
-			translation.access(3, 0) = a_point.x;
-			translation.access(3, 1) = a_point.y;
-			translation.access(3, 2) = a_point.z;
-			*this *= translation;
+			access(3, 0) += a_point.x;
+			access(3, 1) += a_point.y;
+			access(3, 2) += a_point.z;
 			return *this;
 		}
 
 		inline TransformMatrix& translate(PointPrecision a_x, PointPrecision a_y, PointPrecision a_z = 0.0) {
-			TransformMatrix translation;
-			translation.access(3, 0) = a_x;
-			translation.access(3, 1) = a_y;
-			translation.access(3, 2) = a_z;
-			*this *= translation;
+			access(3, 0) += a_x;
+			access(3, 1) += a_y;
+			access(3, 2) += a_z;
 			return *this;
 		}
 
 		inline TransformMatrix& scale(const MV::Scale &a_scale) {
-			TransformMatrix scaling;
-			scaling.access(0, 0) = a_scale.x;
-			scaling.access(1, 1) = a_scale.y;
-			scaling.access(2, 2) = a_scale.z;
-			*this *= scaling;
+			access(0, 0) *= a_scale.x;
+			access(1, 1) *= a_scale.y;
+			access(2, 2) *= a_scale.z;
 			return *this;
 		}
 		inline TransformMatrix& scale(PointPrecision a_x, PointPrecision a_y, PointPrecision a_z = 1.0f) {
-			TransformMatrix scaling;
-			scaling.access(0, 0) = a_x;
-			scaling.access(1, 1) = a_y;
-			scaling.access(2, 2) = a_z;
-			*this *= scaling;
+			access(0, 0) *= a_x;
+			access(1, 1) *= a_y;
+			access(2, 2) *= a_z;
 			return *this;
 		}
 

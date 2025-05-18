@@ -61,14 +61,14 @@ namespace MV {
 	| --CharacterDefinition-- |
 	\*************************/
 	std::shared_ptr<CharacterDefinition> CharacterDefinition::make(std::shared_ptr<SurfaceTextureDefinition> a_texture, const std::string &a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition) {
-	return std::shared_ptr<CharacterDefinition>(new CharacterDefinition(a_texture, a_glyphCharacter, a_fontDefinition));
+		return std::shared_ptr<CharacterDefinition>(new CharacterDefinition(a_texture, a_glyphCharacter, a_fontDefinition));
 	}
 	
 	CharacterDefinition::CharacterDefinition(std::shared_ptr<SurfaceTextureDefinition> a_texture, const std::string &a_glyphCharacter, std::shared_ptr<FontDefinition> a_fontDefinition):
-	glyphTexture(a_texture),
-	glyphHandle(a_texture->makeHandle()),
-	glyphCharacter(a_glyphCharacter),
-	fontDefinition(a_fontDefinition){
+		glyphTexture(a_texture),
+		glyphHandle(a_texture->makeHandle()),
+		glyphCharacter(a_glyphCharacter),
+		fontDefinition(a_fontDefinition){
 
 		glyphHandle->bounds(glyphTexture->surfaceSize());
 	}

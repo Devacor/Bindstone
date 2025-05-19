@@ -2,6 +2,7 @@
 #define _MV_SCENE_DRAWABLE_H_
 
 #include "node.h"
+#include "MV/Utility/properties.h"
 
 #define DrawableDerivedAccessorsShowHide(ComponentType) \
 	std::shared_ptr<ComponentType> show() { \
@@ -133,7 +134,7 @@ namespace MV {
 			void registerWithParent();
 		};
 
-		class Drawable : public Component {
+               class Drawable : public Component, public MV::PropertyHost {
 			friend Anchors;
 			friend Node;
 			friend cereal::access;
@@ -383,7 +384,7 @@ namespace MV {
 
 			GLenum drawType = GL_TRIANGLES;
 
-			bool shouldDraw = true;
+                       MV::MvProperty<bool> shouldDraw{Properties, "shouldDraw", true};
 
 			virtual void initialize() override;
 
@@ -395,7 +396,7 @@ namespace MV {
 			void hookupTextureSizeWatchers();
 			void hookupTextureSizeWatcher(size_t a_textureId);
 
-			BlendModePreset blendModePreset = DEFAULT;
+                       MV::MvProperty<BlendModePreset> blendModePreset{Properties, "blendMode", DEFAULT};
 
 			void rebuildTextureCache();
 

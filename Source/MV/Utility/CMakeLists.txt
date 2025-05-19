@@ -21,4 +21,5 @@ target_sources(BindStone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/tupleHelpers.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/task.hpp
   ${CMAKE_CURRENT_SOURCE_DIR}/taskActions.hpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/properties.h
 )

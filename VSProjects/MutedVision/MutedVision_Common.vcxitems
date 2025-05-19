@@ -113,6 +113,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\messenger.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\optionalCalls.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\package.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\properties.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\require.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\scopeGuard.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\services.hpp" />

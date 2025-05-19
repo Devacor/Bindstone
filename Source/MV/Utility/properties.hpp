@@ -44,14 +44,14 @@ namespace MV {
     };
 
     template<typename T>
-    class MvProperty : public MvPropertyBase {
+    class Property : public MvPropertyBase {
     public:
         using value_type = T;
-        MvProperty() = default;
-        MvProperty(MvPropertyList& a_list, const std::string& a_name, const T& a_default = T{})
+        Property() = default;
+        Property(MvPropertyList& a_list, const std::string& a_name, const T& a_default = T{})
             : MvPropertyBase(a_list, a_name), value(a_default) {}
 
-        MvProperty& operator=(const T& a_val) { value = a_val; return *this; }
+        Property& operator=(const T& a_val) { value = a_val; return *this; }
         operator const T&() const { return value; }
         const T& get() const { return value; }
         T& get() { return value; }

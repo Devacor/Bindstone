@@ -364,6 +364,9 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\webServer.h">
       <Filter>MV\Network</Filter>
     </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\properties.hpp">
+      <Filter>MV\Utility</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\utilityHooks.i">

@@ -160,30 +160,14 @@ namespace MV {
 		}), "modify");
 	}
 
-// 	Script::Registrar<DeltaVariable<int32_t>> _hookDeltaVariableInt32([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
-// 		hookDeltaVariable<int32_t>(a_script);
-// 	});
-// 
-// 	Script::Registrar<DeltaVariable<int64_t>> _hookDeltaVariableInt64([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
-// 		hookDeltaVariable<int64_t>(a_script);
-// 	});
-// 
-// 
-// 	Script::Registrar<DeltaVariable<std::string>> _hookDeltaVariableString([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
-// 		hookDeltaVariable<std::string>(a_script);
-// 	});
-// 
-// 	Script::Registrar<DeltaVariable<MV::Point<MV::PointPrecision>>> _hookDeltaVariablePoint([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
-// 		hookDeltaVariable<MV::Point<MV::PointPrecision>>(a_script);
-// 	});
-// 
-// 	Script::Registrar<DeltaVariable<bool>> _hookDeltaVariableBool([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
-// 		hookDeltaVariable<bool>(a_script);
-// 	});
-// 
-// 	Script::Registrar<DeltaVariable<MV::PointPrecision>> _hookDeltaVariablePointPrecision([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
-// 		hookDeltaVariable<MV::PointPrecision>(a_script);
-// 	});
+	Script::Registrar<DeltaVariable<int32_t>> _hookDeltaVariables([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
+		hookDeltaVariable<int32_t>(a_script);
+		hookDeltaVariable<int64_t>(a_script);
+		hookDeltaVariable<std::string>(a_script);
+		hookDeltaVariable<MV::Point<MV::PointPrecision>>(a_script);
+		hookDeltaVariable<bool>(a_script);
+		hookDeltaVariable<MV::PointPrecision>(a_script);
+	});
 
 	Script::Registrar<Client> _hookClient([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
 		a_script.add(chaiscript::user_type<Client>(), "Client");

@@ -39,6 +39,17 @@
     <ClCompile Include="$(SolutionDir)Source\Game\player.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Game\state.cpp" />
     <ClCompile Include="$(SolutionDir)Source\Game\wallet.cpp" />
+    <ClCompile Include="$(SolutionDir)Source\Game\gameHooks.cxx" />
+    <ClCompile Include="$(SolutionDir)Source\Game\standardHooks.cxx" />
+    <ClCompile Include="$(SolutionDir)Source\Game\Interface\interfaceHooks.cxx" />
+    <ClCompile Include="$(SolutionDir)Source\Game\NetworkLayer\gameNetworkHooks.cxx" />
+    <ClCompile Include="$(SolutionDir)Source\MV\ArtificialIntelligence\artificialIntelligenceHooks.cxx" />
+    <ClCompile Include="$(SolutionDir)Source\MV\Network\networkHooks.cxx" />
+    <ClCompile Include="$(SolutionDir)Source\MV\Render\renderHooks.cxx" />
+    <ClCompile Include="$(SolutionDir)Source\MV\Render\Scene\sceneHooks.cxx" />
+    <ClCompile Include="$(SolutionDir)Source\MV\Script\engineHooks.cxx" />
+    <ClCompile Include="$(SolutionDir)Source\MV\Script\script.cxx" />
+    <ClCompile Include="$(SolutionDir)Source\MV\Utility\utilityHooks.cxx" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(SolutionDir)Source\Editor\anchorEditor.h" />

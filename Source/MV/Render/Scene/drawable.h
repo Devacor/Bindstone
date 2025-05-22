@@ -294,61 +294,31 @@ namespace MV {
 					CEREAL_NVP(localBounds),
 					CEREAL_NVP(drawType)
 				);
+				
+				points.allowSerialization(serializePoints());
+				vertexIndices.allowSerialization(serializePoints());
 
-				if (serializePoints()) {
-					archive(
-						CEREAL_NVP(vertexIndices),
-						CEREAL_NVP(points)
-					);
-				}
 				archive(cereal::make_nvp("blendMode", blendModePreset));
 				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if (version > 0) {
-					archive(cereal::make_nvp("anchors", ourAnchors));
-				}
-				archive(CEREAL_NVP(shouldDraw));
-				if (version < 3) {
-					std::shared_ptr<TextureHandle> ourTexture;
-					archive(cereal::make_nvp("ourTexture", ourTexture));
-					ourTextures.clear();
-					if (ourTexture) {
-						ourTextures[0] = ourTexture;
-					}
-				}
-				else {
-					archive(cereal::make_nvp("textures", ourTextures));
-				}
-				if (version < 4)
-				{
-					archive(
-						CEREAL_NVP(shaderProgramId),
-						CEREAL_NVP(vertexIndices),
-						CEREAL_NVP(localBounds),
-						CEREAL_NVP(drawType),
-						CEREAL_NVP(points)
-					);
-				}
-				else
-				{
-					archive(
-						CEREAL_NVP(shaderProgramId),
-						CEREAL_NVP(localBounds),
-						CEREAL_NVP(drawType)
-					);
-
-					if (serializePoints()) {
-						archive(
-							CEREAL_NVP(vertexIndices),
-							CEREAL_NVP(points)
-						);
-					}
-				}
-				if (version > 1) {
-					archive(cereal::make_nvp("blendMode", blendModePreset));
+				if (version == 0) {
+					properties.load(archive, { "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points" });
+				} else if (version == 1) {
+					properties.load(archive, { "anchors", "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points" });
+				} else if (version == 2) {
+					properties.load(archive, { "anchors", "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points", "blendMode" });
+				} else if (version == 3) {
+					properties.load(archive, { "anchors", "shouldDraw", "textures", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points", "blendMode" });
+				} else if (version == 4) {
+					points.allowSerialization(serializePoints());
+					vertexIndices.allowSerialization(serializePoints());
+					properties.load(archive, { "anchors", "shouldDraw", "textures", "shaderProgramId", "localBounds", "drawType", "vertexIndices", "points", "blendMode" });
+				} else {
+					points.allowSerialization(serializePoints());
+					vertexIndices.allowSerialization(serializePoints());
 				}
 				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 			}
@@ -368,27 +338,30 @@ namespace MV {
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
-			std::vector<DrawPoint> points;
-			std::vector<GLuint> vertexIndices;
+			Property<std::map<size_t, std::shared_ptr<TextureHandle>>> ourTextures(properties, "textures");
+
+			MV_PROPERTY(std::vector<DrawPoint>, points);
+			MV_PROPERTY(std::vector<GLuint>, vertexIndices);
 
 			BoxAABB<> localBounds;
 
 			Shader* shaderProgram = nullptr;
-			std::string shaderProgramId = PREMULTIPLY_ID;
+			MV_PROPERTY(std::string, shaderProgramId, PREMULTIPLY_ID);
 			GLuint bufferId = 0;
 
 			bool dirtyVertexBuffer = true;
 
-			std::map<size_t, std::shared_ptr<TextureHandle>> ourTextures;
+			MV_DELETED_PROPERTY(std::shared_ptr<TextureHandle>, ourTexture);
+
 			std::map<size_t, TextureHandle::SignalType::SharedType> textureSizeSignals;
 
-			GLenum drawType = GL_TRIANGLES;
+			MV_PROPERTY(GLenum, drawType, GL_TRIANGLES);
 
-			bool shouldDraw = true;
+			MV_PROPERTY(bool, shouldDraw, true);
 
 			virtual void initialize() override;
 
-			Anchors ourAnchors;
+			Property<Anchors> ourAnchors(properties, "anchors", {this});
 			std::vector<Anchors*> childAnchors;
 
 			std::function<void(Shader*)> userMaterialSettings;

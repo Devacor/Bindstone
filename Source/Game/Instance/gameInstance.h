@@ -98,17 +98,17 @@ public:
 	virtual void spawnCreature(int /*a_buildingSlot*/, const std::string &/*a_creatureId*/) {
 	}
 
-	void registerCreature(std::shared_ptr<ServerCreature> &a_registerCreature) {
-		if (a_registerCreature->alive()) {
-			creatures[a_registerCreature->netId()] = a_registerCreature;
-			a_registerCreature->onDeath.connect("_RemoveFromTeam", [&](std::shared_ptr<Creature> a_creature) {
-				creatures.erase(a_creature->netId());
-			});
-		}
-	}
+        void registerCreature(std::shared_ptr<Creature> a_registerCreature) {
+                if (a_registerCreature->alive()) {
+                        creatures[a_registerCreature->netId()] = a_registerCreature;
+                        a_registerCreature->onDeath.connect("_RemoveFromTeam", [&](std::shared_ptr<Creature> a_creature) {
+                                creatures.erase(a_creature->netId());
+                        });
+                }
+        }
 
-	const std::shared_ptr<ServerCreature> &creature(int64_t a_id) {
-		static std::shared_ptr<ServerCreature> nullCreature;
+        const std::shared_ptr<Creature> &creature(int64_t a_id) {
+                static std::shared_ptr<Creature> nullCreature;
 		if (a_id == 0) {
 			return nullCreature;
 		}
@@ -137,8 +137,8 @@ protected:
 	void rawScaleAroundScreenPoint(float a_amount, const MV::Point<int>& a_position);
 	void easeToBoundsIfExceeded(const MV::Point<int>& a_pointerCenter);
 
-	std::vector<std::shared_ptr<Building>> buildings;
-	std::map<int64_t, std::shared_ptr<ServerCreature>> creatures;
+        std::vector<std::shared_ptr<Building>> buildings;
+        std::map<int64_t, std::shared_ptr<Creature>> creatures;
 
 	GameData& gameData;
 

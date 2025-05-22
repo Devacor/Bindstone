@@ -62,10 +62,10 @@ void ServerCreature::initialize() {
 		onBlockedSignal(std::static_pointer_cast<ServerCreature>(shared_from_this()));
 	});
 	
-	auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
-	statTemplate.script(gameInstance.script()).spawn(self);
+        auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
+        statTemplate.script(gameInstance.script()).spawn(self);
 
-	gameInstance.registerCreature(self);
+        gameInstance.registerCreature(self);
 }
 
 void ServerCreature::updateImplementation(double a_delta) {
@@ -105,9 +105,9 @@ void TargetPolicy::target(int64_t a_targetId, float a_range, std::function<void(
 	if (!selfCreature->alive()) {
 		a_fail(*this);
 	}
-	auto a_target = self()->gameInstance.creature(a_targetId);
-
-	if (a_target.get() == targetCreature) { return; }
+        auto a_target = std::dynamic_pointer_cast<ServerCreature>(self()->gameInstance.creature(a_targetId));
+        
+        if (a_target.get() == targetCreature) { return; }
 
 	clearTarget();
 	if (!stunDuration && selfCreature) {
@@ -274,7 +274,7 @@ void ClientCreature::initialize() {
 	newNode->serializable(false);
 	spineAnimator = newNode->componentInChildren<MV::Scene::Spine>().get();
 
-	auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
+	auto self = std::static_pointer_cast<ClientCreature>(shared_from_this());
 	statTemplate.script(gameInstance.script()).spawn(self);
 
 	gameInstance.registerCreature(self);

@@ -435,8 +435,8 @@ public:
 
 			if (*health != newHealth) {
 				state->modify()->health = newHealth;
-				auto self = std::static_pointer_cast<ServerCreature>(shared_from_this());
-				onHealthChangeSignal(self, amount);
+                                auto self = std::static_pointer_cast<Creature>(shared_from_this());
+                                onHealthChangeSignal(self, amount);
 			}
 
 			if (newHealth <= 0) {
@@ -465,9 +465,9 @@ protected:
 
 private:
         void animateDeathAndRemove() {
-                auto self = std::static_pointer_cast<ClientCreature>(shared_from_this());
+                auto self = std::static_pointer_cast<Creature>(shared_from_this());
                 onDeathSignal(self);
-		task().cancel();
+                task().cancel();
 		if (owner()->position() != *state->self()->position) {
 			task().now("Tween", [&](MV::Task&, double a_dt) {
 				owner()->position(MV::moveToward(owner()->position(), *state->self()->position, static_cast<MV::PointPrecision>(a_dt) * 200.0f));

@@ -159,7 +159,7 @@ namespace MV {
 			}
 
 			Anchors& anchors() {
-				return ourAnchors;
+				return ourAnchors.get();
 			}
 
 			std::shared_ptr<Drawable> hide();
@@ -171,7 +171,7 @@ namespace MV {
 			std::shared_ptr<Drawable> shader(const std::string &a_shaderProgramId);
 
 			std::shared_ptr<TextureHandle> texture(size_t a_index = 0) const {
-				return ourTextures.at(a_index);
+				return ourTextures->at(a_index);
 			}
 
 			std::shared_ptr<Drawable> texture(std::shared_ptr<TextureHandle> a_texture, size_t a_textureId = 0);
@@ -185,7 +185,7 @@ namespace MV {
 			}
 
 			size_t pointSize() const {
-				return points.size();
+				return points->size();
 			}
 
 			std::shared_ptr<Drawable> setPoint(size_t a_index, const DrawPoint& a_value) {
@@ -212,7 +212,7 @@ namespace MV {
 
 			//fine to just pass back a reference, changing the index order doesn't impact the bounding box logic.
 			std::vector<GLuint>& pointIndices() {
-				return vertexIndices;
+				return vertexIndices.get();
 			}
 
 			std::shared_ptr<Drawable> setPoints(const std::vector<DrawPoint> &a_points, const std::vector<GLuint> &a_vertexIndices) {
@@ -223,10 +223,10 @@ namespace MV {
 			}
 
 			std::shared_ptr<Drawable> appendPoints(const std::vector<DrawPoint> &a_points, std::vector<GLuint> a_vertexIndices) {
-				auto offsetIndex = static_cast<GLuint>(points.size());
+				auto offsetIndex = static_cast<GLuint>(points->size());
 				std::transform(a_vertexIndices.begin(), a_vertexIndices.end(), a_vertexIndices.begin(), [&](GLuint index) {return index + offsetIndex; });
-				points.insert(points.end(), a_points.begin(), a_points.end());
-				vertexIndices.insert(vertexIndices.end(), a_vertexIndices.begin(), a_vertexIndices.end());
+				points->insert(points->end(), a_points.begin(), a_points.end());
+				vertexIndices->insert(vertexIndices->end(), a_vertexIndices.begin(), a_vertexIndices.end());
 				refreshBounds();
 				return std::static_pointer_cast<Drawable>(shared_from_this());
 			}
@@ -340,8 +340,8 @@ namespace MV {
 
 			Property<std::map<size_t, std::shared_ptr<TextureHandle>>> ourTextures(properties, "textures");
 
-			MV_PROPERTY(std::vector<DrawPoint>, points);
-			MV_PROPERTY(std::vector<GLuint>, vertexIndices);
+			MV_PROPERTY(std::vector<DrawPoint>, points, {});
+			MV_PROPERTY(std::vector<GLuint>, vertexIndices, {});
 
 			BoxAABB<> localBounds;
 
@@ -361,7 +361,7 @@ namespace MV {
 
 			virtual void initialize() override;
 
-			Property<Anchors> ourAnchors(properties, "anchors", {this});
+			Property<Anchors> ourAnchors;
 			std::vector<Anchors*> childAnchors;
 
 			std::function<void(Shader*)> userMaterialSettings;

@@ -1,3 +1,4 @@
+#include "Game/standardHooks.cxx"
 #include "Game/NetworkLayer/gameNetworkHooks.cxx"
 #include "Game/Interface/interfaceHooks.cxx"
 

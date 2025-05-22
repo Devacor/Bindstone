@@ -17,6 +17,7 @@
 #include "MV/Utility/task.h"
 #include "MV/Utility/visitor.hpp"
 #include "MV/Utility/services.hpp"
+#include "MV/Utility/properties.hpp"
 
 #define ComponentDerivedAccessors(ComponentType) \
 MV::Scene::SafeComponent<ComponentType> clone(const std::shared_ptr<MV::Scene::Node> &a_parent) { \
@@ -179,7 +180,7 @@ namespace MV {
 
 			SafeComponent<Component> clone(const std::shared_ptr<Node> &a_parent) {
 				auto result = SafeComponent<Component>(a_parent, cloneImplementation(a_parent));
-				result->componentId = componentId;
+				properties.cloneTo(result->properties);
 				return result;
 			}
 
@@ -254,18 +255,16 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				archive(
-					CEREAL_NVP(componentId),
-					CEREAL_NVP(componentOwner)
-				);
+				properties.save(archive);
 			}
 
 			template <class Archive>
-			void load(Archive & archive, std::uint32_t const /*version*/) {
-				archive(
-					CEREAL_NVP(componentId),
-					CEREAL_NVP(componentOwner)
-				);
+			void load(Archive & archive, std::uint32_t const version) {
+				if (version == 0) { //Prior to property system
+					properties.load(archive, {"componentId", "componentOwner"});
+				} else { //Now all properties can just be loaded.
+					properties.load(archive);
+				}
 				if (accumulatedDelta == 0.0) {
 					accumulatedDelta = MV::randomNumber(0.0f, 1.0f); //avoid awkward synchronization
 				}
@@ -284,8 +283,10 @@ namespace MV {
 			bool allowSerialize = true;
 
 			std::unique_ptr<Task> rootTask;
-			std::string componentId;
-			std::weak_ptr<Node> componentOwner;
+			PropertyRegistry properties;
+			MV_PROPERTY(std::string, componentId);
+			//does not clone.
+			MV_PROPERTY(std::weak_ptr<Node>, componentOwner, {}, [](Property<std::weak_ptr<Node>> &, Property<std::weak_ptr<Node>>&){});
 		};
 	}
 }

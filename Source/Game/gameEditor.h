@@ -84,8 +84,8 @@ private:
 
 	void handleInput();
 	
-	Managers managers;
 	MV::TapDevice mouse;
+	Managers managers;
 
 	bool done = false;
 	std::shared_ptr<MV::Scene::Node> limbo;

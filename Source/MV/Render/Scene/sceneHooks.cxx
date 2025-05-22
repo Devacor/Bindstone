@@ -8,15 +8,16 @@
 namespace MV {
 	using namespace MV::Scene;
 	Script::Registrar<Button> _hookButton([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
-		MV::TapDevice* tapDevice = a_services.get<MV::TapDevice>();
-
 		a_script.add(chaiscript::user_type<Button>(), "Button");
 		a_script.add(chaiscript::base_class<Clickable, Button>());
 		a_script.add(chaiscript::base_class<Sprite, Button>());
 		a_script.add(chaiscript::base_class<Drawable, Button>());
 		a_script.add(chaiscript::base_class<Component, Button>());
 
-		a_script.add(chaiscript::fun([=](Node& a_self) { return a_self.attach<Button>(*tapDevice); }), "attachButton");
+		a_script.add(chaiscript::fun([=](Node& a_self) {
+			MV::TapDevice& tapDevice = *a_services.get<MV::TapDevice>();
+			return a_self.attach<Button>(tapDevice);
+		}), "attachButton");
 
 		a_script.add(chaiscript::fun([](Node& a_self) { return a_self.componentInChildren<Button>(true, false, true); }), "componentButton");
 
@@ -40,14 +41,15 @@ namespace MV {
 	});
 
 	Script::Registrar<Clickable> _hookClickable([](chaiscript::ChaiScript& a_script, const MV::Services& a_services) {
-		MV::TapDevice* tapDevice = a_services.get<MV::TapDevice>();
-
 		a_script.add(chaiscript::user_type<Clickable>(), "Clickable");
 		a_script.add(chaiscript::base_class<Sprite, Clickable>());
 		a_script.add(chaiscript::base_class<Drawable, Clickable>());
 		a_script.add(chaiscript::base_class<Component, Clickable>());
 
-		a_script.add(chaiscript::fun([=](Node& a_self) { return a_self.attach<Clickable>(*tapDevice); }), "attachClickable");
+		a_script.add(chaiscript::fun([=](Node& a_self) { 
+			MV::TapDevice& tapDevice = *a_services.get<MV::TapDevice>();
+			return a_self.attach<Clickable>(tapDevice); 
+		}), "attachClickable");
 
 		a_script.add(chaiscript::fun([](Node& a_self) { return a_self.componentInChildren<Clickable>(true, false, true); }), "componentClickable");
 

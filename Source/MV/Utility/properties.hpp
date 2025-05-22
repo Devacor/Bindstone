@@ -81,6 +81,8 @@ namespace MV {
 		virtual void load(cereal::JSONInputArchive& ar) = 0;
 		virtual void save(cereal::BinaryOutputArchive& ar) const = 0;
 		virtual void load(cereal::BinaryInputArchive& ar) = 0;
+		virtual void save(cereal::PortableBinaryOutputArchive& ar) const = 0;
+		virtual void load(cereal::PortableBinaryInputArchive& ar) = 0;
 
 		virtual void cloneInto(PropertyBase& target) = 0;
 
@@ -123,10 +125,12 @@ namespace MV {
 		}
 
 		Property(const Property<T>&) = delete;
-		Property& operator=(const Property<T>&) = delete;
 
-		Property& operator=(const T& a_val) {
-			value = a_val;
+		//Assignment copies the value.
+		Property& operator=(const Property<T>& a_rhs) = delete;
+
+		Property& operator=(const T& a_rhs) {
+			value = a_rhs;
 			return *this;
 		}
 
@@ -137,6 +141,12 @@ namespace MV {
 
 		[[nodiscard]]
 		T& get() { return value; }
+
+		template<typename U = T>
+		std::enable_if_t<std::is_class<U>::value, const U*> operator->() const { return &value; }
+
+		template<typename U = T>
+		std::enable_if_t<std::is_class<U>::value, U*> operator->() { return &value; }
 
 		void save(cereal::JSONOutputArchive& ar) const override {
 			ar(cereal::make_nvp(name(), value));
@@ -151,6 +161,13 @@ namespace MV {
 		}
 
 		void load(cereal::BinaryInputArchive& ar) override {
+			ar(cereal::make_nvp(name(), value));
+		}
+
+		void save(cereal::PortableBinaryOutputArchive& ar) const override {
+			ar(cereal::make_nvp(name(), value));
+		}
+		void load(cereal::PortableBinaryInputArchive& ar) override {
 			ar(cereal::make_nvp(name(), value));
 		}
 
@@ -210,6 +227,12 @@ namespace MV {
 			ar(cereal::make_nvp(name(), ignored));
 		}
 
+		void save(cereal::PortableBinaryOutputArchive& ar) const override {}
+		void load(cereal::PortableBinaryInputArchive& ar) override {
+			T ignored;
+			ar(cereal::make_nvp(name(), ignored));
+		}
+
 		void cloneInto(PropertyBase&) override {
 			// No-op
 		}
@@ -252,6 +275,14 @@ namespace MV {
 			}
 		}
 
+		void load(cereal::PortableBinaryInputArchive& ar) override {
+			T oldVal = this->value;
+			Property<T>::load(ar);
+			if (this->value != oldVal) {
+				onChangedSignal(this->value, oldVal, true);
+			}
+		}
+
 		MV::SignalRegister<ChangeSignature> onChanged;
 	protected:
 		MV::Signal<ChangeSignature> onChangedSignal;
@@ -260,3 +291,13 @@ namespace MV {
 } // namespace MV
 
 #endif // _MV_PROPERTIES_H_
+
+
+#define MV_PROPERTY(type, name, ...) \
+	MV::Property<type> name{ properties, #name, __VA_ARGS__ }
+
+#define MV_OBSERVABLE_PROPERTY(type, name, ...) \
+	MV::ObservableProperty<type> name{ properties, #name, __VA_ARGS__ }
+
+#define MV_DELETED_PROPERTY(type, name) \
+	MV::DeletedProperty<type> name{ properties, #name }

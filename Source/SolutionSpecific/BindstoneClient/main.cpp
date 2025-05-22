@@ -141,8 +141,8 @@ int main(int argc, char *argv[]) {
 	MV::Matrix<3, 1> m1;
 	MV::Matrix<1, 3> m2;
 	for (int i = 0; i < 3; ++i) {
-		m1(i, 0) = i + 3;
-		m2(0, i) = i;
+		m1(i, 0) = (float)i + 3;
+		m2(0, i) = (float)i;
 	}
 
 	auto ra = M_1(m2, m1);

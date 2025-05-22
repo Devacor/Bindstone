@@ -36,15 +36,15 @@ namespace MV {
 			}
 
 			bool hasSlice(){
-				auto found = ourTextures.find(0);
-				return found != ourTextures.end() && found->second->hasSlice();
+				auto found = ourTextures->find(0);
+				return found != ourTextures->end() && found->second->hasSlice();
 			}
 		protected:
 			Sprite(const std::weak_ptr<Node> &a_owner) :
 				Drawable(a_owner) {
 
-				clearTexturePoints(points);
-				appendQuadVertexIndices(vertexIndices, 0);
+				clearTexturePoints(points.get());
+				appendQuadVertexIndices(vertexIndices.get(), 0);
 			}
 
 			template <class Archive>

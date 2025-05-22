@@ -68,10 +68,10 @@ bool LobbyGameConnectionState::handleExpiredPlayers() {
 			leftPlayer->queue.add(leftPlayer);
 			leftPlayer.reset();
 		}
-		if (!rightPlayer->lifespan.expired()) {
-			rightPlayer->queue.add(leftPlayer);
-			rightPlayer.reset();
-		}
+                if (!rightPlayer->lifespan.expired()) {
+                        rightPlayer->queue.add(rightPlayer);
+                        rightPlayer.reset();
+                }
 		return true;
 	}
 	return false;

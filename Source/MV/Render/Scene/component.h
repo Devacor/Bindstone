@@ -279,11 +279,12 @@ namespace MV {
 
 			virtual void updateImplementation(double a_delta) {}
 			double accumulatedDelta = 0.0;
+
+			PropertyRegistry properties;
 		private:
 			bool allowSerialize = true;
 
 			std::unique_ptr<Task> rootTask;
-			PropertyRegistry properties;
 			MV_PROPERTY(std::string, componentId);
 			//does not clone.
 			MV_PROPERTY(std::weak_ptr<Node>, componentOwner, {}, [](Property<std::weak_ptr<Node>> &, Property<std::weak_ptr<Node>>&){});

@@ -134,7 +134,7 @@ namespace MV {
 			auto& ourRenderer = owner()->renderer();
 			if (ourRenderer.headless()) { return; }
 
-			if (!vertexIndices.empty()) {
+			if (!vertexIndices->empty()) {
 				require<ResourceException>(shaderProgram, "No shader program for Drawable!");
 				shaderProgram->use();
 
@@ -149,7 +149,7 @@ namespace MV {
 				auto structSize = static_cast<GLsizei>(sizeof(points[0]));
 				if (dirtyVertexBuffer) {
 					dirtyVertexBuffer = false;
-					glBufferData(GL_ARRAY_BUFFER, points.size() * structSize, &(points[0]), GL_STATIC_DRAW);
+					glBufferData(GL_ARRAY_BUFFER, points->size() * structSize, &(points[0]), GL_STATIC_DRAW);
 				}
 				glEnableVertexAttribArray(0);
 				glEnableVertexAttribArray(1);
@@ -225,13 +225,12 @@ namespace MV {
 		}
 
 		Drawable::Drawable(const std::weak_ptr<Node> &a_owner) :
-			Component(a_owner),
-			ourAnchors(this) {
-			points.resize(4);
+			Component(a_owner) {
+			points->resize(4);
 		}
 
 		void Drawable::detachImplementation() {
-			ourAnchors.removeFromParent();
+			ourAnchors->removeFromParent();
 		}
 
 		void Drawable::materialSettingsImplementation(Shader* a_shaderProgram) {

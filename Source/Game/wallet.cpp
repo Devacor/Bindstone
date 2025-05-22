@@ -34,11 +34,12 @@ Wallet& Wallet::operator=(const Wallet& a_rhs) {
 }
 
 Wallet& Wallet::value(CurrencyType a_type, int64_t a_newValue) {
-	MV::require<MV::RangeException>(a_newValue >= 0, "Negative amount supplied to value: ", a_newValue);
-	auto difference = a_newValue - values[static_cast<int>(a_type)];
-	onChangeCurrencySignal(*this, a_type, difference);
-	onChangeSignal(*this);
-	return *this;
+        MV::require<MV::RangeException>(a_newValue >= 0, "Negative amount supplied to value: ", a_newValue);
+        auto difference = a_newValue - values[static_cast<int>(a_type)];
+        values[static_cast<int>(a_type)] = a_newValue;
+        onChangeCurrencySignal(*this, a_type, difference);
+        onChangeSignal(*this);
+        return *this;
 }
 
 int64_t Wallet::add(CurrencyType a_type, int64_t a_amount) {

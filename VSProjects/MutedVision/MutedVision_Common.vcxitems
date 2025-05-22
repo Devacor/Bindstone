@@ -56,6 +56,13 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\stringUtility.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\task.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\tinyutf8.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\artificialIntelligenceHooks.cxx" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\networkHooks.cxx" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\renderHooks.cxx" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Render\Scene\sceneHooks.cxx" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Script\engineHooks.cxx" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Script\script.cxx" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\utilityHooks.cxx" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.h" />

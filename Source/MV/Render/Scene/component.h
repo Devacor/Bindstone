@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <map>
 
 #include "MV/Render/render.h"
 #include "MV/Render/textures.h"

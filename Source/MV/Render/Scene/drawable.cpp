@@ -225,6 +225,7 @@ namespace MV {
 		}
 
 		Drawable::Drawable(const std::weak_ptr<Node> &a_owner) :
+			ourAnchors(properties, "anchors", {this}),
 			Component(a_owner) {
 			points->resize(4);
 		}

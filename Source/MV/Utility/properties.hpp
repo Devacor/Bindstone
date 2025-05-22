@@ -69,13 +69,14 @@ namespace MV {
 
 	class PropertyBase {
 	public:
-		virtual ~PropertyBase() = default;
-
 		bool operator<(const PropertyBase& rhs) const {
 			return name() < rhs.name();
 		}
 
 		const std::string& name() const { return propertyName; }
+
+		bool serializeEnabled() const { return allowSerialization; }
+		void serializeEnabled(bool a_allowSerialization) { allowSerialization = a_allowSerialization; }
 
 		virtual void save(cereal::JSONOutputArchive& ar) const = 0;
 		virtual void load(cereal::JSONInputArchive& ar) = 0;
@@ -96,6 +97,7 @@ namespace MV {
 			a_list.add(this);
 		}
 
+		bool allowSerialization = true;
 	private:
 		std::string propertyName;
 	};
@@ -148,27 +150,71 @@ namespace MV {
 		template<typename U = T>
 		std::enable_if_t<std::is_class<U>::value, U*> operator->() { return &value; }
 
+		template<typename Index>
+		auto operator[](Index&& index)
+			-> decltype(std::declval<T&>()[std::forward<Index>(index)]) {
+			return value[std::forward<Index>(index)];
+		}
+
+		template<typename Index>
+		auto operator[](Index&& index) const
+			-> decltype(std::declval<const T&>()[std::forward<Index>(index)]) {
+			return value[std::forward<Index>(index)];
+		}
+
+		template<typename U = T>
+		auto begin() -> decltype(std::declval<U&>().begin()) {
+			return value.begin();
+		}
+
+		template<typename U = T>
+		auto end() -> decltype(std::declval<U&>().end()) {
+			return value.end();
+		}
+
+		template<typename U = T>
+		auto begin() const -> decltype(std::declval<const U&>().begin()) {
+			return value.begin();
+		}
+
+		template<typename U = T>
+		auto end() const -> decltype(std::declval<const U&>().end()) {
+			return value.end();
+		}
+
 		void save(cereal::JSONOutputArchive& ar) const override {
-			ar(cereal::make_nvp(name(), value));
+			if(allowSerialization) {
+				ar(cereal::make_nvp(name(), value));
+			}
 		}
 
 		void load(cereal::JSONInputArchive& ar) override {
-			ar(cereal::make_nvp(name(), value));
+			if (allowSerialization) {
+				ar(cereal::make_nvp(name(), value));
+			}
 		}
 
 		void save(cereal::BinaryOutputArchive& ar) const override {
-			ar(cereal::make_nvp(name(), value));
+			if (allowSerialization) {
+				ar(cereal::make_nvp(name(), value));
+			}
 		}
 
 		void load(cereal::BinaryInputArchive& ar) override {
-			ar(cereal::make_nvp(name(), value));
+			if (allowSerialization) {
+				ar(cereal::make_nvp(name(), value));
+			}
 		}
 
 		void save(cereal::PortableBinaryOutputArchive& ar) const override {
-			ar(cereal::make_nvp(name(), value));
+			if (allowSerialization) {
+				ar(cereal::make_nvp(name(), value));
+			}
 		}
 		void load(cereal::PortableBinaryInputArchive& ar) override {
-			ar(cereal::make_nvp(name(), value));
+			if (allowSerialization) {
+				ar(cereal::make_nvp(name(), value));
+			}
 		}
 
 		void cloneInto(PropertyBase& destination) override {
@@ -217,20 +263,26 @@ namespace MV {
 
 		void save(cereal::JSONOutputArchive& ar) const override {}
 		void load(cereal::JSONInputArchive& ar) override {
-			T ignored;
-			ar(cereal::make_nvp(name(), ignored));
+			if(allowSerialization){ //counter intuitively we never allow serialization of deleted properties, but we need to load and ignore them if this is true.
+				T ignored;
+				ar(cereal::make_nvp(name(), ignored));
+			}
 		}
 
 		void save(cereal::BinaryOutputArchive& ar) const override {}
 		void load(cereal::BinaryInputArchive& ar) override {
-			T ignored;
-			ar(cereal::make_nvp(name(), ignored));
+			if (allowSerialization) { //counter intuitively we never allow serialization of deleted properties, but we need to load and ignore them if this is true.
+				T ignored;
+				ar(cereal::make_nvp(name(), ignored));
+			}
 		}
 
 		void save(cereal::PortableBinaryOutputArchive& ar) const override {}
 		void load(cereal::PortableBinaryInputArchive& ar) override {
-			T ignored;
-			ar(cereal::make_nvp(name(), ignored));
+			if (allowSerialization) { //counter intuitively we never allow serialization of deleted properties, but we need to load and ignore them if this is true.
+				T ignored;
+				ar(cereal::make_nvp(name(), ignored));
+			}
 		}
 
 		void cloneInto(PropertyBase&) override {
@@ -260,26 +312,32 @@ namespace MV {
 		}
 
 		void load(cereal::JSONInputArchive& ar) override {
-			T oldVal = this->value;
-			Property<T>::load(ar);
-			if (this->value != oldVal) {
-				onChangedSignal(this->value, oldVal, true);
+			if (this->allowSerialization) {
+				T oldVal = this->value;
+				Property<T>::load(ar);
+				if (this->value != oldVal) {
+					onChangedSignal(this->value, oldVal, true);
+				}
 			}
 		}
 
 		void load(cereal::BinaryInputArchive& ar) override {
-			T oldVal = this->value;
-			Property<T>::load(ar);
-			if (this->value != oldVal) {
-				onChangedSignal(this->value, oldVal, true);
+			if (this->allowSerialization) {
+				T oldVal = this->value;
+				Property<T>::load(ar);
+				if (this->value != oldVal) {
+					onChangedSignal(this->value, oldVal, true);
+				}
 			}
 		}
 
 		void load(cereal::PortableBinaryInputArchive& ar) override {
-			T oldVal = this->value;
-			Property<T>::load(ar);
-			if (this->value != oldVal) {
-				onChangedSignal(this->value, oldVal, true);
+			if (this->allowSerialization) {
+				T oldVal = this->value;
+				Property<T>::load(ar);
+				if (this->value != oldVal) {
+					onChangedSignal(this->value, oldVal, true);
+				}
 			}
 		}
 

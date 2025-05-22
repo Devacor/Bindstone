@@ -242,12 +242,12 @@ namespace MV {
 				auto found = std::find(childComponents.begin(), childComponents.end(), a_component);
 				if (found != childComponents.end()) {
 					auto sharedComponent = *found;
-					auto originalOwner = sharedComponent->componentOwner;
+					auto originalOwner = sharedComponent->componentOwner.get();
 					sharedComponent->detachImplementation();
 					childComponents.erase(found);
 					onDetachSignal(a_component);
-					if (sharedComponent->componentOwner.lock() == originalOwner.lock()) {
-						sharedComponent->componentOwner.reset();
+					if (sharedComponent->componentOwner->lock() == originalOwner.lock()) {
+						sharedComponent->componentOwner->reset();
 					}
 				}
 				return self;
@@ -265,12 +265,12 @@ namespace MV {
 				});
 				if (found != childComponents.end()) {
 					auto sharedComponent = *found;
-					auto originalOwner = sharedComponent->componentOwner;
+					auto originalOwner = sharedComponent->componentOwner.get();
 					sharedComponent->detachImplementation();
 					childComponents.erase(found);
 					onDetachSignal(sharedComponent);
-					if (sharedComponent->componentOwner.lock() == originalOwner.lock()) {
-						sharedComponent->componentOwner.reset();
+					if (sharedComponent->componentOwner->lock() == originalOwner.lock()) {
+						sharedComponent->componentOwner->reset();
 					}
 				} else if (a_throwIfNotFound) {
 					require<ResourceException>(false, "Component with id [", a_componentId, "] not found in node [", id(), "]");

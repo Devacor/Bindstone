@@ -5,6 +5,7 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Component);
+CEREAL_CLASS_VERSION(MV::Scene::Component, 1);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_scenecomponent);
 
 namespace MV {
@@ -68,7 +69,7 @@ namespace MV {
 		}
 
 		bool Component::ownerIsAlive() const {
-			return !componentOwner.expired();
+			return !componentOwner->expired();
 		}
 
 		void Component::notifyParentOfComponentChange() {
@@ -79,13 +80,13 @@ namespace MV {
 		}
 
 		std::shared_ptr<Node> Component::owner() const {
-			auto lockedComponentOwner = componentOwner.lock();
+			auto lockedComponentOwner = componentOwner->lock();
 			MV::require<MV::PointerException>(lockedComponentOwner != nullptr, "Component owner has expired! You are storing a reference to the component, but not the node that owns it!");
 			return lockedComponentOwner;
 		}
 
-		Component::Component(const std::weak_ptr<Node> &a_owner) :
-			componentOwner(a_owner) {
+		Component::Component(const std::weak_ptr<Node> &a_owner) {
+			componentOwner = a_owner;
 		}
 
 		BoxAABB<int> Component::screenBounds() {

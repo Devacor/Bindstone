@@ -253,11 +253,14 @@ myComponent->opacity.onChanged.connect([](const float& newVal, const float& oldV
 - Call `properties.save(ar)`/`properties.load(ar)` only in the base class that owns the registry
 - Use `cereal::base_class<ParentClass>(this)` to chain serialization
 - Properties have many convenience pass-throughs: `sprite->name = "Bob"` `sprite->points[0]` (operator[] and operator() pass through), `sprite->ourAnchors->size()` (operator -> can access member functions and variables of its underlying class. If the underlying class is something like a shared_ptr then operator-> will call the underlying shared_ptr's object rather than requiring a second level of de-reference.)
+- Do evaluate the cloneHelper function to see what the "clone" behavior should be for a given property. If a property was not cloned, it should override a do-nothing clone method. If a property is cloned, but does a deep copy, use that implementation in the Property and remove it from the cloneHelper.
 
 ### Common Mistakes to Avoid
 - Don't create multiple PropertyRegistries in a class hierarchy
 - Don't forget CEREAL_REGISTER_TYPE for polymorphic types
 - Don't call properties.save/load in derived classes (only base) unless dealing with versioned migration (see Drawable::load for a complex example.)
+- Don't make every member variable a property, save property creation for types we want to serialize (mentioned in the save/load functions.)
+- Don't try to convert Signal or SignalRegister type variables to Property. They do need to be serialized in some cases (they save script bindings), however they have custom rules for how to do so and basically are best used with basic archive(cereal::make_nvp("onPress", onPressSignal)) (for example)
 
 ### When to Increment Cereal Class Version
 - YES: Converting from manual serialization to properties

@@ -3,14 +3,17 @@
 
 #include <ostream>
 #include <istream>
+#include <type_traits>
 
 #include "MV/Utility/generalUtility.h"
 #include "cereal/cereal.hpp"
 #include "cereal/access.hpp"
 
 namespace MV {
-
 	typedef float PointPrecision;
+
+	template<typename T>
+	using enable_if_arithmetic_t = std::enable_if_t<std::is_arithmetic_v<T>>;
 
 	class DrawPoint;
 
@@ -63,9 +66,12 @@ namespace MV {
 		Color& operator/=(const Color& a_other);
 
 		template<typename T>
-		Color& operator*=(T a_other);
+		std::enable_if_t<std::is_arithmetic_v<T>, Color&>
+		operator*=(T a_other);
+
 		template<typename T>
-		Color& operator/=(T a_other);
+		std::enable_if_t<std::is_arithmetic_v<T>, Color&>
+		operator/=(T a_other);
 
 		template <class Archive>
 		void serialize(Archive & archive){
@@ -519,72 +525,63 @@ namespace MV {
 	Color operator/(const Color &a_lhs, const Color &a_rhs);
 	Color operator*(const Color &a_lhs, const Color &a_rhs);
 
-	template <typename T>
-	Color& Color::operator*=(T a_other){
-		R *= static_cast<float>(a_other);
-		G *= static_cast<float>(a_other);
-		B *= static_cast<float>(a_other);
-		A *= static_cast<float>(a_other);
-		return *this;
-	}
-
-	template <typename T>
-	Color& Color::operator/=(T a_other){
-		R /= static_cast<float>(a_other != 0 ? a_other : 1);
-		G /= static_cast<float>(a_other != 0 ? a_other : 1);
-		B /= static_cast<float>(a_other != 0 ? a_other : 1);
-		A /= static_cast<float>(a_other != 0 ? a_other : 1);
-		return *this;
-	}
-
 	template<typename T>
-	Color operator*(const Color &a_lhs, T a_rhs){
+	std::enable_if_t<std::is_arithmetic_v<T>, Color>
+		operator*(const Color& a_lhs, T a_rhs) {
 		Color result = a_lhs;
 		return result *= a_rhs;
 	}
+
 	template<typename T>
-	Color operator/(const Color &a_lhs, T a_rhs){
+	std::enable_if_t<std::is_arithmetic_v<T>, Color>
+		operator/(const Color& a_lhs, T a_rhs) {
 		Color result = a_lhs;
 		return result /= a_rhs;
 	}
 
-	template <class T>
-	Color operator+(const Color& a_left, const T& a_right){
+	template<typename T>
+	std::enable_if_t<std::is_arithmetic_v<T>, Color>
+		operator+(const Color& a_left, const T& a_right) {
 		Color tmpPoint = a_left;
 		return tmpPoint += a_right;
 	}
 
-	template <class T>
-	Color operator-(const Color& a_left, const T& a_right){
+	template<typename T>
+	std::enable_if_t<std::is_arithmetic_v<T>, Color>
+		operator-(const Color& a_left, const T& a_right) {
 		Color tmpPoint = a_left;
 		return tmpPoint -= a_right;
 	}
 
-	template <class T>
-	Color operator+(const T& a_left, const Color& a_right){
-        auto value = static_cast<float>(a_left);
+	template<typename T>
+	std::enable_if_t<std::is_arithmetic_v<T>, Color>
+		operator+(const T& a_left, const Color& a_right) {
+		auto value = static_cast<float>(a_left);
 		Color tmpPoint = Color(value, value, value, value);
 		return tmpPoint += a_right;
 	}
 
-	template <class T>
-	Color operator-(const T& a_left, const Color& a_right){
-        auto value = static_cast<float>(a_left);
-        Color tmpPoint = Color(value, value, value, value);
+	template<typename T>
+	std::enable_if_t<std::is_arithmetic_v<T>, Color>
+		operator-(const T& a_left, const Color& a_right) {
+		auto value = static_cast<float>(a_left);
+		Color tmpPoint = Color(value, value, value, value);
 		return tmpPoint -= a_right;
 	}
 
-	template <class T>
-	Color operator*(const T& a_left, const Color& a_right){
-        auto value = static_cast<float>(a_left);
-        Color tmpPoint = Color(value, value, value, value);
+	template<typename T>
+	std::enable_if_t<std::is_arithmetic_v<T>, Color>
+		operator*(const T& a_left, const Color& a_right) {
+		auto value = static_cast<float>(a_left);
+		Color tmpPoint = Color(value, value, value, value);
 		return tmpPoint *= a_right;
 	}
 
-	template <class T>
-	Color operator/(const T& a_left, const Color& a_right){
-        auto value = static_cast<float>(a_left);
-        Color tmpPoint = Color(value, value, value, value);
+	template<typename T>
+	std::enable_if_t<std::is_arithmetic_v<T>, Color>
+		operator/(const T& a_left, const Color& a_right) {
+		auto value = static_cast<float>(a_left);
+		Color tmpPoint = Color(value, value, value, value);
 		return tmpPoint /= a_right;
 	}
 

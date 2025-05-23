@@ -178,23 +178,18 @@ namespace MV{
 				Text(a_owner, a_textLibrary, DEFAULT_ID) {
 			}
 
-			template <class Archive>
-			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				archive(
-					CEREAL_NVP(formattedText),
-					CEREAL_NVP(usingBoundsForLineHeight),
-					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-				);
-			}
+                        template <class Archive>
+                        void save(Archive & archive, std::uint32_t const /*version*/) const {
+                                archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+                        }
 
-			template <class Archive>
-			void load(Archive & archive, std::uint32_t const /*version*/) {
-				archive(
-					CEREAL_NVP(formattedText),
-					CEREAL_NVP(usingBoundsForLineHeight),
-					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-				);
-			}
+                        template <class Archive>
+                        void load(Archive & archive, std::uint32_t const version) {
+                                if (version == 0) {
+                                        properties.load(archive, { "formattedText", "usingBoundsForLineHeight" });
+                                }
+                                archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+                        }
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Text> &construct, std::uint32_t const version) {
@@ -251,11 +246,16 @@ namespace MV{
 				setCursor(cursor + a_change);
 			}
 
-			TextLibrary& textLibrary;
+TextLibrary& textLibrary;
 
-			std::shared_ptr<FormattedText> formattedText;
+MV_PROPERTY(std::shared_ptr<FormattedText>, formattedText, {},
+[](auto &source, auto &destination) {
+if (source.get() && destination.get()) {
+*destination.get() = *source.get();
+}
+});
 
-			bool usingBoundsForLineHeight = false;
+MV_PROPERTY(bool, usingBoundsForLineHeight, false);
 
 			bool displayCursor = false;
 			size_t cursor = 0;

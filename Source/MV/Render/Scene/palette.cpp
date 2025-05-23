@@ -31,18 +31,18 @@ namespace MV {
 			//14 for the color selector, 4 for the hue + saturation,
 			//4 for the alpha left, 4 for the alpha right, 4 for the preview.
 			//4 for the diamond selected, 3 for the arrow
-			points.resize(14 + 4 + 4 + 4 + 4 + 16 + 3);
+			points->resize(14 + 4 + 4 + 4 + 4 + 16 + 3);
 
 			for (int i = 0; i < colorBarList.size(); ++i) {
 				points[i * 2] = colorBarList[i];
 				points[i * 2 + 1] = colorBarList[i];
 				if (i < colorBarList.size() - 1) {
-					vertexIndices.push_back(static_cast<GLuint>((i * 2) + 0));
-					vertexIndices.push_back(static_cast<GLuint>((i * 2) + 2));
-					vertexIndices.push_back(static_cast<GLuint>((i * 2) + 3));
-					vertexIndices.push_back(static_cast<GLuint>((i * 2) + 3));
-					vertexIndices.push_back(static_cast<GLuint>((i * 2) + 1));
-					vertexIndices.push_back(static_cast<GLuint>((i * 2) + 0));
+					vertexIndices->push_back(static_cast<GLuint>((i * 2) + 0));
+					vertexIndices->push_back(static_cast<GLuint>((i * 2) + 2));
+					vertexIndices->push_back(static_cast<GLuint>((i * 2) + 3));
+					vertexIndices->push_back(static_cast<GLuint>((i * 2) + 3));
+					vertexIndices->push_back(static_cast<GLuint>((i * 2) + 1));
+					vertexIndices->push_back(static_cast<GLuint>((i * 2) + 0));
 				}
 			}
 
@@ -60,20 +60,20 @@ namespace MV {
 			points[16] = TexturePoint(1.0f, 1.0f);
 			points[17] = TexturePoint(1.0f, 0.0f);
 
-			appendQuadVertexIndices(vertexIndices, 14);
-			appendQuadVertexIndices(vertexIndices, 18);
-			appendQuadVertexIndices(vertexIndices, 22);
-			appendQuadVertexIndices(vertexIndices, 26);
+			appendQuadVertexIndices(*vertexIndices, 14);
+			appendQuadVertexIndices(*vertexIndices, 18);
+			appendQuadVertexIndices(*vertexIndices, 22);
+			appendQuadVertexIndices(*vertexIndices, 26);
 
 
-			appendQuadVertexIndices(vertexIndices, 30);
-			appendQuadVertexIndices(vertexIndices, 34);
-			appendQuadVertexIndices(vertexIndices, 38);
-			appendQuadVertexIndices(vertexIndices, 42);
+			appendQuadVertexIndices(*vertexIndices, 30);
+			appendQuadVertexIndices(*vertexIndices, 34);
+			appendQuadVertexIndices(*vertexIndices, 38);
+			appendQuadVertexIndices(*vertexIndices, 42);
 
-			vertexIndices.push_back(46);
-			vertexIndices.push_back(47);
-			vertexIndices.push_back(48);
+			vertexIndices->push_back(46);
+			vertexIndices->push_back(47);
+			vertexIndices->push_back(48);
 
 			innerColorAlphaSelectorNoNotification({181, 185, 191}, {65, 68, 77});
 		}

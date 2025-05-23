@@ -143,18 +143,27 @@ namespace MV {
 
                        template <class Archive>
                        void save(Archive & archive, std::uint32_t const /*version*/) const {
+				archive(cereal::make_nvp("onPress", onPressSignal),
+					cereal::make_nvp("onRelease", onReleaseSignal),
+					cereal::make_nvp("onDrag", onDragSignal),
+					cereal::make_nvp("onAccept", onAcceptSignal),
+					cereal::make_nvp("onCancel", onCancelSignal),
+					cereal::make_nvp("onDrop", onDropSignal));
                                archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
                        }
 
                         template <class Archive>
                         void load(Archive & archive, std::uint32_t const version) {
+				archive(cereal::make_nvp("onPress", onPressSignal),
+					cereal::make_nvp("onRelease", onReleaseSignal),
+					cereal::make_nvp("onDrag", onDragSignal),
+					cereal::make_nvp("onAccept", onAcceptSignal),
+					cereal::make_nvp("onCancel", onCancelSignal),
+					cereal::make_nvp("onDrop", onDropSignal));
                                if(version == 0) {
                                        properties.load(archive, {
-                                               "onPress", "onRelease", "onDrag", "onAccept", "onCancel", "onDrop",
                                                "hitDetectionType", "eatTouches", "globalClickPriority", "appendClickPriority", "overrideClickPriority"
                                        });
-                               } else {
-                                       properties.load(archive);
                                }
                                archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
                        }

@@ -3,7 +3,10 @@
 #include "stencil.h"
 
 #include "cereal/archives/json.hpp"
+
 #include "cereal/archives/portable_binary.hpp"
+
+CEREAL_CLASS_VERSION(MV::Scene::Clickable, 1);
 
 CEREAL_REGISTER_TYPE(MV::Scene::Clickable);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_sceneclickable);
@@ -223,13 +226,10 @@ namespace MV {
 			acceptUpClick(true);
 		}
 
-		std::shared_ptr<Component> Clickable::cloneHelper(const std::shared_ptr<Component> &a_clone) {
-			Sprite::cloneHelper(a_clone);
-			auto clickableClone = std::static_pointer_cast<Clickable>(a_clone);
-			clickableClone->eatTouches = eatTouches;
-			clickableClone->hitDetectionType = hitDetectionType;
-			return a_clone;
-		}
+                std::shared_ptr<Component> Clickable::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+                        Sprite::cloneHelper(a_clone);
+                        return a_clone;
+                }
 
 	}
 }

@@ -7,6 +7,7 @@
 #include <vector>
 #include <functional>
 #include <utility>
+#include <memory>
 #include "require.hpp"
 #include "signal.hpp"
 #include <cereal/cereal.hpp>

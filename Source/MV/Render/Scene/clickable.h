@@ -141,41 +141,23 @@ namespace MV {
 
 			virtual void acceptUpClick(bool a_ignoreBounds = false);
 
-			template <class Archive>
-			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				archive(
-					cereal::make_nvp("onPress", onPressSignal),
-					cereal::make_nvp("onRelease", onReleaseSignal),
-					cereal::make_nvp("onDrag", onDragSignal),
-					cereal::make_nvp("onAccept", onAcceptSignal),
-					cereal::make_nvp("onCancel", onCancelSignal),
-					cereal::make_nvp("onDrop", onDropSignal),
-					cereal::make_nvp("hitDetectionType", hitDetectionType),
-					cereal::make_nvp("eatTouches", eatTouches),
-					cereal::make_nvp("globalClickPriority", globalClickPriority),
-					cereal::make_nvp("appendClickPriority", appendClickPriority),
-					cereal::make_nvp("overrideClickPriority", overrideClickPriority),
-					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
-				);
-			}
+                       template <class Archive>
+                       void save(Archive & archive, std::uint32_t const /*version*/) const {
+                               archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
+                       }
 
-			template <class Archive>
-			void load(Archive & archive, std::uint32_t const /*version*/) {
-				archive(
-					cereal::make_nvp("onPress", onPressSignal),
-					cereal::make_nvp("onRelease", onReleaseSignal),
-					cereal::make_nvp("onDrag", onDragSignal),
-					cereal::make_nvp("onAccept", onAcceptSignal),
-					cereal::make_nvp("onCancel", onCancelSignal),
-					cereal::make_nvp("onDrop", onDropSignal),
-					cereal::make_nvp("hitDetectionType", hitDetectionType),
-					cereal::make_nvp("eatTouches", eatTouches),
-					cereal::make_nvp("globalClickPriority", globalClickPriority),
-					cereal::make_nvp("appendClickPriority", appendClickPriority),
-					cereal::make_nvp("overrideClickPriority", overrideClickPriority),
-					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
-				);
-			}
+                        template <class Archive>
+                        void load(Archive & archive, std::uint32_t const version) {
+                               if(version == 0) {
+                                       properties.load(archive, {
+                                               "onPress", "onRelease", "onDrag", "onAccept", "onCancel", "onDrop",
+                                               "hitDetectionType", "eatTouches", "globalClickPriority", "appendClickPriority", "overrideClickPriority"
+                                       });
+                               } else {
+                                       properties.load(archive);
+                               }
+                               archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
+                       }
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Clickable> &construct, std::uint32_t const version) {
@@ -199,8 +181,8 @@ namespace MV {
 				onMouseMoveHandle.reset();
 			}
 
-			int64_t globalClickPriority = 100;
-			int64_t appendClickPriority = 0;
+                       MV_PROPERTY(int64_t, globalClickPriority, 100, [](auto &, auto &){ });
+                       MV_PROPERTY(int64_t, appendClickPriority, 0, [](auto &, auto &){ });
 		private:
 			TapDevice::SignalType onLeftMouseDownHandle;
 			TapDevice::SignalType onLeftMouseUpHandle;
@@ -221,9 +203,9 @@ namespace MV {
 			std::string onAcceptScript;
 			std::string onCancelScript;
 
-			std::vector<int64_t> overrideClickPriority;
-			bool eatTouches = true;
-			BoundsType hitDetectionType = BoundsType::LOCAL;
+                        MV_PROPERTY(std::vector<int64_t>, overrideClickPriority, {}, [](auto &, auto &){ });
+                        MV_PROPERTY(bool, eatTouches, true);
+                        MV_PROPERTY(BoundsType, hitDetectionType, BoundsType::LOCAL);
 		};
 
 	}

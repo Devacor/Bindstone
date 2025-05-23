@@ -47,22 +47,22 @@ namespace MV {
 				appendQuadVertexIndices(*vertexIndices, 0);
 			}
 
-                       template <class Archive>
-                       void save(Archive & archive, std::uint32_t const /*version*/) const {
-                               archive(
-                                       cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-                               );
-                       }
+            template <class Archive>
+            void save(Archive & archive, std::uint32_t const /*version*/) const {
+				archive(
+					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
+				);
+            }
 
-                       template <class Archive>
-                       void load(Archive & archive, std::uint32_t const version) {
-                               if (version == 0) {
-                                       properties.load(archive, { "subdivisions" });
-                               }
-                               archive(
-                                       cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-                               );
-                       }
+            template <class Archive>
+            void load(Archive & archive, std::uint32_t const version) {
+				if (version == 1) {
+					properties.load(archive, { "subdivisions" });
+				}
+				archive(
+					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
+				);
+            }
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Sprite> &construct, std::uint32_t const version) {
@@ -97,7 +97,7 @@ namespace MV {
 
 			void updateTextureCoordinates(size_t a_textureId) override;
 
-                       Property<uint16_t> ourSubdivisions{properties, "subdivisions", 0};
+			Property<uint16_t> ourSubdivisions{properties, "subdivisions", 0};
 		};
 
 		template<typename PointAssign>

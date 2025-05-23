@@ -126,7 +126,7 @@ namespace MV {
 		}
 
 		std::vector<int64_t> Clickable::clickPriority() const {
-			if (overrideClickPriority.empty()) {
+			if (overrideClickPriority->empty()) {
 				auto priority = owner()->parentIndexList(globalClickPriority);
 				if (appendPriority() != 0) {
 					priority.push_back(appendPriority());

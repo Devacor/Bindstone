@@ -203,7 +203,13 @@ namespace MV {
 			value = std::move(v);
 			return *this;
 		}
-		operator const T& () const { return value; }
+		operator const T& () const noexcept { return value; }
+
+		template<typename U = T, typename = std::enable_if_t<std::is_arithmetic_v<U>>>
+		operator U() const noexcept {
+			return value;
+		}
+
 		T& get() { return value; }
 		const T& get() const { return value; }
 

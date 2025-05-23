@@ -5,7 +5,7 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Sprite);
-CEREAL_CLASS_VERSION(MV::Scene::Sprite, 1);
+CEREAL_CLASS_VERSION(MV::Scene::Sprite, 2);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_scenesprite);
 
 namespace MV {

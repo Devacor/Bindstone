@@ -19,7 +19,9 @@ namespace MV{
 			onEnter(onEnterSignal),
 			onChange(onChangeSignal),
 			fontIdentifier(a_defaultFontIdentifier),
-			formattedText(std::make_shared<FormattedText>(a_textLibrary, a_defaultFontIdentifier)) {
+			formattedText(properties, "formattedText", std::make_shared<FormattedText>(a_textLibrary, a_defaultFontIdentifier), [](auto& source, auto& destination) { 
+				*destination.get() = *source.get();
+			}) {
 			
 			for (auto&& point : points) {
 				point = Color(1.0f, 1.0f, 1.0f, 0.0f);
@@ -174,12 +176,12 @@ namespace MV{
 			}
 		}
 
-                std::shared_ptr<Component> Text::cloneHelper(const std::shared_ptr<Component> &a_clone) {
-                        Drawable::cloneHelper(a_clone);
-                        auto textClone = std::static_pointer_cast<Text>(a_clone);
-                        textClone->cursor = cursor;
-                        return a_clone;
-                }
+		std::shared_ptr<Component> Text::cloneHelper(const std::shared_ptr<Component>& a_clone) {
+			Drawable::cloneHelper(a_clone);
+			auto textClone = std::static_pointer_cast<Text>(a_clone);
+			textClone->cursor = cursor;
+			return a_clone;
+		}
 
 		void Text::detachImplementation() {
 			Drawable::detachImplementation();

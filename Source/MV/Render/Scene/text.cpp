@@ -4,6 +4,7 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Text);
+CEREAL_CLASS_VERSION(MV::Scene::Text, 1);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_scenetext);
 
 namespace MV{
@@ -173,14 +174,12 @@ namespace MV{
 			}
 		}
 
-		std::shared_ptr<Component> Text::cloneHelper(const std::shared_ptr<Component> &a_clone) {
-			Drawable::cloneHelper(a_clone);
-			auto textClone = std::static_pointer_cast<Text>(a_clone);
-			(*textClone->formattedText) = *formattedText;
-			textClone->cursor = cursor;
-			textClone->usingBoundsForLineHeight = usingBoundsForLineHeight;
-			return a_clone;
-		}
+                std::shared_ptr<Component> Text::cloneHelper(const std::shared_ptr<Component> &a_clone) {
+                        Drawable::cloneHelper(a_clone);
+                        auto textClone = std::static_pointer_cast<Text>(a_clone);
+                        textClone->cursor = cursor;
+                        return a_clone;
+                }
 
 		void Text::detachImplementation() {
 			Drawable::detachImplementation();

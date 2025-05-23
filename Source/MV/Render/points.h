@@ -157,10 +157,14 @@ namespace MV {
 		Size<T>& operator-=(const Size<T>& a_other);
 		Size<T>& operator*=(const Size<T>& a_other);
 		Size<T>& operator/=(const Size<T>& a_other);
-		Size<T>& operator+=(const T& a_other);
-		Size<T>& operator-=(const T& a_other);
-		Size<T>& operator*=(const T& a_other);
-		Size<T>& operator/=(const T& a_other);
+               template<typename U = T, typename = enable_if_arithmetic_t<U>>
+               Size<T>& operator+=(const T& a_other);
+               template<typename U = T, typename = enable_if_arithmetic_t<U>>
+               Size<T>& operator-=(const T& a_other);
+               template<typename U = T, typename = enable_if_arithmetic_t<U>>
+               Size<T>& operator*=(const T& a_other);
+               template<typename U = T, typename = enable_if_arithmetic_t<U>>
+               Size<T>& operator/=(const T& a_other);
 		Size<T>& operator*=(const Scale& a_other);
 		Size<T>& operator/=(const Scale& a_other);
 
@@ -220,8 +224,10 @@ namespace MV {
 		inline Point<T>& operator-=(const Point<T>& a_other);
 		inline Point<T>& operator*=(const Point<T>& a_other);
 		inline Point<T>& operator/=(const Point<T>& a_other);
-		inline Point<T>& operator*=(const T& a_other);
-		inline Point<T>& operator/=(const T& a_other);
+               template<typename U = T, typename = enable_if_arithmetic_t<U>>
+               inline Point<T>& operator*=(const T& a_other);
+               template<typename U = T, typename = enable_if_arithmetic_t<U>>
+               inline Point<T>& operator/=(const T& a_other);
 		inline Point<T>& operator*=(const Scale& a_other);
 		inline Point<T>& operator/=(const Scale& a_other);
 
@@ -686,19 +692,19 @@ namespace MV {
 	| -------Size IMP------- |
 	\************************/
 
-	template <typename T>
-	Size<T> fitAspect(Size<T> a_toConstrain, Size<T> a_maximum){
+template <typename T, typename>
+Size<T> fitAspect(Size<T> a_toConstrain, Size<T> a_maximum){
 		auto ratio = std::min(static_cast<double>(a_maximum.width) / static_cast<double>(a_toConstrain.width), static_cast<double>(a_maximum.height) / static_cast<double>(a_toConstrain.height));
 		return {static_cast<T>(static_cast<double>(a_toConstrain.width) * ratio), static_cast<T>(static_cast<double>(a_toConstrain.height) * ratio)};
 	}
 
-	template <typename T>
-	Size<T> size(T a_width, T a_height){
+template <typename T, typename>
+Size<T> size(T a_width, T a_height){
 		return Size<T>{a_width, a_height};
 	}
 
-	template <typename T>
-	Size<T> size(T a_width, T a_height, T a_depth) {
+template <typename T, typename>
+Size<T> size(T a_width, T a_height, T a_depth) {
 		return Size<T>{a_width, a_height, a_depth};
 	}
 
@@ -738,20 +744,23 @@ namespace MV {
 		return *this;
 	}
 
-	template <class T>
-	Size<T>& MV::Size<T>::operator+=(const T& a_other){
+template <class T>
+template <typename U, typename>
+Size<T>& MV::Size<T>::operator+=(const T& a_other){
 		width += a_other; height += a_other; depth += a_other;
 		return *this;
 	}
 
-	template <class T>
-	Size<T>& MV::Size<T>::operator-=(const T& a_other){
+template <class T>
+template <typename U, typename>
+Size<T>& MV::Size<T>::operator-=(const T& a_other){
 		width -= a_other; height -= a_other; depth -= a_other;
 		return *this;
 	}
 
-	template <class T>
-	Size<T>& MV::Size<T>::operator*=(const T& a_other){
+template <class T>
+template <typename U, typename>
+Size<T>& MV::Size<T>::operator*=(const T& a_other){
 		width*=a_other; height*=a_other; depth*=a_other;
 		return *this;
 	}
@@ -772,8 +781,9 @@ namespace MV {
 		return *this;
 	}
 
-	template <class T>
-	Size<T>& MV::Size<T>::operator/=(const T& a_other){
+template <class T>
+template <typename U, typename>
+Size<T>& MV::Size<T>::operator/=(const T& a_other){
 		if(a_other != 0){
 			width/=a_other; height/=a_other; depth/=a_other;
 		}else{
@@ -828,50 +838,50 @@ namespace MV {
 		return tmpPoint /= a_right;
 	}
 
-	template <class T>
-	Size<T> operator+(const Size<T>& a_left, const T& a_right){
+template <class T, typename>
+Size<T> operator+(const Size<T>& a_left, const T& a_right){
 		Size<T> tmpPoint = a_left;
 		return tmpPoint+=a_right;
 	}
 
-	template <class T>
-	Size<T> operator-(const Size<T>& a_left, const T& a_right){
+template <class T, typename>
+Size<T> operator-(const Size<T>& a_left, const T& a_right){
 		Size<T> tmpPoint = a_left;
 		return tmpPoint-=a_right;
 	}
 
-	template <class T>
-	Size<T> operator*(const Size<T>& a_left, const T& a_right){
+template <class T, typename>
+Size<T> operator*(const Size<T>& a_left, const T& a_right){
 		Size<T> tmpPoint = a_left;
 		return tmpPoint*=a_right;
 	}
 
-	template <class T>
-	Size<T> operator/(const Size<T>& a_left, const T& a_right){
+template <class T, typename>
+Size<T> operator/(const Size<T>& a_left, const T& a_right){
 		Size<T> tmpPoint = a_left;
 		return tmpPoint/=a_right;
 	}
 
-	template <class T>
-	Size<T> operator+(const T& a_left, const Size<T>& a_right){
+template <class T, typename>
+Size<T> operator+(const T& a_left, const Size<T>& a_right){
 		Size<T> tmpPoint = Size<T>(a_left, a_left, a_left);
 		return tmpPoint += a_right;
 	}
 
-	template <class T>
-	Size<T> operator-(const T& a_left, const Size<T>& a_right){
+template <class T, typename>
+Size<T> operator-(const T& a_left, const Size<T>& a_right){
 		Size<T> tmpPoint = Size<T>(a_left, a_left, a_left);
 		return tmpPoint -= a_right;
 	}
 
-	template <class T>
-	Size<T> operator*(const T& a_left, const Size<T>& a_right){
+template <class T, typename>
+Size<T> operator*(const T& a_left, const Size<T>& a_right){
 		Size<T> tmpPoint = Size<T>(a_left, a_left, a_left);
 		return tmpPoint *= a_right;
 	}
 
-	template <class T>
-	Size<T> operator/(const T& a_left, const Size<T>& a_right){
+template <class T, typename>
+Size<T> operator/(const T& a_left, const Size<T>& a_right){
 		Size<T> tmpPoint = Size<T>(a_left, a_left, a_left);
 		return tmpPoint /= a_right;
 	}
@@ -991,13 +1001,13 @@ namespace MV {
 	| -------Point IMP------- |
 	\*************************/
 
-	template <typename T>
-	Point<T> point(T a_xPos, T a_yPos){
+template <typename T, typename>
+Point<T> point(T a_xPos, T a_yPos){
 		return Point<T>{a_xPos, a_yPos};
 	}
 
-	template <typename T>
-	Point<T> point(T a_xPos, T a_yPos, T a_zPos) {
+template <typename T, typename>
+Point<T> point(T a_xPos, T a_yPos, T a_zPos) {
 		return Point<T>{a_xPos, a_yPos, a_zPos};
 	}
 
@@ -1072,8 +1082,9 @@ namespace MV {
 		return *this;
 	}
 
-	template <class T>
-	Point<T>& MV::Point<T>::operator*=(const T& a_other){
+template <class T>
+template <typename U, typename>
+Point<T>& MV::Point<T>::operator*=(const T& a_other){
 		x*=a_other; y*=a_other; z*=a_other;
 		return *this;
 	}
@@ -1094,8 +1105,9 @@ namespace MV {
 		return *this;
 	}
 
-	template <class T>
-	Point<T>& MV::Point<T>::operator/=(const T& a_other){
+template <class T>
+template <typename U, typename>
+Point<T>& MV::Point<T>::operator/=(const T& a_other){
 		if(a_other != 0){
 			x/=a_other; y/=a_other; z/=a_other;
 		}else{
@@ -1279,50 +1291,50 @@ namespace MV {
 		return result /= a_right;
 	}
 
-	template <class T>
-	Point<T> operator+(const Point<T> &a_left, const T& a_right){
+template <class T, typename>
+Point<T> operator+(const Point<T> &a_left, const T& a_right){
 		auto result = a_left;
 		return result +=Point<T>(a_right, a_right, a_right);
 	}
 
-	template <class T>
-	Point<T> operator-(const Point<T> &a_left, const T& a_right){
+template <class T, typename>
+Point<T> operator-(const Point<T> &a_left, const T& a_right){
 		auto result = a_left;
 		return result-=Point<T>(a_right, a_right, a_right);
 	}
 
-	template <class T>
-	Point<T> operator*(const Point<T> &a_left, const T& a_right){
+template <class T, typename>
+Point<T> operator*(const Point<T> &a_left, const T& a_right){
 		auto result = a_left;
 		return result *=Point<T>(a_right, a_right, a_right);
 	}
 
-	template <class T>
-	Point<T> operator/(const Point<T> &a_left, const T& a_right){
+template <class T, typename>
+Point<T> operator/(const Point<T> &a_left, const T& a_right){
 		auto result = a_left;
 		return result/=Point<T>(a_right, a_right, a_right);
 	}
 
-	template <class T>
-	Point<T> operator+(const T& a_left, const Point<T>& a_right){
+template <class T, typename>
+Point<T> operator+(const T& a_left, const Point<T>& a_right){
 		Point<T> tmpPoint = Point<T>(a_left, a_left, a_left);
 		return tmpPoint += a_right;
 	}
 
-	template <class T>
-	Point<T> operator-(const T& a_left, const Point<T>& a_right){
+template <class T, typename>
+Point<T> operator-(const T& a_left, const Point<T>& a_right){
 		Point<T> tmpPoint = Point<T>(a_left, a_left, a_left);
 		return tmpPoint -= a_right;
 	}
 
-	template <class T>
-	Point<T> operator*(const T& a_left, const Point<T>& a_right){
+template <class T, typename>
+Point<T> operator*(const T& a_left, const Point<T>& a_right){
 		Point<T> tmpPoint = Point<T>(a_left, a_left, a_left);
 		return tmpPoint *= a_right;
 	}
 
-	template <class T>
-	const Point<T> operator/(const T& a_left, const Point<T>& a_right){
+template <class T, typename>
+const Point<T> operator/(const T& a_left, const Point<T>& a_right){
 		Point<T> tmpPoint = Point<T>(a_left, a_left, a_left);
 		return tmpPoint /= a_right;
 	}
@@ -1346,23 +1358,23 @@ namespace MV {
 		return is;
 	}
 
-	template<typename T>
-	PointPrecision distance(const Point<T> &a_lhs, const Point<T> &a_rhs) {
+template<typename T, typename>
+PointPrecision distance(const Point<T> &a_lhs, const Point<T> &a_rhs) {
 		return (a_lhs - a_rhs).magnitude();
 	}
 
-	template<typename T>
-	PointPrecision preSquareDistance(const Point<T> &a_lhs, const Point<T> &a_rhs) {
+template<typename T, typename>
+PointPrecision preSquareDistance(const Point<T> &a_lhs, const Point<T> &a_rhs) {
 		return (a_lhs - a_rhs).preSquareMagnitude();
 	}
 
-	template <typename T>
-	PointPrecision angle2D(const Point<T> &a_lhs, const Point<T> &a_rhs) {
+template <typename T, typename>
+PointPrecision angle2D(const Point<T> &a_lhs, const Point<T> &a_rhs) {
 		return static_cast<PointPrecision>(angle2D(a_lhs.x, a_lhs.y, a_rhs.x, a_rhs.y));
 	}
 
-	template <typename T>
-	PointPrecision angle2DRad(const Point<T> &a_lhs, const Point<T> &a_rhs) {
+template <typename T, typename>
+PointPrecision angle2DRad(const Point<T> &a_lhs, const Point<T> &a_rhs) {
 		return static_cast<PointPrecision>(angle2DRad(a_lhs.x, a_lhs.y, a_rhs.x, a_rhs.y));
 	}
 

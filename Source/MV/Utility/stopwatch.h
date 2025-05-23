@@ -80,9 +80,9 @@ namespace MV {
 		double prevtime = 0;
 		double pausetime = 0;
 		double timeOffset = 0;
-        bool started = false;
-        bool paused = false;
-        bool firstCall = false;
+		bool started = false;
+		bool paused = false;
+		bool firstCall = false;
 
 		std::unordered_map<std::string, double> deltaVals;
 	};

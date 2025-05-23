@@ -6,7 +6,7 @@
 #ifndef _RENDER_H_
 #define _RENDER_H_
 #ifndef NOMINMAX
-	#define NOMINMAX 1
+#define NOMINMAX 1
 #endif
 // #if defined(WIN32) && !defined(GL_BGR)
 // #define GL_BGR GL_BGR_EXT
@@ -31,14 +31,14 @@
 #include "MV/Utility/signal.hpp"
 
 #ifdef __APPLE__
-	#import "TargetConditionals.h" 
-	#ifdef TARGET_OS_IPHONE
-		#define __IPHONEOS__ 1
-	#endif
+#import "TargetConditionals.h" 
+#ifdef TARGET_OS_IPHONE
+#define __IPHONEOS__ 1
+#endif
 #endif
 
 #if defined(TARGET_OS_IPHONE) || defined(__ANDROID__)
-	#define HAVE_OPENGLES 1
+#define HAVE_OPENGLES 1
 #endif
 
 #include <SDL.h>
@@ -48,25 +48,25 @@
 
 #ifdef HAVE_OPENGLES
 	//#include <SDL_opengl.h>
-	#include <SDL_opengles2.h>
-    //#include <OpenGLES/ES3/gl.h>
-    //#include <OpenGLES/ES3/glext.h>
-	//typedef GLfloat GLdouble; //opengles has no GLdouble
+#include <SDL_opengles2.h>
+//#include <OpenGLES/ES3/gl.h>
+//#include <OpenGLES/ES3/glext.h>
+//typedef GLfloat GLdouble; //opengles has no GLdouble
 
-    inline int gl3wInit(){
-        return 0;
-    }
+inline int gl3wInit() {
+	return 0;
+}
 #else
-	#include <gl3w/include/GL/gl3w.h>
-	#include <SDL_opengl.h>
+#include <gl3w/include/GL/gl3w.h>
+#include <SDL_opengl.h>
 #endif
 
 #ifdef GL_DEPTH_COMPONENT24
-	#define GL_DEPTH_COMPONENT_DEFAULT GL_DEPTH_COMPONENT24
+#define GL_DEPTH_COMPONENT_DEFAULT GL_DEPTH_COMPONENT24
 #elif GL_DEPTH_COMPONENT24_OES
-	#define GL_DEPTH_COMPONENT_DEFAULT GL_DEPTH_COMPONENT24_OES
+#define GL_DEPTH_COMPONENT_DEFAULT GL_DEPTH_COMPONENT24_OES
 #else
-	#define GL_DEPTH_COMPONENT_DEFAULT GL_DEPTH_COMPONENT16
+#define GL_DEPTH_COMPONENT_DEFAULT GL_DEPTH_COMPONENT16
 #endif
 
 #include <string>
@@ -100,16 +100,16 @@ namespace MV {
 
 	class glExtensionBlendMode {
 	public:
-		glExtensionBlendMode(Draw2D *a_renderer);
+		glExtensionBlendMode(Draw2D* a_renderer);
 		bool blendModeExtensionEnabled() { return initialized; }
 		void setBlendFunction(GLenum a_sfactorRGB, GLenum a_dfactorRGB, GLenum a_sfactorAlpha, GLenum a_dfactorAlpha);
 		void setBlendFunction(GLenum a_sfactorRGB, GLenum a_dfactorRGB);
 		void setBlendEquation(GLenum a_rgbBlendFunc, GLenum a_alphaBlendFunc);
 	protected:
-		void loadExtensionBlendMode(char *a_extensionsList);
+		void loadExtensionBlendMode(char* a_extensionsList);
 	private:
 		bool initialized;
-		Draw2D *renderer;
+		Draw2D* renderer;
 	};
 
 	class glExtensionFramebufferObject;
@@ -127,13 +127,13 @@ namespace MV {
 			return texture;
 		}
 
-		void setSize(const Size<int> &a_size) {
+		void setSize(const Size<int>& a_size) {
 			frameSize = a_size;
 		}
 		Size<int> size() const {
 			return frameSize;
 		}
-		void setPosition(const Point<int> &a_position) {
+		void setPosition(const Point<int>& a_position) {
 			framePosition = a_position;
 		}
 		Point<int> position() const {
@@ -141,7 +141,7 @@ namespace MV {
 		}
 	private:
 		friend glExtensionFramebufferObject;
-		Framebuffer(Draw2D *a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, const Size<int> &a_size, const Point<int> &a_position, const Color &a_backgroundColor);
+		Framebuffer(Draw2D* a_renderer, GLuint a_framebuffer, GLuint a_renderbuffer, GLuint a_depthbuffer, GLuint a_texture, const Size<int>& a_size, const Point<int>& a_position, const Color& a_backgroundColor);
 
 		GLuint framebuffer;
 		GLuint renderbuffer;
@@ -154,16 +154,16 @@ namespace MV {
 
 		bool started;
 
-		Draw2D *renderer;
+		Draw2D* renderer;
 	};
 
 	class glExtensionFramebufferObject {
 		friend Framebuffer;
 	public:
-		glExtensionFramebufferObject(Draw2D *a_renderer);
+		glExtensionFramebufferObject(Draw2D* a_renderer);
 
 		bool framebufferObjectExtensionEnabled() { return initialized; }
-		std::shared_ptr<Framebuffer> makeFramebuffer(const Point<int> &a_position, const Size<int> &a_size, GLuint a_texture, const Color &a_backgroundColor = Color(0.0f, 0.0f, 0.0f, 0.0f));
+		std::shared_ptr<Framebuffer> makeFramebuffer(const Point<int>& a_position, const Size<int>& a_size, GLuint a_texture, const Color& a_backgroundColor = Color(0.0f, 0.0f, 0.0f, 0.0f));
 
 		void startUsingFramebuffer(std::weak_ptr<Framebuffer> a_framebuffer, bool a_push = true);
 		void stopUsingFramebuffer();
@@ -183,8 +183,8 @@ namespace MV {
 		void loadExtensionFramebufferObject(char* a_extensionsList);
 		void initializeOriginalBufferIds();
 	private:
-		void deleteFramebuffer(Framebuffer &a_framebuffer);
-		Draw2D *renderer;
+		void deleteFramebuffer(Framebuffer& a_framebuffer);
+		Draw2D* renderer;
 		bool initialized;
 
 		Color savedClearColor;
@@ -195,7 +195,7 @@ namespace MV {
 		public glExtensionFramebufferObject
 	{
 	public:
-		glExtensions(Draw2D *a_renderer);
+		glExtensions(Draw2D* a_renderer);
 	protected:
 		void initializeExtensions();
 	private:
@@ -204,42 +204,42 @@ namespace MV {
 
 	class Draw2D;
 	struct ProjectionDetails {
-		ProjectionDetails(const Draw2D &a_renderer):
-			renderer(a_renderer){
+		ProjectionDetails(const Draw2D& a_renderer) :
+			renderer(a_renderer) {
 		}
-			
-		Point<int> projectScreen(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview);
-		Point<> projectWorld(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview);
-		Point<> unProjectScreen(const Point<int> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview);
-		Point<> unProjectWorld(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview);
 
-		const Draw2D &renderer;
+		Point<int> projectScreen(const Point<>& a_point, int32_t a_cameraId, const TransformMatrix& a_modelview);
+		Point<> projectWorld(const Point<>& a_point, int32_t a_cameraId, const TransformMatrix& a_modelview);
+		Point<> unProjectScreen(const Point<int>& a_point, int32_t a_cameraId, const TransformMatrix& a_modelview);
+		Point<> unProjectWorld(const Point<>& a_point, int32_t a_cameraId, const TransformMatrix& a_modelview);
+
+		const Draw2D& renderer;
 	private:
-		inline Point<> projectScreenRaw(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview, const MV::Point<> &a_viewOffset, const MV::Size<> &a_viewSize);
-		inline Point<> unProjectScreenRaw(const Point<> &a_point, int32_t a_cameraId, const TransformMatrix &a_modelview, const MV::Point<>& a_viewOffset, const MV::Size<>& a_viewSize);
+		inline Point<> projectScreenRaw(const Point<>& a_point, int32_t a_cameraId, const TransformMatrix& a_modelview, const MV::Point<>& a_viewOffset, const MV::Size<>& a_viewSize);
+		inline Point<> unProjectScreenRaw(const Point<>& a_point, int32_t a_cameraId, const TransformMatrix& a_modelview, const MV::Point<>& a_viewOffset, const MV::Size<>& a_viewSize);
 	};
 
 	class RenderWorld {
 		friend Draw2D;
 	public:
-		void resize(const Size<> &a_size);
+		void resize(const Size<>& a_size);
 
-		const Size<> &size() const;
+		const Size<>& size() const;
 	private:
 		RenderWorld(Draw2D& a_renderer);
 		Size<> worldSize;
 
-		Draw2D &renderer;
+		Draw2D& renderer;
 	};
 
 	class Window {
 		friend Draw2D;
 	public:
 		~Window();
-		void setTitle(const std::string &a_title);
+		void setTitle(const std::string& a_title);
 
-		MV::Size<int> resize(const Size<int> &a_size);
-		Window& allowUserResize(bool a_maintainProportions = true, const Size<int> &a_minSize = Size<int>(1, 1), const Size<int> &a_maxSize = Size<int>(16384, 16384));
+		MV::Size<int> resize(const Size<int>& a_size);
+		Window& allowUserResize(bool a_maintainProportions = true, const Size<int>& a_minSize = Size<int>(1, 1), const Size<int>& a_maxSize = Size<int>(16384, 16384));
 		Window& lockUserResize();
 
 		bool resizeWorldWithWindow() const;
@@ -248,9 +248,9 @@ namespace MV {
 		Window& windowedMode();
 		Window& fullScreenMode();
 		Window& fullScreenWindowedMode();
-        
-        Window& highResolution();
-        Window& normalResolution();
+
+		Window& highResolution();
+		Window& normalResolution();
 
 		Window& borderless();
 		Window& bordered();
@@ -258,19 +258,19 @@ namespace MV {
 		const Size<int>& drawableSize() const;
 		const Size<int>& windowSize() const;
 
-		bool handleEvent(const SDL_Event &event, RenderWorld &a_world);
+		bool handleEvent(const SDL_Event& event, RenderWorld& a_world);
 
 		float windowDpi() const;
 		float uiScale() const;
 		constexpr float systemDefaultDpi() const;
 	private:
-		Window(Draw2D &a_renderer);
+		Window(Draw2D& a_renderer);
 		bool initialize();
 		void ensureValidGLContext();
 		void refreshContext();
 		void updateScreen();
 		void updateWindowResizeLimits();
-		void conformToAspectRatio(int &a_width, int &a_height) const;
+		void conformToAspectRatio(int& a_width, int& a_height) const;
 
 		SDL_GLContext glcontext = 0;
 
@@ -288,8 +288,8 @@ namespace MV {
 		Size<int> minSize;
 		Size<int> maxSize;
 
-		SDL_Window *window = nullptr;
-		Draw2D &renderer;
+		SDL_Window* window = nullptr;
+		Draw2D& renderer;
 	};
 
 	class TextureDefinition;
@@ -297,29 +297,29 @@ namespace MV {
 	class Shader {
 		friend Draw2D;
 	public:
-		Shader(const std::string &a_stringId, GLuint a_id, bool a_headless, const std::string &a_vertexFile = "", const std::string &a_fragmentFile = "") :
+		Shader(const std::string& a_stringId, GLuint a_id, bool a_headless, const std::string& a_vertexFile = "", const std::string& a_fragmentFile = "") :
 			stringId(a_stringId),
 			programId(a_id),
 			headless(a_headless),
 			vertexShaderFile(a_vertexFile),
-			fragmentShaderFile(a_fragmentFile){
+			fragmentShaderFile(a_fragmentFile) {
 
 			initialize();
 		}
 
-		inline std::string id() const{
+		inline std::string id() const {
 			return stringId;
 		}
 
-		inline void use(){
+		inline void use() {
 			if (!headless) {
 				glUseProgram(programId);
 			}
 		}
 
-		bool set(const std::string &a_variableName, GLuint a_texture, GLuint a_textureBindIndex = 0, bool a_errorIfNotPresent = true);
-		bool set(const std::string &a_variableName, const std::shared_ptr<TextureDefinition> &a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
-		bool set(const std::string &a_variableName, const std::shared_ptr<TextureHandle> &a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
+		bool set(const std::string& a_variableName, GLuint a_texture, GLuint a_textureBindIndex = 0, bool a_errorIfNotPresent = true);
+		bool set(const std::string& a_variableName, const std::shared_ptr<TextureDefinition>& a_texture, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
+		bool set(const std::string& a_variableName, const std::shared_ptr<TextureHandle>& a_value, GLuint a_textureBindIndex, bool a_errorIfNotPresent = true);
 
 		inline bool set(std::string a_variableName, PointPrecision a_value, bool a_errorIfNotPresent = true) {
 			if (!headless) {
@@ -327,46 +327,50 @@ namespace MV {
 				if (offset >= 0) {
 					glUniform1fv(offset, 1, &a_value);
 					return true;
-				} else if (a_errorIfNotPresent) {
+				}
+				else if (a_errorIfNotPresent) {
 					std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
 				}
 			}
 			return false;
 		}
 
-		inline bool setVec2(const std::string &a_variableName, const Point<PointPrecision> &a_point, bool a_errorIfNotPresent = true) {
+		inline bool setVec2(const std::string& a_variableName, const Point<PointPrecision>& a_point, bool a_errorIfNotPresent = true) {
 			if (!headless) {
 				GLint offset = variableOffset(a_variableName);
 				if (offset >= 0) {
 					glUniform2fv(offset, 1, &a_point.x);
 					return true;
-				} else if (a_errorIfNotPresent) {
+				}
+				else if (a_errorIfNotPresent) {
 					std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
 				}
 			}
 			return false;
 		}
-		inline bool setVec3(const std::string &a_variableName, const Point<PointPrecision> &a_point, bool a_errorIfNotPresent = true) {
+		inline bool setVec3(const std::string& a_variableName, const Point<PointPrecision>& a_point, bool a_errorIfNotPresent = true) {
 			if (!headless) {
 				GLint offset = variableOffset(a_variableName);
 				if (offset >= 0) {
 					glUniform3fv(offset, 1, &a_point.x);
 					return true;
-				} else if (a_errorIfNotPresent) {
+				}
+				else if (a_errorIfNotPresent) {
 					std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
 				}
 			}
 			return false;
 		}
 
-		inline bool set(const std::string &a_variableName, const TransformMatrix &a_matrix, bool a_errorIfNotPresent = true) {
+		inline bool set(const std::string& a_variableName, const TransformMatrix& a_matrix, bool a_errorIfNotPresent = true) {
 			if (!headless) {
 				GLint offset = variableOffset(a_variableName);
 				if (offset >= 0) {
-					const GLfloat *mat = &((a_matrix.getMatrixArray())[0]);
+					const GLfloat* mat = &((a_matrix.getMatrixArray())[0]);
 					glUniformMatrix4fv(offset, 1, GL_FALSE, mat);
 					return true;
-				} else if (a_errorIfNotPresent) {
+				}
+				else if (a_errorIfNotPresent) {
 					std::cerr << "Warning: Shader has no variable: " << a_variableName << std::endl;
 				}
 			}
@@ -384,7 +388,8 @@ namespace MV {
 				variables.clear();
 				if (!glIsProgram(programId)) {
 					std::cerr << "GL Program Id IS NOT A PROGRAM: " << programId << std::endl;
-				} else {
+				}
+				else {
 					int total = -1;
 					glGetProgramiv(programId, GL_ACTIVE_UNIFORMS, &total);
 					std::cout << "Shader Id: " << programId << std::endl;
@@ -403,11 +408,12 @@ namespace MV {
 			}
 		}
 
-		inline GLint variableOffset(const std::string &a_variableName){
+		inline GLint variableOffset(const std::string& a_variableName) {
 			auto found = variables.find(a_variableName);
-			if(found != variables.end()){
+			if (found != variables.end()) {
 				return found->second;
-			} else {
+			}
+			else {
 				auto foundLocation = glGetUniformLocation(programId, a_variableName.c_str());
 				//might be -1 if missing, this is fine, avoid calling glGetUniformLocation next time.
 				variables[a_variableName] = foundLocation;
@@ -443,11 +449,11 @@ namespace MV {
 		RenderWorld& world();
 		const RenderWorld& world() const;
 
-		MatrixStack& projectionMatrix(){
+		MatrixStack& projectionMatrix() {
 			return contextProjectionMatrix;
 		}
 
-		const MatrixStack& projectionMatrix() const{
+		const MatrixStack& projectionMatrix() const {
 			return contextProjectionMatrix;
 		}
 
@@ -460,11 +466,12 @@ namespace MV {
 			auto found = ourCameraProjectionMatrices.find(a_index);
 			if (found != ourCameraProjectionMatrices.end()) {
 				return found->second;
-			} else {
+			}
+			else {
 				return contextProjectionMatrix.top();
 			}
 		}
-		
+
 		void clearCameraProjectionMatrices() {
 			ourCameraProjectionMatrices.clear();
 		}
@@ -490,43 +497,43 @@ namespace MV {
 		}
 
 		//call for every event to handle window actions correctly
-		bool handleEvent(const SDL_Event &event);
+		bool handleEvent(const SDL_Event& event);
 
 		bool initialize(Size<int> a_window, Size<> a_world = Size<>(-1, -1), bool a_requireExtensions = false, bool a_summarize = false);
 
 		Color backgroundColor(Color a_newColor);
 		Color backgroundColor() const;
-		
+
 		void clearScreen();
 		void updateScreen();
 
-		Point<> worldFromLocal(const Point<> &a_localPoint, int32_t a_cameraId, const TransformMatrix &a_modelview) const;
-		Point<int> screenFromLocal(const Point<> &a_localPoint, int32_t a_cameraId, const TransformMatrix &a_modelview) const;
+		Point<> worldFromLocal(const Point<>& a_localPoint, int32_t a_cameraId, const TransformMatrix& a_modelview) const;
+		Point<int> screenFromLocal(const Point<>& a_localPoint, int32_t a_cameraId, const TransformMatrix& a_modelview) const;
 
-		Point<> localFromWorld(const Point<> &a_worldPoint, int32_t a_cameraId, const TransformMatrix &a_modelview) const;
-		Point<> localFromScreen(const Point<int> &a_screenPoint, int32_t a_cameraId, const TransformMatrix &a_modelview) const;
+		Point<> localFromWorld(const Point<>& a_worldPoint, int32_t a_cameraId, const TransformMatrix& a_modelview) const;
+		Point<> localFromScreen(const Point<int>& a_screenPoint, int32_t a_cameraId, const TransformMatrix& a_modelview) const;
 
-		Point<> screenFromWorldRaw(const Point<> &a_worldPoint) const;
-		Point<int> screenFromWorld(const Point<> &a_worldPoint) const;
+		Point<> screenFromWorldRaw(const Point<>& a_worldPoint) const;
+		Point<int> screenFromWorld(const Point<>& a_worldPoint) const;
 
-		Point<> worldFromScreen(const Point<int> &a_screenPoint) const;
-		Point<> worldFromScreenRaw(const Point<> &a_screenPoint) const;
-		
+		Point<> worldFromScreen(const Point<int>& a_screenPoint) const;
+		Point<> worldFromScreenRaw(const Point<>& a_screenPoint) const;
+
 		void summarizeDisplayMode() const;
 
 		void defaultBlendFunction();
 
 		void loadDefaultShaders();
-		Shader* loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename);
-		Shader* loadShaderCode(const std::string &a_id, const std::string &a_vertexShaderCode, const std::string &a_fragmentShaderCode);
+		Shader* loadShader(const std::string& a_id, const std::string& a_vertexShaderFilename, const std::string& a_fragmentShaderFilename);
+		Shader* loadShaderCode(const std::string& a_id, const std::string& a_vertexShaderCode, const std::string& a_fragmentShaderCode);
 
 		void reloadShaders();
 
-		bool hasShader(const std::string &a_id);
-		Shader* getShader(const std::string &a_id);
+		bool hasShader(const std::string& a_id);
+		Shader* getShader(const std::string& a_id);
 
 		Shader* defaultShader() const;
-		Shader* defaultShader(const std::string &a_id);
+		Shader* defaultShader(const std::string& a_id);
 
 		bool headless() const {
 			return isHeadless;
@@ -534,9 +541,9 @@ namespace MV {
 
 		//void registerShader(std::shared_ptr<Scene::Node> a_node);
 
-		void checkGlError(std::string a_location = "[not supplied location]"){
+		void checkGlError(std::string a_location = "[not supplied location]") {
 			GLenum error = glGetError();
-			if(error != GL_NO_ERROR) {
+			if (error != GL_NO_ERROR) {
 				std::cerr << "GL Error: (" << error << ")\nencountered in " << a_location << ".\n" << std::endl;
 			}
 		}
@@ -548,7 +555,7 @@ namespace MV {
 		GLuint loadShaderGetProgramId(std::string a_vertexShaderCode, std::string a_fragmentShaderCode);
 
 		void validateShaderStatus(GLuint a_id, bool a_isShader);
-		void loadPartOfShader(GLuint a_id, const std::string &a_code);
+		void loadPartOfShader(GLuint a_id, const std::string& a_code);
 
 		void setInitialSDLAttributes();
 		void setupSDL();
@@ -558,7 +565,7 @@ namespace MV {
 
 		Color clearBackgroundColor;
 		bool initialized;
-		SDL_Renderer *sdlRenderer;
+		SDL_Renderer* sdlRenderer;
 		Window sdlWindow;
 		RenderWorld mvWorld;
 
@@ -576,7 +583,7 @@ namespace MV {
 		static bool firstInitializationSDL;
 		static bool firstInitializationOpenGL;
 	};
-	
+
 	void checkSDLError(int line = -1);
 }
 #endif

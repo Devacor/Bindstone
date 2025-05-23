@@ -10,43 +10,43 @@ namespace MV {
 		onStaticUnblock(onStaticUnblockSignal),
 		onCostChange(onCostChangeSignal),
 		onClearanceChange(onClearanceChangeSignal),
-        map(&a_grid),
-        initialized(false),
-        useCorners(a_useCorners),
-        location(a_location),
-        travelCost(a_cost){
-        
+	map(&a_grid),
+	initialized(false),
+	useCorners(a_useCorners),
+	location(a_location),
+	travelCost(a_cost){
+	
 		edges.fill(nullptr);
 	}
 
 	MapNode::MapNode(const MapNode &a_rhs) :
-        onBlock(onBlockSignal),
-        onUnblock(onUnblockSignal),
-        onStaticBlock(onStaticBlockSignal),
-        onStaticUnblock(onStaticUnblockSignal),
-        onCostChange(onCostChangeSignal),
-        onClearanceChange(onClearanceChangeSignal),
+	onBlock(onBlockSignal),
+	onUnblock(onUnblockSignal),
+	onStaticBlock(onStaticBlockSignal),
+	onStaticUnblock(onStaticUnblockSignal),
+	onCostChange(onCostChangeSignal),
+	onClearanceChange(onClearanceChangeSignal),
 		map(a_rhs.map),
 		initialized(false),
 		useCorners(a_rhs.useCorners),
 		location(a_rhs.location),
-        travelCost(a_rhs.travelCost),
+	travelCost(a_rhs.travelCost),
 		staticBlockedSemaphore(a_rhs.staticBlockedSemaphore){
-        
+	
 		edges.fill(nullptr);
 	}
 
 	MapNode::MapNode() :
-        onBlock(onBlockSignal),
-        onUnblock(onUnblockSignal),
-        onStaticBlock(onStaticBlockSignal),
-        onStaticUnblock(onStaticUnblockSignal),
-        onCostChange(onCostChangeSignal),
-        onClearanceChange(onClearanceChangeSignal),
+	onBlock(onBlockSignal),
+	onUnblock(onUnblockSignal),
+	onStaticBlock(onStaticBlockSignal),
+	onStaticUnblock(onStaticUnblockSignal),
+	onCostChange(onCostChangeSignal),
+	onClearanceChange(onClearanceChangeSignal),
 		map(nullptr),
 		initialized(false),
 		useCorners(false) {
-        
+	
 		edges.fill(nullptr);
 	}
 

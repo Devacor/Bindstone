@@ -39,9 +39,9 @@ namespace MV {
 			friend cereal::access;
 			friend Node;
 		public:
-			typedef void ButtonSignalSignature(const std::shared_ptr<Clickable> &);
-			typedef void DragSignalSignature(const std::shared_ptr<Clickable> &, const Point<int> &startPosition, const Point<int> &deltaPosition);
-			typedef void DropSignalSignature(const std::shared_ptr<Clickable> &, const Point<MV::PointPrecision> &velocity);
+			typedef void ButtonSignalSignature(const std::shared_ptr<Clickable>&);
+			typedef void DragSignalSignature(const std::shared_ptr<Clickable>&, const Point<int>& startPosition, const Point<int>& deltaPosition);
+			typedef void DropSignalSignature(const std::shared_ptr<Clickable>&, const Point<MV::PointPrecision>& velocity);
 
 			enum class BoundsType { LOCAL, NODE, CHILDREN, NODE_CHILDREN, NONE };
 		private:
@@ -61,8 +61,8 @@ namespace MV {
 		public:
 			SpriteDerivedAccessors(Clickable)
 
-			//void (std::shared_ptr<Clickable>)
-			SignalRegister<ButtonSignalSignature> onEnabled;
+				//void (std::shared_ptr<Clickable>)
+				SignalRegister<ButtonSignalSignature> onEnabled;
 			//void (std::shared_ptr<Clickable>)
 			SignalRegister<ButtonSignalSignature> onDisabled;
 
@@ -120,7 +120,7 @@ namespace MV {
 			std::shared_ptr<Clickable> appendPriority(int64_t a_newPriority);
 
 			std::vector<int64_t> overridePriority() const;
-			std::shared_ptr<Clickable> overridePriority( const std::vector<int64_t> &a_newPriority) {
+			std::shared_ptr<Clickable> overridePriority(const std::vector<int64_t>& a_newPriority) {
 				overrideClickPriority = a_newPriority;
 				return std::static_pointer_cast<Clickable>(shared_from_this());
 			}
@@ -131,7 +131,7 @@ namespace MV {
 			void press();
 
 		protected:
-			Clickable(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse);
+			Clickable(const std::weak_ptr<Node>& a_owner, TapDevice& a_mouse);
 
 			virtual void initialize() override;
 
@@ -141,35 +141,35 @@ namespace MV {
 
 			virtual void acceptUpClick(bool a_ignoreBounds = false);
 
-                       template <class Archive>
-                       void save(Archive & archive, std::uint32_t const /*version*/) const {
+			template <class Archive>
+			void save(Archive& archive, std::uint32_t const /*version*/) const {
 				archive(cereal::make_nvp("onPress", onPressSignal),
 					cereal::make_nvp("onRelease", onReleaseSignal),
 					cereal::make_nvp("onDrag", onDragSignal),
 					cereal::make_nvp("onAccept", onAcceptSignal),
 					cereal::make_nvp("onCancel", onCancelSignal),
 					cereal::make_nvp("onDrop", onDropSignal));
-                               archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
-                       }
-
-                        template <class Archive>
-                        void load(Archive & archive, std::uint32_t const version) {
-				archive(cereal::make_nvp("onPress", onPressSignal),
-					cereal::make_nvp("onRelease", onReleaseSignal),
-					cereal::make_nvp("onDrag", onDragSignal),
-					cereal::make_nvp("onAccept", onAcceptSignal),
-					cereal::make_nvp("onCancel", onCancelSignal),
-					cereal::make_nvp("onDrop", onDropSignal));
-                               if(version == 0) {
-                                       properties.load(archive, {
-                                               "hitDetectionType", "eatTouches", "globalClickPriority", "appendClickPriority", "overrideClickPriority"
-                                       });
-                               }
-                               archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
-                       }
+				archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
+			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Clickable> &construct, std::uint32_t const version) {
+			void load(Archive& archive, std::uint32_t const version) {
+				archive(cereal::make_nvp("onPress", onPressSignal),
+					cereal::make_nvp("onRelease", onReleaseSignal),
+					cereal::make_nvp("onDrag", onDragSignal),
+					cereal::make_nvp("onAccept", onAcceptSignal),
+					cereal::make_nvp("onCancel", onCancelSignal),
+					cereal::make_nvp("onDrop", onDropSignal));
+				if (version == 0) {
+					properties.load(archive, {
+							"hitDetectionType", "eatTouches", "globalClickPriority", "appendClickPriority", "overrideClickPriority"
+						});
+				}
+				archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
+			}
+
+			template <class Archive>
+			static void load_and_construct(Archive& archive, cereal::construct<Clickable>& construct, std::uint32_t const version) {
 				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 				auto* mouse = services.get<MV::TapDevice>();
 				construct(std::shared_ptr<Node>(), *mouse);
@@ -177,11 +177,11 @@ namespace MV {
 				construct->initialize();
 			}
 
-			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
+			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node>& a_parent) {
 				return cloneHelper(a_parent->attach<Clickable>(mouse()).self());
 			}
 
-			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
+			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component>& a_clone);
 
 			virtual void onOwnerDestroyed() {
 				Sprite::onOwnerDestroyed();
@@ -190,8 +190,8 @@ namespace MV {
 				onMouseMoveHandle.reset();
 			}
 
-                       MV_PROPERTY(int64_t, globalClickPriority, 100, [](auto &, auto &){ });
-                       MV_PROPERTY(int64_t, appendClickPriority, 0, [](auto &, auto &){ });
+			MV_PROPERTY(int64_t, globalClickPriority, 100, [](auto&, auto&) {});
+			MV_PROPERTY(int64_t, appendClickPriority, 0, [](auto&, auto&) {});
 		private:
 			TapDevice::SignalType onLeftMouseDownHandle;
 			TapDevice::SignalType onLeftMouseUpHandle;
@@ -212,9 +212,9 @@ namespace MV {
 			std::string onAcceptScript;
 			std::string onCancelScript;
 
-                        MV_PROPERTY(std::vector<int64_t>, overrideClickPriority, {}, [](auto &, auto &){ });
-                        MV_PROPERTY(bool, eatTouches, true);
-                        MV_PROPERTY(BoundsType, hitDetectionType, BoundsType::LOCAL);
+			MV_PROPERTY(std::vector<int64_t>, overrideClickPriority, {}, [](auto&, auto&) {});
+			MV_PROPERTY(bool, eatTouches, true);
+			MV_PROPERTY(BoundsType, hitDetectionType, BoundsType::LOCAL);
 		};
 
 	}

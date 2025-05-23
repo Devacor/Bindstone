@@ -120,7 +120,6 @@ namespace MV {
 			Node::BasicReceiverType parentObserver;
 			Draw2D::CameraRecieveType cameraObserver;
 		};
-        
 	}
 }
 

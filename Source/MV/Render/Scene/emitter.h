@@ -303,7 +303,7 @@ namespace MV {
 			inline void spawnParticle(size_t a_groupIndex) {
 				Particle particle;
 
-				particle.textureCount = ourTextures.size();
+				particle.textureCount = ourTextures->size();
 
 				particle.position = spawnProperties.getPosition() - threadData[a_groupIndex].particleOffset;
 				particle.rotation = spawnProperties.getRotation();

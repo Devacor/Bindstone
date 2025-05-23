@@ -23,8 +23,8 @@ namespace MV{
 			for (auto&& point : points) {
 				point = Color(1.0f, 1.0f, 1.0f, 0.0f);
 			}
-			clearTexturePoints(points);
-			appendQuadVertexIndices(vertexIndices, 0);
+			clearTexturePoints(*points);
+			appendQuadVertexIndices(*vertexIndices, 0);
 		}
 
 		void Text::initialize() {

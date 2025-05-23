@@ -181,7 +181,7 @@ namespace MV {
 
 			SafeComponent<Component> clone(const std::shared_ptr<Node> &a_parent) {
 				auto result = SafeComponent<Component>(a_parent, cloneImplementation(a_parent));
-				properties.cloneTo(result->properties);
+				properties.cloneToTarget(result->properties);
 				return result;
 			}
 

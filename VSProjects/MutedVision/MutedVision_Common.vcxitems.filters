@@ -372,6 +372,5 @@
     <None Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Utility\utilityHooks.i">
       <Filter>MV\Utility</Filter>
     </None>
-    <None Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\artificialIntelligenceHooks.i" />
   </ItemGroup>
 </Project>

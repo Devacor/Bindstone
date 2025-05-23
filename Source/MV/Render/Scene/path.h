@@ -117,12 +117,12 @@ namespace MV {
 
 			void resizeNumberOfDebugDrawPoints() {
 				size_t totalMapNodes = static_cast<size_t>(map->size().width * map->size().height);
-				points.resize(static_cast<size_t>(4) * totalMapNodes);
-				clearTexturePoints(points);
+				points->resize(static_cast<size_t>(4) * totalMapNodes);
+				clearTexturePoints(*points);
 
-				vertexIndices.clear();
+				vertexIndices->clear();
 				for (int i = 0; i < totalMapNodes; ++i) {
-					appendQuadVertexIndices(vertexIndices, i * 4);
+					appendQuadVertexIndices(*vertexIndices, i * 4);
 				}
 
 			}

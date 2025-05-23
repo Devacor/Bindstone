@@ -135,9 +135,9 @@ namespace MV {
 			maximumWidth(0.0f),
 			cellColumns(0),
 			dirtyGrid(true) {
-			points.resize(4);
-			clearTexturePoints(points);
-			appendQuadVertexIndices(vertexIndices, 0);
+			points->resize(4);
+			clearTexturePoints(*points);
+			appendQuadVertexIndices(*vertexIndices, 0);
 		}
 
 		bool Grid::bumpToNextLine(PointPrecision a_currentPosition, size_t a_index) const {
@@ -180,7 +180,7 @@ namespace MV {
 			calculatedBounds = calculatedBounds.expandWith(calculatedBounds.maxPoint + margins.second);
 
 			setPointsFromBounds(calculatedBounds);
-			bool changed = localBounds != calculatedBounds;
+			bool changed = *localBounds != calculatedBounds;
 			localBounds = calculatedBounds;
 			return changed;
 		}

@@ -45,8 +45,8 @@ namespace MV {
 		}
 
 		std::shared_ptr<Drawable> MV::Scene::Drawable::colors(const std::vector<Color>& a_newColors) {
-			MV::require<RangeException>(a_newColors.size() == points.size(), "Point and Color vector size mismatch!");
-			for (size_t i = 0; i < points.size(); ++i) {
+			MV::require<RangeException>(a_newColors.size() == points->size(), "Point and Color vector size mismatch!");
+			for (size_t i = 0; i < points->size(); ++i) {
 				points[i] = a_newColors[i];
 			}
 			dirtyVertexBuffer = true;
@@ -93,7 +93,7 @@ namespace MV {
 		}
 
 		std::map<size_t, std::shared_ptr<MV::TextureHandle>>::const_iterator Drawable::disconnectTexture(size_t a_textureId) {
-			auto found = ourTextures.find(a_textureId);
+			auto found = ourTextures->find(a_textureId);
 			if (found != ourTextures.end()) {
 				found->second->sizeChange.disconnect(textureSizeSignals[a_textureId]);
 			}
@@ -102,7 +102,7 @@ namespace MV {
 
 		std::shared_ptr<Drawable> Drawable::clearTexture(size_t a_textureId) {
 			disconnectTexture(a_textureId);
-			ourTextures.erase(a_textureId);
+			ourTextures->erase(a_textureId);
 			textureSizeSignals.erase(a_textureId);
 			clearTextureCoordinates(a_textureId);
 			rebuildTextureCache();
@@ -110,8 +110,8 @@ namespace MV {
 		}
 
 		std::shared_ptr<Drawable> Drawable::clearTextures() {
-			auto texturesToClear = ourTextures;
-			ourTextures.clear();
+			auto texturesToClear = ourTextures.get();
+			ourTextures->clear();
 			textureSizeSignals.clear();
 			for(auto&& kv : texturesToClear){
 				kv.second->sizeChange.disconnect(textureSizeSignals[kv.first]);
@@ -167,7 +167,7 @@ namespace MV {
 					try { userMaterialSettings(shaderProgram); } catch (std::exception &e) { MV::error("Drawable::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
 				}
 
-				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices.size()), GL_UNSIGNED_INT, &vertexIndices[0]);
+				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices->size()), GL_UNSIGNED_INT, &vertexIndices[0]);
 
 				glDisableVertexAttribArray(0);
 				glDisableVertexAttribArray(1);
@@ -193,16 +193,16 @@ namespace MV {
 
 		void Drawable::refreshBounds() {
 			dirtyVertexBuffer = true;
-			auto originalBounds = localBounds;
-			if (!points.empty()) {
-				localBounds.initialize(points[0]);
-				for (size_t i = 1; i < points.size(); ++i) {
-					localBounds.expandWith(points[i]);
+			auto originalBounds = *localBounds;
+			if (!points->empty()) {
+				localBounds->initialize(points[0]);
+				for (size_t i = 1; i < points->size(); ++i) {
+					localBounds->expandWith(points[i]);
 				}
 			} else {
 				localBounds = BoxAABB<>();
 			}
-			if (originalBounds != localBounds) {
+			if (originalBounds != *localBounds) {
 				for (auto&& childAnchor : childAnchors) {
 					childAnchor->apply();
 				}
@@ -248,7 +248,7 @@ namespace MV {
 			if (cachedTextureList.empty()) {
 				return;
 			}
-			auto& bounds = !ourTextures.empty() ? ourTextures.begin()->second->rawPercent() : unitBox;
+			auto& bounds = !ourTextures->empty() ? ourTextures.begin()->second->rawPercent() : unitBox;
 			if (shaderProgram->setVec2("uvMin", bounds.minPoint, false)) {
 				shaderProgram->setVec2("uvMax", bounds.maxPoint, false); //optional but helpful default
 			}
@@ -277,7 +277,7 @@ namespace MV {
 			for (auto&& kv : ourTextures) {
 				texture(kv.second, kv.first);
 			}
-			if (ourTextures.empty()) {
+			if (ourTextures->empty()) {
 				hookupTextureSizeWatchers();
 				rebuildTextureCache();
 			}
@@ -305,24 +305,13 @@ namespace MV {
 		}
 
 		void Drawable::postLoadInitialize() {
-			ourAnchors.postLoadInitialize();
+			ourAnchors->postLoadInitialize();
 		}
 
 		std::shared_ptr<Component> Drawable::cloneHelper(const std::shared_ptr<Component> &a_clone) {
 			Component::cloneHelper(a_clone);
 			auto drawableClone = std::static_pointer_cast<Drawable>(a_clone);
-			drawableClone->shouldDraw = shouldDraw;
-			drawableClone->ourTextures.clear();
-			for (auto&& kv : ourTextures) {
-				drawableClone->ourTextures[kv.first] = kv.second->clone();
-			}
-			drawableClone->shader(shaderProgramId);
-			drawableClone->vertexIndices = vertexIndices;
-			drawableClone->localBounds = localBounds;
-			drawableClone->drawType = drawType;
-			drawableClone->points = points;
-			drawableClone->ourAnchors = ourAnchors;
-			drawableClone->blendModePreset = blendModePreset;
+			drawableClone->forceInitializeShader();
 			drawableClone->notifyParentOfBoundsChange();
 			drawableClone->hookupTextureSizeWatchers();
 			drawableClone->rebuildTextureCache();
@@ -336,7 +325,8 @@ namespace MV {
 		Anchors::Anchors(const Anchors& a_rhs) :
 			parentAnchors(a_rhs.parentAnchors),
 			ourOffset(a_rhs.ourOffset),
-			pivotPercent(a_rhs.pivotPercent) {
+			pivotPercent(a_rhs.pivotPercent),
+			selfReference(a_rhs.selfReference) {
 
 			if (!a_rhs.parentReference.expired() && a_rhs.parentReference.lock() == a_rhs.selfReference->owner()->componentInParents(a_rhs.parentReference.lock()->id(), false, true).self()) {
 				parentIdLoaded = a_rhs.parentReference.lock()->id();

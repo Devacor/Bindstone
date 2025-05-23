@@ -32,7 +32,7 @@
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::texture(a_texture, a_textureId)); \
 	} \
 	std::shared_ptr<MV::TextureHandle> texture(size_t a_textureId = 0) const{ \
-		return ourTextures.at(a_textureId); \
+		return ourTextures->at(a_textureId); \
 	} \
 	std::string shader() const { \
 		return shaderProgramId; \
@@ -60,9 +60,11 @@ namespace MV {
 		class Anchors {
 			friend cereal::access;
 			friend Drawable;
+			friend Property<Anchors>;
 
 		public:
 			Anchors(Drawable *a_self);
+			Anchors(Anchors&&) noexcept = default;
 			~Anchors();
 
 			bool hasParent() const {
@@ -286,19 +288,8 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				archive(cereal::make_nvp("anchors", ourAnchors));
-				archive(CEREAL_NVP(shouldDraw));
-				archive(cereal::make_nvp("textures", ourTextures));
-				archive(
-					CEREAL_NVP(shaderProgramId),
-					CEREAL_NVP(localBounds),
-					CEREAL_NVP(drawType)
-				);
-				
-				points.allowSerialization(serializePoints());
-				vertexIndices.allowSerialization(serializePoints());
-
-				archive(cereal::make_nvp("blendMode", blendModePreset));
+				points.serializeEnabled(serializePoints());
+				vertexIndices.serializeEnabled(serializePoints());
 				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 			}
 
@@ -313,12 +304,12 @@ namespace MV {
 				} else if (version == 3) {
 					properties.load(archive, { "anchors", "shouldDraw", "textures", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points", "blendMode" });
 				} else if (version == 4) {
-					points.allowSerialization(serializePoints());
-					vertexIndices.allowSerialization(serializePoints());
+					points.serializeEnabled(serializePoints());
+					vertexIndices.serializeEnabled(serializePoints());
 					properties.load(archive, { "anchors", "shouldDraw", "textures", "shaderProgramId", "localBounds", "drawType", "vertexIndices", "points", "blendMode" });
 				} else {
-					points.allowSerialization(serializePoints());
-					vertexIndices.allowSerialization(serializePoints());
+					points.serializeEnabled(serializePoints());
+					vertexIndices.serializeEnabled(serializePoints());
 				}
 				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 			}
@@ -338,12 +329,17 @@ namespace MV {
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
 
-			Property<std::map<size_t, std::shared_ptr<TextureHandle>>> ourTextures(properties, "textures");
+			Property<std::map<size_t, std::shared_ptr<TextureHandle>>> ourTextures{properties, "textures", {}, [](auto &source, auto &destination) { 
+				destination->clear();
+				for (auto&& kv : source) {
+					destination[kv.first] = kv.second->clone();
+				}
+			}};
 
 			MV_PROPERTY(std::vector<DrawPoint>, points, {});
 			MV_PROPERTY(std::vector<GLuint>, vertexIndices, {});
 
-			BoxAABB<> localBounds;
+			MV_PROPERTY(BoxAABB<>, localBounds);
 
 			Shader* shaderProgram = nullptr;
 			MV_PROPERTY(std::string, shaderProgramId, PREMULTIPLY_ID);
@@ -369,7 +365,7 @@ namespace MV {
 			void hookupTextureSizeWatchers();
 			void hookupTextureSizeWatcher(size_t a_textureId);
 
-			BlendModePreset blendModePreset = DEFAULT;
+			Property<BlendModePreset> blendModePreset{properties, "blendMode", DEFAULT};
 
 			void rebuildTextureCache();
 

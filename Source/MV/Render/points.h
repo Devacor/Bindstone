@@ -3,6 +3,7 @@
 
 #include <ostream>
 #include <istream>
+#include <type_traits>
 
 #include "MV/Utility/generalUtility.h"
 #include "cereal/cereal.hpp"
@@ -10,7 +11,10 @@
 
 namespace MV {
 
-	typedef float PointPrecision;
+        typedef float PointPrecision;
+
+        template<typename T>
+        using enable_if_arithmetic_t = std::enable_if_t<std::is_arithmetic_v<T>, int>;
 
 	class DrawPoint;
 
@@ -62,10 +66,10 @@ namespace MV {
 		Color& operator*=(const Color& a_other);
 		Color& operator/=(const Color& a_other);
 
-		template<typename T>
-		Color& operator*=(T a_other);
-		template<typename T>
-		Color& operator/=(T a_other);
+                template<typename T, typename = enable_if_arithmetic_t<T>>
+                Color& operator*=(T a_other);
+                template<typename T, typename = enable_if_arithmetic_t<T>>
+                Color& operator/=(T a_other);
 
 		template <class Archive>
 		void serialize(Archive & archive){
@@ -304,12 +308,12 @@ namespace MV {
 	Point<PointPrecision> toPoint(const Scale &a_scale);
 	Size<PointPrecision> toSize(const Scale &a_scale);
 
-	template <typename T>
-	Scale toScale(const Point<T> &a_point){
+        template <typename T, typename = enable_if_arithmetic_t<T>>
+        Scale toScale(const Point<T> &a_point){
 		return{static_cast<PointPrecision>(a_point.x), static_cast<PointPrecision>(a_point.y), static_cast<PointPrecision>(a_point.z)};
 	}
-	template <typename T>
-	Scale toScale(const Size<T> &a_point){
+        template <typename T, typename = enable_if_arithmetic_t<T>>
+        Scale toScale(const Size<T> &a_point){
 		return {static_cast<PointPrecision>(a_point.width), static_cast<PointPrecision>(a_point.height), static_cast<PointPrecision>(a_point.depth)};
 	}
 
@@ -519,8 +523,8 @@ namespace MV {
 	Color operator/(const Color &a_lhs, const Color &a_rhs);
 	Color operator*(const Color &a_lhs, const Color &a_rhs);
 
-	template <typename T>
-	Color& Color::operator*=(T a_other){
+template <typename T, typename>
+Color& Color::operator*=(T a_other){
 		R *= static_cast<float>(a_other);
 		G *= static_cast<float>(a_other);
 		B *= static_cast<float>(a_other);
@@ -528,8 +532,8 @@ namespace MV {
 		return *this;
 	}
 
-	template <typename T>
-	Color& Color::operator/=(T a_other){
+template <typename T, typename>
+Color& Color::operator/=(T a_other){
 		R /= static_cast<float>(a_other != 0 ? a_other : 1);
 		G /= static_cast<float>(a_other != 0 ? a_other : 1);
 		B /= static_cast<float>(a_other != 0 ? a_other : 1);
@@ -537,13 +541,13 @@ namespace MV {
 		return *this;
 	}
 
-	template<typename T>
-	Color operator*(const Color &a_lhs, T a_rhs){
+template<typename T, typename>
+Color operator*(const Color &a_lhs, T a_rhs){
 		Color result = a_lhs;
 		return result *= a_rhs;
 	}
-	template<typename T>
-	Color operator/(const Color &a_lhs, T a_rhs){
+template<typename T, typename>
+Color operator/(const Color &a_lhs, T a_rhs){
 		Color result = a_lhs;
 		return result /= a_rhs;
 	}
@@ -689,19 +693,19 @@ namespace MV {
 	| -------Size IMP------- |
 	\************************/
 
-	template <typename T>
-	Size<T> fitAspect(Size<T> a_toConstrain, Size<T> a_maximum){
+        template <typename T, typename = enable_if_arithmetic_t<T>>
+        Size<T> fitAspect(Size<T> a_toConstrain, Size<T> a_maximum){
 		auto ratio = std::min(static_cast<double>(a_maximum.width) / static_cast<double>(a_toConstrain.width), static_cast<double>(a_maximum.height) / static_cast<double>(a_toConstrain.height));
 		return {static_cast<T>(static_cast<double>(a_toConstrain.width) * ratio), static_cast<T>(static_cast<double>(a_toConstrain.height) * ratio)};
 	}
 
-	template <typename T>
-	Size<T> size(T a_width, T a_height){
+        template <typename T, typename = enable_if_arithmetic_t<T>>
+        Size<T> size(T a_width, T a_height){
 		return Size<T>{a_width, a_height};
 	}
 
-	template <typename T>
-	Size<T> size(T a_width, T a_height, T a_depth) {
+        template <typename T, typename = enable_if_arithmetic_t<T>>
+        Size<T> size(T a_width, T a_height, T a_depth) {
 		return Size<T>{a_width, a_height, a_depth};
 	}
 
@@ -994,13 +998,13 @@ namespace MV {
 	| -------Point IMP------- |
 	\*************************/
 
-	template <typename T>
-	Point<T> point(T a_xPos, T a_yPos){
+        template <typename T, typename = enable_if_arithmetic_t<T>>
+        Point<T> point(T a_xPos, T a_yPos){
 		return Point<T>{a_xPos, a_yPos};
 	}
 
-	template <typename T>
-	Point<T> point(T a_xPos, T a_yPos, T a_zPos) {
+        template <typename T, typename = enable_if_arithmetic_t<T>>
+        Point<T> point(T a_xPos, T a_yPos, T a_zPos) {
 		return Point<T>{a_xPos, a_yPos, a_zPos};
 	}
 
@@ -1349,23 +1353,23 @@ namespace MV {
 		return is;
 	}
 
-	template<typename T>
-	PointPrecision distance(const Point<T> &a_lhs, const Point<T> &a_rhs) {
+        template<typename T, typename = enable_if_arithmetic_t<T>>
+        PointPrecision distance(const Point<T> &a_lhs, const Point<T> &a_rhs) {
 		return (a_lhs - a_rhs).magnitude();
 	}
 
-	template<typename T>
-	PointPrecision preSquareDistance(const Point<T> &a_lhs, const Point<T> &a_rhs) {
+        template<typename T, typename = enable_if_arithmetic_t<T>>
+        PointPrecision preSquareDistance(const Point<T> &a_lhs, const Point<T> &a_rhs) {
 		return (a_lhs - a_rhs).preSquareMagnitude();
 	}
 
-	template <typename T>
-	PointPrecision angle2D(const Point<T> &a_lhs, const Point<T> &a_rhs) {
+        template <typename T, typename = enable_if_arithmetic_t<T>>
+        PointPrecision angle2D(const Point<T> &a_lhs, const Point<T> &a_rhs) {
 		return static_cast<PointPrecision>(angle2D(a_lhs.x, a_lhs.y, a_rhs.x, a_rhs.y));
 	}
 
-	template <typename T>
-	PointPrecision angle2DRad(const Point<T> &a_lhs, const Point<T> &a_rhs) {
+        template <typename T, typename = enable_if_arithmetic_t<T>>
+        PointPrecision angle2DRad(const Point<T> &a_lhs, const Point<T> &a_rhs) {
 		return static_cast<PointPrecision>(angle2DRad(a_lhs.x, a_lhs.y, a_rhs.x, a_rhs.y));
 	}
 

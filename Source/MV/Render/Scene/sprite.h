@@ -43,8 +43,8 @@ namespace MV {
 			Sprite(const std::weak_ptr<Node> &a_owner) :
 				Drawable(a_owner) {
 
-				clearTexturePoints(points.get());
-				appendQuadVertexIndices(vertexIndices.get(), 0);
+				clearTexturePoints(*points);
+				appendQuadVertexIndices(*vertexIndices, 0);
 			}
 
 			template <class Archive>
@@ -93,7 +93,7 @@ namespace MV {
 				if (a_textureId == 0) {
 					clearSlice();
 
-					clearTexturePoints(points);
+					clearTexturePoints(*points);
 					notifyParentOfComponentChange();
 				}
 			}

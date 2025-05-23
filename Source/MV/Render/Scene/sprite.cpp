@@ -18,14 +18,14 @@ namespace MV {
 		\*Vertex Indices*/
 		void Sprite::updateSlice() {
 			if (hasSlice()) {
-				if (points.size() != 16) {
-					points.resize(16);
+				if (points->size() != 16) {
+					points->resize(16);
 					updateSliceColorsFromCorners();
-					vertexIndices.clear();
-					appendNineSliceVertexIndices(vertexIndices, 0);
-					ourTextures[0]->apply(points);
+					vertexIndices->clear();
+					appendNineSliceVertexIndices(*vertexIndices, 0);
+					ourTextures[0]->apply(*points);
 				} else {
-					ourTextures[0]->applySlicePosition(points);
+					ourTextures[0]->applySlicePosition(*points);
 				}
 			} else {
 				clearSlice();
@@ -57,13 +57,13 @@ namespace MV {
 			if (!hasSlice()) {
 				dirtyVertexBuffer = true;
 				if (ourSubdivisions == 0) {
-					points.resize(4);
-					vertexIndices.clear();
-					appendQuadVertexIndices(vertexIndices, 0);
+					points->resize(4);
+					vertexIndices->clear();
+					appendQuadVertexIndices(*vertexIndices, 0);
 				} else {
 					size_t newSize = (2 + ourSubdivisions) * (2 + ourSubdivisions);
-					points.resize(newSize + 1);
-					vertexIndices.clear();
+					points->resize(newSize + 1);
+					vertexIndices->clear();
 					auto boundExtent = points[2].point() - points[0].point();
 					bool colorsMatch = points[0].color() == points[1].color() && points[0].color() == points[2].color();
 
@@ -118,7 +118,7 @@ namespace MV {
 							points[topRight] = TexturePoint(rightTexturePercent, topTexturePercent);
 
 							auto toInsert = std::vector<GLuint>{ topLeft, bottomLeft, bottomRight, bottomRight, topRight, topLeft };
-							vertexIndices.insert(vertexIndices.end(), toInsert.begin(), toInsert.end());
+							vertexIndices->insert(vertexIndices.end(), toInsert.begin(), toInsert.end());
 						}
 					}
 				}
@@ -158,7 +158,7 @@ namespace MV {
 		}
 
 		void Sprite::clearSlice() {
-			if (points.size() == 16 && hasSlice()) {
+			if (points->size() == 16 && hasSlice()) {
 				updateSubdivision();
 			}
 		}
@@ -166,7 +166,7 @@ namespace MV {
 		//no need to iterate over everything for a sprite. Also, update slice.
 		void Sprite::refreshBounds() {
 			dirtyVertexBuffer = true;
-			auto originalBounds = localBounds;
+			auto originalBounds = *localBounds;
 			localBounds = BoxAABB<>(points[0], points[2]);
 			if (originalBounds != localBounds) {
 				for (auto&& childAnchor : childAnchors) {
@@ -184,7 +184,7 @@ namespace MV {
 				updateSlice();
 				//If we didn't have a slice, then we need to manually apply. Otherwise this was handled already.
 				if (!hasSlice()) {
-					ourTextures[a_textureId]->apply(points);
+					ourTextures[a_textureId]->apply(*points);
 					updateSubdivisionTexture();
 				}
 				notifyParentOfComponentChange();

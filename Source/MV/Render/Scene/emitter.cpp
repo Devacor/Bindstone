@@ -164,8 +164,8 @@ namespace MV {
 
 			std::vector<TexturePoint> texturePoints;
 			texturePoints.reserve(4);
-			auto foundTexture = ourTextures.find(0);
-			if (foundTexture != ourTextures.end()) {
+			auto foundTexture = ourTextures->find(0);
+			if (foundTexture != ourTextures->end()) {
 				texturePoints.emplace_back( static_cast<float>((foundTexture->second)->rawPercent().minPoint.x), static_cast<float>((foundTexture->second)->rawPercent().minPoint.y) );
 				texturePoints.emplace_back( static_cast<float>((foundTexture->second)->rawPercent().minPoint.x), static_cast<float>((foundTexture->second)->rawPercent().maxPoint.y) );
 				texturePoints.emplace_back( static_cast<float>((foundTexture->second)->rawPercent().maxPoint.x), static_cast<float>((foundTexture->second)->rawPercent().maxPoint.y) );
@@ -234,10 +234,10 @@ namespace MV {
 		void Emitter::loadPointsFromBufferAndAllowUpdate() {
 			{
 				std::lock_guard<std::recursive_mutex> guard(lock);
-				points.clear();
-				vertexIndices.clear();
-				std::swap(points, pointBuffer);
-				std::swap(vertexIndices, vertexIndexBuffer);
+				points->clear();
+				vertexIndices->clear();
+				std::swap(*points, pointBuffer);
+				std::swap(*vertexIndices, vertexIndexBuffer);
 				dirtyVertexBuffer = true;
 			}
 			updateInProgress.store(false);
@@ -364,9 +364,9 @@ namespace MV {
 			threadData(emitterThreads),
 			updateInProgress(false){
 
-			points.resize(4);
-			clearTexturePoints(points);
-			appendQuadVertexIndices(vertexIndices, 0);
+			points->resize(4);
+			clearTexturePoints(*points);
+			appendQuadVertexIndices(*vertexIndices, 0);
 		}
 
 		BoxAABB<> Emitter::boundsImplementation() {
@@ -402,7 +402,7 @@ namespace MV {
 			if (ourRenderer.headless()) { return; }
 
 			std::lock_guard<std::recursive_mutex> guard(lock); //important!
-			if (!vertexIndices.empty()) {
+			if (!vertexIndices->empty()) {
 				require<ResourceException>(shaderProgram, "No shader program for Drawable!");
 				shaderProgram->use();
 
@@ -416,7 +416,7 @@ namespace MV {
 				auto structSize = static_cast<GLsizei>(sizeof(points[0]));
 				if (dirtyVertexBuffer) {
 					dirtyVertexBuffer = false;
-					glBufferData(GL_ARRAY_BUFFER, points.size() * structSize, &(points[0]), GL_STATIC_DRAW);
+					glBufferData(GL_ARRAY_BUFFER, points->size() * structSize, &(points[0]), GL_STATIC_DRAW);
 				}
 
 				glEnableVertexAttribArray(0);
@@ -438,7 +438,7 @@ namespace MV {
 					try { userMaterialSettings(shaderProgram); } catch (std::exception &e) { MV::error("Emitter::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
 				}
 
-				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices.size()), GL_UNSIGNED_INT, &vertexIndices[0]);
+				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices->size()), GL_UNSIGNED_INT, &vertexIndices[0]);
 
 				glDisableVertexAttribArray(0);
 				glDisableVertexAttribArray(1);

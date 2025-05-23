@@ -195,8 +195,8 @@ namespace MV{
 			if (loaded() && !inUpdate) {
 				tracks.clear();
 				slotsToNodes.clear();
-				points.clear();
-				vertexIndices.clear();
+				points->clear();
+				vertexIndices->clear();
 				fileBundle = FileBundle();
 				if (spineWorldVertices) {
 					FREE(spineWorldVertices);
@@ -229,9 +229,9 @@ namespace MV{
 
 		BoxAABB<> Spine::boundsImplementation() {
 			if (loaded()) {
-				if (points.empty()) {
-					points.clear();
-					vertexIndices.clear();
+				if (points->empty()) {
+					points->clear();
+					vertexIndices->clear();
 
 					for (int i = 0, n = skeleton->slotsCount; i < n; i++) {
 						spSlot* slot = skeleton->drawOrder[i];
@@ -330,8 +330,8 @@ namespace MV{
 
 				glBindBuffer(GL_ARRAY_BUFFER, bufferId);
 
-				points.clear();
-				vertexIndices.clear();
+				points->clear();
+				vertexIndices->clear();
 				
 				FileTextureDefinition *previousTexture = nullptr;
 				spBlendMode previousBlending = SP_BLEND_MODE_NORMAL;
@@ -377,7 +377,7 @@ namespace MV{
 					}
 				}
 
-				if (lastRenderedIndex != vertexIndices.size()) {
+				if (lastRenderedIndex != vertexIndices->size()) {
 					renderSkeletonBatch(lastRenderedIndex, (previousTexture && previousTexture->loaded()) ? previousTexture->textureId() : 0, previousBlending);
 				}
 
@@ -405,7 +405,7 @@ namespace MV{
 
 		size_t Spine::renderSkeletonBatch(size_t a_lastRenderedIndex, GLuint a_textureId, spBlendMode a_blendMode) {
 			auto structSize = static_cast<GLsizei>(sizeof(points[0]));
-			auto bufferSizeToRender = (points.size()) * structSize;
+			auto bufferSizeToRender = (points->size()) * structSize;
 
 			if(bufferSizeToRender > 0){
 				auto ourOwner = owner();
@@ -431,12 +431,12 @@ namespace MV{
 				shaderProgram->set("texture0", a_textureId);
 				shaderProgram->set("transformation", transformationMatrix);
 
-				glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(vertexIndices.size() - a_lastRenderedIndex), GL_UNSIGNED_INT, &vertexIndices[a_lastRenderedIndex]);
+				glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(vertexIndices->size() - a_lastRenderedIndex), GL_UNSIGNED_INT, &vertexIndices[a_lastRenderedIndex]);
 
 				glDisableVertexAttribArray(0);
 				glDisableVertexAttribArray(1);
 				glDisableVertexAttribArray(2);
-				return vertexIndices.size();
+				return vertexIndices->size();
 			}
 			return a_lastRenderedIndex;
 		}
@@ -449,7 +449,7 @@ namespace MV{
 		}
 
 		bool Spine::skeletonRenderStateChangedSinceLastIteration(spBlendMode a_previousBlending, spBlendMode a_currentBlending, FileTextureDefinition * a_previousTexture, FileTextureDefinition * a_texture) {
-			return !points.empty() &&
+			return !points->empty() &&
 				(a_previousBlending != a_currentBlending) ||
 				(a_previousTexture != a_texture);
 		}
@@ -478,10 +478,10 @@ namespace MV{
 					{6, 7},
 				};
 
-				MV::Scene::appendQuadVertexIndices(vertexIndices, static_cast<GLuint>(points.size()));
+				MV::Scene::appendQuadVertexIndices(*vertexIndices, static_cast<GLuint>(points->size()));
 				for(auto &indexPair : spineVertexIndices){
 					Point<> testPosition(spineWorldVertices[indexPair.first], spineWorldVertices[indexPair.second]);
-					points.push_back(DrawPoint(
+					points->push_back(DrawPoint(
 						testPosition,
 						attachmentColor,
 						TexturePoint(attachment->uvs[indexPair.first], attachment->uvs[indexPair.second])
@@ -497,12 +497,12 @@ namespace MV{
 
 				for(int i = 0; i < attachment->trianglesCount; ++i) {
 					auto index = attachment->triangles[i] << 1;
-					points.push_back(DrawPoint(
+					points->push_back(DrawPoint(
 						Point<>(spineWorldVertices[index], spineWorldVertices[index + 1]),
 						attachmentColor,
 						TexturePoint(attachment->uvs[index], attachment->uvs[index + 1])
 						));
-					vertexIndices.push_back(static_cast<GLuint>(points.size() - 1));
+					vertexIndices->push_back(static_cast<GLuint>(points->size() - 1));
 				}
 
 				return getSpineTexture(attachment);

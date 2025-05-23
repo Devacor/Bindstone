@@ -74,8 +74,9 @@ namespace MV{
 			}
 
 			std::shared_ptr<Text> wrapping(MV::TextWrapMethod a_newWrapMethod) {
+				auto self = std::static_pointer_cast<Text>(shared_from_this());
 				formattedText->wrapping(a_newWrapMethod);
-				return std::static_pointer_cast<Text>(shared_from_this());
+				return self;
 			}
 
 			std::shared_ptr<Text> wrappingWidth(MV::PointPrecision a_width) {
@@ -178,18 +179,18 @@ namespace MV{
 				Text(a_owner, a_textLibrary, DEFAULT_ID) {
 			}
 
-                        template <class Archive>
-                        void save(Archive & archive, std::uint32_t const /*version*/) const {
-                                archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
-                        }
+            template <class Archive>
+            void save(Archive & archive, std::uint32_t const /*version*/) const {
+                    archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+            }
 
-                        template <class Archive>
-                        void load(Archive & archive, std::uint32_t const version) {
-                                if (version == 0) {
-                                        properties.load(archive, { "formattedText", "usingBoundsForLineHeight" });
-                                }
-                                archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
-                        }
+            template <class Archive>
+            void load(Archive & archive, std::uint32_t const version) {
+                    if (version == 0) {
+                            properties.load(archive, { "formattedText", "usingBoundsForLineHeight" });
+                    }
+                    archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+            }
 
 			template <class Archive>
 			static void load_and_construct(Archive & archive, cereal::construct<Text> &construct, std::uint32_t const version) {
@@ -248,11 +249,7 @@ namespace MV{
 
 			TextLibrary& textLibrary;
 
-			MV_PROPERTY(std::shared_ptr<FormattedText>, formattedText, {}, [](auto &source, auto &destination) {
-				if (destination.get()) {
-					*destination.get() = source.get() ? nullptr : *source.get();
-				}
-			});
+			MV::Property<std::shared_ptr<FormattedText>> formattedText;
 
 			MV_PROPERTY(bool, usingBoundsForLineHeight, false);
 

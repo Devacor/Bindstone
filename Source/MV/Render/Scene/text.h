@@ -246,16 +246,15 @@ namespace MV{
 				setCursor(cursor + a_change);
 			}
 
-TextLibrary& textLibrary;
+			TextLibrary& textLibrary;
 
-MV_PROPERTY(std::shared_ptr<FormattedText>, formattedText, {},
-[](auto &source, auto &destination) {
-if (source.get() && destination.get()) {
-*destination.get() = *source.get();
-}
-});
+			MV_PROPERTY(std::shared_ptr<FormattedText>, formattedText, {}, [](auto &source, auto &destination) {
+				if (destination.get()) {
+					*destination.get() = source.get() ? nullptr : *source.get();
+				}
+			});
 
-MV_PROPERTY(bool, usingBoundsForLineHeight, false);
+			MV_PROPERTY(bool, usingBoundsForLineHeight, false);
 
 			bool displayCursor = false;
 			size_t cursor = 0;

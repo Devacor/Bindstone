@@ -136,7 +136,7 @@ namespace MV {
 		FontDefinition(TextLibrary *a_library, const std::string &a_file, int a_size, TTF_Font* a_font, FontStyle a_style, const std::string &a_identifier):
 			file(a_file),
 			font(a_font),
-            size(a_size),
+			size(a_size),
 			identifier(a_identifier),
             style(a_style),
 			lineHeight(static_cast<PointPrecision>(TTF_FontLineSkip(a_font))),

@@ -534,7 +534,7 @@ namespace MV {
 	public:
 		MatrixStack(const std::string &a_name = "") :
 			stack(1, TransformMatrix()),
-            name(a_name){
+			name(a_name){
 		}
 
 		TransformMatrix& top() {

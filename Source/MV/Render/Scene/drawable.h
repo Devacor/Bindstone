@@ -63,7 +63,7 @@ namespace MV {
 			friend Property<Anchors>;
 
 		public:
-			Anchors(Drawable *a_self);
+			Anchors(Drawable* a_self);
 			Anchors(Anchors&&) noexcept = default;
 			~Anchors();
 
@@ -72,23 +72,23 @@ namespace MV {
 			}
 			std::shared_ptr<Drawable> parent() const;
 
-			Anchors& parent(const std::weak_ptr<Drawable> &a_parent, bool a_calculateOffsetAndPivot = false);
+			Anchors& parent(const std::weak_ptr<Drawable>& a_parent, bool a_calculateOffsetAndPivot = false);
 			Anchors& removeFromParent();
 
-			Anchors& anchor(const BoxAABB<> &a_anchor);
-			Anchors& anchor(const Point<> &a_anchor);
+			Anchors& anchor(const BoxAABB<>& a_anchor);
+			Anchors& anchor(const Point<>& a_anchor);
 
 			BoxAABB<> anchor() const {
 				return parentAnchors;
 			}
 
-			Anchors& offset(const BoxAABB<> &a_offset);
+			Anchors& offset(const BoxAABB<>& a_offset);
 
 			BoxAABB<> offset() const {
 				return ourOffset;
 			}
 
-			Anchors& pivot(const Point<> &a_pivot);
+			Anchors& pivot(const Point<>& a_pivot);
 			Point<> pivot() const {
 				return pivotPercent;
 			}
@@ -107,7 +107,7 @@ namespace MV {
 			Anchors(const Anchors& a_rhs);
 			Anchors& operator=(const Anchors& a_rhs);
 
-			Drawable *selfReference = nullptr;
+			Drawable* selfReference = nullptr;
 			std::weak_ptr<Drawable> parentReference;
 			BoxAABB<> parentAnchors;
 			BoxAABB<> ourOffset;
@@ -116,10 +116,10 @@ namespace MV {
 			bool applyingPosition = false;
 
 			template <class Archive>
-            void save(Archive & archive, std::uint32_t const /*version*/) const;
+			void save(Archive& archive, std::uint32_t const /*version*/) const;
 
 			template <class Archive>
-			void load(Archive & archive, std::uint32_t const /*version*/) {
+			void load(Archive& archive, std::uint32_t const /*version*/) {
 				archive(
 					cereal::make_nvp("parent", parentReference),
 					cereal::make_nvp("parentId", parentIdLoaded),
@@ -131,7 +131,7 @@ namespace MV {
 			}
 
 			std::string parentIdLoaded;
-			
+
 			void postLoadInitialize();
 			void registerWithParent();
 		};
@@ -146,7 +146,7 @@ namespace MV {
 
 			ComponentDerivedAccessors(Drawable)
 
-			~Drawable();
+				~Drawable();
 
 			virtual bool draw();
 
@@ -167,10 +167,10 @@ namespace MV {
 			std::shared_ptr<Drawable> hide();
 			std::shared_ptr<Drawable> show();
 
-			std::shared_ptr<Drawable> color(const Color &a_newColor);
-			std::shared_ptr<Drawable> colors(const std::vector<Color> &a_newColors);
+			std::shared_ptr<Drawable> color(const Color& a_newColor);
+			std::shared_ptr<Drawable> colors(const std::vector<Color>& a_newColors);
 
-			std::shared_ptr<Drawable> shader(const std::string &a_shaderProgramId);
+			std::shared_ptr<Drawable> shader(const std::string& a_shaderProgramId);
 
 			std::shared_ptr<TextureHandle> texture(size_t a_index = 0) const {
 				return ourTextures->at(a_index);
@@ -182,7 +182,7 @@ namespace MV {
 			std::shared_ptr<Drawable> clearTexture(size_t a_textureId = 0);
 
 			//encapsulated to enforce bounds refreshing.
-			const DrawPoint &point(size_t a_index) const {
+			const DrawPoint& point(size_t a_index) const {
 				return points[a_index];
 			}
 
@@ -217,14 +217,14 @@ namespace MV {
 				return vertexIndices.get();
 			}
 
-			std::shared_ptr<Drawable> setPoints(const std::vector<DrawPoint> &a_points, const std::vector<GLuint> &a_vertexIndices) {
+			std::shared_ptr<Drawable> setPoints(const std::vector<DrawPoint>& a_points, const std::vector<GLuint>& a_vertexIndices) {
 				points = a_points;
 				vertexIndices = a_vertexIndices;
 				refreshBounds();
 				return std::static_pointer_cast<Drawable>(shared_from_this());
 			}
 
-			std::shared_ptr<Drawable> appendPoints(const std::vector<DrawPoint> &a_points, std::vector<GLuint> a_vertexIndices) {
+			std::shared_ptr<Drawable> appendPoints(const std::vector<DrawPoint>& a_points, std::vector<GLuint> a_vertexIndices) {
 				auto offsetIndex = static_cast<GLuint>(points->size());
 				std::transform(a_vertexIndices.begin(), a_vertexIndices.end(), a_vertexIndices.begin(), [&](GLuint index) {return index + offsetIndex; });
 				points->insert(points->end(), a_points.begin(), a_points.end());
@@ -248,7 +248,7 @@ namespace MV {
 			}
 
 		protected:
-			Drawable(const std::weak_ptr<Node> &a_owner);
+			Drawable(const std::weak_ptr<Node>& a_owner);
 
 			std::map<size_t, std::shared_ptr<TextureHandle>>::const_iterator disconnectTexture(size_t a_textureId);
 
@@ -268,9 +268,9 @@ namespace MV {
 				return localBounds;
 			}
 
-			void applyPresetBlendMode(Draw2D &ourRenderer) const;
+			void applyPresetBlendMode(Draw2D& ourRenderer) const;
 
-			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
+			virtual void boundsImplementation(const BoxAABB<>& a_bounds) override;
 
 			//return false if you want this to not draw
 			virtual bool preDraw() {
@@ -287,27 +287,32 @@ namespace MV {
 			virtual void refreshBounds();
 
 			template <class Archive>
-			void save(Archive & archive, std::uint32_t const /*version*/) const {
+			void save(Archive& archive, std::uint32_t const /*version*/) const {
 				points.serializeEnabled(serializePoints());
 				vertexIndices.serializeEnabled(serializePoints());
 				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 			}
 
 			template <class Archive>
-			void load(Archive & archive, std::uint32_t const version) {
+			void load(Archive& archive, std::uint32_t const version) {
 				if (version == 0) {
 					properties.load(archive, { "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points" });
-				} else if (version == 1) {
+				}
+				else if (version == 1) {
 					properties.load(archive, { "anchors", "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points" });
-				} else if (version == 2) {
+				}
+				else if (version == 2) {
 					properties.load(archive, { "anchors", "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points", "blendMode" });
-				} else if (version == 3) {
+				}
+				else if (version == 3) {
 					properties.load(archive, { "anchors", "shouldDraw", "textures", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points", "blendMode" });
-				} else if (version == 4) {
+				}
+				else if (version == 4) {
 					points.serializeEnabled(serializePoints());
 					vertexIndices.serializeEnabled(serializePoints());
 					properties.load(archive, { "anchors", "shouldDraw", "textures", "shaderProgramId", "localBounds", "drawType", "vertexIndices", "points", "blendMode" });
-				} else {
+				}
+				else {
 					points.serializeEnabled(serializePoints());
 					vertexIndices.serializeEnabled(serializePoints());
 				}
@@ -315,26 +320,26 @@ namespace MV {
 			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Drawable> &construct, std::uint32_t const version) {
+			static void load_and_construct(Archive& archive, cereal::construct<Drawable>& construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
 				construct->load(archive, version);
 				construct->initialize();
 			}
 
-			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
+			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node>& a_parent) {
 				return cloneHelper(a_parent->attach<Drawable>().self());
 			}
 
 			virtual void postLoadInitialize() override;
 
-			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
+			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component>& a_clone);
 
-			Property<std::map<size_t, std::shared_ptr<TextureHandle>>> ourTextures{properties, "textures", {}, [](auto &source, auto &destination) { 
+			Property<std::map<size_t, std::shared_ptr<TextureHandle>>> ourTextures{ properties, "textures", {}, [](auto& source, auto& destination) {
 				destination->clear();
 				for (auto&& kv : source) {
 					destination[kv.first] = kv.second->clone();
 				}
-			}};
+			} };
 
 			MV_PROPERTY(std::vector<DrawPoint>, points, {});
 			MV_PROPERTY(std::vector<GLuint>, vertexIndices, {});
@@ -365,7 +370,7 @@ namespace MV {
 			void hookupTextureSizeWatchers();
 			void hookupTextureSizeWatcher(size_t a_textureId);
 
-			Property<BlendModePreset> blendModePreset{properties, "blendMode", DEFAULT};
+			Property<BlendModePreset> blendModePreset{ properties, "blendMode", DEFAULT };
 
 			void rebuildTextureCache();
 
@@ -382,20 +387,20 @@ namespace MV {
 
 			void forceInitializeShader();
 		};
-        
-        template <class Archive>
-        void Anchors::save(Archive & archive, std::uint32_t const /*version*/) const {
-            auto selfShared = std::static_pointer_cast<Drawable>(selfReference->shared_from_this());
-            bool parentCanUseId = !parentReference.expired() && parentReference.lock() == selfReference->owner()->componentInParents(parentReference.lock()->id(), false, true).self();
-            archive(
-                cereal::make_nvp("parent", parentCanUseId ? std::weak_ptr<Drawable>() : parentReference),
-                cereal::make_nvp("parentId", parentCanUseId ? parentReference.lock()->id() : std::string()),
-                cereal::make_nvp("anchors", parentAnchors),
-                cereal::make_nvp("offset", ourOffset),
-                cereal::make_nvp("pivot", pivotPercent),
-                cereal::make_nvp("applyingPosition", applyingPosition)
-            );
-        }
+
+		template <class Archive>
+		void Anchors::save(Archive& archive, std::uint32_t const /*version*/) const {
+			auto selfShared = std::static_pointer_cast<Drawable>(selfReference->shared_from_this());
+			bool parentCanUseId = !parentReference.expired() && parentReference.lock() == selfReference->owner()->componentInParents(parentReference.lock()->id(), false, true).self();
+			archive(
+				cereal::make_nvp("parent", parentCanUseId ? std::weak_ptr<Drawable>() : parentReference),
+				cereal::make_nvp("parentId", parentCanUseId ? parentReference.lock()->id() : std::string()),
+				cereal::make_nvp("anchors", parentAnchors),
+				cereal::make_nvp("offset", ourOffset),
+				cereal::make_nvp("pivot", pivotPercent),
+				cereal::make_nvp("applyingPosition", applyingPosition)
+			);
+		}
 	}
 }
 

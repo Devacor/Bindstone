@@ -4,7 +4,7 @@
 #include "MV/Render/formattedText.h"
 #include "sprite.h"
 
-namespace MV{
+namespace MV {
 	namespace Scene {
 
 		class Text : public Drawable {
@@ -25,32 +25,33 @@ namespace MV{
 
 			DrawableDerivedAccessors(Text)
 
-			UtfString text() const {
+				UtfString text() const {
 				return formattedText->string();
 			}
-			std::shared_ptr<Text> text(const UtfString &a_text);
+			std::shared_ptr<Text> text(const UtfString& a_text);
 			std::shared_ptr<Text> text(UtfChar a_char) {
 				return text(UtfString() + a_char);
 			}
 
-			bool text(SDL_Event &event);
+			bool text(SDL_Event& event);
 
 			PointPrecision number() const {
 				try {
 					return stof(text());
-				} catch (...) {
+				}
+				catch (...) {
 					return 0.0f;
 				}
 			}
-            
-            std::shared_ptr<Text> number(PointPrecision a_newText) {
-                return text(std::to_string(a_newText));
-            }
-            std::shared_ptr<Text> number(int a_newText) {
-                return text(std::to_string(a_newText));
-            }
-            
-            template <typename T>
+
+			std::shared_ptr<Text> number(PointPrecision a_newText) {
+				return text(std::to_string(a_newText));
+			}
+			std::shared_ptr<Text> number(int a_newText) {
+				return text(std::to_string(a_newText));
+			}
+
+			template <typename T>
 			std::shared_ptr<Text> set(T a_newText) {
 				return text(std::to_string(a_newText));
 			}
@@ -96,7 +97,7 @@ namespace MV{
 				return formattedText->width();
 			}
 
-			std::shared_ptr<Text> append(const UtfString &a_text) {
+			std::shared_ptr<Text> append(const UtfString& a_text) {
 				auto inserted = formattedText->append(a_text);
 				if (cursor >= formattedText->size()) {
 					incrementCursor(inserted);
@@ -115,7 +116,7 @@ namespace MV{
 				return self;
 			}
 
-			std::shared_ptr<Text> insertAtCursor(const UtfString &a_text) {
+			std::shared_ptr<Text> insertAtCursor(const UtfString& a_text) {
 				incrementCursor(formattedText->insert(cursor, a_text));
 				auto self = std::static_pointer_cast<Text>(shared_from_this());
 				onChangeSignal(self);
@@ -164,7 +165,7 @@ namespace MV{
 			}
 		protected:
 			virtual void detachImplementation() override;
-			virtual void boundsImplementation(const BoxAABB<> &a_bounds) override;
+			virtual void boundsImplementation(const BoxAABB<>& a_bounds) override;
 			virtual void updateImplementation(double a_dt);
 
 			virtual void initialize() override;
@@ -173,27 +174,27 @@ namespace MV{
 				Drawable::defaultDrawImplementation();
 			}
 
-			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary, const std::string &a_defaultFontIdentifier);
+			Text(const std::weak_ptr<Node>& a_owner, TextLibrary& a_textLibrary, const std::string& a_defaultFontIdentifier);
 
-			Text(const std::weak_ptr<Node> &a_owner, TextLibrary& a_textLibrary) :
+			Text(const std::weak_ptr<Node>& a_owner, TextLibrary& a_textLibrary) :
 				Text(a_owner, a_textLibrary, DEFAULT_ID) {
 			}
 
-            template <class Archive>
-            void save(Archive & archive, std::uint32_t const /*version*/) const {
-                    archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
-            }
-
-            template <class Archive>
-            void load(Archive & archive, std::uint32_t const version) {
-                    if (version == 0) {
-                            properties.load(archive, { "formattedText", "usingBoundsForLineHeight" });
-                    }
-                    archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
-            }
+			template <class Archive>
+			void save(Archive& archive, std::uint32_t const /*version*/) const {
+				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Text> &construct, std::uint32_t const version) {
+			void load(Archive& archive, std::uint32_t const version) {
+				if (version == 0) {
+					properties.load(archive, { "formattedText", "usingBoundsForLineHeight" });
+				}
+				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+			}
+
+			template <class Archive>
+			static void load_and_construct(Archive& archive, cereal::construct<Text>& construct, std::uint32_t const version) {
 				MV::Services& services = cereal::get_user_data<MV::Services>(archive);
 				auto* library = services.get<MV::TextLibrary>();
 
@@ -204,12 +205,12 @@ namespace MV{
 
 				construct->initialize();
 			}
-			
-			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
+
+			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node>& a_parent) {
 				return cloneHelper(a_parent->attach<Text>(textLibrary, formattedText->defaultStateId()).self());
 			}
 
-			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component> &a_clone);
+			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component>& a_clone);
 
 		private:
 			void setCursor(int64_t a_value) {
@@ -221,7 +222,7 @@ namespace MV{
 					if (characterToTest) {
 						int iterateDirection = a_value > static_cast<int64_t>(cursor) ? 1 : -1;
 						auto referenceState = characterToTest->state;
-						while (characterToTest && characterToTest->partOfFormat() && characterToTest->state == referenceState){
+						while (characterToTest && characterToTest->partOfFormat() && characterToTest->state == referenceState) {
 							characterToTest = formattedText->characterForIndex(a_value);
 							if (characterToTest && characterToTest->partOfFormat()) {
 								a_value += iterateDirection;
@@ -233,7 +234,8 @@ namespace MV{
 					auto cursorCharacter = (cursor < maxCursor || cursor == 0) ? formattedText->characterForIndex(cursor) : formattedText->characterForIndex(cursor - 1);
 					if (cursorCharacter) {
 						positionCursorWithCharacter(maxCursor, cursorCharacter);
-					} else {
+					}
+					else {
 						positionCursorWithoutCharacter();
 					}
 				}

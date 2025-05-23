@@ -450,9 +450,9 @@ namespace MV {
 		uint64_t seed() const{
 			return generatorSeed;
 		}
-		Random& seed(uint64_t a_seed){
+		Random& seed(uint64_t a_seed) {
 			generator.seed(static_cast<unsigned long>(a_seed));
-            return *this;
+			return *this;
 		}
 
 		int64_t integer(int64_t a_min, int64_t a_max){

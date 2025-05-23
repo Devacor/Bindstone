@@ -41,8 +41,7 @@ namespace MV {
 	}
 
 	bool Color::operator==(const Color& a_other) const {
-		return equals(R, a_other.R) && equals(G, a_other.G) && 
-			   equals(B, a_other.B) && equals(A, a_other.A);
+		return equals(R, a_other.R) && equals(G, a_other.G) && equals(B, a_other.B) && equals(A, a_other.A);
 	}
 	
 	bool Color::operator!=(const Color& a_other) const {

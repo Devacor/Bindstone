@@ -90,10 +90,10 @@ namespace MV {
 	private:
 
 		template <class Archive>
-        void save(Archive & archive) const;
+		void save(Archive & archive) const;
 
 		template <class Archive>
-        void load(Archive & archive);
+		void load(Archive & archive);
 
 		void calculateClearance() const;
 
@@ -246,9 +246,9 @@ namespace MV {
 		}
 
 		TemporaryCost(TemporaryCost &&a_rhs) noexcept:
-            map(std::move(a_rhs.map)),
+			map(std::move(a_rhs.map)),
 			position(std::move(a_rhs.position)),
-            temporaryCost(std::move(a_rhs.temporaryCost)){
+			temporaryCost(std::move(a_rhs.temporaryCost)){
 
 			a_rhs.map.reset();
 			a_rhs.temporaryCost = 0;
@@ -294,9 +294,9 @@ namespace MV {
 	class Path {
 	public:
 		Path(std::shared_ptr<Map> a_map, const Point<int>& a_start, const Point<int>& a_end, PointPrecision a_distance = 0.0f, int a_unitSize = 1, int64_t a_maxSearchNodes = -1) :
-            maxSearchNodes(a_maxSearchNodes),
-            minimumDistance(a_distance),
-            unitSize(a_unitSize),
+			maxSearchNodes(a_maxSearchNodes),
+			minimumDistance(a_distance),
+			unitSize(a_unitSize),
 			map(a_map),
 			startPosition(std::min(a_start.x, map->size().width), std::min(a_start.y, map->size().height)),
 			goalPosition(std::min(a_end.x, map->size().width), std::min(a_end.y, map->size().height)) {
@@ -329,8 +329,8 @@ namespace MV {
 		public:
 			PathCalculationNode(const Point<int> &a_pathGoal, MapNode& a_mapCell, float a_startCost, Path::PathCalculationNode* a_parent = nullptr, bool a_isCorner = false) :
 				initialCost(a_startCost),
-                isCorner(a_isCorner),
-                ourParent(a_parent),
+				isCorner(a_isCorner),
+				ourParent(a_parent),
 				mapCell(&a_mapCell) {
 
 				goalCost = static_cast<float>(std::abs(mapCell->position().x - a_pathGoal.x) + std::abs(mapCell->position().y - a_pathGoal.y));
@@ -582,8 +582,8 @@ namespace MV {
 		NavigationAgent() :
 			onArrive(onArriveSignal),
 			onBlocked(onBlockedSignal),
-            onStop(onStopSignal),
-            onStart(onStartSignal){}
+			onStop(onStopSignal),
+			onStart(onStartSignal){}
 	private:
 		bool attemptToRecalculate();
 		void incrementPathIndex();
@@ -592,10 +592,10 @@ namespace MV {
 			NavigationAgent(a_map, cast<PointPrecision>(a_newPosition), a_unitSize, a_offsetCenterByHalf){
 		}
 		NavigationAgent(std::shared_ptr<Map> a_map, const Point<> &a_newPosition, int a_unitSize, bool a_offsetCenterByHalf) :
-            onArrive(onArriveSignal),
-            onBlocked(onBlockedSignal),
-            onStop(onStopSignal),
-            onStart(onStartSignal),
+			onArrive(onArriveSignal),
+			onBlocked(onBlockedSignal),
+			onStop(onStopSignal),
+			onStart(onStartSignal),
 			map(a_map),
 			centerOffset(a_offsetCenterByHalf ? point(.5f, .5f) : point(.0f, .0f)),
 			ourPosition(a_newPosition + centerOffset),
@@ -777,33 +777,33 @@ namespace MV {
 
 		int ourDebugId = 0;
 	};
-    
-    template <class Archive>
-    void MapNode::save(Archive & archive) const {
-        std::weak_ptr<Map> weakMap;
-        weakMap = map->shared_from_this();
-        archive(
-            CEREAL_NVP(location),
-            CEREAL_NVP(useCorners),
-            CEREAL_NVP(travelCost),
-            CEREAL_NVP(staticBlockedSemaphore),
-            cereal::make_nvp("map", weakMap)
-        );
-    }
+	
+	template <class Archive>
+	void MapNode::save(Archive & archive) const {
+		std::weak_ptr<Map> weakMap;
+		weakMap = map->shared_from_this();
+		archive(
+			CEREAL_NVP(location),
+			CEREAL_NVP(useCorners),
+			CEREAL_NVP(travelCost),
+			CEREAL_NVP(staticBlockedSemaphore),
+			cereal::make_nvp("map", weakMap)
+		);
+	}
 
-    
-    template <class Archive>
-    void MapNode::load(Archive & archive) {
-        std::weak_ptr<Map> weakMap;
-        archive(
-            CEREAL_NVP(location),
-            CEREAL_NVP(useCorners),
-            CEREAL_NVP(travelCost),
-            CEREAL_NVP(staticBlockedSemaphore),
-            cereal::make_nvp("map", weakMap)
-        );
-        map = weakMap.lock().get();
-    }
+	
+	template <class Archive>
+	void MapNode::load(Archive & archive) {
+		std::weak_ptr<Map> weakMap;
+		archive(
+			CEREAL_NVP(location),
+			CEREAL_NVP(useCorners),
+			CEREAL_NVP(travelCost),
+			CEREAL_NVP(staticBlockedSemaphore),
+			cereal::make_nvp("map", weakMap)
+		);
+		map = weakMap.lock().get();
+	}
 
 	void MapNode::block() {
 		bool wasBlocked = blocked();

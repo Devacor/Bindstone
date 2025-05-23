@@ -292,7 +292,7 @@ namespace MV {
 		template<typename U = T>
 		auto begin() const -> std::enable_if_t<details::has_begin<const U>::value, decltype(std::declval<const U&>().begin())> { return value.begin(); }
 		template<typename U = T>
-		auto end() const   -> std::enable_if_t<details::has_end<const U>::value, decltype(std::declval<const U&>().end())> { return value.end(); }
+		auto end() const -> std::enable_if_t<details::has_end<const U>::value, decltype(std::declval<const U&>().end())> { return value.end(); }
 
 		// serialization
 		void save(cereal::JSONOutputArchive& ar) const override { if (allowSerialization) ar(cereal::make_nvp(name(), value)); }

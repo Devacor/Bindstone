@@ -226,10 +226,9 @@ namespace MV {
 			acceptUpClick(true);
 		}
 
-                std::shared_ptr<Component> Clickable::cloneHelper(const std::shared_ptr<Component> &a_clone) {
-                        Sprite::cloneHelper(a_clone);
-                        return a_clone;
-                }
-
+		std::shared_ptr<Component> Clickable::cloneHelper(const std::shared_ptr<Component>& a_clone) {
+			Sprite::cloneHelper(a_clone);
+			return a_clone;
+		}
 	}
 }

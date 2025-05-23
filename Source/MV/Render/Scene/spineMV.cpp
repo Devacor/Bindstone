@@ -272,7 +272,7 @@ namespace MV{
 			if (found != tracks.end()) {
 				return *found->second;
 			} else {
-                return *(tracks.emplace(defaultTrack, std::make_unique<AnimationTrack>(defaultTrack, animationState, skeleton)).first->second);
+				return *(tracks.emplace(defaultTrack, std::make_unique<AnimationTrack>(defaultTrack, animationState, skeleton)).first->second);
 			}
 		}
 

@@ -20,8 +20,8 @@ namespace MV {
 		public:
 			DrawableDerivedAccessors(Sprite)
 
-			template<typename PointAssign>
-			std::shared_ptr<Sprite> corners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight);
+				template<typename PointAssign>
+			std::shared_ptr<Sprite> corners(const PointAssign& a_TopLeft, const PointAssign& a_TopRight, const PointAssign& a_BottomLeft, const PointAssign& a_BottomRight);
 
 			std::shared_ptr<Sprite> subdivide(uint16_t a_subdivisions) {
 				if (ourSubdivisions != a_subdivisions) {
@@ -35,37 +35,37 @@ namespace MV {
 				return ourSubdivisions;
 			}
 
-			bool hasSlice(){
+			bool hasSlice() {
 				auto found = ourTextures->find(0);
 				return found != ourTextures->end() && found->second->hasSlice();
 			}
 		protected:
-			Sprite(const std::weak_ptr<Node> &a_owner) :
+			Sprite(const std::weak_ptr<Node>& a_owner) :
 				Drawable(a_owner) {
 
 				clearTexturePoints(*points);
 				appendQuadVertexIndices(*vertexIndices, 0);
 			}
 
-            template <class Archive>
-            void save(Archive & archive, std::uint32_t const /*version*/) const {
+			template <class Archive>
+			void save(Archive& archive, std::uint32_t const /*version*/) const {
 				archive(
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
-            }
+			}
 
-            template <class Archive>
-            void load(Archive & archive, std::uint32_t const version) {
+			template <class Archive>
+			void load(Archive& archive, std::uint32_t const version) {
 				if (version == 1) {
 					properties.load(archive, { "subdivisions" });
 				}
 				archive(
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
-            }
+			}
 
 			template <class Archive>
-			static void load_and_construct(Archive & archive, cereal::construct<Sprite> &construct, std::uint32_t const version) {
+			static void load_and_construct(Archive& archive, cereal::construct<Sprite>& construct, std::uint32_t const version) {
 				construct(std::shared_ptr<Node>());
 				construct->load(archive, version);
 				construct->initialize();
@@ -76,7 +76,7 @@ namespace MV {
 			void updateSubdivision();
 			void updateSubdivisionTexture();
 
-			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node> &a_parent) {
+			virtual std::shared_ptr<Component> cloneImplementation(const std::shared_ptr<Node>& a_parent) {
 				return cloneHelper(a_parent->attach<Sprite>().self());
 			}
 
@@ -97,11 +97,11 @@ namespace MV {
 
 			void updateTextureCoordinates(size_t a_textureId) override;
 
-			Property<uint16_t> ourSubdivisions{properties, "subdivisions", 0};
+			Property<uint16_t> ourSubdivisions{ properties, "subdivisions", 0 };
 		};
 
 		template<typename PointAssign>
-		std::shared_ptr<Sprite> Sprite::corners(const PointAssign & a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomRight, const PointAssign & a_BottomLeft) {
+		std::shared_ptr<Sprite> Sprite::corners(const PointAssign& a_TopLeft, const PointAssign& a_TopRight, const PointAssign& a_BottomRight, const PointAssign& a_BottomLeft) {
 			auto self = std::static_pointer_cast<Sprite>(shared_from_this());
 			points[0] = a_TopLeft;
 			points[1] = a_BottomLeft;

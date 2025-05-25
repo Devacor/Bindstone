@@ -20,7 +20,7 @@ namespace MV {
 		public:
 			DrawableDerivedAccessors(Sprite)
 
-				template<typename PointAssign>
+			template<typename PointAssign>
 			std::shared_ptr<Sprite> corners(const PointAssign& a_TopLeft, const PointAssign& a_TopRight, const PointAssign& a_BottomLeft, const PointAssign& a_BottomRight);
 
 			std::shared_ptr<Sprite> subdivide(uint16_t a_subdivisions) {

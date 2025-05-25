@@ -2,6 +2,7 @@
 #define _MV_SCENE_BUTTON_H_
 
 #include "clickable.h"
+#include "text.h"
 
 namespace MV {
 	namespace Scene {
@@ -42,19 +43,16 @@ namespace MV {
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
 				archive(
-					CEREAL_NVP(activeView),
-					CEREAL_NVP(idleView),
-					CEREAL_NVP(disabledView),
 					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
 				);
 			}
 
 			template <class Archive>
-			void load(Archive & archive, std::uint32_t const /*version*/) {
+			void load(Archive & archive, std::uint32_t const version) {
+				if (version == 0) {
+					properties.load(archive, {"activeView", "idleView", "disabledView"});
+				}
 				archive(
-					CEREAL_NVP(activeView),
-					CEREAL_NVP(idleView),
-					CEREAL_NVP(disabledView),
 					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
 				);
 			}
@@ -85,11 +83,11 @@ namespace MV {
 
 			std::shared_ptr<Node> currentView;
 
-			std::shared_ptr<Node> activeView;
-			std::shared_ptr<Node> idleView;
-			std::shared_ptr<Node> disabledView;
+			//Clone is a no-op because it is manually managed in the cloneHelper
+			MV_PROPERTY((std::shared_ptr<Node>), activeView, {}, [](auto&, auto&) {});
+			MV_PROPERTY((std::shared_ptr<Node>), idleView, {}, [](auto&, auto&) {});
+			MV_PROPERTY((std::shared_ptr<Node>), disabledView, {}, [](auto&, auto&){ });
 		};
-
 	}
 }
 

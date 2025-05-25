@@ -341,24 +341,24 @@ namespace MV {
 				}
 			} };
 
-			MV_PROPERTY(std::vector<DrawPoint>, points, {});
-			MV_PROPERTY(std::vector<GLuint>, vertexIndices, {});
+			MV_PROPERTY((std::vector<DrawPoint>), points, {});
+			MV_PROPERTY((std::vector<GLuint>), vertexIndices, {});
 
-			MV_PROPERTY(BoxAABB<>, localBounds);
+			MV_PROPERTY((BoxAABB<>), localBounds);
 
 			Shader* shaderProgram = nullptr;
-			MV_PROPERTY(std::string, shaderProgramId, PREMULTIPLY_ID);
+			MV_PROPERTY((std::string), shaderProgramId, PREMULTIPLY_ID);
 			GLuint bufferId = 0;
 
 			bool dirtyVertexBuffer = true;
 
-			MV_DELETED_PROPERTY(std::shared_ptr<TextureHandle>, ourTexture);
+			MV_DELETED_PROPERTY((std::shared_ptr<TextureHandle>), ourTexture);
 
 			std::map<size_t, TextureHandle::SignalType::SharedType> textureSizeSignals;
 
-			MV_PROPERTY(GLenum, drawType, GL_TRIANGLES);
+			MV_PROPERTY((GLenum), drawType, GL_TRIANGLES);
 
-			MV_PROPERTY(bool, shouldDraw, true);
+			MV_PROPERTY((bool), shouldDraw, true);
 
 			virtual void initialize() override;
 

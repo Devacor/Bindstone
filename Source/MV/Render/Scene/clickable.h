@@ -1,4 +1,4 @@
-﻿#ifndef _MV_SCENE_CLICKABLE_H_
+#ifndef _MV_SCENE_CLICKABLE_H_
 #define _MV_SCENE_CLICKABLE_H_
 
 #include "sprite.h"
@@ -190,8 +190,8 @@ namespace MV {
 				onMouseMoveHandle.reset();
 			}
 
-			MV_PROPERTY(int64_t, globalClickPriority, 100, [](auto&, auto&) {});
-			MV_PROPERTY(int64_t, appendClickPriority, 0, [](auto&, auto&) {});
+			MV_PROPERTY((int64_t), globalClickPriority, 100, [](auto&, auto&) {});
+			MV_PROPERTY((int64_t), appendClickPriority, 0, [](auto&, auto&) {});
 		private:
 			TapDevice::SignalType onLeftMouseDownHandle;
 			TapDevice::SignalType onLeftMouseUpHandle;
@@ -212,9 +212,9 @@ namespace MV {
 			std::string onAcceptScript;
 			std::string onCancelScript;
 
-			MV_PROPERTY(std::vector<int64_t>, overrideClickPriority, {}, [](auto&, auto&) {});
-			MV_PROPERTY(bool, eatTouches, true);
-			MV_PROPERTY(BoundsType, hitDetectionType, BoundsType::LOCAL);
+			MV_PROPERTY((std::vector<int64_t>), overrideClickPriority, {}, [](auto&, auto&) {});
+			MV_PROPERTY((bool), eatTouches, true);
+			MV_PROPERTY((BoundsType), hitDetectionType, BoundsType::LOCAL);
 		};
 
 	}

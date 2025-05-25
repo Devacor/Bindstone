@@ -56,12 +56,12 @@ namespace MV {
 		void Sprite::updateSubdivision() {
 			if (!hasSlice()) {
 				dirtyVertexBuffer = true;
-				if (ourSubdivisions == 0) {
+				if (*ourSubdivisions == 0) {
 					points->resize(4);
 					vertexIndices->clear();
 					appendQuadVertexIndices(*vertexIndices, 0);
 				} else {
-					size_t newSize = (2 + ourSubdivisions) * (2 + ourSubdivisions);
+					size_t newSize = (2 + *ourSubdivisions) * (2 + *ourSubdivisions);
 					points->resize(newSize + 1);
 					vertexIndices->clear();
 					auto boundExtent = points[2].point() - points[0].point();
@@ -70,17 +70,17 @@ namespace MV {
 					auto minTexturePoint = points[0].texturePoint();
 					auto maxTexturePoint = points[2].texturePoint();
 
-					for (size_t x = 0; x <= ourSubdivisions; ++x) {
-						for (size_t y = 0; y <= ourSubdivisions; ++y) {
-							GLuint topLeft = static_cast<GLuint>((x == 0 && y == 0) ? 0 : x > 0 ? ((2 + ourSubdivisions) * x) + y + 2 : 3 + y);
-							GLuint bottomLeft = static_cast<GLuint>((x == 0 && y == ourSubdivisions) ? 1 : x > 0 ? ((2 + ourSubdivisions) * x) + (y + 1) + 2 : 3 + (y + 1));
-							GLuint bottomRight = static_cast<GLuint>((x == ourSubdivisions && y == ourSubdivisions) ? 2 : ((2 + ourSubdivisions) * (x + 1)) + (y + 1) + 2 - (x == ourSubdivisions ? 1 : 0));
-							GLuint topRight = static_cast<GLuint>((x == ourSubdivisions && y == 0) ? 3 : ((2 + ourSubdivisions) * (x + 1)) + y + 2 - (x == ourSubdivisions ? 1 : 0));
+					for (uint16_t x = 0; x <= *ourSubdivisions; x++) {
+						for (uint16_t y = 0; y <= *ourSubdivisions; y++) {
+							GLuint topLeft = static_cast<GLuint>((x == 0 && y == 0) ? 0 : x > 0 ? ((2 + *ourSubdivisions) * x) + y + 2 : 3 + y);
+							GLuint bottomLeft = static_cast<GLuint>((x == 0 && y == *ourSubdivisions) ? 1 : x > 0 ? ((2 + *ourSubdivisions) * x) + (y + 1) + 2 : 3 + (y + 1));
+							GLuint bottomRight = static_cast<GLuint>((x == *ourSubdivisions && y == *ourSubdivisions) ? 2 : ((2 + *ourSubdivisions) * (x + 1)) + (y + 1) + 2 - (x == *ourSubdivisions ? 1 : 0));
+							GLuint topRight = static_cast<GLuint>((x == *ourSubdivisions && y == 0) ? 3 : ((2 + *ourSubdivisions) * (x + 1)) + y + 2 - (x == *ourSubdivisions ? 1 : 0));
 
-							PointPrecision leftPercent = static_cast<PointPrecision>(x) / static_cast<PointPrecision>(ourSubdivisions + 1);
-							PointPrecision topPercent = static_cast<PointPrecision>(y) / static_cast<PointPrecision>(ourSubdivisions + 1);
-							PointPrecision rightPercent = static_cast<PointPrecision>(x + 1) / static_cast<PointPrecision>(ourSubdivisions + 1);
-							PointPrecision bottomPercent = static_cast<PointPrecision>(y + 1) / static_cast<PointPrecision>(ourSubdivisions + 1);
+							PointPrecision leftPercent = static_cast<PointPrecision>(x) / static_cast<PointPrecision>(*ourSubdivisions + 1);
+							PointPrecision topPercent = static_cast<PointPrecision>(y) / static_cast<PointPrecision>(*ourSubdivisions + 1);
+							PointPrecision rightPercent = static_cast<PointPrecision>(x + 1) / static_cast<PointPrecision>(*ourSubdivisions + 1);
+							PointPrecision bottomPercent = static_cast<PointPrecision>(y + 1) / static_cast<PointPrecision>(*ourSubdivisions + 1);
 
 							if (topLeft != 0) {
 								points[topLeft] = (boundExtent * Scale(leftPercent, topPercent)) + points[0];
@@ -118,7 +118,7 @@ namespace MV {
 							points[topRight] = TexturePoint(rightTexturePercent, topTexturePercent);
 
 							auto toInsert = std::vector<GLuint>{ topLeft, bottomLeft, bottomRight, bottomRight, topRight, topLeft };
-							vertexIndices->insert(vertexIndices.end(), toInsert.begin(), toInsert.end());
+							vertexIndices->insert(vertexIndices->end(), toInsert.begin(), toInsert.end());
 						}
 					}
 				}
@@ -126,22 +126,22 @@ namespace MV {
 		}
 
 		void Sprite::updateSubdivisionTexture() {
-			if (!hasSlice() && ourSubdivisions > 0) {
+			if (!hasSlice() && *ourSubdivisions > 0) {
 				dirtyVertexBuffer = true;
 				auto minTexturePoint = points[0].texturePoint();
 				auto maxTexturePoint = points[2].texturePoint();
 
-				for (size_t x = 0; x <= ourSubdivisions; ++x) {
-					for (size_t y = 0; y <= ourSubdivisions; ++y) {
-						GLuint topLeft = static_cast<GLuint>((x == 0 && y == 0) ? 0 : x > 0 ? ((2 + ourSubdivisions) * x) + y + 2 : 3 + y);
-						GLuint bottomLeft = static_cast<GLuint>((x == 0 && y == ourSubdivisions) ? 1 : x > 0 ? ((2 + ourSubdivisions) * x) + (y + 1) + 2 : 3 + (y + 1));
-						GLuint bottomRight = static_cast<GLuint>((x == ourSubdivisions && y == ourSubdivisions) ? 2 : ((2 + ourSubdivisions) * (x + 1)) + (y + 1) + 2 - (x == ourSubdivisions ? 1 : 0));
-						GLuint topRight = static_cast<GLuint>((x == ourSubdivisions && y == 0) ? 3 : ((2 + ourSubdivisions) * (x + 1)) + y + 2 - (x == ourSubdivisions ? 1 : 0));
+				for (uint16_t x = 0; x <= *ourSubdivisions; x++) {
+					for (uint16_t y = 0; y <= *ourSubdivisions; y++) {
+						GLuint topLeft = static_cast<GLuint>((x == 0 && y == 0) ? 0 : x > 0 ? ((2 + *ourSubdivisions) * x) + y + 2 : 3 + y);
+						GLuint bottomLeft = static_cast<GLuint>((x == 0 && y == *ourSubdivisions) ? 1 : x > 0 ? ((2 + *ourSubdivisions) * x) + (y + 1) + 2 : 3 + (y + 1));
+						GLuint bottomRight = static_cast<GLuint>((x == *ourSubdivisions && y == *ourSubdivisions) ? 2 : ((2 + *ourSubdivisions) * (x + 1)) + (y + 1) + 2 - (x == *ourSubdivisions ? 1 : 0));
+						GLuint topRight = static_cast<GLuint>((x == *ourSubdivisions && y == 0) ? 3 : ((2 + *ourSubdivisions) * (x + 1)) + y + 2 - (x == *ourSubdivisions ? 1 : 0));
 
-						PointPrecision leftPercent = static_cast<PointPrecision>(x) / static_cast<PointPrecision>(ourSubdivisions + 1);
-						PointPrecision topPercent = static_cast<PointPrecision>(y) / static_cast<PointPrecision>(ourSubdivisions + 1);
-						PointPrecision rightPercent = static_cast<PointPrecision>(x + 1) / static_cast<PointPrecision>(ourSubdivisions + 1);
-						PointPrecision bottomPercent = static_cast<PointPrecision>(y + 1) / static_cast<PointPrecision>(ourSubdivisions + 1);
+						PointPrecision leftPercent = static_cast<PointPrecision>(x) / static_cast<PointPrecision>(*ourSubdivisions + 1);
+						PointPrecision topPercent = static_cast<PointPrecision>(y) / static_cast<PointPrecision>(*ourSubdivisions + 1);
+						PointPrecision rightPercent = static_cast<PointPrecision>(x + 1) / static_cast<PointPrecision>(*ourSubdivisions + 1);
+						PointPrecision bottomPercent = static_cast<PointPrecision>(y + 1) / static_cast<PointPrecision>(*ourSubdivisions + 1);
 
 						PointPrecision leftTexturePercent = mix(minTexturePoint.textureX, maxTexturePoint.textureX, leftPercent);
 						PointPrecision topTexturePercent = mix(minTexturePoint.textureY, maxTexturePoint.textureY, topPercent);
@@ -168,7 +168,7 @@ namespace MV {
 			dirtyVertexBuffer = true;
 			auto originalBounds = *localBounds;
 			localBounds = BoxAABB<>(points[0], points[2]);
-			if (originalBounds != localBounds) {
+			if (originalBounds != *localBounds) {
 				for (auto&& childAnchor : childAnchors) {
 					childAnchor->apply();
 				}

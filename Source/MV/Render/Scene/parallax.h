@@ -69,24 +69,23 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				archive(cereal::make_nvp("enabled", isEnabled));
-				archive(cereal::make_nvp("translateRatio", ourTranslateRatio));
-				archive(cereal::make_nvp("localOffset", ourLocalOffset));
-				archive(cereal::make_nvp("zoomOffset", ourZoomOffset));
 				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				archive(cereal::make_nvp("enabled", isEnabled));
-				if (version <= 1) {
-					int ourSpace = 0;
-					archive(cereal::make_nvp("space", ourSpace));
-				}
-				archive(cereal::make_nvp("translateRatio", ourTranslateRatio));
-				archive(cereal::make_nvp("localOffset", ourLocalOffset));
-				if (version > 1) {
-					archive(cereal::make_nvp("zoomOffset", ourZoomOffset));
+				if (version <= 2) {
+					std::vector<std::string> propertyKeys;
+					propertyKeys.push_back("isEnabled");
+					if(version <= 1){
+						propertyKeys.push_back("space");
+					}
+					propertyKeys.push_back("translateRatio");
+					propertyKeys.push_back("localOffset");
+					if(version > 1){
+						propertyKeys.push_back("zoomOffset");
+					}
+					properties.load(archive, propertyKeys);
 				}
 				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 			}
@@ -111,12 +110,13 @@ namespace MV {
 
 			Point<> absolutePosition() const;
 
-			bool isEnabled = false;
+			MV_PROPERTY((bool), isEnabled, false);
 			bool needsUpdate = false;
 
-			Point<> ourTranslateRatio;
-			Point<> ourLocalOffset;
-			Point<> ourZoomOffset;
+			MV_PROPERTY((Point<>), ourTranslateRatio);
+			MV_PROPERTY((Point<>), ourLocalOffset);
+			MV_PROPERTY((Point<>), ourZoomOffset);
+			MV_DELETED_PROPERTY((bool), space);
 			Node::BasicReceiverType parentObserver;
 			Draw2D::CameraRecieveType cameraObserver;
 		};

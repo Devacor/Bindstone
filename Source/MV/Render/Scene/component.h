@@ -286,9 +286,9 @@ namespace MV {
 			bool allowSerialize = true;
 
 			std::unique_ptr<Task> rootTask;
-			MV_PROPERTY(std::string, componentId);
+			MV_PROPERTY((std::string), componentId);
 			//does not clone.
-			MV_PROPERTY(std::weak_ptr<Node>, componentOwner, {}, [](Property<std::weak_ptr<Node>> &, Property<std::weak_ptr<Node>>&){});
+			MV_PROPERTY((std::weak_ptr<Node>), componentOwner, {}, [](Property<std::weak_ptr<Node>> &, Property<std::weak_ptr<Node>>&){});
 		};
 	}
 }

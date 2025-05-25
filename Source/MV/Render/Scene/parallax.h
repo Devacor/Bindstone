@@ -76,7 +76,7 @@ namespace MV {
 			void load(Archive & archive, std::uint32_t const version) {
 				if (version <= 2) {
 					std::vector<std::string> propertyKeys;
-					propertyKeys.push_back("isEnabled");
+					propertyKeys.push_back("enabled");
 					if(version <= 1){
 						propertyKeys.push_back("space");
 					}
@@ -110,13 +110,13 @@ namespace MV {
 
 			Point<> absolutePosition() const;
 
-			MV_PROPERTY((bool), isEnabled, false);
+			MV_NAMED_PROPERTY((bool), "enabled", isEnabled, false);
 			bool needsUpdate = false;
 
-			MV_PROPERTY((Point<>), ourTranslateRatio);
-			MV_PROPERTY((Point<>), ourLocalOffset);
-			MV_PROPERTY((Point<>), ourZoomOffset);
-			MV_DELETED_PROPERTY((bool), space);
+			MV_NAMED_PROPERTY((Point<>), "translateRatio", ourTranslateRatio);
+			MV_NAMED_PROPERTY((Point<>), "localOffset", ourLocalOffset);
+			MV_NAMED_PROPERTY((Point<>), "zoomOffset", ourZoomOffset);
+			MV_DELETED_PROPERTY((int), space);
 			Node::BasicReceiverType parentObserver;
 			Draw2D::CameraRecieveType cameraObserver;
 		};

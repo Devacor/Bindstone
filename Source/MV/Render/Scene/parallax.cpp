@@ -6,7 +6,7 @@
 #include "MV/Utility/log.h"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Parallax);
-CEREAL_CLASS_VERSION(MV::Scene::Parallax, 2);
+CEREAL_CLASS_VERSION(MV::Scene::Parallax, 3);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_sceneparallax);
 
 namespace MV {
@@ -22,10 +22,6 @@ namespace MV {
 		std::shared_ptr<Component> Parallax::cloneHelper(const std::shared_ptr<Component>& a_clone) {
 			Component::cloneHelper(a_clone);
 			auto parallaxClone = std::static_pointer_cast<Parallax>(a_clone);
-			parallaxClone->ourLocalOffset = ourLocalOffset;
-			parallaxClone->ourZoomOffset = ourZoomOffset;
-			parallaxClone->ourTranslateRatio = ourTranslateRatio;
-			parallaxClone->isEnabled = isEnabled;
 			return a_clone;
 		}
 
@@ -58,9 +54,9 @@ namespace MV {
 			if (needsUpdate && isEnabled && owner()) {
 				if (auto ownerParent = owner()->parent()) {
 					needsUpdate = false;
-					auto ourPositionOffset = owner()->position(ourLocalOffset)->worldPosition();
-					auto parentPosition = ownerParent->worldPosition() + ourZoomOffset;
-					owner()->worldPosition((parentPosition * -1.0f) + (parentPosition * ourTranslateRatio) + ourPositionOffset);
+					auto ourPositionOffset = owner()->position(*ourLocalOffset)->worldPosition();
+					auto parentPosition = ownerParent->worldPosition() + *ourZoomOffset;
+					owner()->worldPosition((parentPosition * -1.0f) + (parentPosition * ourTranslateRatio.get()) + ourPositionOffset);
 				}
 			}
 		}

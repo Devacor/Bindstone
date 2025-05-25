@@ -6,7 +6,7 @@
 #include "MV/Utility/generalUtility.h"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Grid);
-CEREAL_CLASS_VERSION(MV::Scene::Grid, 2)
+CEREAL_CLASS_VERSION(MV::Scene::Grid, 3)
 CEREAL_REGISTER_DYNAMIC_INIT(mv_scenegrid);
 
 namespace MV {
@@ -19,61 +19,61 @@ namespace MV {
 		}
 
 		std::shared_ptr<Grid> Grid::padding(const std::pair<Point<>, Point<>> &a_padding) {
-			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && cellPadding != a_padding);
+			dirtyGrid = dirtyGrid || (policy.get() >= AutoLayoutPolicy::Self && cellPadding.get() != a_padding);
 			cellPadding = a_padding;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
 		std::shared_ptr<Grid> Grid::padding(const Point<> &a_topLeft, const Point<> &a_botRight) {
-			return padding(std::pair<Point<>, Point<>>(a_topLeft, a_botRight));
+			return padding({a_topLeft, a_botRight});
 		}
 
 		std::shared_ptr<Grid> Grid::padding(const Size<> &a_padding) {
-			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self &&
-				(!equals(a_padding.width, cellPadding.first.x) || !equals(a_padding.width, cellPadding.second.x) ||
-				!equals(a_padding.height, cellPadding.first.y) || !equals(a_padding.height, cellPadding.second.y)));
-			cellPadding.first = toPoint(a_padding);
-			cellPadding.second = toPoint(a_padding);
+			dirtyGrid = dirtyGrid || (policy.get() >= AutoLayoutPolicy::Self &&
+				(!equals(a_padding.width, cellPadding->first.x) || !equals(a_padding.width, cellPadding->second.x) ||
+				!equals(a_padding.height, cellPadding->first.y) || !equals(a_padding.height, cellPadding->second.y)));
+			cellPadding->first = toPoint(a_padding);
+			cellPadding->second = toPoint(a_padding);
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
 		std::pair<Point<>, Point<>> Grid::padding() const {
-			return cellPadding;
+			return cellPadding.get();
 		}
 
 		std::shared_ptr<Grid> Grid::margin(const std::pair<Point<>, Point<>> &a_margin) {
-			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && margins != a_margin);
+			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && margins.get() != a_margin);
 			margins = a_margin;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
 		std::shared_ptr<Grid> Grid::margin(const Point<> &a_topLeft, const Point<> &a_botRight) {
-			return margin(std::pair<Point<>, Point<>>(a_topLeft, a_botRight));
+			return margin({a_topLeft, a_botRight});
 		}
 
 		std::shared_ptr<Grid> Grid::margin(const Size<> &a_margin) {
 			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self &&
-				(!equals(a_margin.width, margins.first.x) || !equals(a_margin.width, margins.second.x) ||
-				!equals(a_margin.height, margins.first.y) || !equals(a_margin.height, margins.second.y)));
-			margins.first = toPoint(a_margin);
-			margins.second = toPoint(a_margin);
+				(!equals(a_margin.width, margins->first.x) || !equals(a_margin.width, margins->second.x) ||
+				!equals(a_margin.height, margins->first.y) || !equals(a_margin.height, margins->second.y)));
+			margins->first = toPoint(a_margin);
+			margins->second = toPoint(a_margin);
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
 		std::shared_ptr<Grid> Grid::cellSize(const Size<> &a_size) {
-			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && a_size != cellDimensions);
+			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && a_size != cellDimensions.get());
 			cellDimensions = a_size;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
 		std::shared_ptr<Grid> Grid::gridWidth(PointPrecision a_rowWidth) {
-			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && maximumWidth != a_rowWidth);
+			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && maximumWidth.get() != a_rowWidth);
 			maximumWidth = a_rowWidth;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
 
 		std::shared_ptr<MV::Scene::Grid> Grid::gridOffset(const Point<> &a_topLeftOffset) {
-			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && topLeftOffset != a_topLeftOffset);
+			dirtyGrid = dirtyGrid || (policy >= AutoLayoutPolicy::Self && topLeftOffset.get() != a_topLeftOffset);
 			topLeftOffset = a_topLeftOffset;
 			return std::static_pointer_cast<Grid>(shared_from_this());
 		}
@@ -118,7 +118,7 @@ namespace MV {
 				inLayoutCall = true;
 				SCOPE_EXIT{ inLayoutCall = false; };
 				dirtyGrid = false;
-				if (cellDimensions.width > 0.0f || cellDimensions.height > 0.0f) {
+				if (cellDimensions->width > 0.0f || cellDimensions->height > 0.0f) {
 					changed = layoutCellSize();
 				} else {
 					changed = layoutChildSize();
@@ -132,8 +132,6 @@ namespace MV {
 
 		Grid::Grid(const std::weak_ptr<Node> &a_owner) :
 			Drawable(a_owner),
-			maximumWidth(0.0f),
-			cellColumns(0),
 			dirtyGrid(true) {
 			points->resize(4);
 			clearTexturePoints(*points);
@@ -142,15 +140,15 @@ namespace MV {
 
 		bool Grid::bumpToNextLine(PointPrecision a_currentPosition, size_t a_index) const {
 			return a_index > 0 &&
-				(maximumWidth > 0.0f && a_currentPosition > maximumWidth) ||
-				(cellColumns > 0 && ((a_index + 1) >= cellColumns && (a_index % cellColumns == 0)));
+				(maximumWidth.get() > 0.0f && a_currentPosition > maximumWidth.get()) ||
+				(cellColumns > 0 && ((a_index + 1) >= cellColumns && (a_index % *cellColumns == 0)));
 		}
 
 		float Grid::getContentWidth() const {
-			if (maximumWidth > 0.0f) {
-				return maximumWidth;
+			if (maximumWidth.get() > 0.0f) {
+				return maximumWidth.get();
 			} else {
-				return (cellColumns * (cellDimensions.width + cellPadding.first.x + cellPadding.second.x) - cellPadding.first.x - cellPadding.second.x) + margins.first.x + margins.second.x;
+				return (cellColumns * (cellDimensions->width + cellPadding->first.x + cellPadding->second.x) - cellPadding->first.x - cellPadding->second.x) + margins->first.x + margins->second.x;
 			}
 		}
 
@@ -162,8 +160,8 @@ namespace MV {
 		}
 
 		bool Grid::layoutCellSize() {
-			BoxAABB<> calculatedBounds(topLeftOffset, size(getContentWidth() - margins.second.x, cellDimensions.height + margins.first.y));
-			Point<> cellPosition = margins.first;
+			BoxAABB<> calculatedBounds(topLeftOffset, size(getContentWidth() - margins->second.x, cellDimensions->height + margins->first.y));
+			Point<> cellPosition = margins->first;
 			size_t index = 0;
 			tiles.clear();
 			tiles.push_back({});
@@ -177,7 +175,7 @@ namespace MV {
 				}
 			}
 
-			calculatedBounds = calculatedBounds.expandWith(calculatedBounds.maxPoint + margins.second);
+			calculatedBounds = calculatedBounds.expandWith(calculatedBounds.maxPoint + margins->second);
 
 			setPointsFromBounds(calculatedBounds);
 			bool changed = *localBounds != calculatedBounds;
@@ -188,11 +186,11 @@ namespace MV {
 
 		Point<> Grid::positionChildNode(Point<> a_cellPosition, size_t a_index, std::shared_ptr<Node> a_node, const Size<> &a_cellSize, BoxAABB<> &a_calculatedBounds, PointPrecision &a_lineHeight) {
 			auto nextPosition = a_cellPosition;
-			nextPosition.translate(a_cellSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
-			if (bumpToNextLine(nextPosition.x - cellPadding.first.x - margins.first.x, a_index)) {
-				a_cellPosition.locate(margins.first.x, a_cellPosition.y + a_lineHeight + cellPadding.first.x + cellPadding.second.y);
+			nextPosition.translate(a_cellSize.width + (cellPadding->first + cellPadding->second).x, 0.0f);
+			if (bumpToNextLine(nextPosition.x - cellPadding->first.x - margins->first.x, a_index)) {
+				a_cellPosition.locate(margins->first.x, a_cellPosition.y + a_lineHeight + cellPadding->first.x + cellPadding->second.y);
 				nextPosition = a_cellPosition;
-				nextPosition.translate(a_cellSize.width + (cellPadding.first + cellPadding.second).x, 0.0f);
+				nextPosition.translate(a_cellSize.width + (cellPadding->first + cellPadding->second).x, 0.0f);
 				a_lineHeight = a_cellSize.height;
 				tiles.push_back({});
 			} else if(a_lineHeight < a_cellSize.height) {
@@ -208,8 +206,8 @@ namespace MV {
 
 
 		bool Grid::layoutChildSize() {
-			BoxAABB<> calculatedBounds(topLeftOffset, size(getContentWidth() - margins.second.x, cellDimensions.height + margins.first.y));
-			Point<> cellPosition = margins.first;
+			BoxAABB<> calculatedBounds(topLeftOffset, size(getContentWidth() - margins->second.x, cellDimensions->height + margins->first.y));
+			Point<> cellPosition = margins->first;
 			size_t index = 0;
 			tiles.clear();
 			tiles.push_back({});
@@ -228,7 +226,7 @@ namespace MV {
 				}
 			}
 
-			calculatedBounds = calculatedBounds.expandWith(calculatedBounds.maxPoint + margins.second);
+			calculatedBounds = calculatedBounds.expandWith(calculatedBounds.maxPoint + margins->second);
 
 			setPointsFromBounds(calculatedBounds);
 			bool changed = localBounds != calculatedBounds;
@@ -332,15 +330,6 @@ namespace MV {
 		std::shared_ptr<Component> Grid::cloneHelper(const std::shared_ptr<Component> &a_clone) {
 			Drawable::cloneHelper(a_clone);
 			auto gridClone = std::static_pointer_cast<Grid>(a_clone);
-			gridClone->maximumWidth = maximumWidth;
-			gridClone->topLeftOffset = topLeftOffset;
-			gridClone->cellDimensions = cellDimensions;
-			gridClone->policy = policy;
-			gridClone->margins = margins;
-			gridClone->cellPadding = cellPadding;
-			gridClone->cellColumns = cellColumns;
-			gridClone->includeChildrenInChildSize = includeChildrenInChildSize;
-			gridClone->dirtyGrid = true;
 			return a_clone;
 		}
 

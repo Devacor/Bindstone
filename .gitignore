@@ -46,3 +46,16 @@ VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/gdbserver
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libc++_shared.so
 VSProjects/BindstoneClient/BindstoneClient_AndroidGradle/app/src/main/jniLibs/*/libbindstonecommon.a
+VSProjects/SDL2/Builds/
+VSProjects/SDL2/CascadeBuildTest/obj/tree_enc.obj
+VSProjects/SDL2/CascadeBuildTest/
+VSProjects/MutedVision/MutedVision_Windows/Builds/
+VSProjects/MutedVision/MutedVision_Windows/CascadeBuildTest/
+msbuild.pre
+External/VSProjects/External_Windows/CascadeBuildTest/
+External/VSProjects/External_Windows/Builds/Intermediate/Windows/External_Windows/ExternalWindows/x64/Release/External_Windows.tlog/External_Windows.lastbuildstate
+External/VSProjects/External_Windows/Builds/Intermediate/Windows/External_Windows/ExternalWindows/x64/Debug/External_Windows.tlog/External_Windows.lastbuildstate
+External/VSProjects/External_Windows/Builds/Intermediate/Windows/External_Windows/ExternalWindows/x64/Release/External_Windows.tlog/CL.command.1.tlog
+External/VSProjects/External_Windows/Builds/
+build_output.txt
+build_errors.txt

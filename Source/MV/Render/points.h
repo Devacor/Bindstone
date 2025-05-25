@@ -193,6 +193,8 @@ namespace MV {
 	template <typename T = PointPrecision>
 	class Point {
 	public:
+		using value_type = T;
+
 		Point() : x(0), y(0), z(0) {}
 		Point(T a_xPos, T a_yPos, T a_zPos = 0) : x(a_xPos), y(a_yPos), z(a_zPos) {}
 
@@ -235,9 +237,9 @@ namespace MV {
 		Point& operator/=(const Point& a_other);
 
 		template<typename U = T>
-		auto operator*=(const T& a_other) -> std::enable_if_t<is_arithmetic_v<U>, Point&>;
+		auto operator*=(const typename Point<T>::value_type& a_other) -> std::enable_if_t<is_arithmetic_v<U>, Point&>;
 		template<typename U = T>
-		auto operator/=(const T& a_other)->std::enable_if_t<is_arithmetic_v<U>, Point&>;
+		auto operator/=(const typename Point<T>::value_type& a_other)->std::enable_if_t<is_arithmetic_v<U>, Point&>;
 
 		Point& operator*=(const Scale& a_other);
 		Point& operator/=(const Scale& a_other);
@@ -1179,7 +1181,7 @@ namespace MV {
 
 	template <typename T>
 	template <typename U>
-	auto Point<T>::operator*=(const T& a_other) -> std::enable_if_t<is_arithmetic_v<U>, Point&> {
+	auto Point<T>::operator*=(const typename Point<T>::value_type& a_other) -> std::enable_if_t<is_arithmetic_v<U>, Point&> {
 		x *= a_other;
 		y *= a_other;
 		z *= a_other;
@@ -1204,7 +1206,7 @@ namespace MV {
 
 	template <typename T>
 	template <typename U>
-	auto Point<T>::operator/=(const T& a_other) -> std::enable_if_t<is_arithmetic_v<U>, Point&> {
+	auto Point<T>::operator/=(const typename Point<T>::value_type& a_other) -> std::enable_if_t<is_arithmetic_v<U>, Point&> {
 		if (a_other != 0) {
 			x /= a_other;
 			y /= a_other;
@@ -1396,57 +1398,57 @@ namespace MV {
 	}
 
 	template <typename T>
-	[[nodiscard]] auto operator+(const Point<T>& a_left, const T& a_right)
-		-> std::enable_if_t<is_arithmetic_v<T>, Point<T>> {
+	[[nodiscard]] auto operator+(const Point<T>& a_left, const typename Point<T>::value_type& a_right)
+		-> Point<T> {
 		auto result = a_left;
 		return result += Point<T>(a_right, a_right, a_right);
 	}
 
 	template <typename T>
-	[[nodiscard]] auto operator-(const Point<T>& a_left, const T& a_right)
-		-> std::enable_if_t<is_arithmetic_v<T>, Point<T>> {
+	[[nodiscard]] auto operator-(const Point<T>& a_left, const typename Point<T>::value_type& a_right)
+		-> Point<T> {
 		auto result = a_left;
 		return result -= Point<T>(a_right, a_right, a_right);
 	}
 
 	template <typename T>
-	[[nodiscard]] auto operator*(const Point<T>& a_left, const T& a_right)
-		-> std::enable_if_t<is_arithmetic_v<T>, Point<T>> {
+	[[nodiscard]] auto operator*(const Point<T>& a_left, const typename Point<T>::value_type& a_right)
+		-> Point<T> {
 		auto result = a_left;
 		return result *= a_right;
 	}
 
 	template <typename T>
-	[[nodiscard]] auto operator/(const Point<T>& a_left, const T& a_right)
-		-> std::enable_if_t<is_arithmetic_v<T>, Point<T>> {
+	[[nodiscard]] auto operator/(const Point<T>& a_left, const typename Point<T>::value_type& a_right)
+		-> Point<T> {
 		auto result = a_left;
 		return result /= a_right;
 	}
 
 	template <typename T>
-	[[nodiscard]] auto operator+(const T& a_left, const Point<T>& a_right)
-		-> std::enable_if_t<is_arithmetic_v<T>, Point<T>> {
+	[[nodiscard]] auto operator+(const typename Point<T>::value_type& a_left, const Point<T>& a_right)
+		-> Point<T> {
 		Point<T> tmpPoint = Point<T>(a_left, a_left, a_left);
 		return tmpPoint += a_right;
 	}
 
 	template <typename T>
-	[[nodiscard]] auto operator-(const T& a_left, const Point<T>& a_right)
-		-> std::enable_if_t<is_arithmetic_v<T>, Point<T>> {
+	[[nodiscard]] auto operator-(const typename Point<T>::value_type& a_left, const Point<T>& a_right)
+		-> Point<T> {
 		Point<T> tmpPoint = Point<T>(a_left, a_left, a_left);
 		return tmpPoint -= a_right;
 	}
 
 	template <typename T>
-	[[nodiscard]] auto operator*(const T& a_left, const Point<T>& a_right)
-		-> std::enable_if_t<is_arithmetic_v<T>, Point<T>> {
+	[[nodiscard]] auto operator*(const typename Point<T>::value_type& a_left, const Point<T>& a_right)
+		-> Point<T> {
 		Point<T> tmpPoint = Point<T>(a_left, a_left, a_left);
 		return tmpPoint *= a_right;
 	}
 
 	template <typename T>
-	[[nodiscard]] auto operator/(const T& a_left, const Point<T>& a_right)
-		-> std::enable_if_t<is_arithmetic_v<T>, Point<T>> {
+	[[nodiscard]] auto operator/(const typename Point<T>::value_type& a_left, const Point<T>& a_right)
+		-> Point<T> {
 		Point<T> tmpPoint = Point<T>(a_left, a_left, a_left);
 		return tmpPoint /= a_right;
 	}

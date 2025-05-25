@@ -6,6 +6,7 @@
 
 CEREAL_REGISTER_TYPE(MV::Scene::Clipped);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_sceneclipped);
+CEREAL_CLASS_VERSION(MV::Scene::Clipped, 1);
 
 namespace MV {
 	namespace Scene {
@@ -17,8 +18,8 @@ namespace MV {
 				auto originalShaderId = shader();
 				SCOPE_EXIT{ dirtyTexture = false;  shader(originalShaderId); };
 				shader(refreshShaderId);
-				bool emptyCapturedBounds = capturedBounds.empty();
-				auto pointAABB = emptyCapturedBounds ? bounds() : capturedBounds;
+				bool emptyCapturedBounds = capturedBounds->empty();
+				auto pointAABB = emptyCapturedBounds ? bounds() : *capturedBounds;
 				pointAABB += capturedOffset;
 				auto textureSize = round<int>(pointAABB.size());
 				if (!clippedTexture || clippedTexture->size() != textureSize) {
@@ -53,8 +54,7 @@ namespace MV {
 		}
 
 		Clipped::Clipped(const std::weak_ptr<Node> &a_owner) :
-			Sprite(a_owner),
-			refreshShaderId(PREMULTIPLY_ID){
+			Sprite(a_owner){
 			
 			shaderProgramId = DEFAULT_ID;
 		}
@@ -71,11 +71,11 @@ namespace MV {
 		}
 
 		BoxAABB<> Clipped::captureBounds() {
-			return capturedBounds.empty() ? bounds() : capturedBounds;
+			return capturedBounds->empty() ? bounds() : capturedBounds;
 		}
 
 		std::shared_ptr<Clipped> MV::Scene::Clipped::clearCaptureOffset() {
-			capturedOffset.clear();
+			capturedOffset->clear();
 			return std::static_pointer_cast<Clipped>(shared_from_this());
 		}
 
@@ -128,8 +128,6 @@ namespace MV {
 			Sprite::cloneHelper(a_clone);
 			auto clippedClone = std::static_pointer_cast<Clipped>(a_clone);
 			clippedClone->refreshShader(refreshShaderId);
-			clippedClone->capturedBounds = capturedBounds;
-			clippedClone->capturedOffset = capturedOffset;
 			return a_clone;
 		}
 

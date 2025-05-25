@@ -51,21 +51,16 @@ namespace MV {
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
 				archive(
-					CEREAL_NVP(refreshShaderId),
-					CEREAL_NVP(capturedBounds),
-					CEREAL_NVP(capturedOffset),
-					CEREAL_NVP(forceRefreshEveryFrame),
 					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
 				);
 			}
 
 			template <class Archive>
-			void load(Archive & archive, std::uint32_t const /*version*/) {
+			void load(Archive & archive, std::uint32_t const version) {
+				if (version == 0) {
+					properties.load(archive, {"refreshShaderId", "capturedBounds", "capturedOffset", "forceRefreshEveryFrame"});
+				}
 				archive(
-					CEREAL_NVP(refreshShaderId),
-					CEREAL_NVP(capturedBounds),
-					CEREAL_NVP(capturedOffset),
-					CEREAL_NVP(forceRefreshEveryFrame),
 					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))
 				);
 			}
@@ -96,11 +91,12 @@ namespace MV {
 			std::shared_ptr<DynamicTextureDefinition> clippedTexture;
 			std::shared_ptr<Framebuffer> framebuffer;
 
-			std::string refreshShaderId;
-			BoxAABB<> capturedBounds;
-			Point<> capturedOffset;
+			MV_PROPERTY((std::string), refreshShaderId, PREMULTIPLY_ID, [](auto&, auto&){});
+			MV_PROPERTY((BoxAABB<>), capturedBounds);
+			MV_PROPERTY((Point<>), capturedOffset);
+			Point<> prevLocalPoint{};
 			bool dirtyTexture = true;
-			bool forceRefreshEveryFrame = false;
+			MV_PROPERTY((bool), forceRefreshEveryFrame, false);
 			Node::BasicReceiverType dirtyObserveSignal;
 		};
 	}

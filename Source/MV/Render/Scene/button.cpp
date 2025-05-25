@@ -30,11 +30,11 @@ namespace MV {
 		}
 
 		std::shared_ptr<Button> Button::activeNode(const std::shared_ptr<Node> &a_activeView) {
-			if (!activeView->empty()) {
+			if (activeView) {
 				activeView->show();
 			}
 			activeView = a_activeView;
-			if (!activeView->empty()) {
+			if (activeView) {
 				if (inPressEvent() && enabled()) {
 					currentView = activeView;
 					activeView->show();
@@ -46,11 +46,11 @@ namespace MV {
 		}
 
 		std::shared_ptr<Button> Button::idleNode(const std::shared_ptr<Node> &a_idleView) {
-			if (!idleView->empty()) {
+			if (idleView) {
 				idleView->show();
 			}
 			idleView = a_idleView;
-			if (!idleView->empty()) {
+			if (idleView) {
 				if (!inPressEvent() && enabled()) {
 					currentView = idleView;
 					idleView->show();
@@ -63,11 +63,11 @@ namespace MV {
 
 		std::shared_ptr<Button> Button::disabledNode(const std::shared_ptr<Node> &a_disabledView) {
 			auto self = shared_from_this(); //guard against deletion
-			if (!disabledView->empty()) {
+			if (disabledView) {
 				disabledView->show();
 			}
 			disabledView = a_disabledView;
-			if (!disabledView->empty()) {
+			if (disabledView) {
 				if (!enabled()) {
 					currentView = disabledView;
 					disabledView->show();

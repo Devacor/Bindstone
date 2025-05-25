@@ -18,7 +18,7 @@ public:
 };
 
 int main(){
-	auto webServer = std::make_shared<MV::WebServer>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 80),
+	auto webServer = std::make_shared<MV::WebServer>(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 80),
 		[](const std::shared_ptr<MV::WebConnection>& a_connection) {
 			return std::make_unique<HelloWorldResponder>(a_connection);
 		});
@@ -38,10 +38,11 @@ int main(){
 #include <atomic>
 #include <string>
 #include <optional>
+#include <chrono>
 #include "MV/Network/url.h"
 #include "MV/Utility/generalUtility.h"
-#include <boost/asio.hpp>
-#include <boost/asio/deadline_timer.hpp>
+#include <asio.hpp>
+#include <asio/steady_timer.hpp>
 #include "MV/Utility/log.h"
 #include "MV/Network/download.h"
 
@@ -64,8 +65,8 @@ namespace MV {
 		inline virtual void processRequest(const HttpRequest& a_recieve);
 
 		//override to supply a custom timeout.
-		virtual boost::posix_time::seconds timeout() const {
-			return boost::posix_time::seconds{ 10 };
+		virtual std::chrono::seconds timeout() const {
+			return std::chrono::seconds{ 10 };
 		}
 
 	protected:
@@ -75,7 +76,7 @@ namespace MV {
 	//Handles a single HTTP Request and response. Closes the connection upon successfully sending, or upon an error or timeout.
 	class WebConnection : public std::enable_shared_from_this<WebConnection> {
 	public:
-		WebConnection(WebServer& a_server, const std::shared_ptr<boost::asio::ip::tcp::socket> &a_socket, boost::asio::io_context& a_ioService) :
+		WebConnection(WebServer& a_server, const std::shared_ptr<asio::ip::tcp::socket> &a_socket, asio::io_context& a_ioService) :
 			server(a_server),
 			socket(a_socket),
 			ioService(a_ioService),
@@ -115,35 +116,35 @@ namespace MV {
 
 			HttpRequest parsedRequest;
 
-			boost::asio::streambuf buffer;
+			asio::streambuf buffer;
 			std::ostringstream streamOutput;
 		};
 
-		void handleReadContent(std::shared_ptr<WebActiveRequestState> a_message, const boost::system::error_code& err);
+		void handleReadContent(std::shared_ptr<WebActiveRequestState> a_message, const asio::error_code& err);
 		void initiateReadingMoreContent(std::shared_ptr<WebActiveRequestState> a_message, size_t minimumTransferAmount);
 		void continueReadingContent(std::shared_ptr<WebActiveRequestState> a_message);
 
 		std::recursive_mutex lock;
 
-		void handleError(const boost::system::error_code &a_err, const std::string &a_section);
+		void handleError(const asio::error_code &a_err, const std::string &a_section);
 
 		void resetTimeout();
 
 		WebServer& server;
-		boost::asio::io_context& ioService;
+		asio::io_context& ioService;
 
 		std::atomic<bool> completed = false;
 
-		std::shared_ptr<boost::asio::ip::tcp::socket> socket;
+		std::shared_ptr<asio::ip::tcp::socket> socket;
 		std::vector<std::shared_ptr<WebActiveRequestState>> inbox;
 
 		std::unique_ptr<WebConnectionStateBase> ourState = nullptr;
 
-		boost::asio::deadline_timer timeout;
+		asio::steady_timer timeout;
 
-		void checkTimeout(const boost::system::error_code& a_ec) {
-			if (!completed && a_ec != boost::asio::error::operation_aborted) {
-				if (timeout.expires_at() <= boost::asio::deadline_timer::traits_type::now()) {
+		void checkTimeout(const asio::error_code& a_ec) {
+			if (!completed && a_ec != asio::error::operation_aborted) {
+				if (timeout.expiry() <= std::chrono::steady_clock::now()) {
 					MV::error("Connection Timed Out!");
 					close();
 				}
@@ -162,7 +163,7 @@ namespace MV {
 	class WebServer {
 		friend WebConnection;
 	public:
-		WebServer(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<WebConnectionStateBase> (const std::shared_ptr<WebConnection> &)> a_connectionStateFactory, int a_totalThreads = 8);
+		WebServer(const asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<WebConnectionStateBase> (const std::shared_ptr<WebConnection> &)> a_connectionStateFactory, int a_totalThreads = 8);
 		~WebServer();
 
 		uint16_t port() {
@@ -172,11 +173,11 @@ namespace MV {
 	private:
 		void acceptClients();
 
-		boost::asio::io_context ioService;
- 		boost::asio::ip::tcp::acceptor acceptor;
+		asio::io_context ioService;
+ 		asio::ip::tcp::acceptor acceptor;
 
 		std::vector<std::unique_ptr<std::thread>> workers;
-		std::unique_ptr<boost::asio::io_context::work> work;
+		std::unique_ptr<asio::io_context::work> work;
 
 		std::function<std::unique_ptr<WebConnectionStateBase> (const std::shared_ptr<WebConnection> &)> connectionStateFactory;
 		double accumulatedTime = 0.0;

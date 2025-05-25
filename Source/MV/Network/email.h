@@ -5,9 +5,9 @@
 #include <string>
 #include <memory>
 #include "MV/Utility/stringUtility.h"
-#include <boost/asio.hpp>
-#include <boost/asio/ssl.hpp>
-#include <boost/asio/ssl/stream.hpp>
+#include <asio.hpp>
+#include <asio/ssl.hpp>
+#include <asio/ssl/stream.hpp>
 
 namespace MV {
 	
@@ -99,7 +99,7 @@ namespace MV {
 			return result;
 		}
 
-		static std::shared_ptr<Email> make(const std::shared_ptr<boost::asio::io_context> &a_suppliedService, const std::string &a_host, const std::string &a_port, const Credentials &a_credentials, MainThreadCallback a_onFinish = MainThreadCallback()) {
+		static std::shared_ptr<Email> make(const std::shared_ptr<asio::io_context> &a_suppliedService, const std::string &a_host, const std::string &a_port, const Credentials &a_credentials, MainThreadCallback a_onFinish = MainThreadCallback()) {
 			auto result = std::shared_ptr<Email>(new Email(a_host, a_port, a_credentials));
 			result->onFinish = a_onFinish;
 			result->ioService = a_suppliedService;
@@ -150,13 +150,13 @@ namespace MV {
 		bool initializeSocket() {
 			bool created = false;
 			if (!ioService) {
-				ioService = std::make_shared<boost::asio::io_context>();
+				ioService = std::make_shared<asio::io_context>();
 				created = true;
 			}
 
-			resolver = std::make_unique<boost::asio::ip::tcp::resolver>(*ioService);
-			tlsContext = std::make_unique<boost::asio::ssl::context>(boost::asio::ssl::context::tlsv13_client);
-			socket = std::make_unique<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>>(*ioService, *tlsContext);
+			resolver = std::make_unique<asio::ip::tcp::resolver>(*ioService);
+			tlsContext = std::make_unique<asio::ssl::context>(asio::ssl::context::tlsv13_client);
+			socket = std::make_unique<asio::ssl::stream<asio::ip::tcp::socket>>(*ioService, *tlsContext);
 
 			return created;
 		}
@@ -181,19 +181,19 @@ namespace MV {
 		}
 
 		void initiateConnection() {
-			request = std::make_unique<boost::asio::streambuf>();
-			response = std::make_unique<boost::asio::streambuf>();
-			using boost::asio::ip::tcp;
+			request = std::make_unique<asio::streambuf>();
+			response = std::make_unique<asio::streambuf>();
+			using asio::ip::tcp;
 
 			tcp::resolver::query query(host, port);
 			resolver->async_resolve(query, std::bind(&Email::handleResolve, shared_from_this(), std::placeholders::_1, std::placeholders::_2));
 		}
 
-		void handleResolve(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
+		void handleResolve(const asio::error_code& err, asio::ip::tcp::resolver::iterator endpoint_iterator) {
 			if (!err) {
 				// Attempt a connection to the first endpoint in the list. Each endpoint
 				// will be tried until we successfully establish a connection.
-				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
+				asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
 				socket->lowest_layer().async_connect(endpoint, std::bind(&Email::handleConnect, shared_from_this(), std::placeholders::_1, ++endpoint_iterator));
 			} else {
 				activeResponse.message = err.message();
@@ -201,13 +201,13 @@ namespace MV {
 			}
 		}
 
-		void handleConnect(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
+		void handleConnect(const asio::error_code& err, asio::ip::tcp::resolver::iterator endpoint_iterator) {
 			if (!err) {
 				smtpHandshake();
-			} else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
+			} else if (endpoint_iterator != asio::ip::tcp::resolver::iterator()) {
 				// The connection failed. Try the next endpoint in the list.
 				socket->lowest_layer().close();
-				boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
+				asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
 				socket->lowest_layer().async_connect(endpoint, std::bind(&Email::handleConnect, shared_from_this(), std::placeholders::_1, ++endpoint_iterator));
 			} else {
 				activeResponse.message = err.message();
@@ -220,7 +220,7 @@ namespace MV {
 			listenForMessageUnsecure({220}, [this, self] {
 				sendInternalUnsecure("EHLO " + domainFromEmail(addresses.from) + "\r\n", {250}, [this, self] {
 					sendInternalUnsecure("STARTTLS\r\n", { 220 }, [this, self] {
-						socket->async_handshake(boost::asio::ssl::stream_base::client, [this, self](const boost::system::error_code& a_err) {
+						socket->async_handshake(asio::ssl::stream_base::client, [this, self](const asio::error_code& a_err) {
 							if (!a_err) {
 								secureLogin();
 							}
@@ -264,7 +264,7 @@ namespace MV {
 
 		void listenForMessage(std::vector<int> a_validResponses, std::function<void ()> a_callback) {
 			auto self = shared_from_this();
-			boost::asio::async_read_until(*socket, *response, "\r\n", [this, a_validResponses, self, a_callback](const boost::system::error_code& a_err, size_t a_amount) {
+			asio::async_read_until(*socket, *response, "\r\n", [this, a_validResponses, self, a_callback](const asio::error_code& a_err, size_t a_amount) {
 				if (!a_err) {
 					responseStream = std::make_unique<std::istream>(&(*response));
 					activeResponse.read(*responseStream);
@@ -291,7 +291,7 @@ namespace MV {
 			auto self = shared_from_this();
 			ioService->post([=] {
 				self; //force capture
-				boost::asio::async_write(*socket, boost::asio::buffer(a_content, a_content.size()), [this,a_validResponses,self,a_callback](boost::system::error_code a_err, size_t a_amount) {
+				asio::async_write(*socket, asio::buffer(a_content, a_content.size()), [this,a_validResponses,self,a_callback](asio::error_code a_err, size_t a_amount) {
 					if (!a_err) {
 						if (a_callback) {
 							listenForMessage(a_validResponses, a_callback);
@@ -306,7 +306,7 @@ namespace MV {
 
 		void listenForMessageUnsecure(std::vector<int> a_validResponses, std::function<void()> a_callback) {
 			auto self = shared_from_this();
-			boost::asio::async_read_until(socket->next_layer(), *response, "\r\n", [this, self, a_validResponses, a_callback](const boost::system::error_code& a_err, size_t a_amount) {
+			asio::async_read_until(socket->next_layer(), *response, "\r\n", [this, self, a_validResponses, a_callback](const asio::error_code& a_err, size_t a_amount) {
 				if (!a_err) {
 					responseStream = std::make_unique<std::istream>(&(*response));
 					activeResponse.read(*responseStream);
@@ -326,7 +326,7 @@ namespace MV {
 			ioService->post([=] {
 				auto self = shared_from_this();
 
-				boost::asio::async_write(socket->next_layer(), boost::asio::buffer(a_content, a_content.size()), [this, a_validResponses, self, a_callback](boost::system::error_code a_err, size_t a_amount) {
+				asio::async_write(socket->next_layer(), asio::buffer(a_content, a_content.size()), [this, a_validResponses, self, a_callback](asio::error_code a_err, size_t a_amount) {
 					if (!a_err) {
 						if (a_callback) {
 							listenForMessageUnsecure(a_validResponses, a_callback);
@@ -339,17 +339,17 @@ namespace MV {
 			});
 		}
 
-		std::shared_ptr<boost::asio::io_context> ioService;
-		std::unique_ptr<boost::asio::ip::tcp::resolver> resolver;
-		//boost::asio::ip::tcp::socket socket;
+		std::shared_ptr<asio::io_context> ioService;
+		std::unique_ptr<asio::ip::tcp::resolver> resolver;
+		//asio::ip::tcp::socket socket;
 
-		std::unique_ptr<boost::asio::ssl::context> tlsContext;
-		std::unique_ptr<boost::asio::ssl::stream<boost::asio::ip::tcp::socket>> socket;
+		std::unique_ptr<asio::ssl::context> tlsContext;
+		std::unique_ptr<asio::ssl::stream<asio::ip::tcp::socket>> socket;
 
 		std::unique_ptr<std::istream> responseStream;
 
-		std::unique_ptr<boost::asio::streambuf> request;
-		std::unique_ptr<boost::asio::streambuf> response;
+		std::unique_ptr<asio::streambuf> request;
+		std::unique_ptr<asio::streambuf> response;
 
 		std::mutex lock;
 

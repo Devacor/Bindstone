@@ -7,10 +7,10 @@
 
 namespace MV {
 
-	WebServer::WebServer(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<WebConnectionStateBase>(const std::shared_ptr<WebConnection> &)> a_connectionStateFactory, int a_totalThreads) :
+	WebServer::WebServer(const asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<WebConnectionStateBase>(const std::shared_ptr<WebConnection> &)> a_connectionStateFactory, int a_totalThreads) :
 		acceptor(ioService, a_endpoint),
 		connectionStateFactory(a_connectionStateFactory),
-		work(std::make_unique<boost::asio::io_context::work>(ioService)) {
+		work(std::make_unique<asio::io_context::work>(ioService)) {
 		acceptClients();
 		info("WebServer: Accepting Clients");
 		for (int i = 0; i < a_totalThreads; ++i) {
@@ -27,8 +27,8 @@ namespace MV {
 	}
 
 	void WebServer::acceptClients() {
-		auto socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
-		acceptor.async_accept(*socket, [this, socket](boost::system::error_code ec) {
+		auto socket = std::make_shared<asio::ip::tcp::socket>(ioService);
+		acceptor.async_accept(*socket, [this, socket](asio::error_code ec) {
 			if (!ec) {
 				auto connection = std::make_shared<WebConnection>(*this, socket, ioService);
 				connection->initialize(connectionStateFactory);
@@ -43,7 +43,7 @@ namespace MV {
 		if (!completed) {
 			completed = true;
 			timeout.cancel();
-			boost::system::error_code ignored_ec;
+			asio::error_code ignored_ec;
 			if (socket) { socket->close(ignored_ec); }
 		}
 	}
@@ -54,7 +54,7 @@ namespace MV {
 
 		ioService.post([this, self, a_content] {
 			std::string content = a_content.to_string();
-			boost::asio::async_write(*socket, boost::asio::buffer(content, content.size()), [self](boost::system::error_code a_err, size_t a_amount) {
+			asio::async_write(*socket, asio::buffer(content, content.size()), [self](asio::error_code a_err, size_t a_amount) {
 				if (a_err) {
 					self->handleError(a_err, "write");
 				} else {
@@ -65,15 +65,15 @@ namespace MV {
 	}
 
 	void WebConnection::initiateReadingMoreContent(std::shared_ptr<WebActiveRequestState> a_message, size_t a_minimumTransferAmount) {
-		boost::asio::async_read(*socket, a_message->buffer, boost::asio::transfer_at_least(a_minimumTransferAmount), std::bind(&WebConnection::handleReadContent, shared_from_this(), a_message, std::placeholders::_1));
+		asio::async_read(*socket, a_message->buffer, asio::transfer_at_least(a_minimumTransferAmount), std::bind(&WebConnection::handleReadContent, shared_from_this(), a_message, std::placeholders::_1));
 	}
 
-	void WebConnection::handleReadContent(std::shared_ptr<WebActiveRequestState> a_message, const boost::system::error_code& err) {
+	void WebConnection::handleReadContent(std::shared_ptr<WebActiveRequestState> a_message, const asio::error_code& err) {
 		resetTimeout();
 
 		if (!err) {
 			continueReadingContent(a_message);
-		} else if (err != boost::asio::error::eof) {
+		} else if (err != asio::error::eof) {
 			handleError(err, "Download Read Content Failure");
 		}
 	}
@@ -111,7 +111,7 @@ namespace MV {
 		auto self = shared_from_this();
 		auto copiedSocket = socket;
 
-		boost::asio::async_read_until(*copiedSocket, message->buffer, "\r\n\r\n", [this, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
+		asio::async_read_until(*copiedSocket, message->buffer, "\r\n\r\n", [this, message, self, copiedSocket](const asio::error_code& a_err, size_t a_amount) {
 			if (!a_err && socket) {
 				message->readHeaderFromBuffer();
 				continueReadingContent(message);
@@ -124,12 +124,12 @@ namespace MV {
 	void WebConnection::resetTimeout() {
 		if (!completed && ourState) {
 			timeout.cancel();
-			timeout.expires_from_now(ourState->timeout());
+			timeout.expires_after(ourState->timeout());
 			timeout.async_wait(std::bind(&WebConnection::checkTimeout, shared_from_this(), std::placeholders::_1));
 		}
 	}
 
-	void WebConnection::handleError(const boost::system::error_code &a_err, const std::string &a_section) {
+	void WebConnection::handleError(const asio::error_code &a_err, const std::string &a_section) {
 		error("[", a_section, "] -> ", a_err.message());
 		close();
 	}

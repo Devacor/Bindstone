@@ -19,8 +19,6 @@
 #include <deque>
 
 #include "MV/Utility/require.hpp"
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_generators.hpp>
 
 #define U8_STR(stringVal) reinterpret_cast<const char *>(u8##stringVal)
 using namespace std::string_literals; //for convenience to enable ""s

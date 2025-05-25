@@ -198,11 +198,11 @@ LobbyServer::LobbyServer(Managers& a_managers) :
 	dbPool(1), //currently locked to 1 as pqxx requires one per thread. We can expand this later with more connections and a different query interface.
 	rankedQueue(*this, "ranked"),
 	normalQueue(*this, "normal"),
-	ourUserServer(std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22325),
+	ourUserServer(std::make_shared<MV::Server>(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 22325),
 		[this](const std::shared_ptr<MV::Connection>& a_connection) {
 			return std::make_unique<LobbyUserConnectionState>(a_connection, *this);
 		})),
-	ourGameServer(std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 22326),
+	ourGameServer(std::make_shared<MV::Server>(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 22326),
 		[this](const std::shared_ptr<MV::Connection>& a_connection) {
 			return std::make_unique<LobbyGameConnectionState>(a_connection, *this);
 		})) {

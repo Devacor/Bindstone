@@ -104,10 +104,10 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;_DEBUG;_LIB;%(PreprocessorDefinitions);NOMINMAX</PreprocessorDefinitions>
+      <PreprocessorDefinitions>ASIO_STANDALONE;_DEBUG;_LIB;%(PreprocessorDefinitions);NOMINMAX</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include</AdditionalIncludeDirectories>
       <AdditionalOptions>-D_CRT_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -125,10 +125,10 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;WIN32;_DEBUG;_LIB;%(PreprocessorDefinitions);NOMINMAX</PreprocessorDefinitions>
+      <PreprocessorDefinitions>ASIO_STANDALONE;WIN32;_DEBUG;_LIB;%(PreprocessorDefinitions);NOMINMAX</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <Optimization>Full</Optimization>
@@ -147,10 +147,10 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;WIN32;NDEBUG;_LIB;%(PreprocessorDefinitions);NOMINMAX</PreprocessorDefinitions>
+      <PreprocessorDefinitions>ASIO_STANDALONE;WIN32;NDEBUG;_LIB;%(PreprocessorDefinitions);NOMINMAX</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
@@ -169,10 +169,10 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;NDEBUG;_LIB;%(PreprocessorDefinitions);NOMINMAX</PreprocessorDefinitions>
+      <PreprocessorDefinitions>ASIO_STANDALONE;NDEBUG;_LIB;%(PreprocessorDefinitions);NOMINMAX</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include</AdditionalIncludeDirectories>
       <AdditionalOptions>-D_CRT_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>

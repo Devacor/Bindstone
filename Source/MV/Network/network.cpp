@@ -10,12 +10,12 @@ namespace MV {
 	void Client::initiateConnection() {
 		if (ourConnectionState == DISCONNECTED) {
 			ourConnectionState = CONNECTING;
-			socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
-			boost::asio::ip::tcp::resolver::query query(url.host(), std::to_string(url.port()), boost::asio::ip::tcp::resolver::query::canonical_name);
+			socket = std::make_shared<asio::ip::tcp::socket>(ioService);
+			asio::ip::tcp::resolver::query query(url.host(), std::to_string(url.port()), asio::ip::tcp::resolver::query::canonical_name);
 			auto self = shared_from_this();
-			resolver.async_resolve(query, [=](const boost::system::error_code& a_err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
+			resolver.async_resolve(query, [=](const asio::error_code& a_err, asio::ip::tcp::resolver::iterator endpoint_iterator) {
 				if (!a_err && socket) {
-					boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
+					asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
 					socket->async_connect(endpoint, std::bind(&Client::handleConnect, self, std::placeholders::_1, ++endpoint_iterator));
 				} else {
 					handleError(a_err, "resolve");
@@ -24,17 +24,17 @@ namespace MV {
 		}
 	}
 
-	void Client::handleConnect(const boost::system::error_code& a_err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
+	void Client::handleConnect(const asio::error_code& a_err, asio::ip::tcp::resolver::iterator endpoint_iterator) {
 		if (ourConnectionState == CONNECTING) {
 			if (!a_err) {
-				//socket->set_option(boost::asio::ip::tcp::no_delay(true));
+				//socket->set_option(asio::ip::tcp::no_delay(true));
 				ourConnectionState = CONNECTING_SUCCESS;
 				initiateRead();
 			}
-			else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
+			else if (endpoint_iterator != asio::ip::tcp::resolver::iterator()) {
 				// Try the next endpoint in the list.
 				info("Trying next endpoint: ", a_err.message());
-				socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
+				socket = std::make_shared<asio::ip::tcp::socket>(ioService);
 				auto endpoint = *endpoint_iterator;
 				auto self = shared_from_this();
 				socket->async_connect(endpoint, std::bind(&Client::handleConnect, self, std::placeholders::_1, ++endpoint_iterator));
@@ -49,10 +49,10 @@ namespace MV {
 		auto message = std::make_shared<NetworkMessage>();
 		auto self = shared_from_this();
 		auto copiedSocket = socket;
-		boost::asio::async_read(*copiedSocket, boost::asio::buffer(message->headerBuffer, 4), boost::asio::transfer_exactly(4), [this, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
+		asio::async_read(*copiedSocket, asio::buffer(message->headerBuffer, 4), asio::transfer_exactly(4), [this, message, self, copiedSocket](const asio::error_code& a_err, size_t a_amount) {
 			if (!a_err && socket) {
 				message->readHeaderFromBuffer();
-				boost::asio::async_read(*copiedSocket, message->buffer, boost::asio::transfer_exactly(message->content.size()), [this, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
+				asio::async_read(*copiedSocket, message->buffer, asio::transfer_exactly(message->content.size()), [this, message, self, copiedSocket](const asio::error_code& a_err, size_t a_amount) {
 					if (!a_err && socket) {
 						if (ourConnectionState != DISCONNECTED) {
 							message->readContentFromBuffer();
@@ -129,7 +129,7 @@ namespace MV {
 		ioService.post([=] {
 			self;
 			auto message = std::make_shared<NetworkMessage>(a_content);
-			boost::asio::async_write(*socket, boost::asio::buffer(message->headerAndContent(), message->headerAndContentSize()), [self, message](boost::system::error_code a_err, size_t a_amount) {
+			asio::async_write(*socket, asio::buffer(message->headerAndContent(), message->headerAndContentSize()), [self, message](asio::error_code a_err, size_t a_amount) {
 				if (a_err) {
 					self->handleError(a_err, "write");
 				}
@@ -150,10 +150,10 @@ namespace MV {
 		}
 	}
 
-	Server::Server(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase>(const std::shared_ptr<Connection> &)> a_connectionStateFactory) :
+	Server::Server(const asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase>(const std::shared_ptr<Connection> &)> a_connectionStateFactory) :
 		acceptor(ioService, a_endpoint),
 		connectionStateFactory(a_connectionStateFactory),
-		work(std::make_unique<boost::asio::io_context::work>(ioService)) {
+		work(std::make_unique<asio::io_context::work>(ioService)) {
 		info("Server Startup");
 		acceptClients();
 		info("Accept Clients");
@@ -187,10 +187,10 @@ namespace MV {
 	}
 
 	void Server::acceptClients() {
-		auto socket = std::make_shared<boost::asio::ip::tcp::socket>(ioService);
-		acceptor.async_accept(*socket, [this, socket](boost::system::error_code ec) {
+		auto socket = std::make_shared<asio::ip::tcp::socket>(ioService);
+		acceptor.async_accept(*socket, [this, socket](asio::error_code ec) {
 			if (!ec) {
-				//socket->set_option(boost::asio::ip::tcp::no_delay(true));
+				//socket->set_option(asio::ip::tcp::no_delay(true));
 				auto connection = std::make_shared<Connection>(*this, socket, ioService);
 				connection->initialize(connectionStateFactory);
 				{
@@ -228,7 +228,7 @@ namespace MV {
 		auto self = shared_from_this();
 		ioService.post([this, self, a_content] {
 			auto message = std::make_shared<NetworkMessage>(a_content);
-			boost::asio::async_write(*socket, boost::asio::buffer(message->headerAndContent(), message->headerAndContentSize()), [self, message](boost::system::error_code a_err, size_t a_amount) {
+			asio::async_write(*socket, asio::buffer(message->headerAndContent(), message->headerAndContentSize()), [self, message](asio::error_code a_err, size_t a_amount) {
 				if (a_err) {
 					self->handleError(a_err, "write");
 				}
@@ -240,10 +240,10 @@ namespace MV {
 		auto message = std::make_shared<NetworkMessage>();
 		auto self = shared_from_this();
 		auto copiedSocket = socket;
-		boost::asio::async_read(*copiedSocket, boost::asio::buffer(message->headerBuffer), boost::asio::transfer_exactly(4), [this, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
+		asio::async_read(*copiedSocket, asio::buffer(message->headerBuffer), asio::transfer_exactly(4), [this, message, self, copiedSocket](const asio::error_code& a_err, size_t a_amount) {
 			if (!a_err && socket) {
 				message->readHeaderFromBuffer();
-				boost::asio::async_read(*copiedSocket, message->buffer, boost::asio::transfer_exactly(message->content.size()), [this, message, self, copiedSocket](const boost::system::error_code& a_err, size_t a_amount) {
+				asio::async_read(*copiedSocket, message->buffer, asio::transfer_exactly(message->content.size()), [this, message, self, copiedSocket](const asio::error_code& a_err, size_t a_amount) {
 					if (!a_err && socket) {
 						message->readContentFromBuffer();
 						{
@@ -286,7 +286,7 @@ namespace MV {
 		return receivedAmount;
 	}
 
-	void Connection::handleError(const boost::system::error_code &a_err, const std::string &a_section) {
+	void Connection::handleError(const asio::error_code &a_err, const std::string &a_section) {
 		error("[", a_section, "] -> ", a_err.message());
 		disconnect();
 	}

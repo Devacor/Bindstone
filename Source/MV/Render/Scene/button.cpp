@@ -9,6 +9,7 @@
 
 CEREAL_REGISTER_TYPE(MV::Scene::Button);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_scenebutton);
+CEREAL_CLASS_VERSION(MV::Scene::Button, 1);
 
 namespace MV {
 	namespace Scene {
@@ -29,11 +30,11 @@ namespace MV {
 		}
 
 		std::shared_ptr<Button> Button::activeNode(const std::shared_ptr<Node> &a_activeView) {
-			if (activeView) {
+			if (!activeView->empty()) {
 				activeView->show();
 			}
 			activeView = a_activeView;
-			if (activeView) {
+			if (!activeView->empty()) {
 				if (inPressEvent() && enabled()) {
 					currentView = activeView;
 					activeView->show();
@@ -45,11 +46,11 @@ namespace MV {
 		}
 
 		std::shared_ptr<Button> Button::idleNode(const std::shared_ptr<Node> &a_idleView) {
-			if (idleView) {
+			if (!idleView->empty()) {
 				idleView->show();
 			}
 			idleView = a_idleView;
-			if (idleView) {
+			if (!idleView->empty()) {
 				if (!inPressEvent() && enabled()) {
 					currentView = idleView;
 					idleView->show();
@@ -62,11 +63,11 @@ namespace MV {
 
 		std::shared_ptr<Button> Button::disabledNode(const std::shared_ptr<Node> &a_disabledView) {
 			auto self = shared_from_this(); //guard against deletion
-			if (disabledView) {
+			if (!disabledView->empty()) {
 				disabledView->show();
 			}
 			disabledView = a_disabledView;
-			if (disabledView) {
+			if (!disabledView->empty()) {
 				if (!enabled()) {
 					currentView = disabledView;
 					disabledView->show();

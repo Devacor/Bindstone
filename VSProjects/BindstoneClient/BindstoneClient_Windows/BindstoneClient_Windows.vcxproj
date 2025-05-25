@@ -128,7 +128,7 @@
       <Optimization>Disabled</Optimization>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\glm\glm;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.0c\include</AdditionalIncludeDirectories>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpp20</LanguageStandard>
       <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;NOMINMAX</PreprocessorDefinitions>
       <AdditionalOptions>/bigobj /Bt+ -D_CRT_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -181,7 +181,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\glm\glm;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\libpqxx-6.4\include;$(SolutionDir)External\libpqxx-6.4\config\sample-headers\compiler\VisualStudio2013;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.0c\include</AdditionalIncludeDirectories>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpp20</LanguageStandard>
       <PreprocessorDefinitions>BOOST_ASIO_DISABLE_MOVE;BOOST_ASIO_MSVC;_WIN32_WINNT=0x0602;CEREAL_FUTURE_EXPERIMENTAL;NOMINMAX</PreprocessorDefinitions>
       <AdditionalOptions>/bigobj /Bt+ -D_CRT_SECURE_NO_WARNINGS %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>

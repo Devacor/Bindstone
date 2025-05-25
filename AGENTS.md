@@ -126,9 +126,29 @@ Bindstone uses a reflection-lite/data-driven layer on top of [cereal](https://us
 ### Quick Reference
 ```cpp
 // In class declaration (inheriting from Component/Drawable/etc):
-MV_PROPERTY(type, name, default_value)              // Auto-serialized member
-MV_OBSERVABLE_PROPERTY(type, name, default_value)   // + change notifications  
-MV_DELETED_PROPERTY(type, name)                     // Consumes old data
+// Always wrap the type in parentheses for consistency:
+MV_PROPERTY((type), name, default_value)              // Auto-serialized member
+MV_OBSERVABLE_PROPERTY((type), name, default_value)   // + change notifications  
+MV_DELETED_PROPERTY((type), name)                     // Consumes old data
+
+// Examples:
+MV_PROPERTY((int), count, 0);
+MV_PROPERTY((std::string), name, "");
+MV_PROPERTY((std::pair<Point<>, Point<>>), cellPadding);
+MV_PROPERTY((std::vector<GLuint>), vertexIndices, {});
+MV_PROPERTY((std::vector<std::shared_ptr<CloneableType>>), items, {}, [](auto& src, auto& dst) {
+    dst->clear();
+    for (const auto& item : *src) {
+        if (item) {
+            dst->push_back(item->clone());
+        }
+    }
+});
+
+// The parentheses ensure the preprocessor treats the entire type as a single argument.
+// The MV_REMOVE_PARENS macro will strip these parentheses during expansion.
+// This is especially important for template types with commas, but should be done
+// consistently for all types to maintain uniformity.
 
 // Access like normal members:
 myComponent->position = Point<>(10, 20);

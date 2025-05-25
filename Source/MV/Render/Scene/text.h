@@ -253,7 +253,7 @@ namespace MV {
 
 			MV::Property<std::shared_ptr<FormattedText>> formattedText;
 
-			MV_PROPERTY(bool, usingBoundsForLineHeight, false);
+			MV_PROPERTY((bool), usingBoundsForLineHeight, false);
 
 			bool displayCursor = false;
 			size_t cursor = 0;

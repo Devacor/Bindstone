@@ -25,27 +25,27 @@ namespace MV {
 			std::shared_ptr<Grid> margin(const Point<> &a_topLeft, const Point<> &a_botRight);
 			std::shared_ptr<Grid> margin(const Size<> &a_margin);
 			std::pair<Point<>, Point<>> margin() const {
-				return margins;
+				return margins.get();
 			}
 
 			std::shared_ptr<Grid> cellSize(const Size<> &a_size);
 			Size<> cellSize() const {
-				return cellDimensions;
+				return cellDimensions.get();
 			}
 
 			std::shared_ptr<Grid> gridWidth(PointPrecision a_rowWidth);
 			PointPrecision gridWidth() const {
-				return maximumWidth;
+				return maximumWidth.get();
 			}
 
 			std::shared_ptr<Grid> gridOffset(const Point<> &a_topLeftOffset);
 			Point<> gridOffset() const {
-				return topLeftOffset;
+				return topLeftOffset.get();
 			}
 
 			std::shared_ptr<Grid> columns(size_t a_columns, bool a_useChildrenForSize = true);
 			size_t columns() const {
-				return cellColumns;
+				return cellColumns.get();
 			}
 
 			std::shared_ptr<Node> nodeFromGrid(const Point<int> &a_coordinate, bool a_throwOnFail = true);
@@ -55,7 +55,7 @@ namespace MV {
 			void layoutCells();
 
 			AutoLayoutPolicy layoutPolicy() const {
-				return policy;
+				return policy.get();
 			}
 			std::shared_ptr<Grid> layoutPolicy(AutoLayoutPolicy a_policy) {
 				policy = a_policy;
@@ -75,34 +75,30 @@ namespace MV {
 					const_cast<Grid*>(this)->layoutCells();
 				}
 				archive(
-					CEREAL_NVP(topLeftOffset),
-					CEREAL_NVP(policy),
-					CEREAL_NVP(maximumWidth),
-					CEREAL_NVP(cellDimensions),
-					CEREAL_NVP(cellPadding),
-					CEREAL_NVP(margins),
-					CEREAL_NVP(cellColumns),
-					CEREAL_NVP(includeChildrenInChildSize),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const a_version) {
-				if (a_version > 1) {
-					archive(CEREAL_NVP(topLeftOffset), CEREAL_NVP(policy));
-				}
-				if (a_version <= 1) {
-					bool manualReposition;
-					archive(cereal::make_nvp("manualReposition", manualReposition));
+				if(a_version <= 2){
+					std::vector<std::string> propertyKeys;
+					if(a_version > 1){
+						propertyKeys.push_back("topLeftOffset");
+						propertyKeys.push_back("policy");
+					}
+					if(a_version <= 1) {
+						propertyKeys.push_back("manualReposition");
+					}
+					propertyKeys.push_back("maximumWidth");
+					propertyKeys.push_back("cellDimensions");
+					propertyKeys.push_back("cellPadding");
+					propertyKeys.push_back("margins");
+					propertyKeys.push_back("cellColumns");
+					propertyKeys.push_back("includeChildrenInChildSize");
+					properties.load(archive, propertyKeys);
 				}
 				archive(
-					CEREAL_NVP(maximumWidth),
-					CEREAL_NVP(cellDimensions),
-					CEREAL_NVP(cellPadding),
-					CEREAL_NVP(margins),
-					CEREAL_NVP(cellColumns),
-					CEREAL_NVP(includeChildrenInChildSize),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 				dirtyGrid = false;
@@ -148,16 +144,17 @@ namespace MV {
 			std::list<Node::BasicReceiverType> basicSignals;
 			std::list<Node::ParentInteractionReceiverType> parentInteractionSignals;
 
-			PointPrecision maximumWidth;
-			Size<> cellDimensions;
-			std::pair<Point<>, Point<>> cellPadding;
-			std::pair<Point<>, Point<>> margins;
-			Point<> topLeftOffset;
-			size_t cellColumns;
+			MV_PROPERTY((PointPrecision), maximumWidth, 0.0f);
+			MV_PROPERTY((Size<>), cellDimensions);
+			MV_PROPERTY((std::pair<Point<>, Point<>>), cellPadding);
+			MV_PROPERTY((std::pair<Point<>, Point<>>), margins);
+			MV_PROPERTY((Point<>), topLeftOffset);
+			MV_PROPERTY((size_t), cellColumns, 0);
 			bool inLayoutCall = false;
 			bool dirtyGrid = true;
-			bool includeChildrenInChildSize = true;
-			AutoLayoutPolicy policy = AutoLayoutPolicy::Comprehensive;
+			MV_PROPERTY((bool), includeChildrenInChildSize, true);
+			MV_PROPERTY((AutoLayoutPolicy), policy, AutoLayoutPolicy::Comprehensive);
+			MV_DELETED_PROPERTY((bool), manualReposition);
 
 			std::vector<std::vector<std::weak_ptr<MV::Scene::Node>>> tiles;
 		};

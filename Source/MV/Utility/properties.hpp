@@ -809,3 +809,10 @@ namespace MV {
 
 #define MV_DELETED_PROPERTY(type, name) \
     MV::DeletedProperty<MV_REMOVE_PARENS(type)> name{ properties, #name }
+
+// Named property macros - allow specifying a custom property name different from the variable name
+#define MV_NAMED_PROPERTY(type, propName, varName, ...) \
+    MV::Property<MV_REMOVE_PARENS(type)> varName{ properties, propName, __VA_ARGS__ }
+
+#define MV_NAMED_OBSERVABLE_PROPERTY(type, propName, varName, ...) \
+    MV::ObservableProperty<MV_REMOVE_PARENS(type)> varName{ properties, propName, __VA_ARGS__ }

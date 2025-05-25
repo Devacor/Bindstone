@@ -33,7 +33,7 @@ void GameUserConnectionState::message(const std::string &a_message) {
 GameServer::GameServer(Managers &a_managers, unsigned short a_port) :
 	manager(a_managers),
 	gameData(a_managers, true),
-	ourUserServer(std::make_shared<MV::Server>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), a_port),
+	ourUserServer(std::make_shared<MV::Server>(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), a_port),
 		[this](const std::shared_ptr<MV::Connection> &a_connection) {
 			return std::make_unique<GameUserConnectionState>(a_connection, *this);
 		})) {

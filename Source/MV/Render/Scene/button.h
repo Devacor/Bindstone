@@ -84,9 +84,9 @@ namespace MV {
 			std::shared_ptr<Node> currentView;
 
 			//Clone is a no-op because it is manually managed in the cloneHelper
-			MV_PROPERTY((std::shared_ptr<Node>), activeView, {}, [](auto&, auto&) {});
-			MV_PROPERTY((std::shared_ptr<Node>), idleView, {}, [](auto&, auto&) {});
-			MV_PROPERTY((std::shared_ptr<Node>), disabledView, {}, [](auto&, auto&){ });
+			MV_PROPERTY((std::shared_ptr<Node>), activeView);
+			MV_PROPERTY((std::shared_ptr<Node>), idleView);
+			MV_PROPERTY((std::shared_ptr<Node>), disabledView);
 		};
 	}
 }

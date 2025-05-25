@@ -147,14 +147,14 @@ namespace MV {
 	std::string GetLocalIpV4() {
 		std::string result = "0.0.0.0";
 		try {
-			boost::asio::io_service io_service;
-			boost::asio::ip::tcp::resolver resolver(io_service);
-			boost::asio::ip::tcp::resolver::query query(boost::asio::ip::host_name(), "");
-			boost::asio::ip::tcp::resolver::iterator iter = resolver.resolve(query);
-			boost::asio::ip::tcp::resolver::iterator end; // End marker.
+			asio::io_service io_service;
+			asio::ip::tcp::resolver resolver(io_service);
+			asio::ip::tcp::resolver::query query(asio::ip::host_name(), "");
+			asio::ip::tcp::resolver::iterator iter = resolver.resolve(query);
+			asio::ip::tcp::resolver::iterator end; // End marker.
 			
 			while (iter != end) {
-				boost::asio::ip::tcp::endpoint ep = *iter++;
+				asio::ip::tcp::endpoint ep = *iter++;
 				if(ep.address().is_v4()) {
 					result = ep.address().to_string();
 				}
@@ -164,7 +164,7 @@ namespace MV {
 		return result;
 	}
 	
-	void DownloadRequest::handleDownloadFailure(const boost::system::error_code& err, const std::string &a_errorMessage){
+	void DownloadRequest::handleDownloadFailure(const asio::error_code& err, const std::string &a_errorMessage){
 		handleDownloadFailure(a_errorMessage + ": " + err.message());
 	}
 		
@@ -182,21 +182,21 @@ namespace MV {
 	
 	void DownloadRequest::closeSockets(){
 		if(socket){
-			boost::system::error_code ec;
-			socket->shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+			asio::error_code ec;
+			socket->shutdown(asio::ip::tcp::socket::shutdown_both, ec);
 			socket->close();
 			socket.reset();
 		}
 		if(sslSocket){
-			boost::system::error_code ec;
+			asio::error_code ec;
 			auto closingSocket = sslSocket;
 			sslSocket.reset();
 			closingSocket->socket.lowest_layer().cancel(ec);
-			closingSocket->socket.async_shutdown([closingSocket](const boost::system::error_code &ec){
-				if (ec && ec != boost::asio::error::eof){
+			closingSocket->socket.async_shutdown([closingSocket](const asio::error_code &ec){
+				if (ec && ec != asio::error::eof){
 					MV::error("Error shutting down SSL socket: ", ec.message());
 				}
-				boost::system::error_code ec2;
+				asio::error_code ec2;
 				closingSocket->socket.lowest_layer().close(ec2);
 				if(ec2){
 					MV::error("Error cancelling SSL socket: ", ec.message());
@@ -205,13 +205,13 @@ namespace MV {
 		}
 	}
 
-	void DownloadRequest::handleReadContent(const boost::system::error_code& err) {
+	void DownloadRequest::handleReadContent(const asio::error_code& err) {
 		std::scoped_lock<std::recursive_mutex> lock(criticalPath);
 		if(handleCancellation()){
 			return;
 		}
 		
-		if (!err || err == boost::asio::error::eof) {
+		if (!err || err == asio::error::eof) {
 			continueReadingContent();
 		} else {
 			handleDownloadFailure(err, "Download Read Content Failure");
@@ -220,9 +220,9 @@ namespace MV {
 
 	void DownloadRequest::initiateReadingMoreContent(size_t a_minimumTransferAmount) {
 		if (sslSocket) {
-			boost::asio::async_read(sslSocket->socket, *intermediateResponse, boost::asio::transfer_at_least(a_minimumTransferAmount), std::bind(&DownloadRequest::handleReadContent, shared_from_this(), std::placeholders::_1));
+			asio::async_read(sslSocket->socket, *intermediateResponse, asio::transfer_at_least(a_minimumTransferAmount), std::bind(&DownloadRequest::handleReadContent, shared_from_this(), std::placeholders::_1));
 		} else {
-			boost::asio::async_read(*socket, *intermediateResponse, boost::asio::transfer_at_least(a_minimumTransferAmount), std::bind(&DownloadRequest::handleReadContent, shared_from_this(), std::placeholders::_1));
+			asio::async_read(*socket, *intermediateResponse, asio::transfer_at_least(a_minimumTransferAmount), std::bind(&DownloadRequest::handleReadContent, shared_from_this(), std::placeholders::_1));
 		}
 	}
 		
@@ -250,7 +250,7 @@ namespace MV {
 		}
 	}
 
-	void DownloadRequest::handleReadHeaders(const boost::system::error_code& err) {
+	void DownloadRequest::handleReadHeaders(const asio::error_code& err) {
 		std::scoped_lock<std::recursive_mutex> lock(criticalPath);
 		if(handleCancellation()){
 			return;
@@ -272,23 +272,23 @@ namespace MV {
 		}
 	}
 
-	void DownloadRequest::handleWriteRequest(const boost::system::error_code& err) {
+	void DownloadRequest::handleWriteRequest(const asio::error_code& err) {
 		std::scoped_lock<std::recursive_mutex> lock(criticalPath);
 		if(handleCancellation()){
 			return;
 		}
 		if (!err) {
 			if(sslSocket){
-				boost::asio::async_read_until(sslSocket->socket, *intermediateResponse, "\r\n\r\n", std::bind(&DownloadRequest::handleReadHeaders, shared_from_this(), std::placeholders::_1));
+				asio::async_read_until(sslSocket->socket, *intermediateResponse, "\r\n\r\n", std::bind(&DownloadRequest::handleReadHeaders, shared_from_this(), std::placeholders::_1));
 			}else{
-				boost::asio::async_read_until(*socket, *intermediateResponse, "\r\n\r\n", std::bind(&DownloadRequest::handleReadHeaders, shared_from_this(), std::placeholders::_1));
+				asio::async_read_until(*socket, *intermediateResponse, "\r\n\r\n", std::bind(&DownloadRequest::handleReadHeaders, shared_from_this(), std::placeholders::_1));
 			}
 		} else {
 			handleDownloadFailure(err, "Download Write Failure");
 		}
 	}
 
-	void DownloadRequest::handleConnect(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
+	void DownloadRequest::handleConnect(const asio::error_code& err, asio::ip::tcp::resolver::iterator endpoint_iterator) {
 		std::scoped_lock<std::recursive_mutex> lock(criticalPath);
 		if(handleCancellation()){
 			return;
@@ -297,19 +297,19 @@ namespace MV {
 			// The connection was successful. Send the request.
 			if(sslSocket){
 				auto self = shared_from_this();
-				sslSocket->socket.async_handshake(boost::asio::ssl::stream_base::client, [this, self](const boost::system::error_code &err){
+				sslSocket->socket.async_handshake(asio::ssl::stream_base::client, [this, self](const asio::error_code &err){
 					if (!err) {
-						boost::asio::async_write(sslSocket->socket, *request, std::bind(&DownloadRequest::handleWriteRequest, self, std::placeholders::_1));
+						asio::async_write(sslSocket->socket, *request, std::bind(&DownloadRequest::handleWriteRequest, self, std::placeholders::_1));
 					}else{
 						handleDownloadFailure(err, "Download Connection Handshake Failure");
 					}
 				});
 			}else{
-				boost::asio::async_write(*socket, *request, std::bind(&DownloadRequest::handleWriteRequest, shared_from_this(), std::placeholders::_1));
+				asio::async_write(*socket, *request, std::bind(&DownloadRequest::handleWriteRequest, shared_from_this(), std::placeholders::_1));
 			}
-		} else if (endpoint_iterator != boost::asio::ip::tcp::resolver::iterator()) {
+		} else if (endpoint_iterator != asio::ip::tcp::resolver::iterator()) {
 			// The connection failed. Try the next endpoint in the list.
-			boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
+			asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
 			if(sslSocket){
 				sslSocket->socket.lowest_layer().close();
 				sslSocket->socket.lowest_layer().async_connect(endpoint, std::bind(&DownloadRequest::handleConnect, shared_from_this(), std::placeholders::_1, ++endpoint_iterator));
@@ -322,7 +322,7 @@ namespace MV {
 		}
 	}
 
-	void DownloadRequest::handleResolve(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
+	void DownloadRequest::handleResolve(const asio::error_code& err, asio::ip::tcp::resolver::iterator endpoint_iterator) {
 		std::scoped_lock<std::recursive_mutex> lock(criticalPath);
 		if(handleCancellation()){
 			return;
@@ -330,7 +330,7 @@ namespace MV {
 		if (!err) {
 			// Attempt a connection to the first endpoint in the list. Each endpoint
 			// will be tried until we successfully establish a connection.
-			boost::asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
+			asio::ip::tcp::endpoint endpoint = *endpoint_iterator;
 			if(sslSocket){
 				sslSocket->socket.lowest_layer().async_connect(endpoint, std::bind(&DownloadRequest::handleConnect, shared_from_this(), std::placeholders::_1, ++endpoint_iterator));
 			}else{
@@ -348,9 +348,9 @@ namespace MV {
 		}
 		currentUrl = a_url;
 		initializeSocket();
-		request = std::make_unique<boost::asio::streambuf>();
-		intermediateResponse = std::make_unique<boost::asio::streambuf>();
-		using boost::asio::ip::tcp;
+		request = std::make_unique<asio::streambuf>();
+		intermediateResponse = std::make_unique<asio::streambuf>();
+		using asio::ip::tcp;
 
 		std::ostream requestStream(&(*request));
 		target.writeRequest(requestStream, a_url);
@@ -361,14 +361,14 @@ namespace MV {
 
 	void DownloadRequest::initializeSocket() {
 		if(!resolver){
-			resolver = std::make_unique<boost::asio::ip::tcp::resolver>(*ioService);
+			resolver = std::make_unique<asio::ip::tcp::resolver>(*ioService);
 		}
 		
 		closeSockets();
 		if(currentUrl.scheme() == "https"){
 			sslSocket = std::make_shared<SSLSocket>(*ioService);
 		}else{
-			socket = std::make_unique<boost::asio::ip::tcp::socket>(*ioService);
+			socket = std::make_unique<asio::ip::tcp::socket>(*ioService);
 		}
 	}
 

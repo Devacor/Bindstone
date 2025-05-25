@@ -11,18 +11,18 @@
 #include <set>
 #include <string>
 #include "MV/Network/url.h"
-#include "boost/asio.hpp"
-#include "boost/asio/ssl.hpp"
+#include <asio.hpp>
+#include <asio/ssl.hpp>
 #include "MV/Utility/threadPool.hpp"
 
 
-#include <boost/asio/ssl/context.hpp>
+#include <asio/ssl/context.hpp>
 
 #ifdef _WIN32
 #include <wincrypt.h>
 #include <tchar.h>
 
-inline void add_root_certs(boost::asio::ssl::context& ctx) {
+inline void add_root_certs(asio::ssl::context& ctx) {
 	HCERTSTORE hStore = CertOpenSystemStore(0, _T("ROOT"));
 	if (!hStore) {
 		return;
@@ -44,7 +44,7 @@ inline void add_root_certs(boost::asio::ssl::context& ctx) {
 	SSL_CTX_set_cert_store(ctx.native_handle(), store);
 }
 #else
-inline void add_root_certs(boost::asio::ssl::context& ctx) {}
+inline void add_root_certs(asio::ssl::context& ctx) {}
 #endif
 
 
@@ -176,7 +176,7 @@ namespace MV {
 		//Single threaded blocking method. Fire this from a non-ui thread if you use it at all.
 		static std::shared_ptr<DownloadRequest> make(const HttpRequest& a_target) {
 			auto result = std::shared_ptr<DownloadRequest>(new DownloadRequest(a_target));
-			result->ioService = std::make_shared<boost::asio::io_context>();
+			result->ioService = std::make_shared<asio::io_context>();
 			result->start();
 			result->ioService->run();
 			return result;
@@ -188,7 +188,7 @@ namespace MV {
 
 		//onComplete is called on success or error at the end of the download.
 		//onProgress(totalBytes, percentBytesDownloaded) is called after each chunk arrives.
-		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<boost::asio::io_context>& a_ioService, const HttpRequest& a_target, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void(size_t, float)> a_onProgress = {}, bool a_delayStart = false) {
+		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<asio::io_context>& a_ioService, const HttpRequest& a_target, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void(size_t, float)> a_onProgress = {}, bool a_delayStart = false) {
 			auto result = std::shared_ptr<DownloadRequest>(new DownloadRequest(a_target));
 			result->onComplete = a_onComplete;
 			result->onProgress = a_onProgress;
@@ -199,7 +199,7 @@ namespace MV {
 			return result;
 		}
 
-		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<boost::asio::io_context>& a_ioService, const MV::Url& a_url, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void(size_t, float)> a_onProgress = {}, bool a_delayStart = false) {
+		static std::shared_ptr<DownloadRequest> make(const std::shared_ptr<asio::io_context>& a_ioService, const MV::Url& a_url, std::function<void(std::shared_ptr<DownloadRequest>)> a_onComplete, std::function<void(size_t, float)> a_onProgress = {}, bool a_delayStart = false) {
 			return make(a_ioService, HttpRequest{ a_url }, a_onComplete, a_onProgress, a_delayStart);
 		}
 		
@@ -244,7 +244,7 @@ namespace MV {
 			return false;
 		}
 		
-		void handleDownloadFailure(const boost::system::error_code& err, const std::string &a_errorMessage);
+		void handleDownloadFailure(const asio::error_code& err, const std::string &a_errorMessage);
 		void handleDownloadFailure(const std::string &a_errorMessage);
 		
 		void initializeSocket();
@@ -253,11 +253,11 @@ namespace MV {
 
 		void initiateRequest(const MV::Url& a_url);
 
-		void handleResolve(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator);
-		void handleConnect(const boost::system::error_code& err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator);
-		void handleWriteRequest(const boost::system::error_code& err);
-		void handleReadHeaders(const boost::system::error_code& err);
-		void handleReadContent(const boost::system::error_code& err);
+		void handleResolve(const asio::error_code& err, asio::ip::tcp::resolver::iterator endpoint_iterator);
+		void handleConnect(const asio::error_code& err, asio::ip::tcp::resolver::iterator endpoint_iterator);
+		void handleWriteRequest(const asio::error_code& err);
+		void handleReadHeaders(const asio::error_code& err);
+		void handleReadContent(const asio::error_code& err);
 		void initiateReadingMoreContent(size_t a_minimumTransferAmount);
 		void continueReadingContent();
 
@@ -289,37 +289,37 @@ namespace MV {
 		MV::Url currentUrl;
 		HttpRequest target;
 
-		std::shared_ptr<boost::asio::io_context> ioService;
-		std::unique_ptr<boost::asio::ip::tcp::resolver> resolver;
-		std::unique_ptr<boost::asio::ip::tcp::socket> socket;
+		std::shared_ptr<asio::io_context> ioService;
+		std::unique_ptr<asio::ip::tcp::resolver> resolver;
+		std::unique_ptr<asio::ip::tcp::socket> socket;
 		struct SSLSocket {
-			SSLSocket(boost::asio::io_context &ioService):
+			SSLSocket(asio::io_context &ioService):
 				socket(ioService, context.context){
 			}
 
 			struct SSLContextInitializer {
 				SSLContextInitializer() :
-					context(boost::asio::ssl::context::sslv23) {
+					context(asio::ssl::context::sslv23) {
 
 					context.set_default_verify_paths();
-					context.set_options(boost::asio::ssl::context::default_workarounds | boost::asio::ssl::context::sslv23);
-					context.set_verify_mode(boost::asio::ssl::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
+					context.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::sslv23);
+					context.set_verify_mode(asio::ssl::verify_peer | asio::ssl::verify_fail_if_no_peer_cert);
 					add_root_certs(context);
 				}
-				boost::asio::ssl::context context;
+				asio::ssl::context context;
 			};
 
 			SSLContextInitializer context;
-			boost::asio::ssl::stream<boost::asio::ip::tcp::socket> socket;
+			asio::ssl::stream<asio::ip::tcp::socket> socket;
 		};
 		std::shared_ptr<SSLSocket> sslSocket;
 		
-		boost::asio::ip::tcp* activeSocket = nullptr;
+		asio::ip::tcp* activeSocket = nullptr;
 
 		std::unique_ptr<std::istream> responseStream;
 
-		std::unique_ptr<boost::asio::streambuf> request;
-		std::unique_ptr<boost::asio::streambuf> intermediateResponse;
+		std::unique_ptr<asio::streambuf> request;
+		std::unique_ptr<asio::streambuf> intermediateResponse;
 
 		std::shared_ptr<std::ostringstream> streamOutput;
 
@@ -355,7 +355,7 @@ namespace MV {
 			return std::shared_ptr<DownloadPool>(new DownloadPool(a_threads));
 		}
 		
-		std::shared_ptr<boost::asio::io_context> service() {
+		std::shared_ptr<asio::io_context> service() {
 			return ioService;
 		}
 		
@@ -393,13 +393,13 @@ namespace MV {
 	private:
 		DownloadPool() :
 			pool(),
-			ioService(std::make_shared<boost::asio::io_context>()),
+			ioService(std::make_shared<asio::io_context>()),
 			keepIoServiceRunning(*ioService){
 			initialize();
 		}
 		DownloadPool(size_t a_threads) :
 			pool(a_threads),
-			ioService(std::make_shared<boost::asio::io_context>()),
+			ioService(std::make_shared<asio::io_context>()),
 			keepIoServiceRunning(*ioService){
 			initialize();
 		}
@@ -415,8 +415,8 @@ namespace MV {
 		}
 		
 		ThreadPool pool;
-		std::shared_ptr<boost::asio::io_context> ioService;
-		boost::asio::io_service::work keepIoServiceRunning;
+		std::shared_ptr<asio::io_context> ioService;
+		asio::io_service::work keepIoServiceRunning;
 		std::mutex activeRequestsMutex;
 		std::set<std::shared_ptr<DownloadRequest>> activeRequests;
 	};

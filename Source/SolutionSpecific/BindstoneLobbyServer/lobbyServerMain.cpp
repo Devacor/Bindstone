@@ -48,7 +48,7 @@ int main(int, char *[]) {
 
 
 	try {
-		auto webServer = std::make_shared<MV::WebServer>(boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 80),
+		auto webServer = std::make_shared<MV::WebServer>(asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 80),
 			[](const std::shared_ptr<MV::WebConnection>& a_connection) {
 				return std::make_unique<TestWebConnection>(a_connection);
 			});

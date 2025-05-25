@@ -18,7 +18,7 @@
 #include <string>
 #include "MV/Network/url.h"
 #include "MV/Utility/generalUtility.h"
-#include <boost/asio.hpp>
+#include <asio.hpp>
 #include "MV/Utility/log.h"
 
 namespace MV {
@@ -42,18 +42,18 @@ namespace MV {
 
 		uint32_t headerAndContentSize() const;
 
-		boost::asio::streambuf buffer;
+		asio::streambuf buffer;
 		std::array<uint8_t, 4> headerBuffer = {0, 0, 0, 0};
 
 		std::string content;
 	};
 
 
-	inline void closeSocket(std::shared_ptr<boost::asio::ip::tcp::socket> &socket) {
+	inline void closeSocket(std::shared_ptr<asio::ip::tcp::socket> &socket) {
 		if (socket) {
 			if (socket->is_open()) {
-				boost::system::error_code ec; //don't really care
-				socket->shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+				asio::error_code ec; //don't really care
+				socket->shutdown(asio::ip::tcp::socket::shutdown_both, ec);
 				socket->close();
 			}
 			socket.reset();
@@ -118,7 +118,7 @@ namespace MV {
 			onMessageGet(a_onMessageGet),
 			onConnectionFail(a_onConnectionFail),
 			onInitialized(a_onInitialized),
-			work(std::make_unique<boost::asio::io_context::work>(ioService)) {
+			work(std::make_unique<asio::io_context::work>(ioService)) {
 		}
 
 		void initialize();
@@ -126,11 +126,11 @@ namespace MV {
 
 		void initiateConnection();
 
-		void handleConnect(const boost::system::error_code& a_err, boost::asio::ip::tcp::resolver::iterator endpoint_iterator);
+		void handleConnect(const asio::error_code& a_err, asio::ip::tcp::resolver::iterator endpoint_iterator);
 
 		void initiateRead();
 
-		void handleError(const boost::system::error_code &a_err, const std::string &a_section) {
+		void handleError(const asio::error_code &a_err, const std::string &a_section) {
 			disconnect();
 			{
 				std::lock_guard<std::mutex> guard(errorLock);
@@ -146,9 +146,9 @@ namespace MV {
 		std::recursive_mutex lock;
 		std::mutex errorLock;
 
-		boost::asio::io_context ioService;
-		boost::asio::ip::tcp::resolver resolver;
-		std::shared_ptr<boost::asio::ip::tcp::socket> socket;
+		asio::io_context ioService;
+		asio::ip::tcp::resolver resolver;
+		std::shared_ptr<asio::ip::tcp::socket> socket;
 
 		std::vector<std::shared_ptr<NetworkMessage>> inbox;
 
@@ -160,7 +160,7 @@ namespace MV {
 		std::function<void()> onInitialized;
 
 		std::unique_ptr<std::thread> worker;
-		std::unique_ptr<boost::asio::io_context::work> work;
+		std::unique_ptr<asio::io_context::work> work;
 
 		std::vector<double> serverTimeDeltas;
 		std::atomic<ConnectionState> ourConnectionState = DISCONNECTED;
@@ -198,7 +198,7 @@ namespace MV {
 
 	class Connection : public std::enable_shared_from_this<Connection> {
 	public:
-		Connection(Server& a_server, const std::shared_ptr<boost::asio::ip::tcp::socket> &a_socket, boost::asio::io_context& a_ioService) :
+		Connection(Server& a_server, const std::shared_ptr<asio::ip::tcp::socket> &a_socket, asio::io_context& a_ioService) :
 			server(a_server),
 			socket(a_socket),
 			ioService(a_ioService){
@@ -233,12 +233,12 @@ namespace MV {
 	private:
 		std::recursive_mutex lock;
 
-		void handleError(const boost::system::error_code &a_err, const std::string &a_section);
+		void handleError(const asio::error_code &a_err, const std::string &a_section);
 
 		Server& server;
-		boost::asio::io_context& ioService;
+		asio::io_context& ioService;
 
-		std::shared_ptr<boost::asio::ip::tcp::socket> socket;
+		std::shared_ptr<asio::ip::tcp::socket> socket;
 		std::vector<std::shared_ptr<NetworkMessage>> inbox;
 
 		std::unique_ptr<ConnectionStateBase> ourState = nullptr;
@@ -274,7 +274,7 @@ namespace MV {
 	class Server {
 		friend Connection;
 	public:
-		Server(const boost::asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase> (const std::shared_ptr<Connection> &)> a_connectionStateFactory);
+		Server(const asio::ip::tcp::endpoint& a_endpoint, std::function<std::unique_ptr<ConnectionStateBase> (const std::shared_ptr<Connection> &)> a_connectionStateFactory);
 
 		~Server();
 
@@ -302,13 +302,13 @@ namespace MV {
 
 		std::recursive_mutex lock;
 
-		boost::asio::io_context ioService;
- 		boost::asio::ip::tcp::acceptor acceptor;
+		asio::io_context ioService;
+ 		asio::ip::tcp::acceptor acceptor;
 
 		std::vector<std::shared_ptr<Connection>> ourConnections;
 
 		std::unique_ptr<std::thread> worker;
-		std::unique_ptr<boost::asio::io_context::work> work;
+		std::unique_ptr<asio::io_context::work> work;
 
 		std::function<std::unique_ptr<ConnectionStateBase> (const std::shared_ptr<Connection> &)> connectionStateFactory;
 		double accumulatedTime = 0.0;

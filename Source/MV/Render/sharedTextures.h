@@ -8,7 +8,7 @@
 #include <functional>
 #include <memory>
 
-#include <boost/filesystem.hpp>
+#include <filesystem>
 
 #include "texturePacker.h"
 

@@ -1,9 +1,10 @@
+#define ASIO_STANDALONE
 #include <SDL.h>
 #include <SDL_image.h>
-#include "boost/filesystem.hpp"
+#include <filesystem>
 #include <iostream>
 #include <string>
-#include "boost/asio.hpp"
+#include <asio.hpp>
 
 #include "MV/Utility/log.h"
 #include "MV/Utility/generalUtility.h"
@@ -42,7 +43,7 @@ SDL_Rect playerPos;
 
 int main(int argc, char* args[])
 {
-	boost::filesystem::path full_path(boost::filesystem::current_path());
+	std::filesystem::path full_path(std::filesystem::current_path());
 	output(std::string("path: ") + full_path.string());
 
 	//std::filesystem::path full_path2(std::filesystem::current_path());
@@ -171,7 +172,7 @@ void RunGame()
 	//output(contents);
 
 	MV::info("Test");
-	output(boost::filesystem::unique_path().string());
+	output(std::filesystem::unique_path().string());
 	SDL_Surface* image = IMG_Load("Images/image.webp");
 	
 	output(IMG_GetError());

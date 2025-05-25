@@ -1,16 +1,16 @@
 #include "asioThreadPool.h"
 
-#include "boost/asio.hpp"
+#include <asio.hpp>
 
 namespace MV{
 	struct ThreadPoolDetails {
 		ThreadPoolDetails() :
-			service(std::make_shared<boost::asio::io_context>()),
-			working(std::make_unique<boost::asio::io_context::work>(*service)) {
+			service(std::make_shared<asio::io_context>()),
+			working(std::make_unique<asio::io_context::work>(*service)) {
 		}
 
-		std::shared_ptr<boost::asio::io_context> service;
-		std::unique_ptr<boost::asio::io_context::work> working;
+		std::shared_ptr<asio::io_context> service;
+		std::unique_ptr<asio::io_context::work> working;
 	};
 
 	AsioThreadPool::AsioThreadPool(size_t a_threads) :
@@ -39,7 +39,7 @@ namespace MV{
 		});
 	}
 
-	std::shared_ptr<boost::asio::io_context> AsioThreadPool::io_context() const {
+	std::shared_ptr<asio::io_context> AsioThreadPool::io_context() const {
 		return details->service;
 	}
 }

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|ARM">
@@ -221,7 +221,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -230,14 +230,14 @@
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName);$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
       <LibraryDependencies>c++_shared;m;dl;z;libssl;libcrypto;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
-      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</SharedLibrarySearchPath>
+      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;$(SolutionDir)VSProjects\SDL2_ttf\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;$(SolutionDir)VSProjects\SDL2_ttf\include</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -246,14 +246,14 @@
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName);$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
       <LibraryDependencies>c++_shared;m;dl;z;libssl;libcrypto;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
-      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName);$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</SharedLibrarySearchPath>
+      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib;$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</SharedLibrarySearchPath>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -262,14 +262,14 @@
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName);$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
       <LibraryDependencies>c++_shared;m;dl;z;libssl;libcrypto;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
-      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</SharedLibrarySearchPath>
+      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -278,14 +278,14 @@
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName);$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
       <LibraryDependencies>c++_shared;m;dl;z;libssl;libcrypto;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
-      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</SharedLibrarySearchPath>
+      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -294,15 +294,15 @@
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName);$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
       <LibraryDependencies>c++_shared;m;dl;z;libssl;libcrypto;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
-      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</SharedLibrarySearchPath>
+      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -311,15 +311,15 @@
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName);$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
       <LibraryDependencies>c++_shared;m;dl;z;libssl;libcrypto;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
-      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</SharedLibrarySearchPath>
+      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -328,15 +328,15 @@
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName);$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
       <LibraryDependencies>c++_shared;m;dl;z;libssl;libcrypto;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
-      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</SharedLibrarySearchPath>
+      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\boost_1.71.0\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(Sysroot)\usr\include;$(StlIncludeDirectories)%(AdditionalIncludeDirectories);$(SolutionDir)VSProjects\SDL2\include;$(SolutionDir)VSProjects\SDL2_ttf\include;$(SolutionDir)VSProjects\SDL2_Image\include;$(SolutionDir)Source;$(SolutionDir)External;$(SolutionDir)External\openssl\include;$(SolutionDir)External\cereal\include;$(SolutionDir)External\ChaiScript-6.1.0\include;$(SolutionDir)External\gl3w\include;$(SolutionDir)External\asio\include;$(SolutionDir)External\openssl\openssl-1.1.1g\include;</AdditionalIncludeDirectories>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <CppLanguageStandard>c++1z</CppLanguageStandard>
       <ExceptionHandling>Enabled</ExceptionHandling>
@@ -345,9 +345,9 @@
       <DebugInformationFormat>FullDebug</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\libs\$(PlatformShortName);$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(ToolchainPrebuiltPath)\lib\gcc\$(ToolchainName)\$(ToolchainFullVersionName)\$(PlatformShortName);$(StlLibraryPath);$(SolutionDir)$(Platform)\$(Configuration);$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\libs\;$(SolutionDir)Builds\Android\$(Platform)\$(Configuration)\;$(SolutionDir)External\openssl\openssl-1.1.1g\android_lib\multiabi</AdditionalLibraryDirectories>
       <LibraryDependencies>c++_shared;m;dl;z;libssl;libcrypto;GLESv1_CM;GLESv2;log;android;OpenSLES;SDL2;SDL2_ttf;SDL2_Image;external;boost_system;boost_filesystem</LibraryDependencies>
-      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib;$(SolutionDir)External\boost_1.71.0\libs\llvm-ndk20\$(PlatformShortName)</SharedLibrarySearchPath>
+      <SharedLibrarySearchPath>%(SharedLibrarySearchPath);$(SysrootLink)\usr\lib</SharedLibrarySearchPath>
       <AdditionalOptions>-fno-gnu-unique %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>

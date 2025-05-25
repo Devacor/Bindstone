@@ -7,7 +7,7 @@
 #include <fstream>
 #include "SDL.h"
 #include "scopeGuard.hpp"
-#include <boost/filesystem.hpp>
+#include <filesystem>
 #include "stringUtility.h"
 #include "log.h"
 
@@ -161,7 +161,7 @@ namespace MV {
 		}
 		return false;
 #else
-		return boost::filesystem::exists(a_path);
+		return std::filesystem::exists(a_path);
 #endif
 	}
 
@@ -207,8 +207,8 @@ namespace MV {
 	}
 
 	bool writeToFile(const std::string& a_path, const std::string& a_contents) {
-		boost::filesystem::path finalPath = boost::filesystem::path(a_path).is_absolute() ? a_path : playerPreferencesPath() + a_path;
-		boost::filesystem::create_directories(finalPath.parent_path());
+		std::filesystem::path finalPath = std::filesystem::path(a_path).is_absolute() ? a_path : playerPreferencesPath() + a_path;
+		std::filesystem::create_directories(finalPath.parent_path());
 #if defined(__ANDROID__) || defined(__APPLE__)
 		SDL_RWops* rw = SDL_RWFromFile(finalPath.c_str(), "wb");
 		if (rw != NULL) {
@@ -221,14 +221,21 @@ namespace MV {
 		MV::error("Failed to Save File: ", finalPath);
 		return false;
 #else
-		boost::filesystem::save_string_file(finalPath, a_contents);
-		MV::info("Saving File: ", finalPath);
-		return true; //assume success.
+		std::ofstream ofs(finalPath, std::ios::binary);
+		if (ofs.is_open()) {
+			ofs.write(a_contents.c_str(), a_contents.size());
+			ofs.close();
+			MV::info("Saving File: ", finalPath);
+			return ofs.good();
+		} else {
+			MV::error("Failed to Save File: ", finalPath);
+			return false;
+		}
 #endif
 	}
 
 	bool deleteFile(const std::string& a_path) {
-		return boost::filesystem::remove(playerPreferencesPath() + a_path);
+		return std::filesystem::remove(playerPreferencesPath() + a_path);
 	}
 
 	time_t lastFileWriteTime(const std::string& a_path) {
@@ -236,11 +243,15 @@ namespace MV {
 		return fileExistsInSearchPaths(a_path) ? 1 : 0;
 #else
 		std::string userPrefPath = playerPreferencesPath() + a_path;
-
-		boost::system::error_code errorCode;
-		return fileExistsAbsolute(a_path) ? boost::filesystem::last_write_time(a_path) :
-			fileExistsAbsolute(userPrefPath) ? boost::filesystem::last_write_time(userPrefPath, errorCode) :
-			fileExistsAbsolute("Assets/" + a_path) ? boost::filesystem::last_write_time("Assets/" + a_path, errorCode) : 0;
+		std::error_code errorCode;
+		auto writeTime = std::filesystem::last_write_time(a_path, errorCode);
+		if (errorCode) {
+			writeTime = std::filesystem::last_write_time(userPrefPath, errorCode);
+			if (errorCode) {
+				writeTime = std::filesystem::last_write_time("Assets/" + a_path, errorCode);
+			}
+		}
+		return writeTime.time_since_epoch().count();
 #endif
 	}
 

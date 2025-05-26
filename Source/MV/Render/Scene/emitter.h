@@ -17,8 +17,8 @@ namespace MV {
 			MV_NAMED_PROPERTY((AxisAngles), "directionalChange", directionalChangeTemplate);
 			AxisAngles directionalChangeCurrent;
 		public:
-			inline void rateOfChangeDeg(AxisAngles a_rateOfChange) { rateOfChange = toRadians(a_rateOfChange); }
-			inline AxisAngles rateOfChangeDeg() { return toDegrees(rateOfChange); }
+			inline void rateOfChangeDeg(AxisAngles a_rateOfChange) { *rateOfChange = toRadians(a_rateOfChange); }
+			inline AxisAngles rateOfChangeDeg() { return toDegrees(*rateOfChange); }
 
 			MV_PROPERTY((AxisAngles), rateOfChange);
 
@@ -41,14 +41,14 @@ namespace MV {
 			}
 
 			AxisAngles directionalChangeDeg() const {
-				return toDegrees(directionalChangeTemplate);
+				return toDegrees(*directionalChangeTemplate);
 			}
 			AxisAngles currentDirectionalChangeDeg() const {
 				return toDegrees(directionalChangeCurrent);
 			}
 
 			AxisAngles directionalChangeRad() const {
-				return directionalChangeTemplate;
+				return *directionalChangeTemplate;
 			}
 			AxisAngles currentDirectionalChangeRad() const {
 				return directionalChangeCurrent;
@@ -56,8 +56,8 @@ namespace MV {
 
 			MV_PROPERTY((AxisAngles), rotationalChange);
 
-			MV_PROPERTY(float, beginSpeed, 0.0f);
-			MV_PROPERTY(float, endSpeed, 0.0f);
+			MV_PROPERTY((float), beginSpeed, 0.0f);
+			MV_PROPERTY((float), endSpeed, 0.0f);
 
 			MV_PROPERTY((Scale), beginScale);
 			MV_PROPERTY((Scale), endScale);
@@ -65,22 +65,22 @@ namespace MV {
 			MV_PROPERTY((Color), beginColor);
 			MV_PROPERTY((Color), endColor);
 
-			MV_PROPERTY(float, maxLifespan, 1.0f);
+			MV_PROPERTY((float), maxLifespan, 1.0f);
 
-			MV_PROPERTY(float, gravityMagnitude, 0.0f);
+			MV_PROPERTY((float), gravityMagnitude, 0.0f);
 			MV_PROPERTY((AxisAngles), gravityDirection);
 
-			MV_PROPERTY(float, animationFramesPerSecond, 10.0f);
+			MV_PROPERTY((float), animationFramesPerSecond, 10.0f);
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				properties.save(archive);
+				reflection().save(archive);
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
 				if (version == 0) {
-					properties.load(archive, {
+					reflection().load(archive, {
 						"rateOfChange", "directionalChange", "rotationalChange",
 						"beginSpeed", "endSpeed",
 						"beginScale", "endScale",
@@ -89,14 +89,14 @@ namespace MV {
 						"gravityMagnitude", "gravityDirection",
 						"animationFramesPerSecond"
 					});
-					toRadiansInPlace(rateOfChange);
-					toRadiansInPlace(directionalChangeTemplate);
-					toRadiansInPlace(rotationalChange);
-					toRadiansInPlace(gravityDirection);
+					toRadiansInPlace(*rateOfChange);
+					toRadiansInPlace(*directionalChangeTemplate);
+					toRadiansInPlace(*rotationalChange);
+					toRadiansInPlace(*gravityDirection);
 				} else {
-					properties.load(archive);
+					reflection().load(archive);
 				}
-				directionalChangeCurrent = directionalChangeTemplate;
+				directionalChangeCurrent = *directionalChangeTemplate;
 			}
 		};
 
@@ -149,7 +149,7 @@ namespace MV {
 			void setGravity(float a_magnitude, const AxisAngles &a_direction = AxisAngles(0.0f, 0.0f, toRadians(180.0f))) {
 				gravityConstant.locate(0.0f, a_magnitude, 0.0f);
 				TransformMatrix rotator;
-				rotator.rotateXYZ(direction);
+				rotator.rotateXYZ(a_direction);
 				gravityConstant = rotator * gravityConstant;
 			}
 		private:
@@ -157,31 +157,31 @@ namespace MV {
 		};
 
 		struct EmitterSpawnProperties : public PropertyOwner {
-			MV_PROPERTY(uint32_t, maximumParticles, std::numeric_limits<uint32_t>::max());
+			MV_PROPERTY((uint32_t), maximumParticles, std::numeric_limits<uint32_t>::max());
 
-			MV_PROPERTY(float, minimumSpawnRate, 0.0f);
-			MV_PROPERTY(float, maximumSpawnRate, 1.0f);
+			MV_PROPERTY((float), minimumSpawnRate, 0.0f);
+			MV_PROPERTY((float), maximumSpawnRate, 1.0f);
 
 			MV_PROPERTY((Point<>), minimumPosition);
 			MV_PROPERTY((Point<>), maximumPosition);
 			std::function<Point<>()> getPosition;
 
-			inline void minimumDirectionDeg(AxisAngles a_minimumDirection) { minimumDirection = toRadians(a_minimumDirection); }
-			inline AxisAngles minimumDirectionDeg() { return toDegrees(minimumDirection); }
+			inline void minimumDirectionDeg(AxisAngles a_min) { minimumDirection = toRadians(a_min); }
+			inline AxisAngles minimumDirectionDeg() { return toDegrees(*minimumDirection); }
 
-			inline void maximumDirectionDeg(AxisAngles a_maximumDirection) { maximumDirection = toRadians(a_maximumDirection); }
-			inline AxisAngles maximumDirectionDeg() { return toDegrees(maximumDirection); }
+			inline void maximumDirectionDeg(AxisAngles a_max) { maximumDirection = toRadians(a_max); }
+			inline AxisAngles maximumDirectionDeg() { return toDegrees(*maximumDirection); }
 
 			MV_PROPERTY((AxisAngles), minimumDirection);
 			MV_PROPERTY((AxisAngles), maximumDirection);
 			std::function<AxisAngles()> getDirection;
 
-			inline void minimumRotationDeg(AxisAngles a_minimumRotation) { minimumRotation = toRadians(a_minimumRotation); }
-			inline AxisAngles minimumRotationDeg() { return toDegrees(minimumRotation); }
+			inline void minimumRotationDeg(AxisAngles a_min) { minimumRotation = toRadians(a_min); }
+			inline AxisAngles minimumRotationDeg() { return toDegrees(*minimumRotation); }
 
-			inline void maximumRotationDeg(AxisAngles a_maximumRotation) { maximumRotation = toRadians(a_maximumRotation); }
-			inline AxisAngles maximumRotationDeg() { return toDegrees(maximumRotation); }
-
+			inline void maximumRotationDeg(AxisAngles a_max) { maximumRotation = toRadians(a_max); }
+			inline AxisAngles maximumRotationDeg() { return toDegrees(*maximumRotation); }
+			
 			MV_PROPERTY((AxisAngles), minimumRotation);
 			MV_PROPERTY((AxisAngles), maximumRotation);
 			std::function<AxisAngles()> getRotation;
@@ -202,13 +202,13 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				properties.save(archive);
+				reflection().save(archive);
 			}
 			
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
 				if (version == 0) {
-					properties.load(archive, {
+					reflection().load(archive, {
 						"maximumParticles",
 						"minimumSpawnRate", "maximumSpawnRate",
 						"minimumPosition", "maximumPosition",
@@ -216,12 +216,12 @@ namespace MV {
 						"minimumRotation", "maximumRotation",
 						"minimum", "maximum"
 					});
-					toRadiansInPlace(minimumDirection);
-					toRadiansInPlace(maximumDirection);
-					toRadiansInPlace(minimumRotation);
-					toRadiansInPlace(maximumRotation);
+					toRadiansInPlace(*minimumDirection);
+					toRadiansInPlace(*maximumDirection);
+					toRadiansInPlace(*minimumRotation);
+					toRadiansInPlace(*maximumRotation);
 				} else {
-					properties.load(archive);
+					reflection().load(archive);
 				}
 				dirty = true;
 			}
@@ -273,7 +273,7 @@ namespace MV {
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
 				if (version == 0) {
-					properties.load(archive, {
+					reflection().load(archive, {
 						"spawnProperties",
 						"spawnParticles", 
 						"relativeParentCount",
@@ -283,8 +283,8 @@ namespace MV {
 				
 				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
 				
-				if (relativeParentCount >= 0) {
-					relativeNodePosition.reset();
+				if (*relativeParentCount >= 0) {
+					(*relativeNodePosition).reset();
 				}
 			}
 
@@ -315,7 +315,7 @@ namespace MV {
 
 				particle.position = spawnProperties->getPosition() - threadData[a_groupIndex].particleOffset;
 				particle.rotation = spawnProperties->getRotation();
-				particle.change.rotationalChange = spawnProperties.getRotationChange();
+				particle.change.rotationalChange = spawnProperties->getRotationChange();
 
 				particle.direction = spawnProperties->getDirection();
 				particle.change.rateOfChange = spawnProperties->getRateOfChange();
@@ -327,13 +327,13 @@ namespace MV {
 
 				spawnProperties->setColor(particle.change.beginColor, particle.change.endColor);
 
-				particle.change.animationFramesPerSecond = mix(spawnProperties->minimum.animationFramesPerSecond, spawnProperties->maximum.animationFramesPerSecond, randomNumber(0.0f, 1.0f));
+				particle.change.animationFramesPerSecond = mix(*spawnProperties->minimum->animationFramesPerSecond, *spawnProperties->maximum->animationFramesPerSecond, randomNumber(0.0f, 1.0f));
 
-				particle.change.maxLifespan = mix(spawnProperties->minimum.maxLifespan, spawnProperties->maximum.maxLifespan, randomNumber(0.0f, 1.0f));
+				particle.change.maxLifespan = mix(*spawnProperties->minimum->maxLifespan, *spawnProperties->maximum->maxLifespan, randomNumber(0.0f, 1.0f));
 
 				particle.setGravity(
-					mix(spawnProperties->minimum.gravityMagnitude, spawnProperties->maximum.gravityMagnitude, randomNumber(0.0f, 1.0f)),
-					randomMix(spawnProperties->minimum.gravityDirection, spawnProperties->maximum.gravityDirection)
+					mix(*spawnProperties->minimum->gravityMagnitude, *spawnProperties->maximum->gravityMagnitude, randomNumber(0.0f, 1.0f)),
+					randomMix(*spawnProperties->minimum->gravityDirection, *spawnProperties->maximum->gravityDirection)
 				);
 
 				//particle.update(0.0f);

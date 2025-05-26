@@ -38,7 +38,7 @@ namespace MV {
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
 				if (version == 0) {
-					properties.load(archive, {
+					reflection().load(archive, {
 						"contentView"
 					});
 				}

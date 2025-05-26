@@ -85,7 +85,7 @@ namespace MV {
 					if(version > 1){
 						propertyKeys.push_back("zoomOffset");
 					}
-					properties.load(archive, propertyKeys);
+					reflection().load(archive, propertyKeys);
 				}
 				archive(cereal::make_nvp("Component", cereal::base_class<Component>(this)));
 			}

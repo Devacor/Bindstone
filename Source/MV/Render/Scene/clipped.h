@@ -58,7 +58,7 @@ namespace MV {
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
 				if (version == 0) {
-					properties.load(archive, {"refreshShaderId", "capturedBounds", "capturedOffset", "forceRefreshEveryFrame"});
+					reflection().load(archive, {"refreshShaderId", "capturedBounds", "capturedOffset", "forceRefreshEveryFrame"});
 				}
 				archive(
 					cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this))

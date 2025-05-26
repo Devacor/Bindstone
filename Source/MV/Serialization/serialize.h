@@ -121,7 +121,7 @@ namespace MV {
 		cereal::JSONInputArchive input(messageStream);
 		T result;
 		input(result);
-		return result;
+		return std::move(result);
 	}
 
 	template <typename T>

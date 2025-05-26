@@ -37,31 +37,31 @@ namespace MV {
 			if (!dirty) { return; }
 
 			if (minimumPosition == maximumPosition) {
-				getPosition = [&] {return minimumPosition; };
+				getPosition = [&] {return *minimumPosition; };
 			} else {
 				getPosition = [&] { return randomMix(minimumPosition, maximumPosition); };
 			}
 
 			if (minimumRotation == maximumRotation) {
-				getRotation = [&] {return minimumRotation; };
+				getRotation = [&] {return *minimumRotation; };
 			} else {
 				getRotation = [&] {return randomMix(minimumRotation, maximumRotation); };
 			}
 
 			if (minimumDirection == maximumDirection) {
-				getDirection = [&] {return minimumDirection; };
+				getDirection = [&] {return *minimumDirection; };
 			} else {
 				getDirection = [&] {return randomMix(minimumDirection, maximumDirection); };
 			}
 
 			if (minimum->rotationalChange == maximum->rotationalChange) {
-				getRotationChange = [&] {return minimum->rotationalChange; };
+				getRotationChange = [&] {return *minimum->rotationalChange; };
 			} else {
 				getRotationChange = [&] {return randomMix(minimum->rotationalChange, maximum->rotationalChange); };
 			}
 
 			if (minimum->rateOfChange == maximum->rateOfChange) {
-				getRateOfChange = [&] {return minimum->rateOfChange; };
+				getRateOfChange = [&] {return *minimum->rateOfChange; };
 			} else {
 				getRateOfChange = [&] {return randomMix(minimum->rateOfChange, maximum->rateOfChange); };
 			}
@@ -72,30 +72,30 @@ namespace MV {
 				getDirectionChange = [&] {return randomMix(minimum->directionalChangeRad(), maximum->directionalChangeRad()); };
 			}
 
-			if (MV::equals(minimum->beginSpeed, maximum->beginSpeed) && MV::equals(minimum->endSpeed, maximum->endSpeed)) {
-				setSpeed = [&](float& begin, float& end) {begin = minimum->beginSpeed; end = minimum->endSpeed; };
+			if (MV::equals(*minimum->beginSpeed, *maximum->beginSpeed) && MV::equals(*minimum->endSpeed, *maximum->endSpeed)) {
+				setSpeed = [&](float& begin, float& end) { begin = *minimum->beginSpeed; end = *minimum->endSpeed; };
 			} else {
 				setSpeed = [&](float& begin, float& end) {
-					begin = mix(minimum->beginSpeed, maximum->beginSpeed, randomNumber(0.0f, 1.0f)); 
-					end = mix(minimum->endSpeed, maximum->endSpeed, randomNumber(0.0f, 1.0f));
+					begin = mix(*minimum->beginSpeed, *maximum->beginSpeed, randomNumber(0.0f, 1.0f));
+					end = mix(*minimum->endSpeed, *maximum->endSpeed, randomNumber(0.0f, 1.0f));
 				};
 			}
 
 			if (minimum->beginScale == maximum->beginScale && minimum->endScale == maximum->endScale) {
-				setScale = [&](Scale& begin, Scale& end) {begin = minimum->beginScale; end = minimum->endScale; };
+				setScale = [&](Scale& begin, Scale& end) { begin = *minimum->beginScale; end = *minimum->endScale; };
 			} else {
 				setScale = [&](Scale& begin, Scale& end) {
-					begin = mix(minimum->beginScale, maximum->beginScale, randomNumber(0.0f, 1.0f));
-					end = mix(minimum->endScale, maximum->endScale, randomNumber(0.0f, 1.0f));
+					begin = mix(*minimum->beginScale, *maximum->beginScale, randomNumber(0.0f, 1.0f));
+					end = mix(*minimum->endScale, *maximum->endScale, randomNumber(0.0f, 1.0f));
 				};
 			}
 
 			if (minimum->beginColor == maximum->beginColor && minimum->endColor == maximum->endColor) {
-				setColor = [&](Color& begin, Color& end) {begin = minimum->beginColor; end = minimum->endColor; };
+				setColor = [&](Color& begin, Color& end) { begin = *minimum->beginColor; end = *minimum->endColor; };
 			} else {
 				setColor = [&](Color& begin, Color& end) {
-					begin = randomMix(minimum->beginColor, maximum->beginColor);
-					end = randomMix(minimum->endColor, maximum->endColor);
+					begin = randomMix(*minimum->beginColor, *maximum->beginColor);
+					end = randomMix(*minimum->endColor, *maximum->endColor);
 				};
 			}
 
@@ -105,9 +105,9 @@ namespace MV {
 		void Emitter::spawnParticlesOnMultipleThreads(double a_dt) {
 			timeSinceLastParticle.store(timeSinceLastParticle.load() + a_dt);
 			size_t particlesToSpawn = nextSpawnDelta <= 0 ? 0 : static_cast<size_t>(timeSinceLastParticle.load() / nextSpawnDelta);
-			size_t totalParticles = std::min(std::accumulate(threadData.begin(), threadData.end(), static_cast<size_t>(0), [](size_t a_total, ThreadData& a_group) {return a_group.particles.size() + a_total; }), static_cast<size_t>(spawnProperties->maximumParticles));
+			size_t totalParticles = std::min(std::accumulate(threadData.begin(), threadData.end(), static_cast<size_t>(0), [](size_t a_total, ThreadData& a_group) {return a_group.particles.size() + a_total; }), static_cast<size_t>(*spawnProperties->maximumParticles));
 
-			particlesToSpawn = std::min(particlesToSpawn + totalParticles, static_cast<size_t>(spawnProperties->maximumParticles)) - totalParticles;
+			particlesToSpawn = std::min(particlesToSpawn + totalParticles, static_cast<size_t>(*spawnProperties->maximumParticles)) - totalParticles;
 
 			double maxParticlesPerFramePerThread = 500;
 
@@ -271,12 +271,12 @@ namespace MV {
 
 		std::shared_ptr<Emitter> Emitter::makeRelativeToParent(int a_count) {
 			relativeParentCount = a_count;
-			relativeNodePosition.reset();
+			relativeNodePosition->reset();
 			if (a_count > 0) {
 				relativeNodePosition = owner()->parent();
 				--a_count;
-				while (a_count > 0 && relativeNodePosition.lock()->parent()) {
-					relativeNodePosition = relativeNodePosition.lock()->parent();
+				while (a_count > 0 && relativeNodePosition->lock()->parent()) {
+					relativeNodePosition = relativeNodePosition->lock()->parent();
 					--a_count;
 				}
 			}
@@ -324,13 +324,13 @@ namespace MV {
 			bool falseValue = false;
 			accumulatedTimeDelta += a_dt;
 			if (updateInProgress.compare_exchange_strong(falseValue, true)) {
-				if (relativeNodePosition.expired() && relativeParentCount >= 0) {
+				if (relativeNodePosition->expired() && relativeParentCount >= 0) {
 					makeRelativeToParent(relativeParentCount);
 				}
 				spawnProperties->initializeCallbacks();
 
 				MV::Point<> particleOffset;
-				if (auto lockedRelativeNodePosition = relativeNodePosition.lock()) {
+				if (auto lockedRelativeNodePosition = relativeNodePosition->lock()) {
 					particleOffset = owner()->localFromWorld(lockedRelativeNodePosition->worldPosition());
 				}
 				for (auto&& data : threadData) {
@@ -432,7 +432,7 @@ namespace MV {
 
 				std::set<std::shared_ptr<MV::TextureDefinition>> actuallyRegistered;
 				addTexturesToShader();
-				auto emitterSpace = relativeNodePosition.expired() ? ourOwner : relativeNodePosition.lock();
+				auto emitterSpace = relativeNodePosition->expired() ? ourOwner : relativeNodePosition->lock();
 				shaderProgram->set("transformation", ourRenderer.cameraProjectionMatrix(ourOwner->cameraId()) * emitterSpace->worldTransform());
 				if (userMaterialSettings) {
 					try { userMaterialSettings(shaderProgram); } catch (std::exception &e) { MV::error("Emitter::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }

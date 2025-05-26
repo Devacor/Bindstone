@@ -2,6 +2,8 @@
 #define _MV_SCENE_SPRITE_H_
 
 #include "drawable.h"
+#include "cereal/access.hpp"
+#include "cereal/types/memory.hpp"
 
 #define SpriteDerivedAccessors(ComponentType) \
 	DrawableDerivedAccessors(ComponentType) \
@@ -57,7 +59,7 @@ namespace MV {
 			template <class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
 				if (version == 1) {
-					properties.load(archive, { "subdivisions" });
+					reflection().load(archive, { "subdivisions" });
 				}
 				archive(
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))

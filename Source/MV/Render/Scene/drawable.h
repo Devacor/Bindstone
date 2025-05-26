@@ -2,7 +2,6 @@
 #define _MV_SCENE_DRAWABLE_H_
 
 #include "node.h"
-//#include "MV/Utility/properties.hpp"
 
 #define DrawableDerivedAccessorsShowHide(ComponentType) \
 	std::shared_ptr<ComponentType> show() { \
@@ -296,21 +295,21 @@ namespace MV {
 			template <class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
 				if (version == 0) {
-					properties.load(archive, { "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points" });
+					reflection().load(archive, { "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points" });
 				}
 				else if (version == 1) {
-					properties.load(archive, { "anchors", "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points" });
+					reflection().load(archive, { "anchors", "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points" });
 				}
 				else if (version == 2) {
-					properties.load(archive, { "anchors", "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points", "blendMode" });
+					reflection().load(archive, { "anchors", "shouldDraw", "ourTexture", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points", "blendMode" });
 				}
 				else if (version == 3) {
-					properties.load(archive, { "anchors", "shouldDraw", "textures", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points", "blendMode" });
+					reflection().load(archive, { "anchors", "shouldDraw", "textures", "shaderProgramId", "vertexIndices", "localBounds", "drawType", "points", "blendMode" });
 				}
 				else if (version == 4) {
 					points.serializeEnabled(serializePoints());
 					vertexIndices.serializeEnabled(serializePoints());
-					properties.load(archive, { "anchors", "shouldDraw", "textures", "shaderProgramId", "localBounds", "drawType", "vertexIndices", "points", "blendMode" });
+					reflection().load(archive, { "anchors", "shouldDraw", "textures", "shaderProgramId", "localBounds", "drawType", "vertexIndices", "points", "blendMode" });
 				}
 				else {
 					points.serializeEnabled(serializePoints());
@@ -334,12 +333,12 @@ namespace MV {
 
 			virtual std::shared_ptr<Component> cloneHelper(const std::shared_ptr<Component>& a_clone);
 
-			Property<std::map<size_t, std::shared_ptr<TextureHandle>>> ourTextures{ properties, "textures", {}, [](auto& source, auto& destination) {
+			MV_NAMED_PROPERTY((std::map<size_t, std::shared_ptr<TextureHandle>>), "textures", ourTextures, [](auto& source, auto& destination) {
 				destination->clear();
 				for (auto&& kv : source) {
-					destination[kv.first] = kv.second->clone();
+					(*destination)[kv.first] = kv.second->clone();
 				}
-			} };
+			});
 
 			MV_PROPERTY((std::vector<DrawPoint>), points, {});
 			MV_PROPERTY((std::vector<GLuint>), vertexIndices, {});
@@ -370,7 +369,7 @@ namespace MV {
 			void hookupTextureSizeWatchers();
 			void hookupTextureSizeWatcher(size_t a_textureId);
 
-			Property<BlendModePreset> blendModePreset{ properties, "blendMode", DEFAULT };
+			MV_NAMED_PROPERTY((BlendModePreset), "blendMode", blendModePreset, DEFAULT );
 
 			void rebuildTextureCache();
 

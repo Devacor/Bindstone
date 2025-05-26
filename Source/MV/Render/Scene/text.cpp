@@ -19,7 +19,7 @@ namespace MV{
 			onEnter(onEnterSignal),
 			onChange(onChangeSignal),
 			fontIdentifier(a_defaultFontIdentifier),
-			formattedText(properties, "formattedText", std::make_shared<FormattedText>(a_textLibrary, a_defaultFontIdentifier), [](auto& source, auto& destination) { 
+			formattedText(propertyManager, "formattedText", std::make_shared<FormattedText>(a_textLibrary, a_defaultFontIdentifier), [](auto& source, auto& destination) { 
 				*destination.get() = *source.get();
 			}) {
 			

@@ -2,6 +2,7 @@
 #define _MV_SCENE_GRID_H_
 
 #include "drawable.h"
+#include "cereal/access.hpp"
 #include "cereal/types/utility.hpp"
 #include <vector>
 
@@ -96,7 +97,7 @@ namespace MV {
 					propertyKeys.push_back("margins");
 					propertyKeys.push_back("cellColumns");
 					propertyKeys.push_back("includeChildrenInChildSize");
-					properties.load(archive, propertyKeys);
+					reflection().load(archive, propertyKeys);
 				}
 				archive(
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))

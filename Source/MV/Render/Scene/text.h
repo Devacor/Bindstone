@@ -188,7 +188,7 @@ namespace MV {
 			template <class Archive>
 			void load(Archive& archive, std::uint32_t const version) {
 				if (version == 0) {
-					properties.load(archive, { "formattedText", "usingBoundsForLineHeight" });
+					reflection().load(archive, { "formattedText", "usingBoundsForLineHeight" });
 				}
 				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
 			}

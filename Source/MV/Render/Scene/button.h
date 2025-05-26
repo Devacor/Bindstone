@@ -45,12 +45,13 @@ namespace MV {
 				archive(
 					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
 				);
+				reflection().save(archive);
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
 				if (version == 0) {
-					properties.load(archive, {"activeView", "idleView", "disabledView"});
+					reflection().load(archive, {"activeView", "idleView", "disabledView"});
 				}
 				archive(
 					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))

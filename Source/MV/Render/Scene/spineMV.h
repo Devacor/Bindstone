@@ -1,5 +1,5 @@
-#ifndef _MV_SPINE_MV_
-#define _MV_SPINE_MV_
+#ifndef _MV_SCENE_SPINE_H_
+#define _MV_SCENE_SPINE_H_
 
 #include "node.h"
 #include "drawable.h"
@@ -138,26 +138,27 @@ namespace MV {
 					return *this;
 				}
 
-				MV_PROPERTY((std::string), skeletonFile);
-				MV_PROPERTY((std::string), atlasFile);
-				MV_PROPERTY(float, loadScale, 1.0f);
+				MV_PROPERTY((std::string), skeletonFile, "");
+				MV_PROPERTY((std::string), atlasFile, "");
+				MV_PROPERTY((float), loadScale, 1.0f);
+
 			private:
 				friend cereal::access;
 				template <class Archive>
 				void save(Archive & archive, std::uint32_t const) const {
-					properties.save(archive);
+					reflection().save(archive);
 				}
 				
 				template <class Archive>
 				void load(Archive & archive, std::uint32_t const version) {
 					if (version == 0) {
-						properties.load(archive, {
+						reflection().load(archive, {
 							"skeletonFile",
 							"atlasFile",
 							"loadScale"
 						});
 					} else {
-						properties.load(archive);
+						reflection().load(archive);
 					}
 				}
 			};
@@ -289,8 +290,6 @@ namespace MV {
 			std::map<std::string, std::set<std::string>> slotsToNodes;
 		};
 
-
-		CEREAL_CLASS_VERSION(MV::Scene::Spine::FileBundle, 1);
 
 	}
 }

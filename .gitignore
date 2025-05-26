@@ -59,3 +59,4 @@ External/VSProjects/External_Windows/Builds/Intermediate/Windows/External_Window
 External/VSProjects/External_Windows/Builds/
 build_output.txt
 build_errors.txt
+enc_temp_folder/

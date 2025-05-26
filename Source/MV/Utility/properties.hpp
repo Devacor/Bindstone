@@ -39,23 +39,20 @@ namespace MV {
 		{ static_cast<bool>(t) };  // Can be explicitly converted to bool
 	};
 
-	// Forward declarations
 	class PropertyBase;
 	template<typename T> class Property;
 	template<typename T> class ObservableProperty;
 
-	// Forward declaration
-	class PropertyRegistry;
+	class PropertyManager;
 	class PropertyOwner;
 
-	// PropertyRegistry - manages all properties
-	class PropertyRegistry {
+	class PropertyManager {
 	public:
-		PropertyRegistry() = default;
-		PropertyRegistry(PropertyRegistry&&) = default;
+		PropertyManager() = default;
+		PropertyManager(PropertyManager&&) = default;
 
-		PropertyRegistry(const PropertyRegistry&) = delete;
-		PropertyRegistry& operator=(const PropertyRegistry&) = delete;
+		PropertyManager(const PropertyManager&) = delete;
+		PropertyManager& operator=(const PropertyManager&) = delete;
 
 		void add(PropertyBase* prop);
 		const std::map<std::string, PropertyBase*>& all() const { return properties; }
@@ -127,20 +124,36 @@ namespace MV {
 			}
 		}
 
-		inline void cloneToTarget(PropertyRegistry& target) const;
+		inline void cloneToTarget(PropertyManager& target) const;
 
 	private:
 		std::map<std::string, PropertyBase*> properties;
 	};
 
-	// PropertyOwner interface - for types that have their own PropertyRegistry
 	class PropertyOwner {
 	public:
-		PropertyRegistry properties;
+		PropertyManager propertyManager;
 		
-		PropertyRegistry& getPropertyRegistry() { return properties; }
-		const PropertyRegistry& getPropertyRegistry() const { return properties; }
-		
+		PropertyManager& reflection() { return propertyManager; }
+		const PropertyManager& reflection() const { return propertyManager; }
+
+
+		PropertyOwner(const PropertyOwner& a_rhs) {
+			*this = a_rhs;
+		}
+
+		PropertyOwner& operator=(const PropertyOwner& other) {
+			if (this != &other) {
+				other.propertyManager.cloneToTarget(propertyManager);
+			}
+			return *this;
+		}
+
+		// Default constructor and move operations
+		PropertyOwner() = default;
+		PropertyOwner(PropertyOwner&&) = default;
+		PropertyOwner& operator=(PropertyOwner&&) = default;
+
 		virtual ~PropertyOwner() = default;
 	};
 
@@ -176,7 +189,7 @@ namespace MV {
 			: propertyName(std::move(a_name)) {
 		}
 
-		inline PropertyBase(PropertyRegistry& a_propertyRegister, std::string a_name)
+		inline PropertyBase(PropertyManager& a_propertyRegister, std::string a_name)
 			: PropertyBase(std::move(a_name)) {
 			a_propertyRegister.add(this);
 		}
@@ -193,36 +206,95 @@ namespace MV {
 		T value;
 		std::function<void(Property<T>&, Property<T>&)> customClone;
 
+		template<typename F>
+		static constexpr bool is_clone_function_v =
+			std::is_invocable_v<F, Property<T>&, Property<T>&>;
+
 	public:
 		using value_type = T;
 
-		// Constructor
-		inline Property(PropertyRegistry& reg, std::string name, T def = T{},
-			std::function<void(Property<T>&, Property<T>&)> cl = {})
+		// Constructor 1: No default value, no clone function
+		inline Property(PropertyManager& reg, std::string name)
+			: PropertyBase(reg, std::move(name))
+			, customClone()
+			, value{} {
+		}
+
+		// Constructor 2: With value (but NOT a function type)
+		template<typename U, std::enable_if_t<!is_clone_function_v<U>, int> = 0>
+		inline Property(PropertyManager& reg, std::string name, U&& def)
+			: PropertyBase(reg, std::move(name))
+			, customClone()
+			, value(std::forward<U>(def)) {
+		}
+
+		// Constructor 3: With clone function only
+		template<typename Fn, std::enable_if_t<is_clone_function_v<Fn>, int> = 0>
+		inline Property(PropertyManager& reg, std::string name, Fn&& cl)
+			: PropertyBase(reg, std::move(name))
+			, customClone(std::forward<Fn>(cl))
+			, value{} {
+		}
+
+		// Constructor 4: With T constructed from initializer list
+		inline Property(PropertyManager& reg, std::string name, T def)
+			: PropertyBase(reg, std::move(name))
+			, customClone()
+			, value(std::move(def)) {
+		}
+
+		// Constructor 5: With value and clone function
+		template<typename U, typename Fn>
+		inline Property(PropertyManager& reg, std::string name, U&& def, Fn&& cl)
+			: PropertyBase(reg, std::move(name))
+			, customClone(std::forward<Fn>(cl))
+			, value(std::forward<U>(def)) {
+		}
+
+		// Constructor 6: With T constructed from initializer list and clone function
+		inline Property(PropertyManager& reg, std::string name, T def,
+			std::function<void(Property<T>&, Property<T>&)> cl)
 			: PropertyBase(reg, std::move(name))
 			, customClone(std::move(cl))
 			, value(std::move(def)) {
 		}
 
+		// Move constructor
+		Property(Property&& other) noexcept
+			: PropertyBase(std::move(other))
+			, customClone(std::move(other.customClone))
+			, value(std::move(other.value)) {
+		}
+
+		Property& operator=(Property&& other) noexcept {
+			if (this != &other) {
+				// Note: Don't move PropertyBase, we stay registered with our original manager
+				customClone = std::move(other.customClone);
+				value = std::move(other.value);
+			}
+			return *this;
+		}
+
+		// We cannot meaningfully copy construct a Property because they need to be tightly bound to their PropertyManager reference.
 		Property(const Property&) = delete;
-		Property& operator=(const Property&) = delete;
+
+		// Basic assignment only copies the value. We do have a cloneToTarget method too, which can be used to invoke explicit deep copy semantics.
+		Property& operator=(const Property& a_rhs) {
+			value = a_rhs.value;
+			return *this;
+		}
 
 		// Assignment operators
 		Property& operator=(const T& v) { value = v; return *this; }
 		Property& operator=(T&& v) { value = std::move(v); return *this; }
 
 		// ===== CONVERSION OPERATORS =====
-		// Implicit conversion to T (works for all types)
-		operator T() const noexcept requires std::is_arithmetic_v<T> {
-			return value;  // Return by value for arithmetic types
+		operator const T& () const noexcept {
+			return value;
 		}
 
-		operator const T& () const noexcept requires (!std::is_arithmetic_v<T>) {
-			return value;  // Return by reference for non-arithmetic types
-		}
-
-		// Mutable conversion for non-const contexts
-		operator T& () noexcept requires (!std::is_arithmetic_v<T>) {
+		// Mutable access  
+		operator T& () noexcept {
 			return value;
 		}
 
@@ -529,7 +601,7 @@ namespace MV {
 			if (allowSerialization) { 
 				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
 					// For PropertyOwner types, save their property registry
-					ar(cereal::make_nvp(name(), value.getPropertyRegistry()));
+					ar(cereal::make_nvp(name(), value.reflection()));
 				} else {
 					ar(cereal::make_nvp(name(), value));
 				}
@@ -540,7 +612,7 @@ namespace MV {
 			if (!a_usingPropertyOverride || allowSerialization) {
 				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
 					// For PropertyOwner types, load their property registry
-					ar(cereal::make_nvp(name(), value.getPropertyRegistry()));
+					ar(cereal::make_nvp(name(), value.reflection()));
 				} else {
 					ar(cereal::make_nvp(name(), value));
 				}
@@ -551,7 +623,7 @@ namespace MV {
 			if (allowSerialization) { 
 				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
 					// For PropertyOwner types, save their property registry
-					ar(cereal::make_nvp(name(), value.getPropertyRegistry()));
+					ar(cereal::make_nvp(name(), value.reflection()));
 				} else {
 					ar(cereal::make_nvp(name(), value));
 				}
@@ -562,7 +634,7 @@ namespace MV {
 			if (!a_usingPropertyOverride || allowSerialization) {
 				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
 					// For PropertyOwner types, load their property registry
-					ar(cereal::make_nvp(name(), value.getPropertyRegistry()));
+					ar(cereal::make_nvp(name(), value.reflection()));
 				} else {
 					ar(cereal::make_nvp(name(), value));
 				}
@@ -573,7 +645,7 @@ namespace MV {
 			if (allowSerialization) { 
 				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
 					// For PropertyOwner types, save their property registry
-					ar(cereal::make_nvp(name(), value.getPropertyRegistry()));
+					ar(cereal::make_nvp(name(), value.reflection()));
 				} else {
 					ar(cereal::make_nvp(name(), value));
 				}
@@ -584,7 +656,7 @@ namespace MV {
 			if (!a_usingPropertyOverride || allowSerialization) {
 				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
 					// For PropertyOwner types, load their property registry
-					ar(cereal::make_nvp(name(), value.getPropertyRegistry()));
+					ar(cereal::make_nvp(name(), value.reflection()));
 				} else {
 					ar(cereal::make_nvp(name(), value));
 				}
@@ -607,7 +679,7 @@ namespace MV {
 	template<typename T>
 	class DeletedProperty : public PropertyBase {
 	public:
-		DeletedProperty(PropertyRegistry& a_list, std::string a_name)
+		DeletedProperty(PropertyManager& a_list, std::string a_name)
 			: PropertyBase(a_list, std::move(a_name)) {
 		}
 
@@ -653,13 +725,69 @@ namespace MV {
 	// ObservableProperty - Property with change notifications
 	template<typename T>
 	class ObservableProperty : public Property<T> {
+	private:
+		template<typename F>
+		static constexpr bool is_clone_function_v =
+			std::is_invocable_v<F, Property<T>&, Property<T>&>;
+
 	public:
 		using ChangeSignature = void(const T& newValue, const T& oldValue, bool isFromLoad);
 
-		inline ObservableProperty(PropertyRegistry& registry, std::string name, T defaultValue = T{},
-			std::function<void(Property<T>&, Property<T>&)> cloneFn = {})
-			: Property<T>(registry, std::move(name), std::move(defaultValue), std::move(cloneFn)),
-			onChanged(onChangedSignal) {
+		// Constructor 1: No default value, no clone function
+		inline ObservableProperty(PropertyManager& registry, std::string name)
+			: Property<T>(registry, std::move(name))
+			, onChanged(onChangedSignal) {
+		}
+
+		// Constructor 2: With value (but NOT a function type)
+		template<typename U, std::enable_if_t<!is_clone_function_v<U>, int> = 0>
+		inline ObservableProperty(PropertyManager& registry, std::string name, U&& defaultValue)
+			: Property<T>(registry, std::move(name), std::forward<U>(defaultValue))
+			, onChanged(onChangedSignal) {
+		}
+
+		// Constructor 3: With clone function only
+		template<typename Fn, std::enable_if_t<is_clone_function_v<Fn>, int> = 0>
+		inline ObservableProperty(PropertyManager& registry, std::string name, Fn&& cloneFn)
+			: Property<T>(registry, std::move(name), std::forward<Fn>(cloneFn))
+			, onChanged(onChangedSignal) {
+		}
+
+		// Constructor 4: With T constructed from initializer list
+		inline ObservableProperty(PropertyManager& registry, std::string name, T defaultValue)
+			: Property<T>(registry, std::move(name), std::move(defaultValue))
+			, onChanged(onChangedSignal) {
+		}
+
+		// Constructor 5: With value and clone function
+		template<typename U, typename Fn>
+		inline ObservableProperty(PropertyManager& registry, std::string name, U&& defaultValue, Fn&& cloneFn)
+			: Property<T>(registry, std::move(name), std::forward<U>(defaultValue), std::forward<Fn>(cloneFn))
+			, onChanged(onChangedSignal) {
+		}
+
+		// Constructor 6: With T constructed from initializer list and clone function
+		inline ObservableProperty(PropertyManager& registry, std::string name, T defaultValue,
+			std::function<void(Property<T>&, Property<T>&)> cloneFn)
+			: Property<T>(registry, std::move(name), std::move(defaultValue), std::move(cloneFn))
+			, onChanged(onChangedSignal) {
+		}
+
+		// Move constructor
+		ObservableProperty(ObservableProperty&& other) noexcept
+			: Property<T>(std::move(other))
+			, onChangedSignal(std::move(other.onChangedSignal))
+			, onChanged(onChangedSignal) {  // Re-bind to our own signal
+		}
+
+		// Move assignment
+		ObservableProperty& operator=(ObservableProperty&& other) noexcept {
+			if (this != &other) {
+				Property<T>::operator=(std::move(other));
+				onChangedSignal = std::move(other.onChangedSignal);
+				// Note: onChanged stays bound to our onChangedSignal
+			}
+			return *this;
 		}
 
 		// Override assignment operators to emit change signals
@@ -803,11 +931,11 @@ namespace MV {
 	};
 
 	// PropertyRegistry implementation
-	inline void PropertyRegistry::add(PropertyBase* prop) {
+	inline void PropertyManager::add(PropertyBase* prop) {
 		properties[prop->name()] = prop;
 	}
 
-	inline void PropertyRegistry::cloneToTarget(PropertyRegistry& target) const {
+	inline void PropertyManager::cloneToTarget(PropertyManager& target) const {
 		for (auto& [k, v] : properties) {
 			auto it = target.properties.find(k);
 			if (it != target.properties.end()) {
@@ -816,25 +944,25 @@ namespace MV {
 		}
 	}
 
-	inline PropertyBase* PropertyRegistry::get(const std::string& key) const {
+	inline PropertyBase* PropertyManager::get(const std::string& key) const {
 		auto it = properties.find(key);
 		return it != properties.end() ? it->second : nullptr;
 	}
 
 	template<typename T>
-	inline Property<T>* PropertyRegistry::get(const std::string& key) const {
+	inline Property<T>* PropertyManager::get(const std::string& key) const {
 		auto base = get(key);
 		return base ? dynamic_cast<Property<T>*>(base) : nullptr;
 	}
 
 	template<typename T>
-	inline ObservableProperty<T>* PropertyRegistry::getObservable(const std::string& key) const {
+	inline ObservableProperty<T>* PropertyManager::getObservable(const std::string& key) const {
 		auto base = get(key);
 		return base ? dynamic_cast<ObservableProperty<T>*>(base) : nullptr;
 	}
 
 	template<typename T>
-	inline T* PropertyRegistry::getValue(const std::string& key) const {
+	inline T* PropertyManager::getValue(const std::string& key) const {
 		if (auto prop = get<T>(key)) {
 			return &prop->get();
 		}
@@ -850,19 +978,19 @@ namespace MV {
 #define MV_REMOVE_PARENS_IMPL(...) __VA_ARGS__
 #define MV_REMOVE_PARENS(x) MV_EXPAND(MV_REMOVE_PARENS_IMPL x)
 
-// Main MV_PROPERTY macro (Always parentheses required)
+// Main property macros
 #define MV_PROPERTY(type, name, ...) \
-    MV::Property<MV_REMOVE_PARENS(type)> name{ properties, #name, __VA_ARGS__ }
+    MV::Property<MV_REMOVE_PARENS(type)> name{ propertyManager, #name, ##__VA_ARGS__ }
 
 #define MV_OBSERVABLE_PROPERTY(type, name, ...) \
-    MV::ObservableProperty<MV_REMOVE_PARENS(type)> name{ properties, #name, __VA_ARGS__ }
+    MV::ObservableProperty<MV_REMOVE_PARENS(type)> name{ propertyManager, #name, ##__VA_ARGS__ }
 
 #define MV_DELETED_PROPERTY(type, name) \
-    MV::DeletedProperty<MV_REMOVE_PARENS(type)> name{ properties, #name }
+    MV::DeletedProperty<MV_REMOVE_PARENS(type)> name{ propertyManager, #name }
 
-// Named property macros - allow specifying a custom property name different from the variable name
+// Named property macros
 #define MV_NAMED_PROPERTY(type, propName, varName, ...) \
-    MV::Property<MV_REMOVE_PARENS(type)> varName{ properties, propName, __VA_ARGS__ }
+    MV::Property<MV_REMOVE_PARENS(type)> varName{ propertyManager, propName, ##__VA_ARGS__ }
 
 #define MV_NAMED_OBSERVABLE_PROPERTY(type, propName, varName, ...) \
-    MV::ObservableProperty<MV_REMOVE_PARENS(type)> varName{ properties, propName, __VA_ARGS__ }
+    MV::ObservableProperty<MV_REMOVE_PARENS(type)> varName{ propertyManager, propName, ##__VA_ARGS__ }

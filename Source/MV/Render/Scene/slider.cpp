@@ -16,7 +16,7 @@ namespace MV {
 		}
 
 		std::shared_ptr<Slider> Slider::percent(PointPrecision a_newPercent, bool a_notify /*= true*/) {
-			auto oldPercent = dragPercent;
+			float oldPercent = dragPercent;
 			dragPercent = std::min(std::max(a_newPercent, 0.0f), 1.0f);
 			auto self = std::static_pointer_cast<Slider>(shared_from_this());
 			if (a_notify && oldPercent != dragPercent) {
@@ -54,7 +54,7 @@ namespace MV {
 		}
 
 		void Slider::updateDragFromMouse() {
-			auto oldPercent = dragPercent;
+			float oldPercent = dragPercent;
 			dragPercent = calculatePercentFromPosition(owner()->localFromScreen(mouse().position()));
 			auto self = std::static_pointer_cast<Slider>(shared_from_this()); //keep alive
 			if (dragPercent != oldPercent) {
@@ -98,7 +98,6 @@ namespace MV {
 		std::shared_ptr<Component> Slider::cloneHelper(const std::shared_ptr<Component> &a_clone) {
 			Clickable::cloneHelper(a_clone);
 			auto sliderClone = std::static_pointer_cast<Slider>(a_clone);
-			sliderClone->dragPercent = dragPercent;
 			if (dragHandle) {
 				auto foundHandle = sliderClone->owner()->get(dragHandle->id());
 				sliderClone->handle(foundHandle);

@@ -142,7 +142,7 @@ namespace MV {
 			std::shared_ptr<T> wrappedComponent;
 		};
 
-		class Component : public std::enable_shared_from_this<Component> {
+		class Component : public std::enable_shared_from_this<Component>, public PropertyOwner {
 			friend Node;
 			friend cereal::access;
 
@@ -181,7 +181,7 @@ namespace MV {
 
 			SafeComponent<Component> clone(const std::shared_ptr<Node> &a_parent) {
 				auto result = SafeComponent<Component>(a_parent, cloneImplementation(a_parent));
-				properties.cloneToTarget(result->properties);
+				reflection().cloneToTarget(result->reflection());
 				return result;
 			}
 
@@ -256,15 +256,15 @@ namespace MV {
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				properties.save(archive);
+				reflection().save(archive);
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if (version == 0) { //Prior to property system
-					properties.load(archive, {"componentId", "componentOwner"});
-				} else { //Now all properties can just be loaded.
-					properties.load(archive);
+				if (version == 0) {
+					reflection().load(archive, {"componentId", "componentOwner"});
+				} else {
+					reflection().load(archive);
 				}
 				if (accumulatedDelta == 0.0) {
 					accumulatedDelta = MV::randomNumber(0.0f, 1.0f); //avoid awkward synchronization
@@ -281,14 +281,13 @@ namespace MV {
 			virtual void updateImplementation(double a_delta) {}
 			double accumulatedDelta = 0.0;
 
-			PropertyRegistry properties;
 		private:
 			bool allowSerialize = true;
 
 			std::unique_ptr<Task> rootTask;
 			MV_PROPERTY((std::string), componentId);
 			//does not clone.
-			MV_PROPERTY((std::weak_ptr<Node>), componentOwner, {}, [](Property<std::weak_ptr<Node>> &, Property<std::weak_ptr<Node>>&){});
+			MV_PROPERTY((std::weak_ptr<Node>), componentOwner, {}, [](auto&, auto&){});
 		};
 	}
 }

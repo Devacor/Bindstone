@@ -161,9 +161,9 @@ namespace MV {
 					cereal::make_nvp("onCancel", onCancelSignal),
 					cereal::make_nvp("onDrop", onDropSignal));
 				if (version == 0) {
-					properties.load(archive, {
-							"hitDetectionType", "eatTouches", "globalClickPriority", "appendClickPriority", "overrideClickPriority"
-						});
+					reflection().load(archive, {
+						"hitDetectionType", "eatTouches", "globalClickPriority", "appendClickPriority", "overrideClickPriority"
+					});
 				}
 				archive(cereal::make_nvp("Sprite", cereal::base_class<Sprite>(this)));
 			}

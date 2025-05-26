@@ -89,15 +89,15 @@ namespace MV {
 			if (dirtyGrid) {
 				layoutCells();
 			}
-			if (a_coordinate.y >= 0 && tiles.size() < a_coordinate.y) {
-				if (a_coordinate.x >= 0 && tiles[a_coordinate.y].size() < a_coordinate.x) {
+			if (a_coordinate.y >= 0 && static_cast<size_t>(a_coordinate.y) < tiles.size()) {
+				if (a_coordinate.x >= 0 && static_cast<size_t>(a_coordinate.x) < tiles[a_coordinate.y].size()) {
 					auto result = tiles[a_coordinate.y][a_coordinate.x];
 					if (auto lockedResult = result.lock()) {
 						return lockedResult;
 					}
 				}
 			}
-			require<RangeException>(!a_throwOnFail, "Failed to load coordinate from grid at: ", a_coordinate, " It is either expired or out of range.");
+			require<RangeException>(!a_throwOnFail, "Failed to load a grid position at: ", a_coordinate);
 			return nullptr;
 		}
 

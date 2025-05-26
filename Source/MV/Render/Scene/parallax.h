@@ -116,7 +116,7 @@ namespace MV {
 			MV_NAMED_PROPERTY((Point<>), "translateRatio", ourTranslateRatio);
 			MV_NAMED_PROPERTY((Point<>), "localOffset", ourLocalOffset);
 			MV_NAMED_PROPERTY((Point<>), "zoomOffset", ourZoomOffset);
-			MV_DELETED_PROPERTY((int), space);
+			MV_DELETED_PROPERTY((int32_t), space);
 			Node::BasicReceiverType parentObserver;
 			Draw2D::CameraRecieveType cameraObserver;
 		};

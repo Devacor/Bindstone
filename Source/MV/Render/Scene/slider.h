@@ -29,19 +29,21 @@ namespace MV {
 			Slider(const std::weak_ptr<Node> &a_owner, TapDevice &a_mouse);
 
 			template <class Archive>
-			void save(Archive & archive, std::uint32_t const /*version*/) const {
+			void save(Archive & archive, std::uint32_t const) const {
 				archive(
-					CEREAL_NVP(dragPercent),
-					CEREAL_NVP(dragHandle),
 					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
 				);
 			}
 
 			template <class Archive>
-			void load(Archive & archive, std::uint32_t const /*version*/) {
+			void load(Archive & archive, std::uint32_t const version) {
+				if (version == 0) {
+					properties.load(archive, {
+						"dragPercent",
+						"dragHandle"
+					});
+				}
 				archive(
-					CEREAL_NVP(dragPercent),
-					CEREAL_NVP(dragHandle),
 					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
 				);
 			}
@@ -72,8 +74,8 @@ namespace MV {
 
 			void updateHandlePosition();
 
-			PointPrecision dragPercent = 0.0f;
-			std::shared_ptr<Node> dragHandle;
+			MV_PROPERTY((float), dragPercent, 0.0f);
+			MV_PROPERTY((std::shared_ptr<Node>), dragHandle);
 		};
 
 	}
@@ -82,4 +84,3 @@ namespace MV {
 CEREAL_FORCE_DYNAMIC_INIT(mv_sceneslider);
 
 #endif
-

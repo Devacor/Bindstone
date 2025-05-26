@@ -5,12 +5,11 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Slider);
+CEREAL_CLASS_VERSION(MV::Scene::Slider, 1);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_sceneslider);
 
 namespace MV {
 	namespace Scene {
-
-
 
 		MV::PointPrecision Slider::percent() const {
 			return dragPercent;
@@ -75,7 +74,7 @@ namespace MV {
 
 		void Slider::updateHandlePosition() {
 			if (dragHandle) {
-				auto areaBounds = bounds();
+				auto areaBounds = owner()->bounds();
 				auto handleBounds = dragHandle->bounds();
 
 				PointPrecision firstX = areaBounds.minPoint.x + (areaBounds.width() - handleBounds.width());

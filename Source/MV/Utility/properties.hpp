@@ -44,6 +44,10 @@ namespace MV {
 	template<typename T> class Property;
 	template<typename T> class ObservableProperty;
 
+	// Forward declaration
+	class PropertyRegistry;
+	class PropertyOwner;
+
 	// PropertyRegistry - manages all properties
 	class PropertyRegistry {
 	public:
@@ -117,8 +121,7 @@ namespace MV {
 				const auto found = a_optionalKeyRenameBindings.find(name);
 				bool wasRenamed = found != a_optionalKeyRenameBindings.end();
 				auto it = properties.find(wasRenamed ? found->second : name);
-				MV::require<ResourceException>(it != properties.end(), "Unknown Property: ",
-					(wasRenamed ? found->second : name),
+				MV::require<ResourceException>(it != properties.end(), "Unknown Property: ", name,
 					" If a property was deleted, you will need to either recreate this archive, or, add a DeletedProperty<TheDeletedPropertyType> with this name.");
 				it->second->load(ar, usingPropertyOverride);
 			}
@@ -128,6 +131,17 @@ namespace MV {
 
 	private:
 		std::map<std::string, PropertyBase*> properties;
+	};
+
+	// PropertyOwner interface - for types that have their own PropertyRegistry
+	class PropertyOwner {
+	public:
+		PropertyRegistry properties;
+		
+		PropertyRegistry& getPropertyRegistry() { return properties; }
+		const PropertyRegistry& getPropertyRegistry() const { return properties; }
+		
+		virtual ~PropertyOwner() = default;
 	};
 
 	// PropertyBase - abstract base for all properties
@@ -512,32 +526,68 @@ namespace MV {
 
 		// Serialization methods
 		void save(cereal::JSONOutputArchive& ar) const override {
-			if (allowSerialization) { ar(cereal::make_nvp(name(), value)); }
+			if (allowSerialization) { 
+				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
+					// For PropertyOwner types, save their property registry
+					ar(cereal::make_nvp(name(), value.getPropertyRegistry()));
+				} else {
+					ar(cereal::make_nvp(name(), value));
+				}
+			}
 		}
 
 		void load(cereal::JSONInputArchive& ar, bool a_usingPropertyOverride) override {
 			if (!a_usingPropertyOverride || allowSerialization) {
-				ar(cereal::make_nvp(name(), value));
+				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
+					// For PropertyOwner types, load their property registry
+					ar(cereal::make_nvp(name(), value.getPropertyRegistry()));
+				} else {
+					ar(cereal::make_nvp(name(), value));
+				}
 			}
 		}
 
 		void save(cereal::BinaryOutputArchive& ar) const override {
-			if (allowSerialization) { ar(cereal::make_nvp(name(), value)); }
+			if (allowSerialization) { 
+				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
+					// For PropertyOwner types, save their property registry
+					ar(cereal::make_nvp(name(), value.getPropertyRegistry()));
+				} else {
+					ar(cereal::make_nvp(name(), value));
+				}
+			}
 		}
 
 		void load(cereal::BinaryInputArchive& ar, bool a_usingPropertyOverride) override {
 			if (!a_usingPropertyOverride || allowSerialization) {
-				ar(cereal::make_nvp(name(), value));
+				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
+					// For PropertyOwner types, load their property registry
+					ar(cereal::make_nvp(name(), value.getPropertyRegistry()));
+				} else {
+					ar(cereal::make_nvp(name(), value));
+				}
 			}
 		}
 
 		void save(cereal::PortableBinaryOutputArchive& ar) const override {
-			if (allowSerialization) { ar(cereal::make_nvp(name(), value)); }
+			if (allowSerialization) { 
+				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
+					// For PropertyOwner types, save their property registry
+					ar(cereal::make_nvp(name(), value.getPropertyRegistry()));
+				} else {
+					ar(cereal::make_nvp(name(), value));
+				}
+			}
 		}
 
 		void load(cereal::PortableBinaryInputArchive& ar, bool a_usingPropertyOverride) override {
 			if (!a_usingPropertyOverride || allowSerialization) {
-				ar(cereal::make_nvp(name(), value));
+				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
+					// For PropertyOwner types, load their property registry
+					ar(cereal::make_nvp(name(), value.getPropertyRegistry()));
+				} else {
+					ar(cereal::make_nvp(name(), value));
+				}
 			}
 		}
 

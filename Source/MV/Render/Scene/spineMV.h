@@ -117,18 +117,49 @@ namespace MV {
 			SignalRegister<void(Spine*, int)> onDispose;
 			SignalRegister<void(std::shared_ptr<Spine>, int, const AnimationEventData &)> onEvent;
 
-			struct FileBundle {
+			struct FileBundle : public PropertyOwner {
 				FileBundle(const std::string &a_skeletonFile, const std::string &a_atlasFile, float a_loadScale = 1.0f);
 
 				FileBundle();
+				
+				// Add copy constructor and assignment operator
+				FileBundle(const FileBundle& other) : PropertyOwner() {
+					*skeletonFile = *other.skeletonFile;
+					*atlasFile = *other.atlasFile;
+					*loadScale = *other.loadScale;
+				}
+				
+				FileBundle& operator=(const FileBundle& other) {
+					if (this != &other) {
+						*skeletonFile = *other.skeletonFile;
+						*atlasFile = *other.atlasFile;
+						*loadScale = *other.loadScale;
+					}
+					return *this;
+				}
 
-				std::string skeletonFile;
-				std::string atlasFile;
-				float loadScale;
+				MV_PROPERTY((std::string), skeletonFile);
+				MV_PROPERTY((std::string), atlasFile);
+				MV_PROPERTY(float, loadScale, 1.0f);
 			private:
 				friend cereal::access;
 				template <class Archive>
-				void serialize(Archive & archive, std::uint32_t const version);
+				void save(Archive & archive, std::uint32_t const) const {
+					properties.save(archive);
+				}
+				
+				template <class Archive>
+				void load(Archive & archive, std::uint32_t const version) {
+					if (version == 0) {
+						properties.load(archive, {
+							"skeletonFile",
+							"atlasFile",
+							"loadScale"
+						});
+					} else {
+						properties.load(archive);
+					}
+				}
 			};
 
 			DrawableDerivedAccessors(Spine)
@@ -259,14 +290,7 @@ namespace MV {
 		};
 
 
-		template <class Archive>
-		void Spine::FileBundle::serialize(Archive & archive, std::uint32_t const /*version*/) {
-			archive(
-				CEREAL_NVP(skeletonFile),
-				CEREAL_NVP(atlasFile),
-				CEREAL_NVP(loadScale)
-			);
-		}
+		CEREAL_CLASS_VERSION(MV::Scene::Spine::FileBundle, 1);
 
 	}
 }

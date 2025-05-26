@@ -3,6 +3,7 @@
 
 #include "sprite.h"
 #include "MV/Utility/threadPool.hpp"
+#include "MV/Utility/properties.hpp"
 #include <atomic>
 
 namespace MV {
@@ -11,15 +12,15 @@ namespace MV {
 		Point<> randomMix(const Point<> &a_rhs, const Point<> &a_lhs);
 		Color randomMix(const Color &a_rhs, const Color &a_lhs);
 
-		struct ParticleChangeValues {
+		struct ParticleChangeValues : public PropertyOwner {
 		private:
-			AxisAngles directionalChangeTemplate;
+			MV_NAMED_PROPERTY((AxisAngles), "directionalChange", directionalChangeTemplate);
 			AxisAngles directionalChangeCurrent;
 		public:
 			inline void rateOfChangeDeg(AxisAngles a_rateOfChange) { rateOfChange = toRadians(a_rateOfChange); }
 			inline AxisAngles rateOfChangeDeg() { return toDegrees(rateOfChange); }
 
-			AxisAngles rateOfChange;
+			MV_PROPERTY((AxisAngles), rateOfChange);
 
 			AxisAngles directionalChangeDeg(const AxisAngles &a_newDirectionalChange) {
 				return directionalChangeRad(toRadians(a_newDirectionalChange));
@@ -53,51 +54,47 @@ namespace MV {
 				return directionalChangeCurrent;
 			}
 
-			AxisAngles rotationalChange;
+			MV_PROPERTY((AxisAngles), rotationalChange);
 
-			float beginSpeed = 0.0f;
-			float endSpeed = 0.0f;
+			MV_PROPERTY(float, beginSpeed, 0.0f);
+			MV_PROPERTY(float, endSpeed, 0.0f);
 
-			Scale beginScale;
-			Scale endScale;
+			MV_PROPERTY((Scale), beginScale);
+			MV_PROPERTY((Scale), endScale);
 
-			Color beginColor;
-			Color endColor;
+			MV_PROPERTY((Color), beginColor);
+			MV_PROPERTY((Color), endColor);
 
-			float maxLifespan = 1.0f;
+			MV_PROPERTY(float, maxLifespan, 1.0f);
 
-			float gravityMagnitude = 0.0f;
-			AxisAngles gravityDirection;
+			MV_PROPERTY(float, gravityMagnitude, 0.0f);
+			MV_PROPERTY((AxisAngles), gravityDirection);
 
-			float animationFramesPerSecond = 10.0f;
+			MV_PROPERTY(float, animationFramesPerSecond, 10.0f);
 
 			template <class Archive>
-			void save(Archive & archive, std::uint32_t const /*version*/) const {
-				archive(CEREAL_NVP(rateOfChange), cereal::make_nvp("directionalChange", directionalChangeTemplate), CEREAL_NVP(rotationalChange),
-					CEREAL_NVP(beginSpeed), CEREAL_NVP(endSpeed),
-					CEREAL_NVP(beginScale), CEREAL_NVP(endScale),
-					CEREAL_NVP(beginColor), CEREAL_NVP(endColor),
-					CEREAL_NVP(maxLifespan),
-					CEREAL_NVP(gravityMagnitude), CEREAL_NVP(gravityDirection),
-					CEREAL_NVP(animationFramesPerSecond)
-				);
+			void save(Archive & archive, std::uint32_t const) const {
+				properties.save(archive);
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				archive(CEREAL_NVP(rateOfChange), cereal::make_nvp("directionalChange", directionalChangeTemplate), CEREAL_NVP(rotationalChange),
-					CEREAL_NVP(beginSpeed), CEREAL_NVP(endSpeed),
-					CEREAL_NVP(beginScale), CEREAL_NVP(endScale),
-					CEREAL_NVP(beginColor), CEREAL_NVP(endColor),
-					CEREAL_NVP(maxLifespan),
-					CEREAL_NVP(gravityMagnitude), CEREAL_NVP(gravityDirection),
-					CEREAL_NVP(animationFramesPerSecond)
-				);
-				if (version < 1) {
+				if (version == 0) {
+					properties.load(archive, {
+						"rateOfChange", "directionalChange", "rotationalChange",
+						"beginSpeed", "endSpeed",
+						"beginScale", "endScale",
+						"beginColor", "endColor",
+						"maxLifespan",
+						"gravityMagnitude", "gravityDirection",
+						"animationFramesPerSecond"
+					});
 					toRadiansInPlace(rateOfChange);
 					toRadiansInPlace(directionalChangeTemplate);
 					toRadiansInPlace(rotationalChange);
 					toRadiansInPlace(gravityDirection);
+				} else {
+					properties.load(archive);
 				}
 				directionalChangeCurrent = directionalChangeTemplate;
 			}
@@ -107,16 +104,16 @@ namespace MV {
 			//return true if dead.
 			inline bool update(double a_dt) {
 				float timeScale = static_cast<float>(a_dt);
-				totalLifespan = std::min(totalLifespan + timeScale, change.maxLifespan);
+				totalLifespan = std::min(totalLifespan + timeScale, *change.maxLifespan);
 
-				float mixValue = totalLifespan / change.maxLifespan;
+				float mixValue = totalLifespan / *change.maxLifespan;
 				
-				direction += change.currentDirectionalChangeRad(change.currentDirectionalChangeRad() + (change.rateOfChange * timeScale)) * timeScale;
-				rotation += change.rotationalChange * timeScale;
+				direction += change.currentDirectionalChangeRad(change.currentDirectionalChangeRad() + (*change.rateOfChange * timeScale)) * timeScale;
+				rotation += *change.rotationalChange * timeScale;
 
-				speed = mix(change.beginSpeed, change.endSpeed, mixValue);
-				scale = mix(change.beginScale, change.endScale, mixValue);
-				color = mix(change.beginColor, change.endColor, mixValue);
+				speed = mix(*change.beginSpeed, *change.endSpeed, mixValue);
+				scale = mix(*change.beginScale, *change.endScale, mixValue);
+				color = mix(*change.beginColor, *change.endColor, mixValue);
 
 				Point<> distance(0.0f, speed * timeScale, 0.0f);
 				TransformMatrix rotator;
@@ -127,7 +124,7 @@ namespace MV {
 				
 				//currentFrame = static_cast<int>(wrap(0.0f, static_cast<float>(textureCount), static_cast<float>(textureCount * (change.animationFramesPerSecond / timeScale))));
 				
-				return totalLifespan == change.maxLifespan;
+				return totalLifespan == *change.maxLifespan;
 			}
 
 			void reset() {
@@ -159,14 +156,14 @@ namespace MV {
 			Point<> gravityConstant;
 		};
 
-		struct EmitterSpawnProperties {
-			uint32_t maximumParticles = std::numeric_limits<uint32_t>::max();
+		struct EmitterSpawnProperties : public PropertyOwner {
+			MV_PROPERTY(uint32_t, maximumParticles, std::numeric_limits<uint32_t>::max());
 
-			float minimumSpawnRate = 0.0f;
-			float maximumSpawnRate = 1.0f;
+			MV_PROPERTY(float, minimumSpawnRate, 0.0f);
+			MV_PROPERTY(float, maximumSpawnRate, 1.0f);
 
-			Point<> minimumPosition;
-			Point<> maximumPosition;
+			MV_PROPERTY((Point<>), minimumPosition);
+			MV_PROPERTY((Point<>), maximumPosition);
 			std::function<Point<>()> getPosition;
 
 			inline void minimumDirectionDeg(AxisAngles a_minimumDirection) { minimumDirection = toRadians(a_minimumDirection); }
@@ -175,8 +172,8 @@ namespace MV {
 			inline void maximumDirectionDeg(AxisAngles a_maximumDirection) { maximumDirection = toRadians(a_maximumDirection); }
 			inline AxisAngles maximumDirectionDeg() { return toDegrees(maximumDirection); }
 
-			AxisAngles minimumDirection;
-			AxisAngles maximumDirection;
+			MV_PROPERTY((AxisAngles), minimumDirection);
+			MV_PROPERTY((AxisAngles), maximumDirection);
 			std::function<AxisAngles()> getDirection;
 
 			inline void minimumRotationDeg(AxisAngles a_minimumRotation) { minimumRotation = toRadians(a_minimumRotation); }
@@ -185,12 +182,12 @@ namespace MV {
 			inline void maximumRotationDeg(AxisAngles a_maximumRotation) { maximumRotation = toRadians(a_maximumRotation); }
 			inline AxisAngles maximumRotationDeg() { return toDegrees(maximumRotation); }
 
-			AxisAngles minimumRotation;
-			AxisAngles maximumRotation;
+			MV_PROPERTY((AxisAngles), minimumRotation);
+			MV_PROPERTY((AxisAngles), maximumRotation);
 			std::function<AxisAngles()> getRotation;
 
-			ParticleChangeValues minimum;
-			ParticleChangeValues maximum;
+			MV_PROPERTY((ParticleChangeValues), minimum);
+			MV_PROPERTY((ParticleChangeValues), maximum);
 
 			std::function<AxisAngles()> getRotationChange;
 			std::function<AxisAngles()> getRateOfChange;
@@ -204,19 +201,27 @@ namespace MV {
 			bool dirty = true;
 
 			template <class Archive>
-			void serialize(Archive & archive, std::uint32_t const version) {
-				archive(CEREAL_NVP(maximumParticles),
-					CEREAL_NVP(minimumSpawnRate), CEREAL_NVP(maximumSpawnRate),
-					CEREAL_NVP(minimumPosition), CEREAL_NVP(maximumPosition),
-					CEREAL_NVP(minimumDirection), CEREAL_NVP(maximumDirection),
-					CEREAL_NVP(minimumRotation), CEREAL_NVP(maximumRotation),
-					CEREAL_NVP(minimum), CEREAL_NVP(maximum)
-				);
-				if (version < 1) {
+			void save(Archive & archive, std::uint32_t const) const {
+				properties.save(archive);
+			}
+			
+			template <class Archive>
+			void load(Archive & archive, std::uint32_t const version) {
+				if (version == 0) {
+					properties.load(archive, {
+						"maximumParticles",
+						"minimumSpawnRate", "maximumSpawnRate",
+						"minimumPosition", "maximumPosition",
+						"minimumDirection", "maximumDirection",
+						"minimumRotation", "maximumRotation",
+						"minimum", "maximum"
+					});
 					toRadiansInPlace(minimumDirection);
 					toRadiansInPlace(maximumDirection);
 					toRadiansInPlace(minimumRotation);
 					toRadiansInPlace(maximumRotation);
+				} else {
+					properties.load(archive);
 				}
 				dirty = true;
 			}
@@ -259,25 +264,28 @@ namespace MV {
 			virtual bool serializePoints() const override { return false; }
 
 			template <class Archive>
-			void save(Archive & archive, std::uint32_t const /*version*/) const {
+			void save(Archive & archive, std::uint32_t const) const {
 				archive(
-					CEREAL_NVP(spawnProperties),
-					CEREAL_NVP(spawnParticles),
-					CEREAL_NVP(relativeParentCount),
-					cereal::make_nvp("relativeNodePosition", (relativeParentCount >= 0 ? std::weak_ptr<MV::Scene::Node>() : relativeNodePosition)),
 					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
 				);
 			}
 
 			template <class Archive>
-			void load(Archive & archive, std::uint32_t const /*version*/) {
-				archive(
-					CEREAL_NVP(spawnProperties),
-					CEREAL_NVP(spawnParticles),
-					CEREAL_NVP(relativeParentCount),
-					cereal::make_nvp("relativeNodePosition", (relativeParentCount >= 0 ? std::weak_ptr<MV::Scene::Node>() : relativeNodePosition)),
-					cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this))
-				);
+			void load(Archive & archive, std::uint32_t const version) {
+				if (version == 0) {
+					properties.load(archive, {
+						"spawnProperties",
+						"spawnParticles", 
+						"relativeParentCount",
+						"relativeNodePosition"
+					});
+				}
+				
+				archive(cereal::make_nvp("Drawable", cereal::base_class<Drawable>(this)));
+				
+				if (relativeParentCount >= 0) {
+					relativeNodePosition.reset();
+				}
 			}
 
 			template <class Archive>
@@ -305,27 +313,27 @@ namespace MV {
 
 				particle.textureCount = ourTextures->size();
 
-				particle.position = spawnProperties.getPosition() - threadData[a_groupIndex].particleOffset;
-				particle.rotation = spawnProperties.getRotation();
+				particle.position = spawnProperties->getPosition() - threadData[a_groupIndex].particleOffset;
+				particle.rotation = spawnProperties->getRotation();
 				particle.change.rotationalChange = spawnProperties.getRotationChange();
 
-				particle.direction = spawnProperties.getDirection();
-				particle.change.rateOfChange = spawnProperties.getRateOfChange();
-				particle.change.directionalChangeRad(spawnProperties.getDirectionChange());
+				particle.direction = spawnProperties->getDirection();
+				particle.change.rateOfChange = spawnProperties->getRateOfChange();
+				particle.change.directionalChangeRad(spawnProperties->getDirectionChange());
 
-				spawnProperties.setSpeed(particle.change.beginSpeed, particle.change.endSpeed);
+				spawnProperties->setSpeed(particle.change.beginSpeed, particle.change.endSpeed);
 
-				spawnProperties.setScale(particle.change.beginScale, particle.change.endScale);
+				spawnProperties->setScale(particle.change.beginScale, particle.change.endScale);
 
-				spawnProperties.setColor(particle.change.beginColor, particle.change.endColor);
+				spawnProperties->setColor(particle.change.beginColor, particle.change.endColor);
 
-				particle.change.animationFramesPerSecond = mix(spawnProperties.minimum.animationFramesPerSecond, spawnProperties.maximum.animationFramesPerSecond, randomNumber(0.0f, 1.0f));
+				particle.change.animationFramesPerSecond = mix(spawnProperties->minimum.animationFramesPerSecond, spawnProperties->maximum.animationFramesPerSecond, randomNumber(0.0f, 1.0f));
 
-				particle.change.maxLifespan = mix(spawnProperties.minimum.maxLifespan, spawnProperties.maximum.maxLifespan, randomNumber(0.0f, 1.0f));
+				particle.change.maxLifespan = mix(spawnProperties->minimum.maxLifespan, spawnProperties->maximum.maxLifespan, randomNumber(0.0f, 1.0f));
 
 				particle.setGravity(
-					mix(spawnProperties.minimum.gravityMagnitude, spawnProperties.maximum.gravityMagnitude, randomNumber(0.0f, 1.0f)),
-					randomMix(spawnProperties.minimum.gravityDirection, spawnProperties.maximum.gravityDirection)
+					mix(spawnProperties->minimum.gravityMagnitude, spawnProperties->maximum.gravityMagnitude, randomNumber(0.0f, 1.0f)),
+					randomMix(spawnProperties->minimum.gravityDirection, spawnProperties->maximum.gravityDirection)
 				);
 
 				//particle.update(0.0f);
@@ -346,7 +354,7 @@ namespace MV {
 
 			double accumulatedTimeDelta = 0.0f;
 
-			EmitterSpawnProperties spawnProperties;
+			MV_PROPERTY((EmitterSpawnProperties), spawnProperties);
 
 			size_t emitterThreads;
 
@@ -361,11 +369,10 @@ namespace MV {
 
 			std::vector<ThreadData> threadData;
 
-			std::weak_ptr<MV::Scene::Node> relativeNodePosition;
+			MV_PROPERTY((std::weak_ptr<MV::Scene::Node>), relativeNodePosition);
+			MV_PROPERTY((int32_t), relativeParentCount, -1);
+			MV_PROPERTY((bool), spawnParticles, true);
 
-			int relativeParentCount = -1;
-
-			bool spawnParticles = true;
 			static const double MAX_TIME_STEP;
 			static const int MAX_PARTICLES_PER_FRAME = 2500;
             std::atomic<double> timeSinceLastParticle = {0.0};

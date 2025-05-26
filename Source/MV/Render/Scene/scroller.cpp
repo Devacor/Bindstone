@@ -6,6 +6,7 @@
 #include "text.h"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Scroller);
+CEREAL_CLASS_VERSION(MV::Scene::Scroller, 1);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_scenescroller);
 
 namespace MV {

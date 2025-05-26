@@ -29,17 +29,21 @@ namespace MV {
 			void shiftContentByDelta(const MV::Point<int> & deltaPosition);
 
 			template <class Archive>
-			void save(Archive & archive, std::uint32_t const /*version*/) const {
+			void save(Archive & archive, std::uint32_t const) const {
 				archive(
-					CEREAL_NVP(contentView),
 					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
 				);
 			}
 
 			template <class Archive>
-			void load(Archive & archive, std::uint32_t const /*version*/) {
+			void load(Archive & archive, std::uint32_t const version) {
+				if (version == 0) {
+					properties.load(archive, {
+						"contentView"
+					});
+				}
+				
 				archive(
-					CEREAL_NVP(contentView),
 					cereal::make_nvp("Clickable", cereal::base_class<Clickable>(this))
 				);
 			}
@@ -67,7 +71,7 @@ namespace MV {
 			}
 
 		private:
-			std::shared_ptr<Node> contentView;
+			MV_PROPERTY((std::shared_ptr<Node>), contentView);
 
 			PointPrecision dragStartThreshold = 5.0f;
 			PointPrecision cancelTimeThreshold = 1.25f;

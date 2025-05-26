@@ -11,7 +11,7 @@
 
 CEREAL_REGISTER_TYPE(MV::Scene::Spine);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_scenespine);
-
+CEREAL_CLASS_VERSION(MV::Scene::Spine::FileBundle, 1);
 
 namespace MV{
 	void initializeSpineBindings() {
@@ -121,18 +121,18 @@ namespace MV{
 
 		void Spine::loadImplementation(const FileBundle &a_fileBundle, bool a_refreshBounds) {
 			unloadImplementation();
-			if (a_fileBundle.skeletonFile != "") {
-				atlas = spAtlas_createFromFile(a_fileBundle.atlasFile.c_str(), 0);
-				require<ResourceException>(atlas, "Error reading atlas file:", a_fileBundle.atlasFile);
+			if (*a_fileBundle.skeletonFile != "") {
+				atlas = spAtlas_createFromFile(a_fileBundle.atlasFile->c_str(), 0);
+				require<ResourceException>(atlas, "Error reading atlas file:", *a_fileBundle.atlasFile);
 
 				spSkeletonJson* json = spSkeletonJson_create(atlas);
-				json->scale = a_fileBundle.loadScale;
-				spSkeletonData* skeletonData = spSkeletonJson_readSkeletonDataFile(json, a_fileBundle.skeletonFile.c_str());
+				json->scale = *a_fileBundle.loadScale;
+				spSkeletonData* skeletonData = spSkeletonJson_readSkeletonDataFile(json, a_fileBundle.skeletonFile->c_str());
 				if (!skeletonData && json->error) {
 					require<ResourceException>(false, json->error);
 				}
 				else if (!skeletonData) {
-					require<ResourceException>(false, "Error reading skeleton data file: ", a_fileBundle.skeletonFile);
+					require<ResourceException>(false, "Error reading skeleton data file: ", *a_fileBundle.skeletonFile);
 				}
 
 				//TODO <low>: maybe cache instead of disposing to avoid file reads.
@@ -140,7 +140,7 @@ namespace MV{
 
 				skeleton = spSkeleton_create(skeletonData);
 
-				require<ResourceException>(skeleton && skeleton->bones && skeleton->bones[0], a_fileBundle.skeletonFile, " has no bones!");
+				require<ResourceException>(skeleton && skeleton->bones && skeleton->bones[0], *a_fileBundle.skeletonFile, " has no bones!");
 				rootBone = skeleton->bones[0];
 
 				animationState = spAnimationState_create(spAnimationStateData_create(skeleton->data));
@@ -521,15 +521,13 @@ namespace MV{
 
 		const double Spine::TIME_BETWEEN_UPDATES = 1.0 / 60.0;
 
-
-		Spine::FileBundle::FileBundle(const std::string &a_skeletonFile, const std::string &a_atlasFile, float a_loadScale /*= 1.0f*/):
-			skeletonFile(a_skeletonFile),
-			atlasFile(a_atlasFile),
-			loadScale(a_loadScale) {
+		Spine::FileBundle::FileBundle() {
 		}
 
-		Spine::FileBundle::FileBundle():
-			loadScale(1.0f) {
+		Spine::FileBundle::FileBundle(const std::string &a_skeletonFile, const std::string &a_atlasFile, float a_loadScale /*= 1.0f*/) {
+			*skeletonFile = a_skeletonFile;
+			*atlasFile = a_atlasFile;
+			*loadScale = a_loadScale;
 		}
 
 		//log("%d event: %s, %s: %d, %f, %s", trackIndex, animationName, event->data->name, event->intValue, event->floatValue, event->stringValue);

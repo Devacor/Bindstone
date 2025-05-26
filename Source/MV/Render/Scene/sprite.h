@@ -97,7 +97,7 @@ namespace MV {
 
 			void updateTextureCoordinates(size_t a_textureId) override;
 
-			Property<uint16_t> ourSubdivisions{ properties, "subdivisions", 0 };
+			MV_NAMED_PROPERTY((uint16_t), "subdivisions", ourSubdivisions, 0);
 		};
 
 		template<typename PointAssign>

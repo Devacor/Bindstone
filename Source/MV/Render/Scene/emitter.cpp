@@ -8,6 +8,7 @@
 CEREAL_REGISTER_TYPE(MV::Scene::Emitter);
 CEREAL_CLASS_VERSION(MV::Scene::ParticleChangeValues, 1);
 CEREAL_CLASS_VERSION(MV::Scene::EmitterSpawnProperties, 1);
+CEREAL_CLASS_VERSION(MV::Scene::Emitter, 1);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_sceneemitter);
 
 namespace MV {
@@ -53,48 +54,48 @@ namespace MV {
 				getDirection = [&] {return randomMix(minimumDirection, maximumDirection); };
 			}
 
-			if (minimum.rotationalChange == maximum.rotationalChange) {
-				getRotationChange = [&] {return minimum.rotationalChange; };
+			if (minimum->rotationalChange == maximum->rotationalChange) {
+				getRotationChange = [&] {return minimum->rotationalChange; };
 			} else {
-				getRotationChange = [&] {return randomMix(minimum.rotationalChange, maximum.rotationalChange); };
+				getRotationChange = [&] {return randomMix(minimum->rotationalChange, maximum->rotationalChange); };
 			}
 
-			if (minimum.rateOfChange == maximum.rateOfChange) {
-				getRateOfChange = [&] {return minimum.rateOfChange; };
+			if (minimum->rateOfChange == maximum->rateOfChange) {
+				getRateOfChange = [&] {return minimum->rateOfChange; };
 			} else {
-				getRateOfChange = [&] {return randomMix(minimum.rateOfChange, maximum.rateOfChange); };
+				getRateOfChange = [&] {return randomMix(minimum->rateOfChange, maximum->rateOfChange); };
 			}
 
-			if (minimum.directionalChangeRad() == maximum.directionalChangeRad()) {
-				getDirectionChange = [&] {return minimum.directionalChangeRad(); };
+			if (minimum->directionalChangeRad() == maximum->directionalChangeRad()) {
+				getDirectionChange = [&] {return minimum->directionalChangeRad(); };
 			} else {
-				getDirectionChange = [&] {return randomMix(minimum.directionalChangeRad(), maximum.directionalChangeRad()); };
+				getDirectionChange = [&] {return randomMix(minimum->directionalChangeRad(), maximum->directionalChangeRad()); };
 			}
 
-			if (MV::equals(minimum.beginSpeed, maximum.beginSpeed) && MV::equals(minimum.endSpeed, maximum.endSpeed)) {
-				setSpeed = [&](float& begin, float& end) {begin = minimum.beginSpeed; end = minimum.endSpeed; };
+			if (MV::equals(minimum->beginSpeed, maximum->beginSpeed) && MV::equals(minimum->endSpeed, maximum->endSpeed)) {
+				setSpeed = [&](float& begin, float& end) {begin = minimum->beginSpeed; end = minimum->endSpeed; };
 			} else {
 				setSpeed = [&](float& begin, float& end) {
-					begin = mix(minimum.beginSpeed, maximum.beginSpeed, randomNumber(0.0f, 1.0f)); 
-					end = mix(minimum.endSpeed, maximum.endSpeed, randomNumber(0.0f, 1.0f));
+					begin = mix(minimum->beginSpeed, maximum->beginSpeed, randomNumber(0.0f, 1.0f)); 
+					end = mix(minimum->endSpeed, maximum->endSpeed, randomNumber(0.0f, 1.0f));
 				};
 			}
 
-			if (minimum.beginScale == maximum.beginScale && minimum.endScale == maximum.endScale) {
-				setScale = [&](Scale& begin, Scale& end) {begin = minimum.beginScale; end = minimum.endScale; };
+			if (minimum->beginScale == maximum->beginScale && minimum->endScale == maximum->endScale) {
+				setScale = [&](Scale& begin, Scale& end) {begin = minimum->beginScale; end = minimum->endScale; };
 			} else {
 				setScale = [&](Scale& begin, Scale& end) {
-					begin = mix(minimum.beginScale, maximum.beginScale, randomNumber(0.0f, 1.0f));
-					end = mix(minimum.endScale, maximum.endScale, randomNumber(0.0f, 1.0f));
+					begin = mix(minimum->beginScale, maximum->beginScale, randomNumber(0.0f, 1.0f));
+					end = mix(minimum->endScale, maximum->endScale, randomNumber(0.0f, 1.0f));
 				};
 			}
 
-			if (minimum.beginColor == maximum.beginColor && minimum.endColor == maximum.endColor) {
-				setColor = [&](Color& begin, Color& end) {begin = minimum.beginColor; end = minimum.endColor; };
+			if (minimum->beginColor == maximum->beginColor && minimum->endColor == maximum->endColor) {
+				setColor = [&](Color& begin, Color& end) {begin = minimum->beginColor; end = minimum->endColor; };
 			} else {
 				setColor = [&](Color& begin, Color& end) {
-					begin = randomMix(minimum.beginColor, maximum.beginColor);
-					end = randomMix(minimum.endColor, maximum.endColor);
+					begin = randomMix(minimum->beginColor, maximum->beginColor);
+					end = randomMix(minimum->endColor, maximum->endColor);
 				};
 			}
 
@@ -104,9 +105,9 @@ namespace MV {
 		void Emitter::spawnParticlesOnMultipleThreads(double a_dt) {
 			timeSinceLastParticle.store(timeSinceLastParticle.load() + a_dt);
 			size_t particlesToSpawn = nextSpawnDelta <= 0 ? 0 : static_cast<size_t>(timeSinceLastParticle.load() / nextSpawnDelta);
-			size_t totalParticles = std::min(std::accumulate(threadData.begin(), threadData.end(), static_cast<size_t>(0), [](size_t a_total, ThreadData& a_group) {return a_group.particles.size() + a_total; }), static_cast<size_t>(spawnProperties.maximumParticles));
+			size_t totalParticles = std::min(std::accumulate(threadData.begin(), threadData.end(), static_cast<size_t>(0), [](size_t a_total, ThreadData& a_group) {return a_group.particles.size() + a_total; }), static_cast<size_t>(spawnProperties->maximumParticles));
 
-			particlesToSpawn = std::min(particlesToSpawn + totalParticles, static_cast<size_t>(spawnProperties.maximumParticles)) - totalParticles;
+			particlesToSpawn = std::min(particlesToSpawn + totalParticles, static_cast<size_t>(spawnProperties->maximumParticles)) - totalParticles;
 
 			double maxParticlesPerFramePerThread = 500;
 
@@ -123,7 +124,7 @@ namespace MV {
 					});
 				}
 				timeSinceLastParticle = 0.0f;
-				nextSpawnDelta = randomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
+				nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
 
 				pool.tasks(spawnTasks, [=]() {
 					updateParticlesOnMultipleThreads(a_dt);
@@ -135,7 +136,7 @@ namespace MV {
 				}
 
 				timeSinceLastParticle = 0.0f;
-				nextSpawnDelta = randomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
+				nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
 				updateParticlesOnMultipleThreads(a_dt);
 			} else {
 				updateParticlesOnMultipleThreads(a_dt);
@@ -284,19 +285,19 @@ namespace MV {
 
 		std::shared_ptr<Emitter> Emitter::properties(const EmitterSpawnProperties & a_emitterProperties) {
 			spawnProperties = a_emitterProperties;
-			nextSpawnDelta = randomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
-			spawnProperties.dirty = true;
+			nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
+			spawnProperties->dirty = true;
 			return std::static_pointer_cast<Emitter>(shared_from_this());
 		}
 
 		const EmitterSpawnProperties & Emitter::properties() const {
-			return spawnProperties;
+			return *spawnProperties;
 		}
 
 		EmitterSpawnProperties & Emitter::properties() {
 			nextSpawnDelta = 0.0f; //zero this out since we return a reference to the properties and may need to re-evaluate our nextSpawnDelta.
-			spawnProperties.dirty = true;
-			return spawnProperties;
+			spawnProperties->dirty = true;
+			return *spawnProperties;
 		}
 
 		bool Emitter::enabled() const {
@@ -326,7 +327,7 @@ namespace MV {
 				if (relativeNodePosition.expired() && relativeParentCount >= 0) {
 					makeRelativeToParent(relativeParentCount);
 				}
-				spawnProperties.initializeCallbacks();
+				spawnProperties->initializeCallbacks();
 
 				MV::Point<> particleOffset;
 				if (auto lockedRelativeNodePosition = relativeNodePosition.lock()) {
@@ -340,7 +341,7 @@ namespace MV {
 					accumulatedTimeDelta = 0.0;
 
 					if (nextSpawnDelta == 0.0) {
-						nextSpawnDelta = randomNumber(spawnProperties.minimumSpawnRate, spawnProperties.maximumSpawnRate);
+						nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
 					}
 					if (enabled()) {
 						spawnParticlesOnMultipleThreads(dt);
@@ -352,8 +353,9 @@ namespace MV {
 		}
 
 		Emitter::~Emitter() {
+			spawnParticles = false;
 			while (updateInProgress.load()) {
-				std::this_thread::sleep_for(std::chrono::nanoseconds(100));
+				std::this_thread::sleep_for(std::chrono::microseconds(100));
 			}
 		}
 
@@ -370,20 +372,18 @@ namespace MV {
 		}
 
 		BoxAABB<> Emitter::boundsImplementation() {
-			return{ spawnProperties.minimumPosition, spawnProperties.maximumPosition };
+			return{ spawnProperties->minimumPosition, spawnProperties->maximumPosition };
 		}
 
 		void Emitter::boundsImplementation(const BoxAABB<> &a_bounds) {
-			spawnProperties.minimumPosition = a_bounds.minPoint;
-			spawnProperties.maximumPosition = a_bounds.maxPoint;
+			spawnProperties->minimumPosition = a_bounds.minPoint;
+			spawnProperties->maximumPosition = a_bounds.maxPoint;
 		}
 
 		std::shared_ptr<Component> Emitter::cloneHelper(const std::shared_ptr<Component> &a_clone) {
 			Drawable::cloneHelper(a_clone);
 			auto emitterClone = std::static_pointer_cast<Emitter>(a_clone);
 			emitterClone->emitterThreads = emitterThreads;
-			emitterClone->spawnProperties = spawnProperties;
-			emitterClone->spawnParticles = spawnParticles;
 			return a_clone;
 		}
 

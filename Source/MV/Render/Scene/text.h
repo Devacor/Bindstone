@@ -25,7 +25,7 @@ namespace MV {
 
 			DrawableDerivedAccessors(Text)
 
-				UtfString text() const {
+			UtfString text() const {
 				return formattedText->string();
 			}
 			std::shared_ptr<Text> text(const UtfString& a_text);
@@ -65,6 +65,11 @@ namespace MV {
 			}
 
 			std::shared_ptr<Text> wrapping(MV::TextWrapMethod a_newWrapMethod, MV::PointPrecision a_width) {
+				// Debug check
+				if (!static_cast<bool>(formattedText)) {
+					throw std::runtime_error("Text::wrapping() called with null formattedText");
+				}
+				
 				formattedText->wrapping(a_newWrapMethod, a_width);
 
 				auto adjustedBounds = bounds();
@@ -75,6 +80,11 @@ namespace MV {
 			}
 
 			std::shared_ptr<Text> wrapping(MV::TextWrapMethod a_newWrapMethod) {
+				// Debug check
+				if (!static_cast<bool>(formattedText)) {
+					throw std::runtime_error("Text::wrapping() called with null formattedText");
+				}
+				
 				auto self = std::static_pointer_cast<Text>(shared_from_this());
 				formattedText->wrapping(a_newWrapMethod);
 				return self;
@@ -140,6 +150,11 @@ namespace MV {
 			}
 
 			std::shared_ptr<Text> minimumLineHeight(PointPrecision a_newLineHeight) {
+				// Debug check
+				if (!static_cast<bool>(formattedText)) {
+					throw std::runtime_error("Text::minimumLineHeight() called with null formattedText");
+				}
+				
 				formattedText->minimumLineHeight(a_newLineHeight);
 				return std::static_pointer_cast<Text>(shared_from_this());
 			}
@@ -179,6 +194,10 @@ namespace MV {
 			Text(const std::weak_ptr<Node>& a_owner, TextLibrary& a_textLibrary) :
 				Text(a_owner, a_textLibrary, DEFAULT_ID) {
 			}
+			Text(const Text&) = delete;
+			Text& operator=(const Text&) = delete;
+			Text(Text&&) = delete;
+			Text& operator=(Text&&) = delete;
 
 			template <class Archive>
 			void save(Archive& archive, std::uint32_t const /*version*/) const {

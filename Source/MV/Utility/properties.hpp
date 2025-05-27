@@ -289,71 +289,100 @@ namespace MV {
 		Property& operator=(T&& v) { value = std::move(v); return *this; }
 
 		// ===== CONVERSION OPERATORS =====
-		operator const T& () const noexcept {
+		operator const T& () const {
 			return value;
 		}
 
 		// Mutable access  
-		operator T& () noexcept {
+		operator T& () {
 			return value;
 		}
 
 		// Boolean conversion for all non-bool types
-		operator bool() const noexcept requires (!std::is_same_v<T, bool>) && requires(const T& t) { static_cast<bool>(t); } {
+		operator bool() const requires (!std::is_same_v<T, bool>) && requires(const T& t) { static_cast<bool>(t); } {
 			return static_cast<bool>(value);
 		}
 
 		// ===== ACCESSOR METHODS =====
-		T& get() noexcept { return value; }
-		const T& get() const noexcept { return value; }
+		T& get() {
+			return value;
+		}
+		const T& get() const {
+			return value;
+		}
 
 		// ===== DEREFERENCE OPERATORS =====
 		// For smart pointers: operator* returns the smart pointer itself
-		T& operator*() noexcept requires SmartPointer<T> {
+		T& operator*() requires SmartPointer<T> {
 			return value;
 		}
-		const T& operator*() const noexcept requires SmartPointer<T> {
+		const T& operator*() const requires SmartPointer<T> {
 			return value;
 		}
 
 		// For raw pointers: operator* dereferences
-		auto& operator*() noexcept requires std::is_pointer_v<T> {
+		auto& operator*() requires std::is_pointer_v<T> {
 			return *value;
 		}
-		const auto& operator*() const noexcept requires std::is_pointer_v<T> {
+		const auto& operator*() const requires std::is_pointer_v<T> {
 			return *value;
 		}
 
 		// For non-pointer types: operator* returns the value
-		T& operator*() noexcept requires (!PointerLike<T>) {
+		T& operator*() requires (!PointerLike<T>) {
 			return value;
 		}
-		const T& operator*() const noexcept requires (!PointerLike<T>) {
+		const T& operator*() const requires (!PointerLike<T>) {
 			return value;
 		}
 
 		// ===== ARROW OPERATORS =====
 		// For smart pointers: arrow goes through to element_type
-		auto operator->() noexcept requires SmartPointer<T> {
+		template<typename U = T>
+		auto operator->() -> std::enable_if_t<SmartPointer<U>, typename U::element_type*> {
+			// Check if the smart pointer is null
+			if (!value) {
+				// Safely get property name, or use a default if not available
+				std::string propName = "unknown";
+				try {
+					propName = name();
+				} catch (...) {
+					// name() might fail if we're in a bad state
+				}
+				throw std::runtime_error("Property<" + propName + ">: Attempted to dereference null smart pointer");
+			}
 			return value.get();
 		}
-		auto operator->() const noexcept requires SmartPointer<T> {
+
+		template<typename U = T>
+		auto operator->() const -> std::enable_if_t<SmartPointer<U>, typename U::element_type*> {
+			// Check if the smart pointer is null
+			if (!value) {
+				// Safely get property name, or use a default if not available
+				std::string propName = "unknown";
+				try {
+					propName = name();
+				} catch (...) {
+					// name() might fail if we're in a bad state
+				}
+				throw std::runtime_error("Property<" + propName + ">: Attempted to dereference null smart pointer");
+			}
 			return value.get();
 		}
 
 		// For raw pointers: just return the pointer
-		T operator->() noexcept requires std::is_pointer_v<T> {
+		T operator->() requires std::is_pointer_v<T> {
 			return value;
 		}
-		T operator->() const noexcept requires std::is_pointer_v<T> {
+		T operator->() const requires std::is_pointer_v<T> {
 			return value;
 		}
 
 		// For class types: return pointer to value
-		T* operator->() noexcept requires std::is_class_v<T> && (!PointerLike<T>) {
+		T* operator->() requires std::is_class_v<T> && (!PointerLike<T>) {
 			return &value;
 		}
-		const T* operator->() const noexcept requires std::is_class_v<T> && (!PointerLike<T>) {
+		const T* operator->() const requires std::is_class_v<T> && (!PointerLike<T>) {
 			return &value;
 		}
 
@@ -361,75 +390,74 @@ namespace MV {
 		// We provide both spaceship and traditional operators to avoid ambiguity
 
 		// Three-way comparison with another Property
-		auto operator<=>(const Property& other) const noexcept
-			requires std::three_way_comparable<T> {
+		auto operator<=>(const Property& other) const requires std::three_way_comparable<T> {
 			return value <=> other.value;
 		}
 
 		// Equality with another Property
-		bool operator==(const Property& other) const noexcept {
+		bool operator==(const Property& other) const {
 			return value == other.value;
 		}
 
 		// Traditional comparison operators with any type U
 		template<typename U>
-		bool operator<(const U& other) const noexcept {
+		bool operator<(const U& other) const {
 			return value < other;
 		}
 
 		template<typename U>
-		bool operator<=(const U& other) const noexcept {
+		bool operator<=(const U& other) const {
 			return value <= other;
 		}
 
 		template<typename U>
-		bool operator>(const U& other) const noexcept {
+		bool operator>(const U& other) const {
 			return value > other;
 		}
 
 		template<typename U>
-		bool operator>=(const U& other) const noexcept {
+		bool operator>=(const U& other) const {
 			return value >= other;
 		}
 
 		template<typename U>
-		bool operator==(const U& other) const noexcept {
+		bool operator==(const U& other) const {
 			return value == other;
 		}
 
 		template<typename U>
-		bool operator!=(const U& other) const noexcept {
+		bool operator!=(const U& other) const {
 			return value != other;
 		}
 
 		// Friend operators for reverse comparisons (e.g., 0 > property)
 		template<typename U>
-		friend bool operator<(const U& lhs, const Property& rhs) noexcept {
+		friend bool operator<(const U& lhs, const Property& rhs) {
 			return lhs < rhs.value;
 		}
 
 		template<typename U>
-		friend bool operator<=(const U& lhs, const Property& rhs) noexcept {
+		friend bool operator<=(const U& lhs, const Property& rhs) {
 			return lhs <= rhs.value;
 		}
 
 		template<typename U>
-		friend bool operator>(const U& lhs, const Property& rhs) noexcept {
+		friend bool operator>(const U& lhs, const Property& rhs) {
 			return lhs > rhs.value;
 		}
 
 		template<typename U>
-		friend bool operator>=(const U& lhs, const Property& rhs) noexcept {
+		friend bool operator>=(const U& lhs, const Property& rhs) {
 			return lhs >= rhs.value;
 		}
 
 		template<typename U>
-		friend bool operator==(const U& lhs, const Property& rhs) noexcept {
+		friend bool operator==(const U& lhs, const Property& rhs) {
 			return lhs == rhs.value;
 		}
 
 		template<typename U>
-		friend bool operator!=(const U& lhs, const Property& rhs) noexcept {
+		friend bool operator!=(const U& lhs, const Property& rhs) {
 			return lhs != rhs.value;
 		}
 

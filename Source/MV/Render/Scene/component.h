@@ -287,7 +287,7 @@ namespace MV {
 			std::unique_ptr<Task> rootTask;
 			MV_PROPERTY((std::string), componentId);
 			//does not clone.
-			MV_PROPERTY((std::weak_ptr<Node>), componentOwner, {}, [](auto&, auto&){});
+			MV_PROPERTY((std::weak_ptr<Node>), componentOwner, [](auto&, auto&){});
 		};
 	}
 }

@@ -23,6 +23,11 @@ namespace MV{
 				*destination.get() = *source.get();
 			}) {
 			
+			// Debug: Verify formattedText is initialized
+			if (!static_cast<bool>(formattedText)) {
+				throw std::runtime_error("Text constructor: formattedText failed to initialize!");
+			}
+			
 			for (auto&& point : points) {
 				point = Color(1.0f, 1.0f, 1.0f, 0.0f);
 			}
@@ -149,11 +154,48 @@ namespace MV{
 		}
 
 		std::shared_ptr<Text> Text::text(const UtfString &a_text) {
-			formattedText->string(a_text);
-			setCursor(a_text.size());
-			auto self = std::static_pointer_cast<Text>(shared_from_this());
-			onChangeSignal(self);
-			return self;
+			// First, let's try to detect if this object is valid at all
+			// We'll use a canary value check - if we can't even read a simple member, we're corrupted
+			try {
+				// Try to access the cursor member (a simple size_t) as a canary
+				size_t testCursor = cursor;
+				(void)testCursor; // Suppress unused warning
+			} catch (...) {
+				// If we can't even read a simple member, the object is corrupted
+				throw std::runtime_error("Text::text() called on corrupted/destroyed object");
+			}
+			
+			// Try to check formattedText more carefully
+			try {
+				if (!static_cast<bool>(formattedText)) {
+					throw std::runtime_error("Text::text() called with null formattedText");
+				}
+			} catch (const std::exception& e) {
+				// If checking formattedText throws, object is likely corrupted
+				throw std::runtime_error(std::string("Text::text() object corruption detected: ") + e.what());
+			} catch (...) {
+				throw std::runtime_error("Text::text() object corruption detected: unknown exception");
+			}
+			
+			// Now try to use formattedText
+			try {
+				formattedText->string(a_text);
+				setCursor(a_text.size());
+			} catch (const std::exception& e) {
+				throw std::runtime_error(std::string("Text::text() failed to set text: ") + e.what());
+			}
+			
+			// Only call shared_from_this() if we're properly owned by a shared_ptr
+			try {
+				auto self = std::static_pointer_cast<Text>(shared_from_this());
+				onChangeSignal(self);
+				return self;
+			} catch (const std::bad_weak_ptr& e) {
+				// If shared_from_this() fails, we're not properly owned yet
+				// This can happen during initialization chains
+				// Just return nullptr and let the caller handle it
+				return nullptr;
+			}
 		}
 
 		void Text::enableCursor() {

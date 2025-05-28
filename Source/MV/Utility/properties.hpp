@@ -342,33 +342,11 @@ namespace MV {
 		// For smart pointers: arrow goes through to element_type
 		template<typename U = T>
 		auto operator->() -> std::enable_if_t<SmartPointer<U>, typename U::element_type*> {
-			// Check if the smart pointer is null
-			if (!value) {
-				// Safely get property name, or use a default if not available
-				std::string propName = "unknown";
-				try {
-					propName = name();
-				} catch (...) {
-					// name() might fail if we're in a bad state
-				}
-				throw std::runtime_error("Property<" + propName + ">: Attempted to dereference null smart pointer");
-			}
 			return value.get();
 		}
 
 		template<typename U = T>
 		auto operator->() const -> std::enable_if_t<SmartPointer<U>, typename U::element_type*> {
-			// Check if the smart pointer is null
-			if (!value) {
-				// Safely get property name, or use a default if not available
-				std::string propName = "unknown";
-				try {
-					propName = name();
-				} catch (...) {
-					// name() might fail if we're in a bad state
-				}
-				throw std::runtime_error("Property<" + propName + ">: Attempted to dereference null smart pointer");
-			}
 			return value.get();
 		}
 
@@ -629,67 +607,37 @@ namespace MV {
 		// Serialization methods
 		void save(cereal::JSONOutputArchive& ar) const override {
 			if (allowSerialization) { 
-				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
-					// For PropertyOwner types, save their property registry
-					ar(cereal::make_nvp(name(), value.reflection()));
-				} else {
-					ar(cereal::make_nvp(name(), value));
-				}
+				ar(cereal::make_nvp(name(), value));
 			}
 		}
 
 		void load(cereal::JSONInputArchive& ar, bool a_usingPropertyOverride) override {
 			if (!a_usingPropertyOverride || allowSerialization) {
-				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
-					// For PropertyOwner types, load their property registry
-					ar(cereal::make_nvp(name(), value.reflection()));
-				} else {
-					ar(cereal::make_nvp(name(), value));
-				}
+				ar(cereal::make_nvp(name(), value));
 			}
 		}
 
 		void save(cereal::BinaryOutputArchive& ar) const override {
 			if (allowSerialization) { 
-				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
-					// For PropertyOwner types, save their property registry
-					ar(cereal::make_nvp(name(), value.reflection()));
-				} else {
-					ar(cereal::make_nvp(name(), value));
-				}
+				ar(cereal::make_nvp(name(), value));
 			}
 		}
 
 		void load(cereal::BinaryInputArchive& ar, bool a_usingPropertyOverride) override {
 			if (!a_usingPropertyOverride || allowSerialization) {
-				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
-					// For PropertyOwner types, load their property registry
-					ar(cereal::make_nvp(name(), value.reflection()));
-				} else {
-					ar(cereal::make_nvp(name(), value));
-				}
+				ar(cereal::make_nvp(name(), value));
 			}
 		}
 
 		void save(cereal::PortableBinaryOutputArchive& ar) const override {
 			if (allowSerialization) { 
-				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
-					// For PropertyOwner types, save their property registry
-					ar(cereal::make_nvp(name(), value.reflection()));
-				} else {
-					ar(cereal::make_nvp(name(), value));
-				}
+				ar(cereal::make_nvp(name(), value));
 			}
 		}
 
 		void load(cereal::PortableBinaryInputArchive& ar, bool a_usingPropertyOverride) override {
 			if (!a_usingPropertyOverride || allowSerialization) {
-				if constexpr (std::is_base_of_v<PropertyOwner, T>) {
-					// For PropertyOwner types, load their property registry
-					ar(cereal::make_nvp(name(), value.reflection()));
-				} else {
-					ar(cereal::make_nvp(name(), value));
-				}
+				ar(cereal::make_nvp(name(), value));
 			}
 		}
 

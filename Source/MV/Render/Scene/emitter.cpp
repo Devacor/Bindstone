@@ -6,9 +6,9 @@
 #include "cereal/archives/portable_binary.hpp"
 
 CEREAL_REGISTER_TYPE(MV::Scene::Emitter);
-CEREAL_CLASS_VERSION(MV::Scene::ParticleChangeValues, 1);
-CEREAL_CLASS_VERSION(MV::Scene::EmitterSpawnProperties, 1);
-CEREAL_CLASS_VERSION(MV::Scene::Emitter, 1);
+CEREAL_CLASS_VERSION(MV::Scene::ParticleChangeValues, 2);
+CEREAL_CLASS_VERSION(MV::Scene::EmitterSpawnProperties, 2);
+CEREAL_CLASS_VERSION(MV::Scene::Emitter, 2);
 CEREAL_REGISTER_DYNAMIC_INIT(mv_sceneemitter);
 
 namespace MV {
@@ -37,65 +37,65 @@ namespace MV {
 			if (!dirty) { return; }
 
 			if (minimumPosition == maximumPosition) {
-				getPosition = [&] {return *minimumPosition; };
+				getPosition = [this] {return *minimumPosition; };
 			} else {
-				getPosition = [&] { return randomMix(minimumPosition, maximumPosition); };
+				getPosition = [this] { return randomMix(minimumPosition, maximumPosition); };
 			}
 
 			if (minimumRotation == maximumRotation) {
-				getRotation = [&] {return *minimumRotation; };
+				getRotation = [this] {return *minimumRotation; };
 			} else {
-				getRotation = [&] {return randomMix(minimumRotation, maximumRotation); };
+				getRotation = [this] {return randomMix(minimumRotation, maximumRotation); };
 			}
 
 			if (minimumDirection == maximumDirection) {
-				getDirection = [&] {return *minimumDirection; };
+				getDirection = [this] {return *minimumDirection; };
 			} else {
-				getDirection = [&] {return randomMix(minimumDirection, maximumDirection); };
+				getDirection = [this] {return randomMix(minimumDirection, maximumDirection); };
 			}
 
 			if (minimum->rotationalChange == maximum->rotationalChange) {
-				getRotationChange = [&] {return *minimum->rotationalChange; };
+				getRotationChange = [this] {return minimum->rotationalChange; };
 			} else {
-				getRotationChange = [&] {return randomMix(minimum->rotationalChange, maximum->rotationalChange); };
+				getRotationChange = [this] {return randomMix(minimum->rotationalChange, maximum->rotationalChange); };
 			}
 
 			if (minimum->rateOfChange == maximum->rateOfChange) {
-				getRateOfChange = [&] {return *minimum->rateOfChange; };
+				getRateOfChange = [this] {return minimum->rateOfChange; };
 			} else {
-				getRateOfChange = [&] {return randomMix(minimum->rateOfChange, maximum->rateOfChange); };
+				getRateOfChange = [this] {return randomMix(minimum->rateOfChange, maximum->rateOfChange); };
 			}
 
 			if (minimum->directionalChangeRad() == maximum->directionalChangeRad()) {
-				getDirectionChange = [&] {return minimum->directionalChangeRad(); };
+				getDirectionChange = [this] {return minimum->directionalChangeRad(); };
 			} else {
-				getDirectionChange = [&] {return randomMix(minimum->directionalChangeRad(), maximum->directionalChangeRad()); };
+				getDirectionChange = [this] {return randomMix(minimum->directionalChangeRad(), maximum->directionalChangeRad()); };
 			}
 
-			if (MV::equals(*minimum->beginSpeed, *maximum->beginSpeed) && MV::equals(*minimum->endSpeed, *maximum->endSpeed)) {
-				setSpeed = [&](float& begin, float& end) { begin = *minimum->beginSpeed; end = *minimum->endSpeed; };
+			if (MV::equals(minimum->beginSpeed, maximum->beginSpeed) && MV::equals(minimum->endSpeed, maximum->endSpeed)) {
+				setSpeed = [this](float& begin, float& end) { begin = minimum->beginSpeed; end = minimum->endSpeed; };
 			} else {
-				setSpeed = [&](float& begin, float& end) {
-					begin = mix(*minimum->beginSpeed, *maximum->beginSpeed, randomNumber(0.0f, 1.0f));
-					end = mix(*minimum->endSpeed, *maximum->endSpeed, randomNumber(0.0f, 1.0f));
+				setSpeed = [this](float& begin, float& end) {
+					begin = mix(minimum->beginSpeed, maximum->beginSpeed, randomNumber(0.0f, 1.0f));
+					end = mix(minimum->endSpeed, maximum->endSpeed, randomNumber(0.0f, 1.0f));
 				};
 			}
 
 			if (minimum->beginScale == maximum->beginScale && minimum->endScale == maximum->endScale) {
-				setScale = [&](Scale& begin, Scale& end) { begin = *minimum->beginScale; end = *minimum->endScale; };
+				setScale = [this](Scale& begin, Scale& end) { begin = minimum->beginScale; end = minimum->endScale; };
 			} else {
-				setScale = [&](Scale& begin, Scale& end) {
-					begin = mix(*minimum->beginScale, *maximum->beginScale, randomNumber(0.0f, 1.0f));
-					end = mix(*minimum->endScale, *maximum->endScale, randomNumber(0.0f, 1.0f));
+				setScale = [this](Scale& begin, Scale& end) {
+					begin = mix(minimum->beginScale, maximum->beginScale, randomNumber(0.0f, 1.0f));
+					end = mix(minimum->endScale, maximum->endScale, randomNumber(0.0f, 1.0f));
 				};
 			}
 
 			if (minimum->beginColor == maximum->beginColor && minimum->endColor == maximum->endColor) {
-				setColor = [&](Color& begin, Color& end) { begin = *minimum->beginColor; end = *minimum->endColor; };
+				setColor = [this](Color& begin, Color& end) { begin = minimum->beginColor; end = minimum->endColor; };
 			} else {
-				setColor = [&](Color& begin, Color& end) {
-					begin = randomMix(*minimum->beginColor, *maximum->beginColor);
-					end = randomMix(*minimum->endColor, *maximum->endColor);
+				setColor = [this](Color& begin, Color& end) {
+					begin = randomMix(minimum->beginColor, maximum->beginColor);
+					end = randomMix(minimum->endColor, maximum->endColor);
 				};
 			}
 
@@ -115,7 +115,7 @@ namespace MV {
 				std::vector<MV::ThreadPool::Job> spawnTasks;
 				spawnTasks.reserve(emitterThreads);
 				for (size_t currentThread = 0; currentThread < emitterThreads; ++currentThread) {
-					spawnTasks.emplace_back([=]() {
+					spawnTasks.emplace_back([this, currentThread, a_dt, particlesToSpawn, maxParticlesPerFramePerThread]() {
 						size_t particlesToSpawnThisThread = std::min(particlesToSpawn / emitterThreads, static_cast<size_t>(maxParticlesPerFramePerThread));
 						threadData[currentThread].particles.reserve(particlesToSpawnThisThread);
 						for (size_t count = 0; count < particlesToSpawnThisThread; ++count) {
@@ -126,7 +126,7 @@ namespace MV {
 				timeSinceLastParticle = 0.0f;
 				nextSpawnDelta = randomNumber(spawnProperties->minimumSpawnRate, spawnProperties->maximumSpawnRate);
 
-				pool.tasks(spawnTasks, [=]() {
+				pool.tasks(spawnTasks, [this, a_dt]() {
 					updateParticlesOnMultipleThreads(a_dt);
 				});
 			} else if (particlesToSpawn > 0) {
@@ -147,14 +147,14 @@ namespace MV {
 			std::vector<MV::ThreadPool::Job> spawnTasks;
 			spawnTasks.reserve(emitterThreads);
 			for (size_t currentThread = 0; currentThread < emitterThreads; ++currentThread) {
-				spawnTasks.emplace_back([=]() {
+				spawnTasks.emplace_back([this, currentThread, a_dt]() {
 					threadData[currentThread].particles.erase(std::remove_if(threadData[currentThread].particles.begin(), threadData[currentThread].particles.end(), [&](Particle& a_particle) {
 						return a_particle.update(a_dt);
 					}), threadData[currentThread].particles.end());
 					loadParticlesToPoints(currentThread);
 				});
 			}
-			pool.tasks(spawnTasks, [=]() {
+			pool.tasks(spawnTasks, [this]() {
 				loadParticlePointsFromGroups();
 			});
 		}
@@ -216,7 +216,7 @@ namespace MV {
 			std::vector<MV::ThreadPool::Job> copyTasks;
 			copyTasks.reserve(emitterThreads);
 			for (int group = 0; group < emitterThreads; ++group) {
-				copyTasks.emplace_back([=]() {
+				copyTasks.emplace_back([this, group, pointOffset, vertexOffset]() {
 					size_t indexSize = threadData[group].vertexIndices.size();
 					moveCopy(pointBuffer, threadData[group].points, pointOffset);
 					moveCopy(vertexIndexBuffer, threadData[group].vertexIndices, vertexOffset);
@@ -227,7 +227,7 @@ namespace MV {
 				pointOffset += threadData[group].points.size();
 				vertexOffset += threadData[group].vertexIndices.size();
 			}
-			pool.tasks(copyTasks, [=]() {
+			pool.tasks(copyTasks, [this]() {
 				loadPointsFromBufferAndAllowUpdate();
 			});
 		}
@@ -336,7 +336,7 @@ namespace MV {
 				for (auto&& data : threadData) {
 					data.particleOffset = particleOffset;
 				}
-				pool.task([&]() {
+				pool.task([this, a_dt]() {
 					double dt = std::min(accumulatedTimeDelta, MAX_TIME_STEP);
 					accumulatedTimeDelta = 0.0;
 

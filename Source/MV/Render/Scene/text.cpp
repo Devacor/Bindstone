@@ -22,15 +22,10 @@ namespace MV{
 			formattedText(propertyManager, "formattedText", std::make_shared<FormattedText>(a_textLibrary, a_defaultFontIdentifier), [](auto& source, auto& destination) { 
 				if (source.get() && destination.get()) {
 					*destination.get() = *source.get();
-				} else {
-					MV::error("Failed to clone formattedText! Investigation needed.");
+				} else if (source.get() && !destination.get()) {
+					destination = std::make_shared<FormattedText>(*source.get());
 				}
 			}) {
-			
-			// Debug: Verify formattedText is initialized
-			if (!static_cast<bool>(formattedText)) {
-				throw std::runtime_error("Text constructor: formattedText failed to initialize!");
-			}
 			
 			for (auto&& point : points) {
 				point = Color(1.0f, 1.0f, 1.0f, 0.0f);

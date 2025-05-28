@@ -127,6 +127,8 @@ namespace MV {
 				}
 			}
 		}
+		// Sort the file paths to ensure deterministic ordering
+		std::sort(imageFiles.begin(), imageFiles.end());
 		return imageFiles;
 	}
 

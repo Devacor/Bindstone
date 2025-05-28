@@ -36,17 +36,19 @@ std::shared_ptr<MV::Scene::Button> button(const std::shared_ptr<MV::Scene::Node>
 
 	auto idleScene = button->owner()->make("idle")->attach<MV::Scene::Sprite>()->bounds(a_size)->colors(boxIdleColors)->owner();
 
-	auto activeBox = activeScene->attach<MV::Scene::Text>(a_library, fontIdentifier)->bounds({ MV::Point<>(), a_size });
-	activeBox->justification(MV::TextJustification::CENTER);
-	activeBox->wrapping(MV::TextWrapMethod::HARD);
-	activeBox->minimumLineHeight(a_size.height);
-	activeBox->text(a_text);
+	auto activeBox = activeScene->attach<MV::Scene::Text>(a_library);
+	activeBox->bounds({ MV::Point<>(), a_size });
+	activeBox->justification(MV::TextJustification::CENTER)
+		->wrapping(MV::TextWrapMethod::HARD)
+		->minimumLineHeight(a_size.height)
+		->text(a_text);
 
-	auto idleBox = idleScene->attach<MV::Scene::Text>(a_library, fontIdentifier)->bounds({ MV::Point<>(), a_size });
-	idleBox->justification(MV::TextJustification::CENTER);
-	idleBox->wrapping(MV::TextWrapMethod::HARD);
-	idleBox->minimumLineHeight(a_size.height);
-	idleBox->text(a_text);
+	auto idleBox = idleScene->attach<MV::Scene::Text>(a_library);
+	idleBox->bounds({ MV::Point<>(), a_size });
+	idleBox->justification(MV::TextJustification::CENTER)
+		->wrapping(MV::TextWrapMethod::HARD)
+		->minimumLineHeight(a_size.height)
+		->text(a_text);
 
 	button->activeNode(activeScene);
 	button->idleNode(idleScene);

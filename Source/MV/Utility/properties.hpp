@@ -137,7 +137,16 @@ namespace MV {
 		PropertyManager& reflection() { return propertyManager; }
 		const PropertyManager& reflection() const { return propertyManager; }
 
+		// Default constructor and move operations
+		PropertyOwner() = default;
+		PropertyOwner(PropertyOwner&&) = default;
+		PropertyOwner& operator=(PropertyOwner&&) = default;
 
+		virtual ~PropertyOwner() = default;
+
+	protected:
+		// Copy operations are protected to prevent slicing
+		// Derived classes must explicitly opt-in to copying
 		PropertyOwner(const PropertyOwner& a_rhs) {
 			*this = a_rhs;
 		}
@@ -148,13 +157,6 @@ namespace MV {
 			}
 			return *this;
 		}
-
-		// Default constructor and move operations
-		PropertyOwner() = default;
-		PropertyOwner(PropertyOwner&&) = default;
-		PropertyOwner& operator=(PropertyOwner&&) = default;
-
-		virtual ~PropertyOwner() = default;
 	};
 
 	// PropertyBase - abstract base for all properties
@@ -698,8 +700,11 @@ namespace MV {
 
 		void cloneToTarget(PropertyBase& target) override {
 			auto& t = static_cast<Property<T>&>(target);
-			if (customClone) customClone(*this, t);
-			else t.value = value;
+			if (customClone){
+				customClone(*this, t);
+			} else {
+				t.value = value;
+			}
 		}
 	};
 

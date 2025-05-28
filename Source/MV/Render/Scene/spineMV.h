@@ -123,17 +123,13 @@ namespace MV {
 				FileBundle();
 				
 				// Add copy constructor and assignment operator
-				FileBundle(const FileBundle& other) : PropertyOwner() {
-					*skeletonFile = *other.skeletonFile;
-					*atlasFile = *other.atlasFile;
-					*loadScale = *other.loadScale;
+				FileBundle(const FileBundle& other) : PropertyOwner(other) {
+					// PropertyOwner copy constructor handles property cloning
 				}
 				
 				FileBundle& operator=(const FileBundle& other) {
 					if (this != &other) {
-						*skeletonFile = *other.skeletonFile;
-						*atlasFile = *other.atlasFile;
-						*loadScale = *other.loadScale;
+						PropertyOwner::operator=(other);
 					}
 					return *this;
 				}

@@ -18,17 +18,17 @@ std::shared_ptr<MV::Scene::Button> makeButton(const std::shared_ptr<MV::Scene::N
 
 	auto activeBox = activeScene->attach<MV::Scene::Text>(a_library, a_fontIdentifier);
 	activeBox->bounds({ MV::Point<>(), a_size });
-	activeBox->justification(MV::TextJustification::CENTER);
-	activeBox->wrapping(MV::TextWrapMethod::HARD);
-	activeBox->minimumLineHeight(a_size.height);
-	activeBox->text(a_text);
+	activeBox->justification(MV::TextJustification::CENTER)
+		->wrapping(MV::TextWrapMethod::HARD)
+		->minimumLineHeight(a_size.height)
+		->text(a_text);
 	
 	auto idleBox = idleScene->attach<MV::Scene::Text>(a_library, a_fontIdentifier);
 	idleBox->bounds({ MV::Point<>(), a_size });
-	idleBox->justification(MV::TextJustification::CENTER);
-	idleBox->wrapping(MV::TextWrapMethod::HARD);
-	idleBox->minimumLineHeight(a_size.height);
-	idleBox->text(a_text);
+	idleBox->justification(MV::TextJustification::CENTER)  
+		->wrapping(MV::TextWrapMethod::HARD)
+		->minimumLineHeight(a_size.height)
+		->text(a_text);
 
 	button->activeNode(activeScene);
 	button->idleNode(idleScene);
@@ -100,17 +100,17 @@ MV::Scene::SafeComponent<MV::Scene::Button> makeColorButton(MV::Draw2D &a_render
 
 	auto activeBox = activeScene->attach<MV::Scene::Text>(a_library);
 	activeBox->bounds({ MV::Point<>(), a_size });
-	activeBox->justification(MV::TextJustification::CENTER);
-	activeBox->wrapping(MV::TextWrapMethod::HARD);
-	activeBox->minimumLineHeight(a_size.height);
-	activeBox->text(a_text);
+	activeBox->justification(MV::TextJustification::CENTER)
+		->wrapping(MV::TextWrapMethod::HARD)
+		->minimumLineHeight(a_size.height)
+		->text(a_text);
 
 	auto idleBox = idleScene->attach<MV::Scene::Text>(a_library);
 	idleBox->bounds({ MV::Point<>(), a_size });
-	idleBox->justification(MV::TextJustification::CENTER);
-	idleBox->wrapping(MV::TextWrapMethod::HARD);
-	idleBox->minimumLineHeight(a_size.height);
-	idleBox->text(a_text);
+	idleBox->justification(MV::TextJustification::CENTER)  
+		->wrapping(MV::TextWrapMethod::HARD)
+		->minimumLineHeight(a_size.height)
+		->text(a_text);
 
 	button->activeNode(activeScene);
 	button->idleNode(idleScene);
@@ -160,17 +160,17 @@ std::shared_ptr<MV::Scene::Button> makeSceneButton(const std::shared_ptr<MV::Sce
 
 	auto activeBox = activeScene->attach<MV::Scene::Text>(a_library, a_fontIdentifier);
 	activeBox->bounds({ MV::Point<>(), a_size });
-	activeBox->justification(MV::TextJustification::LEFT);
-	activeBox->wrapping(MV::TextWrapMethod::NONE, a_size.width);
-	activeBox->minimumLineHeight(a_size.height);
-	activeBox->text(a_text);
+	activeBox->justification(MV::TextJustification::LEFT)
+		->wrapping(MV::TextWrapMethod::NONE, a_size.width)
+		->minimumLineHeight(a_size.height)
+		->text(a_text);
 
 	auto idleBox = idleScene->attach<MV::Scene::Text>(a_library, a_fontIdentifier);
 	idleBox->bounds({ MV::Point<>(), a_size });
-	idleBox->justification(MV::TextJustification::LEFT);
-	idleBox->wrapping(MV::TextWrapMethod::NONE, a_size.width);
-	idleBox->minimumLineHeight(a_size.height);
-	idleBox->text(a_text);
+	idleBox->justification(MV::TextJustification::LEFT)
+		->wrapping(MV::TextWrapMethod::NONE, a_size.width)
+		->minimumLineHeight(a_size.height)
+		->text(a_text);
 
 	button->activeNode(activeScene);
 	button->idleNode(idleScene);
@@ -185,13 +185,14 @@ std::shared_ptr<MV::Scene::Button> makeSceneButton(const std::shared_ptr<MV::Sce
 std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::TapDevice &a_mouse, const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_textLibrary, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_startContents) {
 	auto box = a_parent->make(a_name)->
 		attach<MV::Scene::Sprite>()->bounds(a_size)->colors({ {InterfaceColors::TEXTBOX_TOP}, { InterfaceColors::TEXTBOX_BOTTOM }, { InterfaceColors::TEXTBOX_BOTTOM }, { InterfaceColors::TEXTBOX_TOP } })->owner();
-	auto text = box->attach<MV::Scene::Text>(a_textLibrary, "small");
-	text->justification(MV::TextJustification::CENTER);
-	text->wrapping(MV::TextWrapMethod::NONE, a_size.width);
-	text->minimumLineHeight(a_size.height);
-	text->text(a_startContents);
+	auto text = box->attach<MV::Scene::Text>(a_textLibrary, "small")
+		->bounds({ MV::Point<>(), a_size })
+		->justification(MV::TextJustification::CENTER)
+		->wrapping(MV::TextWrapMethod::NONE, a_size.width)
+		->minimumLineHeight(a_size.height)
+		->text(a_startContents);
 	auto clickable = box->attach<MV::Scene::Clickable>(a_mouse)->bounds(a_size);
-	std::weak_ptr<MV::Scene::Text> weakText = text.self();
+	std::weak_ptr<MV::Scene::Text> weakText = text;
 	clickable->onAccept.connect("register", [=](std::shared_ptr<MV::Scene::Clickable> a_clickable){
 		if(auto lockedText = weakText.lock()){
 			a_panel->activateText(lockedText);
@@ -202,7 +203,7 @@ std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::TapDev
 	text->onEnter.connect("unregister", [=](std::shared_ptr<MV::Scene::Text> a_text){
 		a_panel->deactivateText();
 	});
-	return text.get();
+	return text;
 }
 
 std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::Services &a_services, const std::shared_ptr<MV::Scene::Node> &a_parent, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_startContents) {
@@ -212,10 +213,11 @@ std::shared_ptr<MV::Scene::Text> makeInputField(EditorPanel *a_panel, MV::Servic
 std::shared_ptr<MV::Scene::Text> makeLabel(const std::shared_ptr<MV::Scene::Node> &a_parent, MV::TextLibrary &a_textLibrary, const std::string &a_name, const MV::Size<> &a_size, const MV::UtfString &a_startContents){
 	auto box = a_parent->make(a_name)->attach<MV::Scene::Sprite>()->bounds(a_size)->colors({ { InterfaceColors::LABEL_TOP },{ InterfaceColors::LABEL_BOTTOM },{ InterfaceColors::LABEL_BOTTOM },{ InterfaceColors::LABEL_TOP } })->owner();
 	auto text = box->attach<MV::Scene::Text>(a_textLibrary, "small");
-	text->justification(MV::TextJustification::CENTER);
-	text->minimumLineHeight(a_size.height);
-	text->wrapping(MV::TextWrapMethod::NONE, a_size.width);
-	text->text(a_startContents);
+	text->bounds({ MV::Point<>(), a_size });
+	text->justification(MV::TextJustification::CENTER)
+		->minimumLineHeight(a_size.height)
+		->wrapping(MV::TextWrapMethod::NONE, a_size.width)
+		->text(a_startContents);
 	return text.get();
 }
 

@@ -1380,22 +1380,22 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 
 	auto maximumEndSize = makeSlider(panel.services(), [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum->endScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
-	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().maximum->endScale->x));
+	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().maximum->endScale.x));
 	auto minimumEndSize = makeSlider(panel.services(), [&, maximumEndSize](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum->endScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		maximumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().minimum->endScale->x));
+	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().minimum->endScale.x));
 
 	makeLabel(grid, panel.services(), "startSize", labelSize, U8_STR("Start Size"));
 	auto startSize = makeSlider(node->renderer(), *panel.services().get<MV::TapDevice>(), [=](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum->beginScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		maximumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().maximum->beginScale->x));
+	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().maximum->beginScale.x));
 	makeSlider(panel.services(), grid, [&, minimumEndSize, startSize](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum->beginScale = MV::mix(-60.0f, 60.0f, a_slider->percent());
 		startSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
 		minimumEndSize->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().minimum->beginScale->x));
+	}, MV::unmix(-60.0f, 60.0f, controls->elementToEdit->properties().minimum->beginScale.x));
 	grid->add(startSize);
 	
 	makeLabel(grid, panel.services(), "endSize", labelSize, U8_STR("End Size"));
@@ -1415,11 +1415,11 @@ SelectedEmitterEditorPanel::SelectedEmitterEditorPanel(EditorControls &a_panel, 
 	makeLabel(grid, panel.services(), "rotationChange", labelSize, U8_STR("Rotation Change"));
 	auto maximumRotationChange = makeSlider(node->renderer(), *panel.services().get<MV::TapDevice>(), [&](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().maximum->rotationalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
-	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().maximum->rotationalChange->z));
+	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().maximum->rotationalChange.z));
 	makeSlider(panel.services(), grid, [&, maximumRotationChange](std::shared_ptr<MV::Scene::Slider> a_slider){
 		controls->elementToEdit->properties().minimum->rotationalChange = {0.0f, 0.0f, MV::mix(-720.0f, 720.0f, a_slider->percent())};
 		maximumRotationChange->component<MV::Scene::Slider>()->percent(a_slider->percent());
-	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().minimum->rotationalChange->z));
+	}, MV::unmix(-720.0f, 720.0f, controls->elementToEdit->properties().minimum->rotationalChange.z));
 	grid->add(maximumRotationChange);
 
 	auto maxEndColor = makeColorButton(panel.services(), panel.content(), buttonSize, controls->elementToEdit->properties().maximum->endColor, [&](const MV::Color &a_color) {

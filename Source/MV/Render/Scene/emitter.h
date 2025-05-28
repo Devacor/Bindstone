@@ -12,15 +12,15 @@ namespace MV {
 		Point<> randomMix(const Point<> &a_rhs, const Point<> &a_lhs);
 		Color randomMix(const Color &a_rhs, const Color &a_lhs);
 
-		struct ParticleChangeValues : public PropertyOwner {
+		struct ParticleChangeValues {
 		private:
-			MV_NAMED_PROPERTY((AxisAngles), "directionalChange", directionalChangeTemplate);
+			AxisAngles directionalChangeTemplate;
 			AxisAngles directionalChangeCurrent;
 		public:
-			inline void rateOfChangeDeg(AxisAngles a_rateOfChange) { *rateOfChange = toRadians(a_rateOfChange); }
-			inline AxisAngles rateOfChangeDeg() { return toDegrees(*rateOfChange); }
+			inline void rateOfChangeDeg(AxisAngles a_rateOfChange) { rateOfChange = toRadians(a_rateOfChange); }
+			inline AxisAngles rateOfChangeDeg() { return toDegrees(rateOfChange); }
 
-			MV_PROPERTY((AxisAngles), rateOfChange);
+			AxisAngles rateOfChange;
 
 			AxisAngles directionalChangeDeg(const AxisAngles &a_newDirectionalChange) {
 				return directionalChangeRad(toRadians(a_newDirectionalChange));
@@ -41,62 +41,80 @@ namespace MV {
 			}
 
 			AxisAngles directionalChangeDeg() const {
-				return toDegrees(*directionalChangeTemplate);
+				return toDegrees(directionalChangeTemplate);
 			}
 			AxisAngles currentDirectionalChangeDeg() const {
 				return toDegrees(directionalChangeCurrent);
 			}
 
 			AxisAngles directionalChangeRad() const {
-				return *directionalChangeTemplate;
+				return directionalChangeTemplate;
 			}
 			AxisAngles currentDirectionalChangeRad() const {
 				return directionalChangeCurrent;
 			}
 
-			MV_PROPERTY((AxisAngles), rotationalChange);
+			AxisAngles rotationalChange;
 
-			MV_PROPERTY((float), beginSpeed, 0.0f);
-			MV_PROPERTY((float), endSpeed, 0.0f);
+			float beginSpeed = 0.0f;
+			float endSpeed = 0.0f;
 
-			MV_PROPERTY((Scale), beginScale);
-			MV_PROPERTY((Scale), endScale);
+			Scale beginScale;
+			Scale endScale;
 
-			MV_PROPERTY((Color), beginColor);
-			MV_PROPERTY((Color), endColor);
+			Color beginColor;
+			Color endColor;
 
-			MV_PROPERTY((float), maxLifespan, 1.0f);
+			float maxLifespan = 1.0f;
 
-			MV_PROPERTY((float), gravityMagnitude, 0.0f);
-			MV_PROPERTY((AxisAngles), gravityDirection);
+			float gravityMagnitude = 0.0f;
+			AxisAngles gravityDirection;
 
-			MV_PROPERTY((float), animationFramesPerSecond, 10.0f);
+			float animationFramesPerSecond = 10.0f;
 
 			template <class Archive>
 			void save(Archive & archive, std::uint32_t const) const {
-				reflection().save(archive);
+				archive(
+					cereal::make_nvp("rateOfChange", rateOfChange),
+					cereal::make_nvp("directionalChange", directionalChangeTemplate),
+					cereal::make_nvp("rotationalChange", rotationalChange),
+					cereal::make_nvp("beginSpeed", beginSpeed),
+					cereal::make_nvp("endSpeed", endSpeed),
+					cereal::make_nvp("beginScale", beginScale),
+					cereal::make_nvp("endScale", endScale),
+					cereal::make_nvp("beginColor", beginColor),
+					cereal::make_nvp("endColor", endColor),
+					cereal::make_nvp("maxLifespan", maxLifespan),
+					cereal::make_nvp("gravityMagnitude", gravityMagnitude),
+					cereal::make_nvp("gravityDirection", gravityDirection),
+					cereal::make_nvp("animationFramesPerSecond", animationFramesPerSecond)
+				);
 			}
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if (version == 0) {
-					reflection().load(archive, {
-						"rateOfChange", "directionalChange", "rotationalChange",
-						"beginSpeed", "endSpeed",
-						"beginScale", "endScale",
-						"beginColor", "endColor",
-						"maxLifespan",
-						"gravityMagnitude", "gravityDirection",
-						"animationFramesPerSecond"
-					});
-					toRadiansInPlace(*rateOfChange);
-					toRadiansInPlace(*directionalChangeTemplate);
-					toRadiansInPlace(*rotationalChange);
-					toRadiansInPlace(*gravityDirection);
-				} else {
-					reflection().load(archive);
+				archive(
+					cereal::make_nvp("rateOfChange", rateOfChange),
+					cereal::make_nvp("directionalChange", directionalChangeTemplate),
+					cereal::make_nvp("rotationalChange", rotationalChange),
+					cereal::make_nvp("beginSpeed", beginSpeed),
+					cereal::make_nvp("endSpeed", endSpeed),
+					cereal::make_nvp("beginScale", beginScale),
+					cereal::make_nvp("endScale", endScale),
+					cereal::make_nvp("beginColor", beginColor),
+					cereal::make_nvp("endColor", endColor),
+					cereal::make_nvp("maxLifespan", maxLifespan),
+					cereal::make_nvp("gravityMagnitude", gravityMagnitude),
+					cereal::make_nvp("gravityDirection", gravityDirection),
+					cereal::make_nvp("animationFramesPerSecond", animationFramesPerSecond)
+				);
+				if (version < 1) {
+					toRadiansInPlace(rateOfChange);
+					toRadiansInPlace(directionalChangeTemplate);
+					toRadiansInPlace(rotationalChange);
+					toRadiansInPlace(gravityDirection);
 				}
-				directionalChangeCurrent = *directionalChangeTemplate;
+				directionalChangeCurrent = directionalChangeTemplate;
 			}
 		};
 
@@ -104,16 +122,16 @@ namespace MV {
 			//return true if dead.
 			inline bool update(double a_dt) {
 				float timeScale = static_cast<float>(a_dt);
-				totalLifespan = std::min(totalLifespan + timeScale, *change.maxLifespan);
+				totalLifespan = std::min(totalLifespan + timeScale, change.maxLifespan);
 
-				float mixValue = totalLifespan / *change.maxLifespan;
+				float mixValue = totalLifespan / change.maxLifespan;
 				
-				direction += change.currentDirectionalChangeRad(change.currentDirectionalChangeRad() + (*change.rateOfChange * timeScale)) * timeScale;
-				rotation += *change.rotationalChange * timeScale;
+				direction += change.currentDirectionalChangeRad(change.currentDirectionalChangeRad() + (change.rateOfChange * timeScale)) * timeScale;
+				rotation += change.rotationalChange * timeScale;
 
-				speed = mix(*change.beginSpeed, *change.endSpeed, mixValue);
-				scale = mix(*change.beginScale, *change.endScale, mixValue);
-				color = mix(*change.beginColor, *change.endColor, mixValue);
+				speed = mix(change.beginSpeed, change.endSpeed, mixValue);
+				scale = mix(change.beginScale, change.endScale, mixValue);
+				color = mix(change.beginColor, change.endColor, mixValue);
 
 				Point<> distance(0.0f, speed * timeScale, 0.0f);
 				TransformMatrix rotator;
@@ -124,7 +142,7 @@ namespace MV {
 				
 				//currentFrame = static_cast<int>(wrap(0.0f, static_cast<float>(textureCount), static_cast<float>(textureCount * (change.animationFramesPerSecond / timeScale))));
 				
-				return totalLifespan == *change.maxLifespan;
+				return totalLifespan == change.maxLifespan;
 			}
 
 			void reset() {
@@ -207,7 +225,7 @@ namespace MV {
 			
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if (version == 0) {
+				if (version < 2) {
 					reflection().load(archive, {
 						"maximumParticles",
 						"minimumSpawnRate", "maximumSpawnRate",
@@ -216,10 +234,12 @@ namespace MV {
 						"minimumRotation", "maximumRotation",
 						"minimum", "maximum"
 					});
-					toRadiansInPlace(*minimumDirection);
-					toRadiansInPlace(*maximumDirection);
-					toRadiansInPlace(*minimumRotation);
-					toRadiansInPlace(*maximumRotation);
+					if (version < 1) {
+						toRadiansInPlace(*minimumDirection);
+						toRadiansInPlace(*maximumDirection);
+						toRadiansInPlace(*minimumRotation);
+						toRadiansInPlace(*maximumRotation);
+					}
 				} else {
 					reflection().load(archive);
 				}
@@ -272,7 +292,7 @@ namespace MV {
 
 			template <class Archive>
 			void load(Archive & archive, std::uint32_t const version) {
-				if (version == 0) {
+				if (version < 2) {
 					reflection().load(archive, {
 						"spawnProperties",
 						"spawnParticles", 
@@ -327,13 +347,13 @@ namespace MV {
 
 				spawnProperties->setColor(particle.change.beginColor, particle.change.endColor);
 
-				particle.change.animationFramesPerSecond = mix(*spawnProperties->minimum->animationFramesPerSecond, *spawnProperties->maximum->animationFramesPerSecond, randomNumber(0.0f, 1.0f));
+				particle.change.animationFramesPerSecond = mix(spawnProperties->minimum->animationFramesPerSecond, spawnProperties->maximum->animationFramesPerSecond, randomNumber(0.0f, 1.0f));
 
-				particle.change.maxLifespan = mix(*spawnProperties->minimum->maxLifespan, *spawnProperties->maximum->maxLifespan, randomNumber(0.0f, 1.0f));
+				particle.change.maxLifespan = mix(spawnProperties->minimum->maxLifespan, spawnProperties->maximum->maxLifespan, randomNumber(0.0f, 1.0f));
 
 				particle.setGravity(
-					mix(*spawnProperties->minimum->gravityMagnitude, *spawnProperties->maximum->gravityMagnitude, randomNumber(0.0f, 1.0f)),
-					randomMix(*spawnProperties->minimum->gravityDirection, *spawnProperties->maximum->gravityDirection)
+					mix(spawnProperties->minimum->gravityMagnitude, spawnProperties->maximum->gravityMagnitude, randomNumber(0.0f, 1.0f)),
+					randomMix(spawnProperties->minimum->gravityDirection, spawnProperties->maximum->gravityDirection)
 				);
 
 				//particle.update(0.0f);

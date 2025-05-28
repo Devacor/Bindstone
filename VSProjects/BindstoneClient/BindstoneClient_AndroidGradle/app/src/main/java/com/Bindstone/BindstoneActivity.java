@@ -19,8 +19,6 @@ public class BindstoneActivity extends SDLActivity
             //"c++_shared",
             //"m",
             //"wolfssl",
-            //"boost_system",
-            //"boost_filesystem",
             //"hidapi", //I'm just compiling this directly into the app.
             "SDL2",
             "SDL2_Image",

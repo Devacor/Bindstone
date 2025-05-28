@@ -59,7 +59,7 @@ namespace MV {
 	};
 
 	//Converts a tuple to a vector of pointers to the elements in the tuple.
-	//Works with boost::any or chaiscript::Boxed_Value etc.
+	//Works with std::any or chaiscript::Boxed_Value etc.
 	template<class T, class... Args>
 	std::vector<T> toVector(const std::tuple<Args...>& t) {
 		std::vector<T> result;

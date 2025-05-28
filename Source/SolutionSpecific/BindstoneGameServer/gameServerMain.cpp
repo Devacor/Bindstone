@@ -192,16 +192,6 @@ auto performanceTestInvert(std::string name, MV::TransformMatrix& a) {
 	std::cout << "[" << name << "] == " << elapsed << "s\n";
 }
 
-// void multiplyTest(std::string name, boost::numeric::ublas::matrix<float>& a, boost::numeric::ublas::matrix<float>& b) {
-// 	MV::Stopwatch timer;
-// 	timer.start();
-// 	for (int i = 0; i < 1000000; ++i) {
-// 		boost::numeric::ublas::axpy_prod(a, b, a, true);
-// 	}
-// 	auto elapsed = timer.stop();
-// 	std::cout << "Test [" << name << "] == " << elapsed << "s\n";
-// }
-
 
 std::ostream& operator<<(std::ostream& os, const glm::mat4x4& a_matrix) {
 	for (int y = 0; y < 4; ++y) {

@@ -13,6 +13,9 @@
 
 namespace MV {
 
+	// Forward declaration
+	template<typename T> class Property;
+
 	inline std::string to_string(bool a_type) {
 		return a_type ? std::string("1") : std::string("0");
 	}
@@ -125,6 +128,23 @@ namespace MV {
 		return stream.str();
 	}
 
+	// Helper to unwrap Property objects to their underlying values
+	template<typename T>
+	inline auto unwrap_for_tuple(T&& value) -> decltype(auto) {
+		return std::forward<T>(value);
+	}
+
+	// Specialization for Property objects
+	template<typename T>
+	inline auto unwrap_for_tuple(const Property<T>& prop) -> const T& {
+		return prop.get();
+	}
+
+	template<typename T>
+	inline auto unwrap_for_tuple(Property<T>& prop) -> T& {
+		return prop.get();
+	}
+
 	class Exception : public virtual std::runtime_error {
 	public:
 		explicit Exception(const std::string& a_message) : std::runtime_error(a_message) {}
@@ -214,7 +234,7 @@ namespace MV {
 	template <typename ExceptionType, typename ConditionType, typename... Args>
 	inline void require(ConditionType&& a_condition, Args&&... a_args) {
 		if (!a_condition) {
-			ExceptionType exception(MV::to_string(std::make_tuple(std::forward<Args>(a_args)...)));
+			ExceptionType exception(MV::to_string(std::make_tuple(unwrap_for_tuple(std::forward<Args>(a_args))...)));
 			std::cerr << "ASSERTION FAILED! " << exception.what() << std::endl;
 			throw exception;
 		}

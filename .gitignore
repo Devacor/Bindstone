@@ -60,3 +60,7 @@ External/VSProjects/External_Windows/Builds/
 build_output.txt
 build_errors.txt
 enc_temp_folder/
+*.o
+Source/JaiScript/TestSuite/bin
+.vscode
+.claude

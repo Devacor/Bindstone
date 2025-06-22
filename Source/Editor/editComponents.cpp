@@ -478,7 +478,7 @@ void EditableEmitter::repositionHandles(bool a_fireOnChange, bool a_repositionEl
 		elementToEdit->properties().minimumPosition = corners.minPoint;
 		elementToEdit->properties().maximumPosition = corners.maxPoint;
 	}
-	auto newSize = elementToEdit->properties().maximumPosition - elementToEdit->properties().minimumPosition;
+	auto newSize = *elementToEdit->properties().maximumPosition - *elementToEdit->properties().minimumPosition;
 	if (a_repositionElement) {
 		elementToEdit->properties().minimumPosition = corners.minPoint;
 		elementToEdit->properties().maximumPosition = corners.minPoint + newSize;

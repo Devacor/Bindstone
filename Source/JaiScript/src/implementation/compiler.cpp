@@ -204,13 +204,13 @@ namespace jvm {
         // Set return type
         if (decl->return_type) {
             impl_->current_function->func->return_type = 
-                decl->return_type->base_type != value_type::jai_null_type ? 
-                decl->return_type->base_type : value_type::jai_null_type;
+                decl->return_type->base_type != script_value_type::jai_null_type ? 
+                decl->return_type->base_type : script_value_type::jai_null_type;
         }
         
         // Add parameters as local variables
         for (const auto& param : decl->parameters) {
-            value_type param_type = param.type ? param.type->base_type : value_type::jai_null_type;
+            script_value_type param_type = param.type ? param.type->base_type : script_value_type::jai_null_type;
             declare_local(param.name, param_type);
             impl_->current_function->func->parameter_names.push_back(param.name);
             impl_->current_function->func->parameter_types.push_back(param_type);
@@ -260,7 +260,7 @@ namespace jvm {
         // Determine storage location
         if (impl_->current_function && impl_->current_function->scope_depth > 0) {
             // Local variable
-            value_type var_type = decl->type ? decl->type->base_type : value_type::jai_null_type;
+            script_value_type var_type = decl->type ? decl->type->base_type : script_value_type::jai_null_type;
             uint8_t local_slot = declare_local(decl->name, var_type);
             emit(opcode::STORE_LOCAL, local_slot);
         } else {
@@ -273,6 +273,15 @@ namespace jvm {
     }
     
     void compiler::compile_class_decl(class_decl* decl) {
+        // TODO: Implement VM bytecode compilation for classes
+        // 1. Generate bytecode for class definition (DEFINE_CLASS)
+        // 2. Compile field declarations with default values
+        // 3. Compile constructor bytecode (handle overloading)
+        // 4. Compile method bodies to bytecode modules
+        // 5. Generate vtable for virtual method dispatch
+        // 6. Handle inheritance and base class resolution
+        // 7. Register class in VM's class registry
+        
         // Class compilation would go here
         // For now, just emit a warning
         warning("Class compilation not yet implemented: " + decl->name);
@@ -846,7 +855,7 @@ namespace jvm {
     }
     
     // Variable management
-    uint8_t compiler::declare_local(const std::string& name, value_type type) {
+    uint8_t compiler::declare_local(const std::string& name, script_value_type type) {
         if (!impl_->current_function) {
             error("Cannot declare local variable outside function");
             return UINT8_MAX;

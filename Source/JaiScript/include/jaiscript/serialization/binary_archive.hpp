@@ -118,31 +118,31 @@ public:
         write_uint8(static_cast<uint8_t>(value.type()));
         
         switch (value.type()) {
-            case value_type::jai_null_type:
+            case script_value_type::jai_null_type:
                 // Nothing to write
                 break;
                 
-            case value_type::jai_bool_type:
+            case script_value_type::jai_bool_type:
                 write_bool(value.as<script_bool>());
                 break;
                 
-            case value_type::jai_int_type:
+            case script_value_type::jai_int_type:
                 write_int64(value.as<script_int>());
                 break;
                 
-            case value_type::jai_float_type:
+            case script_value_type::jai_float_type:
                 write_float64(value.as<script_float>());
                 break;
                 
-            case value_type::jai_string_type:
+            case script_value_type::jai_string_type:
                 write_string(value.as<script_string>());
                 break;
                 
-            case value_type::jai_char_type:
+            case script_value_type::jai_char_type:
                 write_uint8(static_cast<uint8_t>(value.as<script_char>()));
                 break;
                 
-            case value_type::jai_array_type: {
+            case script_value_type::jai_array_type: {
                 const auto& arr = value.as_array();
                 write_uint32(static_cast<uint32_t>(arr.size()));
                 for (const auto& elem : arr) {
@@ -151,7 +151,7 @@ public:
                 break;
             }
             
-            case value_type::jai_map_type: {
+            case script_value_type::jai_map_type: {
                 const auto& map = value.as_map();
                 write_uint32(static_cast<uint32_t>(map.size()));
                 for (const auto& [k, v] : map) {
@@ -161,7 +161,7 @@ public:
                 break;
             }
             
-            case value_type::jai_shared_ptr_type: {
+            case script_value_type::jai_shared_ptr_type: {
                 // Handle shared_ptr serialization
                 auto shared_val = std::get<std::shared_ptr<script_value>>(value.storage_);
                 const void* raw_ptr = shared_val.get();
@@ -181,7 +181,7 @@ public:
                 break;
             }
             
-            case value_type::jai_weak_ptr_type: {
+            case script_value_type::jai_weak_ptr_type: {
                 // Handle weak_ptr - promote to shared_ptr first
                 auto weak_val = std::get<std::weak_ptr<script_value>>(value.storage_);
                 if (auto shared_val = weak_val.lock()) {
@@ -200,7 +200,7 @@ public:
                 break;
             }
             
-            case value_type::jai_object_type: {
+            case script_value_type::jai_object_type: {
                 // Self-describing binary format: property names array + values in order
                 auto type_info = value.get_type_info();
                 std::string type_name = type_info ? type_info->type_name : "unknown";
@@ -220,7 +220,7 @@ public:
                         if (class_def) {
                             for (const auto& prop_name : class_def->get_property_names()) {
                                 auto getter = class_def->get_method("_get_" + prop_name);
-                                if (getter.type() == value_type::jai_function_type) {
+                                if (getter.type() == script_value_type::jai_function_type) {
                                     try {
                                         std::vector<script_value> args = {value};
                                         script_value prop_value = getter.as_function()(args);
@@ -418,28 +418,28 @@ public:
     script_value read_value() override {
         // Read type tag first
         uint8_t type_tag = read_uint8();
-        value_type vtype = static_cast<value_type>(type_tag);
+        script_value_type vtype = static_cast<script_value_type>(type_tag);
         
         switch (vtype) {
-            case value_type::jai_null_type:
+            case script_value_type::jai_null_type:
                 return script_value();
                 
-            case value_type::jai_bool_type:
+            case script_value_type::jai_bool_type:
                 return script_value(read_bool());
                 
-            case value_type::jai_int_type:
+            case script_value_type::jai_int_type:
                 return script_value(read_int64());
                 
-            case value_type::jai_float_type:
+            case script_value_type::jai_float_type:
                 return script_value(read_float64());
                 
-            case value_type::jai_string_type:
+            case script_value_type::jai_string_type:
                 return script_value(read_string());
                 
-            case value_type::jai_char_type:
+            case script_value_type::jai_char_type:
                 return script_value(static_cast<script_char>(read_uint8()));
                 
-            case value_type::jai_array_type: {
+            case script_value_type::jai_array_type: {
                 uint32_t size = read_uint32();
                 script_value array_val = script_value::make_array(nullptr);
                 auto& arr = const_cast<std::vector<script_value>&>(array_val.as_array());
@@ -450,7 +450,7 @@ public:
                 return array_val;
             }
             
-            case value_type::jai_map_type: {
+            case script_value_type::jai_map_type: {
                 uint32_t size = read_uint32();
                 script_value map_val = script_value::make_map(type_info::make_string(), nullptr);
                 auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
@@ -463,7 +463,7 @@ public:
                 return map_val;
             }
             
-            case value_type::jai_shared_ptr_type: {
+            case script_value_type::jai_shared_ptr_type: {
                 uint32_t id = read_uint32();
                 
                 if (id == 0) {
@@ -486,7 +486,7 @@ public:
                 }
             }
             
-            case value_type::jai_weak_ptr_type: {
+            case script_value_type::jai_weak_ptr_type: {
                 uint32_t id = read_uint32();
                 
                 if (id == 0) {
@@ -507,7 +507,7 @@ public:
                 }
             }
             
-            case value_type::jai_object_type: {
+            case script_value_type::jai_object_type: {
                 // Read self-describing object: type name + property names array + values
                 std::string type_name = read_string();
                 uint32_t property_count = read_uint32();

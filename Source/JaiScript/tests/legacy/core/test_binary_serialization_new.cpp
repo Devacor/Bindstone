@@ -268,7 +268,7 @@ JAI_TEST(null_pointer_serialization) {
     script_value result = engine.execute("from_binary(to_binary(null_ptr))");
     
     // Should get back something (implementation dependent)
-    expect_true(result.type() != value_type::jai_null_type || result.is_null());
+    expect_true(result.type() != script_value_type::jai_null_type || result.is_null());
 }
 
 JAI_TEST(binary_format_validation) {

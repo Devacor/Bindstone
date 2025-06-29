@@ -7,20 +7,20 @@ std::string type_info::to_string() const {
     std::stringstream ss;
     
     switch (base_type) {
-        case value_type::jai_null_type:
+        case script_value_type::jai_null_type:
             return "null";
-        case value_type::jai_int_type:
+        case script_value_type::jai_int_type:
             return "int";
-        case value_type::jai_float_type:
+        case script_value_type::jai_float_type:
             return "float";
-        case value_type::jai_string_type:
+        case script_value_type::jai_string_type:
             return "string";
-        case value_type::jai_char_type:
+        case script_value_type::jai_char_type:
             return "char";
-        case value_type::jai_bool_type:
+        case script_value_type::jai_bool_type:
             return "bool";
             
-        case value_type::jai_array_type:
+        case script_value_type::jai_array_type:
             if (!type_params.empty()) {
                 ss << "array<" << type_params[0]->to_string() << ">";
             } else {
@@ -28,7 +28,7 @@ std::string type_info::to_string() const {
             }
             return ss.str();
             
-        case value_type::jai_map_type:
+        case script_value_type::jai_map_type:
             if (type_params.size() >= 2) {
                 ss << "map<" << type_params[0]->to_string() 
                    << ", " << type_params[1]->to_string() << ">";
@@ -37,10 +37,10 @@ std::string type_info::to_string() const {
             }
             return ss.str();
             
-        case value_type::jai_object_type:
+        case script_value_type::jai_object_type:
             return type_name.empty() ? "object" : type_name;
             
-        case value_type::jai_function_type:
+        case script_value_type::jai_function_type:
             ss << "function<";
             if (!type_params.empty()) {
                 ss << type_params[0]->to_string() << "(";
@@ -55,7 +55,7 @@ std::string type_info::to_string() const {
             ss << ">";
             return ss.str();
             
-        case value_type::jai_reference_type:
+        case script_value_type::jai_reference_type:
             if (!type_params.empty()) {
                 ss << type_params[0]->to_string() << "&";
             } else {
@@ -63,7 +63,7 @@ std::string type_info::to_string() const {
             }
             return ss.str();
             
-        case value_type::jai_shared_ptr_type:
+        case script_value_type::jai_shared_ptr_type:
             if (!type_params.empty()) {
                 ss << "shared_ptr<" << type_params[0]->to_string() << ">";
             } else {
@@ -71,7 +71,7 @@ std::string type_info::to_string() const {
             }
             return ss.str();
             
-        case value_type::jai_weak_ptr_type:
+        case script_value_type::jai_weak_ptr_type:
             if (!type_params.empty()) {
                 ss << "weak_ptr<" << type_params[0]->to_string() << ">";
             } else {

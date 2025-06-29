@@ -46,19 +46,19 @@ namespace stdlib {
         const bool pretty = (indent >= 0);
 
         switch (val.type()) {
-        case value_type::jai_null_type:
+        case script_value_type::jai_null_type:
             oss << "null";
             break;
             
-        case value_type::jai_bool_type:
+        case script_value_type::jai_bool_type:
             oss << (val.as_bool() ? "true" : "false");
             break;
             
-        case value_type::jai_int_type:
+        case script_value_type::jai_int_type:
             oss << val.as_int();
             break;
             
-        case value_type::jai_float_type: {
+        case script_value_type::jai_float_type: {
             double d = val.as_float();
             if (std::isfinite(d)) {
                 oss << std::setprecision(15) << d;
@@ -75,11 +75,11 @@ namespace stdlib {
             break;
         }
             
-        case value_type::jai_string_type:
+        case script_value_type::jai_string_type:
             oss << '"' << escape_json_string(val.as_string()) << '"';
             break;
             
-        case value_type::jai_array_type: {
+        case script_value_type::jai_array_type: {
             const auto& arr = val.as_array();
             oss << '[';
             if (pretty && !arr.empty()) oss << '\n';
@@ -100,7 +100,7 @@ namespace stdlib {
             break;
         }
             
-        case value_type::jai_map_type: {
+        case script_value_type::jai_map_type: {
             const auto& map = val.as_map();
             oss << '{';
             if (pretty && !map.empty()) oss << '\n';
@@ -135,7 +135,7 @@ namespace stdlib {
             break;
         }
             
-        case value_type::jai_object_type: {
+        case script_value_type::jai_object_type: {
             // Try to extract as class_instance for C++ bound objects
             try {
                 auto instance = val.as<std::shared_ptr<class_instance>>();
@@ -160,7 +160,7 @@ namespace stdlib {
                     for (const auto& propName : classDef->get_property_names()) {
                         // Call the getter method to get property value
                         auto getter = classDef->get_method("_get_" + propName);
-                        if (getter.type() == value_type::jai_function_type) {
+                        if (getter.type() == script_value_type::jai_function_type) {
                             try {
                                 // Call getter with instance as 'this'
                                 std::vector<script_value> args = { val }; // Pass the instance itself
@@ -204,7 +204,7 @@ namespace stdlib {
             break;
         }
             
-        case value_type::jai_char_type:
+        case script_value_type::jai_char_type:
             // Treat char as single-character string
             oss << '"' << escape_json_string(std::string(1, val.as_char())) << '"';
             break;
@@ -485,7 +485,7 @@ namespace stdlib {
                                     auto class_def = temp_class_instance->get_class_definition();
                                     if (class_def) {
                                         script_value custom_constructor = class_def->get_method("_serialize_construct");
-                                        if (custom_constructor.type() == value_type::jai_function_type) {
+                                        if (custom_constructor.type() == script_value_type::jai_function_type) {
                                             // Use custom serialization constructor
                                             std::vector<script_value> args = { val };
                                             instance = custom_constructor.as_function()(args);

@@ -21,15 +21,15 @@ struct engine::implementation {
     // Type conversion registry
     struct TypeConversionRegistry {
         struct Conversion {
-            value_type from;
-            value_type to;
+            script_value_type from;
+            script_value_type to;
             int cost; // Conversion cost for overload resolution
             std::function<script_value(const script_value&)> converter;
         };
         
         std::vector<Conversion> conversions;
         
-        void registerConversion(value_type from, value_type to, int cost, 
+        void register_conversion(script_value_type from, script_value_type to, int cost, 
                                std::function<script_value(const script_value&)> converter) {
             // Remove existing conversion if any
             auto it = std::find_if(conversions.begin(), conversions.end(),
@@ -44,7 +44,7 @@ struct engine::implementation {
             }
         }
         
-        bool canConvert(value_type from, value_type to) const {
+        bool can_convert(script_value_type from, script_value_type to) const {
             if (from == to) return true;
             
             return std::any_of(conversions.begin(), conversions.end(),
@@ -53,7 +53,7 @@ struct engine::implementation {
                 });
         }
         
-        int getConversionCost(value_type from, value_type to) const {
+        int get_conversion_cost(script_value_type from, script_value_type to) const {
             if (from == to) return 0;
             
             auto it = std::find_if(conversions.begin(), conversions.end(),
@@ -64,7 +64,7 @@ struct engine::implementation {
             return (it != conversions.end()) ? it->cost : 1000;
         }
         
-        script_value convert(const script_value& value, value_type targetType) const {
+        script_value convert(const script_value& value, script_value_type targetType) const {
             if (value.type() == targetType) return value;
             
             auto it = std::find_if(conversions.begin(), conversions.end(),
@@ -133,10 +133,10 @@ struct engine::implementation {
         struct Overload {
             size_t argCount;
             script_value function;
-            std::vector<value_type> paramTypes; // Type signature for type-based matching
+            std::vector<script_value_type> paramTypes; // Type signature for type-based matching
             std::function<bool(const std::vector<script_value>&)> typeMatcher; // Custom type matcher
             
-            Overload(size_t count, const script_value& func, const std::vector<value_type>& types = {})
+            Overload(size_t count, const script_value& func, const std::vector<script_value_type>& types = {})
                 : argCount(count), function(func), paramTypes(types) {}
         };
         
@@ -151,7 +151,7 @@ struct engine::implementation {
             conversions = registry;
         }
         
-        void addOverload(size_t argCount, const script_value& func, const std::vector<value_type>& paramTypes = {}) {
+        void addOverload(size_t argCount, const script_value& func, const std::vector<script_value_type>& paramTypes = {}) {
             // If we have type info, check for exact type match first
             if (!paramTypes.empty()) {
                 auto it = std::find_if(overloads.begin(), overloads.end(),
@@ -210,7 +210,7 @@ struct engine::implementation {
                 int totalCost = 0;
                 bool viable = true;
                 for (size_t i = 0; i < argCount && viable; ++i) {
-                    int cost = conversions ? conversions->getConversionCost(args[i].type(), overload.paramTypes[i])
+                    int cost = conversions ? conversions->get_conversion_cost(args[i].type(), overload.paramTypes[i])
                                           : (args[i].type() == overload.paramTypes[i] ? 0 : 1000);
                     if (cost >= 1000) {
                         viable = false; // No valid conversion
@@ -320,36 +320,36 @@ engine::implementation::implementation() {
     
     // Register standard C++ implicit conversions
     // Promotions (lossless) - cost 1
-    typeConversions.registerConversion(value_type::jai_bool_type, value_type::jai_int_type, 1,
+    typeConversions.register_conversion(script_value_type::jai_bool_type, script_value_type::jai_int_type, 1,
         [](const script_value& v) { return script_value(static_cast<script_int>(v.as_bool() ? 1 : 0)); });
     
-    typeConversions.registerConversion(value_type::jai_char_type, value_type::jai_int_type, 1,
+    typeConversions.register_conversion(script_value_type::jai_char_type, script_value_type::jai_int_type, 1,
         [](const script_value& v) { return script_value(static_cast<script_int>(v.as_char())); });
     
-    typeConversions.registerConversion(value_type::jai_int_type, value_type::jai_float_type, 1,
+    typeConversions.register_conversion(script_value_type::jai_int_type, script_value_type::jai_float_type, 1,
         [](const script_value& v) { return script_value(static_cast<script_float>(v.as_int())); });
     
     // Standard conversions (may lose precision) - cost 2
-    typeConversions.registerConversion(value_type::jai_float_type, value_type::jai_int_type, 2,
+    typeConversions.register_conversion(script_value_type::jai_float_type, script_value_type::jai_int_type, 2,
         [](const script_value& v) { return script_value(static_cast<script_int>(v.as_float())); });
     
-    typeConversions.registerConversion(value_type::jai_int_type, value_type::jai_char_type, 2,
+    typeConversions.register_conversion(script_value_type::jai_int_type, script_value_type::jai_char_type, 2,
         [](const script_value& v) { return script_value(static_cast<script_char>(v.as_int())); });
     
-    typeConversions.registerConversion(value_type::jai_int_type, value_type::jai_bool_type, 2,
+    typeConversions.register_conversion(script_value_type::jai_int_type, script_value_type::jai_bool_type, 2,
         [](const script_value& v) { return script_value(static_cast<script_bool>(v.as_int() != 0)); });
     
     // Other numeric conversions - cost 3
-    typeConversions.registerConversion(value_type::jai_float_type, value_type::jai_bool_type, 3,
+    typeConversions.register_conversion(script_value_type::jai_float_type, script_value_type::jai_bool_type, 3,
         [](const script_value& v) { return script_value(static_cast<script_bool>(v.as_float() != 0.0)); });
     
-    typeConversions.registerConversion(value_type::jai_bool_type, value_type::jai_float_type, 3,
+    typeConversions.register_conversion(script_value_type::jai_bool_type, script_value_type::jai_float_type, 3,
         [](const script_value& v) { return script_value(static_cast<script_float>(v.as_bool() ? 1.0 : 0.0)); });
     
-    typeConversions.registerConversion(value_type::jai_char_type, value_type::jai_float_type, 3,
+    typeConversions.register_conversion(script_value_type::jai_char_type, script_value_type::jai_float_type, 3,
         [](const script_value& v) { return script_value(static_cast<script_float>(v.as_char())); });
     
-    typeConversions.registerConversion(value_type::jai_float_type, value_type::jai_char_type, 3,
+    typeConversions.register_conversion(script_value_type::jai_float_type, script_value_type::jai_char_type, 3,
         [](const script_value& v) { return script_value(static_cast<script_char>(static_cast<script_int>(v.as_float()))); });
 }
 
@@ -407,7 +407,7 @@ engine::engine() : impl(std::make_unique<implementation>()) {
             
             // Get the C++ object from the special field
             script_value cppObjValue = instance->get_field("_cpp_object");
-            if (!cppObjValue.is_null() && cppObjValue.type() == value_type::jai_object_type) {
+            if (!cppObjValue.is_null() && cppObjValue.type() == script_value_type::jai_object_type) {
                 // Direct access to the object_holder to avoid recursive extraction
                 auto objHolder = std::get<std::shared_ptr<script_value::object_holder>>(cppObjValue.storage_);
                 return objHolder->data;
@@ -664,7 +664,7 @@ void engine::add_overloaded_function(const std::string& name, size_t argCount, s
     impl->updateOverloadedFunction(name);
 }
 
-void engine::add_overloaded_functionWithTypes(const std::string& name, size_t argCount, script_function func, const std::vector<value_type>& paramTypes) {
+void engine::add_overloaded_functionWithTypes(const std::string& name, size_t argCount, script_function func, const std::vector<script_value_type>& paramTypes) {
     // Check if we need to move an existing function from globalEnvironment
     bool hasExistingFunction = false;
     script_value existing;
@@ -692,7 +692,7 @@ void engine::add_overloaded_functionWithTypes(const std::string& name, size_t ar
     impl->updateOverloadedFunction(name);
 }
 
-void engine::add_functionWithArityAndTypes(const std::string& name, script_function func, size_t arity, const std::vector<value_type>& paramTypes) {
+void engine::add_functionWithArityAndTypes(const std::string& name, script_function func, size_t arity, const std::vector<script_value_type>& paramTypes) {
     // Check if we have an existing function with this name
     bool hasExistingFunction = false;
     script_value existing;
@@ -745,9 +745,9 @@ void engine::add_class_impl(const std::string& name, std::shared_ptr<class_defin
     impl->classes[name] = classDef;
 }
 
-void engine::register_type_conversion(value_type from, value_type to, int cost, 
+void engine::register_type_conversion(script_value_type from, script_value_type to, int cost, 
                                   std::function<script_value(const script_value&)> converter) {
-    impl->typeConversions.registerConversion(from, to, cost, converter);
+    impl->typeConversions.register_conversion(from, to, cost, converter);
 }
 
 script_value engine::get_variable(const std::string& name) const {

@@ -207,7 +207,7 @@ script_value interpreter::handle_not_equal(const script_value& left, const scrip
 
 script_value interpreter::handle_spaceship(const script_value& left, const script_value& right) {
     // Fast path for integer spaceship - avoid function calls
-    if (left.type() == value_type::jai_int_type && right.type() == value_type::jai_int_type) {
+    if (left.type() == script_value_type::jai_int_type && right.type() == script_value_type::jai_int_type) {
         // Direct storage access, single C++20 spaceship operation
         auto cmp = std::get<script_int>(left.storage_) <=> std::get<script_int>(right.storage_);
         return script_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)));

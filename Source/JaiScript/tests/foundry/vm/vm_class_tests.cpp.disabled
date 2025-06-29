@@ -1,0 +1,524 @@
+#include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/jvm/vm_class_system.hpp>
+#include <jaiscript/jvm/vm_function_integration.hpp>
+
+using namespace jai;
+using namespace jai::foundry;
+using namespace jai::jvm;
+
+namespace jai::foundry::tests {
+
+class vm_class_tests : public suite {
+public:
+    vm_class_tests() : suite("VM Class Bytecode Tests") {}
+    
+    void forge_tests() override {
+        test("basic_class_definition", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            engine.execute(R"(
+                class Point {
+                    float x = 0.0;
+                    float y = 0.0;
+                    
+                    Point(float px, float py) {
+                        x = px;
+                        y = py;
+                    }
+                    
+                    float distance() {
+                        return sqrt(x * x + y * y);
+                    }
+                }
+            )");
+            
+            auto result = engine.execute(R"(
+                auto p = new Point(3.0, 4.0);
+                p.distance()
+            )");
+            
+            check_eq(result.as<script_float>(), 5.0);
+        });
+        
+        test("class_method_bytecode_compilation", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            engine.execute(R"(
+                class Calculator {
+                    float value = 0.0;
+                    
+                    Calculator(float initial) {
+                        value = initial;
+                    }
+                    
+                    float add(float x) {
+                        value = value + x;
+                        return value;
+                    }
+                    
+                    float multiply(float x) {
+                        value = value * x;
+                        return value;
+                    }
+                }
+            )");
+            
+            // Methods should execute as bytecode
+            auto result = engine.execute(R"(
+                auto calc = make_shared<Calculator>(10.0);
+                calc->add(5.0);
+                calc->multiply(2.0)
+            )");
+            
+            check_eq(result.as<script_float>(), 30.0); // (10 + 5) * 2 = 30
+        });
+        
+        test("class_inheritance_with_bytecode", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            engine.execute(R"CODE(
+                class Animal {
+                    string name = "Animal";
+                    
+                    Animal(string n) {
+                        name = n;
+                    }
+                    
+                    string speak() {
+                        return name + " makes a sound";
+                    }
+                }
+                
+                class Dog : Animal {
+                    int age = 0;
+                    
+                    Dog(string n, int a) : super(n) {
+                        age = a;
+                    }
+                    
+                    string speak() override {
+                        return name + " barks (age " + to_string(age) + ")";
+                    }
+                }
+            )CODE");
+            
+            auto result = engine.execute(R"(
+                auto dog = make_shared<Dog>("Rex", 5);
+                dog->speak()
+            )");
+            
+            check_eq(result.as<std::string>(), "Rex barks (age 5)");
+        });
+        
+        test("virtual_method_dispatch", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            engine.execute(R"(
+                class Shape {
+                    float area() {
+                        return 0.0;
+                    }
+                }
+                
+                class Circle : Shape {
+                    float radius = 1.0;
+                    
+                    Circle(float r) {
+                        radius = r;
+                    }
+                    
+                    float area() override {
+                        return 3.14159 * radius * radius;
+                    }
+                }
+                
+                class Square : Shape {
+                    float side = 1.0;
+                    
+                    Square(float s) {
+                        side = s;
+                    }
+                    
+                    float area() override {
+                        return side * side;
+                    }
+                }
+            )");
+            
+            // Test polymorphic calls
+            auto result = engine.execute(R"(
+                auto shapes = [
+                    make_shared<Circle>(2.0),
+                    make_shared<Square>(3.0),
+                    make_shared<Circle>(1.0)
+                ];
+                
+                auto total = 0.0;
+                for (auto shape : shapes) {
+                    total = total + shape->area();
+                }
+                total
+            )");
+            
+            // π*4 + 9 + π*1 ≈ 12.566 + 9 + 3.142 ≈ 24.708
+            check_near(result.as<script_float>(), 24.708, 0.001);
+        });
+        
+        test("constructor_delegation", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            engine.execute(R"(
+                class Rectangle {
+                    float width = 0.0;
+                    float height = 0.0;
+                    
+                    Rectangle(float w, float h) {
+                        width = w;
+                        height = h;
+                    }
+                    
+                    Rectangle(float size) : Rectangle(size, size) {
+                        // Square constructor delegates to rectangle
+                    }
+                    
+                    float area() {
+                        return width * height;
+                    }
+                }
+            )");
+            
+            auto result = engine.execute(R"(
+                auto square = new Rectangle(5.0);
+                square.area()
+            )");
+            
+            check_eq(result.as<script_float>(), 25.0);
+        });
+        
+        test("destructor_execution", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            // Set up a global to track destructor calls
+            engine.add_global("destructor_count", script_value(0));
+            
+            engine.execute(R"(
+                class Resource {
+                    string name;
+                    
+                    Resource(string n) {
+                        name = n;
+                    }
+                    
+                    ~Resource() {
+                        destructor_count = destructor_count + 1;
+                    }
+                }
+            )");
+            
+            engine.execute(R"(
+                {
+                    auto r1 = make_shared<Resource>("r1");
+                    auto r2 = make_shared<Resource>("r2");
+                }  // Both should be destroyed here
+            )");
+            
+            auto count = engine.get_variable("destructor_count");
+            check_eq(count.as<script_int>(), 2);
+        });
+        
+        test("field_access_optimization", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            engine.execute(R"(
+                class Data {
+                    int a = 1;
+                    int b = 2;
+                    int c = 3;
+                    
+                    int sum() {
+                        // Should use optimized field access
+                        return a + b + c;
+                    }
+                }
+            )");
+            
+            auto result = engine.execute(R"(
+                auto d = new Data();
+                d.sum()
+            )");
+            
+            check_eq(result.as<script_int>(), 6);
+        });
+        
+        test("method_call_caching", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            // Enable profiling to track cache hits
+            g_class_profiler.start_profiling();
+            
+            engine.execute(R"(
+                class Worker {
+                    int work(int x) {
+                        return x * 2;
+                    }
+                }
+            )");
+            
+            engine.execute(R"(
+                auto w = new Worker();
+                auto sum = 0;
+                for (auto i = 0; i < 1000; i = i + 1) {
+                    sum = sum + w.work(i);
+                }
+                sum
+            )");
+            
+            g_class_profiler.stop_profiling();
+            
+            // Should have high cache hit rate
+            auto stats = g_class_profiler.get_class_stats("Worker");
+            auto method_stats = stats.methods.find("work");
+            check_true(method_stats != stats.methods.end());
+            check_true(method_stats->second.cache_hits > 900); // Most should be hits
+        });
+        
+        test("super_method_call", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            engine.execute(R"(
+                class Base {
+                    string process(string s) {
+                        return "[Base: " + s + "]";
+                    }
+                }
+                
+                class Derived : Base {
+                    string process(string s) override {
+                        auto base_result = super::process(s);
+                        return "[Derived: " + base_result + "]";
+                    }
+                }
+            )");
+            
+            auto result = engine.execute(R"(
+                auto d = new Derived();
+                d.process("test")
+            )");
+            
+            check_eq(result.as<std::string>(), "[Derived: [Base: test]]");
+        });
+        
+        test("instanceof_operator", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            engine.execute(R"(
+                class Vehicle {}
+                class Car : Vehicle {}
+                class Bike : Vehicle {}
+            )");
+            
+            auto result = engine.execute(R"(
+                auto car = new Car();
+                auto bike = new Bike();
+                
+                auto is_car_vehicle = instanceof(car, "Vehicle");
+                auto is_bike_car = instanceof(bike, "Car");
+                
+                [is_car_vehicle, is_bike_car]
+            )");
+            
+            auto array = result.as<script_array>();
+            check_eq(array.size(), 2);
+            check_true(array[0].as<bool>());  // Car is a Vehicle
+            check_false(array[1].as<bool>()); // Bike is not a Car
+        });
+        
+        test("cross_backend_class_usage", [this]() {
+            vm_aware_engine engine;
+            auto interpreter_classes = enable_class_system(engine);
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            vm_classes->integrate_with_interpreter(interpreter_classes.get());
+            
+            // Define class in VM
+            engine.execute_with_vm(R"(
+                class VMClass {
+                    int value = 42;
+                    
+                    int getValue() {
+                        return value;
+                    }
+                }
+            )");
+            
+            // Use from interpreter
+            auto result = engine.execute_with_interpreter(R"(
+                auto obj = new VMClass();
+                obj.getValue()
+            )");
+            
+            check_eq(result.as<script_int>(), 42);
+        });
+        
+        test("class_with_complex_methods", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            engine.execute(R"(
+                class DataProcessor {
+                    array<int> data;
+                    
+                    DataProcessor() {
+                        data = [];
+                    }
+                    
+                    void addData(int value) {
+                        data.push_back(value);
+                    }
+                    
+                    int processData() {
+                        auto sum = 0;
+                        auto count = 0;
+                        
+                        for (auto value : data) {
+                            if (value > 0) {
+                                sum = sum + value;
+                                count = count + 1;
+                            }
+                        }
+                        
+                        if (count > 0) {
+                            return sum / count;
+                        }
+                        return 0;
+                    }
+                }
+            )");
+            
+            auto result = engine.execute(R"(
+                auto processor = new DataProcessor();
+                processor.addData(10);
+                processor.addData(-5);
+                processor.addData(20);
+                processor.addData(30);
+                processor.processData()
+            )");
+            
+            check_eq(result.as<script_int>(), 20); // Average of positive values
+        });
+        
+        test("override_enforcement", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            engine.execute(R"(
+                class Parent {
+                    int method() {
+                        return 1;
+                    }
+                }
+            )");
+            
+            // Missing override keyword should throw
+            check_throws<std::runtime_error>([&]() {
+                engine.execute(R"(
+                    class Child : Parent {
+                        int method() {  // Missing override!
+                            return 2;
+                        }
+                    }
+                )");
+            });
+        });
+        
+        test("class_performance_profiling", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            g_class_profiler.start_profiling();
+            
+            engine.execute(R"(
+                class Counter {
+                    int count = 0;
+                    
+                    void increment() {
+                        count = count + 1;
+                    }
+                    
+                    int get() {
+                        return count;
+                    }
+                }
+            )");
+            
+            engine.execute(R"(
+                auto c = new Counter();
+                for (auto i = 0; i < 1000; i = i + 1) {
+                    c.increment();
+                }
+                c.get()
+            )");
+            
+            g_class_profiler.stop_profiling();
+            
+            auto report = g_class_profiler.generate_optimization_report();
+            check_true(report.find("Counter") != std::string::npos);
+            check_true(report.find("increment") != std::string::npos);
+        });
+    }
+};
+
+} // namespace jai::foundry::tests
+
+FOUNDRY_REGISTER(jai::foundry::tests::vm_class_tests)

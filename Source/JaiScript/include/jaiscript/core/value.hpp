@@ -36,9 +36,7 @@ namespace jai {
 
     class script_value {
     public:
-        // Constructors for each type
         script_value() : type_info_(nullptr), storage_(std::monostate{}) {
-            // Null value
         }
         script_value(std::nullptr_t) : script_value() {}
         
@@ -62,10 +60,8 @@ namespace jai {
         requires (std::is_floating_point_v<T> && !std::is_same_v<T, script_float>)
         script_value(T f) : type_info_(type_info::make_float()), storage_(script_float(f)) {}
         
-        // Move constructor and assignment operator for performance
         script_value(script_value&& other) noexcept 
             : type_info_(std::move(other.type_info_)), storage_(std::move(other.storage_)) {
-            // Reset the moved-from object to a valid null state
             other.type_info_ = nullptr;
             other.storage_ = std::monostate{};
         }
@@ -74,7 +70,6 @@ namespace jai {
             if (this != &other) {
                 type_info_ = std::move(other.type_info_);
                 storage_ = std::move(other.storage_);
-                // Reset the moved-from object to a valid null state
                 other.type_info_ = nullptr;
                 other.storage_ = std::monostate{};
             }
@@ -100,25 +95,25 @@ namespace jai {
         
         // Type information
         type_info_ptr get_type_info() const { return type_info_; }
-        value_type type() const { return type_info_ ? type_info_->base_type : value_type::jai_null_type; }
-        bool is_null() const { return deref().type() == value_type::jai_null_type; }
-        bool is_int() const { return deref().type() == value_type::jai_int_type; }
-        bool is_float() const { return deref().type() == value_type::jai_float_type; }
-        bool is_string() const { return deref().type() == value_type::jai_string_type; }
-        bool is_char() const { return deref().type() == value_type::jai_char_type; }
-        bool is_bool() const { return deref().type() == value_type::jai_bool_type; }
-        bool is_array() const { return deref().type() == value_type::jai_array_type; }
-        bool is_map() const { return deref().type() == value_type::jai_map_type; }
-        bool is_object() const { return deref().type() == value_type::jai_object_type; }
-        bool is_function() const { return deref().type() == value_type::jai_function_type; }
-        bool is_reference() const { return type() == value_type::jai_reference_type; }  // Don't deref for this check!
-        bool is_shared_ptr() const { return deref().type() == value_type::jai_shared_ptr_type; }
-        bool is_weak_ptr() const { return deref().type() == value_type::jai_weak_ptr_type; }
+        script_value_type type() const { return type_info_ ? type_info_->base_type : script_value_type::jai_null_type; }
+        bool is_null() const { return deref().type() == script_value_type::jai_null_type; }
+        bool is_int() const { return deref().type() == script_value_type::jai_int_type; }
+        bool is_float() const { return deref().type() == script_value_type::jai_float_type; }
+        bool is_string() const { return deref().type() == script_value_type::jai_string_type; }
+        bool is_char() const { return deref().type() == script_value_type::jai_char_type; }
+        bool is_bool() const { return deref().type() == script_value_type::jai_bool_type; }
+        bool is_array() const { return deref().type() == script_value_type::jai_array_type; }
+        bool is_map() const { return deref().type() == script_value_type::jai_map_type; }
+        bool is_object() const { return deref().type() == script_value_type::jai_object_type; }
+        bool is_function() const { return deref().type() == script_value_type::jai_function_type; }
+        bool is_reference() const { return type() == script_value_type::jai_reference_type; }  // Don't deref for this check!
+        bool is_shared_ptr() const { return deref().type() == script_value_type::jai_shared_ptr_type; }
+        bool is_weak_ptr() const { return deref().type() == script_value_type::jai_weak_ptr_type; }
         
         // script_value extraction (inlined for performance)
         inline script_int as_int() const {
             const script_value& val = deref();
-            if (val.type() != value_type::jai_int_type) {
+            if (val.type() != script_value_type::jai_int_type) {
                 throw runtime_error("script_value is not an integer");
             }
             return std::get<script_int>(val.storage_);
@@ -126,7 +121,7 @@ namespace jai {
         
         inline script_float as_float() const {
             const script_value& val = deref();
-            if (val.type() != value_type::jai_float_type) {
+            if (val.type() != script_value_type::jai_float_type) {
                 throw runtime_error("script_value is not a float");
             }
             return std::get<script_float>(val.storage_);
@@ -134,7 +129,7 @@ namespace jai {
         
         inline const script_string& as_string() const {
             const script_value& val = deref();
-            if (val.type() != value_type::jai_string_type) {
+            if (val.type() != script_value_type::jai_string_type) {
                 throw runtime_error("script_value is not a string");
             }
             return std::get<script_string>(val.storage_);
@@ -142,7 +137,7 @@ namespace jai {
         
         inline script_bool as_bool() const {
             const script_value& val = deref();
-            if (val.type() != value_type::jai_bool_type) {
+            if (val.type() != script_value_type::jai_bool_type) {
                 throw runtime_error("script_value is not a boolean");
             }
             return std::get<script_bool>(val.storage_);
@@ -150,21 +145,21 @@ namespace jai {
         
         inline script_char as_char() const {
             const script_value& val = deref();
-            if (val.type() != value_type::jai_char_type) {
+            if (val.type() != script_value_type::jai_char_type) {
                 throw runtime_error("script_value is not a character");
             }
             return std::get<script_char>(val.storage_);
         }
         
         inline const std::vector<script_value>& as_array() const {
-            if (type() != value_type::jai_array_type) {
+            if (type() != script_value_type::jai_array_type) {
                 throw runtime_error("script_value is not an array");
             }
             return *std::get<std::shared_ptr<std::vector<script_value>>>(storage_);
         }
         
         inline const std::map<script_value, script_value>& as_map() const {
-            if (type() != value_type::jai_map_type) {
+            if (type() != script_value_type::jai_map_type) {
                 throw runtime_error("script_value is not a map");
             }
             return *std::get<std::shared_ptr<std::map<script_value, script_value>>>(storage_);
@@ -182,22 +177,22 @@ namespace jai {
                 // For const references, we can return references to our internal data
                 if constexpr (std::is_const_v<std::remove_reference_t<T>>) {
                     if constexpr (std::is_same_v<base_type, script_int>) {
-                        if (type() != value_type::jai_int_type) {
+                        if (type() != script_value_type::jai_int_type) {
                             throw runtime_error("script_value is not an integer");
                         }
                         return std::get<script_int>(storage_);
                     } else if constexpr (std::is_same_v<base_type, script_float>) {
-                        if (type() != value_type::jai_float_type) {
+                        if (type() != script_value_type::jai_float_type) {
                             throw runtime_error("script_value is not a float");
                         }
                         return std::get<script_float>(storage_);
                     } else if constexpr (std::is_same_v<base_type, script_bool>) {
-                        if (type() != value_type::jai_bool_type) {
+                        if (type() != script_value_type::jai_bool_type) {
                             throw runtime_error("script_value is not a boolean");
                         }
                         return std::get<script_bool>(storage_);
                     } else if constexpr (std::is_same_v<base_type, script_char>) {
-                        if (type() != value_type::jai_char_type) {
+                        if (type() != script_value_type::jai_char_type) {
                             throw runtime_error("script_value is not a character");
                         }
                         return std::get<script_char>(storage_);
@@ -296,18 +291,18 @@ namespace jai {
                 return static_cast<size_t>(val);
             } else if constexpr (std::is_same_v<T, float>) {
                 // Handle both float and int types for automatic conversion
-                if (type() == value_type::jai_float_type) {
+                if (type() == script_value_type::jai_float_type) {
                     return static_cast<float>(as_float());
-                } else if (type() == value_type::jai_int_type) {
+                } else if (type() == script_value_type::jai_int_type) {
                     return static_cast<float>(as_int());  // Convert int to float
                 } else {
                     throw runtime_error("Cannot convert script_value to float");
                 }
             } else if constexpr (std::is_same_v<T, double>) {
                 // Handle both float and int types for automatic conversion
-                if (type() == value_type::jai_float_type) {
+                if (type() == script_value_type::jai_float_type) {
                     return as_float();  // script_float is already double
-                } else if (type() == value_type::jai_int_type) {
+                } else if (type() == script_value_type::jai_int_type) {
                     return static_cast<double>(as_int());  // Convert int to double
                 } else {
                     throw runtime_error("Cannot convert script_value to double");
@@ -317,7 +312,7 @@ namespace jai {
             }
             // Support for shared_ptr extraction from objects
             else if constexpr (std::is_same_v<T, std::shared_ptr<class_instance>>) {
-                if (type() != value_type::jai_object_type) {
+                if (type() != script_value_type::jai_object_type) {
                     throw runtime_error("script_value is not an object");
                 }
                 auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
@@ -328,7 +323,7 @@ namespace jai {
             }
             // Support for shared_ptr<void> extraction
             else if constexpr (std::is_same_v<T, std::shared_ptr<void>>) {
-                if (type() != value_type::jai_object_type) {
+                if (type() != script_value_type::jai_object_type) {
                     throw runtime_error("script_value is not an object");
                 }
                 auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
@@ -336,7 +331,7 @@ namespace jai {
             }
             // Support for shared_ptr<user_type> extraction from objects
             else if constexpr (is_specialization_v<T, std::shared_ptr>) {
-                if (type() != value_type::jai_object_type) {
+                if (type() != script_value_type::jai_object_type) {
                     throw runtime_error("script_value is not an object");
                 }
                 auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
@@ -359,7 +354,7 @@ namespace jai {
                              !is_specialization_v<T, std::vector> &&
                              !is_specialization_v<T, std::map>) {
                 // For custom classes, try to extract shared_ptr and dereference
-                if (type() == value_type::jai_object_type) {
+                if (type() == script_value_type::jai_object_type) {
                     auto ptr = as<std::shared_ptr<T>>();
                     return *ptr;
                 }
@@ -384,9 +379,9 @@ namespace jai {
                     // For non-const references to our internal data
                     if constexpr (std::is_same_v<base_type, script_int>) {
                         // Handle float-to-int narrowing conversion (like C++)
-                        if (type() == value_type::jai_int_type) {
+                        if (type() == script_value_type::jai_int_type) {
                             return std::get<script_int>(storage_);
-                        } else if (type() == value_type::jai_float_type) {
+                        } else if (type() == script_value_type::jai_float_type) {
                             auto float_val = std::get<script_float>(storage_);
                             // Check for overflow and NaN/inf (script_float is double)
                             if (std::isnan(float_val) || std::isinf(float_val)) {
@@ -402,25 +397,25 @@ namespace jai {
                         }
                     } else if constexpr (std::is_same_v<base_type, script_float>) {
                         // Handle int-to-float conversion (like C++)
-                        if (type() == value_type::jai_float_type) {
+                        if (type() == script_value_type::jai_float_type) {
                             return std::get<script_float>(storage_);
-                        } else if (type() == value_type::jai_int_type) {
+                        } else if (type() == script_value_type::jai_int_type) {
                             return static_cast<script_float>(std::get<script_int>(storage_));
                         } else {
                             throw runtime_error("script_value is not a float or integer");
                         }
                     } else if constexpr (std::is_same_v<base_type, double>) {
                         // Handle both float and int types for automatic conversion (for references)
-                        if (type() == value_type::jai_float_type) {
+                        if (type() == script_value_type::jai_float_type) {
                             return std::get<script_float>(storage_);  // script_float is already double
-                        } else if (type() == value_type::jai_int_type) {
+                        } else if (type() == script_value_type::jai_int_type) {
                             return static_cast<double>(std::get<script_int>(storage_));  // Convert int to double
                         } else {
                             throw runtime_error("Cannot convert script_value to double (non-const ref)");
                         }
                     } else if constexpr (std::is_same_v<base_type, float>) {
                         // Handle double-to-float and int-to-float conversion (like C++)
-                        if (type() == value_type::jai_float_type) {
+                        if (type() == script_value_type::jai_float_type) {
                             auto double_val = std::get<script_float>(storage_);  // script_float is double
                             // Check for overflow (double to float narrowing)
                             if (std::isnan(double_val) || std::isinf(double_val)) {
@@ -430,18 +425,18 @@ namespace jai {
                                 return std::copysign(std::numeric_limits<float>::infinity(), double_val);
                             }
                             return static_cast<float>(double_val);
-                        } else if (type() == value_type::jai_int_type) {
+                        } else if (type() == script_value_type::jai_int_type) {
                             return static_cast<float>(std::get<script_int>(storage_));  // Convert int to float
                         } else {
                             throw runtime_error("Cannot convert script_value to float (non-const ref)");
                         }
                     } else if constexpr (std::is_same_v<base_type, script_bool>) {
                         // Handle int/float-to-bool conversion (like C++)
-                        if (type() == value_type::jai_bool_type) {
+                        if (type() == script_value_type::jai_bool_type) {
                             return std::get<script_bool>(storage_);
-                        } else if (type() == value_type::jai_int_type) {
+                        } else if (type() == script_value_type::jai_int_type) {
                             return std::get<script_int>(storage_) != 0;  // 0 = false, non-zero = true
-                        } else if (type() == value_type::jai_float_type) {
+                        } else if (type() == script_value_type::jai_float_type) {
                             auto float_val = std::get<script_float>(storage_);
                             return float_val != 0.0 && !std::isnan(float_val);  // 0.0 or NaN = false
                         } else {
@@ -449,9 +444,9 @@ namespace jai {
                         }
                     } else if constexpr (std::is_same_v<base_type, script_char>) {
                         // Handle int-to-char conversion (like C++)
-                        if (type() == value_type::jai_char_type) {
+                        if (type() == script_value_type::jai_char_type) {
                             return std::get<script_char>(storage_);
-                        } else if (type() == value_type::jai_int_type) {
+                        } else if (type() == script_value_type::jai_int_type) {
                             auto int_val = std::get<script_int>(storage_);
                             // Check char range
                             if (int_val < std::numeric_limits<char>::min() || 
@@ -463,17 +458,17 @@ namespace jai {
                             throw runtime_error("script_value is not a character or integer");
                         }
                     } else if constexpr (std::is_same_v<base_type, script_string> || std::is_same_v<base_type, std::string>) {
-                        if (type() != value_type::jai_string_type) {
+                        if (type() != script_value_type::jai_string_type) {
                             throw runtime_error("script_value is not a string");
                         }
                         return std::get<script_string>(storage_);
                     } else if constexpr (std::is_same_v<base_type, std::vector<script_value>>) {
-                        if (type() != value_type::jai_array_type) {
+                        if (type() != script_value_type::jai_array_type) {
                             throw runtime_error("script_value is not an array");
                         }
                         return *std::get<std::shared_ptr<std::vector<script_value>>>(storage_);
                     } else if constexpr (std::is_same_v<base_type, std::map<script_value, script_value>>) {
-                        if (type() != value_type::jai_map_type) {
+                        if (type() != script_value_type::jai_map_type) {
                             throw runtime_error("script_value is not a map");
                         }
                         return *std::get<std::shared_ptr<std::map<script_value, script_value>>>(storage_);
@@ -527,7 +522,7 @@ namespace jai {
         // These enable natural overload resolution in C++ function calls
         operator int() const {
             const script_value& val = deref();
-            if (val.type() == value_type::jai_int_type) {
+            if (val.type() == script_value_type::jai_int_type) {
                 auto int_val = std::get<script_int>(val.storage_);
                 if (int_val < std::numeric_limits<int>::min() || 
                     int_val > std::numeric_limits<int>::max()) {
@@ -540,7 +535,7 @@ namespace jai {
         
         operator int64_t() const {
             const script_value& val = deref();
-            if (val.type() == value_type::jai_int_type) {
+            if (val.type() == script_value_type::jai_int_type) {
                 return std::get<script_int>(val.storage_);
             }
             throw runtime_error("script_value is not an integer");
@@ -548,9 +543,9 @@ namespace jai {
         
         operator double() const {
             const script_value& val = deref();
-            if (val.type() == value_type::jai_float_type) {
+            if (val.type() == script_value_type::jai_float_type) {
                 return std::get<script_float>(val.storage_);
-            } else if (val.type() == value_type::jai_int_type) {
+            } else if (val.type() == script_value_type::jai_int_type) {
                 return static_cast<double>(std::get<script_int>(val.storage_));
             }
             throw runtime_error("script_value is not a numeric type");
@@ -558,9 +553,9 @@ namespace jai {
         
         operator float() const {
             const script_value& val = deref();
-            if (val.type() == value_type::jai_float_type) {
+            if (val.type() == script_value_type::jai_float_type) {
                 return static_cast<float>(std::get<script_float>(val.storage_));
-            } else if (val.type() == value_type::jai_int_type) {
+            } else if (val.type() == script_value_type::jai_int_type) {
                 return static_cast<float>(std::get<script_int>(val.storage_));
             }
             throw runtime_error("script_value is not a numeric type");

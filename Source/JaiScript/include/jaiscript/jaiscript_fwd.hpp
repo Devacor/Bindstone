@@ -16,7 +16,7 @@ namespace jai {
     
     struct source_location;
     
-    enum class value_type {
+    enum class script_value_type {
         jai_null_type,
         jai_int_type,
         jai_float_type,

@@ -34,7 +34,7 @@ namespace jai {
         
         
         // Primary API - execute methods
-        script_value execute(const std::string& scriptContent);
+        virtual script_value execute(const std::string& scriptContent);
         script_value execute(const std::string& scriptContent, const instance_variables& instanceVars);
         
         script_value execute_file(const std::string& scriptPath);
@@ -74,7 +74,7 @@ namespace jai {
             script_function wrappedFunc = wrapFunctionForTypeConversion<return_type>(std::move(boundFunc));
             
             // Extract parameter types for type-based overloading
-            std::vector<value_type> paramTypes = extractParameterTypes<Func>();
+            std::vector<script_value_type> paramTypes = extractParameterTypes<Func>();
             
             // Auto-detect numeric operator overrides and set flag
             if (arity == 2 && isNumericOperator(name)) {
@@ -101,14 +101,14 @@ namespace jai {
                    name == "==" || name == "!=" || name == "<=>";
         }
         
-        bool hasNumericOperands(const std::vector<value_type>& paramTypes) const {
+        bool hasNumericOperands(const std::vector<script_value_type>& paramTypes) const {
             if (paramTypes.size() != 2) return false;
             
-            auto isNumericType = [](value_type t) {
-                return t == value_type::jai_int_type || 
-                       t == value_type::jai_float_type || 
-                       t == value_type::jai_char_type || 
-                       t == value_type::jai_bool_type;
+            auto isNumericType = [](script_value_type t) {
+                return t == script_value_type::jai_int_type || 
+                       t == script_value_type::jai_float_type || 
+                       t == script_value_type::jai_char_type || 
+                       t == script_value_type::jai_bool_type;
             };
             
             return isNumericType(paramTypes[0]) && isNumericType(paramTypes[1]);
@@ -119,8 +119,8 @@ namespace jai {
     public:
         // Overloaded function registration
         void add_overloaded_function(const std::string& name, size_t argCount, script_function func);
-        void add_overloaded_functionWithTypes(const std::string& name, size_t argCount, script_function func, const std::vector<value_type>& paramTypes);
-        void add_functionWithArityAndTypes(const std::string& name, script_function func, size_t arity, const std::vector<value_type>& paramTypes);
+        void add_overloaded_functionWithTypes(const std::string& name, size_t argCount, script_function func, const std::vector<script_value_type>& paramTypes);
+        void add_functionWithArityAndTypes(const std::string& name, script_function func, size_t arity, const std::vector<script_value_type>& paramTypes);
         
         // Class registration
         // Register a class with its type information
@@ -142,7 +142,7 @@ namespace jai {
         // Type conversion registration
         // Register a conversion between JaiScript types with a cost for overload resolution
         // Lower costs are preferred (0 = exact match, 1 = promotion, 2 = standard conversion, etc.)
-        void register_type_conversion(value_type from, value_type to, int cost, 
+        void register_type_conversion(script_value_type from, script_value_type to, int cost, 
                                    std::function<script_value(const script_value&)> converter);
         
         // Template version for C++ type safety using std::is_convertible
@@ -151,8 +151,8 @@ namespace jai {
             static_assert(std::is_convertible_v<From, To>, 
                          "Types must be convertible according to C++ rules");
             
-            value_type fromType = mapCppTypeToValueType<From>();
-            value_type toType = mapCppTypeToValueType<To>();
+            script_value_type fromType = mapCppTypeToValueType<From>();
+            script_value_type toType = mapCppTypeToValueType<To>();
             
             // Auto-determine cost if not specified
             if (cost < 0) {
@@ -280,36 +280,36 @@ namespace jai {
         
         // Helper to extract parameter types from a function signature
         template<typename Func>
-        std::vector<value_type> extractParameterTypes() {
+        std::vector<script_value_type> extractParameterTypes() {
             using traits = detail::function_traits<std::decay_t<Func>>;
             return extractParameterTypesImpl<typename traits::argument_types>(std::make_index_sequence<traits::arity>{});
         }
         
         template<typename ArgsTuple, size_t... Is>
-        std::vector<value_type> extractParameterTypesImpl(std::index_sequence<Is...>) {
+        std::vector<script_value_type> extractParameterTypesImpl(std::index_sequence<Is...>) {
             return {mapCppTypeToValueType<std::tuple_element_t<Is, ArgsTuple>>()...};
         }
         
         // Map C++ types to JaiScript ValueType
         template<typename T>
-        static constexpr value_type mapCppTypeToValueType() {
+        static constexpr script_value_type mapCppTypeToValueType() {
             using decay_t = std::decay_t<T>;
             
             if constexpr (std::is_same_v<decay_t, int> || std::is_same_v<decay_t, int64_t> || 
                           std::is_same_v<decay_t, script_int>) {
-                return value_type::jai_int_type;
+                return script_value_type::jai_int_type;
             } else if constexpr (std::is_same_v<decay_t, float> || std::is_same_v<decay_t, double> || 
                                  std::is_same_v<decay_t, script_float>) {
-                return value_type::jai_float_type;
+                return script_value_type::jai_float_type;
             } else if constexpr (std::is_same_v<decay_t, bool> || std::is_same_v<decay_t, script_bool>) {
-                return value_type::jai_bool_type;
+                return script_value_type::jai_bool_type;
             } else if constexpr (std::is_same_v<decay_t, char> || std::is_same_v<decay_t, script_char>) {
-                return value_type::jai_char_type;
+                return script_value_type::jai_char_type;
             } else if constexpr (std::is_same_v<decay_t, std::string> || std::is_same_v<decay_t, script_string>) {
-                return value_type::jai_string_type;
+                return script_value_type::jai_string_type;
             } else {
                 // For unknown types, return Object (could be improved)
-                return value_type::jai_object_type;
+                return script_value_type::jai_object_type;
             }
         }
     };

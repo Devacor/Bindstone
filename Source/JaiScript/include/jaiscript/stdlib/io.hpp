@@ -114,19 +114,19 @@ namespace stdlib {
         // type_of function - returns the type name of a value
         engine.add_function("type_of", [](const script_value& val) -> std::string {
             switch (val.type()) {
-                case value_type::jai_null_type: return "null";
-                case value_type::jai_bool_type: return "bool";
-                case value_type::jai_int_type: return "int";
-                case value_type::jai_float_type: return "float";
-                case value_type::jai_char_type: return "char";
-                case value_type::jai_string_type: return "string";
-                case value_type::jai_array_type: return "array";
-                case value_type::jai_map_type: return "map";
-                case value_type::jai_function_type: return "function";
-                case value_type::jai_object_type: return "object";
-                case value_type::jai_reference_type: return "reference";
-                case value_type::jai_shared_ptr_type: return "shared_ptr";
-                case value_type::jai_weak_ptr_type: return "weak_ptr";
+                case script_value_type::jai_null_type: return "null";
+                case script_value_type::jai_bool_type: return "bool";
+                case script_value_type::jai_int_type: return "int";
+                case script_value_type::jai_float_type: return "float";
+                case script_value_type::jai_char_type: return "char";
+                case script_value_type::jai_string_type: return "string";
+                case script_value_type::jai_array_type: return "array";
+                case script_value_type::jai_map_type: return "map";
+                case script_value_type::jai_function_type: return "function";
+                case script_value_type::jai_object_type: return "object";
+                case script_value_type::jai_reference_type: return "reference";
+                case script_value_type::jai_shared_ptr_type: return "shared_ptr";
+                case script_value_type::jai_weak_ptr_type: return "weak_ptr";
                 default: return "unknown";
             }
         });

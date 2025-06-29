@@ -18,7 +18,7 @@ public:
             script_value basic_val(42);
             script_value shared_ptr_val = script_value::make_shared_ptr(basic_val);
             
-            check(shared_ptr_val.type() == value_type::jai_shared_ptr_type, "Should be shared_ptr type");
+            check(shared_ptr_val.type() == script_value_type::jai_shared_ptr_type, "Should be shared_ptr type");
             
             // Test JSON serialization of the shared_ptr
             engine.add_global("test_shared_ptr", shared_ptr_val);

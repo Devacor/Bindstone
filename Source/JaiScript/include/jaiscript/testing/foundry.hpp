@@ -185,6 +185,102 @@ void check_throws(Func&& func, const std::string& message = "Expected exception"
     }
 }
 
+template<typename Exception, typename Func>
+void check_throws(Func&& func, const std::string& message = "Expected specific exception") {
+    try {
+        func();
+        throw test_failure(message);
+    } catch (const test_failure&) {
+        throw;  // Re-throw test failures
+    } catch (const Exception&) {
+        // Expected exception caught
+    } catch (...) {
+        throw test_failure("Caught unexpected exception type");
+    }
+}
+
+// Additional check functions
+inline void check_true(bool condition, const std::string& message = "Expected true") {
+    if (!condition) {
+        throw test_failure(message);
+    }
+}
+
+inline void check_false(bool condition, const std::string& message = "Expected false") {
+    if (condition) {
+        throw test_failure(message);
+    }
+}
+
+template<typename T>
+void check_null(const T& ptr, const std::string& message = "Expected null") {
+    if (ptr != nullptr) {
+        throw test_failure(message);
+    }
+}
+
+template<typename T>
+void check_not_null(const T& ptr, const std::string& message = "Expected non-null") {
+    if (ptr == nullptr) {
+        throw test_failure(message);
+    }
+}
+
+template<typename T, typename U>
+void check_ne(const T& expected, const U& actual, const std::string& message = "") {
+    if (expected == actual) {
+        if (message.empty()) {
+            throw test_failure("Values should not match");
+        } else {
+            throw test_failure(message);
+        }
+    }
+}
+
+template<typename T, typename U>
+void check_gt(const T& value, const U& threshold, const std::string& message = "") {
+    if (!(value > threshold)) {
+        if (message.empty()) {
+            throw test_failure("Value not greater than threshold");
+        } else {
+            throw test_failure(message);
+        }
+    }
+}
+
+template<typename T, typename U>
+void check_lt(const T& value, const U& threshold, const std::string& message = "") {
+    if (!(value < threshold)) {
+        if (message.empty()) {
+            throw test_failure("Value not less than threshold");
+        } else {
+            throw test_failure(message);
+        }
+    }
+}
+
+template<typename T, typename U>
+void check_ge(const T& value, const U& threshold, const std::string& message = "") {
+    if (!(value >= threshold)) {
+        if (message.empty()) {
+            throw test_failure("Value not greater than or equal to threshold");
+        } else {
+            throw test_failure(message);
+        }
+    }
+}
+
+template<typename T, typename U>
+void check_le(const T& value, const U& threshold, const std::string& message = "") {
+    if (!(value <= threshold)) {
+        if (message.empty()) {
+            throw test_failure("Value not less than or equal to threshold");
+        } else {
+            throw test_failure(message);
+        }
+    }
+}
+
 // Conditional isolated test support
 // When JAI_ISOLATED_TEST is defined, this creates a main() function
 // Otherwise, it does nothing, allowing the test to be part of a suite

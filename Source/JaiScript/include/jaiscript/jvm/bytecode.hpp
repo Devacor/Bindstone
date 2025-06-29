@@ -156,8 +156,8 @@ namespace jvm {
         std::string name;
         std::vector<instruction> instructions;
         std::vector<std::string> parameter_names;
-        std::vector<value_type> parameter_types;
-        value_type return_type;
+        std::vector<script_value_type> parameter_types;
+        script_value_type return_type;
         uint8_t local_count;        // Number of local variable slots
         uint8_t max_stack_size;     // Maximum stack size needed
         bool is_variadic;           // Takes variable arguments
@@ -167,7 +167,7 @@ namespace jvm {
         std::vector<uint16_t> line_numbers; // Line number for each instruction
         std::string source_file;
         
-        function() : return_type(value_type::jai_null_type), local_count(0), 
+        function() : return_type(script_value_type::jai_null_type), local_count(0), 
                     max_stack_size(0), is_variadic(false), captures_upvalues(false) {}
     };
     

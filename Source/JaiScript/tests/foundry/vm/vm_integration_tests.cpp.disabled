@@ -1,0 +1,454 @@
+#include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/jvm/vm_function_integration.hpp>
+#include <jaiscript/jvm/vm_class_system.hpp>
+#include <jaiscript/class_system.hpp>
+
+using namespace jai;
+using namespace jai::foundry;
+using namespace jai::jvm;
+
+namespace jai::foundry::tests {
+
+class vm_integration_tests : public suite {
+public:
+    vm_integration_tests() : suite("VM Integration Tests") {}
+    
+    void forge_tests() override {
+        test("full_system_integration", [this]() {
+            // Create engine with all systems enabled
+            vm_aware_engine engine;
+            
+            // Enable full class system with cross-calling
+            auto [interp_classes, vm_classes] = enable_full_class_system(
+                engine,
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            // Test complete integration
+            auto result = engine.execute(R"(
+                // Function compiled to bytecode
+                auto helper(auto x) -> auto {
+                    return x * x;
+                }
+                
+                // Class with bytecode methods
+                class Calculator {
+                    float base = 0.0;
+                    
+                    Calculator(float b) {
+                        base = b;
+                    }
+                    
+                    float calculate(float x) {
+                        // Method calls bytecode function
+                        return base + helper(x);
+                    }
+                }
+                
+                // Lambda using class
+                auto process = [](auto calc, auto values) -> auto {
+                    auto sum = 0.0;
+                    for (auto val : values) {
+                        sum = sum + calc->calculate(val);
+                    }
+                    return sum;
+                };
+                
+                auto calc = make_shared<Calculator>(10.0);
+                auto values = [1.0, 2.0, 3.0];
+                process(calc, values)
+            )");
+            
+            // 10+1 + 10+4 + 10+9 = 11 + 14 + 19 = 44
+            check_eq(result.as<script_float>(), 44.0);
+        });
+        
+        test("c_plus_plus_to_vm_integration", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            // Register C++ class
+            struct TestClass {
+                int value = 100;
+                int process(int x) { return value + x; }
+            };
+            
+            make_class_builder<TestClass>(engine, "TestClass")
+                .constructor<>()
+                .property("value", &TestClass::value)
+                .method("process", &TestClass::process)
+                .build();
+            
+            // Use C++ class from VM script
+            auto result = engine.execute(R"(
+                auto cpp_obj = new TestClass();
+                
+                // VM function using C++ object
+                auto use_cpp(auto obj, auto n) -> auto {
+                    auto sum = 0;
+                    for (auto i = 0; i < n; i = i + 1) {
+                        sum = sum + obj.process(i);
+                    }
+                    return sum;
+                }
+                
+                use_cpp(cpp_obj, 5)
+            )");
+            
+            // 100+0 + 100+1 + 100+2 + 100+3 + 100+4 = 500 + 10 = 510
+            check_eq(result.as<script_int>(), 510);
+        });
+        
+        test("mixed_inheritance_chain", [this]() {
+            vm_aware_engine engine;
+            auto interp_classes = enable_class_system(engine);
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            vm_classes->integrate_with_interpreter(interp_classes.get());
+            
+            // C++ base class
+            struct CppBase {
+                virtual std::string identify() { return "CppBase"; }
+                virtual ~CppBase() = default;
+            };
+            
+            VM_REGISTER_CLASS(CppBase)
+                .method("identify", &CppBase::identify)
+                .allow_script_inheritance()
+                .build();
+            
+            // Script class inheriting from C++
+            engine.execute(R"(
+                class ScriptDerived : CppBase {
+                    string identify() override {
+                        return super::identify() + "->ScriptDerived";
+                    }
+                }
+                
+                class ScriptGrandchild : ScriptDerived {
+                    string identify() override {
+                        return super::identify() + "->ScriptGrandchild";
+                    }
+                }
+            )");
+            
+            auto result = engine.execute(R"(
+                auto obj = new ScriptGrandchild();
+                obj.identify()
+            )");
+            
+            check_eq(result.as<std::string>(), "CppBase->ScriptDerived->ScriptGrandchild");
+        });
+        
+        test("performance_critical_scenario", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            // Enable profiling
+            VM_PROFILE_CLASSES();
+            
+            engine.execute(R"(
+                // Performance-critical class
+                class Vector2D {
+                    float x = 0.0;
+                    float y = 0.0;
+                    
+                    Vector2D(float px, float py) {
+                        x = px;
+                        y = py;
+                    }
+                    
+                    float dot(Vector2D other) {
+                        return x * other.x + y * other.y;
+                    }
+                    
+                    Vector2D add(Vector2D other) {
+                        return new Vector2D(x + other.x, y + other.y);
+                    }
+                    
+                    float length() {
+                        return sqrt(x * x + y * y);
+                    }
+                }
+                
+                // Performance test
+                auto vectors = [];
+                for (auto i = 0; i < 100; i = i + 1) {
+                    vectors.push_back(new Vector2D(i * 0.1, i * 0.2));
+                }
+                
+                auto sum = new Vector2D(0.0, 0.0);
+                for (auto v : vectors) {
+                    sum = sum.add(v);
+                }
+                
+                sum.length()
+            )");
+            
+            // Should complete quickly with bytecode execution
+            // Profile data should show high bytecode usage
+        });
+        
+        test("error_propagation_across_backends", [this]() {
+            vm_aware_engine engine;
+            enable_full_class_system(
+                engine,
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            engine.execute(R"(
+                auto vm_func(auto x) -> auto {
+                    if (x < 0) {
+                        throw "Negative value not allowed";
+                    }
+                    return x * 2;
+                }
+                
+                class ErrorTest {
+                    int safe_process(int val) {
+                        try {
+                            return vm_func(val);
+                        } catch (e) {
+                            return -1;
+                        }
+                    }
+                }
+            )");
+            
+            auto result = engine.execute(R"(
+                auto test = new ErrorTest();
+                auto r1 = test.safe_process(5);
+                auto r2 = test.safe_process(-3);
+                [r1, r2]
+            )");
+            
+            auto array = result.as<script_array>();
+            check_eq(array[0].as<script_int>(), 10);  // 5 * 2
+            check_eq(array[1].as<script_int>(), -1);  // Error caught
+        });
+        
+        test("hot_reload_with_vm_functions", [this]() {
+            vm_aware_engine engine;
+            enable_full_class_system(
+                engine,
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            // Initial definition
+            engine.execute(R"(
+                auto compute(auto x) -> auto {
+                    return x * 2;
+                }
+                
+                class Computer {
+                    int process(int val) {
+                        return compute(val);
+                    }
+                }
+            )");
+            
+            auto result1 = engine.execute(R"(
+                auto c = new Computer();
+                c.process(5)
+            )");
+            check_eq(result1.as<script_int>(), 10);
+            
+            // Redefine function (simulating hot reload)
+            engine.execute(R"(
+                auto compute(auto x) -> auto {
+                    return x * 3;  // Changed!
+                }
+            )");
+            
+            // Should use new function
+            auto result2 = engine.execute("c.process(5)");
+            check_eq(result2.as<script_int>(), 15);  // Now 5 * 3
+        });
+        
+        test("optimization_hints_application", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            // Apply optimization configuration
+            vm_function_config config;
+            config.enable_function_inlining = true;
+            config.enable_tail_call_optimization = true;
+            config.max_function_size_for_inlining = 20;
+            
+            // Would apply to integration in real implementation
+            // config.apply_to_integration(*vm_classes);
+            
+            // Define small functions that should be inlined
+            engine.execute(R"(
+                auto tiny1(auto x) -> auto { return x + 1; }
+                auto tiny2(auto x) -> auto { return x * 2; }
+                auto tiny3(auto x) -> auto { return x - 1; }
+                
+                auto caller(auto n) -> auto {
+                    // These should be inlined
+                    return tiny3(tiny2(tiny1(n)));
+                }
+                
+                caller(10)
+            )");
+            
+            // Result should be correct regardless of optimization
+            // (10 + 1) * 2 - 1 = 11 * 2 - 1 = 22 - 1 = 21
+        });
+        
+        test("memory_management_across_backends", [this]() {
+            vm_aware_engine engine;
+            enable_full_class_system(
+                engine,
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            // Track destructor calls
+            engine.add_global("destructor_calls", script_value(0));
+            
+            engine.execute(R"(
+                class Resource {
+                    string name;
+                    
+                    Resource(string n) {
+                        name = n;
+                    }
+                    
+                    ~Resource() {
+                        destructor_calls = destructor_calls + 1;
+                    }
+                }
+                
+                auto create_resources() -> auto {
+                    auto r1 = make_shared<Resource>("r1");
+                    auto r2 = make_shared<Resource>("r2");
+                    return [r1, r2];  // Return array of resources
+                }
+            )");
+            
+            // Create and destroy resources
+            engine.execute(R"(
+                {
+                    auto resources = create_resources();
+                    // Resources should be alive here
+                }
+                // Resources should be destroyed here
+            )");
+            
+            auto calls = engine.get_variable("destructor_calls");
+            check_eq(calls.as<script_int>(), 2);
+        });
+        
+        test("complex_real_world_scenario", [this]() {
+            vm_aware_engine engine;
+            enable_full_class_system(
+                engine,
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            // Simulate a game-like scenario
+            engine.execute(R"(
+                // Utility functions (bytecode)
+                auto clamp(auto val, auto min, auto max) -> auto {
+                    if (val < min) return min;
+                    if (val > max) return max;
+                    return val;
+                }
+                
+                auto lerp(auto a, auto b, auto t) -> auto {
+                    return a + (b - a) * t;
+                }
+                
+                // Base game object
+                class GameObject {
+                    float x = 0.0;
+                    float y = 0.0;
+                    float health = 100.0;
+                    
+                    void update(float dt) {
+                        // Base update
+                    }
+                    
+                    void takeDamage(float damage) {
+                        health = clamp(health - damage, 0.0, 100.0);
+                    }
+                    
+                    bool isAlive() {
+                        return health > 0.0;
+                    }
+                }
+                
+                // Enemy class
+                class Enemy : GameObject {
+                    float speed = 50.0;
+                    float targetX = 0.0;
+                    float targetY = 0.0;
+                    
+                    Enemy(float px, float py) {
+                        x = px;
+                        y = py;
+                    }
+                    
+                    void update(float dt) override {
+                        super::update(dt);
+                        
+                        // Move towards target
+                        x = lerp(x, targetX, dt * speed * 0.01);
+                        y = lerp(y, targetY, dt * speed * 0.01);
+                    }
+                    
+                    void setTarget(float tx, float ty) {
+                        targetX = tx;
+                        targetY = ty;
+                    }
+                }
+                
+                // Simulate game loop
+                auto enemies = [];
+                for (auto i = 0; i < 10; i = i + 1) {
+                    enemies.push_back(new Enemy(i * 10.0, i * 5.0));
+                }
+                
+                // Update all enemies
+                auto dt = 0.016;  // 60 FPS
+                for (auto enemy : enemies) {
+                    enemy.setTarget(100.0, 100.0);
+                    enemy.update(dt);
+                    enemy.takeDamage(10.0);
+                }
+                
+                // Count alive enemies
+                auto alive = 0;
+                for (auto enemy : enemies) {
+                    if (enemy.isAlive()) {
+                        alive = alive + 1;
+                    }
+                }
+                
+                alive
+            )");
+            
+            // All enemies should still be alive (90 health each)
+        });
+    }
+};
+
+} // namespace jai::foundry::tests
+
+FOUNDRY_REGISTER(jai::foundry::tests::vm_integration_tests)

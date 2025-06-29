@@ -144,7 +144,7 @@ public:
             
             script_value null_val = engine.execute("null;");
             check(null_val.is_null());
-            check_eq(null_val.type(), value_type::jai_null_type);
+            check_eq(null_val.type(), script_value_type::jai_null_type);
         });
         
         test("type_coercion_in_operations", [this]() {

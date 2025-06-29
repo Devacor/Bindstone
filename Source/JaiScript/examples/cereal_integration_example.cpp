@@ -111,25 +111,25 @@ private:
         
         // Now serialize the actual value based on type
         switch (type_info->base_type) {
-            case jai::value_type::jai_null_type:
+            case jai::script_value_type::jai_null_type:
                 // Nothing to serialize
                 break;
-            case jai::value_type::jai_int_type:
+            case jai::script_value_type::jai_int_type:
                 ar(value.as_int());
                 break;
-            case jai::value_type::jai_float_type:
+            case jai::script_value_type::jai_float_type:
                 ar(value.as_float());
                 break;
-            case jai::value_type::jai_string_type:
+            case jai::script_value_type::jai_string_type:
                 ar(value.as_string());
                 break;
-            case jai::value_type::jai_char_type:
+            case jai::script_value_type::jai_char_type:
                 ar(value.as_char());
                 break;
-            case jai::value_type::jai_bool_type:
+            case jai::script_value_type::jai_bool_type:
                 ar(value.as_bool());
                 break;
-            case jai::value_type::jai_array_type: {
+            case jai::script_value_type::jai_array_type: {
                 // Serialize vector of Values
                 // This would need access to the internal vector
                 // auto& vec = value.as_array();
@@ -140,19 +140,19 @@ private:
                 // }
                 break;
             }
-            case jai::value_type::jai_map_type: {
+            case jai::script_value_type::jai_map_type: {
                 // Serialize map of Values
                 // Similar to array
                 break;
             }
-            case jai::value_type::jai_object_type: {
+            case jai::script_value_type::jai_object_type: {
                 // Use the type registry to serialize
                 // auto holder = value.getObjectHolder();
                 // Find serializer in objectSerializers_[holder->type_name]
                 // Serialize the data
                 break;
             }
-            case jai::value_type::jai_shared_ptr_type: {
+            case jai::script_value_type::jai_shared_ptr_type: {
                 // Serialize the pointed-to value
                 // auto ptr = value.asshared_ptr();
                 // bool hasscript_value = (ptr != nullptr);
@@ -162,17 +162,17 @@ private:
                 // }
                 break;
             }
-            case jai::value_type::jai_weak_ptr_type: {
+            case jai::script_value_type::jai_weak_ptr_type: {
                 // Weak pointers can't be directly serialized
                 // We'd need to handle this specially
                 break;
             }
-            case jai::value_type::jai_reference_type: {
+            case jai::script_value_type::jai_reference_type: {
                 // References can't be directly serialized
                 // We'd need to handle this specially (maybe serialize as a path/id)
                 break;
             }
-            case jai::value_type::jai_function_type: {
+            case jai::script_value_type::jai_function_type: {
                 // Serialize function info (script text, captures, etc.)
                 // Only script-defined functions can be serialized
                 // Native functions would be re-registered on deserialization
@@ -210,27 +210,27 @@ private:
         
         // Based on type, deserialize the value
         switch (base_type) {
-            case jai::value_type::jai_int_type: {
+            case jai::script_value_type::jai_int_type: {
                 jai::int_keyword val;
                 ar(val);
                 return jai::script_value(val);
             }
-            case jai::value_type::jai_float_type: {
+            case jai::script_value_type::jai_float_type: {
                 jai::float_keyword val;
                 ar(val);
                 return jai::script_value(val);
             }
-            case jai::value_type::jai_string_type: {
+            case jai::script_value_type::jai_string_type: {
                 jai::string_keyword val;
                 ar(val);
                 return jai::script_value(val);
             }
-            case jai::value_type::jai_char_type: {
+            case jai::script_value_type::jai_char_type: {
                 jai::char_keyword val;
                 ar(val);
                 return jai::script_value(val);
             }
-            case jai::value_type::jai_bool_type: {
+            case jai::script_value_type::jai_bool_type: {
                 jai::bool_keyword val;
                 ar(val);
                 return jai::script_value(val);

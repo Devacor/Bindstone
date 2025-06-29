@@ -4,6 +4,7 @@
 #include "value.hpp"
 #include "types.hpp"
 #include "function_binder.hpp"
+#include "script_class.hpp"
 #include "../serialization/archive.hpp"
 #include <string>
 #include <memory>
@@ -25,50 +26,8 @@ namespace jai {
     struct parameter;  // Defined in ast.hpp
     using expression_ptr = std::shared_ptr<expression>;
     
-    // Access control for script classes
-    enum class access_level {
-        jai_public,
-        jai_private,
-        jai_protected
-    };
-    
-    // Constructor declaration for script classes  
-    struct constructor_declaration {
-        std::string class_name;
-        std::shared_ptr<std::vector<parameter>> parameters;  // Use pointer to avoid incomplete type
-        std::shared_ptr<block_stmt> body;
-        
-        // Delegation information
-        bool is_delegating = false;
-        enum delegation_type { none, same_class, base_class } delegation_type = none;
-        std::vector<expression_ptr> delegation_args;
-        
-        constructor_declaration(const std::string& name) : class_name(name) {}
-    };
-    
-    // Method declaration for script classes
-    struct method_declaration {
-        std::string name;
-        std::shared_ptr<std::vector<parameter>> parameters;  // Use pointer to avoid incomplete type
-        type_info_ptr return_type;
-        std::shared_ptr<block_stmt> body;
-        access_level access = access_level::jai_public;
-        bool is_override = false;
-        bool is_virtual = true;  // All script methods are virtual by default
-        
-        method_declaration(const std::string& method_name) : name(method_name) {}
-    };
-    
-    // Field declaration for script classes
-    struct field_declaration {
-        std::string name;
-        type_info_ptr type;
-        script_value default_value;
-        access_level access = access_level::jai_public;
-        
-        field_declaration(const std::string& field_name, type_info_ptr field_type) 
-            : name(field_name), type(field_type) {}
-    };
+    // Note: access_level, constructor_declaration, method_declaration,
+    // and field_declaration are now defined in script_class.hpp
 }
 
 namespace jai {
@@ -151,7 +110,6 @@ private:
     std::map<std::string, script_value> fields_;
     std::weak_ptr<class_definition> class_definition_;
     
-    // Helper to extract C++ object from script_value
     static std::shared_ptr<void> extract_cpp_object_impl(const script_value& val);
 };
 
@@ -233,16 +191,22 @@ public:
     // Script class specific methods
     void add_script_constructor(const constructor_declaration& constructor) {
         script_constructors_.push_back(constructor);
+        // TODO: Implement constructor overload resolution
+        // Need to match parameter types/counts for proper overloading
     }
     
     void add_script_method(const method_declaration& method) {
         script_methods_.push_back(method);
+        // TODO: Compile method body to bytecode for VM execution
+        // Currently methods are stored as AST only
     }
     
     void add_script_field(const field_declaration& field) {
         script_fields_.push_back(field);
         // Also add to field_defaults_ for unified field access
         field_defaults_[field.name] = field.default_value;
+        // TODO: Add field type validation
+        // Currently no type checking for field assignments
     }
     
     const std::vector<constructor_declaration>& get_script_constructors() const {
@@ -279,6 +243,9 @@ public:
         return copy_function_(src);
     }
     
+    // TODO: Add support for script-defined destructors
+    // Currently only C++ classes can have destructors registered
+    
 private:
     std::string name_;
     std::map<std::string, script_value> methods_;
@@ -290,7 +257,7 @@ private:
     std::vector<constructor_declaration> script_constructors_;
     std::vector<method_declaration> script_methods_;
     std::vector<field_declaration> script_fields_;
-    access_level default_access_ = access_level::jai_public;
+    access_level default_access_ = access_level::public_access;
     
     // Mixed inheritance support - for script classes inheriting from C++ classes
     std::shared_ptr<class_definition> cpp_base_class_;
@@ -847,7 +814,7 @@ inline bool class_instance::is_cpp_class() const {
 
 inline std::shared_ptr<void> class_instance::extract_cpp_object_impl(const script_value& val) {
     // Access the private object_holder through friend access
-    if (val.type() == value_type::jai_object_type) {
+    if (val.type() == script_value_type::jai_object_type) {
         auto obj_holder = std::get<std::shared_ptr<script_value::object_holder>>(val.storage_);
         return obj_holder->data;
     }

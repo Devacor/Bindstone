@@ -13,7 +13,7 @@
 #define JAISCRIPT_VERSION_MINOR 1
 #define JAISCRIPT_VERSION_PATCH 0
 
-namespace JaiScript {
+namespace jai {
     
     // Version string
     inline const std::string& version() {
@@ -22,8 +22,8 @@ namespace JaiScript {
     }
     
     // Convenience function to create an engine
-    inline std::unique_ptr<Engine> createEngine() {
-        return std::make_unique<Engine>();
+    inline std::unique_ptr<engine> createEngine() {
+        return std::make_unique<engine>();
     }
     
-} // namespace JaiScript
+} // namespace jai

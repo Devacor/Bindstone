@@ -1,125 +1,295 @@
 #include "../../include/jaiscript/core/value.hpp"
+#include "../../include/jaiscript/core/class_builder.hpp"  // For class_instance
+#include "../../include/jaiscript/detail/interpreter.hpp"  // For environment
 #include <sstream>
 
-namespace JaiScript {
+namespace jai {
 
 // Factory methods
-Value Value::makeArray(TypeInfoPtr elementType) {
-    Value v;
-    v.typeInfo_ = TypeInfo::makeArray(elementType);
-    v.storage_ = std::make_shared<std::vector<Value>>();
+script_value script_value::make_array(type_info_ptr element_type) {
+    script_value v;
+    v.type_info_ = type_info::make_array(element_type);
+    v.storage_ = std::make_shared<std::vector<script_value>>();
     return v;
 }
 
-Value Value::makeMap(TypeInfoPtr keyType, TypeInfoPtr valueType) {
-    Value v;
-    v.typeInfo_ = TypeInfo::makeMap(keyType, valueType);
-    v.storage_ = std::make_shared<std::map<Value, Value>>();
+script_value script_value::make_map(type_info_ptr keyType, type_info_ptr valueType) {
+    script_value v;
+    v.type_info_ = type_info::make_map(keyType, valueType);
+    v.storage_ = std::make_shared<std::map<script_value, script_value>>();
     return v;
 }
 
-Value Value::makeSharedPtr(const Value& value) {
-    Value v;
-    v.typeInfo_ = TypeInfo::makeSharedPtr(value.getTypeInfo());
-    v.storage_ = std::make_shared<Value>(value);
+script_value script_value::make_shared_ptr(const script_value& value) {
+    script_value v;
+    v.type_info_ = type_info::make_shared_ptr(value.get_type_info());
+    v.storage_ = std::make_shared<script_value>(value);
     return v;
 }
 
-Value Value::makeWeakPtr(const Value& value) {
+script_value script_value::make_weak_ptr(const script_value& value) {
     // This is tricky - we need a shared_ptr to create a weak_ptr
     // For now, return null
-    Value v;
-    v.typeInfo_ = TypeInfo::makeWeakPtr(value.getTypeInfo());
-    v.storage_ = std::weak_ptr<Value>();
+    script_value v;
+    v.type_info_ = type_info::make_weak_ptr(value.get_type_info());
+    v.storage_ = std::weak_ptr<script_value>();
     return v;
 }
 
-Value Value::makeReference(Value& target) {
-    Value v;
-    v.typeInfo_ = TypeInfo::makeReference(target.getTypeInfo());
-    auto ref = std::make_shared<ReferenceHolder>();
-    ref->target = &target;
+script_value script_value::make_reference(script_value* target, const std::shared_ptr<environment>& env) {
+    if (!target) {
+        throw runtime_error("Cannot create reference to null");
+    }
+    script_value v;
+    v.type_info_ = type_info::make_reference(target->get_type_info());
+    auto ref = std::make_shared<reference_holder>();
+    ref->target = target;
+    ref->sourceEnv = env;  // Store weak reference to environment
     v.storage_ = ref;
     return v;
 }
 
-Value Value::makeObject(const std::string& typeName, std::shared_ptr<void> data) {
-    Value v;
-    v.typeInfo_ = TypeInfo::makeObject(typeName);
-    auto obj = std::make_shared<ObjectHolder>();
-    obj->typeName = typeName;
+script_value script_value::make_object(const std::string& type_name, std::shared_ptr<void> data) {
+    script_value v;
+    v.type_info_ = type_info::make_object(type_name);
+    auto obj = std::make_shared<object_holder>();
+    obj->type_name = type_name;
     obj->data = data;
+    obj->is_cpp_class_instance = true;  // make_object is for class_instance wrapper objects
     v.storage_ = obj;
     return v;
 }
 
-Value Value::makeFunction(const ScriptFunction& func) {
-    Value v;
-    v.typeInfo_ = TypeInfo::makeFunction(TypeInfo::makeVoid(), {}); // TODO: Proper type info
+script_value script_value::make_cpp_object(const std::string& type_name, std::shared_ptr<void> data) {
+    script_value v;
+    v.type_info_ = type_info::make_object(type_name);
+    auto obj = std::make_shared<object_holder>();
+    obj->type_name = type_name;
+    obj->data = data;
+    obj->is_cpp_class_instance = false;  // make_cpp_object is for raw C++ objects
+    v.storage_ = obj;
+    return v;
+}
+
+script_value script_value::make_function(const script_function& func) {
+    script_value v;
+    v.type_info_ = type_info::make_function(type_info::make_void(), {}); // TODO: Proper type info
     v.storage_ = func;
     return v;
 }
 
-
-const ScriptFunction& Value::asFunction() const {
-    if (type() != ValueType::Function) {
-        throw RuntimeError("Value is not a function");
-    }
-    return std::get<ScriptFunction>(storage_);
+// Copy constructor (shallow copy for reference semantics)
+script_value::script_value(const script_value& other) : type_info_(other.type_info_), storage_(other.storage_) {
+    // Simple shallow copy - shares storage with the original
 }
 
-std::string Value::toString() const {
+// Copy assignment operator (shallow copy for reference semantics)
+script_value& script_value::operator=(const script_value& other) {
+    if (this != &other) {
+        type_info_ = other.type_info_;
+        storage_ = other.storage_;
+    }
+    return *this;
+}
+
+// Explicit deep copy method
+script_value script_value::clone() const {
+    script_value result;
+    result.type_info_ = type_info_;
+    
+    // Handle deep copying for different types
     switch (type()) {
-        case ValueType::Null:
+        case value_type::jai_array_type: {
+            // Deep copy the array - each element is also cloned
+            auto& other_array = *std::get<std::shared_ptr<std::vector<script_value>>>(storage_);
+            auto new_array = std::make_shared<std::vector<script_value>>();
+            new_array->reserve(other_array.size());
+            for (const auto& elem : other_array) {
+                new_array->push_back(elem.clone());
+            }
+            result.storage_ = new_array;
+            break;
+        }
+        case value_type::jai_map_type: {
+            // Deep copy the map - keys and values are cloned
+            auto& other_map = *std::get<std::shared_ptr<std::map<script_value, script_value>>>(storage_);
+            auto new_map = std::make_shared<std::map<script_value, script_value>>();
+            for (const auto& [key, value] : other_map) {
+                (*new_map)[key.clone()] = value.clone();
+            }
+            result.storage_ = new_map;
+            break;
+        }
+        case value_type::jai_object_type: {
+            // Deep copy for objects
+            auto obj_holder = std::get<std::shared_ptr<object_holder>>(storage_);
+            
+            // Check if this is a class_instance that supports deep copy
+            if (obj_holder->is_cpp_class_instance) {
+                // This is a class_instance, safe to static_cast
+                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                
+                // Use class_instance's deep_copy method
+                auto new_instance = instance->deep_copy();
+                
+                // Create new object_holder
+                auto new_holder = std::make_shared<object_holder>();
+                new_holder->type_name = obj_holder->type_name;
+                new_holder->data = new_instance;
+                new_holder->is_cpp_class_instance = true;
+                result.storage_ = new_holder;
+            } else {
+                // For raw C++ objects, use shallow copy for now
+                // TODO: Access polymorphic type registry through engine for deep copy
+                result.storage_ = storage_;
+            }
+            break;
+        }
+        case value_type::jai_reference_type: {
+            // When cloning a reference, we want to clone the referenced value,
+            // not create another reference to the same value
+            return deref().clone();
+        }
+        default:
+            // For primitive types and functions, shallow copy is fine
+            result.storage_ = storage_;
+            break;
+    }
+    
+    return result;
+}
+
+const script_function& script_value::as_function() const {
+    const script_value& val = deref();
+    if (val.type() != value_type::jai_function_type) {
+        throw runtime_error("script_value is not a function");
+    }
+    return std::get<script_function>(val.storage_);
+}
+
+std::string script_value::to_string() const {
+    // Special handling for references to show what they point to
+    if (type() == value_type::jai_reference_type) {
+        return deref().to_string();
+    }
+    
+    switch (type()) {
+        case value_type::jai_null_type:
             return "null";
-        case ValueType::Int:
-            return std::to_string(asInt());
-        case ValueType::Float:
-            return std::to_string(asFloat());
-        case ValueType::String:
-            return asString();
-        case ValueType::Char:
-            return std::string(1, asChar());
-        case ValueType::Bool:
-            return asBool() ? "true" : "false";
-        case ValueType::Array:
+        case value_type::jai_int_type:
+            return std::to_string(as_int());
+        case value_type::jai_float_type:
+            return std::to_string(as_float());
+        case value_type::jai_string_type:
+            return as_string();
+        case value_type::jai_char_type:
+            return std::string(1, as_char());
+        case value_type::jai_bool_type:
+            return as_bool() ? "true" : "false";
+        case value_type::jai_array_type:
             return "[array]";
-        case ValueType::Map:
+        case value_type::jai_map_type:
             return "[map]";
-        case ValueType::Object:
+        case value_type::jai_object_type:
             return "[object]";
-        case ValueType::Function:
+        case value_type::jai_function_type:
             return "[function]";
         default:
             return "[unknown]";
     }
 }
 
-bool Value::operator==(const Value& other) const {
+const script_value& script_value::deref() const {
+    if (type() == value_type::jai_reference_type) {
+        auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
+        if (!refHolder || !refHolder->target) {
+            throw runtime_error("Null reference");
+        }
+        if (refHolder->sourceEnv.expired()) {
+            throw runtime_error("Reference target environment has been destroyed");
+        }
+        // Don't recursively deref - just return the target
+        // This prevents infinite recursion and matches C++ reference semantics
+        return *refHolder->target;
+    }
+    return *this;
+}
+
+script_value& script_value::deref() {
+    if (type() == value_type::jai_reference_type) {
+        auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
+        if (!refHolder || !refHolder->target) {
+            throw runtime_error("Null reference");
+        }
+        if (refHolder->sourceEnv.expired()) {
+            throw runtime_error("Reference target environment has been destroyed");
+        }
+        // Don't recursively deref - just return the target
+        // This prevents infinite recursion and matches C++ reference semantics
+        return *refHolder->target;
+    }
+    return *this;
+}
+
+void script_value::assign_through(const script_value& value) {
+    if (type() == value_type::jai_reference_type) {
+        auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
+        if (!refHolder || !refHolder->target) {
+            throw runtime_error("Null reference in assign_through");
+        }
+        if (refHolder->sourceEnv.expired()) {
+            throw runtime_error("Reference target environment has been destroyed");
+        }
+        // Assign to the referenced value
+        *refHolder->target = value;
+    } else {
+        // Not a reference, direct assignment
+        *this = value;
+    }
+}
+
+void script_value::assign_through(script_value&& value) {
+    if (type() == value_type::jai_reference_type) {
+        auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
+        if (!refHolder || !refHolder->target) {
+            throw runtime_error("Null reference in assign_through");
+        }
+        if (refHolder->sourceEnv.expired()) {
+            throw runtime_error("Reference target environment has been destroyed");
+        }
+        // Move assign to the referenced value
+        *refHolder->target = std::move(value);
+    } else {
+        // Not a reference, direct move assignment
+        *this = std::move(value);
+    }
+}
+
+bool script_value::operator==(const script_value& other) const {
     if (type() != other.type()) {
         return false;
     }
     
     switch (type()) {
-        case ValueType::Null:
+        case value_type::jai_null_type:
             return true;
-        case ValueType::Int:
-            return asInt() == other.asInt();
-        case ValueType::Float:
-            return asFloat() == other.asFloat();
-        case ValueType::String:
-            return asString() == other.asString();
-        case ValueType::Char:
-            return asChar() == other.asChar();
-        case ValueType::Bool:
-            return asBool() == other.asBool();
+        case value_type::jai_int_type:
+            return as_int() == other.as_int();
+        case value_type::jai_float_type:
+            return as_float() == other.as_float();
+        case value_type::jai_string_type:
+            return as_string() == other.as_string();
+        case value_type::jai_char_type:
+            return as_char() == other.as_char();
+        case value_type::jai_bool_type:
+            return as_bool() == other.as_bool();
         default:
             // TODO: Implement for complex types
             return false;
     }
 }
 
-std::strong_ordering Value::operator<=>(const Value& other) const {
+std::strong_ordering script_value::operator<=>(const script_value& other) const {
     // First compare types
     if (auto cmp = type() <=> other.type(); cmp != 0) {
         return cmp;
@@ -127,28 +297,29 @@ std::strong_ordering Value::operator<=>(const Value& other) const {
     
     // Then compare values for same types
     switch (type()) {
-        case ValueType::Null:
+        case value_type::jai_null_type:
             return std::strong_ordering::equal; // All nulls are equal
-        case ValueType::Int:
-            return asInt() <=> other.asInt();
-        case ValueType::Float:
-            // Float comparison returns partial_ordering, convert to strong
-            if (auto cmp = asFloat() <=> other.asFloat(); cmp < 0)
+        case value_type::jai_int_type:
+            return as_int() <=> other.as_int();
+        case value_type::jai_float_type:
+            // script_float comparison returns partial_ordering, convert to strong
+            if (auto cmp = as_float() <=> other.as_float(); cmp < 0)
                 return std::strong_ordering::less;
             else if (cmp > 0)
                 return std::strong_ordering::greater;
             else
                 return std::strong_ordering::equal;
-        case ValueType::String:
-            return asString() <=> other.asString();
-        case ValueType::Char:
-            return asChar() <=> other.asChar();
-        case ValueType::Bool:
-            return asBool() <=> other.asBool();
+        case value_type::jai_string_type:
+            return as_string() <=> other.as_string();
+        case value_type::jai_char_type:
+            return as_char() <=> other.as_char();
+        case value_type::jai_bool_type:
+            return as_bool() <=> other.as_bool();
         default:
             // For complex types, compare by address for now
             return &storage_ <=> &other.storage_;
     }
 }
 
-} // namespace JaiScript
+
+} // namespace jai

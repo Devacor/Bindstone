@@ -1,31 +1,36 @@
 #include "../../include/jaiscript/core/engine.hpp"
 #include "../../include/jaiscript/core/class_builder.hpp"
 #include "../../include/jaiscript/core/value.hpp"
+#include "../../include/jaiscript/core/execution_backend.hpp"
 #include "../../include/jaiscript/detail/lexer.hpp"
 #include "../../include/jaiscript/detail/parser.hpp"
 #include "../../include/jaiscript/detail/interpreter.hpp"
+#include "../../include/jaiscript/detail/interpreter_backend.hpp"
+#include "../../include/jaiscript/jvm/vm_backend.hpp"
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
+#include <cstdlib>
 
-namespace JaiScript {
+namespace jai {
 
-struct Engine::Implementation {
+struct engine::implementation {
     // Type conversion registry
     struct TypeConversionRegistry {
         struct Conversion {
-            ValueType from;
-            ValueType to;
+            value_type from;
+            value_type to;
             int cost; // Conversion cost for overload resolution
-            std::function<Value(const Value&)> converter;
+            std::function<script_value(const script_value&)> converter;
         };
         
         std::vector<Conversion> conversions;
         
-        void registerConversion(ValueType from, ValueType to, int cost, 
-                               std::function<Value(const Value&)> converter) {
+        void registerConversion(value_type from, value_type to, int cost, 
+                               std::function<script_value(const script_value&)> converter) {
             // Remove existing conversion if any
             auto it = std::find_if(conversions.begin(), conversions.end(),
                 [from, to](const Conversion& c) { 
@@ -39,7 +44,7 @@ struct Engine::Implementation {
             }
         }
         
-        bool canConvert(ValueType from, ValueType to) const {
+        bool canConvert(value_type from, value_type to) const {
             if (from == to) return true;
             
             return std::any_of(conversions.begin(), conversions.end(),
@@ -48,7 +53,7 @@ struct Engine::Implementation {
                 });
         }
         
-        int getConversionCost(ValueType from, ValueType to) const {
+        int getConversionCost(value_type from, value_type to) const {
             if (from == to) return 0;
             
             auto it = std::find_if(conversions.begin(), conversions.end(),
@@ -59,7 +64,7 @@ struct Engine::Implementation {
             return (it != conversions.end()) ? it->cost : 1000;
         }
         
-        Value convert(const Value& value, ValueType targetType) const {
+        script_value convert(const script_value& value, value_type targetType) const {
             if (value.type() == targetType) return value;
             
             auto it = std::find_if(conversions.begin(), conversions.end(),
@@ -71,7 +76,7 @@ struct Engine::Implementation {
                 return it->converter(value);
             }
             
-            throw RuntimeError("No conversion available from " + 
+            throw runtime_error("No conversion available from " + 
                              std::to_string(static_cast<int>(value.type())) + 
                              " to " + std::to_string(static_cast<int>(targetType)));
         }
@@ -80,15 +85,58 @@ struct Engine::Implementation {
     // Global type conversion registry
     TypeConversionRegistry typeConversions;
     
+    // Polymorphic type registry for deep copying
+    struct polymorphic_type_registry {
+        struct type_copier {
+            std::type_index type_id;
+            std::function<std::shared_ptr<void>(const void*)> copy_func;
+        };
+        
+        // Maps base type -> all registered derived type copiers
+        std::unordered_map<std::type_index, std::vector<type_copier>> base_to_derived_;
+        
+        // Register a derived type with its copy function
+        void register_type(std::type_index derived_type, std::type_index base_type,
+                          std::function<std::shared_ptr<void>(const void*)> copier) {
+            type_copier tc{derived_type, copier};
+            base_to_derived_[base_type].push_back(tc);
+            // Also register under its own type for direct copying
+            base_to_derived_[derived_type].push_back(tc);
+        }
+        
+        // Copy a polymorphic object, maintaining its actual derived type
+        std::shared_ptr<void> copy_polymorphic(const void* obj, std::type_index stored_type) const {
+            // For polymorphic types, we need the actual runtime type
+            // Since we registered the copier with the exact type, we can just use stored_type
+            // The polymorphic behavior is handled by registering derived types with their base
+            
+            // Find copier for this type
+            auto it = base_to_derived_.find(stored_type);
+            if (it != base_to_derived_.end() && !it->second.empty()) {
+                // Use the first copier (there should only be one per type)
+                return it->second[0].copy_func(obj);
+            }
+            
+            // No copier found
+            return nullptr;
+        }
+        
+        bool has_copier(std::type_index type) const {
+            return base_to_derived_.find(type) != base_to_derived_.end();
+        }
+    };
+    
+    polymorphic_type_registry polymorphic_copiers;
+    
     // Structure to hold overloaded functions with type information
     struct OverloadSet {
         struct Overload {
             size_t argCount;
-            Value function;
-            std::vector<ValueType> paramTypes; // Type signature for type-based matching
-            std::function<bool(const std::vector<Value>&)> typeMatcher; // Custom type matcher
+            script_value function;
+            std::vector<value_type> paramTypes; // Type signature for type-based matching
+            std::function<bool(const std::vector<script_value>&)> typeMatcher; // Custom type matcher
             
-            Overload(size_t count, const Value& func, const std::vector<ValueType>& types = {})
+            Overload(size_t count, const script_value& func, const std::vector<value_type>& types = {})
                 : argCount(count), function(func), paramTypes(types) {}
         };
         
@@ -103,7 +151,7 @@ struct Engine::Implementation {
             conversions = registry;
         }
         
-        void addOverload(size_t argCount, const Value& func, const std::vector<ValueType>& paramTypes = {}) {
+        void addOverload(size_t argCount, const script_value& func, const std::vector<value_type>& paramTypes = {}) {
             // If we have type info, check for exact type match first
             if (!paramTypes.empty()) {
                 auto it = std::find_if(overloads.begin(), overloads.end(),
@@ -129,8 +177,9 @@ struct Engine::Implementation {
             overloads.emplace_back(argCount, func, paramTypes);
         }
         
-        Value findBestMatch(const std::vector<Value>& args) const {
+        script_value findBestMatch(const std::vector<script_value>& args) const {
             size_t argCount = args.size();
+            
             
             // Use C++-style overload resolution: find all viable candidates, then pick the best
             struct Candidate {
@@ -177,7 +226,7 @@ struct Engine::Implementation {
             
             // Phase 2: Pick the best viable candidate (lowest cost)
             if (viableCandidates.empty()) {
-                return Value(); // No viable candidates
+                return script_value(); // No viable candidates
             }
             
             auto best = std::min_element(viableCandidates.begin(), viableCandidates.end(),
@@ -190,42 +239,51 @@ struct Engine::Implementation {
             
             if (numBest > 1 && bestCost < 100) { // Don't report ambiguity for untyped functions
                 // Could throw ambiguity error here, but for now just pick first
-                // throw RuntimeError("Ambiguous function call");
+                // throw runtime_error("Ambiguous function call");
             }
             
             return best->overload->function;
         }
     };
     
-    // C++ registered globals (persistent, never reset, injected into each interpreter)
-    std::unordered_map<std::string, Value> cppGlobals;
+    // Track which globals should NOT be serialized (most are serializable by default)
+    std::unordered_set<std::string> nonSerializableGlobals;
     
     // Overloaded functions (support multiple functions with same name)
     std::unordered_map<std::string, OverloadSet> overloadedFunctions;
     
-    // Script-declared variables (transferable between interpreter sessions)
-    // Use unordered_map for performance - convert to ordered during serialization
-    std::unordered_map<std::string, Value> scriptGlobals;
-    
     // Registered classes
-    std::unordered_map<std::string, std::shared_ptr<ClassDefinition>> classes;
+    std::unordered_map<std::string, std::shared_ptr<class_definition>> classes;
+    
+    // Type index to class definition mapping for efficient lookups
+    std::unordered_map<std::type_index, std::shared_ptr<class_definition>> classesByType;
     
     // Function arity info for proper overloading
     std::unordered_map<std::string, size_t> functionArities;
     
     // Shared string symbolizer for consistent variable name mapping
-    StringSymbolizer stringSymbolizer;
+    string_symbolizer stringSymbolizer;
     
     // Type name registry for custom classes (maps typeid name to user-friendly name)
     std::unordered_map<std::string, std::string> typeNameRegistry;
     
     // Type converter registry (maps typeid name to converter function)
-    std::unordered_map<std::string, std::function<Value(const void*)>> typeConverters;
+    std::unordered_map<std::string, std::function<script_value(const void*)>> typeConverters;
     
-    std::unique_ptr<Interpreter> interpreter;
+    // Template type registry for parsing (stores base template names like "Point", "MyMap")
+    std::unordered_set<std::string> registeredTemplateTypes;
     
-    Implementation();
-    ~Implementation();
+    // Global environment shared with interpreter
+    std::shared_ptr<environment> globalEnvironment;
+    
+    execution_backend_ptr backend;
+    backend_type current_backend_type = backend_type::interpreter; // Default to interpreter
+    
+    implementation();
+    ~implementation();
+    
+    // Update interpreter when an overloaded function changes
+    void updateOverloadedFunction(const std::string& name);
     
     // Helper to ensure overload set has conversion registry
     OverloadSet& getOrCreateOverloadSet(const std::string& name) {
@@ -237,190 +295,311 @@ struct Engine::Implementation {
     }
 };
 
-Engine::Implementation::Implementation() {
-    interpreter = std::make_unique<Interpreter>();
+engine::implementation::implementation() {
+    globalEnvironment = std::make_shared<environment>(&stringSymbolizer);
+    
+    const char* backend_env = std::getenv("JAISCRIPT_BACKEND");
+    if (backend_env) {
+        std::string backend_str(backend_env);
+        if (backend_str == "jvm" || backend_str == "vm") {
+            current_backend_type = backend_type::jvm;
+            backend = jvm::create_vm_backend(&stringSymbolizer, globalEnvironment);
+        } else if (backend_str == "auto") {
+            current_backend_type = backend_type::auto_select;
+            backend = std::make_unique<interpreter_backend>(&stringSymbolizer, globalEnvironment);
+        } else {
+            current_backend_type = backend_type::interpreter;
+            backend = std::make_unique<interpreter_backend>(&stringSymbolizer, globalEnvironment);
+        }
+    } else {
+        current_backend_type = backend_type::interpreter;
+        backend = std::make_unique<interpreter_backend>(&stringSymbolizer, globalEnvironment);
+    }
+    
+    backend->set_type_converters(&typeConverters);
     
     // Register standard C++ implicit conversions
     // Promotions (lossless) - cost 1
-    typeConversions.registerConversion(ValueType::Bool, ValueType::Int, 1,
-        [](const Value& v) { return Value(static_cast<Int>(v.asBool() ? 1 : 0)); });
+    typeConversions.registerConversion(value_type::jai_bool_type, value_type::jai_int_type, 1,
+        [](const script_value& v) { return script_value(static_cast<script_int>(v.as_bool() ? 1 : 0)); });
     
-    typeConversions.registerConversion(ValueType::Char, ValueType::Int, 1,
-        [](const Value& v) { return Value(static_cast<Int>(v.asChar())); });
+    typeConversions.registerConversion(value_type::jai_char_type, value_type::jai_int_type, 1,
+        [](const script_value& v) { return script_value(static_cast<script_int>(v.as_char())); });
     
-    typeConversions.registerConversion(ValueType::Int, ValueType::Float, 1,
-        [](const Value& v) { return Value(static_cast<Float>(v.asInt())); });
+    typeConversions.registerConversion(value_type::jai_int_type, value_type::jai_float_type, 1,
+        [](const script_value& v) { return script_value(static_cast<script_float>(v.as_int())); });
     
     // Standard conversions (may lose precision) - cost 2
-    typeConversions.registerConversion(ValueType::Float, ValueType::Int, 2,
-        [](const Value& v) { return Value(static_cast<Int>(v.asFloat())); });
+    typeConversions.registerConversion(value_type::jai_float_type, value_type::jai_int_type, 2,
+        [](const script_value& v) { return script_value(static_cast<script_int>(v.as_float())); });
     
-    typeConversions.registerConversion(ValueType::Int, ValueType::Char, 2,
-        [](const Value& v) { return Value(static_cast<Char>(v.asInt())); });
+    typeConversions.registerConversion(value_type::jai_int_type, value_type::jai_char_type, 2,
+        [](const script_value& v) { return script_value(static_cast<script_char>(v.as_int())); });
     
-    typeConversions.registerConversion(ValueType::Int, ValueType::Bool, 2,
-        [](const Value& v) { return Value(static_cast<Bool>(v.asInt() != 0)); });
+    typeConversions.registerConversion(value_type::jai_int_type, value_type::jai_bool_type, 2,
+        [](const script_value& v) { return script_value(static_cast<script_bool>(v.as_int() != 0)); });
     
     // Other numeric conversions - cost 3
-    typeConversions.registerConversion(ValueType::Float, ValueType::Bool, 3,
-        [](const Value& v) { return Value(static_cast<Bool>(v.asFloat() != 0.0)); });
+    typeConversions.registerConversion(value_type::jai_float_type, value_type::jai_bool_type, 3,
+        [](const script_value& v) { return script_value(static_cast<script_bool>(v.as_float() != 0.0)); });
     
-    typeConversions.registerConversion(ValueType::Bool, ValueType::Float, 3,
-        [](const Value& v) { return Value(static_cast<Float>(v.asBool() ? 1.0 : 0.0)); });
+    typeConversions.registerConversion(value_type::jai_bool_type, value_type::jai_float_type, 3,
+        [](const script_value& v) { return script_value(static_cast<script_float>(v.as_bool() ? 1.0 : 0.0)); });
     
-    typeConversions.registerConversion(ValueType::Char, ValueType::Float, 3,
-        [](const Value& v) { return Value(static_cast<Float>(v.asChar())); });
+    typeConversions.registerConversion(value_type::jai_char_type, value_type::jai_float_type, 3,
+        [](const script_value& v) { return script_value(static_cast<script_float>(v.as_char())); });
     
-    typeConversions.registerConversion(ValueType::Float, ValueType::Char, 3,
-        [](const Value& v) { return Value(static_cast<Char>(static_cast<Int>(v.asFloat()))); });
+    typeConversions.registerConversion(value_type::jai_float_type, value_type::jai_char_type, 3,
+        [](const script_value& v) { return script_value(static_cast<script_char>(static_cast<script_int>(v.as_float()))); });
 }
 
-Engine::Implementation::~Implementation() = default;
+engine::implementation::~implementation() = default;
 
-Engine::Engine() : impl(std::make_unique<Implementation>()) {
-    // Set up custom extractor for ClassInstance objects
-    Value::setCustomExtractor([this](const std::string& typeName, std::shared_ptr<void> obj) -> std::shared_ptr<void> {
-        // Check if this is a class that was registered with ClassBuilder
-        // ClassBuilder creates objects with typeName matching the class name
-        auto classIt = impl->classes.find(typeName);
+void engine::implementation::updateOverloadedFunction(const std::string& name) {
+    // Create a dispatch function that selects the right overload
+    // Make a copy of the name to ensure it survives the lambda lifetime
+    std::string functionName = name;
+    script_function dispatcher = [this, functionName](const std::vector<script_value>& args) -> script_value {
+        auto it = overloadedFunctions.find(functionName);
+        if (it == overloadedFunctions.end()) {
+            throw runtime_error("Overloaded function '" + functionName + "' not found");
+        }
+        
+        script_value bestMatch = it->second.findBestMatch(args);
+        if (bestMatch.is_null()) {
+            throw runtime_error("No matching overload found for function '" + functionName + "' with " + std::to_string(args.size()) + " arguments");
+        }
+        
+        const script_function& func = bestMatch.as_function();
+        return func(args);
+    };
+    
+    // Update in global environment
+    script_value dispatcherValue = script_value::make_function(dispatcher);
+    globalEnvironment->define(name, dispatcherValue);
+}
+
+engine::engine() : impl(std::make_unique<implementation>()) {
+    // Set up the subscript resolver for custom [] operators
+    impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> script_value {
+        auto it = impl->overloadedFunctions.find("[]");
+        if (it == impl->overloadedFunctions.end()) {
+            throw runtime_error("No custom subscript operator registered");
+        }
+        
+        script_value bestMatch = it->second.findBestMatch(args);
+        if (bestMatch.is_null()) {
+            throw runtime_error("No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+        }
+        
+        const script_function& func = bestMatch.as_function();
+        return func(args);
+    });
+    
+    // Set up custom extractor for class_instance objects
+    script_value::set_custom_extractor([this](const std::string& type_name, std::shared_ptr<void> obj) -> std::shared_ptr<void> {
+        // Check if this is a class that was registered with class_builder
+        // class_builder creates objects with type_name matching the class name
+        auto classIt = impl->classes.find(type_name);
         if (classIt != impl->classes.end()) {
-            // This is a registered class, so obj should be a ClassInstance
-            // We need to static_cast since we can't dynamic_cast from void*
-            auto instance = std::static_pointer_cast<ClassInstance>(obj);
+            // This is a registered class, obj should be a class_instance
+            auto instance = std::static_pointer_cast<class_instance>(obj);
             
             // Get the C++ object from the special field
-            Value cppObjValue = instance->getField("__cpp_object");
-            if (!cppObjValue.isNull() && cppObjValue.type() == ValueType::Object) {
-                try {
-                    // Extract as void* shared_ptr
-                    auto voidPtr = cppObjValue.as<std::shared_ptr<void>>();
-                    return voidPtr;
-                } catch (...) {
-                    // Failed to extract
-                }
+            script_value cppObjValue = instance->get_field("_cpp_object");
+            if (!cppObjValue.is_null() && cppObjValue.type() == value_type::jai_object_type) {
+                // Direct access to the object_holder to avoid recursive extraction
+                auto objHolder = std::get<std::shared_ptr<script_value::object_holder>>(cppObjValue.storage_);
+                return objHolder->data;
             }
         }
         return nullptr;
     });
     
     // Add built-in functions
-    addFunction("print", [](const std::vector<Value>& args) {
+    add_function("print", [](const std::vector<script_value>& args) {
         for (const auto& arg : args) {
-            std::cout << arg.toString();
+            std::cout << arg.to_string();
         }
         std::cout << std::endl;
-        return Value();
+        return script_value();
     });
 }
 
-Engine::~Engine() = default;
+engine::~engine() = default;
 
-Engine::Engine(Engine&&) noexcept = default;
-Engine& Engine::operator=(Engine&&) noexcept = default;
+engine::engine(engine&&) noexcept = default;
+engine& engine::operator=(engine&&) noexcept = default;
 
-Value Engine::eval(const std::string& scriptContent) {
+
+script_value engine::execute(const std::string& scriptContent) {
+    return execute(scriptContent, instance_variables{});
+}
+
+script_value engine::execute(const std::string& scriptContent, const instance_variables& instanceVars) {
     try {
-        // Create a new interpreter for this execution using shared string symbolizer
-        Interpreter interpreter(&impl->stringSymbolizer);
-        
-        // Add both C++ globals and script globals to the interpreter
-        std::unordered_map<std::string, Value> allGlobals = impl->cppGlobals;
-        allGlobals.insert(impl->scriptGlobals.begin(), impl->scriptGlobals.end());
-        
-        // Add overloaded functions
-        for (const auto& [name, overloadSet] : impl->overloadedFunctions) {
-            // Create a dispatch function that selects the right overload
-            // Capture by reference to the impl member, not the loop variable
-            ScriptFunction dispatcher = [this, name](const std::vector<Value>& args) -> Value {
-                auto it = impl->overloadedFunctions.find(name);
-                if (it == impl->overloadedFunctions.end()) {
-                    throw RuntimeError("Overloaded function '" + name + "' not found");
-                }
-                
-                Value bestMatch = it->second.findBestMatch(args);
-                if (bestMatch.isNull()) {
-                    throw RuntimeError("No matching overload found for function '" + name + "' with " + std::to_string(args.size()) + " arguments");
-                }
-                
-                // Call the selected overload
-                const ScriptFunction& func = bestMatch.asFunction();
-                return func(args);
-            };
+        // Auto-select backend based on script length if in auto mode
+        if (impl->current_backend_type == backend_type::auto_select) {
+            const size_t SCRIPT_LENGTH_THRESHOLD = 1000; // Characters
+            backend_type selected_type = (scriptContent.length() > SCRIPT_LENGTH_THRESHOLD) 
+                                       ? backend_type::jvm 
+                                       : backend_type::interpreter;
             
-            allGlobals[name] = Value::makeFunction(dispatcher);
+            // Switch backend if needed
+            if (selected_type == backend_type::jvm && dynamic_cast<interpreter_backend*>(impl->backend.get())) {
+                impl->backend = jvm::create_vm_backend(&impl->stringSymbolizer, impl->globalEnvironment);
+                impl->backend->set_type_converters(&impl->typeConverters);
+                impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
+                                                          impl->overloadedFunctions.count("-") > 0 ||
+                                                          impl->overloadedFunctions.count("*") > 0 ||
+                                                          impl->overloadedFunctions.count("/") > 0);
+                impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> script_value {
+                    auto it = impl->overloadedFunctions.find("[]");
+                    if (it == impl->overloadedFunctions.end()) {
+                        throw runtime_error("No custom subscript operator registered");
+                    }
+                    
+                    script_value bestMatch = it->second.findBestMatch(args);
+                    if (bestMatch.is_null()) {
+                        throw runtime_error("No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+                    }
+                    
+                    const script_function& func = bestMatch.as_function();
+                    return func(args);
+                });
+            } else if (selected_type == backend_type::interpreter && !dynamic_cast<interpreter_backend*>(impl->backend.get())) {
+                impl->backend = std::make_unique<interpreter_backend>(&impl->stringSymbolizer, impl->globalEnvironment);
+                impl->backend->set_type_converters(&impl->typeConverters);
+                impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
+                                                          impl->overloadedFunctions.count("-") > 0 ||
+                                                          impl->overloadedFunctions.count("*") > 0 ||
+                                                          impl->overloadedFunctions.count("/") > 0);
+                impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> script_value {
+                    auto it = impl->overloadedFunctions.find("[]");
+                    if (it == impl->overloadedFunctions.end()) {
+                        throw runtime_error("No custom subscript operator registered");
+                    }
+                    
+                    script_value bestMatch = it->second.findBestMatch(args);
+                    if (bestMatch.is_null()) {
+                        throw runtime_error("No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+                    }
+                    
+                    const script_function& func = bestMatch.as_function();
+                    return func(args);
+                });
+            }
         }
-        interpreter.addGlobals(allGlobals);
         
-        // Tokenize the script
-        Lexer lexer(scriptContent);
+        // Prepare backend for new execution
+        impl->backend->prepare_for_execution();
+        
+        // Push scope for instance variables if any
+        bool hasInstanceVars = !instanceVars.empty();
+        if (hasInstanceVars) {
+            impl->backend->push_scope();
+            for (const auto& [name, value] : instanceVars) {
+                impl->backend->define_variable(name, value);
+            }
+        }
+        
+        // Parse and execute
+        lexer lexer(scriptContent, impl->registeredTemplateTypes);
         auto tokens = lexer.tokenize();
-        
-        // Parse the tokens into an AST
-        Parser parser(tokens);
+        parser parser(tokens, impl->registeredTemplateTypes);
         auto declarations = parser.parse();
         
-        // Execute the AST
-        Value result = interpreter.execute(declarations);
+        script_value result = impl->backend->execute(declarations);
         
-        // Update script globals from interpreter back to engine
-        // Only script-declared variables should be transferred back
-        auto variables = interpreter.getAllVariables();
-        // Don't clear old script variables - we want to preserve them
-        // Only update/add variables that were defined or modified
-        for (const auto& [name, value] : variables) {
-            // Only transfer variables that aren't C++ globals
-            if (impl->cppGlobals.find(name) == impl->cppGlobals.end()) {
-                impl->scriptGlobals[name] = value;
+        // Check for unhandled script exception
+        if (impl->backend->is_unwinding()) {
+            const auto& exception = impl->backend->get_current_exception();
+            
+            // Pop instance scope before throwing
+            if (hasInstanceVars) {
+                impl->backend->pop_scope();
             }
+            
+            throw exception;
+        }
+        
+        // No need to sync globals - they're already in the shared environment!
+        
+        // Pop instance scope if we pushed one
+        if (hasInstanceVars) {
+            impl->backend->pop_scope();
         }
         
         return result;
         
+    } catch (const script_exception& e) {
+        // Script exceptions bubble up to C++
+        impl->backend->prepare_for_execution();
+        throw;
+    } catch (const std::runtime_error& e) {
+        // Wrap C++ exceptions as script exceptions for consistency
+        impl->backend->prepare_for_execution();
+        throw script_exception(std::string("C++ exception: ") + e.what());
     } catch (const std::exception& e) {
-        throw RuntimeError("Execution failed: " + std::string(e.what()));
+        // Wrap other C++ exceptions with a generic message
+        impl->backend->prepare_for_execution();
+        throw script_exception("Unbound exception type caught in JaiScript.");
     }
 }
 
-Value Engine::fileEval(const std::string& scriptPath) {
+script_value engine::execute_file(const std::string& scriptPath) {
+    return execute_file(scriptPath, instance_variables{});
+}
+
+script_value engine::execute_file(const std::string& scriptPath, const instance_variables& instanceVars) {
     std::ifstream file(scriptPath);
     if (!file.is_open()) {
-        throw RuntimeError("Failed to open script file: " + scriptPath);
+        throw runtime_error("Failed to open script file: " + scriptPath);
     }
     
     std::stringstream buffer;
     buffer << file.rdbuf();
-    return eval(buffer.str());
+    return execute(buffer.str(), instanceVars);
 }
 
-Value Engine::execute(const std::string& scriptContent) {
-    return eval(scriptContent);
-}
-
-Value Engine::executeFile(const std::string& scriptPath) {
-    return fileEval(scriptPath);
-}
-
-void Engine::addGlobal(const std::string& name, Value value) {
-    impl->cppGlobals[name] = std::move(value);
-}
-
-void Engine::addVariadicFunction(const std::string& name, ScriptFunction func) {
-    // Variadic function registration - handles any number of arguments
-    // Register with arity 0 to indicate it's a wildcard function
-    if (hasFunction(name)) {
-        // Add as overload with arity 0 (wildcard - accepts any number of args)
-        addOverloadedFunction(name, 0, func);
+void engine::add_global(const std::string& name, script_value value, bool is_serializable) {
+    impl->globalEnvironment->define(name, std::move(value));
+    
+    // Track if this global should NOT be serialized
+    if (!is_serializable) {
+        impl->nonSerializableGlobals.insert(name);
     } else {
-        // Register with arity 0 to mark it as variadic
-        addFunctionWithArity(name, func, 0);
+        // In case it was previously marked as non-serializable
+        impl->nonSerializableGlobals.erase(name);
     }
 }
 
-void Engine::addFunctionWithArity(const std::string& name, ScriptFunction func, size_t arity) {
-    auto existingIt = impl->cppGlobals.find(name);
+void engine::add_variadic_function(const std::string& name, script_function func) {
+    // Variadic function registration - handles any number of arguments
+    // Register with arity 0 to indicate it's a wildcard function
+    if (has_function(name)) {
+        // Add as overload with arity 0 (wildcard - accepts any number of args)
+        add_overloaded_function(name, 0, func);
+    } else {
+        // Register with arity 0 to mark it as variadic
+        add_functionWithArity(name, func, 0);
+    }
+}
+
+void engine::add_functionWithArity(const std::string& name, script_function func, size_t arity) {
+    // Check if we have an existing function with this name
+    bool hasExistingFunction = false;
+    script_value existing;
+    try {
+        existing = impl->globalEnvironment->get(name);
+        hasExistingFunction = existing.is_function();
+    } catch (...) {
+        // Variable doesn't exist, which is fine
+    }
+    
     auto overloadIt = impl->overloadedFunctions.find(name);
     
-    if (existingIt != impl->cppGlobals.end() && existingIt->second.isFunction()) {
+    if (hasExistingFunction) {
         // Move existing function to overloaded set
         if (overloadIt == impl->overloadedFunctions.end()) {
             // Check if we have arity info for the existing function
@@ -428,71 +607,105 @@ void Engine::addFunctionWithArity(const std::string& name, ScriptFunction func, 
             size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
             
             impl->getOrCreateOverloadSet(name).setConversionRegistry(&impl->typeConversions);
-            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existingIt->second);
-            impl->cppGlobals.erase(existingIt);
+            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing);
             if (arityIt != impl->functionArities.end()) {
                 impl->functionArities.erase(arityIt);
             }
         }
         
         // Now add the new function as an overload
-        impl->getOrCreateOverloadSet(name).addOverload(arity, Value::makeFunction(func));
+        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func));
+        impl->updateOverloadedFunction(name);
     } else if (overloadIt != impl->overloadedFunctions.end()) {
         // Already have overloaded functions, just add this one
-        impl->getOrCreateOverloadSet(name).addOverload(arity, Value::makeFunction(func));
+        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func));
+        impl->updateOverloadedFunction(name);
     } else {
         // No existing function, just add normally
         // Store arity info for future use
-        impl->cppGlobals[name] = Value::makeFunction(func);
+        script_value funcValue = script_value::make_function(func);
+        impl->globalEnvironment->define(name, funcValue);
         impl->functionArities[name] = arity;
     }
 }
 
-void Engine::addOverloadedFunction(const std::string& name, size_t argCount, ScriptFunction func) {
-    // Check if we need to move an existing function from cppGlobals
-    auto existingIt = impl->cppGlobals.find(name);
-    if (existingIt != impl->cppGlobals.end() && existingIt->second.isFunction()) {
+void engine::add_overloaded_function(const std::string& name, size_t argCount, script_function func) {
+    // Check if we need to move an existing function from globalEnvironment
+    bool hasExistingFunction = false;
+    script_value existing;
+    try {
+        existing = impl->globalEnvironment->get(name);
+        hasExistingFunction = existing.is_function();
+    } catch (...) {
+        // Variable doesn't exist, which is fine
+    }
+    
+    if (hasExistingFunction) {
         // Move existing function to overloaded set first
         // Check if we have arity info for the existing function
         auto arityIt = impl->functionArities.find(name);
         size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
         
-        impl->getOrCreateOverloadSet(name).addOverload(existingArity, existingIt->second);
-        impl->cppGlobals.erase(existingIt);
-        if (arityIt != impl->functionArities.end()) {
-            impl->functionArities.erase(arityIt);
+        // Check if this is already an overloaded function by seeing if it's in the overloadedFunctions map
+        // This prevents trying to add a dispatcher function to the overload set, which would cause
+        // a segfault due to recursive function copying issues
+        auto overloadIt = impl->overloadedFunctions.find(name);
+        if (overloadIt == impl->overloadedFunctions.end()) {
+            // First time creating overload set for this function
+            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing);
+            if (arityIt != impl->functionArities.end()) {
+                impl->functionArities.erase(arityIt);
+            }
         }
     }
     
     // Now add the new overload
-    impl->getOrCreateOverloadSet(name).addOverload(argCount, Value::makeFunction(func));
+    impl->getOrCreateOverloadSet(name).addOverload(argCount, script_value::make_function(func));
+    impl->updateOverloadedFunction(name);
 }
 
-void Engine::addOverloadedFunctionWithTypes(const std::string& name, size_t argCount, ScriptFunction func, const std::vector<ValueType>& paramTypes) {
-    // Check if we need to move an existing function from cppGlobals
-    auto existingIt = impl->cppGlobals.find(name);
-    if (existingIt != impl->cppGlobals.end() && existingIt->second.isFunction()) {
+void engine::add_overloaded_functionWithTypes(const std::string& name, size_t argCount, script_function func, const std::vector<value_type>& paramTypes) {
+    // Check if we need to move an existing function from globalEnvironment
+    bool hasExistingFunction = false;
+    script_value existing;
+    try {
+        existing = impl->globalEnvironment->get(name);
+        hasExistingFunction = existing.is_function();
+    } catch (...) {
+        // Variable doesn't exist, which is fine
+    }
+    
+    if (hasExistingFunction) {
         // Move existing function to overloaded set first
         // Check if we have arity info for the existing function
         auto arityIt = impl->functionArities.find(name);
         size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
         
-        impl->getOrCreateOverloadSet(name).addOverload(existingArity, existingIt->second);
-        impl->cppGlobals.erase(existingIt);
+        impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing);
         if (arityIt != impl->functionArities.end()) {
             impl->functionArities.erase(arityIt);
         }
     }
     
     // Now add the new overload with type information
-    impl->getOrCreateOverloadSet(name).addOverload(argCount, Value::makeFunction(func), paramTypes);
+    impl->getOrCreateOverloadSet(name).addOverload(argCount, script_value::make_function(func), paramTypes);
+    impl->updateOverloadedFunction(name);
 }
 
-void Engine::addFunctionWithArityAndTypes(const std::string& name, ScriptFunction func, size_t arity, const std::vector<ValueType>& paramTypes) {
-    auto existingIt = impl->cppGlobals.find(name);
+void engine::add_functionWithArityAndTypes(const std::string& name, script_function func, size_t arity, const std::vector<value_type>& paramTypes) {
+    // Check if we have an existing function with this name
+    bool hasExistingFunction = false;
+    script_value existing;
+    try {
+        existing = impl->globalEnvironment->get(name);
+        hasExistingFunction = existing.is_function();
+    } catch (...) {
+        // Variable doesn't exist, which is fine
+    }
+    
     auto overloadIt = impl->overloadedFunctions.find(name);
     
-    if (existingIt != impl->cppGlobals.end() && existingIt->second.isFunction()) {
+    if (hasExistingFunction) {
         // Move existing function to overloaded set
         if (overloadIt == impl->overloadedFunctions.end()) {
             // Check if we have arity info for the existing function
@@ -500,149 +713,309 @@ void Engine::addFunctionWithArityAndTypes(const std::string& name, ScriptFunctio
             size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
             
             impl->getOrCreateOverloadSet(name).setConversionRegistry(&impl->typeConversions);
-            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existingIt->second);
-            impl->cppGlobals.erase(existingIt);
+            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing);
             if (arityIt != impl->functionArities.end()) {
                 impl->functionArities.erase(arityIt);
             }
         }
         
         // Now add the new function as an overload with type info
-        impl->getOrCreateOverloadSet(name).addOverload(arity, Value::makeFunction(func), paramTypes);
+        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func), paramTypes);
+        impl->updateOverloadedFunction(name);
     } else if (overloadIt != impl->overloadedFunctions.end()) {
         // Already have overloaded functions, just add this one with type info
-        impl->getOrCreateOverloadSet(name).addOverload(arity, Value::makeFunction(func), paramTypes);
+        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func), paramTypes);
+        impl->updateOverloadedFunction(name);
     } else {
         // No existing function, check if we have type info
         if (!paramTypes.empty()) {
             // Have type info, create overload set immediately
-            impl->getOrCreateOverloadSet(name).addOverload(arity, Value::makeFunction(func), paramTypes);
+            impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func), paramTypes);
+            impl->updateOverloadedFunction(name);
         } else {
             // No type info, add normally
-            impl->cppGlobals[name] = Value::makeFunction(func);
+            script_value funcValue = script_value::make_function(func);
+            impl->globalEnvironment->define(name, funcValue);
             impl->functionArities[name] = arity;
         }
     }
 }
 
-void Engine::addClassImpl(const std::string& name, std::shared_ptr<ClassDefinition> classDef) {
+void engine::add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef) {
     impl->classes[name] = classDef;
 }
 
-void Engine::registerTypeConversion(ValueType from, ValueType to, int cost, 
-                                  std::function<Value(const Value&)> converter) {
+void engine::register_type_conversion(value_type from, value_type to, int cost, 
+                                  std::function<script_value(const script_value&)> converter) {
     impl->typeConversions.registerConversion(from, to, cost, converter);
 }
 
-Value Engine::getVariable(const std::string& name) const {
-    // Check script globals first
-    auto scriptIt = impl->scriptGlobals.find(name);
-    if (scriptIt != impl->scriptGlobals.end()) {
-        return scriptIt->second;
-    }
-    
-    // Then check C++ globals
-    auto cppIt = impl->cppGlobals.find(name);
-    if (cppIt != impl->cppGlobals.end()) {
-        return cppIt->second;
+script_value engine::get_variable(const std::string& name) const {
+    // Use backend to properly handle references
+    try {
+        return impl->backend->get_variable(name);
+    } catch (...) {
+        // Not in global environment, check overloaded functions
     }
     
     // Check overloaded functions
     auto overloadIt = impl->overloadedFunctions.find(name);
     if (overloadIt != impl->overloadedFunctions.end()) {
         // Create a dispatch function that selects the right overload
-        ScriptFunction dispatcher = [this, name](const std::vector<Value>& args) -> Value {
-            auto it = impl->overloadedFunctions.find(name);
+        // Make a copy of the name to ensure it survives the lambda lifetime
+        std::string functionName = name;
+        script_function dispatcher = [this, functionName](const std::vector<script_value>& args) -> script_value {
+            auto it = impl->overloadedFunctions.find(functionName);
             if (it == impl->overloadedFunctions.end()) {
-                throw RuntimeError("Overloaded function '" + name + "' not found");
+                throw runtime_error("Overloaded function '" + functionName + "' not found");
             }
             
-            Value bestMatch = it->second.findBestMatch(args);
-            if (bestMatch.isNull()) {
-                throw RuntimeError("No matching overload found for function '" + name + "' with " + std::to_string(args.size()) + " arguments");
+            script_value bestMatch = it->second.findBestMatch(args);
+            if (bestMatch.is_null()) {
+                throw runtime_error("No matching overload found for function '" + functionName + "' with " + std::to_string(args.size()) + " arguments");
             }
             
             // Call the selected overload
-            const ScriptFunction& func = bestMatch.asFunction();
+            const script_function& func = bestMatch.as_function();
             return func(args);
         };
         
-        return Value::makeFunction(dispatcher);
+        return script_value::make_function(dispatcher);
     }
     
-    throw RuntimeError("Variable '" + name + "' not found");
+    throw runtime_error("Variable '" + name + "' not found");
 }
 
-bool Engine::hasVariable(const std::string& name) const {
-    return impl->scriptGlobals.find(name) != impl->scriptGlobals.end() ||
-           impl->cppGlobals.find(name) != impl->cppGlobals.end() ||
-           impl->overloadedFunctions.find(name) != impl->overloadedFunctions.end();
+bool engine::has_variable(const std::string& name) const {
+    // Delegate to backend to ensure consistency
+    return impl->backend->has_variable(name);
 }
 
-bool Engine::hasFunction(const std::string& name) const {
-    // Check if there's a function in cppGlobals
-    auto cppIt = impl->cppGlobals.find(name);
-    if (cppIt != impl->cppGlobals.end() && cppIt->second.isFunction()) {
-        return true;
+bool engine::has_function(const std::string& name) const {
+    // Check if there's a function in global environment
+    try {
+        script_value val = impl->globalEnvironment->get(name);
+        if (val.is_function()) {
+            return true;
+        }
+    } catch (...) {
+        // Not found
     }
     
     // Check overloaded functions
     return impl->overloadedFunctions.find(name) != impl->overloadedFunctions.end();
 }
 
-Engine::State Engine::getState() const {
-    // Convert to ordered map for deterministic serialization
-    std::map<std::string, Value> orderedGlobals(impl->scriptGlobals.begin(), impl->scriptGlobals.end());
-    return State{orderedGlobals}; // Only return script globals for serialization
+bool engine::is_type_name(const std::string& name) const {
+    // Check if it's a registered class
+    return impl->classes.find(name) != impl->classes.end();
 }
 
-void Engine::setState(const State& state) {
-    // Convert from ordered map back to unordered_map for performance
-    impl->scriptGlobals.clear();
-    impl->scriptGlobals.insert(state.globals.begin(), state.globals.end());
+engine::state engine::get_state() const {
+    // Build ordered map of serializable globals for deterministic serialization
+    std::map<std::string, script_value> orderedGlobals;
+    
+    // Get all variables from the global environment
+    auto allVars = impl->globalEnvironment->get_all_variables();
+    
+    // Filter out non-serializable ones
+    for (const auto& [name, value] : allVars) {
+        if (impl->nonSerializableGlobals.find(name) == impl->nonSerializableGlobals.end()) {
+            orderedGlobals[name] = value;
+        }
+    }
+    
+    return state{orderedGlobals};
 }
 
-bool Engine::canHotReload(const std::string& scriptPath) const {
+void engine::set_state(const state& state) {
+    // Get all current variables
+    auto currentVars = impl->globalEnvironment->get_all_variables();
+    
+    // Create a new environment with only non-serializable globals
+    auto newEnv = std::make_shared<environment>(&impl->stringSymbolizer);
+    
+    // Copy over non-serializable globals
+    for (const auto& [name, value] : currentVars) {
+        if (impl->nonSerializableGlobals.find(name) != impl->nonSerializableGlobals.end()) {
+            newEnv->define(name, value);
+        }
+    }
+    
+    // Add the new state globals  
+    for (const auto& [name, value] : state.globals) {
+        newEnv->define(name, value);
+    }
+    
+    // Replace the global environment
+    impl->globalEnvironment = newEnv;
+    
+    // Update the backend to use the new environment
+    impl->backend = std::make_unique<interpreter_backend>(&impl->stringSymbolizer, impl->globalEnvironment);
+}
+
+bool engine::can_hot_reload(const std::string& scriptPath) const {
     // TODO: Implement file timestamp checking
     return false;
 }
 
-bool Engine::hotReload(const std::string& scriptPath) {
+bool engine::hot_reload(const std::string& scriptPath) {
     // TODO: Implement hot reload with state preservation
     return false;
 }
 
-void Engine::registerTypeNameImpl(const std::string& typeIdName, const std::string& friendlyName) {
+void engine::register_type_name_impl(const std::string& typeIdName, const std::string& friendlyName) {
     impl->typeNameRegistry[typeIdName] = friendlyName;
 }
 
-std::string Engine::getRegisteredTypeName(const std::string& typeIdName) const {
+std::string engine::get_registered_type_name(const std::string& typeIdName) const {
     auto it = impl->typeNameRegistry.find(typeIdName);
     if (it != impl->typeNameRegistry.end()) {
         return it->second;
     }
     // If not registered, try simple demangling for common cases
-    std::string typeName = typeIdName;
+    std::string type_name = typeIdName;
     size_t pos = 0;
-    while (pos < typeName.length() && std::isdigit(typeName[pos])) {
+    while (pos < type_name.length() && std::isdigit(type_name[pos])) {
         pos++;
     }
-    if (pos > 0 && pos < typeName.length()) {
-        typeName = typeName.substr(pos);
+    if (pos > 0 && pos < type_name.length()) {
+        type_name = type_name.substr(pos);
     }
-    return typeName;
+    return type_name;
 }
 
-void Engine::registerTypeConverterImpl(const std::string& typeIdName, std::function<Value(const void*)> converter) {
+void engine::register_type_converterImpl(const std::string& typeIdName, std::function<script_value(const void*)> converter) {
     impl->typeConverters[typeIdName] = converter;
 }
 
-Value Engine::convertToValue(const std::string& typeIdName, const void* obj) const {
+script_value engine::convert_to_value(const std::string& typeIdName, const void* obj) const {
     auto it = impl->typeConverters.find(typeIdName);
     if (it != impl->typeConverters.end()) {
         return it->second(obj);
     }
-    throw RuntimeError("No converter registered for type: " + typeIdName);
+    throw runtime_error("No converter registered for type: " + typeIdName);
 }
 
-} // namespace JaiScript
+void engine::set_has_custom_numeric_operators(bool value) {
+    // Explicitly set whether custom numeric operators are in use
+    // This allows users to opt-in to custom operator support when needed
+    // By default, the fast path is enabled (no custom operators)
+    impl->backend->set_has_custom_numeric_ops(value);
+}
+
+void engine::register_template_type(const std::string& baseTemplateName) {
+    impl->registeredTemplateTypes.insert(baseTemplateName);
+}
+
+std::unordered_set<std::string> engine::get_registered_template_types() const {
+    return impl->registeredTemplateTypes;
+}
+
+void engine::set_backend(backend_type type) {
+    if (type == impl->current_backend_type) {
+        return;
+    }
+    
+    impl->current_backend_type = type;
+    
+    switch (type) {
+        case backend_type::jvm:
+            impl->backend = jvm::create_vm_backend(&impl->stringSymbolizer, impl->globalEnvironment);
+            break;
+        case backend_type::interpreter:
+            impl->backend = std::make_unique<interpreter_backend>(&impl->stringSymbolizer, impl->globalEnvironment);
+            break;
+        case backend_type::auto_select:
+            impl->backend = std::make_unique<interpreter_backend>(&impl->stringSymbolizer, impl->globalEnvironment);
+            break;
+    }
+    
+    impl->backend->set_type_converters(&impl->typeConverters);
+    impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
+                                              impl->overloadedFunctions.count("-") > 0 ||
+                                              impl->overloadedFunctions.count("*") > 0 ||
+                                              impl->overloadedFunctions.count("/") > 0);
+    
+    impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> script_value {
+        auto it = impl->overloadedFunctions.find("[]");
+        if (it == impl->overloadedFunctions.end()) {
+            throw runtime_error("No custom subscript operator registered");
+        }
+        
+        script_value bestMatch = it->second.findBestMatch(args);
+        if (bestMatch.is_null()) {
+            throw runtime_error("No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+        }
+        
+        const script_function& func = bestMatch.as_function();
+        return func(args);
+    });
+}
+
+void engine::set_backend(std::unique_ptr<execution_backend> backend) {
+    impl->backend = std::move(backend);
+    impl->current_backend_type = backend_type::auto_select;
+    
+    impl->backend->set_type_converters(&impl->typeConverters);
+    impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
+                                              impl->overloadedFunctions.count("-") > 0 ||
+                                              impl->overloadedFunctions.count("*") > 0 ||
+                                              impl->overloadedFunctions.count("/") > 0);
+    
+    impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> script_value {
+        auto it = impl->overloadedFunctions.find("[]");
+        if (it == impl->overloadedFunctions.end()) {
+            throw runtime_error("No custom subscript operator registered");
+        }
+        
+        script_value bestMatch = it->second.findBestMatch(args);
+        if (bestMatch.is_null()) {
+            throw runtime_error("No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+        }
+        
+        const script_function& func = bestMatch.as_function();
+        return func(args);
+    });
+}
+
+backend_type engine::get_backend_type() const {
+    return impl->current_backend_type;
+}
+
+std::string engine::get_backend_name() const {
+    return impl->backend->get_backend_name();
+}
+
+void engine::setHasCustomNumericOps(bool value) {
+    // Set the flag on the backend (which might be interpreter or VM)
+    impl->backend->set_has_custom_numeric_ops(value);
+}
+
+std::shared_ptr<class_definition> engine::get_class_definition(const std::string& type_name) const {
+    auto it = impl->classes.find(type_name);
+    if (it != impl->classes.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+void engine::register_polymorphic_copier_impl(std::type_index derived_type, 
+                                             std::type_index base_type,
+                                             std::function<std::shared_ptr<void>(const void*)> copier) {
+    impl->polymorphic_copiers.register_type(derived_type, base_type, std::move(copier));
+}
+
+void engine::register_class_by_type(std::type_index type, std::shared_ptr<class_definition> classDef) {
+    impl->classesByType[type] = classDef;
+}
+
+std::shared_ptr<class_definition> engine::get_class_definition_by_type(std::type_index type) const {
+    auto it = impl->classesByType.find(type);
+    if (it != impl->classesByType.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+} // namespace jai

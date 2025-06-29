@@ -6,7 +6,7 @@
 #include <memory>
 #include <iostream>
 
-namespace JaiScript {
+namespace jai {
 
 // Global type name registry for mapping C++ types to their registered names
 class TypeNameRegistry {
@@ -19,7 +19,7 @@ public:
     // Register a type with its script name
     template<typename T>
     void registerType(const std::string& name) {
-        std::cerr << "TypeRegistry: Registering type " << typeid(T).name() << " as " << name << std::endl;
+        std::cerr << "type_registry: Registering type " << typeid(T).name() << " as " << name << std::endl;
         typeNames_[std::type_index(typeid(T))] = name;
         
         // Also register shared_ptr<T> variant
@@ -28,19 +28,19 @@ public:
     
     // Get the registered name for a type
     template<typename T>
-    std::string getTypeName() const {
+    std::string get_type_name() const {
         auto it = typeNames_.find(std::type_index(typeid(T)));
         if (it != typeNames_.end()) {
             return it->second;
         }
         
         // If not found, return the raw type name as fallback
-        std::cerr << "TypeRegistry: No registered name for type " << typeid(T).name() << std::endl;
+        std::cerr << "type_registry: No registered name for type " << typeid(T).name() << std::endl;
         return typeid(T).name();
     }
     
     // Get name by type_index
-    std::string getTypeName(std::type_index type) const {
+    std::string get_type_name(std::type_index type) const {
         auto it = typeNames_.find(type);
         if (it != typeNames_.end()) {
             return it->second;
@@ -61,8 +61,8 @@ void registerTypeName(const std::string& name) {
 
 // Helper function for getting type names
 template<typename T>
-std::string getRegisteredTypeName() {
-    return TypeNameRegistry::instance().getTypeName<T>();
+std::string get_registered_type_name() {
+    return TypeNameRegistry::instance().get_type_name<T>();
 }
 
-} // namespace JaiScript
+} // namespace jai

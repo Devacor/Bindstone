@@ -1,52 +1,52 @@
 #include "../../include/jaiscript/core/type_info.hpp"
 #include <sstream>
 
-namespace JaiScript {
+namespace jai {
 
-std::string TypeInfo::toString() const {
+std::string type_info::to_string() const {
     std::stringstream ss;
     
-    switch (baseType) {
-        case ValueType::Null:
+    switch (base_type) {
+        case value_type::jai_null_type:
             return "null";
-        case ValueType::Int:
+        case value_type::jai_int_type:
             return "int";
-        case ValueType::Float:
+        case value_type::jai_float_type:
             return "float";
-        case ValueType::String:
+        case value_type::jai_string_type:
             return "string";
-        case ValueType::Char:
+        case value_type::jai_char_type:
             return "char";
-        case ValueType::Bool:
+        case value_type::jai_bool_type:
             return "bool";
             
-        case ValueType::Array:
-            if (!typeParams.empty()) {
-                ss << "array<" << typeParams[0]->toString() << ">";
+        case value_type::jai_array_type:
+            if (!type_params.empty()) {
+                ss << "array<" << type_params[0]->to_string() << ">";
             } else {
                 ss << "array<unknown>";
             }
             return ss.str();
             
-        case ValueType::Map:
-            if (typeParams.size() >= 2) {
-                ss << "map<" << typeParams[0]->toString() 
-                   << ", " << typeParams[1]->toString() << ">";
+        case value_type::jai_map_type:
+            if (type_params.size() >= 2) {
+                ss << "map<" << type_params[0]->to_string() 
+                   << ", " << type_params[1]->to_string() << ">";
             } else {
                 ss << "map<unknown, unknown>";
             }
             return ss.str();
             
-        case ValueType::Object:
-            return typeName.empty() ? "object" : typeName;
+        case value_type::jai_object_type:
+            return type_name.empty() ? "object" : type_name;
             
-        case ValueType::Function:
+        case value_type::jai_function_type:
             ss << "function<";
-            if (!typeParams.empty()) {
-                ss << typeParams[0]->toString() << "(";
-                for (size_t i = 1; i < typeParams.size(); ++i) {
+            if (!type_params.empty()) {
+                ss << type_params[0]->to_string() << "(";
+                for (size_t i = 1; i < type_params.size(); ++i) {
                     if (i > 1) ss << ", ";
-                    ss << typeParams[i]->toString();
+                    ss << type_params[i]->to_string();
                 }
                 ss << ")";
             } else {
@@ -55,27 +55,27 @@ std::string TypeInfo::toString() const {
             ss << ">";
             return ss.str();
             
-        case ValueType::Reference:
-            if (!typeParams.empty()) {
-                ss << typeParams[0]->toString() << "&";
+        case value_type::jai_reference_type:
+            if (!type_params.empty()) {
+                ss << type_params[0]->to_string() << "&";
             } else {
                 ss << "unknown&";
             }
             return ss.str();
             
-        case ValueType::SharedPtr:
-            if (!typeParams.empty()) {
-                ss << "SharedPtr<" << typeParams[0]->toString() << ">";
+        case value_type::jai_shared_ptr_type:
+            if (!type_params.empty()) {
+                ss << "shared_ptr<" << type_params[0]->to_string() << ">";
             } else {
-                ss << "SharedPtr<unknown>";
+                ss << "shared_ptr<unknown>";
             }
             return ss.str();
             
-        case ValueType::WeakPtr:
-            if (!typeParams.empty()) {
-                ss << "WeakPtr<" << typeParams[0]->toString() << ">";
+        case value_type::jai_weak_ptr_type:
+            if (!type_params.empty()) {
+                ss << "weak_ptr<" << type_params[0]->to_string() << ">";
             } else {
-                ss << "WeakPtr<unknown>";
+                ss << "weak_ptr<unknown>";
             }
             return ss.str();
             
@@ -84,25 +84,25 @@ std::string TypeInfo::toString() const {
     }
 }
 
-bool TypeInfo::equals(const TypeInfo& other) const {
-    if (baseType != other.baseType) {
+bool type_info::equals(const type_info& other) const {
+    if (base_type != other.base_type) {
         return false;
     }
     
-    if (typeName != other.typeName) {
+    if (type_name != other.type_name) {
         return false;
     }
     
-    if (typeParams.size() != other.typeParams.size()) {
+    if (type_params.size() != other.type_params.size()) {
         return false;
     }
     
-    for (size_t i = 0; i < typeParams.size(); ++i) {
-        if (!typeParams[i] || !other.typeParams[i]) {
-            if (typeParams[i] != other.typeParams[i]) {
+    for (size_t i = 0; i < type_params.size(); ++i) {
+        if (!type_params[i] || !other.type_params[i]) {
+            if (type_params[i] != other.type_params[i]) {
                 return false;
             }
-        } else if (!typeParams[i]->equals(*other.typeParams[i])) {
+        } else if (!type_params[i]->equals(*other.type_params[i])) {
             return false;
         }
     }
@@ -110,4 +110,4 @@ bool TypeInfo::equals(const TypeInfo& other) const {
     return true;
 }
 
-} // namespace JaiScript
+} // namespace jai

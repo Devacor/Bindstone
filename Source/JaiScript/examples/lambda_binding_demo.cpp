@@ -1,5 +1,5 @@
 // Demonstration of the working lambda method binding syntax
-// This shows that the ClassBuilder compiles and the template machinery works
+// This shows that the class_builder compiles and the template machinery works
 
 #include "../include/jaiscript/jaiscript.hpp"
 #include "../include/jaiscript/core/class_builder.hpp"
@@ -24,12 +24,12 @@ int main() {
     std::cout << "JaiScript Lambda Method Binding Demonstration\n";
     std::cout << "============================================\n\n";
     
-    JaiScript::Engine engine;
+    jai::engine engine;
     
-    std::cout << "✅ Creating ClassBuilder with lambda method binding...\n";
+    std::cout << "✅ Creating class_builder with lambda method binding...\n";
     
     // This compiles and creates the proper method bindings!
-    auto builder = JaiScript::makeClassBuilder<Button>(engine, "Button");
+    auto builder = jai::make_class_builder<Button>(engine, "Button");
     
     std::cout << "✅ Adding constructor...\n";
     builder.constructor<const std::string&>();
@@ -63,7 +63,7 @@ int main() {
     
     std::cout << "✅ Adding type conversions (framework-agnostic)...\n";
     // This would register conversions when the engine supports it
-    // builder.addTypeConversion<SafeComponent<Button>, std::shared_ptr<Button>>(...);
+    // builder.add_type_conversion<SafeComponent<Button>, std::shared_ptr<Button>>(...);
     
     std::cout << "✅ Builder created successfully!\n\n";
     
@@ -77,7 +77,7 @@ int main() {
     std::cout << "  // Plus manual type conversions...\n\n";
     
     std::cout << "JaiScript (new approach):\n";
-    std::cout << "  makeClassBuilder<Button>(engine, \"Button\")\n";
+    std::cout << "  make_class_builder<Button>(engine, \"Button\")\n";
     std::cout << "      .method(\"setText\", [](Button& self, const std::string& text) {\n";
     std::cout << "          self.setText(text);\n";
     std::cout << "      })\n";
@@ -93,10 +93,10 @@ int main() {
     std::cout << "✅ All template metaprogramming works correctly\n\n";
     
     std::cout << "=== READY FOR INTEGRATION ===\n";
-    std::cout << "The ClassBuilder is ready to use once these Engine features are implemented:\n";
-    std::cout << "- Value::makeObject() for class instances\n";
-    std::cout << "- Engine::addClass() to register class definitions\n";
-    std::cout << "- Interpreter support for member access (obj.method())\n";
+    std::cout << "The class_builder is ready to use once these engine features are implemented:\n";
+    std::cout << "- script_value::make_object() for class instances\n";
+    std::cout << "- engine::addClass() to register class definitions\n";
+    std::cout << "- interpreter support for member access (obj.method())\n";
     std::cout << "- Constructor calling from script syntax\n\n";
     
     std::cout << "The lambda method binding syntax is proven to work and ready to go!\n";

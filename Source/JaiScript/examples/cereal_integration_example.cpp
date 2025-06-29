@@ -23,14 +23,14 @@ struct GameCreature {
 };
 
 // Cereal-based serializer implementation
-class CerealJaiScriptSerializer : public JaiScript::ISerializer {
+class CerealJaiScriptSerializer : public jai::ISerializer {
 public:
     CerealJaiScriptSerializer() {
         // Register types that can be serialized
         registerSerializableType<GameCreature>("GameCreature");
     }
     
-    std::vector<uint8_t> serializeValue(const JaiScript::Value& value) override {
+    std::vector<uint8_t> serializescript_value(const jai::script_value& value) override {
         std::stringstream ss;
         {
             cereal::BinaryOutputArchive ar(ss);
@@ -41,7 +41,7 @@ public:
         return std::vector<uint8_t>(str.begin(), str.end());
     }
     
-    JaiScript::Value deserializeValue(const std::vector<uint8_t>& data) override {
+    jai::script_value deserializescript_value(const std::vector<uint8_t>& data) override {
         std::string str(data.begin(), data.end());
         std::stringstream ss(str);
         cereal::BinaryInputArchive ar(ss);
@@ -51,8 +51,8 @@ public:
     
 private:
     template<typename T>
-    void registerSerializableType(const std::string& typeName) {
-        objectSerializers_[typeName] = {
+    void registerSerializableType(const std::string& type_name) {
+        objectSerializers_[type_name] = {
             // Serializer
             [](const void* ptr, std::vector<uint8_t>& out) {
                 std::stringstream ss;
@@ -74,65 +74,65 @@ private:
     }
     
     template<class Archive>
-    void serializeValueToArchive(Archive& ar, const JaiScript::Value& value) {
+    void serializeValueToArchive(Archive& ar, const jai::script_value& value) {
         // First serialize the type info
-        auto typeInfo = value.getTypeInfo();
-        if (!typeInfo) {
+        auto type_info = value.get_type_info();
+        if (!type_info) {
             int nullType = -1;
             ar(nullType);
             return;
         }
         
         // Serialize base type
-        int baseType = static_cast<int>(typeInfo->baseType);
-        ar(baseType);
+        int base_type = static_cast<int>(type_info->base_type);
+        ar(base_type);
         
         // For complex types, also serialize type parameters
-        if (typeInfo->isArray() || typeInfo->isSharedPtr() || typeInfo->isWeakPtr() || typeInfo->isReference()) {
+        if (type_info->is_array() || type_info->is_shared_ptr() || type_info->is_weak_ptr() || type_info->is_reference()) {
             // Has one type parameter
-            serializeTypeInfo(ar, typeInfo->getElementType());
-        } else if (typeInfo->isMap()) {
+            serializeTypeInfo(ar, type_info->get_element_type());
+        } else if (type_info->is_map()) {
             // Has two type parameters
-            serializeTypeInfo(ar, typeInfo->getKeyType());
-            serializeTypeInfo(ar, typeInfo->getValueType());
-        } else if (typeInfo->isFunction()) {
+            serializeTypeInfo(ar, type_info->get_key_type());
+            serializeTypeInfo(ar, type_info->get_value_type());
+        } else if (type_info->is_function()) {
             // Has return type + arg types
-            serializeTypeInfo(ar, typeInfo->getReturnType());
-            auto argTypes = typeInfo->getArgTypes();
-            size_t argCount = argTypes.size();
+            serializeTypeInfo(ar, type_info->get_return_type());
+            auto arg_types = type_info->get_arg_types();
+            size_t argCount = arg_types.size();
             ar(argCount);
-            for (const auto& argType : argTypes) {
+            for (const auto& argType : arg_types) {
                 serializeTypeInfo(ar, argType);
             }
-        } else if (typeInfo->isObject()) {
+        } else if (type_info->is_object()) {
             // Serialize the class name
-            ar(typeInfo->typeName);
+            ar(type_info->type_name);
         }
         
         // Now serialize the actual value based on type
-        switch (typeInfo->baseType) {
-            case JaiScript::ValueType::Null:
+        switch (type_info->base_type) {
+            case jai::value_type::jai_null_type:
                 // Nothing to serialize
                 break;
-            case JaiScript::ValueType::Int:
-                ar(value.asInt());
+            case jai::value_type::jai_int_type:
+                ar(value.as_int());
                 break;
-            case JaiScript::ValueType::Float:
-                ar(value.asFloat());
+            case jai::value_type::jai_float_type:
+                ar(value.as_float());
                 break;
-            case JaiScript::ValueType::String:
-                ar(value.asString());
+            case jai::value_type::jai_string_type:
+                ar(value.as_string());
                 break;
-            case JaiScript::ValueType::Char:
-                ar(value.asChar());
+            case jai::value_type::jai_char_type:
+                ar(value.as_char());
                 break;
-            case JaiScript::ValueType::Bool:
-                ar(value.asBool());
+            case jai::value_type::jai_bool_type:
+                ar(value.as_bool());
                 break;
-            case JaiScript::ValueType::Array: {
+            case jai::value_type::jai_array_type: {
                 // Serialize vector of Values
                 // This would need access to the internal vector
-                // auto& vec = value.asArray();
+                // auto& vec = value.as_array();
                 // size_t size = vec.size();
                 // ar(size);
                 // for (const auto& elem : vec) {
@@ -140,39 +140,39 @@ private:
                 // }
                 break;
             }
-            case JaiScript::ValueType::Map: {
+            case jai::value_type::jai_map_type: {
                 // Serialize map of Values
                 // Similar to array
                 break;
             }
-            case JaiScript::ValueType::Object: {
+            case jai::value_type::jai_object_type: {
                 // Use the type registry to serialize
                 // auto holder = value.getObjectHolder();
-                // Find serializer in objectSerializers_[holder->typeName]
+                // Find serializer in objectSerializers_[holder->type_name]
                 // Serialize the data
                 break;
             }
-            case JaiScript::ValueType::SharedPtr: {
+            case jai::value_type::jai_shared_ptr_type: {
                 // Serialize the pointed-to value
-                // auto ptr = value.asSharedPtr();
-                // bool hasValue = (ptr != nullptr);
+                // auto ptr = value.asshared_ptr();
+                // bool hasscript_value = (ptr != nullptr);
                 // ar(hasValue);
                 // if (hasValue) {
                 //     serializeValueToArchive(ar, *ptr);
                 // }
                 break;
             }
-            case JaiScript::ValueType::WeakPtr: {
+            case jai::value_type::jai_weak_ptr_type: {
                 // Weak pointers can't be directly serialized
                 // We'd need to handle this specially
                 break;
             }
-            case JaiScript::ValueType::Reference: {
+            case jai::value_type::jai_reference_type: {
                 // References can't be directly serialized
                 // We'd need to handle this specially (maybe serialize as a path/id)
                 break;
             }
-            case JaiScript::ValueType::Function: {
+            case jai::value_type::jai_function_type: {
                 // Serialize function info (script text, captures, etc.)
                 // Only script-defined functions can be serialized
                 // Native functions would be re-registered on deserialization
@@ -182,69 +182,69 @@ private:
     }
     
     template<class Archive>
-    void serializeTypeInfo(Archive& ar, JaiScript::TypeInfoPtr typeInfo) {
-        if (!typeInfo) {
+    void serializeTypeInfo(Archive& ar, jai::type_info_ptr type_info) {
+        if (!type_info) {
             int nullType = -1;
             ar(nullType);
             return;
         }
         
-        int baseType = static_cast<int>(typeInfo->baseType);
-        ar(baseType);
+        int base_type = static_cast<int>(type_info->base_type);
+        ar(base_type);
         
         // Recursively serialize type parameters as needed
         // (implementation depends on the type)
     }
     
     template<class Archive>
-    JaiScript::Value deserializeValueFromArchive(Archive& ar) {
+    jai::script_value deserializeValueFromArchive(Archive& ar) {
         // Deserialize type info first
         int baseTypeInt;
         ar(baseTypeInt);
         
         if (baseTypeInt == -1) {
-            return JaiScript::Value(); // Null
+            return jai::script_value(); // Null
         }
         
-        auto baseType = static_cast<JaiScript::ValueType>(baseTypeInt);
+        auto base_type = static_cast<jai::value_type>(baseTypeInt);
         
         // Based on type, deserialize the value
-        switch (baseType) {
-            case JaiScript::ValueType::Int: {
-                JaiScript::Int val;
+        switch (base_type) {
+            case jai::value_type::jai_int_type: {
+                jai::int_keyword val;
                 ar(val);
-                return JaiScript::Value(val);
+                return jai::script_value(val);
             }
-            case JaiScript::ValueType::Float: {
-                JaiScript::Float val;
+            case jai::value_type::jai_float_type: {
+                jai::float_keyword val;
                 ar(val);
-                return JaiScript::Value(val);
+                return jai::script_value(val);
             }
-            case JaiScript::ValueType::String: {
-                JaiScript::String val;
+            case jai::value_type::jai_string_type: {
+                jai::string_keyword val;
                 ar(val);
-                return JaiScript::Value(val);
+                return jai::script_value(val);
             }
-            case JaiScript::ValueType::Char: {
-                JaiScript::Char val;
+            case jai::value_type::jai_char_type: {
+                jai::char_keyword val;
                 ar(val);
-                return JaiScript::Value(val);
+                return jai::script_value(val);
             }
-            case JaiScript::ValueType::Bool: {
-                JaiScript::Bool val;
+            case jai::value_type::jai_bool_type: {
+                jai::bool_keyword val;
                 ar(val);
-                return JaiScript::Value(val);
+                return jai::script_value(val);
             }
             // Handle complex types...
             default:
-                return JaiScript::Value();
+                return jai::script_value();
         }
     }
 };
 
 // Example usage
 int main() {
-    auto engine = JaiScript::createEngine();
+    auto engine = jai::createEngine();
     auto serializer = std::make_unique<CerealJaiScriptSerializer>();
     
     // Create a creature in C++
@@ -254,8 +254,8 @@ int main() {
     creature->speed = 5.5f;
     
     // Pass it to JaiScript as a typed object
-    // auto creatureValue = JaiScript::makeObject(creature, "GameCreature");
-    // engine->addGlobal("creature", creatureValue);
+    // auto creaturescript_value = jai::make_object(creature, "GameCreature");
+    // engine->add_global("creature", creatureValue);
     
     // Execute script that modifies the creature
     engine->eval(R"(
@@ -263,7 +263,7 @@ int main() {
         // creature.name = "Wounded " + creature.name;
         // 
         // // Create a shared pointer to the creature
-        // SharedPtr<GameCreature> sharedCreature = makeSharedPtr(creature);
+        // shared_ptr<GameCreature> sharedCreature = make_shared_ptr(creature);
         // 
         // // Create an array of creatures
         // array<GameCreature> creatures = {creature};
@@ -274,12 +274,12 @@ int main() {
     )");
     
     // Serialize the entire engine state
-    // auto state = engine->getState();
+    // auto state = engine->get_state();
     // auto serialized = serializer->serializeState(state);
     
     // Later, deserialize and restore
     // auto newState = serializer->deserializeState(serialized);
-    // engine->setState(newState);
+    // engine->set_state(newState);
     
     return 0;
 }

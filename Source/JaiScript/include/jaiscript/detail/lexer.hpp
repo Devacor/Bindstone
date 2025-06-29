@@ -3,95 +3,99 @@
 #include "../core/types.hpp"
 #include <string>
 #include <vector>
+#include <unordered_set>
 #include <unordered_map>
 
-namespace JaiScript {
+namespace jai {
 
-    // Token types
-    enum class TokenType {
+    // token types
+    enum class token_type {
         // Literals
-        IntegerLiteral,
-        FloatLiteral,
-        StringLiteral,
-        CharLiteral,
-        BooleanLiteral,
-        NullLiteral,
+        integer_literal,
+        float_literal,
+        string_literal,
+        char_literal,
+        boolean_literal,
+        null_literal,
         
         // Identifiers and Keywords
-        Identifier,
+        identifier,
+        user_template_type,  // User-defined template types (Point, SafeComponent, etc.) to disambiguate from < operator
         
         // Keywords
-        Bool, Break, Char, Class, Const, Continue, Else, False, Float, For,
-        Function, If, Int, Map, Array, New, Null, Private, Public, Return, String,
-        This, True, Void, While, Auto, Var, Super, SharedPtr, WeakPtr,
+        bool_keyword, break_keyword, char_keyword, class_keyword, const_keyword, continue_keyword, else_keyword, false_keyword, float_keyword, for_keyword,
+        function_keyword, if_keyword, int_keyword, map_keyword, array_keyword, null_keyword, private_keyword, public_keyword, return_keyword, string_keyword,
+        this_keyword, true_keyword, void_keyword, while_keyword, auto_keyword, var_keyword, super_keyword, shared_ptr_keyword, weak_ptr_keyword,
+        try_keyword, catch_keyword, throw_keyword,
         
         // Operators
-        Plus, Minus, Star, Slash, Percent,
-        PlusEqual, MinusEqual, StarEqual, SlashEqual, PercentEqual,
-        Equal, EqualEqual, BangEqual,
-        Less, Greater, LessEqual, GreaterEqual,
-        AmpersandAmpersand, PipePipe, Bang,
-        PlusPlus, MinusMinus,
-        Dot, Arrow,
-        Ampersand, Pipe, Caret,  // Bitwise operators &, |, ^
-        ColonColon,
-        Question, Colon,
-        Tilde,  // For bitwise NOT and destructors: ~ClassName()
-        Spaceship,  // C++20 three-way comparison operator <=>
-        LeftShift, RightShift,  // Shift operators << and >>
+        plus, minus, star, slash, percent,
+        plus_equal, minus_equal, star_equal, slash_equal, percent_equal,
+        equal, equal_equal, bang_equal,
+        less, greater, less_equal, greater_equal,
+        ampersand_ampersand, pipe_pipe, bang,
+        plus_plus, minus_minus,
+        dot, arrow,
+        ampersand, pipe, caret,  // Bitwise operators &, |, ^
+        colon_colon,
+        question, colon,
+        tilde,  // For bitwise NOT and destructors: ~ClassName()
+        spaceship,  // C++20 three-way comparison operator <=>
+        left_shift, right_shift,  // Shift operators << and >>
         
         // Delimiters
-        LeftParen, RightParen,
-        LeftBrace, RightBrace,
-        LeftBracket, RightBracket,
-        LeftAngle, RightAngle,
-        Semicolon, Comma,
+        left_paren, right_paren,
+        left_brace, right_brace,
+        left_bracket, right_bracket,
+        left_angle, right_angle,
+        semicolon, comma,
         
         // Special
-        Eof,
-        Error
+        eof,
+        error
     };
     
-    // Token structure
-    struct Token {
-        TokenType type;
+    // token structure
+    struct token {
+        token_type type;
         std::string lexeme;
-        SourceLocation location;
+        source_location location;
         
-        // Value for literals
+        // value for literals
         union {
-            Int intValue;
-            Float floatValue;
-            Bool boolValue;
-            Char charValue;
+            script_int int_value;
+            script_float float_value;
+            script_bool bool_value;
+            script_char char_value;
         };
-        std::string stringValue;  // For string literals (can't be in union)
+        std::string string_value;  // For string literals (can't be in union)
         
-        Token(TokenType t, const std::string& lex, const SourceLocation& loc)
+        token(token_type t, const std::string& lex, const source_location& loc)
             : type(t), lexeme(lex), location(loc) {}
             
-        std::string toString() const;
-        bool isKeyword() const;
-        bool isOperator() const;
-        bool isLiteral() const;
+        std::string to_string() const;
+        bool is_keyword() const;
+        bool is_operator() const;
+        bool is_literal() const;
     };
     
-    // Lexer class
-    class Lexer {
+    // lexer class
+    class lexer {
     public:
-        Lexer(const std::string& source, const std::string& filename = "<script>");
+        lexer(const std::string& source, const std::string& filename = "<script>");
+        lexer(const std::string& source, const std::unordered_set<std::string>& registeredTypes, const std::string& filename = "<script>");
         
         // Get all tokens
-        std::vector<Token> tokenize();
+        std::vector<token> tokenize();
         
         // Get next token
-        Token nextToken();
+        token next_token();
         
         // Peek at next token without consuming
-        Token peekToken();
+        token peek_token();
         
         // Check if at end
-        bool isAtEnd() const { return current_ >= source_.length(); }
+        bool is_at_end() const { return current_ >= source_.length(); }
         
     private:
         std::string source_;
@@ -100,33 +104,36 @@ namespace JaiScript {
         size_t line_ = 1;
         size_t column_ = 1;
         
+        // Registered user-defined types (including template types)
+        std::unordered_set<std::string> registered_types_;
+        
         // Keyword map
-        static const std::unordered_map<std::string, TokenType> keywords_;
+        static const std::unordered_map<std::string, token_type> keywords_;
         
         // Helper methods
         char advance();
         char peek() const;
-        char peekNext() const;
+        char peek_next() const;
         bool match(char expected);
-        void skipWhitespace();
-        void skipComment();
+        void skip_whitespace();
+        void skip_comment();
         
-        // Token creators
-        Token makeToken(TokenType type);
-        Token makeToken(TokenType type, const std::string& lexeme);
-        Token errorToken(const std::string& message);
+        // token creators
+        token make_token(token_type type);
+        token make_token(token_type type, const std::string& lexeme);
+        token error_token(const std::string& message);
         
         // Scanners for different token types
-        Token scanNumber();
-        Token scanString();
-        Token scanChar();
-        Token scanIdentifier();
+        token scan_number();
+        token scan_string();
+        token scan_char();
+        token scan_identifier();
         
         // Utilities
-        bool isDigit(char c) const;
-        bool isAlpha(char c) const;
-        bool isAlphaNumeric(char c) const;
-        SourceLocation currentLocation() const;
+        bool is_digit(char c) const;
+        bool is_alpha(char c) const;
+        bool is_alpha_numeric(char c) const;
+        source_location current_location() const;
     };
     
-} // namespace JaiScript
+} // namespace jai

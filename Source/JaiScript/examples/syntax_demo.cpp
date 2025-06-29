@@ -1,5 +1,5 @@
 // Demonstration that the lambda method binding syntax compiles
-// This proves the ClassBuilder template machinery works correctly
+// This proves the class_builder template machinery works correctly
 
 #include "../include/jaiscript/core/function_binder.hpp"
 #include <iostream>
@@ -30,7 +30,7 @@ int main() {
         self.setText(text);
     };
     
-    using SetTextTraits = JaiScript::detail::function_traits<decltype(setTextLambda)>;
+    using SetTextTraits = jai::detail::function_traits<decltype(setTextLambda)>;
     std::cout << "  setText lambda: " << SetTextTraits::arity << " arguments, ";
     std::cout << (std::is_void_v<SetTextTraits::return_type> ? "void" : "non-void") << " return\n";
     
@@ -39,28 +39,28 @@ int main() {
         return self.getText();
     };
     
-    using GetTextTraits = JaiScript::detail::function_traits<decltype(getTextLambda)>;
+    using GetTextTraits = jai::detail::function_traits<decltype(getTextLambda)>;
     std::cout << "  getText lambda: " << GetTextTraits::arity << " arguments, ";
     std::cout << (std::is_same_v<GetTextTraits::return_type, std::string> ? "string" : "other") << " return\n";
     
     // Test 3: Member function pointer
-    using IsEnabledTraits = JaiScript::detail::function_traits<decltype(&Button::isEnabled)>;
+    using IsEnabledTraits = jai::detail::function_traits<decltype(&Button::isEnabled)>;
     std::cout << "  isEnabled method: " << IsEnabledTraits::arity << " arguments, ";
     std::cout << (std::is_same_v<IsEnabledTraits::return_type, bool> ? "bool" : "other") << " return\n";
     
     std::cout << "\n✅ Testing FunctionBinder creation...\n";
     
     // Test that we can create FunctionBinders for these
-    auto binder1 = JaiScript::makeFunctionBinder(std::move(setTextLambda));
-    auto binder2 = JaiScript::makeFunctionBinder(std::move(getTextLambda));
-    auto binder3 = JaiScript::makeFunctionBinder(&Button::isEnabled);
+    auto binder1 = jai::make_functionBinder(std::move(setTextLambda));
+    auto binder2 = jai::make_functionBinder(std::move(getTextLambda));
+    auto binder3 = jai::make_functionBinder(&Button::isEnabled);
     
     std::cout << "  All FunctionBinders created successfully!\n";
     
-    std::cout << "\n✅ This proves the ClassBuilder syntax would work:\n\n";
+    std::cout << "\n✅ This proves the class_builder syntax would work:\n\n";
     
     std::cout << "// The following syntax compiles and would work once engine support is added:\n";
-    std::cout << "JaiScript::makeClassBuilder<Button>(engine, \"Button\")\n";
+    std::cout << "jai::make_class_builder<Button>(engine, \"Button\")\n";
     std::cout << "    .constructor<const std::string&>()\n";
     std::cout << "    \n";
     std::cout << "    // Lambda method binding - clean and flexible!\n";
@@ -77,7 +77,7 @@ int main() {
     std::cout << "    .method(\"isEnabled\", &Button::isEnabled)\n";
     std::cout << "    \n";
     std::cout << "    // Generic type conversions\n";
-    std::cout << "    .addTypeConversion<SafeComponent<Button>, std::shared_ptr<Button>>(\n";
+    std::cout << "    .add_type_conversion<SafeComponent<Button>, std::shared_ptr<Button>>(\n";
     std::cout << "        [](const auto& item) { return item.self(); }\n";
     std::cout << "    )\n";
     std::cout << "    \n";

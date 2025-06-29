@@ -96,19 +96,19 @@ namespace MV {
     }
 }
 
-namespace JaiScript {
+namespace jai {
     
     // Registration helper matching ChaiScript's Registrar pattern
     template<typename T>
     class Registrar {
     public:
-        using RegistrationFunc = std::function<void(Engine&, const MV::Services&)>;
+        using RegistrationFunc = std::function<void(engine&, const MV::Services&)>;
         
         Registrar(RegistrationFunc func) : registrationFunc_(func) {
             // In real implementation, this would register with a global registry
         }
         
-        void registerType(Engine& engine, const MV::Services& services) {
+        void registerType(engine& engine, const MV::Services& services) {
             registrationFunc_(engine, services);
         }
         
@@ -139,8 +139,8 @@ namespace MV {
 
 // NEW JaiScript style - much cleaner!
 namespace MV {
-    JaiScript::Registrar<Task> _hookTask([](JaiScript::Engine& engine, const MV::Services& services) {
-        JaiScript::makeClassBuilder<Task>(engine, "Task")
+    jai::Registrar<Task> _hookTask([](jai::engine& engine, const MV::Services& services) {
+        jai::make_class_builder<Task>(engine, "Task")
             .constructor<>()
             .constructor<bool>()
             .constructor<const std::string&, bool>()
@@ -184,15 +184,15 @@ namespace MV {
 namespace MV {
     using namespace Scene;
     
-    JaiScript::Registrar<Component> _hookComponent([](JaiScript::Engine& engine, const MV::Services& services) {
-        JaiScript::makeClassBuilder<Component>(engine, "Component")
+    jai::Registrar<Component> _hookComponent([](jai::engine& engine, const MV::Services& services) {
+        jai::make_class_builder<Component>(engine, "Component")
             .method("id", static_cast<std::string(Component::*)() const>(&Component::id))
             .method("id", static_cast<void(Component::*)(const std::string&)>(&Component::id))
             .build();
     });
     
-    JaiScript::Registrar<Drawable> _hookDrawable([](JaiScript::Engine& engine, const MV::Services& services) {
-        JaiScript::makeClassBuilder<Drawable>(engine, "Drawable")
+    jai::Registrar<Drawable> _hookDrawable([](jai::engine& engine, const MV::Services& services) {
+        jai::make_class_builder<Drawable>(engine, "Drawable")
             .inherits<Component>()
             .method("visible", &Drawable::visible)
             .method("hide", &Drawable::hide)
@@ -200,24 +200,24 @@ namespace MV {
             .build();
     });
     
-    JaiScript::Registrar<Sprite> _hookSprite([](JaiScript::Engine& engine, const MV::Services& services) {
-        JaiScript::makeClassBuilder<Sprite>(engine, "Sprite")
+    jai::Registrar<Sprite> _hookSprite([](jai::engine& engine, const MV::Services& services) {
+        jai::make_class_builder<Sprite>(engine, "Sprite")
             .inherits<Drawable>()
             .method("setTexture", &Sprite::setTexture)
             .method("getTexture", &Sprite::getTexture)
             .build();
     });
     
-    JaiScript::Registrar<Clickable> _hookClickable([](JaiScript::Engine& engine, const MV::Services& services) {
-        JaiScript::makeClassBuilder<Clickable>(engine, "Clickable")
+    jai::Registrar<Clickable> _hookClickable([](jai::engine& engine, const MV::Services& services) {
+        jai::make_class_builder<Clickable>(engine, "Clickable")
             .inherits<Sprite>()
             .method("disable", &Clickable::disable)
             .method("enabled", &Clickable::enabled)
             .build();
     });
     
-    JaiScript::Registrar<Button> _hookButton([](JaiScript::Engine& engine, const MV::Services& services) {
-        JaiScript::makeClassBuilder<Button>(engine, "Button")
+    jai::Registrar<Button> _hookButton([](jai::engine& engine, const MV::Services& services) {
+        jai::make_class_builder<Button>(engine, "Button")
             .inherits<Clickable>()
             .method("text", static_cast<void(Button::*)(const std::string&)>(&Button::text))
             .method("text", static_cast<std::string(Button::*)() const>(&Button::text))
@@ -253,8 +253,8 @@ int main() {
     std::cout << "6. No need for ExactType<T> wrappers\n\n";
     
     std::cout << "Migration effort:\n";
-    std::cout << "- Replace Script::Registrar with JaiScript::Registrar\n";
-    std::cout << "- Use makeClassBuilder<T>() instead of multiple add() calls\n";
+    std::cout << "- Replace Script::Registrar with jai::Registrar\n";
+    std::cout << "- Use make_class_builder<T>() instead of multiple add() calls\n";
     std::cout << "- Remove manual type conversions\n";
     std::cout << "- Simplify lambda wrappers\n";
     

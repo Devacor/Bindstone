@@ -1,34 +1,35 @@
 #pragma once
 
-namespace JaiScript {
+namespace jai {
     
-    class Engine;
-    class Value;
-    class Function;
-    class ClassDefinition;
-    class ClassInstance;
-    template<typename T> class ClassBuilder;
-    class Scope;
-    class ParseError;
-    class RuntimeError;
-    class SerializationError;
+    class engine;
+    class script_value;
+    class type_info;
+    class wrapped_function;
+    class class_definition;
+    class class_instance;
+    template<typename T> class class_builder;
+    class variable_scope;
+    class parse_error;
+    class runtime_error;
+    class serialization_error;
     
-    struct SourceLocation;
+    struct source_location;
     
-    enum class ValueType {
-        Null,
-        Int,
-        Float,
-        String,
-        Char,
-        Bool,
-        Array,          // Array<T>
-        Map,            // Map<K,V>
-        Object,         // Object<T> - typed object
-        Function,       // Function<ReturnType(Args...)>
-        Reference,      // T& - Reference to another value
-        SharedPtr,      // SharedPtr<T>
-        WeakPtr         // WeakPtr<T>
+    enum class value_type {
+        jai_null_type,
+        jai_int_type,
+        jai_float_type,
+        jai_string_type,
+        jai_char_type,
+        jai_bool_type,
+        jai_array_type,          // Array<T>
+        jai_map_type,            // Map<K,V>
+        jai_object_type,         // Object<T> - typed object
+        jai_function_type,       // Function<ReturnType(Args...)>
+        jai_reference_type,      // T& - Reference to another value
+        jai_shared_ptr_type,     // shared_ptr<T>
+        jai_weak_ptr_type        // weak_ptr<T>
     };
     
-} // namespace JaiScript
+} // namespace jai

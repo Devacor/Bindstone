@@ -5,109 +5,154 @@
 #include "function_binder.hpp"
 #include <memory>
 #include <optional>
+#include <unordered_set>
+#include <typeindex>
 
-namespace JaiScript {
+namespace jai {
 
     // Forward declarations
-    class ClassDefinition;
+    class class_definition;
+    class execution_backend;
+    
+    // Backend type enumeration
+    enum class backend_type {
+        interpreter,    // Default tree-walk interpreter
+        jvm,           // Bytecode virtual machine
+        auto_select    // Automatic selection based on heuristics
+    };
 
-    class Engine {
+    class engine {
     public:
-        Engine();
-        ~Engine();
+        engine();
+        ~engine();
         
         // Non-copyable, moveable
-        Engine(const Engine&) = delete;
-        Engine& operator=(const Engine&) = delete;
-        Engine(Engine&&) noexcept;
-        Engine& operator=(Engine&&) noexcept;
+        engine(const engine&) = delete;
+        engine& operator=(const engine&) = delete;
+        engine(engine&&) noexcept;
+        engine& operator=(engine&&) noexcept;
         
-        // File-based execution
-        template<typename ReturnType = void>
-        std::optional<ReturnType> fileEval(
-            const std::string& identifier,
-            const std::string& scriptPath,
-            const LocalVariables& localVars = {}
-        );
         
-        // String-based execution
-        template<typename ReturnType = void>
-        std::optional<ReturnType> eval(
-            const std::string& identifier,
-            const std::string& scriptContent,
-            const LocalVariables& localVars = {}
-        );
+        // Primary API - execute methods
+        script_value execute(const std::string& scriptContent);
+        script_value execute(const std::string& scriptContent, const instance_variables& instanceVars);
         
-        // Simplified overloads for common case
-        Value eval(const std::string& scriptContent);
-        Value fileEval(const std::string& scriptPath);
+        script_value execute_file(const std::string& scriptPath);
+        script_value execute_file(const std::string& scriptPath, const instance_variables& instanceVars);
         
-        // Preferred method names
-        Value execute(const std::string& scriptContent);
-        Value executeFile(const std::string& scriptPath);
+        // Deprecated - use execute methods instead
+        [[deprecated("Use execute() instead")]]
+        script_value eval(const std::string& scriptContent);
         
-        // Global registration (non-serializable)
-        void addGlobal(const std::string& name, Value value);
+        [[deprecated("Use execute_file() instead")]]
+        script_value fileEval(const std::string& scriptPath);
+        
+        // Global registration
+        void add_global(const std::string& name, script_value value, bool is_serializable = true);
         
         // === FUNCTION REGISTRATION ===
         
         // Variadic functions - handle any number of arguments at runtime
         // Use this for functions like print(), max(), or functions with optional parameters
-        // Example: engine.addVariadicFunction("print", [](const std::vector<Value>& args) { ... });
-        void addVariadicFunction(const std::string& name, ScriptFunction func);
-        void addFunctionWithArity(const std::string& name, ScriptFunction func, size_t arity);
+        // Example: engine.add_variadic_function("print", [](const std::vector<script_value>& args) { ... });
+        void add_variadic_function(const std::string& name, script_function func);
+        void add_functionWithArity(const std::string& name, script_function func, size_t arity);
         
         // Typed function registration with automatic overloading
         // Use this for functions with specific C++ signatures
-        // Example: engine.addFunction("add", [](int a, int b) -> int { return a + b; });
+        // Example: engine.add_function("add", [](int a, int b) -> int { return a + b; });
         template<typename Func>
-        void addFunction(const std::string& name, Func&& func) {
+        void add_function(const std::string& name, Func&& func) {
             using traits = detail::function_traits<std::decay_t<Func>>;
+            using return_type = typename traits::return_type;
             constexpr size_t arity = traits::arity;
             
-            auto binder = makeFunctionBinder(std::forward<Func>(func));
-            ScriptFunction boundFunc = binder.bind();
+            auto binder = make_functionBinder(std::forward<Func>(func));
+            script_function boundFunc = binder.bind();
+            
+            // Wrap the function to handle type conversion for return values
+            script_function wrappedFunc = wrapFunctionForTypeConversion<return_type>(std::move(boundFunc));
             
             // Extract parameter types for type-based overloading
-            std::vector<ValueType> paramTypes = extractParameterTypes<Func>();
+            std::vector<value_type> paramTypes = extractParameterTypes<Func>();
+            
+            // Auto-detect numeric operator overrides and set flag
+            if (arity == 2 && isNumericOperator(name)) {
+                if (hasNumericOperands(paramTypes)) {
+                    setHasCustomNumericOps(true);
+                }
+            }
             
             // Check if this should be registered as an overload
-            if (hasFunction(name)) {
+            if (has_function(name)) {
                 // Automatically convert to overloaded function with type info
-                addOverloadedFunctionWithTypes(name, arity, boundFunc, paramTypes);
+                add_overloaded_functionWithTypes(name, arity, wrappedFunc, paramTypes);
             } else {
                 // Register normally but store arity info for future overloading
-                addFunctionWithArityAndTypes(name, boundFunc, arity, paramTypes);
+                add_functionWithArityAndTypes(name, wrappedFunc, arity, paramTypes);
             }
         }
         
+    private:
+        // Helper methods for numeric operator detection
+        bool isNumericOperator(const std::string& name) const {
+            return name == "+" || name == "-" || name == "*" || name == "/" || name == "%" ||
+                   name == "<" || name == ">" || name == "<=" || name == ">=" || 
+                   name == "==" || name == "!=" || name == "<=>";
+        }
+        
+        bool hasNumericOperands(const std::vector<value_type>& paramTypes) const {
+            if (paramTypes.size() != 2) return false;
+            
+            auto isNumericType = [](value_type t) {
+                return t == value_type::jai_int_type || 
+                       t == value_type::jai_float_type || 
+                       t == value_type::jai_char_type || 
+                       t == value_type::jai_bool_type;
+            };
+            
+            return isNumericType(paramTypes[0]) && isNumericType(paramTypes[1]);
+        }
+        
+        void setHasCustomNumericOps(bool value);
+        
+    public:
         // Overloaded function registration
-        void addOverloadedFunction(const std::string& name, size_t argCount, ScriptFunction func);
-        void addOverloadedFunctionWithTypes(const std::string& name, size_t argCount, ScriptFunction func, const std::vector<ValueType>& paramTypes);
-        void addFunctionWithArityAndTypes(const std::string& name, ScriptFunction func, size_t arity, const std::vector<ValueType>& paramTypes);
+        void add_overloaded_function(const std::string& name, size_t argCount, script_function func);
+        void add_overloaded_functionWithTypes(const std::string& name, size_t argCount, script_function func, const std::vector<value_type>& paramTypes);
+        void add_functionWithArityAndTypes(const std::string& name, script_function func, size_t arity, const std::vector<value_type>& paramTypes);
         
         // Class registration
         // Register a class with its type information
         template<typename T>
-        void addClass(const std::string& name, std::shared_ptr<ClassDefinition> classDef) {
-            addClassImpl(name, classDef);
-            registerTypeNameImpl(typeid(T).name(), name);
+        void add_class(const std::string& name, std::shared_ptr<class_definition> classDef) {
+            add_class_impl(name, classDef);
+            register_type_name_impl(typeid(T).name(), name);
+            register_class_by_type(std::type_index(typeid(T)), classDef);
         }
+        
+        // Template type registration for parsing
+        // Registers base template names (e.g., "Point" from "Point<int>") 
+        // so the parser knows which identifiers can be followed by template syntax
+        void register_template_type(const std::string& baseTemplateName);
+        
+        // Get all registered template types for parser
+        std::unordered_set<std::string> get_registered_template_types() const;
         
         // Type conversion registration
         // Register a conversion between JaiScript types with a cost for overload resolution
         // Lower costs are preferred (0 = exact match, 1 = promotion, 2 = standard conversion, etc.)
-        void registerTypeConversion(ValueType from, ValueType to, int cost, 
-                                   std::function<Value(const Value&)> converter);
+        void register_type_conversion(value_type from, value_type to, int cost, 
+                                   std::function<script_value(const script_value&)> converter);
         
         // Template version for C++ type safety using std::is_convertible
         template<typename From, typename To>
-        void registerTypeConversion(int cost = -1) {
+        void register_type_conversion(int cost = -1) {
             static_assert(std::is_convertible_v<From, To>, 
                          "Types must be convertible according to C++ rules");
             
-            ValueType fromType = mapCppTypeToValueType<From>();
-            ValueType toType = mapCppTypeToValueType<To>();
+            value_type fromType = mapCppTypeToValueType<From>();
+            value_type toType = mapCppTypeToValueType<To>();
             
             // Auto-determine cost if not specified
             if (cost < 0) {
@@ -122,9 +167,9 @@ namespace JaiScript {
                 }
             }
             
-            registerTypeConversion(fromType, toType, cost, 
-                [](const Value& v) { 
-                    return Value(static_cast<To>(v.as<From>())); 
+            register_type_conversion(fromType, toType, cost, 
+                [](const script_value& v) { 
+                    return script_value(static_cast<To>(v.as<From>())); 
                 });
         }
         
@@ -132,7 +177,7 @@ namespace JaiScript {
         template<typename T>
         class TypeRegistrar {
         public:
-            TypeRegistrar(Engine& engine, const std::string& name);
+            TypeRegistrar(engine& engine, const std::string& name);
             TypeRegistrar& constructor();
             template<typename... Args>
             TypeRegistrar& constructor();
@@ -146,106 +191,128 @@ namespace JaiScript {
         TypeRegistrar<T> registerType(const std::string& name);
         
         // Variable access
-        Value getVariable(const std::string& name) const;
-        bool hasVariable(const std::string& name) const;
-        bool hasFunction(const std::string& name) const;
+        script_value get_variable(const std::string& name) const;
+        bool has_variable(const std::string& name) const;
+        bool has_function(const std::string& name) const;
+        bool is_type_name(const std::string& name) const;
         
-        // State management (hooks for external serialization)
-        struct State {
-            std::map<std::string, Value> globals;  // Use ordered map for deterministic serialization
+        // state management (hooks for external serialization)
+        struct state {
+            std::map<std::string, script_value> globals;  // Use ordered map for deterministic serialization
             // More state to be added
         };
         
-        State getState() const;
-        void setState(const State& state);
+        state get_state() const;
+        void set_state(const state& state);
         
         // Hot-reload support
-        bool canHotReload(const std::string& scriptPath) const;
-        bool hotReload(const std::string& scriptPath);
+        bool can_hot_reload(const std::string& scriptPath) const;
+        
+        // Performance optimization
+        void set_has_custom_numeric_operators(bool value);
+        bool hot_reload(const std::string& scriptPath);
         
         // Get registered type name from typeid
-        std::string getRegisteredTypeName(const std::string& typeIdName) const;
+        std::string get_registered_type_name(const std::string& typeIdName) const;
         
-        // Convert a registered type to Value
-        Value convertToValue(const std::string& typeIdName, const void* obj) const;
+        // Convert a registered type to value
+        script_value convert_to_value(const std::string& typeIdName, const void* obj) const;
+        
+        // Backend configuration
+        void set_backend(backend_type type);
+        void set_backend(std::unique_ptr<execution_backend> backend);
+        backend_type get_backend_type() const;
+        std::string get_backend_name() const;
         
         // Register type converters for custom types
         template<typename T>
-        void registerTypeConverter(const std::string& typeName) {
-            // Register a converter that creates a Value from this type
-            auto toValue = [typeName](const T& obj) -> Value {
+        void register_type_converter(const std::string& type_name) {
+            // Register a converter that creates a script_value from this type
+            auto toValue = [type_name](const T& obj) -> script_value {
                 auto sharedObj = std::make_shared<T>(obj);
-                return Value::makeObject(typeName, std::static_pointer_cast<void>(sharedObj));
+                return script_value::make_cpp_object(type_name, std::static_pointer_cast<void>(sharedObj));
             };
             
             // Store this converter (implementation will handle the storage)
-            registerTypeConverterImpl(typeid(T).name(), 
-                [toValue](const void* obj) -> Value {
+            register_type_converterImpl(typeid(T).name(), 
+                [toValue](const void* obj) -> script_value {
                     return toValue(*static_cast<const T*>(obj));
                 });
         }
         
-    private:
-        struct Implementation;
-        std::unique_ptr<Implementation> impl;
+        // Get class definition by type name
+        std::shared_ptr<class_definition> get_class_definition(const std::string& type_name) const;
         
-        void addClassImpl(const std::string& name, std::shared_ptr<ClassDefinition> classDef);
-        void registerTypeNameImpl(const std::string& typeIdName, const std::string& friendlyName);
-        void registerTypeConverterImpl(const std::string& typeIdName, std::function<Value(const void*)> converter);
+        // Get class definition by type index
+        std::shared_ptr<class_definition> get_class_definition_by_type(std::type_index type) const;
+        
+        // Register polymorphic copier for derived types
+        template<typename Derived>
+        void register_polymorphic_copier(std::type_index derived_type, 
+                                       std::type_index base_type,
+                                       std::function<std::shared_ptr<void>(const void*)> copier) {
+            register_polymorphic_copier_impl(derived_type, base_type, std::move(copier));
+        }
+        
+    private:
+        struct implementation;
+        std::unique_ptr<implementation> impl;
+        
+        void add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef);
+        void register_type_name_impl(const std::string& typeIdName, const std::string& friendlyName);
+        void register_type_converterImpl(const std::string& typeIdName, std::function<script_value(const void*)> converter);
+        void register_polymorphic_copier_impl(std::type_index derived_type, 
+                                             std::type_index base_type,
+                                             std::function<std::shared_ptr<void>(const void*)> copier);
+        void register_class_by_type(std::type_index type, std::shared_ptr<class_definition> classDef);
+        
+        // Allow class_builder to access implementation details
+        template<typename T> friend class class_builder;
+        
+        // Helper to wrap functions with type conversion
+        template<typename ReturnType>
+        script_function wrapFunctionForTypeConversion(script_function func) {
+            // For user-defined types, type conversion is handled by function binder
+            // We just return the function as-is since value_converter in function_binder
+            // already handles the conversion properly
+            return func;
+        }
         
         // Helper to extract parameter types from a function signature
         template<typename Func>
-        std::vector<ValueType> extractParameterTypes() {
+        std::vector<value_type> extractParameterTypes() {
             using traits = detail::function_traits<std::decay_t<Func>>;
             return extractParameterTypesImpl<typename traits::argument_types>(std::make_index_sequence<traits::arity>{});
         }
         
         template<typename ArgsTuple, size_t... Is>
-        std::vector<ValueType> extractParameterTypesImpl(std::index_sequence<Is...>) {
+        std::vector<value_type> extractParameterTypesImpl(std::index_sequence<Is...>) {
             return {mapCppTypeToValueType<std::tuple_element_t<Is, ArgsTuple>>()...};
         }
         
         // Map C++ types to JaiScript ValueType
         template<typename T>
-        static constexpr ValueType mapCppTypeToValueType() {
-            using DecayT = std::decay_t<T>;
+        static constexpr value_type mapCppTypeToValueType() {
+            using decay_t = std::decay_t<T>;
             
-            if constexpr (std::is_same_v<DecayT, int> || std::is_same_v<DecayT, int64_t> || 
-                          std::is_same_v<DecayT, Int>) {
-                return ValueType::Int;
-            } else if constexpr (std::is_same_v<DecayT, float> || std::is_same_v<DecayT, double> || 
-                                 std::is_same_v<DecayT, Float>) {
-                return ValueType::Float;
-            } else if constexpr (std::is_same_v<DecayT, bool> || std::is_same_v<DecayT, Bool>) {
-                return ValueType::Bool;
-            } else if constexpr (std::is_same_v<DecayT, char> || std::is_same_v<DecayT, Char>) {
-                return ValueType::Char;
-            } else if constexpr (std::is_same_v<DecayT, std::string> || std::is_same_v<DecayT, String>) {
-                return ValueType::String;
+            if constexpr (std::is_same_v<decay_t, int> || std::is_same_v<decay_t, int64_t> || 
+                          std::is_same_v<decay_t, script_int>) {
+                return value_type::jai_int_type;
+            } else if constexpr (std::is_same_v<decay_t, float> || std::is_same_v<decay_t, double> || 
+                                 std::is_same_v<decay_t, script_float>) {
+                return value_type::jai_float_type;
+            } else if constexpr (std::is_same_v<decay_t, bool> || std::is_same_v<decay_t, script_bool>) {
+                return value_type::jai_bool_type;
+            } else if constexpr (std::is_same_v<decay_t, char> || std::is_same_v<decay_t, script_char>) {
+                return value_type::jai_char_type;
+            } else if constexpr (std::is_same_v<decay_t, std::string> || std::is_same_v<decay_t, script_string>) {
+                return value_type::jai_string_type;
             } else {
                 // For unknown types, return Object (could be improved)
-                return ValueType::Object;
+                return value_type::jai_object_type;
             }
         }
     };
     
-    // Template implementation (would go in detail file or inline)
-    template<typename ReturnType>
-    std::optional<ReturnType> Engine::eval(
-        const std::string& identifier,
-        const std::string& scriptContent,
-        const LocalVariables& localVars
-    ) {
-        Value result = eval(scriptContent);
-        if constexpr (std::is_same_v<ReturnType, void>) {
-            return std::nullopt;
-        } else {
-            try {
-                return result.as<ReturnType>();
-            } catch (...) {
-                return std::nullopt;
-            }
-        }
-    }
     
-} // namespace JaiScript
+} // namespace jai

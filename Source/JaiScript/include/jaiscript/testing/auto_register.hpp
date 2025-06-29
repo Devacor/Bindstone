@@ -1,0 +1,67 @@
+#pragma once
+
+#include "foundry.hpp"
+#include <vector>
+#include <memory>
+#include <functional>
+#include <string>
+
+namespace jai::foundry {
+
+// Singleton registry for test suites
+class test_registry {
+public:
+    using suite_factory = std::function<std::unique_ptr<suite>()>;
+    
+    static test_registry& instance() {
+        static test_registry registry;
+        return registry;
+    }
+    
+    void register_suite(const std::string& name, suite_factory factory) {
+        suites_.emplace_back(name, factory);
+    }
+    
+    std::vector<std::unique_ptr<suite>> create_all_suites() {
+        std::vector<std::unique_ptr<suite>> suites;
+        for (const auto& [name, factory] : suites_) {
+            suites.push_back(factory());
+        }
+        return suites;
+    }
+    
+private:
+    test_registry() = default;
+    std::vector<std::pair<std::string, suite_factory>> suites_;
+};
+
+// RAII helper for auto-registration
+template<typename TestSuite>
+class suite_registrar {
+public:
+    explicit suite_registrar(const std::string& name) {
+        test_registry::instance().register_suite(name, []() {
+            return std::make_unique<TestSuite>();
+        });
+    }
+};
+
+} // namespace jai::foundry
+
+// Unified macro that:
+// 1. Auto-registers the test suite with the main runner (when not isolated)
+// 2. Provides isolated test capability when compiled standalone
+// 3. Works with any fully-qualified test class name
+// 4. Avoids .o file conflicts by conditionally compiling registration
+#ifdef JAI_ISOLATED_TEST
+    // When building isolated, don't register with the global registry
+    #define FOUNDRY_REGISTER(TestClass) \
+        CONDITIONAL_ISOLATED_TEST(TestClass)
+#else
+    // When building the full suite, register but don't create main()
+    #define FOUNDRY_REGISTER(TestClass)                                       \
+    namespace {                                                                \
+        static ::jai::foundry::suite_registrar<TestClass> _registrar_##TestClass(#TestClass); \
+    }                                                                          \
+    CONDITIONAL_ISOLATED_TEST(TestClass)
+#endif

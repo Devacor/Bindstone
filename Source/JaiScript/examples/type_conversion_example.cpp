@@ -1,4 +1,4 @@
-// Example showing how to handle type conversions with the general-purpose ClassBuilder
+// Example showing how to handle type conversions with the general-purpose class_builder
 // This demonstrates how Bindstone could use the generic type conversion system
 
 #include "../include/jaiscript/jaiscript.hpp"
@@ -41,11 +41,11 @@ namespace MV::Scene {
 }
 
 // Example of how Bindstone would register Button with all the necessary conversions
-void registerButtonWithConversions(JaiScript::Engine& engine) {
+void registerButtonWithConversions(jai::engine& engine) {
     using namespace MV::Scene;
     
     // Register the Button class with lambda methods (no static_cast needed!)
-    JaiScript::makeClassBuilder<Button>(engine, "Button")
+    jai::make_class_builder<Button>(engine, "Button")
         .inherits<Sprite>()  // This would handle basic inheritance
         .constructor<>()
         
@@ -58,22 +58,22 @@ void registerButtonWithConversions(JaiScript::Engine& engine) {
         })
         
         // General-purpose type conversions - Bindstone can add these as needed
-        .addTypeConversion<SafeComponent<Button>, std::shared_ptr<Button>>(
+        .add_type_conversion<SafeComponent<Button>, std::shared_ptr<Button>>(
             [](const SafeComponent<Button>& item) { 
                 return item.self(); 
             }
         )
-        .addTypeConversion<SafeComponent<Button>, std::shared_ptr<Sprite>>(
+        .add_type_conversion<SafeComponent<Button>, std::shared_ptr<Sprite>>(
             [](const SafeComponent<Button>& item) { 
                 return std::static_pointer_cast<Sprite>(item.self()); 
             }
         )
-        .addTypeConversion<SafeComponent<Button>, std::shared_ptr<Drawable>>(
+        .add_type_conversion<SafeComponent<Button>, std::shared_ptr<Drawable>>(
             [](const SafeComponent<Button>& item) { 
                 return std::static_pointer_cast<Drawable>(item.self()); 
             }
         )
-        .addTypeConversion<SafeComponent<Button>, std::shared_ptr<Component>>(
+        .add_type_conversion<SafeComponent<Button>, std::shared_ptr<Component>>(
             [](const SafeComponent<Button>& item) { 
                 return std::static_pointer_cast<Component>(item.self()); 
             }
@@ -86,8 +86,8 @@ void registerButtonWithConversions(JaiScript::Engine& engine) {
 template<typename T>
 class BindstoneClassBuilder {
 public:
-    BindstoneClassBuilder(JaiScript::Engine& engine, const std::string& name)
-        : builder_(JaiScript::makeClassBuilder<T>(engine, name)) {}
+    BindstoneClassBuilder(jai::engine& engine, const std::string& name)
+        : builder_(jai::make_class_builder<T>(engine, name)) {}
     
     // Automatically add SafeComponent conversions
     template<typename Base>
@@ -95,7 +95,7 @@ public:
         builder_.inherits<Base>();
         
         // Add the SafeComponent conversions automatically
-        builder_.addTypeConversion<SafeComponent<T>, std::shared_ptr<Base>>(
+        builder_.add_type_conversion<SafeComponent<T>, std::shared_ptr<Base>>(
             [](const SafeComponent<T>& item) { 
                 return std::static_pointer_cast<Base>(item.self()); 
             }
@@ -119,7 +119,7 @@ public:
     
     void build() {
         // Always add the main SafeComponent<T> -> std::shared_ptr<T> conversion
-        builder_.addTypeConversion<SafeComponent<T>, std::shared_ptr<T>>(
+        builder_.add_type_conversion<SafeComponent<T>, std::shared_ptr<T>>(
             [](const SafeComponent<T>& item) { return item.self(); }
         );
         
@@ -127,11 +127,11 @@ public:
     }
     
 private:
-    JaiScript::ClassBuilder<T> builder_;
+    jai::class_builder<T> builder_;
 };
 
 // Now Bindstone registrations become even cleaner:
-void registerButtonBindstoneStyle(JaiScript::Engine& engine) {
+void registerButtonBindstoneStyle(jai::engine& engine) {
     using namespace MV::Scene;
     
     BindstoneClassBuilder<Button>(engine, "Button")
@@ -150,20 +150,20 @@ int main() {
     std::cout << "Type Conversion Examples\n";
     std::cout << "========================\n\n";
     
-    std::cout << "1. General-purpose ClassBuilder with explicit conversions:\n";
-    std::cout << "   - Uses .addTypeConversion<From, To>(converter)\n";
+    std::cout << "1. General-purpose class_builder with explicit conversions:\n";
+    std::cout << "   - Uses .add_type_conversion<From, To>(converter)\n";
     std::cout << "   - Framework-agnostic\n";
     std::cout << "   - User has full control\n\n";
     
     std::cout << "2. Bindstone-specific wrapper (BindstoneClassBuilder):\n";
     std::cout << "   - Automatically adds SafeComponent conversions\n";
     std::cout << "   - Reduces boilerplate for Bindstone classes\n";
-    std::cout << "   - Built on top of the general ClassBuilder\n\n";
+    std::cout << "   - Built on top of the general class_builder\n\n";
     
     std::cout << "Benefits:\n";
-    std::cout << "- ClassBuilder stays general-purpose\n";
+    std::cout << "- class_builder stays general-purpose\n";
     std::cout << "- Bindstone can add domain-specific helpers\n";
-    std::cout << "- Other projects can use ClassBuilder without Bindstone-specific code\n";
+    std::cout << "- Other projects can use class_builder without Bindstone-specific code\n";
     std::cout << "- Type conversions are explicit and customizable\n";
     
     return 0;

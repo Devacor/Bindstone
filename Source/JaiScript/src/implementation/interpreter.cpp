@@ -4,22 +4,172 @@
 #include <sstream>
 #include <cmath>
 #include <iostream>
+#include <unordered_map>
+#include <unordered_set>
+#include <functional>
 
-namespace JaiScript {
+namespace jai {
 
-// Environment implementation
-void Environment::define(const std::string& name, const Value& value) {
-    uint32_t id = symbolizer_->intern(name);
+// Define static method registries for built-in types
+const std::unordered_map<std::string, interpreter::builtin_method> interpreter::arrayMethods_ = {
+    {"size", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("size() takes no arguments");
+        }
+        return script_value(static_cast<script_int>(self.as_array().size()));
+    }},
+    
+    {"push", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (args.size() != 1) {
+            throw runtime_error("push() takes exactly one argument");
+        }
+        auto& arrayPtr = get_array_storage(self);
+        arrayPtr->push_back(args[0].clone());  // Deep copy when pushing
+        return script_value(); // void return
+    }},
+    
+    {"pop", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("pop() takes no arguments");
+        }
+        auto& arrayPtr = get_array_storage(self);
+        if (arrayPtr->empty()) {
+            throw runtime_error("Cannot pop from empty array");
+        }
+        script_value last = arrayPtr->back();
+        arrayPtr->pop_back();
+        return last;
+    }},
+    
+    {"empty", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("empty() takes no arguments");
+        }
+        return script_value(self.as_array().empty());
+    }},
+    
+    {"clear", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("clear() takes no arguments");
+        }
+        auto& arrayPtr = get_array_storage(self);
+        arrayPtr->clear();
+        return script_value(); // void return
+    }},
+    
+    {"front", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("front() takes no arguments");
+        }
+        const auto& arr = self.as_array();
+        if (arr.empty()) {
+            throw runtime_error("Cannot get front of empty array");
+        }
+        return arr.front();
+    }},
+    
+    {"back", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("back() takes no arguments");
+        }
+        const auto& arr = self.as_array();
+        if (arr.empty()) {
+            throw runtime_error("Cannot get back of empty array");
+        }
+        return arr.back();
+    }}
+};
+
+const std::unordered_map<std::string, interpreter::builtin_method> interpreter::mapMethods_ = {
+    {"size", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("size() takes no arguments");
+        }
+        return script_value(static_cast<script_int>(self.as_map().size()));
+    }},
+    
+    {"empty", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("empty() takes no arguments");
+        }
+        return script_value(self.as_map().empty());
+    }},
+    
+    {"clear", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("clear() takes no arguments");
+        }
+        auto& mapPtr = get_map_storage(self);
+        mapPtr->clear();
+        return script_value(); // void return
+    }},
+    
+    {"contains", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (args.size() != 1) {
+            throw runtime_error("contains() takes exactly one argument");
+        }
+        const auto& map = self.as_map();
+        return script_value(map.find(args[0]) != map.end());
+    }},
+    
+    {"erase", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (args.size() != 1) {
+            throw runtime_error("erase() takes exactly one argument");
+        }
+        auto& mapPtr = get_map_storage(self);
+        mapPtr->erase(args[0]);
+        return script_value(); // void return
+    }},
+    
+    {"keys", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("keys() takes no arguments");
+        }
+        const auto& map = self.as_map();
+        script_value result = script_value::make_array(nullptr);
+        auto& arrayPtr = get_array_storage(result);
+        arrayPtr->reserve(map.size());
+        for (const auto& [key, value] : map) {
+            arrayPtr->push_back(key.clone());
+        }
+        return result;
+    }},
+    
+    {"values", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("values() takes no arguments");
+        }
+        const auto& map = self.as_map();
+        script_value result = script_value::make_array(nullptr);
+        auto& arrayPtr = get_array_storage(result);
+        arrayPtr->reserve(map.size());
+        for (const auto& [key, value] : map) {
+            arrayPtr->push_back(value.clone());
+        }
+        return result;
+    }}
+};
+
+void environment::define(const std::string& name, const script_value& value) {
+    uint64_t id = symbolizer_->intern(name);
     values_[id] = value;
 }
 
-void Environment::define(const std::string& name, Value&& value) {
-    uint32_t id = symbolizer_->intern(name);
+void environment::define(const std::string& name, script_value&& value) {
+    uint64_t id = symbolizer_->intern(name);
     values_[id] = std::move(value);
 }
 
-Value Environment::get(const std::string& name) const {
-    uint32_t id = symbolizer_->intern(name);
+void environment::define(uint64_t id, const script_value& value) {
+    values_[id] = value;
+}
+
+void environment::define(uint64_t id, script_value&& value) {
+    values_[id] = std::move(value);
+}
+
+script_value environment::get(const std::string& name) const {
+    uint64_t id = symbolizer_->intern(name);
     auto it = values_.find(id);
     if (it != values_.end()) {
         return it->second;
@@ -29,11 +179,39 @@ Value Environment::get(const std::string& name) const {
         return parent_->get(name);
     }
     
-    throw RuntimeError("Undefined variable '" + name + "'");
+    throw runtime_error("Undefined variable '" + name + "'");
 }
 
-void Environment::assign(const std::string& name, const Value& value) {
-    uint32_t id = symbolizer_->intern(name);
+script_value environment::get(uint64_t id) const {
+    return get(id, 0);
+}
+
+script_value environment::get(uint64_t id, int depth) const {
+    // Prevent infinite recursion in environment chains
+    const int MAX_RECURSION_DEPTH = 100;
+    if (depth > MAX_RECURSION_DEPTH) {
+        const std::string& name = symbolizer_->get_string(id);
+        throw runtime_error("Maximum environment recursion depth exceeded for variable '" + name + "' at depth " + std::to_string(depth));
+    }
+    
+    
+    
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        return it->second;
+    }
+    
+    if (parent_) {
+        return parent_->get(id, depth + 1);
+    }
+    
+    // Need to get the name for error message
+    const std::string& name = symbolizer_->get_string(id);
+    throw runtime_error("Undefined variable '" + name + "'");
+}
+
+void environment::assign(const std::string& name, const script_value& value) {
+    uint64_t id = symbolizer_->intern(name);
     auto it = values_.find(id);
     if (it != values_.end()) {
         it->second = value;
@@ -45,11 +223,79 @@ void Environment::assign(const std::string& name, const Value& value) {
         return;
     }
     
-    throw RuntimeError("Undefined variable '" + name + "'");
+    throw runtime_error("Undefined variable '" + name + "'");
 }
 
-void Environment::assign(const std::string& name, Value&& value) {
-    uint32_t id = symbolizer_->intern(name);
+const script_value& environment::get_ref(const std::string& name) const {
+    uint64_t id = symbolizer_->intern(name);
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        return it->second;
+    }
+    
+    if (parent_) {
+        return parent_->get_ref(name);
+    }
+    
+    throw runtime_error("Undefined variable '" + name + "'");
+}
+
+const script_value& environment::get_ref(uint64_t id) const {
+    return get_ref(id, 0);
+}
+
+const script_value& environment::get_ref(uint64_t id, int depth) const {
+    // Prevent infinite recursion in environment chains
+    const int MAX_RECURSION_DEPTH = 100;
+    if (depth > MAX_RECURSION_DEPTH) {
+        const std::string& name = symbolizer_->get_string(id);
+        throw runtime_error("Maximum environment recursion depth exceeded for variable '" + name + "' at depth " + std::to_string(depth));
+    }
+    
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        return it->second;
+    }
+    
+    if (parent_) {
+        return parent_->get_ref(id, depth + 1);
+    }
+    
+    // Need to get the name for error message
+    const std::string& name = symbolizer_->get_string(id);
+    throw runtime_error("Undefined variable '" + name + "'");
+}
+
+script_value& environment::get_ref(const std::string& name) {
+    uint64_t id = symbolizer_->intern(name);
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        return it->second;
+    }
+    
+    if (parent_) {
+        return parent_->get_ref(name);
+    }
+    
+    throw runtime_error("Undefined variable '" + name + "'");
+}
+
+script_value& environment::get_ref(uint64_t id) {
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        return it->second;
+    }
+    
+    if (parent_) {
+        return parent_->get_ref(id);
+    }
+    
+    const std::string& name = symbolizer_->get_string(id);
+    throw runtime_error("Undefined variable '" + name + "'");
+}
+
+void environment::assign(const std::string& name, script_value&& value) {
+    uint64_t id = symbolizer_->intern(name);
     auto it = values_.find(id);
     if (it != values_.end()) {
         it->second = std::move(value);
@@ -61,337 +307,448 @@ void Environment::assign(const std::string& name, Value&& value) {
         return;
     }
     
-    throw RuntimeError("Undefined variable '" + name + "'");
+    throw runtime_error("Undefined variable '" + name + "'");
 }
 
-bool Environment::contains(const std::string& name) const {
-    uint32_t id = symbolizer_->intern(name);
+void environment::assign(uint64_t id, const script_value& value) {
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        it->second = value;
+        return;
+    }
+    
+    if (parent_) {
+        parent_->assign(id, value);
+        return;
+    }
+    
+    const std::string& name = symbolizer_->get_string(id);
+    throw runtime_error("Undefined variable '" + name + "'");
+}
+
+void environment::assign(uint64_t id, script_value&& value) {
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        it->second = std::move(value);
+        return;
+    }
+    
+    if (parent_) {
+        parent_->assign(id, std::move(value));
+        return;
+    }
+    
+    const std::string& name = symbolizer_->get_string(id);
+    throw runtime_error("Undefined variable '" + name + "'");
+}
+
+bool environment::contains(const std::string& name) const {
+    uint64_t id = symbolizer_->intern(name);
     if (values_.find(id) != values_.end()) {
         return true;
     }
     return parent_ ? parent_->contains(name) : false;
 }
 
-std::unordered_map<std::string, Value> Environment::getLocalVariables() const {
-    std::unordered_map<std::string, Value> result;
+bool environment::contains(uint64_t id) const {
+    if (values_.find(id) != values_.end()) {
+        return true;
+    }
+    return parent_ ? parent_->contains(id) : false;
+}
+
+std::unordered_map<std::string, script_value> environment::get_local_variables() const {
+    std::unordered_map<std::string, script_value> result;
     for (const auto& [id, value] : values_) {
-        result[symbolizer_->getString(id)] = value;
+        result[symbolizer_->get_string(id)] = value;
     }
     return result;
 }
 
-// Interpreter implementation
-Interpreter::Interpreter() 
-    : ownedSymbolizer_(std::make_unique<StringSymbolizer>()),
+void environment::reset(std::shared_ptr<environment> new_parent) {
+    values_.clear();
+    parent_ = new_parent;
+}
+
+std::unordered_map<std::string, script_value> environment::get_all_variables() const {
+    std::unordered_map<std::string, script_value> allVars;
+    
+    // Start with parent's variables (if any)
+    if (parent_) {
+        allVars = parent_->get_all_variables();
+    }
+    
+    // Add/override with local variables
+    for (const auto& [id, value] : values_) {
+        const std::string& name = symbolizer_->get_string(id);
+        allVars[name] = value;
+    }
+    
+    return allVars;
+}
+
+script_value* environment::get_value_ptr(uint64_t id) {
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        return &it->second;
+    }
+    
+    if (parent_) {
+        return parent_->get_value_ptr(id);
+    }
+    
+    return nullptr;
+}
+
+// interpreter implementation
+interpreter::interpreter() 
+    : ownedSymbolizer_(std::make_unique<string_symbolizer>()),
       stringSymbolizer_(ownedSymbolizer_.get()),
-      environment_(std::make_shared<Environment>(stringSymbolizer_)),
+      environment_(std::make_shared<environment>(stringSymbolizer_)),
       hasReturnValue_(false) {
+    // Initialize optimization pools
+    argument_pool_.reserve(16);  // Reasonable default for most function calls
+    environment_pool_.reserve(8);  // For nested function calls
+    
+    // Pre-populate environment pool
+    for (size_t i = 0; i < 8; ++i) {
+        environment_pool_.push_back(std::make_shared<environment>(nullptr, stringSymbolizer_));
+    }
+    
+    // Initialize binary operator dispatch table
+    init_dispatch_table();
 }
 
-Interpreter::Interpreter(StringSymbolizer* externalSymbolizer)
+interpreter::interpreter(string_symbolizer* external_symbolizer)
     : ownedSymbolizer_(nullptr),
-      stringSymbolizer_(externalSymbolizer),
-      environment_(std::make_shared<Environment>(stringSymbolizer_)),
+      stringSymbolizer_(external_symbolizer),
+      environment_(std::make_shared<environment>(stringSymbolizer_)),
       hasReturnValue_(false) {
+    // Initialize optimization pools
+    argument_pool_.reserve(16);  // Reasonable default for most function calls
+    environment_pool_.reserve(8);  // For nested function calls
+    
+    // Pre-populate environment pool
+    for (size_t i = 0; i < 8; ++i) {
+        environment_pool_.push_back(std::make_shared<environment>(nullptr, stringSymbolizer_));
+    }
+    
+    // Initialize binary operator dispatch table
+    init_dispatch_table();
 }
 
-void Interpreter::addGlobals(const std::unordered_map<std::string, Value>& globals) {
+interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr<environment> global_env)
+    : ownedSymbolizer_(nullptr),
+      stringSymbolizer_(external_symbolizer),
+      environment_(global_env),
+      hasReturnValue_(false) {
+    // Initialize optimization pools
+    argument_pool_.reserve(16);  // Reasonable default for most function calls
+    environment_pool_.reserve(8);  // For nested function calls
+    
+    // Pre-populate environment pool
+    for (size_t i = 0; i < 8; ++i) {
+        environment_pool_.push_back(std::make_shared<environment>(nullptr, stringSymbolizer_));
+    }
+    
+    // Initialize binary operator dispatch table
+    init_dispatch_table();
+}
+
+void interpreter::add_globals(const std::unordered_map<std::string, script_value>& globals) {
     for (const auto& [name, value] : globals) {
         environment_->define(name, value);
     }
 }
 
-Value Interpreter::execute(const std::vector<DeclarationPtr>& declarations) {
-    Value lastValue;
+void interpreter::add_global(const std::string& name, const script_value& value) {
+    environment_->define(name, value);
+}
+
+void interpreter::prepare_for_execution() {
+    // Clear execution state
+    valueStack_.clear();
+    returnValue_ = script_value();
+    hasReturnValue_ = false;
+    
+    // Reset to global scope but keep all variables defined at global scope
+    // Only pop scopes if we're in a nested scope
+    while (environment_->parent_) {
+        environment_ = environment_->parent_;
+    }
+    // Note: We don't clear the global environment, so variables persist between executions
+}
+
+void interpreter::push_scope() {
+    environment_ = std::make_shared<environment>(environment_, stringSymbolizer_);
+}
+
+void interpreter::pop_scope() {
+    if (environment_->parent_) {
+        environment_ = environment_->parent_;
+    }
+}
+
+void interpreter::define_variable(const std::string& name, const script_value& value) {
+    environment_->define(name, value);
+}
+
+script_value interpreter::execute(const std::vector<declaration_ptr>& declarations) {
+    script_value lastscript_value;
     hasReturnValue_ = false;  // Reset return value state
     
-    for (const auto& decl : declarations) {
+    for (size_t i = 0; i < declarations.size(); i++) {
+        const auto& decl = declarations[i];
+        
         decl->accept(this);
         
-        // If there's a value on the stack, save it as the last value
-        if (!valueStack_.empty()) {
-            lastValue = popValue();
+        // Check if this is an implicit return expression
+        if (auto* expr_decl = dynamic_cast<expression_decl*>(decl.get())) {
+            if (expr_decl->implicit_return && !valueStack_.empty()) {
+                lastscript_value = pop_value();
+            }
+        }
+        
+        // Clear any remaining values on the stack (from non-implicit expressions)
+        while (!valueStack_.empty()) {
+            pop_value();
         }
         
         // If we hit a return statement, break out of execution
         if (hasReturnValue_) {
+            reset_environment_pool();  // Reset pool for next execution
             return returnValue_;
         }
     }
     
-    return lastValue;
+    
+    reset_environment_pool();  // Reset pool for next execution
+    return lastscript_value;
 }
 
-Value Interpreter::evaluate(ExpressionPtr expr) {
+script_value interpreter::evaluate(expression_ptr expr) {
     expr->accept(this);
-    return popValue();
+    return pop_value();
 }
 
 // Variable access methods
-Value Interpreter::getVariable(const std::string& name) const {
-    return environment_->get(name);
+script_value interpreter::get_variable(const std::string& name) const {
+    return environment_->get(name).deref();
 }
 
-bool Interpreter::hasVariable(const std::string& name) const {
+bool interpreter::has_variable(const std::string& name) const {
     return environment_->contains(name);
 }
 
-std::unordered_map<std::string, Value> Interpreter::getAllVariables() const {
+std::unordered_map<std::string, script_value> interpreter::get_all_variables() const {
     // Since we should be at root scope after execution, just return local variables
-    return environment_->getLocalVariables();
+    return environment_->get_local_variables();
 }
 
 
-// Expression visitors
-void Interpreter::visitLiteralExpr(LiteralExpr* expr) {
-    pushValue(expr->value);
+// expression visitors
+void interpreter::visit_literal_expr(literal_expr* expr) {
+    push_value(expr->value);
 }
 
-void Interpreter::visitIdentifierExpr(IdentifierExpr* expr) {
-    pushValue(environment_->get(expr->name));
-}
-
-void Interpreter::visitBinaryExpr(BinaryExpr* expr) {
-    // First check for custom operator functions
-    std::string opName;
-    switch (expr->op.type) {
-        case TokenType::Plus: opName = "+"; break;
-        case TokenType::Minus: opName = "-"; break;
-        case TokenType::Star: opName = "*"; break;
-        case TokenType::Slash: opName = "/"; break;
-        case TokenType::Percent: opName = "%"; break;
-        case TokenType::Less: opName = "<"; break;
-        case TokenType::LessEqual: opName = "<="; break;
-        case TokenType::Greater: opName = ">"; break;
-        case TokenType::GreaterEqual: opName = ">="; break;
-        case TokenType::EqualEqual: opName = "=="; break;
-        case TokenType::BangEqual: opName = "!="; break;
-        case TokenType::Spaceship: opName = "<=>"; break;
-        case TokenType::Ampersand: opName = "&"; break;
-        case TokenType::Pipe: opName = "|"; break;
-        case TokenType::Caret: opName = "^"; break;
-        case TokenType::LeftShift: opName = "<<"; break;
-        case TokenType::RightShift: opName = ">>"; break;
-        default: break;
+void interpreter::visit_identifier_expr(identifier_expr* expr) {
+    // Check if this identifier is the current catch variable
+    if (!current_catch_var_.empty() && expr->name == current_catch_var_) {
+        push_value(active_exception_value_);
+        return;
     }
     
-    if (!opName.empty() && environment_->contains(opName)) {
-        try {
-            Value opFunc = environment_->get(opName);
-            if (opFunc.isFunction()) {
-                // Evaluate operands for custom function
-                expr->left->accept(this);
-                Value left = popValue();
-                
-                expr->right->accept(this);
-                Value right = popValue();
-                
-                // Call the custom operator function
-                const ScriptFunction& func = opFunc.asFunction();
-                std::vector<Value> args = {left, right};
-                pushValue(func(args));
-                return;
-            }
-        } catch (const std::exception& e) {
-            // If custom operator fails, fall back to built-in behavior
-            // Rethrow if it's not a simple lookup failure
-            std::string error = e.what();
-            if (error.find("Undefined variable") == std::string::npos) {
-                throw;
-            }
-        }
+    // Use cached symbol ID if available, otherwise compute and cache it
+    if (expr->symbol_id == UINT64_MAX) {
+        expr->symbol_id = stringSymbolizer_->intern(expr->name);
     }
     
-    // Fast path for literal arithmetic - avoid evaluation overhead
-    if (auto* leftLit = dynamic_cast<LiteralExpr*>(expr->left.get())) {
-        if (auto* rightLit = dynamic_cast<LiteralExpr*>(expr->right.get())) {
-            const Value& leftVal = leftLit->value;
-            const Value& rightVal = rightLit->value;
+    const script_value& val = environment_->get_ref(expr->symbol_id);
+    push_value(val.deref());  // Automatically handles references
+}
+
+void interpreter::visit_binary_expr(binary_expr* expr) {
+    // ULTRA-FAST PATH: Literal expressions like "2 + 3" - avoid all AST traversal
+    if (auto* leftLit = dynamic_cast<literal_expr*>(expr->left.get())) {
+        if (auto* rightLit = dynamic_cast<literal_expr*>(expr->right.get())) {
+            const script_value& leftVal = leftLit->value;
+            const script_value& rightVal = rightLit->value;
             
-            // Fast path for integer arithmetic
-            if (leftVal.isInt() && rightVal.isInt()) {
-                Int leftInt = leftVal.asInt();
-                Int rightInt = rightVal.asInt();
+            // Fast path for integer arithmetic (most common case) - but only if no custom ops
+            if (leftVal.is_int() && rightVal.is_int() && can_use_fast_path(expr->op.type)) {
+                script_int leftInt = leftVal.as_int();
+                script_int rightInt = rightVal.as_int();
                 
                 switch (expr->op.type) {
-                    case TokenType::Plus:
-                        pushValue(Value(leftInt + rightInt));
+                    case token_type::plus:
+                        push_value({leftInt + rightInt});
                         return;
-                    case TokenType::Minus:
-                        pushValue(Value(leftInt - rightInt));
+                    case token_type::minus:
+                        push_value({leftInt - rightInt});
                         return;
-                    case TokenType::Star:
-                        pushValue(Value(leftInt * rightInt));
+                    case token_type::star:
+                        push_value({leftInt * rightInt});
                         return;
-                    case TokenType::Slash:
-                        if (rightInt == 0) {
-                            throw RuntimeError("Division by zero");
-                        }
-                        pushValue(Value(leftInt / rightInt));
+                    case token_type::slash:
+                        if (rightInt == 0) throw runtime_error("Division by zero");
+                        push_value({leftInt / rightInt});
                         return;
-                    case TokenType::Percent:
-                        if (rightInt == 0) {
-                            throw RuntimeError("Division by zero");
-                        }
-                        pushValue(Value(leftInt % rightInt));
+                    case token_type::percent:
+                        if (rightInt == 0) throw runtime_error("Division by zero");
+                        push_value({leftInt % rightInt});
                         return;
-                    case TokenType::Less:
-                        pushValue(Value(leftInt < rightInt));
+                    case token_type::less:
+                        push_value({leftInt < rightInt});
                         return;
-                    case TokenType::LessEqual:
-                        pushValue(Value(leftInt <= rightInt));
+                    case token_type::less_equal:
+                        push_value({leftInt <= rightInt});
                         return;
-                    case TokenType::Greater:
-                        pushValue(Value(leftInt > rightInt));
+                    case token_type::greater:
+                        push_value({leftInt > rightInt});
                         return;
-                    case TokenType::GreaterEqual:
-                        pushValue(Value(leftInt >= rightInt));
+                    case token_type::greater_equal:
+                        push_value({leftInt >= rightInt});
                         return;
-                    case TokenType::EqualEqual:
-                        pushValue(Value(leftInt == rightInt));
+                    case token_type::equal_equal:
+                        push_value({leftInt == rightInt});
                         return;
-                    case TokenType::BangEqual:
-                        pushValue(Value(leftInt != rightInt));
+                    case token_type::bang_equal:
+                        push_value({leftInt != rightInt});
                         return;
-                    case TokenType::Spaceship:
-                        pushValue(Value(leftInt < rightInt ? Int(-1) : (leftInt > rightInt ? Int(1) : Int(0))));
+                    case token_type::spaceship:
+                        push_value({leftInt < rightInt ? script_int(-1) : (leftInt > rightInt ? script_int(1) : script_int(0))});
                         return;
                     default:
-                        break; // Fall through to generic path
+                        break; // Fall through to normal path
                 }
             }
-            // Fast path for float arithmetic
-            else if ((leftVal.isInt() || leftVal.isFloat()) && (rightVal.isInt() || rightVal.isFloat())) {
-                Float leftFloat = leftVal.isInt() ? static_cast<Float>(leftVal.asInt()) : leftVal.asFloat();
-                Float rightFloat = rightVal.isInt() ? static_cast<Float>(rightVal.asInt()) : rightVal.asFloat();
+            // Fast path for float arithmetic - but only if no custom ops
+            else if ((leftVal.is_float() || leftVal.is_int()) && (rightVal.is_float() || rightVal.is_int()) && can_use_fast_path(expr->op.type)) {
+                script_float leftFloat = leftVal.is_int() ? static_cast<script_float>(leftVal.as_int()) : leftVal.as_float();
+                script_float rightFloat = rightVal.is_int() ? static_cast<script_float>(rightVal.as_int()) : rightVal.as_float();
                 
                 switch (expr->op.type) {
-                    case TokenType::Plus:
-                        pushValue(Value(leftFloat + rightFloat));
+                    case token_type::plus:
+                        push_value({leftFloat + rightFloat});
                         return;
-                    case TokenType::Minus:
-                        pushValue(Value(leftFloat - rightFloat));
+                    case token_type::minus:
+                        push_value({leftFloat - rightFloat});
                         return;
-                    case TokenType::Star:
-                        pushValue(Value(leftFloat * rightFloat));
+                    case token_type::star:
+                        push_value({leftFloat * rightFloat});
                         return;
-                    case TokenType::Slash:
-                        if (rightFloat == 0.0) {
-                            throw RuntimeError("Division by zero");
-                        }
-                        pushValue(Value(leftFloat / rightFloat));
+                    case token_type::slash:
+                        if (rightFloat == 0.0) throw runtime_error("Division by zero");
+                        push_value({leftFloat / rightFloat});
                         return;
-                    case TokenType::Less:
-                        pushValue(Value(leftFloat < rightFloat));
+                    case token_type::percent:
+                        if (rightFloat == 0.0) throw runtime_error("Division by zero");
+                        push_value({std::fmod(leftFloat, rightFloat)});
                         return;
-                    case TokenType::LessEqual:
-                        pushValue(Value(leftFloat <= rightFloat));
+                    case token_type::less:
+                        push_value({leftFloat < rightFloat});
                         return;
-                    case TokenType::Greater:
-                        pushValue(Value(leftFloat > rightFloat));
+                    case token_type::less_equal:
+                        push_value({leftFloat <= rightFloat});
                         return;
-                    case TokenType::GreaterEqual:
-                        pushValue(Value(leftFloat >= rightFloat));
+                    case token_type::greater:
+                        push_value({leftFloat > rightFloat});
                         return;
-                    case TokenType::EqualEqual:
-                        pushValue(Value(leftFloat == rightFloat));
+                    case token_type::greater_equal:
+                        push_value({leftFloat >= rightFloat});
                         return;
-                    case TokenType::BangEqual:
-                        pushValue(Value(leftFloat != rightFloat));
+                    case token_type::equal_equal:
+                        push_value({leftFloat == rightFloat});
                         return;
-                    case TokenType::Spaceship:
-                        pushValue(Value(leftFloat < rightFloat ? Int(-1) : (leftFloat > rightFloat ? Int(1) : Int(0))));
+                    case token_type::bang_equal:
+                        push_value({leftFloat != rightFloat});
+                        return;
+                    case token_type::spaceship:
+                        push_value({leftFloat < rightFloat ? script_int(-1) : (leftFloat > rightFloat ? script_int(1) : script_int(0))});
                         return;
                     default:
-                        break; // Fall through to generic path
+                        break;
                 }
             }
             // Fast path for string concatenation
-            else if (expr->op.type == TokenType::Plus && leftVal.isString() && rightVal.isString()) {
-                pushValue(Value(leftVal.asString() + rightVal.asString()));
+            else if (expr->op.type == token_type::plus && leftVal.is_string() && rightVal.is_string()) {
+                push_value({leftVal.as_string() + rightVal.as_string()});
                 return;
             }
         }
     }
-    
+
     // Handle logical operators specially for short-circuit evaluation
-    if (expr->op.type == TokenType::AmpersandAmpersand || expr->op.type == TokenType::PipePipe) {
-        // Evaluate left operand (which could be a complex expression with brackets)
+    if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
         expr->left->accept(this);
-        Value left = popValue();
+        script_value left = pop_value();
         
-        bool leftTruthy = isTruthy(left);
+        bool leftTruthy = is_truthy(left);
         
-        if (expr->op.type == TokenType::AmpersandAmpersand) {
-            // Short-circuit: if left is false, return false without evaluating right
+        if (expr->op.type == token_type::ampersand_ampersand) {
             if (!leftTruthy) {
-                pushValue(Value(false));
+                push_value(left);  // Short-circuit: return left (falsy)
                 return;
             }
-            // Otherwise evaluate right and return its truthiness
-            expr->right->accept(this);
-            Value right = popValue();
-            pushValue(Value(isTruthy(right)));
-            return;
-        } else { // PipePipe
-            // Short-circuit: if left is true, return true without evaluating right
+        } else { // pipe_pipe
             if (leftTruthy) {
-                pushValue(Value(true));
+                push_value(left);  // Short-circuit: return left (truthy)
                 return;
             }
-            // Otherwise evaluate right and return its truthiness
-            expr->right->accept(this);
-            Value right = popValue();
-            pushValue(Value(isTruthy(right)));
-            return;
         }
+        
+        // Evaluate right side
+        expr->right->accept(this);
+        // Result is already on stack
+        return;
     }
     
-    // Generic path - evaluate operands and use existing logic
+    // Evaluate operands once and use them throughout
     expr->left->accept(this);
-    Value left = popValue();
+    script_value left = pop_value().deref();  // Handle references safely
     
     expr->right->accept(this);
-    Value right = popValue();
+    // Check if we're unwinding due to an exception in the right expression
+    if (is_unwinding_) {
+        // Don't try to pop a value that wasn't pushed due to the exception
+        return;
+    }
+    script_value right = pop_value().deref();  // Handle references safely
     
-    // First check if there's a custom operator function registered
+    // Check for custom operator functions first
+    std::string opName;
     switch (expr->op.type) {
-        case TokenType::Plus: opName = "+"; break;
-        case TokenType::Minus: opName = "-"; break;
-        case TokenType::Star: opName = "*"; break;
-        case TokenType::Slash: opName = "/"; break;
-        case TokenType::Percent: opName = "%"; break;
-        case TokenType::Less: opName = "<"; break;
-        case TokenType::LessEqual: opName = "<="; break;
-        case TokenType::Greater: opName = ">"; break;
-        case TokenType::GreaterEqual: opName = ">="; break;
-        case TokenType::EqualEqual: opName = "=="; break;
-        case TokenType::BangEqual: opName = "!="; break;
-        case TokenType::Spaceship: opName = "<=>"; break;
-        case TokenType::Ampersand: opName = "&"; break;
-        case TokenType::Pipe: opName = "|"; break;
-        case TokenType::Caret: opName = "^"; break;
-        case TokenType::LeftShift: opName = "<<"; break;
-        case TokenType::RightShift: opName = ">>"; break;
+        case token_type::plus: opName = "+"; break;
+        case token_type::minus: opName = "-"; break;
+        case token_type::star: opName = "*"; break;
+        case token_type::slash: opName = "/"; break;
+        case token_type::percent: opName = "%"; break;
+        case token_type::less: opName = "<"; break;
+        case token_type::less_equal: opName = "<="; break;
+        case token_type::greater: opName = ">"; break;
+        case token_type::greater_equal: opName = ">="; break;
+        case token_type::equal_equal: opName = "=="; break;
+        case token_type::bang_equal: opName = "!="; break;
+        case token_type::spaceship: opName = "<=>"; break;
+        case token_type::ampersand: opName = "&"; break;
+        case token_type::pipe: opName = "|"; break;
+        case token_type::caret: opName = "^"; break;
+        case token_type::left_shift: opName = "<<"; break;
+        case token_type::right_shift: opName = ">>"; break;
         default: break;
     }
     
-    if (!opName.empty()) {
+    // Check for custom operator function (excluding subscript)
+    if (!opName.empty() && environment_ && environment_->contains(opName)) {
         try {
-            // Check if there's a custom operator function in the environment chain
-            if (environment_->contains(opName)) {
-                Value opFunc = environment_->get(opName);
-                if (opFunc.isFunction()) {
-                    // Call the custom operator function
-                    const ScriptFunction& func = opFunc.asFunction();
-                    std::vector<Value> args = {left, right};
-                    pushValue(func(args));
-                    return;
-                }
+            script_value opFunc = environment_->get(opName);
+            if (opFunc.is_function()) {
+                const script_function& func = opFunc.as_function();
+                std::vector<script_value> args = {left, right};
+                push_value(func(args));
+                return;
             }
         } catch (const std::exception& e) {
-            // If custom operator fails, fall back to built-in behavior
-            // Rethrow if it's not a simple lookup failure
             std::string error = e.what();
             if (error.find("Undefined variable") == std::string::npos) {
                 throw;
@@ -399,97 +756,84 @@ void Interpreter::visitBinaryExpr(BinaryExpr* expr) {
         }
     }
     
-    // Perform the operation based on the operator
-    switch (expr->op.type) {
-        // Arithmetic operators
-        case TokenType::Plus:
-        case TokenType::Minus:
-        case TokenType::Star:
-        case TokenType::Slash:
-        case TokenType::Percent:
-            pushValue(evaluateArithmetic(left, expr->op.type, right));
-            break;
-            
-        // Comparison operators
-        case TokenType::Less:
-        case TokenType::LessEqual:
-        case TokenType::Greater:
-        case TokenType::GreaterEqual:
-        case TokenType::EqualEqual:
-        case TokenType::BangEqual:
-        case TokenType::Spaceship:
-            pushValue(evaluateComparison(left, expr->op.type, right));
-            break;
-            
-            
-        // Subscript operator
-        case TokenType::LeftBracket: {
-            // Array or Map subscript access
-            if (left.isArray()) {
-                // Array access: arr[index]
-                if (!right.isInt()) {
-                    throw RuntimeError("Array index must be an integer");
-                }
-                Int index = right.asInt();
-                const auto& array = left.asArray();
-                
-                if (index < 0 || index >= static_cast<Int>(array.size())) {
-                    throw RuntimeError("Array index out of bounds: " + std::to_string(index));
-                }
-                
-                pushValue(array[index]);
-            } else if (left.isMap()) {
-                // Map access: map[key]
-                const auto& map = left.asMap();
-                auto it = map.find(right);
-                
-                if (it != map.end()) {
-                    pushValue(it->second);
-                } else {
-                    // Return null for missing keys (like JavaScript/Python)
-                    pushValue(Value());
-                }
-            } else {
-                throw RuntimeError("Subscript operator [] can only be used on arrays and maps");
+    // Handle subscript operation specially
+    if (expr->op.type == token_type::left_bracket) {
+        if (left.is_array()) {
+            if (!right.is_int()) {
+                throw runtime_error("Array index must be an integer");
             }
-            break;
+            script_int index = right.as_int();
+            auto& array = const_cast<std::vector<script_value>&>(left.as_array());
+            
+            if (index < 0 || index >= static_cast<script_int>(array.size())) {
+                throw runtime_error("Array index out of bounds: " + std::to_string(index));
+            }
+            
+            // Create a reference to the array element for assignment support
+            script_value* element_ptr = &array[index];
+            script_value ref_value = script_value::make_reference(element_ptr, environment_);
+            push_value(ref_value);
+        } else if (left.is_map()) {
+            // Get non-const reference to map for operator[]
+            auto& map = const_cast<std::map<script_value, script_value>&>(left.as_map());
+            
+            // Use operator[] which creates the element if it doesn't exist
+            // This returns a reference to the value
+            script_value& value_ref = map[right];
+            
+            // Create a reference to the map element for assignment support
+            script_value* element_ptr = &value_ref;
+            script_value ref_value = script_value::make_reference(element_ptr, environment_);
+            push_value(ref_value);
+        } else {
+            if (left.is_object()) {
+                try {
+                    script_value getMethod = environment_->get("[]");
+                    if (getMethod.is_function()) {
+                        const script_function& func = getMethod.as_function();
+                        std::vector<script_value> args = {left, right};
+                        push_value(func(args));
+                        return;
+                    }
+                } catch (const std::exception&) {
+                    // No custom [] operator, continue with error
+                }
+            }
+            throw runtime_error("Subscript can only be used on arrays, maps, or types with [] operator");
         }
-            
-        // Bitwise operators
-        case TokenType::Ampersand:
-        case TokenType::Pipe:
-        case TokenType::Caret:
-        case TokenType::LeftShift:
-        case TokenType::RightShift:
-            pushValue(evaluateBitwise(left, expr->op.type, right));
-            break;
-            
-        default:
-            throw RuntimeError("Unsupported binary operator");
+        return;
+    }
+    
+    // Use dispatch table for built-in operators with already-evaluated operands
+    auto handler = binary_dispatch_table_.find(expr->op.type);
+    if (handler != binary_dispatch_table_.end()) {
+        script_value result = (this->*handler->second)(left, right);
+        push_value(result);
+    } else {
+        throw runtime_error("Unknown binary operator");
     }
 }
-
-void Interpreter::visitUnaryExpr(UnaryExpr* expr) {
+void interpreter::visit_unary_expr(unary_expr* expr) {
     // Fast path for literal unary operations
-    if (auto* literal = dynamic_cast<LiteralExpr*>(expr->operand.get())) {
-        const Value& val = literal->value;
+    if (auto* literal = dynamic_cast<literal_expr*>(expr->operand.get())) {
+        const script_value& val = literal->value;
         
         switch (expr->op.type) {
-            case TokenType::Minus:
-                if (val.isInt()) {
-                    pushValue(Value(-val.asInt()));
+            case token_type::minus:
+                if (val.is_int()) {
+                    push_value({-val.as_int()});
                     return;
-                } else if (val.isFloat()) {
-                    pushValue(Value(-val.asFloat()));
+                } else if (val.is_float()) {
+                    push_value({-val.as_float()});
                     return;
                 }
                 break;
-            case TokenType::Bang:
-                pushValue(Value(!isTruthy(val)));
+            case token_type::bang:
+                push_value({!is_truthy(val)});
                 return;
-            case TokenType::Tilde:
-                if (val.isInt()) {
-                    pushValue(Value(~val.asInt()));
+            case token_type::tilde:
+                if (val.is_int()) {
+                    push_value({~val.as_int()});
                     return;
                 }
                 break;
@@ -500,253 +844,518 @@ void Interpreter::visitUnaryExpr(UnaryExpr* expr) {
     
     // Generic path - evaluate operand and use existing logic
     expr->operand->accept(this);
-    Value operand = popValue();
+    script_value operand = pop_value();
     
     switch (expr->op.type) {
-        case TokenType::Minus:
-            if (operand.isInt()) {
-                pushValue(Value(-operand.asInt()));
-            } else if (operand.isFloat()) {
-                pushValue(Value(-operand.asFloat()));
+        case token_type::minus:
+            if (operand.is_int()) {
+                push_value({-operand.as_int()});
+            } else if (operand.is_float()) {
+                push_value({-operand.as_float()});
             } else {
-                throw RuntimeError("Unary minus requires numeric operand");
+                throw runtime_error("Unary minus requires numeric operand");
             }
             break;
             
-        case TokenType::Bang:
-            pushValue(Value(!isTruthy(operand)));
+        case token_type::bang:
+            push_value({!is_truthy(operand)});
             break;
             
-        case TokenType::Tilde:
+        case token_type::tilde:
             // Bitwise NOT
-            if (!operand.isInt()) {
-                throw RuntimeError("Bitwise NOT requires integer operand");
+            if (!operand.is_int()) {
+                throw runtime_error("Bitwise NOT requires integer operand");
             }
-            pushValue(Value(~operand.asInt()));
+            push_value({~operand.as_int()});
             break;
             
-        case TokenType::PlusPlus:
-        case TokenType::MinusMinus: {
+        case token_type::plus_plus:
+        case token_type::minus_minus: {
             // Handle increment/decrement
-            if (auto* identifier = dynamic_cast<IdentifierExpr*>(expr->operand.get())) {
-                Value currentValue = environment_->get(identifier->name);
-                Value newValue;
+            if (auto* identifier = dynamic_cast<identifier_expr*>(expr->operand.get())) {
+                // Cache symbol ID if not already cached
+                if (identifier->symbol_id == UINT64_MAX) {
+                    identifier->symbol_id = stringSymbolizer_->intern(identifier->name);
+                }
+                script_value currentValue = environment_->get(identifier->symbol_id);
+                script_value newValue;
                 
-                if (currentValue.isInt()) {
-                    int64_t val = currentValue.asInt();
-                    if (expr->op.type == TokenType::PlusPlus) {
-                        newValue = Value(val + 1);
+                if (currentValue.is_int()) {
+                    int64_t val = currentValue.as_int();
+                    if (expr->op.type == token_type::plus_plus) {
+                        newValue = {val + 1};
                     } else {
-                        newValue = Value(val - 1);
+                        newValue = {val - 1};
                     }
-                } else if (currentValue.isFloat()) {
-                    double val = currentValue.asFloat();
-                    if (expr->op.type == TokenType::PlusPlus) {
-                        newValue = Value(val + 1.0);
+                } else if (currentValue.is_float()) {
+                    double val = currentValue.as_float();
+                    if (expr->op.type == token_type::plus_plus) {
+                        newValue = {val + 1.0};
                     } else {
-                        newValue = Value(val - 1.0);
+                        newValue = {val - 1.0};
                     }
                 } else {
-                    throw RuntimeError("Cannot increment/decrement non-numeric value");
+                    throw runtime_error("Cannot increment/decrement non-numeric value");
                 }
                 
-                environment_->assign(identifier->name, newValue);
+                // Check if this is a reference variable
+                script_value* varPtr = environment_->get_value_ptr(identifier->symbol_id);
+                if (varPtr && varPtr->is_reference()) {
+                    // This is a reference - update the target
+                    varPtr->deref() = newValue.deref();
+                } else {
+                    // Regular variable assignment
+                    environment_->assign(identifier->symbol_id, newValue);
+                }
                 
                 // For prefix, return the new value; for postfix, return the old value
-                if (expr->isPostfix) {
-                    pushValue(currentValue);
+                if (expr->is_postfix) {
+                    push_value(std::move(currentValue));
                 } else {
-                    pushValue(newValue);
+                    push_value(std::move(newValue));
                 }
             } else {
-                throw RuntimeError("Increment/decrement requires a variable");
+                throw runtime_error("Increment/decrement requires a variable");
             }
             break;
         }
             
         default:
-            throw RuntimeError("Unsupported unary operator");
+            throw runtime_error("Unsupported unary operator");
     }
 }
 
-void Interpreter::visitAssignmentExpr(AssignmentExpr* expr) {
+void interpreter::visit_assignment_expr(assignment_expr* expr) {
+    
     // For compound assignment operators, we need the current value
-    if (expr->op.type != TokenType::Equal) {
+    if (expr->op.type != token_type::equal) {
         // Get current value of the target
-        if (auto* identifier = dynamic_cast<IdentifierExpr*>(expr->target.get())) {
-            Value currentValue = environment_->get(identifier->name);
+        if (auto* identifier = dynamic_cast<identifier_expr*>(expr->target.get())) {
+            // Cache symbol ID if not already cached
+            if (identifier->symbol_id == UINT64_MAX) {
+                identifier->symbol_id = stringSymbolizer_->intern(identifier->name);
+            }
+            script_value currentValue = environment_->get(identifier->symbol_id);
             
             // Evaluate the right-hand side
             expr->value->accept(this);
-            Value rightValue = popValue();
+            script_value rightValue = pop_value();
             
-            // Perform the compound operation
-            Value resultValue;
+            // Perform the compound operation - try custom operators first, then built-in types
+            script_value resultValue;
+            bool customOpFound = false;
+            
             switch (expr->op.type) {
-                case TokenType::PlusEqual:
-                    if (currentValue.isInt() && rightValue.isInt()) {
-                        resultValue = Value(currentValue.asInt() + rightValue.asInt());
-                    } else if ((currentValue.isInt() || currentValue.isFloat()) && (rightValue.isInt() || rightValue.isFloat())) {
-                        resultValue = Value(currentValue.asFloat() + rightValue.asFloat());
-                    } else if (currentValue.isString() && rightValue.isString()) {
-                        resultValue = Value(currentValue.asString() + rightValue.asString());
-                    } else {
-                        throw RuntimeError("Invalid operands for +=");
+                case token_type::plus_equal: {
+                    // Try custom + operator first
+                    if (environment_ && environment_->contains("+")) {
+                        try {
+                            script_value opFunc = environment_->get("+");
+                            if (opFunc.is_function()) {
+                                const script_function& func = opFunc.as_function();
+                                std::vector<script_value> args = {currentValue, rightValue};
+                                resultValue = func(args);
+                                customOpFound = true;
+                            }
+                        } catch (const std::exception&) {
+                            // Custom operator failed, try built-in
+                        }
+                    }
+                    
+                    // Fall back to built-in operators
+                    if (!customOpFound) {
+                        if (currentValue.is_int() && rightValue.is_int()) {
+                            resultValue = script_value(currentValue.as_int() + rightValue.as_int());
+                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                            resultValue = script_value(currentValue.as_float() + rightValue.as_float());
+                        } else if (currentValue.is_string() && rightValue.is_string()) {
+                            resultValue = script_value(currentValue.as_string() + rightValue.as_string());
+                        } else {
+                            throw runtime_error("Invalid operands for +=");
+                        }
                     }
                     break;
+                }
                     
-                case TokenType::MinusEqual:
-                    if (currentValue.isInt() && rightValue.isInt()) {
-                        resultValue = Value(currentValue.asInt() - rightValue.asInt());
-                    } else if ((currentValue.isInt() || currentValue.isFloat()) && (rightValue.isInt() || rightValue.isFloat())) {
-                        resultValue = Value(currentValue.asFloat() - rightValue.asFloat());
-                    } else {
-                        throw RuntimeError("Invalid operands for -=");
+                case token_type::minus_equal: {
+                    // Try custom - operator first
+                    customOpFound = false;
+                    if (environment_ && environment_->contains("-")) {
+                        try {
+                            script_value opFunc = environment_->get("-");
+                            if (opFunc.is_function()) {
+                                const script_function& func = opFunc.as_function();
+                                std::vector<script_value> args = {currentValue, rightValue};
+                                resultValue = func(args);
+                                customOpFound = true;
+                            }
+                        } catch (const std::exception&) {
+                            // Custom operator failed, try built-in
+                        }
+                    }
+                    
+                    // Fall back to built-in operators
+                    if (!customOpFound) {
+                        if (currentValue.is_int() && rightValue.is_int()) {
+                            resultValue = script_value(currentValue.as_int() - rightValue.as_int());
+                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                            resultValue = script_value(currentValue.as_float() - rightValue.as_float());
+                        } else {
+                            throw runtime_error("Invalid operands for -=");
+                        }
                     }
                     break;
+                }
                     
-                case TokenType::StarEqual:
-                    if (currentValue.isInt() && rightValue.isInt()) {
-                        resultValue = Value(currentValue.asInt() * rightValue.asInt());
-                    } else if ((currentValue.isInt() || currentValue.isFloat()) && (rightValue.isInt() || rightValue.isFloat())) {
-                        resultValue = Value(currentValue.asFloat() * rightValue.asFloat());
-                    } else {
-                        throw RuntimeError("Invalid operands for *=");
+                case token_type::star_equal: {
+                    // Try custom * operator first
+                    customOpFound = false;
+                    if (environment_ && environment_->contains("*")) {
+                        try {
+                            script_value opFunc = environment_->get("*");
+                            if (opFunc.is_function()) {
+                                const script_function& func = opFunc.as_function();
+                                std::vector<script_value> args = {currentValue, rightValue};
+                                resultValue = func(args);
+                                customOpFound = true;
+                            }
+                        } catch (const std::exception&) {
+                            // Custom operator failed, try built-in
+                        }
+                    }
+                    
+                    // Fall back to built-in operators
+                    if (!customOpFound) {
+                        if (currentValue.is_int() && rightValue.is_int()) {
+                            resultValue = script_value(currentValue.as_int() * rightValue.as_int());
+                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                            resultValue = script_value(currentValue.as_float() * rightValue.as_float());
+                        } else {
+                            throw runtime_error("Invalid operands for *=");
+                        }
                     }
                     break;
+                }
                     
-                case TokenType::SlashEqual:
-                    if (rightValue.isInt() && rightValue.asInt() == 0) {
-                        throw RuntimeError("Division by zero");
+                case token_type::slash_equal:
+                    if (rightValue.is_int() && rightValue.as_int() == 0) {
+                        throw runtime_error("Division by zero");
                     }
-                    if (rightValue.isFloat() && rightValue.asFloat() == 0.0) {
-                        throw RuntimeError("Division by zero");
+                    if (rightValue.is_float() && rightValue.as_float() == 0.0) {
+                        throw runtime_error("Division by zero");
                     }
                     
-                    if (currentValue.isInt() && rightValue.isInt()) {
-                        resultValue = Value(currentValue.asInt() / rightValue.asInt());
-                    } else if ((currentValue.isInt() || currentValue.isFloat()) && (rightValue.isInt() || rightValue.isFloat())) {
-                        resultValue = Value(currentValue.asFloat() / rightValue.asFloat());
+                    if (currentValue.is_int() && rightValue.is_int()) {
+                        resultValue = script_value(currentValue.as_int() / rightValue.as_int());
+                    } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                        resultValue = script_value(currentValue.as_float() / rightValue.as_float());
                     } else {
-                        throw RuntimeError("Invalid operands for /=");
+                        throw runtime_error("Invalid operands for /=");
                     }
                     break;
                     
                 default:
-                    throw RuntimeError("Unsupported compound assignment operator");
+                    throw runtime_error("Unsupported compound assignment operator");
             }
             
-            // Assign the result
-            environment_->assign(identifier->name, resultValue);
-            pushValue(resultValue);
+            // Check if this is a reference variable
+            script_value* varPtr = environment_->get_value_ptr(identifier->symbol_id);
+            if (varPtr && varPtr->is_reference()) {
+                // This is a reference - update the target (deep copy)
+                varPtr->deref() = resultValue.deref().clone();
+            } else {
+                // Regular assignment (deep copy the result)
+                environment_->assign(identifier->symbol_id, resultValue.clone());
+            }
+            push_value(resultValue);
+        } else if (auto* memberExpr = dynamic_cast<member_expr*>(expr->target.get())) {
+            // Handle compound assignment to member expression (e.g., obj.value += 10)
+            // First, get the current value of the property
+            memberExpr->accept(this);
+            script_value currentValue = pop_value();
+            
+            // Evaluate the right-hand side
+            expr->value->accept(this);
+            script_value rightValue = pop_value();
+            
+            // Perform the compound operation
+            script_value resultValue;
+            bool customOpFound = false;
+            
+            switch (expr->op.type) {
+                case token_type::plus_equal: {
+                    if (!customOpFound) {
+                        if (currentValue.is_int() && rightValue.is_int()) {
+                            resultValue = script_value(currentValue.as_int() + rightValue.as_int());
+                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                            resultValue = script_value(currentValue.as_float() + rightValue.as_float());
+                        } else if (currentValue.is_string() && rightValue.is_string()) {
+                            resultValue = script_value(currentValue.as_string() + rightValue.as_string());
+                        } else {
+                            throw runtime_error("Invalid operands for +=");
+                        }
+                    }
+                    break;
+                }
+                case token_type::minus_equal: {
+                    if (currentValue.is_int() && rightValue.is_int()) {
+                        resultValue = script_value(currentValue.as_int() - rightValue.as_int());
+                    } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                        resultValue = script_value(currentValue.as_float() - rightValue.as_float());
+                    } else {
+                        throw runtime_error("Invalid operands for -=");
+                    }
+                    break;
+                }
+                case token_type::star_equal: {
+                    if (currentValue.is_int() && rightValue.is_int()) {
+                        resultValue = script_value(currentValue.as_int() * rightValue.as_int());
+                    } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                        resultValue = script_value(currentValue.as_float() * rightValue.as_float());
+                    } else {
+                        throw runtime_error("Invalid operands for *=");
+                    }
+                    break;
+                }
+                case token_type::slash_equal: {
+                    if (rightValue.is_int() && rightValue.as_int() == 0) {
+                        throw runtime_error("Division by zero");
+                    } else if (rightValue.is_float() && rightValue.as_float() == 0.0) {
+                        throw runtime_error("Division by zero");
+                    }
+                    if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                        resultValue = script_value(currentValue.as_float() / rightValue.as_float());
+                    } else {
+                        throw runtime_error("Invalid operands for /=");
+                    }
+                    break;
+                }
+                default:
+                    throw runtime_error("Unsupported compound assignment operator");
+            }
+            
+            // Now assign the result back to the property
+            // We need to evaluate the object again to get a fresh reference
+            memberExpr->object->accept(this);
+            script_value objectValue = pop_value();
+            
+            // Check if it's an object
+            if (!objectValue.is_object()) {
+                throw runtime_error("Cannot assign to member of non-object type");
+            }
+            
+            // Extract the class_instance
+            auto objHolder = std::get<std::shared_ptr<script_value::object_holder>>(objectValue.storage_);
+            auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
+            
+            // Check if there's a property setter
+            script_value setter = instance->get_method("_set_" + memberExpr->member);
+            if (!setter.is_null()) {
+                // Call the setter with 'this' and the value
+                const script_function& func = setter.as_function();
+                std::vector<script_value> args = {objectValue, resultValue.clone()};
+                func(args);
+            } else if (instance->has_field(memberExpr->member)) {
+                // Direct field assignment (deep copy)
+                instance->set_field(memberExpr->member, resultValue.clone());
+            } else {
+                throw runtime_error("Cannot assign to non-existent member '" + memberExpr->member + "'");
+            }
+            
+            push_value(std::move(resultValue));
         } else {
-            throw RuntimeError("Compound assignment requires simple identifier target");
+            // General compound assignment for any expression
+            // This handles subscripts, function calls that return references, etc.
+            
+            // First, evaluate the target expression to get current value
+            expr->target->accept(this);
+            script_value currentValue = pop_value();
+            
+            // Evaluate the right-hand side
+            expr->value->accept(this);
+            script_value rightValue = pop_value();
+            
+            // Perform the compound operation
+            script_value resultValue;
+            
+            // Try custom operators first
+            try {
+                script_value opFunc = environment_->get(std::string(1, expr->op.lexeme[0]));
+                if (opFunc.is_function()) {
+                    const script_function& func = opFunc.as_function();
+                    std::vector<script_value> args = {currentValue, rightValue};
+                    resultValue = func(args);
+                } else {
+                    throw runtime_error("Not a function");
+                }
+            } catch (const std::exception&) {
+                // Fall back to built-in operators
+                switch (expr->op.type) {
+                    case token_type::plus_equal:
+                        if (currentValue.is_string() || rightValue.is_string()) {
+                            resultValue = script_value(currentValue.to_string() + rightValue.to_string());
+                        } else {
+                            resultValue = evaluate_arithmetic(currentValue, token_type::plus, rightValue);
+                        }
+                        break;
+                    case token_type::minus_equal:
+                        resultValue = evaluate_arithmetic(currentValue, token_type::minus, rightValue);
+                        break;
+                    case token_type::star_equal:
+                        resultValue = evaluate_arithmetic(currentValue, token_type::star, rightValue);
+                        break;
+                    case token_type::slash_equal:
+                        if ((rightValue.is_int() && rightValue.as_int() == 0) ||
+                            (rightValue.is_float() && rightValue.as_float() == 0.0)) {
+                            throw runtime_error("Division by zero");
+                        }
+                        resultValue = evaluate_arithmetic(currentValue, token_type::slash, rightValue);
+                        break;
+                    case token_type::percent_equal:
+                        if (rightValue.is_int() && rightValue.as_int() == 0) {
+                            throw runtime_error("Modulo by zero");
+                        }
+                        resultValue = evaluate_arithmetic(currentValue, token_type::percent, rightValue);
+                        break;
+                    default:
+                        throw runtime_error("Unknown compound assignment operator");
+                }
+            }
+            
+            // Now create a regular assignment and execute it
+            auto regularAssignment = std::make_shared<assignment_expr>(
+                expr->location,
+                expr->target,
+                token(token_type::equal, "=", expr->op.location),
+                std::make_shared<literal_expr>(expr->location, resultValue)
+            );
+            regularAssignment->accept(this);
         }
     } else {
         // Regular assignment
         expr->value->accept(this);
-        Value value = popValue();
+        // Check if we're unwinding due to an exception in the value expression
+        if (is_unwinding_) {
+            // Don't try to pop a value that wasn't pushed due to the exception
+            return;
+        }
+        script_value value = pop_value();
+        
         
         // Check if target is an identifier
-        if (auto* identifier = dynamic_cast<IdentifierExpr*>(expr->target.get())) {
-            if (environment_->contains(identifier->name)) {
-                // Need to copy here since we need the value for the return
-                environment_->assign(identifier->name, value);
-            } else {
-                // If variable doesn't exist, define it (JavaScript-like behavior)
-                // Need to copy here since we need the value for the return
-                environment_->define(identifier->name, value);
+        if (auto* identifier = dynamic_cast<identifier_expr*>(expr->target.get())) {
+            // Cache symbol ID if not already cached
+            if (identifier->symbol_id == UINT64_MAX) {
+                identifier->symbol_id = stringSymbolizer_->intern(identifier->name);
             }
-            pushValue(std::move(value));  // Assignment expressions return the assigned value
+            // Get the current value to check if it's a reference
+            if (environment_->contains(identifier->symbol_id)) {
+                script_value* currentVal = environment_->get_value_ptr(identifier->symbol_id);
+                if (currentVal && currentVal->is_reference()) {
+                    // This is a reference - assign through it (deep copy the value)
+                    currentVal->deref() = value.deref().clone();
+                } else {
+                    // Regular variable assignment (deep copy the value)
+                    environment_->assign(identifier->symbol_id, value.clone());
+                }
+            } else {
+                // Variable doesn't exist - error
+                throw runtime_error("Undefined variable '" + identifier->name + "'");
+            }
+            push_value(std::move(value));  // Assignment expressions return the assigned value
         } 
         // Check if target is a member expression (property assignment)
-        else if (auto* memberExpr = dynamic_cast<MemberExpr*>(expr->target.get())) {
+        else if (auto* memberExpr = dynamic_cast<member_expr*>(expr->target.get())) {
             // Evaluate the object
             memberExpr->object->accept(this);
-            Value objectValue = popValue();
+            script_value objectValue = pop_value();
             
             // Check if it's an object
-            if (!objectValue.isObject()) {
-                throw RuntimeError("Cannot assign to member of non-object type");
+            if (!objectValue.is_object()) {
+                throw runtime_error("Cannot assign to member of non-object type");
             }
             
-            // Extract the ClassInstance
-            auto objHolder = std::get<std::shared_ptr<Value::ObjectHolder>>(objectValue.storage_);
-            auto instance = std::static_pointer_cast<ClassInstance>(objHolder->data);
+            // Extract the class_instance
+            auto objHolder = std::get<std::shared_ptr<script_value::object_holder>>(objectValue.storage_);
+            auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
             
             // Check if there's a property setter
-            Value setter = instance->getMethod("__set_" + memberExpr->member);
-            if (!setter.isNull()) {
+            script_value setter = instance->get_method("_set_" + memberExpr->member);
+            if (!setter.is_null()) {
                 // Call the setter with 'this' and the value
-                const ScriptFunction& func = setter.asFunction();
-                std::vector<Value> args = {objectValue, value};
+                const script_function& func = setter.as_function();
+                std::vector<script_value> args = {objectValue, value};
                 func(args);
-            } else if (instance->hasField(memberExpr->member)) {
-                // Direct field assignment
-                instance->setField(memberExpr->member, value);
+            } else if (instance->has_field(memberExpr->member)) {
+                // Direct field assignment (deep copy)
+                instance->set_field(memberExpr->member, value.clone());
             } else {
-                throw RuntimeError("Cannot assign to non-existent member '" + memberExpr->member + "'");
+                throw runtime_error("Cannot assign to non-existent member '" + memberExpr->member + "'");
             }
             
-            pushValue(std::move(value));  // Assignment expressions return the assigned value
+            push_value(std::move(value));  // Assignment expressions return the assigned value
         }
         // Check if target is a subscript expression (array[index] or map[key])
-        else if (auto* binaryExpr = dynamic_cast<BinaryExpr*>(expr->target.get())) {
-            if (binaryExpr->op.type == TokenType::LeftBracket) {
-                // Evaluate the array/map
-                binaryExpr->left->accept(this);
-                Value containerValue = popValue();
+        else if (auto* binaryExpr = dynamic_cast<binary_expr*>(expr->target.get())) {
+            if (binaryExpr->op.type == token_type::left_bracket) {
+                // Evaluate the entire target expression (e.g., nested["nums"][1])
+                // This should return a reference if it's a valid lvalue
+                expr->target->accept(this);
+                script_value target_ref = pop_value();
                 
-                // Evaluate the index/key
-                binaryExpr->right->accept(this);
-                Value indexValue = popValue();
-                
-                if (containerValue.isArray()) {
-                    // Array assignment: arr[index] = value
-                    if (!indexValue.isInt()) {
-                        throw RuntimeError("Array index must be an integer");
-                    }
-                    Int index = indexValue.asInt();
-                    auto& array = const_cast<std::vector<Value>&>(containerValue.asArray());
-                    
-                    if (index < 0 || index >= static_cast<Int>(array.size())) {
-                        throw RuntimeError("Array index out of bounds: " + std::to_string(index));
+                // Check if we got a reference
+                if (target_ref.is_reference()) {
+                    // Get the actual target through the reference
+                    auto refHolder = std::get<std::shared_ptr<script_value::reference_holder>>(target_ref.storage_);
+                    script_value* target_ptr = refHolder->target;
+                    if (!target_ptr) {
+                        throw runtime_error("Invalid reference in assignment");
                     }
                     
-                    array[index] = value;
-                } else if (containerValue.isMap()) {
-                    // Map assignment: map[key] = value
-                    auto& map = const_cast<std::map<Value, Value>&>(containerValue.asMap());
-                    map[indexValue] = value;
+                    // Assign the value
+                    *target_ptr = value.clone();
+                    push_value(std::move(value));  // Assignment expressions return the assigned value
                 } else {
-                    throw RuntimeError("Subscript assignment can only be used on arrays and maps");
+                    // Not a reference - this means the subscript expression didn't
+                    // return an lvalue (e.g., trying to assign to a function call result)
+                    throw runtime_error("Cannot assign to rvalue expression");
                 }
-                
-                pushValue(std::move(value));  // Assignment expressions return the assigned value
             } else {
-                throw RuntimeError("Complex assignment targets not yet implemented");
+                throw runtime_error("Complex assignment targets not yet implemented");
             }
         } else {
-            throw RuntimeError("Complex assignment targets not yet implemented");
+            throw runtime_error("Complex assignment targets not yet implemented");
         }
     }
 }
 
-// Statement visitors
-void Interpreter::visitExpressionStmt(ExpressionStmt* stmt) {
+// statement visitors
+void interpreter::visit_expression_stmt(expression_stmt* stmt) {
+    
+    // Check if it's an assignment
+    if (auto* assign = dynamic_cast<assignment_expr*>(stmt->expression.get())) {
+    }
+    
     stmt->expression->accept(this);
-    // For top-level expressions (wrapped in ExpressionDecl), we want to keep the value
+    
+    // Early exit if exception is propagating
+    if (is_unwinding_) return;
+    
+    // For top-level expressions (wrapped in expression_decl), we want to keep the value
     // The execute() method will handle popping it
 }
 
-void Interpreter::visitBlockStmt(BlockStmt* stmt) {
+void interpreter::visit_block_stmt(block_stmt* stmt) {
     // Create new environment for the block scope
     auto previous = environment_;
-    environment_ = std::make_shared<Environment>(environment_, stringSymbolizer_);
+    environment_ = std::make_shared<environment>(environment_, stringSymbolizer_);
     
     try {
         for (const auto& decl : stmt->declarations) {
             decl->accept(this);
+            
+            // Early exit if exception is propagating
+            if (is_unwinding_) break;
         }
     } catch (...) {
         // Restore environment even if an error occurs
@@ -758,166 +1367,242 @@ void Interpreter::visitBlockStmt(BlockStmt* stmt) {
     environment_ = previous;
 }
 
-void Interpreter::visitVariableDecl(VariableDecl* decl) {
-    Value value;
-    
-    if (decl->initializer) {
-        decl->initializer->accept(this);
-        value = popValue();
+void interpreter::visit_variable_decl(variable_decl* decl) {
+    // Check if this is a reference variable declaration
+    bool is_reference = false;
+    if (decl->type && decl->type->base_type == value_type::jai_reference_type) {
+        is_reference = true;
     }
-    // If no initializer, value remains null
     
-    environment_->define(decl->name, std::move(value));
+    if (is_reference) {
+        // Reference variable - must have initializer
+        if (!decl->initializer) {
+            throw runtime_error("Reference variable '" + decl->name + "' must be initialized");
+        }
+        
+        // Check if initializer is an identifier (can take reference)
+        if (auto identExpr = dynamic_cast<identifier_expr*>(decl->initializer.get())) {
+            // Get the target variable's address
+            uint64_t targetSymbolId = stringSymbolizer_->intern(identExpr->name);
+            
+            // Get a pointer to the target value in the environment
+            // This is safe because environment uses unordered_map which doesn't invalidate pointers
+            script_value* targetPtr = environment_->get_value_ptr(targetSymbolId);
+            if (!targetPtr) {
+                throw runtime_error("Cannot take reference of undefined variable '" + identExpr->name + "'");
+            }
+            
+            // Check if the target is itself a reference
+            if (targetPtr->is_reference()) {
+                // Reference to reference - get the final target and its environment
+                auto refHolder = std::get<std::shared_ptr<script_value::reference_holder>>(targetPtr->storage_);
+                targetPtr = refHolder->target;
+                // Use the original reference's environment
+                auto target_env = refHolder->sourceEnv.lock();
+                if (!target_env) {
+                    throw runtime_error("Reference target environment has been destroyed");
+                }
+                script_value refValue = script_value::make_reference(targetPtr, target_env);
+                environment_->define(decl->name, std::move(refValue));
+            } else {
+                // Regular reference - use current environment
+                script_value refValue = script_value::make_reference(targetPtr, environment_);
+                environment_->define(decl->name, std::move(refValue));
+            }
+        } else {
+            // For other expressions, evaluate them and check if they return a reference
+            decl->initializer->accept(this);
+            script_value result = pop_value();
+            
+            // If the result is a reference, we can create a reference to its target
+            if (result.is_reference()) {
+                auto refHolder = std::get<std::shared_ptr<script_value::reference_holder>>(result.storage_);
+                script_value* targetPtr = refHolder->target;
+                auto target_env = refHolder->sourceEnv.lock();
+                if (!target_env) {
+                    throw runtime_error("Reference target environment has been destroyed");
+                }
+                // Create a new reference to the same target
+                script_value refValue = script_value::make_reference(targetPtr, target_env);
+                environment_->define(decl->name, std::move(refValue));
+            } else {
+                throw runtime_error("Cannot take reference of non-lvalue expression");
+            }
+        }
+    } else {
+        // Regular variable declaration
+        script_value value;
+        if (decl->initializer) {
+            decl->initializer->accept(this);
+            value = pop_value();
+            // Clone the value for variable declaration with initializer
+            // Note: clone() now automatically dereferences references
+            value = value.clone();
+        }
+        // If no initializer, value remains null
+        
+        environment_->define(decl->name, std::move(value));
+    }
 }
 
 // Binary operation helpers
-Value Interpreter::evaluateArithmetic(const Value& left, TokenType op, const Value& right) {
+script_value interpreter::evaluate_arithmetic(const script_value& left, token_type op, const script_value& right) {
     // Special case for string concatenation
-    if (op == TokenType::Plus && (left.isString() || right.isString())) {
-        return Value(left.toString() + right.toString());
+    if (op == token_type::plus && (left.is_string() || right.is_string())) {
+        return {left.to_string() + right.to_string()};
     }
     
-    // Convert to numeric values
-    Float leftNum = 0.0;
-    Float rightNum = 0.0;
-    bool useInt = left.isInt() && right.isInt();
+    // Fast path for pure integer arithmetic (avoid float conversion)
+    if (left.is_int() && right.is_int()) {
+        script_int leftInt = left.as_int();
+        script_int rightInt = right.as_int();
+        
+        switch (op) {
+            case token_type::plus:
+                return {leftInt + rightInt};
+            case token_type::minus:
+                return {leftInt - rightInt};
+            case token_type::star:
+                return {leftInt * rightInt};
+            case token_type::slash:
+                if (rightInt == 0) {
+                    throw runtime_error("Division by zero");
+                }
+                // Integer division returns integer (C++ semantics)
+                return {leftInt / rightInt};
+            case token_type::percent:
+                if (rightInt == 0) {
+                    throw runtime_error("Division by zero");
+                }
+                return {leftInt % rightInt};
+            default:
+                throw runtime_error("Unknown arithmetic operator");
+        }
+    }
     
-    if (left.isInt()) {
-        leftNum = static_cast<Float>(left.asInt());
-    } else if (left.isFloat()) {
-        leftNum = left.asFloat();
-        useInt = false;
+    // Mixed or floating point arithmetic path
+    script_float leftNum, rightNum;
+    
+    if (left.is_int()) {
+        leftNum = static_cast<script_float>(left.as_int());
+    } else if (left.is_float()) {
+        leftNum = left.as_float();
     } else {
-        throw RuntimeError("Left operand must be numeric");
+        throw runtime_error("Left operand must be numeric");
     }
     
-    if (right.isInt()) {
-        rightNum = static_cast<Float>(right.asInt());
-    } else if (right.isFloat()) {
-        rightNum = right.asFloat();
-        useInt = false;
+    if (right.is_int()) {
+        rightNum = static_cast<script_float>(right.as_int());
+    } else if (right.is_float()) {
+        rightNum = right.as_float();
     } else {
-        throw RuntimeError("Right operand must be numeric");
+        throw runtime_error("Right operand must be numeric");
     }
     
-    Float result = 0.0;
     switch (op) {
-        case TokenType::Plus:
-            result = leftNum + rightNum;
-            break;
-        case TokenType::Minus:
-            result = leftNum - rightNum;
-            break;
-        case TokenType::Star:
-            result = leftNum * rightNum;
-            break;
-        case TokenType::Slash:
+        case token_type::plus:
+            return {leftNum + rightNum};
+        case token_type::minus:
+            return {leftNum - rightNum};
+        case token_type::star:
+            return {leftNum * rightNum};
+        case token_type::slash:
             if (rightNum == 0.0) {
-                throw RuntimeError("Division by zero");
+                throw runtime_error("Division by zero");
             }
-            result = leftNum / rightNum;
-            useInt = false;  // Division always returns float
-            break;
-        case TokenType::Percent:
+            return {leftNum / rightNum};
+        case token_type::percent:
             if (rightNum == 0.0) {
-                throw RuntimeError("Division by zero");
+                throw runtime_error("Division by zero");
             }
-            result = std::fmod(leftNum, rightNum);
-            break;
+            return {std::fmod(leftNum, rightNum)};
         default:
-            throw RuntimeError("Unknown arithmetic operator");
-    }
-    
-    // Return int if both operands were int and operation preserves int
-    if (useInt) {
-        return Value(static_cast<Int>(result));
-    } else {
-        return Value(result);
+            throw runtime_error("Unknown arithmetic operator");
     }
 }
 
-Value Interpreter::evaluateComparison(const Value& left, TokenType op, const Value& right) {
+script_value interpreter::evaluate_comparison(const script_value& left, token_type op, const script_value& right) {
     // Handle null comparisons
-    if (left.isNull() || right.isNull()) {
+    if (left.is_null() || right.is_null()) {
         switch (op) {
-            case TokenType::EqualEqual:
-                return Value(left.isNull() && right.isNull());
-            case TokenType::BangEqual:
-                return Value(!(left.isNull() && right.isNull()));
+            case token_type::equal_equal:
+                return {left.is_null() && right.is_null()};
+            case token_type::bang_equal:
+                return {!(left.is_null() && right.is_null())};
             default:
-                throw RuntimeError("Cannot compare null values with relational operators");
+                throw runtime_error("Cannot compare null values with relational operators");
         }
     }
     
     // For now, only support numeric and string comparisons
-    if (left.isString() && right.isString()) {
-        const auto& leftStr = left.asString();
-        const auto& rightStr = right.asString();
+    if (left.is_string() && right.is_string()) {
+        const auto& leftStr = left.as_string();
+        const auto& rightStr = right.as_string();
         
         switch (op) {
-            case TokenType::Less:
-                return Value(leftStr < rightStr);
-            case TokenType::LessEqual:
-                return Value(leftStr <= rightStr);
-            case TokenType::Greater:
-                return Value(leftStr > rightStr);
-            case TokenType::GreaterEqual:
-                return Value(leftStr >= rightStr);
-            case TokenType::EqualEqual:
-                return Value(leftStr == rightStr);
-            case TokenType::BangEqual:
-                return Value(leftStr != rightStr);
-            case TokenType::Spaceship: {
+            case token_type::less:
+                return {leftStr < rightStr};
+            case token_type::less_equal:
+                return {leftStr <= rightStr};
+            case token_type::greater:
+                return {leftStr > rightStr};
+            case token_type::greater_equal:
+                return {leftStr >= rightStr};
+            case token_type::equal_equal:
+                return {leftStr == rightStr};
+            case token_type::bang_equal:
+                return {leftStr != rightStr};
+            case token_type::spaceship: {
                 // Three-way comparison for strings
                 int cmp = leftStr.compare(rightStr);
-                return Value(cmp < 0 ? Int(-1) : (cmp > 0 ? Int(1) : Int(0)));
+                return {cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0))};
             }
             default:
-                throw RuntimeError("Unknown comparison operator");
+                throw runtime_error("Unknown comparison operator");
         }
     }
     
     // Numeric comparison
-    Float leftNum = toNumeric(left).asFloat();
-    Float rightNum = toNumeric(right).asFloat();
+    script_float leftNum = to_numeric(left).as_float();
+    script_float rightNum = to_numeric(right).as_float();
     
     switch (op) {
-        case TokenType::Less:
-            return Value(leftNum < rightNum);
-        case TokenType::LessEqual:
-            return Value(leftNum <= rightNum);
-        case TokenType::Greater:
-            return Value(leftNum > rightNum);
-        case TokenType::GreaterEqual:
-            return Value(leftNum >= rightNum);
-        case TokenType::EqualEqual:
-            return Value(leftNum == rightNum);
-        case TokenType::BangEqual:
-            return Value(leftNum != rightNum);
-        case TokenType::Spaceship: {
+        case token_type::less:
+            return {leftNum < rightNum};
+        case token_type::less_equal:
+            return {leftNum <= rightNum};
+        case token_type::greater:
+            return {leftNum > rightNum};
+        case token_type::greater_equal:
+            return {leftNum >= rightNum};
+        case token_type::equal_equal:
+            return {leftNum == rightNum};
+        case token_type::bang_equal:
+            return {leftNum != rightNum};
+        case token_type::spaceship: {
             // Three-way comparison for numbers
             // Return -1 if less, 0 if equal, 1 if greater
-            if (leftNum < rightNum) return Value(Int(-1));
-            else if (leftNum > rightNum) return Value(Int(1));
-            else return Value(Int(0));
+            if (leftNum < rightNum) return {script_int(-1)};
+            else if (leftNum > rightNum) return {script_int(1)};
+            else return {script_int(0)};
         }
         default:
-            throw RuntimeError("Unknown comparison operator");
+            throw runtime_error("Unknown comparison operator");
     }
 }
 
-Value Interpreter::evaluateLogical(const Value& left, TokenType op, const Value& right) {
-    bool leftTruthy = isTruthy(left);
+script_value interpreter::evaluate_logical(const script_value& left, token_type op, const script_value& right) {
+    bool leftTruthy = is_truthy(left);
     
     switch (op) {
-        case TokenType::AmpersandAmpersand:
+        case token_type::ampersand_ampersand:
             // Short-circuit: if left is false, return left
             if (!leftTruthy) {
                 return left;
             }
             return right;
             
-        case TokenType::PipePipe:
+        case token_type::pipe_pipe:
             // Short-circuit: if left is true, return left
             if (leftTruthy) {
                 return left;
@@ -925,345 +1610,665 @@ Value Interpreter::evaluateLogical(const Value& left, TokenType op, const Value&
             return right;
             
         default:
-            throw RuntimeError("Unknown logical operator");
+            throw runtime_error("Unknown logical operator");
     }
 }
 
-Value Interpreter::evaluateBitwise(const Value& left, TokenType op, const Value& right) {
+script_value interpreter::evaluate_bitwise(const script_value& left, token_type op, const script_value& right) {
     // Bitwise operations only work on integers
-    if (!left.isInt() || !right.isInt()) {
-        throw RuntimeError("Bitwise operations require integer operands");
+    if (!left.is_int() || !right.is_int()) {
+        throw runtime_error("Bitwise operations require integer operands");
     }
     
-    Int leftInt = left.asInt();
-    Int rightInt = right.asInt();
+    script_int leftInt = left.as_int();
+    script_int rightInt = right.as_int();
     
     switch (op) {
-        case TokenType::Ampersand:
-            return Value(leftInt & rightInt);
-        case TokenType::Pipe:
-            return Value(leftInt | rightInt);
-        case TokenType::Caret:
-            return Value(leftInt ^ rightInt);
-        case TokenType::LeftShift:
-            return Value(leftInt << rightInt);
-        case TokenType::RightShift:
-            return Value(leftInt >> rightInt);
+        case token_type::ampersand:
+            return {leftInt & rightInt};
+        case token_type::pipe:
+            return {leftInt | rightInt};
+        case token_type::caret:
+            return {leftInt ^ rightInt};
+        case token_type::left_shift:
+            return {leftInt << rightInt};
+        case token_type::right_shift:
+            return {leftInt >> rightInt};
         default:
-            throw RuntimeError("Unknown bitwise operator");
+            throw runtime_error("Unknown bitwise operator");
     }
 }
 
 
 // Placeholder implementations for remaining visitors
-void Interpreter::visitCallExpr(CallExpr* expr) {
+void interpreter::visit_call_expr(call_expr* expr) {
     // Evaluate the callee expression
     expr->callee->accept(this);
-    Value callee = popValue();
+    script_value callee = pop_value();
     
     // Check if the callee is a function
-    if (!callee.isFunction()) {
-        throw RuntimeError("Cannot call non-function value");
+    if (!callee.is_function()) {
+        throw runtime_error("Cannot call non-function value");
     }
     
-    // Evaluate all arguments
-    std::vector<Value> args;
-    args.reserve(expr->arguments.size());
+    // Use a local vector for arguments to avoid issues with nested calls
+    std::vector<script_value> arguments;
+    arguments.reserve(expr->arguments.size());
+    
+    // Also track argument metadata for reference parameters
+    std::vector<std::pair<uint64_t, std::shared_ptr<environment>>> argMetadata;
+    argMetadata.reserve(expr->arguments.size());
     
     for (const auto& argExpr : expr->arguments) {
+        // Check if this is a simple identifier (needed for references)
+        if (auto identExpr = dynamic_cast<identifier_expr*>(argExpr.get())) {
+            // Get the symbol ID for this variable
+            uint64_t symbol_id = stringSymbolizer_->intern(identExpr->name);
+            argMetadata.emplace_back(symbol_id, environment_);
+        } else {
+            // Not an identifier - can't take reference
+            argMetadata.emplace_back(UINT64_MAX, nullptr);
+        }
+        
         argExpr->accept(this);
-        args.push_back(std::move(popValue()));
+        arguments.emplace_back(std::move(pop_value()));
     }
     
-    // Call the function
-    const ScriptFunction& func = callee.asFunction();
-    Value result = func(args);
+    // Store argument metadata in a member variable so call_function can access it
+    current_arg_metadata_ = std::move(argMetadata);
+    
+    // Call the function with C++ exception handling
+    const script_function& func = callee.as_function();
+    script_value result;
+    
+    try {
+        result = func(arguments);
+    } catch (const script_exception& e) {
+        // Script exceptions are re-thrown as-is
+        current_arg_metadata_.clear();
+        throw;
+    } catch (const std::runtime_error& e) {
+        // Wrap C++ runtime_error with message and trigger exception handling
+        current_arg_metadata_.clear();
+        active_exception_value_ = script_value(e.what());
+        current_exception_ = script_exception(e.what());
+        is_unwinding_ = true;
+        push_value(script_value());  // Push a null value since the call failed
+        return;
+    } catch (const std::exception& e) {
+        // Other C++ exceptions get the generic message
+        current_arg_metadata_.clear();
+        active_exception_value_ = script_value("Unbound exception type caught in JaiScript.");
+        current_exception_ = script_exception("Unbound exception type caught in JaiScript.");
+        is_unwinding_ = true;
+        push_value(script_value());  // Push a null value since the call failed
+        return;
+    }
+    
+    // Clear argument metadata
+    current_arg_metadata_.clear();
     
     // Push result onto the stack
-    pushValue(result);
+    push_value(result);
 }
 
-void Interpreter::visitMemberExpr(MemberExpr* expr) {
+void interpreter::visit_member_expr(member_expr* expr) {
     // Evaluate the object expression
     expr->object->accept(this);
-    Value objectValue = popValue();
+    script_value objectValue = pop_value();
     
-    // Check if it's an object
-    if (!objectValue.isObject()) {
-        throw RuntimeError("Cannot access member '" + expr->member + "' on non-object type");
+    // Dereference if needed - subscript access returns references
+    objectValue = objectValue.deref();
+    
+    // Handle array methods
+    if (objectValue.is_array()) {
+        auto methodIt = arrayMethods_.find(expr->member);
+        if (methodIt != arrayMethods_.end()) {
+            // Found the method in the registry
+            const builtin_method& method = methodIt->second;
+            
+            // Create a wrapper function that captures the array value and method
+            script_function boundMethod = [this, objectValue, method](const std::vector<script_value>& args) -> script_value {
+                return method(this, objectValue, args);
+            };
+            
+            push_value(script_value::make_function(boundMethod));
+            return;
+        }
+        else {
+            throw runtime_error("Array has no method '" + expr->member + "'");
+        }
     }
     
-    // Extract the ClassInstance from the object
-    // Access the ObjectHolder directly since we're a friend class
-    auto objHolder = std::get<std::shared_ptr<Value::ObjectHolder>>(objectValue.storage_);
-    auto instance = std::static_pointer_cast<ClassInstance>(objHolder->data);
+    // Handle map methods
+    if (objectValue.is_map()) {
+        auto methodIt = mapMethods_.find(expr->member);
+        if (methodIt != mapMethods_.end()) {
+            // Found the method in the registry
+            const builtin_method& method = methodIt->second;
+            
+            // Create a wrapper function that captures the map value and method
+            script_function boundMethod = [this, objectValue, method](const std::vector<script_value>& args) -> script_value {
+                return method(this, objectValue, args);
+            };
+            
+            push_value(script_value::make_function(boundMethod));
+            return;
+        }
+        else {
+            throw runtime_error("Map has no method '" + expr->member + "'");
+        }
+    }
+    
+    // Check if it's an object
+    if (!objectValue.is_object()) {
+        throw runtime_error("Cannot access member '" + expr->member + "' on non-object type");
+    }
+    
+    // Extract the class_instance from the object
+    // Access the object_holder directly since we're a friend class
+    auto objHolder = std::get<std::shared_ptr<script_value::object_holder>>(objectValue.storage_);
+    
+    
+    // Check if this is actually a class_instance
+    if (!objHolder->is_cpp_class_instance) {
+        throw runtime_error("Cannot access member '" + expr->member + "' on raw C++ object");
+    }
+    
+    auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
     
     // First check if it's a field (registered by the property() method)
-    if (instance->hasField(expr->member)) {
+    bool has_field_result = instance->has_field(expr->member);
+    if (has_field_result) {
         // Check if there's a property getter method
-        Value getter = instance->getMethod("__get_" + expr->member);
-        if (!getter.isNull()) {
+        script_value getter = instance->get_method("_get_" + expr->member);
+        if (!getter.is_null()) {
             // Call the getter with 'this' as argument
-            const ScriptFunction& func = getter.asFunction();
-            std::vector<Value> args = {objectValue};
-            pushValue(func(args));
+            const script_function& func = getter.as_function();
+            std::vector<script_value> args = {objectValue};
+            push_value(func(args));
             return;
         }
         // Otherwise return the field value directly
-        pushValue(instance->getField(expr->member));
+        push_value(instance->get_field(expr->member));
         return;
     }
     
     // Otherwise, look for a method
-    Value method = instance->getMethod(expr->member);
-    if (!method.isNull()) {
+    script_value method = instance->get_method(expr->member);
+    if (!method.is_null()) {
         // Return a bound method (function that has 'this' pre-bound)
         // We'll create a wrapper function that includes the object as first argument
-        ScriptFunction boundMethod = [objectValue, method](const std::vector<Value>& args) -> Value {
+        script_function boundMethod = [objectValue, method](const std::vector<script_value>& args) -> script_value {
             // Prepend the object as the first argument ('this')
-            std::vector<Value> methodArgs;
+            std::vector<script_value> methodArgs;
             methodArgs.reserve(args.size() + 1);
             methodArgs.push_back(objectValue);
             methodArgs.insert(methodArgs.end(), args.begin(), args.end());
             
             // Call the original method with 'this' as first argument
-            const ScriptFunction& func = method.asFunction();
-            return func(methodArgs);
+            const script_function& func = method.as_function();
+            auto result = func(methodArgs);
+            return result;
         };
         
-        pushValue(Value::makeFunction(boundMethod));
+        push_value(script_value::make_function(boundMethod));
         return;
     }
     
-    throw RuntimeError("Object has no member '" + expr->member + "'");
+    throw runtime_error("Object has no member '" + expr->member + "'");
 }
 
-void Interpreter::visitLambdaExpr(LambdaExpr* expr) {
+void interpreter::visit_lambda_expr(lambda_expr* expr) {
+    
     // Capture current environment for closure
-    auto closureEnv = environment_;
+    auto closure_env = environment_;
     
-    // Create captured variables in the closure environment if needed
-    std::shared_ptr<Environment> captureEnv = std::make_shared<Environment>(closureEnv, stringSymbolizer_);
+    // Check if we need a capture environment
+    bool has_explicit_captures = !expr->captures.empty();
+    bool has_default_capture = (expr->default_capture != lambda_expr::capture_default::none);
     
-    // Process captures
-    for (const auto& capture : expr->captures) {
-        if (environment_->contains(capture.name)) {
-            if (capture.byReference) {
-                // For reference capture, we don't copy the value to the capture environment
-                // Instead, we let the lambda access the variable through the parent environment chain
-                // This allows modifications to affect the original variable
-                // The capture environment will automatically delegate to the parent for this variable
-                // We mark this as a reference capture by NOT defining it in the capture environment
-                // This way, variable access will go through the parent environment chain
-            } else {
-                // For value capture, make a copy at capture time
-                Value capturedValue = environment_->get(capture.name);
-                captureEnv->define(capture.name, capturedValue);
+    
+    // For default captures, analyze the lambda body to find which variables are actually used
+    std::unordered_set<std::string> used_variables;
+    if (has_default_capture) {
+        // Helper to recursively find all identifiers in an expression
+        std::function<void(expression*)> find_identifiers;
+        find_identifiers = [&](expression* e) {
+            if (auto* ident = dynamic_cast<identifier_expr*>(e)) {
+                // Skip parameter names
+                bool is_param = false;
+                for (const auto& param : expr->parameters) {
+                    if (param.name == ident->name) {
+                        is_param = true;
+                        break;
+                    }
+                }
+                if (!is_param) {
+                    used_variables.insert(ident->name);
+                }
+            } else if (auto* binary = dynamic_cast<binary_expr*>(e)) {
+                find_identifiers(binary->left.get());
+                find_identifiers(binary->right.get());
+            } else if (auto* unary = dynamic_cast<unary_expr*>(e)) {
+                find_identifiers(unary->operand.get());
+            } else if (auto* call = dynamic_cast<call_expr*>(e)) {
+                find_identifiers(call->callee.get());
+                for (const auto& arg : call->arguments) {
+                    find_identifiers(arg.get());
+                }
+            } else if (auto* member = dynamic_cast<member_expr*>(e)) {
+                find_identifiers(member->object.get());
+            } else if (auto* assign = dynamic_cast<assignment_expr*>(e)) {
+                find_identifiers(assign->target.get());
+                find_identifiers(assign->value.get());
+            } else if (auto* ternary = dynamic_cast<ternary_expr*>(e)) {
+                find_identifiers(ternary->condition.get());
+                find_identifiers(ternary->then_expression.get());
+                find_identifiers(ternary->else_expression.get());
             }
-        } else {
-            throw RuntimeError("Cannot capture undefined variable: " + capture.name);
-        }
+            // Add more expression types as needed
+        };
+        
+        // Helper to find identifiers in statements
+        std::function<void(statement*)> find_in_statement;
+        find_in_statement = [&](statement* s) {
+            if (auto* expr_stmt = dynamic_cast<expression_stmt*>(s)) {
+                find_identifiers(expr_stmt->expression.get());
+            } else if (auto* block = dynamic_cast<block_stmt*>(s)) {
+                for (const auto& decl : block->declarations) {
+                    if (auto* expr_decl = dynamic_cast<expression_decl*>(decl.get())) {
+                        find_identifiers(expr_decl->expression.get());
+                    } else if (auto* stmt_decl = dynamic_cast<statement_decl*>(decl.get())) {
+                        find_in_statement(stmt_decl->statement.get());
+                    }
+                }
+            } else if (auto* if_s = dynamic_cast<if_stmt*>(s)) {
+                find_identifiers(if_s->condition.get());
+                find_in_statement(if_s->then_statement.get());
+                if (if_s->else_statement) {
+                    find_in_statement(if_s->else_statement.get());
+                }
+            } else if (auto* while_s = dynamic_cast<while_stmt*>(s)) {
+                find_identifiers(while_s->condition.get());
+                find_in_statement(while_s->body.get());
+            } else if (auto* return_s = dynamic_cast<return_stmt*>(s)) {
+                if (return_s->value) {
+                    find_identifiers(return_s->value.get());
+                }
+            }
+            // Add more statement types as needed
+        };
+        
+        // Analyze the lambda body
+        find_in_statement(expr->body.get());
+        
     }
     
-    // Convert the lambda body to a BlockStmt if it's not already
-    std::shared_ptr<BlockStmt> lambdaBody;
-    if (auto blockStmt = std::dynamic_pointer_cast<BlockStmt>(expr->body)) {
+    // Determine if we actually need a capture environment
+    bool needs_capture_env = has_explicit_captures || (has_default_capture && !used_variables.empty());
+    
+    
+    std::shared_ptr<environment> final_closure_env;
+    
+    if (needs_capture_env) {
+        // Create captured variables in the closure environment
+        std::shared_ptr<environment> captureEnv = std::make_shared<environment>(closure_env, stringSymbolizer_);
+        
+        // Process default captures first ([=] or [&])
+        if (has_default_capture && !used_variables.empty()) {
+            bool capture_by_ref = (expr->default_capture == lambda_expr::capture_default::by_reference);
+            
+            for (const auto& varName : used_variables) {
+                // Check if this variable is explicitly overridden in the capture list
+                bool is_overridden = false;
+                for (const auto& capture : expr->captures) {
+                    if (capture.name == varName) {
+                        is_overridden = true;
+                        break;
+                    }
+                }
+                
+                if (!is_overridden && environment_->contains(varName)) {
+                    if (capture_by_ref) {
+                        // Capture by reference - create reference to original variable
+                        script_value* targetPtr = environment_->get_value_ptr(stringSymbolizer_->intern(varName));
+                        if (targetPtr) {
+                            script_value refValue = script_value::make_reference(targetPtr, environment_);
+                            captureEnv->define(varName, std::move(refValue));
+                        }
+                    } else {
+                        // Capture by value - deep copy at capture time
+                        script_value capturedValue = environment_->get(varName);
+                        captureEnv->define(varName, capturedValue.clone());
+                    }
+                }
+            }
+        }
+        
+        // Process explicit captures
+        for (const auto& capture : expr->captures) {
+            if (environment_->contains(capture.name)) {
+                if (capture.by_reference) {
+                    // Capture by reference - create reference to original variable
+                    uint64_t symbolId = stringSymbolizer_->intern(capture.name);
+                    script_value* targetPtr = environment_->get_value_ptr(symbolId);
+                    if (targetPtr) {
+                        script_value refValue = script_value::make_reference(targetPtr, environment_);
+                        captureEnv->define(capture.name, std::move(refValue));
+                    } else {
+                        throw runtime_error("Cannot capture variable by reference: " + capture.name);
+                    }
+                } else {
+                    // Capture by value - deep copy at capture time
+                    script_value capturedValue = environment_->get(capture.name);
+                    captureEnv->define(capture.name, capturedValue.clone());
+                }
+            } else {
+                throw runtime_error("Cannot capture undefined variable: " + capture.name);
+            }
+        }
+        
+        final_closure_env = captureEnv;
+    } else {
+        // No captures needed - use current environment directly (fast path)
+        final_closure_env = closure_env;
+        
+    }
+    
+    // Convert the lambda body to a block_stmt if it's not already
+    std::shared_ptr<block_stmt> lambdaBody;
+    if (auto blockStmt = std::dynamic_pointer_cast<block_stmt>(expr->body)) {
         lambdaBody = blockStmt;
     } else {
         // Wrap single statement in a block
-        std::vector<DeclarationPtr> stmts;
-        if (auto stmt = std::dynamic_pointer_cast<Statement>(expr->body)) {
-            auto stmtDecl = std::make_shared<StatementDecl>(expr->location, stmt);
+        std::vector<declaration_ptr> stmts;
+        if (auto stmt = std::dynamic_pointer_cast<statement>(expr->body)) {
+            auto stmtDecl = std::make_shared<statement_decl>(expr->location, stmt);
             stmts.push_back(stmtDecl);
         }
-        lambdaBody = std::make_shared<BlockStmt>(expr->location, std::move(stmts));
+        lambdaBody = std::make_shared<block_stmt>(expr->location, std::move(stmts));
+    }
+    
+    // Pre-cache parameter symbol IDs for optimization
+    for (auto& param : expr->parameters) {
+        if (param.symbol_id == UINT64_MAX) {
+            param.symbol_id = stringSymbolizer_->intern(param.name);
+        }
     }
     
     // Create the script function
-    auto lambdaFunc = std::make_shared<ScriptDefinedFunction>(
+    // Use final_closure_env which is either the capture environment or current environment
+    // This ensures lambdas can access variables from their creation context
+    // IMPORTANT: If needs_capture_env is false, we pass nullptr as closure_env
+    // This makes the lambda behave exactly like a regular function
+    
+    
+    auto lambdaFunc = std::make_shared<script_defined_function>(
         "<lambda>",  // Anonymous function name
         expr->parameters,
-        expr->returnType,
+        expr->return_type,
         lambdaBody,
-        captureEnv  // Use the capture environment
+        needs_capture_env ? final_closure_env : nullptr  // Only use closure env if we have captures
     );
     
-    // Create a ScriptFunction wrapper
-    // Capture lambdaFunc by value to ensure it stays alive
-    ScriptFunction funcWrapper = [this, lambdaFunc](const std::vector<Value>& args) -> Value {
-        return callFunction(*lambdaFunc, args);
+    // Create a script_function wrapper
+    // capture lambdaFunc by value to ensure it stays alive
+    script_function funcWrapper = [this, lambdaFunc](const std::vector<script_value>& args) -> script_value {
+        return call_function(*lambdaFunc, args);
     };
     
     // Push the lambda as a function value
-    pushValue(Value::makeFunction(funcWrapper));
+    push_value(script_value::make_function(funcWrapper));
 }
 
-void Interpreter::visitNewExpr(NewExpr* expr) {
+void interpreter::visit_new_expr(new_expr* expr) {
     // This handles expressions like: new Point(), new Point(3.0, 4.0), etc.
-    // The NewExpr contains a type and arguments
+    // The new_expr contains a type and arguments
     
     if (!expr->type) {
-        throw RuntimeError("New expression missing type information");
+        throw runtime_error("New expression missing type information");
     }
     
-    std::string className = expr->type->typeName;
+    // Handle built-in types specially
+    if (expr->type->base_type == value_type::jai_array_type) {
+        // array<T>{} constructor
+        if (!expr->arguments.empty()) {
+            throw runtime_error("array{} constructor does not take arguments");
+        }
+        
+        // Create empty array with the specified element type
+        auto element_type = expr->type->get_element_type();
+        if (!element_type) {
+            element_type = type_info::make_int(); // Default to int if no type specified
+        }
+        push_value(script_value::make_array(element_type));
+        return;
+    }
+    
+    if (expr->type->base_type == value_type::jai_map_type) {
+        // map<K,V>{} constructor
+        if (!expr->arguments.empty()) {
+            throw runtime_error("map{} constructor does not take arguments");
+        }
+        
+        // Create empty map with the specified key/value types
+        auto key_type = expr->type->get_key_type();
+        auto value_type = expr->type->get_value_type();
+        if (!key_type) key_type = type_info::make_string();
+        if (!value_type) value_type = type_info::make_int();
+        push_value(script_value::make_map(key_type, value_type));
+        return;
+    }
+    
+    std::string className = expr->type->type_name;
     
     // Evaluate all arguments
-    std::vector<Value> args;
+    std::vector<script_value> args;
     for (const auto& argExpr : expr->arguments) {
         argExpr->accept(this);
-        args.push_back(std::move(popValue()));
+        args.push_back(std::move(pop_value()));
     }
     
     // Look for a constructor function registered with this class name
     // The class builder registers constructors as overloaded functions
     try {
-        Value constructorFunc = environment_->get(className);
-        if (constructorFunc.isFunction()) {
-            const ScriptFunction& func = constructorFunc.asFunction();
-            Value instance = func(args);
-            pushValue(std::move(instance));
+        script_value constructorFunc = environment_->get(className);
+        if (constructorFunc.is_function()) {
+            const script_function& func = constructorFunc.as_function();
+            script_value instance = func(args);
+            push_value(std::move(instance));
             return;
         }
-    } catch (const RuntimeError&) {
+    } catch (const runtime_error&) {
         // Constructor function not found, fall through to error
     }
     
-    throw RuntimeError("No constructor found for class: " + className);
+    throw runtime_error("No constructor found for class: " + className);
 }
 
-void Interpreter::visitTernaryExpr(TernaryExpr* expr) {
+void interpreter::visit_ternary_expr(ternary_expr* expr) {
     // Evaluate the condition
     expr->condition->accept(this);
-    Value conditionValue = popValue();
+    script_value conditionValue = pop_value();
     
     // Check if condition is truthy
-    bool conditionIsTruthy = isTruthy(conditionValue);
+    bool conditionIsTruthy = is_truthy(conditionValue);
     
     // Evaluate only the selected branch (short-circuit evaluation)
     if (conditionIsTruthy) {
-        expr->thenExpr->accept(this);
+        expr->then_expression->accept(this);
     } else {
-        expr->elseExpr->accept(this);
+        expr->else_expression->accept(this);
     }
 }
 
-void Interpreter::visitArrayLiteralExpr(ArrayLiteralExpr* expr) {
-    // Create array Value with mixed element type (for now)
-    auto elementType = TypeInfo::makeInt(); // TODO: Better type inference
-    Value arrayValue = Value::makeArray(elementType);
+void interpreter::visit_array_literal_expr(array_literal_expr* expr) {
+    // Create array script_value with mixed element type (for now)
+    auto element_type = type_info::make_int(); // TODO: Better type inference
+    script_value arrayValue = script_value::make_array(element_type);
     
     // Get the internal vector to populate
-    auto& array = const_cast<std::vector<Value>&>(arrayValue.asArray());
+    auto& array = const_cast<std::vector<script_value>&>(arrayValue.as_array());
     
     // Evaluate each element and add to array
     for (const auto& element : expr->elements) {
         element->accept(this);
-        array.push_back(popValue());
+        array.push_back(pop_value());
     }
     
-    pushValue(std::move(arrayValue));
+    push_value(std::move(arrayValue));
 }
 
-void Interpreter::visitMapLiteralExpr(MapLiteralExpr* expr) {
-    // Create map Value with mixed key/value types (for now)
-    auto keyType = TypeInfo::makeString(); // TODO: Better type inference
-    auto valueType = TypeInfo::makeInt(); // TODO: Better type inference
-    Value mapValue = Value::makeMap(keyType, valueType);
+void interpreter::visit_map_literal_expr(map_literal_expr* expr) {
+    // Create map script_value with mixed key/value types (for now)
+    auto keyType = type_info::make_string(); // TODO: Better type inference
+    auto valueType = type_info::make_int(); // TODO: Better type inference
+    script_value mapValue = script_value::make_map(keyType, valueType);
     
     // Get the internal map to populate
-    auto& map = const_cast<std::map<Value, Value>&>(mapValue.asMap());
+    auto& map = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
     
     // Evaluate each key-value pair and add to map
     for (const auto& entry : expr->entries) {
         // Evaluate key
         entry.first->accept(this);
-        Value key = popValue();
+        script_value key = pop_value();
         
         // Evaluate value
         entry.second->accept(this);
-        Value value = popValue();
+        script_value value = pop_value();
         
         // Insert into map
         map[std::move(key)] = std::move(value);
     }
     
-    pushValue(std::move(mapValue));
+    push_value(std::move(mapValue));
 }
 
-void Interpreter::visitThisExpr(ThisExpr* expr) {
-    throw RuntimeError("'this' keyword not yet implemented");
+void interpreter::visit_this_expr(this_expr* expr) {
+    throw runtime_error("'this' keyword not yet implemented");
 }
 
-void Interpreter::visitSuperExpr(SuperExpr* expr) {
-    throw RuntimeError("'super' keyword not yet implemented");
+void interpreter::visit_super_expr(super_expr* expr) {
+    throw runtime_error("'super' keyword not yet implemented");
 }
 
-void Interpreter::visitIfStmt(IfStmt* stmt) {
+void interpreter::visit_throw_expr(throw_expr* expr) {
+    if (expr->value) {
+        // Evaluate the expression to throw
+        expr->value->accept(this);
+        script_value val = pop_value();
+        
+        // Store the exception value and convert to string for exception message
+        active_exception_value_ = val;
+        std::string message = val.to_string();
+        current_exception_ = script_exception(message, expr->location);
+    } else {
+        // Re-throw current exception
+        if (!current_exception_) {
+            throw script_exception("No exception to re-throw", expr->location);
+        }
+        // Keep the existing active_exception_value_
+    }
+    
+    is_unwinding_ = true;
+}
+
+void interpreter::visit_if_stmt(if_stmt* stmt) {
     // Evaluate the condition
     stmt->condition->accept(this);
-    Value conditionValue = popValue();
+    script_value conditionValue = pop_value();
     
     // Execute appropriate branch based on truthiness
-    if (isTruthy(conditionValue)) {
-        stmt->thenStmt->accept(this);
-    } else if (stmt->elseStmt) {
-        stmt->elseStmt->accept(this);
+    if (is_truthy(conditionValue)) {
+        stmt->then_statement->accept(this);
+    } else if (stmt->else_statement) {
+        stmt->else_statement->accept(this);
     }
 }
 
-void Interpreter::visitWhileStmt(WhileStmt* stmt) {
+void interpreter::visit_while_stmt(while_stmt* stmt) {
     while (true) {
         // Evaluate the condition
         stmt->condition->accept(this);
-        Value conditionValue = popValue();
+        script_value conditionValue = pop_value();
         
         // Check if we should continue the loop
-        if (!isTruthy(conditionValue)) {
+        if (!is_truthy(conditionValue)) {
             break;
         }
         
-        // Execute the loop body
-        stmt->body->accept(this);
+        try {
+            // Execute the loop body
+            stmt->body->accept(this);
+        } catch (const break_exception&) {
+            // Break out of the loop
+            break;
+        } catch (const continue_exception&) {
+            // Continue to next iteration
+            continue;
+        }
         
-        // TODO: Handle break/continue statements when implemented
+        // Check if a return statement was executed
+        if (hasReturnValue_) {
+            break;
+        }
     }
 }
 
-void Interpreter::visitForStmt(ForStmt* stmt) {
+void interpreter::visit_for_stmt(for_stmt* stmt) {
     // Create new scope for the for loop (initialization variables should be scoped)
     auto previous = environment_;
-    environment_ = std::make_shared<Environment>(environment_, stringSymbolizer_);
+    environment_ = std::make_shared<environment>(environment_, stringSymbolizer_);
     
     try {
         // Execute initialization (if present)
-        if (stmt->init) {
-            stmt->init->accept(this);
+        if (stmt->initializer) {
+            stmt->initializer->accept(this);
         }
         
         while (true) {
             // Check condition (if present, default to true)
             if (stmt->condition) {
                 stmt->condition->accept(this);
-                Value conditionValue = popValue();
-                if (!isTruthy(conditionValue)) {
+                script_value conditionValue = pop_value();
+                if (!is_truthy(conditionValue)) {
                     break;
                 }
             }
             
-            // Execute the loop body
-            stmt->body->accept(this);
+            try {
+                // Execute the loop body
+                stmt->body->accept(this);
+            } catch (const break_exception&) {
+                // Break out of the loop
+                break;
+            } catch (const continue_exception&) {
+                // Continue to next iteration, but execute update first
+                if (stmt->update) {
+                    stmt->update->accept(this);
+                    // Pop the update result if it leaves a value on the stack
+                    if (!valueStack_.empty()) {
+                        pop_value();
+                    }
+                }
+                continue;
+            }
+            
+            // Check if a return statement was executed
+            if (hasReturnValue_) {
+                break;
+            }
             
             // Execute update expression (if present)
             if (stmt->update) {
                 stmt->update->accept(this);
                 // Pop the update result if it leaves a value on the stack
                 if (!valueStack_.empty()) {
-                    popValue();
+                    pop_value();
                 }
             }
-            
-            // TODO: Handle break/continue statements when implemented
         }
     } catch (...) {
         // Restore environment even if an error occurs
@@ -1275,96 +2280,217 @@ void Interpreter::visitForStmt(ForStmt* stmt) {
     environment_ = previous;
 }
 
-void Interpreter::visitRangeForStmt(RangeForStmt* stmt) {
-    throw RuntimeError("Range-based for loops not yet implemented");
+void interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
+    throw runtime_error("Range-based for loops not yet implemented");
 }
 
-void Interpreter::visitReturnStmt(ReturnStmt* stmt) {
+void interpreter::visit_return_stmt(return_stmt* stmt) {
     if (stmt->value) {
         // Evaluate the return expression
         stmt->value->accept(this);
-        returnValue_ = popValue();
+        returnValue_ = pop_value();
     } else {
         // Return null if no expression
-        returnValue_ = Value();
+        returnValue_ = script_value();
     }
     
     hasReturnValue_ = true;
 }
 
-void Interpreter::visitBreakStmt(BreakStmt* stmt) {
-    throw RuntimeError("Break statements not yet implemented");
+void interpreter::visit_break_stmt(break_stmt* stmt) {
+    throw break_exception();
 }
 
-void Interpreter::visitContinueStmt(ContinueStmt* stmt) {
-    throw RuntimeError("Continue statements not yet implemented");
+void interpreter::visit_continue_stmt(continue_stmt* stmt) {
+    throw continue_exception();
 }
 
-void Interpreter::visitFunctionDecl(FunctionDecl* decl) {
-    // Create a script-defined function
-    auto scriptFunc = std::make_shared<ScriptDefinedFunction>(
+void interpreter::visit_try_stmt(try_stmt* stmt) {
+    // Save exception state
+    auto saved_exception = current_exception_;
+    auto saved_unwinding = is_unwinding_;
+    auto saved_exception_value = active_exception_value_;
+    auto saved_catch_var = current_catch_var_;
+    
+    // Reset state for try block
+    // Don't reset exception state if we're in a catch block (allows re-throw)
+    if (current_catch_var_.empty()) {
+        current_exception_.reset();
+        active_exception_value_ = script_value();
+    }
+    is_unwinding_ = false;
+    current_catch_var_.clear();
+    
+    // Execute try block
+    stmt->try_block->accept(this);
+    
+    // Check if exception was thrown
+    if (is_unwinding_ && current_exception_) {
+        // Reset unwinding flag
+        is_unwinding_ = false;
+        
+        // Set the current catch variable name so identifier lookup can find it
+        current_catch_var_ = stmt->catch_var;
+        
+        // Execute catch block
+        stmt->catch_block->accept(this);
+        
+        // Clear catch variable
+        current_catch_var_.clear();
+        
+        // Only clear exception if it wasn't re-thrown
+        if (!is_unwinding_) {
+            current_exception_.reset();
+            active_exception_value_ = script_value();
+        }
+    }
+    
+    // If still unwinding after catch, we need to be careful about state restoration
+    // Don't restore if a new exception was thrown in the catch block
+    if (is_unwinding_ && saved_unwinding) {
+        // We were already unwinding before this try/catch, restore that state
+        current_exception_ = saved_exception;
+        active_exception_value_ = saved_exception_value;
+    }
+    // If is_unwinding_ is true but saved_unwinding was false, 
+    // it means a new exception was thrown in the catch block - keep it
+    
+    // Always restore the catch variable state
+    current_catch_var_ = saved_catch_var;
+}
+
+void interpreter::visit_function_decl(function_decl* decl) {
+    // Pre-cache symbol IDs for all parameters (parameter binding optimization)
+    for (auto& param : decl->parameters) {
+        if (param.symbol_id == UINT64_MAX) {
+            param.symbol_id = stringSymbolizer_->intern(param.name);
+        }
+    }
+    
+    // Don't capture any environment in the closure - just use nullptr
+    // The environment stack will handle variable lookup naturally
+    auto scriptFunc = std::make_shared<script_defined_function>(
         decl->name,
         decl->parameters,
-        decl->returnType,
+        decl->return_type,
         decl->body,
-        environment_  // Capture current environment for closures
+        nullptr  // No closure needed - environment stack handles everything
     );
     
-    // Create a ScriptFunction wrapper that will call our function
-    ScriptFunction funcWrapper = [this, scriptFunc](const std::vector<Value>& args) -> Value {
-        return callFunction(*scriptFunc, args);
-    };
+    // Create wrapper function
+    script_value functionValue = script_value::make_function([this, scriptFunc](const std::vector<script_value>& args) -> script_value {
+        return call_function(*scriptFunc, args);
+    });
     
-    // Store the function in the environment
-    Value functionValue = Value::makeFunction(funcWrapper);
+    // Define the function in current environment
     environment_->define(decl->name, functionValue);
 }
 
-void Interpreter::visitClassDecl(ClassDecl* decl) {
-    throw RuntimeError("Class declarations not yet implemented");
+void interpreter::visit_class_decl(class_decl* decl) {
+    throw runtime_error("Class declarations not yet implemented");
 }
 
-void Interpreter::visitExpressionDecl(ExpressionDecl* decl) {
+void interpreter::visit_expression_decl(expression_decl* decl) {
     // Evaluate the expression and leave the result on the stack
     // This allows top-level expressions to return values
     decl->expression->accept(this);
 }
 
 // Function call implementation
-Value Interpreter::callFunction(const ScriptDefinedFunction& function, const std::vector<Value>& args) {
+script_value interpreter::call_function(const script_defined_function& function, const std::vector<script_value>& args) {
     // Validate arguments
-    validateFunctionArguments(function.parameters, args);
+    validate_function_arguments(function.parameters, args);
     
-    // Create new environment for function execution
+    
+    // Create new environment for function execution using pool optimization
+    // Both lambdas and functions need a fresh environment for their parameters
     auto previousEnv = environment_;
-    environment_ = std::make_shared<Environment>(function.closureEnv ? function.closureEnv : environment_, stringSymbolizer_);
+    
+    // For lambdas with closures, the execution environment needs to chain:
+    // [parameter env] -> [closure env] -> [global env]
+    // For regular functions:
+    // [parameter env] -> [current env]
+    if (function.closure_env) {
+        // Lambda: create fresh environment with closure as parent
+        environment_ = get_pooled_environment(function.closure_env);
+        
+    } else {
+        // Regular function: create fresh environment with current as parent
+        environment_ = get_pooled_environment(previousEnv);
+    }
     
     // Store previous return state
     bool previousHasReturn = hasReturnValue_;
-    Value previousReturn = returnValue_;
+    script_value previousReturn = returnValue_;
     hasReturnValue_ = false;
     
     try {
+        
         // Bind parameters to arguments
         for (size_t i = 0; i < function.parameters.size(); ++i) {
             const auto& param = function.parameters[i];
             const auto& arg = args[i];
             
-            // TODO: Handle reference parameters and type checking
-            // For now, just bind the value
-            environment_->define(param.name, arg);
+            // Use pre-cached symbol ID (parameter binding optimization)
+            // Symbol IDs are cached at function definition time in visit_function_decl
+            if (param.is_reference) {
+                // For reference parameters, create a reference value
+                if (!current_arg_metadata_.empty() && i < current_arg_metadata_.size()) {
+                    auto symbol_id = current_arg_metadata_[i].first;
+                    auto env = current_arg_metadata_[i].second;
+                    
+                    if (symbol_id != UINT64_MAX && env != nullptr) {
+                        // Get pointer to the argument
+                        script_value* argPtr = env->get_value_ptr(symbol_id);
+                        if (!argPtr) {
+                            throw runtime_error("Cannot take reference of undefined variable");
+                        }
+                        
+                        // If the argument is itself a reference, get the final target
+                        if (argPtr->is_reference()) {
+                            auto refHolder = std::get<std::shared_ptr<script_value::reference_holder>>(argPtr->storage_);
+                            if (!refHolder || !refHolder->target) {
+                                throw runtime_error("Reference target is null");
+                            }
+                            // Create reference to the final target
+                            script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
+                            environment_->define(param.symbol_id, std::move(refValue));
+                        } else {
+                            // Create reference to the argument
+                            script_value refValue = script_value::make_reference(argPtr, env);
+                            environment_->define(param.symbol_id, std::move(refValue));
+                        }
+                    } else {
+                        // No metadata - can't create reference
+                        throw runtime_error("Cannot pass non-lvalue to reference parameter");
+                    }
+                } else {
+                    // No metadata - can't create reference
+                    throw runtime_error("Cannot pass non-lvalue to reference parameter");
+                }
+            } else {
+                // Non-reference parameter - deep copy the argument
+                environment_->define(param.symbol_id, arg.clone());
+            }
         }
         
-        // Execute function body
-        function.body->accept(this);
+        // Execute function body without creating another environment
+        // (since we already created one for the function call)
+        for (const auto& decl : function.body->declarations) {
+            decl->accept(this);
+            // Check if we hit a return statement and break early
+            if (hasReturnValue_) {
+                break;
+            }
+        }
         
         // Get return value
-        Value result;
+        script_value result;
         if (hasReturnValue_) {
             result = returnValue_;
         } else {
             // If no return statement, return null
-            result = Value();
+            result = script_value();
         }
         
         // Restore previous state
@@ -1383,9 +2509,9 @@ Value Interpreter::callFunction(const ScriptDefinedFunction& function, const std
     }
 }
 
-void Interpreter::validateFunctionArguments(const std::vector<Parameter>& params, const std::vector<Value>& args) {
+void interpreter::validate_function_arguments(const std::vector<parameter>& params, const std::vector<script_value>& args) {
     if (params.size() != args.size()) {
-        throw RuntimeError("Function expected " + std::to_string(params.size()) + 
+        throw runtime_error("Function expected " + std::to_string(params.size()) + 
                          " arguments but got " + std::to_string(args.size()));
     }
     
@@ -1393,11 +2519,48 @@ void Interpreter::validateFunctionArguments(const std::vector<Parameter>& params
     // For now, we'll just check argument count
 }
 
-Value Interpreter::makeFunction(std::shared_ptr<ScriptDefinedFunction> func) {
-    ScriptFunction wrapper = [this, func](const std::vector<Value>& args) -> Value {
-        return callFunction(*func, args);
+script_value interpreter::make_function(std::shared_ptr<script_defined_function> func) {
+    // Create a wrapper that handles reference parameters properly
+    script_function wrapper = [this, func](const std::vector<script_value>& args) -> script_value {
+        // For functions with reference parameters, we need special handling
+        bool hasRefParams = false;
+        for (const auto& param : func->parameters) {
+            if (param.is_reference) {
+                hasRefParams = true;
+                break;
+            }
+        }
+        
+        if (!hasRefParams) {
+            // No reference parameters - use normal call
+            return call_function(*func, args);
+        }
+        
+        // Has reference parameters - we need to handle them specially
+        // For now, just call normally - we'll implement proper reference handling later
+        return call_function(*func, args);
     };
-    return Value::makeFunction(wrapper);
+    return script_value::make_function(wrapper);
 }
 
-} // namespace JaiScript
+// Function call optimization helpers
+std::shared_ptr<environment> interpreter::get_pooled_environment(std::shared_ptr<environment> parent) {
+    if (environment_pool_index_ < environment_pool_.size()) {
+        // Reuse existing environment from pool
+        auto env = environment_pool_[environment_pool_index_++];
+        env->reset(parent);
+        return env;
+    } else {
+        // Pool is exhausted, create new environment and add to pool
+        auto newEnv = std::make_shared<environment>(parent, stringSymbolizer_);
+        environment_pool_.push_back(newEnv);
+        ++environment_pool_index_;
+        return newEnv;
+    }
+}
+
+void interpreter::reset_environment_pool() {
+    environment_pool_index_ = 0;
+}
+
+} // namespace jai

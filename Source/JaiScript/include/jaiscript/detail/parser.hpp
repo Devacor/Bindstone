@@ -6,93 +6,101 @@
 #include <vector>
 #include <memory>
 #include <optional>
+#include <unordered_set>
 
-namespace JaiScript {
+namespace jai {
 
-    class Parser {
+    class parser {
     public:
-        Parser(const std::vector<Token>& tokens, const std::string& filename = "<script>");
+        parser(const std::vector<token>& tokens, const std::string& filename = "<script>");
+        parser(const std::vector<token>& tokens, const std::unordered_set<std::string>& registeredTemplateTypes, const std::string& filename = "<script>");
         
         // Parse the entire program
-        std::vector<DeclarationPtr> parse();
+        std::vector<declaration_ptr> parse();
         
         // Check if parsing had errors
-        bool hasErrors() const { return !errors_.empty(); }
-        const std::vector<std::string>& getErrors() const { return errors_; }
+        bool has_errors() const { return !errors_.empty(); }
+        const std::vector<std::string>& get_errors() const { return errors_; }
         
     private:
-        const std::vector<Token>& tokens_;
+        const std::vector<token>& tokens_;
         std::string filename_;
         size_t current_ = 0;
         std::vector<std::string> errors_;
+        std::unordered_set<std::string> registered_template_types_;
         
-        // Token buffer for handling >> splitting in generic contexts
-        std::optional<Token> pushedBackToken_;
+        // token buffer for handling >> splitting in generic contexts
+        std::optional<token> pushed_back_token_;
         
         // Error handling
-        void error(const std::string& message, const Token& token);
+        void error(const std::string& message, const token& token);
         void synchronize();  // Error recovery
         
-        // Token management
-        Token peek() const;
-        Token previous() const;
-        Token advance();
-        bool isAtEnd() const;
-        bool check(TokenType type) const;
-        bool match(TokenType type);
-        bool match(std::initializer_list<TokenType> types);
-        Token consume(TokenType type, const std::string& message);
+        // token management
+        token peek() const;
+        token previous() const;
+        token advance();
+        bool is_at_end() const;
+        bool check(token_type type) const;
+        bool match(token_type type);
+        bool match(std::initializer_list<token_type> types);
+        token consume(token_type type, const std::string& message);
         
-        // Declaration parsing
-        DeclarationPtr declaration();
-        DeclarationPtr classDeclaration();
-        DeclarationPtr functionDeclaration();
-        DeclarationPtr variableDeclaration();
+        // declaration parsing
+        declaration_ptr declaration();
+        declaration_ptr class_declaration();
+        declaration_ptr function_declaration();
+        declaration_ptr variable_declaration();
         
-        // Statement parsing
-        StatementPtr statement();
-        StatementPtr expressionStatement();
-        StatementPtr blockStatement();
-        StatementPtr ifStatement();
-        StatementPtr whileStatement();
-        StatementPtr forStatement();
-        StatementPtr returnStatement();
-        StatementPtr breakStatement();
-        StatementPtr continueStatement();
+        // statement parsing
+        statement_ptr statement();
+        statement_ptr expression_statement();
+        statement_ptr block_statement();
+        statement_ptr if_statement();
+        statement_ptr while_statement();
+        statement_ptr for_statement();
+        statement_ptr return_statement();
+        statement_ptr break_statement();
+        statement_ptr continue_statement();
+        statement_ptr try_statement();
         
-        // Expression parsing (precedence climbing)
-        ExpressionPtr expression();
-        ExpressionPtr assignment();
-        ExpressionPtr ternary();
-        ExpressionPtr logicalOr();
-        ExpressionPtr logicalAnd();
-        ExpressionPtr bitwiseOr();
-        ExpressionPtr bitwiseXor();
-        ExpressionPtr bitwiseAnd();
-        ExpressionPtr equality();
-        ExpressionPtr relational();
-        ExpressionPtr shift();
-        ExpressionPtr additive();
-        ExpressionPtr multiplicative();
-        ExpressionPtr unary();
-        ExpressionPtr postfix();
-        ExpressionPtr primary();
+        // expression parsing (precedence climbing)
+        expression_ptr expression();
+        expression_ptr assignment();
+        expression_ptr ternary();
+        expression_ptr logical_or();
+        expression_ptr logical_and();
+        expression_ptr bitwise_or();
+        expression_ptr bitwise_xor();
+        expression_ptr bitwise_and();
+        expression_ptr equality();
+        expression_ptr relational();
+        expression_ptr shift();
+        expression_ptr additive();
+        expression_ptr multiplicative();
+        expression_ptr unary();
+        expression_ptr postfix();
+        expression_ptr primary();
         
         // Helper parsers
-        ExpressionPtr finishCall(ExpressionPtr callee);
-        ExpressionPtr finishMemberAccess(ExpressionPtr object, bool isArrow);
-        TypeInfoPtr parseType();
-        std::vector<Parameter> parseParameterList();
+        expression_ptr finish_call(expression_ptr callee);
+        expression_ptr finish_member_access(expression_ptr object, bool is_arrow);
+        expression_ptr parse_map_literal();
+        type_info_ptr parse_type();
+        std::vector<parameter> parse_parameter_list();
         
         // Lambda parsing
-        ExpressionPtr lambdaExpression();
-        std::vector<LambdaExpr::Capture> parseCaptureList();
+        expression_ptr lambda_expression();
+        std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture_default> parse_capture_list();
         
         // Helper for parsing function bodies
-        DeclarationPtr parseFunctionBody(const std::string& name, TypeInfoPtr returnType);
+        declaration_ptr parse_function_body(const std::string& name, type_info_ptr return_type);
         
         // Helper for parsing > in generic contexts (handles >> token splitting)
-        void consumeGreaterInGeneric(const std::string& message);
+        void consume_greater_in_generic(const std::string& message);
+        
+        // Helper to check if a type name is registered for template parsing
+        bool is_registered_template_type(const std::string& type_name) const;
     };
 
-} // namespace JaiScript
+} // namespace jai

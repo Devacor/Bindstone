@@ -3,18 +3,18 @@
 #include "../include/jaiscript/detail/parser.hpp"
 #include "../include/jaiscript/detail/lexer.hpp"
 
-using namespace JaiScript;
+using namespace jai;
 
 // Helper function to execute JaiScript code
 template<typename T>
 T executeScript(const std::string& source) {
-    Lexer lexer(source);
+    lexer lexer(source);
     auto tokens = lexer.tokenize();
     
-    Parser parser(tokens);
+    parser parser(tokens);
     auto ast = parser.parse();
     
-    Interpreter interpreter;
+    interpreter interpreter;
     return interpreter.execute<T>(ast);
 }
 
@@ -58,30 +58,30 @@ int main() {
     // Example 5: Using the non-templated version for inspection
     std::cout << "\n=== Variable Inspection Example ===" << std::endl;
     
-    Lexer lexer(R"(
+    lexer lexer(R"(
         name = "Alice";
         age = 25;
         score = 95.5;
         active = true;
-        computedValue = age * 2;
-        return computedValue;
+        computedscript_value = age * 2;
+        return computedscript_value;
     )");
     auto tokens = lexer.tokenize();
     
-    Parser parser(tokens);
+    parser parser(tokens);
     auto ast = parser.parse();
     
-    Interpreter interpreter;
-    Value result = interpreter.execute(ast);
+    interpreter interpreter;
+    script_value result = interpreter.execute(ast);
     
-    std::cout << "Script result: " << result.toString() << std::endl;
-    std::cout << "Has return value: " << (interpreter.hasReturnValue() ? "Yes" : "No") << std::endl;
-    std::cout << "Return value: " << interpreter.getReturnValue().toString() << std::endl;
+    std::cout << "Script result: " << result.to_string() << std::endl;
+    std::cout << "Has return value: " << (interpreter.hasReturnscript_value() ? "Yes" : "No") << std::endl;
+    std::cout << "Return value: " << interpreter.getReturnscript_value().to_string() << std::endl;
     
     std::cout << "\nAll variables after execution:" << std::endl;
     auto variables = interpreter.getAllVariables();
     for (const auto& [name, value] : variables) {
-        std::cout << "  " << name << " = " << value.toString() << std::endl;
+        std::cout << "  " << name << " = " << value.to_string() << std::endl;
     }
     
     // Example 6: Early return behavior

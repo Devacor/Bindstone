@@ -75,11 +75,11 @@ int main() {
     auto getTextLambda = [](Button& self) -> std::string { return self.text(); };
     auto clickLambda = [](Button& self) { self.click(); };
     
-    using SetTextTraits = JaiScript::detail::function_traits<decltype(setTextLambda)>;
-    using GetTextTraits = JaiScript::detail::function_traits<decltype(getTextLambda)>;
-    using ClickTraits = JaiScript::detail::function_traits<decltype(clickLambda)>;
-    using IsEnabledTraits = JaiScript::detail::function_traits<decltype(&Button::isEnabled)>;
-    using GetClickTraits = JaiScript::detail::function_traits<decltype(&Button::getClickCount)>;
+    using SetTextTraits = jai::detail::function_traits<decltype(setTextLambda)>;
+    using GetTextTraits = jai::detail::function_traits<decltype(getTextLambda)>;
+    using ClickTraits = jai::detail::function_traits<decltype(clickLambda)>;
+    using IsEnabledTraits = jai::detail::function_traits<decltype(&Button::isEnabled)>;
+    using GetClickTraits = jai::detail::function_traits<decltype(&Button::getClickCount)>;
     
     std::cout << "✅ " << tests[0] << " - " << SetTextTraits::arity << " args\n";
     std::cout << "✅ " << tests[1] << " - " << GetTextTraits::arity << " args\n";
@@ -91,11 +91,11 @@ int main() {
     std::cout << "\n2. Testing FunctionBinder Creation\n";
     std::cout << "===================================\n";
     
-    auto binder1 = JaiScript::makeFunctionBinder(std::move(setTextLambda));
-    auto binder2 = JaiScript::makeFunctionBinder(std::move(getTextLambda));
-    auto binder3 = JaiScript::makeFunctionBinder(std::move(clickLambda));
-    auto binder4 = JaiScript::makeFunctionBinder(&Button::isEnabled);
-    auto binder5 = JaiScript::makeFunctionBinder(&Button::getClickCount);
+    auto binder1 = jai::make_functionBinder(std::move(setTextLambda));
+    auto binder2 = jai::make_functionBinder(std::move(getTextLambda));
+    auto binder3 = jai::make_functionBinder(std::move(clickLambda));
+    auto binder4 = jai::make_functionBinder(&Button::isEnabled);
+    auto binder5 = jai::make_functionBinder(&Button::getClickCount);
     
     std::cout << "✅ All FunctionBinders created successfully\n";
     
@@ -119,7 +119,7 @@ int main() {
     std::cout << "    [](const SafeComponent<Button>& item) { return item.self(); }));\n";
     
     std::cout << "\n--- JaiScript (new approach) ---\n";
-    std::cout << "makeClassBuilder<Button>(engine, \"Button\")\n";
+    std::cout << "make_class_builder<Button>(engine, \"Button\")\n";
     std::cout << "    .inherits<Component>()  // Automatic inheritance handling\n";
     std::cout << "    .constructor<const std::string&>()\n";
     std::cout << "\n    // CLEAN: Lambda approach - no static_cast needed!\n";
@@ -135,7 +135,7 @@ int main() {
     std::cout << "    .method(\"click\", &Button::click)\n";
     std::cout << "    .method(\"isEnabled\", &Button::isEnabled)\n";
     std::cout << "\n    // Generic type conversions\n";
-    std::cout << "    .addTypeConversion<SafeComponent<Button>, std::shared_ptr<Button>>(\n";
+    std::cout << "    .add_type_conversion<SafeComponent<Button>, std::shared_ptr<Button>>(\n";
     std::cout << "        [](const auto& item) { return item.self(); })\n";
     std::cout << "\n    .build();\n";
     
@@ -169,9 +169,9 @@ int main() {
     std::cout << "✅ Mix lambda and direct binding as needed\n";
     std::cout << "✅ Generic type conversion system\n";
     std::cout << "✅ All template metaprogramming works correctly\n";
-    std::cout << "✅ Ready for integration once Engine supports classes\n\n";
+    std::cout << "✅ Ready for integration once engine supports classes\n\n";
     
-    std::cout << "The ClassBuilder with lambda method binding is production-ready!\n";
+    std::cout << "The class_builder with lambda method binding is production-ready!\n";
     std::cout << "It provides all the flexibility of ChaiScript with much cleaner syntax.\n";
     
     return 0;

@@ -9,78 +9,92 @@
 #include <memory>
 #include <functional>
 #include <optional>
+#include <stdexcept>
 
-namespace JaiScript {
+namespace jai {
 
     // Fixed-size primitive types for cross-platform serialization
-    using Int = int64_t;      // Always 64-bit signed
-    using Float = double;     // Always 64-bit double precision
-    using String = std::string;
-    using Char = char;       // 8-bit character
-    using Bool = bool;       // 1 byte boolean
+    using script_int = int64_t;      // Always 64-bit signed
+    using script_float = double;     // Always 64-bit double precision
+    using script_string = std::string;
+    using script_char = char;       // 8-bit character
+    using script_bool = bool;       // 1 byte boolean
     
     // Forward declarations
-    class Value;
-    class Engine;
+    class script_value;
+    class engine;
     
     // Function type for script functions
-    using ScriptFunction = std::function<Value(const std::vector<Value>&)>;
+    using script_function = std::function<script_value(const std::vector<script_value>&)>;
     
     // For serializable functions, we need to track additional info
-    struct FunctionInfo {
+    struct function_info {
         std::string name;           // Function name (for debugging)
-        std::string scriptText;     // Original script text (for script-defined functions)
+        std::string script_text;     // Original script text (for script-defined functions)
         
         // Captured variables with their types and capture method
-        struct CapturedVar {
+        struct captured_var {
             std::string name;
-            ValueType type;
-            bool byReference;       // true = captured by reference, false = by value
+            value_type type;
+            bool by_reference;       // true = captured by reference, false = by value
         };
-        std::vector<CapturedVar> capturedVars;
+        std::vector<captured_var> captured_vars;
         
-        bool isNative = false;     // True for C++ functions (can't serialize)
+        bool is_native = false;     // True for C++ functions (can't serialize)
     };
     
-    // Local variables for script execution
-    using LocalVariables = std::unordered_map<std::string, Value>;
+    // Instance variables for script execution (per-execution context)
+    using instance_variables = std::unordered_map<std::string, script_value>;
     
     // Source location for error reporting
-    struct SourceLocation {
+    struct source_location {
         std::string filename;
         size_t line = 1;
         size_t column = 1;
         
-        std::string toString() const {
+        std::string to_string() const {
             return filename + ":" + std::to_string(line) + ":" + std::to_string(column);
         }
     };
     
-    // Base exception class
-    class Exception : public std::exception {
+    // Base exception class with source location tracking
+    class exception : public std::runtime_error {
     public:
-        Exception(const std::string& message, const SourceLocation& location = {})
-            : message_(message), location_(location) {}
+        exception(const std::string& message, const source_location& location = {})
+            : std::runtime_error(message), location_(location) {}
             
-        const char* what() const noexcept override { return message_.c_str(); }
-        const SourceLocation& location() const { return location_; }
+        const source_location& location() const { return location_; }
         
     private:
-        std::string message_;
-        SourceLocation location_;
+        source_location location_;
     };
     
     // Specific exception types
-    class ParseError : public Exception {
-        using Exception::Exception;
+    class parse_error : public exception {
+        using exception::exception;
     };
     
-    class RuntimeError : public Exception {
-        using Exception::Exception;
+    class runtime_error : public exception {
+        using exception::exception;
     };
     
-    class SerializationError : public Exception {
-        using Exception::Exception;
+    
+    // Control flow exceptions for break/continue statements
+    class break_exception : public exception {
+    public:
+        break_exception() : exception("break statement") {}
     };
     
-} // namespace JaiScript
+    class continue_exception : public exception {
+    public:
+        continue_exception() : exception("continue statement") {}
+    };
+    
+    // Script exception for try/catch/throw
+    class script_exception : public runtime_error {
+    public:
+        script_exception(const std::string& message, const source_location& loc = {})
+            : runtime_error(message, loc) {}
+    };
+    
+} // namespace jai

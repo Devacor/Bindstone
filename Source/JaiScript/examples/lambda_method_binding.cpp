@@ -38,14 +38,14 @@ private:
 
 class TextInput {
 public:
-    void setValue(const std::string& value) {
+    void setscript_value(const std::string& value) {
         if (value.length() > maxLength_) {
             throw std::runtime_error("Text too long!");
         }
         value_ = value;
     }
     
-    const std::string& getValue() const { return value_; }
+    const std::string& getscript_value() const { return value_; }
     
     void setMaxLength(int length) { maxLength_ = length; }
     int getMaxLength() const { return maxLength_; }
@@ -59,14 +59,14 @@ int main() {
     std::cout << "Lambda Method Binding Examples\n";
     std::cout << "==============================\n\n";
     
-    JaiScript::Engine engine;
+    jai::engine engine;
     
     // Example 1: Traditional vs Lambda binding for overloaded methods
     std::cout << "1. Overloaded Methods - Traditional vs Lambda\n\n";
     
     // TRADITIONAL WAY - requires ugly static_cast
     /*
-    JaiScript::makeClassBuilder<Button>(engine, "Button")
+    jai::make_class_builder<Button>(engine, "Button")
         .constructor<const std::string&>()
         .method("setText", static_cast<void(Button::*)(const std::string&)>(&Button::text))
         .method("getText", static_cast<const std::string&(Button::*)() const>(&Button::text))
@@ -74,7 +74,7 @@ int main() {
     */
     
     // LAMBDA WAY - much cleaner!
-    JaiScript::makeClassBuilder<Button>(engine, "Button")
+    jai::make_class_builder<Button>(engine, "Button")
         .constructor<const std::string&>()
         .method("setText", [](Button* self, const std::string& text) {
             self->text(text);  // Clean! No static_cast needed
@@ -89,14 +89,14 @@ int main() {
     // Example 2: Adding validation/logging with lambdas
     std::cout << "2. Adding Validation and Logging\n\n";
     
-    JaiScript::makeClassBuilder<TextInput>(engine, "TextInput")
+    jai::make_class_builder<TextInput>(engine, "TextInput")
         .constructor<>()
         .method("setValue", [](TextInput* self, const std::string& value) {
             // Add logging before the call
             std::cout << "Setting text input to: '" << value << "'\n";
             
             try {
-                self->setValue(value);
+                self->setscript_value(value);
                 std::cout << "Text set successfully\n";
             } catch (const std::exception& e) {
                 std::cout << "Error setting text: " << e.what() << "\n";
@@ -104,7 +104,7 @@ int main() {
             }
         })
         .method("getValue", [](TextInput* self) -> std::string {
-            std::string value = self->getValue();
+            std::string value = self->getscript_value();
             std::cout << "Getting text input value: '" << value << "'\n";
             return value;
         })
@@ -122,7 +122,7 @@ int main() {
     std::cout << "3. Property-style Access (like ChaiScript)\n\n";
     
     // This creates both getter and setter using the same name, like ChaiScript does
-    JaiScript::makeClassBuilder<Button>(engine, "ButtonWithProps")
+    jai::make_class_builder<Button>(engine, "ButtonWithProps")
         .constructor<>()
         .method("enabled", [](Button* self) -> bool {
             return self->isEnabled();
@@ -157,11 +157,11 @@ int main() {
         input.setMaxLength(10);
         
         try {
-            input.setValue("Short");
-            string value = input.getValue();
+            input.setscript_value("Short");
+            string value = input.getscript_value();
             print("Input value: " + value);
             
-            input.setValue("This is way too long for the limit");
+            input.setscript_value("This is way too long for the limit");
         } catch (error) {
             print("Caught expected error: " + error.message);
         }

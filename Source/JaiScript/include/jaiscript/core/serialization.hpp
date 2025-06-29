@@ -6,10 +6,10 @@
 #include <functional>
 #include <map>
 
-namespace JaiScript {
+namespace jai {
 
     // Forward declaration
-    class Engine;
+    class engine;
     
     // Serialization support for JaiScript
     // This is designed to be implemented externally (e.g., with Cereal)
@@ -19,20 +19,20 @@ namespace JaiScript {
     public:
         virtual ~ISerializer() = default;
         
-        // Serialize a Value to bytes
-        virtual std::vector<uint8_t> serializeValue(const Value& value) = 0;
+        // Serialize a script_value to bytes
+        virtual std::vector<uint8_t> serializescript_value(const script_value& value) = 0;
         
-        // Deserialize bytes to a Value  
-        virtual Value deserializeValue(const std::vector<uint8_t>& data) = 0;
+        // Deserialize bytes to a script_value  
+        virtual script_value deserializescript_value(const std::vector<uint8_t>& data) = 0;
         
         // Register a type for serialization
         // This allows external code to tell JaiScript how to serialize custom types
         template<typename T>
-        void registerType(const std::string& typeName) {
-            objectSerializers_[typeName] = {
+        void registerType(const std::string& type_name) {
+            objectSerializers_[type_name] = {
                 // Serializer function
                 [](const void* ptr, std::vector<uint8_t>& out) {
-                    // Implementation would use Cereal here:
+                    // implementation would use Cereal here:
                     // std::stringstream ss;
                     // cereal::BinaryOutputArchive ar(ss);
                     // ar(*static_cast<const T*>(ptr));
@@ -40,7 +40,7 @@ namespace JaiScript {
                 },
                 // Deserializer function
                 [](const std::vector<uint8_t>& data) -> std::shared_ptr<void> {
-                    // Implementation would use Cereal here:
+                    // implementation would use Cereal here:
                     // std::stringstream ss(data);
                     // cereal::BinaryInputArchive ar(ss);
                     // auto obj = std::make_shared<T>();
@@ -59,36 +59,36 @@ namespace JaiScript {
         >> objectSerializers_;
     };
     
-    // Helper to create a Value that can be serialized
+    // Helper to create a script_value that can be serialized
     // The serializer must have the type registered
     template<typename T>
-    Value makeObject(std::shared_ptr<T> obj, const std::string& typeName) {
-        // This will be implemented to create an ObjectHolder
+    script_value make_object(std::shared_ptr<T> obj, const std::string& type_name) {
+        // This will be implemented to create an object_holder
         // that references the registered serialization functions
-        Value result;
-        // TODO: Implementation
+        script_value result;
+        // TODO: implementation
         return result;
     }
     
     // Example of how this would be used with Cereal in Bindstone:
     /*
-    class CerealJaiScriptSerializer : public JaiScript::ISerializer {
+    class CerealJaiScriptSerializer : public jai::ISerializer {
         template<typename T>
         void registerCerealType(const std::string& name) {
             registerType<T>(name);
             // The actual serialization would use Cereal archives
         }
         
-        std::vector<uint8_t> serializeValue(const Value& value) override {
+        std::vector<uint8_t> serializescript_value(const script_value& value) override {
             std::stringstream ss;
             {
                 cereal::BinaryOutputArchive ar(ss);
                 // Serialize based on value.type()
-                // For objects, look up typeName in registry
+                // For objects, look up type_name in registry
             }
             // Convert stringstream to vector<uint8_t>
         }
     };
     */
     
-} // namespace JaiScript
+} // namespace jai

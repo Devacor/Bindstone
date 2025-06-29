@@ -7,499 +7,545 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <cstdint>
 
-namespace JaiScript {
+namespace jai {
 
     // Forward declarations
-    class ASTNode;
-    class Expression;
-    class Statement;
-    class Declaration;
+    class ast_node;
+    class expression;
+    class statement;
+    class declaration;
     
-    using ASTNodePtr = std::shared_ptr<ASTNode>;
-    using ExpressionPtr = std::shared_ptr<Expression>;
-    using StatementPtr = std::shared_ptr<Statement>;
-    using DeclarationPtr = std::shared_ptr<Declaration>;
+    using ast_node_ptr = std::shared_ptr<ast_node>;
+    using expression_ptr = std::shared_ptr<expression>;
+    using statement_ptr = std::shared_ptr<statement>;
+    using declaration_ptr = std::shared_ptr<declaration>;
     
-    // Parameter information for functions and lambdas
-    struct Parameter {
-        TypeInfoPtr type;
+    // parameter information for functions and lambdas
+    struct parameter {
+        type_info_ptr type;
         std::string name;
-        bool isReference = false;
-        bool isConst = false;
+        bool is_reference = false;
+        bool is_const = false;
+        mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
         
-        Parameter(TypeInfoPtr t, const std::string& n, bool ref = false, bool c = false)
-            : type(t), name(n), isReference(ref), isConst(c) {}
+        parameter(type_info_ptr t, const std::string& n, bool ref = false, bool c = false)
+            : type(t), name(n), is_reference(ref), is_const(c), symbol_id(UINT64_MAX) {}
     };
     
     // Visitor pattern for AST traversal
-    class ASTVisitor {
+    class ast_visitor {
     public:
-        virtual ~ASTVisitor() = default;
-        // Expression visitors
-        virtual void visitLiteralExpr(class LiteralExpr* expr) = 0;
-        virtual void visitIdentifierExpr(class IdentifierExpr* expr) = 0;
-        virtual void visitBinaryExpr(class BinaryExpr* expr) = 0;
-        virtual void visitUnaryExpr(class UnaryExpr* expr) = 0;
-        virtual void visitAssignmentExpr(class AssignmentExpr* expr) = 0;
-        virtual void visitCallExpr(class CallExpr* expr) = 0;
-        virtual void visitMemberExpr(class MemberExpr* expr) = 0;
-        virtual void visitLambdaExpr(class LambdaExpr* expr) = 0;
-        virtual void visitNewExpr(class NewExpr* expr) = 0;
-        virtual void visitTernaryExpr(class TernaryExpr* expr) = 0;
-        virtual void visitArrayLiteralExpr(class ArrayLiteralExpr* expr) = 0;
-        virtual void visitMapLiteralExpr(class MapLiteralExpr* expr) = 0;
-        virtual void visitThisExpr(class ThisExpr* expr) = 0;
-        virtual void visitSuperExpr(class SuperExpr* expr) = 0;
+        virtual ~ast_visitor() = default;
+        // expression visitors
+        virtual void visit_literal_expr(class literal_expr* expr) = 0;
+        virtual void visit_identifier_expr(class identifier_expr* expr) = 0;
+        virtual void visit_binary_expr(class binary_expr* expr) = 0;
+        virtual void visit_unary_expr(class unary_expr* expr) = 0;
+        virtual void visit_assignment_expr(class assignment_expr* expr) = 0;
+        virtual void visit_call_expr(class call_expr* expr) = 0;
+        virtual void visit_member_expr(class member_expr* expr) = 0;
+        virtual void visit_lambda_expr(class lambda_expr* expr) = 0;
+        virtual void visit_new_expr(class new_expr* expr) = 0;
+        virtual void visit_ternary_expr(class ternary_expr* expr) = 0;
+        virtual void visit_array_literal_expr(class array_literal_expr* expr) = 0;
+        virtual void visit_map_literal_expr(class map_literal_expr* expr) = 0;
+        virtual void visit_this_expr(class this_expr* expr) = 0;
+        virtual void visit_super_expr(class super_expr* expr) = 0;
+        virtual void visit_throw_expr(class throw_expr* expr) = 0;
         
-        // Statement visitors
-        virtual void visitExpressionStmt(class ExpressionStmt* stmt) = 0;
-        virtual void visitBlockStmt(class BlockStmt* stmt) = 0;
-        virtual void visitIfStmt(class IfStmt* stmt) = 0;
-        virtual void visitWhileStmt(class WhileStmt* stmt) = 0;
-        virtual void visitForStmt(class ForStmt* stmt) = 0;
-        virtual void visitRangeForStmt(class RangeForStmt* stmt) = 0;
-        virtual void visitReturnStmt(class ReturnStmt* stmt) = 0;
-        virtual void visitBreakStmt(class BreakStmt* stmt) = 0;
-        virtual void visitContinueStmt(class ContinueStmt* stmt) = 0;
+        // statement visitors
+        virtual void visit_expression_stmt(class expression_stmt* stmt) = 0;
+        virtual void visit_block_stmt(class block_stmt* stmt) = 0;
+        virtual void visit_if_stmt(class if_stmt* stmt) = 0;
+        virtual void visit_while_stmt(class while_stmt* stmt) = 0;
+        virtual void visit_for_stmt(class for_stmt* stmt) = 0;
+        virtual void visit_range_for_stmt(class range_for_stmt* stmt) = 0;
+        virtual void visit_return_stmt(class return_stmt* stmt) = 0;
+        virtual void visit_break_stmt(class break_stmt* stmt) = 0;
+        virtual void visit_continue_stmt(class continue_stmt* stmt) = 0;
+        virtual void visit_try_stmt(class try_stmt* stmt) = 0;
         
-        // Declaration visitors
-        virtual void visitVariableDecl(class VariableDecl* decl) = 0;
-        virtual void visitFunctionDecl(class FunctionDecl* decl) = 0;
-        virtual void visitClassDecl(class ClassDecl* decl) = 0;
-        virtual void visitExpressionDecl(class ExpressionDecl* decl) = 0;
+        // declaration visitors
+        virtual void visit_variable_decl(class variable_decl* decl) = 0;
+        virtual void visit_function_decl(class function_decl* decl) = 0;
+        virtual void visit_class_decl(class class_decl* decl) = 0;
+        virtual void visit_expression_decl(class expression_decl* decl) = 0;
     };
     
     // Base AST node
-    class ASTNode {
+    class ast_node {
     public:
-        SourceLocation location;
+        source_location location;
         
-        ASTNode(const SourceLocation& loc) : location(loc) {}
-        virtual ~ASTNode() = default;
-        virtual void accept(ASTVisitor* visitor) = 0;
+        ast_node(const source_location& loc) : location(loc) {}
+        virtual ~ast_node() = default;
+        virtual void accept(ast_visitor* visitor) = 0;
     };
     
     // Base expression node
-    class Expression : public ASTNode {
+    class expression : public ast_node {
     public:
-        TypeInfoPtr resultType;  // Type of the expression result
+        type_info_ptr result_type;  // Type of the expression result
         
-        Expression(const SourceLocation& loc) : ASTNode(loc) {}
+        expression(const source_location& loc) : ast_node(loc) {}
     };
     
     // Literal expression
-    class LiteralExpr : public Expression {
+    class literal_expr : public expression {
     public:
-        Value value;
+        script_value value;
         
-        LiteralExpr(const SourceLocation& loc, const Value& val) 
-            : Expression(loc), value(val) {}
+        literal_expr(const source_location& loc, const script_value& val) 
+            : expression(loc), value(val) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitLiteralExpr(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_literal_expr(this);
         }
     };
     
-    // Identifier expression
-    class IdentifierExpr : public Expression {
+    // identifier expression
+    class identifier_expr : public expression {
     public:
         std::string name;
+        mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID, computed lazily
         
-        IdentifierExpr(const SourceLocation& loc, const std::string& n)
-            : Expression(loc), name(n) {}
+        identifier_expr(const source_location& loc, const std::string& n)
+            : expression(loc), name(n) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitIdentifierExpr(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_identifier_expr(this);
         }
     };
     
     // Binary expression
-    class BinaryExpr : public Expression {
+    class binary_expr : public expression {
     public:
-        ExpressionPtr left;
-        Token op;
-        ExpressionPtr right;
+        expression_ptr left;
+        token op;
+        expression_ptr right;
         
-        BinaryExpr(const SourceLocation& loc, ExpressionPtr l, const Token& o, ExpressionPtr r)
-            : Expression(loc), left(l), op(o), right(r) {}
+        binary_expr(const source_location& loc, expression_ptr l, const token& o, expression_ptr r)
+            : expression(loc), left(l), op(o), right(r) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitBinaryExpr(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_binary_expr(this);
         }
     };
     
     // Unary expression
-    class UnaryExpr : public Expression {
+    class unary_expr : public expression {
     public:
-        Token op;
-        ExpressionPtr operand;
-        bool isPostfix;
+        token op;
+        expression_ptr operand;
+        bool is_postfix;
         
-        UnaryExpr(const SourceLocation& loc, const Token& o, ExpressionPtr expr, bool postfix = false)
-            : Expression(loc), op(o), operand(expr), isPostfix(postfix) {}
+        unary_expr(const source_location& loc, const token& o, expression_ptr expr, bool postfix = false)
+            : expression(loc), op(o), operand(expr), is_postfix(postfix) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitUnaryExpr(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_unary_expr(this);
         }
     };
     
     // Assignment expression
-    class AssignmentExpr : public Expression {
+    class assignment_expr : public expression {
     public:
-        ExpressionPtr target;
-        Token op;
-        ExpressionPtr value;
+        expression_ptr target;
+        token op;
+        expression_ptr value;
         
-        AssignmentExpr(const SourceLocation& loc, ExpressionPtr t, const Token& o, ExpressionPtr v)
-            : Expression(loc), target(t), op(o), value(v) {}
+        assignment_expr(const source_location& loc, expression_ptr t, const token& o, expression_ptr v)
+            : expression(loc), target(t), op(o), value(v) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitAssignmentExpr(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_assignment_expr(this);
         }
     };
     
     // Function call expression
-    class CallExpr : public Expression {
+    class call_expr : public expression {
     public:
-        ExpressionPtr callee;
-        std::vector<ExpressionPtr> arguments;
+        expression_ptr callee;
+        std::vector<expression_ptr> arguments;
         
-        CallExpr(const SourceLocation& loc, ExpressionPtr c, std::vector<ExpressionPtr> args)
-            : Expression(loc), callee(c), arguments(std::move(args)) {}
+        call_expr(const source_location& loc, expression_ptr c, std::vector<expression_ptr> args)
+            : expression(loc), callee(c), arguments(std::move(args)) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitCallExpr(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_call_expr(this);
         }
     };
     
-    // Member access expression
-    class MemberExpr : public Expression {
+    // member access expression
+    class member_expr : public expression {
     public:
-        ExpressionPtr object;
+        expression_ptr object;
         std::string member;
-        bool isArrow;  // true for ->, false for .
+        bool is_arrow;  // true for ->, false for .
         
-        MemberExpr(const SourceLocation& loc, ExpressionPtr obj, const std::string& mem, bool arrow)
-            : Expression(loc), object(obj), member(mem), isArrow(arrow) {}
+        member_expr(const source_location& loc, expression_ptr obj, const std::string& mem, bool arrow)
+            : expression(loc), object(obj), member(mem), is_arrow(arrow) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitMemberExpr(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_member_expr(this);
         }
     };
     
     // Lambda expression
-    class LambdaExpr : public Expression {
+    class lambda_expr : public expression {
     public:
-        struct Capture {
-            std::string name;
-            bool byReference;
+        enum class capture_default {
+            none,           // No default capture (explicit captures only)
+            by_value,       // [=] - capture all by value
+            by_reference    // [&] - capture all by reference
         };
         
-        std::vector<Capture> captures;
-        std::vector<Parameter> parameters;
-        TypeInfoPtr returnType;
-        StatementPtr body;
+        struct capture {
+            std::string name;           // Variable name
+            bool by_reference;          // True if this specific variable is captured by reference
+            
+            // Constructor for explicit variable captures
+            capture(const std::string& n, bool by_ref) 
+                : name(n), by_reference(by_ref) {}
+        };
         
-        LambdaExpr(const SourceLocation& loc) : Expression(loc) {}
+        capture_default default_capture = capture_default::none;
         
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitLambdaExpr(this);
+        std::vector<capture> captures;
+        std::vector<parameter> parameters;
+        type_info_ptr return_type;
+        statement_ptr body;
+        
+        lambda_expr(const source_location& loc) : expression(loc) {}
+        
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_lambda_expr(this);
         }
     };
     
     // New expression
-    class NewExpr : public Expression {
+    class new_expr : public expression {
     public:
-        TypeInfoPtr type;
-        std::vector<ExpressionPtr> arguments;
+        type_info_ptr type;
+        std::vector<expression_ptr> arguments;
         
-        NewExpr(const SourceLocation& loc, TypeInfoPtr t, std::vector<ExpressionPtr> args)
-            : Expression(loc), type(t), arguments(std::move(args)) {}
+        new_expr(const source_location& loc, type_info_ptr t, std::vector<expression_ptr> args)
+            : expression(loc), type(t), arguments(std::move(args)) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitNewExpr(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_new_expr(this);
         }
     };
     
     // Ternary expression
-    class TernaryExpr : public Expression {
+    class ternary_expr : public expression {
     public:
-        ExpressionPtr condition;
-        ExpressionPtr thenExpr;
-        ExpressionPtr elseExpr;
+        expression_ptr condition;
+        expression_ptr then_expression;
+        expression_ptr else_expression;
         
-        TernaryExpr(const SourceLocation& loc, ExpressionPtr c, ExpressionPtr t, ExpressionPtr e)
-            : Expression(loc), condition(c), thenExpr(t), elseExpr(e) {}
+        ternary_expr(const source_location& loc, expression_ptr c, expression_ptr t, expression_ptr e)
+            : expression(loc), condition(c), then_expression(t), else_expression(e) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitTernaryExpr(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_ternary_expr(this);
         }
     };
     
     // Array literal expression
-    class ArrayLiteralExpr : public Expression {
+    class array_literal_expr : public expression {
     public:
-        std::vector<ExpressionPtr> elements;
+        std::vector<expression_ptr> elements;
         
-        ArrayLiteralExpr(const SourceLocation& loc, std::vector<ExpressionPtr> elems)
-            : Expression(loc), elements(std::move(elems)) {}
+        array_literal_expr(const source_location& loc, std::vector<expression_ptr> elems)
+            : expression(loc), elements(std::move(elems)) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitArrayLiteralExpr(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_array_literal_expr(this);
         }
     };
     
     // Map literal expression
-    class MapLiteralExpr : public Expression {
+    class map_literal_expr : public expression {
     public:
-        std::vector<std::pair<ExpressionPtr, ExpressionPtr>> entries;
+        std::vector<std::pair<expression_ptr, expression_ptr>> entries;
         
-        MapLiteralExpr(const SourceLocation& loc, std::vector<std::pair<ExpressionPtr, ExpressionPtr>> e)
-            : Expression(loc), entries(std::move(e)) {}
+        map_literal_expr(const source_location& loc, std::vector<std::pair<expression_ptr, expression_ptr>> e)
+            : expression(loc), entries(std::move(e)) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitMapLiteralExpr(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_map_literal_expr(this);
         }
     };
     
     // This expression
-    class ThisExpr : public Expression {
+    class this_expr : public expression {
     public:
-        ThisExpr(const SourceLocation& loc) : Expression(loc) {}
+        this_expr(const source_location& loc) : expression(loc) {}
         
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitThisExpr(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_this_expr(this);
         }
     };
     
     // Super expression
-    class SuperExpr : public Expression {
+    class super_expr : public expression {
     public:
-        SuperExpr(const SourceLocation& loc) : Expression(loc) {}
+        super_expr(const source_location& loc) : expression(loc) {}
         
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitSuperExpr(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_super_expr(this);
+        }
+    };
+    
+    // Throw expression
+    class throw_expr : public expression {
+    public:
+        expression_ptr value;  // Optional - null for re-throw
+        
+        throw_expr(const source_location& loc, expression_ptr val = nullptr)
+            : expression(loc), value(val) {}
+            
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_throw_expr(this);
         }
     };
     
     // Base statement node
-    class Statement : public ASTNode {
+    class statement : public ast_node {
     public:
-        Statement(const SourceLocation& loc) : ASTNode(loc) {}
+        statement(const source_location& loc) : ast_node(loc) {}
     };
     
-    // Expression statement
-    class ExpressionStmt : public Statement {
+    // expression statement
+    class expression_stmt : public statement {
     public:
-        ExpressionPtr expression;
+        expression_ptr expression;
         
-        ExpressionStmt(const SourceLocation& loc, ExpressionPtr expr)
-            : Statement(loc), expression(expr) {}
+        expression_stmt(const source_location& loc, expression_ptr expr)
+            : statement(loc), expression(expr) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitExpressionStmt(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_expression_stmt(this);
         }
     };
     
     // Block statement
-    class BlockStmt : public Statement {
+    class block_stmt : public statement {
     public:
-        std::vector<DeclarationPtr> declarations;
+        std::vector<declaration_ptr> declarations;
         
-        BlockStmt(const SourceLocation& loc, std::vector<DeclarationPtr> decls)
-            : Statement(loc), declarations(std::move(decls)) {}
+        block_stmt(const source_location& loc, std::vector<declaration_ptr> decls)
+            : statement(loc), declarations(std::move(decls)) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitBlockStmt(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_block_stmt(this);
         }
     };
     
     // If statement
-    class IfStmt : public Statement {
+    class if_stmt : public statement {
     public:
-        ExpressionPtr condition;
-        StatementPtr thenStmt;
-        StatementPtr elseStmt;  // Can be null
+        expression_ptr condition;
+        statement_ptr then_statement;
+        statement_ptr else_statement;  // Can be null
         
-        IfStmt(const SourceLocation& loc, ExpressionPtr c, StatementPtr t, StatementPtr e = nullptr)
-            : Statement(loc), condition(c), thenStmt(t), elseStmt(e) {}
+        if_stmt(const source_location& loc, expression_ptr c, statement_ptr t, statement_ptr e = nullptr)
+            : statement(loc), condition(c), then_statement(t), else_statement(e) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitIfStmt(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_if_stmt(this);
         }
     };
     
     // While statement
-    class WhileStmt : public Statement {
+    class while_stmt : public statement {
     public:
-        ExpressionPtr condition;
-        StatementPtr body;
+        expression_ptr condition;
+        statement_ptr body;
         
-        WhileStmt(const SourceLocation& loc, ExpressionPtr c, StatementPtr b)
-            : Statement(loc), condition(c), body(b) {}
+        while_stmt(const source_location& loc, expression_ptr c, statement_ptr b)
+            : statement(loc), condition(c), body(b) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitWhileStmt(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_while_stmt(this);
         }
     };
     
     // For statement
-    class ForStmt : public Statement {
+    class for_stmt : public statement {
     public:
-        DeclarationPtr init;     // Can be null
-        ExpressionPtr condition;  // Can be null
-        ExpressionPtr update;     // Can be null
-        StatementPtr body;
+        declaration_ptr initializer;     // Can be null
+        expression_ptr condition;  // Can be null
+        expression_ptr update;     // Can be null
+        statement_ptr body;
         
-        ForStmt(const SourceLocation& loc, DeclarationPtr i, ExpressionPtr c, ExpressionPtr u, StatementPtr b)
-            : Statement(loc), init(i), condition(c), update(u), body(b) {}
+        for_stmt(const source_location& loc, declaration_ptr i, expression_ptr c, expression_ptr u, statement_ptr b)
+            : statement(loc), initializer(i), condition(c), update(u), body(b) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitForStmt(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_for_stmt(this);
         }
     };
     
     // Range-based for statement (C++11 style)
-    class RangeForStmt : public Statement {
+    class range_for_stmt : public statement {
     public:
-        TypeInfoPtr elementType;      // Type of loop variable (auto, int, etc.)
-        std::string variableName;     // Name of loop variable
-        bool isReference;             // true for auto&, false for auto
-        bool isConst;                 // true for const auto&
-        ExpressionPtr container;      // The container to iterate over
-        StatementPtr body;            // Loop body
+        type_info_ptr element_type;      // Type of loop variable (auto, int, etc.)
+        std::string variable_name;     // Name of loop variable
+        bool is_reference;             // true for auto&, false for auto
+        bool is_const;                 // true for const auto&
+        expression_ptr container;      // The container to iterate over
+        statement_ptr body;            // Loop body
         
-        RangeForStmt(const SourceLocation& loc, TypeInfoPtr type, const std::string& varName, 
-                     bool ref, bool constRef, ExpressionPtr cont, StatementPtr b)
-            : Statement(loc), elementType(type), variableName(varName), 
-              isReference(ref), isConst(constRef), container(cont), body(b) {}
+        range_for_stmt(const source_location& loc, type_info_ptr type, const std::string& varName, 
+                     bool ref, bool constRef, expression_ptr cont, statement_ptr b)
+            : statement(loc), element_type(type), variable_name(varName), 
+              is_reference(ref), is_const(constRef), container(cont), body(b) {}
               
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitRangeForStmt(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_range_for_stmt(this);
         }
     };
     
     // Return statement
-    class ReturnStmt : public Statement {
+    class return_stmt : public statement {
     public:
-        ExpressionPtr value;  // Can be null
+        expression_ptr value;  // Can be null
         
-        ReturnStmt(const SourceLocation& loc, ExpressionPtr v = nullptr)
-            : Statement(loc), value(v) {}
+        return_stmt(const source_location& loc, expression_ptr v = nullptr)
+            : statement(loc), value(v) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitReturnStmt(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_return_stmt(this);
         }
     };
     
     // Break statement
-    class BreakStmt : public Statement {
+    class break_stmt : public statement {
     public:
-        BreakStmt(const SourceLocation& loc) : Statement(loc) {}
+        break_stmt(const source_location& loc) : statement(loc) {}
         
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitBreakStmt(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_break_stmt(this);
         }
     };
     
     // Continue statement
-    class ContinueStmt : public Statement {
+    class continue_stmt : public statement {
     public:
-        ContinueStmt(const SourceLocation& loc) : Statement(loc) {}
+        continue_stmt(const source_location& loc) : statement(loc) {}
         
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitContinueStmt(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_continue_stmt(this);
+        }
+    };
+    
+    // Try-catch statement
+    class try_stmt : public statement {
+    public:
+        statement_ptr try_block;
+        std::string catch_var;  // Optional - variable name for exception message
+        statement_ptr catch_block;
+        
+        try_stmt(const source_location& loc, statement_ptr try_blk, statement_ptr catch_blk, const std::string& var = "")
+            : statement(loc), try_block(try_blk), catch_var(var), catch_block(catch_blk) {}
+            
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_try_stmt(this);
         }
     };
     
     // Base declaration node
-    class Declaration : public Statement {
+    class declaration : public statement {
     public:
-        Declaration(const SourceLocation& loc) : Statement(loc) {}
+        declaration(const source_location& loc) : statement(loc) {}
     };
     
     // Variable declaration
-    class VariableDecl : public Declaration {
+    class variable_decl : public declaration {
     public:
-        TypeInfoPtr type;
+        type_info_ptr type;
         std::string name;
-        ExpressionPtr initializer;  // Can be null
+        expression_ptr initializer;  // Can be null
         
-        VariableDecl(const SourceLocation& loc, TypeInfoPtr t, const std::string& n, ExpressionPtr init = nullptr)
-            : Declaration(loc), type(t), name(n), initializer(init) {}
+        variable_decl(const source_location& loc, type_info_ptr t, const std::string& n, expression_ptr init = nullptr)
+            : declaration(loc), type(t), name(n), initializer(init) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitVariableDecl(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_variable_decl(this);
         }
     };
     
     // Function declaration
-    class FunctionDecl : public Declaration {
+    class function_decl : public declaration {
     public:
         std::string name;
-        std::vector<Parameter> parameters;
-        TypeInfoPtr returnType;
-        std::shared_ptr<BlockStmt> body;
+        std::vector<parameter> parameters;
+        type_info_ptr return_type;
+        std::shared_ptr<block_stmt> body;
         
-        FunctionDecl(const SourceLocation& loc, const std::string& n)
-            : Declaration(loc), name(n) {}
+        function_decl(const source_location& loc, const std::string& n)
+            : declaration(loc), name(n) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitFunctionDecl(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_function_decl(this);
         }
     };
     
     // Class declaration
-    class ClassDecl : public Declaration {
+    class class_decl : public declaration {
     public:
-        enum MemberVisibility {
+        enum member_visibility {
             Public,
             Private
         };
         
-        struct Member {
-            MemberVisibility visibility;
-            DeclarationPtr declaration;
+        struct member {
+            member_visibility visibility;
+            declaration_ptr declaration;
         };
         
         std::string name;
-        std::vector<std::string> baseClasses;
-        std::vector<Member> members;
+        std::vector<std::string> base_classes;
+        std::vector<member> members;
         
-        ClassDecl(const SourceLocation& loc, const std::string& n)
-            : Declaration(loc), name(n) {}
+        class_decl(const source_location& loc, const std::string& n)
+            : declaration(loc), name(n) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitClassDecl(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_class_decl(this);
         }
     };
     
-    // Expression as declaration (for top-level expressions)
-    class ExpressionDecl : public Declaration {
+    // expression as declaration (for top-level expressions)
+    class expression_decl : public declaration {
     public:
-        ExpressionPtr expression;
+        expression_ptr expression;
+        bool implicit_return;  // True if this expression should implicitly return its value
         
-        ExpressionDecl(const SourceLocation& loc, ExpressionPtr expr)
-            : Declaration(loc), expression(expr) {}
+        expression_decl(const source_location& loc, expression_ptr expr, bool implicit_ret = false)
+            : declaration(loc), expression(expr), implicit_return(implicit_ret) {}
             
-        void accept(ASTVisitor* visitor) override {
-            visitor->visitExpressionDecl(this);
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_expression_decl(this);
         }
     };
     
-    // Statement as declaration (for top-level statements in scripting context)
-    class StatementDecl : public Declaration {
+    // statement as declaration (for top-level statements in scripting context)
+    class statement_decl : public declaration {
     public:
-        StatementPtr statement;
+        statement_ptr statement;
         
-        StatementDecl(const SourceLocation& loc, StatementPtr stmt)
-            : Declaration(loc), statement(stmt) {}
+        statement_decl(const source_location& loc, statement_ptr stmt)
+            : declaration(loc), statement(stmt) {}
             
-        void accept(ASTVisitor* visitor) override {
+        void accept(ast_visitor* visitor) override {
             // Just visit the wrapped statement
             statement->accept(visitor);
         }
     };
     
-} // namespace JaiScript
+} // namespace jai

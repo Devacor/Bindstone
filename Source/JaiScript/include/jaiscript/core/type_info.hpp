@@ -16,7 +16,7 @@ namespace jai {
     // Represents complete type information including generic parameters
     class type_info {
     public:
-        value_type base_type;
+        script_value_type base_type;
         std::string type_name;  // For Object<T>, this would be the class name
         
         // Generic type parameters
@@ -27,41 +27,41 @@ namespace jai {
         bool is_signed = true;      // For integral types
         
         // Constructors
-        type_info(value_type type) : base_type(type) {}
-        type_info(value_type type, const std::string& name) : base_type(type), type_name(name) {}
+        type_info(script_value_type type) : base_type(type) {}
+        type_info(script_value_type type, const std::string& name) : base_type(type), type_name(name) {}
         
         // Factory methods for common types
         static type_info_ptr make_int() { 
-            auto info = std::make_shared<type_info>(value_type::jai_int_type);
+            auto info = std::make_shared<type_info>(script_value_type::jai_int_type);
             info->type_name = "int";
             info->native_size = sizeof(script_int);
             info->is_signed = true;
             return info;
         }
         static type_info_ptr make_float() { 
-            auto info = std::make_shared<type_info>(value_type::jai_float_type);
+            auto info = std::make_shared<type_info>(script_value_type::jai_float_type);
             info->type_name = "float";
             info->native_size = sizeof(script_float);
             return info;
         }
         static type_info_ptr make_string() { 
-            auto info = std::make_shared<type_info>(value_type::jai_string_type);
+            auto info = std::make_shared<type_info>(script_value_type::jai_string_type);
             info->type_name = "string";
             return info;
         }
         static type_info_ptr make_bool() { 
-            auto info = std::make_shared<type_info>(value_type::jai_bool_type);
+            auto info = std::make_shared<type_info>(script_value_type::jai_bool_type);
             info->type_name = "bool";
             return info;
         }
         static type_info_ptr make_char() { 
-            auto info = std::make_shared<type_info>(value_type::jai_char_type);
+            auto info = std::make_shared<type_info>(script_value_type::jai_char_type);
             info->type_name = "char";
             return info;
         }
         
         static type_info_ptr make_void() {
-            auto info = std::make_shared<type_info>(value_type::jai_null_type);
+            auto info = std::make_shared<type_info>(script_value_type::jai_null_type);
             info->type_name = "void";
             return info;
         }
@@ -129,7 +129,7 @@ namespace jai {
         
         // Array<T>
         static type_info_ptr make_array(type_info_ptr element_type) {
-            auto info = std::make_shared<type_info>(value_type::jai_array_type);
+            auto info = std::make_shared<type_info>(script_value_type::jai_array_type);
             info->type_name = "array";
             info->type_params.push_back(element_type);
             return info;
@@ -137,7 +137,7 @@ namespace jai {
         
         // Map<K,V>
         static type_info_ptr make_map(type_info_ptr keyType, type_info_ptr valueType) {
-            auto info = std::make_shared<type_info>(value_type::jai_map_type);
+            auto info = std::make_shared<type_info>(script_value_type::jai_map_type);
             info->type_name = "map";
             info->type_params.push_back(keyType);
             info->type_params.push_back(valueType);
@@ -146,33 +146,33 @@ namespace jai {
         
         // Object<T>
         static type_info_ptr make_object(const std::string& className) {
-            return std::make_shared<type_info>(value_type::jai_object_type, className);
+            return std::make_shared<type_info>(script_value_type::jai_object_type, className);
         }
         
         // shared_ptr<T>
         static type_info_ptr make_shared_ptr(type_info_ptr pointee_type) {
-            auto info = std::make_shared<type_info>(value_type::jai_shared_ptr_type);
+            auto info = std::make_shared<type_info>(script_value_type::jai_shared_ptr_type);
             info->type_params.push_back(pointee_type);
             return info;
         }
         
         // weak_ptr<T>
         static type_info_ptr make_weak_ptr(type_info_ptr pointee_type) {
-            auto info = std::make_shared<type_info>(value_type::jai_weak_ptr_type);
+            auto info = std::make_shared<type_info>(script_value_type::jai_weak_ptr_type);
             info->type_params.push_back(pointee_type);
             return info;
         }
         
         // T&
         static type_info_ptr make_reference(type_info_ptr referenced_type) {
-            auto info = std::make_shared<type_info>(value_type::jai_reference_type);
+            auto info = std::make_shared<type_info>(script_value_type::jai_reference_type);
             info->type_params.push_back(referenced_type);
             return info;
         }
         
         // Function<ReturnType(Args...)>
         static type_info_ptr make_function(type_info_ptr return_type, std::vector<type_info_ptr> arg_types) {
-            auto info = std::make_shared<type_info>(value_type::jai_function_type);
+            auto info = std::make_shared<type_info>(script_value_type::jai_function_type);
             info->type_params.push_back(return_type);
             info->type_params.insert(info->type_params.end(), arg_types.begin(), arg_types.end());
             return info;
@@ -211,32 +211,32 @@ namespace jai {
         }
         
         // Type checking
-        bool is_array() const { return base_type == value_type::jai_array_type; }
-        bool is_map() const { return base_type == value_type::jai_map_type; }
-        bool is_object() const { return base_type == value_type::jai_object_type; }
-        bool is_function() const { return base_type == value_type::jai_function_type; }
-        bool is_reference() const { return base_type == value_type::jai_reference_type; }
-        bool is_shared_ptr() const { return base_type == value_type::jai_shared_ptr_type; }
-        bool is_weak_ptr() const { return base_type == value_type::jai_weak_ptr_type; }
+        bool is_array() const { return base_type == script_value_type::jai_array_type; }
+        bool is_map() const { return base_type == script_value_type::jai_map_type; }
+        bool is_object() const { return base_type == script_value_type::jai_object_type; }
+        bool is_function() const { return base_type == script_value_type::jai_function_type; }
+        bool is_reference() const { return base_type == script_value_type::jai_reference_type; }
+        bool is_shared_ptr() const { return base_type == script_value_type::jai_shared_ptr_type; }
+        bool is_weak_ptr() const { return base_type == script_value_type::jai_weak_ptr_type; }
         
         // Get type parameters
-        type_info_ptr get_element_type() const {  // For Array<T>, shared_ptr<T>, etc.
+        type_info_ptr element_type() const {  // For Array<T>, shared_ptr<T>, etc.
             return type_params.empty() ? nullptr : type_params[0];
         }
         
-        type_info_ptr get_key_type() const {  // For Map<K,V>
+        type_info_ptr key_type() const {  // For Map<K,V>
             return type_params.empty() ? nullptr : type_params[0];
         }
         
-        type_info_ptr get_value_type() const {  // For Map<K,V>
+        type_info_ptr value_type() const {  // For Map<K,V>
             return type_params.size() < 2 ? nullptr : type_params[1];
         }
         
-        type_info_ptr get_return_type() const {  // For Function
+        type_info_ptr return_type() const {  // For Function
             return type_params.empty() ? nullptr : type_params[0];
         }
         
-        std::vector<type_info_ptr> get_arg_types() const {  // For Function
+        std::vector<type_info_ptr> arg_types() const {  // For Function
             if (type_params.size() <= 1) return {};
             return std::vector<type_info_ptr>(type_params.begin() + 1, type_params.end());
         }

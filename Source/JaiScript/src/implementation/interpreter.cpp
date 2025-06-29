@@ -25,7 +25,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         }
         auto& arrayPtr = get_array_storage(self);
         arrayPtr->push_back(args[0].clone());  // Deep copy when pushing
-        return script_value(); // void return
+        return script_value();
     }},
     
     {"pop", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
@@ -54,7 +54,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         }
         auto& arrayPtr = get_array_storage(self);
         arrayPtr->clear();
-        return script_value(); // void return
+        return script_value();
     }},
     
     {"front", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
@@ -101,7 +101,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         }
         auto& mapPtr = get_map_storage(self);
         mapPtr->clear();
-        return script_value(); // void return
+        return script_value();
     }},
     
     {"contains", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
@@ -118,7 +118,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         }
         auto& mapPtr = get_map_storage(self);
         mapPtr->erase(args[0]);
-        return script_value(); // void return
+        return script_value();
     }},
     
     {"keys", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
@@ -1370,7 +1370,7 @@ void interpreter::visit_block_stmt(block_stmt* stmt) {
 void interpreter::visit_variable_decl(variable_decl* decl) {
     // Check if this is a reference variable declaration
     bool is_reference = false;
-    if (decl->type && decl->type->base_type == value_type::jai_reference_type) {
+    if (decl->type && decl->type->base_type == script_value_type::jai_reference_type) {
         is_reference = true;
     }
     
@@ -2031,14 +2031,14 @@ void interpreter::visit_new_expr(new_expr* expr) {
     }
     
     // Handle built-in types specially
-    if (expr->type->base_type == value_type::jai_array_type) {
+    if (expr->type->base_type == script_value_type::jai_array_type) {
         // array<T>{} constructor
         if (!expr->arguments.empty()) {
             throw runtime_error("array{} constructor does not take arguments");
         }
         
         // Create empty array with the specified element type
-        auto element_type = expr->type->get_element_type();
+        auto element_type = expr->type->element_type();
         if (!element_type) {
             element_type = type_info::make_int(); // Default to int if no type specified
         }
@@ -2046,15 +2046,15 @@ void interpreter::visit_new_expr(new_expr* expr) {
         return;
     }
     
-    if (expr->type->base_type == value_type::jai_map_type) {
+    if (expr->type->base_type == script_value_type::jai_map_type) {
         // map<K,V>{} constructor
         if (!expr->arguments.empty()) {
             throw runtime_error("map{} constructor does not take arguments");
         }
         
         // Create empty map with the specified key/value types
-        auto key_type = expr->type->get_key_type();
-        auto value_type = expr->type->get_value_type();
+        auto key_type = expr->type->key_type();
+        auto value_type = expr->type->value_type();
         if (!key_type) key_type = type_info::make_string();
         if (!value_type) value_type = type_info::make_int();
         push_value(script_value::make_map(key_type, value_type));
@@ -2387,6 +2387,13 @@ void interpreter::visit_function_decl(function_decl* decl) {
 }
 
 void interpreter::visit_class_decl(class_decl* decl) {
+    // TODO: Implement script class registration and compilation
+    // 1. Create script_class_definition from AST
+    // 2. Process fields with default values
+    // 3. Compile methods and constructors
+    // 4. Handle inheritance from base classes
+    // 5. Register class in engine's class registry
+    // 6. Support for visibility modifiers (public/private/protected)
     throw runtime_error("Class declarations not yet implemented");
 }
 

@@ -99,7 +99,7 @@ script_value script_value::clone() const {
     
     // Handle deep copying for different types
     switch (type()) {
-        case value_type::jai_array_type: {
+        case script_value_type::jai_array_type: {
             // Deep copy the array - each element is also cloned
             auto& other_array = *std::get<std::shared_ptr<std::vector<script_value>>>(storage_);
             auto new_array = std::make_shared<std::vector<script_value>>();
@@ -110,7 +110,7 @@ script_value script_value::clone() const {
             result.storage_ = new_array;
             break;
         }
-        case value_type::jai_map_type: {
+        case script_value_type::jai_map_type: {
             // Deep copy the map - keys and values are cloned
             auto& other_map = *std::get<std::shared_ptr<std::map<script_value, script_value>>>(storage_);
             auto new_map = std::make_shared<std::map<script_value, script_value>>();
@@ -120,7 +120,7 @@ script_value script_value::clone() const {
             result.storage_ = new_map;
             break;
         }
-        case value_type::jai_object_type: {
+        case script_value_type::jai_object_type: {
             // Deep copy for objects
             auto obj_holder = std::get<std::shared_ptr<object_holder>>(storage_);
             
@@ -145,7 +145,7 @@ script_value script_value::clone() const {
             }
             break;
         }
-        case value_type::jai_reference_type: {
+        case script_value_type::jai_reference_type: {
             // When cloning a reference, we want to clone the referenced value,
             // not create another reference to the same value
             return deref().clone();
@@ -161,7 +161,7 @@ script_value script_value::clone() const {
 
 const script_function& script_value::as_function() const {
     const script_value& val = deref();
-    if (val.type() != value_type::jai_function_type) {
+    if (val.type() != script_value_type::jai_function_type) {
         throw runtime_error("script_value is not a function");
     }
     return std::get<script_function>(val.storage_);
@@ -169,30 +169,30 @@ const script_function& script_value::as_function() const {
 
 std::string script_value::to_string() const {
     // Special handling for references to show what they point to
-    if (type() == value_type::jai_reference_type) {
+    if (type() == script_value_type::jai_reference_type) {
         return deref().to_string();
     }
     
     switch (type()) {
-        case value_type::jai_null_type:
+        case script_value_type::jai_null_type:
             return "null";
-        case value_type::jai_int_type:
+        case script_value_type::jai_int_type:
             return std::to_string(as_int());
-        case value_type::jai_float_type:
+        case script_value_type::jai_float_type:
             return std::to_string(as_float());
-        case value_type::jai_string_type:
+        case script_value_type::jai_string_type:
             return as_string();
-        case value_type::jai_char_type:
+        case script_value_type::jai_char_type:
             return std::string(1, as_char());
-        case value_type::jai_bool_type:
+        case script_value_type::jai_bool_type:
             return as_bool() ? "true" : "false";
-        case value_type::jai_array_type:
+        case script_value_type::jai_array_type:
             return "[array]";
-        case value_type::jai_map_type:
+        case script_value_type::jai_map_type:
             return "[map]";
-        case value_type::jai_object_type:
+        case script_value_type::jai_object_type:
             return "[object]";
-        case value_type::jai_function_type:
+        case script_value_type::jai_function_type:
             return "[function]";
         default:
             return "[unknown]";
@@ -200,7 +200,7 @@ std::string script_value::to_string() const {
 }
 
 const script_value& script_value::deref() const {
-    if (type() == value_type::jai_reference_type) {
+    if (type() == script_value_type::jai_reference_type) {
         auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
         if (!refHolder || !refHolder->target) {
             throw runtime_error("Null reference");
@@ -216,7 +216,7 @@ const script_value& script_value::deref() const {
 }
 
 script_value& script_value::deref() {
-    if (type() == value_type::jai_reference_type) {
+    if (type() == script_value_type::jai_reference_type) {
         auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
         if (!refHolder || !refHolder->target) {
             throw runtime_error("Null reference");
@@ -232,7 +232,7 @@ script_value& script_value::deref() {
 }
 
 void script_value::assign_through(const script_value& value) {
-    if (type() == value_type::jai_reference_type) {
+    if (type() == script_value_type::jai_reference_type) {
         auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
         if (!refHolder || !refHolder->target) {
             throw runtime_error("Null reference in assign_through");
@@ -249,7 +249,7 @@ void script_value::assign_through(const script_value& value) {
 }
 
 void script_value::assign_through(script_value&& value) {
-    if (type() == value_type::jai_reference_type) {
+    if (type() == script_value_type::jai_reference_type) {
         auto refHolder = std::get<std::shared_ptr<reference_holder>>(storage_);
         if (!refHolder || !refHolder->target) {
             throw runtime_error("Null reference in assign_through");
@@ -271,17 +271,17 @@ bool script_value::operator==(const script_value& other) const {
     }
     
     switch (type()) {
-        case value_type::jai_null_type:
+        case script_value_type::jai_null_type:
             return true;
-        case value_type::jai_int_type:
+        case script_value_type::jai_int_type:
             return as_int() == other.as_int();
-        case value_type::jai_float_type:
+        case script_value_type::jai_float_type:
             return as_float() == other.as_float();
-        case value_type::jai_string_type:
+        case script_value_type::jai_string_type:
             return as_string() == other.as_string();
-        case value_type::jai_char_type:
+        case script_value_type::jai_char_type:
             return as_char() == other.as_char();
-        case value_type::jai_bool_type:
+        case script_value_type::jai_bool_type:
             return as_bool() == other.as_bool();
         default:
             // TODO: Implement for complex types
@@ -297,11 +297,11 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
     
     // Then compare values for same types
     switch (type()) {
-        case value_type::jai_null_type:
+        case script_value_type::jai_null_type:
             return std::strong_ordering::equal; // All nulls are equal
-        case value_type::jai_int_type:
+        case script_value_type::jai_int_type:
             return as_int() <=> other.as_int();
-        case value_type::jai_float_type:
+        case script_value_type::jai_float_type:
             // script_float comparison returns partial_ordering, convert to strong
             if (auto cmp = as_float() <=> other.as_float(); cmp < 0)
                 return std::strong_ordering::less;
@@ -309,11 +309,11 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
                 return std::strong_ordering::greater;
             else
                 return std::strong_ordering::equal;
-        case value_type::jai_string_type:
+        case script_value_type::jai_string_type:
             return as_string() <=> other.as_string();
-        case value_type::jai_char_type:
+        case script_value_type::jai_char_type:
             return as_char() <=> other.as_char();
-        case value_type::jai_bool_type:
+        case script_value_type::jai_bool_type:
             return as_bool() <=> other.as_bool();
         default:
             // For complex types, compare by address for now

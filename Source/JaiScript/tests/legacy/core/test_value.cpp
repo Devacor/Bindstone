@@ -10,33 +10,33 @@ JAI_TEST_SUITE(script_valueTests)
 JAI_TEST(default_construction) {
     script_value v;
     expect_true(v.is_null());
-    expect_eq(v.type(), value_type::jai_null_type);
+    expect_eq(v.type(), script_value_type::jai_null_type);
 }
 
 JAI_TEST(null_construction) {
     script_value v(nullptr);
     expect_true(v.is_null());
-    expect_eq(v.type(), value_type::jai_null_type);
+    expect_eq(v.type(), script_value_type::jai_null_type);
 }
 
 JAI_TEST(integer_construction) {
     script_value v(script_int(42));
     expect_true(v.is_int());
-    expect_eq(v.type(), value_type::jai_int_type);
+    expect_eq(v.type(), script_value_type::jai_int_type);
     expect_eq(v.as<script_int>(), 42);
 }
 
 JAI_TEST(float_construction) {
     script_value v(script_float(3.14));
     expect_true(v.is_float());
-    expect_eq(v.type(), value_type::jai_float_type);
+    expect_eq(v.type(), script_value_type::jai_float_type);
     expect_near(v.as<script_float>(), 3.14, 0.001);
 }
 
 JAI_TEST(string_construction) {
     script_value v(script_string("hello"));
     expect_true(v.is_string());
-    expect_eq(v.type(), value_type::jai_string_type);
+    expect_eq(v.type(), script_value_type::jai_string_type);
     expect_eq(v.as<script_string>(), "hello");
 }
 
@@ -49,7 +49,7 @@ JAI_TEST(cstring_construction) {
 JAI_TEST(char_construction) {
     script_value v(script_char('x'));
     expect_true(v.is_char());
-    expect_eq(v.type(), value_type::jai_char_type);
+    expect_eq(v.type(), script_value_type::jai_char_type);
     expect_eq(v.as<script_char>(), 'x');
 }
 
@@ -159,38 +159,38 @@ JAI_TEST(null_access_throws) {
 JAI_TEST(array_creation) {
     script_value arr = script_value::make_array(type_info::make_int());
     expect_true(arr.is_array());
-    expect_eq(arr.type(), value_type::jai_array_type);
+    expect_eq(arr.type(), script_value_type::jai_array_type);
     
     auto type_info = arr.get_type_info();
-    expect_eq(type_info->base_type, value_type::jai_array_type);
+    expect_eq(type_info->base_type, script_value_type::jai_array_type);
     expect_eq(type_info->type_params.size(), 1u);
-    expect_eq(type_info->type_params[0]->base_type, value_type::jai_int_type);
+    expect_eq(type_info->type_params[0]->base_type, script_value_type::jai_int_type);
 }
 
 JAI_TEST(map_creation) {
     script_value map = script_value::make_map(type_info::make_string(), type_info::make_int());
     expect_true(map.is_map());
-    expect_eq(map.type(), value_type::jai_map_type);
+    expect_eq(map.type(), script_value_type::jai_map_type);
     
     auto type_info = map.get_type_info();
-    expect_eq(type_info->base_type, value_type::jai_map_type);
+    expect_eq(type_info->base_type, script_value_type::jai_map_type);
     expect_eq(type_info->type_params.size(), 2u);
-    expect_eq(type_info->type_params[0]->base_type, value_type::jai_string_type);
-    expect_eq(type_info->type_params[1]->base_type, value_type::jai_int_type);
+    expect_eq(type_info->type_params[0]->base_type, script_value_type::jai_string_type);
+    expect_eq(type_info->type_params[1]->base_type, script_value_type::jai_int_type);
 }
 
 JAI_TEST(sharedptr_creation) {
     script_value original(script_int(42));
     script_value ptr = script_value::make_shared_ptr(original);
     expect_true(ptr.is_shared_ptr());
-    expect_eq(ptr.type(), value_type::jai_shared_ptr_type);
+    expect_eq(ptr.type(), script_value_type::jai_shared_ptr_type);
 }
 
 JAI_TEST(reference_creation) {
     // References now require an environment
     // This test is more about the type system than actual reference behavior
     // For proper reference testing, see test_script_references.cpp
-    expect_eq(value_type::jai_reference_type, value_type::jai_reference_type);  // Trivial test
+    expect_eq(script_value_type::jai_reference_type, script_value_type::jai_reference_type);  // Trivial test
 }
 
 JAI_TEST_SUITE_END()

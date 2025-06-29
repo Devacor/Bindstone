@@ -1,0 +1,322 @@
+#include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/jvm/vm_function_integration.hpp>
+#include <jaiscript/jvm/vm_class_system.hpp>
+
+using namespace jai;
+using namespace jai::foundry;
+using namespace jai::jvm;
+
+namespace jai::foundry::tests {
+
+class vm_function_tests : public suite {
+public:
+    vm_function_tests() : suite("VM Function Bytecode Tests") {}
+    
+    void forge_tests() override {
+        test("basic_function_compilation", [this]() {
+            vm_aware_engine engine;
+            
+            // Define a function - should compile to bytecode
+            auto result = engine.execute(R"(
+                auto add(auto x, auto y) -> auto {
+                    return x + y;
+                }
+                add(5, 3)
+            )");
+            
+            check_eq(result.as<script_int>(), 8);
+            
+            // Verify it was compiled to bytecode
+            auto& registry = engine.get_function_registry();
+            auto func = registry.find_function("add");
+            check_not_null(func.get());
+            check_true(!func->bytecode.empty());
+        });
+        
+        test("function_with_locals", [this]() {
+            vm_aware_engine engine;
+            
+            auto result = engine.execute(R"(
+                auto compute(auto a, auto b) -> auto {
+                    auto temp1 = a * 2;
+                    auto temp2 = b * 3;
+                    auto sum = temp1 + temp2;
+                    return sum;
+                }
+                compute(4, 5)
+            )");
+            
+            check_eq(result.as<script_int>(), 23); // 4*2 + 5*3 = 8 + 15 = 23
+        });
+        
+        test("recursive_function", [this]() {
+            vm_aware_engine engine;
+            
+            auto result = engine.execute(R"(
+                auto factorial(auto n) -> auto {
+                    if (n <= 1) return 1;
+                    return n * factorial(n - 1);
+                }
+                factorial(5)
+            )");
+            
+            check_eq(result.as<script_int>(), 120);
+        });
+        
+        test("function_overloading", [this]() {
+            vm_aware_engine engine;
+            
+            engine.execute(R"(
+                auto process(auto x) -> auto {
+                    return x * 2;
+                }
+                
+                auto process(auto x, auto y) -> auto {
+                    return x + y;
+                }
+            )");
+            
+            auto result1 = engine.execute("process(5)");
+            check_eq(result1.as<script_int>(), 10);
+            
+            auto result2 = engine.execute("process(5, 3)");
+            check_eq(result2.as<script_int>(), 8);
+        });
+        
+        test("function_as_value", [this]() {
+            vm_aware_engine engine;
+            
+            auto result = engine.execute(R"(
+                auto double_it(auto x) -> auto {
+                    return x * 2;
+                }
+                
+                auto apply(auto f, auto x) -> auto {
+                    return f(x);
+                }
+                
+                apply(double_it, 7)
+            )");
+            
+            check_eq(result.as<script_int>(), 14);
+        });
+        
+        test("lambda_compilation", [this]() {
+            vm_aware_engine engine;
+            
+            auto result = engine.execute(R"(
+                auto make_adder(auto n) -> auto {
+                    return [n](auto x) -> auto {
+                        return x + n;
+                    };
+                }
+                
+                auto add5 = make_adder(5);
+                add5(10)
+            )");
+            
+            check_eq(result.as<script_int>(), 15);
+        });
+        
+        test("closure_capture", [this]() {
+            vm_aware_engine engine;
+            
+            auto result = engine.execute(R"(
+                auto make_counter() -> auto {
+                    auto count = 0;
+                    return [&count]() -> auto {
+                        count = count + 1;
+                        return count;
+                    };
+                }
+                
+                auto counter = make_counter();
+                counter();  // 1
+                counter();  // 2
+                counter()   // 3
+            )");
+            
+            check_eq(result.as<script_int>(), 3);
+        });
+        
+        test("cross_backend_function_call", [this]() {
+            vm_aware_engine engine;
+            
+            // Define function in interpreter
+            engine.execute_with_interpreter(R"(
+                auto interpreter_func(auto x) -> auto {
+                    return x * 3;
+                }
+            )");
+            
+            // Call from VM
+            auto result = engine.execute_with_vm(R"(
+                auto vm_func(auto x) -> auto {
+                    return interpreter_func(x) + 10;
+                }
+                vm_func(5)
+            )");
+            
+            check_eq(result.as<script_int>(), 25); // 5*3 + 10 = 25
+        });
+        
+        test("bytecode_to_bytecode_call", [this]() {
+            vm_aware_engine engine;
+            
+            // Both functions should be bytecode
+            auto result = engine.execute(R"(
+                auto helper(auto x) -> auto {
+                    return x * x;
+                }
+                
+                auto calculate(auto a, auto b) -> auto {
+                    return helper(a) + helper(b);
+                }
+                
+                calculate(3, 4)
+            )");
+            
+            check_eq(result.as<script_int>(), 25); // 3*3 + 4*4 = 9 + 16 = 25
+            
+            // Verify both are bytecode functions
+            auto& registry = engine.get_function_registry();
+            check_not_null(registry.find_function("helper").get());
+            check_not_null(registry.find_function("calculate").get());
+        });
+        
+        test("function_with_complex_control_flow", [this]() {
+            vm_aware_engine engine;
+            
+            auto result = engine.execute(R"(
+                auto process(auto n) -> auto {
+                    auto sum = 0;
+                    for (auto i = 1; i <= n; i = i + 1) {
+                        if (i % 2 == 0) {
+                            sum = sum + i;
+                        } else {
+                            sum = sum - i;
+                        }
+                    }
+                    return sum;
+                }
+                process(10)
+            )");
+            
+            // 2 + 4 + 6 + 8 + 10 - 1 - 3 - 5 - 7 - 9 = 30 - 25 = 5
+            check_eq(result.as<script_int>(), 5);
+        });
+        
+        test("tail_call_optimization", [this]() {
+            vm_aware_engine engine;
+            
+            auto result = engine.execute(R"(
+                auto tail_recursive(auto n, auto acc) -> auto {
+                    if (n <= 0) return acc;
+                    return tail_recursive(n - 1, acc + n);
+                }
+                tail_recursive(100, 0)
+            )");
+            
+            check_eq(result.as<script_int>(), 5050); // Sum of 1 to 100
+        });
+        
+        test("function_profiling", [this]() {
+            vm_aware_engine engine;
+            
+            // Enable profiling
+            engine.get_profiler().start_profiling();
+            
+            engine.execute(R"(
+                auto hot_function(auto x) -> auto {
+                    return x * 2;
+                }
+                
+                auto sum = 0;
+                for (auto i = 0; i < 1000; i = i + 1) {
+                    sum = sum + hot_function(i);
+                }
+                sum
+            )");
+            
+            engine.get_profiler().stop_profiling();
+            
+            // Check that function was profiled
+            auto hot_funcs = engine.get_profiler().get_hot_functions(500);
+            bool found = false;
+            for (const auto& func : hot_funcs) {
+                if (func.name == "hot_function") {
+                    found = true;
+                    check_true(func.total_calls >= 1000);
+                    check_true(func.bytecode_calls > 0);
+                    break;
+                }
+            }
+            check_true(found);
+        });
+        
+        test("function_inlining_candidate", [this]() {
+            vm_aware_engine engine;
+            
+            engine.execute(R"(
+                auto small_func(auto x) -> auto {
+                    return x + 1;
+                }
+                
+                auto caller() -> auto {
+                    auto sum = 0;
+                    for (auto i = 0; i < 100; i = i + 1) {
+                        sum = sum + small_func(i);
+                    }
+                    return sum;
+                }
+                
+                caller()
+            )");
+            
+            // Check if small_func is marked as inline candidate
+            auto& registry = engine.get_function_registry();
+            auto func = registry.find_function("small_func");
+            check_not_null(func.get());
+            // After many calls, it should be considered for inlining
+            // (actual inlining depends on optimization passes)
+        });
+        
+        test("builtin_function_fallback", [this]() {
+            vm_aware_engine engine;
+            
+            // Register a builtin
+            engine.add_function("builtin_sqrt", [](script_float x) -> script_float {
+                return std::sqrt(x);
+            });
+            
+            // Call from VM function
+            auto result = engine.execute(R"(
+                auto calculate(auto x) -> auto {
+                    return builtin_sqrt(x) * 2.0;
+                }
+                calculate(16.0)
+            )");
+            
+            check_eq(result.as<script_float>(), 8.0);
+        });
+        
+        test("function_error_handling", [this]() {
+            vm_aware_engine engine;
+            
+            // Function with wrong argument count
+            engine.execute(R"(
+                auto needs_two(auto x, auto y) -> auto {
+                    return x + y;
+                }
+            )");
+            
+            check_throws<std::runtime_error>([&]() {
+                engine.execute("needs_two(5)"); // Missing argument
+            });
+        });
+    }
+};
+
+} // namespace jai::foundry::tests
+
+FOUNDRY_REGISTER(jai::foundry::tests::vm_function_tests)

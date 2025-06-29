@@ -443,7 +443,7 @@ type_info_ptr parser::parse_type() {
         return type_info::make_char();
     }
     if (match(token_type::void_keyword)) {
-        auto info = std::make_shared<type_info>(value_type::jai_null_type);
+        auto info = std::make_shared<type_info>(script_value_type::jai_null_type);
         info->type_name = "void";
         return info;
     }
@@ -800,7 +800,7 @@ expression_ptr parser::postfix() {
                 
                 // Create a new_expr for object construction
                 // The type name is in the identifier
-                auto type_info_ptr = std::make_shared<type_info>(value_type::jai_object_type, identExpr->name);
+                auto type_info_ptr = std::make_shared<type_info>(script_value_type::jai_object_type, identExpr->name);
                 expr = std::make_shared<new_expr>(identExpr->location, type_info_ptr, std::move(arguments));
             } else {
                 error("Brace initialization can only be used with type names", previous());
@@ -1261,7 +1261,7 @@ statement_ptr parser::for_statement() {
         
         // Check for reference after type
         if (match(token_type::ampersand)) {
-            auto refType = std::make_shared<type_info>(value_type::jai_reference_type);
+            auto refType = std::make_shared<type_info>(script_value_type::jai_reference_type);
             refType->type_name = type ? (type->type_name + "&") : "auto&";
             refType->type_params.push_back(type);
             type = refType;
@@ -1396,10 +1396,14 @@ declaration_ptr parser::class_declaration() {
         // Constructor/Destructor check
         if (check(token_type::identifier) && peek().lexeme == className.lexeme) {
             advance(); // consume class name
-            member = parse_function_body(className.lexeme, nullptr); // Constructor
+            member = parse_function_body(className.lexeme, nullptr);
+            // TODO: Parse constructor delegation syntax (: base(args), : this(args))
+            // Currently no support for constructor chaining
         } else if (match(token_type::tilde)) {
             consume(token_type::identifier, "Expected class name after '~'");
-            member = parse_function_body("~" + className.lexeme, nullptr); // Destructor
+            member = parse_function_body("~" + className.lexeme, nullptr);
+            // TODO: Mark destructor as virtual if class has any virtual methods
+            // Currently no virtual destructor support
         } else {
             // Regular member (variable or function)
             type_info_ptr type = parse_type();
@@ -1411,6 +1415,8 @@ declaration_ptr parser::class_declaration() {
                     // Function
                     current_--; // Back up to reparse
                     member = parse_function_body(name.lexeme, type);
+                    // TODO: Parse method modifiers (virtual, override, final)
+                    // Currently all methods are implicitly virtual
                 } else {
                     // Variable
                     expression_ptr init = nullptr;
@@ -1439,7 +1445,7 @@ declaration_ptr parser::function_declaration() {
     // Check for reference return type
     if (match(token_type::ampersand)) {
         // Create a reference type
-        auto refType = std::make_shared<type_info>(value_type::jai_reference_type);
+        auto refType = std::make_shared<type_info>(script_value_type::jai_reference_type);
         refType->type_name = return_type ? (return_type->type_name + "&") : "auto&";
         refType->type_params.push_back(return_type);
         return_type = refType;
@@ -1487,7 +1493,7 @@ declaration_ptr parser::variable_declaration() {
     if (match(token_type::ampersand)) {
         is_reference = true;
         // Create a reference type
-        auto refType = std::make_shared<type_info>(value_type::jai_reference_type);
+        auto refType = std::make_shared<type_info>(script_value_type::jai_reference_type);
         refType->type_name = type ? (type->type_name + "&") : "auto&";
         refType->type_params.push_back(type);
         type = refType;

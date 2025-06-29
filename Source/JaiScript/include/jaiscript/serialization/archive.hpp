@@ -121,7 +121,7 @@ public:
         
         // Use type info to write with proper size
         switch (type_info->base_type) {
-            case value_type::jai_int_type:
+            case script_value_type::jai_int_type:
                 if (type_info->native_size == 1) {
                     write_int8(static_cast<int8_t>(value.as<script_int>()));
                 } else if (type_info->native_size == 2) {
@@ -133,7 +133,7 @@ public:
                 }
                 break;
                 
-            case value_type::jai_float_type:
+            case script_value_type::jai_float_type:
                 if (type_info->native_size == 4) {
                     write_float32(static_cast<float>(value.as<script_float>()));
                 } else {
@@ -225,7 +225,7 @@ public:
         
         // Use type info to read with proper size
         switch (type_info->base_type) {
-            case value_type::jai_int_type:
+            case script_value_type::jai_int_type:
                 if (type_info->native_size == 1) {
                     return script_value(static_cast<script_int>(type_info->is_signed ? read_int8() : read_uint8()));
                 } else if (type_info->native_size == 2) {
@@ -238,7 +238,7 @@ public:
                     return script_value(read_int64());
                 }
                 
-            case value_type::jai_float_type:
+            case script_value_type::jai_float_type:
                 if (type_info->native_size == 4) {
                     return script_value(static_cast<script_float>(read_float32()));
                 } else {

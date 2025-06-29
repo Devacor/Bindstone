@@ -9,16 +9,17 @@ CORE_SRCS = $(wildcard core/*.cpp)
 LANG_SRCS = $(wildcard language/*.cpp)
 INTEG_SRCS = $(wildcard integration/*.cpp)
 PERF_SRCS = $(wildcard performance/*.cpp)
+VM_SRCS = $(wildcard vm/*.cpp)
 
 # Main runner
 MAIN_SRC = run_tests.cpp
 
 # JaiScript implementation files
 IMPL_DIR = ../../src/implementation
-IMPL_SRCS = $(IMPL_DIR)/engine.cpp $(IMPL_DIR)/lexer.cpp $(IMPL_DIR)/parser.cpp $(IMPL_DIR)/interpreter.cpp $(IMPL_DIR)/interpreter_dispatch.cpp $(IMPL_DIR)/value.cpp $(IMPL_DIR)/type_info.cpp $(IMPL_DIR)/types.cpp $(IMPL_DIR)/virtual_machine.cpp $(IMPL_DIR)/vm_backend.cpp $(IMPL_DIR)/compiler.cpp
+IMPL_SRCS = $(IMPL_DIR)/engine.cpp $(IMPL_DIR)/lexer.cpp $(IMPL_DIR)/parser.cpp $(IMPL_DIR)/interpreter.cpp $(IMPL_DIR)/interpreter_dispatch.cpp $(IMPL_DIR)/value.cpp $(IMPL_DIR)/type_info.cpp $(IMPL_DIR)/types.cpp vm_backend_fallback.cpp
 
 # All sources
-SRCS = $(MAIN_SRC) $(CORE_SRCS) $(LANG_SRCS) $(INTEG_SRCS) $(PERF_SRCS) $(IMPL_SRCS)
+SRCS = $(MAIN_SRC) $(CORE_SRCS) $(LANG_SRCS) $(INTEG_SRCS) $(PERF_SRCS) $(VM_SRCS) $(IMPL_SRCS)
 OBJS = $(SRCS:.cpp=.o)
 
 # Output binary

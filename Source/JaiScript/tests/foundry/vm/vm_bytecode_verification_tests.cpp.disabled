@@ -1,0 +1,319 @@
+#include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/jvm/vm_function_integration.hpp>
+#include <jaiscript/jvm/vm_class_system.hpp>
+
+using namespace jai;
+using namespace jai::foundry;
+using namespace jai::jvm;
+
+namespace jai::foundry::tests {
+
+class vm_bytecode_verification_tests : public suite {
+public:
+    vm_bytecode_verification_tests() : suite("VM Bytecode Verification Tests") {}
+    
+    void forge_tests() override {
+        test("verify_function_compiles_to_bytecode_not_ast", [this]() {
+            vm_aware_engine engine;
+            
+            // Define function in VM
+            engine.execute(R"(
+                auto test_func(auto x, auto y) -> auto {
+                    auto temp = x + y;
+                    return temp * 2;
+                }
+            )");
+            
+            // Verify it's in the VM registry as bytecode
+            auto& vm_registry = engine.get_function_registry();
+            auto vm_func = vm_registry.find_function("test_func");
+            check_not_null(vm_func.get());
+            
+            // Check that bytecode was generated
+            check_true(!vm_func->bytecode.empty());
+            check_gt(vm_func->bytecode.size(), 0);
+            
+            // Verify it has proper metadata
+            check_eq(vm_func->parameters.size(), 2);
+            check_eq(vm_func->name, "test_func");
+        });
+        
+        test("verify_bytecode_to_bytecode_calls", [this]() {
+            vm_aware_engine engine;
+            
+            // Enable profiling to track execution
+            engine.get_profiler().start_profiling();
+            
+            engine.execute(R"(
+                auto inner_func(auto x) -> auto {
+                    return x * x;
+                }
+                
+                auto outer_func(auto y) -> auto {
+                    // This should be a bytecode-to-bytecode call
+                    return inner_func(y) + inner_func(y + 1);
+                }
+                
+                outer_func(5)
+            )");
+            
+            engine.get_profiler().stop_profiling();
+            
+            // Check both functions were executed as bytecode
+            auto profiles = engine.get_profiler().get_hot_functions(0);
+            
+            bool found_inner = false, found_outer = false;
+            for (const auto& profile : profiles) {
+                if (profile.name == "inner_func") {
+                    found_inner = true;
+                    check_eq(profile.bytecode_calls, 2); // Called twice
+                    check_eq(profile.interpreter_fallbacks, 0); // No fallbacks!
+                } else if (profile.name == "outer_func") {
+                    found_outer = true;
+                    check_eq(profile.bytecode_calls, 1);
+                    check_eq(profile.interpreter_fallbacks, 0); // No fallbacks!
+                }
+            }
+            
+            check_true(found_inner);
+            check_true(found_outer);
+        });
+        
+        test("verify_class_methods_are_bytecode", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            engine.get_profiler().start_profiling();
+            
+            engine.execute(R"(
+                class TestClass {
+                    int value = 0;
+                    
+                    int method1(int x) {
+                        return x * 2;
+                    }
+                    
+                    int method2(int y) {
+                        // Method calling another method - should be bytecode
+                        return method1(y) + value;
+                    }
+                }
+                
+                auto obj = new TestClass();
+                obj.value = 10;
+                obj.method2(5)
+            )");
+            
+            engine.get_profiler().stop_profiling();
+            
+            // Methods should show up in profiling as bytecode
+            auto profiles = engine.get_profiler().get_hot_functions(0);
+            
+            for (const auto& profile : profiles) {
+                if (profile.name.find("TestClass::") != std::string::npos) {
+                    // All class methods should execute as bytecode
+                    check_eq(profile.interpreter_fallbacks, 0);
+                    check_gt(profile.bytecode_calls, 0);
+                }
+            }
+        });
+        
+        test("verify_no_interpreter_callback_in_loops", [this]() {
+            vm_aware_engine engine;
+            
+            engine.get_profiler().start_profiling();
+            
+            auto result = engine.execute(R"(
+                auto helper(auto x) -> auto {
+                    return x + 1;
+                }
+                
+                auto loop_test() -> auto {
+                    auto sum = 0;
+                    for (auto i = 0; i < 100; i = i + 1) {
+                        // This should NOT exit to interpreter 100 times
+                        sum = sum + helper(i);
+                    }
+                    return sum;
+                }
+                
+                loop_test()
+            )");
+            
+            engine.get_profiler().stop_profiling();
+            
+            check_eq(result.as<script_int>(), 5050); // sum of 1 to 100
+            
+            // Verify helper was called 100 times in bytecode
+            auto profiles = engine.get_profiler().get_hot_functions(0);
+            for (const auto& profile : profiles) {
+                if (profile.name == "helper") {
+                    check_eq(profile.bytecode_calls, 100);
+                    check_eq(profile.interpreter_fallbacks, 0); // Critical: no fallbacks!
+                }
+            }
+        });
+        
+        test("verify_closure_bytecode_execution", [this]() {
+            vm_aware_engine engine;
+            
+            engine.get_profiler().start_profiling();
+            
+            engine.execute(R"(
+                auto make_adder(auto n) -> auto {
+                    return [n](auto x) -> auto {
+                        return x + n;
+                    };
+                }
+                
+                auto add5 = make_adder(5);
+                auto add10 = make_adder(10);
+                
+                // These closure calls should be bytecode
+                auto result1 = add5(3);
+                auto result2 = add10(7);
+                
+                result1 + result2
+            )");
+            
+            engine.get_profiler().stop_profiling();
+            
+            // Lambda functions should execute as bytecode
+            auto profiles = engine.get_profiler().get_hot_functions(0);
+            for (const auto& profile : profiles) {
+                if (profile.name == "<lambda>") {
+                    check_gt(profile.bytecode_calls, 0);
+                    check_eq(profile.interpreter_fallbacks, 0);
+                }
+            }
+        });
+        
+        test("benchmark_bytecode_vs_interpreter", [this]() {
+            vm_aware_engine engine;
+            
+            // Define the same function
+            const std::string func_code = R"(
+                auto fibonacci(auto n) -> auto {
+                    if (n <= 1) return n;
+                    return fibonacci(n - 1) + fibonacci(n - 2);
+                }
+            )";
+            
+            // Execute in both backends
+            engine.execute(func_code);
+            
+            // Benchmark the function
+            auto benchmark = vm_function_integration_utils::benchmark_function(
+                "fibonacci",
+                {script_value(20)}, // Smaller value for faster test
+                engine,
+                5 // iterations
+            );
+            
+            // Bytecode should be faster
+            check_gt(benchmark.speedup_factor, 1.0);
+            check_gt(benchmark.interpreter_cycles, benchmark.bytecode_cycles);
+            
+            // Print results for visibility
+            std::cout << "\nBytecode speedup: " << benchmark.speedup_factor << "x\n";
+        });
+        
+        test("verify_function_index_optimization", [this]() {
+            vm_aware_engine engine;
+            
+            engine.execute(R"(
+                auto frequently_called(auto x) -> auto {
+                    return x * 2;
+                }
+            )");
+            
+            // Get function index for fast calls
+            auto& registry = engine.get_function_registry();
+            auto index = registry.get_index("frequently_called");
+            check_ne(index, std::numeric_limits<uint16_t>::max());
+            
+            // Verify indexed access works
+            auto func = registry.get_by_index(index);
+            check_not_null(func.get());
+            check_eq(func->name, "frequently_called");
+        });
+        
+        test("verify_method_cache_effectiveness", [this]() {
+            vm_aware_engine engine;
+            auto vm_classes = enable_vm_class_system(
+                engine.get_vm_executor(),
+                engine.get_vm_compiler()
+            );
+            
+            // Clear caches
+            g_method_cache.clear();
+            
+            engine.execute(R"(
+                class CacheTest {
+                    int method() {
+                        return 42;
+                    }
+                }
+            )");
+            
+            // First call - cache miss
+            engine.execute("auto obj = new CacheTest(); obj.method()");
+            
+            // Subsequent calls should hit cache
+            for (int i = 0; i < 10; ++i) {
+                engine.execute("obj.method()");
+            }
+            
+            // Check cache statistics (would need access to cache internals)
+            // For now, just verify execution works correctly
+        });
+        
+        test("verify_tail_call_optimization", [this]() {
+            vm_aware_engine engine;
+            
+            engine.execute(R"(
+                auto tail_sum(auto n, auto acc) -> auto {
+                    if (n <= 0) return acc;
+                    return tail_sum(n - 1, acc + n);  // Tail call
+                }
+            )");
+            
+            // This should not stack overflow with tail call optimization
+            auto result = engine.execute("tail_sum(1000, 0)");
+            check_eq(result.as<script_int>(), 500500); // Sum of 1 to 1000
+        });
+        
+        test("verify_inline_cache_monomorphic", [this]() {
+            vm_aware_engine engine;
+            
+            engine.get_function_registry().clear_cache();
+            
+            engine.execute(R"(
+                auto poly_func(auto x) -> auto {
+                    return x;
+                }
+                
+                // Monomorphic call site - always calls same function
+                auto mono_caller() -> auto {
+                    auto sum = 0;
+                    for (auto i = 0; i < 100; i = i + 1) {
+                        sum = sum + poly_func(i);
+                    }
+                    return sum;
+                }
+                
+                mono_caller()
+            )");
+            
+            // Cache should be effective for monomorphic sites
+            // (would need cache statistics API to verify)
+        });
+    }
+};
+
+} // namespace jai::foundry::tests
+
+FOUNDRY_REGISTER(jai::foundry::tests::vm_bytecode_verification_tests)

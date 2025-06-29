@@ -112,7 +112,7 @@ public:
     void write_value(const script_value& value) override {
         // Handle shared_ptr types with proper tracking, delegate others to stdlib
         switch (value.type()) {
-            case value_type::jai_shared_ptr_type: {
+            case script_value_type::jai_shared_ptr_type: {
                 // Use base class shared_ptr tracking
                 auto shared_val = std::get<std::shared_ptr<script_value>>(value.storage_);
                 const void* raw_ptr = shared_val.get();
@@ -147,7 +147,7 @@ public:
                 break;
             }
             
-            case value_type::jai_weak_ptr_type: {
+            case script_value_type::jai_weak_ptr_type: {
                 // Handle weak_ptr
                 auto weak_val = std::get<std::weak_ptr<script_value>>(value.storage_);
                 if (auto shared_val = weak_val.lock()) {
@@ -167,7 +167,7 @@ public:
                 break;
             }
             
-            case value_type::jai_array_type: {
+            case script_value_type::jai_array_type: {
                 const auto& arr = value.as_array();
                 oss_ << '[';
                 for (size_t i = 0; i < arr.size(); ++i) {
@@ -178,7 +178,7 @@ public:
                 break;
             }
             
-            case value_type::jai_map_type: {
+            case script_value_type::jai_map_type: {
                 const auto& map = value.as_map();
                 oss_ << '{';
                 bool first = true;
@@ -241,19 +241,19 @@ private:
         std::ostringstream oss;
         
         switch (val.type()) {
-            case value_type::jai_null_type:
+            case script_value_type::jai_null_type:
                 oss << "null";
                 break;
                 
-            case value_type::jai_bool_type:
+            case script_value_type::jai_bool_type:
                 oss << (val.as_bool() ? "true" : "false");
                 break;
                 
-            case value_type::jai_int_type:
+            case script_value_type::jai_int_type:
                 oss << val.as_int();
                 break;
                 
-            case value_type::jai_float_type: {
+            case script_value_type::jai_float_type: {
                 double d = val.as_float();
                 if (std::isfinite(d)) {
                     oss << std::setprecision(15) << d;
@@ -267,15 +267,15 @@ private:
                 break;
             }
                 
-            case value_type::jai_string_type:
+            case script_value_type::jai_string_type:
                 oss << '"' << escape_json_string_local(val.as_string()) << '"';
                 break;
                 
-            case value_type::jai_char_type:
+            case script_value_type::jai_char_type:
                 oss << '"' << escape_json_string_local(std::string(1, val.as_char())) << '"';
                 break;
                 
-            case value_type::jai_array_type: {
+            case script_value_type::jai_array_type: {
                 const auto& arr = val.as_array();
                 oss << '[';
                 for (size_t i = 0; i < arr.size(); ++i) {
@@ -286,7 +286,7 @@ private:
                 break;
             }
             
-            case value_type::jai_map_type: {
+            case script_value_type::jai_map_type: {
                 const auto& map = val.as_map();
                 oss << '{';
                 bool first = true;
@@ -505,7 +505,7 @@ public:
             
             // Check for shared_ptr_id (first occurrence)
             auto id_it = map.find(script_value("_shared_ptr_id"));
-            if (id_it != map.end() && id_it->second.type() == value_type::jai_int_type) {
+            if (id_it != map.end() && id_it->second.type() == script_value_type::jai_int_type) {
                 uint32_t id = static_cast<uint32_t>(id_it->second.as<script_int>());
                 auto value_it = map.find(script_value("_shared_ptr_value"));
                 if (value_it != map.end()) {
@@ -517,14 +517,14 @@ public:
             
             // Check for shared_ptr_ref (subsequent occurrences)
             auto ref_it = map.find(script_value("_shared_ptr_ref"));
-            if (ref_it != map.end() && ref_it->second.type() == value_type::jai_int_type) {
+            if (ref_it != map.end() && ref_it->second.type() == script_value_type::jai_int_type) {
                 uint32_t id = static_cast<uint32_t>(ref_it->second.as<script_int>());
                 return get_shared_ptr(id);
             }
             
             // Check for weak_ptr_ref
             auto weak_ref_it = map.find(script_value("_weak_ptr_ref"));
-            if (weak_ref_it != map.end() && weak_ref_it->second.type() == value_type::jai_int_type) {
+            if (weak_ref_it != map.end() && weak_ref_it->second.type() == script_value_type::jai_int_type) {
                 uint32_t id = static_cast<uint32_t>(weak_ref_it->second.as<script_int>());
                 script_value shared_val = get_shared_ptr(id);
                 return script_value::make_weak_ptr(shared_val);

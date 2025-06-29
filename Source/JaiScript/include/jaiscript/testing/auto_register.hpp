@@ -48,6 +48,10 @@ public:
 
 } // namespace jai::foundry
 
+// Helper macros for concatenation
+#define FOUNDRY_CONCAT_IMPL(a, b) a##b
+#define FOUNDRY_CONCAT(a, b) FOUNDRY_CONCAT_IMPL(a, b)
+
 // Unified macro that:
 // 1. Auto-registers the test suite with the main runner (when not isolated)
 // 2. Provides isolated test capability when compiled standalone
@@ -61,7 +65,7 @@ public:
     // When building the full suite, register but don't create main()
     #define FOUNDRY_REGISTER(TestClass)                                       \
     namespace {                                                                \
-        static ::jai::foundry::suite_registrar<TestClass> _registrar_##TestClass(#TestClass); \
+        static ::jai::foundry::suite_registrar<TestClass> FOUNDRY_CONCAT(_registrar_, __LINE__)(#TestClass); \
     }                                                                          \
     CONDITIONAL_ISOLATED_TEST(TestClass)
 #endif

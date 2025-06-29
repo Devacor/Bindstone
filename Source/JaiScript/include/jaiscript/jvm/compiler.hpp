@@ -123,12 +123,12 @@ namespace jvm {
         struct local_variable {
             std::string name;
             uint8_t slot;
-            value_type type;
+            script_value_type type;
             bool is_captured;
             size_t scope_depth;
         };
         
-        uint8_t declare_local(const std::string& name, value_type type = value_type::jai_null_type);
+        uint8_t declare_local(const std::string& name, script_value_type type = script_value_type::jai_null_type);
         uint8_t resolve_local(const std::string& name);
         uint16_t resolve_global(const std::string& name);
         uint8_t resolve_upvalue(const std::string& name);
@@ -168,8 +168,8 @@ namespace jvm {
         void warning(const std::string& message);
         
         // Type inference and checking
-        value_type infer_expression_type(expression_ptr expr);
-        void check_type_compatibility(value_type expected, value_type actual, const source_location& location);
+        script_value_type infer_expression_type(expression_ptr expr);
+        void check_type_compatibility(script_value_type expected, script_value_type actual, const source_location& location);
         
         // Built-in function handling
         bool is_builtin_function(const std::string& name) const;

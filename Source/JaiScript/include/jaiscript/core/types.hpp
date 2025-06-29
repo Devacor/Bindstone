@@ -13,6 +13,10 @@
 
 namespace jai {
 
+    // Forward declarations
+    class script_value;
+    class engine;
+
     // Fixed-size primitive types for cross-platform serialization
     using script_int = int64_t;      // Always 64-bit signed
     using script_float = double;     // Always 64-bit double precision
@@ -20,9 +24,9 @@ namespace jai {
     using script_char = char;       // 8-bit character
     using script_bool = bool;       // 1 byte boolean
     
-    // Forward declarations
-    class script_value;
-    class engine;
+    // Container types
+    using script_array = std::vector<script_value>;
+    using script_map = std::map<script_value, script_value>;
     
     // Function type for script functions
     using script_function = std::function<script_value(const std::vector<script_value>&)>;
@@ -35,7 +39,7 @@ namespace jai {
         // Captured variables with their types and capture method
         struct captured_var {
             std::string name;
-            value_type type;
+            script_value_type type;
             bool by_reference;       // true = captured by reference, false = by value
         };
         std::vector<captured_var> captured_vars;

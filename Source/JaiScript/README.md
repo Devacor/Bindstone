@@ -317,26 +317,72 @@ jai::stdlib::register_json_functions(engine);
 ### I/O Functions
 
 #### `print(...)`
-Formatted output to stdout with support for format strings.
+Flexible output function that supports both formatted output and sequential concatenation.
 
 **Usage:**
 - `print()` - Prints just a newline
-- `print(value)` - Prints value followed by newline  
-- `print(format, args...)` - Printf-style formatting with placeholders
+- `print(value)` - Prints value followed by newline
+- `print(format, args...)` - If format contains `{}`, uses format-style
+- `print(arg1, arg2, ...)` - If no `{}` in first arg, prints all args sequentially
+- `print(..., skip_newline)` - Skips the newline at end
+- `print(..., skip_flush)` - Skips both newline and flush
 
-**Format placeholders:**
+**Format String Mode (activated when first arg contains `{}` or `{n}` where n is a number):**
 - `{}` - Sequential placeholder, replaced with next argument
-- `{n}` - Positional placeholder, replaced with nth argument (0-based)
-- `{{` - Escaped left brace, prints literal '{'
-- `}}` - Escaped right brace, prints literal '}'
+- `{n}` - Positional placeholder, replaced with nth argument (0-based, digits only)
+- `{{` - Escaped left brace, prints literal `{`
+- `}}` - Escaped right brace, prints literal `}`
+
+**Note:** Format mode is only activated by valid placeholders. Patterns like `{abc}`, `{ }`, or `{1a}` are treated as literal text and will trigger concatenation mode.
 
 **Examples:**
 ```javascript
-print("Hello, World!");                    // Hello, World!
+// Format mode - first arg has {}
 print("Hello, {}!", "JaiScript");          // Hello, JaiScript!
 print("{} + {} = {}", 2, 3, 5);            // 2 + 3 = 5
 print("{1} comes after {0}", "A", "B");   // B comes after A
+
+// Concatenation mode - no {} in first arg
+print("The answer is ", 42, "!");          // The answer is 42!
+print("Hello", " ", "World");              // Hello World
+
+// Escape sequences
 print("Use {{}} for placeholders");        // Use {} for placeholders
+print("Closing brace: }}");                // Closing brace: }
+
+// Control output behavior
+print("Progress: 50%", skip_newline);      // Progress: 50% (no newline)
+print(" [######### ]");                    // <continued from previous line>
+print("Debug: ", value, skip_flush);       // Debug: <value> (no newline/flush)
+```
+
+#### `format(...)`
+Builds formatted strings with identical behavior to `print` but returns a string instead of printing.
+
+**Usage:**
+- `format(value)` - Converts value to string
+- `format(format_str, args...)` - If format_str contains `{}`, uses format-style
+- `format(arg1, arg2, ...)` - If no `{}` in first arg, concatenates all args
+
+**Note:** Control types (`skip_newline`, `skip_flush`) are ignored in format function.
+
+**Examples:**
+```javascript
+// Format mode
+auto greeting = format("Hello, {}!", "World");     // "Hello, World!"
+auto equation = format("{} + {} = {}", 2, 3, 5);   // "2 + 3 = 5"
+
+// Concatenation mode
+auto message = format("The answer is ", 42);       // "The answer is 42"
+auto path = format("/home/", username, "/docs");   // "/home/alice/docs"
+
+// Escape sequences work the same as print
+auto literal = format("{{name}}: {{value}}");      // "{name}: {value}"
+
+// Building JSON strings (use concatenation mode)
+auto json = format("", "{\"", key, "\": \"", value, "\"}");  // {"key": "value"}
+// Or use string concatenation
+auto json2 = "{\"" + key + "\": \"" + value + "\"}";
 ```
 
 #### `to_string(value)`

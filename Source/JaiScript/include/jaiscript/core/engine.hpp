@@ -139,6 +139,9 @@ namespace jai {
         // Get all registered template types for parser
         std::unordered_set<std::string> get_registered_template_types() const;
         
+        // Get class definition by name
+        std::shared_ptr<class_definition> get_class_definition(const std::string& name) const;
+        
         // Type conversion registration
         // Register a conversion between JaiScript types with a cost for overload resolution
         // Lower costs are preferred (0 = exact match, 1 = promotion, 2 = standard conversion, etc.)
@@ -241,7 +244,7 @@ namespace jai {
         }
         
         // Get class definition by type name
-        std::shared_ptr<class_definition> get_class_definition(const std::string& type_name) const;
+        std::shared_ptr<class_definition> get_class_definition_by_type(const std::type_index& type) const;
         
         // Get class definition by type index
         std::shared_ptr<class_definition> get_class_definition_by_type(std::type_index type) const;

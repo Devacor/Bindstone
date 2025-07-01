@@ -36,6 +36,7 @@ namespace jai {
 class class_definition;
 class class_instance;
 
+
 // Class instance representation in JaiScript
 class class_instance {
 public:
@@ -391,9 +392,9 @@ public:
         return *this;
     }
     
-    // Add lambda/callable method binding - ChaiScript style!
+    // Add lambda/callable method binding
     // Supports: .method("setText", [](Button& self, const std::string& text) { self.setText(text); })
-    // Note: First parameter should be a reference to match ChaiScript convention
+    // Note: First parameter can be a reference to self for accessing the object
     template<typename Callable>
     class_builder& method(const std::string& name, Callable&& callable) {
         // Use function_traits to determine the signature
@@ -589,6 +590,92 @@ public:
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
             
             cpp_obj.get()->*member = args[1].as<P>();
+            return script_value(); // null
+        });
+        
+        return *this;
+    }
+    
+    // Add property with lambda getter/setter
+    template<typename Getter, typename Setter>
+    class_builder& property(const std::string& name, Getter&& getter, Setter&& setter) {
+        // Register the property as a field
+        class_def_->add_field(name, script_value()); // Register field name
+        
+        // Add getter method
+        class_def_->add_method("_get_" + name, [getter = std::forward<Getter>(getter)](const std::vector<script_value>& args) -> script_value {
+            if (args.empty()) {
+                throw runtime_error("Property getter called without 'this' object");
+            }
+            
+            // Extract the class_instance from the first argument (this)
+            auto instance = args[0].as<std::shared_ptr<class_instance>>();
+            
+            // Get the C++ object from the special field
+            auto cpp_obj_value = instance->get_field("_cpp_object");
+            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
+            
+            // Call the getter lambda with the C++ object
+            return detail::value_converter<decltype(getter(*cpp_obj))>::to(getter(*cpp_obj));
+        });
+        
+        // Add setter method
+        class_def_->add_method("_set_" + name, [setter = std::forward<Setter>(setter)](const std::vector<script_value>& args) -> script_value {
+            if (args.size() < 2) {
+                throw runtime_error("Property setter requires 'this' and value");
+            }
+            
+            // Extract the class_instance from the first argument (this)
+            auto instance = args[0].as<std::shared_ptr<class_instance>>();
+            
+            // Get the C++ object from the special field
+            auto cpp_obj_value = instance->get_field("_cpp_object");
+            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
+            
+            // Extract the value to set
+            using setter_traits = detail::function_traits<std::decay_t<Setter>>;
+            using value_type = std::tuple_element_t<1, typename setter_traits::argument_types>;
+            auto value = args[1].as<value_type>();
+            
+            // Call the setter lambda
+            setter(*cpp_obj, value);
+            return script_value(); // null
+        });
+        
+        // Also add traditional getter/setter methods for compatibility
+        std::string getterName = "get" + name;
+        getterName[3] = std::toupper(getterName[3]); // Capitalize first letter
+        
+        class_def_->add_method(getterName, [getter = std::forward<Getter>(getter)](const std::vector<script_value>& args) -> script_value {
+            if (args.empty()) {
+                throw runtime_error("Getter called without 'this' object");
+            }
+            
+            auto instance = args[0].as<std::shared_ptr<class_instance>>();
+            auto cpp_obj_value = instance->get_field("_cpp_object");
+            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
+            
+            return detail::value_converter<decltype(getter(*cpp_obj))>::to(getter(*cpp_obj));
+        });
+        
+        // Add setter
+        std::string setterName = "set" + name;
+        setterName[3] = std::toupper(setterName[3]); // Capitalize first letter
+        
+        class_def_->add_method(setterName, [setter = std::forward<Setter>(setter)](const std::vector<script_value>& args) -> script_value {
+            if (args.size() < 2) {
+                throw runtime_error("Setter requires 'this' and value");
+            }
+            
+            auto instance = args[0].as<std::shared_ptr<class_instance>>();
+            auto cpp_obj_value = instance->get_field("_cpp_object");
+            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
+            
+            using setter_traits = detail::function_traits<std::decay_t<Setter>>;
+            using value_type = std::tuple_element_t<1, typename setter_traits::argument_types>;
+            auto value = args[1].as<value_type>();
+            
+            setter(*cpp_obj, value);
             return script_value(); // null
         });
         

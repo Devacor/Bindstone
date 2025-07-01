@@ -745,6 +745,14 @@ void engine::add_class_impl(const std::string& name, std::shared_ptr<class_defin
     impl->classes[name] = classDef;
 }
 
+std::shared_ptr<class_definition> engine::get_class_definition(const std::string& name) const {
+    auto it = impl->classes.find(name);
+    if (it != impl->classes.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
 void engine::register_type_conversion(script_value_type from, script_value_type to, int cost, 
                                   std::function<script_value(const script_value&)> converter) {
     impl->typeConversions.register_conversion(from, to, cost, converter);
@@ -992,13 +1000,7 @@ void engine::setHasCustomNumericOps(bool value) {
     impl->backend->set_has_custom_numeric_ops(value);
 }
 
-std::shared_ptr<class_definition> engine::get_class_definition(const std::string& type_name) const {
-    auto it = impl->classes.find(type_name);
-    if (it != impl->classes.end()) {
-        return it->second;
-    }
-    return nullptr;
-}
+// Removed duplicate - already defined at line 748
 
 void engine::register_polymorphic_copier_impl(std::type_index derived_type, 
                                              std::type_index base_type,

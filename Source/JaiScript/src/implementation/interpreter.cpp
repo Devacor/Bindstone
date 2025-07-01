@@ -563,8 +563,32 @@ void interpreter::visit_identifier_expr(identifier_expr* expr) {
         expr->symbol_id = stringSymbolizer_->intern(expr->name);
     }
     
-    const script_value& val = environment_->get_ref(expr->symbol_id);
-    push_value(val.deref());  // Automatically handles references
+    // Try to get the variable from environment
+    try {
+        const script_value& val = environment_->get_ref(expr->symbol_id);
+        push_value(val.deref());  // Automatically handles references
+    } catch (const runtime_error&) {
+        // Variable not found - check if it's a member of 'this'
+        try {
+            script_value this_val = environment_->get("this");
+            if (this_val.is_object()) {
+                // Try to access as a member of 'this'
+                auto obj_holder = std::get<std::shared_ptr<script_value::object_holder>>(this_val.storage_);
+                if (obj_holder->is_cpp_class_instance) {
+                    auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                    if (instance->has_field(expr->name)) {
+                        push_value(instance->get_field(expr->name));
+                        return;
+                    }
+                }
+            }
+        } catch (...) {
+            // No 'this' in scope
+        }
+        
+        // Re-throw the original error
+        throw runtime_error("Undefined variable '" + expr->name + "'");
+    }
 }
 
 void interpreter::visit_binary_expr(binary_expr* expr) {
@@ -1259,8 +1283,27 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                     environment_->assign(identifier->symbol_id, value.clone());
                 }
             } else {
-                // Variable doesn't exist - error
-                throw runtime_error("Undefined variable '" + identifier->name + "'");
+                // Variable doesn't exist - check if it's a member of 'this'
+                bool assigned_to_this = false;
+                try {
+                    script_value this_val = environment_->get("this");
+                    if (this_val.is_object()) {
+                        auto obj_holder = std::get<std::shared_ptr<script_value::object_holder>>(this_val.storage_);
+                        if (obj_holder->is_cpp_class_instance) {
+                            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                            if (instance->has_field(identifier->name)) {
+                                instance->set_field(identifier->name, value.clone());
+                                assigned_to_this = true;
+                            }
+                        }
+                    }
+                } catch (...) {
+                    // No 'this' in scope
+                }
+                
+                if (!assigned_to_this) {
+                    throw runtime_error("Undefined variable '" + identifier->name + "'");
+                }
             }
             push_value(std::move(value));  // Assignment expressions return the assigned value
         } 
@@ -1770,12 +1813,21 @@ void interpreter::visit_member_expr(member_expr* expr) {
     auto objHolder = std::get<std::shared_ptr<script_value::object_holder>>(objectValue.storage_);
     
     
-    // Check if this is actually a class_instance
-    if (!objHolder->is_cpp_class_instance) {
-        throw runtime_error("Cannot access member '" + expr->member + "' on raw C++ object");
+    // Get the class_instance - could be script or C++ class
+    std::shared_ptr<class_instance> instance;
+    
+    // For C++ classes, is_cpp_class_instance is true and data is class_instance
+    if (objHolder->is_cpp_class_instance) {
+        instance = std::static_pointer_cast<class_instance>(objHolder->data);
+    } else {
+        // For script classes, the data IS a class_instance directly
+        // Try to cast it (will fail if it's not a class_instance)
+        instance = std::static_pointer_cast<class_instance>(objHolder->data);
     }
     
-    auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
+    if (!instance) {
+        throw runtime_error("Cannot access member '" + expr->member + "' on non-class object");
+    }
     
     // First check if it's a field (registered by the property() method)
     bool has_field_result = instance->has_field(expr->member);
@@ -2147,7 +2199,13 @@ void interpreter::visit_map_literal_expr(map_literal_expr* expr) {
 }
 
 void interpreter::visit_this_expr(this_expr* expr) {
-    throw runtime_error("'this' keyword not yet implemented");
+    // Try to get 'this' from the current environment
+    try {
+        script_value this_val = environment_->get("this");
+        push_value(this_val);
+    } catch (const runtime_error&) {
+        throw runtime_error("'this' can only be used inside methods");
+    }
 }
 
 void interpreter::visit_super_expr(super_expr* expr) {
@@ -2387,14 +2445,135 @@ void interpreter::visit_function_decl(function_decl* decl) {
 }
 
 void interpreter::visit_class_decl(class_decl* decl) {
-    // TODO: Implement script class registration and compilation
-    // 1. Create script_class_definition from AST
-    // 2. Process fields with default values
-    // 3. Compile methods and constructors
-    // 4. Handle inheritance from base classes
-    // 5. Register class in engine's class registry
-    // 6. Support for visibility modifiers (public/private/protected)
-    throw runtime_error("Class declarations not yet implemented");
+    // Create a script class definition
+    auto class_def = std::make_shared<class_definition>(decl->name, class_definition::script_class);
+    
+    // Handle base classes (single inheritance for now)
+    if (!decl->base_classes.empty()) {
+        // For now, only support single inheritance
+        if (decl->base_classes.size() > 1) {
+            throw runtime_error("Multiple inheritance not supported");
+        }
+        
+        // Look up base class definition
+        const std::string& base_name = decl->base_classes[0];
+        // TODO: Implement proper base class lookup from class registry
+        // For now, skip inheritance support
+        throw runtime_error("Class inheritance not yet implemented");
+    }
+    
+    // Process class members
+    for (const auto& member : decl->members) {
+        // Extract the actual declaration from the member
+        auto* var_decl = dynamic_cast<variable_decl*>(member.declaration.get());
+        auto* func_decl = dynamic_cast<function_decl*>(member.declaration.get());
+        
+        if (var_decl) {
+            // Field declaration
+            script_value default_val;
+            if (var_decl->initializer) {
+                // Evaluate the initializer expression to get default value
+                var_decl->initializer->accept(this);
+                default_val = pop_value();
+            }
+            
+            // Add field to class definition
+            class_def->add_field(var_decl->name, default_val);
+            
+        } else if (func_decl) {
+            // Method declaration
+            auto method_name = func_decl->name;
+            
+            // Check for constructor
+            if (method_name == decl->name) {
+                // Constructor
+                // For now, create a simple constructor function
+                auto ctor_func = [this, func_decl, class_def, class_name = decl->name](const std::vector<script_value>& args) -> script_value {
+                    // Create instance
+                    auto instance = class_def->create_instance();
+                    
+                    // Create a script_defined_function from the function_decl
+                    script_defined_function script_func(
+                        func_decl->name,
+                        func_decl->parameters, 
+                        func_decl->return_type,
+                        func_decl->body,
+                        environment_  // Current environment as closure
+                    );
+                    
+                    // Execute constructor body with 'this' implicitly available
+                    // Create a new environment for the constructor that has 'this' defined
+                    auto ctor_env = std::make_shared<environment>(environment_, stringSymbolizer_);
+                    ctor_env->define("this", script_value::make_object(class_name, instance));
+                    
+                    // Update the script function to use this environment
+                    script_defined_function ctor_script_func(
+                        func_decl->name,
+                        func_decl->parameters, 
+                        func_decl->return_type,
+                        func_decl->body,
+                        ctor_env  // Constructor environment with 'this'
+                    );
+                    
+                    // Execute constructor body with original arguments
+                    call_function(ctor_script_func, args);
+                    
+                    // Return the instance
+                    return script_value::make_object(class_name, instance);
+                };
+                
+                // Register constructor as a function in the environment
+                script_value ctor_value = script_value::make_function(ctor_func);
+                // Store constructor in current environment
+                environment_->define(decl->name, ctor_value);
+                
+            } else if (method_name.size() > 0 && method_name[0] == '~') {
+                // Destructor - skip for now
+                // TODO: Implement destructor support
+                
+            } else {
+                // Regular method
+                auto method_func = [this, func_decl](const std::vector<script_value>& args) -> script_value {
+                    // First argument should be 'this' object
+                    if (args.empty()) {
+                        throw runtime_error("Method called without 'this' object");
+                    }
+                    
+                    // Extract 'this' from first argument
+                    script_value this_obj = args[0];
+                    
+                    // Create remaining arguments (excluding 'this')
+                    std::vector<script_value> method_args(args.begin() + 1, args.end());
+                    
+                    // Create a new environment for the method that has 'this' defined
+                    auto method_env = std::make_shared<environment>(environment_, stringSymbolizer_);
+                    method_env->define("this", this_obj);
+                    
+                    // Create a script_defined_function with the method environment
+                    script_defined_function script_func(
+                        func_decl->name,
+                        func_decl->parameters, 
+                        func_decl->return_type,
+                        func_decl->body,
+                        method_env  // Method environment with 'this'
+                    );
+                    
+                    // Execute method with the remaining arguments (excluding 'this')
+                    return call_function(script_func, method_args);
+                };
+                
+                // Add method to class definition
+                class_def->add_method(method_name, method_func);
+            }
+        }
+    }
+    
+    // For now, we'll store the class definition as a special value in the environment
+    // This allows class instantiation through the constructor function
+    // TODO: Properly integrate with engine's class registry
+    
+    // The constructor function is already registered as an overloaded function
+    // which allows "new ClassName()" syntax to work
 }
 
 void interpreter::visit_expression_decl(expression_decl* decl) {
@@ -2461,11 +2640,19 @@ script_value interpreter::call_function(const script_defined_function& function,
                             }
                             // Create reference to the final target
                             script_value refValue = script_value::make_reference(refHolder->target, refHolder->sourceEnv.lock());
-                            environment_->define(param.symbol_id, std::move(refValue));
+                            if (param.symbol_id != UINT64_MAX) {
+                                environment_->define(param.symbol_id, std::move(refValue));
+                            } else {
+                                environment_->define(param.name, std::move(refValue));
+                            }
                         } else {
                             // Create reference to the argument
                             script_value refValue = script_value::make_reference(argPtr, env);
-                            environment_->define(param.symbol_id, std::move(refValue));
+                            if (param.symbol_id != UINT64_MAX) {
+                                environment_->define(param.symbol_id, std::move(refValue));
+                            } else {
+                                environment_->define(param.name, std::move(refValue));
+                            }
                         }
                     } else {
                         // No metadata - can't create reference
@@ -2477,7 +2664,12 @@ script_value interpreter::call_function(const script_defined_function& function,
                 }
             } else {
                 // Non-reference parameter - deep copy the argument
-                environment_->define(param.symbol_id, arg.clone());
+                if (param.symbol_id != UINT64_MAX) {
+                    environment_->define(param.symbol_id, arg.clone());
+                } else {
+                    // Fallback to parameter name if symbol_id not set
+                    environment_->define(param.name, arg.clone());
+                }
             }
         }
         

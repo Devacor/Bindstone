@@ -4,6 +4,8 @@
 
 This document defines the technical specification for JaiScript's class system, including native script classes, C++ integration, inheritance, and method dispatch. The design builds upon the existing ClassBuilder infrastructure while adding native script class support.
 
+**Current Status**: Architecture designed but implementation incomplete. See [JaiScriptClassImplementationStatus.md](JaiScriptClassImplementationStatus.md) for detailed implementation gaps.
+
 ## Table of Contents
 
 1. [Class Declaration Syntax](#class-declaration-syntax)
@@ -1184,6 +1186,39 @@ public:
                       const std::vector<FieldDeclaration>& newFieldDefs);
 };
 ```
+
+## Implementation Status
+
+### Current State (December 2024)
+
+**✅ Completed:**
+- Full parser support for class syntax
+- C++ class integration via `class_builder<T>`
+- Runtime infrastructure (class_definition, class_instance)
+- Basic architecture for method dispatch
+
+**❌ Not Implemented:**
+- Interpreter support (`visit_class_decl` throws error)
+- VM compiler support (only emits warning)
+- Connection between parser and runtime
+- Constructor execution
+- Method compilation to bytecode
+- Type validation
+
+**⚠️ Partially Implemented:**
+- Script class runtime (exists but disconnected)
+- VM class system (designed but not integrated)
+- Virtual method infrastructure (premature optimization)
+
+### Critical Missing Pieces
+
+1. **No way to create script class instances** - Parser creates AST but it's never processed
+2. **Methods stored as AST only** - Never compiled to bytecode for VM execution
+3. **Constructor delegation not parsed** - Syntax like `: base(args)` not handled
+4. **No type checking** - Field and method types not validated
+5. **Namespace inconsistencies** - Mix of `jai` and `jaiscript` namespaces
+
+See [JaiScriptClassImplementationStatus.md](JaiScriptClassImplementationStatus.md) for complete gap analysis.
 
 ## Implementation Plan
 

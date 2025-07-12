@@ -14,8 +14,8 @@ public:
     
     void forge_tests() override {
         test("example_test", [this]() {
-            engine engine;
-            auto result = engine.execute("2 + 2");
+            auto engine = engine::make();
+            auto result = engine->execute("2 + 2");
             check_eq(result.as<int>(), 4);
         });
     }

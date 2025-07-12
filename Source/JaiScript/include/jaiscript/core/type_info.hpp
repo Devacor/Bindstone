@@ -1,7 +1,10 @@
 #pragma once
 
+#ifndef __JAISCRIPT_CORE_TYPE_INFO_HPP__
+#define __JAISCRIPT_CORE_TYPE_INFO_HPP__
+
 #include "types.hpp"
-#include "../jaiscript_fwd.hpp"
+#include <jaiscript/jaiscript_fwd.hpp>
 #include <vector>
 #include <memory>
 #include <type_traits>
@@ -149,13 +152,6 @@ namespace jai {
             return std::make_shared<type_info>(script_value_type::jai_object_type, className);
         }
         
-        // shared_ptr<T>
-        static type_info_ptr make_shared_ptr(type_info_ptr pointee_type) {
-            auto info = std::make_shared<type_info>(script_value_type::jai_shared_ptr_type);
-            info->type_params.push_back(pointee_type);
-            return info;
-        }
-        
         // weak_ptr<T>
         static type_info_ptr make_weak_ptr(type_info_ptr pointee_type) {
             auto info = std::make_shared<type_info>(script_value_type::jai_weak_ptr_type);
@@ -216,11 +212,10 @@ namespace jai {
         bool is_object() const { return base_type == script_value_type::jai_object_type; }
         bool is_function() const { return base_type == script_value_type::jai_function_type; }
         bool is_reference() const { return base_type == script_value_type::jai_reference_type; }
-        bool is_shared_ptr() const { return base_type == script_value_type::jai_shared_ptr_type; }
         bool is_weak_ptr() const { return base_type == script_value_type::jai_weak_ptr_type; }
         
         // Get type parameters
-        type_info_ptr element_type() const {  // For Array<T>, shared_ptr<T>, etc.
+        type_info_ptr element_type() const {  // For Array<T>, weak_ptr<T>, etc.
             return type_params.empty() ? nullptr : type_params[0];
         }
         
@@ -252,7 +247,9 @@ namespace jai {
     // int x = 5;                           // type_info::make_int()
     // array<int> nums = {1, 2, 3};         // type_info::make_array(make_int())
     // map<string, int> scores;             // type_info::make_map(make_string(), make_int())
-    // shared_ptr<Creature> creature;        // type_info::make_shared_ptr(make_object("Creature"))
+    // weak_ptr<Creature> creature;         // type_info::make_weak_ptr(make_object("Creature"))
     // Function<int(float, float)> add;     // type_info::make_function(make_int(), {make_float(), make_float()})
     
 } // namespace jai
+
+#endif // __JAISCRIPT_CORE_TYPE_INFO_HPP__

@@ -1,0 +1,6 @@
+set pagination off
+run
+bt
+info registers
+info frame
+quit

@@ -17,7 +17,7 @@ JAI_TEST_SUITE(ExtractionConvenience)
 JAI_TEST(both_extraction_methods_work) {
     engine engine;
     
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<float, float>()
         .property("x", &Point::x)
         .property("y", &Point::y)
@@ -45,7 +45,7 @@ JAI_TEST(both_extraction_methods_work) {
 JAI_TEST(convenient_operator_usage) {
     engine engine;
     
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<float, float>()
         .property("x", &Point::x)
         .property("y", &Point::y)

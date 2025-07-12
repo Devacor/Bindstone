@@ -1,6 +1,4 @@
-#include "../../include/jaiscript/core/value.hpp"
-#include "../../include/jaiscript/core/class_builder.hpp"  // For class_instance
-#include "../../include/jaiscript/detail/interpreter.hpp"  // For environment
+#include <jaiscript/jaiscript.hpp>
 #include <sstream>
 
 namespace jai {
@@ -20,19 +18,24 @@ script_value script_value::make_map(type_info_ptr keyType, type_info_ptr valueTy
     return v;
 }
 
-script_value script_value::make_shared_ptr(const script_value& value) {
-    script_value v;
-    v.type_info_ = type_info::make_shared_ptr(value.get_type_info());
-    v.storage_ = std::make_shared<script_value>(value);
-    return v;
-}
-
 script_value script_value::make_weak_ptr(const script_value& value) {
-    // This is tricky - we need a shared_ptr to create a weak_ptr
-    // For now, return null
     script_value v;
     v.type_info_ = type_info::make_weak_ptr(value.get_type_info());
-    v.storage_ = std::weak_ptr<script_value>();
+    
+    if (value.type() == script_value_type::jai_object_type) {
+        // Store a reference to the original value in a special holder
+        // This allows weak_ptr to work with objects
+        auto holder = std::make_shared<object_holder>();
+        holder->type_name = "weak_ptr_holder";
+        holder->data = std::make_shared<script_value>(value);
+        holder->is_cpp_class_instance = false;
+        
+        // Store as object type with weak_ptr type info
+        v.storage_ = holder;
+    } else {
+        throw runtime_error("weak_ptr can only be created from objects");
+    }
+    
     return v;
 }
 
@@ -78,15 +81,59 @@ script_value script_value::make_function(const script_function& func) {
     return v;
 }
 
+// Engine-aware factory method implementations
+script_value script_value::make_array(type_info_ptr element_type, std::weak_ptr<engine> eng) {
+    script_value v = make_array(element_type);
+    v.engine_ref_ = eng;
+    return v;
+}
+
+script_value script_value::make_map(type_info_ptr keyType, type_info_ptr valueType, std::weak_ptr<engine> eng) {
+    script_value v = make_map(keyType, valueType);
+    v.engine_ref_ = eng;
+    return v;
+}
+
+script_value script_value::make_object(const std::string& type_name, std::shared_ptr<void> data, std::weak_ptr<engine> eng) {
+    script_value v = make_object(type_name, data);
+    v.engine_ref_ = eng;
+    return v;
+}
+
+script_value script_value::make_cpp_object(const std::string& type_name, std::shared_ptr<void> data, std::weak_ptr<engine> eng) {
+    script_value v = make_cpp_object(type_name, data);
+    v.engine_ref_ = eng;
+    return v;
+}
+
+script_value script_value::make_weak_ptr(const script_value& value, std::weak_ptr<engine> eng) {
+    script_value v = make_weak_ptr(value);
+    v.engine_ref_ = eng;
+    return v;
+}
+
+script_value script_value::make_reference(script_value* target, const std::shared_ptr<environment>& env, std::weak_ptr<engine> eng) {
+    script_value v = make_reference(target, env);
+    v.engine_ref_ = eng;
+    return v;
+}
+
+script_value script_value::make_function(const script_function& func, std::weak_ptr<engine> eng) {
+    script_value v = make_function(func);
+    v.engine_ref_ = eng;
+    return v;
+}
+
 // Copy constructor (shallow copy for reference semantics)
-script_value::script_value(const script_value& other) : type_info_(other.type_info_), storage_(other.storage_) {
-    // Simple shallow copy - shares storage with the original
+script_value::script_value(const script_value& other) : type_info_(other.type_info_), engine_ref_(other.engine_ref_), storage_(other.storage_) {
+    // Simple shallow copy - shares storage with the original, including engine reference
 }
 
 // Copy assignment operator (shallow copy for reference semantics)
 script_value& script_value::operator=(const script_value& other) {
     if (this != &other) {
         type_info_ = other.type_info_;
+        engine_ref_ = other.engine_ref_;
         storage_ = other.storage_;
     }
     return *this;
@@ -94,7 +141,7 @@ script_value& script_value::operator=(const script_value& other) {
 
 // Explicit deep copy method
 script_value script_value::clone() const {
-    script_value result;
+    script_value result(std::monostate{}, engine_ref_);  // Preserve engine reference!
     result.type_info_ = type_info_;
     
     // Handle deep copying for different types
@@ -115,7 +162,7 @@ script_value script_value::clone() const {
             auto& other_map = *std::get<std::shared_ptr<std::map<script_value, script_value>>>(storage_);
             auto new_map = std::make_shared<std::map<script_value, script_value>>();
             for (const auto& [key, value] : other_map) {
-                (*new_map)[key.clone()] = value.clone();
+                new_map->emplace(key.clone(), value.clone());
             }
             result.storage_ = new_map;
             break;

@@ -73,6 +73,13 @@ inline int gl3wInit() {
 #include <iostream>
 
 namespace MV {
+	
+	enum BlendMode { 
+		BLEND_DEFAULT, 
+		BLEND_MULTIPLY, 
+		BLEND_ADD, 
+		BLEND_SCREEN 
+	};
 	namespace Scene {
 		class Node;
 	}
@@ -294,6 +301,11 @@ namespace MV {
 
 	class TextureDefinition;
 	class TextureHandle;
+	
+	namespace Scene {
+		class Drawable;
+	}
+	
 	class Shader {
 		friend Draw2D;
 	public:
@@ -428,6 +440,55 @@ namespace MV {
 		bool headless;
 	};
 
+	struct MaterialContext {
+		Draw2D& renderer;
+		float time;
+		const TransformMatrix& worldTransform;
+		float alpha;
+		int32_t cameraId;
+		// Add other context data as needed
+	};
+
+	class Material {
+	public:
+		using ApplyFunction = std::function<void(Shader&, const MaterialContext&)>;
+		
+		Material(const std::string& id, const std::string& shaderProgramId)
+			: ourId(id), ourShaderProgramId(shaderProgramId) {}
+		
+		Material& setApply(ApplyFunction applyFn) {
+			applyFunction = applyFn;
+			return *this;
+		}
+		
+		Material& texture(size_t slot, std::shared_ptr<TextureHandle> tex) {
+			defaultTextures[slot] = tex;
+			return *this;
+		}
+		
+		Material& blend(BlendMode mode) {
+			blendMode = mode;
+			return *this;
+		}
+		
+		BlendMode blend() const { 
+			return blendMode; 
+		}
+		
+		void apply(Shader& shader, const MaterialContext& context) const;
+		
+		const std::string& id() const { return ourId; }
+		const std::string& shaderProgramId() const { return ourShaderProgramId; }
+		const std::map<size_t, std::shared_ptr<TextureHandle>>& textures() const { return defaultTextures; }
+		
+	private:
+		std::string ourId;
+		std::string ourShaderProgramId;
+		ApplyFunction applyFunction;
+		std::map<size_t, std::shared_ptr<TextureHandle>> defaultTextures;
+		BlendMode blendMode = BLEND_DEFAULT;
+	};
+
 	//If attempting to make multiple instances of Draw2D bear in mind it modifies global state in the
 	//projection matrices, OpenGL, and SDL.
 	class Draw2D : public glExtensions {
@@ -524,20 +585,29 @@ namespace MV {
 		void defaultBlendFunction();
 
 		void loadDefaultShaders();
-		Shader* loadShader(const std::string& a_id, const std::string& a_vertexShaderFilename, const std::string& a_fragmentShaderFilename);
-		Shader* loadShaderCode(const std::string& a_id, const std::string& a_vertexShaderCode, const std::string& a_fragmentShaderCode);
+		std::shared_ptr<Shader> loadShader(const std::string& a_id, const std::string& a_vertexShaderFilename, const std::string& a_fragmentShaderFilename);
+		std::shared_ptr<Shader> loadShaderCode(const std::string& a_id, const std::string& a_vertexShaderCode, const std::string& a_fragmentShaderCode);
 
 		void reloadShaders();
 
 		bool hasShader(const std::string& a_id);
-		Shader* getShader(const std::string& a_id);
+		std::shared_ptr<Shader> getShader(const std::string& a_id);
 
-		Shader* defaultShader() const;
-		Shader* defaultShader(const std::string& a_id);
+		std::shared_ptr<Shader> defaultShader() const;
+		std::shared_ptr<Shader> defaultShader(const std::string& a_id);
 
 		bool headless() const {
 			return isHeadless;
 		}
+		
+		// Material management
+		std::shared_ptr<Material> loadMaterial(const std::string& a_id, const std::string& a_shaderProgramId);
+		bool hasMaterial(const std::string& a_id) const;
+		std::shared_ptr<Material> getMaterial(const std::string& a_id);
+		std::shared_ptr<const Material> getMaterial(const std::string& a_id) const;
+		
+		std::shared_ptr<Material> defaultMaterial() const;
+		std::shared_ptr<Material> defaultMaterial(const std::string& a_id);
 
 		//void registerShader(std::shared_ptr<Scene::Node> a_node);
 
@@ -575,8 +645,11 @@ namespace MV {
 		std::unordered_map<int32_t, TransformMatrix> ourCameras;
 		std::unordered_map<int32_t, TransformMatrix> ourCameraProjectionMatrices;
 
-		std::unordered_map<std::string, Shader> shaders;
-		Shader* defaultShaderPtr = nullptr;
+		std::unordered_map<std::string, std::shared_ptr<Shader>> shaders;
+		std::shared_ptr<Shader> defaultShaderPtr = nullptr;
+		
+		std::unordered_map<std::string, std::shared_ptr<Material>> materials;
+		std::shared_ptr<Material> defaultMaterialPtr = nullptr;
 
 		bool isHeadless = false;
 

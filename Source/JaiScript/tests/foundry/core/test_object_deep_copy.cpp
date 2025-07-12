@@ -44,10 +44,10 @@ public:
     
     void forge_tests() override {
         test("basic object deep copy", [this]() {
-            engine eng;
+            auto eng = engine::make();
             
             // Register test_object class
-            make_class_builder<test_object>(eng, "test_object")
+            class_builder<test_object>(*eng, "test_object")
                 .constructor<int, script_string>()
                 .method("get_value", &test_object::get_value)
                 .method("set_value", &test_object::set_value)
@@ -58,7 +58,7 @@ public:
                 .build();
             
             // Test object creation and copying
-            eng.execute(R"(
+            eng->execute(R"(
                 var obj1 = test_object(42, "original");
                 var obj2 = obj1;  // This should deep copy
                 
@@ -68,10 +68,10 @@ public:
             )");
             
             // Verify deep copy - obj1 should be unchanged
-            auto obj1_value = eng.execute("obj1.get_value()").as<int>();
-            auto obj1_name = eng.execute("obj1.get_name()").as<std::string>();
-            auto obj2_value = eng.execute("obj2.get_value()").as<int>();
-            auto obj2_name = eng.execute("obj2.get_name()").as<std::string>();
+            auto obj1_value = eng->execute("obj1.get_value()").as<int>();
+            auto obj1_name = eng->execute("obj1.get_name()").as<std::string>();
+            auto obj2_value = eng->execute("obj2.get_value()").as<int>();
+            auto obj2_name = eng->execute("obj2.get_name()").as<std::string>();
             
             check_eq(obj1_value, 42);
             check_eq(obj1_name, "original");
@@ -80,10 +80,10 @@ public:
         });
         
         test("object deep copy with inheritance", [this]() {
-            engine eng;
+            auto eng = engine::make();
             
             // Register base and derived classes
-            make_class_builder<test_object>(eng, "test_object")
+            class_builder<test_object>(*eng, "test_object")
                 .constructor<int, script_string>()
                 .method("get_value", &test_object::get_value)
                 .method("set_value", &test_object::set_value)
@@ -91,7 +91,7 @@ public:
                 .method("set_name", &test_object::set_name)
                 .build();
             
-            make_class_builder<derived_object>(eng, "derived_object")
+            class_builder<derived_object>(*eng, "derived_object")
                 .constructor<int, script_string, script_float>()
                 .base_class<test_object>()
                 .method("get_extra", &derived_object::get_extra)
@@ -99,7 +99,7 @@ public:
                 .build();
             
             // Test derived object creation and copying
-            eng.execute(R"(
+            eng->execute(R"(
                 var obj1 = derived_object(42, "original", 3.14);
                 var obj2 = obj1;  // This should deep copy
                 
@@ -110,13 +110,13 @@ public:
             )");
             
             // Verify deep copy - obj1 should be unchanged
-            auto obj1_value = eng.execute("obj1.get_value()").as<int>();
-            auto obj1_name = eng.execute("obj1.get_name()").as<std::string>();
-            auto obj1_extra = eng.execute("obj1.get_extra()").as<double>();
+            auto obj1_value = eng->execute("obj1.get_value()").as<int>();
+            auto obj1_name = eng->execute("obj1.get_name()").as<std::string>();
+            auto obj1_extra = eng->execute("obj1.get_extra()").as<double>();
             
-            auto obj2_value = eng.execute("obj2.get_value()").as<int>();
-            auto obj2_name = eng.execute("obj2.get_name()").as<std::string>();
-            auto obj2_extra = eng.execute("obj2.get_extra()").as<double>();
+            auto obj2_value = eng->execute("obj2.get_value()").as<int>();
+            auto obj2_name = eng->execute("obj2.get_name()").as<std::string>();
+            auto obj2_extra = eng->execute("obj2.get_extra()").as<double>();
             
             check_eq(obj1_value, 42);
             check_eq(obj1_name, "original");
@@ -128,10 +128,10 @@ public:
         });
         
         test("object deep copy in containers", [this]() {
-            engine eng;
+            auto eng = engine::make();
             
             // Register test_object class
-            make_class_builder<test_object>(eng, "test_object")
+            class_builder<test_object>(*eng, "test_object")
                 .constructor<int, script_string>()
                 .method("get_value", &test_object::get_value)
                 .method("set_value", &test_object::set_value)
@@ -140,7 +140,7 @@ public:
                 .build();
             
             // Test objects in arrays and maps
-            eng.execute(R"(
+            eng->execute(R"(
                 var obj = test_object(42, "original");
                 
                 // Put object in array
@@ -159,14 +159,14 @@ public:
             )");
             
             // Verify deep copy - original objects should be unchanged
-            auto obj_value = eng.execute("obj.get_value()").as<int>();
-            auto obj_name = eng.execute("obj.get_name()").as<std::string>();
+            auto obj_value = eng->execute("obj.get_value()").as<int>();
+            auto obj_name = eng->execute("obj.get_name()").as<std::string>();
             
-            auto arr1_obj_value = eng.execute("arr1[0].get_value()").as<int>();
-            auto arr2_obj_value = eng.execute("arr2[0].get_value()").as<int>();
+            auto arr1_obj_value = eng->execute("arr1[0].get_value()").as<int>();
+            auto arr2_obj_value = eng->execute("arr2[0].get_value()").as<int>();
             
-            auto map1_obj_name = eng.execute("map1[\"key\"].get_name()").as<std::string>();
-            auto map2_obj_name = eng.execute("map2[\"key\"].get_name()").as<std::string>();
+            auto map1_obj_name = eng->execute("map1[\"key\"].get_name()").as<std::string>();
+            auto map2_obj_name = eng->execute("map2[\"key\"].get_name()").as<std::string>();
             
             check_eq(obj_value, 42);
             check_eq(obj_name, "original");

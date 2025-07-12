@@ -11,7 +11,7 @@ public:
     
     void forge_tests() override {
         test("simple_function_declaration_and_call", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 auto add(auto a, auto b) -> auto {
@@ -22,13 +22,13 @@ public:
                 result;
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.is_int());
             check_eq(result.as<int>(), 8);
         });
 
         test("function_with_no_parameters", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 auto getValue() -> auto {
@@ -38,13 +38,13 @@ public:
                 getValue();
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.is_int());
             check_eq(result.as<int>(), 42);
         });
 
         test("function_with_side_effects", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 auto x = 10;
@@ -57,13 +57,13 @@ public:
                 x;
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.is_int());
             check_eq(result.as<int>(), 25);
         });
 
         test("function_with_multiple_parameters", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 function multiply(auto a, auto b, auto c) -> auto {
@@ -73,13 +73,13 @@ public:
                 multiply(2, 3, 4);
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.is_int());
             check_eq(result.as<int>(), 24);
         });
 
         test("recursive_function", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 function factorial(auto n) -> auto {
@@ -92,13 +92,13 @@ public:
                 factorial(5);
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.is_int());
             check_eq(result.as<int>(), 120);
         });
 
         test("function_returning_string", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 function greeting(auto name) -> auto {
@@ -108,13 +108,13 @@ public:
                 greeting("World");
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.is_string());
             check_eq(result.as<std::string>(), "Hello, World!");
         });
 
         test("nested_function_calls", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 function double(auto x) -> auto {
@@ -128,13 +128,13 @@ public:
                 double(add(3, 4));
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.is_int());
             check_eq(result.as<int>(), 14); // double(3 + 4) = double(7) = 14
         });
 
         test("function_with_local_variables", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 function compute(auto n) -> auto {
@@ -146,13 +146,13 @@ public:
                 compute(10);
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.is_int());
             check_eq(result.as<int>(), 25); // (10 * 2) + 5 = 25
         });
 
         test("function_with_conditional_return", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 function max(auto a, auto b) -> auto {
@@ -166,13 +166,13 @@ public:
                 max(15, 10);
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.is_int());
             check_eq(result.as<int>(), 15);
         });
 
         test("function_with_early_return", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 function findFirst(auto n) -> auto {
@@ -187,13 +187,13 @@ public:
                 findFirst(5);
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.is_int());
             check_eq(result.as<int>(), 5);
         });
 
         test("function_scope_isolation", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 auto global_var = 100;
@@ -206,13 +206,13 @@ public:
                 test_scope();
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.is_int());
             check_eq(result.as<int>(), 150);
         });
 
         test("function_parameter_shadowing", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 auto x = 10;
@@ -224,13 +224,13 @@ public:
                 shadow_test(5);
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.is_int());
             check_eq(result.as<int>(), 10); // uses parameter x=5, not global x=10
         });
 
         test("function_with_different_syntax_styles", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 // C++ style
@@ -251,7 +251,7 @@ public:
                 cpp_style(10) + func_style(10) + short_style(10);
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.is_int());
             check_eq(result.as<int>(), 36); // 11 + 12 + 13 = 36
         });

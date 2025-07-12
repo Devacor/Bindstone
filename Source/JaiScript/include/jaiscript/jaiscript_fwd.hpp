@@ -1,5 +1,8 @@
 #pragma once
 
+#ifndef __JAISCRIPT_JAISCRIPT_FWD_HPP__
+#define __JAISCRIPT_JAISCRIPT_FWD_HPP__
+
 namespace jai {
     
     class engine;
@@ -28,8 +31,9 @@ namespace jai {
         jai_object_type,         // Object<T> - typed object
         jai_function_type,       // Function<ReturnType(Args...)>
         jai_reference_type,      // T& - Reference to another value
-        jai_shared_ptr_type,     // shared_ptr<T>
         jai_weak_ptr_type        // weak_ptr<T>
     };
     
 } // namespace jai
+
+#endif // __JAISCRIPT_JAISCRIPT_FWD_HPP__

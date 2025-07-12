@@ -21,6 +21,7 @@ namespace jvm {
         // Shared state with engine
         string_symbolizer* symbolizer = nullptr;
         std::shared_ptr<environment> global_env;
+        std::weak_ptr<engine> engine_ref;
         
         // Compiled modules cache
         std::unique_ptr<module> current_module;
@@ -206,10 +207,31 @@ namespace jvm {
     }
     
     void vm_backend::set_subscript_resolver(std::function<script_value(const std::vector<script_value>&)> resolver) {
-        // Subscript resolver support would need to be implemented in VM
+        // TODO: Subscript resolver support would need to be implemented in VM
         // For now, just log a warning
         if (impl_->debug_mode) {
             std::cerr << "Warning: set_subscript_resolver() not fully implemented for VM backend" << std::endl;
+        }
+    }
+    
+    void vm_backend::set_class_lookup_callback(std::function<std::shared_ptr<class_definition>(const std::string&)> callback) {
+        // TODO: Implement class lookup callback support in VM
+        // For now, just log a warning
+        if (impl_->debug_mode) {
+            std::cerr << "Warning: set_class_lookup_callback() not fully implemented for VM backend" << std::endl;
+        }
+    }
+    
+    void vm_backend::set_engine_reference(std::weak_ptr<engine> engine_ref) {
+        impl_->engine_ref = engine_ref;
+        
+        // Pass the engine reference to the virtual machine for script_value creation
+        if (impl_->vm) {
+            impl_->vm->set_engine_reference(engine_ref);
+        }
+        
+        if (impl_->debug_mode) {
+            std::cerr << "VM backend: Engine reference set successfully" << std::endl;
         }
     }
     
@@ -538,8 +560,33 @@ namespace jvm {
         // }
     }
     
+    void hybrid_backend::set_class_lookup_callback(std::function<std::shared_ptr<class_definition>(const std::string&)> callback) {
+        // TODO: Implement class lookup callback support in hybrid backend
+        impl_->vm_backend_impl->set_class_lookup_callback(callback);
+        // if (impl_->interpreter_backend_impl) {
+        //     impl_->interpreter_backend_impl->set_class_lookup_callback(callback);
+        // }
+    }
+    
+    void hybrid_backend::set_engine_reference(std::weak_ptr<engine> engine_ref) {
+        impl_->vm_backend_impl->set_engine_reference(engine_ref);
+        // if (impl_->interpreter_backend_impl) {
+        //     impl_->interpreter_backend_impl->set_engine_reference(engine_ref);
+        // }
+    }
+    
     std::string hybrid_backend::get_backend_name() const {
         return "JaiScript Hybrid (VM + Interpreter)";
+    }
+    
+    bool hybrid_backend::is_unwinding() const {
+        // TODO: Implement proper exception handling in hybrid backend
+        return impl_->vm_backend_impl->is_unwinding();
+    }
+    
+    const script_exception& hybrid_backend::get_current_exception() const {
+        // TODO: Implement proper exception handling in hybrid backend
+        return impl_->vm_backend_impl->get_current_exception();
     }
     
     // Hybrid-specific configuration

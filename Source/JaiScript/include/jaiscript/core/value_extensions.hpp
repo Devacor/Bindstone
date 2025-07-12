@@ -36,11 +36,18 @@ public:
     // Extract script class instance from script_value
     static std::shared_ptr<script_class_instance> as_script_class_instance(const script_value& value);
     
-    // Create script_value from hybrid class instance
-    static script_value make_hybrid_class_instance(std::shared_ptr<hybrid_class_instance> instance);
+    // Check if a class instance has a C++ base object (hybrid class)
+    static bool has_cpp_base(const script_value& value);
     
-    // Extract hybrid class instance from script_value
-    static std::shared_ptr<hybrid_class_instance> as_hybrid_class_instance(const script_value& value);
+    // Get the C++ base object from a hybrid class instance
+    template<typename T>
+    static std::shared_ptr<T> get_cpp_base(const script_value& value) {
+        auto instance = as_script_class_instance(value);
+        if (instance && instance->has_cpp_object()) {
+            return instance->get_cpp_object_as<T>();
+        }
+        return nullptr;
+    }
     
     // Check if value holds a script class instance
     static bool is_script_class_instance(const script_value& value);

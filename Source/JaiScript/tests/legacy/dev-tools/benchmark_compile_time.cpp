@@ -35,7 +35,7 @@ int main() {
         // Register 10 test classes
         for (int i = 0; i < 10; i++) {
             std::string class_name = "TestClass" + std::to_string(i);
-            make_class_builder<TestClass>(jai_engine, class_name)
+            class_builder<TestClass>(jai_engine, class_name)
                 .constructor<>()
                 .constructor<int>()
                 .method("getValue", &TestClass::getValue)

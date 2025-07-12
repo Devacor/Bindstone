@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../core/execution_backend.hpp"
-#include "../core/function_binder.hpp"
+#include <jaiscript/core/execution_backend.hpp>
+#include <jaiscript/core/function_binder.hpp>
 #include "virtual_machine.hpp"
 #include "compiler.hpp"
 #include <memory>
@@ -37,9 +37,10 @@ namespace jvm {
         void pop_scope() override;
         void define_variable(const std::string& name, const script_value& value) override;
         
-        void set_type_converters(const std::unordered_map<std::string, std::function<script_value(const void*)>>* converters) override;
         void set_has_custom_numeric_ops(bool value) override;
         void set_subscript_resolver(std::function<script_value(const std::vector<script_value>&)> resolver) override;
+        void set_class_lookup_callback(std::function<std::shared_ptr<class_definition>(const std::string&)> callback) override;
+        void set_engine_reference(std::weak_ptr<engine> engine_ref) override;
         
         // Exception handling
         bool is_unwinding() const override;
@@ -154,9 +155,12 @@ namespace jvm {
         void push_scope() override;
         void pop_scope() override;
         void define_variable(const std::string& name, const script_value& value) override;
-        void set_type_converters(const std::unordered_map<std::string, std::function<script_value(const void*)>>* converters) override;
         void set_has_custom_numeric_ops(bool value) override;
         void set_subscript_resolver(std::function<script_value(const std::vector<script_value>&)> resolver) override;
+        void set_class_lookup_callback(std::function<std::shared_ptr<class_definition>(const std::string&)> callback) override;
+        void set_engine_reference(std::weak_ptr<engine> engine_ref) override;
+        bool is_unwinding() const override;
+        const script_exception& get_current_exception() const override;
         std::string get_backend_name() const override;
         
         // Hybrid-specific configuration

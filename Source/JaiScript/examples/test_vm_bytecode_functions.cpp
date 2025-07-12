@@ -118,7 +118,7 @@ int main() {
                 }
             }
             
-            auto obj = new TestClass();
+            auto obj = TestClass();
             obj.compute(21)
         )");
         

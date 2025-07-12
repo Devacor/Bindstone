@@ -1,18 +1,32 @@
 #pragma once
 
+#ifndef __JAISCRIPT_CORE_ENGINE_HPP__
+#define __JAISCRIPT_CORE_ENGINE_HPP__
+
 #include "types.hpp"
 #include "value.hpp"
 #include "function_binder.hpp"
+#include "binding_traits.hpp"
+#include "conversion_registry.hpp"
+#include "conversion_registry_impl.hpp"
+// conversion_registry_templates.hpp moved to after engine class definition
+#include "bound_array.hpp"
+#include "bound_map.hpp"
 #include <memory>
 #include <optional>
 #include <unordered_set>
 #include <typeindex>
+#include <iostream>
 
 namespace jai {
 
     // Forward declarations
     class class_definition;
     class execution_backend;
+    
+    namespace serialization {
+        class serialization_registry;
+    }
     
     // Backend type enumeration
     enum class backend_type {
@@ -21,10 +35,19 @@ namespace jai {
         auto_select    // Automatic selection based on heuristics
     };
 
-    class engine {
-    public:
+    class engine : public std::enable_shared_from_this<engine> {
+    private:
         engine();
+        
+    public:
         ~engine();
+        
+        // Factory method to ensure engines are always created as shared_ptr
+        static std::shared_ptr<engine> make() {
+            auto eng = std::shared_ptr<engine>(new engine());
+            eng->initialize_engine_reference();
+            return eng;
+        }
         
         // Non-copyable, moveable
         engine(const engine&) = delete;
@@ -50,6 +73,34 @@ namespace jai {
         // Global registration
         void add_global(const std::string& name, script_value value, bool is_serializable = true);
         
+        // Object creation through registered class system
+        template<typename T, typename... Args>
+        script_value make_object(Args&&... args) {
+            return script_value::make_registered_object<T>(this, std::forward<Args>(args)...);
+        }
+        
+        // Convenient script_value creation methods
+        // Usage: engine->make_value(42) instead of script_value(42, engine->weak_from_this())
+        template<typename T>
+        script_value make_value(T&& value) {
+            return script_value(std::forward<T>(value), weak_from_this());
+        }
+        
+        // Create null/void value
+        script_value make_null() {
+            return script_value(std::monostate{}, weak_from_this());
+        }
+        
+        // Create array value
+        script_value make_array() {
+            return script_value::make_array(nullptr, weak_from_this());
+        }
+        
+        // Create map value
+        script_value make_map() {
+            return script_value::make_map(nullptr, nullptr, weak_from_this());
+        }
+        
         // === FUNCTION REGISTRATION ===
         
         // Variadic functions - handle any number of arguments at runtime
@@ -63,11 +114,14 @@ namespace jai {
         // Example: engine.add_function("add", [](int a, int b) -> int { return a + b; });
         template<typename Func>
         void add_function(const std::string& name, Func&& func) {
+            // Check for rejected container references
+            binding_traits::check_binding_validity<Func>(name);
+            
             using traits = detail::function_traits<std::decay_t<Func>>;
             using return_type = typename traits::return_type;
             constexpr size_t arity = traits::arity;
             
-            auto binder = make_functionBinder(std::forward<Func>(func));
+            auto binder = make_functionBinder(std::forward<Func>(func), this);
             script_function boundFunc = binder.bind();
             
             // Wrap the function to handle type conversion for return values
@@ -141,6 +195,48 @@ namespace jai {
         
         // Get class definition by name
         std::shared_ptr<class_definition> get_class_definition(const std::string& name) const;
+        
+        // Enhanced Conversion System
+        // Get the conversion manager for this engine
+        conversions::conversion_manager get_conversion_manager();
+        
+        // Register standard vector and map conversions
+        void add_standard_conversions();
+        
+        // Register vector conversion for a specific type
+        template<typename T>
+        void add_vector_conversion() {
+            auto manager = get_conversion_manager();
+            manager.add_vector_conversion<T>();
+        }
+        
+        // Register map conversion for specific key/value types
+        template<typename K, typename V>
+        void add_map_conversion() {
+            auto manager = get_conversion_manager();
+            manager.add_map_conversion<K, V>();
+        }
+        
+        // Register bound_array conversion for a specific type
+        template<typename T>
+        void add_bound_array_conversion() {
+            auto manager = get_conversion_manager();
+            manager.add_bound_array_conversion<T>();
+        }
+        
+        // Register bound_map conversion for specific key/value types
+        template<typename K, typename V>
+        void add_bound_map_conversion() {
+            auto manager = get_conversion_manager();
+            manager.add_bound_map_conversion<K, V>();
+        }
+        
+        // Register custom conversion for any type
+        template<typename T>
+        void add_custom_conversion(
+            std::function<T(const script_value&)> from_func,
+            std::function<script_value(const T&)> to_func
+        );
         
         // Type conversion registration
         // Register a conversion between JaiScript types with a cost for overload resolution
@@ -219,7 +315,7 @@ namespace jai {
         std::string get_registered_type_name(const std::string& typeIdName) const;
         
         // Convert a registered type to value
-        script_value convert_to_value(const std::string& typeIdName, const void* obj) const;
+        script_value convert_to_value(const std::type_info& type, const void* obj) const;
         
         // Backend configuration
         void set_backend(backend_type type);
@@ -227,7 +323,7 @@ namespace jai {
         backend_type get_backend_type() const;
         std::string get_backend_name() const;
         
-        // Register type converters for custom types
+        // Register C++ type converters for custom types
         template<typename T>
         void register_type_converter(const std::string& type_name) {
             // Register a converter that creates a script_value from this type
@@ -237,17 +333,26 @@ namespace jai {
             };
             
             // Store this converter (implementation will handle the storage)
-            register_type_converterImpl(typeid(T).name(), 
+            register_type_converter_impl(typeid(T), 
                 [toValue](const void* obj) -> script_value {
                     return toValue(*static_cast<const T*>(obj));
                 });
         }
         
-        // Get class definition by type name
+        // Get class definition by type index
         std::shared_ptr<class_definition> get_class_definition_by_type(const std::type_index& type) const;
         
-        // Get class definition by type index
-        std::shared_ptr<class_definition> get_class_definition_by_type(std::type_index type) const;
+        // Get the conversion registry - shareable between engines
+        std::shared_ptr<conversions::conversion_registry> get_conversion_registry() const;
+        
+        // Set a shared conversion registry (for sharing between engine instances)
+        void set_conversion_registry(std::shared_ptr<conversions::conversion_registry> registry);
+        
+        // Get the serialization registry for this engine
+        serialization::serialization_registry& get_serialization_registry();
+        
+        // Reference support for function parameters
+        script_value try_create_reference(size_t arg_index, const script_value& fallback);
         
         // Register polymorphic copier for derived types
         template<typename Derived>
@@ -261,9 +366,10 @@ namespace jai {
         struct implementation;
         std::unique_ptr<implementation> impl;
         
+        void initialize_engine_reference();
         void add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef);
         void register_type_name_impl(const std::string& typeIdName, const std::string& friendlyName);
-        void register_type_converterImpl(const std::string& typeIdName, std::function<script_value(const void*)> converter);
+        void register_type_converter_impl(const std::type_info& type, std::function<script_value(const void*)> converter);
         void register_polymorphic_copier_impl(std::type_index derived_type, 
                                              std::type_index base_type,
                                              std::function<std::shared_ptr<void>(const void*)> copier);
@@ -271,6 +377,8 @@ namespace jai {
         
         // Allow class_builder to access implementation details
         template<typename T> friend class class_builder;
+        // Allow function_binder to access conversion registry
+        template<typename T> friend struct detail::value_converter;
         
         // Helper to wrap functions with type conversion
         template<typename ReturnType>
@@ -310,6 +418,16 @@ namespace jai {
                 return script_value_type::jai_char_type;
             } else if constexpr (std::is_same_v<decay_t, std::string> || std::is_same_v<decay_t, script_string>) {
                 return script_value_type::jai_string_type;
+            } else if constexpr (is_specialization_v<decay_t, std::vector>) {
+                return script_value_type::jai_array_type;
+            } else if constexpr (is_specialization_v<decay_t, bound_array>) {
+                // bound_array is a zero-copy wrapper for arrays
+                return script_value_type::jai_array_type;
+            } else if constexpr (is_specialization_v<decay_t, std::map>) {
+                return script_value_type::jai_map_type;
+            } else if constexpr (is_specialization_v<decay_t, bound_map>) {
+                // bound_map is a zero-copy wrapper for maps
+                return script_value_type::jai_map_type;
             } else {
                 // For unknown types, return Object (could be improved)
                 return script_value_type::jai_object_type;
@@ -319,3 +437,9 @@ namespace jai {
     
     
 } // namespace jai
+
+// Include template implementations that need both engine and other headers
+#include "engine_impl.hpp"
+#include "conversion_registry_templates.hpp"
+
+#endif // __JAISCRIPT_CORE_ENGINE_HPP__

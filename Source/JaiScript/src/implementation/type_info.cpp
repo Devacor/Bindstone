@@ -63,14 +63,6 @@ std::string type_info::to_string() const {
             }
             return ss.str();
             
-        case script_value_type::jai_shared_ptr_type:
-            if (!type_params.empty()) {
-                ss << "shared_ptr<" << type_params[0]->to_string() << ">";
-            } else {
-                ss << "shared_ptr<unknown>";
-            }
-            return ss.str();
-            
         case script_value_type::jai_weak_ptr_type:
             if (!type_params.empty()) {
                 ss << "weak_ptr<" << type_params[0]->to_string() << ">";

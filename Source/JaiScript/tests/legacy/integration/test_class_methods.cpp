@@ -24,7 +24,7 @@ JAI_TEST(register_class_with_methods) {
     engine engine;
     
     // Should not throw when registering class with methods
-    make_class_builder<TestClass>(engine, "TestClass")
+    class_builder<TestClass>(engine, "TestClass")
         .constructor<>()
         .method("setValue", &TestClass::setValue)
         .method("getValue", &TestClass::getValue)
@@ -34,7 +34,7 @@ JAI_TEST(register_class_with_methods) {
 JAI_TEST(create_instance) {
     engine engine;
     
-    make_class_builder<TestClass>(engine, "TestClass")
+    class_builder<TestClass>(engine, "TestClass")
         .constructor<>()
         .method("setValue", &TestClass::setValue)
         .method("getValue", &TestClass::getValue)
@@ -48,7 +48,7 @@ JAI_TEST(create_instance) {
 JAI_TEST(call_methods_on_instance) {
     engine engine;
     
-    make_class_builder<TestClass>(engine, "TestClass")
+    class_builder<TestClass>(engine, "TestClass")
         .constructor<>()
         .method("setValue", &TestClass::setValue)
         .method("getValue", &TestClass::getValue)

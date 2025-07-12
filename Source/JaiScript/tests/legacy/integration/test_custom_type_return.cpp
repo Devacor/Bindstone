@@ -30,7 +30,7 @@ JAI_TEST(return_custom_type_from_function) {
     std::cout << "Test: Registering Button class..." << std::endl;
     
     // Register Button class
-    make_class_builder<Button>(engine, "Button")
+    class_builder<Button>(engine, "Button")
         .constructor<>()
         .constructor<const std::string&>()
         .method("getText", &Button::getText)
@@ -74,7 +74,7 @@ JAI_TEST(return_shared_ptr_custom_type) {
     engine engine;
     
     // Register Button class
-    make_class_builder<Button>(engine, "Button")
+    class_builder<Button>(engine, "Button")
         .constructor<>()
         .constructor<const std::string&>()
         .method("getText", &Button::getText)

@@ -169,7 +169,9 @@ void check(const T& expected, const T& actual) {
 template<typename T>
 void check_near(T expected, T actual, T tolerance) {
     if (std::abs(expected - actual) > tolerance) {
-        throw test_failure(std::format("Expected: {} ± {}, Actual: {}", expected, tolerance, actual));
+        std::stringstream ss;
+        ss << "Expected: " << expected << " ± " << tolerance << ", Actual: " << actual;
+        throw test_failure(ss.str());
     }
 }
 

@@ -33,19 +33,19 @@ void interpreter::init_dispatch_table() {
 script_value interpreter::handle_add(const script_value& left, const script_value& right) {
     // Fast path for integer addition
     if (left.is_int() && right.is_int()) {
-        return script_value(left.as_int() + right.as_int());
+        return make_value(left.as_int() + right.as_int());
     }
     
     // Fast path for float addition
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
-        return script_value(lf + rf);
+        return make_value(lf + rf);
     }
     
     // String concatenation
     if (left.is_string() || right.is_string()) {
-        return script_value(left.to_string() + right.to_string());
+        return make_value(left.to_string() + right.to_string());
     }
     
     throw runtime_error("Invalid operands for + operator");
@@ -53,13 +53,13 @@ script_value interpreter::handle_add(const script_value& left, const script_valu
 
 script_value interpreter::handle_subtract(const script_value& left, const script_value& right) {
     if (left.is_int() && right.is_int()) {
-        return script_value(left.as_int() - right.as_int());
+        return make_value(left.as_int() - right.as_int());
     }
     
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
-        return script_value(lf - rf);
+        return make_value(lf - rf);
     }
     
     throw runtime_error("Invalid operands for - operator");
@@ -67,13 +67,13 @@ script_value interpreter::handle_subtract(const script_value& left, const script
 
 script_value interpreter::handle_multiply(const script_value& left, const script_value& right) {
     if (left.is_int() && right.is_int()) {
-        return script_value(left.as_int() * right.as_int());
+        return make_value(left.as_int() * right.as_int());
     }
     
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
-        return script_value(lf * rf);
+        return make_value(lf * rf);
     }
     
     throw runtime_error("Invalid operands for * operator");
@@ -82,14 +82,14 @@ script_value interpreter::handle_multiply(const script_value& left, const script
 script_value interpreter::handle_divide(const script_value& left, const script_value& right) {
     if (left.is_int() && right.is_int()) {
         if (right.as_int() == 0) throw runtime_error("Division by zero");
-        return script_value(left.as_int() / right.as_int());
+        return make_value(left.as_int() / right.as_int());
     }
     
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
         if (rf == 0.0) throw runtime_error("Division by zero");
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
-        return script_value(lf / rf);
+        return make_value(lf / rf);
     }
     
     throw runtime_error("Invalid operands for / operator");
@@ -98,14 +98,14 @@ script_value interpreter::handle_divide(const script_value& left, const script_v
 script_value interpreter::handle_modulo(const script_value& left, const script_value& right) {
     if (left.is_int() && right.is_int()) {
         if (right.as_int() == 0) throw runtime_error("Division by zero");
-        return script_value(left.as_int() % right.as_int());
+        return make_value(left.as_int() % right.as_int());
     }
     
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
         if (rf == 0.0) throw runtime_error("Division by zero");
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
-        return script_value(std::fmod(lf, rf));
+        return make_value(std::fmod(lf, rf));
     }
     
     throw runtime_error("Invalid operands for % operator");
@@ -113,17 +113,17 @@ script_value interpreter::handle_modulo(const script_value& left, const script_v
 
 script_value interpreter::handle_less(const script_value& left, const script_value& right) {
     if (left.is_int() && right.is_int()) {
-        return script_value(left.as_int() < right.as_int());
+        return make_value(left.as_int() < right.as_int());
     }
     
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
-        return script_value(lf < rf);
+        return make_value(lf < rf);
     }
     
     if (left.is_string() && right.is_string()) {
-        return script_value(left.as_string() < right.as_string());
+        return make_value(left.as_string() < right.as_string());
     }
     
     throw runtime_error("Invalid operands for < operator");
@@ -131,17 +131,17 @@ script_value interpreter::handle_less(const script_value& left, const script_val
 
 script_value interpreter::handle_less_equal(const script_value& left, const script_value& right) {
     if (left.is_int() && right.is_int()) {
-        return script_value(left.as_int() <= right.as_int());
+        return make_value(left.as_int() <= right.as_int());
     }
     
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
-        return script_value(lf <= rf);
+        return make_value(lf <= rf);
     }
     
     if (left.is_string() && right.is_string()) {
-        return script_value(left.as_string() <= right.as_string());
+        return make_value(left.as_string() <= right.as_string());
     }
     
     throw runtime_error("Invalid operands for <= operator");
@@ -149,17 +149,17 @@ script_value interpreter::handle_less_equal(const script_value& left, const scri
 
 script_value interpreter::handle_greater(const script_value& left, const script_value& right) {
     if (left.is_int() && right.is_int()) {
-        return script_value(left.as_int() > right.as_int());
+        return make_value(left.as_int() > right.as_int());
     }
     
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
-        return script_value(lf > rf);
+        return make_value(lf > rf);
     }
     
     if (left.is_string() && right.is_string()) {
-        return script_value(left.as_string() > right.as_string());
+        return make_value(left.as_string() > right.as_string());
     }
     
     throw runtime_error("Invalid operands for > operator");
@@ -167,42 +167,114 @@ script_value interpreter::handle_greater(const script_value& left, const script_
 
 script_value interpreter::handle_greater_equal(const script_value& left, const script_value& right) {
     if (left.is_int() && right.is_int()) {
-        return script_value(left.as_int() >= right.as_int());
+        return make_value(left.as_int() >= right.as_int());
     }
     
     if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
-        return script_value(lf >= rf);
+        return make_value(lf >= rf);
     }
     
     if (left.is_string() && right.is_string()) {
-        return script_value(left.as_string() >= right.as_string());
+        return make_value(left.as_string() >= right.as_string());
     }
     
     throw runtime_error("Invalid operands for >= operator");
 }
 
 script_value interpreter::handle_equal(const script_value& left, const script_value& right) {
-    // Type mismatch = not equal
-    if (left.type() != right.type()) {
-        return script_value(false);
+    // Handle weak_ptr comparisons with null
+    if ((left.is_weak_ptr() && right.is_null()) || (left.is_null() && right.is_weak_ptr())) {
+        // For weak_ptr, null comparison checks if expired
+        bool is_expired = false;
+        if (left.is_weak_ptr()) {
+            if (std::holds_alternative<std::weak_ptr<script_value>>(left.storage_)) {
+                auto weak_ptr = std::get<std::weak_ptr<script_value>>(left.storage_);
+                // Check if weak_ptr is expired (includes default-constructed)
+                is_expired = weak_ptr.expired();
+            } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(left.storage_)) {
+                // weak_ptr_holder type - check if it contains an actual value
+                auto holder = std::get<std::shared_ptr<script_value::object_holder>>(left.storage_);
+                is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
+            } else {
+                // Other cases - consider expired
+                is_expired = true;
+            }
+        } else {
+            // right is weak_ptr
+            if (std::holds_alternative<std::weak_ptr<script_value>>(right.storage_)) {
+                auto weak_ptr = std::get<std::weak_ptr<script_value>>(right.storage_);
+                // Check if weak_ptr is expired (includes default-constructed)
+                is_expired = weak_ptr.expired();
+            } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(right.storage_)) {
+                // weak_ptr_holder type - check if it contains an actual value
+                auto holder = std::get<std::shared_ptr<script_value::object_holder>>(right.storage_);
+                is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
+            } else {
+                // Other cases - consider expired
+                is_expired = true;
+            }
+        }
+        
+        return make_value(is_expired);  // weak == null is true if expired
     }
     
-    if (left.is_null()) return script_value(true);
-    if (left.is_int()) return script_value(left.as_int() == right.as_int());
-    if (left.is_float()) return script_value(left.as_float() == right.as_float());
-    if (left.is_string()) return script_value(left.as_string() == right.as_string());
-    if (left.is_bool()) return script_value(left.as_bool() == right.as_bool());
-    if (left.is_char()) return script_value(left.as_char() == right.as_char());
+    // Type mismatch = not equal (except for weak_ptr vs null handled above)
+    if (left.type() != right.type()) {
+        return make_value(false);
+    }
+    
+    if (left.is_null()) return make_value(true);
+    if (left.is_int()) return make_value(left.as_int() == right.as_int());
+    if (left.is_float()) return make_value(left.as_float() == right.as_float());
+    if (left.is_string()) return make_value(left.as_string() == right.as_string());
+    if (left.is_bool()) return make_value(left.as_bool() == right.as_bool());
+    if (left.is_char()) return make_value(left.as_char() == right.as_char());
     
     // For complex types, default to false
-    return script_value(false);
+    return make_value(false);
 }
 
 script_value interpreter::handle_not_equal(const script_value& left, const script_value& right) {
-    // Just negate the equality result
-    return script_value(!handle_equal(left, right).as_bool());
+    // Handle weak_ptr comparisons with null
+    if ((left.is_weak_ptr() && right.is_null()) || (left.is_null() && right.is_weak_ptr())) {
+        // For weak_ptr, null comparison checks if expired
+        bool is_expired = false;
+        if (left.is_weak_ptr()) {
+            if (std::holds_alternative<std::weak_ptr<script_value>>(left.storage_)) {
+                auto weak_ptr = std::get<std::weak_ptr<script_value>>(left.storage_);
+                // Check if weak_ptr is expired (includes default-constructed)
+                is_expired = weak_ptr.expired();
+            } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(left.storage_)) {
+                // weak_ptr_holder type - check if it contains an actual value
+                auto holder = std::get<std::shared_ptr<script_value::object_holder>>(left.storage_);
+                is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
+            } else {
+                // Other cases - consider expired
+                is_expired = true;
+            }
+        } else {
+            // right is weak_ptr
+            if (std::holds_alternative<std::weak_ptr<script_value>>(right.storage_)) {
+                auto weak_ptr = std::get<std::weak_ptr<script_value>>(right.storage_);
+                // Check if weak_ptr is expired (includes default-constructed)
+                is_expired = weak_ptr.expired();
+            } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(right.storage_)) {
+                // weak_ptr_holder type - check if it contains an actual value
+                auto holder = std::get<std::shared_ptr<script_value::object_holder>>(right.storage_);
+                is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
+            } else {
+                // Other cases - consider expired
+                is_expired = true;
+            }
+        }
+        
+        return make_value(!is_expired);  // weak != null is true if not expired
+    }
+    
+    // For other cases, just negate the equality result
+    return make_value(!handle_equal(left, right).as_bool());
 }
 
 script_value interpreter::handle_spaceship(const script_value& left, const script_value& right) {
@@ -210,7 +282,7 @@ script_value interpreter::handle_spaceship(const script_value& left, const scrip
     if (left.type() == script_value_type::jai_int_type && right.type() == script_value_type::jai_int_type) {
         // Direct storage access, single C++20 spaceship operation
         auto cmp = std::get<script_int>(left.storage_) <=> std::get<script_int>(right.storage_);
-        return script_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)));
+        return make_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)));
     }
     
     // Mixed numeric types
@@ -218,13 +290,13 @@ script_value interpreter::handle_spaceship(const script_value& left, const scrip
         script_float lf = left.is_int() ? script_float(left.as_int()) : left.as_float();
         script_float rf = right.is_int() ? script_float(right.as_int()) : right.as_float();
         auto cmp = lf <=> rf;
-        return script_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)));
+        return make_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)));
     }
     
     // String comparison
     if (left.is_string() && right.is_string()) {
         int cmp = left.as_string().compare(right.as_string());
-        return script_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)));
+        return make_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)));
     }
     
     throw runtime_error("Invalid operands for <=> operator");
@@ -234,35 +306,35 @@ script_value interpreter::handle_bitwise_and(const script_value& left, const scr
     if (!left.is_int() || !right.is_int()) {
         throw runtime_error("Bitwise & requires integer operands");
     }
-    return script_value(left.as_int() & right.as_int());
+    return make_value(left.as_int() & right.as_int());
 }
 
 script_value interpreter::handle_bitwise_or(const script_value& left, const script_value& right) {
     if (!left.is_int() || !right.is_int()) {
         throw runtime_error("Bitwise | requires integer operands");
     }
-    return script_value(left.as_int() | right.as_int());
+    return make_value(left.as_int() | right.as_int());
 }
 
 script_value interpreter::handle_bitwise_xor(const script_value& left, const script_value& right) {
     if (!left.is_int() || !right.is_int()) {
         throw runtime_error("Bitwise ^ requires integer operands");
     }
-    return script_value(left.as_int() ^ right.as_int());
+    return make_value(left.as_int() ^ right.as_int());
 }
 
 script_value interpreter::handle_left_shift(const script_value& left, const script_value& right) {
     if (!left.is_int() || !right.is_int()) {
         throw runtime_error("Left shift requires integer operands");
     }
-    return script_value(left.as_int() << right.as_int());
+    return make_value(left.as_int() << right.as_int());
 }
 
 script_value interpreter::handle_right_shift(const script_value& left, const script_value& right) {
     if (!left.is_int() || !right.is_int()) {
         throw runtime_error("Right shift requires integer operands");
     }
-    return script_value(left.as_int() >> right.as_int());
+    return make_value(left.as_int() >> right.as_int());
 }
 
 } // namespace jai

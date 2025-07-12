@@ -1,10 +1,10 @@
 #pragma once
 
-#include "../core/engine.hpp"
-#include "../core/value.hpp"
-#include "../core/class_builder.hpp"
-#include "../serialization/binary_archive.hpp"
-#include "../serialization/json_archive.hpp"
+#include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/value.hpp>
+#include <jaiscript/core/class_builder.hpp>
+#include <jaiscript/serialization/binary_archive.hpp>
+#include <jaiscript/serialization/json_archive.hpp>
 #include <sstream>
 #include <iomanip>
 #include <cmath>
@@ -220,6 +220,9 @@ namespace stdlib {
     }
 
     // Simple JSON parser for from_json
+    // NOTE: This parser is deprecated in favor of json_archive_reader
+    // which properly handles engine references and shared_ptr reconstruction
+    /*
     class JsonParser {
     private:
         const std::string& json;
@@ -433,22 +436,23 @@ namespace stdlib {
             return result;
         }
     };
+    */
 
     // Register JSON and binary serialization functions with an engine
     inline void register_json_functions(engine& engine) {
         // to_json with optional pretty printing - now with shared_ptr support
-        engine.add_variadic_function("to_json", [](const std::vector<script_value>& args) -> script_value {
+        engine.add_variadic_function("to_json", [&engine](const std::vector<script_value>& args) -> script_value {
             if (args.size() == 1) {
                 // Compact mode - use archive for shared_ptr support
                 serialization::json_archive_writer writer(-1); // No indentation
                 writer.write_value(args[0]);
-                return script_value(writer.str());
+                return script_value(writer.str(), engine.weak_from_this());
             } else if (args.size() == 2) {
                 // Pretty mode with indentation
                 int indent = static_cast<int>(args[1].as_int());
                 serialization::json_archive_writer writer(indent);
                 writer.write_value(args[0]);
-                return script_value(writer.str());
+                return script_value(writer.str(), engine.weak_from_this());
             } else {
                 throw runtime_error("to_json expects 1 or 2 arguments, got " + std::to_string(args.size()));
             }
@@ -467,13 +471,13 @@ namespace stdlib {
                     const auto& map = val.as_map();
                     
                     // Check if this map has a _type_ field
-                    auto typeIt = map.find(script_value("_type_"));
+                    auto typeIt = map.find(script_value("_type_", engine.weak_from_this()));
                     if (typeIt != map.end() && typeIt->second.is_string()) {
                         std::string type_name = typeIt->second.as_string();
                         
                         // Try to reconstruct the bound object
                         try {
-                            script_value instance;
+                            script_value instance(std::monostate{}, engine.weak_from_this());
                             
                             // Try to get the class definition to check for custom serialization constructor
                             bool has_custom_constructor = false;
@@ -559,7 +563,7 @@ namespace stdlib {
         });
         
         // Binary serialization functions
-        engine.add_variadic_function("to_binary", [](const std::vector<script_value>& args) -> script_value {
+        engine.add_variadic_function("to_binary", [&engine](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
                 throw runtime_error("to_binary expects exactly 1 argument, got " + std::to_string(args.size()));
             }
@@ -573,7 +577,7 @@ namespace stdlib {
             // Convert binary data to string for script access
             const auto& data = writer.data();
             script_string binary_str(data.begin(), data.end());
-            return script_value(binary_str);
+            return script_value(binary_str, engine.weak_from_this());
         });
         
         engine.add_variadic_function("from_binary", [&engine](const std::vector<script_value>& args) -> script_value {
@@ -597,7 +601,7 @@ namespace stdlib {
             // For objects with _type_ field, try to reconstruct like JSON
             if (result.is_map()) {
                 const auto& map = result.as_map();
-                auto type_it = map.find(script_value("_type_"));
+                auto type_it = map.find(script_value("_type_", engine.weak_from_this()));
                 if (type_it != map.end() && type_it->second.is_string()) {
                     std::string type_name = type_it->second.as_string();
                     

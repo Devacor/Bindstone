@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../core/engine.hpp"
+#include <jaiscript/core/engine.hpp>
 #include "json.hpp"
 #include "io.hpp"
 // Future stdlib modules:

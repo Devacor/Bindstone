@@ -1,8 +1,11 @@
 #pragma once
 
-#include "../core/types.hpp"
-#include "../core/type_info.hpp"
-#include "../core/value.hpp"
+#ifndef __JAISCRIPT_DETAIL_AST_HPP__
+#define __JAISCRIPT_DETAIL_AST_HPP__
+
+#include <jaiscript/core/types.hpp>
+#include <jaiscript/core/type_info.hpp>
+#include <jaiscript/core/value.hpp>
 #include "lexer.hpp"
 #include <memory>
 #include <vector>
@@ -549,3 +552,5 @@ namespace jai {
     };
     
 } // namespace jai
+
+#endif // __JAISCRIPT_DETAIL_AST_HPP__

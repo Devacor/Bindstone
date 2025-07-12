@@ -60,7 +60,7 @@ int main() {
     std::cout << "\n✅ This proves the class_builder syntax would work:\n\n";
     
     std::cout << "// The following syntax compiles and would work once engine support is added:\n";
-    std::cout << "jai::make_class_builder<Button>(engine, \"Button\")\n";
+    std::cout << "jai::class_builder<Button>(engine, \"Button\")\n";
     std::cout << "    .constructor<const std::string&>()\n";
     std::cout << "    \n";
     std::cout << "    // Lambda method binding - clean and flexible!\n";

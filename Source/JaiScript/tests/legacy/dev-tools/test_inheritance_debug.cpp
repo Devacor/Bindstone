@@ -36,7 +36,7 @@ int main() {
         engine engine;
         
         std::cout << "=== Registering Circle class ===\n";
-        make_class_builder<Circle>(engine, "Circle")
+        class_builder<Circle>(engine, "Circle")
             .constructor<float>()
             .method("area", [](Circle& self) -> float {
                 std::cout << "area() called\n";

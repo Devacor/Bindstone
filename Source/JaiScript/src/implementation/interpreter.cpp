@@ -1,5 +1,4 @@
-#include "../../include/jaiscript/detail/interpreter.hpp"
-#include "../../include/jaiscript/core/class_builder.hpp"
+#include <jaiscript/jaiscript.hpp>
 #include <stdexcept>
 #include <sstream>
 #include <cmath>
@@ -16,7 +15,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         if (!args.empty()) {
             throw runtime_error("size() takes no arguments");
         }
-        return script_value(static_cast<script_int>(self.as_array().size()));
+        return interp->make_value(static_cast<script_int>(self.as_array().size()));
     }},
     
     {"push", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
@@ -25,7 +24,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         }
         auto& arrayPtr = get_array_storage(self);
         arrayPtr->push_back(args[0].clone());  // Deep copy when pushing
-        return script_value();
+        return interp->make_value();
     }},
     
     {"pop", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
@@ -45,7 +44,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         if (!args.empty()) {
             throw runtime_error("empty() takes no arguments");
         }
-        return script_value(self.as_array().empty());
+        return interp->make_value(self.as_array().empty());
     }},
     
     {"clear", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
@@ -54,7 +53,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         }
         auto& arrayPtr = get_array_storage(self);
         arrayPtr->clear();
-        return script_value();
+        return interp->make_value();
     }},
     
     {"front", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
@@ -85,14 +84,14 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         if (!args.empty()) {
             throw runtime_error("size() takes no arguments");
         }
-        return script_value(static_cast<script_int>(self.as_map().size()));
+        return interp->make_value(static_cast<script_int>(self.as_map().size()));
     }},
     
     {"empty", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("empty() takes no arguments");
         }
-        return script_value(self.as_map().empty());
+        return interp->make_value(self.as_map().empty());
     }},
     
     {"clear", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
@@ -101,7 +100,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         }
         auto& mapPtr = get_map_storage(self);
         mapPtr->clear();
-        return script_value();
+        return interp->make_value();
     }},
     
     {"contains", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
@@ -109,7 +108,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
             throw runtime_error("contains() takes exactly one argument");
         }
         const auto& map = self.as_map();
-        return script_value(map.find(args[0]) != map.end());
+        return interp->make_value(map.find(args[0]) != map.end());
     }},
     
     {"erase", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
@@ -118,7 +117,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         }
         auto& mapPtr = get_map_storage(self);
         mapPtr->erase(args[0]);
-        return script_value();
+        return interp->make_value();
     }},
     
     {"keys", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
@@ -126,7 +125,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
             throw runtime_error("keys() takes no arguments");
         }
         const auto& map = self.as_map();
-        script_value result = script_value::make_array(nullptr);
+        script_value result = script_value::make_array(nullptr, interp->engine_ref_);
         auto& arrayPtr = get_array_storage(result);
         arrayPtr->reserve(map.size());
         for (const auto& [key, value] : map) {
@@ -140,7 +139,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
             throw runtime_error("values() takes no arguments");
         }
         const auto& map = self.as_map();
-        script_value result = script_value::make_array(nullptr);
+        script_value result = script_value::make_array(nullptr, interp->engine_ref_);
         auto& arrayPtr = get_array_storage(result);
         arrayPtr->reserve(map.size());
         for (const auto& [key, value] : map) {
@@ -403,8 +402,8 @@ script_value* environment::get_value_ptr(uint64_t id) {
 // interpreter implementation
 interpreter::interpreter() 
     : ownedSymbolizer_(std::make_unique<string_symbolizer>()),
-      stringSymbolizer_(ownedSymbolizer_.get()),
-      environment_(std::make_shared<environment>(stringSymbolizer_)),
+      string_symbolizer_(ownedSymbolizer_.get()),
+      environment_(std::make_shared<environment>(string_symbolizer_)),
       hasReturnValue_(false) {
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
@@ -412,7 +411,7 @@ interpreter::interpreter()
     
     // Pre-populate environment pool
     for (size_t i = 0; i < 8; ++i) {
-        environment_pool_.push_back(std::make_shared<environment>(nullptr, stringSymbolizer_));
+        environment_pool_.push_back(std::make_shared<environment>(nullptr, string_symbolizer_));
     }
     
     // Initialize binary operator dispatch table
@@ -421,8 +420,8 @@ interpreter::interpreter()
 
 interpreter::interpreter(string_symbolizer* external_symbolizer)
     : ownedSymbolizer_(nullptr),
-      stringSymbolizer_(external_symbolizer),
-      environment_(std::make_shared<environment>(stringSymbolizer_)),
+      string_symbolizer_(external_symbolizer),
+      environment_(std::make_shared<environment>(string_symbolizer_)),
       hasReturnValue_(false) {
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
@@ -430,7 +429,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     
     // Pre-populate environment pool
     for (size_t i = 0; i < 8; ++i) {
-        environment_pool_.push_back(std::make_shared<environment>(nullptr, stringSymbolizer_));
+        environment_pool_.push_back(std::make_shared<environment>(nullptr, string_symbolizer_));
     }
     
     // Initialize binary operator dispatch table
@@ -439,7 +438,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
 
 interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr<environment> global_env)
     : ownedSymbolizer_(nullptr),
-      stringSymbolizer_(external_symbolizer),
+      string_symbolizer_(external_symbolizer),
       environment_(global_env),
       hasReturnValue_(false) {
     // Initialize optimization pools
@@ -448,7 +447,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     
     // Pre-populate environment pool
     for (size_t i = 0; i < 8; ++i) {
-        environment_pool_.push_back(std::make_shared<environment>(nullptr, stringSymbolizer_));
+        environment_pool_.push_back(std::make_shared<environment>(nullptr, string_symbolizer_));
     }
     
     // Initialize binary operator dispatch table
@@ -468,8 +467,14 @@ void interpreter::add_global(const std::string& name, const script_value& value)
 void interpreter::prepare_for_execution() {
     // Clear execution state
     valueStack_.clear();
-    returnValue_ = script_value();
+    returnValue_ = make_value();
     hasReturnValue_ = false;
+    
+    // Clear exception state
+    current_exception_.reset();
+    is_unwinding_ = false;
+    active_exception_value_ = make_value();
+    current_catch_var_.clear();
     
     // Reset to global scope but keep all variables defined at global scope
     // Only pop scopes if we're in a nested scope
@@ -480,7 +485,7 @@ void interpreter::prepare_for_execution() {
 }
 
 void interpreter::push_scope() {
-    environment_ = std::make_shared<environment>(environment_, stringSymbolizer_);
+    environment_ = std::make_shared<environment>(environment_, string_symbolizer_);
 }
 
 void interpreter::pop_scope() {
@@ -500,7 +505,26 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
     for (size_t i = 0; i < declarations.size(); i++) {
         const auto& decl = declarations[i];
         
-        decl->accept(this);
+        // Execute declaration with exception handling
+        try {
+            decl->accept(this);
+        } catch (const script_exception& e) {
+            // Convert to interpreter exception state
+            active_exception_value_ = make_value(std::string(e.what()));
+            current_exception_ = e;
+            is_unwinding_ = true;
+        } catch (const std::runtime_error& e) {
+            // Convert runtime errors to script exceptions
+            active_exception_value_ = make_value(std::string(e.what()));
+            current_exception_ = script_exception(e.what());
+            is_unwinding_ = true;
+        }
+        
+        // Check if we're unwinding due to an uncaught exception
+        if (is_unwinding_) {
+            // Stop executing further declarations
+            break;
+        }
         
         // Check if this is an implicit return expression
         if (auto* expr_decl = dynamic_cast<expression_decl*>(decl.get())) {
@@ -558,9 +582,28 @@ void interpreter::visit_identifier_expr(identifier_expr* expr) {
         return;
     }
     
+    // Special handling for type constructors like weak_ptr<T>, shared_ptr<T>
+    if (expr->name.find("weak_ptr<") == 0 || expr->name.find("shared_ptr<") == 0) {
+        // This is a type constructor being used as a function
+        // Extract the base type name (weak_ptr or shared_ptr)
+        size_t pos = expr->name.find('<');
+        std::string base_type = expr->name.substr(0, pos);
+        
+        // Look up the constructor function for this type
+        try {
+            script_value constructor_func = environment_->get(base_type);
+            if (constructor_func.is_function()) {
+                push_value(constructor_func);
+                return;
+            }
+        } catch (const runtime_error&) {
+            // Fall through to normal error handling
+        }
+    }
+    
     // Use cached symbol ID if available, otherwise compute and cache it
     if (expr->symbol_id == UINT64_MAX) {
-        expr->symbol_id = stringSymbolizer_->intern(expr->name);
+        expr->symbol_id = string_symbolizer_->intern(expr->name);
     }
     
     // Try to get the variable from environment
@@ -605,42 +648,42 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
                 
                 switch (expr->op.type) {
                     case token_type::plus:
-                        push_value({leftInt + rightInt});
+                        push_value(make_value(leftInt + rightInt));
                         return;
                     case token_type::minus:
-                        push_value({leftInt - rightInt});
+                        push_value(make_value(leftInt - rightInt));
                         return;
                     case token_type::star:
-                        push_value({leftInt * rightInt});
+                        push_value(make_value(leftInt * rightInt));
                         return;
                     case token_type::slash:
                         if (rightInt == 0) throw runtime_error("Division by zero");
-                        push_value({leftInt / rightInt});
+                        push_value(make_value(leftInt / rightInt));
                         return;
                     case token_type::percent:
                         if (rightInt == 0) throw runtime_error("Division by zero");
-                        push_value({leftInt % rightInt});
+                        push_value(make_value(leftInt % rightInt));
                         return;
                     case token_type::less:
-                        push_value({leftInt < rightInt});
+                        push_value(make_value(leftInt < rightInt));
                         return;
                     case token_type::less_equal:
-                        push_value({leftInt <= rightInt});
+                        push_value(make_value(leftInt <= rightInt));
                         return;
                     case token_type::greater:
-                        push_value({leftInt > rightInt});
+                        push_value(make_value(leftInt > rightInt));
                         return;
                     case token_type::greater_equal:
-                        push_value({leftInt >= rightInt});
+                        push_value(make_value(leftInt >= rightInt));
                         return;
                     case token_type::equal_equal:
-                        push_value({leftInt == rightInt});
+                        push_value(make_value(leftInt == rightInt));
                         return;
                     case token_type::bang_equal:
-                        push_value({leftInt != rightInt});
+                        push_value(make_value(leftInt != rightInt));
                         return;
                     case token_type::spaceship:
-                        push_value({leftInt < rightInt ? script_int(-1) : (leftInt > rightInt ? script_int(1) : script_int(0))});
+                        push_value(make_value(leftInt < rightInt ? script_int(-1) : (leftInt > rightInt ? script_int(1) : script_int(0))));
                         return;
                     default:
                         break; // Fall through to normal path
@@ -653,42 +696,42 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
                 
                 switch (expr->op.type) {
                     case token_type::plus:
-                        push_value({leftFloat + rightFloat});
+                        push_value(make_value(leftFloat + rightFloat));
                         return;
                     case token_type::minus:
-                        push_value({leftFloat - rightFloat});
+                        push_value(make_value(leftFloat - rightFloat));
                         return;
                     case token_type::star:
-                        push_value({leftFloat * rightFloat});
+                        push_value(make_value(leftFloat * rightFloat));
                         return;
                     case token_type::slash:
                         if (rightFloat == 0.0) throw runtime_error("Division by zero");
-                        push_value({leftFloat / rightFloat});
+                        push_value(make_value(leftFloat / rightFloat));
                         return;
                     case token_type::percent:
                         if (rightFloat == 0.0) throw runtime_error("Division by zero");
-                        push_value({std::fmod(leftFloat, rightFloat)});
+                        push_value(make_value(std::fmod(leftFloat, rightFloat)));
                         return;
                     case token_type::less:
-                        push_value({leftFloat < rightFloat});
+                        push_value(make_value(leftFloat < rightFloat));
                         return;
                     case token_type::less_equal:
-                        push_value({leftFloat <= rightFloat});
+                        push_value(make_value(leftFloat <= rightFloat));
                         return;
                     case token_type::greater:
-                        push_value({leftFloat > rightFloat});
+                        push_value(make_value(leftFloat > rightFloat));
                         return;
                     case token_type::greater_equal:
-                        push_value({leftFloat >= rightFloat});
+                        push_value(make_value(leftFloat >= rightFloat));
                         return;
                     case token_type::equal_equal:
-                        push_value({leftFloat == rightFloat});
+                        push_value(make_value(leftFloat == rightFloat));
                         return;
                     case token_type::bang_equal:
-                        push_value({leftFloat != rightFloat});
+                        push_value(make_value(leftFloat != rightFloat));
                         return;
                     case token_type::spaceship:
-                        push_value({leftFloat < rightFloat ? script_int(-1) : (leftFloat > rightFloat ? script_int(1) : script_int(0))});
+                        push_value(make_value(leftFloat < rightFloat ? script_int(-1) : (leftFloat > rightFloat ? script_int(1) : script_int(0))));
                         return;
                     default:
                         break;
@@ -696,7 +739,7 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
             }
             // Fast path for string concatenation
             else if (expr->op.type == token_type::plus && leftVal.is_string() && rightVal.is_string()) {
-                push_value({leftVal.as_string() + rightVal.as_string()});
+                push_value(make_value(leftVal.as_string() + rightVal.as_string()));
                 return;
             }
         }
@@ -845,19 +888,19 @@ void interpreter::visit_unary_expr(unary_expr* expr) {
         switch (expr->op.type) {
             case token_type::minus:
                 if (val.is_int()) {
-                    push_value({-val.as_int()});
+                    push_value(make_value(-val.as_int()));
                     return;
                 } else if (val.is_float()) {
-                    push_value({-val.as_float()});
+                    push_value(make_value(-val.as_float()));
                     return;
                 }
                 break;
             case token_type::bang:
-                push_value({!is_truthy(val)});
+                push_value(make_value(!is_truthy(val)));
                 return;
             case token_type::tilde:
                 if (val.is_int()) {
-                    push_value({~val.as_int()});
+                    push_value(make_value(~val.as_int()));
                     return;
                 }
                 break;
@@ -873,16 +916,16 @@ void interpreter::visit_unary_expr(unary_expr* expr) {
     switch (expr->op.type) {
         case token_type::minus:
             if (operand.is_int()) {
-                push_value({-operand.as_int()});
+                push_value(make_value(-operand.as_int()));
             } else if (operand.is_float()) {
-                push_value({-operand.as_float()});
+                push_value(make_value(-operand.as_float()));
             } else {
                 throw runtime_error("Unary minus requires numeric operand");
             }
             break;
             
         case token_type::bang:
-            push_value({!is_truthy(operand)});
+            push_value(make_value(!is_truthy(operand)));
             break;
             
         case token_type::tilde:
@@ -890,7 +933,7 @@ void interpreter::visit_unary_expr(unary_expr* expr) {
             if (!operand.is_int()) {
                 throw runtime_error("Bitwise NOT requires integer operand");
             }
-            push_value({~operand.as_int()});
+            push_value(make_value(~operand.as_int()));
             break;
             
         case token_type::plus_plus:
@@ -899,7 +942,7 @@ void interpreter::visit_unary_expr(unary_expr* expr) {
             if (auto* identifier = dynamic_cast<identifier_expr*>(expr->operand.get())) {
                 // Cache symbol ID if not already cached
                 if (identifier->symbol_id == UINT64_MAX) {
-                    identifier->symbol_id = stringSymbolizer_->intern(identifier->name);
+                    identifier->symbol_id = string_symbolizer_->intern(identifier->name);
                 }
                 script_value currentValue = environment_->get(identifier->symbol_id);
                 script_value newValue;
@@ -907,16 +950,16 @@ void interpreter::visit_unary_expr(unary_expr* expr) {
                 if (currentValue.is_int()) {
                     int64_t val = currentValue.as_int();
                     if (expr->op.type == token_type::plus_plus) {
-                        newValue = {val + 1};
+                        newValue = make_value(val + 1);
                     } else {
-                        newValue = {val - 1};
+                        newValue = make_value(val - 1);
                     }
                 } else if (currentValue.is_float()) {
                     double val = currentValue.as_float();
                     if (expr->op.type == token_type::plus_plus) {
-                        newValue = {val + 1.0};
+                        newValue = make_value(val + 1.0);
                     } else {
-                        newValue = {val - 1.0};
+                        newValue = make_value(val - 1.0);
                     }
                 } else {
                     throw runtime_error("Cannot increment/decrement non-numeric value");
@@ -957,7 +1000,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
         if (auto* identifier = dynamic_cast<identifier_expr*>(expr->target.get())) {
             // Cache symbol ID if not already cached
             if (identifier->symbol_id == UINT64_MAX) {
-                identifier->symbol_id = stringSymbolizer_->intern(identifier->name);
+                identifier->symbol_id = string_symbolizer_->intern(identifier->name);
             }
             script_value currentValue = environment_->get(identifier->symbol_id);
             
@@ -989,11 +1032,11 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // Fall back to built-in operators
                     if (!customOpFound) {
                         if (currentValue.is_int() && rightValue.is_int()) {
-                            resultValue = script_value(currentValue.as_int() + rightValue.as_int());
+                            resultValue = make_value(currentValue.as_int() + rightValue.as_int());
                         } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                            resultValue = script_value(currentValue.as_float() + rightValue.as_float());
+                            resultValue = make_value(currentValue.as_float() + rightValue.as_float());
                         } else if (currentValue.is_string() && rightValue.is_string()) {
-                            resultValue = script_value(currentValue.as_string() + rightValue.as_string());
+                            resultValue = make_value(currentValue.as_string() + rightValue.as_string());
                         } else {
                             throw runtime_error("Invalid operands for +=");
                         }
@@ -1021,9 +1064,9 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // Fall back to built-in operators
                     if (!customOpFound) {
                         if (currentValue.is_int() && rightValue.is_int()) {
-                            resultValue = script_value(currentValue.as_int() - rightValue.as_int());
+                            resultValue = make_value(currentValue.as_int() - rightValue.as_int());
                         } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                            resultValue = script_value(currentValue.as_float() - rightValue.as_float());
+                            resultValue = make_value(currentValue.as_float() - rightValue.as_float());
                         } else {
                             throw runtime_error("Invalid operands for -=");
                         }
@@ -1051,9 +1094,9 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // Fall back to built-in operators
                     if (!customOpFound) {
                         if (currentValue.is_int() && rightValue.is_int()) {
-                            resultValue = script_value(currentValue.as_int() * rightValue.as_int());
+                            resultValue = make_value(currentValue.as_int() * rightValue.as_int());
                         } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                            resultValue = script_value(currentValue.as_float() * rightValue.as_float());
+                            resultValue = make_value(currentValue.as_float() * rightValue.as_float());
                         } else {
                             throw runtime_error("Invalid operands for *=");
                         }
@@ -1070,9 +1113,9 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                     }
                     
                     if (currentValue.is_int() && rightValue.is_int()) {
-                        resultValue = script_value(currentValue.as_int() / rightValue.as_int());
+                        resultValue = make_value(currentValue.as_int() / rightValue.as_int());
                     } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                        resultValue = script_value(currentValue.as_float() / rightValue.as_float());
+                        resultValue = make_value(currentValue.as_float() / rightValue.as_float());
                     } else {
                         throw runtime_error("Invalid operands for /=");
                     }
@@ -1110,11 +1153,11 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 case token_type::plus_equal: {
                     if (!customOpFound) {
                         if (currentValue.is_int() && rightValue.is_int()) {
-                            resultValue = script_value(currentValue.as_int() + rightValue.as_int());
+                            resultValue = make_value(currentValue.as_int() + rightValue.as_int());
                         } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                            resultValue = script_value(currentValue.as_float() + rightValue.as_float());
+                            resultValue = make_value(currentValue.as_float() + rightValue.as_float());
                         } else if (currentValue.is_string() && rightValue.is_string()) {
-                            resultValue = script_value(currentValue.as_string() + rightValue.as_string());
+                            resultValue = make_value(currentValue.as_string() + rightValue.as_string());
                         } else {
                             throw runtime_error("Invalid operands for +=");
                         }
@@ -1123,9 +1166,9 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
                 case token_type::minus_equal: {
                     if (currentValue.is_int() && rightValue.is_int()) {
-                        resultValue = script_value(currentValue.as_int() - rightValue.as_int());
+                        resultValue = make_value(currentValue.as_int() - rightValue.as_int());
                     } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                        resultValue = script_value(currentValue.as_float() - rightValue.as_float());
+                        resultValue = make_value(currentValue.as_float() - rightValue.as_float());
                     } else {
                         throw runtime_error("Invalid operands for -=");
                     }
@@ -1133,9 +1176,9 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
                 case token_type::star_equal: {
                     if (currentValue.is_int() && rightValue.is_int()) {
-                        resultValue = script_value(currentValue.as_int() * rightValue.as_int());
+                        resultValue = make_value(currentValue.as_int() * rightValue.as_int());
                     } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                        resultValue = script_value(currentValue.as_float() * rightValue.as_float());
+                        resultValue = make_value(currentValue.as_float() * rightValue.as_float());
                     } else {
                         throw runtime_error("Invalid operands for *=");
                     }
@@ -1148,7 +1191,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                         throw runtime_error("Division by zero");
                     }
                     if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
-                        resultValue = script_value(currentValue.as_float() / rightValue.as_float());
+                        resultValue = make_value(currentValue.as_float() / rightValue.as_float());
                     } else {
                         throw runtime_error("Invalid operands for /=");
                     }
@@ -1165,7 +1208,12 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             
             // Check if it's an object
             if (!objectValue.is_object()) {
-                throw runtime_error("Cannot assign to member of non-object type");
+                // Set exception state instead of throwing
+                active_exception_value_ = make_value("Cannot assign to member of non-object type");
+                current_exception_ = script_exception("Cannot assign to member of non-object type", memberExpr->location);
+                is_unwinding_ = true;
+                push_value(make_value());
+                return;
             }
             
             // Extract the class_instance
@@ -1183,7 +1231,12 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Direct field assignment (deep copy)
                 instance->set_field(memberExpr->member, resultValue.clone());
             } else {
-                throw runtime_error("Cannot assign to non-existent member '" + memberExpr->member + "'");
+                // Set exception state instead of throwing
+                active_exception_value_ = make_value("Cannot assign to non-existent member '" + memberExpr->member + "'");
+                current_exception_ = script_exception("Cannot assign to non-existent member '" + memberExpr->member + "'", memberExpr->location);
+                is_unwinding_ = true;
+                push_value(make_value());
+                return;
             }
             
             push_value(std::move(resultValue));
@@ -1217,7 +1270,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 switch (expr->op.type) {
                     case token_type::plus_equal:
                         if (currentValue.is_string() || rightValue.is_string()) {
-                            resultValue = script_value(currentValue.to_string() + rightValue.to_string());
+                            resultValue = make_value(currentValue.to_string() + rightValue.to_string());
                         } else {
                             resultValue = evaluate_arithmetic(currentValue, token_type::plus, rightValue);
                         }
@@ -1270,7 +1323,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
         if (auto* identifier = dynamic_cast<identifier_expr*>(expr->target.get())) {
             // Cache symbol ID if not already cached
             if (identifier->symbol_id == UINT64_MAX) {
-                identifier->symbol_id = stringSymbolizer_->intern(identifier->name);
+                identifier->symbol_id = string_symbolizer_->intern(identifier->name);
             }
             // Get the current value to check if it's a reference
             if (environment_->contains(identifier->symbol_id)) {
@@ -1315,7 +1368,12 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             
             // Check if it's an object
             if (!objectValue.is_object()) {
-                throw runtime_error("Cannot assign to member of non-object type");
+                // Set exception state instead of throwing
+                active_exception_value_ = make_value("Cannot assign to member of non-object type");
+                current_exception_ = script_exception("Cannot assign to member of non-object type", memberExpr->location);
+                is_unwinding_ = true;
+                push_value(make_value());
+                return;
             }
             
             // Extract the class_instance
@@ -1333,7 +1391,12 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Direct field assignment (deep copy)
                 instance->set_field(memberExpr->member, value.clone());
             } else {
-                throw runtime_error("Cannot assign to non-existent member '" + memberExpr->member + "'");
+                // Set exception state instead of throwing
+                active_exception_value_ = make_value("Cannot assign to non-existent member '" + memberExpr->member + "'");
+                current_exception_ = script_exception("Cannot assign to non-existent member '" + memberExpr->member + "'", memberExpr->location);
+                is_unwinding_ = true;
+                push_value(make_value());
+                return;
             }
             
             push_value(std::move(value));  // Assignment expressions return the assigned value
@@ -1391,7 +1454,7 @@ void interpreter::visit_expression_stmt(expression_stmt* stmt) {
 void interpreter::visit_block_stmt(block_stmt* stmt) {
     // Create new environment for the block scope
     auto previous = environment_;
-    environment_ = std::make_shared<environment>(environment_, stringSymbolizer_);
+    environment_ = std::make_shared<environment>(environment_, string_symbolizer_);
     
     try {
         for (const auto& decl : stmt->declarations) {
@@ -1417,7 +1480,30 @@ void interpreter::visit_variable_decl(variable_decl* decl) {
         is_reference = true;
     }
     
-    if (is_reference) {
+    // Check if this is a weak_ptr declaration
+    bool is_weak_ptr = false;
+    if (decl->type && decl->type->base_type == script_value_type::jai_weak_ptr_type) {
+        is_weak_ptr = true;
+    }
+    
+    if (is_weak_ptr) {
+        // weak_ptr<T> variable - convert initializer to weak_ptr
+        if (!decl->initializer) {
+            // No initializer - create empty weak_ptr
+            script_value null_weak;
+            null_weak.type_info_ = decl->type;
+            null_weak.storage_ = std::weak_ptr<script_value>();
+            environment_->define(decl->name, std::move(null_weak));
+        } else {
+            // Evaluate initializer and wrap in weak_ptr
+            decl->initializer->accept(this);
+            script_value value = pop_value();
+            
+            // Call weak_ptr function
+            script_value weak = script_value::make_weak_ptr(value);
+            environment_->define(decl->name, std::move(weak));
+        }
+    } else if (is_reference) {
         // Reference variable - must have initializer
         if (!decl->initializer) {
             throw runtime_error("Reference variable '" + decl->name + "' must be initialized");
@@ -1426,7 +1512,7 @@ void interpreter::visit_variable_decl(variable_decl* decl) {
         // Check if initializer is an identifier (can take reference)
         if (auto identExpr = dynamic_cast<identifier_expr*>(decl->initializer.get())) {
             // Get the target variable's address
-            uint64_t targetSymbolId = stringSymbolizer_->intern(identExpr->name);
+            uint64_t targetSymbolId = string_symbolizer_->intern(identExpr->name);
             
             // Get a pointer to the target value in the environment
             // This is safe because environment uses unordered_map which doesn't invalidate pointers
@@ -1492,7 +1578,7 @@ void interpreter::visit_variable_decl(variable_decl* decl) {
 script_value interpreter::evaluate_arithmetic(const script_value& left, token_type op, const script_value& right) {
     // Special case for string concatenation
     if (op == token_type::plus && (left.is_string() || right.is_string())) {
-        return {left.to_string() + right.to_string()};
+        return make_value(left.to_string() + right.to_string());
     }
     
     // Fast path for pure integer arithmetic (avoid float conversion)
@@ -1502,22 +1588,22 @@ script_value interpreter::evaluate_arithmetic(const script_value& left, token_ty
         
         switch (op) {
             case token_type::plus:
-                return {leftInt + rightInt};
+                return make_value(leftInt + rightInt);
             case token_type::minus:
-                return {leftInt - rightInt};
+                return make_value(leftInt - rightInt);
             case token_type::star:
-                return {leftInt * rightInt};
+                return make_value(leftInt * rightInt);
             case token_type::slash:
                 if (rightInt == 0) {
                     throw runtime_error("Division by zero");
                 }
                 // Integer division returns integer (C++ semantics)
-                return {leftInt / rightInt};
+                return make_value(leftInt / rightInt);
             case token_type::percent:
                 if (rightInt == 0) {
                     throw runtime_error("Division by zero");
                 }
-                return {leftInt % rightInt};
+                return make_value(leftInt % rightInt);
             default:
                 throw runtime_error("Unknown arithmetic operator");
         }
@@ -1544,34 +1630,76 @@ script_value interpreter::evaluate_arithmetic(const script_value& left, token_ty
     
     switch (op) {
         case token_type::plus:
-            return {leftNum + rightNum};
+            return make_value(leftNum + rightNum);
         case token_type::minus:
-            return {leftNum - rightNum};
+            return make_value(leftNum - rightNum);
         case token_type::star:
-            return {leftNum * rightNum};
+            return make_value(leftNum * rightNum);
         case token_type::slash:
             if (rightNum == 0.0) {
                 throw runtime_error("Division by zero");
             }
-            return {leftNum / rightNum};
+            return make_value(leftNum / rightNum);
         case token_type::percent:
             if (rightNum == 0.0) {
                 throw runtime_error("Division by zero");
             }
-            return {std::fmod(leftNum, rightNum)};
+            return make_value(std::fmod(leftNum, rightNum));
         default:
             throw runtime_error("Unknown arithmetic operator");
     }
 }
 
 script_value interpreter::evaluate_comparison(const script_value& left, token_type op, const script_value& right) {
+    // Handle weak_ptr comparisons with null
+    if ((left.is_weak_ptr() && right.is_null()) || (left.is_null() && right.is_weak_ptr())) {
+        if (op == token_type::equal_equal || op == token_type::bang_equal) {
+            // For weak_ptr, null comparison checks if expired
+            bool is_expired = false;
+            if (left.is_weak_ptr()) {
+                if (std::holds_alternative<std::weak_ptr<script_value>>(left.storage_)) {
+                    auto weak_ptr = std::get<std::weak_ptr<script_value>>(left.storage_);
+                    // Check if weak_ptr is expired (includes default-constructed)
+                    is_expired = weak_ptr.expired();
+                } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(left.storage_)) {
+                    // weak_ptr_holder type - check if it contains an actual value
+                    auto holder = std::get<std::shared_ptr<script_value::object_holder>>(left.storage_);
+                    is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
+                } else {
+                    // Other cases - consider expired
+                    is_expired = true;
+                }
+            } else {
+                // right is weak_ptr
+                if (std::holds_alternative<std::weak_ptr<script_value>>(right.storage_)) {
+                    auto weak_ptr = std::get<std::weak_ptr<script_value>>(right.storage_);
+                    // Check if weak_ptr is expired (includes default-constructed)
+                    is_expired = weak_ptr.expired();
+                } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(right.storage_)) {
+                    // weak_ptr_holder type - check if it contains an actual value
+                    auto holder = std::get<std::shared_ptr<script_value::object_holder>>(right.storage_);
+                    is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
+                } else {
+                    // Other cases - consider expired
+                    is_expired = true;
+                }
+            }
+            
+            if (op == token_type::equal_equal) {
+                return make_value(is_expired);  // weak == null is true if expired
+            } else {
+                return make_value(!is_expired); // weak != null is true if not expired
+            }
+        }
+    }
+    
     // Handle null comparisons
     if (left.is_null() || right.is_null()) {
         switch (op) {
             case token_type::equal_equal:
-                return {left.is_null() && right.is_null()};
+                return make_value(left.is_null() && right.is_null());
             case token_type::bang_equal:
-                return {!(left.is_null() && right.is_null())};
+                return make_value(!(left.is_null() && right.is_null()));
             default:
                 throw runtime_error("Cannot compare null values with relational operators");
         }
@@ -1584,21 +1712,21 @@ script_value interpreter::evaluate_comparison(const script_value& left, token_ty
         
         switch (op) {
             case token_type::less:
-                return {leftStr < rightStr};
+                return make_value(leftStr < rightStr);
             case token_type::less_equal:
-                return {leftStr <= rightStr};
+                return make_value(leftStr <= rightStr);
             case token_type::greater:
-                return {leftStr > rightStr};
+                return make_value(leftStr > rightStr);
             case token_type::greater_equal:
-                return {leftStr >= rightStr};
+                return make_value(leftStr >= rightStr);
             case token_type::equal_equal:
-                return {leftStr == rightStr};
+                return make_value(leftStr == rightStr);
             case token_type::bang_equal:
-                return {leftStr != rightStr};
+                return make_value(leftStr != rightStr);
             case token_type::spaceship: {
                 // Three-way comparison for strings
                 int cmp = leftStr.compare(rightStr);
-                return {cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0))};
+                return make_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)));
             }
             default:
                 throw runtime_error("Unknown comparison operator");
@@ -1611,23 +1739,23 @@ script_value interpreter::evaluate_comparison(const script_value& left, token_ty
     
     switch (op) {
         case token_type::less:
-            return {leftNum < rightNum};
+            return make_value(leftNum < rightNum);
         case token_type::less_equal:
-            return {leftNum <= rightNum};
+            return make_value(leftNum <= rightNum);
         case token_type::greater:
-            return {leftNum > rightNum};
+            return make_value(leftNum > rightNum);
         case token_type::greater_equal:
-            return {leftNum >= rightNum};
+            return make_value(leftNum >= rightNum);
         case token_type::equal_equal:
-            return {leftNum == rightNum};
+            return make_value(leftNum == rightNum);
         case token_type::bang_equal:
-            return {leftNum != rightNum};
+            return make_value(leftNum != rightNum);
         case token_type::spaceship: {
             // Three-way comparison for numbers
             // Return -1 if less, 0 if equal, 1 if greater
-            if (leftNum < rightNum) return {script_int(-1)};
-            else if (leftNum > rightNum) return {script_int(1)};
-            else return {script_int(0)};
+            if (leftNum < rightNum) return make_value(script_int(-1));
+            else if (leftNum > rightNum) return make_value(script_int(1));
+            else return make_value(script_int(0));
         }
         default:
             throw runtime_error("Unknown comparison operator");
@@ -1668,15 +1796,15 @@ script_value interpreter::evaluate_bitwise(const script_value& left, token_type 
     
     switch (op) {
         case token_type::ampersand:
-            return {leftInt & rightInt};
+            return make_value(leftInt & rightInt);
         case token_type::pipe:
-            return {leftInt | rightInt};
+            return make_value(leftInt | rightInt);
         case token_type::caret:
-            return {leftInt ^ rightInt};
+            return make_value(leftInt ^ rightInt);
         case token_type::left_shift:
-            return {leftInt << rightInt};
+            return make_value(leftInt << rightInt);
         case token_type::right_shift:
-            return {leftInt >> rightInt};
+            return make_value(leftInt >> rightInt);
         default:
             throw runtime_error("Unknown bitwise operator");
     }
@@ -1706,15 +1834,32 @@ void interpreter::visit_call_expr(call_expr* expr) {
         // Check if this is a simple identifier (needed for references)
         if (auto identExpr = dynamic_cast<identifier_expr*>(argExpr.get())) {
             // Get the symbol ID for this variable
-            uint64_t symbol_id = stringSymbolizer_->intern(identExpr->name);
+            uint64_t symbol_id = string_symbolizer_->intern(identExpr->name);
             argMetadata.emplace_back(symbol_id, environment_);
         } else {
             // Not an identifier - can't take reference
             argMetadata.emplace_back(UINT64_MAX, nullptr);
         }
         
-        argExpr->accept(this);
-        arguments.emplace_back(std::move(pop_value()));
+        // Evaluate argument with exception handling
+        try {
+            argExpr->accept(this);
+            arguments.emplace_back(std::move(pop_value()));
+        } catch (const script_exception& e) {
+            // Convert to interpreter exception state
+            active_exception_value_ = make_value(std::string(e.what()));
+            current_exception_ = e;
+            is_unwinding_ = true;
+            push_value(make_value());  // Push null for the failed call
+            return;
+        } catch (const std::runtime_error& e) {
+            // Convert runtime errors to script exceptions
+            active_exception_value_ = make_value(std::string(e.what()));
+            current_exception_ = script_exception(e.what());
+            is_unwinding_ = true;
+            push_value(make_value());  // Push null for the failed call
+            return;
+        }
     }
     
     // Store argument metadata in a member variable so call_function can access it
@@ -1727,24 +1872,28 @@ void interpreter::visit_call_expr(call_expr* expr) {
     try {
         result = func(arguments);
     } catch (const script_exception& e) {
-        // Script exceptions are re-thrown as-is
+        // Convert script exceptions to interpreter exception state
         current_arg_metadata_.clear();
-        throw;
+        active_exception_value_ = make_value(e.what());
+        current_exception_ = e;
+        is_unwinding_ = true;
+        push_value(make_value());  // Push a null value since the call failed
+        return;
     } catch (const std::runtime_error& e) {
         // Wrap C++ runtime_error with message and trigger exception handling
         current_arg_metadata_.clear();
-        active_exception_value_ = script_value(e.what());
+        active_exception_value_ = make_value(e.what());
         current_exception_ = script_exception(e.what());
         is_unwinding_ = true;
-        push_value(script_value());  // Push a null value since the call failed
+        push_value(make_value());  // Push a null value since the call failed
         return;
     } catch (const std::exception& e) {
         // Other C++ exceptions get the generic message
         current_arg_metadata_.clear();
-        active_exception_value_ = script_value("Unbound exception type caught in JaiScript.");
+        active_exception_value_ = make_value("Unbound exception type caught in JaiScript.");
         current_exception_ = script_exception("Unbound exception type caught in JaiScript.");
         is_unwinding_ = true;
-        push_value(script_value());  // Push a null value since the call failed
+        push_value(make_value());  // Push a null value since the call failed
         return;
     }
     
@@ -1775,11 +1924,16 @@ void interpreter::visit_member_expr(member_expr* expr) {
                 return method(this, objectValue, args);
             };
             
-            push_value(script_value::make_function(boundMethod));
+            push_value(script_value::make_function(boundMethod, engine_ref_));
             return;
         }
         else {
-            throw runtime_error("Array has no method '" + expr->member + "'");
+            // Set exception state instead of throwing
+            active_exception_value_ = make_value("Array has no method '" + expr->member + "'");
+            current_exception_ = script_exception("Array has no method '" + expr->member + "'", expr->location);
+            is_unwinding_ = true;
+            push_value(make_value());
+            return;
         }
     }
     
@@ -1795,11 +1949,60 @@ void interpreter::visit_member_expr(member_expr* expr) {
                 return method(this, objectValue, args);
             };
             
-            push_value(script_value::make_function(boundMethod));
+            push_value(script_value::make_function(boundMethod, engine_ref_));
             return;
         }
         else {
             throw runtime_error("Map has no method '" + expr->member + "'");
+        }
+    }
+    
+    // Handle weak_ptr methods
+    if (objectValue.is_weak_ptr()) {
+        if (expr->member == "lock") {
+            script_function lockMethod = [this, objectValue](const std::vector<script_value>& args) -> script_value {
+                if (!args.empty()) {
+                    throw runtime_error("lock() takes no arguments");
+                }
+                
+                // Check storage type
+                if (std::holds_alternative<std::weak_ptr<script_value>>(objectValue.storage_)) {
+                    // True weak_ptr
+                    auto weak_ptr = std::get<std::weak_ptr<script_value>>(objectValue.storage_);
+                    if (auto locked = weak_ptr.lock()) {
+                        return *locked;
+                    }
+                } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(objectValue.storage_)) {
+                    // Weak reference stored as object_holder
+                    auto holder = std::get<std::shared_ptr<script_value::object_holder>>(objectValue.storage_);
+                    if (holder->type_name == "weak_ptr_holder" && holder->data) {
+                        auto stored_value = std::static_pointer_cast<script_value>(holder->data);
+                        return *stored_value;
+                    }
+                }
+                return make_value(); // null
+            };
+            push_value(script_value::make_function(lockMethod, engine_ref_));
+            return;
+        } else if (expr->member == "expired") {
+            script_function expiredMethod = [this, objectValue](const std::vector<script_value>& args) -> script_value {
+                if (!args.empty()) {
+                    throw runtime_error("expired() takes no arguments");
+                }
+                
+                // For our implementation, weak_ptr_holder never expires
+                // This is a simplification - proper implementation would track object lifetime
+                if (std::holds_alternative<std::weak_ptr<script_value>>(objectValue.storage_)) {
+                    auto weak_ptr = std::get<std::weak_ptr<script_value>>(objectValue.storage_);
+                    return make_value(weak_ptr.expired());
+                } else {
+                    return make_value(false); // Not expired
+                }
+            };
+            push_value(script_value::make_function(expiredMethod, engine_ref_));
+            return;
+        } else {
+            throw runtime_error("weak_ptr has no method '" + expr->member + "'");
         }
     }
     
@@ -1864,11 +2067,15 @@ void interpreter::visit_member_expr(member_expr* expr) {
             return result;
         };
         
-        push_value(script_value::make_function(boundMethod));
+        push_value(script_value::make_function(boundMethod, engine_ref_));
         return;
     }
     
-    throw runtime_error("Object has no member '" + expr->member + "'");
+    // Set exception state instead of throwing
+    active_exception_value_ = make_value("Object has no member '" + expr->member + "'");
+    current_exception_ = script_exception("Object has no member '" + expr->member + "'", expr->location);
+    is_unwinding_ = true;
+    push_value(make_value());  // Push null for failed member access
 }
 
 void interpreter::visit_lambda_expr(lambda_expr* expr) {
@@ -1965,7 +2172,7 @@ void interpreter::visit_lambda_expr(lambda_expr* expr) {
     
     if (needs_capture_env) {
         // Create captured variables in the closure environment
-        std::shared_ptr<environment> captureEnv = std::make_shared<environment>(closure_env, stringSymbolizer_);
+        std::shared_ptr<environment> captureEnv = std::make_shared<environment>(closure_env, string_symbolizer_);
         
         // Process default captures first ([=] or [&])
         if (has_default_capture && !used_variables.empty()) {
@@ -1984,7 +2191,7 @@ void interpreter::visit_lambda_expr(lambda_expr* expr) {
                 if (!is_overridden && environment_->contains(varName)) {
                     if (capture_by_ref) {
                         // Capture by reference - create reference to original variable
-                        script_value* targetPtr = environment_->get_value_ptr(stringSymbolizer_->intern(varName));
+                        script_value* targetPtr = environment_->get_value_ptr(string_symbolizer_->intern(varName));
                         if (targetPtr) {
                             script_value refValue = script_value::make_reference(targetPtr, environment_);
                             captureEnv->define(varName, std::move(refValue));
@@ -2003,7 +2210,7 @@ void interpreter::visit_lambda_expr(lambda_expr* expr) {
             if (environment_->contains(capture.name)) {
                 if (capture.by_reference) {
                     // Capture by reference - create reference to original variable
-                    uint64_t symbolId = stringSymbolizer_->intern(capture.name);
+                    uint64_t symbolId = string_symbolizer_->intern(capture.name);
                     script_value* targetPtr = environment_->get_value_ptr(symbolId);
                     if (targetPtr) {
                         script_value refValue = script_value::make_reference(targetPtr, environment_);
@@ -2045,7 +2252,7 @@ void interpreter::visit_lambda_expr(lambda_expr* expr) {
     // Pre-cache parameter symbol IDs for optimization
     for (auto& param : expr->parameters) {
         if (param.symbol_id == UINT64_MAX) {
-            param.symbol_id = stringSymbolizer_->intern(param.name);
+            param.symbol_id = string_symbolizer_->intern(param.name);
         }
     }
     
@@ -2071,12 +2278,14 @@ void interpreter::visit_lambda_expr(lambda_expr* expr) {
     };
     
     // Push the lambda as a function value
-    push_value(script_value::make_function(funcWrapper));
+    push_value(script_value::make_function(funcWrapper, engine_ref_));
 }
 
 void interpreter::visit_new_expr(new_expr* expr) {
     // This handles expressions like: new Point(), new Point(3.0, 4.0), etc.
     // The new_expr contains a type and arguments
+    
+    // std::cerr << "DEBUG: visit_new_expr called for type: " << (expr->type ? expr->type->type_name : "NULL") << std::endl;
     
     if (!expr->type) {
         throw runtime_error("New expression missing type information");
@@ -2125,15 +2334,19 @@ void interpreter::visit_new_expr(new_expr* expr) {
     // Look for a constructor function registered with this class name
     // The class builder registers constructors as overloaded functions
     try {
+        // std::cerr << "DEBUG: Looking for constructor: " << className << std::endl;
         script_value constructorFunc = environment_->get(className);
         if (constructorFunc.is_function()) {
+            // std::cerr << "DEBUG: Found constructor function for: " << className << std::endl;
             const script_function& func = constructorFunc.as_function();
             script_value instance = func(args);
             push_value(std::move(instance));
             return;
         }
-    } catch (const runtime_error&) {
+        // std::cerr << "DEBUG: Constructor found but not a function for: " << className << std::endl;
+    } catch (const runtime_error& e) {
         // Constructor function not found, fall through to error
+        // std::cerr << "DEBUG: Constructor not found for: " << className << " - " << e.what() << std::endl;
     }
     
     throw runtime_error("No constructor found for class: " + className);
@@ -2158,7 +2371,7 @@ void interpreter::visit_ternary_expr(ternary_expr* expr) {
 void interpreter::visit_array_literal_expr(array_literal_expr* expr) {
     // Create array script_value with mixed element type (for now)
     auto element_type = type_info::make_int(); // TODO: Better type inference
-    script_value arrayValue = script_value::make_array(element_type);
+    script_value arrayValue = script_value::make_array(element_type, engine_ref_);
     
     // Get the internal vector to populate
     auto& array = const_cast<std::vector<script_value>&>(arrayValue.as_array());
@@ -2176,7 +2389,7 @@ void interpreter::visit_map_literal_expr(map_literal_expr* expr) {
     // Create map script_value with mixed key/value types (for now)
     auto keyType = type_info::make_string(); // TODO: Better type inference
     auto valueType = type_info::make_int(); // TODO: Better type inference
-    script_value mapValue = script_value::make_map(keyType, valueType);
+    script_value mapValue = script_value::make_map(keyType, valueType, engine_ref_);
     
     // Get the internal map to populate
     auto& map = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
@@ -2192,7 +2405,7 @@ void interpreter::visit_map_literal_expr(map_literal_expr* expr) {
         script_value value = pop_value();
         
         // Insert into map
-        map[std::move(key)] = std::move(value);
+        map.insert_or_assign(std::move(key), std::move(value));
     }
     
     push_value(std::move(mapValue));
@@ -2209,7 +2422,21 @@ void interpreter::visit_this_expr(this_expr* expr) {
 }
 
 void interpreter::visit_super_expr(super_expr* expr) {
-    throw runtime_error("'super' keyword not yet implemented");
+    // The super expression is used in two contexts:
+    // 1. Constructor delegation: Enemy(name) : super(name)
+    // 2. Method calls: super::attack()
+    
+    // For now, we'll handle it as a method call context
+    // Constructor delegation is handled differently in the parser
+    
+    // Get 'this' from the environment
+    auto this_value = environment_->get("this");
+    if (this_value.is_null()) {
+        throw runtime_error("'super' used outside of class method");
+    }
+    
+    // Push 'this' onto the stack for method call
+    push_value(this_value);
 }
 
 void interpreter::visit_throw_expr(throw_expr* expr) {
@@ -2278,7 +2505,7 @@ void interpreter::visit_while_stmt(while_stmt* stmt) {
 void interpreter::visit_for_stmt(for_stmt* stmt) {
     // Create new scope for the for loop (initialization variables should be scoped)
     auto previous = environment_;
-    environment_ = std::make_shared<environment>(environment_, stringSymbolizer_);
+    environment_ = std::make_shared<environment>(environment_, string_symbolizer_);
     
     try {
         // Execute initialization (if present)
@@ -2349,7 +2576,7 @@ void interpreter::visit_return_stmt(return_stmt* stmt) {
         returnValue_ = pop_value();
     } else {
         // Return null if no expression
-        returnValue_ = script_value();
+        returnValue_ = make_value();
     }
     
     hasReturnValue_ = true;
@@ -2374,7 +2601,7 @@ void interpreter::visit_try_stmt(try_stmt* stmt) {
     // Don't reset exception state if we're in a catch block (allows re-throw)
     if (current_catch_var_.empty()) {
         current_exception_.reset();
-        active_exception_value_ = script_value();
+        active_exception_value_ = make_value();
     }
     is_unwinding_ = false;
     current_catch_var_.clear();
@@ -2399,7 +2626,7 @@ void interpreter::visit_try_stmt(try_stmt* stmt) {
         // Only clear exception if it wasn't re-thrown
         if (!is_unwinding_) {
             current_exception_.reset();
-            active_exception_value_ = script_value();
+            active_exception_value_ = make_value();
         }
     }
     
@@ -2421,7 +2648,7 @@ void interpreter::visit_function_decl(function_decl* decl) {
     // Pre-cache symbol IDs for all parameters (parameter binding optimization)
     for (auto& param : decl->parameters) {
         if (param.symbol_id == UINT64_MAX) {
-            param.symbol_id = stringSymbolizer_->intern(param.name);
+            param.symbol_id = string_symbolizer_->intern(param.name);
         }
     }
     
@@ -2438,15 +2665,54 @@ void interpreter::visit_function_decl(function_decl* decl) {
     // Create wrapper function
     script_value functionValue = script_value::make_function([this, scriptFunc](const std::vector<script_value>& args) -> script_value {
         return call_function(*scriptFunc, args);
-    });
+    }, engine_ref_);
     
     // Define the function in current environment
     environment_->define(decl->name, functionValue);
 }
 
 void interpreter::visit_class_decl(class_decl* decl) {
-    // Create a script class definition
-    auto class_def = std::make_shared<class_definition>(decl->name, class_definition::script_class);
+    // Check if class already exists (for hot reloading)
+    std::shared_ptr<script_class_definition> class_def = nullptr;
+    bool is_redefinition = false;
+    
+    // Use a static prefix to avoid repeated allocations
+    static const std::string CLASS_PREFIX = "__class_";
+    std::string class_var_name = CLASS_PREFIX + decl->name;
+    
+    try {
+        auto existing = environment_->get(class_var_name);
+        if (!existing.is_null()) {
+            // Class already exists - reuse the definition for hot reloading
+            class_def = existing.as<std::shared_ptr<script_class_definition>>();
+            is_redefinition = true;
+            // Found existing class definition for hot reload
+        }
+    } catch (...) {
+        // Class doesn't exist yet
+        // No existing class definition found
+    }
+    
+    if (!class_def) {
+        // Create a new script class definition
+        class_def = std::make_shared<script_class_definition>(decl->name, engine_ref_);
+    } else if (is_redefinition) {
+        // Clear old ASTs for hot reload
+        class_def->clear_asts();
+    }
+    
+    // Collect new field defaults and methods
+    std::unordered_map<std::string, script_value> new_field_defaults;
+    std::unordered_map<std::string, script_value> new_methods;
+    
+    // Reserve capacity based on member count for efficiency
+    if (!decl->members.empty()) {
+        new_field_defaults.reserve(decl->members.size());
+        new_methods.reserve(decl->members.size());
+    }
+    
+    // Debug output
+    // std::cerr << "DEBUG: Processing class declaration: " << decl->name << std::endl;
     
     // Handle base classes (single inheritance for now)
     if (!decl->base_classes.empty()) {
@@ -2457,10 +2723,44 @@ void interpreter::visit_class_decl(class_decl* decl) {
         
         // Look up base class definition
         const std::string& base_name = decl->base_classes[0];
-        // TODO: Implement proper base class lookup from class registry
-        // For now, skip inheritance support
-        throw runtime_error("Class inheritance not yet implemented");
+        
+        // First try to find a script class
+        auto base_class_var = environment_->get("__class_" + base_name);
+        
+        if (!base_class_var.is_null()) {
+            // Found a script class
+            auto base_class_def = base_class_var.as<std::shared_ptr<class_definition>>();
+            class_def->set_parent(base_class_def);
+        } else {
+            // Try to find a C++ class using the class lookup callback
+            if (class_lookup_callback_) {
+                auto cpp_class_def = class_lookup_callback_(base_name);
+                if (cpp_class_def) {
+                    // Found a C++ class! Set it as the base
+                    class_def->set_cpp_base_class(cpp_class_def);
+                    
+                    // Also set as regular parent for method resolution
+                    class_def->set_parent(cpp_class_def);
+                } else if (environment_->contains(base_name)) {
+                    // Constructor exists but no class definition found
+                    // This shouldn't happen with proper engine integration
+                    throw runtime_error("Constructor found for '" + base_name + "' but no class definition available");
+                } else {
+                    throw runtime_error("Base class not found: " + base_name);
+                }
+            } else {
+                // No class lookup callback set - check if constructor exists
+                if (environment_->contains(base_name)) {
+                    throw runtime_error("Script class inheriting from C++ class requires engine integration");
+                } else {
+                    throw runtime_error("Base class not found: " + base_name);
+                }
+            }
+        }
     }
+    
+    // Track whether we found an explicit constructor
+    bool found_constructor = false;
     
     // Process class members
     for (const auto& member : decl->members) {
@@ -2471,14 +2771,31 @@ void interpreter::visit_class_decl(class_decl* decl) {
         if (var_decl) {
             // Field declaration
             script_value default_val;
+            std::string field_name = var_decl->name;
+            
             if (var_decl->initializer) {
-                // Evaluate the initializer expression to get default value
-                var_decl->initializer->accept(this);
-                default_val = pop_value();
+                // Check if the initializer is an assignment expression
+                // This happens when the parser sees "x = 0" and creates assignment_expr
+                auto* assign_expr = dynamic_cast<assignment_expr*>(var_decl->initializer.get());
+                if (assign_expr) {
+                    // For field declarations like "x = 0", we need to get the field name from the assignment
+                    if (auto* ident_expr = dynamic_cast<identifier_expr*>(assign_expr->target.get())) {
+                        field_name = ident_expr->name;
+                    }
+                    // Get the RHS value
+                    assign_expr->value->accept(this);
+                    default_val = pop_value();
+                } else {
+                    // Normal initializer expression
+                    var_decl->initializer->accept(this);
+                    default_val = pop_value();
+                }
             }
             
-            // Add field to class definition
-            class_def->add_field(var_decl->name, default_val);
+            // Collect field for later processing
+            if (!field_name.empty()) {
+                new_field_defaults[field_name] = default_val;
+            }
             
         } else if (func_decl) {
             // Method declaration
@@ -2487,92 +2804,186 @@ void interpreter::visit_class_decl(class_decl* decl) {
             // Check for constructor
             if (method_name == decl->name) {
                 // Constructor
-                // For now, create a simple constructor function
-                auto ctor_func = [this, func_decl, class_def, class_name = decl->name](const std::vector<script_value>& args) -> script_value {
-                    // Create instance
-                    auto instance = class_def->create_instance();
-                    
-                    // Create a script_defined_function from the function_decl
-                    script_defined_function script_func(
-                        func_decl->name,
-                        func_decl->parameters, 
-                        func_decl->return_type,
-                        func_decl->body,
-                        environment_  // Current environment as closure
-                    );
-                    
-                    // Execute constructor body with 'this' implicitly available
-                    // Create a new environment for the constructor that has 'this' defined
-                    auto ctor_env = std::make_shared<environment>(environment_, stringSymbolizer_);
-                    ctor_env->define("this", script_value::make_object(class_name, instance));
-                    
-                    // Update the script function to use this environment
-                    script_defined_function ctor_script_func(
-                        func_decl->name,
-                        func_decl->parameters, 
-                        func_decl->return_type,
-                        func_decl->body,
-                        ctor_env  // Constructor environment with 'this'
-                    );
-                    
-                    // Execute constructor body with original arguments
-                    call_function(ctor_script_func, args);
-                    
-                    // Return the instance
-                    return script_value::make_object(class_name, instance);
-                };
+                found_constructor = true;
                 
-                // Register constructor as a function in the environment
-                script_value ctor_value = script_value::make_function(ctor_func);
-                // Store constructor in current environment
-                environment_->define(decl->name, ctor_value);
+                // Pre-cache symbol IDs for constructor parameters
+                for (auto& param : func_decl->parameters) {
+                    if (param.symbol_id == UINT64_MAX) {
+                        param.symbol_id = string_symbolizer_->intern(param.name);
+                    }
+                }
+                
+                class_def->add_constructor_from_ast(
+                    std::static_pointer_cast<function_decl>(member.declaration),
+                    this
+                );
+                
+                // Constructor will be registered after all members are processed
                 
             } else if (method_name.size() > 0 && method_name[0] == '~') {
-                // Destructor - skip for now
-                // TODO: Implement destructor support
+                // Destructor
+                class_def->add_destructor_from_ast(
+                    std::static_pointer_cast<function_decl>(member.declaration),
+                    this
+                );
                 
             } else {
                 // Regular method
-                auto method_func = [this, func_decl](const std::vector<script_value>& args) -> script_value {
-                    // First argument should be 'this' object
-                    if (args.empty()) {
-                        throw runtime_error("Method called without 'this' object");
-                    }
+                if (is_redefinition) {
+                    // For redefinition, just collect the method function
+                    // We'll add it to the class via redefine_class later
+                    auto method_ast = std::static_pointer_cast<function_decl>(member.declaration);
+                    auto method_func = [weak_self = std::weak_ptr<interpreter>(shared_from_this()), 
+                                       method_ast, 
+                                       class_def, 
+                                       class_name = decl->name](const std::vector<script_value>& args) -> script_value {
+                        auto self = weak_self.lock();
+                        if (!self) {
+                            throw runtime_error("Interpreter was destroyed before method call");
+                        }
+                        
+                        // First argument should be 'this' object
+                        if (args.empty()) {
+                            throw runtime_error("Method called without 'this' object");
+                        }
+                        
+                        // Extract 'this' from first argument
+                        script_value this_obj = args[0];
+                        
+                        // Create remaining arguments (excluding 'this')
+                        std::vector<script_value> method_args(args.begin() + 1, args.end());
+                        
+                        // Create a new environment for the method that has 'this' defined
+                        auto method_env = std::make_shared<environment>(
+                            self->environment_, 
+                            self->string_symbolizer_
+                        );
+                        method_env->define("this", this_obj);
+                        
+                        // Call the interpreter method directly
+                        return self->execute_method_ast(method_ast, method_env, method_args);
+                    };
                     
-                    // Extract 'this' from first argument
-                    script_value this_obj = args[0];
-                    
-                    // Create remaining arguments (excluding 'this')
-                    std::vector<script_value> method_args(args.begin() + 1, args.end());
-                    
-                    // Create a new environment for the method that has 'this' defined
-                    auto method_env = std::make_shared<environment>(environment_, stringSymbolizer_);
-                    method_env->define("this", this_obj);
-                    
-                    // Create a script_defined_function with the method environment
-                    script_defined_function script_func(
-                        func_decl->name,
-                        func_decl->parameters, 
-                        func_decl->return_type,
-                        func_decl->body,
-                        method_env  // Method environment with 'this'
+                    new_methods[method_name] = script_value::make_function(method_func, engine_ref_);
+                } else {
+                    // For new classes, add method normally
+                    class_def->add_method_from_ast(
+                        method_name,
+                        std::static_pointer_cast<function_decl>(member.declaration),
+                        this
                     );
-                    
-                    // Execute method with the remaining arguments (excluding 'this')
-                    return call_function(script_func, method_args);
-                };
-                
-                // Add method to class definition
-                class_def->add_method(method_name, method_func);
+                }
             }
         }
     }
     
-    // For now, we'll store the class definition as a special value in the environment
-    // This allows class instantiation through the constructor function
-    // TODO: Properly integrate with engine's class registry
+    // After processing all members, create a dispatcher for constructors if any were found
+    if (found_constructor) {
+        // Create a constructor dispatcher that selects based on argument count
+        auto ctor_dispatcher = [weak_self = std::weak_ptr<interpreter>(shared_from_this()), 
+                               class_def, 
+                               class_name = decl->name](const std::vector<script_value>& args) -> script_value {
+            auto self = weak_self.lock();
+            if (!self) {
+                throw runtime_error("Interpreter was destroyed before constructor call");
+            }
+            
+            // Get all constructor ASTs
+            const auto& ctor_asts = class_def->get_constructor_asts();
+            
+            // Find constructor with matching parameter count
+            std::shared_ptr<function_decl> matching_ctor;
+            for (const auto& ctor_ast : ctor_asts) {
+                if (ctor_ast->parameters.size() == args.size()) {
+                    matching_ctor = ctor_ast;
+                    break;
+                }
+            }
+            
+            if (!matching_ctor) {
+                throw runtime_error("No constructor found for " + class_name + 
+                                  " with " + std::to_string(args.size()) + " arguments");
+            }
+            
+            // Create instance
+            auto instance = class_def->create_instance();
+            // Instance created
+            
+            // Create environment with 'this'
+            auto ctor_env = std::make_shared<environment>(self->environment_, self->string_symbolizer_);
+            ctor_env->define("this", script_value::make_object(class_name, instance));
+            // 'this' defined in constructor environment
+            
+            // Execute the matching constructor
+            script_defined_function ctor_script_func(
+                matching_ctor->name,
+                matching_ctor->parameters,
+                matching_ctor->return_type,
+                matching_ctor->body,
+                ctor_env
+            );
+            
+            self->call_function(ctor_script_func, args);
+            // Constructor executed
+            
+            auto result = script_value::make_object(class_name, instance);
+            // Object wrapped
+            return result;
+        };
+        
+        // Register the dispatcher
+        environment_->define(decl->name, script_value::make_function(ctor_dispatcher, engine_ref_));
+    }
     
-    // The constructor function is already registered as an overloaded function
+    // If no constructor was found, create a default constructor
+    else {
+        // Create a default constructor that just initializes the instance
+        auto default_ctor_func = [weak_self = std::weak_ptr<interpreter>(shared_from_this()), class_def, class_name = decl->name](const std::vector<script_value>& args) -> script_value {
+            // Get strong reference from weak_ptr
+            auto self = weak_self.lock();
+            if (!self) {
+                throw runtime_error("Interpreter was destroyed before constructor call");
+            }
+            
+            // Default constructor shouldn't have arguments
+            if (!args.empty()) {
+                throw runtime_error("Default constructor for class " + class_name + " takes no arguments");
+            }
+            
+            // Create instance using inherited create_instance()!
+            // This will initialize all fields with their default values
+            auto instance = class_def->create_instance();
+            // Default constructor instance created
+            
+            auto result = script_value::make_object(class_name, instance);
+            // Default constructor object wrapped
+            return result;
+        };
+        
+        // Register default constructor
+        environment_->define(decl->name, script_value::make_function(default_ctor_func, engine_ref_));
+        // std::cerr << "DEBUG: Registered default constructor for class: " << decl->name << std::endl;
+    }
+    
+    // If this is a redefinition, we need to call redefine_class to update all instances
+    if (is_redefinition) {
+        // Call redefine_class with the new field defaults and methods
+        // Call redefine_class to migrate existing instances
+        class_def->redefine_class(new_field_defaults, new_methods, engine_ref_);
+    } else {
+        // For new classes, add the fields normally
+        for (const auto& [field_name, default_val] : new_field_defaults) {
+            class_def->add_field(field_name, default_val);
+        }
+        // Initialize fingerprint for future comparisons
+        class_def->initialize_fingerprint();
+    }
+    
+    // Store the class definition in a special variable for later retrieval
+    // This allows inheritance and other features to work
+    environment_->define(class_var_name, script_value::make_object("class_definition", class_def, engine_ref_));
+    
+    // The constructor function is already registered in the environment
     // which allows "new ClassName()" syntax to work
 }
 
@@ -2580,6 +2991,23 @@ void interpreter::visit_expression_decl(expression_decl* decl) {
     // Evaluate the expression and leave the result on the stack
     // This allows top-level expressions to return values
     decl->expression->accept(this);
+}
+
+// Execute a method AST with a given environment
+script_value interpreter::execute_method_ast(std::shared_ptr<function_decl> ast, 
+                                           std::shared_ptr<environment> method_env,
+                                           const std::vector<script_value>& args) {
+    // Create a script_defined_function with the method environment
+    script_defined_function script_func(
+        ast->name,
+        ast->parameters, 
+        ast->return_type,
+        ast->body,
+        method_env  // Method environment with 'this'
+    );
+    
+    // Execute method with the arguments
+    return call_function(script_func, args);
 }
 
 // Function call implementation
@@ -2616,6 +3044,7 @@ script_value interpreter::call_function(const script_defined_function& function,
         for (size_t i = 0; i < function.parameters.size(); ++i) {
             const auto& param = function.parameters[i];
             const auto& arg = args[i];
+            
             
             // Use pre-cached symbol ID (parameter binding optimization)
             // Symbol IDs are cached at function definition time in visit_function_decl
@@ -2689,7 +3118,7 @@ script_value interpreter::call_function(const script_defined_function& function,
             result = returnValue_;
         } else {
             // If no return statement, return null
-            result = script_value();
+            result = make_value();
         }
         
         // Restore previous state
@@ -2739,7 +3168,7 @@ script_value interpreter::make_function(std::shared_ptr<script_defined_function>
         // For now, just call normally - we'll implement proper reference handling later
         return call_function(*func, args);
     };
-    return script_value::make_function(wrapper);
+    return script_value::make_function(wrapper, engine_ref_);
 }
 
 // Function call optimization helpers
@@ -2751,7 +3180,7 @@ std::shared_ptr<environment> interpreter::get_pooled_environment(std::shared_ptr
         return env;
     } else {
         // Pool is exhausted, create new environment and add to pool
-        auto newEnv = std::make_shared<environment>(parent, stringSymbolizer_);
+        auto newEnv = std::make_shared<environment>(parent, string_symbolizer_);
         environment_pool_.push_back(newEnv);
         ++environment_pool_index_;
         return newEnv;

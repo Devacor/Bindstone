@@ -13,8 +13,8 @@ public:
     void forge_tests() override {
         // If statement tests
         test("if_statement_true", [this]() {
-            engine engine;
-            script_value result = engine.execute(R"(
+            auto engine = engine::make();
+            script_value result = engine->execute(R"(
                 var x = 5;
                 if (x > 0) {
                     x = 10;
@@ -25,8 +25,8 @@ public:
         });
         
         test("if_statement_false", [this]() {
-            engine engine;
-            script_value result = engine.execute(R"(
+            auto engine = engine::make();
+            script_value result = engine->execute(R"(
                 var x = 5;
                 if (x < 0) {
                     x = 10;
@@ -37,10 +37,10 @@ public:
         });
         
         test("if_else_branches", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             // Test true branch
-            script_value result = engine.execute(R"(
+            script_value result = engine->execute(R"(
                 var x = 5;
                 if (x > 0) {
                     x = 10;
@@ -52,7 +52,7 @@ public:
             check_eq(result.as<int>(), 10);
             
             // Test false branch
-            result = engine.execute(R"(
+            result = engine->execute(R"(
                 var x = -5;
                 if (x > 0) {
                     x = 10;
@@ -65,8 +65,8 @@ public:
         });
         
         test("nested_if_statements", [this]() {
-            engine engine;
-            script_value result = engine.execute(R"(
+            auto engine = engine::make();
+            script_value result = engine->execute(R"(
                 var x = 5;
                 var y = 10;
                 if (x > 0) {
@@ -81,8 +81,8 @@ public:
         
         // While loop tests
         test("while_loop_counter", [this]() {
-            engine engine;
-            script_value result = engine.execute(R"(
+            auto engine = engine::make();
+            script_value result = engine->execute(R"(
                 var counter = 0;
                 while (counter < 5) {
                     counter = counter + 1;
@@ -93,8 +93,8 @@ public:
         });
         
         test("while_loop_sum", [this]() {
-            engine engine;
-            script_value result = engine.execute(R"(
+            auto engine = engine::make();
+            script_value result = engine->execute(R"(
                 var sum = 0;
                 var i = 1;
                 while (i <= 4) {
@@ -107,8 +107,8 @@ public:
         });
         
         test("while_loop_with_break", [this]() {
-            engine engine;
-            script_value result = engine.execute(R"(
+            auto engine = engine::make();
+            script_value result = engine->execute(R"(
                 var i = 0;
                 while (true) {
                     i = i + 1;
@@ -122,8 +122,8 @@ public:
         });
         
         test("while_loop_with_continue", [this]() {
-            engine engine;
-            script_value result = engine.execute(R"(
+            auto engine = engine::make();
+            script_value result = engine->execute(R"(
                 var sum = 0;
                 var i = 0;
                 while (i < 10) {
@@ -140,8 +140,8 @@ public:
         
         // For loop tests
         test("for_loop_basic", [this]() {
-            engine engine;
-            script_value result = engine.execute(R"(
+            auto engine = engine::make();
+            script_value result = engine->execute(R"(
                 var sum = 0;
                 for (var i = 1; i <= 5; i = i + 1) {
                     sum = sum + i;
@@ -152,8 +152,8 @@ public:
         });
         
         test("for_loop_with_increment_operator", [this]() {
-            engine engine;
-            script_value result = engine.execute(R"(
+            auto engine = engine::make();
+            script_value result = engine->execute(R"(
                 var sum = 0;
                 for (int i = 0; i < 5; ++i) {
                     sum += i;
@@ -164,8 +164,8 @@ public:
         });
         
         test("for_loop_with_break", [this]() {
-            engine engine;
-            script_value result = engine.execute(R"(
+            auto engine = engine::make();
+            script_value result = engine->execute(R"(
                 var sum = 0;
                 for (int i = 1; i <= 10; ++i) {
                     if (i > 5) {
@@ -179,8 +179,8 @@ public:
         });
         
         test("for_loop_with_continue", [this]() {
-            engine engine;
-            script_value result = engine.execute(R"(
+            auto engine = engine::make();
+            script_value result = engine->execute(R"(
                 var sum = 0;
                 for (int i = 1; i <= 10; ++i) {
                     if (i % 2 == 0) {
@@ -194,8 +194,8 @@ public:
         });
         
         test("nested_loops", [this]() {
-            engine engine;
-            script_value result = engine.execute(R"(
+            auto engine = engine::make();
+            script_value result = engine->execute(R"(
                 var sum = 0;
                 for (int i = 1; i <= 3; ++i) {
                     for (int j = 1; j <= 3; ++j) {
@@ -208,8 +208,8 @@ public:
         });
         
         test("complex_control_flow", [this]() {
-            engine engine;
-            script_value result = engine.execute(R"(
+            auto engine = engine::make();
+            script_value result = engine->execute(R"(
                 var result = 0;
                 for (int i = 1; i <= 10; ++i) {
                     if (i % 2 == 0) {

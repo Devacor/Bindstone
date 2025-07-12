@@ -29,7 +29,7 @@ JAI_TEST(vector2_operator_test) {
     engine engine;
     
     std::cout << "=== Registering Vector2 ===\n";
-    make_class_builder<Vector2>(engine, "Vector2")
+    class_builder<Vector2>(engine, "Vector2")
         .constructor<>()
         .constructor<float, float>()
         .property("x", &Vector2::x)

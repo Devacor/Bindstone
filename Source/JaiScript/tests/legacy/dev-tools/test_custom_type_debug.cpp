@@ -19,7 +19,7 @@ JAI_TEST(type_name_matching) {
     engine engine;
     
     // Register the class
-    make_class_builder<SimpleClass>(engine, "SimpleClass")
+    class_builder<SimpleClass>(engine, "SimpleClass")
         .constructor<int>()
         .property("value", &SimpleClass::value)
         .build();

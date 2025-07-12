@@ -8,7 +8,7 @@
 #define SpriteDerivedAccessors(ComponentType) \
 	DrawableDerivedAccessors(ComponentType) \
 	template<typename PointAssign> \
-	std::shared_ptr<PointAssign> corners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight){ \
+	std::shared_ptr<ComponentType> corners(const PointAssign &a_TopLeft, const PointAssign & a_TopRight, const PointAssign & a_BottomLeft, const PointAssign & a_BottomRight){ \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Sprite::corners(a_TopLeft, a_TopRight, a_BottomLeft, a_BottomRight)); \
 	}
 

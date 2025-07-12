@@ -19,7 +19,7 @@ int main() {
     stdlib::register_all(engine);
     
     // Register Point class
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<>()
         .constructor<double, double>()
         .property("x", &Point::x)

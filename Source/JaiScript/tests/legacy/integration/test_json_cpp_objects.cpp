@@ -48,7 +48,7 @@ JAI_TEST(to_json_cpp_simple_object) {
     stdlib::register_all(engine);
     
     // Register Point class
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<>()
         .constructor<double, double>()
         .property("x", &Point::x)
@@ -76,7 +76,7 @@ JAI_TEST(to_json_cpp_complex_object) {
     stdlib::register_all(engine);
     
     // Register Player class
-    make_class_builder<Player>(engine, "Player")
+    class_builder<Player>(engine, "Player")
         .constructor<>()
         .constructor<const std::string&>()
         .property("name", &Player::name)
@@ -110,7 +110,7 @@ JAI_TEST(to_json_cpp_object_in_container) {
     stdlib::register_all(engine);
     
     // Register Point class
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<>()
         .constructor<double, double>()
         .property("x", &Point::x)
@@ -141,7 +141,7 @@ JAI_TEST(to_json_cpp_object_default_constructor) {
     stdlib::register_all(engine);
     
     // Register Player class
-    make_class_builder<Player>(engine, "Player")
+    class_builder<Player>(engine, "Player")
         .constructor<>()
         .property("name", &Player::name)
         .property("health", &Player::health)

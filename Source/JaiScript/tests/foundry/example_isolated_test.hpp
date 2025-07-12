@@ -12,12 +12,12 @@ public:
     
     void forge_tests() override {
         test("demo_test", [this]() {
-            engine engine;
-            engine.add_function("greet", [](const script_string& name) {
+            auto engine = engine::make();
+            engine->add_function("greet", [](const script_string& name) {
                 return "Hello, " + name + "!";
             });
             
-            auto result = engine.execute("greet(\"World\")");
+            auto result = engine->execute("greet(\"World\")");
             check_eq(result.as<script_string>(), "Hello, World!");
         });
     }

@@ -96,7 +96,7 @@ std::unique_ptr<engine> create_vm_engine_with_bindings() {
     auto eng = std::make_unique<engine>();
     
     // Bind point class
-    make_class_builder<point>(*eng, "point")
+    class_builder<point>(*eng, "point")
         .constructor<>()
         .constructor<script_float, script_float>()
         .property("x", &point::x)
@@ -109,7 +109,7 @@ std::unique_ptr<engine> create_vm_engine_with_bindings() {
         .build();
     
     // Bind counter class
-    make_class_builder<counter>(*eng, "counter")
+    class_builder<counter>(*eng, "counter")
         .constructor<>()
         .constructor<script_int>()
         .method("increment", &counter::increment)
@@ -121,7 +121,7 @@ std::unique_ptr<engine> create_vm_engine_with_bindings() {
         .build();
     
     // Bind container class
-    make_class_builder<container>(*eng, "container")
+    class_builder<container>(*eng, "container")
         .constructor<>()
         .method("push", &container::push)
         .method("pop", &container::pop)

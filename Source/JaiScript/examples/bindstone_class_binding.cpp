@@ -140,7 +140,7 @@ namespace MV {
 // NEW JaiScript style - much cleaner!
 namespace MV {
     jai::Registrar<Task> _hookTask([](jai::engine& engine, const MV::Services& services) {
-        jai::make_class_builder<Task>(engine, "Task")
+        jai::class_builder<Task>(engine, "Task")
             .constructor<>()
             .constructor<bool>()
             .constructor<const std::string&, bool>()
@@ -185,14 +185,14 @@ namespace MV {
     using namespace Scene;
     
     jai::Registrar<Component> _hookComponent([](jai::engine& engine, const MV::Services& services) {
-        jai::make_class_builder<Component>(engine, "Component")
+        jai::class_builder<Component>(engine, "Component")
             .method("id", static_cast<std::string(Component::*)() const>(&Component::id))
             .method("id", static_cast<void(Component::*)(const std::string&)>(&Component::id))
             .build();
     });
     
     jai::Registrar<Drawable> _hookDrawable([](jai::engine& engine, const MV::Services& services) {
-        jai::make_class_builder<Drawable>(engine, "Drawable")
+        jai::class_builder<Drawable>(engine, "Drawable")
             .inherits<Component>()
             .method("visible", &Drawable::visible)
             .method("hide", &Drawable::hide)
@@ -201,7 +201,7 @@ namespace MV {
     });
     
     jai::Registrar<Sprite> _hookSprite([](jai::engine& engine, const MV::Services& services) {
-        jai::make_class_builder<Sprite>(engine, "Sprite")
+        jai::class_builder<Sprite>(engine, "Sprite")
             .inherits<Drawable>()
             .method("setTexture", &Sprite::setTexture)
             .method("getTexture", &Sprite::getTexture)
@@ -209,7 +209,7 @@ namespace MV {
     });
     
     jai::Registrar<Clickable> _hookClickable([](jai::engine& engine, const MV::Services& services) {
-        jai::make_class_builder<Clickable>(engine, "Clickable")
+        jai::class_builder<Clickable>(engine, "Clickable")
             .inherits<Sprite>()
             .method("disable", &Clickable::disable)
             .method("enabled", &Clickable::enabled)
@@ -217,7 +217,7 @@ namespace MV {
     });
     
     jai::Registrar<Button> _hookButton([](jai::engine& engine, const MV::Services& services) {
-        jai::make_class_builder<Button>(engine, "Button")
+        jai::class_builder<Button>(engine, "Button")
             .inherits<Clickable>()
             .method("text", static_cast<void(Button::*)(const std::string&)>(&Button::text))
             .method("text", static_cast<std::string(Button::*)() const>(&Button::text))
@@ -254,7 +254,7 @@ int main() {
     
     std::cout << "Migration effort:\n";
     std::cout << "- Replace Script::Registrar with jai::Registrar\n";
-    std::cout << "- Use make_class_builder<T>() instead of multiple add() calls\n";
+    std::cout << "- Use class_builder<T>() instead of multiple add() calls\n";
     std::cout << "- Remove manual type conversions\n";
     std::cout << "- Simplify lambda wrappers\n";
     

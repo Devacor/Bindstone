@@ -30,7 +30,7 @@ JAI_TEST(basic_operator_overloading_for_custom_type) {
     engine engine;
     
     // Register Vector2 type
-    make_class_builder<Vector2>(engine, "Vector2")
+    class_builder<Vector2>(engine, "Vector2")
         .constructor<>()
         .constructor<float, float>()
         .property("x", &Vector2::x)
@@ -95,7 +95,7 @@ JAI_TEST(comparison_operator_overloading) {
     engine engine;
     
     // Custom comparison for Vector2 based on length
-    make_class_builder<Vector2>(engine, "Vector2")
+    class_builder<Vector2>(engine, "Vector2")
         .constructor<float, float>()
         .property("x", &Vector2::x)
         .property("y", &Vector2::y)
@@ -153,12 +153,12 @@ JAI_TEST(operator_overloading_with_multiple_types) {
     };
     
     // Register types
-    make_class_builder<Money>(engine, "Money")
+    class_builder<Money>(engine, "Money")
         .constructor<float>()
         .property("amount", &Money::amount)
         .build();
     
-    make_class_builder<Percentage>(engine, "Percentage")
+    class_builder<Percentage>(engine, "Percentage")
         .constructor<float>()
         .property("value", &Percentage::value)
         .build();
@@ -228,7 +228,7 @@ JAI_TEST(operator_precedence_with_overloading) {
 JAI_TEST(chained_operator_overloading) {
     engine engine;
     
-    make_class_builder<Vector2>(engine, "Vector2")
+    class_builder<Vector2>(engine, "Vector2")
         .constructor<float, float>()
         .property("x", &Vector2::x)
         .property("y", &Vector2::y)
@@ -279,7 +279,7 @@ JAI_TEST(operator_overloading_error_handling) {
 JAI_TEST(compound_assignment_with_overloading) {
     engine engine;
     
-    make_class_builder<Vector2>(engine, "Vector2")
+    class_builder<Vector2>(engine, "Vector2")
         .constructor<float, float>()
         .property("x", &Vector2::x)
         .property("y", &Vector2::y)
@@ -326,7 +326,7 @@ JAI_TEST(mixed_type_arithmetic_overloading) {
         Complex(float r = 0, float i = 0) : real(r), imag(i) {}
     };
     
-    make_class_builder<Complex>(engine, "Complex")
+    class_builder<Complex>(engine, "Complex")
         .constructor<float, float>()
         .property("real", &Complex::real)
         .property("imag", &Complex::imag)
@@ -374,7 +374,7 @@ JAI_TEST(mixed_type_arithmetic_overloading) {
 JAI_BENCHMARK(operator_overloading_performance) {
     engine engine;
     
-    make_class_builder<Vector2>(engine, "Vector2")
+    class_builder<Vector2>(engine, "Vector2")
         .constructor<float, float>()
         .property("x", &Vector2::x)
         .property("y", &Vector2::y)

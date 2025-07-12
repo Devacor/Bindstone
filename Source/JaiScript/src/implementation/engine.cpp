@@ -1,12 +1,5 @@
-#include "../../include/jaiscript/core/engine.hpp"
-#include "../../include/jaiscript/core/class_builder.hpp"
-#include "../../include/jaiscript/core/value.hpp"
-#include "../../include/jaiscript/core/execution_backend.hpp"
-#include "../../include/jaiscript/detail/lexer.hpp"
-#include "../../include/jaiscript/detail/parser.hpp"
-#include "../../include/jaiscript/detail/interpreter.hpp"
-#include "../../include/jaiscript/detail/interpreter_backend.hpp"
-#include "../../include/jaiscript/jvm/vm_backend.hpp"
+#include <jaiscript/jaiscript.hpp>
+// JVM backend is already included in jaiscript.hpp
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -14,76 +7,16 @@
 #include <unordered_set>
 #include <algorithm>
 #include <cstdlib>
+#include <limits>
 
 namespace jai {
 
 struct engine::implementation {
-    // Type conversion registry
-    struct TypeConversionRegistry {
-        struct Conversion {
-            script_value_type from;
-            script_value_type to;
-            int cost; // Conversion cost for overload resolution
-            std::function<script_value(const script_value&)> converter;
-        };
-        
-        std::vector<Conversion> conversions;
-        
-        void register_conversion(script_value_type from, script_value_type to, int cost, 
-                               std::function<script_value(const script_value&)> converter) {
-            // Remove existing conversion if any
-            auto it = std::find_if(conversions.begin(), conversions.end(),
-                [from, to](const Conversion& c) { 
-                    return c.from == from && c.to == to; 
-                });
-            
-            if (it != conversions.end()) {
-                *it = {from, to, cost, converter};
-            } else {
-                conversions.push_back({from, to, cost, converter});
-            }
-        }
-        
-        bool can_convert(script_value_type from, script_value_type to) const {
-            if (from == to) return true;
-            
-            return std::any_of(conversions.begin(), conversions.end(),
-                [from, to](const Conversion& c) { 
-                    return c.from == from && c.to == to; 
-                });
-        }
-        
-        int get_conversion_cost(script_value_type from, script_value_type to) const {
-            if (from == to) return 0;
-            
-            auto it = std::find_if(conversions.begin(), conversions.end(),
-                [from, to](const Conversion& c) { 
-                    return c.from == from && c.to == to; 
-                });
-            
-            return (it != conversions.end()) ? it->cost : 1000;
-        }
-        
-        script_value convert(const script_value& value, script_value_type targetType) const {
-            if (value.type() == targetType) return value;
-            
-            auto it = std::find_if(conversions.begin(), conversions.end(),
-                [&](const Conversion& c) { 
-                    return c.from == value.type() && c.to == targetType; 
-                });
-            
-            if (it != conversions.end()) {
-                return it->converter(value);
-            }
-            
-            throw runtime_error("No conversion available from " + 
-                             std::to_string(static_cast<int>(value.type())) + 
-                             " to " + std::to_string(static_cast<int>(targetType)));
-        }
-    };
+    // Unified conversion registry (replaces both type_conversions and custom_conversions)
+    std::shared_ptr<conversions::conversion_registry> conversions;
     
-    // Global type conversion registry
-    TypeConversionRegistry typeConversions;
+    // Serialization registry for class metadata (non-static to ensure test isolation)
+    serialization::serialization_registry serialization_registry;
     
     // Polymorphic type registry for deep copying
     struct polymorphic_type_registry {
@@ -143,11 +76,11 @@ struct engine::implementation {
         std::vector<Overload> overloads;
         
         // Reference to the conversion registry
-        const TypeConversionRegistry* conversions;
+        std::shared_ptr<const conversions::conversion_registry> conversions;
         
-        OverloadSet() : conversions(nullptr) {}
+        OverloadSet() : conversions() {}
         
-        void setConversionRegistry(const TypeConversionRegistry* registry) {
+        void setConversionRegistry(std::shared_ptr<const conversions::conversion_registry> registry) {
             conversions = registry;
         }
         
@@ -210,7 +143,7 @@ struct engine::implementation {
                 int totalCost = 0;
                 bool viable = true;
                 for (size_t i = 0; i < argCount && viable; ++i) {
-                    int cost = conversions ? conversions->get_conversion_cost(args[i].type(), overload.paramTypes[i])
+                    int cost = conversions ? conversions->get_builtin_conversion_cost(args[i].type(), overload.paramTypes[i])
                                           : (args[i].type() == overload.paramTypes[i] ? 0 : 1000);
                     if (cost >= 1000) {
                         viable = false; // No valid conversion
@@ -226,7 +159,7 @@ struct engine::implementation {
             
             // Phase 2: Pick the best viable candidate (lowest cost)
             if (viableCandidates.empty()) {
-                return script_value(); // No viable candidates
+                throw runtime_error("No viable candidates for function call"); // No viable candidates - throw instead of returning null
             }
             
             auto best = std::min_element(viableCandidates.begin(), viableCandidates.end(),
@@ -267,8 +200,6 @@ struct engine::implementation {
     // Type name registry for custom classes (maps typeid name to user-friendly name)
     std::unordered_map<std::string, std::string> typeNameRegistry;
     
-    // Type converter registry (maps typeid name to converter function)
-    std::unordered_map<std::string, std::function<script_value(const void*)>> typeConverters;
     
     // Template type registry for parsing (stores base template names like "Point", "MyMap")
     std::unordered_set<std::string> registeredTemplateTypes;
@@ -283,19 +214,20 @@ struct engine::implementation {
     ~implementation();
     
     // Update interpreter when an overloaded function changes
-    void updateOverloadedFunction(const std::string& name);
+    void updateOverloadedFunction(const std::string& name, engine* engine_ptr);
     
     // Helper to ensure overload set has conversion registry
     OverloadSet& getOrCreateOverloadSet(const std::string& name) {
         auto& overloadSet = overloadedFunctions[name];
         if (!overloadSet.conversions) {
-            overloadSet.setConversionRegistry(&typeConversions);
+            overloadSet.setConversionRegistry(conversions);
         }
         return overloadSet;
     }
 };
 
-engine::implementation::implementation() {
+engine::implementation::implementation() 
+    : conversions(std::make_shared<conversions::conversion_registry>()) {
     globalEnvironment = std::make_shared<environment>(&stringSymbolizer);
     
     const char* backend_env = std::getenv("JAISCRIPT_BACKEND");
@@ -316,46 +248,25 @@ engine::implementation::implementation() {
         backend = std::make_unique<interpreter_backend>(&stringSymbolizer, globalEnvironment);
     }
     
-    backend->set_type_converters(&typeConverters);
+    
+    // Set up class lookup callback
+    backend->set_class_lookup_callback([this](const std::string& name) -> std::shared_ptr<class_definition> {
+        auto it = classes.find(name);
+        if (it != classes.end()) {
+            return it->second;
+        }
+        return nullptr;
+    });
     
     // Register standard C++ implicit conversions
-    // Promotions (lossless) - cost 1
-    typeConversions.register_conversion(script_value_type::jai_bool_type, script_value_type::jai_int_type, 1,
-        [](const script_value& v) { return script_value(static_cast<script_int>(v.as_bool() ? 1 : 0)); });
-    
-    typeConversions.register_conversion(script_value_type::jai_char_type, script_value_type::jai_int_type, 1,
-        [](const script_value& v) { return script_value(static_cast<script_int>(v.as_char())); });
-    
-    typeConversions.register_conversion(script_value_type::jai_int_type, script_value_type::jai_float_type, 1,
-        [](const script_value& v) { return script_value(static_cast<script_float>(v.as_int())); });
-    
-    // Standard conversions (may lose precision) - cost 2
-    typeConversions.register_conversion(script_value_type::jai_float_type, script_value_type::jai_int_type, 2,
-        [](const script_value& v) { return script_value(static_cast<script_int>(v.as_float())); });
-    
-    typeConversions.register_conversion(script_value_type::jai_int_type, script_value_type::jai_char_type, 2,
-        [](const script_value& v) { return script_value(static_cast<script_char>(v.as_int())); });
-    
-    typeConversions.register_conversion(script_value_type::jai_int_type, script_value_type::jai_bool_type, 2,
-        [](const script_value& v) { return script_value(static_cast<script_bool>(v.as_int() != 0)); });
-    
-    // Other numeric conversions - cost 3
-    typeConversions.register_conversion(script_value_type::jai_float_type, script_value_type::jai_bool_type, 3,
-        [](const script_value& v) { return script_value(static_cast<script_bool>(v.as_float() != 0.0)); });
-    
-    typeConversions.register_conversion(script_value_type::jai_bool_type, script_value_type::jai_float_type, 3,
-        [](const script_value& v) { return script_value(static_cast<script_float>(v.as_bool() ? 1.0 : 0.0)); });
-    
-    typeConversions.register_conversion(script_value_type::jai_char_type, script_value_type::jai_float_type, 3,
-        [](const script_value& v) { return script_value(static_cast<script_float>(v.as_char())); });
-    
-    typeConversions.register_conversion(script_value_type::jai_float_type, script_value_type::jai_char_type, 3,
-        [](const script_value& v) { return script_value(static_cast<script_char>(static_cast<script_int>(v.as_float()))); });
+    // NOTE: These conversions can't use engine reference yet because the engine isn't fully constructed
+    // They will be updated to use proper engine references in initialize_engine_reference()
+    // For now, we'll leave them empty and register them properly after engine construction
 }
 
 engine::implementation::~implementation() = default;
 
-void engine::implementation::updateOverloadedFunction(const std::string& name) {
+void engine::implementation::updateOverloadedFunction(const std::string& name, engine* engine_ptr) {
     // Create a dispatch function that selects the right overload
     // Make a copy of the name to ensure it survives the lambda lifetime
     std::string functionName = name;
@@ -375,7 +286,7 @@ void engine::implementation::updateOverloadedFunction(const std::string& name) {
     };
     
     // Update in global environment
-    script_value dispatcherValue = script_value::make_function(dispatcher);
+    script_value dispatcherValue = script_value::make_function(dispatcher, engine_ptr->weak_from_this());
     globalEnvironment->define(name, dispatcherValue);
 }
 
@@ -396,8 +307,37 @@ engine::engine() : impl(std::make_unique<implementation>()) {
         return func(args);
     });
     
-    // Set up custom extractor for class_instance objects
-    script_value::set_custom_extractor([this](const std::string& type_name, std::shared_ptr<void> obj) -> std::shared_ptr<void> {
+    // Custom extractor will be set up in the conversion registry in initialize_engine_reference()
+    
+    // TODO: Remove static converter setup - now using engine-bound conversions
+    
+    // Built-in functions will be added in initialize_engine_reference() after engine is fully constructed
+    
+    // Standard container conversions will be added in initialize_engine_reference()
+    // when we have proper engine reference
+    
+    // Custom conversions that create script_value will be added in initialize_engine_reference()
+    
+    // Built-in functions that create script_value will be added in initialize_engine_reference()
+}
+
+engine::~engine() = default;
+
+engine::engine(engine&&) noexcept = default;
+engine& engine::operator=(engine&&) noexcept = default;
+
+void engine::initialize_engine_reference() {
+    // Pass the engine reference to the backend
+    impl->backend->set_engine_reference(weak_from_this());
+    
+    // Pass the engine reference to the conversion registry
+    impl->conversions->set_engine(weak_from_this());
+    
+    // Now that we have a proper engine reference, add conversions and functions that create script_value
+    auto engine_weak = weak_from_this();
+    
+    // Set up custom extractor for class_instance objects in the conversion registry
+    impl->conversions->set_custom_extractor([this](const std::string& type_name, std::shared_ptr<void> obj) -> std::shared_ptr<void> {
         // Check if this is a class that was registered with class_builder
         // class_builder creates objects with type_name matching the class name
         auto classIt = impl->classes.find(type_name);
@@ -416,20 +356,210 @@ engine::engine() : impl(std::make_unique<implementation>()) {
         return nullptr;
     });
     
+    // Register standard container conversions for common types
+    conversions::conversion_manager conv_mgr(impl->conversions, this);
+    
+    // Vector conversions for common types
+    conv_mgr.add_vector_conversion<int>();           // Platform int (usually int32_t)
+    conv_mgr.add_vector_conversion<int32_t>();       // Explicit 32-bit
+    conv_mgr.add_vector_conversion<int64_t>();       // Explicit 64-bit (same as script_int)
+    conv_mgr.add_vector_conversion<float>();         // 32-bit float
+    conv_mgr.add_vector_conversion<double>();        // 64-bit double (same as script_float)
+    conv_mgr.add_vector_conversion<char>();          // Single character
+    conv_mgr.add_vector_conversion<std::string>();   // Strings
+    conv_mgr.add_vector_conversion<bool>();          // Booleans
+    
+    // Map conversions for common key/value combinations
+    // String keys (most common)
+    conv_mgr.add_map_conversion<std::string, int>();
+    conv_mgr.add_map_conversion<std::string, int32_t>();
+    conv_mgr.add_map_conversion<std::string, int64_t>();
+    conv_mgr.add_map_conversion<std::string, double>();
+    conv_mgr.add_map_conversion<std::string, float>();
+    conv_mgr.add_map_conversion<std::string, std::string>();
+    conv_mgr.add_map_conversion<std::string, bool>();
+    
+    // Integer keys
+    conv_mgr.add_map_conversion<int, int>();
+    conv_mgr.add_map_conversion<int, int32_t>();
+    conv_mgr.add_map_conversion<int, int64_t>();
+    conv_mgr.add_map_conversion<int, double>();
+    conv_mgr.add_map_conversion<int, float>();
+    conv_mgr.add_map_conversion<int, std::string>();
+    conv_mgr.add_map_conversion<int, bool>();
+    
+    conv_mgr.add_map_conversion<int32_t, int>();
+    conv_mgr.add_map_conversion<int32_t, int32_t>();
+    conv_mgr.add_map_conversion<int32_t, int64_t>();
+    conv_mgr.add_map_conversion<int32_t, double>();
+    conv_mgr.add_map_conversion<int32_t, std::string>();
+    
+    conv_mgr.add_map_conversion<int64_t, int>();
+    conv_mgr.add_map_conversion<int64_t, int32_t>();
+    conv_mgr.add_map_conversion<int64_t, int64_t>();
+    conv_mgr.add_map_conversion<int64_t, double>();
+    conv_mgr.add_map_conversion<int64_t, std::string>();
+    
+    // Double keys
+    conv_mgr.add_map_conversion<double, double>();
+    conv_mgr.add_map_conversion<double, int>();
+    conv_mgr.add_map_conversion<double, std::string>();
+    
+    // Nested vector conversions
+    conv_mgr.add_vector_conversion<std::vector<int>>();
+    conv_mgr.add_vector_conversion<std::vector<double>>();
+    conv_mgr.add_vector_conversion<std::vector<std::string>>();
+    
+    // Map of vectors
+    conv_mgr.add_map_conversion<std::string, std::vector<int>>();
+    conv_mgr.add_map_conversion<std::string, std::vector<double>>();
+    conv_mgr.add_map_conversion<std::string, std::vector<std::string>>();
+    
+    // Bound array conversions for zero-copy performance
+    conv_mgr.add_bound_array_conversion<int>();
+    conv_mgr.add_bound_array_conversion<int32_t>();
+    conv_mgr.add_bound_array_conversion<int64_t>();
+    conv_mgr.add_bound_array_conversion<float>();
+    conv_mgr.add_bound_array_conversion<double>();
+    conv_mgr.add_bound_array_conversion<char>();
+    conv_mgr.add_bound_array_conversion<std::string>();
+    conv_mgr.add_bound_array_conversion<bool>();
+    
+    // Bound map conversions
+    conv_mgr.add_bound_map_conversion<std::string, int>();
+    conv_mgr.add_bound_map_conversion<std::string, int64_t>();
+    conv_mgr.add_bound_map_conversion<std::string, double>();
+    conv_mgr.add_bound_map_conversion<std::string, float>();
+    conv_mgr.add_bound_map_conversion<std::string, std::string>();
+    conv_mgr.add_bound_map_conversion<std::string, bool>();
+    
+    // Register custom conversions for numeric types
+    // int32_t conversion with bounds checking
+    conv_mgr.add_custom_conversion<int32_t>(
+        [](const script_value& v) -> int32_t {
+            script_int val = v.as_int();
+            if (val > std::numeric_limits<int32_t>::max() || val < std::numeric_limits<int32_t>::min()) {
+                throw std::overflow_error("Value " + std::to_string(val) + " is out of range for int32_t");
+            }
+            return static_cast<int32_t>(val);
+        },
+        [engine_weak](const int32_t& val) -> script_value {
+            return script_value(static_cast<script_int>(val), engine_weak);
+        }
+    );
+    
+    // int64_t is the same as script_int, so direct conversion
+    conv_mgr.add_custom_conversion<int64_t>(
+        [](const script_value& v) -> int64_t {
+            return v.as_int();
+        },
+        [engine_weak](const int64_t& val) -> script_value {
+            return script_value(val, engine_weak);
+        }
+    );
+    
+    // float conversion with potential precision loss
+    conv_mgr.add_custom_conversion<float>(
+        [](const script_value& v) -> float {
+            return static_cast<float>(v.as_float());
+        },
+        [engine_weak](const float& val) -> script_value {
+            return script_value(static_cast<script_float>(val), engine_weak);
+        }
+    );
+    
+    // Register standard C++ implicit conversions with proper engine references
+    // Promotions (lossless) - cost 1
+    impl->conversions->register_builtin_conversion(script_value_type::jai_bool_type, script_value_type::jai_int_type, 1,
+        [engine_weak](const script_value& v) { return script_value(static_cast<script_int>(v.as_bool() ? 1 : 0), engine_weak); });
+    
+    impl->conversions->register_builtin_conversion(script_value_type::jai_char_type, script_value_type::jai_int_type, 1,
+        [engine_weak](const script_value& v) { return script_value(static_cast<script_int>(v.as_char()), engine_weak); });
+    
+    impl->conversions->register_builtin_conversion(script_value_type::jai_int_type, script_value_type::jai_float_type, 1,
+        [engine_weak](const script_value& v) { return script_value(static_cast<script_float>(v.as_int()), engine_weak); });
+    
+    // Standard conversions (may lose precision) - cost 2
+    impl->conversions->register_builtin_conversion(script_value_type::jai_float_type, script_value_type::jai_int_type, 2,
+        [engine_weak](const script_value& v) { return script_value(static_cast<script_int>(v.as_float()), engine_weak); });
+    
+    impl->conversions->register_builtin_conversion(script_value_type::jai_int_type, script_value_type::jai_char_type, 2,
+        [engine_weak](const script_value& v) { return script_value(static_cast<script_char>(v.as_int()), engine_weak); });
+    
+    impl->conversions->register_builtin_conversion(script_value_type::jai_int_type, script_value_type::jai_bool_type, 2,
+        [engine_weak](const script_value& v) { return script_value(static_cast<script_bool>(v.as_int() != 0), engine_weak); });
+    
+    // Other numeric conversions - cost 3
+    impl->conversions->register_builtin_conversion(script_value_type::jai_float_type, script_value_type::jai_bool_type, 3,
+        [engine_weak](const script_value& v) { return script_value(static_cast<script_bool>(v.as_float() != 0.0), engine_weak); });
+    
+    impl->conversions->register_builtin_conversion(script_value_type::jai_bool_type, script_value_type::jai_float_type, 3,
+        [engine_weak](const script_value& v) { return script_value(static_cast<script_float>(v.as_bool() ? 1.0 : 0.0), engine_weak); });
+    
+    impl->conversions->register_builtin_conversion(script_value_type::jai_char_type, script_value_type::jai_float_type, 3,
+        [engine_weak](const script_value& v) { return script_value(static_cast<script_float>(v.as_char()), engine_weak); });
+    
+    impl->conversions->register_builtin_conversion(script_value_type::jai_float_type, script_value_type::jai_char_type, 3,
+        [engine_weak](const script_value& v) { return script_value(static_cast<script_char>(static_cast<script_int>(v.as_float())), engine_weak); });
+    
+    // Register standard container conversions now that we have engine reference
+    add_standard_conversions();
+    
+    // Register int64_t to int conversion with bounds checking
+    conversions::conversion_manager conv_manager(impl->conversions, this);
+    conv_manager.add_custom_conversion<int>(
+        [](const script_value& v) -> int {
+            script_int val = v.as_int();  // Use as_int() instead of as<int64_t>()
+            if (val > std::numeric_limits<int>::max() || val < std::numeric_limits<int>::min()) {
+                throw std::overflow_error("Value " + std::to_string(val) + " is out of range for int");
+            }
+            return static_cast<int>(val);
+        },
+        [engine_weak](const int& val) -> script_value {
+            return script_value(static_cast<script_int>(val), engine_weak);
+        }
+    );
+    
     // Add built-in functions
-    add_function("print", [](const std::vector<script_value>& args) {
+    add_function("print", [engine_weak](const std::vector<script_value>& args) -> script_value {
         for (const auto& arg : args) {
             std::cout << arg.to_string();
         }
         std::cout << std::endl;
-        return script_value();
+        return script_value(std::monostate{}, engine_weak);
+    });
+    
+    // Add weak_ptr support for all object types
+    add_function("weak_ptr", [](const script_value& obj) -> script_value {
+        if (!obj.is_object()) {
+            throw runtime_error("weak_ptr can only be created from objects");
+        }
+        
+        return script_value::make_weak_ptr(obj);
+    });
+    
+    // Add weak_ptr methods
+    add_function("lock", [](const script_value& weak) -> script_value {
+        if (!weak.is_weak_ptr()) {
+            throw runtime_error("lock() can only be called on weak_ptr");
+        }
+        
+        auto weak_ptr = std::get<std::weak_ptr<script_value>>(weak.storage_);
+        if (auto locked = weak_ptr.lock()) {
+            return *locked;
+        }
+        throw runtime_error("Weak pointer is expired"); // weak_ptr is null - throw instead of returning null
+    });
+    
+    add_function("expired", [engine_weak](const script_value& weak) -> script_value {
+        if (!weak.is_weak_ptr()) {
+            throw runtime_error("expired() can only be called on weak_ptr");
+        }
+        
+        auto weak_ptr = std::get<std::weak_ptr<script_value>>(weak.storage_);
+        return script_value(weak_ptr.expired(), engine_weak);
     });
 }
-
-engine::~engine() = default;
-
-engine::engine(engine&&) noexcept = default;
-engine& engine::operator=(engine&&) noexcept = default;
 
 
 script_value engine::execute(const std::string& scriptContent) {
@@ -448,7 +578,6 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
             // Switch backend if needed
             if (selected_type == backend_type::jvm && dynamic_cast<interpreter_backend*>(impl->backend.get())) {
                 impl->backend = jvm::create_vm_backend(&impl->stringSymbolizer, impl->globalEnvironment);
-                impl->backend->set_type_converters(&impl->typeConverters);
                 impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
                                                           impl->overloadedFunctions.count("-") > 0 ||
                                                           impl->overloadedFunctions.count("*") > 0 ||
@@ -467,9 +596,16 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
                     const script_function& func = bestMatch.as_function();
                     return func(args);
                 });
+                
+                impl->backend->set_class_lookup_callback([this](const std::string& name) -> std::shared_ptr<class_definition> {
+                    auto it = impl->classes.find(name);
+                    if (it != impl->classes.end()) {
+                        return it->second;
+                    }
+                    return nullptr;
+                });
             } else if (selected_type == backend_type::interpreter && !dynamic_cast<interpreter_backend*>(impl->backend.get())) {
                 impl->backend = std::make_unique<interpreter_backend>(&impl->stringSymbolizer, impl->globalEnvironment);
-                impl->backend->set_type_converters(&impl->typeConverters);
                 impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
                                                           impl->overloadedFunctions.count("-") > 0 ||
                                                           impl->overloadedFunctions.count("*") > 0 ||
@@ -487,6 +623,14 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
                     
                     const script_function& func = bestMatch.as_function();
                     return func(args);
+                });
+                
+                impl->backend->set_class_lookup_callback([this](const std::string& name) -> std::shared_ptr<class_definition> {
+                    auto it = impl->classes.find(name);
+                    if (it != impl->classes.end()) {
+                        return it->second;
+                    }
+                    return nullptr;
                 });
             }
         }
@@ -589,10 +733,10 @@ void engine::add_variadic_function(const std::string& name, script_function func
 void engine::add_functionWithArity(const std::string& name, script_function func, size_t arity) {
     // Check if we have an existing function with this name
     bool hasExistingFunction = false;
-    script_value existing;
+    std::optional<script_value> existing_opt;
     try {
-        existing = impl->globalEnvironment->get(name);
-        hasExistingFunction = existing.is_function();
+        existing_opt = impl->globalEnvironment->get(name);
+        hasExistingFunction = existing_opt && existing_opt->is_function();
     } catch (...) {
         // Variable doesn't exist, which is fine
     }
@@ -606,24 +750,24 @@ void engine::add_functionWithArity(const std::string& name, script_function func
             auto arityIt = impl->functionArities.find(name);
             size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
             
-            impl->getOrCreateOverloadSet(name).setConversionRegistry(&impl->typeConversions);
-            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing);
+            impl->getOrCreateOverloadSet(name).setConversionRegistry(impl->conversions);
+            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing_opt.value());
             if (arityIt != impl->functionArities.end()) {
                 impl->functionArities.erase(arityIt);
             }
         }
         
         // Now add the new function as an overload
-        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func));
-        impl->updateOverloadedFunction(name);
+        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, weak_from_this()));
+        impl->updateOverloadedFunction(name, this);
     } else if (overloadIt != impl->overloadedFunctions.end()) {
         // Already have overloaded functions, just add this one
-        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func));
-        impl->updateOverloadedFunction(name);
+        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, weak_from_this()));
+        impl->updateOverloadedFunction(name, this);
     } else {
         // No existing function, just add normally
         // Store arity info for future use
-        script_value funcValue = script_value::make_function(func);
+        script_value funcValue = script_value::make_function(func, weak_from_this());
         impl->globalEnvironment->define(name, funcValue);
         impl->functionArities[name] = arity;
     }
@@ -632,10 +776,10 @@ void engine::add_functionWithArity(const std::string& name, script_function func
 void engine::add_overloaded_function(const std::string& name, size_t argCount, script_function func) {
     // Check if we need to move an existing function from globalEnvironment
     bool hasExistingFunction = false;
-    script_value existing;
+    std::optional<script_value> existing_opt;
     try {
-        existing = impl->globalEnvironment->get(name);
-        hasExistingFunction = existing.is_function();
+        existing_opt = impl->globalEnvironment->get(name);
+        hasExistingFunction = existing_opt && existing_opt->is_function();
     } catch (...) {
         // Variable doesn't exist, which is fine
     }
@@ -652,7 +796,7 @@ void engine::add_overloaded_function(const std::string& name, size_t argCount, s
         auto overloadIt = impl->overloadedFunctions.find(name);
         if (overloadIt == impl->overloadedFunctions.end()) {
             // First time creating overload set for this function
-            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing);
+            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing_opt.value());
             if (arityIt != impl->functionArities.end()) {
                 impl->functionArities.erase(arityIt);
             }
@@ -660,17 +804,17 @@ void engine::add_overloaded_function(const std::string& name, size_t argCount, s
     }
     
     // Now add the new overload
-    impl->getOrCreateOverloadSet(name).addOverload(argCount, script_value::make_function(func));
-    impl->updateOverloadedFunction(name);
+    impl->getOrCreateOverloadSet(name).addOverload(argCount, script_value::make_function(func, weak_from_this()));
+    impl->updateOverloadedFunction(name, this);
 }
 
 void engine::add_overloaded_functionWithTypes(const std::string& name, size_t argCount, script_function func, const std::vector<script_value_type>& paramTypes) {
     // Check if we need to move an existing function from globalEnvironment
     bool hasExistingFunction = false;
-    script_value existing;
+    std::optional<script_value> existing_opt;
     try {
-        existing = impl->globalEnvironment->get(name);
-        hasExistingFunction = existing.is_function();
+        existing_opt = impl->globalEnvironment->get(name);
+        hasExistingFunction = existing_opt && existing_opt->is_function();
     } catch (...) {
         // Variable doesn't exist, which is fine
     }
@@ -681,24 +825,24 @@ void engine::add_overloaded_functionWithTypes(const std::string& name, size_t ar
         auto arityIt = impl->functionArities.find(name);
         size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
         
-        impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing);
+        impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing_opt.value());
         if (arityIt != impl->functionArities.end()) {
             impl->functionArities.erase(arityIt);
         }
     }
     
     // Now add the new overload with type information
-    impl->getOrCreateOverloadSet(name).addOverload(argCount, script_value::make_function(func), paramTypes);
-    impl->updateOverloadedFunction(name);
+    impl->getOrCreateOverloadSet(name).addOverload(argCount, script_value::make_function(func, weak_from_this()), paramTypes);
+    impl->updateOverloadedFunction(name, this);
 }
 
 void engine::add_functionWithArityAndTypes(const std::string& name, script_function func, size_t arity, const std::vector<script_value_type>& paramTypes) {
     // Check if we have an existing function with this name
     bool hasExistingFunction = false;
-    script_value existing;
+    std::optional<script_value> existing_opt;
     try {
-        existing = impl->globalEnvironment->get(name);
-        hasExistingFunction = existing.is_function();
+        existing_opt = impl->globalEnvironment->get(name);
+        hasExistingFunction = existing_opt && existing_opt->is_function();
     } catch (...) {
         // Variable doesn't exist, which is fine
     }
@@ -712,29 +856,29 @@ void engine::add_functionWithArityAndTypes(const std::string& name, script_funct
             auto arityIt = impl->functionArities.find(name);
             size_t existingArity = (arityIt != impl->functionArities.end()) ? arityIt->second : 0;
             
-            impl->getOrCreateOverloadSet(name).setConversionRegistry(&impl->typeConversions);
-            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing);
+            impl->getOrCreateOverloadSet(name).setConversionRegistry(impl->conversions);
+            impl->getOrCreateOverloadSet(name).addOverload(existingArity, existing_opt.value());
             if (arityIt != impl->functionArities.end()) {
                 impl->functionArities.erase(arityIt);
             }
         }
         
         // Now add the new function as an overload with type info
-        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func), paramTypes);
-        impl->updateOverloadedFunction(name);
+        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, weak_from_this()), paramTypes);
+        impl->updateOverloadedFunction(name, this);
     } else if (overloadIt != impl->overloadedFunctions.end()) {
         // Already have overloaded functions, just add this one with type info
-        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func), paramTypes);
-        impl->updateOverloadedFunction(name);
+        impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, weak_from_this()), paramTypes);
+        impl->updateOverloadedFunction(name, this);
     } else {
         // No existing function, check if we have type info
         if (!paramTypes.empty()) {
             // Have type info, create overload set immediately
-            impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func), paramTypes);
-            impl->updateOverloadedFunction(name);
+            impl->getOrCreateOverloadSet(name).addOverload(arity, script_value::make_function(func, weak_from_this()), paramTypes);
+            impl->updateOverloadedFunction(name, this);
         } else {
             // No type info, add normally
-            script_value funcValue = script_value::make_function(func);
+            script_value funcValue = script_value::make_function(func, weak_from_this());
             impl->globalEnvironment->define(name, funcValue);
             impl->functionArities[name] = arity;
         }
@@ -755,7 +899,7 @@ std::shared_ptr<class_definition> engine::get_class_definition(const std::string
 
 void engine::register_type_conversion(script_value_type from, script_value_type to, int cost, 
                                   std::function<script_value(const script_value&)> converter) {
-    impl->typeConversions.register_conversion(from, to, cost, converter);
+    impl->conversions->register_builtin_conversion(from, to, cost, converter);
 }
 
 script_value engine::get_variable(const std::string& name) const {
@@ -788,7 +932,7 @@ script_value engine::get_variable(const std::string& name) const {
             return func(args);
         };
         
-        return script_value::make_function(dispatcher);
+        return script_value::make_function(dispatcher, std::const_pointer_cast<engine>(shared_from_this()));
     }
     
     throw runtime_error("Variable '" + name + "' not found");
@@ -893,16 +1037,20 @@ std::string engine::get_registered_type_name(const std::string& typeIdName) cons
     return type_name;
 }
 
-void engine::register_type_converterImpl(const std::string& typeIdName, std::function<script_value(const void*)> converter) {
-    impl->typeConverters[typeIdName] = converter;
+void engine::register_type_converter_impl(const std::type_info& type, std::function<script_value(const void*)> converter) {
+    // Register with the conversion registry using type_id
+    auto registry = impl->conversions;
+    if (registry) {
+        registry->register_cpp_type_converter(conversions::type_id::of_type(type), converter);
+    }
 }
 
-script_value engine::convert_to_value(const std::string& typeIdName, const void* obj) const {
-    auto it = impl->typeConverters.find(typeIdName);
-    if (it != impl->typeConverters.end()) {
-        return it->second(obj);
+script_value engine::convert_to_value(const std::type_info& type, const void* obj) const {
+    auto registry = impl->conversions;
+    if (registry) {
+        return registry->convert_cpp_type_from_void(conversions::type_id::of_type(type), obj);
     }
-    throw runtime_error("No converter registered for type: " + typeIdName);
+    throw runtime_error("No converter registered for type: " + std::string(type.name()));
 }
 
 void engine::set_has_custom_numeric_operators(bool value) {
@@ -939,7 +1087,6 @@ void engine::set_backend(backend_type type) {
             break;
     }
     
-    impl->backend->set_type_converters(&impl->typeConverters);
     impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
                                               impl->overloadedFunctions.count("-") > 0 ||
                                               impl->overloadedFunctions.count("*") > 0 ||
@@ -965,7 +1112,6 @@ void engine::set_backend(std::unique_ptr<execution_backend> backend) {
     impl->backend = std::move(backend);
     impl->current_backend_type = backend_type::auto_select;
     
-    impl->backend->set_type_converters(&impl->typeConverters);
     impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
                                               impl->overloadedFunctions.count("-") > 0 ||
                                               impl->overloadedFunctions.count("*") > 0 ||
@@ -1012,7 +1158,7 @@ void engine::register_class_by_type(std::type_index type, std::shared_ptr<class_
     impl->classesByType[type] = classDef;
 }
 
-std::shared_ptr<class_definition> engine::get_class_definition_by_type(std::type_index type) const {
+std::shared_ptr<class_definition> engine::get_class_definition_by_type(const std::type_index& type) const {
     auto it = impl->classesByType.find(type);
     if (it != impl->classesByType.end()) {
         return it->second;
@@ -1020,4 +1166,73 @@ std::shared_ptr<class_definition> engine::get_class_definition_by_type(std::type
     return nullptr;
 }
 
+void engine::add_standard_conversions() {
+    conversions::register_all_standard_conversions(impl->conversions);
+}
+
+std::shared_ptr<conversions::conversion_registry> engine::get_conversion_registry() const {
+    return impl->conversions;
+}
+
+void engine::set_conversion_registry(std::shared_ptr<conversions::conversion_registry> registry) {
+    impl->conversions = registry;
+}
+
+serialization::serialization_registry& engine::get_serialization_registry() {
+    return impl->serialization_registry;
+}
+
+script_value engine::try_create_reference(size_t arg_index, const script_value& fallback) {
+    // Check if current backend is an interpreter
+    auto* interpreter_backend_ptr = dynamic_cast<interpreter_backend*>(impl->backend.get());
+    if (!interpreter_backend_ptr) {
+        return fallback; // Not using interpreter backend, use fallback
+    }
+    
+    // Get the interpreter instance from the backend
+    interpreter* current_interpreter = interpreter_backend_ptr->get_interpreter();
+    if (!current_interpreter) {
+        return fallback; // No interpreter available, use fallback
+    }
+    
+    // Access the current argument metadata
+    const auto& metadata = current_interpreter->get_current_arg_metadata();
+    if (arg_index >= metadata.size()) {
+        return fallback; // Index out of bounds, use fallback
+    }
+    
+    auto [symbol_id, env] = metadata[arg_index];
+    if (symbol_id == UINT64_MAX || !env) {
+        return fallback; // No valid metadata for this argument, use fallback
+    }
+    
+    // Try to get pointer to the original variable
+    script_value* target = env->get_value_ptr(symbol_id);
+    if (!target) {
+        return fallback; // Variable not found, use fallback
+    }
+    
+    // Create reference wrapper to original variable
+    return script_value::make_reference(target, env);
+}
+
+conversions::conversion_manager engine::get_conversion_manager() {
+    return conversions::conversion_manager(impl->conversions, this);
+}
+
+
+} // namespace jai
+
+// Helper function for conversion_registry_impl.hpp to avoid circular dependency
+namespace jai {
+std::weak_ptr<engine> get_engine_weak_ptr(engine* eng) {
+    if (!eng) {
+        throw runtime_error("Engine reference required for script_value creation");
+    }
+    return eng->weak_from_this();
+}
+
+std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng) {
+    return eng ? eng->get_conversion_registry() : nullptr;
+}
 } // namespace jai

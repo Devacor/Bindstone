@@ -30,7 +30,7 @@ std::function<script_value()> createTestObjectWrapper(engine& eng) {
             return script_value(); // null
         }
         // Use the engine's type converter system to create proper class_instance
-        return eng.convert_to_value(typeid(TestClass).name(), ptr.get());
+        return eng.convert_to_value(typeid(TestClass), ptr.get());
     };
 }
 
@@ -43,7 +43,7 @@ JAI_TEST(test_shared_ptr_unwrap_class) {
     engine engine;
     
     // Register the TestClass
-    make_class_builder<TestClass>(engine, "TestClass")
+    class_builder<TestClass>(engine, "TestClass")
         .constructor<>()
         .method("setValue", &TestClass::setValue)
         .method("getValue", &TestClass::getValue)

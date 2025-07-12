@@ -78,6 +78,16 @@ namespace MV {
 			return self;
 		}
 
+		std::shared_ptr<Drawable> Drawable::material(std::shared_ptr<Material> a_material) {
+			materialInstance = a_material;
+			if (a_material) {
+				materialId = a_material->id();
+			} else {
+				materialId = "";
+			}
+			return std::static_pointer_cast<Drawable>(shared_from_this());
+		}
+
 		std::shared_ptr<Drawable> Drawable::texture(std::shared_ptr<TextureHandle> a_texture, size_t a_textureId) {
 			if (!a_texture) {
 				clearTexture(a_textureId);
@@ -162,9 +172,27 @@ namespace MV {
 				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)textureOffset); //UV
 				glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, structSize, (GLvoid*)colorOffset); //Color
 
-				materialSettingsImplementation(shaderProgram);
-				if (userMaterialSettings) {
-					try { userMaterialSettings(shaderProgram); } catch (std::exception &e) { MV::error("Drawable::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
+				// Apply material if present
+				if (materialInstance) {
+					try {
+						// Create material context
+						MaterialContext context {
+							ourRenderer,
+							static_cast<float>(accumulatedDelta),
+							owner()->worldTransform(),
+							owner()->worldAlpha(),
+							owner()->cameraId()
+						};
+						materialInstance->apply(*shaderProgram, context); 
+					} catch (std::exception &e) { 
+						MV::error("Drawable::defaultDrawImplementation. Exception in material->apply: ", e.what()); 
+					}
+				} else {
+					// Use old path
+					materialSettingsImplementation(*shaderProgram);
+					if (userMaterialSettings) {
+						try { userMaterialSettings(*shaderProgram); } catch (std::exception &e) { MV::error("Drawable::defaultDrawImplementation. Exception in userMaterialSettings: ", e.what()); }
+					}
 				}
 
 				glDrawElements(drawType, static_cast<GLsizei>(vertexIndices->size()), GL_UNSIGNED_INT, &vertexIndices[0]);
@@ -173,21 +201,30 @@ namespace MV {
 				glDisableVertexAttribArray(1);
 				glDisableVertexAttribArray(2);
 				glUseProgram(0);
-				if (blendModePreset != DEFAULT) {
+				if ((materialInstance && materialInstance->blend() != BLEND_DEFAULT) || blendModePreset != BLEND_DEFAULT) {
 					ourRenderer.defaultBlendFunction();
 				}
 			}
 		}
 
-		void Drawable::applyPresetBlendMode(Draw2D &ourRenderer) const {
-			if (blendModePreset != DEFAULT) {
-				if (blendModePreset == ADD) {
-					ourRenderer.setBlendFunction(GL_ONE, GL_ONE);
-				} else if (blendModePreset == MULTIPLY) {
-					ourRenderer.setBlendFunction(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
-				} else if (blendModePreset == SCREEN) {
-					ourRenderer.setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
+		static void applyBlendModeToRenderer(BlendMode blendMode, Draw2D &renderer) {
+			if (blendMode != BLEND_DEFAULT) {
+				if (blendMode == BLEND_ADD) {
+					renderer.setBlendFunction(GL_ONE, GL_ONE);
+				} else if (blendMode == BLEND_MULTIPLY) {
+					renderer.setBlendFunction(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
+				} else if (blendMode == BLEND_SCREEN) {
+					renderer.setBlendFunction(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
 				}
+			}
+		}
+
+		void Drawable::applyPresetBlendMode(Draw2D &ourRenderer) const {
+			// Use material blend mode if present, otherwise use drawable's preset
+			if (materialInstance) {
+				applyBlendModeToRenderer(materialInstance->blend(), ourRenderer);
+			} else {
+				applyBlendModeToRenderer(blendModePreset, ourRenderer);
 			}
 		}
 
@@ -234,13 +271,13 @@ namespace MV {
 			ourAnchors->removeFromParent();
 		}
 
-		void Drawable::materialSettingsImplementation(Shader* a_shaderProgram) {
+		void Drawable::materialSettingsImplementation(Shader& a_shaderProgram) {
 			auto ourOwner = owner();
-			a_shaderProgram->set("time", static_cast<PointPrecision>(accumulatedDelta), false); //optional but helpful default
-			if (ourOwner->worldAlpha() != 1.0f) { a_shaderProgram->set("alpha", ourOwner->worldAlpha(), false); }
+			a_shaderProgram.set("time", static_cast<PointPrecision>(accumulatedDelta), false); //optional but helpful default
+			if (ourOwner->worldAlpha() != 1.0f) { a_shaderProgram.set("alpha", ourOwner->worldAlpha(), false); }
 			addTexturesToShader();
 
-			a_shaderProgram->set("transformation", ourOwner->renderer().cameraProjectionMatrix(ourOwner->cameraId()) * ourOwner->worldTransform());
+			a_shaderProgram.set("transformation", ourOwner->renderer().cameraProjectionMatrix(ourOwner->cameraId()) * ourOwner->worldTransform());
 		}
 
 		void Drawable::addTexturesToShader() {

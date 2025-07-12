@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../core/value.hpp"
-#include "../core/types.hpp"
+#include <jaiscript/core/value.hpp>
+#include <jaiscript/core/types.hpp>
 #include <vector>
 #include <cstdint>
 #include <string>

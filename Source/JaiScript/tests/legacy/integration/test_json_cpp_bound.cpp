@@ -58,7 +58,7 @@ JAI_TEST(to_json_bound_class) {
     stdlib::register_all(engine);
     
     // Register Person class
-    make_class_builder<Person>(engine, "Person")
+    class_builder<Person>(engine, "Person")
         .constructor<>()
         .constructor<const std::string&, int, double, bool>()
         .property("name", &Person::name)
@@ -89,7 +89,7 @@ JAI_TEST(to_json_nested_bound_classes) {
     stdlib::register_all(engine);
     
     // Register Address class
-    make_class_builder<Address>(engine, "Address")
+    class_builder<Address>(engine, "Address")
         .constructor<>()
         .constructor<const std::string&, const std::string&, int>()
         .property("street", &Address::street)
@@ -98,14 +98,14 @@ JAI_TEST(to_json_nested_bound_classes) {
         .build();
     
     // Register Person class  
-    make_class_builder<Person>(engine, "Person")
+    class_builder<Person>(engine, "Person")
         .constructor<const std::string&, int, double, bool>()
         .property("name", &Person::name)
         .property("age", &Person::age)
         .build();
         
     // Register Employee class
-    make_class_builder<Employee>(engine, "Employee")
+    class_builder<Employee>(engine, "Employee")
         .constructor<>()
         .property("person", &Employee::person)
         .property("address", &Employee::address)
@@ -135,7 +135,7 @@ JAI_TEST(mixed_json_with_bound_classes) {
     stdlib::register_all(engine);
     
     // Register Person class
-    make_class_builder<Person>(engine, "Person")
+    class_builder<Person>(engine, "Person")
         .constructor<const std::string&, int, double, bool>()
         .property("name", &Person::name)
         .property("age", &Person::age)
@@ -173,7 +173,7 @@ JAI_TEST(from_json_to_map_with_bound_classes) {
     stdlib::register_all(engine);
     
     // Register Person class
-    make_class_builder<Person>(engine, "Person")
+    class_builder<Person>(engine, "Person")
         .constructor<const std::string&, int, double, bool>()
         .property("name", &Person::name)
         .property("age", &Person::age)

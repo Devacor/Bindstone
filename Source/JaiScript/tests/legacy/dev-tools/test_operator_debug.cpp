@@ -18,7 +18,7 @@ JAI_TEST(simple_vec2_test) {
     engine engine;
     
     // Register Vec2
-    make_class_builder<Vec2>(engine, "Vec2")
+    class_builder<Vec2>(engine, "Vec2")
         .constructor<float, float>()
         .property("x", &Vec2::x)
         .property("y", &Vec2::y)

@@ -55,9 +55,10 @@ private:
     std::map<std::string, std::shared_ptr<class_definition>> cpp_classes_;
     
     // Validators and promoters
-    override_validator override_validator_;
-    virtual_method_promoter method_promoter_;
-    constructor_resolver constructor_resolver_;
+    // TODO: Implement these from the tech spec
+    // override_validator override_validator_;
+    // virtual_method_promoter method_promoter_;
+    // constructor_resolver constructor_resolver_;
     
     // Helper methods
     bool check_inheritance_chain(const std::string& derived, const std::string& base);

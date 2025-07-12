@@ -13,9 +13,9 @@ public:
     
     void forge_tests() override {
         test("map_creation_and_access", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value result = engine.execute(R"(
+            script_value result = engine->execute(R"(
                 var m = {"a": 1, "b": 2, "c": 3};
                 m["b"];
             )");
@@ -23,25 +23,25 @@ public:
         });
         
         test("map_assignment", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            engine.execute(R"(
+            engine->execute(R"(
                 var m = {"x": 10, "y": 20};
                 m["x"] = 30;
                 m["z"] = 40;
             )");
             
-            script_value x = engine.execute("m[\"x\"];");
+            script_value x = engine->execute("m[\"x\"];");
             check_eq(x.as<int>(), 30);
             
-            script_value z = engine.execute("m[\"z\"];");
+            script_value z = engine->execute("m[\"z\"];");
             check_eq(z.as<int>(), 40);
         });
         
         test("map_size_method", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value result = engine.execute(R"(
+            script_value result = engine->execute(R"(
                 var m = {"a": 1, "b": 2, "c": 3};
                 m.size();
             )");
@@ -49,15 +49,15 @@ public:
         });
         
         test("map_empty_method", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value empty_map = engine.execute(R"(
+            script_value empty_map = engine->execute(R"(
                 var m = {};
                 m.empty();
             )");
             check_eq(empty_map.as<bool>(), true);
             
-            script_value non_empty = engine.execute(R"(
+            script_value non_empty = engine->execute(R"(
                 var m2 = {"x": 1};
                 m2.empty();
             )");
@@ -65,51 +65,51 @@ public:
         });
         
         test("map_clear_method", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            engine.execute(R"(
+            engine->execute(R"(
                 var m = {"a": 1, "b": 2, "c": 3};
                 m.clear();
             )");
             
-            script_value size = engine.execute("m.size();");
+            script_value size = engine->execute("m.size();");
             check_eq(size.as<int>(), 0);
             
-            script_value empty = engine.execute("m.empty();");
+            script_value empty = engine->execute("m.empty();");
             check_eq(empty.as<bool>(), true);
         });
         
         test("map_contains_method", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            engine.execute("var m = {\"foo\": 42, \"bar\": 99};");
+            engine->execute("var m = {\"foo\": 42, \"bar\": 99};");
             
-            script_value has_foo = engine.execute("m.contains(\"foo\");");
+            script_value has_foo = engine->execute("m.contains(\"foo\");");
             check_eq(has_foo.as<bool>(), true);
             
-            script_value has_baz = engine.execute("m.contains(\"baz\");");
+            script_value has_baz = engine->execute("m.contains(\"baz\");");
             check_eq(has_baz.as<bool>(), false);
         });
         
         test("map_erase_method", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            engine.execute(R"(
+            engine->execute(R"(
                 var m = {"a": 1, "b": 2, "c": 3};
                 m.erase("b");
             )");
             
-            script_value size = engine.execute("m.size();");
+            script_value size = engine->execute("m.size();");
             check_eq(size.as<int>(), 2);
             
-            script_value has_b = engine.execute("m.contains(\"b\");");
+            script_value has_b = engine->execute("m.contains(\"b\");");
             check_eq(has_b.as<bool>(), false);
         });
         
         test("map_keys_method", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value keys = engine.execute(R"(
+            script_value keys = engine->execute(R"(
                 var m = {"x": 10, "y": 20, "z": 30};
                 m.keys();
             )");
@@ -128,9 +128,9 @@ public:
         });
         
         test("map_values_method", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value values = engine.execute(R"(
+            script_value values = engine->execute(R"(
                 var m = {"a": 10, "b": 20, "c": 30};
                 m.values();
             )");
@@ -149,9 +149,9 @@ public:
         });
         
         test("map_mixed_types", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            engine.execute(R"(
+            engine->execute(R"(
                 var m = {};
                 m["int"] = 42;
                 m["float"] = 3.14;
@@ -160,26 +160,26 @@ public:
                 m["array"] = [1, 2, 3];
             )");
             
-            script_value int_val = engine.execute("m[\"int\"];");
+            script_value int_val = engine->execute("m[\"int\"];");
             check_eq(int_val.as<int>(), 42);
             
-            script_value float_val = engine.execute("m[\"float\"];");
+            script_value float_val = engine->execute("m[\"float\"];");
             check_eq(float_val.as<double>(), 3.14);
             
-            script_value string_val = engine.execute("m[\"string\"];");
+            script_value string_val = engine->execute("m[\"string\"];");
             check_eq(string_val.as_string(), "hello");
             
-            script_value bool_val = engine.execute("m[\"bool\"];");
+            script_value bool_val = engine->execute("m[\"bool\"];");
             check_eq(bool_val.as<bool>(), true);
             
-            script_value array_val = engine.execute("m[\"array\"];");
+            script_value array_val = engine->execute("m[\"array\"];");
             check_eq(array_val.as_array().size(), size_t(3));
         });
         
         test("map_nested_operations", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value result = engine.execute(R"(
+            script_value result = engine->execute(R"(
                 var data = {
                     "users": {
                         "alice": {"age": 25, "city": "NYC"},

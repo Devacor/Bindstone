@@ -45,7 +45,7 @@ void registerButtonWithConversions(jai::engine& engine) {
     using namespace MV::Scene;
     
     // Register the Button class with lambda methods (no static_cast needed!)
-    jai::make_class_builder<Button>(engine, "Button")
+    jai::class_builder<Button>(engine, "Button")
         .inherits<Sprite>()  // This would handle basic inheritance
         .constructor<>()
         
@@ -87,7 +87,7 @@ template<typename T>
 class BindstoneClassBuilder {
 public:
     BindstoneClassBuilder(jai::engine& engine, const std::string& name)
-        : builder_(jai::make_class_builder<T>(engine, name)) {}
+        : builder_(jai::class_builder<T>(engine, name)) {}
     
     // Automatically add SafeComponent conversions
     template<typename Base>

@@ -11,8 +11,8 @@ public:
     
     void forge_tests() override {
         test("map_deep_copy", [this]() {
-            engine engine;
-            stdlib::register_all(engine);
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
             
             std::string script = R"(
                 var map1 = {"a": 1, "b": 2};
@@ -21,13 +21,13 @@ public:
                 map1["a"] + map1.size() * 10  // Should be 1 + 2*10 = 21
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.as<script_int>(), 21, "map1 should not be affected by map2 changes");
         });
         
         test("array_deep_copy", [this]() {
-            engine engine;
-            stdlib::register_all(engine);
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
             
             std::string script = R"(
                 var arr1 = [1, 2, 3];
@@ -36,13 +36,13 @@ public:
                 arr1.size()       // Should still be 3
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.as<script_int>(), 3, "arr1 should not be affected by arr2 changes");
         });
         
         test("nested_container_deep_copy", [this]() {
-            engine engine;
-            stdlib::register_all(engine);
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
             
             std::string script = R"(
                 var data1 = {
@@ -59,13 +59,13 @@ public:
                 data1["array"].size() + data1["map"].size() * 10  // 3 + 2*10 = 23
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.as<script_int>(), 23, "Nested containers should be deep copied");
         });
         
         test("assignment_operator_deep_copy", [this]() {
-            engine engine;
-            stdlib::register_all(engine);
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
             
             std::string script = R"(
                 var map1 = {"a": 1};
@@ -75,46 +75,46 @@ public:
                 map1.size()       // Should still be 1
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.as<script_int>(), 1, "Assignment operator should deep copy");
         });
         
         test("function_parameter_copy", [this]() {
-            engine engine;
-            stdlib::register_all(engine);
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
             
             std::string script = R"(
                 // Function parameters should copy by value
-                var modify_map = fun(m) {
+                auto modify_map(auto m) -> auto {
                     m["modified"] = true;
                     return m.size();
-                };
+                }
                 
                 var original = {"a": 1, "b": 2};
                 var size = modify_map(original);
                 original.size()  // Should still be 2 (not modified)
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.as<script_int>(), 2, "Function parameters should be copied by value");
         });
         
         test("reference_semantics_preserved", [this]() {
-            engine engine;
-            stdlib::register_all(engine);
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
             
             std::string script = R"(
                 // References should still work for explicit sharing
                 var data = {"value": 42};
-                var ref modify_ref = fun(ref m) {
+                auto modify_ref(auto &m) -> auto {
                     m["value"] = 100;
-                };
+                }
                 
                 modify_ref(data);
                 data["value"]  // Should be modified to 100
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.as<script_int>(), 100, "Reference parameters should allow modification");
         });
     }

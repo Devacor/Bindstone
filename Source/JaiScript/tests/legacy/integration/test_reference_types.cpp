@@ -17,7 +17,7 @@ JAI_TEST_SUITE(ReferenceTypes)
 JAI_TEST(non_const_reference_works) {
     engine engine;
     
-    make_class_builder<SimpleClass>(engine, "SimpleClass")
+    class_builder<SimpleClass>(engine, "SimpleClass")
         .constructor<int>()
         .property("value", &SimpleClass::value)
         .build();
@@ -39,7 +39,7 @@ JAI_TEST(non_const_reference_works) {
 JAI_TEST(shared_ptr_reference_works) {
     engine engine;
     
-    make_class_builder<SimpleClass>(engine, "SimpleClass")
+    class_builder<SimpleClass>(engine, "SimpleClass")
         .constructor<int>()
         .property("value", &SimpleClass::value)
         .build();

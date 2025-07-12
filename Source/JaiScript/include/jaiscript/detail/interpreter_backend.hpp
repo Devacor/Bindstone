@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../core/execution_backend.hpp"
+#include <jaiscript/core/execution_backend.hpp>
 #include "interpreter.hpp"
 #include <memory>
 
@@ -13,7 +13,7 @@ namespace jai {
 class interpreter_backend : public execution_backend {
 public:
     interpreter_backend(string_symbolizer* symbolizer, std::shared_ptr<environment> global_env)
-        : interpreter_(std::make_unique<interpreter>(symbolizer, global_env)) {}
+        : interpreter_(std::make_shared<interpreter>(symbolizer, global_env)) {}
     
     // Core execution
     script_value execute(const std::vector<declaration_ptr>& declarations) override {
@@ -47,16 +47,20 @@ public:
     }
     
     // Configuration
-    void set_type_converters(const std::unordered_map<std::string, std::function<script_value(const void*)>>* converters) override {
-        interpreter_->set_type_converters(converters);
-    }
-    
     void set_has_custom_numeric_ops(bool value) override {
         interpreter_->set_has_custom_numeric_ops(value);
     }
     
     void set_subscript_resolver(std::function<script_value(const std::vector<script_value>&)> resolver) override {
         interpreter_->set_subscript_resolver(resolver);
+    }
+    
+    void set_class_lookup_callback(std::function<std::shared_ptr<class_definition>(const std::string&)> callback) override {
+        interpreter_->set_class_lookup_callback(callback);
+    }
+    
+    void set_engine_reference(std::weak_ptr<engine> engine_ref) override {
+        interpreter_->set_engine_reference(engine_ref);
     }
     
     // Exception handling
@@ -77,7 +81,7 @@ public:
     const interpreter* get_interpreter() const { return interpreter_.get(); }
     
 private:
-    std::unique_ptr<interpreter> interpreter_;
+    std::shared_ptr<interpreter> interpreter_;
 };
 
 } // namespace jai

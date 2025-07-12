@@ -20,7 +20,7 @@ JAI_TEST(debug_class_registration) {
     engine engine;
     
     std::cout << "Creating class builder\n" << std::flush;
-    auto builder = make_class_builder<SimpleClass>(engine, "SimpleClass");
+    auto builder = class_builder<SimpleClass>(engine, "SimpleClass");
     
     std::cout << "Adding constructor\n" << std::flush;
     builder.constructor<>();

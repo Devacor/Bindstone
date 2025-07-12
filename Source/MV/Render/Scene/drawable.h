@@ -14,7 +14,7 @@
 #define DrawableDerivedAccessorsColor(ComponentType) \
 	std::shared_ptr<ComponentType> color(const MV::Color &a_newColor) { \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::color(a_newColor)); \
-	}\
+	} \
 	MV::Color color() const { \
 		return MV::Scene::Drawable::color(); \
 	}
@@ -23,18 +23,23 @@
 	std::shared_ptr<ComponentType> shader(const std::string &a_shaderProgramId) { \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::shader(a_shaderProgramId)); \
 	} \
-	std::shared_ptr<ComponentType> materialSettings(std::function<void(Shader*)> a_materialSettingsCallback) { \
-		userMaterialSettings = a_materialSettingsCallback; \
-		return std::static_pointer_cast<ComponentType>(shared_from_this()); \
+	std::shared_ptr<ComponentType> material(std::shared_ptr<Material> a_material) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::material(a_material)); \
+	} \
+	std::shared_ptr<Material> material() const { \
+		return MV::Scene::Drawable::material(); \
+	} \
+	std::shared_ptr<ComponentType> materialSettings(std::function<void(Shader&)> a_materialSettingsCallback) { \
+		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::materialSettings(a_materialSettingsCallback)); \
 	} \
 	std::shared_ptr<ComponentType> texture(std::shared_ptr<MV::TextureHandle> a_texture, size_t a_textureId = 0) { \
 		return std::static_pointer_cast<ComponentType>(MV::Scene::Drawable::texture(a_texture, a_textureId)); \
 	} \
 	std::shared_ptr<MV::TextureHandle> texture(size_t a_textureId = 0) const{ \
-		return ourTextures->at(a_textureId); \
+		return MV::Scene::Drawable::texture(a_textureId); \
 	} \
 	std::string shader() const { \
-		return shaderProgramId; \
+		return MV::Scene::Drawable::shader(); \
 	}
 
 #define DrawableDerivedAccessorsNoColor(ComponentType) \
@@ -141,7 +146,6 @@ namespace MV {
 			friend cereal::access;
 
 		public:
-			enum BlendModePreset { DEFAULT, MULTIPLY, ADD, SCREEN };
 
 			ComponentDerivedAccessors(Drawable)
 
@@ -170,6 +174,9 @@ namespace MV {
 			std::shared_ptr<Drawable> colors(const std::vector<Color>& a_newColors);
 
 			std::shared_ptr<Drawable> shader(const std::string& a_shaderProgramId);
+			
+			std::shared_ptr<Drawable> material(std::shared_ptr<Material> a_material);
+			std::shared_ptr<Material> material() const { return materialInstance; }
 
 			std::shared_ptr<TextureHandle> texture(size_t a_index = 0) const {
 				return ourTextures->at(a_index);
@@ -232,17 +239,17 @@ namespace MV {
 				return std::static_pointer_cast<Drawable>(shared_from_this());
 			}
 
-			std::shared_ptr<Drawable> materialSettings(std::function<void(Shader*)> a_materialSettingsCallback) {
+			std::shared_ptr<Drawable> materialSettings(std::function<void(Shader&)> a_materialSettingsCallback) {
 				userMaterialSettings = a_materialSettingsCallback;
 				return std::static_pointer_cast<Drawable>(shared_from_this());
 			}
 
-			std::shared_ptr<Drawable> blend(BlendModePreset a_newPreset) {
+			std::shared_ptr<Drawable> blend(BlendMode a_newPreset) {
 				blendModePreset = a_newPreset;
 				return std::static_pointer_cast<Drawable>(shared_from_this());
 			}
 
-			BlendModePreset blend() const {
+			BlendMode blend() const {
 				return blendModePreset;
 			}
 
@@ -255,7 +262,7 @@ namespace MV {
 
 			virtual void detachImplementation() override;
 
-			virtual void materialSettingsImplementation(Shader* a_shaderProgram);
+			virtual void materialSettingsImplementation(Shader& a_shaderProgram);
 
 			void addTexturesToShader();
 
@@ -266,7 +273,6 @@ namespace MV {
 			virtual BoxAABB<> boundsImplementation() override {
 				return localBounds;
 			}
-
 			void applyPresetBlendMode(Draw2D& ourRenderer) const;
 
 			virtual void boundsImplementation(const BoxAABB<>& a_bounds) override;
@@ -345,8 +351,12 @@ namespace MV {
 
 			MV_PROPERTY((BoxAABB<>), localBounds);
 
-			Shader* shaderProgram = nullptr;
+			std::shared_ptr<Shader> shaderProgram = nullptr;
 			MV_PROPERTY((std::string), shaderProgramId, PREMULTIPLY_ID);
+			
+			std::shared_ptr<Material> materialInstance = nullptr;
+			MV_PROPERTY((std::string), materialId, "");
+			
 			GLuint bufferId = 0;
 
 			bool dirtyVertexBuffer = true;
@@ -364,12 +374,12 @@ namespace MV {
 			Property<Anchors> ourAnchors;
 			std::vector<Anchors*> childAnchors;
 
-			std::function<void(Shader*)> userMaterialSettings;
+			std::function<void(Shader&)> userMaterialSettings;
 
 			void hookupTextureSizeWatchers();
 			void hookupTextureSizeWatcher(size_t a_textureId);
 
-			MV_NAMED_PROPERTY((BlendModePreset), "blendMode", blendModePreset, DEFAULT );
+			MV_NAMED_PROPERTY((BlendMode), "blendMode", blendModePreset, BLEND_DEFAULT);
 
 			void rebuildTextureCache();
 

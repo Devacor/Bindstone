@@ -161,26 +161,6 @@ public:
                 break;
             }
             
-            case script_value_type::jai_shared_ptr_type: {
-                // Handle shared_ptr serialization
-                auto shared_val = std::get<std::shared_ptr<script_value>>(value.storage_);
-                const void* raw_ptr = shared_val.get();
-                
-                auto [id, is_new] = track_shared_ptr(raw_ptr);
-                
-                // Write the ID (with MSB set if new)
-                if (is_new && id != 0) {
-                    write_uint32(id | 0x80000000);  // Set MSB for new pointers
-                    // Serialize the pointed-to value
-                    if (shared_val) {
-                        write_value(*shared_val);
-                    }
-                } else {
-                    write_uint32(id);  // Just the ID for already-seen or null
-                }
-                break;
-            }
-            
             case script_value_type::jai_weak_ptr_type: {
                 // Handle weak_ptr - promote to shared_ptr first
                 auto weak_val = std::get<std::weak_ptr<script_value>>(value.storage_);
@@ -287,11 +267,11 @@ private:
 // Binary archive reader
 class binary_archive_reader : public archive_reader {
 public:
-    explicit binary_archive_reader(const std::vector<uint8_t>& data) 
-        : data_(data), pos_(0) {}
+    explicit binary_archive_reader(const std::vector<uint8_t>& data, std::weak_ptr<engine> eng = {}) 
+        : archive_reader(eng), data_(data), pos_(0) {}
     
-    explicit binary_archive_reader(const void* data, size_t size)
-        : data_(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size), pos_(0) {}
+    explicit binary_archive_reader(const void* data, size_t size, std::weak_ptr<engine> eng = {})
+        : archive_reader(eng), data_(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size), pos_(0) {}
     
     // Basic type deserialization
     int8_t read_int8() override {
@@ -416,32 +396,39 @@ public:
     }
     
     script_value read_value() override {
+        // Get engine reference once at the start
+        auto eng = engine_ref_.lock();
+        if (!eng) {
+            throw serialization_error("Engine reference expired during deserialization");
+        }
+        auto eng_weak = eng->weak_from_this();
+        
         // Read type tag first
         uint8_t type_tag = read_uint8();
         script_value_type vtype = static_cast<script_value_type>(type_tag);
         
         switch (vtype) {
             case script_value_type::jai_null_type:
-                return script_value();
+                return script_value(std::monostate{}, eng_weak);
                 
             case script_value_type::jai_bool_type:
-                return script_value(read_bool());
+                return script_value(read_bool(), eng_weak);
                 
             case script_value_type::jai_int_type:
-                return script_value(read_int64());
+                return script_value(read_int64(), eng_weak);
                 
             case script_value_type::jai_float_type:
-                return script_value(read_float64());
+                return script_value(read_float64(), eng_weak);
                 
             case script_value_type::jai_string_type:
-                return script_value(read_string());
+                return script_value(read_string(), eng_weak);
                 
             case script_value_type::jai_char_type:
-                return script_value(static_cast<script_char>(read_uint8()));
+                return script_value(static_cast<script_char>(read_uint8()), eng_weak);
                 
             case script_value_type::jai_array_type: {
                 uint32_t size = read_uint32();
-                script_value array_val = script_value::make_array(nullptr);
+                script_value array_val = script_value::make_array(nullptr, eng_weak);
                 auto& arr = const_cast<std::vector<script_value>&>(array_val.as_array());
                 
                 for (uint32_t i = 0; i < size; ++i) {
@@ -452,38 +439,15 @@ public:
             
             case script_value_type::jai_map_type: {
                 uint32_t size = read_uint32();
-                script_value map_val = script_value::make_map(type_info::make_string(), nullptr);
+                script_value map_val = script_value::make_map(type_info::make_string(), nullptr, eng_weak);
                 auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
                 
                 for (uint32_t i = 0; i < size; ++i) {
                     script_value key = read_value();
                     script_value value = read_value();
-                    map[key] = value;
+                    map.insert_or_assign(key, value);
                 }
                 return map_val;
-            }
-            
-            case script_value_type::jai_shared_ptr_type: {
-                uint32_t id = read_uint32();
-                
-                if (id == 0) {
-                    // Null shared_ptr
-                    return script_value::make_shared_ptr(script_value());
-                }
-                
-                bool is_new = (id & 0x80000000) != 0;
-                id &= 0x7FFFFFFF;  // Clear MSB to get actual ID
-                
-                if (is_new) {
-                    // New shared_ptr - deserialize the value
-                    script_value pointed_value = read_value();
-                    script_value shared_ptr_val = script_value::make_shared_ptr(pointed_value);
-                    register_shared_ptr(id, shared_ptr_val);
-                    return shared_ptr_val;
-                } else {
-                    // Previously seen shared_ptr
-                    return get_shared_ptr(id);
-                }
             }
             
             case script_value_type::jai_weak_ptr_type: {
@@ -491,7 +455,7 @@ public:
                 
                 if (id == 0) {
                     // Null/expired weak_ptr
-                    return script_value::make_weak_ptr(script_value());
+                    return script_value::make_weak_ptr(script_value(std::monostate{}, eng_weak));
                 }
                 
                 bool is_new = (id & 0x80000000) != 0;
@@ -527,15 +491,15 @@ public:
                 }
                 
                 // Convert to map for reconstruction by from_binary
-                script_value map_val = script_value::make_map(type_info::make_string(), nullptr);
+                script_value map_val = script_value::make_map(type_info::make_string(), nullptr, eng_weak);
                 auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
                 
                 // Add type information
-                map[script_value("_type_")] = script_value(type_name);
+                map.insert_or_assign(script_value("_type_", eng_weak), script_value(type_name, eng_weak));
                 
                 // Add properties in the order they were serialized
                 for (uint32_t i = 0; i < property_count; ++i) {
-                    map[script_value(property_names[i])] = property_values[i];
+                    map.insert_or_assign(script_value(property_names[i], eng_weak), property_values[i]);
                 }
                 
                 return map_val;  // Return as map for reconstruction by from_binary

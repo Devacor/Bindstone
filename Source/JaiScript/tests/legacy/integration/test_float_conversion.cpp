@@ -29,7 +29,7 @@ JAI_TEST(register_class_with_float_constructor) {
     engine engine;
     
     // Should not throw when registering class with float constructor
-    make_class_builder<FloatTest>(engine, "FloatTest")
+    class_builder<FloatTest>(engine, "FloatTest")
         .constructor<float>()
         .method("getValue", &FloatTest::getValue)
         .build();
@@ -38,7 +38,7 @@ JAI_TEST(register_class_with_float_constructor) {
 JAI_TEST(create_instance_with_float) {
     engine engine;
     
-    make_class_builder<FloatTest>(engine, "FloatTest")
+    class_builder<FloatTest>(engine, "FloatTest")
         .constructor<float>()
         .method("getValue", &FloatTest::getValue)
         .build();

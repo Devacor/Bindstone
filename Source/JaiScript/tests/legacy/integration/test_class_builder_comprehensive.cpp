@@ -38,7 +38,7 @@ JAI_TEST_SUITE(ClassBuilderComprehensive)
 JAI_TEST(property_access_via_getters_setters) {
     engine engine;
     
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<>()
         .method("getX", &Point::getX)
         .method("setX", &Point::setX)
@@ -90,7 +90,7 @@ JAI_TEST(method_chaining_support) {
         int value_;
     };
     
-    make_class_builder<Builder>(engine, "Builder")
+    class_builder<Builder>(engine, "Builder")
         .constructor<>()
         .method("withName", &Builder::withName)
         .method("withValue", &Builder::withValue)
@@ -116,7 +116,7 @@ JAI_TEST(method_chaining_support) {
 JAI_TEST(complex_method_calls) {
     engine engine;
     
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<float, float>()
         .method("getX", &Point::getX)
         .method("getY", &Point::getY)
@@ -160,7 +160,7 @@ JAI_TEST(multiple_classes) {
         float x_, y_;
     };
     
-    make_class_builder<SimplePoint>(engine, "SimplePoint")
+    class_builder<SimplePoint>(engine, "SimplePoint")
         .constructor<float, float>()
         .method("getX", &SimplePoint::getX)
         .method("getY", &SimplePoint::getY)
@@ -193,7 +193,7 @@ JAI_TEST(constructor_overloading_comprehensive) {
         float multiplier_;
     };
     
-    make_class_builder<NumberBox>(engine, "NumberBox")
+    class_builder<NumberBox>(engine, "NumberBox")
         .constructor<>()                           // Default constructor
         .constructor<int>()                        // script_value constructor
         .constructor<int, float>()                 // script_value + multiplier constructor

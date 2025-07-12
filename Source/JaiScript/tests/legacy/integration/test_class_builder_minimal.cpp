@@ -20,7 +20,7 @@ JAI_TEST(basic_object_creation) {
     engine engine;
     
     // Register Point class with just a constructor
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<>()
         .build();
     
@@ -38,7 +38,7 @@ JAI_TEST(constructor_with_arguments) {
     engine engine;
     
     // Register Point class with parameterized constructor  
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<float, float>()
         .build();
     
@@ -68,7 +68,7 @@ JAI_TEST(member_access_basic) {
     };
     
     // Register Point class with methods
-    make_class_builder<TestPoint>(engine, "TestPoint")
+    class_builder<TestPoint>(engine, "TestPoint")
         .constructor<>()
         .method("getX", &TestPoint::getX)
         .method("setX", &TestPoint::setX)
@@ -100,7 +100,7 @@ JAI_TEST(method_calls) {
     };
     
     // Register Point class with methods
-    make_class_builder<TestPoint>(engine, "TestPoint")
+    class_builder<TestPoint>(engine, "TestPoint")
         .constructor<>()
         .method("getX", &TestPoint::getX)
         .method("setX", &TestPoint::setX)
@@ -135,7 +135,7 @@ JAI_TEST(constructor_overloading) {
     };
     
     // Register Rectangle class with multiple constructors
-    make_class_builder<Rectangle>(engine, "Rectangle")
+    class_builder<Rectangle>(engine, "Rectangle")
         .constructor<>()                    // Default constructor
         .constructor<float>()               // Square constructor  
         .constructor<float, float>()        // Full constructor

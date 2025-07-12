@@ -66,7 +66,7 @@ int main() {
     
     // TRADITIONAL WAY - requires ugly static_cast
     /*
-    jai::make_class_builder<Button>(engine, "Button")
+    jai::class_builder<Button>(engine, "Button")
         .constructor<const std::string&>()
         .method("setText", static_cast<void(Button::*)(const std::string&)>(&Button::text))
         .method("getText", static_cast<const std::string&(Button::*)() const>(&Button::text))
@@ -74,7 +74,7 @@ int main() {
     */
     
     // LAMBDA WAY - much cleaner!
-    jai::make_class_builder<Button>(engine, "Button")
+    jai::class_builder<Button>(engine, "Button")
         .constructor<const std::string&>()
         .method("setText", [](Button* self, const std::string& text) {
             self->text(text);  // Clean! No static_cast needed
@@ -89,7 +89,7 @@ int main() {
     // Example 2: Adding validation/logging with lambdas
     std::cout << "2. Adding Validation and Logging\n\n";
     
-    jai::make_class_builder<TextInput>(engine, "TextInput")
+    jai::class_builder<TextInput>(engine, "TextInput")
         .constructor<>()
         .method("setValue", [](TextInput* self, const std::string& value) {
             // Add logging before the call
@@ -122,7 +122,7 @@ int main() {
     std::cout << "3. Property-style Access (like ChaiScript)\n\n";
     
     // This creates both getter and setter using the same name, like ChaiScript does
-    jai::make_class_builder<Button>(engine, "ButtonWithProps")
+    jai::class_builder<Button>(engine, "ButtonWithProps")
         .constructor<>()
         .method("enabled", [](Button* self) -> bool {
             return self->isEnabled();

@@ -29,7 +29,7 @@ int main() {
     std::cout << "✅ Creating class_builder with lambda method binding...\n";
     
     // This compiles and creates the proper method bindings!
-    auto builder = jai::make_class_builder<Button>(engine, "Button");
+    auto builder = jai::class_builder<Button>(engine, "Button");
     
     std::cout << "✅ Adding constructor...\n";
     builder.constructor<const std::string&>();
@@ -77,7 +77,7 @@ int main() {
     std::cout << "  // Plus manual type conversions...\n\n";
     
     std::cout << "JaiScript (new approach):\n";
-    std::cout << "  make_class_builder<Button>(engine, \"Button\")\n";
+    std::cout << "  class_builder<Button>(engine, \"Button\")\n";
     std::cout << "      .method(\"setText\", [](Button& self, const std::string& text) {\n";
     std::cout << "          self.setText(text);\n";
     std::cout << "      })\n";

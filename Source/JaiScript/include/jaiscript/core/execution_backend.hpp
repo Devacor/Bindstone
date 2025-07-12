@@ -1,7 +1,7 @@
 #pragma once
 
 #include "value.hpp"
-#include "../detail/ast.hpp"
+#include <jaiscript/detail/ast.hpp>
 #include <memory>
 #include <vector>
 #include <string>
@@ -11,6 +11,7 @@ namespace jai {
 // Forward declarations
 class environment;
 class string_symbolizer;
+class class_definition;
 
 /**
  * Abstract interface for script execution backends.
@@ -34,9 +35,10 @@ public:
     virtual void define_variable(const std::string& name, const script_value& value) = 0;
     
     // Configuration
-    virtual void set_type_converters(const std::unordered_map<std::string, std::function<script_value(const void*)>>* converters) = 0;
     virtual void set_has_custom_numeric_ops(bool value) = 0;
     virtual void set_subscript_resolver(std::function<script_value(const std::vector<script_value>&)> resolver) = 0;
+    virtual void set_class_lookup_callback(std::function<std::shared_ptr<class_definition>(const std::string&)> callback) = 0;
+    virtual void set_engine_reference(std::weak_ptr<engine> engine_ref) = 0;
     
     // Exception handling
     virtual bool is_unwinding() const = 0;

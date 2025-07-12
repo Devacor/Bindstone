@@ -119,7 +119,7 @@ int main() {
     std::cout << "    [](const SafeComponent<Button>& item) { return item.self(); }));\n";
     
     std::cout << "\n--- JaiScript (new approach) ---\n";
-    std::cout << "make_class_builder<Button>(engine, \"Button\")\n";
+    std::cout << "class_builder<Button>(engine, \"Button\")\n";
     std::cout << "    .inherits<Component>()  // Automatic inheritance handling\n";
     std::cout << "    .constructor<const std::string&>()\n";
     std::cout << "\n    // CLEAN: Lambda approach - no static_cast needed!\n";

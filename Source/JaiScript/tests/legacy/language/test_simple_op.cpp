@@ -49,7 +49,7 @@ JAI_TEST(custom_type_creation) {
         Point(float x_ = 0, float y_ = 0) : x(x_), y(y_) {}
     };
     
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<float, float>()
         .property("x", &Point::x)
         .property("y", &Point::y)
@@ -81,7 +81,7 @@ JAI_TEST(custom_type_function_return) {
         Point(float x_ = 0, float y_ = 0) : x(x_), y(y_) {}
     };
     
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<float, float>()
         .property("x", &Point::x)
         .property("y", &Point::y)

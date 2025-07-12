@@ -100,7 +100,7 @@ JAI_TEST(basic_custom_subscript_read) {
     engine engine;
     
     // Register MyVector class
-    make_class_builder<MyVector>(engine, "MyVector")
+    class_builder<MyVector>(engine, "MyVector")
         .constructor<>()
         .method("push_back", &MyVector::push_back)
         .method("size", &MyVector::size);
@@ -131,7 +131,7 @@ JAI_TEST(custom_subscript_with_assignment) {
     engine engine;
     
     // Register MyVector
-    make_class_builder<MyVector>(engine, "MyVector")
+    class_builder<MyVector>(engine, "MyVector")
         .constructor<>()
         .method("push_back", &MyVector::push_back)
         .method("size", &MyVector::size);
@@ -171,7 +171,7 @@ JAI_TEST(string_subscript_operator) {
     engine engine;
     
     // Register MyString class
-    make_class_builder<MyString>(engine, "MyString")
+    class_builder<MyString>(engine, "MyString")
         .constructor<const std::string&>()
         .method("length", &MyString::length);
     
@@ -248,7 +248,7 @@ JAI_TEST(mixed_builtin_and_custom_subscript) {
     engine engine;
     
     // Register a custom type
-    make_class_builder<MyVector>(engine, "MyVector")
+    class_builder<MyVector>(engine, "MyVector")
         .constructor<>()
         .method("push_back", &MyVector::push_back);
     
@@ -282,7 +282,7 @@ JAI_TEST(error_handling) {
     engine engine;
     
     // Register MyVector
-    make_class_builder<MyVector>(engine, "MyVector")
+    class_builder<MyVector>(engine, "MyVector")
         .constructor<>()
         .method("push_back", &MyVector::push_back);
     
@@ -322,7 +322,7 @@ JAI_TEST(chained_subscript_operator) {
     engine engine;
     
     // Register Matrix
-    make_class_builder<Matrix>(engine, "Matrix")
+    class_builder<Matrix>(engine, "Matrix")
         .constructor<size_t, size_t>();
     
     // Register operator[] that returns a row

@@ -112,40 +112,6 @@ public:
     void write_value(const script_value& value) override {
         // Handle shared_ptr types with proper tracking, delegate others to stdlib
         switch (value.type()) {
-            case script_value_type::jai_shared_ptr_type: {
-                // Use base class shared_ptr tracking
-                auto shared_val = std::get<std::shared_ptr<script_value>>(value.storage_);
-                const void* raw_ptr = shared_val.get();
-                
-                auto [id, is_new] = track_shared_ptr(raw_ptr);
-                
-                if (id == 0) {
-                    // Null shared_ptr
-                    oss_ << "null";
-                } else if (is_new && shared_val) {
-                    // First time: serialize with ID annotation
-                    oss_ << '{';
-                    current_depth_++;
-                    
-                    write_newline();
-                    write_indent();
-                    oss_ << "\"_shared_ptr_id\": " << id << ',';
-                    
-                    write_newline();
-                    write_indent();
-                    oss_ << "\"_shared_ptr_value\": ";
-                    write_value(*shared_val);  // Recursive call
-                    
-                    current_depth_--;
-                    write_newline();
-                    write_indent();
-                    oss_ << '}';
-                } else {
-                    // Subsequent times: just the reference
-                    oss_ << "{\"_shared_ptr_ref\": " << id << "}";
-                }
-                break;
-            }
             
             case script_value_type::jai_weak_ptr_type: {
                 // Handle weak_ptr
@@ -366,7 +332,8 @@ private:
 
 class json_archive_reader : public archive_reader {
 public:
-    json_archive_reader(const std::string& json_string) : json_(json_string), pos_(0) {
+    json_archive_reader(const std::string& json_string, std::weak_ptr<engine> eng = {}) 
+        : archive_reader(eng), json_(json_string), pos_(0) {
         root_value_ = parse_json();
         current_value_ = &root_value_;
         path_stack_.push_back("");
@@ -405,8 +372,15 @@ public:
         
         const auto& map = current_value_->as_map();
         
+        // Get engine reference for creating script_values
+        auto eng = engine_ref_.lock();
+        if (!eng) {
+            throw serialization_error("Engine reference expired during JSON deserialization");
+        }
+        auto eng_weak = eng->weak_from_this();
+        
         // Read _type_ field
-        auto type_it = map.find(script_value("_type_"));
+        auto type_it = map.find(script_value("_type_", eng_weak));
         if (type_it != map.end() && type_it->second.is_string()) {
             type_name = type_it->second.as_string();
         } else {
@@ -414,7 +388,7 @@ public:
         }
         
         // Read _version_ field (default to 1)
-        auto version_it = map.find(script_value("_version_"));
+        auto version_it = map.find(script_value("_version_", eng_weak));
         if (version_it != map.end() && version_it->second.is_int()) {
             version = static_cast<uint32_t>(version_it->second.as_int());
         } else {
@@ -478,8 +452,15 @@ public:
             return false;
         }
         
+        // Get engine reference for creating script_values
+        auto eng = engine_ref_.lock();
+        if (!eng) {
+            throw serialization_error("Engine reference expired during JSON deserialization");
+        }
+        auto eng_weak = eng->weak_from_this();
+        
         const auto& obj_state = object_stack_.top();
-        return obj_state.map.find(script_value(name)) != obj_state.map.end();
+        return obj_state.map.find(script_value(name, eng_weak)) != obj_state.map.end();
     }
     
     script_value read_value() override {
@@ -503,27 +484,16 @@ public:
         if (result.is_map()) {
             const auto& map = result.as_map();
             
-            // Check for shared_ptr_id (first occurrence)
-            auto id_it = map.find(script_value("_shared_ptr_id"));
-            if (id_it != map.end() && id_it->second.type() == script_value_type::jai_int_type) {
-                uint32_t id = static_cast<uint32_t>(id_it->second.as<script_int>());
-                auto value_it = map.find(script_value("_shared_ptr_value"));
-                if (value_it != map.end()) {
-                    script_value shared_ptr_val = script_value::make_shared_ptr(value_it->second);
-                    register_shared_ptr(id, shared_ptr_val);
-                    return shared_ptr_val;
-                }
-            }
             
-            // Check for shared_ptr_ref (subsequent occurrences)
-            auto ref_it = map.find(script_value("_shared_ptr_ref"));
-            if (ref_it != map.end() && ref_it->second.type() == script_value_type::jai_int_type) {
-                uint32_t id = static_cast<uint32_t>(ref_it->second.as<script_int>());
-                return get_shared_ptr(id);
+            // Get engine reference for creating script_values
+            auto eng = engine_ref_.lock();
+            if (!eng) {
+                throw serialization_error("Engine reference expired during JSON deserialization");
             }
+            auto eng_weak = eng->weak_from_this();
             
             // Check for weak_ptr_ref
-            auto weak_ref_it = map.find(script_value("_weak_ptr_ref"));
+            auto weak_ref_it = map.find(script_value("_weak_ptr_ref", eng_weak));
             if (weak_ref_it != map.end() && weak_ref_it->second.type() == script_value_type::jai_int_type) {
                 uint32_t id = static_cast<uint32_t>(weak_ref_it->second.as<script_int>());
                 script_value shared_val = get_shared_ptr(id);
@@ -561,20 +531,27 @@ private:
             throw serialization_error("Unexpected end of JSON");
         }
         
+        // Get engine reference for creating script_values
+        auto eng = engine_ref_.lock();
+        if (!eng) {
+            throw serialization_error("Engine reference expired during JSON deserialization");
+        }
+        auto eng_weak = eng->weak_from_this();
+        
         char c = json_[pos_];
         
         if (c == '"') {
-            return script_value(parse_string());
+            return script_value(parse_string(), eng_weak);
         } else if (c == '{') {
-            return parse_object();
+            return parse_object(eng_weak);
         } else if (c == '[') {
-            return parse_array();
+            return parse_array(eng_weak);
         } else if (c == 't' || c == 'f') {
-            return parse_bool();
+            return parse_bool(eng_weak);
         } else if (c == 'n') {
-            return parse_null();
+            return parse_null(eng_weak);
         } else if (c == '-' || std::isdigit(c)) {
-            return parse_number();
+            return parse_number(eng_weak);
         } else {
             throw serialization_error("Unexpected character in JSON: " + std::string(1, c));
         }
@@ -648,10 +625,10 @@ private:
         return result;
     }
     
-    script_value parse_object() {
+    script_value parse_object(std::weak_ptr<engine> eng_weak) {
         expect('{');
         
-        script_value map_val = script_value::make_map(type_info::make_string(), nullptr);
+        script_value map_val = script_value::make_map(type_info::make_string(), nullptr, eng_weak);
         auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
         
         if (peek() == '}') {
@@ -664,7 +641,7 @@ private:
             expect(':');
             script_value value = parse_value();
             
-            map[script_value(key)] = value;
+            map[script_value(key, eng_weak)] = value;
             
             char c = peek();
             if (c == '}') {
@@ -680,10 +657,10 @@ private:
         return map_val;
     }
     
-    script_value parse_array() {
+    script_value parse_array(std::weak_ptr<engine> eng_weak) {
         expect('[');
         
-        script_value array_val = script_value::make_array(nullptr);
+        script_value array_val = script_value::make_array(nullptr, eng_weak);
         auto& arr = const_cast<std::vector<script_value>&>(array_val.as_array());
         
         if (peek() == ']') {
@@ -708,28 +685,28 @@ private:
         return array_val;
     }
     
-    script_value parse_bool() {
+    script_value parse_bool(std::weak_ptr<engine> eng_weak) {
         if (json_.substr(pos_, 4) == "true") {
             pos_ += 4;
-            return script_value(true);
+            return script_value(true, eng_weak);
         } else if (json_.substr(pos_, 5) == "false") {
             pos_ += 5;
-            return script_value(false);
+            return script_value(false, eng_weak);
         } else {
             throw serialization_error("Invalid boolean value");
         }
     }
     
-    script_value parse_null() {
+    script_value parse_null(std::weak_ptr<engine> eng_weak) {
         if (json_.substr(pos_, 4) == "null") {
             pos_ += 4;
-            return script_value();
+            return script_value(std::monostate{}, eng_weak);
         } else {
             throw serialization_error("Invalid null value");
         }
     }
     
-    script_value parse_number() {
+    script_value parse_number(std::weak_ptr<engine> eng_weak) {
         size_t start = pos_;
         bool has_decimal = false;
         bool has_exponent = false;
@@ -748,9 +725,9 @@ private:
         std::string num_str = json_.substr(start, pos_ - start);
         
         if (has_decimal || has_exponent) {
-            return script_value(std::stod(num_str));
+            return script_value(std::stod(num_str), eng_weak);
         } else {
-            return script_value(static_cast<script_int>(std::stoll(num_str)));
+            return script_value(static_cast<script_int>(std::stoll(num_str)), eng_weak);
         }
     }
     

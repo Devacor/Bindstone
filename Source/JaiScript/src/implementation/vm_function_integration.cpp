@@ -107,9 +107,9 @@ void vm_function_system_integration::enable_cross_backend_calls() {
             auto func = registry_.find_function(name);
             if (func) {
                 auto wrapper = vm_function_bridge::create_interpreter_wrapper(func);
-                return script_value::make_function(wrapper);
+                return script_value::make_function(wrapper, engine_.weak_from_this());
             }
-            return script_value();
+            return script_value(std::monostate{}, engine_.weak_from_this());
         }
     );
 }
@@ -211,7 +211,8 @@ script_value vm_aware_engine::execute_with_vm(const std::string& script) {
         return vm_class_bridge::to_script_value(ctx.pop());
     }
     
-    return script_value();
+    // TODO: Get engine reference from context
+    return script_value(std::monostate{}, std::weak_ptr<engine>{});
 }
 
 // vm_function_definition_visitor implementation

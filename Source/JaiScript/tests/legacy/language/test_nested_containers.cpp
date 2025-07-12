@@ -20,7 +20,7 @@ JAI_TEST(array_of_maps) {
     try {
         jai::engine engine;
         
-        make_class_builder<Vec2>(engine, "Vec2")
+        class_builder<Vec2>(engine, "Vec2")
             .constructor<>()
             .constructor<float, float>()
             .property("x", &Vec2::x)
@@ -94,7 +94,7 @@ JAI_TEST(deeply_nested) {
     try {
         jai::engine engine;
         
-        make_class_builder<Vec2>(engine, "Vec2")
+        class_builder<Vec2>(engine, "Vec2")
             .constructor<>()
             .constructor<float, float>()
             .property("x", &Vec2::x)

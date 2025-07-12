@@ -1,6 +1,9 @@
 #pragma once
 
-#include "../jaiscript_fwd.hpp"
+#ifndef __JAISCRIPT_CORE_TYPES_HPP__
+#define __JAISCRIPT_CORE_TYPES_HPP__
+
+#include <jaiscript/jaiscript_fwd.hpp>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -102,3 +105,5 @@ namespace jai {
     };
     
 } // namespace jai
+
+#endif // __JAISCRIPT_CORE_TYPES_HPP__

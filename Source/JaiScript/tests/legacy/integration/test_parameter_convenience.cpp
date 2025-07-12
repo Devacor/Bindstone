@@ -18,7 +18,7 @@ JAI_TEST_SUITE(ParameterConvenience)
 JAI_TEST(function_parameter_styles) {
     engine engine;
     
-    make_class_builder<Circle>(engine, "Circle")
+    class_builder<Circle>(engine, "Circle")
         .constructor<float>()
         .property("radius", &Circle::radius)
         .method("area", &Circle::area)
@@ -59,7 +59,7 @@ JAI_TEST(function_parameter_styles) {
 JAI_TEST(mixed_parameter_styles) {
     engine engine;
     
-    make_class_builder<Circle>(engine, "Circle")
+    class_builder<Circle>(engine, "Circle")
         .constructor<float>()
         .property("radius", &Circle::radius)
         .build();

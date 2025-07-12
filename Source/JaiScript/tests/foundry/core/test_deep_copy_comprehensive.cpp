@@ -50,8 +50,8 @@ public:
     
     void forge_tests() override {
         test("container_deep_copy", [this]() {
-            engine engine;
-            stdlib::register_all(engine);
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
             
             // Test map deep copy
             std::string script = R"(
@@ -66,13 +66,13 @@ public:
                 map1.size() == 2 && map1["b"].size() == 3
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.as<script_bool>(), "Map deep copy failed");
         });
         
         test("nested_container_deep_copy", [this]() {
-            engine engine;
-            stdlib::register_all(engine);
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
             
             std::string script = R"(
                 var data = {
@@ -98,16 +98,16 @@ public:
                 data["nested"]["deep"]["value"] == 42
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.as<script_bool>(), "Nested container deep copy failed");
         });
         
         test("cpp_object_deep_copy", [this]() {
-            engine engine;
-            stdlib::register_all(engine);
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
             
             // Register Point class
-            make_class_builder<Point>(engine, "Point")
+            class_builder<Point>(*engine, "Point")
                 .constructor<>()
                 .constructor<double, double>()
                 .property("x", &Point::x)
@@ -125,27 +125,27 @@ public:
                 p1.x == 3.0 && p1.y == 4.0
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.as<script_bool>(), "C++ object deep copy failed");
         });
         
         test("polymorphic_deep_copy", [this]() {
-            engine engine;
-            stdlib::register_all(engine);
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
             
             // Register polymorphic classes
-            make_class_builder<Shape>(engine, "Shape")
+            class_builder<Shape>(*engine, "Shape")
                 .method("area", &Shape::area)
                 .method("type", &Shape::type)
                 .build();
                 
-            make_class_builder<Circle>(engine, "Circle")
+            class_builder<Circle>(*engine, "Circle")
                 .base_class<Shape>()
                 .constructor<double>()
                 .property("radius", &Circle::radius)
                 .build();
                 
-            make_class_builder<Rectangle>(engine, "Rectangle")
+            class_builder<Rectangle>(*engine, "Rectangle")
                 .base_class<Shape>()
                 .constructor<double, double>()
                 .property("width", &Rectangle::width)
@@ -168,16 +168,16 @@ public:
                 area1 < 80 && area2 > 300
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.as<script_bool>(), "Polymorphic deep copy failed");
         });
         
         test("mixed_container_object_copy", [this]() {
-            engine engine;
-            stdlib::register_all(engine);
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
             
             // Register Point class
-            make_class_builder<Point>(engine, "Point")
+            class_builder<Point>(*engine, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)
@@ -201,13 +201,13 @@ public:
                 points.size() == 3 && points[0].x == 1.0
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.as<script_bool>(), "Mixed container/object deep copy failed");
         });
         
         test("assignment_operator_deep_copy", [this]() {
-            engine engine;
-            stdlib::register_all(engine);
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
             
             std::string script = R"(
                 var arr1 = [1, 2, 3];
@@ -219,13 +219,13 @@ public:
                 arr1.size() == 3 && arr2.size() == 4
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.as<script_bool>(), "Assignment operator deep copy failed");
         });
         
         test("function_parameter_copy", [this]() {
-            engine engine;
-            stdlib::register_all(engine);
+            auto engine = engine::make();
+            stdlib::register_all(*engine);
             
             std::string script = R"(
                 function modify(auto arr) {
@@ -240,7 +240,7 @@ public:
                 original.size() == 3 && size == 4
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check(result.as<script_bool>(), "Function parameter copy failed");
         });
     }

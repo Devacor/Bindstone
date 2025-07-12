@@ -121,7 +121,7 @@ JAI_TEST(binary_cpp_objects) {
     stdlib::register_all(engine);
     
     // Register TestPoint class
-    make_class_builder<TestPoint>(engine, "TestPoint")
+    class_builder<TestPoint>(engine, "TestPoint")
         .constructor<>()
         .constructor<double, double>()
         .property("x", &TestPoint::x)
@@ -222,7 +222,7 @@ JAI_TEST(circular_reference_test) {
     stdlib::register_all(engine);
     
     // Register TestNode class
-    make_class_builder<TestNode>(engine, "TestNode")
+    class_builder<TestNode>(engine, "TestNode")
         .constructor<const std::string&>()
         .method("get_name", &TestNode::get_name)
         .method("set_name", &TestNode::set_name)

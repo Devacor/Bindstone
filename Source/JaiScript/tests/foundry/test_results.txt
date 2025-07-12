@@ -1,0 +1,16 @@
+╔════════════════════════════════════════╗
+║       JaiScript Foundry Tests          ║
+╚════════════════════════════════════════╝
+
+╔══ Auto Container Conversion Tests ══╗
+  auto_vector_registration ... ✗
+    Error: C++ object field not found in class_instance
+  auto_map_string_registration ... ✗
+    Error: Internal error: fell through all type conversions
+  auto_map_int_registration ... ✗
+    Error: Internal error: fell through all type conversions
+  nested_auto_registration ... ✗
+    Error: Object is not a class_instance wrapper
+  non_default_constructible_type ... ✗
+    Error: C++ object field not found in class_instance
+  complex_nested_containers ... 

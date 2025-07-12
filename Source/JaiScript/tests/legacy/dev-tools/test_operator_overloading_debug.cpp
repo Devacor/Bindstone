@@ -22,7 +22,7 @@ JAI_TEST(debug_vec2_creation) {
     
     std::cout << "=== DEBUG: Vec2 Creation Test ===\n";
     
-    make_class_builder<Vec2>(engine, "Vec2")
+    class_builder<Vec2>(engine, "Vec2")
         .constructor<float, float>()
         .property("x", &Vec2::x)
         .property("y", &Vec2::y)
@@ -45,7 +45,7 @@ JAI_TEST(debug_operator_registration) {
     
     std::cout << "\n=== DEBUG: Operator Registration Test ===\n";
     
-    make_class_builder<Vec2>(engine, "Vec2")
+    class_builder<Vec2>(engine, "Vec2")
         .constructor<float, float>()
         .property("x", &Vec2::x)
         .property("y", &Vec2::y)
@@ -119,7 +119,7 @@ JAI_TEST(debug_type_info) {
     // Check what type name is registered
     std::cout << "typeid(Vec2).name() = " << typeid(Vec2).name() << "\n";
     
-    make_class_builder<Vec2>(engine, "Vec2")
+    class_builder<Vec2>(engine, "Vec2")
         .constructor<float, float>()
         .property("x", &Vec2::x)
         .property("y", &Vec2::y)

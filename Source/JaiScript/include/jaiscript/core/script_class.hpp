@@ -4,246 +4,122 @@
 #include <vector>
 #include <map>
 #include <memory>
-#include <unordered_map>
-#include <functional>
-#include "jaiscript/core/value.hpp"
-#include "jaiscript/core/function_binder.hpp"
+
+// Need these for the inline implementation at the end
+#include <jaiscript/detail/interpreter.hpp>
+#include <jaiscript/detail/ast.hpp>
 
 namespace jai {
 
-// Forward declarations
-struct script_class_instance;
-struct script_class_definition;
-struct method_info;
-struct field_declaration;
-struct method_declaration;
-struct constructor_declaration;
-struct function_decl;
+// Forward declarations - class_definition is available since we're included after it's defined
+class interpreter;
+class function_decl;
 
-enum class access_level {
-    public_access,
-    private_access,
-    protected_access
-};
-
-enum class delegation_type {
-    none,
-    same_class,
-    base_class
-};
-
-// Method information for dispatch
-struct method_info {
-    enum type { 
-        script_direct, 
-        script_virtual, 
-        cpp, 
-        destructor 
-    } method_type = script_direct;
+// Script class definition - now inherits from class_definition!
+class script_class_definition : public class_definition {
+public:
+    // Constructor
+    script_class_definition(const std::string& name, std::weak_ptr<engine> eng) 
+        : class_definition(name, class_type::script_class, eng) {
+        // That's it! Everything else is inherited from class_definition
+    }
     
-    std::string name;
-    std::vector<std::string> param_types;
-    access_level access = access_level::public_access;
+    // Helper to add a script method from AST
+    void add_method_from_ast(const std::string& name, 
+                            std::shared_ptr<function_decl> ast,
+                            interpreter* interp) {
+        // Store AST for potential VM compilation later
+        method_asts_[name] = ast;
+        
+        // Use inherited add_script_method
+        add_script_method(name, ast, interp);
+        
+        // Optionally set metadata if needed
+        method_metadata metadata;
+        metadata.is_virtual = true;  // Script methods are virtual by default
+        set_method_metadata(name, metadata);
+    }
     
-    // For script methods
-    std::shared_ptr<function_decl> script_method = nullptr;
+    // Add constructor from AST
+    void add_constructor_from_ast(std::shared_ptr<function_decl> ctor_ast,
+                                 interpreter* interp) {
+        // Store for later reference
+        constructor_asts_.push_back(ctor_ast);
+        
+        // The constructor is already added to the environment by visit_class_decl
+        // We just need to store it for potential VM compilation
+    }
     
-    // For C++ methods
-    std::function<script_value(const std::vector<script_value>&)> cpp_method = nullptr;
+    // Add destructor from AST
+    void add_destructor_from_ast(std::shared_ptr<function_decl> dtor_ast,
+                                interpreter* interp) {
+        destructor_ast_ = dtor_ast;
+        
+        // Add as a special method
+        add_script_method("~" + get_name(), dtor_ast, interp);
+        
+        // Mark as virtual
+        method_metadata metadata;
+        metadata.is_virtual = true;
+        set_method_metadata("~" + get_name(), metadata);
+    }
     
-    // Dynamic virtualization
-    bool is_virtual = false;
-    bool is_override = false;
-    bool can_be_virtualized = true;
+    // Get ASTs for VM compilation
+    const std::map<std::string, std::shared_ptr<function_decl>>& get_method_asts() const {
+        return method_asts_;
+    }
     
-    // TODO: Add compiled bytecode for script methods
-    // Currently methods execute via interpreter even in VM
-    // std::shared_ptr<bytecode_module> compiled_method = nullptr;
-};
-
-// Field declaration
-struct field_declaration {
-    std::string name;
-    std::string type_name;
-    script_value default_value;
-    access_level access = access_level::public_access;
-};
-
-// Method declaration
-struct method_declaration {
-    std::string name;
-    std::vector<std::string> parameters;
-    std::string return_type;
-    std::shared_ptr<function_decl> implementation;
-    access_level access = access_level::public_access;
-    bool is_override = false;
-    bool is_virtual = true;
-};
-
-// Constructor declaration
-struct constructor_declaration {
-    std::string class_name;
-    std::vector<std::string> parameters;
-    std::shared_ptr<function_decl> implementation;
+    const std::vector<std::shared_ptr<function_decl>>& get_constructor_asts() const {
+        return constructor_asts_;
+    }
     
-    // Delegation information
-    bool is_delegating = false;
-    delegation_type delegation_type_val = delegation_type::none;
-    std::vector<script_value> delegation_args;
-};
-
-// Core script class definition
-struct script_class_definition {
-    std::string name;
-    std::vector<field_declaration> fields;
-    std::map<std::string, method_info> methods;
-    std::vector<constructor_declaration> constructors;
-    std::shared_ptr<function_decl> destructor = nullptr;
-    bool destructor_is_virtual = false;
-    std::shared_ptr<script_class_definition> base_class = nullptr;
-    access_level default_access = access_level::public_access;
+    std::shared_ptr<function_decl> get_destructor_ast() const {
+        return destructor_ast_;
+    }
     
-    // Method caching per class - more efficient than per-call-site
-    mutable std::unordered_map<std::string, method_info*> method_cache_;
-    
-    // Centralized method dispatch - same pattern as destructor dispatch
-    script_value call_method(
-        script_class_instance* instance,
-        const std::string& method_name,
-        const std::vector<script_value>& args
-    ) const;
-    
-    // Centralized destructor dispatch
-    void call_destructor(script_class_instance* instance) const;
-    
-    // Method lookup
-    method_info* find_method(const std::string& method_name) const;
-    method_info* find_method_in_hierarchy(const std::string& method_name) const;
-    
-    // Virtual promotion
-    void promote_method_to_virtual(const std::string& method_name);
-    void promote_destructor_to_virtual();
+    // Clear all stored ASTs (for hot reload)
+    void clear_asts() {
+        method_asts_.clear();
+        constructor_asts_.clear();
+        destructor_ast_.reset();
+    }
     
 private:
-    script_value call_method_direct(
-        script_class_instance* instance,
-        method_info* method,
-        const std::vector<script_value>& args
-    ) const;
-    
-    script_value call_method_virtual(
-        script_class_instance* instance,
-        const std::string& method_name,
-        const std::vector<script_value>& args
-    ) const;
-    
-    void call_destructor_direct(script_class_instance* instance) const;
-    void call_destructor_virtual(script_class_instance* instance) const;
-    
-    std::shared_ptr<script_class_definition> find_actual_class(script_class_instance* instance) const;
+    // Store ASTs for potential VM compilation
+    std::map<std::string, std::shared_ptr<function_decl>> method_asts_;
+    std::vector<std::shared_ptr<function_decl>> constructor_asts_;
+    std::shared_ptr<function_decl> destructor_ast_;
 };
 
-// Script class instance
-struct script_class_instance : public std::enable_shared_from_this<script_class_instance> {
-    std::string class_name;
-    std::shared_ptr<script_class_definition> class_def;
-    std::map<std::string, script_value> fields;
-    std::shared_ptr<void> cpp_object = nullptr;  // C++ base object (if inheriting)
-    
-    // Always delegate to class definition for consistent dispatch
-    ~script_class_instance() {
-        if (class_def) {
-            class_def->call_destructor(this);
+// For backward compatibility during migration
+using script_class_instance = class_instance;
+
+// Implementation of add_script_method (needs full interpreter definition)
+inline void class_definition::add_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp) {
+    methods_.insert_or_assign(name, script_value::make_function(
+        [ast, interp](const std::vector<script_value>& args) -> script_value {
+            // First argument should be 'this' object
+            if (args.empty()) {
+                throw runtime_error("Method called without 'this' object");
+            }
+            
+            // Extract 'this' from first argument
+            script_value this_obj = args[0];
+            
+            // Create remaining arguments (excluding 'this')
+            std::vector<script_value> method_args(args.begin() + 1, args.end());
+            
+            // Create a new environment for the method that has 'this' defined
+            auto method_env = std::make_shared<environment>(
+                interp->get_current_environment(), 
+                interp->get_string_symbolizer()
+            );
+            method_env->define("this", this_obj);
+            
+            // Call the interpreter method directly
+            return interp->execute_method_ast(ast, method_env, method_args);
         }
-    }
-};
-
-// Hybrid class instance for C++/script inheritance
-struct hybrid_class_instance : script_class_instance {
-    std::shared_ptr<void> cpp_base_object;
-    std::string cpp_base_type_name;
-    
-    template<typename T>
-    T& get_cpp_base() {
-        return *static_cast<T*>(cpp_base_object.get());
-    }
-};
-
-// Constructor resolver for delegation chains
-class constructor_resolver {
-public:
-    // TODO: Implement constructor delegation resolution
-    // Currently no implementation for constructor chaining
-    
-    // Resolve constructor delegation chain
-    std::vector<constructor_declaration*> resolve_delegation_chain(
-        const std::string& class_name,
-        const std::vector<script_value>& args
-    );
-    
-    // Execute constructor with delegation
-    void execute_constructor_chain(
-        std::shared_ptr<script_class_instance> instance,
-        const std::vector<constructor_declaration*>& chain,
-        const std::vector<script_value>& original_args
-    );
-    
-    // Validate no circular delegation
-    bool validate_no_cycles(const std::string& class_name);
-};
-
-// Virtual method promoter for dynamic virtualization
-class virtual_method_promoter {
-public:
-    // Called when derived class defines override method
-    void promote_to_virtual(
-        std::shared_ptr<script_class_definition> base_class,
-        const std::string& method_name
-    );
-    
-    // Validate override requirements
-    void validate_override(
-        std::shared_ptr<script_class_definition> derived_class,
-        const method_declaration& method
-    );
-    
-    // Promote destructor to virtual when derived class has destructor
-    void promote_destructor_to_virtual(std::shared_ptr<script_class_definition> base_class);
-};
-
-// Override validator for strict override enforcement
-class override_validator {
-public:
-    // Called during class registration
-    void validate_overrides(std::shared_ptr<script_class_definition> class_def);
-    
-private:
-    void validate_signature_compatibility(
-        const method_declaration& derived,
-        const method_declaration& base
-    );
-    
-    method_declaration* find_method_in_hierarchy(
-        std::shared_ptr<script_class_definition> class_def,
-        const std::string& method_name
-    );
-};
-
-// Simplified method call interface
-script_value call_method(
-    std::shared_ptr<script_class_instance> instance,
-    const std::string& method_name,
-    const std::vector<script_value>& args
-);
-
-// Factory function for creating script class instances
-template<typename... Args>
-std::shared_ptr<script_class_instance> make_shared_script_class(
-    const std::string& class_name,
-    Args&&... args
-);
-
-// TODO: Implement factory function template
-// Currently no implementation for creating script class instances
+    ));
+}
 
 } // namespace jai

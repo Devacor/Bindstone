@@ -17,7 +17,7 @@ JAI_TEST_SUITE(SimpleOperator)
 JAI_TEST(basic_operator_test) {
     engine engine;
     
-    make_class_builder<Vec>(engine, "Vec")
+    class_builder<Vec>(engine, "Vec")
         .constructor<float, float>()
         .property("x", &Vec::x)
         .property("y", &Vec::y)

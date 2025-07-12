@@ -2,8 +2,22 @@
 
 #include "types.hpp"
 #include "value.hpp"
+#include "conversion_registry.hpp"
+#include "conversion_registry_impl.hpp"
+#include "bound_array.hpp"
+#include "bound_map.hpp"
 #include <functional>
 #include <tuple>
+
+// Forward declarations to avoid circular dependencies
+namespace jai {
+    class engine;
+    
+    // Helper function to convert custom types using engine's conversion registry
+    // Implementation in engine_impl.hpp
+    template<typename T>
+    script_value convert_custom_type_with_registry(const T& t, engine* eng);
+}
 #include <type_traits>
 #include <typeinfo>
 
@@ -11,6 +25,7 @@ namespace jai {
 
 // Forward declarations
 class class_instance;
+class engine;
 
     // Type traits to help with function binding
     namespace detail {
@@ -18,22 +33,47 @@ class class_instance;
         // Helper to convert C++ types to/from value
         template<typename T>
         struct value_converter {
-            static T from(const script_value& v) {
-                return v.as<T>();
+            static T from(const script_value& v, engine* eng) {
+                // Handle containers explicitly to avoid infinite recursion
+                if constexpr (is_specialization_v<T, std::vector>) {
+                    using element_type = typename T::value_type;
+                    return conversions::convert_script_array_to_vector<element_type>(v, eng);
+                } else if constexpr (is_specialization_v<T, std::map>) {
+                    using key_type = typename T::key_type;
+                    using value_type = typename T::mapped_type;
+                    return conversions::convert_script_map_to_stdmap<key_type, value_type>(v, eng);
+                } else {
+                    // The custom converter is set up by the engine at startup
+                    // and checks the engine's conversion registry
+                    return v.as<T>();
+                }
             }
             
-            static script_value to(const T& t) {
-                // Check if this is a custom class type (excluding standard containers and string)
-                if constexpr (std::is_class_v<T> && 
-                             !std::is_same_v<T, std::string> &&
-                             !is_specialization_v<T, std::vector> &&
-                             !is_specialization_v<T, std::map>) {
-                    // For user classes, create raw C++ object (not class_instance)
-                    auto sharedObj = std::make_shared<T>(t);
-                    return script_value::make_cpp_object(typeid(T).name(), std::static_pointer_cast<void>(sharedObj));
+            static script_value to(const T& t, engine* eng) {
+                // Handle standard containers explicitly since script_value doesn't have constructors for them
+                if constexpr (is_specialization_v<T, std::vector>) {
+                    // For vectors, use the conversion utility with engine for registry access
+                    using element_type = typename T::value_type;
+                    return conversions::convert_vector_to_script_array<element_type>(t, eng);
+                } else if constexpr (is_specialization_v<T, std::map>) {
+                    // For maps, use the conversion utility
+                    using key_type = typename T::key_type;
+                    using value_type = typename T::mapped_type;
+                    return conversions::convert_stdmap_to_script_map<key_type, value_type>(t, eng);
+                } else if constexpr (std::is_class_v<T> && 
+                             !std::is_same_v<T, std::string>) {
+                    // For user classes, use the conversion registry if available
+                    // Implementation moved to engine_impl.hpp to avoid circular dependencies
+                    if (!eng) {
+                        throw runtime_error("Engine reference required for custom type conversion");
+                    }
+                    return convert_custom_type_with_registry<T>(t, eng);
                 } else {
-                    // For basic types and standard containers, use the script_value constructor
-                    return script_value(t);
+                    // For basic types, use the script_value constructor with engine
+                    if (!eng) {
+                        throw runtime_error("Engine reference required for script_value creation");
+                    }
+                    return script_value(t, get_engine_weak_ptr(eng));
                 }
             }
         };
@@ -41,48 +81,57 @@ class class_instance;
         // Specialization for int (convert to script_int/int64_t)
         template<>
         struct value_converter<int> {
-            static int from(const script_value& v) {
+            static int from(const script_value& v, engine* eng) {
                 return v.as<int>();
             }
             
-            static script_value to(const int& t) {
-                return script_value(static_cast<script_int>(t));
+            static script_value to(const int& t, engine* eng) {
+                if (!eng) {
+                    throw runtime_error("Engine reference required for script_value creation");
+                }
+                return script_value(static_cast<script_int>(t), get_engine_weak_ptr(eng));
             }
         };
         
         // Specialization for float (convert to script_float/double)
         template<>
         struct value_converter<float> {
-            static float from(const script_value& v) {
+            static float from(const script_value& v, engine* eng) {
                 return v.as<float>();
             }
             
-            static script_value to(const float& t) {
-                return script_value(static_cast<script_float>(t));
+            static script_value to(const float& t, engine* eng) {
+                if (!eng) {
+                    throw runtime_error("Engine reference required for script_value creation");
+                }
+                return script_value(static_cast<script_float>(t), get_engine_weak_ptr(eng));
             }
         };
         
         // Specialization for double - handle int-to-double conversion
         template<>
         struct value_converter<double> {
-            static double from(const script_value& v) {
+            static double from(const script_value& v, engine* eng) {
                 // Use the implicit conversion operator we just added
                 return static_cast<double>(v);
             }
             
-            static script_value to(const double& t) {
-                return script_value(t);  // script_float is double
+            static script_value to(const double& t, engine* eng) {
+                if (!eng) {
+                    throw runtime_error("Engine reference required for script_value creation");
+                }
+                return script_value(t, get_engine_weak_ptr(eng));  // script_float is double
             }
         };
         
         // Specialization for script_value itself (no conversion needed!)
         template<>
         struct value_converter<script_value> {
-            static const script_value& from(const script_value& v) {
+            static const script_value& from(const script_value& v, engine* eng) {
                 return v;
             }
             
-            static script_value to(const script_value& v) {
+            static script_value to(const script_value& v, engine* eng) {
                 return v;  // Return as-is, no wrapping!
             }
         };
@@ -90,78 +139,76 @@ class class_instance;
         // Specialization for std::shared_ptr<T> - auto-unwrap to T
         template<typename T>
         struct value_converter<std::shared_ptr<T>> {
-            static std::shared_ptr<T> from(const script_value& v) {
+            static std::shared_ptr<T> from(const script_value& v, engine* eng) {
                 return v.as<std::shared_ptr<T>>();
             }
             
-            static script_value to(const std::shared_ptr<T>& ptr) {
+            static script_value to(const std::shared_ptr<T>& ptr, engine* eng) {
                 if (!ptr) {
-                    return script_value(); // Return null for nullptr
+                    if (!eng) {
+                        throw runtime_error("Engine reference required for null script_value creation");
+                    }
+                    return script_value(std::monostate{}, get_engine_weak_ptr(eng)); // Return null for nullptr
                 }
                 
                 // Auto-unwrap: dereference the shared_ptr and convert the underlying object
                 // This delegates to the base value_converter<T> which may have custom handling
-                return value_converter<T>::to(*ptr);
+                return value_converter<T>::to(*ptr, eng);
             }
         };
         
-        // Specializations for reference types
+        // Specializations for reference types - ZERO-COPY for built-in types
         template<typename T>
         struct value_converter<T&> {
-            static T& from(const script_value& v) {
-                // For std::string, return reference directly (const_cast for non-const ref)
-                if constexpr (std::is_same_v<T, std::string>) {
-                    return const_cast<T&>(v.as_string());
+            static T& from(const script_value& v, engine* eng) {
+                // Get the actual target value (dereferences if v is a reference)
+                script_value& target = const_cast<script_value&>(v).deref();
+                
+                // ZERO-COPY: Direct mutable access to stored values for built-in types
+                if constexpr (std::is_same_v<T, script_int> || std::is_same_v<T, int64_t>) {
+                    // Direct reference to stored int - ZERO COPY
+                    if (target.type() != script_value_type::jai_int_type) {
+                        throw runtime_error("Expected int for int64_t& parameter");
+                    }
+                    return std::get<script_int>(target.storage_);
                 }
-                // For std::vector<script_value> arrays, return reference to avoid copy
+                else if constexpr (std::is_same_v<T, std::string>) {
+                    // Direct reference to stored string - ZERO COPY
+                    if (target.type() != script_value_type::jai_string_type) {
+                        throw runtime_error("Expected string for string& parameter");
+                    }
+                    return std::get<script_string>(target.storage_);
+                }
                 else if constexpr (std::is_same_v<T, std::vector<script_value>>) {
-                    return const_cast<T&>(v.as_array());
+                    // Direct reference to stored array - ZERO COPY
+                    if (target.type() != script_value_type::jai_array_type) {
+                        throw runtime_error("Expected array for vector<script_value>& parameter");
+                    }
+                    return *std::get<std::shared_ptr<std::vector<script_value>>>(target.storage_);
                 }
-                // For std::map<script_value, script_value> maps, return reference to avoid copy
                 else if constexpr (std::is_same_v<T, std::map<script_value, script_value>>) {
-                    return const_cast<T&>(v.as_map());
+                    // Direct reference to stored map - ZERO COPY
+                    if (target.type() != script_value_type::jai_map_type) {
+                        throw runtime_error("Expected map for map<script_value,script_value>& parameter");
+                    }
+                    return *std::get<std::shared_ptr<std::map<script_value, script_value>>>(target.storage_);
                 }
-                // For std::shared_ptr<user_type>&, we need special handling
-                else if constexpr (is_specialization_v<T, std::shared_ptr>) {
-                    // This is problematic - we can't return a reference to a temporary shared_ptr
-                    // The shared_ptr is extracted from script_value, but we need a persistent reference
-                    // We'd need to store it somewhere persistent (thread_local)
-                    thread_local T temp = v.as<T>();
-                    return temp;
-                }
-                // For custom classes, extract shared_ptr and return reference to avoid copy
-                else if constexpr (std::is_class_v<T> && 
-                                  !std::is_same_v<T, std::string> &&
-                                  !is_specialization_v<T, std::vector> &&
-                                  !is_specialization_v<T, std::map>) {
-                    auto ptr = v.as<std::shared_ptr<T>>();
-                    return *ptr;
-                } else {
-                    // For basic types, still need to make a copy and use thread_local
-                    thread_local T temp = v.as<T>();
-                    return temp;
+                else {
+                    // Fall back to the as<T&>() method for other types (including int conversions)
+                    return target.as<T&>();
                 }
             }
             
-            static script_value to(T& t) {
-                if constexpr (std::is_class_v<T> && 
-                             !std::is_same_v<T, std::string> &&
-                             !is_specialization_v<T, std::vector> &&
-                             !is_specialization_v<T, std::map>) {
-                    // For user classes, create raw C++ object (not class_instance)
-                    auto sharedObj = std::make_shared<T>(t);
-                    return script_value::make_cpp_object(typeid(T).name(), sharedObj);
-                } else {
-                    // For basic types and standard containers, return by value
-                    return script_value(t);
-                }
+            static script_value to(T& t, engine* eng) {
+                // Delegate to the const T& version with the engine parameter
+                return value_converter<const T&>::to(t, eng);
             }
         };
         
         // Specialization for const references
         template<typename T>
         struct value_converter<const T&> {
-            static const T& from(const script_value& v) {
+            static const T& from(const script_value& v, engine* eng) {
                 // For std::string, return reference directly
                 if constexpr (std::is_same_v<T, std::string>) {
                     return v.as_string();
@@ -174,6 +221,21 @@ class class_instance;
                 else if constexpr (std::is_same_v<T, std::map<script_value, script_value>>) {
                     return v.as_map();
                 }
+                // For std::vector<T> containers, use conversion utility
+                else if constexpr (is_specialization_v<T, std::vector>) {
+                    thread_local T temp;
+                    using element_type = typename T::value_type;
+                    temp = conversions::convert_script_array_to_vector<element_type>(v, eng);
+                    return temp;
+                }
+                // For std::map<K,V> containers, use conversion utility
+                else if constexpr (is_specialization_v<T, std::map>) {
+                    thread_local T temp;
+                    using key_type = typename T::key_type;
+                    using value_type = typename T::mapped_type;
+                    temp = conversions::convert_script_map_to_stdmap<key_type, value_type>(v, eng);
+                    return temp;
+                }
                 // For custom classes, extract shared_ptr and return reference to avoid copy
                 else if constexpr (std::is_class_v<T> && 
                                   !std::is_same_v<T, std::string> &&
@@ -183,23 +245,30 @@ class class_instance;
                     return *ptr;
                 } else {
                     // For basic types (int, float, bool, etc.), still need to make a copy and use thread_local
-                    thread_local T temp = v.as<T>();
+                    thread_local T temp;
+                    temp = v.as<T>();
                     return temp;
                 }
             }
             
-            static script_value to(const T& t) {
+            static script_value to(const T& t, engine* eng) {
                 // Check if this is a custom class type (excluding standard containers and string)
                 if constexpr (std::is_class_v<T> && 
                              !std::is_same_v<T, std::string> &&
                              !is_specialization_v<T, std::vector> &&
                              !is_specialization_v<T, std::map>) {
-                    // For user classes, create raw C++ object (not class_instance)
-                    auto sharedObj = std::make_shared<T>(t);
-                    return script_value::make_cpp_object(typeid(T).name(), std::static_pointer_cast<void>(sharedObj));
+                    // For user classes, use the conversion registry if available
+                    // Implementation moved to engine_impl.hpp to avoid circular dependencies
+                    if (!eng) {
+                        throw runtime_error("Engine reference required for custom type conversion");
+                    }
+                    return convert_custom_type_with_registry<T>(t, eng);
                 } else {
-                    // For basic types and standard containers, use the script_value constructor
-                    return script_value(t);
+                    // For basic types and standard containers, use the script_value constructor with engine
+                    if (!eng) {
+                        throw runtime_error("Engine reference required for script_value creation");
+                    }
+                    return script_value(t, get_engine_weak_ptr(eng));
                 }
             }
         };
@@ -207,8 +276,165 @@ class class_instance;
         // Specialization for void
         template<>
         struct value_converter<void> {
-            static script_value to() {
-                return script_value(); // null/void
+            static script_value to(engine* eng) {
+                if (!eng) {
+                    throw runtime_error("Engine reference required for script_value creation");
+                }
+                // Create null/void value with engine reference
+                return script_value(std::monostate{}, get_engine_weak_ptr(eng));
+            }
+        };
+        
+        // Specialization for bound_array<T> - zero-copy wrapper
+        template<typename T>
+        struct value_converter<bound_array<T>> {
+            static bound_array<T> from(const script_value& v, engine* eng) {
+                if (!v.is_array()) {
+                    throw runtime_error("Cannot convert non-array to bound_array<T>");
+                }
+                // Create by value - will deep copy
+                return bound_array<T>(v);
+            }
+            
+            static script_value to(const bound_array<T>& arr, engine* eng) {
+                // If the array owns its data, return the owned value
+                if (arr.is_owned()) {
+                    return arr.as_script_value();
+                }
+                // Otherwise, we need to create a new script_value with the array data
+                // This will copy the array elements
+                if (!eng) {
+                    throw runtime_error("Engine reference required for script_value creation");
+                }
+                return script_value(arr.to_vector(), get_engine_weak_ptr(eng));
+            }
+        };
+        
+        // Specialization for const bound_array<T>& - safe approach using thread_local with proper indexing
+        template<typename T>
+        struct value_converter<const bound_array<T>&> {
+            static const bound_array<T>& from(const script_value& v, engine* eng) {
+                if (!v.is_array()) {
+                    throw runtime_error("Cannot convert non-array to const bound_array<T>&");
+                }
+                
+                // Use thread_local array to store multiple bound_arrays safely
+                // This avoids the single-wrapper overwrite issue
+                thread_local std::array<std::optional<bound_array<T>>, 10> storage;
+                thread_local size_t next_index = 0;
+                
+                // Reset storage for new function calls (heuristic: when index wraps)
+                if (next_index == 0) {
+                    for (auto& slot : storage) {
+                        slot.reset();
+                    }
+                }
+                
+                // Use the safe script_value constructor - creates deep copy but prevents crashes
+                storage[next_index].emplace(v);
+                const auto& result = storage[next_index].value();
+                
+                // Advance index for next parameter
+                next_index = (next_index + 1) % storage.size();
+                
+                return result;
+            }
+            
+            static script_value to(const bound_array<T>& arr, engine* eng) {
+                return arr.as_script_value();
+            }
+        };
+        
+        // Specialization for bound_array<T>& - safe approach
+        template<typename T>
+        struct value_converter<bound_array<T>&> {
+            static bound_array<T>& from(const script_value& v, engine* eng) {
+                if (!v.is_array()) {
+                    throw runtime_error("Cannot convert non-array to bound_array<T>&");
+                }
+                
+                // Similar approach as const version
+                thread_local std::array<std::optional<bound_array<T>>, 10> storage;
+                thread_local size_t next_index = 0;
+                
+                if (next_index == 0) {
+                    for (auto& slot : storage) {
+                        slot.reset();
+                    }
+                }
+                
+                storage[next_index].emplace(v);
+                auto& result = storage[next_index].value();
+                next_index = (next_index + 1) % storage.size();
+                
+                return result;
+            }
+            
+            static script_value to(bound_array<T>& arr, engine* eng) {
+                return arr.as_script_value();
+            }
+        };
+        
+        // Note: bound_array<T> by value specialization is already defined above at line ~300
+        
+        // Specialization for bound_map<K,V> - zero-copy wrapper
+        template<typename K, typename V>
+        struct value_converter<bound_map<K, V>> {
+            static bound_map<K, V> from(const script_value& v, engine* eng) {
+                if (!v.is_map()) {
+                    throw runtime_error("Cannot convert non-map to bound_map<K,V>");
+                }
+                // Create by value - will deep copy
+                return bound_map<K, V>(v);
+            }
+            
+            static script_value to(const bound_map<K, V>& map, engine* eng) {
+                // If the map owns its data, return the owned value
+                if (map.is_owned()) {
+                    return map.as_script_value();
+                }
+                // Otherwise, we need to create a new script_value with the map data
+                return script_value(map.to_map());
+            }
+        };
+        
+        // Specialization for bound_map<K,V>& - zero-copy reference
+        template<typename K, typename V>
+        struct value_converter<bound_map<K, V>&> {
+            static bound_map<K, V>& from(const script_value& v, engine* eng) {
+                if (!v.is_map()) {
+                    throw runtime_error("Cannot convert non-map to bound_map<K,V>&");
+                }
+                // Use thread_local to store the wrapper
+                thread_local bound_map<K, V> wrapper(const_cast<script_value&>(v).as_map(), get_engine_weak_ptr(eng));
+                return wrapper;
+            }
+            
+            static script_value to(bound_map<K, V>& map, engine* eng) {
+                // No conversion needed - the map is already managing a script_value
+                return script_value(); // This will be handled by the function binder
+            }
+        };
+        
+        // Specialization for const bound_map<K,V>& - zero-copy const reference
+        template<typename K, typename V>
+        struct value_converter<const bound_map<K, V>&> {
+            static const bound_map<K, V>& from(const script_value& v, engine* eng) {
+                if (!v.is_map()) {
+                    throw runtime_error("Cannot convert non-map to const bound_map<K,V>&");
+                }
+                // Use thread_local to store the wrapper
+                thread_local bound_map<K, V> wrapper(const_cast<script_value&>(v).as_map(), get_engine_weak_ptr(eng));
+                return wrapper;
+            }
+            
+            static script_value to(const bound_map<K, V>& map, engine* eng) {
+                // If the map owns its data, return the owned value
+                if (map.is_owned()) {
+                    return map.as_script_value();
+                }
+                // Otherwise, we need to create a new script_value with the map data
+                return script_value(map.to_map());
             }
         };
         
@@ -270,85 +496,151 @@ class class_instance;
         
         // Convert vector of Values to tuple of C++ types
         template<typename... Args, size_t... Is>
-        std::tuple<Args...> values_to_tuple(const std::vector<script_value>& values, std::index_sequence<Is...>) {
-            return std::make_tuple(value_converter<Args>::from(values[Is])...);
+        std::tuple<Args...> values_to_tuple(const std::vector<script_value>& values, std::index_sequence<Is...>, engine* eng) {
+            return std::make_tuple(value_converter<Args>::from(values[Is], eng)...);
         }
         
         // Helper function to call a function with converted arguments
         template<typename Func, typename ArgsTuple, size_t... Is>
-        auto call_with_converted_args(Func&& func, const std::vector<script_value>& args, std::index_sequence<Is...>) {
+        auto call_with_converted_args(Func&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
             using traits = function_traits<std::decay_t<Func>>;
             using return_type = typename traits::return_type;
             
             if constexpr (std::is_void_v<return_type>) {
                 // Void function
-                func(value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is])...);
-                return value_converter<void>::to();
+                func(value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
+                return value_converter<void>::to(eng);
             } else {
                 // Non-void function
-                auto result = func(value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is])...);
-                return value_converter<return_type>::to(result);
+                auto result = func(value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
+                return value_converter<return_type>::to(result, eng);
             }
         }
         
     } // namespace detail
     
+    // Helper to detect if function has reference parameters
+    template<typename Tuple, size_t... Is>
+    constexpr bool tuple_has_references_impl(std::index_sequence<Is...>) {
+        return (std::is_reference_v<std::tuple_element_t<Is, Tuple>> || ...);
+    }
+    
+    template<typename Tuple>
+    constexpr bool tuple_has_references() {
+        return tuple_has_references_impl<Tuple>(std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+    }
+
     // Main function binder
     template<typename Func>
     class FunctionBinder {
     public:
-        explicit FunctionBinder(Func f) : func_(std::forward<Func>(f)) {}
+        explicit FunctionBinder(Func f, engine* eng) : func_(std::forward<Func>(f)), engine_(eng) {}
         
         script_function bind() {
-            // IMPORTANT: capture func_ by value, not this!
+            using traits = detail::function_traits<Func>;
+            using args_tuple = typename traits::argument_types;
+            
+            // IMPORTANT: capture func_ by value and engine pointer, not this!
             // The FunctionBinder is temporary and will be destroyed after add_function returns
-            return [func = func_](const std::vector<script_value>& args) -> script_value {
-                using traits = detail::function_traits<Func>;
-                using return_type = typename traits::return_type;
-                using args_tuple = typename traits::argument_types;
-                
-                // Check argument count
-                if (args.size() != traits::arity) {
-                    throw runtime_error("Function expects " + std::to_string(traits::arity) + 
-                                     " arguments, got " + std::to_string(args.size()));
-                }
-                
-                // Call the function with unpacked arguments
-                return FunctionBinder::call_impl_static<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{});
-            };
+            
+            // Check if function has reference parameters
+            if constexpr (tuple_has_references<args_tuple>()) {
+                // Use reference-aware calling for functions with reference parameters
+                return [func = func_, eng = engine_](const std::vector<script_value>& args) -> script_value {
+                    using traits = detail::function_traits<Func>;
+                    using return_type = typename traits::return_type;
+                    using args_tuple = typename traits::argument_types;
+                    
+                    // Check argument count
+                    if (args.size() != traits::arity) {
+                        throw runtime_error("Function expects " + std::to_string(traits::arity) + 
+                                         " arguments, got " + std::to_string(args.size()));
+                    }
+                    
+                    // Call with reference support
+                    return FunctionBinder::call_with_reference_support<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
+                };
+            } else {
+                // Use standard calling for functions without reference parameters
+                return [func = func_, eng = engine_](const std::vector<script_value>& args) -> script_value {
+                    using traits = detail::function_traits<Func>;
+                    using return_type = typename traits::return_type;
+                    using args_tuple = typename traits::argument_types;
+                    
+                    // Check argument count
+                    if (args.size() != traits::arity) {
+                        throw runtime_error("Function expects " + std::to_string(traits::arity) + 
+                                         " arguments, got " + std::to_string(args.size()));
+                    }
+                    
+                    // Call the function with unpacked arguments
+                    return FunctionBinder::call_impl_static<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
+                };
+            }
         }
         
     private:
         Func func_;
+        engine* engine_;
         
         template<typename R, typename ArgsTuple, typename F, size_t... Is>
-        static script_value call_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>) {
+        static script_value call_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
             if constexpr (std::is_void_v<R>) {
                 // Void function
-                call_void_impl_static<ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{});
-                return script_value(); // Return null for void
+                call_void_impl_static<ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
+                return script_value(std::monostate{}, get_engine_weak_ptr(eng)); // Return null for void
             } else {
                 // Non-void function
-                auto result = call_non_void_impl_static<R, ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{});
-                return detail::value_converter<R>::to(result);
+                auto result = call_non_void_impl_static<R, ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
+                return detail::value_converter<R>::to(result, eng);
             }
         }
         
         template<typename ArgsTuple, typename F, size_t... Is>
-        static void call_void_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>) {
-            func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is])...);
+        static void call_void_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+            func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
         }
         
         template<typename R, typename ArgsTuple, typename F, size_t... Is>
-        static R call_non_void_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>) {
-            return func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is])...);
+        static R call_non_void_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+            return func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
+        }
+        
+        // Reference-aware calling methods
+        template<typename R, typename ArgsTuple, typename F, size_t... Is>
+        static script_value call_with_reference_support(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+            if constexpr (std::is_void_v<R>) {
+                // Void function with reference support
+                call_with_reference_support_void<ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
+                return script_value(std::monostate{}, get_engine_weak_ptr(eng)); // Return null for void
+            } else {
+                // Non-void function with reference support
+                auto result = call_with_reference_support_non_void<R, ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
+                return detail::value_converter<R>::to(result, eng);
+            }
+        }
+        
+        template<typename ArgsTuple, typename F, size_t... Is>
+        static void call_with_reference_support_void(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+            func(process_argument<std::tuple_element_t<Is, ArgsTuple>>(args[Is], Is, eng)...);
+        }
+        
+        template<typename R, typename ArgsTuple, typename F, size_t... Is>
+        static R call_with_reference_support_non_void(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+            return func(process_argument<std::tuple_element_t<Is, ArgsTuple>>(args[Is], Is, eng)...);
+        }
+        
+        // Process individual arguments
+        template<typename T>
+        static T process_argument(const script_value& arg, size_t index, engine* eng) {
+            return detail::value_converter<T>::from(arg, eng);
         }
     };
     
     // Helper function to create a binder
     template<typename Func>
-    FunctionBinder<Func> make_functionBinder(Func&& f) {
-        return FunctionBinder<Func>(std::forward<Func>(f));
+    FunctionBinder<Func> make_functionBinder(Func&& f, engine* eng) {
+        return FunctionBinder<Func>(std::forward<Func>(f), eng);
     }
     
 } // namespace jai

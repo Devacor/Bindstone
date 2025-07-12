@@ -1,0 +1,7 @@
+set breakpoint pending on
+break jai::runtime_error::runtime_error if strstr(msg, "Undefined variable") \!= 0
+run "Script Class Tests"
+where
+up
+info locals
+cont

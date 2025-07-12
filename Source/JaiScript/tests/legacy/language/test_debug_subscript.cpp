@@ -18,7 +18,7 @@ JAI_TEST_SUITE(DebugSubscript)
 JAI_TEST(separate_execution_works) {
     engine engine;
     
-    make_class_builder<MyVector>(engine, "MyVector")
+    class_builder<MyVector>(engine, "MyVector")
         .constructor<>()
         .method("push_back", &MyVector::push_back);
     
@@ -45,7 +45,7 @@ JAI_TEST(separate_execution_works) {
 JAI_TEST(combined_execution_fails) {
     engine engine;
     
-    make_class_builder<MyVector>(engine, "MyVector")
+    class_builder<MyVector>(engine, "MyVector")
         .constructor<>()
         .method("push_back", &MyVector::push_back);
     

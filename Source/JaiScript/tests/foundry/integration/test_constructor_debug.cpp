@@ -26,10 +26,10 @@ public:
     
     void forge_tests() override {
         test("constructor_with_ints", [this]() {
-            engine eng;
+            auto eng = engine::make();
             
             std::cout << "Registering TestPoint class...\n";
-            make_class_builder<TestPoint>(eng, "TestPoint")
+            class_builder<TestPoint>(*eng, "TestPoint")
                 .constructor<>()
                 .constructor<double, double>()
                 .method("length", &TestPoint::length)
@@ -39,7 +39,7 @@ public:
             
             std::cout << "Executing TestPoint(3, 4)...\n";
             try {
-                auto result = eng.execute("p = TestPoint(3, 4); p.length()");
+                auto result = eng->execute("p = TestPoint(3, 4); p.length()");
                 std::cout << "Success! Result: " << result.as<double>() << "\n";
                 check_eq(result.as<double>(), 5.0);
             } catch (const std::exception& e) {
@@ -50,7 +50,7 @@ public:
         
         test("direct_value_conversion", [this]() {
             // Test the script_value conversion directly
-            script_value intVal(3);
+            script_value intVal(script_value::serialization_tag{}, script_int(3));
             std::cout << "intVal type: " << static_cast<int>(intVal.type()) << " (should be 1 for int)\n";
             
             try {

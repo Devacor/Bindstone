@@ -12,9 +12,9 @@ public:
     
     void forge_tests() override {
         test("array_subscript_write", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value result = engine.execute(R"(
+            script_value result = engine->execute(R"(
                 var arr = [1, 2, 3];
                 arr[1] = 99;
                 arr[1];
@@ -24,9 +24,9 @@ public:
         });
         
         test("array_swap_elements", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value result = engine.execute(R"(
+            script_value result = engine->execute(R"(
                 var arr = [10, 20];
                 var temp = arr[0];
                 arr[0] = arr[1];
@@ -38,9 +38,9 @@ public:
         });
         
         test("array_reversal_algorithm", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value result = engine.execute(R"(
+            script_value result = engine->execute(R"(
                 var arr = [1, 2, 3, 4, 5];
                 var n = 5;
                 for (int i = 0; i < n / 2; ++i) {
@@ -61,9 +61,9 @@ public:
         });
         
         test("nested_array_assignment", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value result = engine.execute(R"(
+            script_value result = engine->execute(R"(
                 var matrix = [[1, 2], [3, 4]];
                 matrix[0][1] = 99;
                 matrix[1][0] = 88;
@@ -76,9 +76,9 @@ public:
         });
         
         test("array_arithmetic_modification", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value result = engine.execute(R"(
+            script_value result = engine->execute(R"(
                 var arr = [10, 20, 30];
                 arr[0] += 5;
                 arr[1] *= 2;
@@ -93,9 +93,9 @@ public:
         });
         
         test("array_mixed_type_assignment", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value result = engine.execute(R"(
+            script_value result = engine->execute(R"(
                 var arr = [1, "hello", 3.14];
                 arr[0] = "world";
                 arr[1] = 42;
@@ -111,9 +111,9 @@ public:
         
         // Array method tests
         test("array_size_method", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value result = engine.execute(R"(
+            script_value result = engine->execute(R"(
                 var arr = [1, 2, 3, 4, 5];
                 arr.size();
             )");
@@ -122,57 +122,57 @@ public:
         });
         
         test("array_push_pop_methods", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            engine.execute(R"(
+            engine->execute(R"(
                 var arr = [1, 2, 3];
                 arr.push(4);
                 arr.push(5);
             )");
             
-            script_value size = engine.execute("arr.size();");
+            script_value size = engine->execute("arr.size();");
             check_eq(size.as<int>(), 5);
             
-            script_value last = engine.execute("arr.pop();");
+            script_value last = engine->execute("arr.pop();");
             check_eq(last.as<int>(), 5);
             
-            size = engine.execute("arr.size();");
+            size = engine->execute("arr.size();");
             check_eq(size.as<int>(), 4);
         });
         
         test("array_clear_empty_methods", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            engine.execute("var arr = [1, 2, 3, 4, 5];");
+            engine->execute("var arr = [1, 2, 3, 4, 5];");
             
-            script_value empty = engine.execute("arr.empty();");
+            script_value empty = engine->execute("arr.empty();");
             check_eq(empty.as<bool>(), false);
             
-            engine.execute("arr.clear();");
+            engine->execute("arr.clear();");
             
-            script_value size = engine.execute("arr.size();");
+            script_value size = engine->execute("arr.size();");
             check_eq(size.as<int>(), 0);
             
-            empty = engine.execute("arr.empty();");
+            empty = engine->execute("arr.empty();");
             check_eq(empty.as<bool>(), true);
         });
         
         test("array_front_back_methods", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            engine.execute("var arr = [10, 20, 30, 40];");
+            engine->execute("var arr = [10, 20, 30, 40];");
             
-            script_value front = engine.execute("arr.front();");
+            script_value front = engine->execute("arr.front();");
             check_eq(front.as<int>(), 10);
             
-            script_value back = engine.execute("arr.back();");
+            script_value back = engine->execute("arr.back();");
             check_eq(back.as<int>(), 40);
         });
         
         test("array_chained_operations", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
-            script_value result = engine.execute(R"(
+            script_value result = engine->execute(R"(
                 var arr = [];
                 arr.push(1).push(2).push(3);
                 arr.size();

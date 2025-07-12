@@ -55,7 +55,7 @@ JAI_TEST(point_int_template) {
     engine engine;
     
     // Register Point<int> as a concrete type
-    make_class_builder<Point<int>>(engine, "Point<int>")
+    class_builder<Point<int>>(engine, "Point<int>")
         .constructor<>()
         .constructor<int, int>()
         .method("getX", &Point<int>::getX)
@@ -87,7 +87,7 @@ JAI_TEST(point_float_template) {
     engine engine;
     
     // Register Point<float> as a concrete type
-    make_class_builder<Point<float>>(engine, "Point<float>")
+    class_builder<Point<float>>(engine, "Point<float>")
         .constructor<>()
         .constructor<float, float>()
         .method("getX", &Point<float>::getX)
@@ -110,14 +110,14 @@ JAI_TEST(multiple_template_types_in_same_engine) {
     engine engine;
     
     // Register both Point<int> and Point<float>
-    make_class_builder<Point<int>>(engine, "Point<int>")
+    class_builder<Point<int>>(engine, "Point<int>")
         .constructor<>()
         .constructor<int, int>()
         .method("getX", &Point<int>::getX)
         .method("getY", &Point<int>::getY)
         .build();
         
-    make_class_builder<Point<float>>(engine, "Point<float>")
+    class_builder<Point<float>>(engine, "Point<float>")
         .constructor<>()
         .constructor<float, float>()
         .method("getX", &Point<float>::getX)
@@ -139,7 +139,7 @@ JAI_TEST(safe_component_template) {
     engine engine;
     
     // Register Button first
-    make_class_builder<Button>(engine, "Button")
+    class_builder<Button>(engine, "Button")
         .constructor<>()
         .constructor<std::string>()
         .method("setText", &Button::setText)
@@ -147,7 +147,7 @@ JAI_TEST(safe_component_template) {
         .build();
     
     // Register SafeComponent<Button>
-    make_class_builder<SafeComponent<Button>>(engine, "SafeComponent<Button>")
+    class_builder<SafeComponent<Button>>(engine, "SafeComponent<Button>")
         .constructor<>()
         .method("self", &SafeComponent<Button>::self)
         .build();
@@ -168,7 +168,7 @@ JAI_TEST(template_type_in_variable_declaration) {
     engine engine;
     
     // Register Point<int>
-    make_class_builder<Point<int>>(engine, "Point<int>")
+    class_builder<Point<int>>(engine, "Point<int>")
         .constructor<>()
         .constructor<int, int>()
         .method("getX", &Point<int>::getX)
@@ -196,7 +196,7 @@ JAI_TEST(template_type_brace_initialization) {
     engine engine;
     
     // Register Point<float>
-    make_class_builder<Point<float>>(engine, "Point<float>")
+    class_builder<Point<float>>(engine, "Point<float>")
         .constructor<>()
         .constructor<float, float>()
         .property("x", &Point<float>::x)

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../core/value.hpp"
-#include "../core/type_info.hpp"
+#include <jaiscript/core/value.hpp>
+#include <jaiscript/core/type_info.hpp>
 #include <string>
 #include <vector>
 #include <memory>
@@ -155,19 +155,27 @@ protected:
 // Archive reader interface
 class archive_reader {
 protected:
+    // Engine reference for creating script_values
+    std::weak_ptr<engine> engine_ref_;
+    
     // Shared pointer tracking for deserialization
     std::unordered_map<uint32_t, script_value> id_to_shared_ptr_;  // ID -> reconstructed shared_ptr
     
     // Register a reconstructed shared_ptr
     void register_shared_ptr(uint32_t id, const script_value& ptr) {
         if (id != 0) {  // Don't register null
-            id_to_shared_ptr_[id] = ptr;
+            id_to_shared_ptr_.insert_or_assign(id, ptr);
         }
     }
     
     // Get previously deserialized shared_ptr by ID
     script_value get_shared_ptr(uint32_t id) const {
-        if (id == 0) return script_value();  // null
+        if (id == 0) {
+            if (auto eng = engine_ref_.lock()) {
+                return script_value(std::monostate{}, eng->weak_from_this());
+            }
+            throw serialization_error("Engine reference expired during deserialization");
+        }
         
         auto it = id_to_shared_ptr_.find(id);
         if (it != id_to_shared_ptr_.end()) {
@@ -177,7 +185,15 @@ protected:
     }
     
 public:
+    // Constructor that accepts engine reference
+    explicit archive_reader(std::weak_ptr<engine> eng = {}) : engine_ref_(eng) {}
+    
     virtual ~archive_reader() = default;
+    
+    // Set engine reference (for readers that can't pass it in constructor)
+    void set_engine(std::weak_ptr<engine> eng) {
+        engine_ref_ = eng;
+    }
     
     // Basic type deserialization
     virtual int8_t read_int8() = 0;
@@ -223,26 +239,32 @@ public:
             return read_value();
         }
         
+        // Get engine reference for creating script_values
+        auto eng = engine_ref_.lock();
+        if (!eng) {
+            throw serialization_error("Engine reference expired during deserialization");
+        }
+        
         // Use type info to read with proper size
         switch (type_info->base_type) {
             case script_value_type::jai_int_type:
                 if (type_info->native_size == 1) {
-                    return script_value(static_cast<script_int>(type_info->is_signed ? read_int8() : read_uint8()));
+                    return script_value(static_cast<script_int>(type_info->is_signed ? read_int8() : read_uint8()), eng->weak_from_this());
                 } else if (type_info->native_size == 2) {
-                    return script_value(static_cast<script_int>(type_info->is_signed ? read_int16() : read_uint16()));
+                    return script_value(static_cast<script_int>(type_info->is_signed ? read_int16() : read_uint16()), eng->weak_from_this());
                 } else if (type_info->native_size == 4) {
-                    return script_value(static_cast<script_int>(type_info->is_signed ? read_int32() : read_uint32()));
+                    return script_value(static_cast<script_int>(type_info->is_signed ? read_int32() : read_uint32()), eng->weak_from_this());
                 } else if (type_info->native_size == 8 && !type_info->is_signed) {
-                    return script_value(static_cast<script_int>(read_uint64()));
+                    return script_value(static_cast<script_int>(read_uint64()), eng->weak_from_this());
                 } else {
-                    return script_value(read_int64());
+                    return script_value(read_int64(), eng->weak_from_this());
                 }
                 
             case script_value_type::jai_float_type:
                 if (type_info->native_size == 4) {
-                    return script_value(static_cast<script_float>(read_float32()));
+                    return script_value(static_cast<script_float>(read_float32()), eng->weak_from_this());
                 } else {
-                    return script_value(read_float64());
+                    return script_value(read_float64(), eng->weak_from_this());
                 }
                 
             default:
@@ -308,13 +330,10 @@ struct class_metadata {
     }
 };
 
-// Global registry for class serialization metadata
+// Registry for class serialization metadata - now tied to engine instance
 class serialization_registry {
 public:
-    static serialization_registry& instance() {
-        static serialization_registry instance;
-        return instance;
-    }
+    serialization_registry() = default;
     
     void register_class(const std::string& class_name, const class_metadata& metadata) {
         classes_[class_name] = metadata;

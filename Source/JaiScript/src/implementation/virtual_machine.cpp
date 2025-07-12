@@ -28,6 +28,9 @@ namespace jvm {
         // Type converters (from engine)
         const std::unordered_map<std::string, std::function<script_value(const void*)>>* type_converters = nullptr;
         
+        // Engine reference for script_value creation (enables shared conversion registry)
+        std::weak_ptr<engine> engine_ref;
+        
         // Breakpoints for debugging
         struct breakpoint {
             std::string function_name;
@@ -58,7 +61,7 @@ namespace jvm {
                     std::cout << args[i].to_string();
                 }
                 std::cout << std::endl;
-                return script_value(); // null/void return
+                return script_value(std::monostate{}, impl_->engine_ref); // null/void return
             };
             
             builtin_functions.push_back(print_func);
@@ -88,7 +91,7 @@ namespace jvm {
     script_value virtual_machine::execute() {
         if (!impl_->state.current_module) {
             runtime_error("No module loaded");
-            return script_value();
+            return script_value(std::monostate{}, impl_->engine_ref);
         }
         
         if (impl_->debug_mode) {
@@ -102,12 +105,12 @@ namespace jvm {
     script_value virtual_machine::execute_function(size_t function_index, const std::vector<script_value>& args) {
         if (!impl_->state.current_module) {
             runtime_error("No module loaded");
-            return script_value();
+            return script_value(std::monostate{}, impl_->engine_ref);
         }
         
         if (function_index >= impl_->state.current_module->functions.size()) {
             runtime_error("Function index out of bounds");
-            return script_value();
+            return script_value(std::monostate{}, impl_->engine_ref);
         }
         
         const auto& func = impl_->state.current_module->functions[function_index];
@@ -117,7 +120,7 @@ namespace jvm {
     script_value virtual_machine::execute_function(const std::string& function_name, const std::vector<script_value>& args) {
         if (!impl_->state.current_module) {
             runtime_error("No module loaded");
-            return script_value();
+            return script_value(std::monostate{}, impl_->engine_ref);
         }
         
         // Find function by name
@@ -128,7 +131,7 @@ namespace jvm {
         }
         
         runtime_error("Function '" + function_name + "' not found");
-        return script_value();
+        return script_value(std::monostate{}, impl_->engine_ref);
     }
     
     script_value virtual_machine::execute_function_impl(const function* func, const std::vector<script_value>& args) {
@@ -145,7 +148,7 @@ namespace jvm {
             runtime_error("Function '" + func->name + "' expects " + 
                          std::to_string(func->parameter_names.size()) + " arguments, got " + 
                          std::to_string(args.size()));
-            return script_value();
+            return script_value(std::monostate{}, impl_->engine_ref);
         }
         
         // Clear previous state
@@ -186,12 +189,12 @@ namespace jvm {
         
         if (!impl_->state.current_module) {
             runtime_error("No module loaded");
-            return script_value();
+            return script_value(std::monostate{}, impl_->engine_ref);
         }
         
         if (function_index >= impl_->state.current_module->functions.size()) {
             runtime_error("Function index out of bounds");
-            return script_value();
+            return script_value(std::monostate{}, impl_->engine_ref);
         }
         
         const auto& func = impl_->state.current_module->functions[function_index];
@@ -201,7 +204,7 @@ namespace jvm {
             runtime_error("Function '" + func->name + "' expects " + 
                          std::to_string(func->parameter_names.size()) + " arguments, got " + 
                          std::to_string(args.size()));
-            return script_value();
+            return script_value(std::monostate{}, impl_->engine_ref);
         }
         
         // Save current locals count (we'll restore it later)
@@ -235,7 +238,7 @@ namespace jvm {
             if (frame.ip >= func->instructions.size()) {
                 // Function ended without explicit return
                 impl_->state.call_stack.pop_back();
-                result = script_value(); // null return
+                result = script_value(std::monostate{}, impl_->engine_ref); // null return
                 break;
             }
             
@@ -253,7 +256,7 @@ namespace jvm {
                     std::cout << "Function " << func->name << " returned. Stack size: " 
                               << impl_->state.stack.size() << "\n";
                 }
-                result = impl_->state.stack.empty() ? script_value() : pop();
+                result = impl_->state.stack.empty() ? script_value(std::monostate{}, impl_->engine_ref) : pop();
                 break;
             }
         }
@@ -267,7 +270,7 @@ namespace jvm {
     script_value virtual_machine::run() {
         if (impl_->state.call_stack.empty()) {
             runtime_error("Empty call stack");
-            return script_value();
+            return script_value(std::monostate{}, impl_->engine_ref);
         }
         
         while (!impl_->state.call_stack.empty() && !impl_->state.has_error) {
@@ -288,7 +291,7 @@ namespace jvm {
                     if (impl_->debug_mode) {
                         std::cout << "Main function ended. Returning from stack.\n";
                     }
-                    return impl_->state.stack.empty() ? script_value() : pop();
+                    return impl_->state.stack.empty() ? script_value(std::monostate{}, impl_->engine_ref) : pop();
                 }
                 continue;
             }
@@ -325,7 +328,7 @@ namespace jvm {
         
         // If we exit due to error, return null
         if (impl_->state.has_error) {
-            return script_value();
+            return script_value(std::monostate{}, impl_->engine_ref);
         }
         
         // Return top of stack if available
@@ -335,7 +338,7 @@ namespace jvm {
                 std::cout << "Returning top of stack, type: " << static_cast<int>(impl_->state.stack.back().type()) << "\n";
             }
         }
-        return impl_->state.stack.empty() ? script_value() : pop();
+        return impl_->state.stack.empty() ? script_value(std::monostate{}, impl_->engine_ref) : pop();
     }
     
     void virtual_machine::execute_instruction(const instruction& instr) {
@@ -365,7 +368,7 @@ namespace jvm {
                 
             // Constants
             case opcode::PUSH_NULL:
-                push(script_value());
+                push(script_value(std::monostate{}, impl_->engine_ref));
                 break;
                 
             case opcode::PUSH_TRUE:
@@ -416,7 +419,8 @@ namespace jvm {
                         }
                         return result;
                     };
-                    push(script_value::make_function(vm_func));
+                    // Use the stored engine reference for proper conversion registry access
+                    push(script_value::make_function(vm_func, impl_->engine_ref));
                     if (impl_->debug_mode) {
                         std::cout << "PUSH_FUNCTION: index=" << func_index 
                                   << " name=" << impl_->state.current_module->functions[func_index]->name << "\n";
@@ -729,7 +733,7 @@ namespace jvm {
                     if (!map.is_map()) {
                         runtime_error("MAP_GET on non-map value");
                         pop(); // Remove the map
-                        push(script_value()); // Push null
+                        push(script_value(std::monostate{}, impl_->engine_ref)); // Push null
                         break;
                     }
                     
@@ -746,12 +750,12 @@ namespace jvm {
                         if (it != mapData.end()) {
                             push(it->second);
                         } else {
-                            push(script_value()); // Key not found, push null
+                            push(script_value(std::monostate{}, impl_->engine_ref)); // Key not found, push null
                         }
                     } catch (const std::exception& e) {
                         pop(); // Remove the map
                         runtime_error("Error accessing map: " + std::string(e.what()));
-                        push(script_value());
+                        push(script_value(std::monostate{}, impl_->engine_ref));
                     }
                 }
                 break;
@@ -896,7 +900,7 @@ namespace jvm {
     script_value virtual_machine::pop() {
         if (impl_->state.stack.empty()) {
             runtime_error("Stack underflow");
-            return script_value();
+            return script_value(std::monostate{}, impl_->engine_ref);
         }
         
         script_value result = std::move(impl_->state.stack.back());
@@ -949,10 +953,10 @@ namespace jvm {
             try {
                 return impl_->state.global_env->get(name);
             } catch (...) {
-                return script_value();
+                return script_value(std::monostate{}, impl_->engine_ref);
             }
         }
-        return script_value();
+        return script_value(std::monostate{}, impl_->engine_ref);
     }
     
     bool virtual_machine::has_global(const std::string& name) const {
@@ -1202,7 +1206,7 @@ namespace jvm {
                     if (container.is_array()) {
                         if (!index.is_int()) {
                             runtime_error("Array index must be integer");
-                            push(script_value()); // Push null
+                            push(script_value(std::monostate{}, impl_->engine_ref)); // Push null
                             return;
                         }
                         
@@ -1212,7 +1216,7 @@ namespace jvm {
                         if (impl_->bounds_checking) {
                             if (idx < 0 || idx >= static_cast<script_int>(arr.size())) {
                                 runtime_error("Array index out of bounds");
-                                push(script_value()); // Push null
+                                push(script_value(std::monostate{}, impl_->engine_ref)); // Push null
                                 return;
                             }
                         }
@@ -1225,11 +1229,11 @@ namespace jvm {
                         if (it != map.end()) {
                             push(it->second);
                         } else {
-                            push(script_value()); // Key not found, return null
+                            push(script_value(std::monostate{}, impl_->engine_ref)); // Key not found, return null
                         }
                     } else {
                         runtime_error("Cannot index non-array/non-map value");
-                        push(script_value()); // Push null
+                        push(script_value(std::monostate{}, impl_->engine_ref)); // Push null
                         return;
                     }
                 }
@@ -1350,6 +1354,10 @@ namespace jvm {
         } catch (const std::exception& e) {
             runtime_error("Built-in function call failed: " + std::string(e.what()));
         }
+    }
+    
+    void virtual_machine::set_engine_reference(std::weak_ptr<engine> engine_ref) {
+        impl_->engine_ref = engine_ref;
     }
     
     std::unique_ptr<virtual_machine> create_vm() {

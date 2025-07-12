@@ -155,41 +155,41 @@ token parser::consume(token_type type, const std::string& message) {
 expression_ptr parser::primary() {
     // Literals
     if (match(token_type::true_keyword)) {
-        script_value val(true);
+        script_value val(script_value::serialization_tag{}, true);
         return std::make_shared<literal_expr>(previous().location, val);
     }
     
     if (match(token_type::false_keyword)) {
-        script_value val(false);
+        script_value val(script_value::serialization_tag{}, false);
         return std::make_shared<literal_expr>(previous().location, val);
     }
     
     if (match(token_type::null_keyword)) {
-        script_value val;  // Default constructor creates null
+        script_value val(script_value::serialization_tag{}, std::monostate{});
         return std::make_shared<literal_expr>(previous().location, val);
     }
     
     if (match(token_type::integer_literal)) {
         token token = previous();
-        script_value val(token.int_value);
+        script_value val(script_value::serialization_tag{}, token.int_value);
         return std::make_shared<literal_expr>(token.location, val);
     }
     
     if (match(token_type::float_literal)) {
         token token = previous();
-        script_value val(token.float_value);
+        script_value val(script_value::serialization_tag{}, token.float_value);
         return std::make_shared<literal_expr>(token.location, val);
     }
     
     if (match(token_type::string_literal)) {
         token token = previous();
-        script_value val(token.string_value);
+        script_value val(script_value::serialization_tag{}, token.string_value);
         return std::make_shared<literal_expr>(token.location, val);
     }
     
     if (match(token_type::char_literal)) {
         token token = previous();
-        script_value val(token.char_value);
+        script_value val(script_value::serialization_tag{}, token.char_value);
         return std::make_shared<literal_expr>(token.location, val);
     }
     
@@ -326,7 +326,7 @@ expression_ptr parser::primary() {
     
     
     // Check for type constructors (array<int>(), map<string, int>(), etc.)
-    if (check(token_type::array_keyword) || check(token_type::map_keyword) || check(token_type::shared_ptr_keyword) || 
+    if (check(token_type::array_keyword) || check(token_type::map_keyword) || 
         check(token_type::weak_ptr_keyword) || check(token_type::int_keyword) || check(token_type::float_keyword) || 
         check(token_type::string_keyword) || check(token_type::bool_keyword) || check(token_type::char_keyword)) {
         size_t savedPos = current_;
@@ -463,13 +463,6 @@ type_info_ptr parser::parse_type() {
         type_info_ptr valueType = parse_type();
         consume_greater_in_generic("Expected '>' after map value type");
         return type_info::make_map(keyType, valueType);
-    }
-    
-    if (match(token_type::shared_ptr_keyword)) {
-        consume(token_type::less, "Expected '<' after 'shared_ptr'");
-        type_info_ptr pointee_type = parse_type();
-        consume_greater_in_generic("Expected '>' after shared_ptr type");
-        return type_info::make_shared_ptr(pointee_type);
     }
     
     if (match(token_type::weak_ptr_keyword)) {
@@ -843,7 +836,7 @@ declaration_ptr parser::declaration() {
     // Check for explicit type keywords that start declarations
     if (match({token_type::auto_keyword, token_type::var_keyword, token_type::int_keyword, token_type::float_keyword, 
                token_type::string_keyword, token_type::bool_keyword, token_type::char_keyword, token_type::void_keyword,
-               token_type::array_keyword, token_type::map_keyword, token_type::shared_ptr_keyword, token_type::weak_ptr_keyword})) {
+               token_type::array_keyword, token_type::map_keyword, token_type::weak_ptr_keyword})) {
         // We already consumed the type keyword, so we need to backtrack
         current_--;
         
@@ -1012,7 +1005,7 @@ std::vector<parameter> parser::parse_parameter_list() {
                      check(token_type::function_keyword) || check(token_type::int_keyword) || check(token_type::float_keyword) || 
                      check(token_type::string_keyword) || check(token_type::bool_keyword) || check(token_type::char_keyword) || 
                      check(token_type::void_keyword) || check(token_type::array_keyword) || check(token_type::map_keyword) ||
-                     check(token_type::shared_ptr_keyword) || check(token_type::weak_ptr_keyword)) {
+                     check(token_type::weak_ptr_keyword)) {
                 
                 type = parse_type();
                 

@@ -63,7 +63,7 @@ JAI_TEST(binary_cpp_objects) {
     stdlib::register_all(engine);
     
     // Register TestPoint class
-    make_class_builder<TestPoint>(engine, "TestPoint")
+    class_builder<TestPoint>(engine, "TestPoint")
         .constructor<>()
         .constructor<double, double>()
         .property("x", &TestPoint::x)

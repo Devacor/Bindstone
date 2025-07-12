@@ -52,7 +52,7 @@ JAI_TEST(register_spaceship_only_class) {
     engine engine;
     
     // Register our custom type that ONLY has spaceship operator
-    make_class_builder<SpaceshipOnly>(engine, "SpaceshipOnly")
+    class_builder<SpaceshipOnly>(engine, "SpaceshipOnly")
         .constructor<>()
         .constructor<int>()
         .method("getValue", [](SpaceshipOnly& self) { return self.value; })
@@ -66,7 +66,7 @@ JAI_TEST(register_spaceship_only_class) {
 JAI_TEST(spaceship_only_object_creation) {
     engine engine;
     
-    make_class_builder<SpaceshipOnly>(engine, "SpaceshipOnly")
+    class_builder<SpaceshipOnly>(engine, "SpaceshipOnly")
         .constructor<>()
         .constructor<int>()
         .method("getValue", [](SpaceshipOnly& self) { return self.value; })
@@ -86,7 +86,7 @@ JAI_TEST(spaceship_only_object_creation) {
 JAI_TEST(spaceship_only_method_calls) {
     engine engine;
     
-    make_class_builder<SpaceshipOnly>(engine, "SpaceshipOnly")
+    class_builder<SpaceshipOnly>(engine, "SpaceshipOnly")
         .constructor<>()
         .constructor<int>()
         .method("getValue", [](SpaceshipOnly& self) { return self.value; })
@@ -106,7 +106,7 @@ JAI_TEST(spaceship_only_method_calls) {
 JAI_TEST(verify_comparison_operators_generated) {
     engine engine;
     
-    make_class_builder<ComparisonVerifier>(engine, "ComparisonVerifier")
+    class_builder<ComparisonVerifier>(engine, "ComparisonVerifier")
         .constructor<>()
         .constructor<int>()
         .method("getValue", [](ComparisonVerifier& self) { return self.value; })
@@ -131,7 +131,7 @@ JAI_TEST(spaceship_operator_independence) {
     
     engine engine;
     
-    make_class_builder<SpaceshipOnly>(engine, "SpaceshipOnly")
+    class_builder<SpaceshipOnly>(engine, "SpaceshipOnly")
         .constructor<int>()
         .method("getValue", [](SpaceshipOnly& self) { return self.value; })
         .build();
@@ -157,7 +157,7 @@ JAI_TEST(class_builder_constructor_fix) {
     // Test that the class_builder constructor lambda capture fix works correctly
     engine engine;
     
-    make_class_builder<SpaceshipOnly>(engine, "TestClass")
+    class_builder<SpaceshipOnly>(engine, "TestClass")
         .constructor<>()
         .constructor<int>()
         .build();
@@ -173,7 +173,7 @@ JAI_TEST(class_builder_constructor_fix) {
 JAI_BENCHMARK(spaceship_only_object_creation_performance) {
     engine engine;
     
-    make_class_builder<SpaceshipOnly>(engine, "SpaceshipOnly")
+    class_builder<SpaceshipOnly>(engine, "SpaceshipOnly")
         .constructor<int>()
         .build();
     

@@ -11,7 +11,7 @@ public:
     
     void forge_tests() override {
         test("basic_throw_catch", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 try {
@@ -21,13 +21,13 @@ public:
                 }
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.is_string(), true);
             check_eq(result.as_string(), "Test error message");
         });
         
         test("throw_without_catch_bubbles_to_cpp", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 throw "Unhandled exception";
@@ -35,7 +35,7 @@ public:
             
             bool caught_exception = false;
             try {
-                engine.execute(script);
+                engine->execute(script);
             } catch (const script_exception& e) {
                 caught_exception = true;
                 check_eq(std::string(e.what()), "Unhandled exception");
@@ -45,7 +45,7 @@ public:
         });
         
         test("catch_without_variable", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 try {
@@ -55,13 +55,13 @@ public:
                 }
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.is_string(), true);
             check_eq(result.as_string(), "Caught without variable");
         });
         
         test("nested_try_catch", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 try {
@@ -75,16 +75,16 @@ public:
                 }
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.is_string(), true);
             check_eq(result.as_string(), "Outer error: Inner error");
         });
         
         test("cpp_runtime_error_interop", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             // Add a C++ function that throws std::runtime_error
-            engine.add_function("risky_function", []() {
+            engine->add_function("risky_function", []() {
                 throw std::runtime_error("C++ function error");
             });
             
@@ -96,16 +96,16 @@ public:
                 }
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.is_string(), true);
             check_eq(result.as_string(), "C++ function error");
         });
         
         test("cpp_generic_exception_interop", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             // Add a C++ function that throws generic std::exception
-            engine.add_function("generic_exception", []() {
+            engine->add_function("generic_exception", []() {
                 throw std::logic_error("Generic C++ error");
             });
             
@@ -117,13 +117,13 @@ public:
                 }
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.is_string(), true);
             check_eq(result.as_string(), "Unbound exception type caught in JaiScript.");
         });
         
         test("throw_rethrow", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 try {
@@ -137,13 +137,13 @@ public:
                 }
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.is_string(), true);
             check_eq(result.as_string(), "Original error");
         });
         
         test("throw_in_expressions", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 auto result = "Start";
@@ -155,13 +155,13 @@ public:
                 return result;
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.is_string(), true);
             check_eq(result.as_string(), "Start caught: Error in expression");
         });
         
         test("exception_with_numeric_values", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 try {
@@ -171,13 +171,13 @@ public:
                 }
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.is_string(), true);
             check_eq(result.as_string(), "42");
         });
         
         test("exception_scope_isolation", [this]() {
-            engine engine;
+            auto engine = engine::make();
             
             std::string script = R"(
                 auto outer_var = "outer";
@@ -190,7 +190,7 @@ public:
                 }
             )";
             
-            script_value result = engine.execute(script);
+            script_value result = engine->execute(script);
             check_eq(result.is_string(), true);
             check_eq(result.as_string(), "outer test");
         });

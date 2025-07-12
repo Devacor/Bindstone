@@ -68,7 +68,7 @@ JAI_TEST(basic_class_registration) {
     engine engine;
     
     // Register Point class using builder pattern
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<>()
         .method("getX", &Point::getX)
         .method("getY", &Point::getY)
@@ -97,7 +97,7 @@ JAI_TEST(basic_class_registration) {
 JAI_TEST(property_access_via_getters_setters) {
     engine engine;
     
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<>()
         .property("x", &Point::x)
         .property("y", &Point::y)
@@ -121,7 +121,7 @@ JAI_TEST(clean_registration_syntax) {
     engine engine;
     
     // JaiScript style - clean and simple
-    auto builder = make_class_builder<Point>(engine, "Point");
+    auto builder = class_builder<Point>(engine, "Point");
     builder.constructor<float, float>()
            .method("distance", &Point::distance)
            .property("x", &Point::x)
@@ -141,13 +141,13 @@ JAI_TEST(inheritance_support) {
     engine engine;
     
     // Register base class
-    make_class_builder<Shape>(engine, "Shape")
+    class_builder<Shape>(engine, "Shape")
         .method("area", &Shape::area)
         .method("type", &Shape::type)
         .build();
     
     // Register derived class
-    make_class_builder<Circle>(engine, "Circle")
+    class_builder<Circle>(engine, "Circle")
         .inherits<Shape>()
         .constructor<float>()
         .method("area", [](Circle& self) { return self.area(); })
@@ -198,7 +198,7 @@ JAI_TEST(method_chaining) {
     
     engine engine;
     
-    make_class_builder<Builder>(engine, "Builder")
+    class_builder<Builder>(engine, "Builder")
         .constructor<>()
         // For method chaining, use lambda syntax with reference return
         .method("withName", [](Builder& self, const std::string& name) -> Builder& {
@@ -226,7 +226,7 @@ JAI_TEST(method_chaining) {
 JAI_TEST(direct_property_access) {
     engine engine;
     
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<float, float>()
         .property("x", &Point::x)
         .property("y", &Point::y)
@@ -263,7 +263,7 @@ JAI_TEST(multiple_constructors) {
     
     engine engine;
     
-    make_class_builder<Rectangle>(engine, "Rectangle")
+    class_builder<Rectangle>(engine, "Rectangle")
         .constructor<>()                    // Default constructor only for now
         .method("area", &Rectangle::area)
         .build();
@@ -282,7 +282,7 @@ JAI_TEST(multiple_constructors) {
 JAI_BENCHMARK(class_instantiation) {
     engine engine;
     
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<float, float>()
         .method("distance", &Point::distance)
         .build();
@@ -293,7 +293,7 @@ JAI_BENCHMARK(class_instantiation) {
 JAI_BENCHMARK(property_access_performance) {
     engine engine;
     
-    make_class_builder<Point>(engine, "Point")
+    class_builder<Point>(engine, "Point")
         .constructor<float, float>()
         .property("x", &Point::x)
         .property("y", &Point::y)

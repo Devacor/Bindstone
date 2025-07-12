@@ -1,8 +1,11 @@
 #pragma once
 
+#ifndef __JAISCRIPT_DETAIL_INTERPRETER_HPP__
+#define __JAISCRIPT_DETAIL_INTERPRETER_HPP__
+
 #include "ast.hpp"
-#include "../core/value.hpp"
-#include "../core/types.hpp"
+#include <jaiscript/core/value.hpp>
+#include <jaiscript/core/types.hpp>
 #include <unordered_map>
 #include <memory>
 #include <vector>
@@ -106,10 +109,9 @@ namespace jai {
     };
     
     // The interpreter implements the visitor pattern to execute the AST
-    class interpreter : public ast_visitor {
+    class interpreter : public ast_visitor, public std::enable_shared_from_this<interpreter> {
     public:
-        using type_converter = std::function<script_value(const void*)>;
-        using type_converter_map = std::unordered_map<std::string, type_converter>;
+        using class_lookup_callback = std::function<std::shared_ptr<class_definition>(const std::string&)>;
         
         // Method type for built-in type methods
         using builtin_method = std::function<script_value(interpreter*, const script_value&, const std::vector<script_value>&)>;
@@ -135,17 +137,59 @@ namespace jai {
         // Define a variable in the current scope
         void define_variable(const std::string& name, const script_value& value);
         
-        // Set type converter map (owned by engine)
-        void set_type_converters(const type_converter_map* converters) {
-            type_converters_ = converters;
+        // Set class lookup callback (for finding C++ classes)
+        void set_class_lookup_callback(class_lookup_callback callback) {
+            class_lookup_callback_ = std::move(callback);
         }
         
-        // Get type converter for a specific type
-        type_converter get_type_converter(const std::string& type_id_name) const {
-            if (!type_converters_) return nullptr;
-            auto it = type_converters_->find(type_id_name);
-            return it != type_converters_->end() ? it->second : nullptr;
+        // Set engine reference for script_value creation
+        void set_engine_reference(std::weak_ptr<engine> engine_ref) {
+            engine_ref_ = std::move(engine_ref);
         }
+        
+        // Helper to create script_value with engine context
+        script_value make_value(script_int i) const {
+            if (!engine_ref_.expired()) {
+                return script_value(i, engine_ref_);
+            }
+            throw runtime_error("Engine reference expired - cannot create script_value");
+        }
+        
+        script_value make_value(script_float f) const {
+            if (!engine_ref_.expired()) {
+                return script_value(f, engine_ref_);
+            }
+            throw runtime_error("Engine reference expired - cannot create script_value");
+        }
+        
+        script_value make_value(const script_string& s) const {
+            if (!engine_ref_.expired()) {
+                return script_value(s, engine_ref_);
+            }
+            throw runtime_error("Engine reference expired - cannot create script_value");
+        }
+        
+        script_value make_value(script_bool b) const {
+            if (!engine_ref_.expired()) {
+                return script_value(b, engine_ref_);
+            }
+            throw runtime_error("Engine reference expired - cannot create script_value");
+        }
+        
+        script_value make_value(script_char c) const {
+            if (!engine_ref_.expired()) {
+                return script_value(c, engine_ref_);
+            }
+            throw runtime_error("Engine reference expired - cannot create script_value");
+        }
+        
+        script_value make_value() const {
+            if (!engine_ref_.expired()) {
+                return script_value(std::monostate{}, engine_ref_);
+            }
+            throw runtime_error("Engine reference expired - cannot create script_value");
+        }
+        
         
         // Execute a list of declarations and return the last value
         script_value execute(const std::vector<declaration_ptr>& declarations);
@@ -219,6 +263,20 @@ namespace jai {
         void set_has_custom_numeric_ops(bool value) { has_custom_numeric_ops_ = value; }
         bool has_custom_numeric_ops() const { return has_custom_numeric_ops_; }
         
+        // Accessors for script class support
+        std::shared_ptr<environment> get_current_environment() const { return environment_; }
+        string_symbolizer* get_string_symbolizer() const { return string_symbolizer_; }
+        
+        // Access to current argument metadata for reference parameter support
+        const std::vector<std::pair<uint64_t, std::shared_ptr<environment>>>& get_current_arg_metadata() const { 
+            return current_arg_metadata_; 
+        }
+        
+        // Execute a method AST with a given environment
+        script_value execute_method_ast(std::shared_ptr<function_decl> ast, 
+                                      std::shared_ptr<environment> method_env,
+                                      const std::vector<script_value>& args);
+        
     private:
         // Binary operator dispatch table for performance
         using binary_op_handler = script_value(interpreter::*)(const script_value&, const script_value&);
@@ -290,7 +348,7 @@ namespace jai {
         
         // script_string symbolizer for variable names
         std::unique_ptr<string_symbolizer> ownedSymbolizer_;  // Only used if we own it
-        string_symbolizer* stringSymbolizer_;  // Points to either owned or external
+        string_symbolizer* string_symbolizer_;  // Points to either owned or external
         
         // Current environment for variable storage
         std::shared_ptr<environment> environment_;
@@ -312,16 +370,20 @@ namespace jai {
             
             void push(script_value&& v) {
                 if (top_ >= values_.size()) {
-                    values_.resize(values_.size() == 0 ? 256 : values_.size() * 2);
+                    values_.emplace_back(std::move(v));
+                    top_++;
+                } else {
+                    values_[top_++] = std::move(v);
                 }
-                values_[top_++] = std::move(v);
             }
             
             void push(const script_value& v) {
                 if (top_ >= values_.size()) {
-                    values_.resize(values_.size() == 0 ? 256 : values_.size() * 2);
+                    values_.emplace_back(v);
+                    top_++;
+                } else {
+                    values_[top_++] = v;
                 }
-                values_[top_++] = v;
             }
             
             script_value& top() { 
@@ -362,8 +424,11 @@ namespace jai {
         std::vector<std::shared_ptr<environment>> environment_pool_;  // Pool of reusable environments
         size_t environment_pool_index_ = 0;  // Current pool position
         
-        // Type converter registry (non-owning pointer to engine's converters)
-        const type_converter_map* type_converters_ = nullptr;
+        // Class lookup callback for finding C++ classes
+        class_lookup_callback class_lookup_callback_;
+        
+        // Engine reference for script_value creation (weak reference to avoid circular dependency)
+        std::weak_ptr<engine> engine_ref_;
         
         // Helper to get the last evaluated value (inlined for performance)
         inline script_value pop_value() {
@@ -396,11 +461,11 @@ namespace jai {
         
         inline script_value to_numeric(const script_value& value) {
             if (value.is_int()) {
-                return script_value(static_cast<script_float>(value.as_int()));
+                return make_value(static_cast<script_float>(value.as_int()));
             } else if (value.is_float()) {
                 return value;
             } else if (value.is_bool()) {
-                return script_value(value.as_bool() ? 1.0 : 0.0);
+                return make_value(value.as_bool() ? 1.0 : 0.0);
             } else {
                 throw runtime_error("Cannot convert to numeric value");
             }
@@ -448,3 +513,5 @@ namespace jai {
     };
     
 } // namespace jai
+
+#endif // __JAISCRIPT_DETAIL_INTERPRETER_HPP__

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../core/engine.hpp"
-#include "../core/value.hpp"
-#include "../core/class_builder.hpp"
+#include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/value.hpp>
+#include <jaiscript/core/class_builder.hpp>
 #include <iostream>
 #include <sstream>
 #include <format>
@@ -193,9 +193,10 @@ namespace stdlib {
 
     // Register standard I/O functions with an engine
     inline void register_io_functions(engine& engine) {
+        auto eng_weak = engine.weak_from_this();
         // Register the special control types
-        make_class_builder<skip_newline_t>(engine, "skip_newline_t").build();
-        make_class_builder<skip_flush_t>(engine, "skip_flush_t").build();
+        class_builder<skip_newline_t>(engine, "skip_newline_t").build();
+        class_builder<skip_flush_t>(engine, "skip_flush_t").build();
         
         // Create shared instances that can be used as singletons
         auto skip_newline_ptr = std::make_shared<skip_newline_t>();
@@ -228,10 +229,10 @@ namespace stdlib {
         //   print("Line 1", skip_newline)             // Output: Line 1 (no newline)
         //   print("Debug: ", value, skip_flush)       // Output: Debug: <value> (no newline/flush)
         //
-        engine.add_variadic_function("print", [](const std::vector<script_value>& args) -> script_value {
+        engine.add_variadic_function("print", [&engine](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 std::cout << std::endl;
-                return script_value();
+                return script_value(std::monostate{}, engine.weak_from_this());
             }
             
             // Check if last argument is a control type
@@ -261,7 +262,7 @@ namespace stdlib {
                 } else if (should_flush) {
                     std::cout << std::flush;
                 }
-                return script_value();
+                return script_value(std::monostate{}, engine.weak_from_this());
             }
             
             if (effective_args == 1) {
@@ -272,7 +273,7 @@ namespace stdlib {
                 } else if (should_flush) {
                     std::cout << std::flush;
                 }
-                return script_value();
+                return script_value(std::monostate{}, engine.weak_from_this());
             }
             
             // Multiple arguments - check if first arg contains format placeholders
@@ -289,7 +290,7 @@ namespace stdlib {
                 } else if (should_flush) {
                     std::cout << std::flush;
                 }
-                return script_value();
+                return script_value(std::monostate{}, engine.weak_from_this());
             }
             
             // Has format specifiers - use format string logic
@@ -303,7 +304,7 @@ namespace stdlib {
             } else if (should_flush) {
                 std::cout << std::flush;
             }
-            return script_value(); // void return
+            return engine.make_null(); // void return
         });
         
         // format function - builds formatted strings
@@ -318,9 +319,9 @@ namespace stdlib {
         //   format("Hello", " ", "World")      // Returns: "Hello World"
         //   format("{} + {} = {}", 2, 3, 5)    // Returns: "2 + 3 = 5"
         //
-        engine.add_variadic_function("format", [](const std::vector<script_value>& args) -> script_value {
+        engine.add_variadic_function("format", [&engine](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
-                return script_value("");
+                return script_value("", engine.weak_from_this());
             }
             
             // Filter out control types (they don't make sense for format)
@@ -334,12 +335,12 @@ namespace stdlib {
             }
             
             if (filtered_args.empty()) {
-                return script_value("");
+                return script_value("", engine.weak_from_this());
             }
             
             if (filtered_args.size() == 1) {
                 // Single argument - return as-is, no format processing
-                return script_value(filtered_args[0].to_string());
+                return script_value(filtered_args[0].to_string(), engine.weak_from_this());
             }
             
             // Multiple arguments - check if first arg contains format placeholders
@@ -352,13 +353,13 @@ namespace stdlib {
                 for (const auto& arg : filtered_args) {
                     result += arg.to_string();
                 }
-                return script_value(result);
+                return script_value(result, engine.weak_from_this());
             }
             
             // Has format specifiers - use format string logic
             std::string result = process_format_string(first_str, filtered_args, 1);
             
-            return script_value(result);
+            return script_value(result, engine.weak_from_this());
         });
         
         // to_string function - converts value to string
@@ -380,7 +381,6 @@ namespace stdlib {
                 case script_value_type::jai_function_type: return "function";
                 case script_value_type::jai_object_type: return "object";
                 case script_value_type::jai_reference_type: return "reference";
-                case script_value_type::jai_shared_ptr_type: return "shared_ptr";
                 case script_value_type::jai_weak_ptr_type: return "weak_ptr";
                 default: return "unknown";
             }

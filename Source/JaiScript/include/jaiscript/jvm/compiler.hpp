@@ -1,9 +1,9 @@
 #pragma once
 
 #include "bytecode.hpp"
-#include "../detail/ast.hpp"
-#include "../detail/lexer.hpp"
-#include "../detail/parser.hpp"
+#include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/lexer.hpp>
+#include <jaiscript/detail/parser.hpp>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>

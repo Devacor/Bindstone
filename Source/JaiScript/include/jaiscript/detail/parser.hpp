@@ -2,7 +2,7 @@
 
 #include "lexer.hpp"
 #include "ast.hpp"
-#include "../core/types.hpp"
+#include <jaiscript/core/types.hpp>
 #include <vector>
 #include <memory>
 #include <optional>

@@ -888,37 +888,36 @@ namespace MV {
 		}
 	}
 
-	Shader* Draw2D::loadShaderCode(const std::string &a_id, const std::string &a_vertexShaderCode, const std::string &a_fragmentShaderCode) {
+	std::shared_ptr<Shader> Draw2D::loadShaderCode(const std::string &a_id, const std::string &a_vertexShaderCode, const std::string &a_fragmentShaderCode) {
 		bool makeDefault = shaders.empty();
 		auto programId = loadShaderGetProgramId(a_vertexShaderCode, a_fragmentShaderCode);
 
-		auto emplaceResult = shaders.emplace(std::make_pair(a_id, Shader(a_id, programId, headless())));
-		MV::require<ResourceException>(emplaceResult.second, "Failed to insert shader to map: ", a_id);
-		Shader* shaderPtr = &emplaceResult.first->second;
+		auto shader = std::make_shared<Shader>(a_id, programId, headless());
+		shaders[a_id] = shader;
 
 		if (makeDefault) {
-			defaultShaderPtr = shaderPtr;
+			defaultShaderPtr = shader;
 		}
 
-		return shaderPtr;
+		return shader;
 	}
 
 	void Draw2D::reloadShaders() {
 		if (!headless()) {
-			for (auto&& shader : shaders) {
+			for (auto&& [id, shader] : shaders) {
 				try {
-					if (shader.second.vertexShaderFile.empty() || shader.second.fragmentShaderFile.empty()) { continue; }
+					if (shader->vertexShaderFile.empty() || shader->fragmentShaderFile.empty()) { continue; }
 
-					std::string vertexShaderCode = fileContents(shader.second.vertexShaderFile);
+					std::string vertexShaderCode = fileContents(shader->vertexShaderFile);
 					if (vertexShaderCode.empty()) { continue; }
 
-					std::string fragmentShaderCode = fileContents(shader.second.fragmentShaderFile);
+					std::string fragmentShaderCode = fileContents(shader->fragmentShaderFile);
 					if (fragmentShaderCode.empty()) { continue; }
                     
 					auto newId = loadShaderGetProgramId(vertexShaderCode, fragmentShaderCode);
-					glDeleteProgram(shader.second.programId);
-					shader.second.programId = newId;
-					shader.second.initialize();
+					glDeleteProgram(shader->programId);
+					shader->programId = newId;
+					shader->initialize();
 				} catch (ResourceException &e) {
 					std::cerr << "Failed to reload shader: " << e.what() << std::endl;
 				}
@@ -962,7 +961,7 @@ namespace MV {
 		loadShader(MV::COLOR_PICKER_ID, "Shaders/default.vert", "Shaders/colorPicker.frag");
 	}
 
-	Shader* Draw2D::loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename) {
+	std::shared_ptr<Shader> Draw2D::loadShader(const std::string &a_id, const std::string &a_vertexShaderFilename, const std::string &a_fragmentShaderFilename) {
 		auto found = shaders.find(a_id);
 		if(found == shaders.end()){
 			std::string vertexShaderCode = fileContents(a_vertexShaderFilename);
@@ -979,16 +978,15 @@ namespace MV {
                 e.append("ShaderID: " + a_id);
                 throw;
             }
-            auto emplaceResult = shaders.emplace(std::make_pair(a_id, Shader(a_id, programId, headless(), a_vertexShaderFilename, a_fragmentShaderFilename)));
-            MV::require<ResourceException>(emplaceResult.second, "Failed to insert shader to map: ", a_id);
-            Shader* shaderPtr = &emplaceResult.first->second;
+            auto shader = std::make_shared<Shader>(a_id, programId, headless(), a_vertexShaderFilename, a_fragmentShaderFilename);
+            shaders[a_id] = shader;
                 
             if (makeDefault) {
-                defaultShaderPtr = shaderPtr;
+                defaultShaderPtr = shader;
             }
-            return shaderPtr;
+            return shader;
 		} else {
-			return &found->second;
+			return found->second;
 		}
 	}
 
@@ -998,19 +996,19 @@ namespace MV {
 		return found != shaders.end();
 	}
 
-	Shader* Draw2D::getShader(const std::string &a_id) {
+	std::shared_ptr<Shader> Draw2D::getShader(const std::string &a_id) {
 		auto found = shaders.find(a_id);
 		MV::require<RangeException>(found != shaders.end(), "Shader not loaded: ", a_id);
-		return &found->second;
+		return found->second;
 	}
 
-	Shader* Draw2D::defaultShader(const std::string &a_id) {
+	std::shared_ptr<Shader> Draw2D::defaultShader(const std::string &a_id) {
 		defaultShaderPtr = getShader(a_id);
 		MV::require<MV::PointerException>(defaultShaderPtr != nullptr, "No default shader.");
 		return defaultShaderPtr;
 	}
 
-	Shader* Draw2D::defaultShader() const {
+	std::shared_ptr<Shader> Draw2D::defaultShader() const {
 		MV::require<PointerException>(defaultShaderPtr != nullptr, "No default shader.");
 		return defaultShaderPtr;
 	}
@@ -1191,6 +1189,60 @@ namespace MV {
 			}
 		}
 		return false;
+	}
+
+	void Material::apply(Shader& shader, Scene::Drawable& drawable) const {
+		// Apply default textures
+		for (const auto& [slot, tex] : defaultTextures) {
+			if (tex) {
+				shader.set("texture" + std::to_string(slot), tex, slot, false);
+			}
+		}
+		
+		// Call user-defined apply function
+		if (applyFunction) {
+			applyFunction(shader, drawable);
+		}
+	}
+
+	std::shared_ptr<Material> Draw2D::loadMaterial(const std::string& a_id, const std::string& a_shaderProgramId) {
+		if (!hasShader(a_shaderProgramId)) {
+			error("loadMaterial: Shader program not found: ", a_shaderProgramId);
+			return nullptr;
+		}
+		
+		auto material = std::make_shared<Material>(a_id, a_shaderProgramId);
+		materials[a_id] = material;
+		return material;
+	}
+
+	bool Draw2D::hasMaterial(const std::string& a_id) const {
+		return materials.find(a_id) != materials.end();
+	}
+
+	std::shared_ptr<Material> Draw2D::getMaterial(const std::string& a_id) {
+		auto it = materials.find(a_id);
+		if (it != materials.end()) {
+			return it->second;
+		}
+		return nullptr;
+	}
+
+	std::shared_ptr<const Material> Draw2D::getMaterial(const std::string& a_id) const {
+		auto it = materials.find(a_id);
+		if (it != materials.end()) {
+			return it->second;
+		}
+		return nullptr;
+	}
+
+	std::shared_ptr<Material> Draw2D::defaultMaterial() const {
+		return defaultMaterialPtr;
+	}
+
+	std::shared_ptr<Material> Draw2D::defaultMaterial(const std::string& a_id) {
+		defaultMaterialPtr = getMaterial(a_id);
+		return defaultMaterialPtr;
 	}
 
 }

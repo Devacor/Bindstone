@@ -1,8 +1,8 @@
 #pragma once
 
 #include "bytecode.hpp"
-#include "../core/value.hpp"
-#include "../detail/interpreter.hpp"
+#include <jaiscript/core/value.hpp>
+#include <jaiscript/detail/interpreter.hpp>
 #include <memory>
 #include <unordered_map>
 #include <functional>
@@ -48,6 +48,9 @@ namespace jvm {
         
         // Type converter support (for engine integration)
         void set_type_converters(const std::unordered_map<std::string, std::function<script_value(const void*)>>* converters);
+        
+        // Engine reference for script_value creation (enables shared conversion registry)
+        void set_engine_reference(std::weak_ptr<engine> engine_ref);
         
         // Performance optimization flags
         void set_has_custom_numeric_ops(bool value);

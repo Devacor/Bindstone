@@ -1,105 +1,52 @@
-╔════════════════════════════════════════╗
-║       JaiScript Foundry Tests          ║
-╚════════════════════════════════════════╝
+=== FOUNDRY TEST RESULTS ===
 
-╔══ Auto Container Conversion Tests ══╗
-  auto_vector_registration ... ✓ (8772μs)
-  auto_map_string_registration ... ✓ (760μs)
-  auto_map_int_registration ... ✓ (430μs)
-  nested_auto_registration ... ✓ (284μs)
-  non_default_constructible_type ... ✓ (290μs)
-  complex_nested_containers ... ✓ (572μs)
-  custom_type_with_custom_methods ... ✓ (442μs)
-  inheritance_and_containers ... ✓ (509μs)
+CORE TESTS:
+  auto_container_conversion_tests: PASS
+  container_conversion_tests: PASS
+  conversion_tests: PASS
+  engine_tests: PASS
+  enhanced_conversion_tests: PASS
+  lexer_tests: PASS
+  map_conversion_tests: PASS
+  parser_tests: PASS
+  script_container_tests: PASS
+  test_bound_debug: PASS
+  test_conversion_isolation: PASS
+  test_deep_copy: PASS
+  test_deep_copy_comprehensive: PASS
+  test_object_deep_copy: PASS
+  type_conversion_tests: PASS
+  type_info_tests: PASS
+  value_semantics_tests: PASS
+  vector_conversion_tests: PASS
+  weak_ptr_tests: PASS
 
-  Summary: 8 passed
+LANGUAGE TESTS:
+  array_tests: PASS
+  assignment_tests: PASS
+  control_flow_tests: PASS
+  exception_handling_tests: PASS
+  function_tests: PASS
+  hot_reload_tests: PASS
+  map_tests: PASS
+  member_access_tests: PASS
+  operator_tests: PASS
+  parser_debug_test: PASS
+  script_class_tests: PASS
+  test_cat_class_syntax: PASS
+  test_constructor_syntax_comprehensive: PASS
+  test_function_return_types: PASS
+  test_map_constructor_syntax: PASS
+  test_parser_constructor_syntax: PASS
+  test_template_parameters: PASS
+  vm_tests: PASS
 
-╔══ Container Conversion Tests ══╗
-  large_vector_performance ...     Large vector (10k elements) conversion time: 2845μs
-✓ (133254μs)
-  vector_int_basic ... ✓ (422μs)
-  vector_double_conversion ... ✓ (171μs)
-  vector_string_operations ... ✓ (172μs)
-  vector_return_values ... ✓ (134μs)
-  nested_vectors ... ✓ (216μs)
-  map_string_int_basic ... ✓ (189μs)
-  map_return_values ... ✗
-    Error: Non-engine-aware map conversion is no longer supported. Use convert_stdmap_to_script_map(map, engine) instead.
-  map_int_string ...     SKIPPED: Map literal parsing issue
-✓ (147μs)
-  empty_containers ... ✓ (359μs)
-  large_vector_performance ... About to call sum_large with array size: 10000
-    Array size: 10000
-    First few elements in large_array: 0 1 2 3 4 
-    Testing direct sum_large([1,2,3,4,5])...
-    sum_large called with vector size: 5
-    Vector address: 0x7ffd603eacf0
-    First few elements: 1 2 3 4 5 
-    Direct call result: 15
-    sum_large called with vector size: 10000
-    Vector address: 0x7ffd603eacf0
-    Result: 49995000 (expected: 49995000)
-    Large vector (10k elements) conversion time: 2639μs
-✓ (122790μs)
-  type_mismatch_errors ... ✓ (1153μs)
-  vector_of_maps ... ✓ (276μs)
-  map_of_vectors ... ✓ (251μs)
-  custom_type_vectors ... ✓ (353μs)
-  performance_comparison ...     Performance comparison (100 iterations, 1000 elements):
-      Variadic version: 4433μs
-      Typed version: 28771μs
-      Speedup: 0.154079x
-✓ (45073μs)
+INTEGRATION TESTS:
+  class_builder_tests: PASS
+  test_constructor_debug: PASS
+  test_shared_ptr_conversion: PASS
+  test_shared_ptr_debug: PASS
 
-  Summary: 15 passed, 1 failed
-
-╔══ Script Value Conversions ══╗
-  basic_type_conversions ... ✓ (224μs)
-  array_to_vector_conversions ... ✓ (259μs)
-  map_to_stdmap_conversions ... ✓ (157μs)
-  vector_parameter_binding_attempt ...     ✓ Vector<int> parameter binding works!
-✓ (166μs)
-  map_parameter_binding_attempt ...     ✓ Map<string, int> parameter binding works!
-✓ (198μs)
-  script_value_vector_compatibility ...     ✓ Vector<script_value> parameter binding works!
-✓ (162μs)
-  script_value_map_compatibility ...     ✓ Map<script_value, script_value> parameter binding works!
-✓ (176μs)
-  bound_class_conversions ...     Object type: 8
-    Is object: 1
-✓ (389μs)
-
-  Summary: 8 passed
-
-╔══ Core Engine ══╗
-  engine_creation ... ✓ (84μs)
-  simple_arithmetic ... ✓ (90μs)
-  variable_definition_and_access ... ✓ (101μs)
-  global_variable_persistence ... ✓ (93μs)
-  function_registration ... ✓ (102μs)
-  multiple_executions ... ✓ (171μs)
-  error_handling ... ✓ (1104μs)
-  script_defined_functions ... ✓ (210μs)
-  string_operations ... ✓ (102μs)
-  boolean_operations ... ✓ (131μs)
-  comparison_operators ... ✓ (145μs)
-  null_handling ... ✓ (135μs)
-  implicit_return ... ✓ (88μs)
-  complex_expression ... ✓ (118μs)
-
-  Summary: 14 passed
-
-╔══ Enhanced Conversion System ══╗
-  standard_vector_conversions ...     ✓ Vector<int> conversion works!
-    ✓ Vector<double> with mixed types works!
-    ✓ Vector<string> conversion works!
-✓ (340μs)
-  standard_map_conversions ...     ✓ Map<string, int> conversion works!
-    ✓ Map<string, double> with mixed types works!
-    ✗ Map return value failed: Non-engine-aware map conversion is no longer supported. Use convert_stdmap_to_script_map(map, engine) instead.
-✓ (1085μs)
-  custom_type_conversions ...     ✗ Custom Point conversion failed: No viable candidates for function call
-    ✓ Vector of custom types works!
-    ✓ Custom type return value works!
-✓ (395μs)
-  specific_type_registration ... timeout: the monitored command dumped core
+SUMMARY:
+  Passed: 41
+  Failed: 0

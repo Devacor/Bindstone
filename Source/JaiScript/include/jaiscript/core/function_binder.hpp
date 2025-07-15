@@ -398,43 +398,31 @@ class engine;
             }
         };
         
-        // Specialization for bound_map<K,V>& - zero-copy reference
-        template<typename K, typename V>
-        struct value_converter<bound_map<K, V>&> {
-            static bound_map<K, V>& from(const script_value& v, engine* eng) {
-                if (!v.is_map()) {
-                    throw runtime_error("Cannot convert non-map to bound_map<K,V>&");
-                }
-                // Use thread_local to store the wrapper
-                thread_local bound_map<K, V> wrapper(const_cast<script_value&>(v).as_map(), get_engine_weak_ptr(eng));
-                return wrapper;
-            }
-            
-            static script_value to(bound_map<K, V>& map, engine* eng) {
-                // No conversion needed - the map is already managing a script_value
-                return script_value(); // This will be handled by the function binder
-            }
-        };
+        // Note: bound_map<K,V>& and const bound_map<K,V>& are handled directly
+        // in the function binder's call_with_bound_maps functions to ensure
+        // proper stack-based lifetime management without thread_local storage.
         
-        // Specialization for const bound_map<K,V>& - zero-copy const reference
+        // Specialization for std::map<K,V> return values - converts to script map
         template<typename K, typename V>
-        struct value_converter<const bound_map<K, V>&> {
-            static const bound_map<K, V>& from(const script_value& v, engine* eng) {
+        struct value_converter<std::map<K, V>> {
+            static std::map<K, V> from(const script_value& v, engine* eng) {
                 if (!v.is_map()) {
-                    throw runtime_error("Cannot convert non-map to const bound_map<K,V>&");
+                    throw runtime_error("Cannot convert non-map to std::map<K,V>");
                 }
-                // Use thread_local to store the wrapper
-                thread_local bound_map<K, V> wrapper(const_cast<script_value&>(v).as_map(), get_engine_weak_ptr(eng));
-                return wrapper;
+                // Convert script map to std::map
+                std::map<K, V> result;
+                auto& script_map = v.as_map();
+                for (const auto& [key, value] : script_map) {
+                    K converted_key = value_converter<K>::from(key, eng);
+                    V converted_value = value_converter<V>::from(value, eng);
+                    result[converted_key] = converted_value;
+                }
+                return result;
             }
             
-            static script_value to(const bound_map<K, V>& map, engine* eng) {
-                // If the map owns its data, return the owned value
-                if (map.is_owned()) {
-                    return map.as_script_value();
-                }
-                // Otherwise, we need to create a new script_value with the map data
-                return script_value(map.to_map());
+            static script_value to(const std::map<K, V>& stdmap, engine* eng) {
+                // Use the engine-aware conversion function
+                return conversions::convert_stdmap_to_script_map(stdmap, eng);
             }
         };
         
@@ -622,12 +610,85 @@ class engine;
         
         template<typename ArgsTuple, typename F, size_t... Is>
         static void call_with_reference_support_void(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
-            func(process_argument<std::tuple_element_t<Is, ArgsTuple>>(args[Is], Is, eng)...);
+            // Create bound_map objects on the stack for zero-copy semantics
+            // This approach supports recursion naturally
+            call_with_bound_maps_void<ArgsTuple, F, Is...>(std::forward<F>(func), args, eng);
+        }
+        
+        // Helper to create bound_map objects on stack and call void function
+        template<typename ArgsTuple, typename F, size_t... Is>
+        static void call_with_bound_maps_void(F&& func, const std::vector<script_value>& args, engine* eng) {
+            // Create tuple of arguments, handling bound_map types specially
+            auto arg_tuple = std::make_tuple(create_argument<std::tuple_element_t<Is, ArgsTuple>>(args[Is], eng)...);
+            
+            // Call function with unpacked arguments
+            std::apply(std::forward<F>(func), arg_tuple);
         }
         
         template<typename R, typename ArgsTuple, typename F, size_t... Is>
         static R call_with_reference_support_non_void(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
-            return func(process_argument<std::tuple_element_t<Is, ArgsTuple>>(args[Is], Is, eng)...);
+            // Create bound_map objects on the stack for zero-copy semantics
+            // This approach supports recursion naturally
+            return call_with_bound_maps<R, ArgsTuple, F, Is...>(std::forward<F>(func), args, eng);
+        }
+        
+        // Helper trait to detect bound_map types
+        template<typename T>
+        struct is_bound_map_ref : std::false_type {};
+        
+        template<typename K, typename V>
+        struct is_bound_map_ref<bound_map<K, V>&> : std::true_type {
+            using key_type = K;
+            using value_type = V;
+        };
+        
+        template<typename K, typename V>
+        struct is_bound_map_ref<const bound_map<K, V>&> : std::true_type {
+            using key_type = K;
+            using value_type = V;
+        };
+        
+        // Helper to create bound_map objects on stack and call function
+        template<typename R, typename ArgsTuple, typename F, size_t... Is>
+        static R call_with_bound_maps(F&& func, const std::vector<script_value>& args, engine* eng) {
+            // Create tuple of arguments, handling bound_map types specially
+            auto arg_tuple = std::make_tuple(create_argument<std::tuple_element_t<Is, ArgsTuple>>(args[Is], eng)...);
+            
+            // Call function with unpacked arguments
+            return std::apply(std::forward<F>(func), arg_tuple);
+        }
+        
+        // Create individual arguments, handling bound_map types specially
+        template<typename T>
+        static auto create_argument(const script_value& arg, engine* eng) {
+            if constexpr (is_bound_map_ref<T>::value) {
+                using K = typename is_bound_map_ref<T>::key_type;
+                using V = typename is_bound_map_ref<T>::value_type;
+                
+                if (!arg.is_map()) {
+                    throw runtime_error("Cannot convert non-map to bound_map<K,V>&");
+                }
+                // Create bound_map object on stack - zero-copy reference to script_map
+                return bound_map<K, V>(const_cast<script_value&>(arg).as_map(), get_engine_weak_ptr(eng));
+            } else if constexpr (std::is_reference_v<T>) {
+                // For reference parameters, work with the dereferenced value
+                using base_type = std::remove_cv_t<std::remove_reference_t<T>>;
+                
+                // Get the actual value (deref handles references automatically)
+                const script_value& actual_arg = arg.deref();
+                
+                // For custom classes, get shared_ptr and return reference to the object
+                if constexpr (std::is_class_v<base_type> && !std::is_same_v<base_type, std::string>) {
+                    auto ptr = actual_arg.as<std::shared_ptr<base_type>>();
+                    return std::ref(*ptr);
+                } else {
+                    // For built-in types, use the non-const as<T&>() method
+                    return const_cast<script_value&>(actual_arg).as<T>();
+                }
+            } else {
+                // For value parameters, use normal conversion which creates a copy
+                return detail::value_converter<T>::from(arg, eng);
+            }
         }
         
         // Process individual arguments

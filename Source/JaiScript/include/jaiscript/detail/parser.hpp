@@ -63,6 +63,7 @@ namespace jai {
         statement_ptr break_statement();
         statement_ptr continue_statement();
         statement_ptr try_statement();
+        statement_ptr switch_statement();
         
         // expression parsing (precedence climbing)
         expression_ptr expression();
@@ -98,6 +99,9 @@ namespace jai {
         
         // Helper for parsing > in generic contexts (handles >> token splitting)
         void consume_greater_in_generic(const std::string& message);
+        
+        // Context tracking for context-sensitive parsing
+        bool in_switch_case_ = false;  // Track if we're inside a switch case
         
         // Helper to check if a type name is registered for template parsing
         bool is_registered_template_type(const std::string& type_name) const;

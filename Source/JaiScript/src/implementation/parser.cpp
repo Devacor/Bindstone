@@ -1138,6 +1138,14 @@ statement_ptr parser::statement() {
     if (match(token_type::break_keyword)) return break_statement();
     if (match(token_type::continue_keyword)) return continue_statement();
     if (match(token_type::try_keyword)) return try_statement();
+    if (match(token_type::switch_keyword)) return switch_statement();
+    
+    // Check for fallthrough keyword only if we're inside a switch case
+    if (in_switch_case_ && match(token_type::fallthrough_keyword)) {
+        auto fallthrough = std::make_shared<fallthrough_stmt>(previous().location);
+        consume(token_type::semicolon, "Expected ';' after 'fallthrough'");
+        return fallthrough;
+    }
     
     return expression_statement();
 }
@@ -1548,6 +1556,105 @@ void parser::consume_greater_in_generic(const std::string& message) {
 
 bool parser::is_registered_template_type(const std::string& type_name) const {
     return registered_template_types_.find(type_name) != registered_template_types_.end();
+}
+
+statement_ptr parser::switch_statement() {
+    token switchToken = previous();
+    
+    consume(token_type::left_paren, "Expected '(' after 'switch'");
+    expression_ptr condition = expression();
+    consume(token_type::right_paren, "Expected ')' after switch condition");
+    
+    consume(token_type::left_brace, "Expected '{' after switch condition");
+    
+    auto switchStmt = std::make_shared<switch_stmt>(switchToken.location, condition);
+    
+    // Parse cases and default
+    while (!check(token_type::right_brace) && !is_at_end()) {
+        if (match(token_type::case_keyword)) {
+            // Parse case
+            expression_ptr caseValue = expression();
+            consume(token_type::colon, "Expected ':' after case value");
+            
+            auto caseStmt = std::make_shared<case_stmt>(previous().location, caseValue);
+            
+            // Set context for parsing case body
+            bool oldInSwitchCase = in_switch_case_;
+            in_switch_case_ = true;
+            
+            // Parse case body until we hit another case, default, or end of switch
+            while (!check(token_type::case_keyword) && !check(token_type::default_keyword) && 
+                   !check(token_type::right_brace) && !is_at_end()) {
+                
+                // Check for fallthrough as the last statement
+                if (check(token_type::fallthrough_keyword)) {
+                    auto fallthroughStmt = std::make_shared<fallthrough_stmt>(peek().location);
+                    advance(); // consume 'fallthrough'
+                    consume(token_type::semicolon, "Expected ';' after 'fallthrough'");
+                    caseStmt->body.push_back(fallthroughStmt);
+                    caseStmt->has_fallthrough = true;
+                    break; // fallthrough must be the last statement in a case
+                }
+                
+                // Check for break statement (it's allowed but redundant)
+                if (check(token_type::break_keyword)) {
+                    advance(); // consume 'break'
+                    consume(token_type::semicolon, "Expected ';' after 'break'");
+                    // Don't add break to the body since it's implicit
+                    break;
+                }
+                
+                // Parse regular statement
+                caseStmt->body.push_back(statement());
+            }
+            
+            // Restore context
+            in_switch_case_ = oldInSwitchCase;
+            
+            switchStmt->cases.push_back(caseStmt);
+            
+        } else if (match(token_type::default_keyword)) {
+            // Parse default
+            if (switchStmt->default_case) {
+                error("Multiple default labels in switch statement", previous());
+            }
+            
+            consume(token_type::colon, "Expected ':' after 'default'");
+            
+            auto defaultStmt = std::make_shared<default_stmt>(previous().location);
+            
+            // Set context for parsing default body
+            bool oldInSwitchCase = in_switch_case_;
+            in_switch_case_ = true;
+            
+            // Parse default body
+            while (!check(token_type::case_keyword) && !check(token_type::default_keyword) && 
+                   !check(token_type::right_brace) && !is_at_end()) {
+                
+                // Check for break statement (allowed but redundant)
+                if (check(token_type::break_keyword)) {
+                    advance(); // consume 'break'
+                    consume(token_type::semicolon, "Expected ';' after 'break'");
+                    break;
+                }
+                
+                defaultStmt->body.push_back(statement());
+            }
+            
+            // Restore context
+            in_switch_case_ = oldInSwitchCase;
+            
+            switchStmt->default_case = defaultStmt;
+            
+        } else {
+            error("Expected 'case' or 'default' in switch statement", peek());
+            advance(); // Try to recover
+        }
+    }
+    
+    consume(token_type::right_brace, "Expected '}' after switch body");
+    
+    return switchStmt;
 }
 
 } // namespace jai

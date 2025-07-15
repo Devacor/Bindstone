@@ -225,10 +225,14 @@ namespace jai {
         // script_value extraction (inlined for performance)
         inline script_int as_int() const {
             const script_value& val = deref();
-            if (val.type() != script_value_type::jai_int_type) {
-                throw runtime_error("script_value is not an integer");
+            if (val.type() == script_value_type::jai_int_type) {
+                return std::get<script_int>(val.storage_);
+            } else if (val.type() == script_value_type::jai_float_type) {
+                // Float to int conversion with truncation (like C++)
+                return static_cast<script_int>(std::get<script_float>(val.storage_));
+            } else {
+                throw runtime_error("script_value is not an integer or float");
             }
-            return std::get<script_int>(val.storage_);
         }
         
         inline script_float as_float() const {
@@ -329,16 +333,16 @@ namespace jai {
                     } else if constexpr (std::is_same_v<base_type, std::map<script_value, script_value>>) {
                         return as_map();     // as_map() already returns const std::map<script_value, script_value>&
                     } else {
-                        // For user-defined types stored as objects
-                        if (type_info_ && type_info_->is_object()) {
-                            auto holder = std::get<std::shared_ptr<object_holder>>(storage_);
-                            // Get the void* from the holder
-                            auto objectPtr = holder->data;
-                            // Try to cast to the requested type
-                            if (auto typedPtr = std::static_pointer_cast<base_type>(objectPtr)) {
-                                return *typedPtr;
+                        // For user-defined types stored as objects - use the same logic as by-value extraction
+                        if (type() == script_value_type::jai_object_type) {
+                            // First try to get shared_ptr<base_type> and dereference it
+                            try {
+                                auto ptr = as<std::shared_ptr<base_type>>();
+                                return *ptr;
+                            } catch (const std::exception&) {
+                                // If shared_ptr extraction fails, this might not be the right type
+                                throw runtime_error("Cannot extract const reference to custom type - type mismatch");
                             }
-                            throw runtime_error("Object type mismatch");
                         }
                         throw runtime_error("Unsupported type for const reference extraction");
                     }
@@ -379,7 +383,7 @@ namespace jai {
             }
             // Allow common C++ type conversions with bounds checking
             else if constexpr (std::is_same_v<T, int>) {
-                script_int val = as_int();
+                script_int val = as_int();  // Now handles int and float->int conversion
                 if (val < std::numeric_limits<int>::min() || val > std::numeric_limits<int>::max()) {
                     throw runtime_error("Integer value out of range for int");
                 }

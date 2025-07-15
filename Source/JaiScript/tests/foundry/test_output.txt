@@ -3,86 +3,88 @@
 ╚════════════════════════════════════════╝
 
 ╔══ Auto Container Conversion Tests ══╗
-  auto_vector_registration ... ✓ (3932μs)
-  auto_map_string_registration ... ✓ (400μs)
-  auto_map_int_registration ... ✓ (365μs)
-  nested_auto_registration ... ✓ (261μs)
-  non_default_constructible_type ... ✓ (293μs)
-  complex_nested_containers ... ✓ (593μs)
-  custom_type_with_custom_methods ... ✓ (517μs)
-  inheritance_and_containers ... ✓ (499μs)
+  auto_vector_registration ... ✓ (10981μs)
+  auto_map_string_registration ... ✓ (857μs)
+  auto_map_int_registration ... ✓ (497μs)
+  nested_auto_registration ... ✓ (376μs)
+  non_default_constructible_type ... ✓ (1319μs)
+  complex_nested_containers ... ✓ (694μs)
+  custom_type_with_custom_methods ... ✓ (999μs)
+  inheritance_and_containers ... ✓ (703μs)
 
   Summary: 8 passed
 
 ╔══ Container Conversion Tests ══╗
-  large_vector_performance ...     Large vector (10k elements) conversion time: 395μs
-✓ (118766μs)
-  vector_int_basic ... ✓ (355μs)
-  vector_double_conversion ... ✓ (227μs)
-  vector_string_operations ... ✓ (196μs)
-  vector_return_values ... ✓ (201μs)
-  nested_vectors ... ✓ (316μs)
-  map_string_int_basic ... ✓ (225μs)
-  map_return_values ... ✓ (147μs)
+  large_vector_performance ...     Large vector (10k elements) conversion time: 3322μs
+✓ (134796μs)
+  vector_int_basic ... ✓ (572μs)
+  vector_double_conversion ... ✓ (293μs)
+  vector_string_operations ... ✓ (273μs)
+  vector_return_values ... ✓ (278μs)
+  nested_vectors ... ✓ (344μs)
+  map_string_int_basic ... ✓ (296μs)
+  map_return_values ... ✓ (216μs)
   map_int_string ...     SKIPPED: Map literal parsing issue
-✓ (167μs)
-  empty_containers ... ✓ (297μs)
+✓ (279μs)
+  empty_containers ... ✓ (390μs)
   large_vector_performance ... About to call sum_large with array size: 10000
     Array size: 10000
     First few elements in large_array: 0 1 2 3 4 
     Testing direct sum_large([1,2,3,4,5])...
     sum_large called with vector size: 5
-    Vector address: 0x72b44fcf1868
+    Vector address: 0x7ffdd0d45450
     First few elements: 1 2 3 4 5 
     Direct call result: 15
     sum_large called with vector size: 10000
-    Vector address: 0x72b44fcf1868
+    Vector address: 0x7ffdd0d45450
     Result: 49995000 (expected: 49995000)
-    Large vector (10k elements) conversion time: 488μs
-✓ (118899μs)
-  type_mismatch_errors ... ✓ (2042μs)
-  vector_of_maps ... ✓ (255μs)
-  map_of_vectors ... ✓ (323μs)
-  custom_type_vectors ... ✓ (404μs)
+    Large vector (10k elements) conversion time: 3242μs
+✓ (134685μs)
+  type_mismatch_errors ... ✓ (5590μs)
+  vector_of_maps ... ✓ (436μs)
+  map_of_vectors ... ✓ (356μs)
+  custom_type_vectors ... ✓ (565μs)
   performance_comparison ...     Performance comparison (100 iterations, 1000 elements):
-      Variadic version: 4388μs
-      Typed version: 5729μs
-      Speedup: 0.765928x
-✓ (22580μs)
+      Variadic version: 4657μs
+      Typed version: 32113μs
+      Speedup: 0.145019x
+✓ (52135μs)
 
   Summary: 16 passed
 
 ╔══ Script Value Conversions ══╗
-  basic_type_conversions ... ✓ (263μs)
-  array_to_vector_conversions ... ✓ (321μs)
-  map_to_stdmap_conversions ... ✓ (213μs)
+  basic_type_conversions ... ✓ (394μs)
+  array_to_vector_conversions ... ✓ (550μs)
+  map_to_stdmap_conversions ... ✓ (335μs)
   vector_parameter_binding_attempt ...     ✓ Vector<int> parameter binding works!
-✓ (219μs)
+✓ (309μs)
   map_parameter_binding_attempt ...     ✓ Map<string, int> parameter binding works!
-✓ (240μs)
+✓ (305μs)
   script_value_vector_compatibility ...     ✓ Vector<script_value> parameter binding works!
-✓ (212μs)
+✓ (267μs)
   script_value_map_compatibility ...     ✓ Map<script_value, script_value> parameter binding works!
-✓ (209μs)
-  bound_class_conversions ... ✓ (408μs)
+✓ (291μs)
+  bound_class_conversions ...     Object type: 8
+    Is object: 1
+✓ (929μs)
 
   Summary: 8 passed
 
 ╔══ Core Engine ══╗
-  engine_creation ... ✓ (83μs)
-  simple_arithmetic ... ✓ (112μs)
-  variable_definition_and_access ... ✓ (180μs)
-  global_variable_persistence ... ✓ (152μs)
-  function_registration ... ✓ (160μs)
-  multiple_executions ... ✓ (206μs)
-  error_handling ... ✓ (275μs)
-  script_defined_functions ... ✓ (210μs)
-  string_operations ... ✓ (117μs)
-  boolean_operations ... ✓ (192μs)
-  comparison_operators ... ✓ (173μs)
-  null_handling ... ✓ (163μs)
-  implicit_return ... ✓ (107μs)
-  complex_expression ... ✓ (144μs)
+  engine_creation ... ✓ (168μs)
+  simple_arithmetic ... ✓ (198μs)
+  variable_definition_and_access ... ✓ (214μs)
+  global_variable_persistence ... ✓ (201μs)
+  function_registration ... ✓ (269μs)
+  multiple_executions ... ✓ (292μs)
+  error_handling ... ✓ (675μs)
+  script_defined_functions ... ✓ (293μs)
+  string_operations ... ✓ (209μs)
+  boolean_operations ... ✓ (241μs)
+  comparison_operators ... ✓ (253μs)
+  null_handling ... ✓ (239μs)
+  implicit_return ... ✓ (182μs)
+  complex_expression ... ✓ (246μs)
 
   Summary: 14 passed
 
@@ -90,406 +92,13 @@
   standard_vector_conversions ...     ✓ Vector<int> conversion works!
     ✓ Vector<double> with mixed types works!
     ✓ Vector<string> conversion works!
-✓ (366μs)
+✓ (483μs)
   standard_map_conversions ...     ✓ Map<string, int> conversion works!
     ✓ Map<string, double> with mixed types works!
     ✓ Map return value works!
-✓ (363μs)
-  custom_type_conversions ...     ✗ Custom Point conversion failed: No matching overload found for function 'point_distance' with 1 arguments
-    ✗ Vector of custom types failed: Cannot extract custom type by value from non-object
+✓ (450μs)
+  custom_type_conversions ...     ✓ Custom Point conversion works!
+    ✓ Vector of custom types works!
     ✓ Custom type return value works!
-✓ (1093μs)
-  specific_type_registration ...     ✓ Specific type registration works!
-✓ (275μs)
-  int64_downconversion_bounds_checking ...     ✓ Normal range values work!
-    ✓ Out-of-range bounds checking works: Integer value out of range for int
-✓ (232μs)
-  mixed_type_array_conversions ...     ✓ Mixed int/float to double conversion works!
-    ✗ Mixed int/bool conversion failed: script_value is not a boolean
-✓ (322μs)
-
-  Summary: 6 passed
-
-╔══ Lexer Tests ══╗
-  empty_input ... ✓ (6μs)
-  single_identifier ... ✓ (3μs)
-  keywords ... ✓ (8μs)
-  integer_literals ... ✓ (9μs)
-  float_literals ... ✓ (5μs)
-  string_literals ... ✓ (5μs)
-  character_literals ... ✓ (4μs)
-  boolean_keywords ... ✓ (4μs)
-  operators ... ✓ (11μs)
-  compound_assignments ... ✓ (4μs)
-  delimiters ... ✓ (6μs)
-
-  Summary: 11 passed
-
-╔══ Map Conversion Tests ══╗
-  basic_string_int_map_conversion ...     ✓ Basic map<string, int> parameter works
-    ✓ Map key extraction works
-    ✓ Map value extraction works
-    ✓ Map size works
-✓ (1060μs)
-  map_return_values ...     ✓ Map return value works
-    ✓ Map transformation works
-✓ (513μs)
-  string_string_map_conversion ...     ✓ Map<string, string> parameter works
-    ✓ Empty map works
-    ✓ Single entry map works
-✓ (673μs)
-  double_value_map_conversion ...     ✓ Map<string, double> with doubles works
-    ✓ Map<string, double> with integers works
-    ✓ Map<string, double> with mixed types works
-✓ (667μs)
-  nested_map_conversion ...     ✓ Nested map creation works
-    ✓ Nested map processing works
-    ✓ Manual nested map creation works
-✓ (612μs)
-  map_with_custom_objects ...     ✓ Map with custom objects creation works
-    ✓ Processing map with custom objects works
-    ✓ Extracting data from map with custom objects works
-✓ (807μs)
-  map_key_lookup_operations ...     ✓ Map key existence check (true) works
-    ✓ Map key existence check (false) works
-    ✓ Map value retrieval (found) works
-    ✓ Map value retrieval (not found) works
-✓ (1069μs)
-  map_edge_cases ...     ✓ Empty map works
-    ✓ Single entry map works
-    ✓ Map with special character keys works
-    ✓ Map with empty string key works
-✓ (1107μs)
-  map_script_value_compatibility ...     ✓ Map<script_value, script_value> with mixed types works
-    ✓ Returning map<script_value, script_value> works
-✓ (600μs)
-
-  Summary: 9 passed
-
-╔══ Parser Tests ══╗
-  expression_literals ... ✓ (114μs)
-  expression_identifiers ... ✓ (55μs)
-  binary_operators ... ✓ (136μs)
-  unary_operators ... ✓ (78μs)
-  assignment_operators ... ✓ (74μs)
-  ternary_operator ... ✓ (112μs)
-  parenthesized_expressions ... ✓ (125μs)
-  function_calls ... ✓ (161μs)
-  member_access ... ✓ (72μs)
-  array_access ... ✓ (70μs)
-  array_literals ... ✓ (118μs)
-  map_literals ... ✓ (80μs)
-  variable_declarations ... ✓ (60μs)
-  function_declarations ... ✓ (109μs)
-  control_flow_statements ... ✓ (292μs)
-  break_continue_statements ... ✓ (132μs)
-  return_statements ... ✓ (49μs)
-  lambda_expressions ... ✓ (87μs)
-  complex_expressions ... ✓ (164μs)
-  error_cases ... ✓ (478μs)
-
-  Summary: 20 passed
-
-╔══ Deep Copy Tests ══╗
-  map_deep_copy ... ✓ (442μs)
-  array_deep_copy ... ✓ (324μs)
-  nested_container_deep_copy ... ✓ (559μs)
-  assignment_operator_deep_copy ... ✓ (363μs)
-  function_parameter_copy ... ✗
-    Error: Undefined variable 'm'
-  reference_semantics_preserved ... ✗
-    Error: Undefined variable 'modify_ref'
-
-  Summary: 4 passed, 2 failed
-
-╔══ Deep Copy Comprehensive Tests ══╗
-  container_deep_copy ... ✓ (494μs)
-  nested_container_deep_copy ... ✓ (654μs)
-  cpp_object_deep_copy ... ✓ (460μs)
-  polymorphic_deep_copy ... ✗
-    Error: Cannot call non-function value
-  mixed_container_object_copy ... ✗
-    Error: Unbound exception type caught in JaiScript.
-  assignment_operator_deep_copy ... ✓ (405μs)
-  function_parameter_copy ... ✓ (406μs)
-
-  Summary: 5 passed, 2 failed
-
-╔══ object deep copy tests ══╗
-  basic object deep copy ... ✓ (442μs)
-  object deep copy with inheritance ... ✗
-    Error: Cannot call non-function value
-  object deep copy in containers ... ✓ (690μs)
-
-  Summary: 2 passed, 1 failed
-
-╔══ Type Conversions ══╗
-  integer_type_conversions ... ✓ (123μs)
-  integer_size_conversions ... ✓ (159μs)
-  unsigned_integer_conversions ... ✓ (164μs)
-  float_type_conversions ... ✓ (189μs)
-  string_conversions ... ✓ (164μs)
-  boolean_conversions ... ✓ (131μs)
-  implicit_numeric_conversions ... ✗
-    Error: Undefined variable 'script_int'
-  array_element_conversions ... ✓ (175μs)
-  map_value_conversions ... ✓ (236μs)
-  null_conversions ... ✓ (120μs)
-  type_coercion_in_operations ... ✗
-    Error: Invalid operands for + operator
-
-  Summary: 9 passed, 2 failed
-
-╔══ Type Info ══╗
-  recursive_reference_type_creation ... ✓ (2μs)
-  type_info_equality ... ✗
-    Error: Values do not match
-  array_type_creation ... ✓ (1μs)
-  map_type_creation ... ✓ (2μs)
-
-  Summary: 3 passed, 1 failed
-
-╔══ Value Semantics ══╗
-  variable_declaration_copies ... ✓ (216μs)
-  variable_access_no_copy ... ✓ (212μs)
-  property_access_no_copy ... ✓ (208μs)
-  method_call_no_copy ... ✓ (212μs)
-  assignment_copies ... ✓ (210μs)
-  deep_copy_verification ... ✓ (274μs)
-  function_by_value_copies ... ✗
-    Error: Values do not match
-  function_by_reference_no_copy ... ✓ (241μs)
-  array_push_copies ... ✓ (246μs)
-  array_assignment_copies ... ✓ (263μs)
-  map_assignment_copies ...   TrackedObject(42) -> id=1
-  COPY from id=1 to id=2
-  ~TrackedObject() id=1
-✗
-    Error: Values do not match
-  lambda_capture_by_value_copies ... ✓ (293μs)
-  lambda_capture_by_reference_no_copy ... ✓ (269μs)
-  lambda_default_capture_by_value ... ✓ (264μs)
-  lambda_default_capture_by_reference ... ✓ (262μs)
-  multiple_assignments ... ✓ (245μs)
-  compound_assignment_on_property ... ✓ (254μs)
-  temporary_object_no_copy ... ✓ (186μs)
-  method_chaining_no_copy ... ✓ (288μs)
-  array_literal_copies ... ✓ (248μs)
-  reference_parameter_preserves_modifications ... ✓ (268μs)
-  method_call_on_cpp_object_property ... ✗
-    Error: Values do not match
-
-  Summary: 19 passed, 3 failed
-
-╔══ Vector Conversion Tests ══╗
-  basic_vector_int_conversion ...     ✓ Basic vector<int> parameter works
-    ✓ Vector<int> return value works
-    ✓ Const reference vector parameter works
-✓ (615μs)
-  vector_double_conversion ...     ✓ Vector<double> with integers works
-    ✓ Vector<double> with floats works
-    ✓ Vector<double> with mixed types works
-✓ (522μs)
-  vector_string_conversion ...     ✓ Vector<string> parameter works
-    ✓ Empty vector<string> works
-    ✓ Single element vector<string> works
-✓ (493μs)
-  vector_custom_object_conversion ...     ✓ Vector of custom objects creation works
-    ✗ Vector of custom objects as parameter failed: Cannot extract custom type by value from non-object
-✓ (588μs)
-  nested_vector_conversion ...     ✓ Nested vector creation works
-    ✓ Nested vector as parameter works
-    ✓ Manual nested vector creation works
-✓ (1772μs)
-  vector_edge_cases ...     ✓ Empty vector works
-    ✓ Single element vector works
-    ✓ Large vector works
-✓ (11134μs)
-  vector_type_coercion ...     Mixed types in integer vector failed (expected): script_value is not an integer
-    Non-numeric types in numeric vector failed as expected: script_value is not an integer
-    Numeric types in string vector failed: script_value is not a string
-✓ (1044μs)
-  vector_script_value_compatibility ...     ✓ Vector<script_value> with mixed types works
-    ✓ Returning vector<script_value> works
-✓ (827μs)
-
-  Summary: 8 passed
-
-╔══ weak_ptr Tests ══╗
-  weak_ptr_basic_syntax ... LifetimeTracker(42) created, id=1, alive=1
-~LifetimeTracker() id=1, alive=0
-~LifetimeTracker() id=1, alive=-1
-✓ (652μs)
-  weak_ptr_null_checking ... ✓ (199μs)
-  weak_ptr_lock_valid ... LifetimeTracker(42) created, id=2, alive=0
-~LifetimeTracker() id=2, alive=-1
-~LifetimeTracker() id=2, alive=-2
-~LifetimeTracker() id=2, alive=-3
-✓ (697μs)
-  weak_ptr_becomes_invalid ... LifetimeTracker(42) created, id=1, alive=1
-~LifetimeTracker() id=1, alive=0
-~LifetimeTracker() id=1, alive=-1
-✗
-    Error: Undefined variable ''
-  weak_ptr_tree_structure ... ✓ (531μs)
-  weak_ptr_reassignment ... LifetimeTracker(10) created, id=2, alive=0
-~LifetimeTracker() id=2, alive=-1
-LifetimeTracker(20) created, id=3, alive=0
-~LifetimeTracker() id=3, alive=-1
-~LifetimeTracker() id=3, alive=-2
-~LifetimeTracker() id=3, alive=-3
-~LifetimeTracker() id=2, alive=-4
-✗
-    Error: Cannot call non-function value
-  weak_ptr_in_containers ... LifetimeTracker(1) created, id=4, alive=-3
-~LifetimeTracker() id=4, alive=-4
-LifetimeTracker(2) created, id=5, alive=-3
-~LifetimeTracker() id=5, alive=-4
-LifetimeTracker(3) created, id=6, alive=-3
-~LifetimeTracker() id=6, alive=-4
-~LifetimeTracker() id=6, alive=-5
-~LifetimeTracker() id=5, alive=-6
-~LifetimeTracker() id=4, alive=-7
-✗
-    Error: Undefined variable ''
-  weak_ptr_expired_method ... LifetimeTracker(42) created, id=7, alive=-6
-~LifetimeTracker() id=7, alive=-7
-~LifetimeTracker() id=7, alive=-8
-~LifetimeTracker() id=7, alive=-9
-✗
-    Error: Cannot call non-function value
-  weak_ptr_script_class ... ✗
-    Error: Undefined variable 'value'
-  weak_ptr_script_class_lifetime ... ✗
-    Error: Undefined variable 'alive_count'
-  weak_ptr_circular_reference_script ... ✗
-    Error: Undefined variable 'next'
-
-  Summary: 4 passed, 7 failed
-
-╔══ Array Operations ══╗
-  array_subscript_write ... ✓ (282μs)
-  array_swap_elements ... ✓ (310μs)
-  array_reversal_algorithm ... ✓ (491μs)
-  nested_array_assignment ... ✓ (370μs)
-  array_arithmetic_modification ... ✓ (339μs)
-  array_mixed_type_assignment ... ✓ (320μs)
-  array_size_method ... ✓ (223μs)
-  array_push_pop_methods ... ✓ (302μs)
-  array_clear_empty_methods ... ✓ (303μs)
-  array_front_back_methods ... ✓ (274μs)
-  array_chained_operations ... ✗
-    Error: Cannot access member 'push' on non-object type
-
-  Summary: 10 passed, 1 failed
-
-╔══ Assignment Operations ══╗
-  simple_variable_assignment ... ✓ (175μs)
-  array_subscript_assignment ... ✓ (220μs)
-  empty_map_creation_and_assignment ... ✓ (211μs)
-  map_integer_key_assignment ... ✓ (221μs)
-  map_variable_key_assignment ... ✓ (242μs)
-  non_empty_map_assignment ... ✓ (302μs)
-  mixed_key_types_in_map ... ✓ (364μs)
-  compound_assignment_on_array_element ... ✓ (301μs)
-  compound_assignment_on_map_element ... ✓ (246μs)
-  nested_container_assignment ... ✓ (367μs)
-  reference_semantics_verification ... ✓ (322μs)
-  map_keyword_conflict_resolution ... ✓ (203μs)
-  array_bounds_checking ... ✓ (293μs)
-  auto_reference_syntax ... ✓ (601μs)
-  complete_workflow_test ... ✓ (302μs)
-
-  Summary: 15 passed
-
-╔══ Control Flow ══╗
-  if_statement_true ... ✓ (203μs)
-  if_statement_false ... ✓ (233μs)
-  if_else_branches ... ✓ (383μs)
-  nested_if_statements ... ✓ (305μs)
-  while_loop_counter ... ✓ (250μs)
-  while_loop_sum ... ✓ (321μs)
-  while_loop_with_break ... ✓ (263μs)
-  while_loop_with_continue ... ✓ (467μs)
-  for_loop_basic ... ✓ (302μs)
-  for_loop_with_increment_operator ... ✓ (299μs)
-  for_loop_with_break ... ✓ (363μs)
-  for_loop_with_continue ... ✓ (416μs)
-  nested_loops ... ✓ (405μs)
-  complex_control_flow ... ✗
-    Error: Values do not match
-
-  Summary: 13 passed, 1 failed
-
-╔══ Exception Handling ══╗
-  basic_throw_catch ... ✓ (175μs)
-  throw_without_catch_bubbles_to_cpp ... ✓ (433μs)
-  catch_without_variable ... ✓ (162μs)
-  nested_try_catch ... ✓ (217μs)
-  cpp_runtime_error_interop ... ✓ (194μs)
-  cpp_generic_exception_interop ... ✓ (221μs)
-  throw_rethrow ... ✓ (207μs)
-  throw_in_expressions ... ✓ (305μs)
-  exception_with_numeric_values ... ✗
-    Error: Values do not match
-  exception_scope_isolation ... ✓ (248μs)
-
-  Summary: 9 passed, 1 failed
-
-╔══ Function Tests ══╗
-  simple_function_declaration_and_call ... ✓ (252μs)
-  function_with_no_parameters ... ✓ (157μs)
-  function_with_side_effects ... ✓ (206μs)
-  function_with_multiple_parameters ... ✓ (209μs)
-  recursive_function ... ✓ (304μs)
-  function_returning_string ... ✓ (199μs)
-  nested_function_calls ... ✓ (249μs)
-  function_with_local_variables ... ✓ (228μs)
-  function_with_conditional_return ... ✓ (255μs)
-  function_with_early_return ... ✓ (386μs)
-  function_scope_isolation ... ✓ (230μs)
-  function_parameter_shadowing ... ✓ (202μs)
-  function_with_different_syntax_styles ... ✓ (316μs)
-
-  Summary: 13 passed
-
-╔══ Hot Reload Tests ══╗
-  basic_class_redefinition ... Fluffy is dancing! 
-✓ (982μs)
-  inheritance_hot_reload ... ✗
-    Error: No matching overload found for function 'check_value' with 2 arguments
-  multi_level_inheritance_hot_reload ... ✓ (1198μs)
-  method_override_hot_reload ... ✓ (933μs)
-  constructor_hot_reload ... ✓ (716μs)
-  complex_field_migration ... ✓ (1586μs)
-  multiple_instances_hot_reload ... ✓ (1681μs)
-  hot_reload_migrate_lifecycle ... ✗
-    Error: Cannot assign to non-existent member 'settings'
-  performance_stress_test ... ✓ (8052μs)
-  fields_unchanged_optimization ... ✗
-    Error: Values do not match
-  fields_unchanged_performance ... ✗
-    Error: Undefined variable 'to_string'
-  identical_class_fingerprint ... ✗
-    Error: Undefined variable 'Calculator'
-
-  Summary: 7 passed, 5 failed
-
-╔══ Map Operations ══╗
-  map_creation_and_access ... ✓ (255μs)
-  map_assignment ... ✓ (338μs)
-  map_size_method ... ✓ (215μs)
-  map_empty_method ... ✓ (235μs)
-  map_clear_method ... ✓ (340μs)
-  map_contains_method ... ✓ (300μs)
-  map_erase_method ... ✓ (339μs)
-  map_keys_method ... ✓ (262μs)
-  map_values_method ... ✓ (264μs)
-  map_mixed_types ... ✗
-    Error: Cannot convert script_value to float/double
-  map_nested_operations ... ✓ (357μs)
-
-  Summary: 10 passed, 1 failed
-
-╔══ Member Access Tests ══╗
-  array_method_on_subscript ... 
+✓ (689μs)
+  specific_type_registration ... 

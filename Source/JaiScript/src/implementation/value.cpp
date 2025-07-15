@@ -141,6 +141,9 @@ script_value& script_value::operator=(const script_value& other) {
 
 // Explicit deep copy method
 script_value script_value::clone() const {
+    if (engine_ref_.expired()) {
+        throw runtime_error("Cannot clone script_value: missing engine reference");
+    }
     script_value result(std::monostate{}, engine_ref_);  // Preserve engine reference!
     result.type_info_ = type_info_;
     

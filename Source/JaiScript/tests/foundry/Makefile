@@ -8,7 +8,7 @@ LDFLAGS = -pthread
 CORE_SRCS = $(wildcard core/*.cpp)
 LANG_SRCS = $(wildcard language/*.cpp)
 # Exclude standalone test files that have their own main()
-INTEG_EXCLUDE = integration/test_shared_ptr_conversion.cpp integration/test_shared_ptr_debug.cpp
+INTEG_EXCLUDE = integration/test_shared_ptr_conversion.cpp integration/test_shared_ptr_debug.cpp integration/test_operator_class_instance_fix.cpp
 INTEG_SRCS = $(filter-out $(INTEG_EXCLUDE), $(wildcard integration/*.cpp))
 # Performance tests are standalone, not part of the main suite
 # PERF_SRCS = $(wildcard performance/*.cpp)

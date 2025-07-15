@@ -38,6 +38,10 @@ const std::unordered_map<std::string, token_type> lexer::keywords_ = {
     {"try", token_type::try_keyword},
     {"catch", token_type::catch_keyword},
     {"throw", token_type::throw_keyword},
+    {"switch", token_type::switch_keyword},
+    {"case", token_type::case_keyword},
+    {"default", token_type::default_keyword},
+    {"fallthrough", token_type::fallthrough_keyword},
 };
 
 lexer::lexer(const std::string& source, const std::string& filename)

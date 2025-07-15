@@ -1517,8 +1517,8 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
             }
         }
         
-        // For other fields, use script_value's copy constructor (which handles deep copy)
-        new_instance->set_field(name, value);
+        // For other fields, use script_value's clone method for deep copy
+        new_instance->set_field(name, value.clone());
     }
     
     // Copy class definition reference

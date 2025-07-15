@@ -25,6 +25,17 @@ namespace jai {
     using statement_ptr = std::shared_ptr<statement>;
     using declaration_ptr = std::shared_ptr<declaration>;
     
+    // Forward declarations for switch statement components
+    class switch_stmt;
+    class case_stmt;
+    class default_stmt;
+    class fallthrough_stmt;
+    
+    using switch_stmt_ptr = std::shared_ptr<switch_stmt>;
+    using case_stmt_ptr = std::shared_ptr<case_stmt>;
+    using default_stmt_ptr = std::shared_ptr<default_stmt>;
+    using fallthrough_stmt_ptr = std::shared_ptr<fallthrough_stmt>;
+    
     // parameter information for functions and lambdas
     struct parameter {
         type_info_ptr type;
@@ -69,6 +80,10 @@ namespace jai {
         virtual void visit_break_stmt(class break_stmt* stmt) = 0;
         virtual void visit_continue_stmt(class continue_stmt* stmt) = 0;
         virtual void visit_try_stmt(class try_stmt* stmt) = 0;
+        virtual void visit_switch_stmt(class switch_stmt* stmt) = 0;
+        virtual void visit_case_stmt(class case_stmt* stmt) = 0;
+        virtual void visit_default_stmt(class default_stmt* stmt) = 0;
+        virtual void visit_fallthrough_stmt(class fallthrough_stmt* stmt) = 0;
         
         // declaration visitors
         virtual void visit_variable_decl(class variable_decl* decl) = 0;
@@ -458,6 +473,60 @@ namespace jai {
             
         void accept(ast_visitor* visitor) override {
             visitor->visit_try_stmt(this);
+        }
+    };
+    
+    // Switch statement
+    class switch_stmt : public statement {
+    public:
+        expression_ptr condition;
+        std::vector<case_stmt_ptr> cases;
+        default_stmt_ptr default_case;  // Can be null
+        
+        switch_stmt(const source_location& loc, expression_ptr cond)
+            : statement(loc), condition(cond), default_case(nullptr) {}
+            
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_switch_stmt(this);
+        }
+    };
+    
+    // Case statement (part of switch)
+    class case_stmt : public statement {
+    public:
+        expression_ptr value;  // The case value to match
+        std::vector<statement_ptr> body;
+        bool has_fallthrough = false;  // Set if last statement is fallthrough
+        
+        case_stmt(const source_location& loc, expression_ptr val)
+            : statement(loc), value(val) {}
+            
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_case_stmt(this);
+        }
+    };
+    
+    // Default statement (part of switch)
+    class default_stmt : public statement {
+    public:
+        std::vector<statement_ptr> body;
+        
+        default_stmt(const source_location& loc)
+            : statement(loc) {}
+            
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_default_stmt(this);
+        }
+    };
+    
+    // Fallthrough statement (only valid inside switch cases)
+    class fallthrough_stmt : public statement {
+    public:
+        fallthrough_stmt(const source_location& loc)
+            : statement(loc) {}
+            
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_fallthrough_stmt(this);
         }
     };
     

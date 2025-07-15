@@ -252,6 +252,10 @@ namespace jai {
         void visit_break_stmt(break_stmt* stmt) override;
         void visit_continue_stmt(continue_stmt* stmt) override;
         void visit_try_stmt(try_stmt* stmt) override;
+        void visit_switch_stmt(switch_stmt* stmt) override;
+        void visit_case_stmt(case_stmt* stmt) override;
+        void visit_default_stmt(default_stmt* stmt) override;
+        void visit_fallthrough_stmt(fallthrough_stmt* stmt) override;
         
         // declaration visitors
         void visit_variable_decl(variable_decl* decl) override;
@@ -417,6 +421,10 @@ namespace jai {
         bool is_unwinding_ = false;
         script_value active_exception_value_;  // The exception message as a script_value
         std::string current_catch_var_;  // Name of the current catch variable (if any)
+        
+        // Switch statement control flow state
+        bool in_switch_ = false;
+        bool should_fallthrough_ = false;
         
         
         // Function call optimization pools

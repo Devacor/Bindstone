@@ -68,17 +68,37 @@ function quest_update() {
 - Versioning support for schema evolution
 - Zero-copy deserialization where possible
 
-### 3. Advanced Hot Reload
+### 3. Advanced Hot Reload (✅ Core Functionality Implemented)
 
-**State-Preserving Reload**
-- Maintain local variables
-- Preserve call stack
+**Already Implemented:**
+- ✅ Class redefinition with automatic instance migration
+- ✅ Field preservation (same-named fields keep values)
+- ✅ Method replacement (all methods updated)
+- ✅ Custom migration via `hot_reload_migrate()`
+- ✅ Instance tracking (including clones)
+- ✅ Performance optimized (<10ms for 100 instances)
+
+**Still Planned - State-Preserving Reload:**
+- Maintain local variables in functions
+- Preserve call stack during reload
 - Keep closure captures
 - Update function bodies in-place
 
 **Development Workflow**
 ```javascript
-// Edit script while game is running
+// Already works for classes:
+class Character {
+    auto health = 100;
+    void on_damage(amount) {
+        health -= amount;
+        // Hot reload here updates method instantly!
+        if (health < 20) {
+            start_limp_animation(); // Add this line
+        }
+    }
+}
+
+// Still planned for standalone functions:
 character.on_damage = function(amount) {
     health -= amount;
     if (health < 20) {
@@ -134,7 +154,8 @@ engine.add_property_provider(std::make_unique<mv_property_provider>());
 
 **Control Flow**
 - ✅ Break and continue statements (completed)
-- Switch/case statements  
+- ✅ Switch/case statements with break-by-default safety (completed 2025-07-15)
+- ✅ Range-based for loops (completed 2025-07-15)
 - Exception handling (try/catch)
 
 **Advanced Features**

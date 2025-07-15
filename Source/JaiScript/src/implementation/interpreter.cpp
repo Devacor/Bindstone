@@ -1,4 +1,5 @@
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/stdlib/containers.hpp>
 #include <stdexcept>
 #include <sstream>
 #include <cmath>
@@ -572,6 +573,9 @@ std::unordered_map<std::string, script_value> interpreter::get_all_variables() c
 
 // expression visitors
 void interpreter::visit_literal_expr(literal_expr* expr) {
+    // Literals are created at parse time without engine references
+    // Set the engine reference before pushing
+    expr->value.set_engine_ref(engine_ref_);
     push_value(expr->value);
 }
 
@@ -772,7 +776,8 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
     
     // Evaluate operands once and use them throughout
     expr->left->accept(this);
-    script_value left = pop_value().deref();  // Handle references safely
+    script_value left_raw = pop_value();  // Keep raw value for subscript handling
+    script_value left = left_raw.deref();  // Dereferenced version for most operations
     
     expr->right->accept(this);
     // Check if we're unwinding due to an exception in the right expression
@@ -830,28 +835,71 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
                 throw runtime_error("Array index must be an integer");
             }
             script_int index = right.as_int();
-            auto& array = const_cast<std::vector<script_value>&>(left.as_array());
+            const auto& array = left.as_array();
             
             if (index < 0 || index >= static_cast<script_int>(array.size())) {
                 throw runtime_error("Array index out of bounds: " + std::to_string(index));
             }
             
-            // Create a reference to the array element for assignment support
-            script_value* element_ptr = &array[index];
-            script_value ref_value = script_value::make_reference(element_ptr, environment_);
-            push_value(ref_value);
+            // For arrays, check if this is a true temporary
+            auto array_ptr = std::get<std::shared_ptr<std::vector<script_value>>>(left.storage_);
+            bool is_temporary = array_ptr.use_count() == 1;
+            
+            if (!is_temporary) {
+                // This array is stored somewhere, allow assignment
+                auto& mut_array = const_cast<std::vector<script_value>&>(array);
+                script_value* element_ptr = &mut_array[index];
+                script_value ref_value = script_value::make_reference(element_ptr, environment_);
+                push_value(ref_value);
+            } else {
+                // True temporary, read-only access
+                push_value(array[index]);
+            }
         } else if (left.is_map()) {
-            // Get non-const reference to map for operator[]
-            auto& map = const_cast<std::map<script_value, script_value>&>(left.as_map());
-            
-            // Use operator[] which creates the element if it doesn't exist
-            // This returns a reference to the value
-            script_value& value_ref = map[right];
-            
-            // Create a reference to the map element for assignment support
-            script_value* element_ptr = &value_ref;
-            script_value ref_value = script_value::make_reference(element_ptr, environment_);
-            push_value(ref_value);
+            // For maps, we need to handle both assignment and read access
+            // Try to get a mutable reference if possible
+            try {
+                auto& map = const_cast<std::map<script_value, script_value>&>(left.as_map());
+                
+                // Check if this is a true temporary by seeing if the shared_ptr is unique
+                // If it's shared (refcount > 1), it means it's stored in a variable
+                auto map_ptr = std::get<std::shared_ptr<std::map<script_value, script_value>>>(left.storage_);
+                bool is_temporary = map_ptr.use_count() == 1;
+                
+                if (!is_temporary) {
+                    // This map is stored somewhere (variable, field, etc.), allow assignment
+                    script_value& value_ref = map[right];
+                    
+                    // If this created a new entry with default constructor, it has invalid engine reference
+                    if (value_ref.engine_ref_.expired()) {
+                        if (left.engine_ref_.expired()) {
+                            throw runtime_error("Invalid script_value: both map and new entry missing engine reference");
+                        }
+                        value_ref.engine_ref_ = left.engine_ref_;
+                    }
+                    
+                    script_value* element_ptr = &value_ref;
+                    script_value ref_value = script_value::make_reference(element_ptr, environment_);
+                    push_value(ref_value);
+                } else {
+                    // This is a true temporary (e.g., function return), read-only access
+                    auto it = map.find(right);
+                    if (it != map.end()) {
+                        push_value(it->second);
+                    } else {
+                        push_value(script_value(std::monostate{}, engine_ref_));
+                    }
+                }
+            } catch (...) {
+                // Fallback for any edge cases
+                const auto& map = left.as_map();
+                auto it = map.find(right);
+                if (it != map.end()) {
+                    push_value(it->second);
+                } else {
+                    push_value(script_value(std::monostate{}, engine_ref_));
+                }
+            }
         } else {
             if (left.is_object()) {
                 try {
@@ -1129,10 +1177,10 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             script_value* varPtr = environment_->get_value_ptr(identifier->symbol_id);
             if (varPtr && varPtr->is_reference()) {
                 // This is a reference - update the target (deep copy)
-                varPtr->deref() = resultValue.deref().clone();
+                varPtr->deref() = std::move(resultValue.deref().clone());
             } else {
                 // Regular assignment (deep copy the result)
-                environment_->assign(identifier->symbol_id, resultValue.clone());
+                environment_->assign(identifier->symbol_id, std::move(resultValue.clone()));
             }
             push_value(resultValue);
         } else if (auto* memberExpr = dynamic_cast<member_expr*>(expr->target.get())) {
@@ -1225,11 +1273,11 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             if (!setter.is_null()) {
                 // Call the setter with 'this' and the value
                 const script_function& func = setter.as_function();
-                std::vector<script_value> args = {objectValue, resultValue.clone()};
+                std::vector<script_value> args = {objectValue, std::move(resultValue.clone())};
                 func(args);
             } else if (instance->has_field(memberExpr->member)) {
                 // Direct field assignment (deep copy)
-                instance->set_field(memberExpr->member, resultValue.clone());
+                instance->set_field(memberExpr->member, std::move(resultValue.clone()));
             } else {
                 // Set exception state instead of throwing
                 active_exception_value_ = make_value("Cannot assign to non-existent member '" + memberExpr->member + "'");
@@ -1310,6 +1358,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
         }
     } else {
         // Regular assignment
+        
         expr->value->accept(this);
         // Check if we're unwinding due to an exception in the value expression
         if (is_unwinding_) {
@@ -1330,10 +1379,10 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 script_value* currentVal = environment_->get_value_ptr(identifier->symbol_id);
                 if (currentVal && currentVal->is_reference()) {
                     // This is a reference - assign through it (deep copy the value)
-                    currentVal->deref() = value.deref().clone();
+                    currentVal->deref() = std::move(value.deref().clone());
                 } else {
                     // Regular variable assignment (deep copy the value)
-                    environment_->assign(identifier->symbol_id, value.clone());
+                    environment_->assign(identifier->symbol_id, std::move(value.clone()));
                 }
             } else {
                 // Variable doesn't exist - check if it's a member of 'this'
@@ -1345,7 +1394,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                         if (obj_holder->is_cpp_class_instance) {
                             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
                             if (instance->has_field(identifier->name)) {
-                                instance->set_field(identifier->name, value.clone());
+                                instance->set_field(identifier->name, std::move(value.clone()));
                                 assigned_to_this = true;
                             }
                         }
@@ -1389,7 +1438,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 func(args);
             } else if (instance->has_field(memberExpr->member)) {
                 // Direct field assignment (deep copy)
-                instance->set_field(memberExpr->member, value.clone());
+                instance->set_field(memberExpr->member, std::move(value.clone()));
             } else {
                 // Set exception state instead of throwing
                 active_exception_value_ = make_value("Cannot assign to non-existent member '" + memberExpr->member + "'");
@@ -1418,8 +1467,8 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                         throw runtime_error("Invalid reference in assignment");
                     }
                     
-                    // Assign the value
-                    *target_ptr = value.clone();
+                    // Assign the value  
+                    *target_ptr = std::move(value.clone());
                     push_value(std::move(value));  // Assignment expressions return the assigned value
                 } else {
                     // Not a reference - this means the subscript expression didn't
@@ -1437,11 +1486,6 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
 
 // statement visitors
 void interpreter::visit_expression_stmt(expression_stmt* stmt) {
-    
-    // Check if it's an assignment
-    if (auto* assign = dynamic_cast<assignment_expr*>(stmt->expression.get())) {
-    }
-    
     stmt->expression->accept(this);
     
     // Early exit if exception is propagating
@@ -2566,14 +2610,129 @@ void interpreter::visit_for_stmt(for_stmt* stmt) {
 }
 
 void interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
-    throw runtime_error("Range-based for loops not yet implemented");
+    // Evaluate the container expression
+    stmt->container->accept(this);
+    script_value container = pop_value();
+    
+    // Create a new scope for the loop variable
+    push_scope();
+    
+    try {
+        if (container.is_array()) {
+            // Iterate over array
+            auto& array_storage = get_array_storage(container);
+            
+            for (size_t i = 0; i < array_storage->size(); ++i) {
+                script_value loop_var;
+                
+                if (stmt->is_reference) {
+                    // Create a reference to the actual array element
+                    loop_var = script_value::make_reference(&(*array_storage)[i], environment_, engine_ref_);
+                } else {
+                    // Make a copy of the element
+                    loop_var = (*array_storage)[i].clone();
+                }
+                
+                // Define the loop variable in current scope
+                environment_->define(stmt->variable_name, std::move(loop_var));
+                
+                // Execute loop body
+                try {
+                    stmt->body->accept(this);
+                } catch (const continue_exception&) {
+                    continue; // Skip to next iteration
+                } catch (const break_exception&) {
+                    break; // Exit loop
+                }
+                
+                // Check for return or exception
+                if (hasReturnValue_ || is_unwinding_) {
+                    break;
+                }
+            }
+            
+        } else if (container.is_map()) {
+            // Iterate over map - return key-value pairs with first/second access
+            auto& map_storage = get_map_storage(container);
+            
+            for (auto it = map_storage->begin(); it != map_storage->end(); ++it) {
+                // Create a pair object using the registered stdlib::script_pair type
+                script_value loop_var;
+                
+                try {
+                    if (stmt->is_reference) {
+                        // For references, create a pair with a reference to the map value
+                        // Cast away const to get a pointer (safe because we own the map)
+                        script_value* value_ptr = const_cast<script_value*>(&it->second);
+                        
+                        // Use the script_pair factory method that preserves references
+                        loop_var = script_value::make_object(
+                            std::make_shared<stdlib::script_pair>(
+                                stdlib::script_pair::make_with_reference(
+                                    it->first, value_ptr, environment_, engine_ref_
+                                )
+                            ),
+                            engine_ref_
+                        );
+                    } else {
+                        // For copies, use regular pair constructor
+                        std::vector<script_value> args;
+                        args.push_back(it->first.clone());
+                        args.push_back(it->second.clone());
+                        
+                        // Look up the pair constructor function using symbol ID
+                        uint64_t pair_symbol_id = string_symbolizer_->intern("pair");
+                        script_value pairConstructor = environment_->get_ref(pair_symbol_id);
+                        
+                        if (pairConstructor.is_function()) {
+                            const script_function& func = pairConstructor.as_function();
+                            loop_var = func(args);
+                        } else {
+                            throw runtime_error("pair type not registered - make sure stdlib is loaded");
+                        }
+                    }
+                } catch (const runtime_error& e) {
+                    throw runtime_error("Failed to create pair for map iteration: " + std::string(e.what()));
+                }
+                
+                // Define the loop variable in current scope
+                environment_->define(stmt->variable_name, std::move(loop_var));
+                
+                // Execute loop body
+                try {
+                    stmt->body->accept(this);
+                } catch (const continue_exception&) {
+                    continue; // Skip to next iteration
+                } catch (const break_exception&) {
+                    break; // Exit loop
+                }
+                
+                // Check for return or exception
+                if (hasReturnValue_ || is_unwinding_) {
+                    break;
+                }
+            }
+            
+        } else {
+            throw runtime_error("Range-based for loop requires an array or map, got unsupported type");
+        }
+        
+    } catch (const break_exception&) {
+        // Break caught from inner loop
+    } catch (const continue_exception&) {
+        // Continue should not escape the loop
+        throw runtime_error("'continue' statement not in loop");
+    }
+    
+    // Pop the loop scope
+    pop_scope();
 }
 
 void interpreter::visit_return_stmt(return_stmt* stmt) {
     if (stmt->value) {
         // Evaluate the return expression
         stmt->value->accept(this);
-        returnValue_ = pop_value();
+        returnValue_ = std::move(pop_value());
     } else {
         // Return null if no expression
         returnValue_ = make_value();
@@ -2642,6 +2801,93 @@ void interpreter::visit_try_stmt(try_stmt* stmt) {
     
     // Always restore the catch variable state
     current_catch_var_ = saved_catch_var;
+}
+
+void interpreter::visit_switch_stmt(switch_stmt* stmt) {
+    // Evaluate the switch condition
+    stmt->condition->accept(this);
+    script_value switch_value = pop_value();
+    
+    // Save and set switch state
+    bool old_in_switch = in_switch_;
+    bool old_should_fallthrough = should_fallthrough_;
+    in_switch_ = true;
+    should_fallthrough_ = false;
+    
+    try {
+        bool matched = false;
+        bool executed_case = false;
+        
+        // Check each case
+        for (const auto& case_stmt : stmt->cases) {
+            // Evaluate case value
+            case_stmt->value->accept(this);
+            script_value case_value = pop_value();
+            
+            // Check if values match using operator==
+            bool case_matches = false;
+            try {
+                case_matches = (switch_value == case_value);
+            } catch (const std::exception& e) {
+                // If comparison fails, treat as non-match
+                case_matches = false;
+            }
+            
+            if (case_matches || executed_case) {
+                matched = true;
+                executed_case = true;
+                
+                // Execute case body
+                case_stmt->accept(this);
+                
+                // Check if we should continue to next case
+                if (!should_fallthrough_) {
+                    break;  // Implicit break by default
+                }
+                should_fallthrough_ = false;  // Reset for next case
+            }
+        }
+        
+        // If no case matched and there's a default, execute it
+        if (!matched && stmt->default_case) {
+            stmt->default_case->accept(this);
+        }
+    } catch (const break_exception&) {
+        // Break out of switch - this is expected behavior
+    }
+    
+    // Restore switch state
+    in_switch_ = old_in_switch;
+    should_fallthrough_ = old_should_fallthrough;
+}
+
+void interpreter::visit_case_stmt(case_stmt* stmt) {
+    // Execute all statements in the case body
+    for (const auto& s : stmt->body) {
+        s->accept(this);
+        
+        // Check for break or return
+        if (hasReturnValue_ || is_unwinding_) {
+            break;
+        }
+    }
+}
+
+void interpreter::visit_default_stmt(default_stmt* stmt) {
+    // Execute all statements in the default body
+    for (const auto& s : stmt->body) {
+        s->accept(this);
+        
+        // Check for break or return
+        if (hasReturnValue_ || is_unwinding_) {
+            break;
+        }
+    }
+}
+
+void interpreter::visit_fallthrough_stmt(fallthrough_stmt* stmt) {
+    // Set flag to continue to next case
+    should_fallthrough_ = true;
 }
 
 void interpreter::visit_function_decl(function_decl* decl) {
@@ -3115,7 +3361,7 @@ script_value interpreter::call_function(const script_defined_function& function,
         // Get return value
         script_value result;
         if (hasReturnValue_) {
-            result = returnValue_;
+            result = std::move(returnValue_);
         } else {
             // If no return statement, return null
             result = make_value();

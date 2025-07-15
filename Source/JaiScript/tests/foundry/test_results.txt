@@ -3,14 +3,104 @@
 ╚════════════════════════════════════════╝
 
 ╔══ Auto Container Conversion Tests ══╗
-  auto_vector_registration ... ✗
-    Error: C++ object field not found in class_instance
+  auto_vector_registration ... ✓ (8299μs)
   auto_map_string_registration ... ✗
-    Error: Internal error: fell through all type conversions
+    Error: Cannot assign to rvalue expression
   auto_map_int_registration ... ✗
-    Error: Internal error: fell through all type conversions
-  nested_auto_registration ... ✗
-    Error: Object is not a class_instance wrapper
-  non_default_constructible_type ... ✗
-    Error: C++ object field not found in class_instance
-  complex_nested_containers ... 
+    Error: Cannot assign to rvalue expression
+  nested_auto_registration ... ✓ (428μs)
+  non_default_constructible_type ... ✓ (676μs)
+  complex_nested_containers ... ✓ (672μs)
+  custom_type_with_custom_methods ... ✓ (993μs)
+  inheritance_and_containers ... ✓ (651μs)
+
+  Summary: 6 passed, 2 failed
+
+╔══ Container Conversion Tests ══╗
+  large_vector_performance ...     Large vector (10k elements) conversion time: 3363μs
+✓ (144237μs)
+  vector_int_basic ... ✓ (546μs)
+  vector_double_conversion ... ✓ (405μs)
+  vector_string_operations ... ✓ (386μs)
+  vector_return_values ... ✓ (349μs)
+  nested_vectors ... ✓ (352μs)
+  map_string_int_basic ... ✓ (329μs)
+  map_return_values ... ✓ (310μs)
+  map_int_string ...     SKIPPED: Map literal parsing issue
+✓ (386μs)
+  empty_containers ... ✓ (489μs)
+  large_vector_performance ... About to call sum_large with array size: 10000
+    Array size: 10000
+    First few elements in large_array: 0 1 2 3 4 
+    Testing direct sum_large([1,2,3,4,5])...
+    sum_large called with vector size: 5
+    Vector address: 0x7fff3b4199b0
+    First few elements: 1 2 3 4 5 
+    Direct call result: 15
+    sum_large called with vector size: 10000
+    Vector address: 0x7fff3b4199b0
+    Result: 49995000 (expected: 49995000)
+    Large vector (10k elements) conversion time: 3407μs
+✓ (142196μs)
+  type_mismatch_errors ... ✓ (4141μs)
+  vector_of_maps ... ✓ (418μs)
+  map_of_vectors ... ✓ (376μs)
+  custom_type_vectors ... ✓ (525μs)
+  performance_comparison ...     Performance comparison (100 iterations, 1000 elements):
+      Variadic version: 4637μs
+      Typed version: 32638μs
+      Speedup: 0.142074x
+✓ (51684μs)
+
+  Summary: 16 passed
+
+╔══ Script Value Conversions ══╗
+  basic_type_conversions ... ✓ (419μs)
+  array_to_vector_conversions ... ✓ (411μs)
+  map_to_stdmap_conversions ... ✓ (268μs)
+  vector_parameter_binding_attempt ...     ✓ Vector<int> parameter binding works!
+✓ (306μs)
+  map_parameter_binding_attempt ...     ✓ Map<string, int> parameter binding works!
+✓ (325μs)
+  script_value_vector_compatibility ...     ✓ Vector<script_value> parameter binding works!
+✓ (274μs)
+  script_value_map_compatibility ...     ✓ Map<script_value, script_value> parameter binding works!
+✓ (306μs)
+  bound_class_conversions ...     Object type: 8
+    Is object: 1
+✓ (1330μs)
+
+  Summary: 8 passed
+
+╔══ Core Engine ══╗
+  engine_creation ... ✓ (178μs)
+  simple_arithmetic ... ✓ (191μs)
+  variable_definition_and_access ... ✓ (246μs)
+  global_variable_persistence ... ✓ (222μs)
+  function_registration ... ✓ (244μs)
+  multiple_executions ... ✓ (304μs)
+  error_handling ... ✓ (687μs)
+  script_defined_functions ... ✓ (328μs)
+  string_operations ... ✓ (219μs)
+  boolean_operations ... ✓ (264μs)
+  comparison_operators ... ✓ (292μs)
+  null_handling ... ✓ (254μs)
+  implicit_return ... ✓ (232μs)
+  complex_expression ... ✓ (249μs)
+
+  Summary: 14 passed
+
+╔══ Enhanced Conversion System ══╗
+  standard_vector_conversions ...     ✓ Vector<int> conversion works!
+    ✓ Vector<double> with mixed types works!
+    ✓ Vector<string> conversion works!
+✓ (511μs)
+  standard_map_conversions ...     ✓ Map<string, int> conversion works!
+    ✓ Map<string, double> with mixed types works!
+    ✓ Map return value works!
+✓ (472μs)
+  custom_type_conversions ...     ✓ Custom Point conversion works!
+    ✓ Vector of custom types works!
+    ✓ Custom type return value works!
+✓ (728μs)
+  specific_type_registration ... 

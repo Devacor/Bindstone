@@ -120,14 +120,6 @@ std::map<K, V> convert_script_map_to_stdmap(const script_value& v, engine* eng) 
     return result;
 }
 
-// This template function should not be used directly - use the engine-aware version instead
-// Keeping it only for backward compatibility
-template<typename K, typename V>
-[[deprecated("Use engine-aware version convert_stdmap_to_script_map(map, engine) instead")]]
-script_value convert_stdmap_to_script_map(const std::map<K, V>& stdmap) {
-    throw std::runtime_error("Non-engine-aware map conversion is no longer supported. Use convert_stdmap_to_script_map(map, engine) instead.");
-}
-
 // Engine-aware version that uses the conversion registry for custom types
 // Implementation moved to engine_impl.hpp to avoid circular dependencies
 template<typename K, typename V>

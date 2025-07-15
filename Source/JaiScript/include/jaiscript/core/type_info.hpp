@@ -243,6 +243,17 @@ namespace jai {
         bool equals(const type_info& other) const;
     };
     
+    // Equality operator for type_info_ptr to compare contents instead of addresses
+    inline bool operator==(const type_info_ptr& lhs, const type_info_ptr& rhs) {
+        if (!lhs && !rhs) return true;
+        if (!lhs || !rhs) return false;
+        return lhs->equals(*rhs);
+    }
+    
+    inline bool operator!=(const type_info_ptr& lhs, const type_info_ptr& rhs) {
+        return !(lhs == rhs);
+    }
+    
     // Example usage in JaiScript syntax:
     // int x = 5;                           // type_info::make_int()
     // array<int> nums = {1, 2, 3};         // type_info::make_array(make_int())

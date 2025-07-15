@@ -1,13 +1,20 @@
-# JaiScript Class System Unification Plan
+# JaiScript Class System Unification Plan (Simplified)
 
 ## Overview
 
 JaiScript currently has three parallel class systems with significant code duplication:
-1. **C++ Class Exposure** (`class_builder`, `class_definition`) - **Working well, will be our foundation**
+1. **C++ Class Exposure** (`class_builder`, `class_definition`) - **Working perfectly, provides the foundation**
 2. **Script-Defined Classes** (`script_class_definition`, `class_interpreter`) - Will inherit from #1
 3. **VM Classes** (`vm_class_definition`, bytecode compilation) - Will inherit from #1
 
-This document outlines a plan to unify these systems by building on the existing, battle-tested `class_definition` infrastructure.
+## Key Insight: `script_value` Already Unifies Everything!
+
+The existing `methods_` map storing `script_value` objects can handle ALL method types:
+- C++ methods: Already stored as `script_value::make_function(cpp_function)`
+- Script methods: Can wrap AST execution in a function
+- VM methods: Can wrap bytecode execution in a function
+
+**No need for complex unified structures - the existing design already supports everything!**
 
 ## Current State Analysis
 
@@ -29,61 +36,59 @@ This document outlines a plan to unify these systems by building on the existing
 - 3 constructor invocation patterns
 - Multiple inheritance resolution algorithms
 
-## Unified Architecture Design (Building on Existing)
+## Simplified Architecture (Using Existing Infrastructure)
 
-### Evolution Strategy
+### The Beautiful Realization
 
-Rather than creating new base classes, we'll evolve the existing `class_definition` and `class_instance` into our unified base classes. This preserves all working code while enabling unification.
+The existing `class_definition` already has everything we need! The `methods_` map storing `script_value` objects can handle all method types uniformly.
 
-### Step 1: Evolve class_definition
+### How It Works
 
 ```cpp
-// Current class_definition becomes our base - minimal changes needed!
 class class_definition : public std::enable_shared_from_this<class_definition> {
 public:
-    enum class_type { 
-        cpp_class,      // Existing
-        script_class,   // Existing
-        vm_class        // New addition
-    };
+    enum class_type { cpp_class, script_class, vm_class };
     
-    // Existing constructor for C++ classes
-    class_definition(const std::string& name) : name_(name), class_type_(cpp_class) {}
-    
-    // Existing constructor for script classes  
-    class_definition(const std::string& name, class_type type) : name_(name), class_type_(type) {}
-    
-    // ALL EXISTING METHODS REMAIN UNCHANGED
-    // Just add new unified structures alongside:
-    
-    // New: Unified method storage (alongside existing methods_)
-    void add_unified_method(const std::string& name, unified_method_info&& info) {
-        unified_methods_[name] = std::move(info);
-        // Also update existing methods_ for compatibility
-        methods_[name] = script_value::make_function(/* adapter */);
-    }
-    
-    // New: Get unified method (falls back to existing methods_)
-    const unified_method_info* get_unified_method(const std::string& name) const {
-        auto it = unified_methods_.find(name);
-        if (it != unified_methods_.end()) {
-            return &it->second;
-        }
-        // Fallback: wrap existing method in unified_method_info
-        return wrap_legacy_method(name);
-    }
-    
-private:
-    // Existing fields remain
-    std::string name_;
+    // Existing methods storage works for EVERYTHING
     std::map<std::string, script_value> methods_;
-    std::map<std::string, script_value> field_defaults_;
-    std::shared_ptr<class_definition> parent_class_;
-    class_type class_type_;
     
-    // New unified storage (gradually migrated to)
-    std::map<std::string, unified_method_info> unified_methods_;
-    std::map<std::string, unified_field_info> unified_fields_;
+    // Add method for C++ classes (existing)
+    void add_method(const std::string& name, script_function func) {
+        methods_[name] = script_value::make_function(func);
+    }
+    
+    // Add method for script classes (new)
+    void add_script_method(const std::string& name, std::shared_ptr<function_decl> ast) {
+        methods_[name] = script_value::make_function(
+            [ast, this](const std::vector<script_value>& args) -> script_value {
+                return interpreter_->execute_function(ast, args);
+            }
+        );
+    }
+    
+    // Add method for VM classes (new)
+    void add_vm_method(const std::string& name, std::shared_ptr<bytecode_function> bytecode) {
+        methods_[name] = script_value::make_function(
+            [bytecode, this](const std::vector<script_value>& args) -> script_value {
+                return vm_->execute_bytecode(bytecode, args);
+            }
+        );
+    }
+    
+    // Single get_method works for all types!
+    script_value get_method(const std::string& name) const {
+        auto it = methods_.find(name);
+        return it != methods_.end() ? it->second : script_value();
+    }
+    
+    // Optional: Add metadata for optimizations
+    struct method_metadata {
+        bool is_virtual = false;
+        bool is_override = false;
+        size_t vtable_index = 0;
+        access_level access = access_level::public_access;
+    };
+    std::map<std::string, method_metadata> method_metadata_;
 };
 ```
 
@@ -232,49 +237,46 @@ struct unified_destructor_info {
 };
 ```
 
-### Step 3: Refactor Other Class Types
+### Step 3: Script Classes Just Inherit!
 
 ```cpp
-// Script class definition now inherits from class_definition!
+// Script class definition is now trivial!
 class script_class_definition : public class_definition {
 public:
     script_class_definition(const std::string& name) 
         : class_definition(name, class_type::script_class) {
-        // Inherits ALL functionality from class_definition!
-        // Methods, fields, inheritance, instance creation - all work!
+        // That's it! Everything just works!
+        // Methods, fields, inheritance, instance creation - all inherited!
     }
     
-    // Override only what's different for script classes
-    void compile_to_bytecode() {
-        // Script-specific: compile methods from AST to bytecode
-        for (auto& [name, method] : get_script_methods()) {
-            auto bytecode = compile_method(method);
-            add_unified_method(name, make_vm_method(bytecode));
-        }
-    }
-};
-
-// VM class definition also inherits!
-class vm_class_definition : public class_definition {
-public:
-    vm_class_definition(const std::string& name)
-        : class_definition(name, class_type::vm_class) {
-        // Start with all class_definition features
-        optimize_for_vm();
-    }
-    
-    // VM-specific optimizations
-    void optimize_for_vm() {
-        // Convert named fields to indexed access
-        build_field_layout();
-        // Build vtable from methods
-        build_vtable();
+    // Helper to add script methods with AST
+    void add_method_from_ast(const std::string& name, std::shared_ptr<function_decl> ast) {
+        // Store AST for later compilation if needed
+        method_asts_[name] = ast;
+        
+        // Add to methods_ as a callable function
+        add_method(name, [ast, this](const std::vector<script_value>& args) -> script_value {
+            // Execute through interpreter when called
+            return get_interpreter()->execute_function(ast, args);
+        });
     }
     
 private:
-    std::vector<size_t> field_indices_;  // Map field names to indices
-    std::vector<const unified_method_info*> vtable_;  // Fast virtual dispatch
+    // Store ASTs for potential VM compilation later
+    std::map<std::string, std::shared_ptr<function_decl>> method_asts_;
 };
+
+// VM compilation is now just an optimization pass!
+void compile_script_class_to_vm(script_class_definition* script_class) {
+    for (auto& [name, ast] : script_class->method_asts_) {
+        auto bytecode = compile_to_bytecode(ast);
+        
+        // Replace interpreter execution with VM execution
+        script_class->add_method(name, [bytecode](const std::vector<script_value>& args) {
+            return vm_execute(bytecode, args);
+        });
+    }
+}
 ```
 
 ### Unified Method Dispatch
@@ -450,46 +452,37 @@ engine.register_class<Point>("Point")
 - Indexed field access for VM
 - Fast property getter paths
 
-## Migration Plan (Building on Existing)
+## Simplified Migration Plan
 
-### Phase 1: Extend class_definition (Day 1-2)
-1. Add `class_type::vm_class` enum value
-2. Add `unified_method_info` map alongside existing `methods_`
-3. Add adapter functions to wrap existing methods
-4. **No breaking changes** - all tests continue to pass
-5. Benchmark performance to ensure no regression
+### Phase 1: Minimal Changes to class_definition (Day 1)
+1. Add `class_type::vm_class` enum value ✓
+2. Add `add_script_method()` helper that wraps AST in function
+3. Add optional `method_metadata_` map for optimization hints
+4. **No breaking changes** - existing code unchanged
 
-### Phase 2: Refactor script_class_definition (Day 3-4)
+### Phase 2: Make script_class_definition inherit (Day 2)
 1. Change `script_class_definition` to inherit from `class_definition`
-2. Remove duplicate fields (name, methods, fields, etc.)
-3. Use inherited `create_instance()` method
-4. Use inherited method storage and dispatch
-5. Script classes now automatically support all class_builder features!
+2. Delete ALL duplicate code (it's all in the parent!)
+3. Add `add_method_from_ast()` helper
+4. Script classes instantly work with all C++ infrastructure!
 
-### Phase 3: Create vm_class_definition (Day 5-6)
-1. Create `vm_class_definition` inheriting from `class_definition`
-2. Add VM-specific optimizations (field indices, vtable)
-3. Compile script methods to bytecode using inherited method list
-4. VM classes get all infrastructure for free
+### Phase 3: Update interpreter (Day 3)
+1. `visit_class_decl` creates `script_class_definition` instead of custom type
+2. Methods added via `add_method_from_ast()`
+3. Delete `class_interpreter` - no longer needed!
+4. Field access already works through inherited `get_field`/`set_field`
 
-### Phase 4: Unify class_interpreter (Day 7-8)
-1. Remove `class_interpreter` - no longer needed!
-2. `interpreter::visit_class_decl` creates `script_class_definition`
-3. Use existing `class_definition` method dispatch
-4. Script classes now work exactly like C++ classes
+### Phase 4: Testing & Cleanup (Day 4)
+1. Test script/C++ class interoperability
+2. Remove old duplicate structures
+3. Celebrate massive simplification!
 
-### Phase 5: Testing & Polish (Day 9-10)
-1. Comprehensive tests for script/C++ interoperability
-2. Performance benchmarks
-3. Remove any remaining duplicate code
-4. Update documentation
-
-### Key Advantages of This Approach
-- **Immediate Benefits**: Script classes get all C++ features on Day 3
-- **No Breaking Changes**: Existing code continues to work throughout
-- **Incremental**: Can ship after any phase
-- **Less Code**: Reusing existing infrastructure instead of duplicating
-- **Battle-Tested**: Building on proven code, not starting fresh
+### Why This Works So Well
+- **script_value** was already designed as a universal wrapper
+- **methods_** map already stores everything as callable functions  
+- Script methods are just functions that call the interpreter
+- VM methods are just functions that call the VM
+- **Zero performance impact** - same number of indirections as before
 
 ## Benefits
 

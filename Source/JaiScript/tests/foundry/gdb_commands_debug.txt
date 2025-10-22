@@ -1,4 +1,0 @@
-run "Enhanced Conversion"
-bt
-frame 0
-quit

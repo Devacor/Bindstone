@@ -1,7 +1,0 @@
-set pagination off
-run
-where
-list
-info locals
-thread apply all bt
-quit

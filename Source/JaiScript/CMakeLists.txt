@@ -19,7 +19,6 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # Options
 option(JAISCRIPT_BUILD_TESTS "Build JaiScript test suite" ON)
-option(JAISCRIPT_BUILD_EXAMPLES "Build JaiScript examples" ON)
 
 # JaiScript Library
 add_subdirectory(source)
@@ -27,9 +26,4 @@ add_subdirectory(source)
 # Tests (Foundry test suite)
 if(JAISCRIPT_BUILD_TESTS)
     add_subdirectory(tests)
-endif()
-
-# Examples
-if(JAISCRIPT_BUILD_EXAMPLES)
-    add_subdirectory(examples)
 endif()

@@ -49,11 +49,10 @@ ctest -C Release --output-on-failure
 ## CMake Options
 
 - `JAISCRIPT_BUILD_TESTS` - Build test suite (default: ON)
-- `JAISCRIPT_BUILD_EXAMPLES` - Build examples (default: ON)
 
 Example:
 ```bash
-cmake -B build -DJAISCRIPT_BUILD_EXAMPLES=OFF
+cmake -B build -DJAISCRIPT_BUILD_TESTS=OFF
 ```
 
 ## Running Tests

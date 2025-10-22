@@ -79,7 +79,7 @@ private:
                 }
                 auto& array = detail::get_mutable_array(self);
                 array.push_back(args[0].clone());  // Deep copy when pushing
-                return script_value(); // void return
+                return self; // Return self for method chaining - shared_ptr means same underlying array
             }},
             
             {"pop", [](interpreter*, const script_value& self, const std::vector<script_value>& args) -> script_value {

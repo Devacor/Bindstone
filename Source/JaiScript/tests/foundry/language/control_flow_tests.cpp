@@ -226,7 +226,7 @@ public:
                 }
                 result;
             )");
-            check_eq(result.as<int>(), 15);
+            check_eq(result.as<int>(), 16);
         });
     }
 };

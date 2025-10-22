@@ -174,9 +174,9 @@ void assignment_tests::forge_tests() {
         auto engine = engine::make();
         
         // Register print function for the test
-        engine->add_variadic_function("print", [](const std::vector<script_value>& args) -> script_value {
+        engine->add_variadic_function("print", [engine](const std::vector<script_value>& args) -> script_value {
             // Just consume the args, don't actually print in tests
-            return script_value(script_value::serialization_tag{}, std::monostate{});
+            return script_value(std::monostate{}, engine->weak_from_this());
         });
         
         // The exact workflow requested by the user

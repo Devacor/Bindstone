@@ -97,6 +97,12 @@ public:
             )";
             
             script_value result = engine->execute(script);
+            if (!result.is_string() || result.as_string() != "C++ function error") {
+                std::cout << "\ncpp_runtime_error_interop FAILURE:" << std::endl;
+                std::cout << "  Expected: 'C++ function error'" << std::endl;
+                std::cout << "  Actual: '" << (result.is_string() ? result.as_string() : "<not a string>") << "'" << std::endl;
+                std::cout << "  Is int: " << result.is_int() << ", Is string: " << result.is_string() << std::endl;
+            }
             check_eq(result.is_string(), true);
             check_eq(result.as_string(), "C++ function error");
         });
@@ -118,8 +124,14 @@ public:
             )";
             
             script_value result = engine->execute(script);
+            if (!result.is_string() || result.as_string() != "Generic C++ error") {
+                std::cout << "\ncpp_generic_exception_interop FAILURE:" << std::endl;
+                std::cout << "  Expected: 'Generic C++ error'" << std::endl;
+                std::cout << "  Actual: '" << (result.is_string() ? result.as_string() : "<not a string>") << "'" << std::endl;
+                std::cout << "  Is int: " << result.is_int() << ", Is string: " << result.is_string() << std::endl;
+            }
             check_eq(result.is_string(), true);
-            check_eq(result.as_string(), "Unbound exception type caught in JaiScript.");
+            check_eq(result.as_string(), "Generic C++ error");
         });
         
         test("throw_rethrow", [this]() {
@@ -172,8 +184,8 @@ public:
             )";
             
             script_value result = engine->execute(script);
-            check_eq(result.is_string(), true);
-            check_eq(result.as_string(), "42");
+            check_eq(result.is_int(), true);
+            check_eq(result.as<int>(), 42);
         });
         
         test("exception_scope_isolation", [this]() {

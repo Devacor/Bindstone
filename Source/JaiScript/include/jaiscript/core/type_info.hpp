@@ -69,6 +69,12 @@ namespace jai {
             return info;
         }
         
+        static type_info_ptr make_invalid() {
+            auto info = std::make_shared<type_info>(script_value_type::jai_invalid_type);
+            info->type_name = "invalid";
+            return info;
+        }
+        
         // Factory methods for specific native types
         static type_info_ptr make_int8() {
             auto info = make_int();
@@ -156,6 +162,7 @@ namespace jai {
         static type_info_ptr make_weak_ptr(type_info_ptr pointee_type) {
             auto info = std::make_shared<type_info>(script_value_type::jai_weak_ptr_type);
             info->type_params.push_back(pointee_type);
+            info->type_name = "weak_ptr";  // Keep generic name for lookups
             return info;
         }
         
@@ -163,6 +170,13 @@ namespace jai {
         static type_info_ptr make_reference(type_info_ptr referenced_type) {
             auto info = std::make_shared<type_info>(script_value_type::jai_reference_type);
             info->type_params.push_back(referenced_type);
+            return info;
+        }
+        
+        // C++ bound value
+        static type_info_ptr make_cpp_bound(type_info_ptr bound_type) {
+            auto info = std::make_shared<type_info>(script_value_type::jai_cpp_bound_type);
+            info->type_params.push_back(bound_type);
             return info;
         }
         

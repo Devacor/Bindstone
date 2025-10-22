@@ -49,8 +49,9 @@ public:
         });
         
         test("direct_value_conversion", [this]() {
+            auto eng = engine::make();
             // Test the script_value conversion directly
-            script_value intVal(script_value::serialization_tag{}, script_int(3));
+            script_value intVal(script_int(3), eng->weak_from_this());
             std::cout << "intVal type: " << static_cast<int>(intVal.type()) << " (should be 1 for int)\n";
             
             try {

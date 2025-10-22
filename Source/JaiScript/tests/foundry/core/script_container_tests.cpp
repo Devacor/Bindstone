@@ -44,6 +44,11 @@ class script_container_tests : public suite {
 public:
     script_container_tests() : suite("script_container_tests") {}
     
+    void pre_test() override {
+        // Reset static counters before each test
+        TestWidget::reset_counts();
+    }
+    
     void forge_tests() override {
         // ========== SCRIPT ARRAY TESTS ==========
         

@@ -22,6 +22,7 @@ namespace jai {
 
     // Forward declarations
     class class_definition;
+    class class_registry;
     class execution_backend;
     
     namespace serialization {
@@ -73,10 +74,68 @@ namespace jai {
         // Global registration
         void add_global(const std::string& name, script_value value, bool is_serializable = true);
         
+        // Convenience overload for add_global that automatically wraps values
+        template<typename T>
+        void add_global(const std::string& name, const T& value, bool is_serializable = true) {
+            add_global(name, make_value(value), is_serializable);
+        }
+        
+        // Add a global reference that binds to a C++ variable
+        // Supports both primitive types AND custom objects registered via class_builder
+        template<typename T>
+        void add_global_ref(const std::string& name, T& value, bool is_serializable = false) {
+            // For primitive types, use cpp_bound for direct binding
+            if constexpr (std::is_integral_v<T> || std::is_floating_point_v<T> ||
+                          std::is_same_v<T, bool> || std::is_same_v<T, std::string> ||
+                          std::is_same_v<T, char>) {
+                auto ref = script_value::make_cpp_bound(&value, weak_from_this());
+                add_global(name, std::move(ref), is_serializable);
+            } else {
+                // For custom types, create a non-owning shared_ptr using aliasing constructor
+                // This allows script to access the object without taking ownership
+                // WARNING: Caller must ensure 'value' outlives the script engine!
+                auto lifetime_tracker = std::make_shared<bool>(true);
+                std::shared_ptr<T> non_owning_ptr(lifetime_tracker, &value);
+                add_global(name, make_object(non_owning_ptr), is_serializable);
+            }
+        }
+        
         // Object creation through registered class system
         template<typename T, typename... Args>
         script_value make_object(Args&&... args) {
-            return script_value::make_registered_object<T>(this, std::forward<Args>(args)...);
+            auto data = std::make_shared<T>(std::forward<Args>(args)...);
+            // Delegate to the shared_ptr overload which handles wrapping properly
+            return make_object(data);
+        }
+        
+        // Object creation from existing shared_ptr
+        // NOTE: This method currently doesn't support property access on C++ objects
+        // For C++ objects with properties, create them via script constructor instead
+        template<typename T>
+        script_value make_object(std::shared_ptr<T> data) {
+            std::string type_name = get_registered_name<T>();
+
+            // Try to get the class definition to wrap the object properly
+            try {
+                auto class_def = get_class_definition_by_type(std::type_index(typeid(T)));
+                if (class_def) {
+                    // Create a class_instance to wrap the object (same as constructors do)
+                    auto instance = class_def->create_instance();
+
+                    // Store the C++ object in the special field (same pattern as class_builder)
+                    // Using the constant "_cpp_object" directly to avoid circular include
+                    instance->set_field("_cpp_object",
+                        script_value::make_cpp_object(type_name, std::static_pointer_cast<void>(data), weak_from_this()));
+
+                    // Return the class_instance wrapped in a script_value
+                    return script_value::make_object(type_name, instance, weak_from_this());
+                }
+            } catch (...) {
+                // Class not registered, fall back to raw object storage
+            }
+
+            // Fallback: store as raw C++ object (properties won't work)
+            return script_value::make_cpp_object(type_name, std::static_pointer_cast<void>(data), weak_from_this());
         }
         
         // Convenient script_value creation methods
@@ -99,6 +158,11 @@ namespace jai {
         // Create map value
         script_value make_map() {
             return script_value::make_map(nullptr, nullptr, weak_from_this());
+        }
+        
+        // Create empty weak_ptr value with specified type
+        script_value make_empty_weak_ptr(type_info_ptr weak_ptr_type) {
+            return script_value::make_empty_weak_ptr(weak_ptr_type, weak_from_this());
         }
         
         // === FUNCTION REGISTRATION ===
@@ -195,6 +259,10 @@ namespace jai {
         
         // Get class definition by name
         std::shared_ptr<class_definition> get_class_definition(const std::string& name) const;
+        
+        // Get registered script name for a C++ type
+        template<typename T>
+        std::string get_registered_name() const;
         
         // Enhanced Conversion System
         // Get the conversion manager for this engine
@@ -295,6 +363,9 @@ namespace jai {
         bool has_function(const std::string& name) const;
         bool is_type_name(const std::string& name) const;
         
+        // Get the global environment (for internal use)
+        std::shared_ptr<environment> get_global_environment() const;
+        
         // state management (hooks for external serialization)
         struct state {
             std::map<std::string, script_value> globals;  // Use ordered map for deterministic serialization
@@ -351,6 +422,9 @@ namespace jai {
         // Get the serialization registry for this engine
         serialization::serialization_registry& get_serialization_registry();
         
+        // Get the class registry for this engine
+        class_registry& get_class_registry();
+        
         // Reference support for function parameters
         script_value try_create_reference(size_t arg_index, const script_value& fallback);
         
@@ -361,6 +435,31 @@ namespace jai {
                                        std::function<std::shared_ptr<void>(const void*)> copier) {
             register_polymorphic_copier_impl(derived_type, base_type, std::move(copier));
         }
+        
+        // Include/Import path management
+        void include_paths(const std::vector<std::string>& paths);
+        void add_include_path(const std::string& path);
+        void clear_include_paths();
+        std::vector<std::string> get_include_paths() const;
+        
+        // Import behavior configuration
+        enum class import_behavior {
+            file_timestamp, // Re-import if file modified (DEFAULT)
+            once,           // Import only once, ignore file changes
+            always         // Treat import as include
+        };
+        
+        void set_import_behavior(import_behavior behavior);
+        import_behavior get_import_behavior() const;
+        
+        // Import management
+        void reset_imports();
+        void reset_import(const std::string& path);
+        bool is_imported(const std::string& path) const;
+        std::vector<std::string> get_imported_files() const;
+        
+        // Execute a file with import tracking
+        script_value execute_import(const std::string& resolved_path);
         
     private:
         struct implementation;
@@ -379,6 +478,8 @@ namespace jai {
         template<typename T> friend class class_builder;
         // Allow function_binder to access conversion registry
         template<typename T> friend struct detail::value_converter;
+        // Allow interpreter to access implementation for include/import
+        friend class interpreter;
         
         // Helper to wrap functions with type conversion
         template<typename ReturnType>

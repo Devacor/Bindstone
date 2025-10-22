@@ -47,6 +47,7 @@ public:
                         fallthrough;
                     case 3:
                         result = result + "three";
+                        fallthrough;
                     default:
                         result = result + "default";
                 }

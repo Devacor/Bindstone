@@ -114,22 +114,9 @@ public:
         switch (value.type()) {
             
             case script_value_type::jai_weak_ptr_type: {
-                // Handle weak_ptr
-                auto weak_val = std::get<std::weak_ptr<script_value>>(value.storage_);
-                if (auto shared_val = weak_val.lock()) {
-                    const void* raw_ptr = shared_val.get();
-                    auto [id, is_new] = track_shared_ptr(raw_ptr);
-                    
-                    if (id == 0) {
-                        oss_ << "null";
-                    } else {
-                        // Weak ptrs are always references
-                        oss_ << "{\"_weak_ptr_ref\": " << id << "}";
-                    }
-                } else {
-                    // Expired weak_ptr
-                    oss_ << "null";
-                }
+                // Handle weak_ptr - for now just write null
+                // TODO: Implement proper serialization for weak_ptr<object_holder>
+                oss_ << "null";
                 break;
             }
             
@@ -495,9 +482,9 @@ public:
             // Check for weak_ptr_ref
             auto weak_ref_it = map.find(script_value("_weak_ptr_ref", eng_weak));
             if (weak_ref_it != map.end() && weak_ref_it->second.type() == script_value_type::jai_int_type) {
-                uint32_t id = static_cast<uint32_t>(weak_ref_it->second.as<script_int>());
-                script_value shared_val = get_shared_ptr(id);
-                return script_value::make_weak_ptr(shared_val);
+                // For now, return null for weak_ptr references
+                // TODO: Implement proper deserialization for weak_ptr<object_holder>
+                return script_value::make_null(eng_weak);
             }
         }
         

@@ -9,6 +9,7 @@ using namespace jai;
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+namespace conversion_tests_ns {
 
 // Test classes for bound type conversions
 class TestObject {
@@ -229,8 +230,8 @@ public:
     }
 };
 
+} // namespace conversion_tests_ns
 } // namespace jai::foundry::tests
 
 // Auto-register with the test framework
-using conversion_tests = jai::foundry::tests::conversion_tests;
-FOUNDRY_REGISTER(conversion_tests)
+FOUNDRY_REGISTER(jai::foundry::tests::conversion_tests_ns::conversion_tests)

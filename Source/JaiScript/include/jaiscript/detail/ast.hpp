@@ -90,6 +90,8 @@ namespace jai {
         virtual void visit_function_decl(class function_decl* decl) = 0;
         virtual void visit_class_decl(class class_decl* decl) = 0;
         virtual void visit_expression_decl(class expression_decl* decl) = 0;
+        virtual void visit_include_decl(class include_decl* decl) = 0;
+        virtual void visit_import_decl(class import_decl* decl) = 0;
     };
     
     // Base AST node
@@ -202,9 +204,10 @@ namespace jai {
         expression_ptr object;
         std::string member;
         bool is_arrow;  // true for ->, false for .
+        bool is_static; // true for ::, false for . or ->
         
-        member_expr(const source_location& loc, expression_ptr obj, const std::string& mem, bool arrow)
-            : expression(loc), object(obj), member(mem), is_arrow(arrow) {}
+        member_expr(const source_location& loc, expression_ptr obj, const std::string& mem, bool arrow, bool static_access = false)
+            : expression(loc), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}
             
         void accept(ast_visitor* visitor) override {
             visitor->visit_member_expr(this);
@@ -542,15 +545,25 @@ namespace jai {
         type_info_ptr type;
         std::string name;
         expression_ptr initializer;  // Can be null
+        bool is_static = false;      // For static class members
         
         variable_decl(const source_location& loc, type_info_ptr t, const std::string& n, expression_ptr init = nullptr)
-            : declaration(loc), type(t), name(n), initializer(init) {}
+            : declaration(loc), type(t), name(n), initializer(init), is_static(false) {}
             
         void accept(ast_visitor* visitor) override {
             visitor->visit_variable_decl(this);
         }
     };
     
+    // Constructor initialization entry (for : super(args), : this(args))
+    struct constructor_initializer {
+        std::string target; // "super" or "this"
+        std::vector<expression_ptr> arguments;
+        
+        constructor_initializer(const std::string& t, std::vector<expression_ptr> args)
+            : target(t), arguments(std::move(args)) {}
+    };
+
     // Function declaration
     class function_decl : public declaration {
     public:
@@ -558,9 +571,12 @@ namespace jai {
         std::vector<parameter> parameters;
         type_info_ptr return_type;
         std::shared_ptr<block_stmt> body;
+        std::vector<constructor_initializer> initializers; // For constructor initialization lists
+        bool is_override = false; // For override keyword in derived classes
+        bool is_static = false;   // For static methods
         
         function_decl(const source_location& loc, const std::string& n)
-            : declaration(loc), name(n) {}
+            : declaration(loc), name(n), is_override(false), is_static(false) {}
             
         void accept(ast_visitor* visitor) override {
             visitor->visit_function_decl(this);
@@ -617,6 +633,44 @@ namespace jai {
         void accept(ast_visitor* visitor) override {
             // Just visit the wrapped statement
             statement->accept(visitor);
+        }
+    };
+    
+    // include declaration - always parses the file
+    class include_decl : public declaration {
+    public:
+        std::string path;  // The file path to include (for literal syntax)
+        expression_ptr path_expr;  // The expression that evaluates to path (for function syntax)
+        
+        // Constructor for literal syntax: include "file.jai"
+        include_decl(const source_location& loc, const std::string& p)
+            : declaration(loc), path(p), path_expr(nullptr) {}
+            
+        // Constructor for expression syntax: include(expr)
+        include_decl(const source_location& loc, expression_ptr expr)
+            : declaration(loc), path(), path_expr(expr) {}
+            
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_include_decl(this);
+        }
+    };
+    
+    // import declaration - intelligently manages file parsing
+    class import_decl : public declaration {
+    public:
+        std::string path;  // The file path to import (for literal syntax)
+        expression_ptr path_expr;  // The expression that evaluates to path (for function syntax)
+        
+        // Constructor for literal syntax: import "file.jai"
+        import_decl(const source_location& loc, const std::string& p)
+            : declaration(loc), path(p), path_expr(nullptr) {}
+            
+        // Constructor for expression syntax: import(expr)
+        import_decl(const source_location& loc, expression_ptr expr)
+            : declaration(loc), path(), path_expr(expr) {}
+            
+        void accept(ast_visitor* visitor) override {
+            visitor->visit_import_decl(this);
         }
     };
     

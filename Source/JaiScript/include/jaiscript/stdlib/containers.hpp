@@ -11,7 +11,12 @@ namespace stdlib {
         script_value first;
         script_value second;
         
-        // We need to provide the engine reference for script_values
+        // Engine-aware constructor - will be used as default by class_builder
+        explicit script_pair(std::weak_ptr<engine> eng) 
+            : first(std::monostate{}, eng), 
+              second(std::monostate{}, eng) {}
+        
+        // Constructor with values - script_values should already have engine references
         script_pair(const script_value& f, const script_value& s) 
             : first(f), second(s) {}
             
@@ -32,6 +37,7 @@ namespace stdlib {
     inline void register_container_types(engine& engine) {
         // Register the pair type for map iteration
         class_builder<script_pair>(engine, "pair")
+            .constructor<>()  // Will automatically use engine-aware constructor
             .constructor<script_value, script_value>()
             .property("first", &script_pair::first)
             .property("second", &script_pair::second)

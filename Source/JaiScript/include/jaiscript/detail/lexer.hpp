@@ -24,10 +24,11 @@ namespace jai {
         
         // Keywords
         bool_keyword, break_keyword, char_keyword, class_keyword, const_keyword, continue_keyword, else_keyword, false_keyword, float_keyword, for_keyword,
-        function_keyword, if_keyword, int_keyword, map_keyword, array_keyword, null_keyword, private_keyword, public_keyword, return_keyword, string_keyword,
-        this_keyword, true_keyword, void_keyword, while_keyword, auto_keyword, var_keyword, super_keyword, weak_ptr_keyword,
+        function_keyword, if_keyword, int_keyword, map_keyword, array_keyword, null_keyword, override_keyword, private_keyword, public_keyword, return_keyword, static_keyword, string_keyword,
+        this_keyword, true_keyword, void_keyword, while_keyword, auto_keyword, var_keyword, super_keyword, weak_ptr_keyword, shared_ptr_keyword,
         try_keyword, catch_keyword, throw_keyword,
         switch_keyword, case_keyword, default_keyword, fallthrough_keyword,
+        include_keyword, import_keyword,
         
         // Operators
         plus, minus, star, slash, percent,

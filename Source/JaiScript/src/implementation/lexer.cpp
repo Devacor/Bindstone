@@ -23,9 +23,11 @@ const std::unordered_map<std::string, token_type> lexer::keywords_ = {
     {"array", token_type::array_keyword},
     {"null", token_type::null_keyword},
     {"nullptr", token_type::null_keyword},
+    {"override", token_type::override_keyword},
     {"private", token_type::private_keyword},
     {"public", token_type::public_keyword},
     {"return", token_type::return_keyword},
+    {"static", token_type::static_keyword},
     {"string", token_type::string_keyword},
     {"this", token_type::this_keyword},
     {"true", token_type::true_keyword},
@@ -35,6 +37,7 @@ const std::unordered_map<std::string, token_type> lexer::keywords_ = {
     {"var", token_type::var_keyword},
     {"super", token_type::super_keyword},
     {"weak_ptr", token_type::weak_ptr_keyword},
+    {"shared_ptr", token_type::shared_ptr_keyword},
     {"try", token_type::try_keyword},
     {"catch", token_type::catch_keyword},
     {"throw", token_type::throw_keyword},
@@ -42,6 +45,8 @@ const std::unordered_map<std::string, token_type> lexer::keywords_ = {
     {"case", token_type::case_keyword},
     {"default", token_type::default_keyword},
     {"fallthrough", token_type::fallthrough_keyword},
+    {"include", token_type::include_keyword},
+    {"import", token_type::import_keyword},
 };
 
 lexer::lexer(const std::string& source, const std::string& filename)
@@ -112,6 +117,12 @@ token lexer::next_token() {
         case '?': return make_token(token_type::question);
         case '~': return make_token(token_type::tilde);
         case '^': return make_token(token_type::caret);
+        
+        // Handle #include and #import (# is optional/ignored)
+        case '#':
+            // Skip the # and process the next token
+            skip_whitespace();
+            return next_token();
         
         // Operators that might be compound
         case '+':
@@ -551,7 +562,7 @@ std::string token::to_string() const {
 }
 
 bool token::is_keyword() const {
-    return type >= token_type::bool_keyword && type <= token_type::weak_ptr_keyword;
+    return type >= token_type::bool_keyword && type <= token_type::import_keyword;
 }
 
 bool token::is_operator() const {

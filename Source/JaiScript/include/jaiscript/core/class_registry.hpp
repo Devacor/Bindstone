@@ -1,7 +1,7 @@
 #pragma once
 
-#include "jaiscript/core/script_class.hpp"
 #include "jaiscript/core/class_builder.hpp"
+#include "jaiscript/core/script_class.hpp"
 #include <memory>
 #include <map>
 #include <string>
@@ -17,7 +17,6 @@ struct base_class_definition {
 // Unified class registry for both script and C++ classes
 class class_registry {
 public:
-    static class_registry& instance();
     
     // Register script-defined class
     void register_script_class(std::shared_ptr<script_class_definition> class_def);
@@ -48,7 +47,6 @@ public:
         const std::string& derived_class_name
     );
     
-private:
     class_registry() = default;
     
     std::map<std::string, std::shared_ptr<script_class_definition>> script_classes_;
@@ -71,11 +69,12 @@ private:
 // Factory functions for creating script class instances
 template<typename... Args>
 std::shared_ptr<script_class_instance> make_shared_script_class(
+    engine& eng,
     const std::string& class_name,
     Args&&... args
 ) {
     std::vector<script_value> script_args = {script_value(std::forward<Args>(args))...};
-    return class_registry::instance().create_script_instance(class_name, script_args);
+    return eng.get_class_registry().create_script_instance(class_name, script_args);
 }
 
 } // namespace jai

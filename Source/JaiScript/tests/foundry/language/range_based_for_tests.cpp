@@ -12,10 +12,10 @@ public:
     
     void forge_tests() override {
         test("array_value_iteration", [this]() {
-            engine engine;
+            auto engine = engine::make();
             stdlib::register_all(engine);
             
-            auto result = engine.execute(R"(
+            auto result = engine->execute(R"(
                 auto numbers = [1, 2, 3, 4, 5];
                 auto sum = 0;
                 for (auto x : numbers) {
@@ -28,10 +28,10 @@ public:
         });
         
         test("array_reference_iteration", [this]() {
-            engine engine;
+            auto engine = engine::make();
             stdlib::register_all(engine);
             
-            auto result = engine.execute(R"(
+            auto result = engine->execute(R"(
                 auto numbers = [1, 2, 3, 4, 5];
                 for (auto& x : numbers) {
                     x *= 2;
@@ -47,10 +47,10 @@ public:
         });
         
         test("map_value_iteration", [this]() {
-            engine engine;
+            auto engine = engine::make();
             stdlib::register_all(engine);
             
-            auto result = engine.execute(R"(
+            auto result = engine->execute(R"(
                 auto scores = {"alice": 100, "bob": 85, "charlie": 92};
                 auto total = 0;
                 for (auto kv : scores) {
@@ -63,10 +63,10 @@ public:
         });
         
         test("map_reference_iteration", [this]() {
-            engine engine;
+            auto engine = engine::make();
             stdlib::register_all(engine);
             
-            auto result = engine.execute(R"(
+            auto result = engine->execute(R"(
                 auto scores = {"alice": 100, "bob": 85, "charlie": 92};
                 
                 // Add 10 bonus points to each score
@@ -81,10 +81,10 @@ public:
         });
         
         test("map_key_const_check", [this]() {
-            engine engine;
+            auto engine = engine::make();
             stdlib::register_all(engine);
             
-            auto result = engine.execute(R"(
+            auto result = engine->execute(R"(
                 auto test_map = {"key1": 100, "key2": 200};
                 auto original_keys = "";
                 for (auto kv : test_map) {
@@ -108,10 +108,10 @@ public:
         });
         
         test("nested_iteration", [this]() {
-            engine engine;
+            auto engine = engine::make();
             stdlib::register_all(engine);
             
-            auto result = engine.execute(R"(
+            auto result = engine->execute(R"(
                 auto matrix = [[1, 2], [3, 4], [5, 6]];
                 auto sum = 0;
                 for (auto row : matrix) {
@@ -126,10 +126,10 @@ public:
         });
         
         test("break_in_range_for", [this]() {
-            engine engine;
+            auto engine = engine::make();
             stdlib::register_all(engine);
             
-            auto result = engine.execute(R"(
+            auto result = engine->execute(R"(
                 auto numbers = [1, 2, 3, 4, 5];
                 auto sum = 0;
                 for (auto x : numbers) {
@@ -145,10 +145,10 @@ public:
         });
         
         test("continue_in_range_for", [this]() {
-            engine engine;
+            auto engine = engine::make();
             stdlib::register_all(engine);
             
-            auto result = engine.execute(R"(
+            auto result = engine->execute(R"(
                 auto numbers = [1, 2, 3, 4, 5];
                 auto sum = 0;
                 for (auto x : numbers) {
@@ -164,10 +164,10 @@ public:
         });
         
         test("empty_container_iteration", [this]() {
-            engine engine;
+            auto engine = engine::make();
             stdlib::register_all(engine);
             
-            auto result = engine.execute(R"(
+            auto result = engine->execute(R"(
                 auto empty_array = [];
                 auto count = 0;
                 for (auto x : empty_array) {
@@ -186,10 +186,10 @@ public:
         });
         
         test("pair_member_access", [this]() {
-            engine engine;
+            auto engine = engine::make();
             stdlib::register_all(engine);
             
-            auto result = engine.execute(R"(
+            auto result = engine->execute(R"(
                 auto data = {"x": 10, "y": 20};
                 auto keys = "";
                 auto sum = 0;

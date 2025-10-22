@@ -5,8 +5,20 @@
 
 #include "engine.hpp"
 #include "conversion_registry.hpp"
+#include "class_builder.hpp"
 
 namespace jai {
+
+// Implementation of get_registered_name template
+template<typename T>
+std::string engine::get_registered_name() const {
+    auto class_def = get_class_definition_by_type(std::type_index(typeid(T)));
+    if (class_def) {
+        return class_def->get_name();
+    }
+    // Fallback to raw type name
+    return typeid(T).name();
+}
 
 // Forward declaration helper function for conversion_registry_impl.hpp
 // Implementation moved to engine.cpp
@@ -27,7 +39,8 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng) {
     if (!eng) {
         throw runtime_error("Engine reference required for custom type conversion");
     }
-    return script_value::make_object(typeid(T).name(), std::static_pointer_cast<void>(sharedObj), get_engine_weak_ptr(eng));
+    // Use engine to create object with proper type name lookup
+    return eng->make_object(sharedObj);
 }
 
 // Implementation of engine-aware vector conversion function
@@ -57,7 +70,7 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
             }
             // Fallback: create raw C++ object with engine reference
             auto sharedObj = std::make_shared<T>(item);
-            arr.push_back(script_value::make_cpp_object(typeid(T).name(), std::static_pointer_cast<void>(sharedObj), get_engine_weak_ptr(eng)));
+            arr.push_back(eng->make_object(sharedObj));
         }
     }
     
@@ -92,12 +105,12 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
                 } else {
                     // Fallback: create raw C++ object with engine reference
                     auto sharedObj = std::make_shared<K>(key);
-                    converted_key = script_value::make_cpp_object(typeid(K).name(), std::static_pointer_cast<void>(sharedObj), get_engine_weak_ptr(eng));
+                    converted_key = eng->make_object(sharedObj);
                 }
             } else {
                 // Fallback: create raw C++ object with engine reference
                 auto sharedObj = std::make_shared<K>(key);
-                converted_key = script_value::make_cpp_object(typeid(K).name(), std::static_pointer_cast<void>(sharedObj), get_engine_weak_ptr(eng));
+                converted_key = eng->make_object(sharedObj);
             }
         }
         
@@ -118,12 +131,12 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
                 } else {
                     // Fallback: create raw C++ object with engine reference
                     auto sharedObj = std::make_shared<V>(value);
-                    converted_value = script_value::make_cpp_object(typeid(V).name(), std::static_pointer_cast<void>(sharedObj), get_engine_weak_ptr(eng));
+                    converted_value = eng->make_object(sharedObj);
                 }
             } else {
                 // Fallback: create raw C++ object with engine reference
                 auto sharedObj = std::make_shared<V>(value);
-                converted_value = script_value::make_cpp_object(typeid(V).name(), std::static_pointer_cast<void>(sharedObj), get_engine_weak_ptr(eng));
+                converted_value = eng->make_object(sharedObj);
             }
         }
         

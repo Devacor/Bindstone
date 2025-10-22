@@ -27,6 +27,11 @@ std::vector<declaration_ptr> parser::parse() {
         }
     }
     
+    // If there were parse errors, throw the first one
+    if (!errors_.empty()) {
+        throw parse_error(errors_[0], source_location{});
+    }
+
     // Mark the last expression declaration as an implicit return
     if (!declarations.empty()) {
         if (auto* expr_decl = dynamic_cast<expression_decl*>(declarations.back().get())) {
@@ -48,7 +53,7 @@ std::vector<declaration_ptr> parser::parse() {
                 // Since expression_stmt doesn't have implicit_return flag, we need to convert
                 // this statement_decl to an expression_decl
                 auto expr_decl = std::make_shared<expression_decl>(
-                    expr_stmt->expression->location, 
+                    expr_stmt->expression->location,
                     expr_stmt->expression
                 );
                 expr_decl->implicit_return = true;
@@ -56,7 +61,7 @@ std::vector<declaration_ptr> parser::parse() {
             }
         }
     }
-    
+
     return declarations;
 }
 
@@ -155,41 +160,41 @@ token parser::consume(token_type type, const std::string& message) {
 expression_ptr parser::primary() {
     // Literals
     if (match(token_type::true_keyword)) {
-        script_value val(script_value::serialization_tag{}, true);
+        script_value val(script_value::ast_literal_tag{}, true);
         return std::make_shared<literal_expr>(previous().location, val);
     }
     
     if (match(token_type::false_keyword)) {
-        script_value val(script_value::serialization_tag{}, false);
+        script_value val(script_value::ast_literal_tag{}, false);
         return std::make_shared<literal_expr>(previous().location, val);
     }
     
     if (match(token_type::null_keyword)) {
-        script_value val(script_value::serialization_tag{}, std::monostate{});
+        script_value val(script_value::ast_literal_tag{}, std::monostate{});
         return std::make_shared<literal_expr>(previous().location, val);
     }
     
     if (match(token_type::integer_literal)) {
         token token = previous();
-        script_value val(script_value::serialization_tag{}, token.int_value);
+        script_value val(script_value::ast_literal_tag{}, token.int_value);
         return std::make_shared<literal_expr>(token.location, val);
     }
     
     if (match(token_type::float_literal)) {
         token token = previous();
-        script_value val(script_value::serialization_tag{}, token.float_value);
+        script_value val(script_value::ast_literal_tag{}, token.float_value);
         return std::make_shared<literal_expr>(token.location, val);
     }
     
     if (match(token_type::string_literal)) {
         token token = previous();
-        script_value val(script_value::serialization_tag{}, token.string_value);
+        script_value val(script_value::ast_literal_tag{}, token.string_value);
         return std::make_shared<literal_expr>(token.location, val);
     }
     
     if (match(token_type::char_literal)) {
         token token = previous();
-        script_value val(script_value::serialization_tag{}, token.char_value);
+        script_value val(script_value::ast_literal_tag{}, token.char_value);
         return std::make_shared<literal_expr>(token.location, val);
     }
     
@@ -327,7 +332,8 @@ expression_ptr parser::primary() {
     
     // Check for type constructors (array<int>(), map<string, int>(), etc.)
     if (check(token_type::array_keyword) || check(token_type::map_keyword) || 
-        check(token_type::weak_ptr_keyword) || check(token_type::int_keyword) || check(token_type::float_keyword) || 
+        check(token_type::weak_ptr_keyword) || check(token_type::shared_ptr_keyword) ||
+        check(token_type::int_keyword) || check(token_type::float_keyword) || 
         check(token_type::string_keyword) || check(token_type::bool_keyword) || check(token_type::char_keyword)) {
         size_t savedPos = current_;
         type_info_ptr type = parse_type();
@@ -344,19 +350,24 @@ expression_ptr parser::primary() {
                 current_ = savedPos;
                 type = parse_type();
                 
-                // Check if this is followed by {} for constructor syntax
-                if (check(token_type::left_brace)) {
-                    advance(); // consume '{'
+                // Check if this is followed by {} or () for constructor syntax
+                if (check(token_type::left_brace) || check(token_type::left_paren)) {
+                    bool is_brace = check(token_type::left_brace);
+                    advance(); // consume '{' or '('
                     
                     std::vector<expression_ptr> arguments;
-                    if (!check(token_type::right_brace)) {
+                    if (!check(is_brace ? token_type::right_brace : token_type::right_paren)) {
                         arguments.reserve(4);
                         do {
                             arguments.push_back(expression());
                         } while (match(token_type::comma));
                     }
                     
-                    consume(token_type::right_brace, "Expected '}' after constructor arguments");
+                    if (is_brace) {
+                        consume(token_type::right_brace, "Expected '}' after constructor arguments");
+                    } else {
+                        consume(token_type::right_paren, "Expected ')' after constructor arguments");
+                    }
                     return std::make_shared<new_expr>(typeToken.location, type, std::move(arguments));
                 }
                 
@@ -409,12 +420,17 @@ expression_ptr parser::primary() {
         }
     }
     
+    // Super keyword
+    if (match(token_type::super_keyword)) {
+        return std::make_shared<super_expr>(previous().location);
+    }
+
     // Regular identifier (variable name)
     if (match(token_type::identifier)) {
         token name = previous();
         return std::make_shared<identifier_expr>(name.location, name.lexeme);
     }
-    
+
     error("Expected expression", peek());
     return nullptr; // Never reached
 }
@@ -470,6 +486,23 @@ type_info_ptr parser::parse_type() {
         type_info_ptr pointee_type = parse_type();
         consume_greater_in_generic("Expected '>' after weak_ptr type");
         return type_info::make_weak_ptr(pointee_type);
+    }
+    
+    if (match(token_type::shared_ptr_keyword)) {
+        consume(token_type::less, "Expected '<' after 'shared_ptr'");
+        type_info_ptr pointee_type = parse_type();
+        consume_greater_in_generic("Expected '>' after shared_ptr type");
+        // Create a shared_ptr type that wraps the pointee type
+        // This ensures reference semantics (no clone on assign)
+        auto info = std::make_shared<type_info>(script_value_type::jai_shared_ptr_type);
+        info->type_params.push_back(pointee_type);
+        // For shared_ptr<T>, the type_name should be T since it's just reference semantics
+        if (pointee_type) {
+            info->type_name = pointee_type->type_name;
+        } else {
+            info->type_name = "shared_ptr";
+        }
+        return info;
     }
     
     // User-defined type (potentially templated)
@@ -559,13 +592,21 @@ expression_ptr parser::assignment() {
 expression_ptr parser::parse_map_literal() {
     consume(token_type::left_brace, "Expected '{'");
     auto startLoc = previous().location;
-    
+
     // Empty map
     if (check(token_type::right_brace)) {
         consume(token_type::right_brace, "Expected '}'");
         return std::make_shared<map_literal_expr>(startLoc, std::vector<std::pair<expression_ptr, expression_ptr>>());
     }
-    
+
+    // Check if this looks like a block statement, not a map
+    // If we see keywords that start statements/declarations, fail early
+    if (check(token_type::auto_keyword) || check(token_type::var_keyword) ||
+        check(token_type::if_keyword) || check(token_type::while_keyword) ||
+        check(token_type::for_keyword) || check(token_type::return_keyword)) {
+        throw parse_error("Not a map literal", peek().location);
+    }
+
     // Save position to check for JSON style
     size_t savedPos = current_;
     
@@ -586,9 +627,23 @@ expression_ptr parser::parse_map_literal() {
     entries.reserve(8);
     
     if (isJsonStyle) {
-        // Parse JSON style: {"key": value, "key2": value2}
+        // Parse JSON style: {key: value, key2: value2} or {"key": value}
         do {
-            expression_ptr key = expression();
+            expression_ptr key;
+
+            // Check if key is a bare identifier (convert to string literal)
+            if (check(token_type::identifier)) {
+                token keyToken = advance();
+                // Convert bare identifier to string literal for JSON-style syntax
+                // e.g., {x: 10} becomes {"x": 10}
+                const script_string& keyStr = keyToken.lexeme;
+                script_value keyValue(script_value::ast_literal_tag{}, keyStr);
+                key = std::make_shared<literal_expr>(keyToken.location, keyValue);
+            } else {
+                // Parse as expression (for quoted strings or computed keys)
+                key = expression();
+            }
+
             consume(token_type::colon, "Expected ':' after key in JSON-style map");
             expression_ptr value = expression();
             entries.emplace_back(std::move(key), std::move(value));
@@ -802,6 +857,10 @@ expression_ptr parser::postfix() {
             expr = finish_member_access(expr, false);
         } else if (match(token_type::arrow)) {
             expr = finish_member_access(expr, true);
+        } else if (match(token_type::colon_colon)) {
+            // Static member access
+            token name = consume(token_type::identifier, "Expected member name after '::'");
+            expr = std::make_shared<member_expr>(name.location, expr, name.lexeme, false, true);
         } else if (match(token_type::left_bracket)) {
             // Array subscript
             expression_ptr index = expression();
@@ -824,6 +883,10 @@ expression_ptr parser::postfix() {
 declaration_ptr parser::declaration() {
     if (match(token_type::class_keyword)) return class_declaration();
     
+    // Check for include/import directives
+    if (match(token_type::include_keyword)) return include_declaration();
+    if (match(token_type::import_keyword)) return import_declaration();
+    
     // Check specifically for function keyword to handle function declarations
     if (check(token_type::function_keyword)) {
         // This is definitely a function declaration
@@ -836,7 +899,7 @@ declaration_ptr parser::declaration() {
     // Check for explicit type keywords that start declarations
     if (match({token_type::auto_keyword, token_type::var_keyword, token_type::int_keyword, token_type::float_keyword, 
                token_type::string_keyword, token_type::bool_keyword, token_type::char_keyword, token_type::void_keyword,
-               token_type::array_keyword, token_type::map_keyword, token_type::weak_ptr_keyword})) {
+               token_type::array_keyword, token_type::map_keyword, token_type::weak_ptr_keyword, token_type::shared_ptr_keyword})) {
         // We already consumed the type keyword, so we need to backtrack
         current_--;
         
@@ -941,7 +1004,7 @@ declaration_ptr parser::declaration() {
     // Check for other statements that can appear at top level
     if (check(token_type::if_keyword) || check(token_type::while_keyword) || check(token_type::for_keyword) ||
         check(token_type::return_keyword) || check(token_type::break_keyword) || check(token_type::continue_keyword) ||
-        check(token_type::try_keyword)) {
+        check(token_type::try_keyword) || check(token_type::switch_keyword) || check(token_type::fallthrough_keyword)) {
         // We need to wrap the statement in a declaration since parse() returns declarations
         auto stmt = statement();
         // Create a statement_decl to wrap statements at the top level
@@ -1005,18 +1068,30 @@ std::vector<parameter> parser::parse_parameter_list() {
                      check(token_type::function_keyword) || check(token_type::int_keyword) || check(token_type::float_keyword) || 
                      check(token_type::string_keyword) || check(token_type::bool_keyword) || check(token_type::char_keyword) || 
                      check(token_type::void_keyword) || check(token_type::array_keyword) || check(token_type::map_keyword) ||
-                     check(token_type::weak_ptr_keyword)) {
+                     check(token_type::weak_ptr_keyword) || check(token_type::shared_ptr_keyword)) {
                 
                 type = parse_type();
-                
+
                 if (match(token_type::colon)) {
                     // type: name syntax
                     name = consume(token_type::identifier, "Expected parameter name after ':'").lexeme;
-                } else {
+                } else if (check(token_type::identifier)) {
                     // Traditional type name syntax
                     // Check for reference
                     is_reference = match(token_type::ampersand);
                     name = consume(token_type::identifier, "Expected parameter name").lexeme;
+                } else if (check(token_type::comma) || check(token_type::right_paren)) {
+                    // No identifier after type - treat the type as the parameter name with auto type
+                    // This handles shorthand like: void foo(x) where x is untyped
+                    // The type parsed is actually just a simple identifier, so use it as the name
+                    if (type && type->base_type == script_value_type::jai_object_type && !type->type_name.empty()) {
+                        name = type->type_name;
+                        type = nullptr; // Auto type
+                    } else {
+                        error("Expected parameter name", peek());
+                    }
+                } else {
+                    error("Expected parameter name", peek());
                 }
             }
             // No type specified, error
@@ -1140,8 +1215,11 @@ statement_ptr parser::statement() {
     if (match(token_type::try_keyword)) return try_statement();
     if (match(token_type::switch_keyword)) return switch_statement();
     
-    // Check for fallthrough keyword only if we're inside a switch case
-    if (in_switch_case_ && match(token_type::fallthrough_keyword)) {
+    // Check for fallthrough keyword 
+    if (match(token_type::fallthrough_keyword)) {
+        if (!in_switch_case_) {
+            error("'fallthrough' can only be used inside a switch case", previous());
+        }
         auto fallthrough = std::make_shared<fallthrough_stmt>(previous().location);
         consume(token_type::semicolon, "Expected ';' after 'fallthrough'");
         return fallthrough;
@@ -1407,17 +1485,80 @@ declaration_ptr parser::class_declaration() {
             // Currently no virtual destructor support
         } else {
             // Regular member (variable or function)
+            bool is_static = match(token_type::static_keyword);
+            bool is_override = match(token_type::override_keyword);
+
             type_info_ptr type = parse_type();
             
             if (check(token_type::identifier)) {
                 token name = advance();
                 
                 if (match(token_type::left_paren)) {
-                    // Function
-                    current_--; // Back up to reparse
-                    member = parse_function_body(name.lexeme, type);
-                    // TODO: Parse method modifiers (virtual, override, final)
-                    // Currently all methods are implicitly virtual
+                    // Function - we need to parse parameters and check for override before body
+                    current_--; // Back up to before '('
+                    
+                    // Create function declaration
+                    auto func = std::make_shared<function_decl>(previous().location, name.lexeme);
+                    func->is_static = is_static;
+                    func->is_override = is_override; // Set from earlier check
+
+                    // Parse parameters
+                    consume(token_type::left_paren, "Expected '(' after function name");
+                    func->parameters = parse_parameter_list();
+                    consume(token_type::right_paren, "Expected ')' after parameters");
+
+                    // Handle trailing return type
+                    if (match(token_type::arrow)) {
+                        if (check(token_type::left_brace)) {
+                            func->return_type = nullptr; // auto return
+                        } else {
+                            func->return_type = parse_type();
+                        }
+                    } else {
+                        func->return_type = type; // Use declared type
+                    }
+
+                    // Check for override keyword after parameters (alternative position)
+                    if (match(token_type::override_keyword)) {
+                        func->is_override = true;
+                    }
+                    
+                    // Parse constructor initialization list if present
+                    if (match(token_type::colon)) {
+                        do {
+                            if (match(token_type::super_keyword)) {
+                                consume(token_type::left_paren, "Expected '(' after 'super'");
+                                std::vector<expression_ptr> args;
+                                if (!check(token_type::right_paren)) {
+                                    do {
+                                        args.push_back(expression());
+                                    } while (match(token_type::comma));
+                                }
+                                consume(token_type::right_paren, "Expected ')' after super arguments");
+                                func->initializers.emplace_back("super", std::move(args));
+                            } else if (match(token_type::this_keyword)) {
+                                consume(token_type::left_paren, "Expected '(' after 'this'");
+                                std::vector<expression_ptr> args;
+                                if (!check(token_type::right_paren)) {
+                                    do {
+                                        args.push_back(expression());
+                                    } while (match(token_type::comma));
+                                }
+                                consume(token_type::right_paren, "Expected ')' after this arguments");
+                                func->initializers.emplace_back("this", std::move(args));
+                            } else {
+                                error("Expected 'super' or 'this' in constructor initializer list", peek());
+                            }
+                        } while (match(token_type::comma));
+                    }
+                    
+                    // Now parse the body
+                    if (!match(token_type::left_brace)) {
+                        error("Expected '{' before function body", peek());
+                    }
+                    func->body = std::dynamic_pointer_cast<block_stmt>(block_statement());
+                    
+                    member = func;
                 } else {
                     // Variable
                     expression_ptr init = nullptr;
@@ -1425,7 +1566,9 @@ declaration_ptr parser::class_declaration() {
                         init = expression();
                     }
                     consume(token_type::semicolon, "Expected ';' after field declaration");
-                    member = std::make_shared<variable_decl>(name.location, type, name.lexeme, init);
+                    auto var_decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, init);
+                    var_decl->is_static = is_static;
+                    member = var_decl;
                 }
             } else {
                 error("Expected member name", peek());
@@ -1438,6 +1581,74 @@ declaration_ptr parser::class_declaration() {
     consume(token_type::right_brace, "Expected '}' after class body");
     
     return classDecl;
+}
+
+declaration_ptr parser::include_declaration() {
+    // include "path" or include <path> or include(expr)
+    
+    // Check for function-style syntax: include(expr)
+    if (match(token_type::left_paren)) {
+        // Parse the expression inside parentheses
+        expression_ptr path_expr = expression();
+        consume(token_type::right_paren, "Expected ')' after include expression");
+        return std::make_shared<include_decl>(previous().location, path_expr);
+    }
+    
+    // Original literal syntax
+    std::string path;
+    
+    if (match(token_type::string_literal)) {
+        // include "path"
+        path = previous().string_value;
+    } else if (match(token_type::less)) {
+        // include <path>
+        // Read until we find >
+        std::string path_buffer;
+        while (!check(token_type::greater) && !is_at_end()) {
+            path_buffer += peek().lexeme;
+            advance();
+        }
+        consume(token_type::greater, "Expected '>' after include path");
+        path = path_buffer;
+    } else {
+        error("Expected string literal, '<', or '(' after include", peek());
+    }
+    
+    return std::make_shared<include_decl>(previous().location, path);
+}
+
+declaration_ptr parser::import_declaration() {
+    // import "path" or import <path> or import(expr)
+    
+    // Check for function-style syntax: import(expr)
+    if (match(token_type::left_paren)) {
+        // Parse the expression inside parentheses
+        expression_ptr path_expr = expression();
+        consume(token_type::right_paren, "Expected ')' after import expression");
+        return std::make_shared<import_decl>(previous().location, path_expr);
+    }
+    
+    // Original literal syntax
+    std::string path;
+    
+    if (match(token_type::string_literal)) {
+        // import "path"
+        path = previous().string_value;
+    } else if (match(token_type::less)) {
+        // import <path>
+        // Read until we find >
+        std::string path_buffer;
+        while (!check(token_type::greater) && !is_at_end()) {
+            path_buffer += peek().lexeme;
+            advance();
+        }
+        consume(token_type::greater, "Expected '>' after import path");
+        path = path_buffer;
+    } else {
+        error("Expected string literal, '<', or '(' after import", peek());
+    }
+    
+    return std::make_shared<import_decl>(previous().location, path);
 }
 
 declaration_ptr parser::function_declaration() {
@@ -1476,6 +1687,38 @@ declaration_ptr parser::parse_function_body(const std::string& name, type_info_p
         // No arrow - if we have a return type from before 'function', use it
         // Otherwise default to auto (nullptr) for inference
         func->return_type = return_type;  // nullptr means auto inference
+    }
+    
+    // Parse constructor initialization list (: super(args), : this(args))
+    if (match(token_type::colon)) {
+        do {
+            // Parse initializer target (super or this)
+            if (match(token_type::super_keyword)) {
+                // Parse super(args)
+                consume(token_type::left_paren, "Expected '(' after 'super'");
+                std::vector<expression_ptr> args;
+                if (!check(token_type::right_paren)) {
+                    do {
+                        args.push_back(expression());
+                    } while (match(token_type::comma));
+                }
+                consume(token_type::right_paren, "Expected ')' after super arguments");
+                func->initializers.emplace_back("super", std::move(args));
+            } else if (match(token_type::this_keyword)) {
+                // Parse this(args)
+                consume(token_type::left_paren, "Expected '(' after 'this'");
+                std::vector<expression_ptr> args;
+                if (!check(token_type::right_paren)) {
+                    do {
+                        args.push_back(expression());
+                    } while (match(token_type::comma));
+                }
+                consume(token_type::right_paren, "Expected ')' after this arguments");
+                func->initializers.emplace_back("this", std::move(args));
+            } else {
+                error("Expected 'super' or 'this' in constructor initializer list", peek());
+            }
+        } while (match(token_type::comma));
     }
     
     if (!match(token_type::left_brace)) {

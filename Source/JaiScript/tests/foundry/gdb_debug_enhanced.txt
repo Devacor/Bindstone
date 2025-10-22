@@ -1,6 +1,0 @@
-run specific_type_registration
-bt
-frame 4
-p val
-p val.type_info_
-quit

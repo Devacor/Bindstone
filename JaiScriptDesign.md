@@ -141,15 +141,17 @@ The intent will be that the language state easily serializes/deserializes using 
 - Flexible syntax tests - ALL PASSING ✅
 - Test runner infrastructure - COMPLETE ✅
 
-### 🚧 Current Priority: Script-Side Class System
+### ✅ Script Classes - FULLY IMPLEMENTED
 
-**Core Language Complete** - Parser, Interpreter, and Function system fully working.
-
-**Next Major Milestone:**
-- Script-side class definitions and instantiation 
-- Member method calls and property access
-- Constructor/destructor execution in scripts
-- Class inheritance and polymorphism
+**Complete Native Script Class System** with all features working:
+- ✅ Class declarations with fields and default values
+- ✅ Constructor support with parameters and overloading
+- ✅ Inheritance with `super()` calls
+- ✅ Method definitions and calls
+- ✅ Implicit `this` in methods
+- ✅ Field access and assignment
+- ✅ Mixed script/C++ inheritance
+- ✅ Hot reload with automatic instance migration
 
 ### 📋 TODO
 
@@ -164,55 +166,63 @@ The intent will be that the language state easily serializes/deserializes using 
 - ✅ `[&var]` explicit reference capture (WORKING)
 - ✅ `[var1, var2]` multiple captures (WORKING)
 
-**Class System (Not Implemented):**
-- ❌ Class declarations and instantiation
-- ❌ Constructor/destructor calls  
-- ❌ Method dispatch and member access (. and -> operators)
-- ❌ Field access and assignment
-- ❌ `this` keyword in member functions
-- ❌ `[this]` explicit this capture in lambdas
-- ❌ `[=]` implicit this capture in member functions
-- ❌ Inheritance (single and multiple)
-- ❌ Super calls with `super::` syntax
-- ❌ Member visibility (public/private)
+**Class System (FULLY IMPLEMENTED):**
+- ✅ Class declarations and instantiation
+- ✅ Constructor/destructor calls  
+- ✅ Method dispatch and member access (. operator)
+- ✅ Field access and assignment
+- ✅ `this` keyword in member functions (implicit and explicit)
+- ✅ Inheritance (single and multiple)
+- ✅ Super calls with `super()` syntax in constructors
+- ✅ Member visibility (public/private)
+- ⚠️ `->` operator (not needed - references work with `.`)
+- ⚠️ `[this]` capture in lambdas (not yet implemented)
 
 **Advanced Expression Features:**
-- ❌ Member access expressions (obj.field, ptr->field)
-- ❌ Array literal expressions ([1, 2, 3])
-- ❌ Map literal expressions ({{"key", value}})
-- ❌ Ternary operator (condition ? true_val : false_val)
-- ❌ New expressions (new Type(args))
-- ❌ Array indexing (arr[index])
-- ❌ Map indexing (map["key"])
+- ✅ Member access expressions (obj.field, obj.method())
+- ✅ Array literal expressions ([1, 2, 3])
+- ✅ Map literal expressions ({{"key", value}} or {"key": value})
+- ✅ Ternary operator (condition ? true_val : false_val)
+- ✅ Type construction expressions (Type{args})
+- ✅ Array indexing (arr[index])
+- ✅ Map indexing (map["key"])
+- ⚠️ `new` expressions (use Type{} constructor syntax instead)
 
 **Statement and Control Flow:**
-- ❌ Range-based for loops (for auto& item : container)
-- ❌ Break and continue statements
-- ❌ Switch/case statements (if planned)
+- ✅ Range-based for loops (for auto& item : container)
+- ✅ Break and continue statements
+- ✅ Switch/case statements with break-by-default safety
+- ✅ Try/catch/throw exception handling (interpreter only)
 
 **Built-in Types and Operations:**
-- ❌ Array<T> container operations (push_back, size, etc.)
-- ❌ Map<K,V> container operations (insert, get, etc.)
-- ❌ String operations (length, substring, replace, etc.)
-- ❌ SharedPtr<T> and WeakPtr<T> operations
+- ✅ Array operations (push_back, pop_back, size, empty, clear, insert, remove)
+- ✅ Map operations (insert, get, remove, size, empty, clear, contains, keys, values)
+- ✅ String operations (length, substring, replace, contains, split, toLowerCase, toUpperCase)
+- ✅ SharedPtr<T> and WeakPtr<T> support
 
 **Error Handling:**
-- ❌ Try-catch exception handling
-- ❌ Throw statements
+- ✅ Try-catch exception handling (interpreter)
+- ✅ Throw statements (interpreter)
+- ✅ Re-throw in catch blocks
+- ⚠️ Exception handling in VM (not yet implemented)
 - ❌ Custom exception types
 
 **C++ Integration:**
-- Type registration system (Engine::registerType<T>)
-- Method and property binding
-- Constructor binding for C++ types
-- Global function registration
-- Service injection pattern
+- ✅ Type registration system via class_builder
+- ✅ Method and property binding  
+- ✅ Constructor binding for C++ types
+- ✅ Global function registration
+- ✅ Lambda method binding (no static_cast needed!)
+- ✅ Operator overloading support
+- ✅ Zero-copy const& parameters
+- ✅ Service injection pattern
 
 **Advanced Features:**
-- State serialization/deserialization
-- Hot-reload system with state preservation
-- REPL for interactive testing
-- Performance optimizations
+- ✅ Hot-reload system with automatic instance migration
+- ✅ Performance optimizations (string_symbolizer, move semantics)
+- ✅ Optional VM backend for large scripts
+- ⚠️ State serialization/deserialization (partial)
+- ❌ REPL for interactive testing
 
 ### 📊 Progress Summary
 
@@ -221,17 +231,18 @@ The intent will be that the language state easily serializes/deserializes using 
 | Lexer | ✅ 100% | All tokens, operators, literals working |
 | Parser | ✅ 100% | Complete with all language features |
 | AST | ✅ 100% | Full node hierarchy with visitor pattern |
-| Type System | ✅ 100% | Value class, TypeInfo, spaceship operator |
-| **Interpreter** | ✅ **100%** | **Core execution, functions, lambdas, operators working** |
-| Engine Integration | ✅ 100% | Full pipeline, variable persistence, globals separation |
+| Type System | ✅ 100% | Value class, type_info, automatic conversions |
+| Interpreter | ✅ 100% | All features including exceptions |
+| Engine Integration | ✅ 100% | Full pipeline, variable persistence |
 | Lambda System | ✅ 90% | Individual captures work, need capture-all |
-| Function System | ✅ 100% | Declarations, calls, parameters all working |
-| Control Flow | ✅ 100% | if/else, while, for loops complete |
-| **Operators** | ✅ **100%** | **All arithmetic, compound assignment, increment/decrement** |
-| Class System | ⏳ 20% | ClassBuilder done, need script-side classes |
-| C++ Bindings | ✅ 60% | ClassBuilder complete, need script instantiation |
-| Serialization | ⏳ 0% | After core interpreter |
-| Hot Reload | ⏳ 0% | Final feature |
+| Function System | ✅ 100% | All declaration styles, overloading |
+| Control Flow | ✅ 100% | if/else, while, for, range-for, switch, try/catch |
+| Operators | ✅ 100% | All operators including ternary and bitwise |
+| **Script Classes** | ✅ 100% | **Full OOP with inheritance and hot reload** |
+| C++ Bindings | ✅ 100% | class_builder API with all features |
+| **Hot Reload** | ✅ 100% | **Automatic instance migration working** |
+| VM Backend | ✅ 30% | Basic execution, intentionally limited |
+| Serialization | ⏳ 20% | Basic support, needs completion |
 
 ### Development Timeline
 - **Phase 1**: Feasibility analysis, design, core infrastructure ✅
@@ -348,19 +359,41 @@ Should support initializer lists:
 map<string, int> map = {{"one", 1}, {"two", 2}, {"three", 3}};
 
 
-//Class support:
-class MyType {
-public:
-    int value;
-    MyType(int value) : value(value) {}
+//Script Classes (FULLY WORKING):
+class Cat {
+    int a = 0;
+    Cat(int val) { a = val; }
+}
 
-    int printValue() {
-        print("Value: {}\n", value);
+class Tiger : Cat {
+    int b = 5;
+    Tiger() : super(5) {}
+    
+    void roar() {
+        print("ROAR! Tiger with a=" + to_string(a) + ", b=" + to_string(b));
     }
-};
+}
 
-MyType myType = MyType(1);
-myType.printValue();
+auto tiger = Tiger();
+tiger.roar();  // Output: ROAR! Tiger with a=5, b=5
+
+// Classes with methods and implicit this:
+class Rectangle {
+    int width = 0;
+    int height = 0;
+    
+    Rectangle(int w, int h) {
+        width = w;  // implicit this
+        height = h;
+    }
+    
+    int area() {
+        return width * height;  // implicit this
+    }
+}
+
+auto rect = Rectangle(4, 3);
+print("Area: " + to_string(rect.area()));  // Area: 12
 
 //Built in function support:
 int add(int a, int b) {
@@ -380,6 +413,38 @@ increment(value);
 //Support for pointers:
 MyType* ptr = &myType;
 ptr->printValue();
+
+//Switch/Case with break-by-default safety (FULLY WORKING):
+switch (weapon_type) {
+    case "sword":
+        damage = 10;        // Implicit break
+    case "bow":
+        damage = 8;         // Implicit break
+    case "magic":
+        damage = 15;
+        fallthrough;        // Explicit fallthrough required
+    case "enchanted":
+        damage += 5;        // Executes for both magic and enchanted
+    default:
+        damage = 5;
+}
+
+//Range-based for loops (FULLY WORKING):
+auto numbers = [1, 2, 3, 4, 5];
+for (auto x : numbers) {
+    print(to_string(x));  // Prints each number
+}
+
+// With references for modification:
+for (auto& x : numbers) {
+    x *= 2;  // Doubles each element in-place
+}
+
+// Map iteration:
+auto scores = {"alice": 100, "bob": 85};
+for (auto kv : scores) {
+    print(kv.first + ": " + to_string(kv.second));
+}
 
 //Lambda syntax and function variables:
 auto add = [](int a, int b) -> int { return a + b; };

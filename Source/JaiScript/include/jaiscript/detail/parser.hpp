@@ -51,6 +51,8 @@ namespace jai {
         declaration_ptr class_declaration();
         declaration_ptr function_declaration();
         declaration_ptr variable_declaration();
+        declaration_ptr include_declaration();
+        declaration_ptr import_declaration();
         
         // statement parsing
         statement_ptr statement();

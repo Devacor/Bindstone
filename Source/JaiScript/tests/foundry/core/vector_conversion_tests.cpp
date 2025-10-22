@@ -402,13 +402,13 @@ public:
             }
             
             // Test function that returns vector<script_value>
-            engine->add_function("create_mixed_vector", []() -> std::vector<script_value> {
+            engine->add_function("create_mixed_vector", [engine]() -> std::vector<script_value> {
                 std::vector<script_value> result;
                 // TODO: These should use engine references when lambda captures are available
-                result.push_back(script_value(script_value::serialization_tag{}, script_int(42)));
-                result.push_back(script_value(script_value::serialization_tag{}, script_string("hello")));
-                result.push_back(script_value(script_value::serialization_tag{}, script_float(3.14)));
-                result.push_back(script_value(script_value::serialization_tag{}, script_bool(true)));
+                result.push_back(script_value(script_int(42), engine->weak_from_this()));
+                result.push_back(script_value(script_string("hello"), engine->weak_from_this()));
+                result.push_back(script_value(script_float(3.14), engine->weak_from_this()));
+                result.push_back(script_value(script_bool(true), engine->weak_from_this()));
                 return result;
             });
             

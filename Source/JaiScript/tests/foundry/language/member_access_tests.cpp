@@ -2,11 +2,12 @@
 #include <jaiscript/core/class_builder.hpp>
 
 namespace jai::foundry::tests {
+namespace member_access_ns {
 
 // Test class for member access
-class TestObject {
+class MemberTestObject {
 public:
-    TestObject(int val = 0) : value_(val) {}
+    MemberTestObject(int val = 0) : value_(val) {}
     
     int getValue() const { return value_; }
     void setValue(int val) { value_ = val; }
@@ -16,14 +17,15 @@ private:
     int value_;
 };
 
-void member_access_tests::forge_tests() {
-    test("array_method_on_subscript", [this]() {
+
+void forge_tests(member_access_tests* suite) {
+    suite->test("array_method_on_subscript", [suite]() {
         auto engine = engine::make();
-        class_builder<TestObject>(*engine, "TestObject")
+        class_builder<MemberTestObject>(*engine, "TestObject")
             .constructor<int>()
-            .method("getValue", &TestObject::getValue)
-            .method("setValue", &TestObject::setValue)
-            .method("increment", &TestObject::increment)
+            .method("getValue", &MemberTestObject::getValue)
+            .method("setValue", &MemberTestObject::setValue)
+            .method("increment", &MemberTestObject::increment)
             .build();
         engine->execute("auto nested = [[1, 2, 3], [4, 5], [6, 7, 8, 9]];");
         auto result = engine->execute("nested[1].size()");
@@ -35,13 +37,13 @@ void member_access_tests::forge_tests() {
         check_eq(newSize.as<int>(), 4);
     });
     
-    test("map_method_on_subscript", [this]() {
+    suite->test("map_method_on_subscript", [suite]() {
         auto engine = engine::make();
-        class_builder<TestObject>(*engine, "TestObject")
+        class_builder<MemberTestObject>(*engine, "TestObject")
             .constructor<int>()
-            .method("getValue", &TestObject::getValue)
-            .method("setValue", &TestObject::setValue)
-            .method("increment", &TestObject::increment)
+            .method("getValue", &MemberTestObject::getValue)
+            .method("setValue", &MemberTestObject::setValue)
+            .method("increment", &MemberTestObject::increment)
             .build();
         engine->execute("auto mapOfMaps = {{\"first\", {{\"a\", 1}, {\"b\", 2}}}, {\"second\", {{\"x\", 10}}}};");
         auto result = engine->execute("mapOfMaps[\"first\"].size()");
@@ -51,13 +53,13 @@ void member_access_tests::forge_tests() {
         check_eq(empty.as<bool>(), false);
     });
     
-    test("cpp_object_method_on_subscript", [this]() {
+    suite->test("cpp_object_method_on_subscript", [suite]() {
         auto engine = engine::make();
-        class_builder<TestObject>(*engine, "TestObject")
+        class_builder<MemberTestObject>(*engine, "TestObject")
             .constructor<int>()
-            .method("getValue", &TestObject::getValue)
-            .method("setValue", &TestObject::setValue)
-            .method("increment", &TestObject::increment)
+            .method("getValue", &MemberTestObject::getValue)
+            .method("setValue", &MemberTestObject::setValue)
+            .method("increment", &MemberTestObject::increment)
             .build();
         engine->execute("auto objects = {{\"test\", TestObject(42)}};");
         auto result = engine->execute("objects[\"test\"].getValue()");
@@ -69,13 +71,13 @@ void member_access_tests::forge_tests() {
         check_eq(newVal.as<int>(), 43);
     });
     
-    test("array_of_objects_member_access", [this]() {
+    suite->test("array_of_objects_member_access", [suite]() {
         auto engine = engine::make();
-        class_builder<TestObject>(*engine, "TestObject")
+        class_builder<MemberTestObject>(*engine, "TestObject")
             .constructor<int>()
-            .method("getValue", &TestObject::getValue)
-            .method("setValue", &TestObject::setValue)
-            .method("increment", &TestObject::increment)
+            .method("getValue", &MemberTestObject::getValue)
+            .method("setValue", &MemberTestObject::setValue)
+            .method("increment", &MemberTestObject::increment)
             .build();
         engine->execute("auto arr = [TestObject(10), TestObject(20), TestObject(30)];");
         auto result = engine->execute("arr[1].getValue()");
@@ -86,13 +88,13 @@ void member_access_tests::forge_tests() {
         check_eq(updated.as<int>(), 99);
     });
     
-    test("deeply_nested_member_access", [this]() {
+    suite->test("deeply_nested_member_access", [suite]() {
         auto engine = engine::make();
-        class_builder<TestObject>(*engine, "TestObject")
+        class_builder<MemberTestObject>(*engine, "TestObject")
             .constructor<int>()
-            .method("getValue", &TestObject::getValue)
-            .method("setValue", &TestObject::setValue)
-            .method("increment", &TestObject::increment)
+            .method("getValue", &MemberTestObject::getValue)
+            .method("setValue", &MemberTestObject::setValue)
+            .method("increment", &MemberTestObject::increment)
             .build();
         // Test multiple levels of subscript + member access
         engine->execute("auto deep = {{\"level1\", {{\"level2\", [TestObject(777)]}}}}; ");
@@ -105,13 +107,13 @@ void member_access_tests::forge_tests() {
         check_eq(updated.as<int>(), 888);
     });
     
-    test("reference_preserving_member_access", [this]() {
+    suite->test("reference_preserving_member_access", [suite]() {
         auto engine = engine::make();
-        class_builder<TestObject>(*engine, "TestObject")
+        class_builder<MemberTestObject>(*engine, "TestObject")
             .constructor<int>()
-            .method("getValue", &TestObject::getValue)
-            .method("setValue", &TestObject::setValue)
-            .method("increment", &TestObject::increment)
+            .method("getValue", &MemberTestObject::getValue)
+            .method("setValue", &MemberTestObject::setValue)
+            .method("increment", &MemberTestObject::increment)
             .build();
         // Ensure auto& works with member access
         engine->execute("auto myMap = {{\"nums\", [10, 20, 30]}};");
@@ -125,13 +127,13 @@ void member_access_tests::forge_tests() {
         check_eq(last.as<int>(), 40);
     });
     
-    test("mixed_container_operations", [this]() {
+    suite->test("mixed_container_operations", [suite]() {
         auto engine = engine::make();
-        class_builder<TestObject>(*engine, "TestObject")
+        class_builder<MemberTestObject>(*engine, "TestObject")
             .constructor<int>()
-            .method("getValue", &TestObject::getValue)
-            .method("setValue", &TestObject::setValue)
-            .method("increment", &TestObject::increment)
+            .method("getValue", &MemberTestObject::getValue)
+            .method("setValue", &MemberTestObject::setValue)
+            .method("increment", &MemberTestObject::increment)
             .build();
         // Complex scenario mixing different types
         engine->execute("auto data = {"
@@ -152,6 +154,12 @@ void member_access_tests::forge_tests() {
         auto newSize = engine->execute("data[\"arrays\"][1].size()");
         check_eq(newSize.as<int>(), 2);
     });
+}
+
+} // namespace member_access_ns
+
+void member_access_tests::forge_tests() {
+    member_access_ns::forge_tests(this);
 }
 
 } // namespace jai::foundry::tests

@@ -55,12 +55,17 @@ class value_semantics_tests : public suite {
 public:
     value_semantics_tests() : suite("Value Semantics") {}
     
+    void pre_test() override {
+        // Reset TrackedObject counters before each test
+        TrackedObject::reset();
+        TrackedObject::verbose = false;  // Ensure verbose is off by default
+    }
+    
     void forge_tests() override {
         test("variable_declaration_copies", [this]() {
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             eng->execute("auto obj = TrackedObject(42);");
             
             // Should have 1 copy: from constructor result to variable
@@ -71,7 +76,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             eng->execute("auto obj = TrackedObject(42); obj;");
             
             // Still only 1 copy, accessing variable shouldn't copy
@@ -82,7 +86,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             auto result = eng->execute("auto obj = TrackedObject(42); obj.value");
             
             check_eq(TrackedObject::copy_count, 1);
@@ -93,7 +96,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             auto result = eng->execute("auto obj = TrackedObject(42); obj.get()");
             
             check_eq(TrackedObject::copy_count, 1);
@@ -104,7 +106,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             eng->execute("auto obj1 = TrackedObject(42); auto obj2 = obj1;");
             
             // Should have 2 copies: initial + assignment
@@ -115,7 +116,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             eng->execute("auto obj1 = TrackedObject(42); auto obj2 = obj1;");
             eng->execute("obj1.modify(99);");
             
@@ -135,7 +135,6 @@ public:
                 return obj.get();
             });
             
-            TrackedObject::reset();
             auto result = eng->execute("auto obj = TrackedObject(42); take_by_value(obj)");
             
             // Should have 2 copies: initial + parameter
@@ -152,7 +151,6 @@ public:
                 return obj.get();
             });
             
-            TrackedObject::reset();
             auto result = eng->execute("auto obj = TrackedObject(42); take_by_ref(obj)");
             
             // Should have only 1 copy: initial
@@ -164,7 +162,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             eng->execute("auto obj = TrackedObject(42); auto arr = []; arr.push(obj);");
             
             // Should have 2 copies: initial + array push
@@ -175,7 +172,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             eng->execute("auto obj = TrackedObject(42); auto arr = [null]; arr[0] = obj;");
             
             // Should have 2 copies: initial + array assignment
@@ -186,7 +182,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             TrackedObject::verbose = true;
             eng->execute("auto obj = TrackedObject(42);");
             
@@ -207,7 +202,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             auto result = eng->execute(R"(
                 auto obj = TrackedObject(42);
                 auto f = [obj]() { return obj.get(); };
@@ -223,7 +217,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             auto result = eng->execute(R"(
                 auto obj = TrackedObject(42);
                 auto f = [&obj]() { return obj.get(); };
@@ -239,7 +232,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             auto result = eng->execute(R"(
                 auto obj = TrackedObject(42);
                 auto f = [=]() { return obj.get(); };
@@ -255,7 +247,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             auto result = eng->execute(R"(
                 auto obj = TrackedObject(42);
                 auto f = [&]() { return obj.get(); };
@@ -271,7 +262,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             eng->execute("auto obj1 = TrackedObject(42); auto obj2 = obj1; auto obj3 = obj2;");
             
             // Should have 3 copies: initial + 2 assignments
@@ -282,7 +272,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             eng->execute("auto obj = TrackedObject(42); obj.value += 10;");
             
             // Should have only 1 copy: initial
@@ -296,7 +285,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             auto result = eng->execute("TrackedObject(42).value");
             
             // Should have 0 copies: temporary object
@@ -308,7 +296,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             eng->execute("auto obj = TrackedObject(42); obj.modify(10); obj.modify(20);");
             auto result = eng->execute("obj.get()");
             
@@ -321,7 +308,6 @@ public:
             auto eng = engine::make();
             register_tracked_object(*eng);
             
-            TrackedObject::reset();
             eng->execute("auto obj = TrackedObject(42); auto arr = [obj, obj, obj];");
             
             // Should have 4 copies: initial + 3 in array
@@ -337,7 +323,6 @@ public:
                 obj.modify(val);
             });
             
-            TrackedObject::reset();
             eng->execute("auto obj = TrackedObject(42); modify_by_ref(obj, 99);");
             auto result = eng->execute("obj.get()");
             
@@ -355,7 +340,11 @@ public:
             public:
                 std::shared_ptr<TrackedObject> obj;
                 
-                ObjectContainer() : obj(std::make_shared<TrackedObject>(100)) {}
+                ObjectContainer() : obj(std::make_shared<TrackedObject>(100)) {
+                    if (TrackedObject::verbose) {
+                        std::cout << "ObjectContainer created, copy_count=" << TrackedObject::copy_count << std::endl;
+                    }
+                }
                 
                 std::shared_ptr<TrackedObject> get_object() { return obj; }
             };
@@ -365,11 +354,17 @@ public:
                 .method("get_object", &ObjectContainer::get_object)
                 .build();
             
-            TrackedObject::reset();
             eng->execute("auto container = ObjectContainer();");
             auto result = eng->execute("container.get_object().value");
             
             // The shared_ptr object is created in C++, no script copies
+            if (TrackedObject::copy_count != 0) {
+                std::cout << "\nmethod_call_on_cpp_object_property FAILURE:" << std::endl;
+                std::cout << "  Expected copy_count: 0" << std::endl;
+                std::cout << "  Actual copy_count: " << TrackedObject::copy_count << std::endl;
+                std::cout << "  instance_count: " << TrackedObject::instance_count << std::endl;
+                std::cout << "  move_count: " << TrackedObject::move_count << std::endl;
+            }
             check_eq(TrackedObject::copy_count, 0);
             check_eq(result.as<int>(), 100);
         });

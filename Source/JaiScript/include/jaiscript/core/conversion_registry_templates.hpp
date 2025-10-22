@@ -155,8 +155,8 @@ inline void conversion_manager::add_bound_array_conversion() {
     
     // The function_binder handles:
     // - bound_array<T> by value: deep copy via script_value constructor
-    // - bound_array<T>&: thread_local wrapper with zero-copy
-    // - const bound_array<T>&: thread_local wrapper with zero-copy
+    // - bound_array<T>&: stack-based object via create_argument() with zero-copy
+    // - const bound_array<T>&: stack-based object via create_argument() with zero-copy
 }
 
 template<typename K, typename V>
@@ -169,8 +169,8 @@ inline void conversion_manager::add_bound_map_conversion() {
     
     // The function_binder handles:
     // - bound_map<K,V> by value: deep copy via script_value constructor
-    // - bound_map<K,V>&: thread_local wrapper with zero-copy
-    // - const bound_map<K,V>&: thread_local wrapper with zero-copy
+    // - bound_map<K,V>&: stack-based object via create_argument() with zero-copy
+    // - const bound_map<K,V>&: stack-based object via create_argument() with zero-copy
 }
 
 template<typename T>

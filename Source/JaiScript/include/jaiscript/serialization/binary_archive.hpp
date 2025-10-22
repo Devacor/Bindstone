@@ -162,21 +162,9 @@ public:
             }
             
             case script_value_type::jai_weak_ptr_type: {
-                // Handle weak_ptr - promote to shared_ptr first
-                auto weak_val = std::get<std::weak_ptr<script_value>>(value.storage_);
-                if (auto shared_val = weak_val.lock()) {
-                    // Treat as shared_ptr
-                    const void* raw_ptr = shared_val.get();
-                    auto [id, is_new] = track_shared_ptr(raw_ptr);
-                    
-                    write_uint32(id | (is_new && id != 0 ? 0x80000000 : 0));
-                    if (is_new && id != 0) {
-                        write_value(*shared_val);
-                    }
-                } else {
-                    // Expired weak_ptr
-                    write_uint32(0);  // null
-                }
+                // Handle weak_ptr - for now just write a null since we changed the type
+                // TODO: Implement proper serialization for weak_ptr<object_holder>
+                write_uint32(0);  // null
                 break;
             }
             
@@ -451,24 +439,10 @@ public:
             }
             
             case script_value_type::jai_weak_ptr_type: {
+                // For now, just read the null marker and return a null value
+                // TODO: Implement proper deserialization for weak_ptr<object_holder>
                 uint32_t id = read_uint32();
-                
-                if (id == 0) {
-                    // Null/expired weak_ptr
-                    return script_value::make_weak_ptr(script_value(std::monostate{}, eng_weak));
-                }
-                
-                bool is_new = (id & 0x80000000) != 0;
-                id &= 0x7FFFFFFF;  // Clear MSB
-                
-                if (is_new) {
-                    // Should not happen - weak_ptrs are serialized as shared_ptrs
-                    throw serialization_error("Unexpected new weak_ptr in deserialization");
-                } else {
-                    // Convert previously seen shared_ptr to weak_ptr
-                    script_value shared_val = get_shared_ptr(id);
-                    return script_value::make_weak_ptr(shared_val);
-                }
+                return script_value::make_null(eng_weak);
             }
             
             case script_value_type::jai_object_type: {

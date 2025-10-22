@@ -7,19 +7,21 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
+#include <filesystem>
+#include <fstream>
 
 namespace jai {
 
 // Define static method registries for built-in types
 const std::unordered_map<std::string, interpreter::builtin_method> interpreter::arrayMethods_ = {
-    {"size", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"size", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("size() takes no arguments");
         }
         return interp->make_value(static_cast<script_int>(self.as_array().size()));
     }},
     
-    {"push", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"push", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (args.size() != 1) {
             throw runtime_error("push() takes exactly one argument");
         }
@@ -28,7 +30,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         return interp->make_value();
     }},
     
-    {"pop", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"pop", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("pop() takes no arguments");
         }
@@ -41,14 +43,14 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         return last;
     }},
     
-    {"empty", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"empty", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("empty() takes no arguments");
         }
         return interp->make_value(self.as_array().empty());
     }},
     
-    {"clear", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"clear", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("clear() takes no arguments");
         }
@@ -57,7 +59,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         return interp->make_value();
     }},
     
-    {"front", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"front", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("front() takes no arguments");
         }
@@ -68,7 +70,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         return arr.front();
     }},
     
-    {"back", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"back", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("back() takes no arguments");
         }
@@ -81,21 +83,21 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
 };
 
 const std::unordered_map<std::string, interpreter::builtin_method> interpreter::mapMethods_ = {
-    {"size", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"size", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("size() takes no arguments");
         }
         return interp->make_value(static_cast<script_int>(self.as_map().size()));
     }},
     
-    {"empty", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"empty", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("empty() takes no arguments");
         }
         return interp->make_value(self.as_map().empty());
     }},
     
-    {"clear", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"clear", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("clear() takes no arguments");
         }
@@ -104,7 +106,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         return interp->make_value();
     }},
     
-    {"contains", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"contains", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (args.size() != 1) {
             throw runtime_error("contains() takes exactly one argument");
         }
@@ -112,7 +114,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         return interp->make_value(map.find(args[0]) != map.end());
     }},
     
-    {"erase", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"erase", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (args.size() != 1) {
             throw runtime_error("erase() takes exactly one argument");
         }
@@ -121,7 +123,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         return interp->make_value();
     }},
     
-    {"keys", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"keys", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("keys() takes no arguments");
         }
@@ -135,7 +137,7 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         return result;
     }},
     
-    {"values", [](interpreter* interp, const script_value& self, const std::vector<script_value>& args) -> script_value {
+    {"values", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("values() takes no arguments");
         }
@@ -147,6 +149,125 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
             arrayPtr->push_back(value.clone());
         }
         return result;
+    }}
+};
+
+const std::unordered_map<std::string, interpreter::builtin_method> interpreter::weakPtrMethods_ = {
+    {"lock", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("lock() takes no arguments");
+        }
+        
+        if (!self.is_weak_ptr()) {
+            throw runtime_error("lock() can only be called on weak_ptr");
+        }
+        
+        auto weak_ptr = self.get_weak_ptr();
+        if (auto locked = weak_ptr.lock()) {
+            // Reconstruct a script_value from the object_holder
+            script_value result(std::monostate{}, interp->engine_ref_);
+            
+            // Get the original type info from the weak_ptr's type info
+            auto weak_type_info = self.get_type_info();
+            if (weak_type_info && weak_type_info->element_type()) {
+                result.set_type_info(weak_type_info->element_type());
+            } else {
+                // Fallback: use the object type
+                result.set_type_info(type_info::make_object(locked->type_name));
+            }
+            
+            // Create the object value
+            result = script_value::make_object(locked->type_name, locked->data, interp->engine_ref_);
+            if (weak_type_info && weak_type_info->element_type()) {
+                result.set_type_info(weak_type_info->element_type());
+            }
+            
+            return result;
+        } else {
+            // weak_ptr is expired, return null
+            return script_value::make_null(interp->engine_ref_);
+        }
+    }},
+    
+    {"expired", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("expired() takes no arguments");
+        }
+        
+        if (!self.is_weak_ptr()) {
+            throw runtime_error("expired() can only be called on weak_ptr");
+        }
+        
+        auto weak_ptr = self.get_weak_ptr();
+        return interp->make_value(weak_ptr.expired());
+    }},
+    
+    {"reset", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("reset() takes no arguments");
+        }
+        
+        if (!self.is_weak_ptr()) {
+            throw runtime_error("reset() can only be called on weak_ptr");
+        }
+        
+        // Reset the weak_ptr to null
+        auto& weak_storage = self.get_weak_ptr_storage();
+        weak_storage.reset();
+        
+        return self; // Return the reset weak_ptr
+    }}
+};
+
+const std::unordered_map<std::string, interpreter::builtin_method> interpreter::sharedPtrMethods_ = {
+    {"reset", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("reset() takes no arguments");
+        }
+        
+        // In JaiScript, all objects are internally shared_ptr<object_holder>
+        // Reset it to null while preserving the shared_ptr type
+        auto current_type_info = self.get_type_info();
+        self = script_value::make_null(interp->engine_ref_);
+        self.set_type_info(current_type_info); // Preserve the shared_ptr<T> type
+        
+        return self; // Return the reset shared_ptr
+    }},
+    
+    {"use_count", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("use_count() takes no arguments");
+        }
+        
+        if (self.is_object()) {
+            auto obj_holder = self.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                // Get the use count of the underlying shared_ptr
+                long count = obj_holder->data.use_count();
+                return interp->make_value(static_cast<script_int>(count));
+            }
+        }
+        
+        // Not a valid shared_ptr
+        return interp->make_value(static_cast<script_int>(0));
+    }},
+    
+    {"unique", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        if (!args.empty()) {
+            throw runtime_error("unique() takes no arguments");
+        }
+        
+        if (self.is_object()) {
+            auto obj_holder = self.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                // Check if use count is 1
+                bool is_unique = (obj_holder->data.use_count() == 1);
+                return interp->make_value(is_unique);
+            }
+        }
+        
+        // Not a valid shared_ptr
+        return interp->make_value(false);
     }}
 };
 
@@ -241,11 +362,16 @@ const script_value& environment::get_ref(const std::string& name) const {
 }
 
 const script_value& environment::get_ref(uint64_t id) const {
+    const std::string& name = symbolizer_->get_string(id);
+    if (name == "getValue") {
+        std::cerr << "  this type: " << typeid(*this).name() << "\n";
+    }
     return get_ref(id, 0);
 }
 
 const script_value& environment::get_ref(uint64_t id, int depth) const {
-    // Prevent infinite recursion in environment chains
+    // This version with depth is only called internally for recursion tracking
+    // The public version delegates here
     const int MAX_RECURSION_DEPTH = 100;
     if (depth > MAX_RECURSION_DEPTH) {
         const std::string& name = symbolizer_->get_string(id);
@@ -258,7 +384,13 @@ const script_value& environment::get_ref(uint64_t id, int depth) const {
     }
     
     if (parent_) {
-        return parent_->get_ref(id, depth + 1);
+        // For proper virtual dispatch, we need to call the public virtual method
+        // on the parent, not this internal version
+        const std::string& name = symbolizer_->get_string(id);
+        if (name == "getValue") {
+            std::cerr << "  parent type: " << typeid(*parent_).name() << "\n";
+        }
+        return parent_->get_ref(id);
     }
     
     // Need to get the name for error message
@@ -401,11 +533,534 @@ script_value* environment::get_value_ptr(uint64_t id) {
 }
 
 // interpreter implementation
+
+// Helper to resolve include/import paths
+std::string resolve_include_path(const std::string& path, std::shared_ptr<engine> engine_ptr) {
+    // First, try the path as-is (for absolute paths)
+    if (std::filesystem::exists(path)) {
+        return std::filesystem::canonical(path).string();
+    }
+    
+    // Get the include paths from the engine
+    auto include_paths = engine_ptr->get_include_paths();
+    
+    // Try each include path
+    for (const auto& include_path : include_paths) {
+        auto full_path = std::filesystem::path(include_path) / path;
+        if (std::filesystem::exists(full_path)) {
+            return std::filesystem::canonical(full_path).string();
+        }
+    }
+    
+    // Path not found
+    throw runtime_error("Could not find include/import file: " + path);
+}
+
+// Note: Direct engine implementation access removed
+// Import tracking will be handled by the engine's public API
+
+// Helper to create a bound method - binds 'this' as the first argument
+script_value interpreter::create_bound_method(const script_value& this_obj, const script_value& method) {
+    auto engine_weak = this_obj.get_engine_ref();
+    return script_value::make_function([this_obj, method](const std::vector<script_value>& args) -> script_value {
+        // Create a new argument list with 'this' as the first argument
+        std::vector<script_value> method_args;
+        method_args.reserve(args.size() + 1);
+        method_args.push_back(this_obj);
+        method_args.insert(method_args.end(), args.begin(), args.end());
+        
+        // Call the method with 'this' included
+        const auto& method_func = method.as_function();
+        return method_func(method_args);
+    }, engine_weak);
+}
+
+// method_environment implementation
+script_value method_environment::get(const std::string& name) const {
+    // DEBUG: Log method environment lookup
+    // std::cerr << "DEBUG: method_environment::get(\"" << name << "\")\n";
+    
+    // Special handling for 'this'
+    if (name == "this") {
+        return this_object_;
+    }
+
+    // First try normal environment lookup
+    try {
+        return environment::get(name);
+    } catch (const runtime_error&) {
+        // During class definition, we shouldn't resolve methods - let the unresolved identifier handling take over
+        // The this_object_ might be invalid during class parsing
+        if (name != "this" && this_object_.type() == script_value_type::jai_object_type && !this_object_.is_null()) {
+            auto obj_holder = this_object_.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                
+                // Try to get field first (non-throwing) - now returns a reference
+                const script_value& field_ref = instance->get_field(name, false);
+                if (!field_ref.is_invalid()) {
+                    return field_ref;
+                }
+                
+                // Try to get method (non-throwing)
+                script_value method = instance->get_method(name, false);
+                if (!method.is_invalid()) {
+                    // Found the method! Store in instance member
+                    bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
+                    return bound_method_storage_;
+                }
+                
+                // Try to get static field from class definition
+                auto class_def = instance->get_class_definition();
+                if (class_def && class_def->has_static_field(name)) {
+                    return class_def->get_static_field(name);
+                }
+            }
+        }
+        // Re-throw the original error
+        throw;
+    }
+}
+
+script_value method_environment::get(uint64_t id) const {
+    // Special handling for 'this' using cached ID
+    if (id == symbolizer_->get_this_id()) {
+        return this_object_;
+    }
+    
+    // First try normal environment lookup
+    try {
+        return environment::get(id);
+    } catch (const runtime_error&) {
+        // If not found, check 'this' object fields and methods
+        const std::string& name = symbolizer_->get_string(id);
+        if (name != "this" && this_object_.type() == script_value_type::jai_object_type) {
+            auto obj_holder = this_object_.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                
+                // Try to get field first (non-throwing) - now returns a reference
+                const script_value& field_ref = instance->get_field(name, false);
+                if (!field_ref.is_invalid()) {
+                    return field_ref;
+                }
+                
+                // Try to get method (non-throwing)
+                script_value method = instance->get_method(name, false);
+                if (!method.is_invalid()) {
+                    // Found the method! Store in instance member
+                    bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
+                    return bound_method_storage_;
+                }
+                
+                // Try to get static field from class definition
+                auto class_def = instance->get_class_definition();
+                if (class_def && class_def->has_static_field(name)) {
+                    return class_def->get_static_field(name);
+                }
+            }
+        }
+        // Re-throw the original error
+        throw runtime_error("Undefined variable '" + name + "'");
+    }
+}
+
+const script_value& method_environment::get_ref(const std::string& name) const {
+    
+    // First check if it's in our local values
+    uint64_t id = symbolizer_->intern(name);
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        return it->second;
+    }
+    
+    
+    // Then try parent environment lookup
+    if (parent_) {
+        try {
+            return parent_->get_ref(name);
+        } catch (const runtime_error&) {
+            // Not in parent, fall through to check 'this'
+        }
+    }
+    
+    // Finally, check 'this' object fields and methods
+        if (name != "this" && this_object_.type() == script_value_type::jai_object_type && !this_object_.is_null()) {
+            auto obj_holder = this_object_.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                
+                // Try to get field first (non-throwing) - now returns a reference
+                const script_value& field_ref = instance->get_field(name, false);
+                if (!field_ref.is_invalid()) {
+                    return field_ref;
+                }
+                
+                // Try to get method (non-throwing)
+                script_value method = instance->get_method(name, false);
+                if (!method.is_invalid()) {
+                    // Found the method! Store in instance member
+                    bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
+                    return bound_method_storage_;
+                }
+                
+                // Try to get static field from class definition
+                auto class_def = instance->get_class_definition();
+                if (class_def && class_def->has_static_field(name)) {
+                    return class_def->get_static_field(name);
+                }
+            }
+        }
+        throw runtime_error("Undefined variable '" + name + "'");
+}
+
+const script_value& method_environment::get_ref(uint64_t id) const {
+    // Force no inlining
+    volatile int x = 42;
+    (void)x;
+    
+    const std::string& name = symbolizer_->get_string(id);
+    
+    // First check if it's in our local values (parameters, local variables)
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        return it->second;
+    }
+    
+    // Then try parent environment lookup
+    if (parent_) {
+        try {
+            return parent_->get_ref(id);
+        } catch (const runtime_error&) {
+            // Not in parent, fall through to check 'this'
+        }
+    }
+    
+    // Finally, check 'this' object fields and methods as fallback
+    if (name != "this" && this_object_.type() == script_value_type::jai_object_type) {
+            auto obj_holder = this_object_.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                
+                // Try to get field first (non-throwing) - now returns a reference
+                const script_value& field_ref = instance->get_field(name, false);
+                if (!field_ref.is_invalid()) {
+                    return field_ref;
+                }
+                
+                // Try to get method (non-throwing)
+                script_value method = instance->get_method(name, false);
+                if (!method.is_invalid()) {
+                    // Found the method! Store in instance member
+                    bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
+                    return bound_method_storage_;
+                }
+                
+                // Try to get static field from class definition
+                auto class_def = instance->get_class_definition();
+                if (class_def && class_def->has_static_field(name)) {
+                    return class_def->get_static_field(name);
+                }
+            }
+        }
+        throw runtime_error("Undefined variable '" + name + "'");
+}
+
+script_value& method_environment::get_ref(const std::string& name) {
+    
+    // First check if it's in our local values
+    uint64_t id = symbolizer_->intern(name);
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        return it->second;
+    }
+    
+    // Then try parent environment lookup
+    if (parent_) {
+        try {
+            return parent_->get_ref(name);
+        } catch (const runtime_error&) {
+            // Not in parent, fall through to check 'this'
+        }
+    }
+    
+    // Finally, check 'this' object fields and methods
+        if (name != "this" && this_object_.type() == script_value_type::jai_object_type && !this_object_.is_null()) {
+            auto obj_holder = this_object_.get_object_holder();
+            if (obj_holder && obj_holder->data) {
+                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                
+                // Try to get field first (non-throwing) - now returns a reference
+                script_value& field_ref = instance->get_field(name, false);
+                if (!field_ref.is_invalid()) {
+                    return field_ref;
+                }
+                
+                // Try to get method
+                script_value method = instance->get_method(name, false);
+                if (!method.is_invalid()) {
+                    // Found the method! Store in instance member
+                    bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
+                    return bound_method_storage_;
+                }
+                
+                // Try to get static field from class definition
+                auto class_def = instance->get_class_definition();
+                if (class_def && class_def->has_static_field(name)) {
+                    return class_def->get_static_field(name);
+                }
+            }
+        }
+        throw runtime_error("Undefined variable '" + name + "'");
+}
+
+script_value& method_environment::get_ref(uint64_t id) {
+    const std::string& name = symbolizer_->get_string(id);
+    
+    
+    // First check if it's in our local values (parameters, local variables)
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        return it->second;
+    }
+    
+    // Then try parent environment lookup
+    if (parent_) {
+        try {
+            return parent_->get_ref(id);
+        } catch (const runtime_error&) {
+            // Not in parent, fall through to check 'this'
+        }
+    }
+    
+    // Finally, check 'this' object fields and methods as fallback
+    if (name != "this" && this_object_.type() == script_value_type::jai_object_type) {
+        auto obj_holder = this_object_.get_object_holder();
+        if (obj_holder && obj_holder->data) {
+            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+            
+            // Try to get field first (non-throwing) - now returns a reference
+            script_value& field_ref = instance->get_field(name, false);
+            if (!field_ref.is_invalid()) {
+                return field_ref;
+            }
+            
+            // Try to get method (non-throwing)
+            script_value method = instance->get_method(name, false);
+            if (!method.is_invalid()) {
+                // Found the method! Store in instance member
+                bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
+                return bound_method_storage_;
+            }
+            
+            // Try to get static field from class definition
+            auto class_def = instance->get_class_definition();
+            if (class_def && class_def->has_static_field(name)) {
+                return class_def->get_static_field(name);
+            }
+        }
+    }
+    throw runtime_error("Undefined variable '" + name + "'");
+}
+
+void method_environment::assign(const std::string& name, const script_value& value) {
+    // First check if it's a local variable or parameter
+    uint64_t id = symbolizer_->intern(name);
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        it->second = value;
+        return;
+    }
+    
+    // Check parent environments
+    if (parent_ && parent_->contains(name)) {
+        parent_->assign(name, value);
+        return;
+    }
+    
+    // If not found anywhere and 'this' has this field, update it
+    if (name != "this" && this_object_.type() == script_value_type::jai_object_type) {
+        auto obj_holder = this_object_.get_object_holder();
+        if (obj_holder && obj_holder->data) {
+            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+            if (instance && instance->has_field(name)) {
+                instance->set_field(name, value.clone());
+                return;
+            }
+        }
+    }
+    
+    // Not found anywhere - define it locally (this matches normal environment behavior)
+    define(name, value);
+}
+
+void method_environment::assign(uint64_t id, const script_value& value) {
+    // Convert to string name and use the string version
+    const std::string& name = symbolizer_->get_string(id);
+    assign(name, value);
+}
+
+// static_method_environment implementation
+script_value static_method_environment::get(const std::string& name) const {
+    std::cout << "[DEBUG] static_method_environment::get('" << name << "') called" << std::endl;
+    std::cout << "[DEBUG] class_def_ = " << (class_def_ ? "valid" : "null") << std::endl;
+
+    // First try normal environment lookup
+    try {
+        auto result = environment::get(name);
+        std::cout << "[DEBUG] Found '" << name << "' in parent environment" << std::endl;
+        return result;
+    } catch (const runtime_error&) {
+        std::cout << "[DEBUG] Not in parent environment, checking static members" << std::endl;
+
+        // If not found, check static fields
+        if (class_def_ && class_def_->has_static_field(name)) {
+            std::cout << "[DEBUG] Found '" << name << "' as static field" << std::endl;
+            return class_def_->get_static_field(name);
+        }
+        std::cout << "[DEBUG] Not a static field" << std::endl;
+
+        // Also check static methods (for calling other static methods)
+        if (class_def_ && class_def_->has_static_method(name)) {
+            std::cout << "[DEBUG] Found '" << name << "' as static method" << std::endl;
+            return class_def_->get_static_method(name);
+        }
+        std::cout << "[DEBUG] Not a static method either, throwing error" << std::endl;
+
+        // Re-throw the original error
+        throw;
+    }
+}
+
+script_value static_method_environment::get(uint64_t id) const {
+    // First try normal environment lookup
+    try {
+        return environment::get(id);
+    } catch (const runtime_error&) {
+        // If not found, check static fields
+        const std::string& name = symbolizer_->get_string(id);
+        if (class_def_ && class_def_->has_static_field(name)) {
+            return class_def_->get_static_field(name);
+        }
+        // Also check static methods (for calling other static methods)
+        if (class_def_ && class_def_->has_static_method(name)) {
+            return class_def_->get_static_method(name);
+        }
+        // Re-throw the original error
+        throw runtime_error("Undefined variable '" + name + "'");
+    }
+}
+
+const script_value& static_method_environment::get_ref(const std::string& name) const {
+    // First check if it's in our local values
+    uint64_t id = symbolizer_->intern(name);
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        return it->second;
+    }
+
+    // Then try parent environment lookup
+    if (parent_) {
+        try {
+            return parent_->get_ref(name);
+        } catch (const runtime_error&) {
+            // Continue to static field check
+        }
+    }
+
+    // Check static fields
+    if (class_def_ && class_def_->has_static_field(name)) {
+        return class_def_->get_static_field(name);
+    }
+
+    // Check static methods (for calling other static methods)
+    if (class_def_ && class_def_->has_static_method(name)) {
+        // Store in bound_method_storage_ to return a reference
+        bound_method_storage_ = class_def_->get_static_method(name);
+        return bound_method_storage_;
+    }
+
+    throw runtime_error("Undefined variable '" + name + "'");
+}
+
+const script_value& static_method_environment::get_ref(uint64_t id) const {
+    const std::string& name = symbolizer_->get_string(id);
+    return get_ref(name);
+}
+
+script_value& static_method_environment::get_ref(const std::string& name) {
+    // First check if it's in our local values
+    uint64_t id = symbolizer_->intern(name);
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        return it->second;
+    }
+
+    // Then try parent environment lookup
+    if (parent_) {
+        try {
+            return parent_->get_ref(name);
+        } catch (const runtime_error&) {
+            // Continue to static field check
+        }
+    }
+
+    // Check static fields
+    if (class_def_ && class_def_->has_static_field(name)) {
+        return class_def_->get_static_field(name);
+    }
+
+    // Check static methods (for calling other static methods)
+    if (class_def_ && class_def_->has_static_method(name)) {
+        // Store in bound_method_storage_ to return a reference
+        bound_method_storage_ = class_def_->get_static_method(name);
+        return bound_method_storage_;
+    }
+
+    throw runtime_error("Undefined variable '" + name + "'");
+}
+
+script_value& static_method_environment::get_ref(uint64_t id) {
+    const std::string& name = symbolizer_->get_string(id);
+    return get_ref(name);
+}
+
+void static_method_environment::assign(const std::string& name, const script_value& value) {
+    // First check if it's a local variable or parameter
+    uint64_t id = symbolizer_->intern(name);
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        it->second = value;
+        return;
+    }
+    
+    // Check parent environments
+    if (parent_ && parent_->contains(name)) {
+        parent_->assign(name, value);
+        return;
+    }
+    
+    // Check if it's a static field
+    if (class_def_ && class_def_->has_static_field(name)) {
+        class_def_->set_static_field(name, value);
+        return;
+    }
+    
+    // Not found anywhere - define it locally
+    define(name, value);
+}
+
+void static_method_environment::assign(uint64_t id, const script_value& value) {
+    const std::string& name = symbolizer_->get_string(id);
+    assign(name, value);
+}
+
 interpreter::interpreter() 
     : ownedSymbolizer_(std::make_unique<string_symbolizer>()),
       string_symbolizer_(ownedSymbolizer_.get()),
       environment_(std::make_shared<environment>(string_symbolizer_)),
-      hasReturnValue_(false) {
+      hasReturnValue_(false),
+      current_method_this_(std::monostate{}, std::weak_ptr<engine>{}) {
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
     environment_pool_.reserve(8);  // For nested function calls
@@ -423,7 +1078,8 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     : ownedSymbolizer_(nullptr),
       string_symbolizer_(external_symbolizer),
       environment_(std::make_shared<environment>(string_symbolizer_)),
-      hasReturnValue_(false) {
+      hasReturnValue_(false),
+      current_method_this_(std::monostate{}, std::weak_ptr<engine>{}) {
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
     environment_pool_.reserve(8);  // For nested function calls
@@ -441,7 +1097,8 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     : ownedSymbolizer_(nullptr),
       string_symbolizer_(external_symbolizer),
       environment_(global_env),
-      hasReturnValue_(false) {
+      hasReturnValue_(false),
+      current_method_this_(std::monostate{}, std::weak_ptr<engine>{}) {
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
     environment_pool_.reserve(8);  // For nested function calls
@@ -500,15 +1157,19 @@ void interpreter::define_variable(const std::string& name, const script_value& v
 }
 
 script_value interpreter::execute(const std::vector<declaration_ptr>& declarations) {
-    script_value lastscript_value;
+    // std::cerr << "DEBUG: interpreter::execute called with " << declarations.size() << " declarations\n";
+    script_value last_script_value = script_value::make_null(engine_ref_);
     hasReturnValue_ = false;  // Reset return value state
     
     for (size_t i = 0; i < declarations.size(); i++) {
         const auto& decl = declarations[i];
-        
+        // std::cerr << "  Declaration " << i << " type: " << typeid(*decl).name() << "\n";
+
         // Execute declaration with exception handling
         try {
+            // std::cerr << "  About to visit declaration " << i << "\n";
             decl->accept(this);
+            // std::cerr << "  Finished visiting declaration " << i << "\n";
         } catch (const script_exception& e) {
             // Convert to interpreter exception state
             active_exception_value_ = make_value(std::string(e.what()));
@@ -530,7 +1191,9 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         // Check if this is an implicit return expression
         if (auto* expr_decl = dynamic_cast<expression_decl*>(decl.get())) {
             if (expr_decl->implicit_return && !valueStack_.empty()) {
-                lastscript_value = pop_value();
+                last_script_value = pop_value();
+                // Dereference in case it's a reference (for expressions like m["key"] that return references)
+                last_script_value = last_script_value.deref();
             }
         }
         
@@ -542,13 +1205,14 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         // If we hit a return statement, break out of execution
         if (hasReturnValue_) {
             reset_environment_pool();  // Reset pool for next execution
-            return returnValue_;
+            return returnValue_.value();
         }
     }
     
-    
+
+
     reset_environment_pool();  // Reset pool for next execution
-    return lastscript_value;
+    return last_script_value;
 }
 
 script_value interpreter::evaluate(expression_ptr expr) {
@@ -574,15 +1238,40 @@ std::unordered_map<std::string, script_value> interpreter::get_all_variables() c
 // expression visitors
 void interpreter::visit_literal_expr(literal_expr* expr) {
     // Literals are created at parse time without engine references
-    // Set the engine reference before pushing
-    expr->value.set_engine_ref(engine_ref_);
-    push_value(expr->value);
+    // Create a new value with the proper engine reference based on the literal's type
+    switch (expr->value.type()) {
+        case script_value_type::jai_int_type:
+            push_value(make_value(expr->value.as_int()));
+            break;
+        case script_value_type::jai_float_type:
+            push_value(make_value(expr->value.as_float()));
+            break;
+        case script_value_type::jai_string_type:
+            push_value(make_value(expr->value.as_string()));
+            break;
+        case script_value_type::jai_char_type:
+            push_value(make_value(expr->value.as_char()));
+            break;
+        case script_value_type::jai_bool_type:
+            push_value(make_value(expr->value.as_bool()));
+            break;
+        case script_value_type::jai_null_type:
+            push_value(make_value());
+            break;
+        default:
+            // For other types, try to set engine ref (though this shouldn't happen with literals)
+            expr->value.set_engine_ref(engine_ref_);
+            push_value(expr->value);
+            break;
+    }
 }
 
 void interpreter::visit_identifier_expr(identifier_expr* expr) {
+    if (expr->name == "getValue") {
+    }
     // Check if this identifier is the current catch variable
     if (!current_catch_var_.empty() && expr->name == current_catch_var_) {
-        push_value(active_exception_value_);
+        push_value(active_exception_value_.value());
         return;
     }
     
@@ -612,19 +1301,47 @@ void interpreter::visit_identifier_expr(identifier_expr* expr) {
     
     // Try to get the variable from environment
     try {
+        
         const script_value& val = environment_->get_ref(expr->symbol_id);
         push_value(val.deref());  // Automatically handles references
-    } catch (const runtime_error&) {
+    } catch (const runtime_error& e) {
+        // If we're in a class method context, collect unresolved identifier
+        if (current_class_context_ && current_class_context_->in_method) {
+            // Add to unresolved identifiers for later validation
+            current_class_context_->unresolved_identifiers.insert(expr->name);
+            // Push a placeholder value to continue parsing
+            push_value(make_value());
+            return;
+        }
+        
+        
         // Variable not found - check if it's a member of 'this'
         try {
             script_value this_val = environment_->get("this");
             if (this_val.is_object()) {
                 // Try to access as a member of 'this'
-                auto obj_holder = std::get<std::shared_ptr<script_value::object_holder>>(this_val.storage_);
+                auto obj_holder = this_val.get_object_holder();
+                std::shared_ptr<class_instance> instance;
+                
+                // For C++ classes, is_cpp_class_instance is true and data is class_instance
                 if (obj_holder->is_cpp_class_instance) {
-                    auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                    instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                } else {
+                    // For script classes, the data IS a class_instance directly
+                    instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                }
+                
+                if (instance) {
+                    // Check instance fields first
                     if (instance->has_field(expr->name)) {
                         push_value(instance->get_field(expr->name));
+                        return;
+                    }
+                    
+                    // Check for static fields of the class
+                    auto class_def = instance->get_class_definition();
+                    if (class_def && class_def->has_static_field(expr->name)) {
+                        push_value(class_def->get_static_field(expr->name));
                         return;
                     }
                 }
@@ -632,9 +1349,13 @@ void interpreter::visit_identifier_expr(identifier_expr* expr) {
         } catch (...) {
             // No 'this' in scope
         }
-        
-        // Re-throw the original error
-        throw runtime_error("Undefined variable '" + expr->name + "'");
+
+        // Set exception state instead of throwing C++ exception
+        active_exception_value_ = make_value("Undefined variable '" + expr->name + "'");
+        current_exception_ = script_exception("Undefined variable '" + expr->name + "'", expr->location);
+        is_unwinding_ = true;
+        push_value(make_value());  // Push null for failed variable access
+        return;
     }
 }
 
@@ -842,7 +1563,7 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
             }
             
             // For arrays, check if this is a true temporary
-            auto array_ptr = std::get<std::shared_ptr<std::vector<script_value>>>(left.storage_);
+            auto array_ptr = left.get_array_storage();
             bool is_temporary = array_ptr.use_count() == 1;
             
             if (!is_temporary) {
@@ -863,7 +1584,7 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
                 
                 // Check if this is a true temporary by seeing if the shared_ptr is unique
                 // If it's shared (refcount > 1), it means it's stored in a variable
-                auto map_ptr = std::get<std::shared_ptr<std::map<script_value, script_value>>>(left.storage_);
+                auto map_ptr = left.get_map_storage();
                 bool is_temporary = map_ptr.use_count() == 1;
                 
                 if (!is_temporary) {
@@ -871,11 +1592,11 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
                     script_value& value_ref = map[right];
                     
                     // If this created a new entry with default constructor, it has invalid engine reference
-                    if (value_ref.engine_ref_.expired()) {
-                        if (left.engine_ref_.expired()) {
+                    if (!value_ref.has_valid_engine_ref()) {
+                        if (!left.has_valid_engine_ref()) {
                             throw runtime_error("Invalid script_value: both map and new entry missing engine reference");
                         }
-                        value_ref.engine_ref_ = left.engine_ref_;
+                        value_ref.set_engine_ref(left.get_engine_ref());
                     }
                     
                     script_value* element_ptr = &value_ref;
@@ -885,7 +1606,12 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
                     // This is a true temporary (e.g., function return), read-only access
                     auto it = map.find(right);
                     if (it != map.end()) {
-                        push_value(it->second);
+                        // Ensure the value has an engine ref before pushing
+                        script_value val = it->second;
+                        if (!val.has_valid_engine_ref()) {
+                            val.set_engine_ref(engine_ref_);
+                        }
+                        push_value(val);
                     } else {
                         push_value(script_value(std::monostate{}, engine_ref_));
                     }
@@ -895,7 +1621,12 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
                 const auto& map = left.as_map();
                 auto it = map.find(right);
                 if (it != map.end()) {
-                    push_value(it->second);
+                    // Ensure the value has an engine ref before pushing
+                    script_value val = it->second;
+                    if (!val.has_valid_engine_ref()) {
+                        val.set_engine_ref(engine_ref_);
+                    }
+                    push_value(val);
                 } else {
                     push_value(script_value(std::monostate{}, engine_ref_));
                 }
@@ -993,7 +1724,7 @@ void interpreter::visit_unary_expr(unary_expr* expr) {
                     identifier->symbol_id = string_symbolizer_->intern(identifier->name);
                 }
                 script_value currentValue = environment_->get(identifier->symbol_id);
-                script_value newValue;
+                script_value newValue = script_value::make_null(engine_ref_);
                 
                 if (currentValue.is_int()) {
                     int64_t val = currentValue.as_int();
@@ -1050,14 +1781,14 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             if (identifier->symbol_id == UINT64_MAX) {
                 identifier->symbol_id = string_symbolizer_->intern(identifier->name);
             }
-            script_value currentValue = environment_->get(identifier->symbol_id);
+            script_value currentValue = environment_->get_ref(identifier->symbol_id);
             
             // Evaluate the right-hand side
             expr->value->accept(this);
             script_value rightValue = pop_value();
             
             // Perform the compound operation - try custom operators first, then built-in types
-            script_value resultValue;
+            script_value resultValue = script_value::make_null(engine_ref_);
             bool customOpFound = false;
             
             switch (expr->op.type) {
@@ -1187,14 +1918,14 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             // Handle compound assignment to member expression (e.g., obj.value += 10)
             // First, get the current value of the property
             memberExpr->accept(this);
-            script_value currentValue = pop_value();
+            script_value currentValue = pop_value().deref();
             
             // Evaluate the right-hand side
             expr->value->accept(this);
             script_value rightValue = pop_value();
             
             // Perform the compound operation
-            script_value resultValue;
+            script_value resultValue = script_value::make_null(engine_ref_);
             bool customOpFound = false;
             
             switch (expr->op.type) {
@@ -1265,11 +1996,14 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
             
             // Extract the class_instance
-            auto objHolder = std::get<std::shared_ptr<script_value::object_holder>>(objectValue.storage_);
+            auto objHolder = objectValue.get_object_holder();
+            if (!objHolder) {
+                throw runtime_error("Cannot assign property to non-object value");
+            }
             auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
             
             // Check if there's a property setter
-            script_value setter = instance->get_method("_set_" + memberExpr->member);
+            script_value setter = instance->get_method("_set_" + memberExpr->member, false);
             if (!setter.is_null()) {
                 // Call the setter with 'this' and the value
                 const script_function& func = setter.as_function();
@@ -1301,7 +2035,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             script_value rightValue = pop_value();
             
             // Perform the compound operation
-            script_value resultValue;
+            script_value resultValue = script_value::make_null(engine_ref_);
             
             // Try custom operators first
             try {
@@ -1380,22 +2114,71 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 if (currentVal && currentVal->is_reference()) {
                     // This is a reference - assign through it (deep copy the value)
                     currentVal->deref() = std::move(value.deref().clone());
+                } else if (currentVal && currentVal->is_cpp_bound()) {
+                    // This is a C++ bound value - use assign_through
+                    currentVal->assign_through(value);
+                } else if (currentVal && currentVal->is_weak_ptr()) {
+                    // Special handling for weak_ptr assignment
+                    if (value.is_null()) {
+                        // Assign null - create empty weak_ptr
+                        auto type_info = currentVal->get_type_info();
+                        environment_->assign(identifier->symbol_id, script_value::make_empty_weak_ptr(type_info, engine_ref_));
+                    } else if (value.is_weak_ptr()) {
+                        // Assign another weak_ptr
+                        environment_->assign(identifier->symbol_id, std::move(value));
+                    } else if (value.type() == script_value_type::jai_object_type) {
+                        // Convert object to weak_ptr
+                        script_value weak = script_value::make_weak_ptr(value, engine_ref_);
+                        environment_->assign(identifier->symbol_id, std::move(weak));
+                    } else {
+                        auto type_info = value.get_type_info();
+                        std::string type_name = type_info ? type_info->type_name : "unknown";
+                        throw runtime_error("Cannot assign " + type_name + " to weak_ptr");
+                    }
+                } else if (currentVal && currentVal->get_type_info() && 
+                          currentVal->get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
+                    // Special handling for shared_ptr assignment
+                    if (value.is_null()) {
+                        // Assign null - that's fine
+                        environment_->assign(identifier->symbol_id, std::move(value));
+                    } else if (value.is_weak_ptr()) {
+                        throw runtime_error("Cannot assign weak_ptr to shared_ptr - use weak.lock() instead");
+                    } else if (value.type() == script_value_type::jai_object_type) {
+                        // Assign object to shared_ptr - just update the value but keep the shared_ptr type info
+                        auto type_info = currentVal->get_type_info();
+                        value.set_type_info(type_info);
+                        environment_->assign(identifier->symbol_id, std::move(value));
+                    } else {
+                        auto type_info = value.get_type_info();
+                        std::string type_name = type_info ? type_info->type_name : "unknown";
+                        throw runtime_error("Cannot assign " + type_name + " to shared_ptr");
+                    }
                 } else {
                     // Regular variable assignment (deep copy the value)
                     environment_->assign(identifier->symbol_id, std::move(value.clone()));
                 }
             } else {
-                // Variable doesn't exist - check if it's a member of 'this'
+                // Variable doesn't exist - check if it's a member of 'this' or a static field
                 bool assigned_to_this = false;
                 try {
                     script_value this_val = environment_->get("this");
                     if (this_val.is_object()) {
-                        auto obj_holder = std::get<std::shared_ptr<script_value::object_holder>>(this_val.storage_);
-                        if (obj_holder->is_cpp_class_instance) {
+                        auto obj_holder = this_val.get_object_holder();
+                        if (obj_holder->is_cpp_class_instance || obj_holder->data) {
                             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                            
+                            // First try instance fields
                             if (instance->has_field(identifier->name)) {
                                 instance->set_field(identifier->name, std::move(value.clone()));
                                 assigned_to_this = true;
+                            } 
+                            // Then try static fields
+                            else {
+                                auto class_def = instance->get_class_definition();
+                                if (class_def && class_def->has_static_field(identifier->name)) {
+                                    class_def->set_static_field(identifier->name, value);
+                                    assigned_to_this = true;
+                                }
                             }
                         }
                     }
@@ -1411,7 +2194,50 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
         } 
         // Check if target is a member expression (property assignment)
         else if (auto* memberExpr = dynamic_cast<member_expr*>(expr->target.get())) {
-            // Evaluate the object
+            // Check if this is a static member assignment
+            if (memberExpr->is_static) {
+                // For static assignment, get the class definition
+                auto* ident_expr = dynamic_cast<identifier_expr*>(memberExpr->object.get());
+                if (!ident_expr) {
+                    throw runtime_error("Static member assignment requires a class name");
+                }
+                
+                std::string class_name = ident_expr->name;
+                script_value class_var = script_value::make_null(engine_ref_);
+                
+                try {
+                    class_var = environment_->get("__class_" + class_name);
+                } catch (const runtime_error&) {
+                    throw runtime_error("Class '" + class_name + "' not found");
+                }
+                
+                if (!class_var.is_object()) {
+                    throw runtime_error("'" + class_name + "' is not a class");
+                }
+                
+                auto objHolder = class_var.get_object_holder();
+                if (!objHolder || objHolder->type_name != "class_definition") {
+                    throw runtime_error("'" + class_name + "' is not a valid class");
+                }
+                
+                auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
+                
+                // Evaluate the value
+                expr->value->accept(this);
+                script_value value = pop_value();
+                
+                // Set the static field
+                try {
+                    class_def->set_static_field(memberExpr->member, value.clone());
+                } catch (const runtime_error& e) {
+                    throw runtime_error("Cannot assign to static member: " + std::string(e.what()));
+                }
+                
+                push_value(value);
+                return;
+            }
+            
+            // Regular member assignment - evaluate the object
             memberExpr->object->accept(this);
             script_value objectValue = pop_value();
             
@@ -1426,15 +2252,18 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
             
             // Extract the class_instance
-            auto objHolder = std::get<std::shared_ptr<script_value::object_holder>>(objectValue.storage_);
+            auto objHolder = objectValue.get_object_holder();
+            if (!objHolder) {
+                throw runtime_error("Cannot assign property to non-object value");
+            }
             auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
             
-            // Check if there's a property setter
-            script_value setter = instance->get_method("_set_" + memberExpr->member);
+            // Check if there's a property setter first (for C++ properties)
+            script_value setter = instance->get_method("_set_" + memberExpr->member, false);
             if (!setter.is_null()) {
                 // Call the setter with 'this' and the value
                 const script_function& func = setter.as_function();
-                std::vector<script_value> args = {objectValue, value};
+                std::vector<script_value> args = {objectValue, std::move(value.clone())};
                 func(args);
             } else if (instance->has_field(memberExpr->member)) {
                 // Direct field assignment (deep copy)
@@ -1461,7 +2290,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Check if we got a reference
                 if (target_ref.is_reference()) {
                     // Get the actual target through the reference
-                    auto refHolder = std::get<std::shared_ptr<script_value::reference_holder>>(target_ref.storage_);
+                    auto refHolder = target_ref.get_reference_holder();
                     script_value* target_ptr = refHolder->target;
                     if (!target_ptr) {
                         throw runtime_error("Invalid reference in assignment");
@@ -1487,7 +2316,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
 // statement visitors
 void interpreter::visit_expression_stmt(expression_stmt* stmt) {
     stmt->expression->accept(this);
-    
+
     // Early exit if exception is propagating
     if (is_unwinding_) return;
     
@@ -1499,11 +2328,11 @@ void interpreter::visit_block_stmt(block_stmt* stmt) {
     // Create new environment for the block scope
     auto previous = environment_;
     environment_ = std::make_shared<environment>(environment_, string_symbolizer_);
-    
+
     try {
         for (const auto& decl : stmt->declarations) {
             decl->accept(this);
-            
+
             // Early exit if exception is propagating
             if (is_unwinding_) break;
         }
@@ -1512,7 +2341,7 @@ void interpreter::visit_block_stmt(block_stmt* stmt) {
         environment_ = previous;
         throw;
     }
-    
+
     // Restore previous environment
     environment_ = previous;
 }
@@ -1530,22 +2359,70 @@ void interpreter::visit_variable_decl(variable_decl* decl) {
         is_weak_ptr = true;
     }
     
+    // Check if this is a shared_ptr declaration
+    bool is_shared_ptr = false;
+    if (decl->type && decl->type->base_type == script_value_type::jai_shared_ptr_type) {
+        is_shared_ptr = true;
+    }
+    
     if (is_weak_ptr) {
-        // weak_ptr<T> variable - convert initializer to weak_ptr
+        // weak_ptr<T> variable - handle initialization
         if (!decl->initializer) {
             // No initializer - create empty weak_ptr
-            script_value null_weak;
-            null_weak.type_info_ = decl->type;
-            null_weak.storage_ = std::weak_ptr<script_value>();
-            environment_->define(decl->name, std::move(null_weak));
+            script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_ref_);
+            environment_->define(decl->name, std::move(weak));
         } else {
-            // Evaluate initializer and wrap in weak_ptr
+            // Evaluate initializer
             decl->initializer->accept(this);
             script_value value = pop_value();
             
-            // Call weak_ptr function
-            script_value weak = script_value::make_weak_ptr(value);
-            environment_->define(decl->name, std::move(weak));
+            // Handle different initialization cases
+            if (value.is_null()) {
+                // Initialize with null - create empty weak_ptr
+                script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_ref_);
+                environment_->define(decl->name, std::move(weak));
+            } else if (value.is_weak_ptr()) {
+                // Initialize with another weak_ptr - copy it
+                environment_->define(decl->name, std::move(value));
+            } else if (value.type() == script_value_type::jai_object_type) {
+                // Initialize with object/shared_ptr - create weak_ptr from it
+                script_value weak = script_value::make_weak_ptr(value, engine_ref_);
+                environment_->define(decl->name, std::move(weak));
+            } else {
+                auto type_info = value.get_type_info();
+                std::string type_name = type_info ? type_info->type_name : "unknown";
+                throw runtime_error("Cannot initialize weak_ptr with " + type_name);
+            }
+        }
+    } else if (is_shared_ptr) {
+        // shared_ptr<T> variable - handle initialization
+        if (!decl->initializer) {
+            // No initializer - create null shared_ptr
+            script_value null_ptr = script_value::make_null(engine_ref_);
+            null_ptr.set_type_info(decl->type);  // Mark as shared_ptr type
+            environment_->define(decl->name, std::move(null_ptr));
+        } else {
+            // Evaluate initializer
+            decl->initializer->accept(this);
+            script_value value = pop_value();
+            
+            // Handle different initialization cases
+            if (value.is_null()) {
+                // Initialize with null - that's fine
+                value.set_type_info(decl->type);  // Mark as shared_ptr type
+                environment_->define(decl->name, std::move(value));
+            } else if (value.is_weak_ptr()) {
+                throw runtime_error("Cannot initialize shared_ptr directly from weak_ptr - use weak.lock() instead");
+            } else if (value.type() == script_value_type::jai_object_type) {
+                // Initialize with object/shared_ptr - that's fine, objects are already shared_ptr
+                // Mark the type as shared_ptr to ensure reference semantics
+                value.set_type_info(decl->type);
+                environment_->define(decl->name, std::move(value));
+            } else {
+                auto type_info = value.get_type_info();
+                std::string type_name = type_info ? type_info->type_name : "unknown";
+                throw runtime_error("Cannot initialize shared_ptr with " + type_name);
+            }
         }
     } else if (is_reference) {
         // Reference variable - must have initializer
@@ -1568,7 +2445,7 @@ void interpreter::visit_variable_decl(variable_decl* decl) {
             // Check if the target is itself a reference
             if (targetPtr->is_reference()) {
                 // Reference to reference - get the final target and its environment
-                auto refHolder = std::get<std::shared_ptr<script_value::reference_holder>>(targetPtr->storage_);
+                auto refHolder = targetPtr->get_reference_holder();
                 targetPtr = refHolder->target;
                 // Use the original reference's environment
                 auto target_env = refHolder->sourceEnv.lock();
@@ -1589,7 +2466,7 @@ void interpreter::visit_variable_decl(variable_decl* decl) {
             
             // If the result is a reference, we can create a reference to its target
             if (result.is_reference()) {
-                auto refHolder = std::get<std::shared_ptr<script_value::reference_holder>>(result.storage_);
+                auto refHolder = result.get_reference_holder();
                 script_value* targetPtr = refHolder->target;
                 auto target_env = refHolder->sourceEnv.lock();
                 if (!target_env) {
@@ -1604,7 +2481,7 @@ void interpreter::visit_variable_decl(variable_decl* decl) {
         }
     } else {
         // Regular variable declaration
-        script_value value;
+        script_value value = script_value::make_null(engine_ref_);
         if (decl->initializer) {
             decl->initializer->accept(this);
             value = pop_value();
@@ -1701,13 +2578,13 @@ script_value interpreter::evaluate_comparison(const script_value& left, token_ty
             // For weak_ptr, null comparison checks if expired
             bool is_expired = false;
             if (left.is_weak_ptr()) {
-                if (std::holds_alternative<std::weak_ptr<script_value>>(left.storage_)) {
-                    auto weak_ptr = std::get<std::weak_ptr<script_value>>(left.storage_);
+                if (left.is_weak_ptr()) {
+                    auto weak_ptr = left.get_weak_ptr();
                     // Check if weak_ptr is expired (includes default-constructed)
                     is_expired = weak_ptr.expired();
-                } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(left.storage_)) {
+                } else if (left.get_object_holder() != nullptr) {
                     // weak_ptr_holder type - check if it contains an actual value
-                    auto holder = std::get<std::shared_ptr<script_value::object_holder>>(left.storage_);
+                    auto holder = left.get_object_holder();
                     is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
                 } else {
                     // Other cases - consider expired
@@ -1715,13 +2592,13 @@ script_value interpreter::evaluate_comparison(const script_value& left, token_ty
                 }
             } else {
                 // right is weak_ptr
-                if (std::holds_alternative<std::weak_ptr<script_value>>(right.storage_)) {
-                    auto weak_ptr = std::get<std::weak_ptr<script_value>>(right.storage_);
+                if (right.is_weak_ptr()) {
+                    auto weak_ptr = right.get_weak_ptr();
                     // Check if weak_ptr is expired (includes default-constructed)
                     is_expired = weak_ptr.expired();
-                } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(right.storage_)) {
+                } else if (right.get_object_holder() != nullptr) {
                     // weak_ptr_holder type - check if it contains an actual value
-                    auto holder = std::get<std::shared_ptr<script_value::object_holder>>(right.storage_);
+                    auto holder = right.get_object_holder();
                     is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
                 } else {
                     // Other cases - consider expired
@@ -1911,14 +2788,14 @@ void interpreter::visit_call_expr(call_expr* expr) {
     
     // Call the function with C++ exception handling
     const script_function& func = callee.as_function();
-    script_value result;
+    script_value result = script_value::make_null(engine_ref_);
     
     try {
         result = func(arguments);
     } catch (const script_exception& e) {
         // Convert script exceptions to interpreter exception state
         current_arg_metadata_.clear();
-        active_exception_value_ = make_value(e.what());
+        active_exception_value_ = make_value(std::string(e.what()));
         current_exception_ = e;
         is_unwinding_ = true;
         push_value(make_value());  // Push a null value since the call failed
@@ -1926,16 +2803,16 @@ void interpreter::visit_call_expr(call_expr* expr) {
     } catch (const std::runtime_error& e) {
         // Wrap C++ runtime_error with message and trigger exception handling
         current_arg_metadata_.clear();
-        active_exception_value_ = make_value(e.what());
+        active_exception_value_ = make_value(std::string(e.what()));
         current_exception_ = script_exception(e.what());
         is_unwinding_ = true;
         push_value(make_value());  // Push a null value since the call failed
         return;
     } catch (const std::exception& e) {
-        // Other C++ exceptions get the generic message
+        // Other C++ exceptions use their what() message
         current_arg_metadata_.clear();
-        active_exception_value_ = make_value("Unbound exception type caught in JaiScript.");
-        current_exception_ = script_exception("Unbound exception type caught in JaiScript.");
+        active_exception_value_ = make_value(std::string(e.what()));
+        current_exception_ = script_exception(e.what());
         is_unwinding_ = true;
         push_value(make_value());  // Push a null value since the call failed
         return;
@@ -1949,12 +2826,109 @@ void interpreter::visit_call_expr(call_expr* expr) {
 }
 
 void interpreter::visit_member_expr(member_expr* expr) {
+    // Check if this is a static member access (::)
+    if (expr->is_static) {
+        // For static access, the object should be a class identifier
+        auto* ident_expr = dynamic_cast<identifier_expr*>(expr->object.get());
+        if (!ident_expr) {
+            throw runtime_error("Static member access requires a class name");
+        }
+        
+        // Look up the class definition
+        std::string class_name = ident_expr->name;
+        script_value class_var = script_value::make_null(engine_ref_);
+        
+        try {
+            // Try to find the class definition
+            class_var = environment_->get("__class_" + class_name);
+        } catch (const runtime_error&) {
+            throw runtime_error("Class '" + class_name + "' not found");
+        }
+        
+        if (!class_var.is_object()) {
+            throw runtime_error("'" + class_name + "' is not a class");
+        }
+        
+        // Extract the class definition
+        auto objHolder = class_var.get_object_holder();
+        if (!objHolder || objHolder->type_name != "class_definition") {
+            throw runtime_error("'" + class_name + "' is not a valid class");
+        }
+        
+        auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
+        
+        // Try static field first
+        try {
+            script_value static_value = class_def->get_static_field(expr->member);
+            push_value(static_value);
+            return;
+        } catch (const runtime_error&) {
+            // Field not found, try static method
+        }
+        
+        // Try static method
+        try {
+            script_value static_method = class_def->get_static_method(expr->member);
+            push_value(static_method);
+            return;
+        } catch (const runtime_error&) {
+            // Method not found either
+        }
+        
+        throw runtime_error("Class '" + class_name + "' has no static member '" + expr->member + "'");
+        return;
+    }
+    
+    // Check if this is a super:: member access
+    bool is_super_access = dynamic_cast<super_expr*>(expr->object.get()) != nullptr;
+    
     // Evaluate the object expression
     expr->object->accept(this);
     script_value objectValue = pop_value();
     
     // Dereference if needed - subscript access returns references
     objectValue = objectValue.deref();
+    
+    // Handle super:: member access specially
+    if (is_super_access) {
+        // objectValue is 'this' from visit_super_expr
+        if (!objectValue.is_object()) {
+            throw runtime_error("super:: used on non-object");
+        }
+        
+        // Get the class instance
+        auto objHolder = objectValue.get_object_holder();
+        if (!objHolder || !objHolder->data) {
+            throw runtime_error("super:: used on non-class object");
+        }
+        
+        // Both script and C++ classes store class_instance in data
+        auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
+        if (!instance) {
+            throw runtime_error("super:: used on non-class object");
+        }
+        
+        // Get the class definition and its parent
+        auto class_def = instance->get_class_definition();
+        if (!class_def) {
+            throw runtime_error("Class definition not found for super:: access");
+        }
+        
+        auto parent_def = class_def->get_parent();
+        if (!parent_def) {
+            throw runtime_error("super:: used in class with no parent");
+        }
+        
+        // Look for the method in the parent class
+        script_value method = parent_def->get_method(expr->member);
+        if (method.is_null()) {
+            throw runtime_error("Parent class has no method '" + expr->member + "'");
+        }
+        
+        // Return a bound method that calls the parent's implementation
+        push_value(create_bound_method(objectValue, method));
+        return;
+    }
     
     // Handle array methods
     if (objectValue.is_array()) {
@@ -1963,9 +2937,9 @@ void interpreter::visit_member_expr(member_expr* expr) {
             // Found the method in the registry
             const builtin_method& method = methodIt->second;
             
-            // Create a wrapper function that captures the array value and method
-            script_function boundMethod = [this, objectValue, method](const std::vector<script_value>& args) -> script_value {
-                return method(this, objectValue, args);
+            // Create a wrapper function that captures the array value by moving it
+            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> script_value {
+                return method(this, capturedValue, args);
             };
             
             push_value(script_value::make_function(boundMethod, engine_ref_));
@@ -1988,9 +2962,9 @@ void interpreter::visit_member_expr(member_expr* expr) {
             // Found the method in the registry
             const builtin_method& method = methodIt->second;
             
-            // Create a wrapper function that captures the map value and method
-            script_function boundMethod = [this, objectValue, method](const std::vector<script_value>& args) -> script_value {
-                return method(this, objectValue, args);
+            // Create a wrapper function that captures the map value by moving it
+            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> script_value {
+                return method(this, capturedValue, args);
             };
             
             push_value(script_value::make_function(boundMethod, engine_ref_));
@@ -2003,50 +2977,43 @@ void interpreter::visit_member_expr(member_expr* expr) {
     
     // Handle weak_ptr methods
     if (objectValue.is_weak_ptr()) {
-        if (expr->member == "lock") {
-            script_function lockMethod = [this, objectValue](const std::vector<script_value>& args) -> script_value {
-                if (!args.empty()) {
-                    throw runtime_error("lock() takes no arguments");
-                }
-                
-                // Check storage type
-                if (std::holds_alternative<std::weak_ptr<script_value>>(objectValue.storage_)) {
-                    // True weak_ptr
-                    auto weak_ptr = std::get<std::weak_ptr<script_value>>(objectValue.storage_);
-                    if (auto locked = weak_ptr.lock()) {
-                        return *locked;
-                    }
-                } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(objectValue.storage_)) {
-                    // Weak reference stored as object_holder
-                    auto holder = std::get<std::shared_ptr<script_value::object_holder>>(objectValue.storage_);
-                    if (holder->type_name == "weak_ptr_holder" && holder->data) {
-                        auto stored_value = std::static_pointer_cast<script_value>(holder->data);
-                        return *stored_value;
-                    }
-                }
-                return make_value(); // null
+        auto methodIt = weakPtrMethods_.find(expr->member);
+        if (methodIt != weakPtrMethods_.end()) {
+            // Found the method in the registry
+            const builtin_method& method = methodIt->second;
+            
+            // Create a wrapper function that captures the weak_ptr value by moving it
+            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> script_value {
+                return method(this, capturedValue, args);
             };
-            push_value(script_value::make_function(lockMethod, engine_ref_));
+            
+            push_value(script_value::make_function(boundMethod, engine_ref_));
             return;
-        } else if (expr->member == "expired") {
-            script_function expiredMethod = [this, objectValue](const std::vector<script_value>& args) -> script_value {
-                if (!args.empty()) {
-                    throw runtime_error("expired() takes no arguments");
-                }
-                
-                // For our implementation, weak_ptr_holder never expires
-                // This is a simplification - proper implementation would track object lifetime
-                if (std::holds_alternative<std::weak_ptr<script_value>>(objectValue.storage_)) {
-                    auto weak_ptr = std::get<std::weak_ptr<script_value>>(objectValue.storage_);
-                    return make_value(weak_ptr.expired());
-                } else {
-                    return make_value(false); // Not expired
-                }
-            };
-            push_value(script_value::make_function(expiredMethod, engine_ref_));
-            return;
-        } else {
+        }
+        else {
             throw runtime_error("weak_ptr has no method '" + expr->member + "'");
+        }
+    }
+    
+    // Handle shared_ptr methods (all objects in JaiScript are internally shared_ptr)
+    if (objectValue.is_object()) {
+        // Check if this object has shared_ptr type info
+        auto type_info = objectValue.get_type_info();
+        if (type_info && type_info->type_name.find("shared_ptr<") == 0) {
+            auto methodIt = sharedPtrMethods_.find(expr->member);
+            if (methodIt != sharedPtrMethods_.end()) {
+                // Found the method in the registry
+                const builtin_method& method = methodIt->second;
+                
+                // Create a wrapper function that captures the shared_ptr value by moving it
+                script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> script_value {
+                    return method(this, capturedValue, args);
+                };
+                
+                push_value(script_value::make_function(boundMethod, engine_ref_));
+                return;
+            }
+            // If method not found, fall through to regular object member access
         }
     }
     
@@ -2057,7 +3024,7 @@ void interpreter::visit_member_expr(member_expr* expr) {
     
     // Extract the class_instance from the object
     // Access the object_holder directly since we're a friend class
-    auto objHolder = std::get<std::shared_ptr<script_value::object_holder>>(objectValue.storage_);
+    auto objHolder = objectValue.get_object_holder();
     
     
     // Get the class_instance - could be script or C++ class
@@ -2079,39 +3046,33 @@ void interpreter::visit_member_expr(member_expr* expr) {
     // First check if it's a field (registered by the property() method)
     bool has_field_result = instance->has_field(expr->member);
     if (has_field_result) {
-        // Check if there's a property getter method
-        script_value getter = instance->get_method("_get_" + expr->member);
-        if (!getter.is_null()) {
-            // Call the getter with 'this' as argument
-            const script_function& func = getter.as_function();
-            std::vector<script_value> args = {objectValue};
-            push_value(func(args));
-            return;
+        // For script classes, always access fields directly
+        // For C++ classes, check if there's a property getter method
+        if (!instance->is_script_class()) {
+            try {
+                script_value getter = instance->get_method("_get_" + expr->member);
+                if (!getter.is_null()) {
+                    // Call the getter with 'this' as argument
+                    const script_function& func = getter.as_function();
+                    std::vector<script_value> args = {objectValue};
+                    push_value(func(args));
+                    return;
+                }
+            } catch (const std::exception&) {
+                // If get_method fails (e.g., class definition expired), fall back to direct field access
+            }
         }
-        // Otherwise return the field value directly
+        // Return the field value directly (for script classes or if no getter)
         push_value(instance->get_field(expr->member));
         return;
     }
     
-    // Otherwise, look for a method
-    script_value method = instance->get_method(expr->member);
-    if (!method.is_null()) {
+    // Otherwise, look for a method (pass false to avoid throwing)
+    script_value method = instance->get_method(expr->member, false);
+    if (!method.is_null() && !method.is_invalid()) {
         // Return a bound method (function that has 'this' pre-bound)
         // We'll create a wrapper function that includes the object as first argument
-        script_function boundMethod = [objectValue, method](const std::vector<script_value>& args) -> script_value {
-            // Prepend the object as the first argument ('this')
-            std::vector<script_value> methodArgs;
-            methodArgs.reserve(args.size() + 1);
-            methodArgs.push_back(objectValue);
-            methodArgs.insert(methodArgs.end(), args.begin(), args.end());
-            
-            // Call the original method with 'this' as first argument
-            const script_function& func = method.as_function();
-            auto result = func(methodArgs);
-            return result;
-        };
-        
-        push_value(script_value::make_function(boundMethod, engine_ref_));
+        push_value(create_bound_method(objectValue, method));
         return;
     }
     
@@ -2366,6 +3327,92 @@ void interpreter::visit_new_expr(new_expr* expr) {
         return;
     }
     
+    if (expr->type->base_type == script_value_type::jai_weak_ptr_type) {
+        // weak_ptr<T>() or weak_ptr<T>(obj) constructor
+        if (expr->arguments.empty()) {
+            // No arguments - create empty weak_ptr
+            push_value(script_value::make_empty_weak_ptr(expr->type, engine_ref_));
+        } else if (expr->arguments.size() == 1) {
+            // One argument - create weak_ptr from object
+            expr->arguments[0]->accept(this);
+            script_value obj = pop_value();
+            
+            // Handle null objects
+            if (obj.is_null()) {
+                push_value(script_value::make_empty_weak_ptr(expr->type, engine_ref_));
+                return;
+            }
+            
+            // Allow creating weak_ptr from:
+            // 1. Another weak_ptr (copy constructor)
+            // 2. A shared_ptr (which in JaiScript is any object)
+            // 3. A raw object (jai_object_type)
+            
+            if (obj.is_weak_ptr()) {
+                // Copy constructor - just return the weak_ptr as-is
+                push_value(obj);
+                return;
+            }
+            
+            // shared_ptr and objects are both jai_object_type internally
+            if (obj.type() != script_value_type::jai_object_type) {
+                auto type_info = obj.get_type_info();
+                std::string type_name = type_info ? type_info->type_name : "unknown";
+                throw runtime_error("weak_ptr can only be created from objects, shared_ptr, or other weak_ptrs, got " + type_name);
+            }
+            
+            // Type validation is optional - in C++ you can have weak_ptr<Base> from shared_ptr<Derived>
+            // For now, we'll create the weak_ptr without strict type checking
+            push_value(script_value::make_weak_ptr(obj, engine_ref_));
+        } else {
+            throw runtime_error("weak_ptr() expects 0 or 1 arguments, got " + std::to_string(expr->arguments.size()));
+        }
+        return;
+    }
+    
+    if (expr->type->base_type == script_value_type::jai_shared_ptr_type) {
+        // shared_ptr<T>() or shared_ptr<T>(obj) constructor
+        if (expr->arguments.empty()) {
+            // No arguments - create empty shared_ptr (null)
+            push_value(script_value::make_null(engine_ref_));
+        } else if (expr->arguments.size() == 1) {
+            // One argument - validate and return
+            expr->arguments[0]->accept(this);
+            script_value obj = pop_value();
+            
+            // Handle null
+            if (obj.is_null()) {
+                push_value(obj);
+                return;
+            }
+            
+            // Allow creating shared_ptr from:
+            // 1. Another shared_ptr (which is any object in JaiScript)
+            // 2. A raw object (jai_object_type)
+            // Note: Cannot create shared_ptr from weak_ptr directly - need to use lock()
+            
+            if (obj.is_weak_ptr()) {
+                throw runtime_error("Cannot create shared_ptr directly from weak_ptr - use weak.lock() instead");
+            }
+            
+            // Only allow objects (which are already internally shared_ptr)
+            if (obj.type() != script_value_type::jai_object_type) {
+                auto type_info = obj.get_type_info();
+                std::string type_name = type_info ? type_info->type_name : "unknown";
+                throw runtime_error("shared_ptr can only be created from objects or other shared_ptrs, got " + type_name);
+            }
+            
+            // The object is already a shared_ptr internally
+            // Update its type info to reflect that it's explicitly a shared_ptr
+            // This ensures reference semantics in assignments
+            obj.set_type_info(expr->type);
+            push_value(obj);
+        } else {
+            throw runtime_error("shared_ptr() expects 0 or 1 arguments, got " + std::to_string(expr->arguments.size()));
+        }
+        return;
+    }
+    
     std::string className = expr->type->type_name;
     
     // Evaluate all arguments
@@ -2456,30 +3503,34 @@ void interpreter::visit_map_literal_expr(map_literal_expr* expr) {
 }
 
 void interpreter::visit_this_expr(this_expr* expr) {
+    // If we're in a class method context during parsing, allow 'this'
+    if (current_class_context_ && current_class_context_->in_method) {
+        // Push a placeholder value to continue parsing
+        push_value(make_value());
+        return;
+    }
+    
     // Try to get 'this' from the current environment
     try {
         script_value this_val = environment_->get("this");
         push_value(this_val);
-    } catch (const runtime_error&) {
+    } catch (const runtime_error& e) {
         throw runtime_error("'this' can only be used inside methods");
     }
 }
 
 void interpreter::visit_super_expr(super_expr* expr) {
-    // The super expression is used in two contexts:
-    // 1. Constructor delegation: Enemy(name) : super(name)
-    // 2. Method calls: super::attack()
+    // Super expression is used for accessing parent class methods: super::method()
+    // Constructor delegation (Enemy() : super()) is handled in the parser/constructor
     
-    // For now, we'll handle it as a method call context
-    // Constructor delegation is handled differently in the parser
-    
-    // Get 'this' from the environment
+    // Get 'this' from the environment - super only makes sense in instance methods
     auto this_value = environment_->get("this");
     if (this_value.is_null()) {
         throw runtime_error("'super' used outside of class method");
     }
     
-    // Push 'this' onto the stack for method call
+    // Push 'this' onto the stack - visit_member_expr will handle the parent lookup
+    // when it detects that the object expression is a super_expr
     push_value(this_value);
 }
 
@@ -2623,7 +3674,7 @@ void interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             auto& array_storage = get_array_storage(container);
             
             for (size_t i = 0; i < array_storage->size(); ++i) {
-                script_value loop_var;
+                script_value loop_var = script_value::make_null(engine_ref_);
                 
                 if (stmt->is_reference) {
                     // Create a reference to the actual array element
@@ -2657,7 +3708,7 @@ void interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             
             for (auto it = map_storage->begin(); it != map_storage->end(); ++it) {
                 // Create a pair object using the registered stdlib::script_pair type
-                script_value loop_var;
+                script_value loop_var = script_value::make_null(engine_ref_);
                 
                 try {
                     if (stmt->is_reference) {
@@ -2665,15 +3716,21 @@ void interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                         // Cast away const to get a pointer (safe because we own the map)
                         script_value* value_ptr = const_cast<script_value*>(&it->second);
                         
-                        // Use the script_pair factory method that preserves references
-                        loop_var = script_value::make_object(
-                            std::make_shared<stdlib::script_pair>(
-                                stdlib::script_pair::make_with_reference(
-                                    it->first, value_ptr, environment_, engine_ref_
-                                )
-                            ),
-                            engine_ref_
-                        );
+                        // Create pair using the constructor with first as copy and second as reference
+                        std::vector<script_value> args;
+                        args.push_back(it->first);  // Don't clone - just pass the key
+                        args.push_back(script_value::make_reference(value_ptr, environment_, engine_ref_));
+                        
+                        // Look up the pair constructor function
+                        uint64_t pair_symbol_id = string_symbolizer_->intern("pair");
+                        script_value pairConstructor = environment_->get_ref(pair_symbol_id);
+                        
+                        if (pairConstructor.is_function()) {
+                            const script_function& func = pairConstructor.as_function();
+                            loop_var = func(args);
+                        } else {
+                            throw runtime_error("pair type not registered - make sure stdlib is loaded");
+                        }
                     } else {
                         // For copies, use regular pair constructor
                         std::vector<script_value> args;
@@ -2833,24 +3890,54 @@ void interpreter::visit_switch_stmt(switch_stmt* stmt) {
                 case_matches = false;
             }
             
-            if (case_matches || executed_case) {
+            // Execute case if it matches OR if we're falling through from a previous case
+            if (case_matches || (executed_case && should_fallthrough_)) {
                 matched = true;
                 executed_case = true;
-                
-                // Execute case body
-                case_stmt->accept(this);
-                
-                // Check if we should continue to next case
-                if (!should_fallthrough_) {
-                    break;  // Implicit break by default
+
+                // Reset fallthrough flag for this case (will be set again if case contains fallthrough statement)
+                should_fallthrough_ = false;
+
+                // Create a new scope for the case body (like an if statement)
+                auto previous = environment_;
+                environment_ = std::make_shared<environment>(environment_, string_symbolizer_);
+
+                try {
+                    // Execute case body
+                    case_stmt->accept(this);
+
+                    // Restore the previous environment
+                    environment_ = previous;
+
+                    // Check if we should continue to next case (implicit break by default)
+                    if (!should_fallthrough_) {
+                        break;  // Stop executing further cases
+                    }
+                    // If should_fallthrough_ is true, continue to next iteration
+                } catch (...) {
+                    // Restore environment before re-throwing
+                    environment_ = previous;
+                    throw;
                 }
-                should_fallthrough_ = false;  // Reset for next case
             }
         }
-        
-        // If no case matched and there's a default, execute it
-        if (!matched && stmt->default_case) {
-            stmt->default_case->accept(this);
+
+        // Execute default if no case matched OR if we're falling through from the last case
+        if ((!matched || (executed_case && should_fallthrough_)) && stmt->default_case) {
+            // Create a new scope for the default body
+            auto previous = environment_;
+            environment_ = std::make_shared<environment>(environment_, string_symbolizer_);
+
+            try {
+                stmt->default_case->accept(this);
+
+                // Restore the previous environment
+                environment_ = previous;
+            } catch (...) {
+                // Restore environment before re-throwing
+                environment_ = previous;
+                throw;
+            }
         }
     } catch (const break_exception&) {
         // Break out of switch - this is expected behavior
@@ -2863,6 +3950,7 @@ void interpreter::visit_switch_stmt(switch_stmt* stmt) {
 
 void interpreter::visit_case_stmt(case_stmt* stmt) {
     // Execute all statements in the case body
+    // Note: The scope is created by visit_switch_stmt when it decides to execute this case
     for (const auto& s : stmt->body) {
         s->accept(this);
         
@@ -2875,6 +3963,7 @@ void interpreter::visit_case_stmt(case_stmt* stmt) {
 
 void interpreter::visit_default_stmt(default_stmt* stmt) {
     // Execute all statements in the default body
+    // Note: The scope is created by visit_switch_stmt when it decides to execute the default
     for (const auto& s : stmt->body) {
         s->accept(this);
         
@@ -2918,6 +4007,26 @@ void interpreter::visit_function_decl(function_decl* decl) {
 }
 
 void interpreter::visit_class_decl(class_decl* decl) {
+    // Set up class parsing context
+    class_context prev_context;
+    bool had_context = false;
+    if (current_class_context_) {
+        prev_context = *current_class_context_;
+        had_context = true;
+    }
+    
+    // Create new context for this class
+    current_class_context_ = class_context{decl->name, {}, false};
+    
+    // Restore previous context on exit
+    auto context_guard = std::shared_ptr<void>(nullptr, [this, prev_context, had_context](void*) {
+        if (had_context) {
+            current_class_context_ = prev_context;
+        } else {
+            current_class_context_.reset();
+        }
+    });
+    
     // Check if class already exists (for hot reloading)
     std::shared_ptr<script_class_definition> class_def = nullptr;
     bool is_redefinition = false;
@@ -2928,15 +4037,16 @@ void interpreter::visit_class_decl(class_decl* decl) {
     
     try {
         auto existing = environment_->get(class_var_name);
-        if (!existing.is_null()) {
-            // Class already exists - reuse the definition for hot reloading
-            class_def = existing.as<std::shared_ptr<script_class_definition>>();
-            is_redefinition = true;
-            // Found existing class definition for hot reload
+        if (!existing.is_null() && existing.is_object()) {
+            // Class already exists - extract from object holder
+            auto objHolder = existing.get_object_holder();
+            if (objHolder && objHolder->type_name == "class_definition") {
+                class_def = std::static_pointer_cast<script_class_definition>(objHolder->data);
+                is_redefinition = true;
+            }
         }
     } catch (...) {
         // Class doesn't exist yet
-        // No existing class definition found
     }
     
     if (!class_def) {
@@ -2950,11 +4060,13 @@ void interpreter::visit_class_decl(class_decl* decl) {
     // Collect new field defaults and methods
     std::unordered_map<std::string, script_value> new_field_defaults;
     std::unordered_map<std::string, script_value> new_methods;
+    std::unordered_map<std::string, script_value> new_static_methods;
     
     // Reserve capacity based on member count for efficiency
     if (!decl->members.empty()) {
         new_field_defaults.reserve(decl->members.size());
         new_methods.reserve(decl->members.size());
+        new_static_methods.reserve(decl->members.size());
     }
     
     // Debug output
@@ -2969,14 +4081,24 @@ void interpreter::visit_class_decl(class_decl* decl) {
         
         // Look up base class definition
         const std::string& base_name = decl->base_classes[0];
-        
+
         // First try to find a script class
-        auto base_class_var = environment_->get("__class_" + base_name);
-        
-        if (!base_class_var.is_null()) {
-            // Found a script class
-            auto base_class_def = base_class_var.as<std::shared_ptr<class_definition>>();
-            class_def->set_parent(base_class_def);
+        script_value base_class_var = script_value::make_null(engine_ref_);
+        try {
+            base_class_var = environment_->get("__class_" + base_name);
+        } catch (...) {
+            // Script class not found, will try C++ class below
+        }
+
+        if (!base_class_var.is_null() && base_class_var.is_object()) {
+            // Found a script class - extract from object holder
+            auto objHolder = base_class_var.get_object_holder();
+            if (objHolder && objHolder->type_name == "class_definition") {
+                auto base_class_def = std::static_pointer_cast<class_definition>(objHolder->data);
+                class_def->set_parent(base_class_def);
+            } else {
+                throw runtime_error("Base class '" + base_name + "' is not a valid class definition");
+            }
         } else {
             // Try to find a C++ class using the class lookup callback
             if (class_lookup_callback_) {
@@ -3013,10 +4135,10 @@ void interpreter::visit_class_decl(class_decl* decl) {
         // Extract the actual declaration from the member
         auto* var_decl = dynamic_cast<variable_decl*>(member.declaration.get());
         auto* func_decl = dynamic_cast<function_decl*>(member.declaration.get());
-        
+
         if (var_decl) {
             // Field declaration
-            script_value default_val;
+            script_value default_val(std::monostate{}, engine_ref_);  // Ensure engine reference
             std::string field_name = var_decl->name;
             
             if (var_decl->initializer) {
@@ -3031,16 +4153,34 @@ void interpreter::visit_class_decl(class_decl* decl) {
                     // Get the RHS value
                     assign_expr->value->accept(this);
                     default_val = pop_value();
+                    
+                    // Ensure the default value has an engine reference
+                    if (default_val.get_engine_ref().expired() && !engine_ref_.expired()) {
+                        default_val.set_engine_ref(engine_ref_);
+                    }
                 } else {
                     // Normal initializer expression
                     var_decl->initializer->accept(this);
                     default_val = pop_value();
                 }
+                
+                // Ensure the default value has an engine reference
+                if (default_val.get_engine_ref().expired() && !engine_ref_.expired()) {
+                    default_val.set_engine_ref(engine_ref_);
+                }
             }
             
-            // Collect field for later processing
-            if (!field_name.empty()) {
-                new_field_defaults[field_name] = default_val;
+            // Check if field is static
+            if (var_decl->is_static) {
+                // Add static field directly to the class
+                if (!field_name.empty()) {
+                    class_def->add_static_field(field_name, default_val);
+                }
+            } else {
+                // Collect instance field for later processing
+                if (!field_name.empty()) {
+                    new_field_defaults[field_name] = default_val;
+                }
             }
             
         } else if (func_decl) {
@@ -3059,65 +4199,157 @@ void interpreter::visit_class_decl(class_decl* decl) {
                     }
                 }
                 
-                class_def->add_constructor_from_ast(
-                    std::static_pointer_cast<function_decl>(member.declaration),
-                    this
-                );
+                // Set in_method flag while processing constructor body (for static field access)
+                if (current_class_context_) {
+                    current_class_context_->in_method = true;
+                }
+                
+                try {
+                    class_def->add_constructor_from_ast(
+                        std::static_pointer_cast<function_decl>(member.declaration),
+                        this
+                    );
+                } catch (const runtime_error& e) {
+                    // Reset in_method flag on error
+                    if (current_class_context_) {
+                        current_class_context_->in_method = false;
+                    }
+                    throw;
+                }
+                
+                // Reset in_method flag
+                if (current_class_context_) {
+                    current_class_context_->in_method = false;
+                }
                 
                 // Constructor will be registered after all members are processed
                 
             } else if (method_name.size() > 0 && method_name[0] == '~') {
                 // Destructor
-                class_def->add_destructor_from_ast(
-                    std::static_pointer_cast<function_decl>(member.declaration),
-                    this
-                );
+                // Set in_method flag while processing destructor body
+                if (current_class_context_) {
+                    current_class_context_->in_method = true;
+                }
                 
-            } else {
-                // Regular method
-                if (is_redefinition) {
-                    // For redefinition, just collect the method function
-                    // We'll add it to the class via redefine_class later
-                    auto method_ast = std::static_pointer_cast<function_decl>(member.declaration);
-                    auto method_func = [weak_self = std::weak_ptr<interpreter>(shared_from_this()), 
-                                       method_ast, 
-                                       class_def, 
-                                       class_name = decl->name](const std::vector<script_value>& args) -> script_value {
-                        auto self = weak_self.lock();
-                        if (!self) {
-                            throw runtime_error("Interpreter was destroyed before method call");
-                        }
-                        
-                        // First argument should be 'this' object
-                        if (args.empty()) {
-                            throw runtime_error("Method called without 'this' object");
-                        }
-                        
-                        // Extract 'this' from first argument
-                        script_value this_obj = args[0];
-                        
-                        // Create remaining arguments (excluding 'this')
-                        std::vector<script_value> method_args(args.begin() + 1, args.end());
-                        
-                        // Create a new environment for the method that has 'this' defined
-                        auto method_env = std::make_shared<environment>(
-                            self->environment_, 
-                            self->string_symbolizer_
-                        );
-                        method_env->define("this", this_obj);
-                        
-                        // Call the interpreter method directly
-                        return self->execute_method_ast(method_ast, method_env, method_args);
-                    };
-                    
-                    new_methods[method_name] = script_value::make_function(method_func, engine_ref_);
-                } else {
-                    // For new classes, add method normally
-                    class_def->add_method_from_ast(
-                        method_name,
+                try {
+                    class_def->add_destructor_from_ast(
                         std::static_pointer_cast<function_decl>(member.declaration),
                         this
                     );
+                } catch (const runtime_error& e) {
+                    // Reset in_method flag on error
+                    if (current_class_context_) {
+                        current_class_context_->in_method = false;
+                    }
+                    throw;
+                }
+                
+                // Reset in_method flag
+                if (current_class_context_) {
+                    current_class_context_->in_method = false;
+                }
+                
+            } else {
+                // Regular method or static method
+                auto method_ast = std::static_pointer_cast<function_decl>(member.declaration);
+                
+                if (is_redefinition) {
+                    // For redefinition, just collect the method function
+                    // We'll add it to the class via redefine_class later
+                    
+                    if (method_ast->is_static) {
+                        // Static method - no 'this' parameter
+                        auto static_method_func = [weak_self = std::weak_ptr<interpreter>(shared_from_this()), 
+                                                  method_ast, 
+                                                  class_def, 
+                                                  class_name = decl->name](const std::vector<script_value>& args) -> script_value {
+                            auto self = weak_self.lock();
+                            if (!self) {
+                                throw runtime_error("Interpreter was destroyed before static method call");
+                            }
+                            
+                            // Create a static method environment (C++ scope rules for static members)
+                            // This environment automatically resolves unqualified static member access
+                            auto static_env = std::make_shared<static_method_environment>(
+                                self->environment_,
+                                self->string_symbolizer_,
+                                class_def
+                            );
+
+                            // Call the interpreter method directly without 'this'
+                            return self->execute_method_ast(method_ast, static_env, args);
+                        };
+                        
+                        new_static_methods[method_name] = script_value::make_function(static_method_func, engine_ref_);
+                    } else {
+                        // Instance method - has 'this' parameter
+                        auto method_func = [weak_self = std::weak_ptr<interpreter>(shared_from_this()), 
+                                           method_ast, 
+                                           class_def, 
+                                           class_name = decl->name](const std::vector<script_value>& args) -> script_value {
+                            auto self = weak_self.lock();
+                            if (!self) {
+                                throw runtime_error("Interpreter was destroyed before method call");
+                            }
+                            
+                            // First argument should be 'this' object
+                            if (args.empty()) {
+                                throw runtime_error("Method called without 'this' object");
+                            }
+                            
+                            // Extract 'this' from first argument
+                            script_value this_obj = args[0];
+                            
+                            // Create remaining arguments (excluding 'this')
+                            std::vector<script_value> method_args(args.begin() + 1, args.end());
+                            
+                            // Create a method environment that provides implicit 'this' field access
+                            auto method_env = std::make_shared<method_environment>(
+                                self->environment_, 
+                                self->string_symbolizer_,
+                                this_obj
+                            );
+                            method_env->define("this", this_obj);
+                            
+                            // Call the interpreter method directly
+                            return self->execute_method_ast(method_ast, method_env, method_args);
+                        };
+                        
+                        new_methods[method_name] = script_value::make_function(method_func, engine_ref_);
+                    }
+                } else {
+                    // For new classes, add method normally
+                    try {
+                        // Set in_method flag while processing the method
+                        if (current_class_context_) {
+                            current_class_context_->in_method = true;
+                        }
+
+                        if (method_ast->is_static) {
+                            // Add static method
+                            class_def->add_static_script_method(method_name, method_ast, this);
+                        } else {
+                            // Add instance method
+                            class_def->add_method_from_ast(method_name, method_ast, this, is_redefinition);
+                        }
+                        
+                        // Reset in_method flag
+                        if (current_class_context_) {
+                            current_class_context_->in_method = false;
+                        }
+                    } catch (const runtime_error& e) {
+                        // Reset in_method flag on error
+                        if (current_class_context_) {
+                            current_class_context_->in_method = false;
+                        }
+                        // Don't re-throw "Undefined variable" errors - they'll be validated later
+                        std::string error_msg = e.what();
+                        if (error_msg.find("Undefined variable") == std::string::npos) {
+                            // Re-throw other errors
+                            throw;
+                        }
+                        // For undefined variable errors, we've already collected them in unresolved_identifiers
+                    }
                 }
             }
         }
@@ -3155,24 +4387,158 @@ void interpreter::visit_class_decl(class_decl* decl) {
             auto instance = class_def->create_instance();
             // Instance created
             
-            // Create environment with 'this'
-            auto ctor_env = std::make_shared<environment>(self->environment_, self->string_symbolizer_);
-            ctor_env->define("this", script_value::make_object(class_name, instance));
-            // 'this' defined in constructor environment
+            // Create 'this' value
+            auto this_value = script_value::make_object(class_name, instance, self->engine_ref_);
             
-            // Execute the matching constructor
-            script_defined_function ctor_script_func(
-                matching_ctor->name,
-                matching_ctor->parameters,
-                matching_ctor->return_type,
-                matching_ctor->body,
-                ctor_env
+            // Create a temporary environment with 'this' and constructor parameters for evaluating initializer arguments
+            auto init_env = std::make_shared<environment>(self->environment_, self->string_symbolizer_);
+            init_env->define("this", this_value);
+
+            // Bind constructor parameters so they're available in initializer expressions
+            if (matching_ctor->parameters.size() != args.size()) {
+                throw runtime_error("Constructor parameter count mismatch");
+            }
+            for (size_t i = 0; i < matching_ctor->parameters.size(); ++i) {
+                init_env->define(matching_ctor->parameters[i].name, args[i]);
+            }
+
+            // Process constructor initializers (: super(args), : this(args))
+            for (const auto& initializer : matching_ctor->initializers) {
+                if (initializer.target == "super") {
+                    // Call base class constructor
+                    if (class_def->get_parent()) {
+                        // Evaluate initializer arguments in init environment
+                        std::vector<script_value> init_args;
+                        init_args.reserve(initializer.arguments.size());
+                        
+                        // Temporarily switch to init environment for argument evaluation
+                        auto old_env = self->environment_;
+                        self->environment_ = init_env;
+                        
+                        for (const auto& arg_expr : initializer.arguments) {
+                            arg_expr->accept(self.get());
+                            init_args.push_back(self->pop_value());
+                        }
+                        
+                        // Restore environment
+                        self->environment_ = old_env;
+                        
+                        // Call parent constructor to initialize parent fields
+                        auto parent_class = class_def->get_parent();
+                        if (parent_class) {
+                            // Check if parent is a script class
+                            auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent_class);
+                            if (parent_script_class) {
+                                // Find matching parent constructor
+                                const auto& parent_ctor_asts = parent_script_class->get_constructor_asts();
+                                std::shared_ptr<function_decl> parent_ctor;
+                                for (const auto& ctor_ast : parent_ctor_asts) {
+                                    if (ctor_ast->parameters.size() == init_args.size()) {
+                                        parent_ctor = ctor_ast;
+                                        break;
+                                    }
+                                }
+
+                                if (parent_ctor) {
+                                    // Execute parent constructor with method environment
+                                    auto parent_method_env = std::make_shared<method_environment>(
+                                        self->environment_,
+                                        self->string_symbolizer_,
+                                        this_value
+                                    );
+                                    parent_method_env->define("this", this_value);
+
+                                    self->execute_method_ast(parent_ctor, parent_method_env, init_args);
+                                } else {
+                                    throw runtime_error("No matching parent constructor found for super(" +
+                                                      std::to_string(init_args.size()) + " arguments)");
+                                }
+                            } else {
+                                // Parent is a C++ class - call its constructor
+                                try {
+                                    // Get the C++ class constructor function
+                                    auto parent_name = parent_class->get_name();
+                                    script_value cpp_ctor = self->environment_->get(parent_name);
+                                    if (cpp_ctor.is_function()) {
+                                        // Call C++ constructor with init_args
+                                        script_value cpp_obj = cpp_ctor.as_function()(init_args);
+
+                                        // Extract the C++ object and store it in _cpp_object field
+                                        if (cpp_obj.is_object()) {
+                                            auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
+                                            if (cpp_instance && cpp_instance->has_field("_cpp_object")) {
+                                                // Copy _cpp_object from parent to derived instance
+                                                instance->set_field("_cpp_object", cpp_instance->get_field("_cpp_object"));
+                                            }
+                                        }
+                                    }
+                                } catch (const runtime_error& e) {
+                                    throw runtime_error("Failed to call C++ parent constructor: " + std::string(e.what()));
+                                }
+                            }
+                        }
+                    } else {
+                        throw runtime_error("Cannot call super() - class has no base class");
+                    }
+                } else if (initializer.target == "this") {
+                    // Delegate to another constructor in the same class
+                    // Evaluate initializer arguments in constructor environment
+                    std::vector<script_value> init_args;
+                    init_args.reserve(initializer.arguments.size());
+                    
+                    // Temporarily switch to init environment for argument evaluation
+                    auto old_env = self->environment_;
+                    self->environment_ = init_env;
+                    
+                    for (const auto& arg_expr : initializer.arguments) {
+                        arg_expr->accept(self.get());
+                        init_args.push_back(self->pop_value());
+                    }
+                    
+                    // Restore environment
+                    self->environment_ = old_env;
+                    
+                    // Find matching constructor in same class
+                    const auto& ctor_asts = class_def->get_constructor_asts();
+                    std::shared_ptr<function_decl> target_ctor;
+                    for (const auto& ctor_ast : ctor_asts) {
+                        if (ctor_ast->parameters.size() == init_args.size() && ctor_ast != matching_ctor) {
+                            target_ctor = ctor_ast;
+                            break;
+                        }
+                    }
+                    
+                    if (!target_ctor) {
+                        throw runtime_error("No matching constructor found for this(" + 
+                                          std::to_string(init_args.size()) + " arguments)");
+                    }
+                    
+                    // Call the target constructor on this instance with method environment
+                    auto target_method_env = std::make_shared<method_environment>(
+                        self->environment_, 
+                        self->string_symbolizer_,
+                        this_value
+                    );
+                    target_method_env->define("this", this_value);
+                    
+                    self->execute_method_ast(target_ctor, target_method_env, init_args);
+                }
+            }
+            
+            // Execute the matching constructor with method environment
+            // Create a method environment that provides implicit 'this' field access
+            auto method_env = std::make_shared<method_environment>(
+                self->environment_, 
+                self->string_symbolizer_,
+                this_value
             );
+            method_env->define("this", this_value);
             
-            self->call_function(ctor_script_func, args);
+            // Execute constructor as a method so it has access to 'this' and fields
+            self->execute_method_ast(matching_ctor, method_env, args);
             // Constructor executed
             
-            auto result = script_value::make_object(class_name, instance);
+            auto result = script_value::make_object(class_name, instance, self->engine_ref_);
             // Object wrapped
             return result;
         };
@@ -3201,7 +4567,7 @@ void interpreter::visit_class_decl(class_decl* decl) {
             auto instance = class_def->create_instance();
             // Default constructor instance created
             
-            auto result = script_value::make_object(class_name, instance);
+            auto result = script_value::make_object(class_name, instance, self->engine_ref_);
             // Default constructor object wrapped
             return result;
         };
@@ -3213,22 +4579,139 @@ void interpreter::visit_class_decl(class_decl* decl) {
     
     // If this is a redefinition, we need to call redefine_class to update all instances
     if (is_redefinition) {
+        // Ensure all field defaults have engine references before passing to redefine_class
+        std::unordered_map<std::string, script_value> field_defaults_with_engine;
+        field_defaults_with_engine.reserve(new_field_defaults.size());
+        
+        for (const auto& [name, value] : new_field_defaults) {
+            if (value.get_engine_ref().expired() && !engine_ref_.expired()) {
+                // Create a copy with engine reference
+                script_value value_with_engine(value);
+                value_with_engine.set_engine_ref(engine_ref_);
+                field_defaults_with_engine[name] = value_with_engine;
+            } else {
+                field_defaults_with_engine[name] = value;
+            }
+        }
+        
+        // Generate getter and setter methods for all fields (including new ones)
+        // This is needed for hot reload to work properly with property access
+        for (const auto& [field_name, default_val] : field_defaults_with_engine) {
+            // Add getter method
+            auto getter = [field_name, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
+                if (args.empty()) {
+                    throw runtime_error("Property getter called without 'this' object");
+                }
+                
+                // Extract the class_instance from the first argument (this)
+                auto instance = args[0].as<std::shared_ptr<class_instance>>();
+                
+                // Get the field value
+                return instance->get_field(field_name);
+            };
+            new_methods["_get_" + field_name] = script_value::make_function(getter, engine_ref_);
+            
+            // Add setter method
+            auto setter = [field_name, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
+                if (args.size() != 2) {
+                    throw runtime_error("Property setter requires 'this' object and value");
+                }
+                
+                // Extract the class_instance from the first argument (this)
+                auto instance = args[0].as<std::shared_ptr<class_instance>>();
+                
+                // Set the field value
+                instance->set_field(field_name, args[1]);
+                
+                // Return the value that was set
+                return args[1];
+            };
+            new_methods["_set_" + field_name] = script_value::make_function(setter, engine_ref_);
+        }
+        
+        
         // Call redefine_class with the new field defaults and methods
         // Call redefine_class to migrate existing instances
-        class_def->redefine_class(new_field_defaults, new_methods, engine_ref_);
+        class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_ref_);
     } else {
         // For new classes, add the fields normally
         for (const auto& [field_name, default_val] : new_field_defaults) {
             class_def->add_field(field_name, default_val);
+            
+            // Generate getter and setter methods for script class fields
+            // This enables property-style access (obj.field) to work properly
+            
+            // Add getter method
+            auto getter = [field_name, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
+                if (args.empty()) {
+                    throw runtime_error("Property getter called without 'this' object");
+                }
+                
+                // Extract the class_instance from the first argument (this)
+                auto instance = args[0].as<std::shared_ptr<class_instance>>();
+                
+                // Get the field value
+                return instance->get_field(field_name);
+            };
+            class_def->add_method("_get_" + field_name, getter);
+            
+            // Add setter method
+            auto setter = [field_name, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
+                if (args.size() != 2) {
+                    throw runtime_error("Property setter requires 'this' object and value");
+                }
+                
+                // Extract the class_instance from the first argument (this)
+                auto instance = args[0].as<std::shared_ptr<class_instance>>();
+                
+                // Set the field value
+                instance->set_field(field_name, args[1]);
+                
+                // Return the value that was set
+                return args[1];
+            };
+            class_def->add_method("_set_" + field_name, setter);
         }
         // Initialize fingerprint for future comparisons
         class_def->initialize_fingerprint();
     }
     
+    // Validate unresolved identifiers before finalizing the class
+    if (current_class_context_ && !current_class_context_->unresolved_identifiers.empty()) {
+        // Get all fields including inherited ones (already efficient)
+        auto all_fields = class_def->get_all_field_defaults();
+        
+        // Check each unresolved identifier
+        std::vector<std::string> undefined_identifiers;
+        for (const auto& identifier : current_class_context_->unresolved_identifiers) {
+            // Skip special keywords that are always valid in methods
+            if (identifier == "this" || identifier == "super") continue;
+            
+            // Check if it's a field
+            if (all_fields.find(identifier) != all_fields.end()) continue;
+            
+            // Check if it's a method (including inherited)
+            if (class_def->find_method(identifier).owner_class != nullptr) continue;
+            
+            // Not found as field or method
+            undefined_identifiers.push_back(identifier);
+        }
+        
+        // If there are still undefined identifiers, throw an error
+        if (!undefined_identifiers.empty()) {
+            std::string error_msg = "Undefined identifiers in class '" + decl->name + "': ";
+            for (size_t i = 0; i < undefined_identifiers.size(); ++i) {
+                if (i > 0) error_msg += ", ";
+                error_msg += "'" + undefined_identifiers[i] + "'";
+            }
+            throw runtime_error(error_msg);
+        }
+    }
+    
     // Store the class definition in a special variable for later retrieval
     // This allows inheritance and other features to work
     environment_->define(class_var_name, script_value::make_object("class_definition", class_def, engine_ref_));
-    
+
     // The constructor function is already registered in the environment
     // which allows "new ClassName()" syntax to work
 }
@@ -3239,8 +4722,87 @@ void interpreter::visit_expression_decl(expression_decl* decl) {
     decl->expression->accept(this);
 }
 
+void interpreter::visit_include_decl(include_decl* decl) {
+    // Get the engine reference
+    auto engine_ptr = engine_ref_.lock();
+    if (!engine_ptr) {
+        throw runtime_error("Engine reference expired during include processing");
+    }
+    
+    // Get the path either from literal or expression
+    std::string path;
+    if (decl->path_expr) {
+        // Evaluate the expression to get the path
+        decl->path_expr->accept(this);
+        script_value path_value = pop_value();
+        
+        // Convert to string
+        if (path_value.type() != script_value_type::jai_string_type) {
+            throw runtime_error("Include path expression must evaluate to a string");
+        }
+        path = path_value.as<std::string>();
+    } else {
+        // Use the literal path
+        path = decl->path;
+    }
+    
+    // Resolve the file path
+    std::string resolved_path = resolve_include_path(path, engine_ptr);
+    
+    // Read the file contents
+    std::ifstream file(resolved_path);
+    if (!file.is_open()) {
+        throw runtime_error("Failed to open include file: " + path + " (resolved to: " + resolved_path + ")");
+    }
+    
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    std::string content = buffer.str();
+    
+    // Execute the included file
+    // Note: include always parses and executes the file
+    auto result = engine_ptr->execute(content);
+    
+    // Push the result onto the value stack
+    push_value(result);
+}
+
+void interpreter::visit_import_decl(import_decl* decl) {
+    // Get the engine reference
+    auto engine_ptr = engine_ref_.lock();
+    if (!engine_ptr) {
+        throw runtime_error("Engine reference expired during import processing");
+    }
+    
+    // Get the path either from literal or expression
+    std::string path;
+    if (decl->path_expr) {
+        // Evaluate the expression to get the path
+        decl->path_expr->accept(this);
+        script_value path_value = pop_value();
+        
+        // Convert to string
+        if (path_value.type() != script_value_type::jai_string_type) {
+            throw runtime_error("Import path expression must evaluate to a string");
+        }
+        path = path_value.as<std::string>();
+    } else {
+        // Use the literal path
+        path = decl->path;
+    }
+    
+    // Resolve the file path
+    std::string resolved_path = resolve_include_path(path, engine_ptr);
+    
+    // Use the engine's public API to handle import with tracking
+    auto result = engine_ptr->execute_import(resolved_path);
+    
+    // Push the result onto the value stack
+    push_value(result);
+}
+
 // Execute a method AST with a given environment
-script_value interpreter::execute_method_ast(std::shared_ptr<function_decl> ast, 
+script_value interpreter::execute_method_ast(std::shared_ptr<function_decl> ast,
                                            std::shared_ptr<environment> method_env,
                                            const std::vector<script_value>& args) {
     // Create a script_defined_function with the method environment
@@ -3271,9 +4833,14 @@ script_value interpreter::call_function(const script_defined_function& function,
     // For regular functions:
     // [parameter env] -> [current env]
     if (function.closure_env) {
-        // Lambda: create fresh environment with closure as parent
-        environment_ = get_pooled_environment(function.closure_env);
-        
+        // Check if the closure is a method_environment
+        if (auto method_env = std::dynamic_pointer_cast<method_environment>(function.closure_env)) {
+            // Create a new method_environment that preserves implicit 'this' lookups
+            environment_ = get_pooled_method_environment(method_env->get_parent(), method_env->get_this_object());
+        } else {
+            // Regular closure - create new environment for parameters
+            environment_ = get_pooled_environment(function.closure_env);
+        }
     } else {
         // Regular function: create fresh environment with current as parent
         environment_ = get_pooled_environment(previousEnv);
@@ -3281,7 +4848,7 @@ script_value interpreter::call_function(const script_defined_function& function,
     
     // Store previous return state
     bool previousHasReturn = hasReturnValue_;
-    script_value previousReturn = returnValue_;
+    std::optional<script_value> previousReturn = returnValue_;
     hasReturnValue_ = false;
     
     try {
@@ -3309,7 +4876,7 @@ script_value interpreter::call_function(const script_defined_function& function,
                         
                         // If the argument is itself a reference, get the final target
                         if (argPtr->is_reference()) {
-                            auto refHolder = std::get<std::shared_ptr<script_value::reference_holder>>(argPtr->storage_);
+                            auto refHolder = argPtr->get_reference_holder();
                             if (!refHolder || !refHolder->target) {
                                 throw runtime_error("Reference target is null");
                             }
@@ -3359,9 +4926,9 @@ script_value interpreter::call_function(const script_defined_function& function,
         }
         
         // Get return value
-        script_value result;
+        script_value result = script_value::make_null(engine_ref_);
         if (hasReturnValue_) {
-            result = std::move(returnValue_);
+            result = std::move(returnValue_.value());
         } else {
             // If no return statement, return null
             result = make_value();
@@ -3433,8 +5000,35 @@ std::shared_ptr<environment> interpreter::get_pooled_environment(std::shared_ptr
     }
 }
 
+std::shared_ptr<method_environment> interpreter::get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj) {
+    if (method_environment_pool_index_ < method_environment_pool_.size()) {
+        // Reuse existing method environment from pool
+        auto env = method_environment_pool_[method_environment_pool_index_++];
+        // Reset with new parent and this object
+        env->reset(parent, std::move(this_obj));
+        return env;
+    } else {
+        // Pool is exhausted, create new method environment and add to pool
+        auto newEnv = std::make_shared<method_environment>(parent, string_symbolizer_, std::move(this_obj));
+        method_environment_pool_.push_back(newEnv);
+        ++method_environment_pool_index_;
+        return newEnv;
+    }
+}
+
 void interpreter::reset_environment_pool() {
     environment_pool_index_ = 0;
+    method_environment_pool_index_ = 0;
+
+    // Clear the environment values to release references
+    for (auto& env : environment_pool_) {
+        // Reset the environment by clearing its parent and values
+        env->reset(nullptr);
+    }
+    for (auto& env : method_environment_pool_) {
+        // Reset the method environment (clear values and this_object to release references)
+        env->reset(nullptr, script_value::make_null(engine_ref_));
+    }
 }
 
 } // namespace jai

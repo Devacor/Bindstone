@@ -64,12 +64,12 @@ public:
                 return value.as_script_value();
             } else {
                 // If it's a reference wrapper, we need to create a deep copy
-                script_value result = script_value::make_array(nullptr);
+                script_value result = script_value::make_array(nullptr, eng);
                 auto& arr = result.as_array();
                 arr.reserve(value.size());
                 for (const auto& elem : value) {
                     // Recursively convert each element
-                    arr.push_back(bound_array<typename T::value_type>::make_script_value(elem));
+                    arr.push_back(bound_array<typename T::value_type>::make_script_value(elem, eng));
                 }
                 return result;
             }
@@ -83,18 +83,21 @@ public:
                 using V = typename T::mapped_type;
                 script_value result = script_value::make_map(
                     type_info::make<K>(), 
-                    type_info::make<V>()
+                    type_info::make<V>(),
+                    eng
                 );
                 auto& map = result.as_map();
                 for (const auto& [k, v] : value) {
-                    map[bound_array<K>::make_script_value(k)] = bound_array<V>::make_script_value(v);
+                    map[bound_array<K>::make_script_value(k, eng)] = bound_array<V>::make_script_value(v, eng);
                 }
                 return result;
             }
         } else {
-            // Custom object type - wrap in shared_ptr
-            auto type_name = typeid(T).name();
-            return script_value::make_object(type_name, std::make_shared<T>(value));
+            // Custom object type - this should not be used directly
+            // Custom objects should be registered via class_builder and created via engine->make_object<T>()
+            // If you're seeing this error, register your type first!
+            throw runtime_error("Cannot create script_value for unregistered custom type in bound_array. "
+                              "Use class_builder<T> to register the type first, then create objects via engine->make_object<T>()");
         }
     }
     
@@ -176,15 +179,18 @@ public:
      */
     bound_array(const bound_array& other) {
         engine_ref_ = other.engine_ref_;  // Copy engine reference
+
         // Always create owned copy when copy constructing (value semantics)
         if (other.owned_value_) {
+            // Clone the entire array - this preserves class_instance wrappers
             owned_value_ = std::make_shared<script_value>(other.owned_value_->deref().clone());
         } else {
-            // Create a new array and copy elements from the referenced array
+            // Create a new array and deep copy each element via clone
             owned_value_ = std::make_shared<script_value>(script_value::make_array(nullptr, engine_ref_));
             auto& temp_arr = owned_value_->as_array();
             if (other.arr_) {
                 for (const auto& elem : *other.arr_) {
+                    // Clone preserves wrapper structure (class_instance vs raw C++ object)
                     temp_arr.push_back(elem.deref().clone());
                 }
             }
@@ -423,7 +429,7 @@ public:
                 throw runtime_error("Element is not an array");
             }
             auto& nested_arr = nested_val.as_array();
-            nested_arr.push_back(U::make_script_value(std::forward<V>(value)));
+            nested_arr.push_back(U::make_script_value(std::forward<V>(value), engine_ref_));
         }
         
         // Support for nested bound_map subscript operations

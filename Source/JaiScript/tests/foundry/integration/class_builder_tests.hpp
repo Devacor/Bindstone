@@ -42,6 +42,11 @@ class class_builder_tests : public suite {
 public:
     class_builder_tests() : suite("Class Builder") {}
     
+    void pre_test() override {
+        // Reset static state before each test
+        Point::point_count = 0;
+    }
+    
     void forge_tests() override {
         test("basic_class_registration", [this]() {
             auto eng = engine::make();

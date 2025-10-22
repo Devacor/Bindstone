@@ -6,6 +6,9 @@
 using namespace jai;
 using namespace jai::foundry;
 
+namespace jai::foundry::tests {
+namespace object_deep_copy_ns {
+
 // Test class for deep copy verification
 class test_object {
 public:
@@ -178,4 +181,7 @@ public:
     }
 };
 
-FOUNDRY_REGISTER(object_deep_copy_tests)
+} // namespace object_deep_copy_ns
+} // namespace jai::foundry::tests
+
+FOUNDRY_REGISTER(jai::foundry::tests::object_deep_copy_ns::object_deep_copy_tests)

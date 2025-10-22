@@ -1,4 +1,5 @@
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/core/class_registry.hpp>
 // JVM backend is already included in jaiscript.hpp
 #include <iostream>
 #include <fstream>
@@ -8,8 +9,19 @@
 #include <algorithm>
 #include <cstdlib>
 #include <limits>
+#include <filesystem>
 
 namespace jai {
+
+// Forward declaration for VM backend stub
+std::unique_ptr<execution_backend> create_vm_backend();
+
+namespace jvm {
+    // Temporary stub until VM is refactored
+    inline std::unique_ptr<execution_backend> create_vm_backend(string_symbolizer*, std::shared_ptr<environment>) {
+        return ::jai::create_vm_backend();
+    }
+}
 
 struct engine::implementation {
     // Unified conversion registry (replaces both type_conversions and custom_conversions)
@@ -17,6 +29,9 @@ struct engine::implementation {
     
     // Serialization registry for class metadata (non-static to ensure test isolation)
     serialization::serialization_registry serialization_registry;
+    
+    // Class registry for both C++ and script classes (replaces global singleton)
+    class_registry class_registry_;
     
     // Polymorphic type registry for deep copying
     struct polymorphic_type_registry {
@@ -210,6 +225,16 @@ struct engine::implementation {
     execution_backend_ptr backend;
     backend_type current_backend_type = backend_type::interpreter; // Default to interpreter
     
+    // Include/Import support
+    std::vector<std::string> include_paths;
+    engine::import_behavior import_behavior = engine::import_behavior::file_timestamp; // Default
+    
+    struct import_record {
+        std::string resolved_path;
+        std::filesystem::file_time_type last_modified;
+    };
+    std::unordered_map<std::string, import_record> import_cache;
+    
     implementation();
     ~implementation();
     
@@ -349,7 +374,7 @@ void engine::initialize_engine_reference() {
             script_value cppObjValue = instance->get_field("_cpp_object");
             if (!cppObjValue.is_null() && cppObjValue.type() == script_value_type::jai_object_type) {
                 // Direct access to the object_holder to avoid recursive extraction
-                auto objHolder = std::get<std::shared_ptr<script_value::object_holder>>(cppObjValue.storage_);
+                auto objHolder = cppObjValue.get_object_holder();
                 return objHolder->data;
             }
         }
@@ -529,36 +554,18 @@ void engine::initialize_engine_reference() {
         return script_value(std::monostate{}, engine_weak);
     });
     
-    // Add weak_ptr support for all object types
-    add_function("weak_ptr", [](const script_value& obj) -> script_value {
-        if (!obj.is_object()) {
-            throw runtime_error("weak_ptr can only be created from objects");
-        }
-        
-        return script_value::make_weak_ptr(obj);
-    });
+    // Note: weak_ptr and shared_ptr are now handled as type constructors in the interpreter
+    // They are keywords and follow C++ semantics:
+    // - weak_ptr<T> var;           // Creates empty weak_ptr
+    // - weak_ptr<T> var = obj;     // Creates weak_ptr from object
+    // - weak_ptr<T>(obj)           // Constructor syntax
+    // - shared_ptr<T> var;         // Creates empty shared_ptr  
+    // - shared_ptr<T>(obj)         // Constructor syntax
     
-    // Add weak_ptr methods
-    add_function("lock", [](const script_value& weak) -> script_value {
-        if (!weak.is_weak_ptr()) {
-            throw runtime_error("lock() can only be called on weak_ptr");
-        }
-        
-        auto weak_ptr = std::get<std::weak_ptr<script_value>>(weak.storage_);
-        if (auto locked = weak_ptr.lock()) {
-            return *locked;
-        }
-        throw runtime_error("Weak pointer is expired"); // weak_ptr is null - throw instead of returning null
-    });
+    // weak_ptr methods are now registered as instance methods on weak_ptr objects
+    // See interpreter::weakPtrMethods_ for lock() and expired() implementations
     
-    add_function("expired", [engine_weak](const script_value& weak) -> script_value {
-        if (!weak.is_weak_ptr()) {
-            throw runtime_error("expired() can only be called on weak_ptr");
-        }
-        
-        auto weak_ptr = std::get<std::weak_ptr<script_value>>(weak.storage_);
-        return script_value(weak_ptr.expired(), engine_weak);
-    });
+    // expired() is now a method on weak_ptr objects - see interpreter::weakPtrMethods_
 }
 
 
@@ -651,8 +658,8 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
         lexer lexer(scriptContent, impl->registeredTemplateTypes);
         auto tokens = lexer.tokenize();
         parser parser(tokens, impl->registeredTemplateTypes);
-        auto declarations = parser.parse();
-        
+        auto declarations = parser.parse();  // Will throw parse_error if parsing failed
+
         script_value result = impl->backend->execute(declarations);
         
         // Check for unhandled script exception
@@ -680,14 +687,18 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
         // Script exceptions bubble up to C++
         impl->backend->prepare_for_execution();
         throw;
+    } catch (const parse_error& e) {
+        // Parse errors should propagate as-is (don't wrap compilation errors)
+        impl->backend->prepare_for_execution();
+        throw;
     } catch (const std::runtime_error& e) {
-        // Wrap C++ exceptions as script exceptions for consistency
+        // Wrap runtime C++ exceptions as script exceptions for consistency
         impl->backend->prepare_for_execution();
         throw script_exception(std::string("C++ exception: ") + e.what());
     } catch (const std::exception& e) {
-        // Wrap other C++ exceptions with a generic message
+        // Wrap other C++ exceptions with their actual message
         impl->backend->prepare_for_execution();
-        throw script_exception("Unbound exception type caught in JaiScript.");
+        throw script_exception(std::string("C++ exception: ") + e.what());
     }
 }
 
@@ -887,6 +898,8 @@ void engine::add_functionWithArityAndTypes(const std::string& name, script_funct
 
 void engine::add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef) {
     impl->classes[name] = classDef;
+    // Also register with the unified class_registry for both C++ and script classes
+    impl->class_registry_.register_cpp_class(classDef);
 }
 
 std::shared_ptr<class_definition> engine::get_class_definition(const std::string& name) const {
@@ -961,6 +974,10 @@ bool engine::has_function(const std::string& name) const {
 bool engine::is_type_name(const std::string& name) const {
     // Check if it's a registered class
     return impl->classes.find(name) != impl->classes.end();
+}
+
+std::shared_ptr<environment> engine::get_global_environment() const {
+    return impl->globalEnvironment;
 }
 
 engine::state engine::get_state() const {
@@ -1182,6 +1199,10 @@ serialization::serialization_registry& engine::get_serialization_registry() {
     return impl->serialization_registry;
 }
 
+class_registry& engine::get_class_registry() {
+    return impl->class_registry_;
+}
+
 script_value engine::try_create_reference(size_t arg_index, const script_value& fallback) {
     // Check if current backend is an interpreter
     auto* interpreter_backend_ptr = dynamic_cast<interpreter_backend*>(impl->backend.get());
@@ -1218,6 +1239,122 @@ script_value engine::try_create_reference(size_t arg_index, const script_value& 
 
 conversions::conversion_manager engine::get_conversion_manager() {
     return conversions::conversion_manager(impl->conversions, this);
+}
+
+// Include/Import path management
+void engine::include_paths(const std::vector<std::string>& paths) {
+    impl->include_paths = paths;
+}
+
+void engine::add_include_path(const std::string& path) {
+    impl->include_paths.push_back(path);
+}
+
+void engine::clear_include_paths() {
+    impl->include_paths.clear();
+}
+
+std::vector<std::string> engine::get_include_paths() const {
+    return impl->include_paths;
+}
+
+// Import behavior configuration
+void engine::set_import_behavior(import_behavior behavior) {
+    impl->import_behavior = behavior;
+}
+
+engine::import_behavior engine::get_import_behavior() const {
+    return impl->import_behavior;
+}
+
+// Import management
+void engine::reset_imports() {
+    impl->import_cache.clear();
+}
+
+void engine::reset_import(const std::string& path) {
+    impl->import_cache.erase(path);
+}
+
+bool engine::is_imported(const std::string& path) const {
+    return impl->import_cache.find(path) != impl->import_cache.end();
+}
+
+std::vector<std::string> engine::get_imported_files() const {
+    std::vector<std::string> result;
+    result.reserve(impl->import_cache.size());
+    for (const auto& [path, record] : impl->import_cache) {
+        result.push_back(path);
+    }
+    return result;
+}
+
+script_value engine::execute_import(const std::string& resolved_path) {
+    // Check import behavior
+    bool should_import = false;
+    
+    switch (impl->import_behavior) {
+        case import_behavior::always:
+            should_import = true;
+            break;
+            
+        case import_behavior::once: {
+            auto it = impl->import_cache.find(resolved_path);
+            should_import = (it == impl->import_cache.end());
+            break;
+        }
+        
+        case import_behavior::file_timestamp: {
+            auto it = impl->import_cache.find(resolved_path);
+            if (it == impl->import_cache.end()) {
+                should_import = true;
+            } else {
+                // Check if file has been modified
+                try {
+                    auto current_time = std::filesystem::last_write_time(resolved_path);
+                    should_import = (current_time != it->second.last_modified);
+                    if (should_import) {
+                        // Update the timestamp for next check
+                        it->second.last_modified = current_time;
+                    }
+                } catch (...) {
+                    // If we can't get the file time, import it
+                    should_import = true;
+                }
+            }
+            break;
+        }
+    }
+    
+    if (should_import) {
+        // Read and execute the file
+        std::ifstream file(resolved_path);
+        if (!file.is_open()) {
+            throw runtime_error("Failed to open import file: " + resolved_path);
+        }
+        
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        std::string content = buffer.str();
+        
+        auto result = execute(content);
+        
+        // Update import cache
+        implementation::import_record record;
+        record.resolved_path = resolved_path;
+        try {
+            record.last_modified = std::filesystem::last_write_time(resolved_path);
+        } catch (...) {
+            // Use epoch time if we can't get file time
+            record.last_modified = std::filesystem::file_time_type::min();
+        }
+        impl->import_cache[resolved_path] = record;
+        
+        return result;
+    } else {
+        // File already imported and doesn't need re-import
+        return make_null();
+    }
 }
 
 

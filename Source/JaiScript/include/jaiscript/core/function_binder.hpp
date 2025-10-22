@@ -6,6 +6,7 @@
 #include "conversion_registry_impl.hpp"
 #include "bound_array.hpp"
 #include "bound_map.hpp"
+#include "parameter_storage.hpp"
 #include <functional>
 #include <tuple>
 
@@ -42,9 +43,23 @@ class engine;
                     using key_type = typename T::key_type;
                     using value_type = typename T::mapped_type;
                     return conversions::convert_script_map_to_stdmap<key_type, value_type>(v, eng);
+                } else if constexpr (std::is_class_v<T> && !std::is_same_v<T, std::string>) {
+                    // For custom classes, try to extract directly from shared_ptr to avoid extra copies
+                    if (v.is_object()) {
+                        try {
+                            // Try to get as shared_ptr and dereference - this creates only one copy
+                            auto ptr = v.as<std::shared_ptr<T>>();
+                            return *ptr;  // Single copy here
+                        } catch (const std::exception&) {
+                            // Fall back to conversion registry if direct extraction fails
+                            return v.as<T>();
+                        }
+                    } else {
+                        // Not an object, use standard conversion
+                        return v.as<T>();
+                    }
                 } else {
-                    // The custom converter is set up by the engine at startup
-                    // and checks the engine's conversion registry
+                    // For basic types, use standard conversion
                     return v.as<T>();
                 }
             }
@@ -223,14 +238,22 @@ class engine;
                 }
                 // For std::vector<T> containers, use conversion utility
                 else if constexpr (is_specialization_v<T, std::vector>) {
-                    thread_local T temp;
+                    auto* storage = detail::parameter_storage::current();
+                    if (!storage) {
+                        throw runtime_error("No parameter storage available for const reference conversion");
+                    }
+                    T& temp = storage->allocate<T>();
                     using element_type = typename T::value_type;
                     temp = conversions::convert_script_array_to_vector<element_type>(v, eng);
                     return temp;
                 }
                 // For std::map<K,V> containers, use conversion utility
                 else if constexpr (is_specialization_v<T, std::map>) {
-                    thread_local T temp;
+                    auto* storage = detail::parameter_storage::current();
+                    if (!storage) {
+                        throw runtime_error("No parameter storage available for const reference conversion");
+                    }
+                    T& temp = storage->allocate<T>();
                     using key_type = typename T::key_type;
                     using value_type = typename T::mapped_type;
                     temp = conversions::convert_script_map_to_stdmap<key_type, value_type>(v, eng);
@@ -244,8 +267,12 @@ class engine;
                     auto ptr = v.as<std::shared_ptr<T>>();
                     return *ptr;
                 } else {
-                    // For basic types (int, float, bool, etc.), still need to make a copy and use thread_local
-                    thread_local T temp;
+                    // For basic types (int, float, bool, etc.), need to make a copy
+                    auto* storage = detail::parameter_storage::current();
+                    if (!storage) {
+                        throw runtime_error("No parameter storage available for const reference conversion");
+                    }
+                    T& temp = storage->allocate<T>();
                     temp = v.as<T>();
                     return temp;
                 }
@@ -310,72 +337,9 @@ class engine;
             }
         };
         
-        // Specialization for const bound_array<T>& - safe approach using thread_local with proper indexing
-        template<typename T>
-        struct value_converter<const bound_array<T>&> {
-            static const bound_array<T>& from(const script_value& v, engine* eng) {
-                if (!v.is_array()) {
-                    throw runtime_error("Cannot convert non-array to const bound_array<T>&");
-                }
-                
-                // Use thread_local array to store multiple bound_arrays safely
-                // This avoids the single-wrapper overwrite issue
-                thread_local std::array<std::optional<bound_array<T>>, 10> storage;
-                thread_local size_t next_index = 0;
-                
-                // Reset storage for new function calls (heuristic: when index wraps)
-                if (next_index == 0) {
-                    for (auto& slot : storage) {
-                        slot.reset();
-                    }
-                }
-                
-                // Use the safe script_value constructor - creates deep copy but prevents crashes
-                storage[next_index].emplace(v);
-                const auto& result = storage[next_index].value();
-                
-                // Advance index for next parameter
-                next_index = (next_index + 1) % storage.size();
-                
-                return result;
-            }
-            
-            static script_value to(const bound_array<T>& arr, engine* eng) {
-                return arr.as_script_value();
-            }
-        };
-        
-        // Specialization for bound_array<T>& - safe approach
-        template<typename T>
-        struct value_converter<bound_array<T>&> {
-            static bound_array<T>& from(const script_value& v, engine* eng) {
-                if (!v.is_array()) {
-                    throw runtime_error("Cannot convert non-array to bound_array<T>&");
-                }
-                
-                // Similar approach as const version
-                thread_local std::array<std::optional<bound_array<T>>, 10> storage;
-                thread_local size_t next_index = 0;
-                
-                if (next_index == 0) {
-                    for (auto& slot : storage) {
-                        slot.reset();
-                    }
-                }
-                
-                storage[next_index].emplace(v);
-                auto& result = storage[next_index].value();
-                next_index = (next_index + 1) % storage.size();
-                
-                return result;
-            }
-            
-            static script_value to(bound_array<T>& arr, engine* eng) {
-                return arr.as_script_value();
-            }
-        };
-        
-        // Note: bound_array<T> by value specialization is already defined above at line ~300
+        // Note: bound_array<T>&, const bound_array<T>& are handled by create_argument() 
+        // in the function call path, not through value_converter. They create stack-based
+        // objects for zero-copy semantics without needing thread_local storage.
         
         // Specialization for bound_map<K,V> - zero-copy wrapper
         template<typename K, typename V>
@@ -586,11 +550,21 @@ class engine;
         
         template<typename ArgsTuple, typename F, size_t... Is>
         static void call_void_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+            // Create parameter storage on stack
+            detail::parameter_storage storage;
+            detail::parameter_storage::scope_guard guard(&storage);
+            
+            // Call function with conversions using the storage
             func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
         }
         
         template<typename R, typename ArgsTuple, typename F, size_t... Is>
         static R call_non_void_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+            // Create parameter storage on stack
+            detail::parameter_storage storage;
+            detail::parameter_storage::scope_guard guard(&storage);
+            
+            // Call function with conversions using the storage
             return func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
         }
         
@@ -632,6 +606,34 @@ class engine;
             return call_with_bound_maps<R, ArgsTuple, F, Is...>(std::forward<F>(func), args, eng);
         }
         
+        // Helper trait to detect bound_array types
+        template<typename T>
+        struct is_bound_array_ref : std::false_type {};
+        
+        template<typename T>
+        struct is_bound_array_ref<bound_array<T>&> : std::true_type {
+            using value_type = T;
+        };
+        
+        template<typename T>
+        struct is_bound_array_ref<const bound_array<T>&> : std::true_type {
+            using value_type = T;
+        };
+        
+        // Helper to check if a type is bound_array (not a reference)
+        template<typename T>
+        struct is_bound_array_type : std::false_type {};
+        
+        template<typename T>
+        struct is_bound_array_type<bound_array<T>> : std::true_type {};
+        
+        // Helper to check if a type is bound_map (not a reference)
+        template<typename T>
+        struct is_bound_map_type : std::false_type {};
+        
+        template<typename K, typename V>
+        struct is_bound_map_type<bound_map<K, V>> : std::true_type {};
+        
         // Helper trait to detect bound_map types
         template<typename T>
         struct is_bound_map_ref : std::false_type {};
@@ -658,10 +660,18 @@ class engine;
             return std::apply(std::forward<F>(func), arg_tuple);
         }
         
-        // Create individual arguments, handling bound_map types specially
+        // Create individual arguments, handling bound_array and bound_map types specially
         template<typename T>
         static auto create_argument(const script_value& arg, engine* eng) {
-            if constexpr (is_bound_map_ref<T>::value) {
+            if constexpr (is_bound_array_ref<T>::value) {
+                using V = typename is_bound_array_ref<T>::value_type;
+                
+                if (!arg.is_array()) {
+                    throw runtime_error("Cannot convert non-array to bound_array<T>&");
+                }
+                // Create bound_array object on stack - zero-copy reference to script_array
+                return bound_array<V>(const_cast<script_value&>(arg).as_array(), get_engine_weak_ptr(eng));
+            } else if constexpr (is_bound_map_ref<T>::value) {
                 using K = typename is_bound_map_ref<T>::key_type;
                 using V = typename is_bound_map_ref<T>::value_type;
                 
@@ -678,11 +688,17 @@ class engine;
                 const script_value& actual_arg = arg.deref();
                 
                 // For custom classes, get shared_ptr and return reference to the object
-                if constexpr (std::is_class_v<base_type> && !std::is_same_v<base_type, std::string>) {
+                // Exclude string, bound_array, bound_map, and built-in container types which have special handling
+                if constexpr (std::is_class_v<base_type> && 
+                            !std::is_same_v<base_type, std::string> &&
+                            !is_bound_array_type<base_type>::value &&
+                            !is_bound_map_type<base_type>::value &&
+                            !is_specialization_v<base_type, std::vector> &&
+                            !is_specialization_v<base_type, std::map>) {
                     auto ptr = actual_arg.as<std::shared_ptr<base_type>>();
                     return std::ref(*ptr);
                 } else {
-                    // For built-in types, use the non-const as<T&>() method
+                    // For built-in types and special types, use the non-const as<T&>() method
                     return const_cast<script_value&>(actual_arg).as<T>();
                 }
             } else {

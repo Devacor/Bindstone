@@ -6,6 +6,9 @@
 using namespace jai;
 using namespace jai::foundry;
 
+namespace jai::foundry::tests {
+namespace deep_copy_comprehensive_ns {
+
 // Test classes
 class Point {
 public:
@@ -19,27 +22,27 @@ public:
 };
 
 // Polymorphic classes
-class Shape {
+class GeometricShape {
 public:
-    virtual ~Shape() = default;
+    virtual ~GeometricShape() = default;
     virtual double area() const = 0;
     virtual std::string type() const = 0;
 };
 
-class Circle : public Shape {
+class GeometricCircle : public GeometricShape {
 public:
     double radius;
     
-    Circle(double r) : radius(r) {}
+    GeometricCircle(double r) : radius(r) {}
     double area() const override { return 3.14159 * radius * radius; }
     std::string type() const override { return "Circle"; }
 };
 
-class Rectangle : public Shape {
+class GeometricRectangle : public GeometricShape {
 public:
     double width, height;
     
-    Rectangle(double w, double h) : width(w), height(h) {}
+    GeometricRectangle(double w, double h) : width(w), height(h) {}
     double area() const override { return width * height; }
     std::string type() const override { return "Rectangle"; }
 };
@@ -134,28 +137,28 @@ public:
             stdlib::register_all(*engine);
             
             // Register polymorphic classes
-            class_builder<Shape>(*engine, "Shape")
-                .method("area", &Shape::area)
-                .method("type", &Shape::type)
+            class_builder<GeometricShape>(*engine, "GeometricShape")
+                .method("area", &GeometricShape::area)
+                .method("type", &GeometricShape::type)
                 .build();
                 
-            class_builder<Circle>(*engine, "Circle")
-                .base_class<Shape>()
+            class_builder<GeometricCircle>(*engine, "GeometricCircle")
+                .base_class<GeometricShape>()
                 .constructor<double>()
-                .property("radius", &Circle::radius)
+                .property("radius", &GeometricCircle::radius)
                 .build();
                 
-            class_builder<Rectangle>(*engine, "Rectangle")
-                .base_class<Shape>()
+            class_builder<GeometricRectangle>(*engine, "GeometricRectangle")
+                .base_class<GeometricShape>()
                 .constructor<double, double>()
-                .property("width", &Rectangle::width)
-                .property("height", &Rectangle::height)
+                .property("width", &GeometricRectangle::width)
+                .property("height", &GeometricRectangle::height)
                 .build();
             
             std::string script = R"(
                 // Create shapes
-                var shape1 = Circle(5.0);
-                var shape2 = shape1;  // Should deep copy as Circle
+                var shape1 = GeometricCircle(5.0);
+                var shape2 = shape1;  // Should deep copy as GeometricCircle
                 
                 // Modify shape2
                 shape2.radius = 10.0;
@@ -246,4 +249,7 @@ public:
     }
 };
 
-FOUNDRY_REGISTER(deep_copy_comprehensive_tests)
+} // namespace deep_copy_comprehensive_ns
+} // namespace jai::foundry::tests
+
+FOUNDRY_REGISTER(jai::foundry::tests::deep_copy_comprehensive_ns::deep_copy_comprehensive_tests)

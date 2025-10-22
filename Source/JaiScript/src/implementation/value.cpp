@@ -18,32 +18,17 @@ script_value script_value::make_map(type_info_ptr keyType, type_info_ptr valueTy
     return v;
 }
 
-script_value script_value::make_weak_ptr(const script_value& value) {
-    script_value v;
-    v.type_info_ = type_info::make_weak_ptr(value.get_type_info());
-    
-    if (value.type() == script_value_type::jai_object_type) {
-        // Store a reference to the original value in a special holder
-        // This allows weak_ptr to work with objects
-        auto holder = std::make_shared<object_holder>();
-        holder->type_name = "weak_ptr_holder";
-        holder->data = std::make_shared<script_value>(value);
-        holder->is_cpp_class_instance = false;
-        
-        // Store as object type with weak_ptr type info
-        v.storage_ = holder;
-    } else {
-        throw runtime_error("weak_ptr can only be created from objects");
-    }
-    
-    return v;
-}
 
 script_value script_value::make_reference(script_value* target, const std::shared_ptr<environment>& env) {
     if (!target) {
         throw runtime_error("Cannot create reference to null");
     }
-    script_value v;
+    // Get engine reference from the target value
+    auto eng_ref = target->get_engine_ref();
+    if (eng_ref.expired()) {
+        throw runtime_error("Cannot create reference: target has no valid engine reference");
+    }
+    script_value v(std::monostate{}, eng_ref);  // Use engine reference from target
     v.type_info_ = type_info::make_reference(target->get_type_info());
     auto ref = std::make_shared<reference_holder>();
     ref->target = target;
@@ -53,6 +38,7 @@ script_value script_value::make_reference(script_value* target, const std::share
 }
 
 script_value script_value::make_object(const std::string& type_name, std::shared_ptr<void> data) {
+    // TODO: This method is deprecated but still used by converters that don't have engine access
     script_value v;
     v.type_info_ = type_info::make_object(type_name);
     auto obj = std::make_shared<object_holder>();
@@ -64,6 +50,7 @@ script_value script_value::make_object(const std::string& type_name, std::shared
 }
 
 script_value script_value::make_cpp_object(const std::string& type_name, std::shared_ptr<void> data) {
+    // TODO: This method is deprecated but still used by converters that don't have engine access
     script_value v;
     v.type_info_ = type_info::make_object(type_name);
     auto obj = std::make_shared<object_holder>();
@@ -75,6 +62,7 @@ script_value script_value::make_cpp_object(const std::string& type_name, std::sh
 }
 
 script_value script_value::make_function(const script_function& func) {
+    // TODO: This method is deprecated but still used by code that doesn't have engine access
     script_value v;
     v.type_info_ = type_info::make_function(type_info::make_void(), {}); // TODO: Proper type info
     v.storage_ = func;
@@ -83,32 +71,76 @@ script_value script_value::make_function(const script_function& func) {
 
 // Engine-aware factory method implementations
 script_value script_value::make_array(type_info_ptr element_type, std::weak_ptr<engine> eng) {
-    script_value v = make_array(element_type);
-    v.engine_ref_ = eng;
+    if (eng.expired()) {
+        throw runtime_error("Cannot create array with expired engine reference");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = type_info::make_array(element_type);
+    v.storage_ = std::make_shared<std::vector<script_value>>();
     return v;
 }
 
 script_value script_value::make_map(type_info_ptr keyType, type_info_ptr valueType, std::weak_ptr<engine> eng) {
-    script_value v = make_map(keyType, valueType);
-    v.engine_ref_ = eng;
+    if (eng.expired()) {
+        throw runtime_error("Cannot create map with expired engine reference");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = type_info::make_map(keyType, valueType);
+    v.storage_ = std::make_shared<std::map<script_value, script_value>>();
     return v;
 }
 
 script_value script_value::make_object(const std::string& type_name, std::shared_ptr<void> data, std::weak_ptr<engine> eng) {
-    script_value v = make_object(type_name, data);
-    v.engine_ref_ = eng;
+    if (eng.expired()) {
+        throw runtime_error("Cannot create object with expired engine reference");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = type_info::make_object(type_name);
+    auto obj = std::make_shared<object_holder>();
+    obj->type_name = type_name;
+    obj->data = data;
+    obj->is_cpp_class_instance = true;  // make_object is for class_instance wrapper objects
+    v.storage_ = obj;
     return v;
 }
 
 script_value script_value::make_cpp_object(const std::string& type_name, std::shared_ptr<void> data, std::weak_ptr<engine> eng) {
-    script_value v = make_cpp_object(type_name, data);
-    v.engine_ref_ = eng;
+    if (eng.expired()) {
+        throw runtime_error("Cannot create cpp_object with expired engine reference");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = type_info::make_object(type_name);
+    auto obj = std::make_shared<object_holder>();
+    obj->type_name = type_name;
+    obj->data = data;
+    obj->is_cpp_class_instance = false;  // make_cpp_object is for raw C++ objects
+    v.storage_ = obj;
     return v;
 }
 
 script_value script_value::make_weak_ptr(const script_value& value, std::weak_ptr<engine> eng) {
-    script_value v = make_weak_ptr(value);
-    v.engine_ref_ = eng;
+    if (eng.expired()) {
+        throw runtime_error("Cannot create weak_ptr with expired engine reference");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = type_info::make_weak_ptr(value.get_type_info());
+    
+    if (value.type() == script_value_type::jai_object_type) {
+        // Get the shared_ptr<object_holder> from the value
+        auto holder = value.get_object_holder();
+        if (!holder) {
+            throw runtime_error("Failed to get object_holder from script_value");
+        }
+        
+        // Create a weak_ptr from the shared_ptr
+        std::weak_ptr<object_holder> weak = holder;
+        
+        // Store the weak_ptr directly in the variant
+        v.storage_ = weak;
+    } else {
+        throw runtime_error("weak_ptr can only be created from objects");
+    }
+    
     return v;
 }
 
@@ -119,14 +151,23 @@ script_value script_value::make_reference(script_value* target, const std::share
 }
 
 script_value script_value::make_function(const script_function& func, std::weak_ptr<engine> eng) {
-    script_value v = make_function(func);
-    v.engine_ref_ = eng;
+    if (eng.expired()) {
+        throw runtime_error("Cannot create function with expired engine reference");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = type_info::make_function(type_info::make_void(), {}); // TODO: Proper type info
+    v.storage_ = func;
     return v;
 }
 
 // Copy constructor (shallow copy for reference semantics)
-script_value::script_value(const script_value& other) : type_info_(other.type_info_), engine_ref_(other.engine_ref_), storage_(other.storage_) {
+script_value::script_value(const script_value& other) 
+    : type_info_(other.type_info_), 
+      engine_ref_(other.engine_ref_), 
+      storage_(other.storage_),
+      cpp_bound_ptr_(other.cpp_bound_ptr_) {
     // Simple shallow copy - shares storage with the original, including engine reference
+    // cpp_bound_ptr_ is also copied so copies of bound values remain bound
 }
 
 // Copy assignment operator (shallow copy for reference semantics)
@@ -135,6 +176,7 @@ script_value& script_value::operator=(const script_value& other) {
         type_info_ = other.type_info_;
         engine_ref_ = other.engine_ref_;
         storage_ = other.storage_;
+        cpp_bound_ptr_ = other.cpp_bound_ptr_;
     }
     return *this;
 }
@@ -146,7 +188,8 @@ script_value script_value::clone() const {
     }
     script_value result(std::monostate{}, engine_ref_);  // Preserve engine reference!
     result.type_info_ = type_info_;
-    
+    result.cpp_bound_ptr_ = cpp_bound_ptr_;  // Preserve C++ binding
+
     // Handle deep copying for different types
     switch (type()) {
         case script_value_type::jai_array_type: {
@@ -199,6 +242,16 @@ script_value script_value::clone() const {
             // When cloning a reference, we want to clone the referenced value,
             // not create another reference to the same value
             return deref().clone();
+        }
+        case script_value_type::jai_weak_ptr_type: {
+            // For weak_ptr, shallow copy the weak_ptr itself (copy the weak reference)
+            result.storage_ = storage_;
+            break;
+        }
+        case script_value_type::jai_shared_ptr_type: {
+            // For shared_ptr, shallow copy the shared_ptr itself (copy the shared reference)
+            result.storage_ = storage_;
+            break;
         }
         default:
             // For primitive types and functions, shallow copy is fine
@@ -262,6 +315,8 @@ const script_value& script_value::deref() const {
         // This prevents infinite recursion and matches C++ reference semantics
         return *refHolder->target;
     }
+    // For C++ references, we don't deref here - they need special handling
+    // The interpreter will handle them specially
     return *this;
 }
 
@@ -292,6 +347,30 @@ void script_value::assign_through(const script_value& value) {
         }
         // Assign to the referenced value
         *refHolder->target = value;
+    } else if (cpp_bound_ptr_ != nullptr) {
+        // For C++ bound values, assign directly to the C++ variable
+        // TODO: Store type metadata with cpp_bound values for proper casting
+        // For now, we handle common C++ types (int, float, etc.)
+        switch (type()) {
+            case script_value_type::jai_int_type:
+                *static_cast<int*>(cpp_bound_ptr_) = static_cast<int>(value.as<script_int>());
+                break;
+            case script_value_type::jai_float_type:
+                *static_cast<float*>(cpp_bound_ptr_) = static_cast<float>(value.as<script_float>());
+                break;
+            case script_value_type::jai_string_type:
+                *static_cast<std::string*>(cpp_bound_ptr_) = value.as<script_string>();
+                break;
+            case script_value_type::jai_bool_type:
+                *static_cast<bool*>(cpp_bound_ptr_) = value.as<script_bool>();
+                break;
+            case script_value_type::jai_char_type:
+                *static_cast<char*>(cpp_bound_ptr_) = value.as<script_char>();
+                break;
+            default:
+                // For complex types, we'll need to use the conversion registry
+                throw runtime_error("assign_through not yet implemented for this cpp_bound type");
+        }
     } else {
         // Not a reference, direct assignment
         *this = value;
@@ -309,6 +388,10 @@ void script_value::assign_through(script_value&& value) {
         }
         // Move assign to the referenced value
         *refHolder->target = std::move(value);
+    } else if (cpp_bound_ptr_ != nullptr) {
+        // For C++ bound values, we can't really move into the C++ variable
+        // Just do a regular assignment
+        assign_through(value);
     } else {
         // Not a reference, direct move assignment
         *this = std::move(value);

@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <memory>
 #include <vector>
+#include <iostream>
 
 namespace jai {
 
@@ -20,6 +21,7 @@ namespace jai {
     private:
         std::unordered_map<std::string, uint64_t> string_id_map_;
         std::vector<std::string> strings_;
+        mutable uint64_t cached_this_id_ = UINT64_MAX;  // Cached ID for "this"
         
     public:
         string_symbolizer() {
@@ -42,14 +44,23 @@ namespace jai {
         const std::string& get_string(uint64_t id) const {
             return strings_[id];
         }
+        
+        // Get cached "this" ID (lazily initialized)
+        uint64_t get_this_id() const {
+            if (cached_this_id_ == UINT64_MAX) {
+                cached_this_id_ = const_cast<string_symbolizer*>(this)->intern("this");
+            }
+            return cached_this_id_;
+        }
     };
 
     // environment for storing variables in a scope
     class environment {
     public:
         environment(string_symbolizer* symbolizer) : symbolizer_(symbolizer) {}
-        environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer) 
+        environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer)
             : parent_(parent), symbolizer_(symbolizer) {}
+        virtual ~environment() = default;
         
         // Reference tracking for proper reference parameter support
         struct ref_info {
@@ -64,20 +75,20 @@ namespace jai {
         void define(uint64_t id, script_value&& value);
         
         // Get a variable value (searches parent scopes)
-        script_value get(const std::string& name) const;
-        script_value get(uint64_t id) const;  // Optimized direct lookup
+        virtual script_value get(const std::string& name) const;
+        virtual script_value get(uint64_t id) const;  // Optimized direct lookup
         
         // Get a reference to variable value (for avoiding copies)
-        const script_value& get_ref(const std::string& name) const;
-        const script_value& get_ref(uint64_t id) const;
-        script_value& get_ref(const std::string& name);
-        script_value& get_ref(uint64_t id);
+        virtual const script_value& get_ref(const std::string& name) const;
+        virtual const script_value& get_ref(uint64_t id) const;
+        virtual script_value& get_ref(const std::string& name);
+        virtual script_value& get_ref(uint64_t id);
         
         // Assign to an existing variable (searches parent scopes)
-        void assign(const std::string& name, const script_value& value);
-        void assign(const std::string& name, script_value&& value);
-        void assign(uint64_t id, const script_value& value);
-        void assign(uint64_t id, script_value&& value);
+        virtual void assign(const std::string& name, const script_value& value);
+        virtual void assign(const std::string& name, script_value&& value);
+        virtual void assign(uint64_t id, const script_value& value);
+        virtual void assign(uint64_t id, script_value&& value);
         
         // Check if variable exists in current or parent scopes
         bool contains(const std::string& name) const;
@@ -96,6 +107,9 @@ namespace jai {
         // Reset environment for reuse (optimization helper)
         void reset(std::shared_ptr<environment> new_parent);
         
+        // Get parent environment (needed for method_environment handling)
+        std::shared_ptr<environment> get_parent() const { return parent_; }
+        
     private:
         std::unordered_map<uint64_t, script_value> values_;  // Use symbolized string IDs
         std::shared_ptr<environment> parent_;
@@ -106,6 +120,73 @@ namespace jai {
         const script_value& get_ref(uint64_t id, int depth) const;
         
         friend class interpreter;
+        friend class method_environment;
+        friend class static_method_environment;
+    };
+    
+    // Special environment for script class methods that provides implicit 'this' field access
+    class method_environment : public environment {
+    public:
+        method_environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer, script_value this_obj)
+            : environment(parent, symbolizer), this_object_(std::move(this_obj)),
+              bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {
+        }
+        
+        // Override get to check 'this' object fields as fallback
+        script_value get(const std::string& name) const override;
+        script_value get(uint64_t id) const override;
+        
+        // Override get_ref to check 'this' object fields as fallback
+        const script_value& get_ref(const std::string& name) const override;
+        const script_value& get_ref(uint64_t id) const override;
+        script_value& get_ref(const std::string& name) override;
+        script_value& get_ref(uint64_t id) override;
+        
+        // Override assign to update 'this' object fields when appropriate
+        void assign(const std::string& name, const script_value& value) override;
+        void assign(uint64_t id, const script_value& value) override;
+        
+        // Get the 'this' object for super access
+        const script_value& get_this_object() const { return this_object_; }
+        
+        // Reset method for pooling
+        void reset(std::shared_ptr<environment> parent, script_value this_obj) {
+            // Clear local values
+            values_.clear();
+            parent_ = parent;
+            this_object_ = std::move(this_obj);
+        }
+        
+    private:
+        script_value this_object_;
+        mutable script_value bound_method_storage_;  // Storage for bound methods
+    };
+    
+    // Special environment for static script methods that provides implicit static field access
+    class static_method_environment : public environment {
+    public:
+        static_method_environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer, std::shared_ptr<class_definition> class_def)
+            : environment(parent, symbolizer), class_def_(class_def),
+              bound_method_storage_(std::monostate{}, std::weak_ptr<engine>{}) {
+        }
+        
+        // Override get to check static fields as fallback
+        script_value get(const std::string& name) const override;
+        script_value get(uint64_t id) const override;
+        
+        // Override get_ref to check static fields as fallback
+        const script_value& get_ref(const std::string& name) const override;
+        const script_value& get_ref(uint64_t id) const override;
+        script_value& get_ref(const std::string& name) override;
+        script_value& get_ref(uint64_t id) override;
+        
+        // Override assign to update static fields when appropriate
+        void assign(const std::string& name, const script_value& value) override;
+        void assign(uint64_t id, const script_value& value) override;
+        
+    private:
+        std::shared_ptr<class_definition> class_def_;
+        mutable script_value bound_method_storage_;  // Storage for bound methods
     };
     
     // The interpreter implements the visitor pattern to execute the AST
@@ -114,7 +195,7 @@ namespace jai {
         using class_lookup_callback = std::function<std::shared_ptr<class_definition>(const std::string&)>;
         
         // Method type for built-in type methods
-        using builtin_method = std::function<script_value(interpreter*, const script_value&, const std::vector<script_value>&)>;
+        using builtin_method = std::function<script_value(interpreter*, script_value&, const std::vector<script_value>&)>;
         
         interpreter();
         interpreter(string_symbolizer* external_symbolizer);
@@ -205,7 +286,7 @@ namespace jai {
             }
             
             // Try to convert the return value to the requested type
-            return returnValue_.as<T>();
+            return returnValue_.value().as<T>();
         }
         
         // Execute a single expression and return its value
@@ -213,7 +294,9 @@ namespace jai {
         
         // Return value access (for global scope return statements)
         bool has_return_value() const { return hasReturnValue_; }
-        script_value get_return_value() const { return returnValue_; }
+        script_value get_return_value() const { 
+            return returnValue_.value_or(script_value::make_null(engine_ref_)); 
+        }
         
         // Variable access methods
         script_value get_variable(const std::string& name) const;
@@ -262,6 +345,8 @@ namespace jai {
         void visit_function_decl(function_decl* decl) override;
         void visit_class_decl(class_decl* decl) override;
         void visit_expression_decl(expression_decl* decl) override;
+        void visit_include_decl(include_decl* decl) override;
+        void visit_import_decl(import_decl* decl) override;
         
         // Performance optimization flags
         void set_has_custom_numeric_ops(bool value) { has_custom_numeric_ops_ = value; }
@@ -280,6 +365,9 @@ namespace jai {
         script_value execute_method_ast(std::shared_ptr<function_decl> ast, 
                                       std::shared_ptr<environment> method_env,
                                       const std::vector<script_value>& args);
+                                      
+        // Helper to create a bound method - binds 'this' as the first argument
+        static script_value create_bound_method(const script_value& this_obj, const script_value& method);
         
     private:
         // Binary operator dispatch table for performance
@@ -401,25 +489,40 @@ namespace jai {
                 if (top_ == 0) {
                     throw runtime_error("Internal error: empty value stack");
                 }
-                return std::move(values_[--top_]);
+                script_value result = std::move(values_[--top_]);
+                // Clear the moved-from value to release references
+                values_[top_] = script_value::make_null(std::weak_ptr<engine>{});
+                return result;
             }
             
             bool empty() const { return top_ == 0; }
             size_t size() const { return top_; }
-            
-            void clear() { top_ = 0; }
+
+            void clear() {
+                // Actually destroy the values to release references
+                values_.clear();
+                top_ = 0;
+            }
         };
         
         script_valueStack valueStack_;
         
         // Return value storage for global scope returns
-        script_value returnValue_;
+        std::optional<script_value> returnValue_;  // Use optional to avoid needing default constructor
         bool hasReturnValue_ = false;
         
         // Exception handling state
         std::optional<script_exception> current_exception_;
         bool is_unwinding_ = false;
-        script_value active_exception_value_;  // The exception message as a script_value
+        std::optional<script_value> active_exception_value_;  // The exception message as a script_value (optional)
+        
+        // Class parsing context - tracks unresolved identifiers in methods
+        struct class_context {
+            std::string class_name;
+            std::set<std::string> unresolved_identifiers;  // Identifiers found in methods but not yet resolved
+            bool in_method = false;
+        };
+        std::optional<class_context> current_class_context_;
         std::string current_catch_var_;  // Name of the current catch variable (if any)
         
         // Switch statement control flow state
@@ -431,12 +534,17 @@ namespace jai {
         mutable std::vector<script_value> argument_pool_;  // Reusable argument vector
         std::vector<std::shared_ptr<environment>> environment_pool_;  // Pool of reusable environments
         size_t environment_pool_index_ = 0;  // Current pool position
+        std::vector<std::shared_ptr<method_environment>> method_environment_pool_;  // Pool of reusable method environments
+        size_t method_environment_pool_index_ = 0;  // Current pool position for method environments
         
         // Class lookup callback for finding C++ classes
         class_lookup_callback class_lookup_callback_;
         
         // Engine reference for script_value creation (weak reference to avoid circular dependency)
         std::weak_ptr<engine> engine_ref_;
+        
+        // Temporary storage for 'this' value during method/constructor execution
+        script_value current_method_this_;
         
         // Helper to get the last evaluated value (inlined for performance)
         inline script_value pop_value() {
@@ -486,6 +594,7 @@ namespace jai {
         
         // Function call optimization helpers
         std::shared_ptr<environment> get_pooled_environment(std::shared_ptr<environment> parent);
+        std::shared_ptr<method_environment> get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj);
         void reset_environment_pool();
         
         // Callback for resolving subscript operators when built-in logic fails
@@ -495,22 +604,16 @@ namespace jai {
         // Static method registries for built-in types
         static const std::unordered_map<std::string, builtin_method> arrayMethods_;
         static const std::unordered_map<std::string, builtin_method> mapMethods_;
+        static const std::unordered_map<std::string, builtin_method> weakPtrMethods_;
+        static const std::unordered_map<std::string, builtin_method> sharedPtrMethods_;
         
         // Helper to access value's private storage (since interpreter is a friend)
         static std::shared_ptr<std::vector<script_value>>& get_array_storage(const script_value& value) {
-            return const_cast<std::shared_ptr<std::vector<script_value>>&>(
-                std::get<std::shared_ptr<std::vector<script_value>>>(
-                    const_cast<script_value&>(value).storage_
-                )
-            );
+            return const_cast<script_value&>(value).get_array_storage();
         }
         
         static std::shared_ptr<std::map<script_value, script_value>>& get_map_storage(const script_value& value) {
-            return const_cast<std::shared_ptr<std::map<script_value, script_value>>&>(
-                std::get<std::shared_ptr<std::map<script_value, script_value>>>(
-                    const_cast<script_value&>(value).storage_
-                )
-            );
+            return const_cast<script_value&>(value).get_map_storage();
         }
         
     public:

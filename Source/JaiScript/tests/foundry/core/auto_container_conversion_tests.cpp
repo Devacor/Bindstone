@@ -14,9 +14,28 @@ namespace jai::foundry::tests {
 struct Widget {
     std::string name;
     int value;
-    
+
     Widget() : name("default"), value(0) {}
     Widget(const std::string& n, int v) : name(n), value(v) {}
+};
+
+// Animal hierarchy for inheritance test (moved outside lambda for MSVC compatibility)
+struct Animal {
+    std::string name;
+    virtual ~Animal() = default;
+    virtual std::string speak() const = 0;
+};
+
+struct Dog : Animal {
+    Dog() { name = "Dog"; }
+    Dog(const std::string& n) { name = n; }
+    std::string speak() const override { return "Woof!"; }
+};
+
+struct Cat : Animal {
+    Cat() { name = "Cat"; }
+    Cat(const std::string& n) { name = n; }
+    std::string speak() const override { return "Meow!"; }
 };
 
 class auto_container_conversion_tests : public suite {
@@ -262,26 +281,8 @@ public:
         
         test("inheritance_and_containers", [this]() {
             auto engine = engine::make();
-            
-            struct Animal {
-                std::string name;
-                virtual ~Animal() = default;
-                virtual std::string speak() const = 0;
-            };
-            
-            struct Dog : Animal {
-                Dog() { name = "Dog"; }
-                Dog(const std::string& n) { name = n; }
-                std::string speak() const override { return "Woof!"; }
-            };
-            
-            struct Cat : Animal {
-                Cat() { name = "Cat"; }
-                Cat(const std::string& n) { name = n; }
-                std::string speak() const override { return "Meow!"; }
-            };
-            
-            // Register base and derived classes
+
+            // Register base and derived classes (Animal, Dog, Cat defined at namespace scope)
             class_builder<Animal>(*engine, "Animal")
                 .property("name", &Animal::name)
                 .method("speak", &Animal::speak)
@@ -309,6 +310,35 @@ public:
                 return values.size();
             });
             
+            // Debug: Try explicitly registering the conversion
+            // This shouldn't be necessary since script_value vectors are native
+            if (!engine->get_conversion_registry()->has_conversion<std::vector<script_value>>()) {
+                std::cout << "Registering std::vector<script_value> conversion..." << std::endl;
+                engine->add_vector_conversion<script_value>();
+            }
+            
+            // Add some debug output
+            std::cout << "\n=== Testing inheritance_and_containers ===" << std::endl;
+            
+            // First test each function individually
+            std::cout << "Testing count_dogs..." << std::endl;
+            auto test1 = engine->execute(R"(
+                auto dogs = [];
+                dogs.push(Dog("Rex"));
+                dogs.push(Dog("Buddy"));
+                count_dogs(dogs)
+            )");
+            std::cout << "count_dogs result: " << test1.as<int>() << std::endl;
+            
+            std::cout << "Testing count_script_values..." << std::endl;
+            auto test2 = engine->execute(R"(
+                auto values = [1, 2, 3, 4, 5];
+                count_script_values(values)
+            )");
+            std::cout << "count_script_values result: " << test2.as<int>() << std::endl;
+            
+            // Now test the combined expression
+            std::cout << "Testing combined expression..." << std::endl;
             auto result = engine->execute(R"(
                 auto dogs = [];
                 dogs.push(Dog("Rex"));

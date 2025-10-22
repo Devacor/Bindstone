@@ -31,7 +31,10 @@ namespace jai {
         jai_object_type,         // Object<T> - typed object
         jai_function_type,       // Function<ReturnType(Args...)>
         jai_reference_type,      // T& - Reference to another value
-        jai_weak_ptr_type        // weak_ptr<T>
+        jai_weak_ptr_type,       // weak_ptr<T>
+        jai_shared_ptr_type,     // shared_ptr<T>
+        jai_cpp_bound_type,      // C++ bound value
+        jai_invalid_type         // Invalid/non-existent value (used as sentinel)
     };
     
 } // namespace jai

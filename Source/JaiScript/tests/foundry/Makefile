@@ -25,10 +25,11 @@ MAIN_SRC = run_tests.cpp
 
 # JaiScript implementation files
 IMPL_DIR = ../../src/implementation
-IMPL_SRCS = $(IMPL_DIR)/engine.cpp $(IMPL_DIR)/lexer.cpp $(IMPL_DIR)/parser.cpp $(IMPL_DIR)/interpreter.cpp $(IMPL_DIR)/interpreter_dispatch.cpp $(IMPL_DIR)/value.cpp $(IMPL_DIR)/type_info.cpp $(IMPL_DIR)/types.cpp $(IMPL_DIR)/conversion_registry.cpp vm_backend_fallback.cpp
+IMPL_SRCS = $(IMPL_DIR)/engine.cpp $(IMPL_DIR)/lexer.cpp $(IMPL_DIR)/parser.cpp $(IMPL_DIR)/interpreter.cpp $(IMPL_DIR)/interpreter_dispatch.cpp $(IMPL_DIR)/value.cpp $(IMPL_DIR)/type_info.cpp $(IMPL_DIR)/types.cpp $(IMPL_DIR)/conversion_registry.cpp $(IMPL_DIR)/class_registry.cpp $(IMPL_DIR)/vm_backend_stub.cpp
 
 # All sources
-SRCS = $(MAIN_SRC) $(CORE_SRCS) $(LANG_SRCS) $(INTEG_SRCS) $(VM_SRCS) $(IMPL_SRCS)
+# VM_SRCS removed - VM is being refactored
+SRCS = $(MAIN_SRC) $(CORE_SRCS) $(LANG_SRCS) $(INTEG_SRCS) $(IMPL_SRCS)
 OBJS = $(SRCS:.cpp=.o)
 
 # Output binary

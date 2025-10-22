@@ -189,13 +189,13 @@ script_value interpreter::handle_equal(const script_value& left, const script_va
         // For weak_ptr, null comparison checks if expired
         bool is_expired = false;
         if (left.is_weak_ptr()) {
-            if (std::holds_alternative<std::weak_ptr<script_value>>(left.storage_)) {
-                auto weak_ptr = std::get<std::weak_ptr<script_value>>(left.storage_);
+            if (left.is_weak_ptr()) {
+                auto weak_ptr = left.get_weak_ptr();
                 // Check if weak_ptr is expired (includes default-constructed)
                 is_expired = weak_ptr.expired();
-            } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(left.storage_)) {
+            } else if ((left.get_object_holder() != nullptr)) {
                 // weak_ptr_holder type - check if it contains an actual value
-                auto holder = std::get<std::shared_ptr<script_value::object_holder>>(left.storage_);
+                auto holder = left.get_object_holder();
                 is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
             } else {
                 // Other cases - consider expired
@@ -203,13 +203,13 @@ script_value interpreter::handle_equal(const script_value& left, const script_va
             }
         } else {
             // right is weak_ptr
-            if (std::holds_alternative<std::weak_ptr<script_value>>(right.storage_)) {
-                auto weak_ptr = std::get<std::weak_ptr<script_value>>(right.storage_);
+            if (right.is_weak_ptr()) {
+                auto weak_ptr = right.get_weak_ptr();
                 // Check if weak_ptr is expired (includes default-constructed)
                 is_expired = weak_ptr.expired();
-            } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(right.storage_)) {
+            } else if ((right.get_object_holder() != nullptr)) {
                 // weak_ptr_holder type - check if it contains an actual value
-                auto holder = std::get<std::shared_ptr<script_value::object_holder>>(right.storage_);
+                auto holder = right.get_object_holder();
                 is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
             } else {
                 // Other cases - consider expired
@@ -242,13 +242,13 @@ script_value interpreter::handle_not_equal(const script_value& left, const scrip
         // For weak_ptr, null comparison checks if expired
         bool is_expired = false;
         if (left.is_weak_ptr()) {
-            if (std::holds_alternative<std::weak_ptr<script_value>>(left.storage_)) {
-                auto weak_ptr = std::get<std::weak_ptr<script_value>>(left.storage_);
+            if (left.is_weak_ptr()) {
+                auto weak_ptr = left.get_weak_ptr();
                 // Check if weak_ptr is expired (includes default-constructed)
                 is_expired = weak_ptr.expired();
-            } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(left.storage_)) {
+            } else if ((left.get_object_holder() != nullptr)) {
                 // weak_ptr_holder type - check if it contains an actual value
-                auto holder = std::get<std::shared_ptr<script_value::object_holder>>(left.storage_);
+                auto holder = left.get_object_holder();
                 is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
             } else {
                 // Other cases - consider expired
@@ -256,13 +256,13 @@ script_value interpreter::handle_not_equal(const script_value& left, const scrip
             }
         } else {
             // right is weak_ptr
-            if (std::holds_alternative<std::weak_ptr<script_value>>(right.storage_)) {
-                auto weak_ptr = std::get<std::weak_ptr<script_value>>(right.storage_);
+            if (right.is_weak_ptr()) {
+                auto weak_ptr = right.get_weak_ptr();
                 // Check if weak_ptr is expired (includes default-constructed)
                 is_expired = weak_ptr.expired();
-            } else if (std::holds_alternative<std::shared_ptr<script_value::object_holder>>(right.storage_)) {
+            } else if ((right.get_object_holder() != nullptr)) {
                 // weak_ptr_holder type - check if it contains an actual value
-                auto holder = std::get<std::shared_ptr<script_value::object_holder>>(right.storage_);
+                auto holder = right.get_object_holder();
                 is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
             } else {
                 // Other cases - consider expired
@@ -281,7 +281,7 @@ script_value interpreter::handle_spaceship(const script_value& left, const scrip
     // Fast path for integer spaceship - avoid function calls
     if (left.type() == script_value_type::jai_int_type && right.type() == script_value_type::jai_int_type) {
         // Direct storage access, single C++20 spaceship operation
-        auto cmp = std::get<script_int>(left.storage_) <=> std::get<script_int>(right.storage_);
+        auto cmp = left.as_int() <=> right.as_int();
         return make_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)));
     }
     

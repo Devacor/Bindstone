@@ -48,10 +48,11 @@
 #include "detail/interpreter_backend.hpp"
 
 // 11. JVM system (optional)
-#include "jvm/bytecode.hpp"
-#include "jvm/compiler.hpp"
-#include "jvm/virtual_machine.hpp"
-#include "jvm/vm_backend.hpp"
+// VM is being refactored - moved to LEGACY_VM
+// #include "jvm/bytecode.hpp"
+// #include "jvm/compiler.hpp"
+// #include "jvm/virtual_machine.hpp"
+// #include "jvm/vm_backend.hpp"
 
 // 12. Serialization (optional)
 #include "serialization/archive.hpp"

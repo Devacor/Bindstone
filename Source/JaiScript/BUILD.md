@@ -79,17 +79,15 @@ JaiScript/
 ├── source/                 # Library implementation
 │   ├── CMakeLists.txt
 │   └── implementation/     # .cpp files
-├── tests/                  # Foundry test suites
-│   ├── CMakeLists.txt
-│   ├── main_test_runner.cpp
-│   ├── containers/
-│   ├── language/
-│   ├── semantics/
-│   ├── integration/
-│   ├── performance/
-│   └── vm/
-└── examples/               # Example programs
-    └── CMakeLists.txt
+└── tests/                  # Foundry test suites
+    ├── CMakeLists.txt
+    ├── main_test_runner.cpp
+    ├── containers/
+    ├── language/
+    ├── semantics/
+    ├── integration/
+    ├── performance/
+    └── vm/
 ```
 
 ## Incremental Builds

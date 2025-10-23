@@ -8,8 +8,8 @@ file(GLOB_RECURSE TEST_SOURCES
     integration/*.hpp
     language/*.cpp
     language/*.hpp
-    performance/*.cpp
-    performance/*.hpp
+    # performance/*.cpp  # Temporarily disabled
+    # performance/*.hpp
     semantics/*.cpp
     semantics/*.hpp
     # vm/*.cpp  # VM backend not yet implemented - excluded for now

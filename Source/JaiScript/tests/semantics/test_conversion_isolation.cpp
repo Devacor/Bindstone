@@ -43,7 +43,7 @@ public:
             
             // Try to use the conversion
             engine->add_function("count_widgets", [](std::vector<SimpleWidget> widgets) -> int {
-                return widgets.size();
+                return static_cast<int>(widgets.size());
             });
             
             try {
@@ -82,7 +82,7 @@ public:
             
             // Try to use the conversion
             engine->add_function("count_widgets", [](std::vector<SimpleWidget> widgets) -> int {
-                return widgets.size();
+                return static_cast<int>(widgets.size());
             });
             
             try {

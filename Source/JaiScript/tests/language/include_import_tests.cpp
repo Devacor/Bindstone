@@ -92,6 +92,7 @@ public:
             // Now create increment file
             cleanup_temp_file(counter_file);
             counter_file = create_temp_file("counter.jai", R"(
+                // counter already exists from first include, so we can increment it
                 counter = counter + 1;
             )");
             

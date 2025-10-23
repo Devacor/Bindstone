@@ -283,7 +283,7 @@ public:
             engine->add_function("count_total_items", [](std::vector<std::map<std::string, int>> data) -> int {
                 int count = 0;
                 for (const auto& m : data) {
-                    count += m.size();
+                    count += static_cast<int>(m.size());
                 }
                 return count;
             });

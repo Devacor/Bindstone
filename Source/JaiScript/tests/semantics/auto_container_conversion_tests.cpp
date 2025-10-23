@@ -56,7 +56,7 @@ public:
             
             // Add a function that takes vector<Widget> by value
             engine->add_function("count_widgets", [](std::vector<Widget> widgets) -> int {
-                return widgets.size();
+                return static_cast<int>(widgets.size());
             });
             
             // This should work without explicit conversion registration
@@ -180,7 +180,7 @@ public:
             
             // Vector should work - use by value for simple count
             engine->add_function("count_ndwidgets", [](std::vector<NonDefaultWidget> widgets) -> int {
-                return widgets.size();
+                return static_cast<int>(widgets.size());
             });
             
             auto result = engine->execute(R"(
@@ -207,7 +207,7 @@ public:
             engine->add_function("count_all_widgets", [](std::vector<std::vector<Widget>> widget_groups) -> int {
                 int count = 0;
                 for (const auto& group : widget_groups) {
-                    count += group.size();
+                    count += static_cast<int>(group.size());
                 }
                 return count;
             });
@@ -302,12 +302,12 @@ public:
             
             // Test that vector<Dog> and vector<Cat> work - use by value
             engine->add_function("count_dogs", [](std::vector<Dog> dogs) -> int {
-                return dogs.size();
+                return static_cast<int>(dogs.size());
             });
-            
+
             // Test std::vector<script_value>& which should be allowed
             engine->add_function("count_script_values", [](const std::vector<script_value>& values) -> int {
-                return values.size();
+                return static_cast<int>(values.size());
             });
             
             // Debug: Try explicitly registering the conversion

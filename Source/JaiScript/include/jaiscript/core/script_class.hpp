@@ -181,9 +181,7 @@ inline void class_definition::add_static_script_method(const std::string& name, 
     std::shared_ptr<class_definition> class_def = shared_from_this();
 
     static_methods_.insert_or_assign(name, script_value::make_function(
-        [ast, interp, class_def, name](const std::vector<script_value>& args) -> script_value {
-            std::cout << "[DEBUG] Executing static method: " << name << std::endl;
-
+        [ast, interp, class_def](const std::vector<script_value>& args) -> script_value {
             // Create a static method environment (C++ scope rules for static members)
             // This environment automatically resolves unqualified static member access
             auto static_env = std::make_shared<static_method_environment>(
@@ -191,8 +189,6 @@ inline void class_definition::add_static_script_method(const std::string& name, 
                 interp->get_string_symbolizer(),
                 class_def
             );
-
-            std::cout << "[DEBUG] Created static_method_environment for: " << name << std::endl;
 
             // Call the interpreter method directly without 'this'
             return interp->execute_method_ast(ast, static_env, args);

@@ -67,11 +67,11 @@ public:
     bool is_unwinding() const override {
         return interpreter_->is_unwinding();
     }
-    
+
     const script_exception& get_current_exception() const override {
         return interpreter_->get_current_exception();
     }
-    
+
     std::string get_backend_name() const override {
         return "interpreter";
     }

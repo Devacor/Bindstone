@@ -6,12 +6,36 @@
 #include "ast.hpp"
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/types.hpp>
+#include <jaiscript/core/runtime_errors.hpp>
 #include <unordered_map>
 #include <memory>
 #include <vector>
 #include <iostream>
+#include <system_error>
 
 namespace jai {
+
+    // Transparent hasher for string_view lookup in unordered_map<string, ...>
+    struct string_hash {
+        using is_transparent = void;  // Enable heterogeneous lookup
+
+        [[nodiscard]] size_t operator()(std::string_view sv) const noexcept {
+            return std::hash<std::string_view>{}(sv);
+        }
+
+        [[nodiscard]] size_t operator()(const std::string& s) const noexcept {
+            return std::hash<std::string>{}(s);
+        }
+    };
+
+    // Transparent equality for string_view lookup
+    struct string_equal {
+        using is_transparent = void;
+
+        [[nodiscard]] bool operator()(std::string_view lhs, std::string_view rhs) const noexcept {
+            return lhs == rhs;
+        }
+    };
 
     // script_string symbolizer for faster variable lookups (like FName in Unreal engine)
     // IMPORTANT: This is a LOCAL-ONLY optimization. script_string IDs are NOT deterministic
@@ -19,25 +43,28 @@ namespace jai {
     // For network sync or save/load, use the original string keys, not symbolized IDs.
     class string_symbolizer {
     private:
-        std::unordered_map<std::string, uint64_t> string_id_map_;
+        std::unordered_map<std::string, uint64_t, string_hash, string_equal> string_id_map_;
         std::vector<std::string> strings_;
         mutable uint64_t cached_this_id_ = UINT64_MAX;  // Cached ID for "this"
-        
+
     public:
         string_symbolizer() {
             // Reserve capacity for typical script usage
             strings_.reserve(256);
             string_id_map_.reserve(256);
         }
-        
+
         uint64_t intern(std::string_view str) {
-            std::string key(str);
-            if (auto it = string_id_map_.find(key); it != string_id_map_.end()) {
+            // C++20 heterogeneous lookup - avoid string construction on lookup
+            // Only create string if we need to insert
+            if (auto it = string_id_map_.find(str); it != string_id_map_.end()) {
                 return it->second;
             }
+
+            // Not found - need to insert
             uint64_t id = static_cast<uint64_t>(strings_.size());
-            strings_.emplace_back(key);
-            string_id_map_[key] = id;
+            strings_.emplace_back(str);
+            string_id_map_.emplace(strings_.back(), id);  // Use the stored string
             return id;
         }
         
@@ -182,8 +209,10 @@ namespace jai {
         
         // Override assign to update static fields when appropriate
         void assign(const std::string& name, const script_value& value) override;
+        void assign(const std::string& name, script_value&& value) override;
         void assign(uint64_t id, const script_value& value) override;
-        
+        void assign(uint64_t id, script_value&& value) override;
+
     private:
         std::shared_ptr<class_definition> class_def_;
         mutable script_value bound_method_storage_;  // Storage for bound methods
@@ -306,47 +335,47 @@ namespace jai {
         // Exception handling methods
         bool is_unwinding() const { return is_unwinding_; }
         const script_exception& get_current_exception() const { return current_exception_.value(); }
-        
+
         // expression visitors
-        void visit_literal_expr(literal_expr* expr) override;
-        void visit_identifier_expr(identifier_expr* expr) override;
-        void visit_binary_expr(binary_expr* expr) override;
-        void visit_unary_expr(unary_expr* expr) override;
-        void visit_assignment_expr(assignment_expr* expr) override;
-        void visit_call_expr(call_expr* expr) override;
-        void visit_member_expr(member_expr* expr) override;
-        void visit_lambda_expr(lambda_expr* expr) override;
-        void visit_new_expr(new_expr* expr) override;
-        void visit_ternary_expr(ternary_expr* expr) override;
-        void visit_array_literal_expr(array_literal_expr* expr) override;
-        void visit_map_literal_expr(map_literal_expr* expr) override;
-        void visit_this_expr(this_expr* expr) override;
-        void visit_super_expr(super_expr* expr) override;
-        void visit_throw_expr(throw_expr* expr) override;
-        
+        checked_result<void> visit_literal_expr(literal_expr* expr) override;
+        checked_result<void> visit_identifier_expr(identifier_expr* expr) override;
+        checked_result<void> visit_binary_expr(binary_expr* expr) override;
+        checked_result<void> visit_unary_expr(unary_expr* expr) override;
+        checked_result<void> visit_assignment_expr(assignment_expr* expr) override;
+        checked_result<void> visit_call_expr(call_expr* expr) override;
+        checked_result<void> visit_member_expr(member_expr* expr) override;
+        checked_result<void> visit_lambda_expr(lambda_expr* expr) override;
+        checked_result<void> visit_new_expr(new_expr* expr) override;
+        checked_result<void> visit_ternary_expr(ternary_expr* expr) override;
+        checked_result<void> visit_array_literal_expr(array_literal_expr* expr) override;
+        checked_result<void> visit_map_literal_expr(map_literal_expr* expr) override;
+        checked_result<void> visit_this_expr(this_expr* expr) override;
+        checked_result<void> visit_super_expr(super_expr* expr) override;
+        checked_result<void> visit_throw_expr(throw_expr* expr) override;
+
         // statement visitors
-        void visit_expression_stmt(expression_stmt* stmt) override;
-        void visit_block_stmt(block_stmt* stmt) override;
-        void visit_if_stmt(if_stmt* stmt) override;
-        void visit_while_stmt(while_stmt* stmt) override;
-        void visit_for_stmt(for_stmt* stmt) override;
-        void visit_range_for_stmt(range_for_stmt* stmt) override;
-        void visit_return_stmt(return_stmt* stmt) override;
-        void visit_break_stmt(break_stmt* stmt) override;
-        void visit_continue_stmt(continue_stmt* stmt) override;
-        void visit_try_stmt(try_stmt* stmt) override;
-        void visit_switch_stmt(switch_stmt* stmt) override;
-        void visit_case_stmt(case_stmt* stmt) override;
-        void visit_default_stmt(default_stmt* stmt) override;
-        void visit_fallthrough_stmt(fallthrough_stmt* stmt) override;
-        
+        checked_result<void> visit_expression_stmt(expression_stmt* stmt) override;
+        checked_result<void> visit_block_stmt(block_stmt* stmt) override;
+        checked_result<void> visit_if_stmt(if_stmt* stmt) override;
+        checked_result<void> visit_while_stmt(while_stmt* stmt) override;
+        checked_result<void> visit_for_stmt(for_stmt* stmt) override;
+        checked_result<void> visit_range_for_stmt(range_for_stmt* stmt) override;
+        checked_result<void> visit_return_stmt(return_stmt* stmt) override;
+        checked_result<void> visit_break_stmt(break_stmt* stmt) override;
+        checked_result<void> visit_continue_stmt(continue_stmt* stmt) override;
+        checked_result<void> visit_try_stmt(try_stmt* stmt) override;
+        checked_result<void> visit_switch_stmt(switch_stmt* stmt) override;
+        checked_result<void> visit_case_stmt(case_stmt* stmt) override;
+        checked_result<void> visit_default_stmt(default_stmt* stmt) override;
+        checked_result<void> visit_fallthrough_stmt(fallthrough_stmt* stmt) override;
+
         // declaration visitors
-        void visit_variable_decl(variable_decl* decl) override;
-        void visit_function_decl(function_decl* decl) override;
-        void visit_class_decl(class_decl* decl) override;
-        void visit_expression_decl(expression_decl* decl) override;
-        void visit_include_decl(include_decl* decl) override;
-        void visit_import_decl(import_decl* decl) override;
+        checked_result<void> visit_variable_decl(variable_decl* decl) override;
+        checked_result<void> visit_function_decl(function_decl* decl) override;
+        checked_result<void> visit_class_decl(class_decl* decl) override;
+        checked_result<void> visit_expression_decl(expression_decl* decl) override;
+        checked_result<void> visit_include_decl(include_decl* decl) override;
+        checked_result<void> visit_import_decl(import_decl* decl) override;
         
         // Performance optimization flags
         void set_has_custom_numeric_ops(bool value) { has_custom_numeric_ops_ = value; }
@@ -515,7 +544,7 @@ namespace jai {
         std::optional<script_exception> current_exception_;
         bool is_unwinding_ = false;
         std::optional<script_value> active_exception_value_;  // The exception message as a script_value (optional)
-        
+
         // Class parsing context - tracks unresolved identifiers in methods
         struct class_context {
             std::string class_name;

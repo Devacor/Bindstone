@@ -64,7 +64,7 @@ public:
         return "null";
     }
     
-    int child_count() const { return children.size(); }
+    int child_count() const { return static_cast<int>(children.size()); }
 };
 
 class weak_ptr_tests : public suite {

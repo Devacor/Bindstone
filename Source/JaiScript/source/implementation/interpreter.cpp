@@ -1,5 +1,6 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/containers.hpp>
+#include <jaiscript/core/runtime_errors.hpp>
 #include <stdexcept>
 #include <sstream>
 #include <cmath>
@@ -333,32 +334,14 @@ script_value environment::get(uint64_t id, int depth) const {
 
 void environment::assign(const std::string& name, const script_value& value) {
     uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        it->second = value;
-        return;
-    }
-    
-    if (parent_) {
-        parent_->assign(name, value);
-        return;
-    }
-    
-    throw runtime_error("Undefined variable '" + name + "'");
+    // Use numeric ID for recursion to avoid re-interning at each parent level
+    assign(id, value);
 }
 
 const script_value& environment::get_ref(const std::string& name) const {
     uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        return it->second;
-    }
-    
-    if (parent_) {
-        return parent_->get_ref(name);
-    }
-    
-    throw runtime_error("Undefined variable '" + name + "'");
+    // Use numeric ID for recursion to avoid re-interning at each parent level
+    return get_ref(id);
 }
 
 const script_value& environment::get_ref(uint64_t id) const {
@@ -400,16 +383,8 @@ const script_value& environment::get_ref(uint64_t id, int depth) const {
 
 script_value& environment::get_ref(const std::string& name) {
     uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        return it->second;
-    }
-    
-    if (parent_) {
-        return parent_->get_ref(name);
-    }
-    
-    throw runtime_error("Undefined variable '" + name + "'");
+    // Use numeric ID for recursion to avoid re-interning at each parent level
+    return get_ref(id);
 }
 
 script_value& environment::get_ref(uint64_t id) {
@@ -428,18 +403,8 @@ script_value& environment::get_ref(uint64_t id) {
 
 void environment::assign(const std::string& name, script_value&& value) {
     uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        it->second = std::move(value);
-        return;
-    }
-    
-    if (parent_) {
-        parent_->assign(name, std::move(value));
-        return;
-    }
-    
-    throw runtime_error("Undefined variable '" + name + "'");
+    // Use numeric ID for recursion to avoid re-interning at each parent level
+    assign(id, std::move(value));
 }
 
 void environment::assign(uint64_t id, const script_value& value) {
@@ -476,10 +441,8 @@ void environment::assign(uint64_t id, script_value&& value) {
 
 bool environment::contains(const std::string& name) const {
     uint64_t id = symbolizer_->intern(name);
-    if (values_.find(id) != values_.end()) {
-        return true;
-    }
-    return parent_ ? parent_->contains(name) : false;
+    // Use numeric ID for recursion to avoid re-interning at each parent level
+    return contains(id);
 }
 
 bool environment::contains(uint64_t id) const {
@@ -902,30 +865,19 @@ void method_environment::assign(uint64_t id, const script_value& value) {
 
 // static_method_environment implementation
 script_value static_method_environment::get(const std::string& name) const {
-    std::cout << "[DEBUG] static_method_environment::get('" << name << "') called" << std::endl;
-    std::cout << "[DEBUG] class_def_ = " << (class_def_ ? "valid" : "null") << std::endl;
-
     // First try normal environment lookup
     try {
-        auto result = environment::get(name);
-        std::cout << "[DEBUG] Found '" << name << "' in parent environment" << std::endl;
-        return result;
+        return environment::get(name);
     } catch (const runtime_error&) {
-        std::cout << "[DEBUG] Not in parent environment, checking static members" << std::endl;
-
         // If not found, check static fields
         if (class_def_ && class_def_->has_static_field(name)) {
-            std::cout << "[DEBUG] Found '" << name << "' as static field" << std::endl;
             return class_def_->get_static_field(name);
         }
-        std::cout << "[DEBUG] Not a static field" << std::endl;
 
         // Also check static methods (for calling other static methods)
         if (class_def_ && class_def_->has_static_method(name)) {
-            std::cout << "[DEBUG] Found '" << name << "' as static method" << std::endl;
             return class_def_->get_static_method(name);
         }
-        std::cout << "[DEBUG] Not a static method either, throwing error" << std::endl;
 
         // Re-throw the original error
         throw;
@@ -939,13 +891,16 @@ script_value static_method_environment::get(uint64_t id) const {
     } catch (const runtime_error&) {
         // If not found, check static fields
         const std::string& name = symbolizer_->get_string(id);
+
         if (class_def_ && class_def_->has_static_field(name)) {
             return class_def_->get_static_field(name);
         }
+
         // Also check static methods (for calling other static methods)
         if (class_def_ && class_def_->has_static_method(name)) {
             return class_def_->get_static_method(name);
         }
+
         // Re-throw the original error
         throw runtime_error("Undefined variable '" + name + "'");
     }
@@ -1033,21 +988,46 @@ void static_method_environment::assign(const std::string& name, const script_val
         it->second = value;
         return;
     }
-    
+
     // Check parent environments
     if (parent_ && parent_->contains(name)) {
         parent_->assign(name, value);
         return;
     }
-    
+
     // Check if it's a static field
     if (class_def_ && class_def_->has_static_field(name)) {
         class_def_->set_static_field(name, value);
         return;
     }
-    
-    // Not found anywhere - define it locally
-    define(name, value);
+
+    // Not found anywhere - throw error
+    throw runtime_error("Undefined variable '" + name + "'");
+}
+
+void static_method_environment::assign(const std::string& name, script_value&& value) {
+    // First check if it's a local variable or parameter
+    uint64_t id = symbolizer_->intern(name);
+    auto it = values_.find(id);
+    if (it != values_.end()) {
+        it->second = std::move(value);
+        return;
+    }
+
+    // Check parent environments
+    if (parent_ && parent_->contains(name)) {
+        parent_->assign(name, std::move(value));
+        return;
+    }
+
+    // Check if it's a static field
+    if (class_def_ && class_def_->has_static_field(name)) {
+        class_def_->set_static_field(name, value);
+        return;
+    }
+
+    // Not found anywhere - throw error
+    throw runtime_error("Undefined variable '" + name + "'");
 }
 
 void static_method_environment::assign(uint64_t id, const script_value& value) {
@@ -1055,7 +1035,12 @@ void static_method_environment::assign(uint64_t id, const script_value& value) {
     assign(name, value);
 }
 
-interpreter::interpreter() 
+void static_method_environment::assign(uint64_t id, script_value&& value) {
+    const std::string& name = symbolizer_->get_string(id);
+    assign(name, std::move(value));
+}
+
+interpreter::interpreter()
     : ownedSymbolizer_(std::make_unique<string_symbolizer>()),
       string_symbolizer_(ownedSymbolizer_.get()),
       environment_(std::make_shared<environment>(string_symbolizer_)),
@@ -1127,13 +1112,13 @@ void interpreter::prepare_for_execution() {
     valueStack_.clear();
     returnValue_ = make_value();
     hasReturnValue_ = false;
-    
+
     // Clear exception state
     current_exception_.reset();
     is_unwinding_ = false;
     active_exception_value_ = make_value();
     current_catch_var_.clear();
-    
+
     // Reset to global scope but keep all variables defined at global scope
     // Only pop scopes if we're in a nested scope
     while (environment_->parent_) {
@@ -1143,7 +1128,7 @@ void interpreter::prepare_for_execution() {
 }
 
 void interpreter::push_scope() {
-    environment_ = std::make_shared<environment>(environment_, string_symbolizer_);
+    environment_ = get_pooled_environment(environment_);  // Use pool instead of make_shared!
 }
 
 void interpreter::pop_scope() {
@@ -1160,7 +1145,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
     // std::cerr << "DEBUG: interpreter::execute called with " << declarations.size() << " declarations\n";
     script_value last_script_value = script_value::make_null(engine_ref_);
     hasReturnValue_ = false;  // Reset return value state
-    
+
     for (size_t i = 0; i < declarations.size(); i++) {
         const auto& decl = declarations[i];
         // std::cerr << "  Declaration " << i << " type: " << typeid(*decl).name() << "\n";
@@ -1168,7 +1153,11 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         // Execute declaration with exception handling
         try {
             // std::cerr << "  About to visit declaration " << i << "\n";
-            decl->accept(this);
+            auto result = decl->accept(this);
+            if (!result) [[unlikely]] {
+                // Convert error code to exception at boundary
+                throw std::system_error(result.error());
+            }
             // std::cerr << "  Finished visiting declaration " << i << "\n";
         } catch (const script_exception& e) {
             // Convert to interpreter exception state
@@ -1181,7 +1170,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
             current_exception_ = script_exception(e.what());
             is_unwinding_ = true;
         }
-        
+
         // Check if we're unwinding due to an uncaught exception
         if (is_unwinding_) {
             // Stop executing further declarations
@@ -1216,7 +1205,11 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
 }
 
 script_value interpreter::evaluate(expression_ptr expr) {
-    expr->accept(this);
+    auto result = expr->accept(this);
+    if (!result) {
+        // Return null on error
+        return script_value::make_null(engine_ref_);
+    }
     return pop_value();
 }
 
@@ -1236,7 +1229,7 @@ std::unordered_map<std::string, script_value> interpreter::get_all_variables() c
 
 
 // expression visitors
-void interpreter::visit_literal_expr(literal_expr* expr) {
+checked_result<void> interpreter::visit_literal_expr(literal_expr* expr) {
     // Literals are created at parse time without engine references
     // Create a new value with the proper engine reference based on the literal's type
     switch (expr->value.type()) {
@@ -1264,15 +1257,16 @@ void interpreter::visit_literal_expr(literal_expr* expr) {
             push_value(expr->value);
             break;
     }
+    return checked_result<void>();
 }
 
-void interpreter::visit_identifier_expr(identifier_expr* expr) {
+checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
     if (expr->name == "getValue") {
     }
     // Check if this identifier is the current catch variable
     if (!current_catch_var_.empty() && expr->name == current_catch_var_) {
         push_value(active_exception_value_.value());
-        return;
+        return checked_result<void>();
     }
     
     // Special handling for type constructors like weak_ptr<T>, shared_ptr<T>
@@ -1287,7 +1281,7 @@ void interpreter::visit_identifier_expr(identifier_expr* expr) {
             script_value constructor_func = environment_->get(base_type);
             if (constructor_func.is_function()) {
                 push_value(constructor_func);
-                return;
+                return checked_result<void>();
             }
         } catch (const runtime_error&) {
             // Fall through to normal error handling
@@ -1301,20 +1295,20 @@ void interpreter::visit_identifier_expr(identifier_expr* expr) {
     
     // Try to get the variable from environment
     try {
-        
+
         const script_value& val = environment_->get_ref(expr->symbol_id);
         push_value(val.deref());  // Automatically handles references
-    } catch (const runtime_error& e) {
+    } catch (const runtime_error&) {
         // If we're in a class method context, collect unresolved identifier
         if (current_class_context_ && current_class_context_->in_method) {
             // Add to unresolved identifiers for later validation
             current_class_context_->unresolved_identifiers.insert(expr->name);
             // Push a placeholder value to continue parsing
             push_value(make_value());
-            return;
+            return checked_result<void>();
         }
-        
-        
+
+
         // Variable not found - check if it's a member of 'this'
         try {
             script_value this_val = environment_->get("this");
@@ -1322,7 +1316,7 @@ void interpreter::visit_identifier_expr(identifier_expr* expr) {
                 // Try to access as a member of 'this'
                 auto obj_holder = this_val.get_object_holder();
                 std::shared_ptr<class_instance> instance;
-                
+
                 // For C++ classes, is_cpp_class_instance is true and data is class_instance
                 if (obj_holder->is_cpp_class_instance) {
                     instance = std::static_pointer_cast<class_instance>(obj_holder->data);
@@ -1330,19 +1324,19 @@ void interpreter::visit_identifier_expr(identifier_expr* expr) {
                     // For script classes, the data IS a class_instance directly
                     instance = std::static_pointer_cast<class_instance>(obj_holder->data);
                 }
-                
+
                 if (instance) {
                     // Check instance fields first
                     if (instance->has_field(expr->name)) {
                         push_value(instance->get_field(expr->name));
-                        return;
+                        return checked_result<void>();
                     }
-                    
+
                     // Check for static fields of the class
                     auto class_def = instance->get_class_definition();
                     if (class_def && class_def->has_static_field(expr->name)) {
                         push_value(class_def->get_static_field(expr->name));
-                        return;
+                        return checked_result<void>();
                     }
                 }
             }
@@ -1350,16 +1344,13 @@ void interpreter::visit_identifier_expr(identifier_expr* expr) {
             // No 'this' in scope
         }
 
-        // Set exception state instead of throwing C++ exception
-        active_exception_value_ = make_value("Undefined variable '" + expr->name + "'");
-        current_exception_ = script_exception("Undefined variable '" + expr->name + "'", expr->location);
-        is_unwinding_ = true;
-        push_value(make_value());  // Push null for failed variable access
-        return;
+        // Use error code instead of exception state
+        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable  // [ErrorText] Undefined variable
     }
+    return checked_result<void>();
 }
 
-void interpreter::visit_binary_expr(binary_expr* expr) {
+checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
     // ULTRA-FAST PATH: Literal expressions like "2 + 3" - avoid all AST traversal
     if (auto* leftLit = dynamic_cast<literal_expr*>(expr->left.get())) {
         if (auto* rightLit = dynamic_cast<literal_expr*>(expr->right.get())) {
@@ -1374,42 +1365,46 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
                 switch (expr->op.type) {
                     case token_type::plus:
                         push_value(make_value(leftInt + rightInt));
-                        return;
+                        return {};
                     case token_type::minus:
                         push_value(make_value(leftInt - rightInt));
-                        return;
+                        return {};
                     case token_type::star:
                         push_value(make_value(leftInt * rightInt));
-                        return;
+                        return {};
                     case token_type::slash:
-                        if (rightInt == 0) throw runtime_error("Division by zero");
+                        if (rightInt == 0) {
+                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));  // [ErrorText] Division by zero
+                        }
                         push_value(make_value(leftInt / rightInt));
-                        return;
+                        return {};
                     case token_type::percent:
-                        if (rightInt == 0) throw runtime_error("Division by zero");
+                        if (rightInt == 0) {
+                            return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero));  // [ErrorText] Modulo by zero
+                        }
                         push_value(make_value(leftInt % rightInt));
-                        return;
+                        return {};
                     case token_type::less:
                         push_value(make_value(leftInt < rightInt));
-                        return;
+                        return {};
                     case token_type::less_equal:
                         push_value(make_value(leftInt <= rightInt));
-                        return;
+                        return {};
                     case token_type::greater:
                         push_value(make_value(leftInt > rightInt));
-                        return;
+                        return {};
                     case token_type::greater_equal:
                         push_value(make_value(leftInt >= rightInt));
-                        return;
+                        return {};
                     case token_type::equal_equal:
                         push_value(make_value(leftInt == rightInt));
-                        return;
+                        return {};
                     case token_type::bang_equal:
                         push_value(make_value(leftInt != rightInt));
-                        return;
+                        return {};
                     case token_type::spaceship:
                         push_value(make_value(leftInt < rightInt ? script_int(-1) : (leftInt > rightInt ? script_int(1) : script_int(0))));
-                        return;
+                        return {};
                     default:
                         break; // Fall through to normal path
                 }
@@ -1422,42 +1417,46 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
                 switch (expr->op.type) {
                     case token_type::plus:
                         push_value(make_value(leftFloat + rightFloat));
-                        return;
+                        return {};
                     case token_type::minus:
                         push_value(make_value(leftFloat - rightFloat));
-                        return;
+                        return {};
                     case token_type::star:
                         push_value(make_value(leftFloat * rightFloat));
-                        return;
+                        return {};
                     case token_type::slash:
-                        if (rightFloat == 0.0) throw runtime_error("Division by zero");
+                        if (rightFloat == 0.0) {
+                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));  // [ErrorText] Division by zero
+                        }
                         push_value(make_value(leftFloat / rightFloat));
-                        return;
+                        return {};
                     case token_type::percent:
-                        if (rightFloat == 0.0) throw runtime_error("Division by zero");
+                        if (rightFloat == 0.0) {
+                            return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero));  // [ErrorText] Modulo by zero
+                        }
                         push_value(make_value(std::fmod(leftFloat, rightFloat)));
-                        return;
+                        return {};
                     case token_type::less:
                         push_value(make_value(leftFloat < rightFloat));
-                        return;
+                        return {};
                     case token_type::less_equal:
                         push_value(make_value(leftFloat <= rightFloat));
-                        return;
+                        return {};
                     case token_type::greater:
                         push_value(make_value(leftFloat > rightFloat));
-                        return;
+                        return {};
                     case token_type::greater_equal:
                         push_value(make_value(leftFloat >= rightFloat));
-                        return;
+                        return {};
                     case token_type::equal_equal:
                         push_value(make_value(leftFloat == rightFloat));
-                        return;
+                        return {};
                     case token_type::bang_equal:
                         push_value(make_value(leftFloat != rightFloat));
-                        return;
+                        return {};
                     case token_type::spaceship:
                         push_value(make_value(leftFloat < rightFloat ? script_int(-1) : (leftFloat > rightFloat ? script_int(1) : script_int(0))));
-                        return;
+                        return {};
                     default:
                         break;
                 }
@@ -1465,46 +1464,46 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
             // Fast path for string concatenation
             else if (expr->op.type == token_type::plus && leftVal.is_string() && rightVal.is_string()) {
                 push_value(make_value(leftVal.as_string() + rightVal.as_string()));
-                return;
+                return {};
             }
         }
     }
 
     // Handle logical operators specially for short-circuit evaluation
     if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
-        expr->left->accept(this);
+        JAISCRIPT_TRY(expr->left->accept(this));
         script_value left = pop_value();
-        
+
         bool leftTruthy = is_truthy(left);
-        
+
         if (expr->op.type == token_type::ampersand_ampersand) {
             if (!leftTruthy) {
                 push_value(left);  // Short-circuit: return left (falsy)
-                return;
+                return {};
             }
         } else { // pipe_pipe
             if (leftTruthy) {
                 push_value(left);  // Short-circuit: return left (truthy)
-                return;
+                return {};
             }
         }
-        
+
         // Evaluate right side
-        expr->right->accept(this);
+        JAISCRIPT_TRY(expr->right->accept(this));
         // Result is already on stack
-        return;
+        return {};
     }
-    
+
     // Evaluate operands once and use them throughout
-    expr->left->accept(this);
+    JAISCRIPT_TRY(expr->left->accept(this));
     script_value left_raw = pop_value();  // Keep raw value for subscript handling
     script_value left = left_raw.deref();  // Dereferenced version for most operations
-    
-    expr->right->accept(this);
+
+    JAISCRIPT_TRY(expr->right->accept(this));
     // Check if we're unwinding due to an exception in the right expression
     if (is_unwinding_) {
         // Don't try to pop a value that wasn't pushed due to the exception
-        return;
+        return {};
     }
     script_value right = pop_value().deref();  // Handle references safely
     
@@ -1539,7 +1538,7 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
                 const script_function& func = opFunc.as_function();
                 std::vector<script_value> args = {left, right};
                 push_value(func(args));
-                return;
+                return {};
             }
         } catch (const std::exception& e) {
             std::string error = e.what();
@@ -1548,18 +1547,18 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
             }
         }
     }
-    
+
     // Handle subscript operation specially
     if (expr->op.type == token_type::left_bracket) {
         if (left.is_array()) {
             if (!right.is_int()) {
-                throw runtime_error("Array index must be an integer");
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_index_type));  // [ErrorText] Invalid index type
             }
             script_int index = right.as_int();
             const auto& array = left.as_array();
-            
+
             if (index < 0 || index >= static_cast<script_int>(array.size())) {
-                throw runtime_error("Array index out of bounds: " + std::to_string(index));
+                return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds));  // [ErrorText] Index out of bounds
             }
             
             // For arrays, check if this is a true temporary
@@ -1639,7 +1638,7 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
                         const script_function& func = getMethod.as_function();
                         std::vector<script_value> args = {left, right};
                         push_value(func(args));
-                        return;
+                        return {};
                     }
                 } catch (const std::exception&) {
                     // No custom [] operator, continue with error
@@ -1647,49 +1646,50 @@ void interpreter::visit_binary_expr(binary_expr* expr) {
             }
             throw runtime_error("Subscript can only be used on arrays, maps, or types with [] operator");
         }
-        return;
+        return {};
     }
-    
+
     // Use dispatch table for built-in operators with already-evaluated operands
     auto handler = binary_dispatch_table_.find(expr->op.type);
     if (handler != binary_dispatch_table_.end()) {
         script_value result = (this->*handler->second)(left, right);
         push_value(result);
     } else {
-        throw runtime_error("Unknown binary operator");
+        return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));  // [ErrorText] Unknown operator
     }
+    return {};
 }
-void interpreter::visit_unary_expr(unary_expr* expr) {
+checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
     // Fast path for literal unary operations
     if (auto* literal = dynamic_cast<literal_expr*>(expr->operand.get())) {
         const script_value& val = literal->value;
-        
+
         switch (expr->op.type) {
             case token_type::minus:
                 if (val.is_int()) {
                     push_value(make_value(-val.as_int()));
-                    return;
+                    return {};
                 } else if (val.is_float()) {
                     push_value(make_value(-val.as_float()));
-                    return;
+                    return {};
                 }
                 break;
             case token_type::bang:
                 push_value(make_value(!is_truthy(val)));
-                return;
+                return {};
             case token_type::tilde:
                 if (val.is_int()) {
                     push_value(make_value(~val.as_int()));
-                    return;
+                    return {};
                 }
                 break;
             default:
                 break; // Fall through to generic path for increment/decrement
         }
     }
-    
+
     // Generic path - evaluate operand and use existing logic
-    expr->operand->accept(this);
+    JAISCRIPT_TRY(expr->operand->accept(this));
     script_value operand = pop_value();
     
     switch (expr->op.type) {
@@ -1699,18 +1699,18 @@ void interpreter::visit_unary_expr(unary_expr* expr) {
             } else if (operand.is_float()) {
                 push_value(make_value(-operand.as_float()));
             } else {
-                throw runtime_error("Unary minus requires numeric operand");
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));  // [ErrorText] Unary minus requires numeric operand
             }
             break;
-            
+
         case token_type::bang:
             push_value(make_value(!is_truthy(operand)));
             break;
-            
+
         case token_type::tilde:
             // Bitwise NOT
             if (!operand.is_int()) {
-                throw runtime_error("Bitwise NOT requires integer operand");
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));  // [ErrorText] Bitwise NOT requires integer operand
             }
             push_value(make_value(~operand.as_int()));
             break;
@@ -1741,9 +1741,9 @@ void interpreter::visit_unary_expr(unary_expr* expr) {
                         newValue = make_value(val - 1.0);
                     }
                 } else {
-                    throw runtime_error("Cannot increment/decrement non-numeric value");
+                    return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));  // [ErrorText] Cannot increment/decrement non-numeric value
                 }
-                
+
                 // Check if this is a reference variable
                 script_value* varPtr = environment_->get_value_ptr(identifier->symbol_id);
                 if (varPtr && varPtr->is_reference()) {
@@ -1753,7 +1753,7 @@ void interpreter::visit_unary_expr(unary_expr* expr) {
                     // Regular variable assignment
                     environment_->assign(identifier->symbol_id, newValue);
                 }
-                
+
                 // For prefix, return the new value; for postfix, return the old value
                 if (expr->is_postfix) {
                     push_value(std::move(currentValue));
@@ -1761,18 +1761,19 @@ void interpreter::visit_unary_expr(unary_expr* expr) {
                     push_value(std::move(newValue));
                 }
             } else {
-                throw runtime_error("Increment/decrement requires a variable");
+                return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target));  // [ErrorText] Increment/decrement requires a variable
             }
             break;
         }
-            
+
         default:
-            throw runtime_error("Unsupported unary operator");
+            return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));  // [ErrorText] Unknown operator
     }
+    return {};
 }
 
-void interpreter::visit_assignment_expr(assignment_expr* expr) {
-    
+checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
+
     // For compound assignment operators, we need the current value
     if (expr->op.type != token_type::equal) {
         // Get current value of the target
@@ -1782,9 +1783,9 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 identifier->symbol_id = string_symbolizer_->intern(identifier->name);
             }
             script_value currentValue = environment_->get_ref(identifier->symbol_id);
-            
+
             // Evaluate the right-hand side
-            expr->value->accept(this);
+            JAISCRIPT_TRY(expr->value->accept(this));
             script_value rightValue = pop_value();
             
             // Perform the compound operation - try custom operators first, then built-in types
@@ -1793,8 +1794,8 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             
             switch (expr->op.type) {
                 case token_type::plus_equal: {
-                    // Try custom + operator first
-                    if (environment_ && environment_->contains("+")) {
+                    // Only check for custom operators if we know they exist (fast path optimization)
+                    if (has_custom_numeric_ops_ && environment_ && environment_->contains("+")) {
                         try {
                             script_value opFunc = environment_->get("+");
                             if (opFunc.is_function()) {
@@ -1807,7 +1808,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                             // Custom operator failed, try built-in
                         }
                     }
-                    
+
                     // Fall back to built-in operators
                     if (!customOpFound) {
                         if (currentValue.is_int() && rightValue.is_int()) {
@@ -1817,16 +1818,16 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                         } else if (currentValue.is_string() && rightValue.is_string()) {
                             resultValue = make_value(currentValue.as_string() + rightValue.as_string());
                         } else {
-                            throw runtime_error("Invalid operands for +=");
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Invalid operands for +=
                         }
                     }
                     break;
                 }
-                    
+
                 case token_type::minus_equal: {
-                    // Try custom - operator first
+                    // Only check for custom operators if we know they exist (fast path optimization)
                     customOpFound = false;
-                    if (environment_ && environment_->contains("-")) {
+                    if (has_custom_numeric_ops_ && environment_ && environment_->contains("-")) {
                         try {
                             script_value opFunc = environment_->get("-");
                             if (opFunc.is_function()) {
@@ -1847,16 +1848,16 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                         } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
                             resultValue = make_value(currentValue.as_float() - rightValue.as_float());
                         } else {
-                            throw runtime_error("Invalid operands for -=");
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Invalid operands for -=
                         }
                     }
                     break;
                 }
-                    
+
                 case token_type::star_equal: {
-                    // Try custom * operator first
+                    // Only check for custom operators if we know they exist (fast path optimization)
                     customOpFound = false;
-                    if (environment_ && environment_->contains("*")) {
+                    if (has_custom_numeric_ops_ && environment_ && environment_->contains("*")) {
                         try {
                             script_value opFunc = environment_->get("*");
                             if (opFunc.is_function()) {
@@ -1877,31 +1878,31 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                         } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
                             resultValue = make_value(currentValue.as_float() * rightValue.as_float());
                         } else {
-                            throw runtime_error("Invalid operands for *=");
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Invalid operands for *=
                         }
                     }
                     break;
                 }
-                    
+
                 case token_type::slash_equal:
                     if (rightValue.is_int() && rightValue.as_int() == 0) {
-                        throw runtime_error("Division by zero");
+                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));  // [ErrorText] Division by zero
                     }
                     if (rightValue.is_float() && rightValue.as_float() == 0.0) {
-                        throw runtime_error("Division by zero");
+                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));  // [ErrorText] Division by zero
                     }
-                    
+
                     if (currentValue.is_int() && rightValue.is_int()) {
                         resultValue = make_value(currentValue.as_int() / rightValue.as_int());
                     } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
                         resultValue = make_value(currentValue.as_float() / rightValue.as_float());
                     } else {
-                        throw runtime_error("Invalid operands for /=");
+                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Invalid operands for /=
                     }
                     break;
-                    
+
                 default:
-                    throw runtime_error("Unsupported compound assignment operator");
+                    return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));  // [ErrorText] Unknown operator
             }
             
             // Check if this is a reference variable
@@ -1917,11 +1918,11 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
         } else if (auto* memberExpr = dynamic_cast<member_expr*>(expr->target.get())) {
             // Handle compound assignment to member expression (e.g., obj.value += 10)
             // First, get the current value of the property
-            memberExpr->accept(this);
+            JAISCRIPT_TRY(memberExpr->accept(this));
             script_value currentValue = pop_value().deref();
             
             // Evaluate the right-hand side
-            expr->value->accept(this);
+            JAISCRIPT_TRY(expr->value->accept(this));
             script_value rightValue = pop_value();
             
             // Perform the compound operation
@@ -1982,7 +1983,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             
             // Now assign the result back to the property
             // We need to evaluate the object again to get a fresh reference
-            memberExpr->object->accept(this);
+            JAISCRIPT_TRY(memberExpr->object->accept(this));
             script_value objectValue = pop_value();
             
             // Check if it's an object
@@ -1992,7 +1993,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 current_exception_ = script_exception("Cannot assign to member of non-object type", memberExpr->location);
                 is_unwinding_ = true;
                 push_value(make_value());
-                return;
+                return {};
             }
             
             // Extract the class_instance
@@ -2018,7 +2019,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 current_exception_ = script_exception("Cannot assign to non-existent member '" + memberExpr->member + "'", memberExpr->location);
                 is_unwinding_ = true;
                 push_value(make_value());
-                return;
+                return {};
             }
             
             push_value(std::move(resultValue));
@@ -2027,11 +2028,11 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             // This handles subscripts, function calls that return references, etc.
             
             // First, evaluate the target expression to get current value
-            expr->target->accept(this);
+            JAISCRIPT_TRY(expr->target->accept(this));
             script_value currentValue = pop_value();
-            
+
             // Evaluate the right-hand side
-            expr->value->accept(this);
+            JAISCRIPT_TRY(expr->value->accept(this));
             script_value rightValue = pop_value();
             
             // Perform the compound operation
@@ -2081,23 +2082,33 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
             }
             
-            // Now create a regular assignment and execute it
-            auto regularAssignment = std::make_shared<assignment_expr>(
-                expr->location,
-                expr->target,
-                token(token_type::equal, "=", expr->op.location),
-                std::make_shared<literal_expr>(expr->location, resultValue)
-            );
-            regularAssignment->accept(this);
+            // Directly assign the result without creating new AST nodes (optimization)
+            if (auto* identifier = dynamic_cast<identifier_expr*>(expr->target.get())) {
+                // Fast path for simple identifier assignment
+                if (identifier->symbol_id == UINT64_MAX) {
+                    identifier->symbol_id = string_symbolizer_->intern(identifier->name);
+                }
+                environment_->assign(identifier->symbol_id, std::move(resultValue));
+                push_value(resultValue);
+            } else {
+                // Fall back to AST creation for complex lvalues
+                auto regularAssignment = std::make_shared<assignment_expr>(
+                    expr->location,
+                    expr->target,
+                    token(token_type::equal, "=", expr->op.location),
+                    std::make_shared<literal_expr>(expr->location, resultValue)
+                );
+                JAISCRIPT_TRY(regularAssignment->accept(this));
+            }
         }
     } else {
         // Regular assignment
-        
-        expr->value->accept(this);
+
+        JAISCRIPT_TRY(expr->value->accept(this));
         // Check if we're unwinding due to an exception in the value expression
         if (is_unwinding_) {
             // Don't try to pop a value that wasn't pushed due to the exception
-            return;
+            return {};
         }
         script_value value = pop_value();
         
@@ -2135,7 +2146,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                         std::string type_name = type_info ? type_info->type_name : "unknown";
                         throw runtime_error("Cannot assign " + type_name + " to weak_ptr");
                     }
-                } else if (currentVal && currentVal->get_type_info() && 
+                } else if (currentVal && currentVal->get_type_info() &&
                           currentVal->get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
                     // Special handling for shared_ptr assignment
                     if (value.is_null()) {
@@ -2158,36 +2169,42 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                     environment_->assign(identifier->symbol_id, std::move(value.clone()));
                 }
             } else {
-                // Variable doesn't exist - check if it's a member of 'this' or a static field
-                bool assigned_to_this = false;
+                // Variable doesn't exist in environment
+                // Try static_method_environment's assign (which handles static fields)
+                // or instance method's 'this' field assignment
+                bool assigned_to_member = false;
                 try {
                     script_value this_val = environment_->get("this");
                     if (this_val.is_object()) {
                         auto obj_holder = this_val.get_object_holder();
                         if (obj_holder->is_cpp_class_instance || obj_holder->data) {
                             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-                            
+
                             // First try instance fields
                             if (instance->has_field(identifier->name)) {
                                 instance->set_field(identifier->name, std::move(value.clone()));
-                                assigned_to_this = true;
-                            } 
+                                assigned_to_member = true;
+                            }
                             // Then try static fields
                             else {
                                 auto class_def = instance->get_class_definition();
                                 if (class_def && class_def->has_static_field(identifier->name)) {
                                     class_def->set_static_field(identifier->name, value);
-                                    assigned_to_this = true;
+                                    assigned_to_member = true;
                                 }
                             }
                         }
                     }
                 } catch (...) {
-                    // No 'this' in scope
+                    // No 'this' in scope - that's OK, might be in static method
+                    // Let environment->assign() handle it (static_method_environment will check static fields)
                 }
-                
-                if (!assigned_to_this) {
-                    throw runtime_error("Undefined variable '" + identifier->name + "'");
+
+                if (!assigned_to_member) {
+                    // Use environment->assign() which will:
+                    // - For static_method_environment: check static fields, then throw if not found
+                    // - For regular environment: throw error if variable doesn't exist
+                    environment_->assign(identifier->symbol_id, std::move(value.clone()));
                 }
             }
             push_value(std::move(value));  // Assignment expressions return the assigned value
@@ -2221,9 +2238,9 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 }
                 
                 auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
-                
+
                 // Evaluate the value
-                expr->value->accept(this);
+                JAISCRIPT_TRY(expr->value->accept(this));
                 script_value value = pop_value();
                 
                 // Set the static field
@@ -2232,13 +2249,14 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 } catch (const runtime_error& e) {
                     throw runtime_error("Cannot assign to static member: " + std::string(e.what()));
                 }
-                
+
+
                 push_value(value);
-                return;
+                return {};
             }
-            
+
             // Regular member assignment - evaluate the object
-            memberExpr->object->accept(this);
+            JAISCRIPT_TRY(memberExpr->object->accept(this));
             script_value objectValue = pop_value();
             
             // Check if it's an object
@@ -2248,7 +2266,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 current_exception_ = script_exception("Cannot assign to member of non-object type", memberExpr->location);
                 is_unwinding_ = true;
                 push_value(make_value());
-                return;
+                return {};
             }
             
             // Extract the class_instance
@@ -2274,7 +2292,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
                 current_exception_ = script_exception("Cannot assign to non-existent member '" + memberExpr->member + "'", memberExpr->location);
                 is_unwinding_ = true;
                 push_value(make_value());
-                return;
+                return {};
             }
             
             push_value(std::move(value));  // Assignment expressions return the assigned value
@@ -2284,7 +2302,7 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             if (binaryExpr->op.type == token_type::left_bracket) {
                 // Evaluate the entire target expression (e.g., nested["nums"][1])
                 // This should return a reference if it's a valid lvalue
-                expr->target->accept(this);
+                JAISCRIPT_TRY(expr->target->accept(this));
                 script_value target_ref = pop_value();
                 
                 // Check if we got a reference
@@ -2311,29 +2329,33 @@ void interpreter::visit_assignment_expr(assignment_expr* expr) {
             throw runtime_error("Complex assignment targets not yet implemented");
         }
     }
+    return {};
 }
 
 // statement visitors
-void interpreter::visit_expression_stmt(expression_stmt* stmt) {
-    stmt->expression->accept(this);
+checked_result<void> interpreter::visit_expression_stmt(expression_stmt* stmt) {
+    JAISCRIPT_TRY(stmt->expression->accept(this));
 
     // Early exit if exception is propagating
-    if (is_unwinding_) return;
-    
+    if (is_unwinding_) return {};
+
     // For top-level expressions (wrapped in expression_decl), we want to keep the value
     // The execute() method will handle popping it
+    return {};
 }
 
-void interpreter::visit_block_stmt(block_stmt* stmt) {
+checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
     // Create new environment for the block scope
     auto previous = environment_;
-    environment_ = std::make_shared<environment>(environment_, string_symbolizer_);
+    environment_ = get_pooled_environment(environment_);  // Use pool!
 
     try {
         for (const auto& decl : stmt->declarations) {
-            decl->accept(this);
-
-            // Early exit if exception is propagating
+            auto result = decl->accept(this);
+            if (!result) {
+                environment_ = previous;
+                return result;
+            }
             if (is_unwinding_) break;
         }
     } catch (...) {
@@ -2344,9 +2366,10 @@ void interpreter::visit_block_stmt(block_stmt* stmt) {
 
     // Restore previous environment
     environment_ = previous;
+    return {};
 }
 
-void interpreter::visit_variable_decl(variable_decl* decl) {
+checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
     // Check if this is a reference variable declaration
     bool is_reference = false;
     if (decl->type && decl->type->base_type == script_value_type::jai_reference_type) {
@@ -2373,7 +2396,7 @@ void interpreter::visit_variable_decl(variable_decl* decl) {
             environment_->define(decl->name, std::move(weak));
         } else {
             // Evaluate initializer
-            decl->initializer->accept(this);
+            JAISCRIPT_TRY(decl->initializer->accept(this));
             script_value value = pop_value();
             
             // Handle different initialization cases
@@ -2403,7 +2426,7 @@ void interpreter::visit_variable_decl(variable_decl* decl) {
             environment_->define(decl->name, std::move(null_ptr));
         } else {
             // Evaluate initializer
-            decl->initializer->accept(this);
+            JAISCRIPT_TRY(decl->initializer->accept(this));
             script_value value = pop_value();
             
             // Handle different initialization cases
@@ -2461,7 +2484,7 @@ void interpreter::visit_variable_decl(variable_decl* decl) {
             }
         } else {
             // For other expressions, evaluate them and check if they return a reference
-            decl->initializer->accept(this);
+            JAISCRIPT_TRY(decl->initializer->accept(this));
             script_value result = pop_value();
             
             // If the result is a reference, we can create a reference to its target
@@ -2483,16 +2506,17 @@ void interpreter::visit_variable_decl(variable_decl* decl) {
         // Regular variable declaration
         script_value value = script_value::make_null(engine_ref_);
         if (decl->initializer) {
-            decl->initializer->accept(this);
+            JAISCRIPT_TRY(decl->initializer->accept(this));
             value = pop_value();
             // Clone the value for variable declaration with initializer
             // Note: clone() now automatically dereferences references
             value = value.clone();
         }
         // If no initializer, value remains null
-        
+
         environment_->define(decl->name, std::move(value));
     }
+    return {};
 }
 
 // Binary operation helpers
@@ -2733,14 +2757,14 @@ script_value interpreter::evaluate_bitwise(const script_value& left, token_type 
 
 
 // Placeholder implementations for remaining visitors
-void interpreter::visit_call_expr(call_expr* expr) {
+checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     // Evaluate the callee expression
-    expr->callee->accept(this);
+    JAISCRIPT_TRY(expr->callee->accept(this));
     script_value callee = pop_value();
-    
+
     // Check if the callee is a function
     if (!callee.is_function()) {
-        throw runtime_error("Cannot call non-function value");
+        return checked_result<void>(make_error_code(runtime_error_code::not_a_function));  // [ErrorText] Not a function
     }
     
     // Use a local vector for arguments to avoid issues with nested calls
@@ -2764,7 +2788,7 @@ void interpreter::visit_call_expr(call_expr* expr) {
         
         // Evaluate argument with exception handling
         try {
-            argExpr->accept(this);
+            JAISCRIPT_TRY(argExpr->accept(this));
             arguments.emplace_back(std::move(pop_value()));
         } catch (const script_exception& e) {
             // Convert to interpreter exception state
@@ -2772,14 +2796,14 @@ void interpreter::visit_call_expr(call_expr* expr) {
             current_exception_ = e;
             is_unwinding_ = true;
             push_value(make_value());  // Push null for the failed call
-            return;
+            return {};
         } catch (const std::runtime_error& e) {
             // Convert runtime errors to script exceptions
             active_exception_value_ = make_value(std::string(e.what()));
             current_exception_ = script_exception(e.what());
             is_unwinding_ = true;
             push_value(make_value());  // Push null for the failed call
-            return;
+            return {};
         }
     }
     
@@ -2799,7 +2823,7 @@ void interpreter::visit_call_expr(call_expr* expr) {
         current_exception_ = e;
         is_unwinding_ = true;
         push_value(make_value());  // Push a null value since the call failed
-        return;
+        return {};
     } catch (const std::runtime_error& e) {
         // Wrap C++ runtime_error with message and trigger exception handling
         current_arg_metadata_.clear();
@@ -2807,7 +2831,7 @@ void interpreter::visit_call_expr(call_expr* expr) {
         current_exception_ = script_exception(e.what());
         is_unwinding_ = true;
         push_value(make_value());  // Push a null value since the call failed
-        return;
+        return {};
     } catch (const std::exception& e) {
         // Other C++ exceptions use their what() message
         current_arg_metadata_.clear();
@@ -2815,75 +2839,80 @@ void interpreter::visit_call_expr(call_expr* expr) {
         current_exception_ = script_exception(e.what());
         is_unwinding_ = true;
         push_value(make_value());  // Push a null value since the call failed
-        return;
+        return {};
     }
-    
+
     // Clear argument metadata
     current_arg_metadata_.clear();
-    
+
     // Push result onto the stack
     push_value(result);
+    return {};
 }
 
-void interpreter::visit_member_expr(member_expr* expr) {
+checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     // Check if this is a static member access (::)
     if (expr->is_static) {
         // For static access, the object should be a class identifier
         auto* ident_expr = dynamic_cast<identifier_expr*>(expr->object.get());
         if (!ident_expr) {
-            throw runtime_error("Static member access requires a class name");
+            // Static member access requires a class name
+            return checked_result<void>(make_error_code(jai::runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
-        
+
         // Look up the class definition
         std::string class_name = ident_expr->name;
         script_value class_var = script_value::make_null(engine_ref_);
-        
+
         try {
             // Try to find the class definition
             class_var = environment_->get("__class_" + class_name);
         } catch (const runtime_error&) {
-            throw runtime_error("Class '" + class_name + "' not found");
+            // Class not found
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
         }
-        
+
         if (!class_var.is_object()) {
-            throw runtime_error("'" + class_name + "' is not a class");
+            // Not a class
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
-        
+
         // Extract the class definition
         auto objHolder = class_var.get_object_holder();
         if (!objHolder || objHolder->type_name != "class_definition") {
-            throw runtime_error("'" + class_name + "' is not a valid class");
+            // Not a valid class
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
-        
+
         auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
-        
+
         // Try static field first
         try {
             script_value static_value = class_def->get_static_field(expr->member);
             push_value(static_value);
-            return;
+            return {};
         } catch (const runtime_error&) {
             // Field not found, try static method
         }
-        
+
         // Try static method
         try {
             script_value static_method = class_def->get_static_method(expr->member);
             push_value(static_method);
-            return;
+            return {};
         } catch (const runtime_error&) {
             // Method not found either
         }
-        
-        throw runtime_error("Class '" + class_name + "' has no static member '" + expr->member + "'");
-        return;
+
+        // Class has no static member
+        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
     }
-    
+
     // Check if this is a super:: member access
     bool is_super_access = dynamic_cast<super_expr*>(expr->object.get()) != nullptr;
-    
+
     // Evaluate the object expression
-    expr->object->accept(this);
+    JAISCRIPT_TRY(expr->object->accept(this));
     script_value objectValue = pop_value();
     
     // Dereference if needed - subscript access returns references
@@ -2893,41 +2922,47 @@ void interpreter::visit_member_expr(member_expr* expr) {
     if (is_super_access) {
         // objectValue is 'this' from visit_super_expr
         if (!objectValue.is_object()) {
-            throw runtime_error("super:: used on non-object");
+            // super:: used on non-object
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
-        
+
         // Get the class instance
         auto objHolder = objectValue.get_object_holder();
         if (!objHolder || !objHolder->data) {
-            throw runtime_error("super:: used on non-class object");
+            // super:: used on non-class object
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
-        
+
         // Both script and C++ classes store class_instance in data
         auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
         if (!instance) {
-            throw runtime_error("super:: used on non-class object");
+            // super:: used on non-class object
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
-        
+
         // Get the class definition and its parent
         auto class_def = instance->get_class_definition();
         if (!class_def) {
-            throw runtime_error("Class definition not found for super:: access");
+            // Class definition not found for super:: access
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
-        
+
         auto parent_def = class_def->get_parent();
         if (!parent_def) {
-            throw runtime_error("super:: used in class with no parent");
+            // super:: used in class with no parent
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
-        
+
         // Look for the method in the parent class
         script_value method = parent_def->get_method(expr->member);
         if (method.is_null()) {
-            throw runtime_error("Parent class has no method '" + expr->member + "'");
+            // Parent class has no method
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
         }
-        
+
         // Return a bound method that calls the parent's implementation
         push_value(create_bound_method(objectValue, method));
-        return;
+        return {};
     }
     
     // Handle array methods
@@ -2936,14 +2971,14 @@ void interpreter::visit_member_expr(member_expr* expr) {
         if (methodIt != arrayMethods_.end()) {
             // Found the method in the registry
             const builtin_method& method = methodIt->second;
-            
+
             // Create a wrapper function that captures the array value by moving it
             script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> script_value {
                 return method(this, capturedValue, args);
             };
-            
+
             push_value(script_value::make_function(boundMethod, engine_ref_));
-            return;
+            return {};
         }
         else {
             // Set exception state instead of throwing
@@ -2951,47 +2986,49 @@ void interpreter::visit_member_expr(member_expr* expr) {
             current_exception_ = script_exception("Array has no method '" + expr->member + "'", expr->location);
             is_unwinding_ = true;
             push_value(make_value());
-            return;
+            return {};
         }
     }
-    
+
     // Handle map methods
     if (objectValue.is_map()) {
         auto methodIt = mapMethods_.find(expr->member);
         if (methodIt != mapMethods_.end()) {
             // Found the method in the registry
             const builtin_method& method = methodIt->second;
-            
+
             // Create a wrapper function that captures the map value by moving it
             script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> script_value {
                 return method(this, capturedValue, args);
             };
-            
+
             push_value(script_value::make_function(boundMethod, engine_ref_));
-            return;
+            return {};
         }
         else {
-            throw runtime_error("Map has no method '" + expr->member + "'");
+            // Map has no method
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
         }
     }
-    
+
     // Handle weak_ptr methods
     if (objectValue.is_weak_ptr()) {
         auto methodIt = weakPtrMethods_.find(expr->member);
         if (methodIt != weakPtrMethods_.end()) {
             // Found the method in the registry
             const builtin_method& method = methodIt->second;
-            
+
             // Create a wrapper function that captures the weak_ptr value by moving it
             script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> script_value {
                 return method(this, capturedValue, args);
             };
-            
+
             push_value(script_value::make_function(boundMethod, engine_ref_));
-            return;
+            return {};
         }
         else {
-            throw runtime_error("weak_ptr has no method '" + expr->member + "'");
+            // weak_ptr has no method
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
         }
     }
     
@@ -3004,32 +3041,33 @@ void interpreter::visit_member_expr(member_expr* expr) {
             if (methodIt != sharedPtrMethods_.end()) {
                 // Found the method in the registry
                 const builtin_method& method = methodIt->second;
-                
+
                 // Create a wrapper function that captures the shared_ptr value by moving it
                 script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> script_value {
                     return method(this, capturedValue, args);
                 };
-                
+
                 push_value(script_value::make_function(boundMethod, engine_ref_));
-                return;
+                return {};
             }
             // If method not found, fall through to regular object member access
         }
     }
-    
+
     // Check if it's an object
     if (!objectValue.is_object()) {
-        throw runtime_error("Cannot access member '" + expr->member + "' on non-object type");
+        // Cannot access member on non-object type
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
-    
+
     // Extract the class_instance from the object
     // Access the object_holder directly since we're a friend class
     auto objHolder = objectValue.get_object_holder();
-    
-    
+
+
     // Get the class_instance - could be script or C++ class
     std::shared_ptr<class_instance> instance;
-    
+
     // For C++ classes, is_cpp_class_instance is true and data is class_instance
     if (objHolder->is_cpp_class_instance) {
         instance = std::static_pointer_cast<class_instance>(objHolder->data);
@@ -3038,11 +3076,12 @@ void interpreter::visit_member_expr(member_expr* expr) {
         // Try to cast it (will fail if it's not a class_instance)
         instance = std::static_pointer_cast<class_instance>(objHolder->data);
     }
-    
+
     if (!instance) {
-        throw runtime_error("Cannot access member '" + expr->member + "' on non-class object");
+        // Cannot access member on non-class object
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
-    
+
     // First check if it's a field (registered by the property() method)
     bool has_field_result = instance->has_field(expr->member);
     if (has_field_result) {
@@ -3056,7 +3095,7 @@ void interpreter::visit_member_expr(member_expr* expr) {
                     const script_function& func = getter.as_function();
                     std::vector<script_value> args = {objectValue};
                     push_value(func(args));
-                    return;
+                    return {};
                 }
             } catch (const std::exception&) {
                 // If get_method fails (e.g., class definition expired), fall back to direct field access
@@ -3064,27 +3103,28 @@ void interpreter::visit_member_expr(member_expr* expr) {
         }
         // Return the field value directly (for script classes or if no getter)
         push_value(instance->get_field(expr->member));
-        return;
+        return {};
     }
-    
+
     // Otherwise, look for a method (pass false to avoid throwing)
     script_value method = instance->get_method(expr->member, false);
     if (!method.is_null() && !method.is_invalid()) {
         // Return a bound method (function that has 'this' pre-bound)
         // We'll create a wrapper function that includes the object as first argument
         push_value(create_bound_method(objectValue, method));
-        return;
+        return {};
     }
-    
+
     // Set exception state instead of throwing
     active_exception_value_ = make_value("Object has no member '" + expr->member + "'");
     current_exception_ = script_exception("Object has no member '" + expr->member + "'", expr->location);
     is_unwinding_ = true;
     push_value(make_value());  // Push null for failed member access
+    return {};
 }
 
-void interpreter::visit_lambda_expr(lambda_expr* expr) {
-    
+checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
+
     // Capture current environment for closure
     auto closure_env = environment_;
     
@@ -3221,7 +3261,8 @@ void interpreter::visit_lambda_expr(lambda_expr* expr) {
                         script_value refValue = script_value::make_reference(targetPtr, environment_);
                         captureEnv->define(capture.name, std::move(refValue));
                     } else {
-                        throw runtime_error("Cannot capture variable by reference: " + capture.name);
+                        // Cannot capture variable by reference
+                        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
                     }
                 } else {
                     // Capture by value - deep copy at capture time
@@ -3229,7 +3270,8 @@ void interpreter::visit_lambda_expr(lambda_expr* expr) {
                     captureEnv->define(capture.name, capturedValue.clone());
                 }
             } else {
-                throw runtime_error("Cannot capture undefined variable: " + capture.name);
+                // Cannot capture undefined variable
+                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
             }
         }
         
@@ -3281,50 +3323,54 @@ void interpreter::visit_lambda_expr(lambda_expr* expr) {
     script_function funcWrapper = [this, lambdaFunc](const std::vector<script_value>& args) -> script_value {
         return call_function(*lambdaFunc, args);
     };
-    
+
     // Push the lambda as a function value
     push_value(script_value::make_function(funcWrapper, engine_ref_));
+    return {};
 }
 
-void interpreter::visit_new_expr(new_expr* expr) {
+checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
     // This handles expressions like: new Point(), new Point(3.0, 4.0), etc.
     // The new_expr contains a type and arguments
-    
+
     // std::cerr << "DEBUG: visit_new_expr called for type: " << (expr->type ? expr->type->type_name : "NULL") << std::endl;
-    
+
     if (!expr->type) {
-        throw runtime_error("New expression missing type information");
+        // New expression missing type information
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
-    
+
     // Handle built-in types specially
     if (expr->type->base_type == script_value_type::jai_array_type) {
         // array<T>{} constructor
         if (!expr->arguments.empty()) {
-            throw runtime_error("array{} constructor does not take arguments");
+            // array{} constructor does not take arguments
+            return checked_result<void>(make_error_code(runtime_error_code::argument_count_mismatch));  // [ErrorText] Invalid argument count
         }
-        
+
         // Create empty array with the specified element type
         auto element_type = expr->type->element_type();
         if (!element_type) {
             element_type = type_info::make_int(); // Default to int if no type specified
         }
         push_value(script_value::make_array(element_type));
-        return;
+        return {};
     }
-    
+
     if (expr->type->base_type == script_value_type::jai_map_type) {
         // map<K,V>{} constructor
         if (!expr->arguments.empty()) {
-            throw runtime_error("map{} constructor does not take arguments");
+            // map{} constructor does not take arguments
+            return checked_result<void>(make_error_code(runtime_error_code::argument_count_mismatch));  // [ErrorText] Invalid argument count
         }
-        
+
         // Create empty map with the specified key/value types
         auto key_type = expr->type->key_type();
         auto value_type = expr->type->value_type();
         if (!key_type) key_type = type_info::make_string();
         if (!value_type) value_type = type_info::make_int();
         push_value(script_value::make_map(key_type, value_type));
-        return;
+        return {};
     }
     
     if (expr->type->base_type == script_value_type::jai_weak_ptr_type) {
@@ -3334,40 +3380,40 @@ void interpreter::visit_new_expr(new_expr* expr) {
             push_value(script_value::make_empty_weak_ptr(expr->type, engine_ref_));
         } else if (expr->arguments.size() == 1) {
             // One argument - create weak_ptr from object
-            expr->arguments[0]->accept(this);
+            JAISCRIPT_TRY(expr->arguments[0]->accept(this));
             script_value obj = pop_value();
-            
+
             // Handle null objects
             if (obj.is_null()) {
                 push_value(script_value::make_empty_weak_ptr(expr->type, engine_ref_));
-                return;
+                return {};
             }
-            
+
             // Allow creating weak_ptr from:
             // 1. Another weak_ptr (copy constructor)
             // 2. A shared_ptr (which in JaiScript is any object)
             // 3. A raw object (jai_object_type)
-            
+
             if (obj.is_weak_ptr()) {
                 // Copy constructor - just return the weak_ptr as-is
                 push_value(obj);
-                return;
+                return {};
             }
-            
+
             // shared_ptr and objects are both jai_object_type internally
             if (obj.type() != script_value_type::jai_object_type) {
-                auto type_info = obj.get_type_info();
-                std::string type_name = type_info ? type_info->type_name : "unknown";
-                throw runtime_error("weak_ptr can only be created from objects, shared_ptr, or other weak_ptrs, got " + type_name);
+                // weak_ptr can only be created from objects
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
             }
-            
+
             // Type validation is optional - in C++ you can have weak_ptr<Base> from shared_ptr<Derived>
             // For now, we'll create the weak_ptr without strict type checking
             push_value(script_value::make_weak_ptr(obj, engine_ref_));
         } else {
-            throw runtime_error("weak_ptr() expects 0 or 1 arguments, got " + std::to_string(expr->arguments.size()));
+            // weak_ptr() expects 0 or 1 arguments
+            return checked_result<void>(make_error_code(runtime_error_code::argument_count_mismatch));  // [ErrorText] Invalid argument count
         }
-        return;
+        return {};
     }
     
     if (expr->type->base_type == script_value_type::jai_shared_ptr_type) {
@@ -3377,51 +3423,52 @@ void interpreter::visit_new_expr(new_expr* expr) {
             push_value(script_value::make_null(engine_ref_));
         } else if (expr->arguments.size() == 1) {
             // One argument - validate and return
-            expr->arguments[0]->accept(this);
+            JAISCRIPT_TRY(expr->arguments[0]->accept(this));
             script_value obj = pop_value();
-            
+
             // Handle null
             if (obj.is_null()) {
                 push_value(obj);
-                return;
+                return {};
             }
-            
+
             // Allow creating shared_ptr from:
             // 1. Another shared_ptr (which is any object in JaiScript)
             // 2. A raw object (jai_object_type)
             // Note: Cannot create shared_ptr from weak_ptr directly - need to use lock()
-            
+
             if (obj.is_weak_ptr()) {
-                throw runtime_error("Cannot create shared_ptr directly from weak_ptr - use weak.lock() instead");
+                // Cannot create shared_ptr directly from weak_ptr
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
             }
-            
+
             // Only allow objects (which are already internally shared_ptr)
             if (obj.type() != script_value_type::jai_object_type) {
-                auto type_info = obj.get_type_info();
-                std::string type_name = type_info ? type_info->type_name : "unknown";
-                throw runtime_error("shared_ptr can only be created from objects or other shared_ptrs, got " + type_name);
+                // shared_ptr can only be created from objects
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
             }
-            
+
             // The object is already a shared_ptr internally
             // Update its type info to reflect that it's explicitly a shared_ptr
             // This ensures reference semantics in assignments
             obj.set_type_info(expr->type);
             push_value(obj);
         } else {
-            throw runtime_error("shared_ptr() expects 0 or 1 arguments, got " + std::to_string(expr->arguments.size()));
+            // shared_ptr() expects 0 or 1 arguments
+            return checked_result<void>(make_error_code(runtime_error_code::argument_count_mismatch));  // [ErrorText] Invalid argument count
         }
-        return;
+        return {};
     }
     
     std::string className = expr->type->type_name;
-    
+
     // Evaluate all arguments
     std::vector<script_value> args;
     for (const auto& argExpr : expr->arguments) {
-        argExpr->accept(this);
+        JAISCRIPT_TRY(argExpr->accept(this));
         args.push_back(std::move(pop_value()));
     }
-    
+
     // Look for a constructor function registered with this class name
     // The class builder registers constructors as overloaded functions
     try {
@@ -3432,114 +3479,122 @@ void interpreter::visit_new_expr(new_expr* expr) {
             const script_function& func = constructorFunc.as_function();
             script_value instance = func(args);
             push_value(std::move(instance));
-            return;
+            return {};
         }
         // std::cerr << "DEBUG: Constructor found but not a function for: " << className << std::endl;
-    } catch (const runtime_error& e) {
+    } catch (const runtime_error&) {
         // Constructor function not found, fall through to error
         // std::cerr << "DEBUG: Constructor not found for: " << className << " - " << e.what() << std::endl;
     }
-    
-    throw runtime_error("No constructor found for class: " + className);
+
+    // No constructor found for class
+    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));
 }
 
-void interpreter::visit_ternary_expr(ternary_expr* expr) {
+checked_result<void> interpreter::visit_ternary_expr(ternary_expr* expr) {
     // Evaluate the condition
-    expr->condition->accept(this);
+    JAISCRIPT_TRY(expr->condition->accept(this));
     script_value conditionValue = pop_value();
-    
+
     // Check if condition is truthy
     bool conditionIsTruthy = is_truthy(conditionValue);
-    
+
     // Evaluate only the selected branch (short-circuit evaluation)
     if (conditionIsTruthy) {
-        expr->then_expression->accept(this);
+        JAISCRIPT_TRY(expr->then_expression->accept(this));
     } else {
-        expr->else_expression->accept(this);
+        JAISCRIPT_TRY(expr->else_expression->accept(this));
     }
+    return {};
 }
 
-void interpreter::visit_array_literal_expr(array_literal_expr* expr) {
+checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* expr) {
     // Create array script_value with mixed element type (for now)
     auto element_type = type_info::make_int(); // TODO: Better type inference
     script_value arrayValue = script_value::make_array(element_type, engine_ref_);
-    
+
     // Get the internal vector to populate
     auto& array = const_cast<std::vector<script_value>&>(arrayValue.as_array());
-    
+
     // Evaluate each element and add to array
     for (const auto& element : expr->elements) {
-        element->accept(this);
+        JAISCRIPT_TRY(element->accept(this));
         array.push_back(pop_value());
     }
-    
+
     push_value(std::move(arrayValue));
+    return {};
 }
 
-void interpreter::visit_map_literal_expr(map_literal_expr* expr) {
+checked_result<void> interpreter::visit_map_literal_expr(map_literal_expr* expr) {
     // Create map script_value with mixed key/value types (for now)
     auto keyType = type_info::make_string(); // TODO: Better type inference
     auto valueType = type_info::make_int(); // TODO: Better type inference
     script_value mapValue = script_value::make_map(keyType, valueType, engine_ref_);
-    
+
     // Get the internal map to populate
     auto& map = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
-    
+
     // Evaluate each key-value pair and add to map
     for (const auto& entry : expr->entries) {
         // Evaluate key
-        entry.first->accept(this);
+        JAISCRIPT_TRY(entry.first->accept(this));
         script_value key = pop_value();
-        
+
         // Evaluate value
-        entry.second->accept(this);
+        JAISCRIPT_TRY(entry.second->accept(this));
         script_value value = pop_value();
-        
+
         // Insert into map
         map.insert_or_assign(std::move(key), std::move(value));
     }
-    
+
     push_value(std::move(mapValue));
+    return {};
 }
 
-void interpreter::visit_this_expr(this_expr* expr) {
+checked_result<void> interpreter::visit_this_expr(this_expr* expr) {
     // If we're in a class method context during parsing, allow 'this'
     if (current_class_context_ && current_class_context_->in_method) {
         // Push a placeholder value to continue parsing
         push_value(make_value());
-        return;
+        return {};
     }
-    
+
     // Try to get 'this' from the current environment
     try {
         script_value this_val = environment_->get("this");
         push_value(this_val);
-    } catch (const runtime_error& e) {
-        throw runtime_error("'this' can only be used inside methods");
+    } catch (const runtime_error&) {
+        // 'this' can only be used inside methods
+        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
     }
+    return {};
 }
 
-void interpreter::visit_super_expr(super_expr* expr) {
+checked_result<void> interpreter::visit_super_expr(super_expr* expr) {
     // Super expression is used for accessing parent class methods: super::method()
     // Constructor delegation (Enemy() : super()) is handled in the parser/constructor
-    
+
     // Get 'this' from the environment - super only makes sense in instance methods
     auto this_value = environment_->get("this");
     if (this_value.is_null()) {
-        throw runtime_error("'super' used outside of class method");
+        // 'super' used outside of class method
+        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
     }
-    
+
     // Push 'this' onto the stack - visit_member_expr will handle the parent lookup
     // when it detects that the object expression is a super_expr
     push_value(this_value);
+    return {};
 }
 
-void interpreter::visit_throw_expr(throw_expr* expr) {
+checked_result<void> interpreter::visit_throw_expr(throw_expr* expr) {
     if (expr->value) {
         // Evaluate the expression to throw
-        expr->value->accept(this);
+        JAISCRIPT_TRY(expr->value->accept(this));
         script_value val = pop_value();
-        
+
         // Store the exception value and convert to string for exception message
         active_exception_value_ = val;
         std::string message = val.to_string();
@@ -3547,41 +3602,45 @@ void interpreter::visit_throw_expr(throw_expr* expr) {
     } else {
         // Re-throw current exception
         if (!current_exception_) {
+            // No exception to re-throw (note: this uses exception unwinding, not error codes)
             throw script_exception("No exception to re-throw", expr->location);
         }
         // Keep the existing active_exception_value_
     }
-    
+
     is_unwinding_ = true;
+    return {};
 }
 
-void interpreter::visit_if_stmt(if_stmt* stmt) {
+checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
     // Evaluate the condition
-    stmt->condition->accept(this);
+    JAISCRIPT_TRY(stmt->condition->accept(this));
     script_value conditionValue = pop_value();
-    
+
     // Execute appropriate branch based on truthiness
     if (is_truthy(conditionValue)) {
-        stmt->then_statement->accept(this);
+        JAISCRIPT_TRY(stmt->then_statement->accept(this));
     } else if (stmt->else_statement) {
-        stmt->else_statement->accept(this);
+        JAISCRIPT_TRY(stmt->else_statement->accept(this));
     }
+    return {};
 }
 
-void interpreter::visit_while_stmt(while_stmt* stmt) {
+checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
     while (true) {
         // Evaluate the condition
-        stmt->condition->accept(this);
+        JAISCRIPT_TRY(stmt->condition->accept(this));
         script_value conditionValue = pop_value();
-        
+
         // Check if we should continue the loop
         if (!is_truthy(conditionValue)) {
             break;
         }
-        
+
         try {
             // Execute the loop body
-            stmt->body->accept(this);
+            auto result = stmt->body->accept(this);
+            if (!result) return result;
         } catch (const break_exception&) {
             // Break out of the loop
             break;
@@ -3589,45 +3648,62 @@ void interpreter::visit_while_stmt(while_stmt* stmt) {
             // Continue to next iteration
             continue;
         }
-        
+
         // Check if a return statement was executed
         if (hasReturnValue_) {
             break;
         }
     }
+    return {};
 }
 
-void interpreter::visit_for_stmt(for_stmt* stmt) {
+checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
     // Create new scope for the for loop (initialization variables should be scoped)
     auto previous = environment_;
-    environment_ = std::make_shared<environment>(environment_, string_symbolizer_);
-    
+    environment_ = get_pooled_environment(environment_);  // Use pool instead of make_shared!
+
     try {
         // Execute initialization (if present)
         if (stmt->initializer) {
-            stmt->initializer->accept(this);
+            auto result = stmt->initializer->accept(this);
+            if (!result) {
+                environment_ = previous;
+                return result;
+            }
         }
-        
+
         while (true) {
             // Check condition (if present, default to true)
             if (stmt->condition) {
-                stmt->condition->accept(this);
+                auto result = stmt->condition->accept(this);
+                if (!result) {
+                    environment_ = previous;
+                    return result;
+                }
                 script_value conditionValue = pop_value();
                 if (!is_truthy(conditionValue)) {
                     break;
                 }
             }
-            
+
             try {
                 // Execute the loop body
-                stmt->body->accept(this);
+                auto result = stmt->body->accept(this);
+                if (!result) {
+                    environment_ = previous;
+                    return result;
+                }
             } catch (const break_exception&) {
                 // Break out of the loop
                 break;
             } catch (const continue_exception&) {
                 // Continue to next iteration, but execute update first
                 if (stmt->update) {
-                    stmt->update->accept(this);
+                    auto result = stmt->update->accept(this);
+                    if (!result) {
+                        environment_ = previous;
+                        return result;
+                    }
                     // Pop the update result if it leaves a value on the stack
                     if (!valueStack_.empty()) {
                         pop_value();
@@ -3635,15 +3711,19 @@ void interpreter::visit_for_stmt(for_stmt* stmt) {
                 }
                 continue;
             }
-            
+
             // Check if a return statement was executed
             if (hasReturnValue_) {
                 break;
             }
-            
+
             // Execute update expression (if present)
             if (stmt->update) {
-                stmt->update->accept(this);
+                auto result = stmt->update->accept(this);
+                if (!result) {
+                    environment_ = previous;
+                    return result;
+                }
                 // Pop the update result if it leaves a value on the stack
                 if (!valueStack_.empty()) {
                     pop_value();
@@ -3655,27 +3735,28 @@ void interpreter::visit_for_stmt(for_stmt* stmt) {
         environment_ = previous;
         throw;
     }
-    
+
     // Restore previous environment
     environment_ = previous;
+    return {};
 }
 
-void interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
+checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
     // Evaluate the container expression
-    stmt->container->accept(this);
+    JAISCRIPT_TRY(stmt->container->accept(this));
     script_value container = pop_value();
-    
+
     // Create a new scope for the loop variable
     push_scope();
-    
+
     try {
         if (container.is_array()) {
             // Iterate over array
             auto& array_storage = get_array_storage(container);
-            
+
             for (size_t i = 0; i < array_storage->size(); ++i) {
                 script_value loop_var = script_value::make_null(engine_ref_);
-                
+
                 if (stmt->is_reference) {
                     // Create a reference to the actual array element
                     loop_var = script_value::make_reference(&(*array_storage)[i], environment_, engine_ref_);
@@ -3683,19 +3764,23 @@ void interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     // Make a copy of the element
                     loop_var = (*array_storage)[i].clone();
                 }
-                
+
                 // Define the loop variable in current scope
                 environment_->define(stmt->variable_name, std::move(loop_var));
-                
+
                 // Execute loop body
                 try {
-                    stmt->body->accept(this);
+                    auto body_result = stmt->body->accept(this);
+                    if (!body_result) {
+                        pop_scope();
+                        return body_result;
+                    }
                 } catch (const continue_exception&) {
                     continue; // Skip to next iteration
                 } catch (const break_exception&) {
                     break; // Exit loop
                 }
-                
+
                 // Check for return or exception
                 if (hasReturnValue_ || is_unwinding_) {
                     break;
@@ -3729,27 +3814,30 @@ void interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                             const script_function& func = pairConstructor.as_function();
                             loop_var = func(args);
                         } else {
-                            throw runtime_error("pair type not registered - make sure stdlib is loaded");
+                            pop_scope();
+                            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] pair type not registered - make sure stdlib is loaded
                         }
                     } else {
                         // For copies, use regular pair constructor
                         std::vector<script_value> args;
                         args.push_back(it->first.clone());
                         args.push_back(it->second.clone());
-                        
+
                         // Look up the pair constructor function using symbol ID
                         uint64_t pair_symbol_id = string_symbolizer_->intern("pair");
                         script_value pairConstructor = environment_->get_ref(pair_symbol_id);
-                        
+
                         if (pairConstructor.is_function()) {
                             const script_function& func = pairConstructor.as_function();
                             loop_var = func(args);
                         } else {
-                            throw runtime_error("pair type not registered - make sure stdlib is loaded");
+                            pop_scope();
+                            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] pair type not registered - make sure stdlib is loaded
                         }
                     }
-                } catch (const runtime_error& e) {
-                    throw runtime_error("Failed to create pair for map iteration: " + std::string(e.what()));
+                } catch (const runtime_error&) {
+                    pop_scope();
+                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Failed to create pair for map iteration
                 }
                 
                 // Define the loop variable in current scope
@@ -3757,7 +3845,11 @@ void interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 
                 // Execute loop body
                 try {
-                    stmt->body->accept(this);
+                    auto body_result = stmt->body->accept(this);
+                    if (!body_result) {
+                        pop_scope();
+                        return body_result;
+                    }
                 } catch (const continue_exception&) {
                     continue; // Skip to next iteration
                 } catch (const break_exception&) {
@@ -3769,50 +3861,56 @@ void interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     break;
                 }
             }
-            
+
         } else {
-            throw runtime_error("Range-based for loop requires an array or map, got unsupported type");
+            pop_scope();
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Range-based for loop requires an array or map
         }
-        
+
     } catch (const break_exception&) {
         // Break caught from inner loop
     } catch (const continue_exception&) {
         // Continue should not escape the loop
-        throw runtime_error("'continue' statement not in loop");
+        pop_scope();
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] 'continue' statement not in loop
     }
-    
+
     // Pop the loop scope
     pop_scope();
+    return {};
 }
 
-void interpreter::visit_return_stmt(return_stmt* stmt) {
+checked_result<void> interpreter::visit_return_stmt(return_stmt* stmt) {
     if (stmt->value) {
         // Evaluate the return expression
-        stmt->value->accept(this);
+        JAISCRIPT_TRY(stmt->value->accept(this));
         returnValue_ = std::move(pop_value());
     } else {
         // Return null if no expression
         returnValue_ = make_value();
     }
-    
+
     hasReturnValue_ = true;
+    return {};
 }
 
-void interpreter::visit_break_stmt(break_stmt* stmt) {
+checked_result<void> interpreter::visit_break_stmt(break_stmt* stmt) {
     throw break_exception();
+    return {};  // Unreachable but needed for signature
 }
 
-void interpreter::visit_continue_stmt(continue_stmt* stmt) {
+checked_result<void> interpreter::visit_continue_stmt(continue_stmt* stmt) {
     throw continue_exception();
+    return {};  // Unreachable but needed for signature
 }
 
-void interpreter::visit_try_stmt(try_stmt* stmt) {
+checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
     // Save exception state
     auto saved_exception = current_exception_;
     auto saved_unwinding = is_unwinding_;
     auto saved_exception_value = active_exception_value_;
     auto saved_catch_var = current_catch_var_;
-    
+
     // Reset state for try block
     // Don't reset exception state if we're in a catch block (allows re-throw)
     if (current_catch_var_.empty()) {
@@ -3821,31 +3919,38 @@ void interpreter::visit_try_stmt(try_stmt* stmt) {
     }
     is_unwinding_ = false;
     current_catch_var_.clear();
-    
+
     // Execute try block
-    stmt->try_block->accept(this);
-    
+    auto try_result = stmt->try_block->accept(this);
+    // Don't propagate errors from try block - that's what catch is for
+    // Just continue to check if exception was thrown
+
     // Check if exception was thrown
     if (is_unwinding_ && current_exception_) {
         // Reset unwinding flag
         is_unwinding_ = false;
-        
+
         // Set the current catch variable name so identifier lookup can find it
         current_catch_var_ = stmt->catch_var;
-        
+
         // Execute catch block
-        stmt->catch_block->accept(this);
-        
+        auto catch_result = stmt->catch_block->accept(this);
+        // Propagate errors from catch block
+        if (!catch_result) {
+            current_catch_var_ = saved_catch_var;
+            return catch_result;
+        }
+
         // Clear catch variable
         current_catch_var_.clear();
-        
+
         // Only clear exception if it wasn't re-thrown
         if (!is_unwinding_) {
             current_exception_.reset();
             active_exception_value_ = make_value();
         }
     }
-    
+
     // If still unwinding after catch, we need to be careful about state restoration
     // Don't restore if a new exception was thrown in the catch block
     if (is_unwinding_ && saved_unwinding) {
@@ -3853,43 +3958,49 @@ void interpreter::visit_try_stmt(try_stmt* stmt) {
         current_exception_ = saved_exception;
         active_exception_value_ = saved_exception_value;
     }
-    // If is_unwinding_ is true but saved_unwinding was false, 
+    // If is_unwinding_ is true but saved_unwinding was false,
     // it means a new exception was thrown in the catch block - keep it
-    
+
     // Always restore the catch variable state
     current_catch_var_ = saved_catch_var;
+    return {};
 }
 
-void interpreter::visit_switch_stmt(switch_stmt* stmt) {
+checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
     // Evaluate the switch condition
-    stmt->condition->accept(this);
+    JAISCRIPT_TRY(stmt->condition->accept(this));
     script_value switch_value = pop_value();
-    
+
     // Save and set switch state
     bool old_in_switch = in_switch_;
     bool old_should_fallthrough = should_fallthrough_;
     in_switch_ = true;
     should_fallthrough_ = false;
-    
+
     try {
         bool matched = false;
         bool executed_case = false;
-        
+
         // Check each case
         for (const auto& case_stmt : stmt->cases) {
             // Evaluate case value
-            case_stmt->value->accept(this);
+            auto result = case_stmt->value->accept(this);
+            if (!result) {
+                in_switch_ = old_in_switch;
+                should_fallthrough_ = old_should_fallthrough;
+                return result;
+            }
             script_value case_value = pop_value();
-            
+
             // Check if values match using operator==
             bool case_matches = false;
             try {
                 case_matches = (switch_value == case_value);
-            } catch (const std::exception& e) {
+            } catch (const std::exception&) {
                 // If comparison fails, treat as non-match
                 case_matches = false;
             }
-            
+
             // Execute case if it matches OR if we're falling through from a previous case
             if (case_matches || (executed_case && should_fallthrough_)) {
                 matched = true;
@@ -3900,11 +4011,17 @@ void interpreter::visit_switch_stmt(switch_stmt* stmt) {
 
                 // Create a new scope for the case body (like an if statement)
                 auto previous = environment_;
-                environment_ = std::make_shared<environment>(environment_, string_symbolizer_);
+                environment_ = get_pooled_environment(environment_);  // Use pool!
 
                 try {
                     // Execute case body
-                    case_stmt->accept(this);
+                    auto case_result = case_stmt->accept(this);
+                    if (!case_result) {
+                        environment_ = previous;
+                        in_switch_ = old_in_switch;
+                        should_fallthrough_ = old_should_fallthrough;
+                        return case_result;
+                    }
 
                     // Restore the previous environment
                     environment_ = previous;
@@ -3926,10 +4043,16 @@ void interpreter::visit_switch_stmt(switch_stmt* stmt) {
         if ((!matched || (executed_case && should_fallthrough_)) && stmt->default_case) {
             // Create a new scope for the default body
             auto previous = environment_;
-            environment_ = std::make_shared<environment>(environment_, string_symbolizer_);
+            environment_ = get_pooled_environment(environment_);  // Use pool!
 
             try {
-                stmt->default_case->accept(this);
+                auto default_result = stmt->default_case->accept(this);
+                if (!default_result) {
+                    environment_ = previous;
+                    in_switch_ = old_in_switch;
+                    should_fallthrough_ = old_should_fallthrough;
+                    return default_result;
+                }
 
                 // Restore the previous environment
                 environment_ = previous;
@@ -3942,51 +4065,57 @@ void interpreter::visit_switch_stmt(switch_stmt* stmt) {
     } catch (const break_exception&) {
         // Break out of switch - this is expected behavior
     }
-    
+
     // Restore switch state
     in_switch_ = old_in_switch;
     should_fallthrough_ = old_should_fallthrough;
+    return {};
 }
 
-void interpreter::visit_case_stmt(case_stmt* stmt) {
+checked_result<void> interpreter::visit_case_stmt(case_stmt* stmt) {
     // Execute all statements in the case body
     // Note: The scope is created by visit_switch_stmt when it decides to execute this case
     for (const auto& s : stmt->body) {
-        s->accept(this);
-        
+        auto result = s->accept(this);
+        if (!result) return result;
+
         // Check for break or return
         if (hasReturnValue_ || is_unwinding_) {
             break;
         }
     }
+    return {};
 }
 
-void interpreter::visit_default_stmt(default_stmt* stmt) {
+checked_result<void> interpreter::visit_default_stmt(default_stmt* stmt) {
     // Execute all statements in the default body
     // Note: The scope is created by visit_switch_stmt when it decides to execute the default
     for (const auto& s : stmt->body) {
-        s->accept(this);
-        
+        auto result = s->accept(this);
+        if (!result) return result;
+
         // Check for break or return
         if (hasReturnValue_ || is_unwinding_) {
             break;
         }
     }
+    return {};
 }
 
-void interpreter::visit_fallthrough_stmt(fallthrough_stmt* stmt) {
+checked_result<void> interpreter::visit_fallthrough_stmt(fallthrough_stmt* stmt) {
     // Set flag to continue to next case
     should_fallthrough_ = true;
+    return {};
 }
 
-void interpreter::visit_function_decl(function_decl* decl) {
+checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
     // Pre-cache symbol IDs for all parameters (parameter binding optimization)
     for (auto& param : decl->parameters) {
         if (param.symbol_id == UINT64_MAX) {
             param.symbol_id = string_symbolizer_->intern(param.name);
         }
     }
-    
+
     // Don't capture any environment in the closure - just use nullptr
     // The environment stack will handle variable lookup naturally
     auto scriptFunc = std::make_shared<script_defined_function>(
@@ -3996,17 +4125,18 @@ void interpreter::visit_function_decl(function_decl* decl) {
         decl->body,
         nullptr  // No closure needed - environment stack handles everything
     );
-    
+
     // Create wrapper function
     script_value functionValue = script_value::make_function([this, scriptFunc](const std::vector<script_value>& args) -> script_value {
         return call_function(*scriptFunc, args);
     }, engine_ref_);
-    
+
     // Define the function in current environment
     environment_->define(decl->name, functionValue);
+    return {};
 }
 
-void interpreter::visit_class_decl(class_decl* decl) {
+checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     // Set up class parsing context
     class_context prev_context;
     bool had_context = false;
@@ -4076,7 +4206,7 @@ void interpreter::visit_class_decl(class_decl* decl) {
     if (!decl->base_classes.empty()) {
         // For now, only support single inheritance
         if (decl->base_classes.size() > 1) {
-            throw runtime_error("Multiple inheritance not supported");
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Multiple inheritance not supported
         }
         
         // Look up base class definition
@@ -4097,7 +4227,7 @@ void interpreter::visit_class_decl(class_decl* decl) {
                 auto base_class_def = std::static_pointer_cast<class_definition>(objHolder->data);
                 class_def->set_parent(base_class_def);
             } else {
-                throw runtime_error("Base class '" + base_name + "' is not a valid class definition");
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Base class is not a valid class definition
             }
         } else {
             // Try to find a C++ class using the class lookup callback
@@ -4106,22 +4236,22 @@ void interpreter::visit_class_decl(class_decl* decl) {
                 if (cpp_class_def) {
                     // Found a C++ class! Set it as the base
                     class_def->set_cpp_base_class(cpp_class_def);
-                    
+
                     // Also set as regular parent for method resolution
                     class_def->set_parent(cpp_class_def);
                 } else if (environment_->contains(base_name)) {
                     // Constructor exists but no class definition found
                     // This shouldn't happen with proper engine integration
-                    throw runtime_error("Constructor found for '" + base_name + "' but no class definition available");
+                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Constructor found but no class definition available
                 } else {
-                    throw runtime_error("Base class not found: " + base_name);
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Base class not found
                 }
             } else {
                 // No class lookup callback set - check if constructor exists
                 if (environment_->contains(base_name)) {
-                    throw runtime_error("Script class inheriting from C++ class requires engine integration");
+                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Script class inheriting from C++ class requires engine integration
                 } else {
-                    throw runtime_error("Base class not found: " + base_name);
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Base class not found
                 }
             }
         }
@@ -4151,16 +4281,16 @@ void interpreter::visit_class_decl(class_decl* decl) {
                         field_name = ident_expr->name;
                     }
                     // Get the RHS value
-                    assign_expr->value->accept(this);
+                    JAISCRIPT_TRY(assign_expr->value->accept(this));
                     default_val = pop_value();
-                    
+
                     // Ensure the default value has an engine reference
                     if (default_val.get_engine_ref().expired() && !engine_ref_.expired()) {
                         default_val.set_engine_ref(engine_ref_);
                     }
                 } else {
                     // Normal initializer expression
-                    var_decl->initializer->accept(this);
+                    JAISCRIPT_TRY(var_decl->initializer->accept(this));
                     default_val = pop_value();
                 }
                 
@@ -4209,7 +4339,7 @@ void interpreter::visit_class_decl(class_decl* decl) {
                         std::static_pointer_cast<function_decl>(member.declaration),
                         this
                     );
-                } catch (const runtime_error& e) {
+                } catch (const runtime_error&) {
                     // Reset in_method flag on error
                     if (current_class_context_) {
                         current_class_context_->in_method = false;
@@ -4236,7 +4366,7 @@ void interpreter::visit_class_decl(class_decl* decl) {
                         std::static_pointer_cast<function_decl>(member.declaration),
                         this
                     );
-                } catch (const runtime_error& e) {
+                } catch (const runtime_error&) {
                     // Reset in_method flag on error
                     if (current_class_context_) {
                         current_class_context_->in_method = false;
@@ -4414,12 +4544,17 @@ void interpreter::visit_class_decl(class_decl* decl) {
                         // Temporarily switch to init environment for argument evaluation
                         auto old_env = self->environment_;
                         self->environment_ = init_env;
-                        
+
                         for (const auto& arg_expr : initializer.arguments) {
-                            arg_expr->accept(self.get());
+                            auto result = arg_expr->accept(self.get());
+                            if (!result) {
+                                // Restore environment before throwing
+                                self->environment_ = old_env;
+                                throw runtime_error("Failed to evaluate constructor initializer argument");
+                            }
                             init_args.push_back(self->pop_value());
                         }
-                        
+
                         // Restore environment
                         self->environment_ = old_env;
                         
@@ -4489,12 +4624,17 @@ void interpreter::visit_class_decl(class_decl* decl) {
                     // Temporarily switch to init environment for argument evaluation
                     auto old_env = self->environment_;
                     self->environment_ = init_env;
-                    
+
                     for (const auto& arg_expr : initializer.arguments) {
-                        arg_expr->accept(self.get());
+                        auto result = arg_expr->accept(self.get());
+                        if (!result) {
+                            // Restore environment before throwing
+                            self->environment_ = old_env;
+                            throw runtime_error("Failed to evaluate constructor initializer argument");
+                        }
                         init_args.push_back(self->pop_value());
                     }
-                    
+
                     // Restore environment
                     self->environment_ = old_env;
                     
@@ -4704,101 +4844,109 @@ void interpreter::visit_class_decl(class_decl* decl) {
                 if (i > 0) error_msg += ", ";
                 error_msg += "'" + undefined_identifiers[i] + "'";
             }
-            throw runtime_error(error_msg);
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined identifiers in class
         }
     }
-    
+
     // Store the class definition in a special variable for later retrieval
     // This allows inheritance and other features to work
     environment_->define(class_var_name, script_value::make_object("class_definition", class_def, engine_ref_));
 
     // The constructor function is already registered in the environment
     // which allows "new ClassName()" syntax to work
+    return {};
 }
 
-void interpreter::visit_expression_decl(expression_decl* decl) {
+checked_result<void> interpreter::visit_expression_decl(expression_decl* decl) {
     // Evaluate the expression and leave the result on the stack
     // This allows top-level expressions to return values
-    decl->expression->accept(this);
+    return decl->expression->accept(this);
 }
 
-void interpreter::visit_include_decl(include_decl* decl) {
+checked_result<void> interpreter::visit_include_decl(include_decl* decl) {
     // Get the engine reference
     auto engine_ptr = engine_ref_.lock();
     if (!engine_ptr) {
-        throw runtime_error("Engine reference expired during include processing");
+        // [ErrorText] Engine reference expired during include processing
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
-    
+
     // Get the path either from literal or expression
     std::string path;
     if (decl->path_expr) {
         // Evaluate the expression to get the path
-        decl->path_expr->accept(this);
+        JAISCRIPT_TRY(decl->path_expr->accept(this));
         script_value path_value = pop_value();
-        
+
         // Convert to string
         if (path_value.type() != script_value_type::jai_string_type) {
-            throw runtime_error("Include path expression must evaluate to a string");
+            // [ErrorText] Include path expression must evaluate to a string
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
         }
         path = path_value.as<std::string>();
     } else {
         // Use the literal path
         path = decl->path;
     }
-    
+
     // Resolve the file path
     std::string resolved_path = resolve_include_path(path, engine_ptr);
-    
+
     // Read the file contents
     std::ifstream file(resolved_path);
     if (!file.is_open()) {
-        throw runtime_error("Failed to open include file: " + path + " (resolved to: " + resolved_path + ")");
+        // [ErrorText] Failed to open include file
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
-    
+
     std::stringstream buffer;
     buffer << file.rdbuf();
     std::string content = buffer.str();
-    
+
     // Execute the included file
     // Note: include always parses and executes the file
     auto result = engine_ptr->execute(content);
-    
+
     // Push the result onto the value stack
     push_value(result);
+    return {};
 }
 
-void interpreter::visit_import_decl(import_decl* decl) {
+checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
     // Get the engine reference
     auto engine_ptr = engine_ref_.lock();
     if (!engine_ptr) {
-        throw runtime_error("Engine reference expired during import processing");
+        // [ErrorText] Engine reference expired during import processing
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
-    
+
     // Get the path either from literal or expression
     std::string path;
     if (decl->path_expr) {
         // Evaluate the expression to get the path
-        decl->path_expr->accept(this);
+        JAISCRIPT_TRY(decl->path_expr->accept(this));
         script_value path_value = pop_value();
-        
+
         // Convert to string
         if (path_value.type() != script_value_type::jai_string_type) {
-            throw runtime_error("Import path expression must evaluate to a string");
+            // [ErrorText] Import path expression must evaluate to a string
+            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
         }
         path = path_value.as<std::string>();
     } else {
         // Use the literal path
         path = decl->path;
     }
-    
+
     // Resolve the file path
     std::string resolved_path = resolve_include_path(path, engine_ptr);
-    
+
     // Use the engine's public API to handle import with tracking
     auto result = engine_ptr->execute_import(resolved_path);
-    
+
     // Push the result onto the value stack
     push_value(result);
+    return {};
 }
 
 // Execute a method AST with a given environment
@@ -4918,7 +5066,16 @@ script_value interpreter::call_function(const script_defined_function& function,
         // Execute function body without creating another environment
         // (since we already created one for the function call)
         for (const auto& decl : function.body->declarations) {
-            decl->accept(this);
+            auto result = decl->accept(this);
+
+            // Check for error codes
+            if (!result) {
+                environment_ = previousEnv;
+                hasReturnValue_ = previousHasReturn;
+                returnValue_ = previousReturn;
+                return make_value();  // Return null on error
+            }
+
             // Check if we hit a return statement and break early
             if (hasReturnValue_) {
                 break;

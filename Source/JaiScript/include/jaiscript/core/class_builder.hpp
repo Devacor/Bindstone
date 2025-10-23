@@ -1035,7 +1035,7 @@ public:
 
                     // Return the class_instance wrapped in a value
                     return script_value::make_object(class_name, instance, engine_ref);
-                } catch (const std::exception& e) {
+                } catch (const std::exception&) {
                     throw;
                 }
             });

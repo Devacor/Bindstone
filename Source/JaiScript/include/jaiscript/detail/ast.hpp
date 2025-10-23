@@ -6,6 +6,7 @@
 #include <jaiscript/core/types.hpp>
 #include <jaiscript/core/type_info.hpp>
 #include <jaiscript/core/value.hpp>
+#include <jaiscript/core/checked_result.hpp>
 #include "lexer.hpp"
 #include <memory>
 #include <vector>
@@ -53,55 +54,55 @@ namespace jai {
     public:
         virtual ~ast_visitor() = default;
         // expression visitors
-        virtual void visit_literal_expr(class literal_expr* expr) = 0;
-        virtual void visit_identifier_expr(class identifier_expr* expr) = 0;
-        virtual void visit_binary_expr(class binary_expr* expr) = 0;
-        virtual void visit_unary_expr(class unary_expr* expr) = 0;
-        virtual void visit_assignment_expr(class assignment_expr* expr) = 0;
-        virtual void visit_call_expr(class call_expr* expr) = 0;
-        virtual void visit_member_expr(class member_expr* expr) = 0;
-        virtual void visit_lambda_expr(class lambda_expr* expr) = 0;
-        virtual void visit_new_expr(class new_expr* expr) = 0;
-        virtual void visit_ternary_expr(class ternary_expr* expr) = 0;
-        virtual void visit_array_literal_expr(class array_literal_expr* expr) = 0;
-        virtual void visit_map_literal_expr(class map_literal_expr* expr) = 0;
-        virtual void visit_this_expr(class this_expr* expr) = 0;
-        virtual void visit_super_expr(class super_expr* expr) = 0;
-        virtual void visit_throw_expr(class throw_expr* expr) = 0;
-        
+        virtual checked_result<void> visit_literal_expr(class literal_expr* expr) = 0;
+        virtual checked_result<void> visit_identifier_expr(class identifier_expr* expr) = 0;
+        virtual checked_result<void> visit_binary_expr(class binary_expr* expr) = 0;
+        virtual checked_result<void> visit_unary_expr(class unary_expr* expr) = 0;
+        virtual checked_result<void> visit_assignment_expr(class assignment_expr* expr) = 0;
+        virtual checked_result<void> visit_call_expr(class call_expr* expr) = 0;
+        virtual checked_result<void> visit_member_expr(class member_expr* expr) = 0;
+        virtual checked_result<void> visit_lambda_expr(class lambda_expr* expr) = 0;
+        virtual checked_result<void> visit_new_expr(class new_expr* expr) = 0;
+        virtual checked_result<void> visit_ternary_expr(class ternary_expr* expr) = 0;
+        virtual checked_result<void> visit_array_literal_expr(class array_literal_expr* expr) = 0;
+        virtual checked_result<void> visit_map_literal_expr(class map_literal_expr* expr) = 0;
+        virtual checked_result<void> visit_this_expr(class this_expr* expr) = 0;
+        virtual checked_result<void> visit_super_expr(class super_expr* expr) = 0;
+        virtual checked_result<void> visit_throw_expr(class throw_expr* expr) = 0;
+
         // statement visitors
-        virtual void visit_expression_stmt(class expression_stmt* stmt) = 0;
-        virtual void visit_block_stmt(class block_stmt* stmt) = 0;
-        virtual void visit_if_stmt(class if_stmt* stmt) = 0;
-        virtual void visit_while_stmt(class while_stmt* stmt) = 0;
-        virtual void visit_for_stmt(class for_stmt* stmt) = 0;
-        virtual void visit_range_for_stmt(class range_for_stmt* stmt) = 0;
-        virtual void visit_return_stmt(class return_stmt* stmt) = 0;
-        virtual void visit_break_stmt(class break_stmt* stmt) = 0;
-        virtual void visit_continue_stmt(class continue_stmt* stmt) = 0;
-        virtual void visit_try_stmt(class try_stmt* stmt) = 0;
-        virtual void visit_switch_stmt(class switch_stmt* stmt) = 0;
-        virtual void visit_case_stmt(class case_stmt* stmt) = 0;
-        virtual void visit_default_stmt(class default_stmt* stmt) = 0;
-        virtual void visit_fallthrough_stmt(class fallthrough_stmt* stmt) = 0;
-        
+        virtual checked_result<void> visit_expression_stmt(class expression_stmt* stmt) = 0;
+        virtual checked_result<void> visit_block_stmt(class block_stmt* stmt) = 0;
+        virtual checked_result<void> visit_if_stmt(class if_stmt* stmt) = 0;
+        virtual checked_result<void> visit_while_stmt(class while_stmt* stmt) = 0;
+        virtual checked_result<void> visit_for_stmt(class for_stmt* stmt) = 0;
+        virtual checked_result<void> visit_range_for_stmt(class range_for_stmt* stmt) = 0;
+        virtual checked_result<void> visit_return_stmt(class return_stmt* stmt) = 0;
+        virtual checked_result<void> visit_break_stmt(class break_stmt* stmt) = 0;
+        virtual checked_result<void> visit_continue_stmt(class continue_stmt* stmt) = 0;
+        virtual checked_result<void> visit_try_stmt(class try_stmt* stmt) = 0;
+        virtual checked_result<void> visit_switch_stmt(class switch_stmt* stmt) = 0;
+        virtual checked_result<void> visit_case_stmt(class case_stmt* stmt) = 0;
+        virtual checked_result<void> visit_default_stmt(class default_stmt* stmt) = 0;
+        virtual checked_result<void> visit_fallthrough_stmt(class fallthrough_stmt* stmt) = 0;
+
         // declaration visitors
-        virtual void visit_variable_decl(class variable_decl* decl) = 0;
-        virtual void visit_function_decl(class function_decl* decl) = 0;
-        virtual void visit_class_decl(class class_decl* decl) = 0;
-        virtual void visit_expression_decl(class expression_decl* decl) = 0;
-        virtual void visit_include_decl(class include_decl* decl) = 0;
-        virtual void visit_import_decl(class import_decl* decl) = 0;
+        virtual checked_result<void> visit_variable_decl(class variable_decl* decl) = 0;
+        virtual checked_result<void> visit_function_decl(class function_decl* decl) = 0;
+        virtual checked_result<void> visit_class_decl(class class_decl* decl) = 0;
+        virtual checked_result<void> visit_expression_decl(class expression_decl* decl) = 0;
+        virtual checked_result<void> visit_include_decl(class include_decl* decl) = 0;
+        virtual checked_result<void> visit_import_decl(class import_decl* decl) = 0;
     };
     
     // Base AST node
     class ast_node {
     public:
         source_location location;
-        
+
         ast_node(const source_location& loc) : location(loc) {}
         virtual ~ast_node() = default;
-        virtual void accept(ast_visitor* visitor) = 0;
+        [[nodiscard]] virtual checked_result<void> accept(ast_visitor* visitor) = 0;
     };
     
     // Base expression node
@@ -116,12 +117,12 @@ namespace jai {
     class literal_expr : public expression {
     public:
         script_value value;
-        
-        literal_expr(const source_location& loc, const script_value& val) 
+
+        literal_expr(const source_location& loc, const script_value& val)
             : expression(loc), value(val) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_literal_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_literal_expr(this);
         }
     };
     
@@ -130,12 +131,12 @@ namespace jai {
     public:
         std::string name;
         mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID, computed lazily
-        
+
         identifier_expr(const source_location& loc, const std::string& n)
             : expression(loc), name(n) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_identifier_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_identifier_expr(this);
         }
     };
     
@@ -148,9 +149,9 @@ namespace jai {
         
         binary_expr(const source_location& loc, expression_ptr l, const token& o, expression_ptr r)
             : expression(loc), left(l), op(o), right(r) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_binary_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_binary_expr(this);
         }
     };
     
@@ -163,41 +164,41 @@ namespace jai {
         
         unary_expr(const source_location& loc, const token& o, expression_ptr expr, bool postfix = false)
             : expression(loc), op(o), operand(expr), is_postfix(postfix) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_unary_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_unary_expr(this);
         }
     };
-    
+
     // Assignment expression
     class assignment_expr : public expression {
     public:
         expression_ptr target;
         token op;
         expression_ptr value;
-        
+
         assignment_expr(const source_location& loc, expression_ptr t, const token& o, expression_ptr v)
             : expression(loc), target(t), op(o), value(v) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_assignment_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_assignment_expr(this);
         }
     };
-    
+
     // Function call expression
     class call_expr : public expression {
     public:
         expression_ptr callee;
         std::vector<expression_ptr> arguments;
-        
+
         call_expr(const source_location& loc, expression_ptr c, std::vector<expression_ptr> args)
             : expression(loc), callee(c), arguments(std::move(args)) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_call_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_call_expr(this);
         }
     };
-    
+
     // member access expression
     class member_expr : public expression {
     public:
@@ -205,12 +206,12 @@ namespace jai {
         std::string member;
         bool is_arrow;  // true for ->, false for .
         bool is_static; // true for ::, false for . or ->
-        
+
         member_expr(const source_location& loc, expression_ptr obj, const std::string& mem, bool arrow, bool static_access = false)
             : expression(loc), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_member_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_member_expr(this);
         }
     };
     
@@ -240,97 +241,97 @@ namespace jai {
         statement_ptr body;
         
         lambda_expr(const source_location& loc) : expression(loc) {}
-        
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_lambda_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_lambda_expr(this);
         }
     };
-    
+
     // New expression
     class new_expr : public expression {
     public:
         type_info_ptr type;
         std::vector<expression_ptr> arguments;
-        
+
         new_expr(const source_location& loc, type_info_ptr t, std::vector<expression_ptr> args)
             : expression(loc), type(t), arguments(std::move(args)) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_new_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_new_expr(this);
         }
     };
-    
+
     // Ternary expression
     class ternary_expr : public expression {
     public:
         expression_ptr condition;
         expression_ptr then_expression;
         expression_ptr else_expression;
-        
+
         ternary_expr(const source_location& loc, expression_ptr c, expression_ptr t, expression_ptr e)
             : expression(loc), condition(c), then_expression(t), else_expression(e) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_ternary_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_ternary_expr(this);
         }
     };
-    
+
     // Array literal expression
     class array_literal_expr : public expression {
     public:
         std::vector<expression_ptr> elements;
-        
+
         array_literal_expr(const source_location& loc, std::vector<expression_ptr> elems)
             : expression(loc), elements(std::move(elems)) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_array_literal_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_array_literal_expr(this);
         }
     };
-    
+
     // Map literal expression
     class map_literal_expr : public expression {
     public:
         std::vector<std::pair<expression_ptr, expression_ptr>> entries;
-        
+
         map_literal_expr(const source_location& loc, std::vector<std::pair<expression_ptr, expression_ptr>> e)
             : expression(loc), entries(std::move(e)) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_map_literal_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_map_literal_expr(this);
         }
     };
-    
+
     // This expression
     class this_expr : public expression {
     public:
         this_expr(const source_location& loc) : expression(loc) {}
-        
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_this_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_this_expr(this);
         }
     };
-    
+
     // Super expression
     class super_expr : public expression {
     public:
         super_expr(const source_location& loc) : expression(loc) {}
-        
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_super_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_super_expr(this);
         }
     };
-    
+
     // Throw expression
     class throw_expr : public expression {
     public:
         expression_ptr value;  // Optional - null for re-throw
-        
+
         throw_expr(const source_location& loc, expression_ptr val = nullptr)
             : expression(loc), value(val) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_throw_expr(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_throw_expr(this);
         }
     };
     
@@ -344,57 +345,57 @@ namespace jai {
     class expression_stmt : public statement {
     public:
         expression_ptr expression;
-        
+
         expression_stmt(const source_location& loc, expression_ptr expr)
             : statement(loc), expression(expr) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_expression_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_expression_stmt(this);
         }
     };
-    
+
     // Block statement
     class block_stmt : public statement {
     public:
         std::vector<declaration_ptr> declarations;
-        
+
         block_stmt(const source_location& loc, std::vector<declaration_ptr> decls)
             : statement(loc), declarations(std::move(decls)) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_block_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_block_stmt(this);
         }
     };
-    
+
     // If statement
     class if_stmt : public statement {
     public:
         expression_ptr condition;
         statement_ptr then_statement;
         statement_ptr else_statement;  // Can be null
-        
+
         if_stmt(const source_location& loc, expression_ptr c, statement_ptr t, statement_ptr e = nullptr)
             : statement(loc), condition(c), then_statement(t), else_statement(e) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_if_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_if_stmt(this);
         }
     };
-    
+
     // While statement
     class while_stmt : public statement {
     public:
         expression_ptr condition;
         statement_ptr body;
-        
+
         while_stmt(const source_location& loc, expression_ptr c, statement_ptr b)
             : statement(loc), condition(c), body(b) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_while_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_while_stmt(this);
         }
     };
-    
+
     // For statement
     class for_stmt : public statement {
     public:
@@ -402,15 +403,15 @@ namespace jai {
         expression_ptr condition;  // Can be null
         expression_ptr update;     // Can be null
         statement_ptr body;
-        
+
         for_stmt(const source_location& loc, declaration_ptr i, expression_ptr c, expression_ptr u, statement_ptr b)
             : statement(loc), initializer(i), condition(c), update(u), body(b) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_for_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_for_stmt(this);
         }
     };
-    
+
     // Range-based for statement (C++11 style)
     class range_for_stmt : public statement {
     public:
@@ -420,116 +421,116 @@ namespace jai {
         bool is_const;                 // true for const auto&
         expression_ptr container;      // The container to iterate over
         statement_ptr body;            // Loop body
-        
-        range_for_stmt(const source_location& loc, type_info_ptr type, const std::string& varName, 
+
+        range_for_stmt(const source_location& loc, type_info_ptr type, const std::string& varName,
                      bool ref, bool constRef, expression_ptr cont, statement_ptr b)
-            : statement(loc), element_type(type), variable_name(varName), 
+            : statement(loc), element_type(type), variable_name(varName),
               is_reference(ref), is_const(constRef), container(cont), body(b) {}
-              
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_range_for_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_range_for_stmt(this);
         }
     };
-    
+
     // Return statement
     class return_stmt : public statement {
     public:
         expression_ptr value;  // Can be null
-        
+
         return_stmt(const source_location& loc, expression_ptr v = nullptr)
             : statement(loc), value(v) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_return_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_return_stmt(this);
         }
     };
-    
+
     // Break statement
     class break_stmt : public statement {
     public:
         break_stmt(const source_location& loc) : statement(loc) {}
-        
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_break_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_break_stmt(this);
         }
     };
-    
+
     // Continue statement
     class continue_stmt : public statement {
     public:
         continue_stmt(const source_location& loc) : statement(loc) {}
-        
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_continue_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_continue_stmt(this);
         }
     };
-    
+
     // Try-catch statement
     class try_stmt : public statement {
     public:
         statement_ptr try_block;
         std::string catch_var;  // Optional - variable name for exception message
         statement_ptr catch_block;
-        
+
         try_stmt(const source_location& loc, statement_ptr try_blk, statement_ptr catch_blk, const std::string& var = "")
             : statement(loc), try_block(try_blk), catch_var(var), catch_block(catch_blk) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_try_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_try_stmt(this);
         }
     };
-    
+
     // Switch statement
     class switch_stmt : public statement {
     public:
         expression_ptr condition;
         std::vector<case_stmt_ptr> cases;
         default_stmt_ptr default_case;  // Can be null
-        
+
         switch_stmt(const source_location& loc, expression_ptr cond)
             : statement(loc), condition(cond), default_case(nullptr) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_switch_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_switch_stmt(this);
         }
     };
-    
+
     // Case statement (part of switch)
     class case_stmt : public statement {
     public:
         expression_ptr value;  // The case value to match
         std::vector<statement_ptr> body;
         bool has_fallthrough = false;  // Set if last statement is fallthrough
-        
+
         case_stmt(const source_location& loc, expression_ptr val)
             : statement(loc), value(val) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_case_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_case_stmt(this);
         }
     };
-    
+
     // Default statement (part of switch)
     class default_stmt : public statement {
     public:
         std::vector<statement_ptr> body;
-        
+
         default_stmt(const source_location& loc)
             : statement(loc) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_default_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_default_stmt(this);
         }
     };
-    
+
     // Fallthrough statement (only valid inside switch cases)
     class fallthrough_stmt : public statement {
     public:
         fallthrough_stmt(const source_location& loc)
             : statement(loc) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_fallthrough_stmt(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_fallthrough_stmt(this);
         }
     };
     
@@ -546,12 +547,12 @@ namespace jai {
         std::string name;
         expression_ptr initializer;  // Can be null
         bool is_static = false;      // For static class members
-        
+
         variable_decl(const source_location& loc, type_info_ptr t, const std::string& n, expression_ptr init = nullptr)
             : declaration(loc), type(t), name(n), initializer(init), is_static(false) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_variable_decl(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_variable_decl(this);
         }
     };
     
@@ -574,15 +575,15 @@ namespace jai {
         std::vector<constructor_initializer> initializers; // For constructor initialization lists
         bool is_override = false; // For override keyword in derived classes
         bool is_static = false;   // For static methods
-        
+
         function_decl(const source_location& loc, const std::string& n)
             : declaration(loc), name(n), is_override(false), is_static(false) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_function_decl(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_function_decl(this);
         }
     };
-    
+
     // Class declaration
     class class_decl : public declaration {
     public:
@@ -590,87 +591,87 @@ namespace jai {
             Public,
             Private
         };
-        
+
         struct member {
             member_visibility visibility;
             declaration_ptr declaration;
         };
-        
+
         std::string name;
         std::vector<std::string> base_classes;
         std::vector<member> members;
-        
+
         class_decl(const source_location& loc, const std::string& n)
             : declaration(loc), name(n) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_class_decl(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_class_decl(this);
         }
     };
-    
+
     // expression as declaration (for top-level expressions)
     class expression_decl : public declaration {
     public:
         expression_ptr expression;
         bool implicit_return;  // True if this expression should implicitly return its value
-        
+
         expression_decl(const source_location& loc, expression_ptr expr, bool implicit_ret = false)
             : declaration(loc), expression(expr), implicit_return(implicit_ret) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_expression_decl(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_expression_decl(this);
         }
     };
-    
+
     // statement as declaration (for top-level statements in scripting context)
     class statement_decl : public declaration {
     public:
         statement_ptr statement;
-        
+
         statement_decl(const source_location& loc, statement_ptr stmt)
             : declaration(loc), statement(stmt) {}
-            
-        void accept(ast_visitor* visitor) override {
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
             // Just visit the wrapped statement
-            statement->accept(visitor);
+            return statement->accept(visitor);
         }
     };
-    
+
     // include declaration - always parses the file
     class include_decl : public declaration {
     public:
         std::string path;  // The file path to include (for literal syntax)
         expression_ptr path_expr;  // The expression that evaluates to path (for function syntax)
-        
+
         // Constructor for literal syntax: include "file.jai"
         include_decl(const source_location& loc, const std::string& p)
             : declaration(loc), path(p), path_expr(nullptr) {}
-            
+
         // Constructor for expression syntax: include(expr)
         include_decl(const source_location& loc, expression_ptr expr)
             : declaration(loc), path(), path_expr(expr) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_include_decl(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_include_decl(this);
         }
     };
-    
+
     // import declaration - intelligently manages file parsing
     class import_decl : public declaration {
     public:
         std::string path;  // The file path to import (for literal syntax)
         expression_ptr path_expr;  // The expression that evaluates to path (for function syntax)
-        
+
         // Constructor for literal syntax: import "file.jai"
         import_decl(const source_location& loc, const std::string& p)
             : declaration(loc), path(p), path_expr(nullptr) {}
-            
+
         // Constructor for expression syntax: import(expr)
         import_decl(const source_location& loc, expression_ptr expr)
             : declaration(loc), path(), path_expr(expr) {}
-            
-        void accept(ast_visitor* visitor) override {
-            visitor->visit_import_decl(this);
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_import_decl(this);
         }
     };
     

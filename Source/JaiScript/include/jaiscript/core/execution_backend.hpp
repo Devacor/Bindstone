@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <system_error>
 
 namespace jai {
 
@@ -43,7 +44,7 @@ public:
     // Exception handling
     virtual bool is_unwinding() const = 0;
     virtual const script_exception& get_current_exception() const = 0;
-    
+
     // Optional: Get backend name for debugging/logging
     virtual std::string get_backend_name() const = 0;
 };

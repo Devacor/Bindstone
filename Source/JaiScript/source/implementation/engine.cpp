@@ -1,5 +1,6 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/core/class_registry.hpp>
+#include <jaiscript/core/runtime_errors.hpp>
 // JVM backend is already included in jaiscript.hpp
 #include <iostream>
 #include <fstream>
@@ -182,7 +183,7 @@ struct engine::implementation {
             
             // Check for ambiguity (multiple candidates with same cost)
             int bestCost = best->totalCost;
-            int numBest = std::count_if(viableCandidates.begin(), viableCandidates.end(),
+            auto numBest = std::count_if(viableCandidates.begin(), viableCandidates.end(),
                 [bestCost](const Candidate& c) { return c.totalCost == bestCost; });
             
             if (numBest > 1 && bestCost < 100) { // Don't report ambiguity for untyped functions
@@ -251,13 +252,18 @@ struct engine::implementation {
     }
 };
 
-engine::implementation::implementation() 
+engine::implementation::implementation()
     : conversions(std::make_shared<conversions::conversion_registry>()) {
     globalEnvironment = std::make_shared<environment>(&stringSymbolizer);
-    
-    const char* backend_env = std::getenv("JAISCRIPT_BACKEND");
+
+    // Use unique_ptr with custom deleter for automatic cleanup
+    char* backend_env_raw = nullptr;
+    size_t len = 0;
+    _dupenv_s(&backend_env_raw, &len, "JAISCRIPT_BACKEND");
+    std::unique_ptr<char, decltype(&free)> backend_env(backend_env_raw, &free);
+
     if (backend_env) {
-        std::string backend_str(backend_env);
+        std::string backend_str(backend_env.get());
         if (backend_str == "jvm" || backend_str == "vm") {
             current_backend_type = backend_type::jvm;
             backend = jvm::create_vm_backend(&stringSymbolizer, globalEnvironment);
@@ -661,16 +667,16 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
         auto declarations = parser.parse();  // Will throw parse_error if parsing failed
 
         script_value result = impl->backend->execute(declarations);
-        
+
         // Check for unhandled script exception
         if (impl->backend->is_unwinding()) {
             const auto& exception = impl->backend->get_current_exception();
-            
+
             // Pop instance scope before throwing
             if (hasInstanceVars) {
                 impl->backend->pop_scope();
             }
-            
+
             throw exception;
         }
         
@@ -682,12 +688,12 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
         }
         
         return result;
-        
-    } catch (const script_exception& e) {
+
+    } catch (const script_exception&) {
         // Script exceptions bubble up to C++
         impl->backend->prepare_for_execution();
         throw;
-    } catch (const parse_error& e) {
+    } catch (const parse_error&) {
         // Parse errors should propagate as-is (don't wrap compilation errors)
         impl->backend->prepare_for_execution();
         throw;

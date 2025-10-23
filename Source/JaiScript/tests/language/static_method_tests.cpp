@@ -264,7 +264,7 @@ public:
             check_eq(eng->execute("Calculator::getMode()").as<std::string>(), "scientific");
             
             // Test instance methods
-            eng->execute("auto calc = Calculator(10)");
+            eng->execute("auto calc = Calculator(10); calc");
             check_eq(eng->execute("calc.getValue()").as<int>(), 10);
             check_eq(eng->execute("calc.add(5)").as<int>(), 15);
             

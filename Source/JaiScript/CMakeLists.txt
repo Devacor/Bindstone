@@ -19,6 +19,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # Options
 option(JAISCRIPT_BUILD_TESTS "Build JaiScript test suite" ON)
+option(JAISCRIPT_ENABLE_PROFILING "Enable profiling instrumentation" OFF)
 
 # JaiScript Library
 add_subdirectory(source)

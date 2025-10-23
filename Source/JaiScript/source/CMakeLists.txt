@@ -9,6 +9,7 @@ set(JAISCRIPT_SOURCES
     implementation/interpreter_dispatch.cpp
     implementation/lexer.cpp
     implementation/parser.cpp
+    implementation/runtime_errors.cpp
     implementation/type_info.cpp
     implementation/types.cpp
     implementation/value.cpp
@@ -35,6 +36,30 @@ if(MSVC)
         /EHsc              # Exception handling model
         /permissive-       # Standards conformance
     )
+
+    # Profiling support for MSVC
+    if(JAISCRIPT_ENABLE_PROFILING)
+        target_compile_options(jaiscript PRIVATE
+            /Zi             # Generate debug info for profiler
+            /Oi             # Enable intrinsic functions (better profiling)
+        )
+        target_link_options(jaiscript PRIVATE
+            /PROFILE        # Enable profiling
+            /DEBUG:FULL     # Full debug info
+        )
+    endif()
+
+    # RelWithDebInfo is best for profiling - optimized but with debug symbols
+    if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+        target_compile_options(jaiscript PRIVATE
+            /O2             # Optimize for speed
+            /Ob2            # Inline function expansion
+            /Oi             # Enable intrinsic functions
+            /Ot             # Favor fast code
+            /Zi             # Debug info
+        )
+    endif()
+
     # Use static runtime for consistent linkage
     set_property(TARGET jaiscript PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"

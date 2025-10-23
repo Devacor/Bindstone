@@ -1,6 +1,7 @@
 #include "jaiscript/core/execution_backend.hpp"
 #include "jaiscript/core/engine.hpp"
 #include "jaiscript/core/types.hpp"
+#include <system_error>
 
 namespace jai {
 
@@ -8,7 +9,8 @@ namespace jai {
 class vm_backend_stub : public execution_backend {
 private:
     static script_exception dummy_exception;
-    
+    static std::string empty_context;
+
 public:
     vm_backend_stub() = default;
     ~vm_backend_stub() override = default;
@@ -65,11 +67,11 @@ public:
     bool is_unwinding() const override {
         return false;
     }
-    
+
     const script_exception& get_current_exception() const override {
         return dummy_exception;
     }
-    
+
     // Backend name
     std::string get_backend_name() const override {
         return "VM Backend (Stub - Under Refactoring)";
@@ -77,6 +79,7 @@ public:
 };
 
 script_exception vm_backend_stub::dummy_exception("No exception");
+std::string vm_backend_stub::empty_context;
 
 std::unique_ptr<execution_backend> create_vm_backend() {
     return std::make_unique<vm_backend_stub>();

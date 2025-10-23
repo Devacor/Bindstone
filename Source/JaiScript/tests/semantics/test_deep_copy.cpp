@@ -106,10 +106,10 @@ public:
             std::string script = R"(
                 // References should still work for explicit sharing
                 var data = {"value": 42};
-                auto modify_ref(auto &m) -> auto {
+                auto modify_ref(auto& m) -> auto {
                     m["value"] = 100;
                 }
-                
+
                 modify_ref(data);
                 data["value"]  // Should be modified to 100
             )";

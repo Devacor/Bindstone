@@ -39,7 +39,7 @@ public:
             
             std::cout << "Executing TestPoint(3, 4)...\n";
             try {
-                auto result = eng->execute("p = TestPoint(3, 4); p.length()");
+                auto result = eng->execute("auto p = TestPoint(3, 4); p.length()");
                 std::cout << "Success! Result: " << result.as<double>() << "\n";
                 check_eq(result.as<double>(), 5.0);
             } catch (const std::exception& e) {

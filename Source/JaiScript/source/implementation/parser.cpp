@@ -21,7 +21,7 @@ std::vector<declaration_ptr> parser::parse() {
             if (decl) {
                 declarations.push_back(decl);
             }
-        } catch (const parse_error& e) {
+        } catch (const parse_error&) {
             // Error already reported, synchronize and continue
             synchronize();
         }
@@ -1075,7 +1075,7 @@ std::vector<parameter> parser::parse_parameter_list() {
                 if (match(token_type::colon)) {
                     // type: name syntax
                     name = consume(token_type::identifier, "Expected parameter name after ':'").lexeme;
-                } else if (check(token_type::identifier)) {
+                } else if (check(token_type::ampersand) || check(token_type::identifier)) {
                     // Traditional type name syntax
                     // Check for reference
                     is_reference = match(token_type::ampersand);

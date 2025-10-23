@@ -66,7 +66,7 @@ namespace jai {
         
         // Friend std::pair and std::tuple for map's internal piecewise construction
         template<typename T1, typename T2>
-        friend class std::pair;
+        friend struct std::pair;
         template<typename... Types>
         friend class std::tuple;
         

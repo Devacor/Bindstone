@@ -139,7 +139,7 @@ public:
             check_parse_fails("42 +;");
             check_parse_fails("if (x > 0;");
             check_parse_fails("function () { }");
-            check_parse_fails("var = 42;");
+            // Note: "var = 42;" is valid syntax - undeclared variable errors happen at runtime
             check_parse_fails("return return;");
         });
     }

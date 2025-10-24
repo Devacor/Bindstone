@@ -8,9 +8,9 @@
 int main(int argc, char** argv) {
     using namespace jai::foundry;
 
-    std::cout << "╔════════════════════════════════════════╗\n";
-    std::cout << "║       JaiScript Foundry Tests          ║\n";
-    std::cout << "╚════════════════════════════════════════╝\n";
+    std::cout << ".________________________________________.\n";
+    std::cout << "|       JaiScript Foundry Tests          |\n";
+    std::cout << "|________________________________________|\n";
     std::cout << "\n";
 
     // Get all auto-registered test suites
@@ -42,13 +42,13 @@ int main(int argc, char** argv) {
 
     // Summary
     std::cout << "\n";
-    std::cout << "════════════════════════════════════════\n";
+    std::cout << "-----------------------------------------\n";
     if (total_failures == 0) {
-        std::cout << "✅ All tests passed! (" << suites_run << " suites)\n";
+        std::cout << "<3 :D All tests passed! (" << suites_run << " suites)\n";
     } else {
-        std::cout << "❌ " << total_failures << " test(s) failed\n";
+        std::cout << "x " << total_failures << " test(s) failed\n";
     }
-    std::cout << "════════════════════════════════════════\n";
+    std::cout << "-----------------------------------------\n";
 
     return total_failures > 0 ? 1 : 0;
 }

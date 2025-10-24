@@ -286,10 +286,33 @@ expression_ptr parser::primary() {
         bool is_array = true;
         
         // Check if this might be a lambda with default capture [= or [&
+        // or explicit capture [this, [x, [&x
         if (check(token_type::equal) || check(token_type::ampersand)) {
             // This is definitely a lambda, not an array
             current_ = savedPos - 1;
             return lambda_expression();
+        }
+
+        // Check for [this]() or [identifier]() pattern which is definitely a lambda
+        // We need to look ahead further to distinguish from single-element arrays like [x]
+        if (check(token_type::this_keyword) || check(token_type::identifier)) {
+            // Look ahead to see if this is followed by ] and then (
+            size_t lookAhead = current_ + 1;
+            if (lookAhead < tokens_.size() && tokens_[lookAhead].type == token_type::right_bracket) {
+                // Check if there's a ( after the ]
+                size_t lookAhead2 = lookAhead + 1;
+                if (lookAhead2 < tokens_.size() && tokens_[lookAhead2].type == token_type::left_paren) {
+                    // Pattern is [this]() or [x]() - definitely a lambda
+                    current_ = savedPos - 1;
+                    return lambda_expression();
+                }
+            }
+            // Check for [this, or [identifier, which indicates lambda capture list
+            else if (lookAhead < tokens_.size() && (tokens_[lookAhead].type == token_type::comma || tokens_[lookAhead].type == token_type::ampersand)) {
+                // Pattern is [this, or [x, or [&x - definitely a lambda
+                current_ = savedPos - 1;
+                return lambda_expression();
+            }
         }
         
         // Parse first element/expression
@@ -1143,7 +1166,17 @@ expression_ptr parser::lambda_expression() {
 std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture_default> parser::parse_capture_list() {
     std::vector<lambda_expr::capture> captures;
     lambda_expr::capture_default default_mode = lambda_expr::capture_default::none;
-    
+
+    // Helper lambda to parse a capture variable name (identifier or 'this')
+    auto parse_capture_name = [this]() -> std::string {
+        if (check(token_type::this_keyword)) {
+            advance();  // consume 'this'
+            return "this";
+        } else {
+            return consume(token_type::identifier, "Expected capture variable name or 'this'").lexeme;
+        }
+    };
+
     if (!check(token_type::right_bracket)) {
         // Check for default capture first
         if (check(token_type::equal)) {
@@ -1155,7 +1188,7 @@ std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture_default> parse
             if (match(token_type::comma)) {
                 do {
                     bool byRef = match(token_type::ampersand);
-                    std::string name = consume(token_type::identifier, "Expected capture variable name").lexeme;
+                    std::string name = parse_capture_name();
                     captures.emplace_back(name, byRef);
                 } while (match(token_type::comma));
             }
@@ -1174,27 +1207,27 @@ std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture_default> parse
                         if (match(token_type::ampersand)) {
                             byRef = true;
                         }
-                        std::string name = consume(token_type::identifier, "Expected capture variable name").lexeme;
+                        std::string name = parse_capture_name();
                         captures.emplace_back(name, byRef);
                     } while (match(token_type::comma));
                 }
             } else {
                 // [&variable] - specific variable by reference
-                std::string name = consume(token_type::identifier, "Expected capture variable name").lexeme;
+                std::string name = parse_capture_name();
                 captures.emplace_back(name, true);
-                
+
                 // Continue parsing other captures
                 while (match(token_type::comma)) {
                     bool byRef = match(token_type::ampersand);
-                    std::string varName = consume(token_type::identifier, "Expected capture variable name").lexeme;
+                    std::string varName = parse_capture_name();
                     captures.emplace_back(varName, byRef);
                 }
             }
         } else {
-            // Regular explicit captures: [x, y, &z]
+            // Regular explicit captures: [x, y, &z, this]
             do {
                 bool byRef = match(token_type::ampersand);
-                std::string name = consume(token_type::identifier, "Expected capture variable name").lexeme;
+                std::string name = parse_capture_name();
                 captures.emplace_back(name, byRef);
             } while (match(token_type::comma));
         }

@@ -136,25 +136,25 @@ struct engine::implementation {
                 int totalCost;
             };
             std::vector<Candidate> viableCandidates;
-            
+
             // Phase 1: Find all viable candidates
             for (const auto& overload : overloads) {
                 if (overload.argCount != argCount && overload.argCount != 0) {
                     continue; // Wrong number of arguments
                 }
-                
+
                 if (overload.argCount == 0) {
                     // Wildcard function - always viable but with high cost
                     viableCandidates.push_back({&overload, 999});
                     continue;
                 }
-                
+
                 if (overload.paramTypes.empty()) {
                     // No type info - viable with medium cost
                     viableCandidates.push_back({&overload, 100});
                     continue;
                 }
-                
+
                 // Calculate conversion cost for typed overload
                 int totalCost = 0;
                 bool viable = true;
@@ -167,15 +167,15 @@ struct engine::implementation {
                         totalCost += cost;
                     }
                 }
-                
+
                 if (viable) {
                     viableCandidates.push_back({&overload, totalCost});
                 }
             }
-            
+
             // Phase 2: Pick the best viable candidate (lowest cost)
             if (viableCandidates.empty()) {
-                throw runtime_error("No viable candidates for function call"); // No viable candidates - throw instead of returning null
+                throw runtime_error("No viable candidates for function call");
             }
             
             auto best = std::min_element(viableCandidates.begin(), viableCandidates.end(),
@@ -906,6 +906,10 @@ void engine::add_class_impl(const std::string& name, std::shared_ptr<class_defin
     impl->classes[name] = classDef;
     // Also register with the unified class_registry for both C++ and script classes
     impl->class_registry_.register_cpp_class(classDef);
+
+    // Store the class definition in the global environment with __class_ prefix
+    // This allows static member access (ClassName::static_field) to work for C++ classes
+    impl->globalEnvironment->define("__class_" + name, script_value::make_object("class_definition", classDef, weak_from_this()));
 }
 
 std::shared_ptr<class_definition> engine::get_class_definition(const std::string& name) const {

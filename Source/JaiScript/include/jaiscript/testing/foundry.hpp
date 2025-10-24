@@ -79,10 +79,10 @@ public:
                 auto end = std::chrono::steady_clock::now();
                 auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
                 
-                std::cout << "✓ (" << duration.count() << "μs)\n";
+                std::cout << "<3 (" << duration.count() << "us)\n";
                 passed++;
             } catch (const std::exception& e) {
-                std::cout << "✗\n";
+                std::cout << "x\n";
                 std::cout << "    Error: " << e.what() << "\n";
                 failed++;
             }

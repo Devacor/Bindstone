@@ -1574,19 +1574,19 @@ public:
     // Set base class
     template<typename Base>
     class_builder& base_class() {
-        static_assert(std::is_base_of_v<Base, T>, 
+        static_assert(std::is_base_of_v<Base, T>,
                       "Specified type is not a base class of this class");
-        
-        // Set up inheritance relationship
-        auto base_def = engine_.get_class_definition(typeid(Base).name());
+
+        // Set up inheritance relationship - use type_index lookup instead of typeid name
+        auto base_def = engine_.get_class_definition_by_type(std::type_index(typeid(Base)));
         if (base_def) {
             class_def_->set_parent(base_def);
         }
-        
+
         // Store base type info for polymorphic copy registration
         has_base_class_ = true;
         base_type_index_ = std::type_index(typeid(Base));
-        
+
         return *this;
     }
     
@@ -2068,7 +2068,7 @@ inline std::shared_ptr<void> class_instance::extract_cpp_object_impl(const scrip
 
 inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
     auto new_instance = std::make_shared<class_instance>(class_name_);
-    
+
     // Copy all fields
     for (const auto& [name, value] : fields_) {
         // Special handling for _cpp_object field
@@ -2081,28 +2081,28 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
                     if (cpp_obj) {
                         // Use the copy function to create a new C++ object
                         auto new_cpp_obj = class_def->copy_object(cpp_obj.get());
-                        
+
                         // Wrap in a new script_value
-                        new_instance->set_field(class_constants::CPP_OBJECT_FIELD, 
+                        new_instance->set_field(class_constants::CPP_OBJECT_FIELD,
                             script_value::make_cpp_object(class_name_, new_cpp_obj));
                         continue;
                     }
                 }
             }
         }
-        
+
         // For other fields, use script_value's clone method for deep copy
         new_instance->set_field(name, value.clone());
     }
-    
+
     // Copy class definition reference
     new_instance->class_definition_ = class_definition_;
-    
+
     // Register the new instance for hot reload tracking
     if (auto class_def = class_definition_.lock()) {
         class_def->register_instance(std::weak_ptr<class_instance>(new_instance));
     }
-    
+
     return new_instance;
 }
 
@@ -2170,7 +2170,13 @@ inline script_value class_instance::get_method(const std::string& name, bool thr
     if (auto def = class_definition_.lock()) {
         return def->get_method(name, throw_if_missing);
     }
-    
+
+    // DEBUG: Diagnose why class_definition_ weak_ptr failed to lock
+    std::cerr << "[DEBUG] class_instance::get_method('" << name << "') - class_definition_ failed to lock for class '"
+              << class_name_ << "'" << std::endl;
+    std::cerr << "[DEBUG] class_definition_.expired() = " << class_definition_.expired() << std::endl;
+    std::cerr << "[DEBUG] class_definition_.use_count() = " << class_definition_.use_count() << std::endl;
+
     if (throw_if_missing) {
         throw runtime_error("Class definition not available for method '" + name + "' lookup");
     }

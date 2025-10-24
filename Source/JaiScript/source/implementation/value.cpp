@@ -356,7 +356,7 @@ void script_value::assign_through(const script_value& value) {
                 *static_cast<int*>(cpp_bound_ptr_) = static_cast<int>(value.as<script_int>());
                 break;
             case script_value_type::jai_float_type:
-                *static_cast<float*>(cpp_bound_ptr_) = static_cast<float>(value.as<script_float>());
+                *static_cast<double*>(cpp_bound_ptr_) = value.as<script_float>();
                 break;
             case script_value_type::jai_string_type:
                 *static_cast<std::string*>(cpp_bound_ptr_) = value.as<script_string>();

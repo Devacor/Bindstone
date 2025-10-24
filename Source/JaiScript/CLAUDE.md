@@ -277,6 +277,41 @@ for (auto& kv : scores) {
 
 ## Build Commands
 
+### Windows (MSVC/CMake - Primary Build System)
+
+**Location:** Project uses CMake with Ninja generator. Build directory: `out/build/x64-Debug/`
+
+**Building the library:**
+```batch
+REM Set up Visual Studio environment and build with CMake
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"
+cd /d D:\git\Bindstone\Source\JaiScript\out\build\x64-Debug
+cmake --build . --target jaiscript
+```
+
+**Building tests:**
+```batch
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"
+cd /d D:\git\Bindstone\Source\JaiScript\out\build\x64-Debug
+cmake --build . --target jaiscript_tests
+```
+
+**Running tests:**
+```batch
+REM Run all tests
+.\bin\jaiscript_tests.exe
+
+REM Run specific test suite
+.\bin\jaiscript_tests.exe "Comprehensive"
+
+REM Run specific test by name
+.\bin\jaiscript_tests.exe "mixed_scopes_comprehensive"
+```
+
+**Important:** Always use the Visual Studio Developer Command Prompt environment for building, or call `VsDevCmd.bat` first to set up paths.
+
+### Linux/WSL (Make - Alternative)
+
 ```bash
 cd Source/JaiScript/tests/foundry
 

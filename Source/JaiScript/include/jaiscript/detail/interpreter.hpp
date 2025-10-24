@@ -172,7 +172,11 @@ namespace jai {
         // Override assign to update 'this' object fields when appropriate
         void assign(const std::string& name, const script_value& value) override;
         void assign(uint64_t id, const script_value& value) override;
-        
+
+        // Override contains to include 'this'
+        bool contains(const std::string& name) const;
+        bool contains(uint64_t id) const;
+
         // Get the 'this' object for super access
         const script_value& get_this_object() const { return this_object_; }
         
@@ -624,6 +628,7 @@ namespace jai {
         // Function call optimization helpers
         std::shared_ptr<environment> get_pooled_environment(std::shared_ptr<environment> parent);
         std::shared_ptr<method_environment> get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj);
+        void release_environment(std::shared_ptr<environment> env);
         void reset_environment_pool();
         
         // Callback for resolving subscript operators when built-in logic fails

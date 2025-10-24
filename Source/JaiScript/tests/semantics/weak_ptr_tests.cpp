@@ -14,32 +14,52 @@ class LifetimeTracker {
 public:
     static int alive_count;
     static int total_created;
-    
+    static int copy_count;
+
     int id;
     int value;
-    
+
     LifetimeTracker(int val = 0) : id(++total_created), value(val) {
         alive_count++;
         std::cout << "LifetimeTracker(" << value << ") created, id=" << id << ", alive=" << alive_count << std::endl;
     }
-    
+
+    // Copy constructor - track when copies are made
+    LifetimeTracker(const LifetimeTracker& other) : id(other.id), value(other.value) {
+        copy_count++;
+        std::cout << "LifetimeTracker COPY from id=" << other.id << " (copy #" << copy_count << "), alive=" << alive_count << std::endl;
+        // Note: We don't increment alive_count for copies to track only "real" objects
+    }
+
+    // Copy assignment - track when assigned
+    LifetimeTracker& operator=(const LifetimeTracker& other) {
+        if (this != &other) {
+            id = other.id;
+            value = other.value;
+            std::cout << "LifetimeTracker ASSIGN from id=" << other.id << ", alive=" << alive_count << std::endl;
+        }
+        return *this;
+    }
+
     ~LifetimeTracker() {
         alive_count--;
         std::cout << "~LifetimeTracker() id=" << id << ", alive=" << alive_count << std::endl;
         std::cout.flush(); // Ensure output is flushed
     }
-    
+
     int get_value() const { return value; }
     void set_value(int v) { value = v; }
-    
+
     static void reset() {
         alive_count = 0;
         total_created = 0;
+        copy_count = 0;
     }
 };
 
 int LifetimeTracker::alive_count = 0;
 int LifetimeTracker::total_created = 0;
+int LifetimeTracker::copy_count = 0;
 
 // Tree node for testing parent-child relationships
 class TreeNode : public std::enable_shared_from_this<TreeNode> {
@@ -137,12 +157,12 @@ public:
         test("weak_ptr_becomes_invalid", [this]() {
             auto eng = engine::make();
             register_lifetime_tracker(*eng);
-            
+
             // Test weak_ptr becoming invalid when object is destroyed
             auto result = eng->execute(R"(
                 // Check initial count
                 auto initial_count = LifetimeTracker::alive_count;
-                
+
                 // Create object and weak_ptr in local scope
                 weak_ptr<LifetimeTracker> weak;
                 {
@@ -156,7 +176,11 @@ public:
                 auto after_scope = LifetimeTracker::alive_count == initial_count;
                 weak.expired() && after_scope
             )");
-            
+
+            std::cout << "Initial LifetimeTracker::alive_count: 0" << std::endl;
+            std::cout << "After scope, LifetimeTracker::alive_count: " << LifetimeTracker::alive_count << std::endl;
+            std::cout << "Test result: " << result.to_string() << " (type: " << (result.is_bool() ? "bool" : "other") << ")" << std::endl;
+
             check_eq(result.as<bool>(), true);
             // The key test is that weak.expired() returns true AND alive_count decreased
         });
@@ -466,6 +490,8 @@ private:
             .method("set_value", &LifetimeTracker::set_value)
             .property("value", &LifetimeTracker::value)
             .property("id", &LifetimeTracker::id)
+            .static_property("alive_count", &LifetimeTracker::alive_count)
+            .static_property("total_created", &LifetimeTracker::total_created)
             .build();
     }
     

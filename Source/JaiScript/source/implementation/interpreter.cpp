@@ -590,24 +590,24 @@ script_value method_environment::get(uint64_t id) const {
     if (id == symbolizer_->get_this_id()) {
         return this_object_;
     }
-    
+
     // First try normal environment lookup
     try {
         return environment::get(id);
     } catch (const runtime_error&) {
         // If not found, check 'this' object fields and methods
         const std::string& name = symbolizer_->get_string(id);
-        if (name != "this" && this_object_.type() == script_value_type::jai_object_type) {
+        if (name != "this" && this_object_.type() == script_value_type::jai_object_type && !this_object_.is_null()) {
             auto obj_holder = this_object_.get_object_holder();
             if (obj_holder && obj_holder->data) {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-                
+
                 // Try to get field first (non-throwing) - now returns a reference
                 const script_value& field_ref = instance->get_field(name, false);
                 if (!field_ref.is_invalid()) {
                     return field_ref;
                 }
-                
+
                 // Try to get method (non-throwing)
                 script_value method = instance->get_method(name, false);
                 if (!method.is_invalid()) {
@@ -615,7 +615,7 @@ script_value method_environment::get(uint64_t id) const {
                     bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
                     return bound_method_storage_;
                 }
-                
+
                 // Try to get static field from class definition
                 auto class_def = instance->get_class_definition();
                 if (class_def && class_def->has_static_field(name)) {
@@ -861,6 +861,24 @@ void method_environment::assign(uint64_t id, const script_value& value) {
     // Convert to string name and use the string version
     const std::string& name = symbolizer_->get_string(id);
     assign(name, value);
+}
+
+bool method_environment::contains(const std::string& name) const {
+    // Check if it's 'this'
+    if (name == "this") {
+        return true;
+    }
+    // Otherwise use base environment::contains
+    return environment::contains(name);
+}
+
+bool method_environment::contains(uint64_t id) const {
+    // Check if it's 'this' using cached ID
+    if (id == symbolizer_->get_this_id()) {
+        return true;
+    }
+    // Otherwise use base environment::contains
+    return environment::contains(id);
 }
 
 // static_method_environment implementation
@@ -1560,19 +1578,22 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
             if (index < 0 || index >= static_cast<script_int>(array.size())) {
                 return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds));  // [ErrorText] Index out of bounds
             }
-            
-            // For arrays, check if this is a true temporary
-            auto array_ptr = left.get_array_storage();
-            bool is_temporary = array_ptr.use_count() == 1;
-            
-            if (!is_temporary) {
-                // This array is stored somewhere, allow assignment
+
+            // Check if the left side is an lvalue (variable, member access, or subscript)
+            // These should allow modification, even if use_count == 1
+            bool is_lvalue = dynamic_cast<identifier_expr*>(expr->left.get()) != nullptr ||
+                            dynamic_cast<member_expr*>(expr->left.get()) != nullptr ||
+                            (dynamic_cast<binary_expr*>(expr->left.get()) != nullptr &&
+                             dynamic_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket);
+
+            if (is_lvalue) {
+                // This is an lvalue expression, return a reference to allow modification
                 auto& mut_array = const_cast<std::vector<script_value>&>(array);
                 script_value* element_ptr = &mut_array[index];
                 script_value ref_value = script_value::make_reference(element_ptr, environment_);
                 push_value(ref_value);
             } else {
-                // True temporary, read-only access
+                // True temporary (e.g., function return), read-only access
                 push_value(array[index]);
             }
         } else if (left.is_map()) {
@@ -1580,16 +1601,17 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
             // Try to get a mutable reference if possible
             try {
                 auto& map = const_cast<std::map<script_value, script_value>&>(left.as_map());
-                
-                // Check if this is a true temporary by seeing if the shared_ptr is unique
-                // If it's shared (refcount > 1), it means it's stored in a variable
-                auto map_ptr = left.get_map_storage();
-                bool is_temporary = map_ptr.use_count() == 1;
-                
-                if (!is_temporary) {
-                    // This map is stored somewhere (variable, field, etc.), allow assignment
+
+                // Check if the left side is an lvalue (variable, member access, or subscript)
+                bool is_lvalue = dynamic_cast<identifier_expr*>(expr->left.get()) != nullptr ||
+                                dynamic_cast<member_expr*>(expr->left.get()) != nullptr ||
+                                (dynamic_cast<binary_expr*>(expr->left.get()) != nullptr &&
+                                 dynamic_cast<binary_expr*>(expr->left.get())->op.type == token_type::left_bracket);
+
+                if (is_lvalue) {
+                    // This is an lvalue expression, return a reference to allow modification
                     script_value& value_ref = map[right];
-                    
+
                     // If this created a new entry with default constructor, it has invalid engine reference
                     if (!value_ref.has_valid_engine_ref()) {
                         if (!left.has_valid_engine_ref()) {
@@ -1597,7 +1619,7 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                         }
                         value_ref.set_engine_ref(left.get_engine_ref());
                     }
-                    
+
                     script_value* element_ptr = &value_ref;
                     script_value ref_value = script_value::make_reference(element_ptr, environment_);
                     push_value(ref_value);
@@ -2258,9 +2280,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // Regular member assignment - evaluate the object
             JAISCRIPT_TRY(memberExpr->object->accept(this));
             script_value objectValue = pop_value();
-            
+
+            // Dereference if it's a reference (e.g., from array[index])
+            const script_value& dereferenced = objectValue.deref();
+
             // Check if it's an object
-            if (!objectValue.is_object()) {
+            if (!dereferenced.is_object()) {
                 // Set exception state instead of throwing
                 active_exception_value_ = make_value("Cannot assign to member of non-object type");
                 current_exception_ = script_exception("Cannot assign to member of non-object type", memberExpr->location);
@@ -2270,18 +2295,18 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
             
             // Extract the class_instance
-            auto objHolder = objectValue.get_object_holder();
+            auto objHolder = dereferenced.get_object_holder();
             if (!objHolder) {
                 throw runtime_error("Cannot assign property to non-object value");
             }
             auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
-            
+
             // Check if there's a property setter first (for C++ properties)
             script_value setter = instance->get_method("_set_" + memberExpr->member, false);
             if (!setter.is_null()) {
                 // Call the setter with 'this' and the value
                 const script_function& func = setter.as_function();
-                std::vector<script_value> args = {objectValue, std::move(value.clone())};
+                std::vector<script_value> args = {dereferenced, std::move(value.clone())};
                 func(args);
             } else if (instance->has_field(memberExpr->member)) {
                 // Direct field assignment (deep copy)
@@ -2347,22 +2372,29 @@ checked_result<void> interpreter::visit_expression_stmt(expression_stmt* stmt) {
 checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
     // Create new environment for the block scope
     auto previous = environment_;
-    environment_ = get_pooled_environment(environment_);  // Use pool!
+    auto block_env = get_pooled_environment(environment_);
+    environment_ = block_env;
 
     try {
         for (const auto& decl : stmt->declarations) {
             auto result = decl->accept(this);
             if (!result) {
+                // Release the block environment before returning
+                release_environment(block_env);
                 environment_ = previous;
                 return result;
             }
             if (is_unwinding_) break;
         }
     } catch (...) {
-        // Restore environment even if an error occurs
+        // Release the block environment even if an error occurs
+        release_environment(block_env);
         environment_ = previous;
         throw;
     }
+
+    // Release the block environment to destroy all local variables
+    release_environment(block_env);
 
     // Restore previous environment
     environment_ = previous;
@@ -2508,9 +2540,19 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         if (decl->initializer) {
             JAISCRIPT_TRY(decl->initializer->accept(this));
             value = pop_value();
-            // Clone the value for variable declaration with initializer
-            // Note: clone() now automatically dereferences references
-            value = value.clone();
+
+            // Only clone if initializing from an lvalue (existing object)
+            // Temporaries (constructor calls, expressions) should use move semantics
+            bool is_lvalue_init = dynamic_cast<identifier_expr*>(decl->initializer.get()) != nullptr ||
+                                  dynamic_cast<member_expr*>(decl->initializer.get()) != nullptr ||
+                                  (dynamic_cast<binary_expr*>(decl->initializer.get()) != nullptr &&
+                                   dynamic_cast<binary_expr*>(decl->initializer.get())->op.type == token_type::left_bracket);
+
+            if (is_lvalue_init) {
+                // Initializing from an existing object - deep copy
+                value = value.clone();
+            }
+            // else: Initializing from a temporary - use move semantics (no clone)
         }
         // If no initializer, value remains null
 
@@ -2887,6 +2929,20 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
 
         // Try static field first
+        // Check if there's a getter method (for C++ bound properties)
+        std::string getter_name = "_get_" + expr->member;
+        try {
+            script_value getter_method = class_def->get_static_method(getter_name);
+            // Call the getter with no arguments to get the live C++ value
+            auto func = getter_method.as_function();
+            std::vector<script_value> no_args;
+            script_value static_value = func(no_args);
+            push_value(static_value);
+            return {};
+        } catch (const runtime_error&) {
+            // No getter method, try direct field access
+        }
+
         try {
             script_value static_value = class_def->get_static_field(expr->member);
             push_value(static_value);
@@ -2895,7 +2951,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             // Field not found, try static method
         }
 
-        // Try static method
+        // Try static method (regular method, not getter)
         try {
             script_value static_method = class_def->get_static_method(expr->member);
             push_value(static_method);
@@ -3114,7 +3170,6 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         push_value(create_bound_method(objectValue, method));
         return {};
     }
-
     // Set exception state instead of throwing
     active_exception_value_ = make_value("Object has no member '" + expr->member + "'");
     current_exception_ = script_exception("Object has no member '" + expr->member + "'", expr->location);
@@ -3127,7 +3182,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
 
     // Capture current environment for closure
     auto closure_env = environment_;
-    
+
     // Check if we need a capture environment
     bool has_explicit_captures = !expr->captures.empty();
     bool has_default_capture = (expr->default_capture != lambda_expr::capture_default::none);
@@ -3211,10 +3266,26 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     
     // Determine if we actually need a capture environment
     bool needs_capture_env = has_explicit_captures || (has_default_capture && !used_variables.empty());
-    
-    
+
+    // Pre-cache capture symbol IDs for optimization
+    uint64_t this_id = string_symbolizer_->get_this_id();
+    for (auto& capture : expr->captures) {
+        if (capture.symbol_id == UINT64_MAX) {
+            capture.symbol_id = string_symbolizer_->intern(capture.name);
+        }
+    }
+
+    // Check if [this] is captured - we'll need special handling
+    bool captures_this = false;
+    for (const auto& capture : expr->captures) {
+        if (capture.symbol_id == this_id) {
+            captures_this = true;
+            break;
+        }
+    }
+
     std::shared_ptr<environment> final_closure_env;
-    
+
     if (needs_capture_env) {
         // Create captured variables in the closure environment
         std::shared_ptr<environment> captureEnv = std::make_shared<environment>(closure_env, string_symbolizer_);
@@ -3226,25 +3297,26 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             for (const auto& varName : used_variables) {
                 // Check if this variable is explicitly overridden in the capture list
                 bool is_overridden = false;
+                uint64_t var_id = string_symbolizer_->intern(varName);
                 for (const auto& capture : expr->captures) {
-                    if (capture.name == varName) {
+                    if (capture.symbol_id == var_id) {
                         is_overridden = true;
                         break;
                     }
                 }
-                
-                if (!is_overridden && environment_->contains(varName)) {
+
+                if (!is_overridden && environment_->contains(var_id)) {
                     if (capture_by_ref) {
                         // Capture by reference - create reference to original variable
-                        script_value* targetPtr = environment_->get_value_ptr(string_symbolizer_->intern(varName));
+                        script_value* targetPtr = environment_->get_value_ptr(var_id);
                         if (targetPtr) {
                             script_value refValue = script_value::make_reference(targetPtr, environment_);
-                            captureEnv->define(varName, std::move(refValue));
+                            captureEnv->define(var_id, std::move(refValue));
                         }
                     } else {
                         // Capture by value - deep copy at capture time
-                        script_value capturedValue = environment_->get(varName);
-                        captureEnv->define(varName, capturedValue.clone());
+                        script_value capturedValue = environment_->get(var_id);
+                        captureEnv->define(var_id, capturedValue.clone());
                     }
                 }
             }
@@ -3252,30 +3324,77 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         
         // Process explicit captures
         for (const auto& capture : expr->captures) {
-            if (environment_->contains(capture.name)) {
+            // Special handling for 'this' - method_environment provides it via get() override
+            // even though contains() might return false
+            bool can_capture = environment_->contains(capture.symbol_id);
+            if (!can_capture && capture.symbol_id == this_id) {
+                // Try to get 'this' - method_environment will provide it
+                try {
+                    script_value this_test = environment_->get(this_id);
+                    can_capture = true;
+                } catch (...) {
+                    // 'this' not available
+                }
+            }
+
+            if (can_capture) {
                 if (capture.by_reference) {
                     // Capture by reference - create reference to original variable
-                    uint64_t symbolId = string_symbolizer_->intern(capture.name);
-                    script_value* targetPtr = environment_->get_value_ptr(symbolId);
+                    script_value* targetPtr = environment_->get_value_ptr(capture.symbol_id);
                     if (targetPtr) {
                         script_value refValue = script_value::make_reference(targetPtr, environment_);
-                        captureEnv->define(capture.name, std::move(refValue));
+                        captureEnv->define(capture.symbol_id, std::move(refValue));
                     } else {
                         // Cannot capture variable by reference
-                        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
+                        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));
                     }
                 } else {
                     // Capture by value - deep copy at capture time
-                    script_value capturedValue = environment_->get(capture.name);
-                    captureEnv->define(capture.name, capturedValue.clone());
+                    script_value capturedValue = environment_->get(capture.symbol_id);
+                    captureEnv->define(capture.symbol_id, capturedValue.clone());
                 }
             } else {
                 // Cannot capture undefined variable
-                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
+                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));
             }
         }
-        
-        final_closure_env = captureEnv;
+
+        // If [this] was captured, we need to use a method_environment instead
+        // so that member variables can be accessed without "this."
+        if (captures_this) {
+            // Get the 'this' object that was captured
+            script_value this_obj = captureEnv->get(this_id);
+
+            // Create a method_environment with the captured 'this' object
+            // The parent is closure_env (the environment where the lambda was defined)
+            auto method_env = std::make_shared<method_environment>(
+                closure_env,
+                string_symbolizer_,
+                this_obj
+            );
+            method_env->define(this_id, this_obj);
+
+            // Copy all captured variables (except 'this') into the method_environment
+            for (const auto& capture : expr->captures) {
+                if (capture.symbol_id != this_id && captureEnv->contains(capture.symbol_id)) {
+                    method_env->define(capture.symbol_id, captureEnv->get(capture.symbol_id));
+                }
+            }
+
+            // Also copy default-captured variables
+            if (has_default_capture) {
+                for (const auto& varName : used_variables) {
+                    uint64_t var_id = string_symbolizer_->intern(varName);
+                    if (var_id != this_id && captureEnv->contains(var_id)) {
+                        method_env->define(var_id, captureEnv->get(var_id));
+                    }
+                }
+            }
+
+            final_closure_env = method_env;
+        } else {
+            final_closure_env = captureEnv;
+        }
     } else {
         // No captures needed - use current environment directly (fast path)
         final_closure_env = closure_env;
@@ -3660,13 +3779,15 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
 checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
     // Create new scope for the for loop (initialization variables should be scoped)
     auto previous = environment_;
-    environment_ = get_pooled_environment(environment_);  // Use pool instead of make_shared!
+    auto loop_env = get_pooled_environment(environment_);
+    environment_ = loop_env;
 
     try {
         // Execute initialization (if present)
         if (stmt->initializer) {
             auto result = stmt->initializer->accept(this);
             if (!result) {
+                release_environment(loop_env);
                 environment_ = previous;
                 return result;
             }
@@ -3677,6 +3798,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
             if (stmt->condition) {
                 auto result = stmt->condition->accept(this);
                 if (!result) {
+                    release_environment(loop_env);
                     environment_ = previous;
                     return result;
                 }
@@ -3690,6 +3812,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                 // Execute the loop body
                 auto result = stmt->body->accept(this);
                 if (!result) {
+                    release_environment(loop_env);
                     environment_ = previous;
                     return result;
                 }
@@ -3701,6 +3824,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                 if (stmt->update) {
                     auto result = stmt->update->accept(this);
                     if (!result) {
+                        release_environment(loop_env);
                         environment_ = previous;
                         return result;
                     }
@@ -3721,6 +3845,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
             if (stmt->update) {
                 auto result = stmt->update->accept(this);
                 if (!result) {
+                    release_environment(loop_env);
                     environment_ = previous;
                     return result;
                 }
@@ -3731,10 +3856,14 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
             }
         }
     } catch (...) {
-        // Restore environment even if an error occurs
+        // Release the loop environment even if an error occurs
+        release_environment(loop_env);
         environment_ = previous;
         throw;
     }
+
+    // Release the loop environment to destroy all loop variables
+    release_environment(loop_env);
 
     // Restore previous environment
     environment_ = previous;
@@ -5154,6 +5283,22 @@ std::shared_ptr<environment> interpreter::get_pooled_environment(std::shared_ptr
         environment_pool_.push_back(newEnv);
         ++environment_pool_index_;
         return newEnv;
+    }
+}
+
+// Release an environment back to the pool by clearing its values
+// This must be called when a scope ends to ensure proper destruction of variables
+void interpreter::release_environment(std::shared_ptr<environment> env) {
+    if (!env) return;
+
+    // Clear all values in the environment to trigger destruction
+    // This is critical for proper object lifetime management
+    env->reset(nullptr);
+
+    // Decrement the pool index to make this environment available for reuse
+    // Note: We don't actually need to do anything else - the environment stays in the pool
+    if (environment_pool_index_ > 0) {
+        --environment_pool_index_;
     }
 }
 

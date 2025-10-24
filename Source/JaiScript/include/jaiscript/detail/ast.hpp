@@ -227,10 +227,11 @@ namespace jai {
         struct capture {
             std::string name;           // Variable name
             bool by_reference;          // True if this specific variable is captured by reference
-            
+            mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
+
             // Constructor for explicit variable captures
-            capture(const std::string& n, bool by_ref) 
-                : name(n), by_reference(by_ref) {}
+            capture(const std::string& n, bool by_ref)
+                : name(n), by_reference(by_ref), symbol_id(UINT64_MAX) {}
         };
         
         capture_default default_capture = capture_default::none;

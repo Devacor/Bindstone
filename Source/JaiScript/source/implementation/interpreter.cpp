@@ -1770,15 +1770,20 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
     script_value operand = pop_value();
     
     switch (expr->op.type) {
-        case token_type::minus:
-            if (operand.is_int()) {
-                push_value(make_value(-operand.as_int()));
-            } else if (operand.is_float()) {
-                push_value(make_value(-operand.as_float()));
-            } else {
-                return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));  // [ErrorText] Unary minus requires numeric operand
+        case token_type::minus: {
+            // Use single type() call + switch for faster type checking
+            switch (operand.type()) {
+                case script_value_type::jai_int_type:
+                    push_value(make_value(-operand.as_int()));
+                    break;
+                case script_value_type::jai_float_type:
+                    push_value(make_value(-operand.as_float()));
+                    break;
+                default:
+                    return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));  // [ErrorText] Unary minus requires numeric operand
             }
             break;
+        }
 
         case token_type::bang:
             push_value(make_value(!is_truthy(operand)));
@@ -1786,7 +1791,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
 
         case token_type::tilde:
             // Bitwise NOT
-            if (!operand.is_int()) {
+            if (operand.type() != script_value_type::jai_int_type) {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));  // [ErrorText] Bitwise NOT requires integer operand
             }
             push_value(make_value(~operand.as_int()));
@@ -1802,23 +1807,21 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                 }
                 script_value currentValue = environment_->get(identifier->symbol_id);
                 script_value newValue = script_value::make_null(engine_ref_);
-                
-                if (currentValue.is_int()) {
-                    int64_t val = currentValue.as_int();
-                    if (expr->op.type == token_type::plus_plus) {
-                        newValue = make_value(val + 1);
-                    } else {
-                        newValue = make_value(val - 1);
+
+                // Use single type() call + switch for faster type checking
+                switch (currentValue.type()) {
+                    case script_value_type::jai_int_type: {
+                        int64_t val = currentValue.as_int();
+                        newValue = make_value(expr->op.type == token_type::plus_plus ? val + 1 : val - 1);
+                        break;
                     }
-                } else if (currentValue.is_float()) {
-                    double val = currentValue.as_float();
-                    if (expr->op.type == token_type::plus_plus) {
-                        newValue = make_value(val + 1.0);
-                    } else {
-                        newValue = make_value(val - 1.0);
+                    case script_value_type::jai_float_type: {
+                        double val = currentValue.as_float();
+                        newValue = make_value(expr->op.type == token_type::plus_plus ? val + 1.0 : val - 1.0);
+                        break;
                     }
-                } else {
-                    return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));  // [ErrorText] Cannot increment/decrement non-numeric value
+                    default:
+                        return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand));  // [ErrorText] Cannot increment/decrement non-numeric value
                 }
 
                 // Check if this is a reference variable
@@ -1888,11 +1891,16 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
 
                     // Fall back to built-in operators
                     if (!customOpFound) {
-                        if (currentValue.is_int() && rightValue.is_int()) {
+                        // Use single type() call + switch for faster type checking
+                        auto leftType = currentValue.type();
+                        auto rightType = rightValue.type();
+
+                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
                             resultValue = make_value(currentValue.as_int() + rightValue.as_int());
-                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                        } else if ((leftType == script_value_type::jai_int_type || leftType == script_value_type::jai_float_type) &&
+                                   (rightType == script_value_type::jai_int_type || rightType == script_value_type::jai_float_type)) {
                             resultValue = make_value(currentValue.as_float() + rightValue.as_float());
-                        } else if (currentValue.is_string() && rightValue.is_string()) {
+                        } else if (leftType == script_value_type::jai_string_type && rightType == script_value_type::jai_string_type) {
                             resultValue = make_value(currentValue.as_string() + rightValue.as_string());
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Invalid operands for +=
@@ -1920,9 +1928,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     
                     // Fall back to built-in operators
                     if (!customOpFound) {
-                        if (currentValue.is_int() && rightValue.is_int()) {
+                        // Use single type() call + switch for faster type checking
+                        auto leftType = currentValue.type();
+                        auto rightType = rightValue.type();
+
+                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
                             resultValue = make_value(currentValue.as_int() - rightValue.as_int());
-                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                        } else if ((leftType == script_value_type::jai_int_type || leftType == script_value_type::jai_float_type) &&
+                                   (rightType == script_value_type::jai_int_type || rightType == script_value_type::jai_float_type)) {
                             resultValue = make_value(currentValue.as_float() - rightValue.as_float());
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Invalid operands for -=
@@ -1950,9 +1963,14 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     
                     // Fall back to built-in operators
                     if (!customOpFound) {
-                        if (currentValue.is_int() && rightValue.is_int()) {
+                        // Use single type() call + switch for faster type checking
+                        auto leftType = currentValue.type();
+                        auto rightType = rightValue.type();
+
+                        if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
                             resultValue = make_value(currentValue.as_int() * rightValue.as_int());
-                        } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                        } else if ((leftType == script_value_type::jai_int_type || leftType == script_value_type::jai_float_type) &&
+                                   (rightType == script_value_type::jai_int_type || rightType == script_value_type::jai_float_type)) {
                             resultValue = make_value(currentValue.as_float() * rightValue.as_float());
                         } else {
                             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Invalid operands for *=
@@ -1961,22 +1979,29 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     break;
                 }
 
-                case token_type::slash_equal:
-                    if (rightValue.is_int() && rightValue.as_int() == 0) {
+                case token_type::slash_equal: {
+                    // Use single type() call + switch for faster type checking
+                    auto leftType = currentValue.type();
+                    auto rightType = rightValue.type();
+
+                    // Check for division by zero
+                    if (rightType == script_value_type::jai_int_type && rightValue.as_int() == 0) {
                         return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));  // [ErrorText] Division by zero
                     }
-                    if (rightValue.is_float() && rightValue.as_float() == 0.0) {
+                    if (rightType == script_value_type::jai_float_type && rightValue.as_float() == 0.0) {
                         return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));  // [ErrorText] Division by zero
                     }
 
-                    if (currentValue.is_int() && rightValue.is_int()) {
+                    if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
                         resultValue = make_value(currentValue.as_int() / rightValue.as_int());
-                    } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
+                    } else if ((leftType == script_value_type::jai_int_type || leftType == script_value_type::jai_float_type) &&
+                               (rightType == script_value_type::jai_int_type || rightType == script_value_type::jai_float_type)) {
                         resultValue = make_value(currentValue.as_float() / rightValue.as_float());
                     } else {
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Invalid operands for /=
                     }
                     break;
+                }
 
                 default:
                     return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));  // [ErrorText] Unknown operator

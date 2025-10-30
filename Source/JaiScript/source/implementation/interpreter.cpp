@@ -82,6 +82,210 @@ void interpreter::init_builtin_methods() {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get back of empty array");
         }
         return arr.back();
+    }},
+
+        {string_symbolizer_->intern("index_of"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "index_of() takes exactly one argument");
+        }
+        const auto& arr = self.as_array();
+        for (size_t i = 0; i < arr.size(); ++i) {
+            if (arr[i] == args[0]) {
+                return interp->make_value(static_cast<script_int>(i));
+            }
+        }
+        return interp->make_value(static_cast<script_int>(-1));
+    }},
+
+        {string_symbolizer_->intern("has"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "has() takes exactly one argument");
+        }
+        const auto& arr = self.as_array();
+        for (const auto& elem : arr) {
+            if (elem == args[0]) {
+                return interp->make_value(true);
+            }
+        }
+        return interp->make_value(false);
+    }},
+
+        {string_symbolizer_->intern("contains"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
+        }
+        const auto& arr = self.as_array();
+        for (const auto& elem : arr) {
+            if (elem == args[0]) {
+                return interp->make_value(true);
+            }
+        }
+        return interp->make_value(false);
+    }},
+
+        {string_symbolizer_->intern("first"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (!args.empty()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "first() takes no arguments");
+        }
+        const auto& arr = self.as_array();
+        if (arr.empty()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get first of empty array");
+        }
+        return arr.front();
+    }},
+
+        {string_symbolizer_->intern("last"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (!args.empty()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "last() takes no arguments");
+        }
+        const auto& arr = self.as_array();
+        if (arr.empty()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get last of empty array");
+        }
+        return arr.back();
+    }},
+
+        {string_symbolizer_->intern("length"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (!args.empty()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "length() takes no arguments");
+        }
+        return interp->make_value(static_cast<script_int>(self.as_array().size()));
+    }},
+
+        {string_symbolizer_->intern("slice"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 2) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "slice() takes exactly two arguments");
+        }
+        const auto& arr = self.as_array();
+        script_int start = args[0].as<script_int>();
+        script_int end = args[1].as<script_int>();
+
+        // Handle negative indices
+        if (start < 0) start = static_cast<script_int>(arr.size()) + start;
+        if (end < 0) end = static_cast<script_int>(arr.size()) + end;
+
+        // Clamp to valid range
+        start = std::max<script_int>(0, std::min<script_int>(start, static_cast<script_int>(arr.size())));
+        end = std::max<script_int>(0, std::min<script_int>(end, static_cast<script_int>(arr.size())));
+
+        if (start > end) start = end;
+
+        script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
+        auto& resultPtr = result.get_array_storage();
+        for (script_int i = start; i < end; ++i) {
+            resultPtr->push_back(arr[i].clone());
+        }
+        return result;
+    }},
+
+        {string_symbolizer_->intern("filter"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "filter() takes exactly one argument");
+        }
+        if (!args[0].is_function()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "filter() requires a function argument");
+        }
+
+        const auto& arr = self.as_array();
+        const auto& func = args[0].as_function();
+        script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
+        auto& resultPtr = result.get_array_storage();
+
+        for (const auto& elem : arr) {
+            auto call_result = func({elem});
+            if (!call_result) {
+                return checked_result<script_value>(call_result.error(), call_result.message());
+            }
+            if (call_result.value().as<bool>()) {
+                resultPtr->push_back(elem.clone());
+            }
+        }
+        return result;
+    }},
+
+        {string_symbolizer_->intern("sort"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() > 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "sort() takes zero or one argument");
+        }
+
+        auto& arrPtr = self.get_array_storage();
+
+        if (args.empty()) {
+            // Default sort - numeric or lexicographic
+            std::sort(arrPtr->begin(), arrPtr->end(), [](const script_value& a, const script_value& b) {
+                if (a.is_int() && b.is_int()) {
+                    return a.as<script_int>() < b.as<script_int>();
+                } else if (a.is_float() && b.is_float()) {
+                    return a.as<script_float>() < b.as<script_float>();
+                } else if (a.is_string() && b.is_string()) {
+                    return a.as<std::string>() < b.as<std::string>();
+                }
+                return false;
+            });
+        } else {
+            // Custom comparator
+            if (!args[0].is_function()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "sort() comparator must be a function");
+            }
+            const auto& comparator = args[0].as_function();
+            std::sort(arrPtr->begin(), arrPtr->end(), [&comparator](const script_value& a, const script_value& b) {
+                auto result = comparator({a, b});
+                if (!result) return false;
+                return result.value().as<bool>();
+            });
+        }
+        return interp->make_value();
+    }},
+
+        {string_symbolizer_->intern("reverse"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (!args.empty()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reverse() takes no arguments");
+        }
+        auto& arrPtr = self.get_array_storage();
+        std::reverse(arrPtr->begin(), arrPtr->end());
+        return interp->make_value();
+    }},
+
+        {string_symbolizer_->intern("remove"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove() takes exactly one argument");
+        }
+        auto& arrPtr = self.get_array_storage();
+        script_int index = args[0].as<script_int>();
+
+        if (index < 0 || index >= static_cast<script_int>(arrPtr->size())) {
+            return interp->make_value(false);
+        }
+
+        arrPtr->erase(arrPtr->begin() + index);
+        return interp->make_value(true);
+    }},
+
+        {string_symbolizer_->intern("remove_if"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove_if() takes exactly one argument");
+        }
+        if (!args[0].is_function()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_if() requires a function argument");
+        }
+
+        auto& arrPtr = self.get_array_storage();
+        const auto& predicate = args[0].as_function();
+        script_int removed_count = 0;
+
+        for (auto it = arrPtr->begin(); it != arrPtr->end(); ) {
+            auto call_result = predicate({*it});
+            if (!call_result) {
+                return checked_result<script_value>(call_result.error(), call_result.message());
+            }
+            if (call_result.value().as<bool>()) {
+                it = arrPtr->erase(it);
+                ++removed_count;
+            } else {
+                ++it;
+            }
+        }
+        return interp->make_value(removed_count);
     }}
     };
 
@@ -151,6 +355,118 @@ void interpreter::init_builtin_methods() {
         arrayPtr->reserve(map.size());
         for (const auto& [key, value] : map) {
             arrayPtr->push_back(value.clone());
+        }
+        return result;
+    }},
+
+        {string_symbolizer_->intern("has"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "has() takes exactly one argument");
+        }
+        const auto& map = self.as_map();
+        return interp->make_value(map.find(args[0]) != map.end());
+    }},
+
+        {string_symbolizer_->intern("get"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 2) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "get() takes exactly two arguments (key, default)");
+        }
+        const auto& map = self.as_map();
+        auto it = map.find(args[0]);
+        if (it != map.end()) {
+            return it->second;
+        }
+        return args[1];  // Return default value
+    }},
+
+        {string_symbolizer_->intern("length"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (!args.empty()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "length() takes no arguments");
+        }
+        return interp->make_value(static_cast<script_int>(self.as_map().size()));
+    }},
+
+        {string_symbolizer_->intern("remove"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove() takes exactly one argument");
+        }
+        auto& mapPtr = self.get_map_storage();
+        auto it = mapPtr->find(args[0]);
+        if (it != mapPtr->end()) {
+            mapPtr->erase(it);
+            return interp->make_value(true);
+        }
+        return interp->make_value(false);
+    }},
+
+        {string_symbolizer_->intern("remove_if"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove_if() takes exactly one argument");
+        }
+        if (!args[0].is_function()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_if() requires a function argument");
+        }
+
+        auto& mapPtr = self.get_map_storage();
+        const auto& predicate = args[0].as_function();
+        script_int removed_count = 0;
+
+        for (auto it = mapPtr->begin(); it != mapPtr->end(); ) {
+            auto call_result = predicate({it->first, it->second});
+            if (!call_result) {
+                return checked_result<script_value>(call_result.error(), call_result.message());
+            }
+            if (call_result.value().as<bool>()) {
+                it = mapPtr->erase(it);
+                ++removed_count;
+            } else {
+                ++it;
+            }
+        }
+        return interp->make_value(removed_count);
+    }},
+
+        {string_symbolizer_->intern("filter"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "filter() takes exactly one argument");
+        }
+        if (!args[0].is_function()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "filter() requires a function argument");
+        }
+
+        const auto& map = self.as_map();
+        const auto& predicate = args[0].as_function();
+        script_value result = script_value::make_map(nullptr, nullptr, interp->get_engine_ref());
+        auto& resultPtr = result.get_map_storage();
+
+        for (const auto& [key, value] : map) {
+            auto call_result = predicate({key, value});
+            if (!call_result) {
+                return checked_result<script_value>(call_result.error(), call_result.message());
+            }
+            if (call_result.value().as<bool>()) {
+                (*resultPtr)[key.clone()] = value.clone();
+            }
+        }
+        return result;
+    }},
+
+        {string_symbolizer_->intern("to_array"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (!args.empty()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_array() takes no arguments");
+        }
+        const auto& map = self.as_map();
+        script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
+        auto& arrayPtr = result.get_array_storage();
+        arrayPtr->reserve(map.size());
+
+        // Return array of [key, value] pairs
+        for (const auto& [key, value] : map) {
+            script_value pair = script_value::make_array(nullptr, interp->get_engine_ref());
+            auto& pairPtr = pair.get_array_storage();
+            pairPtr->push_back(key.clone());
+            pairPtr->push_back(value.clone());
+            arrayPtr->push_back(std::move(pair));
         }
         return result;
     }}
@@ -2989,8 +3305,12 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
 
     // Check if function call succeeded
     if (!result_checked) {
-        // Function returned an error via checked_result - propagate it up
-        return checked_result<void>(result_checked.error(), result_checked.message());
+        // Function returned an error via checked_result - convert to exception state
+        active_exception_value_ = make_value(result_checked.message());
+        current_exception_ = script_exception(result_checked.message());
+        is_unwinding_ = true;
+        push_value(make_value());  // Push null for failed call
+        return {};
     }
 
     // Push successful result onto the stack

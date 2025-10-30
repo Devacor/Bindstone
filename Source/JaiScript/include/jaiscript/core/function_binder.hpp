@@ -7,6 +7,7 @@
 #include "bound_array.hpp"
 #include "bound_map.hpp"
 #include "parameter_storage.hpp"
+#include "runtime_errors.hpp"
 #include <functional>
 #include <tuple>
 
@@ -179,34 +180,22 @@ class engine;
                 // Get the actual target value (dereferences if v is a reference)
                 script_value& target = const_cast<script_value&>(v).deref();
                 
-                // ZERO-COPY: Direct mutable access to stored values for built-in types
+                // ZERO-COPY: Direct mutable access to stored values using safe accessors
                 if constexpr (std::is_same_v<T, script_int> || std::is_same_v<T, int64_t>) {
                     // Direct reference to stored int - ZERO COPY
-                    if (target.type() != script_value_type::jai_int_type) {
-                        throw runtime_error("Expected int for int64_t& parameter");
-                    }
-                    return std::get<script_int>(target.storage_);
+                    return target.as_int_ref();
                 }
                 else if constexpr (std::is_same_v<T, std::string>) {
                     // Direct reference to stored string - ZERO COPY
-                    if (target.type() != script_value_type::jai_string_type) {
-                        throw runtime_error("Expected string for string& parameter");
-                    }
-                    return std::get<script_string>(target.storage_);
+                    return target.as_string_ref();
                 }
                 else if constexpr (std::is_same_v<T, std::vector<script_value>>) {
                     // Direct reference to stored array - ZERO COPY
-                    if (target.type() != script_value_type::jai_array_type) {
-                        throw runtime_error("Expected array for vector<script_value>& parameter");
-                    }
-                    return *std::get<std::shared_ptr<std::vector<script_value>>>(target.storage_);
+                    return target.as_array();
                 }
                 else if constexpr (std::is_same_v<T, std::map<script_value, script_value>>) {
                     // Direct reference to stored map - ZERO COPY
-                    if (target.type() != script_value_type::jai_map_type) {
-                        throw runtime_error("Expected map for map<script_value,script_value>& parameter");
-                    }
-                    return *std::get<std::shared_ptr<std::map<script_value, script_value>>>(target.storage_);
+                    return target.as_map();
                 }
                 else {
                     // Fall back to the as<T&>() method for other types (including int conversions)
@@ -498,35 +487,53 @@ class engine;
             // Check if function has reference parameters
             if constexpr (tuple_has_references<args_tuple>()) {
                 // Use reference-aware calling for functions with reference parameters
-                return [func = func_, eng = engine_](const std::vector<script_value>& args) -> script_value {
+                return [func = func_, eng = engine_](const std::vector<script_value>& args) -> checked_result<script_value> {
                     using traits = detail::function_traits<Func>;
                     using return_type = typename traits::return_type;
                     using args_tuple = typename traits::argument_types;
-                    
+
                     // Check argument count
                     if (args.size() != traits::arity) {
-                        throw runtime_error("Function expects " + std::to_string(traits::arity) + 
-                                         " arguments, got " + std::to_string(args.size()));
+                        return checked_result<script_value>(
+                            make_error_code(runtime_error_code::argument_count_mismatch),
+                            "Function expects " + std::to_string(traits::arity) + " arguments, got " + std::to_string(args.size())
+                        );
                     }
-                    
-                    // Call with reference support
-                    return FunctionBinder::call_with_reference_support<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
+
+                    // Call with reference support, catching any C++ exceptions
+                    try {
+                        return FunctionBinder::call_with_reference_support<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
+                    } catch (const std::exception& e) {
+                        return checked_result<script_value>(
+                            make_error_code(runtime_error_code::cpp_exception),
+                            std::string(e.what())
+                        );
+                    }
                 };
             } else {
                 // Use standard calling for functions without reference parameters
-                return [func = func_, eng = engine_](const std::vector<script_value>& args) -> script_value {
+                return [func = func_, eng = engine_](const std::vector<script_value>& args) -> checked_result<script_value> {
                     using traits = detail::function_traits<Func>;
                     using return_type = typename traits::return_type;
                     using args_tuple = typename traits::argument_types;
-                    
+
                     // Check argument count
                     if (args.size() != traits::arity) {
-                        throw runtime_error("Function expects " + std::to_string(traits::arity) + 
-                                         " arguments, got " + std::to_string(args.size()));
+                        return checked_result<script_value>(
+                            make_error_code(runtime_error_code::argument_count_mismatch),
+                            "Function expects " + std::to_string(traits::arity) + " arguments, got " + std::to_string(args.size())
+                        );
                     }
-                    
-                    // Call the function with unpacked arguments
-                    return FunctionBinder::call_impl_static<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
+
+                    // Call the function with unpacked arguments, catching any C++ exceptions
+                    try {
+                        return FunctionBinder::call_impl_static<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
+                    } catch (const std::exception& e) {
+                        return checked_result<script_value>(
+                            make_error_code(runtime_error_code::cpp_exception),
+                            std::string(e.what())
+                        );
+                    }
                 };
             }
         }

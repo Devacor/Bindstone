@@ -108,6 +108,8 @@ std::string runtime_error_category_impl::message(int ev) const {
             return "Engine reference destroyed";
         case runtime_error_code::stdlib_not_loaded:
             return "Standard library not loaded";
+        case runtime_error_code::cpp_exception:
+            return "C++ exception";
 
         default:
             return "Unknown runtime error";

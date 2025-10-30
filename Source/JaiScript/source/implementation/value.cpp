@@ -86,18 +86,20 @@ script_value script_value::make_object(const std::string& type_name, std::shared
     if (eng.expired()) {
         throw runtime_error("Cannot create object with expired engine reference");
     }
-    script_value v(std::monostate{}, eng);
-    v.type_info_ = type_info::make_object(type_name);
-    auto obj = std::make_shared<object_holder>();
-    obj->type_name = type_name;
-    obj->data = data;
-    obj->is_cpp_class_instance = true;  // make_object is for class_instance wrapper objects
-    v.storage_ = obj;
-    return v;
+
+    // Intern the type name for fast comparison
+    auto locked_engine = eng.lock();
+    if (!locked_engine) {
+        throw runtime_error("Cannot create object with expired engine reference");
+    }
+    uint64_t type_id = locked_engine->get_symbolizer()->intern(type_name);
+
+    // Call the optimized version with type_id
+    return make_object(type_name, type_id, data, eng);
 }
 
-// Optimized version with cached type_id (for interpreter namespace objects)
-script_value script_value::make_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, std::weak_ptr<engine> eng) {
+// Optimized version with cached type_id
+script_value script_value::make_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, std::weak_ptr<engine> eng, bool is_cpp_class) {
     if (eng.expired()) {
         throw runtime_error("Cannot create object with expired engine reference");
     }
@@ -107,7 +109,7 @@ script_value script_value::make_object(const std::string& type_name, uint64_t ty
     obj->type_name = type_name;
     obj->type_id = type_id;  // Set the cached type_id for fast comparison
     obj->data = data;
-    obj->is_cpp_class_instance = false;  // Namespace objects are not C++ class instances
+    obj->is_cpp_class_instance = is_cpp_class;  // True for C++ class instances, false for metadata objects
     v.storage_ = obj;
     return v;
 }

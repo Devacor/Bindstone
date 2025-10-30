@@ -225,6 +225,44 @@ public:
             auto result2 = eng->execute("my::nested::GLOBAL_CAT.climb()");
             check_eq(result2.as<bool>(), true);
         });
+
+        test("namespace_overrides_class_static", [&]() {
+            auto eng = engine::make();
+            eng->execute(R"(
+                class cat {
+                public:
+                    static auto meow() { return 1; }
+                    static auto climb() { return 1; }
+                    static auto meow(a) { return 5; }
+                };
+
+                namespace cat {
+                    auto meow() override { return 2; }
+                    auto dance() { return 2; }
+                    auto meow(a, b) { return 10; }
+                }
+            )");
+
+            // Namespace override of static method (0 params)
+            auto r1 = eng->execute("cat::meow()");
+            check_eq(r1.as<int>(), 2);
+
+            // Class static method (1 param - no namespace override)
+            auto r2 = eng->execute("cat::meow(1)");
+            check_eq(r2.as<int>(), 5);
+
+            // Namespace function (2 params)
+            auto r3 = eng->execute("cat::meow(1, 2)");
+            check_eq(r3.as<int>(), 10);
+
+            // Class static method (no namespace override)
+            auto r4 = eng->execute("cat::climb()");
+            check_eq(r4.as<int>(), 1);
+
+            // Namespace-only function
+            auto r5 = eng->execute("cat::dance()");
+            check_eq(r5.as<int>(), 2);
+        });
     }
 };
 

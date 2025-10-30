@@ -213,7 +213,8 @@ expression_ptr parser::primary() {
 
         // Create a member access on super
         auto superExpr = std::make_shared<super_expr>(superToken.location);
-        return std::make_shared<member_expr>(methodName.location, superExpr, methodName.lexeme, false);
+        uint64_t member_id = symbolizer_->intern(methodName.lexeme);
+        return std::make_shared<member_expr>(methodName.location, superExpr, methodName.lexeme, member_id, false);
     }
 
     // Check if a keyword is being used as a namespace identifier (e.g., string::length)
@@ -224,7 +225,7 @@ expression_ptr parser::primary() {
         if (lookAhead < tokens_.size() && tokens_[lookAhead].type == token_type::colon_colon) {
             // This is a keyword being used as a namespace name
             token nameToken = advance();
-            return std::make_shared<identifier_expr>(nameToken.location, nameToken.lexeme);
+            return std::make_shared<identifier_expr>(nameToken.location, nameToken.lexeme, symbolizer_->intern(nameToken.lexeme));
         }
     }
 
@@ -275,7 +276,7 @@ expression_ptr parser::primary() {
             current_ = savedPos + 1;
         }
         
-        return std::make_shared<identifier_expr>(identToken.location, identToken.lexeme);
+        return std::make_shared<identifier_expr>(identToken.location, identToken.lexeme, symbolizer_->intern(identToken.lexeme));
     }
     
     // Grouped expression
@@ -420,7 +421,7 @@ expression_ptr parser::primary() {
                 type_name = type->type_name;
             }
             
-            return std::make_shared<identifier_expr>(typeToken.location, type_name);
+            return std::make_shared<identifier_expr>(typeToken.location, type_name, symbolizer_->intern(type_name));
         }
         current_ = savedPos;
     }
@@ -482,7 +483,7 @@ expression_ptr parser::primary() {
     // Regular identifier (variable name)
     if (match(token_type::identifier)) {
         token name = previous();
-        return std::make_shared<identifier_expr>(name.location, name.lexeme);
+        return std::make_shared<identifier_expr>(name.location, name.lexeme, symbolizer_->intern(name.lexeme));
     }
 
     error("Expected expression", peek());
@@ -966,7 +967,8 @@ expression_ptr parser::postfix() {
                 (name.type != token_type::eof && name.type != token_type::left_paren &&
                  name.type != token_type::right_paren && name.type != token_type::semicolon)) {
                 advance();
-                expr = std::make_shared<member_expr>(name.location, expr, name.lexeme, false, true);
+                uint64_t member_id = symbolizer_->intern(name.lexeme);
+                expr = std::make_shared<member_expr>(name.location, expr, name.lexeme, member_id, false, true);
             } else {
                 error("Expected member name after '::'", name);
             }
@@ -1169,7 +1171,8 @@ expression_ptr parser::finish_call(expression_ptr callee) {
 
 expression_ptr parser::finish_member_access(expression_ptr object, bool is_arrow) {
     token name = consume(token_type::identifier, "Expected member name");
-    return std::make_shared<member_expr>(name.location, object, name.lexeme, is_arrow);
+    uint64_t member_id = symbolizer_->intern(name.lexeme);
+    return std::make_shared<member_expr>(name.location, object, name.lexeme, member_id, is_arrow);
 }
 
 std::vector<parameter> parser::parse_parameter_list() {
@@ -1634,6 +1637,7 @@ declaration_ptr parser::class_declaration() {
                         // Function
                         current_--;
                         auto func = std::make_shared<function_decl>(previous().location, name.lexeme);
+                        func->name_id = symbolizer_->intern(name.lexeme);
                         func->is_static = is_static;
                         func->is_override = is_override;
                         consume(token_type::left_paren, "Expected '(' after function name");
@@ -1719,6 +1723,7 @@ declaration_ptr parser::class_declaration() {
                     
                     // Create function declaration
                     auto func = std::make_shared<function_decl>(previous().location, name.lexeme);
+                    func->name_id = symbolizer_->intern(name.lexeme);
                     func->is_static = is_static;
                     func->is_override = is_override; // Set from earlier check
 
@@ -1878,6 +1883,7 @@ declaration_ptr parser::namespace_declaration() {
             if (match(token_type::left_paren)) {
                 // Function declaration
                 auto func = std::make_shared<function_decl>(member_name.location, member_name.lexeme);
+                func->name_id = symbolizer_->intern(member_name.lexeme);
                 func->return_type = type;
 
                 // Parse parameters
@@ -2009,7 +2015,8 @@ declaration_ptr parser::function_declaration() {
 
 declaration_ptr parser::parse_function_body(const std::string& name, type_info_ptr return_type) {
     auto func = std::make_shared<function_decl>(previous().location, name);
-    
+    func->name_id = symbolizer_->intern(name);
+
     consume(token_type::left_paren, "Expected '(' after function name");
     func->parameters = parse_parameter_list();
     consume(token_type::right_paren, "Expected ')' after parameters");

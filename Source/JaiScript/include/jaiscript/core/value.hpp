@@ -159,8 +159,8 @@ namespace jai {
         static script_value make_array(type_info_ptr element_type, std::weak_ptr<engine> eng);
         static script_value make_map(type_info_ptr keyType, type_info_ptr valueType, std::weak_ptr<engine> eng);
         static script_value make_object(const std::string& type_name, std::shared_ptr<void> data, std::weak_ptr<engine> eng);
-        // Optimized version with cached type_id (for interpreter namespace objects)
-        static script_value make_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, std::weak_ptr<engine> eng);
+        // Optimized version with cached type_id
+        static script_value make_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, std::weak_ptr<engine> eng, bool is_cpp_class = true);
         // Internal factory method for raw C++ objects - use make_object for general use
         static script_value make_cpp_object(const std::string& type_name, std::shared_ptr<void> data, std::weak_ptr<engine> eng);
     public:

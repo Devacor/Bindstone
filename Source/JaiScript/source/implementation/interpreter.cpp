@@ -2987,24 +2987,85 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     if (expr->is_static) {
         // For static access, the object should be an identifier (class or namespace name)
         auto* ident_expr = dynamic_cast<identifier_expr*>(expr->object.get());
-        if (!ident_expr) {
-            // Static member access requires an identifier
+        // Handle nested namespace access: outer::inner::getValue()
+        // Build the full namespace path
+        std::string name;
+        uint64_t name_id;
+
+        if (ident_expr) {
+            // Simple case: just an identifier
+            name = ident_expr->name;
+            name_id = ident_expr->symbol_id;
+
+            // Cache symbol ID if not already done
+            if (name_id == UINT64_MAX) {
+                name_id = string_symbolizer_->intern(name);
+                ident_expr->symbol_id = name_id;
+            }
+        } else if (auto* member_expr_obj = dynamic_cast<member_expr*>(expr->object.get())) {
+            // Nested namespace: outer::inner where the object is "outer::inner" (a member_expr)
+            // Recursively build the full path
+            std::function<std::string(expression*)> build_namespace_path = [&](expression* e) -> std::string {
+                if (auto* ident = dynamic_cast<identifier_expr*>(e)) {
+                    return ident->name;
+                } else if (auto* member = dynamic_cast<member_expr*>(e)) {
+                    if (member->is_static) {
+                        // This is a :: access, continue building the path
+                        return build_namespace_path(member->object.get()) + "::" + member->member;
+                    }
+                }
+                return "";
+            };
+
+            name = build_namespace_path(expr->object.get());
+            if (name.empty()) {
+                return checked_result<void>(make_error_code(jai::runtime_error_code::type_mismatch));  // [ErrorText] Invalid namespace path
+            }
+            name_id = string_symbolizer_->intern(name);
+        } else {
+            // Static member access requires an identifier or namespace path
             return checked_result<void>(make_error_code(jai::runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
 
-        std::string name = ident_expr->name;
-        uint64_t name_id = ident_expr->symbol_id;
-
-        // Cache symbol ID if not already done
-        if (name_id == UINT64_MAX) {
-            name_id = string_symbolizer_->intern(name);
-            ident_expr->symbol_id = name_id;
-        }
-
-        // PRIORITY 1: Check for namespace with this name
+        // PRIORITY 1: Check for namespace with this name FIRST
         // Namespaces can override class static methods
         auto ns_it = namespaces_.find(name_id);
-        if (ns_it != namespaces_.end()) {
+        bool is_namespace = (ns_it != namespaces_.end());
+
+        // PRIORITY 1.5: Special case for namespace::class::static_member
+        // ONLY if name is NOT a namespace itself
+        // For "my::nested::cat::meow()", name would be "my::nested::cat" which is NOT a namespace
+        // We need to detect this pattern and split it into namespace="my::nested" and class="cat"
+        if (!is_namespace && name.find("::") != std::string::npos) {
+            size_t last_colon = name.rfind("::");
+            std::string potential_ns = name.substr(0, last_colon);
+            std::string potential_class = name.substr(last_colon + 2);
+
+            uint64_t ns_id = string_symbolizer_->intern(potential_ns);
+            uint64_t class_id = string_symbolizer_->intern(potential_class);
+
+            auto ns_check = namespaces_.find(ns_id);
+            if (ns_check != namespaces_.end()) {
+                auto class_check = ns_check->second->classes.find(class_id);
+                if (class_check != ns_check->second->classes.end()) {
+                    // Found! This is namespace::class, and we're accessing a static member
+                    auto class_def = class_check->second;
+
+                    // Try to get the static method
+                    script_value static_method = class_def->get_static_method(expr->member, false);
+                    if (!static_method.is_null()) {
+                        push_value(static_method);
+                        return {};
+                    }
+
+                    // Method not found - might be trying to access the class constructor
+                    // Fall through to handle namespace::class access
+                }
+            }
+        }
+
+        // PRIORITY 2: Handle namespace members
+        if (is_namespace) {
             auto& ns_data = ns_it->second;
 
             // Use parser's pre-computed member ID (always set by parser)
@@ -3016,23 +3077,66 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 // Store all overloads for arity-based dispatch
                 auto overloads = func_it->second;
 
+                // Check if there's also a class with the same name (for fallback)
+                std::shared_ptr<class_definition> fallback_class;
+                try {
+                    script_value class_var = environment_->get("__class_" + name);
+                    if (class_var.is_object()) {
+                        auto objHolder = class_var.get_object_holder();
+                        if (objHolder && objHolder->type_name == "class_definition") {
+                            fallback_class = std::static_pointer_cast<class_definition>(objHolder->data);
+                        }
+                    }
+                } catch (const runtime_error&) {
+                    // No class with this name - that's fine
+                }
+
                 // Create a script_function that dispatches based on arity
-                script_function namespace_func = [this, overloads, name](const std::vector<script_value>& args) -> script_value {
-                    // Find matching overload by arity
+                // Capture namespace_id to provide access to namespace variables
+                uint64_t namespace_id = name_id;
+                std::string member_name = expr->member;
+                script_function namespace_func = [this, overloads, name, namespace_id, fallback_class, member_name](const std::vector<script_value>& args) -> script_value {
+                    // Find matching overload by arity in namespace
                     for (const auto& func_decl : overloads) {
                         if (func_decl->parameters.size() == args.size()) {
-                            // Found matching arity - create script_defined_function and call it
+                            // Create an environment with namespace variables accessible
+                            auto ns_env = std::make_shared<environment>(environment_, string_symbolizer_);
+
+                            // Add all namespace variables to this environment
+                            auto ns_it = namespaces_.find(namespace_id);
+                            if (ns_it != namespaces_.end()) {
+                                for (const auto& [var_id, var_value] : ns_it->second->variables) {
+                                    ns_env->define(var_id, var_value);
+                                }
+                            }
+
+                            // Found matching arity - create script_defined_function with namespace environment
                             auto script_func = std::make_shared<script_defined_function>(
                                 func_decl->name,
                                 func_decl->parameters,
                                 func_decl->return_type,
                                 func_decl->body,
-                                nullptr // No closure environment for namespace functions
+                                ns_env  // Environment with namespace variables
                             );
                             return call_function(*script_func, args);
                         }
                     }
-                    // No matching overload found
+
+                    // No matching overload found in namespace - try fallback to class static method
+                    if (fallback_class) {
+                        try {
+                            script_value static_method = fallback_class->get_static_method(member_name, false);
+                            if (!static_method.is_null() && static_method.is_function()) {
+                                // Call the class static method
+                                auto func = static_method.as_function();
+                                return func(args);
+                            }
+                        } catch (const runtime_error&) {
+                            // Class method not found or error calling it
+                        }
+                    }
+
+                    // Neither namespace nor class has matching method
                     throw runtime_error("No matching function overload in namespace '" + name + "' for " +
                                        std::to_string(args.size()) + " arguments");
                 };
@@ -3049,14 +3153,17 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             }
 
             // Look for class in namespace
+            // Note: namespace::class::static_member is handled earlier (before namespace lookup)
             auto class_it = ns_data->classes.find(expr->member_id);
             if (class_it != ns_data->classes.end()) {
-                // Return the class constructor function
-                auto class_def = class_it->second;
-                // TODO: This needs to return something callable that creates instances
-                // For now, just push the class definition
-                push_value(script_value::make_object("class_definition", class_definition_type_id_, class_def, engine_ref_, false));
-                return {};
+                // Found a class in the namespace - return the constructor
+                try {
+                    script_value ctor_func = environment_->get(expr->member_id);
+                    push_value(ctor_func);
+                    return {};
+                } catch (const runtime_error&) {
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Class constructor not found
+                }
             }
 
             // Member not found in namespace - fall through to check class static methods
@@ -5224,21 +5331,14 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                         if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
                             auto class_def = std::static_pointer_cast<class_definition>(obj_holder->data);
 
-                            // Check if class has static method with this name
-                            // TODO: Need arity-aware lookup here
-                            try {
-                                class_def->get_static_method(func_decl->name, false);
-                                // Found static method - require override
-                                std::string error_msg = "Function '" + func_decl->name + "' in namespace '" + decl->name +
-                                                       "' collides with static method in class '" + decl->name +
-                                                       "'. Use 'override' keyword to override the class static method.";
+                            // Arity-aware collision check
+                            if (class_def->has_static_method_with_arity(func_decl->name_id, func_decl->parameters.size())) {
+                                std::string error_msg = "Function '" + func_decl->name + "' with " +
+                                                      std::to_string(func_decl->parameters.size()) +
+                                                      " parameters in namespace '" + decl->name +
+                                                      "' collides with static method in class '" + decl->name +
+                                                      "'. Use 'override' keyword to override the class static method.";
                                 return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), error_msg);
-                            } catch (const runtime_error& e) {
-                                // If error is "not found", that's OK - we can add the function
-                                std::string msg = e.what();
-                                if (msg.find("not found") == std::string::npos) {
-                                    throw; // Re-throw other errors
-                                }
                             }
                         }
                     }
@@ -5276,8 +5376,10 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             // Then also store reference in namespace
             JAISCRIPT_TRY(class_decl_ptr->accept(this));
 
-            // Look up the registered class definition
-            if (auto* class_def_var = environment_->get_value_ptr(class_decl_ptr->name_id)) {
+            // Look up the registered class definition using __class_ prefix
+            std::string class_var_name = "__class_" + class_decl_ptr->name;
+            uint64_t class_var_id = string_symbolizer_->intern(class_var_name);
+            if (auto* class_def_var = environment_->get_value_ptr(class_var_id)) {
                 if (class_def_var->is_object()) {
                     auto obj_holder = class_def_var->get_object_holder();
                     if (obj_holder && obj_holder->type_id == class_definition_type_id_) {

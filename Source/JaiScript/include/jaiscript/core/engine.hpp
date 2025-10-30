@@ -398,6 +398,9 @@ namespace jai {
         // Get string symbolizer for interning identifiers
         string_symbolizer* get_symbolizer();
 
+        // Intern a string and return its unique ID
+        uint64_t symbolize(const std::string& str);
+
         // Register C++ type converters for custom types
         template<typename T>
         void register_type_converter(const std::string& type_name) {

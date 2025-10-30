@@ -212,13 +212,34 @@ public:
     bool is_vm_class() const { return class_type_ == vm_class; }
     
     // Add a method to the class
-    void add_method(const std::string& name, script_function func) {
+    void add_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
         methods_.insert_or_assign(name, script_value::make_function(func, engine_ref_));
+
+        // If arity is provided, store it for arity-aware method resolution
+        if (arity != SIZE_MAX) {
+            auto eng = engine_ref_.lock();
+            if (eng) {
+                uint64_t name_id = eng->symbolize(name);
+                // Track arity for C++ methods
+                method_arities_[name_id].push_back(arity);
+            }
+        }
     }
     
-    // Add a static method to the class
-    void add_static_method(const std::string& name, script_function func) {
+    // Add a static method to the class (with optional arity for C++ methods)
+    void add_static_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
         static_methods_.insert_or_assign(name, script_value::make_function(func, engine_ref_));
+
+        // If arity is provided, store it for arity-aware collision detection
+        // (arity == SIZE_MAX means arity unknown, typically for generic lambdas)
+        if (arity != SIZE_MAX) {
+            auto eng = engine_ref_.lock();
+            if (eng) {
+                uint64_t name_id = eng->symbolize(name);
+                // Track arity for C++ methods
+                static_method_arities_[name_id].push_back(arity);
+            }
+        }
     }
     
     // Add a script method (wraps AST execution in a function)
@@ -379,6 +400,10 @@ public:
     bool has_static_method(const std::string& name) const {
         return static_methods_.find(name) != static_methods_.end();
     }
+
+    // Check if this class has a static method with specific name_id and arity
+    // Defined in script_class.hpp where function_decl is available
+    bool has_static_method_with_arity(uint64_t name_id, size_t arity) const;
 
     // DEPRECATED: Static methods are not inherited (C++ semantics)
     // This method exists for backward compatibility but just checks the current class
@@ -922,7 +947,10 @@ private:
     uint64_t type_id_;  // Interned type name for fast comparisons
     std::weak_ptr<engine> engine_ref_;  // Engine reference for script_value creation
     std::unordered_map<std::string, script_value> methods_;
-    std::unordered_map<std::string, script_value> static_methods_;  // Static method storage
+    std::unordered_map<uint64_t, std::vector<size_t>> method_arities_;  // Track arities for C++ methods (name_id -> list of arities)
+    std::unordered_map<std::string, script_value> static_methods_;  // Static method storage (keyed by name string for now)
+    std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> static_method_overloads_;  // Track overloads by name_id and arity (for script methods)
+    std::unordered_map<uint64_t, std::vector<size_t>> static_method_arities_;  // Track arities for C++ methods (name_id -> list of arities)
     std::unordered_map<std::string, script_value> field_defaults_;
     std::unordered_map<std::string, script_value> static_field_values_;  // Static field storage
     std::unordered_set<std::string> static_fields_;  // Track which fields are static
@@ -1183,11 +1211,11 @@ public:
         
         // Add method to the class definition (for object.method() calls)
         // Methods are stored per-class and accessed through the object instance
-        class_def_->add_method(name, method_func);
-        
+        class_def_->add_method(name, method_func, sizeof...(Args));
+
         return *this;
     }
-    
+
     // Add const method binding
     template<typename R, typename... Args>
     class_builder& method(const std::string& name, R(T::*method)(Args...) const) {
@@ -1215,14 +1243,14 @@ public:
             }
             throw runtime_error("Engine no longer exists");
         };
-        
+
         // Add method to the class definition (for object.method() calls)
         // Methods are stored per-class and accessed through the object instance
-        class_def_->add_method(name, method_func);
-        
+        class_def_->add_method(name, method_func, sizeof...(Args));
+
         return *this;
     }
-    
+
     // Add lambda/callable method binding
     // Supports: .method("setText", [](Button& self, const std::string& text) { self.setText(text); })
     // Note: First parameter can be a reference to self for accessing the object
@@ -1275,11 +1303,13 @@ public:
                 throw runtime_error("Engine no longer exists");
             }
         };
-        
+
         // Add method to the class definition (for object.method() calls)
         // Methods are stored per-class and accessed through the object instance
-        class_def_->add_method(name, method_func);
-        
+        // Arity from script perspective: if has_self_param, arity is traits::arity - 1, else traits::arity
+        constexpr size_t script_arity = has_self_param ? traits::arity - 1 : traits::arity;
+        class_def_->add_method(name, method_func, script_arity);
+
         return *this;
     }
     
@@ -1311,9 +1341,9 @@ public:
             }
         };
         
-        // Add static method to the class definition
-        class_def_->add_static_method(name, static_method_func);
-        
+        // Add static method to the class definition with arity
+        class_def_->add_static_method(name, static_method_func, sizeof...(Args));
+
         return *this;
     }
     
@@ -1347,13 +1377,13 @@ public:
                 throw runtime_error("Engine no longer exists");
             }
         };
-        
-        // Add static method to the class definition
-        class_def_->add_static_method(name, static_method_func);
-        
+
+        // Add static method to the class definition with arity
+        class_def_->add_static_method(name, static_method_func, traits::arity);
+
         return *this;
     }
-    
+
     // Add custom serialization constructor for non-default constructible types
     template<typename constructor_func>
     class_builder& serialize_construct(constructor_func&& constructor) {

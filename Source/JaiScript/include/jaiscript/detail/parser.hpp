@@ -32,9 +32,12 @@ namespace jai {
         std::vector<std::string> errors_;
         std::unordered_set<std::string> registered_template_types_;
         string_symbolizer* symbolizer_ = nullptr;  // Optional: for interning identifiers at parse time
-        
+
         // token buffer for handling >> splitting in generic contexts
         std::optional<token> pushed_back_token_;
+
+        // Current namespace context for nested namespace declarations
+        std::vector<std::string> current_namespace_path_;
         
         // Error handling
         void error(const std::string& message, const token& token);

@@ -50,8 +50,8 @@ public:
     }
     
     // Add a benchmark
-    void benchmark(const std::string& name, std::function<void()> bench_func) {
-        benchmarks_.emplace_back(name, bench_func);
+    void benchmark(const std::string& name, std::function<void()> bench_func, int32_t iterations = 1000) {
+        benchmarks_.emplace_back(name, bench_func, iterations);
     }
     
     // Get the name of this test suite
@@ -98,13 +98,9 @@ public:
         // Run benchmarks if any
         if (!benchmarks_.empty()) {
             std::cout << "\n  Benchmarks:\n";
-            // Call pre_test once before all benchmarks
-            pre_test();
-            for (const auto& [name, func] : benchmarks_) {
-                run_benchmark(name, func);
+            for (const auto& [name, func, iterations] : benchmarks_) {
+                run_benchmark(name, func, iterations);
             }
-            // Call post_test once after all benchmarks
-            post_test();
         }
         
         std::cout << "\n  Summary: " << passed << " passed";
@@ -117,15 +113,14 @@ public:
     }
     
 private:
-    void run_benchmark(const std::string& name, std::function<void()> func) {
-        constexpr int iterations = 1000;
+    void run_benchmark(const std::string& name, std::function<void()> func, int32_t iterations = 1000) {
         
         // Setup for benchmark
         pre_test();
         
         try {
             // Warmup
-            for (int i = 0; i < 100; ++i) {
+            for (int i = 0; i < 10; ++i) {
                 func();
             }
             
@@ -155,7 +150,7 @@ private:
     
     std::string suite_name_;
     std::vector<std::pair<std::string, std::function<void()>>> tests_;
-    std::vector<std::pair<std::string, std::function<void()>>> benchmarks_;
+    std::vector<std::tuple<std::string, std::function<void()>, int32_t>> benchmarks_;
 };
 
 // Simple assertion helpers

@@ -992,7 +992,11 @@ expression_ptr parser::postfix() {
 
 // Stub for declaration
 declaration_ptr parser::declaration() {
-    if (match(token_type::class_keyword)) return class_declaration();
+    if (match(token_type::class_keyword)) {
+        auto result = class_declaration();
+        match(token_type::semicolon);  // Consume optional semicolon after class
+        return result;
+    }
     if (match(token_type::namespace_keyword)) return namespace_declaration();
 
     // Check for include/import directives
@@ -1846,16 +1850,33 @@ declaration_ptr parser::namespace_declaration() {
 
     consume(token_type::left_brace, "Expected '{' before namespace body");
 
-    // Join the namespace path with :: to create the full namespace name
-    // namespace my::nested::nspace {} becomes namespace "my::nested::nspace"
-    // This is simpler than creating actual nested structures
-    std::string full_namespace_name = namespace_path[0];
+    // Build the full namespace name by prepending the current namespace context
+    // For nested namespaces: namespace outer { namespace inner {} }
+    // When parsing "inner", current_namespace_path_ = ["outer"], so we create "outer::inner"
+    std::string full_namespace_name;
+
+    // Prepend current namespace context
+    if (!current_namespace_path_.empty()) {
+        full_namespace_name = current_namespace_path_[0];
+        for (size_t i = 1; i < current_namespace_path_.size(); ++i) {
+            full_namespace_name += "::" + current_namespace_path_[i];
+        }
+        full_namespace_name += "::";
+    }
+
+    // Append the new namespace path
+    full_namespace_name += namespace_path[0];
     for (size_t i = 1; i < namespace_path.size(); ++i) {
         full_namespace_name += "::" + namespace_path[i];
     }
 
     // Intern the namespace name at parse time for fast comparisons later
     auto namespace_decl_node = std::make_shared<namespace_decl>(start_loc, full_namespace_name, symbolizer_->intern(full_namespace_name));
+
+    // Push this namespace onto the context stack for nested namespaces
+    for (const auto& part : namespace_path) {
+        current_namespace_path_.push_back(part);
+    }
 
     // Parse namespace members (functions, classes, variables)
     while (!check(token_type::right_brace) && !is_at_end()) {
@@ -1925,6 +1946,11 @@ declaration_ptr parser::namespace_declaration() {
     }
 
     consume(token_type::right_brace, "Expected '}' after namespace body");
+
+    // Pop the namespace context (restore to parent namespace or global scope)
+    for (size_t i = 0; i < namespace_path.size(); ++i) {
+        current_namespace_path_.pop_back();
+    }
 
     return namespace_decl_node;
 }

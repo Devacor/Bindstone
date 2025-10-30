@@ -196,6 +196,38 @@ inline void class_definition::add_static_script_method(const std::string& name, 
         },
         engine_ref_  // Pass engine reference for proper function value creation
     ));
+
+    // Also store in overloads map for arity-aware lookup
+    uint64_t name_id = ast->name_id;
+    if (name_id == UINT64_MAX) {
+        name_id = interp->get_string_symbolizer()->intern(name);
+    }
+    static_method_overloads_[name_id].push_back(ast);
+}
+
+// Implementation of has_static_method_with_arity (needs full function_decl definition)
+inline bool class_definition::has_static_method_with_arity(uint64_t name_id, size_t arity) const {
+    // Check script method overloads (have full AST)
+    auto it = static_method_overloads_.find(name_id);
+    if (it != static_method_overloads_.end()) {
+        for (const auto& func_decl : it->second) {
+            if (func_decl->parameters.size() == arity) {
+                return true;
+            }
+        }
+    }
+
+    // Check C++ method arities
+    auto arity_it = static_method_arities_.find(name_id);
+    if (arity_it != static_method_arities_.end()) {
+        for (size_t cpp_arity : arity_it->second) {
+            if (cpp_arity == arity) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 } // namespace jai

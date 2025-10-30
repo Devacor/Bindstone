@@ -74,6 +74,7 @@ namespace jai {
         // Engine errors (121-130)
         engine_destroyed = 121,
         stdlib_not_loaded = 122,
+        cpp_exception = 123,
     };
 
     // Error category for JaiScript runtime

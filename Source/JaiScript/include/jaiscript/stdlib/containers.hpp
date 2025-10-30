@@ -124,23 +124,32 @@ namespace stdlib {
             .build();
 
         // Register container utility functions using variadic approach
-        eng.add_variadic_function("merge", [engine_weak](const std::vector<script_value>& args) -> script_value {
+        eng.add_variadic_function("merge", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 2) {
-                throw runtime_error("merge() expects exactly 2 arguments, got " + std::to_string(args.size()));
+                return checked_result<script_value>(
+                    make_error_code(runtime_error_code::argument_count_mismatch),
+                    "merge() expects exactly 2 arguments, got " + std::to_string(args.size())
+                );
             }
             return map_merge(args[0], args[1]);
         });
 
-        eng.add_variadic_function("concatenate", [engine_weak](const std::vector<script_value>& args) -> script_value {
+        eng.add_variadic_function("concatenate", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1) {
-                throw runtime_error("concatenate() expects at least 1 argument");
+                return checked_result<script_value>(
+                    make_error_code(runtime_error_code::argument_count_mismatch),
+                    "concatenate() expects at least 1 argument"
+                );
             }
             return concatenate_impl(args);
         });
 
-        eng.add_variadic_function("append", [engine_weak](const std::vector<script_value>& args) -> script_value {
+        eng.add_variadic_function("append", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() < 1) {
-                throw runtime_error("append() expects at least 1 argument");
+                return checked_result<script_value>(
+                    make_error_code(runtime_error_code::argument_count_mismatch),
+                    "append() expects at least 1 argument"
+                );
             }
             return concatenate_impl(args);
         });

@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
+#include <jaiscript/detail/interpreter.hpp>  // For string_symbolizer
 #include <jaiscript/detail/ast.hpp>
 
 using namespace jai::foundry;
@@ -148,7 +149,9 @@ private:
     void check_parse_succeeds(const std::string& code) {
         lexer lex(code, "test.jai");
         auto tokens = lex.tokenize();
-        parser p(tokens, "test.jai");
+        string_symbolizer symbolizer;
+        std::unordered_set<std::string> empty_types;
+        parser p(tokens, &symbolizer, empty_types, "test.jai");
         auto ast = p.parse();
         check(!p.has_errors(), "Expected parsing to succeed for: " + code);
     }
@@ -156,9 +159,16 @@ private:
     void check_parse_fails(const std::string& code) {
         lexer lex(code, "test.jai");
         auto tokens = lex.tokenize();
-        parser p(tokens, "test.jai");
-        auto ast = p.parse();
-        check(p.has_errors(), "Expected parsing to fail for: " + code);
+        string_symbolizer symbolizer;
+        std::unordered_set<std::string> empty_types;
+        parser p(tokens, &symbolizer, empty_types, "test.jai");
+        try {
+            auto ast = p.parse();
+            check(p.has_errors(), "Expected parsing to fail for: " + code);
+        } catch (const parse_error&) {
+            // Expected - parsing failed as intended
+            check(true);
+        }
     }
 };
 

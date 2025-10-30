@@ -74,7 +74,7 @@ public:
                     }
                 }
             )");
-            
+
             // Initial count should be 0
             check_eq(eng->execute("Counter::getCount()").as<int>(), 0);
             
@@ -94,35 +94,36 @@ public:
         
         test("static_method_with_inheritance", [&]() {
             auto eng = engine::make();
-            
+
             eng->execute(R"(
                 class Base {
                     static int base_value = 10;
-                    
+
                     static function getBaseValue() -> int {
                         return base_value;
                     }
                 }
-                
+
                 class Derived : Base {
                     static int derived_value = 20;
-                    
+
                     static function getDerivedValue() -> int {
                         return derived_value;
                     }
-                    
+
                     static function getTotalValue() -> int {
-                        return base_value + derived_value;
+                        // Static members follow C++ semantics: not inherited, must use explicit qualification
+                        return Base::base_value + derived_value;
                     }
                 }
             )");
-            
+
             // Test base class static method
             check_eq(eng->execute("Base::getBaseValue()").as<int>(), 10);
-            
-            // Test derived class can access parent static fields
+
+            // Test derived class can access parent static fields via explicit qualification
             check_eq(eng->execute("Derived::getTotalValue()").as<int>(), 30);
-            
+
             // Test derived class own static method
             check_eq(eng->execute("Derived::getDerivedValue()").as<int>(), 20);
         });

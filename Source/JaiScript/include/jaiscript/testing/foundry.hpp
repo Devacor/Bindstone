@@ -60,40 +60,51 @@ public:
     // Run all tests and benchmarks
     int quench() {
         std::cout << "\n╔══ " << suite_name_ << " ══╗\n";
-        
+
         // Let derived class register its tests
         forge_tests();
-        
+
         int passed = 0;
         int failed = 0;
-        
+
         // Run tests
         for (const auto& [name, func] : tests_) {
             std::cout << "  " << name << " ... " << std::flush;
-            
+
             auto start = std::chrono::steady_clock::now();
-            
+
             try {
+                // Call pre_test before each test
+                pre_test();
+
                 func();
-                
+
+                // Call post_test after each test
+                post_test();
+
                 auto end = std::chrono::steady_clock::now();
                 auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-                
+
                 std::cout << "<3 (" << duration.count() << "us)\n";
                 passed++;
             } catch (const std::exception& e) {
+                post_test();  // Clean up even on error
                 std::cout << "x\n";
                 std::cout << "    Error: " << e.what() << "\n";
                 failed++;
             }
         }
-        
+
         // Run benchmarks if any
         if (!benchmarks_.empty()) {
             std::cout << "\n  Benchmarks:\n";
+            // Call pre_test once before all benchmarks
+            pre_test();
             for (const auto& [name, func] : benchmarks_) {
                 run_benchmark(name, func);
             }
+            // Call post_test once after all benchmarks
+            post_test();
         }
         
         std::cout << "\n  Summary: " << passed << " passed";
@@ -129,10 +140,15 @@ private:
             auto per_iteration = total.count() / iterations;
             
             std::cout << "    " << name << ": " << per_iteration << "μs/iteration\n";
-            
+
             post_test();
+        } catch (const std::exception& e) {
+            post_test();
+            std::cerr << "\n*** BENCHMARK ERROR in \"" << name << "\": " << e.what() << std::endl;
+            throw;
         } catch (...) {
             post_test();
+            std::cerr << "\n*** BENCHMARK ERROR in \"" << name << "\": Unknown exception" << std::endl;
             throw;
         }
     }

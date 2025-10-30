@@ -200,10 +200,10 @@ public:
     virtual ~class_definition() = default;
     
     // Constructor for C++ classes (existing)
-    class_definition(const std::string& name, std::weak_ptr<engine> eng) : name_(name), class_type_(cpp_class), engine_ref_(eng) {}
-    
+    class_definition(const std::string& name, uint64_t type_id, std::weak_ptr<engine> eng) : name_(name), type_id_(type_id), class_type_(cpp_class), engine_ref_(eng) {}
+
     // Constructor for script classes
-    class_definition(const std::string& name, class_type type, std::weak_ptr<engine> eng) : name_(name), class_type_(type), engine_ref_(eng) {}
+    class_definition(const std::string& name, uint64_t type_id, class_type type, std::weak_ptr<engine> eng) : name_(name), type_id_(type_id), class_type_(type), engine_ref_(eng) {}
     
     // Get the class type
     class_type get_class_type() const { return class_type_; }
@@ -262,63 +262,73 @@ public:
         }
     }
     
-    // Get static field value by reference (const version)
+    // Get static field value by pointer (const version) - No exceptions
+    // Returns nullptr if not found. Does NOT check parent classes (C++ semantics).
+    // Static members belong to the class itself, they are not inherited.
+    const script_value* get_static_field_ptr(const std::string& name) const {
+        auto it = static_field_values_.find(name);
+        if (it != static_field_values_.end()) {
+            return &it->second;
+        }
+        return nullptr;
+    }
+
+    // Get static field value by pointer (non-const version) - No exceptions
+    // Returns nullptr if not found. Does NOT check parent classes (C++ semantics).
+    // Static members belong to the class itself, they are not inherited.
+    script_value* get_static_field_ptr(const std::string& name) {
+        auto it = static_field_values_.find(name);
+        if (it != static_field_values_.end()) {
+            return &it->second;
+        }
+        return nullptr;
+    }
+
+    // Legacy API - kept for backward compatibility
+    // NOTE: This does single traversal now (uses get_static_field_ptr internally)
     const script_value& get_static_field(const std::string& name) const {
-        auto it = static_field_values_.find(name);
-        if (it != static_field_values_.end()) {
-            return it->second;
+        const script_value* ptr = get_static_field_ptr(name);
+        if (ptr) {
+            return *ptr;
         }
-        
-        // Check parent class
-        if (parent_class_) {
-            return parent_class_->get_static_field(name);
-        }
-        
-        throw runtime_error("Static field '" + name + "' not found in class '" + name_ + "'");
+        // Fallback - should not be reached if caller checks first
+        static const script_value null_value = script_value::make_null(std::weak_ptr<engine>());
+        return null_value;
     }
-    
-    // Get static field value by reference (non-const version)
+
+    // Legacy API - kept for backward compatibility
+    // NOTE: This does single traversal now (uses get_static_field_ptr internally)
     script_value& get_static_field(const std::string& name) {
-        auto it = static_field_values_.find(name);
-        if (it != static_field_values_.end()) {
-            return it->second;
+        script_value* ptr = get_static_field_ptr(name);
+        if (ptr) {
+            return *ptr;
         }
-        
-        // Check parent class
-        if (parent_class_) {
-            return parent_class_->get_static_field(name);
-        }
-        
-        throw runtime_error("Static field '" + name + "' not found in class '" + name_ + "'");
+        // Fallback - should not be reached if caller checks first
+        static script_value null_value = script_value::make_null(std::weak_ptr<engine>());
+        return null_value;
     }
     
-    // Set static field value
-    void set_static_field(const std::string& name, const script_value& value) {
+    // Set static field value - returns true if field was found and set
+    // No exceptions. Callers MUST check return value (enforced by [[nodiscard]]).
+    // Does NOT check parent classes (C++ semantics) - static members are not inherited.
+    [[nodiscard]] bool set_static_field(const std::string& name, const script_value& value) {
         auto it = static_field_values_.find(name);
         if (it != static_field_values_.end()) {
             it->second = value;
-            return;
+            return true;
         }
-        
-        // Check parent class
-        if (parent_class_ && parent_class_->has_static_field(name)) {
-            parent_class_->set_static_field(name, value);
-            return;
-        }
-        
-        throw runtime_error("Static field '" + name + "' not found in class '" + name_ + "'");
+
+        return false;  // Field not found - static members are not inherited
     }
     
-    // Check if field is static
+    // Check if field is static (does NOT check parent classes - C++ semantics)
     bool is_static_field(const std::string& name) const {
-        return static_fields_.find(name) != static_fields_.end() ||
-               (parent_class_ && parent_class_->is_static_field(name));
+        return static_fields_.find(name) != static_fields_.end();
     }
-    
-    // Check if static field exists
+
+    // Check if static field exists (does NOT check parent classes - C++ semantics)
     bool has_static_field(const std::string& name) const {
-        return static_field_values_.find(name) != static_field_values_.end() ||
-               (parent_class_ && parent_class_->has_static_field(name));
+        return static_field_values_.find(name) != static_field_values_.end();
     }
     
     // Get a method
@@ -327,17 +337,21 @@ public:
         if (it != methods_.end()) {
             return it->second;
         }
-        
-        
-        // Check parent class if we have inheritance
-        if (parent_class_) {
-            return parent_class_->get_method(name, throw_if_missing);
+
+        // Check parent classes (left-to-right) if we have inheritance
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                auto result = parent->get_method(name, false);
+                if (!result.is_invalid()) {
+                    return result;
+                }
+            }
         }
-        
+
         if (throw_if_missing) {
             throw runtime_error("Method '" + name + "' not found in class '" + name_ + "'");
         }
-        
+
         // Return invalid value as sentinel
         return script_value::make_invalid(engine_ref_);
     }
@@ -347,39 +361,29 @@ public:
         return methods_.find(name) != methods_.end();
     }
     
-    // Get a static method
+    // Get a static method (does NOT check parent classes - C++ semantics)
+    // Static methods belong to the class itself, they are not inherited.
     script_value get_static_method(const std::string& name, bool throw_if_missing = true) const {
         auto it = static_methods_.find(name);
         if (it != static_methods_.end()) {
             return it->second;
         }
-        
-        // Check parent class
-        if (parent_class_) {
-            try {
-                return parent_class_->get_static_method(name, throw_if_missing);
-            } catch (const runtime_error&) {
-                // Parent doesn't have it either
-            }
-        }
-        
+
         if (throw_if_missing) {
             throw runtime_error("Static method '" + name + "' not found in class '" + name_ + "'");
         }
         return script_value::make_null(engine_ref_);
     }
-    
-    // Check if this class has a static method (does not check parent classes)
+
+    // Check if this class has a static method (does NOT check parent classes - C++ semantics)
     bool has_static_method(const std::string& name) const {
         return static_methods_.find(name) != static_methods_.end();
     }
-    
-    // Check if this class or parent classes have a static method
+
+    // DEPRECATED: Static methods are not inherited (C++ semantics)
+    // This method exists for backward compatibility but just checks the current class
     bool has_static_method_recursive(const std::string& name) const {
-        if (has_static_method(name)) {
-            return true;
-        }
-        return parent_class_ && parent_class_->has_static_method_recursive(name);
+        return has_static_method(name);
     }
 
     // Get all static field names (only this class, not parent)
@@ -417,22 +421,40 @@ public:
             instance = std::shared_ptr<class_instance>(raw_instance,
                 [class_def, destructor_name](class_instance* ptr) {
                     if (ptr) {
-                        // Try to find and call the destructor
-                        auto method_it = class_def->methods_.find(destructor_name);
-                        if (method_it != class_def->methods_.end()) {
-                            try {
-                                // Create a temporary shared_ptr for 'this' parameter
-                                // This is safe because we're in the deleter and control lifetime
-                                std::shared_ptr<class_instance> temp_this(ptr, [](class_instance*){});
+                        // Call destructors from derived to base (like C++)
+                        // For multiple inheritance, call destructors in reverse order of construction
+                        // Use a recursive helper to handle the inheritance tree
+                        std::function<void(std::shared_ptr<class_definition>)> call_destructors;
+                        call_destructors = [&](std::shared_ptr<class_definition> current_class) {
+                            if (!current_class) return;
 
-                                // Call the destructor with 'this' as argument
-                                // Use the class definition's engine reference
-                                const script_function& destructor_func = method_it->second.as_function();
-                                destructor_func({script_value::make_object(class_def->name_, temp_this, class_def->get_engine_ref())});
-                            } catch (...) {
-                                // Swallow exceptions in destructors
+                            // First call this class's destructor
+                            auto current_destructor_name = "~" + current_class->name_;
+                            auto method_it = current_class->methods_.find(current_destructor_name);
+
+                            if (method_it != current_class->methods_.end()) {
+                                try {
+                                    // Create a temporary shared_ptr for 'this' parameter
+                                    // This is safe because we're in the deleter and control lifetime
+                                    std::shared_ptr<class_instance> temp_this(ptr, [](class_instance*){});
+
+                                    // Call the destructor with 'this' as argument
+                                    const script_function& destructor_func = method_it->second.as_function();
+                                    destructor_func({script_value::make_object(current_class->name_, temp_this, current_class->get_engine_ref())});
+                                } catch (...) {
+                                    // Swallow exceptions in destructors
+                                }
                             }
-                        }
+
+                            // Then call parent destructors (left-to-right, same as construction order)
+                            for (const auto& parent : current_class->parent_classes_) {
+                                call_destructors(parent);
+                            }
+                        };
+
+                        // Start the destruction chain from the most derived class
+                        call_destructors(class_def);
+
                         delete ptr;
                     }
                 });
@@ -446,11 +468,16 @@ public:
         // Register instance for hot reload tracking
         register_instance(std::weak_ptr<class_instance>(instance));
         
-        // Initialize fields from parent classes first (if any)
-        if (parent_class_) {
-            const auto& parent_fields = parent_class_->get_all_field_defaults();
-            for (const auto& [field_name, default_value] : parent_fields) {
-                instance->set_field(field_name, default_value);
+        // Initialize fields from parent classes first (left-to-right precedence)
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                const auto& parent_fields = parent->get_all_field_defaults();
+                for (const auto& [field_name, default_value] : parent_fields) {
+                    // Only set if not already set (left-to-right: first parent wins)
+                    if (!instance->has_field(field_name)) {
+                        instance->set_field(field_name, default_value);
+                    }
+                }
             }
         }
         
@@ -467,39 +494,113 @@ public:
         // Rebuild cache if invalid
         if (!field_defaults_cache_valid_) {
             all_field_defaults_cache_.clear();
-            
-            // Start with parent fields
-            if (parent_class_) {
-                const auto& parent_fields = parent_class_->get_all_field_defaults();
-                all_field_defaults_cache_ = parent_fields;  // Copy parent fields
+
+            // Collect parent fields (left-to-right precedence)
+            for (const auto& parent : parent_classes_) {
+                if (parent) {
+                    const auto& parent_fields = parent->get_all_field_defaults();
+                    for (const auto& [name, value] : parent_fields) {
+                        // Only add if not already present (left-to-right: first parent wins)
+                        if (all_field_defaults_cache_.find(name) == all_field_defaults_cache_.end()) {
+                            all_field_defaults_cache_[name] = value;
+                        }
+                    }
+                }
             }
-            
-            // Add/override with our fields
+
+            // Add/override with our fields (derived class always wins)
             for (const auto& [name, value] : field_defaults_) {
                 all_field_defaults_cache_.insert_or_assign(name, value);
             }
-            
+
             field_defaults_cache_valid_ = true;
         }
         
         return all_field_defaults_cache_;
     }
     
-    // Set parent class for inheritance
+    // Set parent class for inheritance (single inheritance - kept for compatibility)
     void set_parent(std::shared_ptr<class_definition> parent) {
-        parent_class_ = parent;
-        field_defaults_cache_valid_ = false;  // Invalidate cache when parent changes
-        // Register this as a derived class of parent
+        parent_classes_.clear();
         if (parent) {
+            parent_classes_.push_back(parent);
             parent->add_derived_class(shared_from_this());
         }
+        field_defaults_cache_valid_ = false;  // Invalidate cache when parent changes
+    }
+
+    // Set multiple parent classes for multiple inheritance
+    // Returns true if successful, false if diamond inheritance detected
+    [[nodiscard]] bool set_parents(const std::vector<std::shared_ptr<class_definition>>& parents) {
+        parent_classes_ = parents;
+        field_defaults_cache_valid_ = false;  // Invalidate cache when parents change
+
+        // Check for diamond inheritance (not supported)
+        if (has_diamond_inheritance()) {
+            parent_classes_.clear();  // Roll back the change
+            return false;
+        }
+
+        // Register this as a derived class of all parents
+        for (auto& parent : parent_classes_) {
+            if (parent) {
+                parent->add_derived_class(shared_from_this());
+            }
+        }
+
+        return true;
+    }
+
+    // Get parent classes
+    const std::vector<std::shared_ptr<class_definition>>& get_parent_classes() const {
+        return parent_classes_;
     }
     
-    // Get parent class for inheritance
+    // Get first parent class for inheritance (for compatibility with single inheritance code)
     std::shared_ptr<class_definition> get_parent() const {
-        return parent_class_;
+        return parent_classes_.empty() ? nullptr : parent_classes_[0];
     }
-    
+
+    // Check if this class's inheritance hierarchy contains a diamond pattern
+    // Returns true if any base class is reachable through multiple paths
+    bool has_diamond_inheritance() const {
+        // Quick check: if we have 0 or 1 parents, no diamond possible
+        if (parent_classes_.size() <= 1) {
+            return false;
+        }
+
+        std::unordered_set<const class_definition*> visited;
+        std::vector<const class_definition*> to_visit;
+
+        // Start with all direct parents and mark them as visited
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                to_visit.push_back(parent.get());
+                visited.insert(parent.get());
+            }
+        }
+
+        // BFS through the inheritance tree
+        size_t index = 0;
+        while (index < to_visit.size()) {
+            const class_definition* current = to_visit[index++];
+
+            // Add all parents of this class to the queue
+            for (const auto& parent : current->parent_classes_) {
+                if (parent) {
+                    // If we've seen this parent before, it's a diamond!
+                    if (visited.count(parent.get()) > 0) {
+                        return true;
+                    }
+                    visited.insert(parent.get());
+                    to_visit.push_back(parent.get());
+                }
+            }
+        }
+
+        return false;
+    }
+
     // Track derived classes for hot reload
     void add_derived_class(std::weak_ptr<class_definition> derived) {
         derived_classes_.push_back(derived);
@@ -513,7 +614,11 @@ public:
     std::shared_ptr<class_definition> get_cpp_base_class() const { return cpp_base_class_; }
     
     const std::string& get_name() const { return name_; }
-    
+    uint64_t get_type_id() const { return type_id_; }
+
+    // Set type_id (called by engine during registration)
+    void set_type_id(uint64_t type_id) { type_id_ = type_id; }
+
     // Get the engine reference
     std::weak_ptr<engine> get_engine_ref() const { return engine_ref_; }
     
@@ -814,13 +919,14 @@ public:
     
 private:
     std::string name_;
+    uint64_t type_id_;  // Interned type name for fast comparisons
     std::weak_ptr<engine> engine_ref_;  // Engine reference for script_value creation
     std::unordered_map<std::string, script_value> methods_;
     std::unordered_map<std::string, script_value> static_methods_;  // Static method storage
     std::unordered_map<std::string, script_value> field_defaults_;
     std::unordered_map<std::string, script_value> static_field_values_;  // Static field storage
     std::unordered_set<std::string> static_fields_;  // Track which fields are static
-    std::shared_ptr<class_definition> parent_class_;
+    std::vector<std::shared_ptr<class_definition>> parent_classes_;  // Support multiple inheritance
     mutable std::unordered_map<std::string, script_value> all_field_defaults_cache_;
     mutable bool field_defaults_cache_valid_ = false;
     
@@ -955,18 +1061,21 @@ concept has_engine_constructor = requires(std::weak_ptr<engine> eng) {
 template<typename T>
 class class_builder {
 public:
-    class_builder(engine& engine, const std::string& class_name) 
+    class_builder(engine& engine, const std::string& class_name)
         : engine_(engine), class_name_(class_name) {
         // Extract base template name if this is a templated type
         std::string baseTemplateName = extract_base_template_name(class_name);
-        
+
         // Register the base template name if it contains template syntax
         if (baseTemplateName != class_name) {
             engine.register_template_type(baseTemplateName);
         }
-        
+
+        // Intern the class name for fast type comparisons
+        uint64_t type_id = engine.get_symbolizer()->intern(class_name);
+
         auto engine_weak = std::weak_ptr<jai::engine>(engine_.shared_from_this());
-        class_def_ = std::make_shared<class_definition>(class_name, engine_weak);
+        class_def_ = std::make_shared<class_definition>(class_name, type_id, engine_weak);
         
         // Initialize serialization metadata
         serialization_metadata_.class_name = class_name;

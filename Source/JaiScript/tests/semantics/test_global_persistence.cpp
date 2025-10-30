@@ -47,22 +47,22 @@ public:
         
         test("top_level_object_persistence", [this]() {
             auto eng = engine::make();
-            
-            // Define an object at top level
+
+            // Define a map at top level
             eng->execute(R"(
                 auto obj = {
-                    x: 10,
-                    y: 20
+                    "x": 10,
+                    "y": 20
                 };
             )");
-            
+
             // Should be accessible
-            check_eq(eng->execute("obj.x").as<int>(), 10);
-            check_eq(eng->execute("obj.y").as<int>(), 20);
-            
+            check_eq(eng->execute("obj[\"x\"]").as<int>(), 10);
+            check_eq(eng->execute("obj[\"y\"]").as<int>(), 20);
+
             // Modify it
-            eng->execute("obj.x = 30;");
-            check_eq(eng->execute("obj.x").as<int>(), 30);
+            eng->execute("obj[\"x\"] = 30;");
+            check_eq(eng->execute("obj[\"x\"]").as<int>(), 30);
         });
         
         test("top_level_function_persistence", [this]() {
@@ -92,13 +92,13 @@ public:
                 class Point {
                     int x = 0;
                     int y = 0;
-                    
+
                     Point(x_, y_) {
                         x = x_;
                         y = y_;
                     }
-                    
-                    sum() {
+
+                    int sum() {
                         return x + y;
                     }
                 }
@@ -121,7 +121,7 @@ public:
             auto eng = engine::make();
             
             // Add an explicit global
-            eng->add_global("explicit_var", script_value(100, eng->weak_from_this()));
+            eng->add_global("explicit_var", 100);
             
             // Define a top-level variable
             eng->execute("auto script_var = 200;");

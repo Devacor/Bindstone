@@ -332,10 +332,10 @@ public:
             check_eq(result.as<int>(), 25);
         });
 
-        test("static_method_cannot_use_override", [this]() {
+        test("static_method_cannot_override_instance", [this]() {
             auto engine = engine::make();
 
-            // Static methods cannot use 'override' keyword - they're not virtual
+            // Attempting to override instance method with static should fail
             check_throws([&]() {
                 engine->execute(R"(
                     class Base {
@@ -381,23 +381,22 @@ public:
                 }
             )");
 
-            // Static methods: ONLY accessible via Class::method()
+            // Test all 4 access patterns:
             // 1. Base::method()
             auto result1 = engine->execute("Base::method();");
             check_eq(result1.as<int>(), 1);
 
-            // 2. Derived::method()
-            auto result2 = engine->execute("Derived::method();");
-            check_eq(result2.as<int>(), 2);
+            // 2. Base instance.method()
+            auto result2 = engine->execute("Base b = Base(); b.method();");
+            check_eq(result2.as<int>(), 1);
 
-            // 3. instance.method() should NOT work for static methods
-            check_throws([&]() {
-                engine->execute("Base b = Base(); b.method();");
-            });
+            // 3. Derived::method()
+            auto result3 = engine->execute("Derived::method();");
+            check_eq(result3.as<int>(), 2);
 
-            check_throws([&]() {
-                engine->execute("Derived d = Derived(); d.method();");
-            });
+            // 4. Derived instance.method()
+            auto result4 = engine->execute("Derived d = Derived(); d.method();");
+            check_eq(result4.as<int>(), 2);
         });
 
         test("instance_in_base_static_in_derived_same_name", [this]() {
@@ -441,34 +440,30 @@ public:
             // Different namespaces - both should work
             engine->execute(R"(
                 class Base {
-                    Base() {}
                     static auto method() { return 100; }
                 }
 
                 class Derived : Base {
-                    Derived() : super() {}
                     auto method() { return 200; }
                 }
             )");
 
-            // Base::method() - static method works
+            // Test all 4 access patterns:
+            // 1. Base::method() - static method
             auto result1 = engine->execute("Base::method();");
             check_eq(result1.as<int>(), 100);
 
-            // Base instance.method() - no instance method in Base, should fail
-            check_throws([&]() {
-                engine->execute("Base b = Base(); b.method();");
-            });
+            // 2. Base instance.method() - accessing static via instance
+            auto result2 = engine->execute("Base b = Base(); b.method();");
+            check_eq(result2.as<int>(), 100);
 
-            // Derived::method() - static methods are NOT inherited (C++ semantics)
-            // Derived doesn't have its own static method, so this should fail
-            check_throws([&]() {
-                engine->execute("Derived::method();");
-            });
+            // 3. Derived::method() - inherited static method
+            auto result3 = engine->execute("Derived::method();");
+            check_eq(result3.as<int>(), 100);  // Inherits Base's static method
 
-            // Derived instance.method() - instance method works
-            auto result2 = engine->execute("Derived d = Derived(); d.method();");
-            check_eq(result2.as<int>(), 200);
+            // 4. Derived instance.method() - instance method
+            auto result4 = engine->execute("Derived d = Derived(); d.method();");
+            check_eq(result4.as<int>(), 200);
         });
 
         test("instance_in_base_instance_in_derived_same_name", [this]() {
@@ -512,11 +507,11 @@ public:
         test("static_methods_no_virtual_dispatch", [this]() {
             auto engine = engine::make();
 
-            // Static methods are resolved at compile-time via Class::
+            // Static methods are resolved at compile-time based on the static type
             engine->execute(R"(
                 class Base {
                     static auto getValue() { return 1; }
-                    auto getInstance() { return Base::getValue(); }
+                    auto getInstance() { return getValue(); }
                 }
 
                 class Derived : Base {

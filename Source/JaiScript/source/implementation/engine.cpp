@@ -305,17 +305,19 @@ void engine::implementation::updateOverloadedFunction(const std::string& name, e
     // Create a dispatch function that selects the right overload
     // Make a copy of the name to ensure it survives the lambda lifetime
     std::string functionName = name;
-    script_function dispatcher = [this, functionName](const std::vector<script_value>& args) -> script_value {
+    script_function dispatcher = [this, functionName](const std::vector<script_value>& args) -> checked_result<script_value> {
         auto it = overloadedFunctions.find(functionName);
         if (it == overloadedFunctions.end()) {
-            throw runtime_error("Overloaded function '" + functionName + "' not found");
+            return checked_result<script_value>(make_error_code(runtime_error_code::not_a_function),
+                "Overloaded function '" + functionName + "' not found");
         }
-        
+
         script_value bestMatch = it->second.findBestMatch(args);
         if (bestMatch.is_null()) {
-            throw runtime_error("No matching overload found for function '" + functionName + "' with " + std::to_string(args.size()) + " arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                "No matching overload found for function '" + functionName + "' with " + std::to_string(args.size()) + " arguments");
         }
-        
+
         const script_function& func = bestMatch.as_function();
         return func(args);
     };
@@ -327,17 +329,19 @@ void engine::implementation::updateOverloadedFunction(const std::string& name, e
 
 engine::engine() : impl(std::make_unique<implementation>()) {
     // Set up the subscript resolver for custom [] operators
-    impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> script_value {
+    impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> checked_result<script_value> {
         auto it = impl->overloadedFunctions.find("[]");
         if (it == impl->overloadedFunctions.end()) {
-            throw runtime_error("No custom subscript operator registered");
+            return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+                "No custom subscript operator registered");
         }
-        
+
         script_value bestMatch = it->second.findBestMatch(args);
         if (bestMatch.is_null()) {
-            throw runtime_error("No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                "No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
         }
-        
+
         const script_function& func = bestMatch.as_function();
         return func(args);
     });
@@ -556,7 +560,7 @@ void engine::initialize_engine_reference() {
     );
     
     // Add built-in functions
-    add_function("print", [engine_weak](const std::vector<script_value>& args) -> script_value {
+    add_function("print", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
         for (const auto& arg : args) {
             std::cout << arg.to_string();
         }
@@ -599,17 +603,19 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
                                                           impl->overloadedFunctions.count("-") > 0 ||
                                                           impl->overloadedFunctions.count("*") > 0 ||
                                                           impl->overloadedFunctions.count("/") > 0);
-                impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> script_value {
+                impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> checked_result<script_value> {
                     auto it = impl->overloadedFunctions.find("[]");
                     if (it == impl->overloadedFunctions.end()) {
-                        throw runtime_error("No custom subscript operator registered");
+                        return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+                            "No custom subscript operator registered");
                     }
-                    
+
                     script_value bestMatch = it->second.findBestMatch(args);
                     if (bestMatch.is_null()) {
-                        throw runtime_error("No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+                        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                            "No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
                     }
-                    
+
                     const script_function& func = bestMatch.as_function();
                     return func(args);
                 });
@@ -627,17 +633,19 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
                                                           impl->overloadedFunctions.count("-") > 0 ||
                                                           impl->overloadedFunctions.count("*") > 0 ||
                                                           impl->overloadedFunctions.count("/") > 0);
-                impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> script_value {
+                impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> checked_result<script_value> {
                     auto it = impl->overloadedFunctions.find("[]");
                     if (it == impl->overloadedFunctions.end()) {
-                        throw runtime_error("No custom subscript operator registered");
+                        return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+                            "No custom subscript operator registered");
                     }
-                    
+
                     script_value bestMatch = it->second.findBestMatch(args);
                     if (bestMatch.is_null()) {
-                        throw runtime_error("No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+                        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                            "No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
                     }
-                    
+
                     const script_function& func = bestMatch.as_function();
                     return func(args);
                 });
@@ -952,17 +960,19 @@ script_value engine::get_variable(const std::string& name) const {
         // Create a dispatch function that selects the right overload
         // Make a copy of the name to ensure it survives the lambda lifetime
         std::string functionName = name;
-        script_function dispatcher = [this, functionName](const std::vector<script_value>& args) -> script_value {
+        script_function dispatcher = [this, functionName](const std::vector<script_value>& args) -> checked_result<script_value> {
             auto it = impl->overloadedFunctions.find(functionName);
             if (it == impl->overloadedFunctions.end()) {
-                throw runtime_error("Overloaded function '" + functionName + "' not found");
+                return checked_result<script_value>(make_error_code(runtime_error_code::not_a_function),
+                    "Overloaded function '" + functionName + "' not found");
             }
-            
+
             script_value bestMatch = it->second.findBestMatch(args);
             if (bestMatch.is_null()) {
-                throw runtime_error("No matching overload found for function '" + functionName + "' with " + std::to_string(args.size()) + " arguments");
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                    "No matching overload found for function '" + functionName + "' with " + std::to_string(args.size()) + " arguments");
             }
-            
+
             // Call the selected overload
             const script_function& func = bestMatch.as_function();
             return func(args);
@@ -1131,18 +1141,20 @@ void engine::set_backend(backend_type type) {
                                               impl->overloadedFunctions.count("-") > 0 ||
                                               impl->overloadedFunctions.count("*") > 0 ||
                                               impl->overloadedFunctions.count("/") > 0);
-    
-    impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> script_value {
+
+    impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> checked_result<script_value> {
         auto it = impl->overloadedFunctions.find("[]");
         if (it == impl->overloadedFunctions.end()) {
-            throw runtime_error("No custom subscript operator registered");
+            return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+                "No custom subscript operator registered");
         }
-        
+
         script_value bestMatch = it->second.findBestMatch(args);
         if (bestMatch.is_null()) {
-            throw runtime_error("No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                "No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
         }
-        
+
         const script_function& func = bestMatch.as_function();
         return func(args);
     });
@@ -1156,18 +1168,20 @@ void engine::set_backend(std::unique_ptr<execution_backend> backend) {
                                               impl->overloadedFunctions.count("-") > 0 ||
                                               impl->overloadedFunctions.count("*") > 0 ||
                                               impl->overloadedFunctions.count("/") > 0);
-    
-    impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> script_value {
+
+    impl->backend->set_subscript_resolver([this](const std::vector<script_value>& args) -> checked_result<script_value> {
         auto it = impl->overloadedFunctions.find("[]");
         if (it == impl->overloadedFunctions.end()) {
-            throw runtime_error("No custom subscript operator registered");
+            return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
+                "No custom subscript operator registered");
         }
-        
+
         script_value bestMatch = it->second.findBestMatch(args);
         if (bestMatch.is_null()) {
-            throw runtime_error("No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                "No matching overload found for function '[]' with " + std::to_string(args.size()) + " arguments");
         }
-        
+
         const script_function& func = bestMatch.as_function();
         return func(args);
     });

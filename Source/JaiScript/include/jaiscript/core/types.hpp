@@ -4,6 +4,7 @@
 #define __JAISCRIPT_CORE_TYPES_HPP__
 
 #include <jaiscript/jaiscript_fwd.hpp>
+#include <jaiscript/core/checked_result.hpp>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -32,7 +33,8 @@ namespace jai {
     using script_map = std::map<script_value, script_value>;
     
     // Function type for script functions
-    using script_function = std::function<script_value(const std::vector<script_value>&)>;
+    // Returns checked_result to allow proper error propagation without exceptions
+    using script_function = std::function<checked_result<script_value>(const std::vector<script_value>&)>;
     
     // For serializable functions, we need to track additional info
     struct function_info {

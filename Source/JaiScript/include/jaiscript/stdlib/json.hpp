@@ -164,15 +164,19 @@ namespace stdlib {
                             try {
                                 // Call getter with instance as 'this'
                                 std::vector<script_value> args = { val }; // Pass the instance itself
-                                script_value propscript_value = getter.as_function()(args);
-                                
-                                if (!first) {
-                                    oss << ',';
-                                    if (pretty) oss << '\n' << next_indent;
+                                auto result = getter.as_function()(args);
+                                if (result) {
+                                    script_value propscript_value = std::move(result.value());
+
+                                    if (!first) {
+                                        oss << ',';
+                                        if (pretty) oss << '\n' << next_indent;
+                                    }
+                                    first = false;
+                                    oss << "\"" << propName << "\": ";
+                                    oss << to_json_impl(propscript_value, indent, current_depth + 1);
                                 }
-                                first = false;
-                                oss << "\"" << propName << "\": ";
-                                oss << to_json_impl(propscript_value, indent, current_depth + 1);
+                                // Skip properties that fail (result has error)
                             } catch (...) {
                                 // Skip properties that fail to serialize
                             }
@@ -500,8 +504,11 @@ namespace stdlib {
                                         if (custom_constructor.type() == script_value_type::jai_function_type) {
                                             // Use custom serialization constructor
                                             std::vector<script_value> args = { val };
-                                            instance = custom_constructor.as_function()(args);
-                                            has_custom_constructor = true;
+                                            auto result = custom_constructor.as_function()(args);
+                                            if (result) {
+                                                instance = std::move(result.value());
+                                                has_custom_constructor = true;
+                                            }
                                         }
                                     }
                                 }

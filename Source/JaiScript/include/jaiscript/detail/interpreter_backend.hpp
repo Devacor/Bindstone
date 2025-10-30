@@ -51,7 +51,7 @@ public:
         interpreter_->set_has_custom_numeric_ops(value);
     }
     
-    void set_subscript_resolver(std::function<script_value(const std::vector<script_value>&)> resolver) override {
+    void set_subscript_resolver(std::function<checked_result<script_value>(const std::vector<script_value>&)> resolver) override {
         interpreter_->set_subscript_resolver(resolver);
     }
     

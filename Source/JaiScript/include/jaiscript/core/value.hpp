@@ -344,12 +344,94 @@ namespace jai {
         const script_function& as_function() const;
         
         // Generic extraction with type checking
+        // HOT PATH OPTIMIZATION: Specialize common types to avoid template overhead
         template<typename T>
         T as() const {
+            // FAST PATH: Direct type specializations for hot types (avoids constexpr cascade)
+            // These will be resolved at compile-time to direct function calls
+            if constexpr (std::is_same_v<T, script_int>) {
+                // Inline the deref + variant access to avoid function call overhead
+                const script_value& val = deref();
+                if (val.cpp_bound_ptr_) {
+                    return static_cast<script_int>(*static_cast<const int*>(val.cpp_bound_ptr_));
+                }
+                // Direct variant access with single type check
+                if (val.type() == script_value_type::jai_int_type) {
+                    return std::get<script_int>(val.storage_);
+                } else if (val.type() == script_value_type::jai_float_type) {
+                    // Float to int conversion
+                    return static_cast<script_int>(std::get<script_float>(val.storage_));
+                }
+                throw runtime_error("script_value is not an integer or float");
+            }
+            else if constexpr (std::is_same_v<T, script_float> || std::is_same_v<T, double>) {
+                // Inline hot path for float access
+                const script_value& val = deref();
+                if (val.cpp_bound_ptr_) {
+                    return *static_cast<const script_float*>(val.cpp_bound_ptr_);
+                }
+                // Direct variant access with type conversion
+                if (val.type() == script_value_type::jai_float_type) {
+                    return std::get<script_float>(val.storage_);
+                } else if (val.type() == script_value_type::jai_int_type) {
+                    return static_cast<script_float>(std::get<script_int>(val.storage_));
+                }
+                throw runtime_error("script_value is not a float or integer");
+            }
+            else if constexpr (std::is_same_v<T, script_bool>) {
+                // Inline hot path for bool access
+                const script_value& val = deref();
+                if (val.cpp_bound_ptr_) {
+                    return *static_cast<const script_bool*>(val.cpp_bound_ptr_);
+                }
+                if (val.type() == script_value_type::jai_bool_type) {
+                    return std::get<script_bool>(val.storage_);
+                }
+                throw runtime_error("script_value is not a boolean");
+            }
+            else if constexpr (std::is_same_v<T, script_char>) {
+                // Inline hot path for char access
+                const script_value& val = deref();
+                if (val.cpp_bound_ptr_) {
+                    return *static_cast<const script_char*>(val.cpp_bound_ptr_);
+                }
+                if (val.type() == script_value_type::jai_char_type) {
+                    return std::get<script_char>(val.storage_);
+                }
+                throw runtime_error("script_value is not a character");
+            }
+            // MEDIUM PATH: Common integral conversions (inlined to avoid cascading checks)
+            else if constexpr (std::is_same_v<T, int>) {
+                script_int val = as<script_int>();  // Uses fast path above
+                if (val < std::numeric_limits<int>::min() || val > std::numeric_limits<int>::max()) {
+                    throw runtime_error("Integer value out of range for int");
+                }
+                return static_cast<int>(val);
+            }
+            else if constexpr (std::is_same_v<T, int64_t>) {
+                return static_cast<int64_t>(as<script_int>());  // Uses fast path, no bounds check
+            }
+            else if constexpr (std::is_same_v<T, float>) {
+                // Inline float conversion to avoid double dispatch
+                const script_value& val = deref();
+                if (val.type() == script_value_type::jai_float_type) {
+                    if (val.cpp_bound_ptr_) {
+                        return static_cast<float>(*static_cast<const script_float*>(val.cpp_bound_ptr_));
+                    }
+                    return static_cast<float>(std::get<script_float>(val.storage_));
+                } else if (val.type() == script_value_type::jai_int_type) {
+                    if (val.cpp_bound_ptr_) {
+                        return static_cast<float>(*static_cast<const int*>(val.cpp_bound_ptr_));
+                    }
+                    return static_cast<float>(std::get<script_int>(val.storage_));
+                }
+                throw runtime_error("Cannot convert script_value to float");
+            }
+            // SLOWER PATH: Everything else (original implementation)
             // Handle reference types
-            if constexpr (std::is_reference_v<T>) {
+            else if constexpr (std::is_reference_v<T>) {
                 using base_type = std::remove_cv_t<std::remove_reference_t<T>>;
-                
+
                 // For const references, we can return references to our internal data
                 if constexpr (std::is_const_v<std::remove_reference_t<T>>) {
                     if constexpr (std::is_same_v<base_type, script_int>) {
@@ -398,117 +480,58 @@ namespace jai {
                     throw runtime_error("Cannot extract non-const reference from const script_value");
                 }
             }
-            // Handle value types
-            else if constexpr (std::is_same_v<T, script_int>) {
-                return as_int();
-            } else if constexpr (std::is_same_v<T, double> && !std::is_same_v<double, script_float>) {
-                // Handle double separately if it's different from script_float
-                // This branch won't be taken since script_float is double, but keeping for clarity
-                if (type() == script_value_type::jai_float_type) {
-                    return as_float();
-                } else if (type() == script_value_type::jai_int_type) {
-                    return static_cast<double>(as_int());
-                } else {
-                    throw runtime_error("Cannot convert script_value to double");
-                }
-            } else if constexpr (std::is_same_v<T, script_float> || std::is_same_v<T, double>) {
-                // Handle script_float (which is double) with int->float conversion
-                if (type() == script_value_type::jai_float_type) {
-                    return as_float();
-                } else if (type() == script_value_type::jai_int_type) {
-                    return static_cast<script_float>(as_int());
-                } else {
-                    // Debug: show actual type
-                    std::string type_name;
-                    switch(type()) {
-                        case script_value_type::jai_null_type: type_name = "null"; break;
-                        case script_value_type::jai_int_type: type_name = "int"; break;
-                        case script_value_type::jai_float_type: type_name = "float"; break;
-                        case script_value_type::jai_string_type: type_name = "string"; break;
-                        case script_value_type::jai_bool_type: type_name = "bool"; break;
-                        case script_value_type::jai_char_type: type_name = "char"; break;
-                        case script_value_type::jai_array_type: type_name = "array"; break;
-                        case script_value_type::jai_map_type: type_name = "map"; break;
-                        case script_value_type::jai_function_type: type_name = "function"; break;
-                        case script_value_type::jai_object_type: type_name = "object"; break;
-                        case script_value_type::jai_reference_type: type_name = "reference"; break;
-                        default: type_name = "unknown(" + std::to_string(static_cast<int>(type())) + ")"; break;
-                    }
-                    throw runtime_error("Cannot convert script_value to float/double - actual type is: " + type_name);
-                }
-            } else if constexpr (std::is_same_v<T, script_string>) {
+            else if constexpr (std::is_same_v<T, script_string>) {
                 return as_string();
-            } else if constexpr (std::is_same_v<T, script_char>) {
-                return as_char();
-            } else if constexpr (std::is_same_v<T, script_bool>) {
-                return as_bool();
-            }
-            // Allow common C++ type conversions with bounds checking
-            else if constexpr (std::is_same_v<T, int>) {
-                script_int val = as_int();  // Now handles int and float->int conversion
-                if (val < std::numeric_limits<int>::min() || val > std::numeric_limits<int>::max()) {
-                    throw runtime_error("Integer value out of range for int");
-                }
-                return static_cast<int>(val);
             } else if constexpr (std::is_same_v<T, int8_t>) {
-                script_int val = as_int();
+                script_int val = as<script_int>();
                 if (val < std::numeric_limits<int8_t>::min() || val > std::numeric_limits<int8_t>::max()) {
                     throw runtime_error("Integer value out of range for int8_t");
                 }
                 return static_cast<int8_t>(val);
             } else if constexpr (std::is_same_v<T, int16_t>) {
-                script_int val = as_int();
+                script_int val = as<script_int>();
                 if (val < std::numeric_limits<int16_t>::min() || val > std::numeric_limits<int16_t>::max()) {
                     throw runtime_error("Integer value out of range for int16_t");
                 }
                 return static_cast<int16_t>(val);
             } else if constexpr (std::is_same_v<T, int32_t>) {
-                script_int val = as_int();
+                script_int val = as<script_int>();
                 if (val < std::numeric_limits<int32_t>::min() || val > std::numeric_limits<int32_t>::max()) {
                     throw runtime_error("Integer value out of range for int32_t");
                 }
                 return static_cast<int32_t>(val);
-            } else if constexpr (std::is_same_v<T, int64_t>) {
-                return static_cast<int64_t>(as_int());  // No bounds check needed, same size
-            } else if constexpr (std::is_same_v<T, uint8_t>) {
-                script_int val = as_int();
+            }
+            // Unsigned integer types with bounds checking
+            else if constexpr (std::is_same_v<T, uint8_t>) {
+                script_int val = as<script_int>();
                 if (val < 0 || val > std::numeric_limits<uint8_t>::max()) {
                     throw runtime_error("Integer value out of range for uint8_t (must be 0-255)");
                 }
                 return static_cast<uint8_t>(val);
             } else if constexpr (std::is_same_v<T, uint16_t>) {
-                script_int val = as_int();
+                script_int val = as<script_int>();
                 if (val < 0 || val > std::numeric_limits<uint16_t>::max()) {
                     throw runtime_error("Integer value out of range for uint16_t (must be non-negative)");
                 }
                 return static_cast<uint16_t>(val);
             } else if constexpr (std::is_same_v<T, uint32_t>) {
-                script_int val = as_int();
+                script_int val = as<script_int>();
                 if (val < 0 || val > std::numeric_limits<uint32_t>::max()) {
                     throw runtime_error("Integer value out of range for uint32_t (must be non-negative)");
                 }
                 return static_cast<uint32_t>(val);
             } else if constexpr (std::is_same_v<T, uint64_t>) {
-                script_int val = as_int();
+                script_int val = as<script_int>();
                 if (val < 0) {
                     throw runtime_error("Integer value must be non-negative for uint64_t");
                 }
                 return static_cast<uint64_t>(val);
             } else if constexpr (std::is_same_v<T, size_t>) {
-                script_int val = as_int();
+                script_int val = as<script_int>();
                 if (val < 0) {
                     throw runtime_error("Integer value must be non-negative for size_t");
                 }
                 return static_cast<size_t>(val);
-            } else if constexpr (std::is_same_v<T, float>) {
-                // Handle both float and int types for automatic conversion
-                if (type() == script_value_type::jai_float_type) {
-                    return static_cast<float>(as_float());
-                } else if (type() == script_value_type::jai_int_type) {
-                    return static_cast<float>(as_int());  // Convert int to float
-                } else {
-                    throw runtime_error("Cannot convert script_value to float");
-                }
             } else if constexpr (std::is_same_v<T, std::string>) {
                 return as_string();  // script_string is already std::string
             }

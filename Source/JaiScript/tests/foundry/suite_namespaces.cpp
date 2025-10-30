@@ -213,7 +213,7 @@ public:
                         }
                     };
 
-                    cat GLOBAL_CAT;
+                    cat GLOBAL_CAT = cat();
                 }
             )");
 
@@ -262,6 +262,36 @@ public:
             // Namespace-only function
             auto r5 = eng->execute("cat::dance()");
             check_eq(r5.as<int>(), 2);
+        });
+
+        test("namespace_override_before_class", [&]() {
+            auto eng = engine::make();
+            // Define namespace with override BEFORE the class exists
+            // The override keyword should still work when class is defined later
+            eng->execute(R"(
+                namespace dog {
+                    auto bark() override { return 100; }
+                    auto wag() { return 200; }
+                }
+
+                class dog {
+                public:
+                    static auto bark() { return 1; }
+                    static auto sit() { return 2; }
+                };
+            )");
+
+            // Namespace override should take precedence (defined before class)
+            auto r1 = eng->execute("dog::bark()");
+            check_eq(r1.as<int>(), 100);
+
+            // Class static method (no namespace override)
+            auto r2 = eng->execute("dog::sit()");
+            check_eq(r2.as<int>(), 2);
+
+            // Namespace-only function
+            auto r3 = eng->execute("dog::wag()");
+            check_eq(r3.as<int>(), 200);
         });
     }
 };

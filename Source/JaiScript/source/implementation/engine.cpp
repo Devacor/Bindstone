@@ -910,6 +910,10 @@ string_symbolizer* engine::get_symbolizer() {
     return &impl->stringSymbolizer;
 }
 
+uint64_t engine::symbolize(const std::string& str) {
+    return impl->stringSymbolizer.intern(str);
+}
+
 void engine::add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef) {
     impl->classes[name] = classDef;
     // Also register with the unified class_registry for both C++ and script classes

@@ -490,11 +490,11 @@ See `docs/performance.md` for detailed benchmarks.
 
 ## Current Limitations
 
-- No script-defined classes yet (C++ classes can be used)
-- No switch/case statements
-- Exception handling not yet supported in VM backend (interpreter only)
+- Exception handling not yet supported in VM backend (works in interpreter)
 
-See `JaiScript_FutureDesign.md` for planned features including unified serialization, state-preserving hot reload, and property system integration.
+Script classes, switch/case statements, range-based for loops, and hot reload are all fully implemented.
+
+See `JaiScript_FutureDesign.md` for planned features including unified serialization and property system enhancements.
 
 ## License
 

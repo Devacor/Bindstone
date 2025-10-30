@@ -131,10 +131,10 @@ namespace jai {
     class identifier_expr : public expression {
     public:
         std::string name;
-        mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID, computed lazily
+        uint64_t symbol_id;  // Interned symbol ID - must be set by parser
 
-        identifier_expr(const source_location& loc, const std::string& n)
-            : expression(loc), name(n) {}
+        identifier_expr(const source_location& loc, const std::string& n, uint64_t sym_id)
+            : expression(loc), name(n), symbol_id(sym_id) {}
 
         [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
             return visitor->visit_identifier_expr(this);
@@ -205,11 +205,15 @@ namespace jai {
     public:
         expression_ptr object;
         std::string member;
+        uint64_t member_id = UINT64_MAX;  // Cached interned ID for the member name
         bool is_arrow;  // true for ->, false for .
         bool is_static; // true for ::, false for . or ->
 
         member_expr(const source_location& loc, expression_ptr obj, const std::string& mem, bool arrow, bool static_access = false)
             : expression(loc), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}
+
+        member_expr(const source_location& loc, expression_ptr obj, const std::string& mem, uint64_t mem_id, bool arrow, bool static_access = false)
+            : expression(loc), object(obj), member(mem), member_id(mem_id), is_arrow(arrow), is_static(static_access) {}
 
         [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
             return visitor->visit_member_expr(this);
@@ -575,6 +579,7 @@ namespace jai {
     class function_decl : public declaration {
     public:
         std::string name;
+        uint64_t name_id = UINT64_MAX;  // Cached interned ID for the function name
         std::vector<parameter> parameters;
         type_info_ptr return_type;
         std::shared_ptr<block_stmt> body;

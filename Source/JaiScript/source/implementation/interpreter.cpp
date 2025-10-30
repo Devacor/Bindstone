@@ -13,16 +13,18 @@
 
 namespace jai {
 
-// Define static method registries for built-in types
-const std::unordered_map<std::string, interpreter::builtin_method> interpreter::array_methods_ = {
-    {"size", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+// Initialize built-in method registries with interned method names for O(1) lookup
+void interpreter::init_builtin_methods() {
+    // Array methods
+    array_methods_ = {
+        {string_symbolizer_->intern("size"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("size() takes no arguments");
         }
         return interp->make_value(static_cast<script_int>(self.as_array().size()));
     }},
-    
-    {"push", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("push"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (args.size() != 1) {
             throw runtime_error("push() takes exactly one argument");
         }
@@ -30,8 +32,8 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         arrayPtr->push_back(args[0].clone());  // Deep copy when pushing
         return interp->make_value();
     }},
-    
-    {"pop", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("pop"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("pop() takes no arguments");
         }
@@ -43,15 +45,15 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         arrayPtr->pop_back();
         return last;
     }},
-    
-    {"empty", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("empty"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("empty() takes no arguments");
         }
         return interp->make_value(self.as_array().empty());
     }},
-    
-    {"clear", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("clear"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("clear() takes no arguments");
         }
@@ -59,8 +61,8 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         arrayPtr->clear();
         return interp->make_value();
     }},
-    
-    {"front", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("front"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("front() takes no arguments");
         }
@@ -70,8 +72,8 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         }
         return arr.front();
     }},
-    
-    {"back", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("back"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("back() takes no arguments");
         }
@@ -81,24 +83,25 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         }
         return arr.back();
     }}
-};
+    };
 
-const std::unordered_map<std::string, interpreter::builtin_method> interpreter::map_methods_ = {
-    {"size", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+    // Map methods
+    map_methods_ = {
+        {string_symbolizer_->intern("size"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("size() takes no arguments");
         }
         return interp->make_value(static_cast<script_int>(self.as_map().size()));
     }},
-    
-    {"empty", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("empty"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("empty() takes no arguments");
         }
         return interp->make_value(self.as_map().empty());
     }},
-    
-    {"clear", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("clear"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("clear() takes no arguments");
         }
@@ -106,16 +109,16 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         mapPtr->clear();
         return interp->make_value();
     }},
-    
-    {"contains", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("contains"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (args.size() != 1) {
             throw runtime_error("contains() takes exactly one argument");
         }
         const auto& map = self.as_map();
         return interp->make_value(map.find(args[0]) != map.end());
     }},
-    
-    {"erase", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("erase"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (args.size() != 1) {
             throw runtime_error("erase() takes exactly one argument");
         }
@@ -123,8 +126,8 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         mapPtr->erase(args[0]);
         return interp->make_value();
     }},
-    
-    {"keys", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("keys"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("keys() takes no arguments");
         }
@@ -137,8 +140,8 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         }
         return result;
     }},
-    
-    {"values", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("values"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("values() takes no arguments");
         }
@@ -151,10 +154,11 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         }
         return result;
     }}
-};
+    };
 
-const std::unordered_map<std::string, interpreter::builtin_method> interpreter::weak_ptr_methods_ = {
-    {"lock", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+    // Weak pointer methods
+    weak_ptr_methods_ = {
+        {string_symbolizer_->intern("lock"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("lock() takes no arguments");
         }
@@ -189,8 +193,8 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
             return script_value::make_null(interp->get_engine_ref());
         }
     }},
-    
-    {"expired", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("expired"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("expired() takes no arguments");
         }
@@ -202,8 +206,8 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         auto weak_ptr = self.get_weak_ptr();
         return interp->make_value(weak_ptr.expired());
     }},
-    
-    {"reset", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("reset"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("reset() takes no arguments");
         }
@@ -215,13 +219,14 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         // Reset the weak_ptr to null
         auto& weak_storage = self.get_weak_ptr_storage();
         weak_storage.reset();
-        
+
         return self; // Return the reset weak_ptr
     }}
-};
+    };
 
-const std::unordered_map<std::string, interpreter::builtin_method> interpreter::shared_ptr_methods_ = {
-    {"reset", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+    // Shared pointer methods
+    shared_ptr_methods_ = {
+        {string_symbolizer_->intern("reset"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("reset() takes no arguments");
         }
@@ -234,8 +239,8 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         
         return self; // Return the reset shared_ptr
     }},
-    
-    {"use_count", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("use_count"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("use_count() takes no arguments");
         }
@@ -252,8 +257,8 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         // Not a valid shared_ptr
         return interp->make_value(static_cast<script_int>(0));
     }},
-    
-    {"unique", [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+
+        {string_symbolizer_->intern("unique"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
         if (!args.empty()) {
             throw runtime_error("unique() takes no arguments");
         }
@@ -270,7 +275,8 @@ const std::unordered_map<std::string, interpreter::builtin_method> interpreter::
         // Not a valid shared_ptr
         return interp->make_value(false);
     }}
-};
+    };
+}
 
 void environment::define(const std::string& name, const script_value& value) {
     uint64_t id = symbolizer_->intern(name);
@@ -1098,7 +1104,15 @@ interpreter::interpreter()
     for (size_t i = 0; i < 8; ++i) {
         environment_pool_.push_back(std::make_shared<environment>(nullptr, string_symbolizer_));
     }
-    
+
+    // Initialize cached type IDs for fast object type comparison
+    class_definition_type_id_ = string_symbolizer_->intern("class_definition");
+    weak_ptr_holder_type_id_ = string_symbolizer_->intern("weak_ptr_holder");
+    shared_ptr_holder_type_id_ = string_symbolizer_->intern("shared_ptr_holder");
+
+    // Initialize built-in method registries with interned method names
+    init_builtin_methods();
+
     // Initialize binary operator dispatch table
     init_dispatch_table();
 }
@@ -1112,12 +1126,20 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
     environment_pool_.reserve(8);  // For nested function calls
-    
+
     // Pre-populate environment pool
     for (size_t i = 0; i < 8; ++i) {
         environment_pool_.push_back(std::make_shared<environment>(nullptr, string_symbolizer_));
     }
-    
+
+    // Initialize cached type IDs for fast object type comparison
+    class_definition_type_id_ = string_symbolizer_->intern("class_definition");
+    weak_ptr_holder_type_id_ = string_symbolizer_->intern("weak_ptr_holder");
+    shared_ptr_holder_type_id_ = string_symbolizer_->intern("shared_ptr_holder");
+
+    // Initialize built-in method registries with interned method names
+    init_builtin_methods();
+
     // Initialize binary operator dispatch table
     init_dispatch_table();
 }
@@ -1131,12 +1153,20 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     // Initialize optimization pools
     argument_pool_.reserve(16);  // Reasonable default for most function calls
     environment_pool_.reserve(8);  // For nested function calls
-    
+
     // Pre-populate environment pool
     for (size_t i = 0; i < 8; ++i) {
         environment_pool_.push_back(std::make_shared<environment>(nullptr, string_symbolizer_));
     }
-    
+
+    // Initialize cached type IDs for fast object type comparison
+    class_definition_type_id_ = string_symbolizer_->intern("class_definition");
+    weak_ptr_holder_type_id_ = string_symbolizer_->intern("weak_ptr_holder");
+    shared_ptr_holder_type_id_ = string_symbolizer_->intern("shared_ptr_holder");
+
+    // Initialize built-in method registries with interned method names
+    init_builtin_methods();
+
     // Initialize binary operator dispatch table
     init_dispatch_table();
 }
@@ -1336,14 +1366,9 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         }
     }
     
-    // Use cached symbol ID if available, otherwise compute and cache it
-    if (expr->symbol_id == UINT64_MAX) {
-        expr->symbol_id = string_symbolizer_->intern(expr->name);
-    }
-    
+    // Use parser's pre-computed symbol ID (always set by parser)
     // Try to get the variable from environment
     try {
-
         const script_value& val = environment_->get_ref(expr->symbol_id);
         push_value(val.deref());  // Automatically handles references
     } catch (const runtime_error&) {
@@ -2464,7 +2489,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         if (!decl->initializer) {
             // No initializer - create empty weak_ptr
             script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_ref_);
-            environment_->define(decl->name, std::move(weak));
+            environment_->define(decl->name_id, std::move(weak));
         } else {
             // Evaluate initializer
             JAISCRIPT_TRY(decl->initializer->accept(this));
@@ -2474,14 +2499,14 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             if (value.is_null()) {
                 // Initialize with null - create empty weak_ptr
                 script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_ref_);
-                environment_->define(decl->name, std::move(weak));
+                environment_->define(decl->name_id, std::move(weak));
             } else if (value.is_weak_ptr()) {
                 // Initialize with another weak_ptr - copy it
-                environment_->define(decl->name, std::move(value));
+                environment_->define(decl->name_id, std::move(value));
             } else if (value.type() == script_value_type::jai_object_type) {
                 // Initialize with object/shared_ptr - create weak_ptr from it
                 script_value weak = script_value::make_weak_ptr(value, engine_ref_);
-                environment_->define(decl->name, std::move(weak));
+                environment_->define(decl->name_id, std::move(weak));
             } else {
                 auto type_info = value.get_type_info();
                 std::string type_name = type_info ? type_info->type_name : "unknown";
@@ -2494,7 +2519,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             // No initializer - create null shared_ptr
             script_value null_ptr = script_value::make_null(engine_ref_);
             null_ptr.set_type_info(decl->type);  // Mark as shared_ptr type
-            environment_->define(decl->name, std::move(null_ptr));
+            environment_->define(decl->name_id, std::move(null_ptr));
         } else {
             // Evaluate initializer
             JAISCRIPT_TRY(decl->initializer->accept(this));
@@ -2504,14 +2529,14 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
             if (value.is_null()) {
                 // Initialize with null - that's fine
                 value.set_type_info(decl->type);  // Mark as shared_ptr type
-                environment_->define(decl->name, std::move(value));
+                environment_->define(decl->name_id, std::move(value));
             } else if (value.is_weak_ptr()) {
                 throw runtime_error("Cannot initialize shared_ptr directly from weak_ptr - use weak.lock() instead");
             } else if (value.type() == script_value_type::jai_object_type) {
                 // Initialize with object/shared_ptr - that's fine, objects are already shared_ptr
                 // Mark the type as shared_ptr to ensure reference semantics
                 value.set_type_info(decl->type);
-                environment_->define(decl->name, std::move(value));
+                environment_->define(decl->name_id, std::move(value));
             } else {
                 auto type_info = value.get_type_info();
                 std::string type_name = type_info ? type_info->type_name : "unknown";
@@ -2547,11 +2572,11 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                     throw runtime_error("Reference target environment has been destroyed");
                 }
                 script_value refValue = script_value::make_reference(targetPtr, target_env);
-                environment_->define(decl->name, std::move(refValue));
+                environment_->define(decl->name_id, std::move(refValue));
             } else {
                 // Regular reference - use current environment
                 script_value refValue = script_value::make_reference(targetPtr, environment_);
-                environment_->define(decl->name, std::move(refValue));
+                environment_->define(decl->name_id, std::move(refValue));
             }
         } else {
             // For other expressions, evaluate them and check if they return a reference
@@ -2568,7 +2593,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 }
                 // Create a new reference to the same target
                 script_value refValue = script_value::make_reference(targetPtr, target_env);
-                environment_->define(decl->name, std::move(refValue));
+                environment_->define(decl->name_id, std::move(refValue));
             } else {
                 throw runtime_error("Cannot take reference of non-lvalue expression");
             }
@@ -2595,7 +2620,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         }
         // If no initializer, value remains null
 
-        environment_->define(decl->name, std::move(value));
+        environment_->define(decl->name_id, std::move(value));
         // After move, value is in moved-from state, so don't access it
     }
     return {};
@@ -2691,7 +2716,7 @@ script_value interpreter::evaluate_comparison(const script_value& left, token_ty
                 } else if (left.get_object_holder() != nullptr) {
                     // weak_ptr_holder type - check if it contains an actual value
                     auto holder = left.get_object_holder();
-                    is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
+                    is_expired = (holder->type_id == weak_ptr_holder_type_id_ && !holder->data);
                 } else {
                     // Other cases - consider expired
                     is_expired = true;
@@ -2705,7 +2730,7 @@ script_value interpreter::evaluate_comparison(const script_value& left, token_ty
                 } else if (right.get_object_holder() != nullptr) {
                     // weak_ptr_holder type - check if it contains an actual value
                     auto holder = right.get_object_holder();
-                    is_expired = (holder->type_name == "weak_ptr_holder" && !holder->data);
+                    is_expired = (holder->type_id == weak_ptr_holder_type_id_ && !holder->data);
                 } else {
                     // Other cases - consider expired
                     is_expired = true;
@@ -2935,20 +2960,89 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
 checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     // Check if this is a static member access (::)
     if (expr->is_static) {
-        // For static access, the object should be a class identifier
+        // For static access, the object should be an identifier (class or namespace name)
         auto* ident_expr = dynamic_cast<identifier_expr*>(expr->object.get());
         if (!ident_expr) {
-            // Static member access requires a class name
+            // Static member access requires an identifier
             return checked_result<void>(make_error_code(jai::runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
 
-        // Look up the class definition
-        std::string class_name = ident_expr->name;
+        std::string name = ident_expr->name;
+        uint64_t name_id = ident_expr->symbol_id;
+
+        // Cache symbol ID if not already done
+        if (name_id == UINT64_MAX) {
+            name_id = string_symbolizer_->intern(name);
+            ident_expr->symbol_id = name_id;
+        }
+
+        // PRIORITY 1: Check for namespace with this name
+        // Namespaces can override class static methods
+        auto ns_it = namespaces_.find(name_id);
+        if (ns_it != namespaces_.end()) {
+            auto& ns_data = ns_it->second;
+
+            // Use parser's pre-computed member ID (always set by parser)
+            // Look for function in namespace (handles overloads by arity)
+            // This will be called later with arguments, so we need to return a callable
+            auto func_it = ns_data->functions.find(expr->member_id);
+            if (func_it != ns_data->functions.end()) {
+                // Create a namespace function wrapper
+                // Store all overloads for arity-based dispatch
+                auto overloads = func_it->second;
+
+                // Create a script_function that dispatches based on arity
+                script_function namespace_func = [this, overloads, name](const std::vector<script_value>& args) -> script_value {
+                    // Find matching overload by arity
+                    for (const auto& func_decl : overloads) {
+                        if (func_decl->parameters.size() == args.size()) {
+                            // Found matching arity - create script_defined_function and call it
+                            auto script_func = std::make_shared<script_defined_function>(
+                                func_decl->name,
+                                func_decl->parameters,
+                                func_decl->return_type,
+                                func_decl->body,
+                                nullptr // No closure environment for namespace functions
+                            );
+                            return call_function(*script_func, args);
+                        }
+                    }
+                    // No matching overload found
+                    throw runtime_error("No matching function overload in namespace '" + name + "' for " +
+                                       std::to_string(args.size()) + " arguments");
+                };
+
+                push_value(script_value::make_function(namespace_func, engine_ref_));
+                return {};
+            }
+
+            // Look for variable in namespace
+            auto var_it = ns_data->variables.find(expr->member_id);
+            if (var_it != ns_data->variables.end()) {
+                push_value(var_it->second);
+                return {};
+            }
+
+            // Look for class in namespace
+            auto class_it = ns_data->classes.find(expr->member_id);
+            if (class_it != ns_data->classes.end()) {
+                // Return the class constructor function
+                auto class_def = class_it->second;
+                // TODO: This needs to return something callable that creates instances
+                // For now, just push the class definition
+                push_value(script_value::make_object("class_definition", class_definition_type_id_, class_def, engine_ref_, false));
+                return {};
+            }
+
+            // Member not found in namespace - fall through to check class static methods
+        }
+
+        // PRIORITY 2: Look up the class definition
         script_value class_var = script_value::make_null(engine_ref_);
 
         try {
             // Try to find the class definition
-            class_var = environment_->get("__class_" + class_name);
+            class_var = environment_->get("__class_" + name);
         } catch (const runtime_error&) {
             // Class not found
             return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
@@ -3070,7 +3164,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     
     // Handle array methods
     if (objectValue.is_array()) {
-        auto methodIt = array_methods_.find(expr->member);
+        auto methodIt = array_methods_.find(expr->member_id);
         if (methodIt != array_methods_.end()) {
             // Found the method in the registry
             const builtin_method& method = methodIt->second;
@@ -3095,7 +3189,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
     // Handle map methods
     if (objectValue.is_map()) {
-        auto methodIt = map_methods_.find(expr->member);
+        auto methodIt = map_methods_.find(expr->member_id);
         if (methodIt != map_methods_.end()) {
             // Found the method in the registry
             const builtin_method& method = methodIt->second;
@@ -3116,7 +3210,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
     // Handle weak_ptr methods
     if (objectValue.is_weak_ptr()) {
-        auto methodIt = weak_ptr_methods_.find(expr->member);
+        auto methodIt = weak_ptr_methods_.find(expr->member_id);
         if (methodIt != weak_ptr_methods_.end()) {
             // Found the method in the registry
             const builtin_method& method = methodIt->second;
@@ -3140,7 +3234,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         // Check if this object has shared_ptr type info
         auto type_info = objectValue.get_type_info();
         if (type_info && type_info->type_name.find("shared_ptr<") == 0) {
-            auto methodIt = shared_ptr_methods_.find(expr->member);
+            auto methodIt = shared_ptr_methods_.find(expr->member_id);
             if (methodIt != shared_ptr_methods_.end()) {
                 // Found the method in the registry
                 const builtin_method& method = methodIt->second;
@@ -4308,7 +4402,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
     }, engine_ref_);
 
     // Define the function in current environment
-    environment_->define(decl->name, functionValue);
+    environment_->define(decl->name_id, functionValue);
     return {};
 }
 
@@ -4346,7 +4440,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         if (!existing.is_null() && existing.is_object()) {
             // Class already exists - extract from object holder
             auto objHolder = existing.get_object_holder();
-            if (objHolder && objHolder->type_name == "class_definition") {
+            if (objHolder && objHolder->type_id == class_definition_type_id_) {
                 class_def = std::static_pointer_cast<script_class_definition>(objHolder->data);
                 is_redefinition = true;
             }
@@ -4400,7 +4494,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             if (!base_class_var.is_null() && base_class_var.is_object()) {
                 // Found a script class - extract from object holder
                 auto objHolder = base_class_var.get_object_holder();
-                if (objHolder && objHolder->type_name == "class_definition") {
+                if (objHolder && objHolder->type_id == class_definition_type_id_) {
                     base_class_def = std::static_pointer_cast<class_definition>(objHolder->data);
                 } else {
                     return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Base class is not a valid class definition
@@ -4878,7 +4972,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         };
         
         // Register the dispatcher
-        environment_->define(decl->name, script_value::make_function(ctor_dispatcher, engine_ref_));
+        environment_->define(decl->name_id, script_value::make_function(ctor_dispatcher, engine_ref_));
     }
     
     // If no constructor was found, create a default constructor
@@ -4907,7 +5001,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         };
         
         // Register default constructor
-        environment_->define(decl->name, script_value::make_function(default_ctor_func, engine_ref_));
+        environment_->define(decl->name_id, script_value::make_function(default_ctor_func, engine_ref_));
         // std::cerr << "DEBUG: Registered default constructor for class: " << decl->name << std::endl;
     }
     
@@ -5044,10 +5138,136 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
     // Store the class definition in a special variable for later retrieval
     // This allows inheritance and other features to work
-    environment_->define(class_var_name, script_value::make_object("class_definition", class_def, engine_ref_));
+    environment_->define(class_var_name, script_value::make_object("class_definition", class_definition_type_id_, class_def, engine_ref_, false));
 
     // The constructor function is already registered in the environment
     // which allows "new ClassName()" syntax to work
+    return {};
+}
+
+checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
+    // Namespaces are FLAT - "my::nested::deep" is a single namespace name
+    // Members are stored in a registry and accessed via qualified names (ns::member)
+
+    // Intern the namespace name if not already done
+    if (decl->name_id == UINT64_MAX) {
+        decl->name_id = string_symbolizer_->intern(decl->name);
+    }
+
+    // Get or create namespace data
+    auto& ns_data = namespaces_[decl->name_id];
+    if (!ns_data) {
+        ns_data = std::make_shared<namespace_data>();
+    }
+
+    // Process all declarations within the namespace
+    // Functions, variables, and classes are stored in the namespace_data registry
+    for (const auto& member_decl : decl->declarations) {
+        // Check what kind of declaration this is
+        if (auto* func_decl = dynamic_cast<function_decl*>(member_decl.get())) {
+            // Intern the function name if not already done
+            if (func_decl->name_id == UINT64_MAX) {
+                func_decl->name_id = string_symbolizer_->intern(func_decl->name);
+            }
+
+            // Check for collisions: same name AND same arity in this namespace
+            auto& overloads = ns_data->functions[func_decl->name_id];
+            for (auto it = overloads.begin(); it != overloads.end(); ++it) {
+                if ((*it)->parameters.size() == func_decl->parameters.size()) {
+                    // Collision detected!
+                    if (!func_decl->is_override) {
+                        std::string error_msg = "Function '" + func_decl->name + "' with " +
+                                              std::to_string(func_decl->parameters.size()) +
+                                              " parameters already exists in namespace '" + decl->name +
+                                              "'. Use 'override' keyword to replace it.";
+                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), error_msg);
+                    }
+                    // Override is specified - remove old definition
+                    overloads.erase(it);
+                    break;
+                }
+            }
+
+            // Check if this namespace name matches a class name
+            // If so, check for collision with class static methods
+            if (!func_decl->is_override) {
+                uint64_t class_var_id = string_symbolizer_->intern("__class_" + decl->name);
+                try {
+                    script_value class_var = environment_->get(class_var_id);
+                    if (class_var.is_object()) {
+                        auto obj_holder = class_var.get_object_holder();
+                        if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
+                            auto class_def = std::static_pointer_cast<class_definition>(obj_holder->data);
+
+                            // Check if class has static method with this name
+                            // TODO: Need arity-aware lookup here
+                            try {
+                                class_def->get_static_method(func_decl->name, false);
+                                // Found static method - require override
+                                std::string error_msg = "Function '" + func_decl->name + "' in namespace '" + decl->name +
+                                                       "' collides with static method in class '" + decl->name +
+                                                       "'. Use 'override' keyword to override the class static method.";
+                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), error_msg);
+                            } catch (const runtime_error& e) {
+                                // If error is "not found", that's OK - we can add the function
+                                std::string msg = e.what();
+                                if (msg.find("not found") == std::string::npos) {
+                                    throw; // Re-throw other errors
+                                }
+                            }
+                        }
+                    }
+                } catch (const runtime_error&) {
+                    // Class doesn't exist - that's fine
+                }
+            }
+
+            // Store function declaration
+            overloads.push_back(std::make_shared<function_decl>(*func_decl));
+
+        } else if (auto* var_decl = dynamic_cast<variable_decl*>(member_decl.get())) {
+            // Intern the variable name if not already done
+            if (var_decl->name_id == UINT64_MAX) {
+                var_decl->name_id = string_symbolizer_->intern(var_decl->name);
+            }
+
+            // Evaluate variable initializer and store value
+            if (var_decl->initializer) {
+                JAISCRIPT_TRY(var_decl->initializer->accept(this));
+                script_value value = pop_value();
+                ns_data->variables[var_decl->name_id] = value;
+            } else {
+                // No initializer - store null
+                ns_data->variables[var_decl->name_id] = make_value();
+            }
+
+        } else if (auto* class_decl_ptr = dynamic_cast<class_decl*>(member_decl.get())) {
+            // Intern the class name if not already done
+            if (class_decl_ptr->name_id == UINT64_MAX) {
+                class_decl_ptr->name_id = string_symbolizer_->intern(class_decl_ptr->name);
+            }
+
+            // Process class declaration normally to register it globally
+            // Then also store reference in namespace
+            JAISCRIPT_TRY(class_decl_ptr->accept(this));
+
+            // Look up the registered class definition
+            if (auto* class_def_var = environment_->get_value_ptr(class_decl_ptr->name_id)) {
+                if (class_def_var->is_object()) {
+                    auto obj_holder = class_def_var->get_object_holder();
+                    if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
+                        auto class_def = std::static_pointer_cast<class_definition>(obj_holder->data);
+                        ns_data->classes[class_decl_ptr->name_id] = class_def;
+                    }
+                }
+            }
+
+        } else {
+            // Other declaration types (expressions, includes, etc.) - execute normally
+            JAISCRIPT_TRY(member_decl->accept(this));
+        }
+    }
+
     return {};
 }
 

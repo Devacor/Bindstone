@@ -603,17 +603,19 @@ namespace jai {
 
         // Namespace registry (flat - no true nesting)
         struct namespace_data {
-            std::unordered_map<std::string, std::vector<std::shared_ptr<function_decl>>> functions;  // function_name -> overloads
-            std::unordered_map<std::string, script_value> variables;  // variable_name -> value
-            std::unordered_map<std::string, std::shared_ptr<class_definition>> classes;  // class_name -> definition
+            std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> functions;  // function_name_id -> overloads
+            std::unordered_map<uint64_t, script_value> variables;  // variable_name_id -> value
+            std::unordered_map<uint64_t, std::shared_ptr<class_definition>> classes;  // class_name_id -> definition
         };
         std::unordered_map<uint64_t, std::shared_ptr<namespace_data>> namespaces_;  // namespace_id (interned name) -> data
 
-        // Cached symbol IDs for namespace object type names (initialized in constructor)
+        // Cached symbol IDs for object type names (initialized in constructor)
         uint64_t namespace_function_type_id_;
         uint64_t namespace_class_type_id_;
         uint64_t namespace_identifier_type_id_;
         uint64_t class_definition_type_id_;
+        uint64_t weak_ptr_holder_type_id_;
+        uint64_t shared_ptr_holder_type_id_;
 
         // Engine reference for script_value creation (weak reference to avoid circular dependency)
         std::weak_ptr<engine> engine_ref_;
@@ -689,10 +691,14 @@ namespace jai {
         subscript_resolver subscriptResolver_;
         
         // Static method registries for built-in types
-        static const std::unordered_map<std::string, builtin_method> array_methods_;
-        static const std::unordered_map<std::string, builtin_method> map_methods_;
-        static const std::unordered_map<std::string, builtin_method> weak_ptr_methods_;
-        static const std::unordered_map<std::string, builtin_method> shared_ptr_methods_;
+        // Built-in method registries (using interned IDs for O(1) lookup)
+        std::unordered_map<uint64_t, builtin_method> array_methods_;
+        std::unordered_map<uint64_t, builtin_method> map_methods_;
+        std::unordered_map<uint64_t, builtin_method> weak_ptr_methods_;
+        std::unordered_map<uint64_t, builtin_method> shared_ptr_methods_;
+
+        // Initialize built-in method registries with interned method names
+        void init_builtin_methods();
         
         // Helper to access value's private storage (since interpreter is a friend)
         static std::shared_ptr<std::vector<script_value>>& get_array_storage(const script_value& value) {

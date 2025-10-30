@@ -191,9 +191,12 @@ public:
                                 if (getter.type() == script_value_type::jai_function_type) {
                                     try {
                                         std::vector<script_value> args = {value};
-                                        script_value prop_value = getter.as_function()(args);
-                                        property_names.push_back(prop_name);
-                                        property_values.push_back(prop_value);
+                                        auto result = getter.as_function()(args);
+                                        if (result) {
+                                            property_names.push_back(prop_name);
+                                            property_values.push_back(std::move(result.value()));
+                                        }
+                                        // Skip properties that fail (result has error)
                                     } catch (...) {
                                         // Skip properties that fail
                                     }

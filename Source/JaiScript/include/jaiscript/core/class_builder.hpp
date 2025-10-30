@@ -465,7 +465,9 @@ public:
 
                                     // Call the destructor with 'this' as argument
                                     const script_function& destructor_func = method_it->second.as_function();
-                                    destructor_func({script_value::make_object(current_class->name_, temp_this, current_class->get_engine_ref())});
+                                    auto result = destructor_func({script_value::make_object(current_class->name_, temp_this, current_class->get_engine_ref())});
+                                    // Ignore result in destructor context - errors are swallowed
+                                    (void)result;
                                 } catch (...) {
                                     // Swallow exceptions in destructors
                                 }
@@ -823,20 +825,19 @@ public:
                     // This allows the migration method to access both old and new fields
                     if (migrate_method_it != new_methods.end() && !migrate_method_it->second.is_null()) {
                         // Call hot_reload_migrate method
-                        try {
-                            // Create a script_value wrapper for this instance
-                            auto instance_value = script_value::make_object(name_, instance, engine_ref);
+                        // Create a script_value wrapper for this instance
+                        auto instance_value = script_value::make_object(name_, instance, engine_ref);
 
-                            // Call the method with 'this' as the instance
-                            const script_function& migrate_func = migrate_method_it->second.as_function();
-                            std::vector<script_value> args = {instance_value};
-                            migrate_func(args);
-                            // Migration completed successfully
-                        } catch (const std::exception& e) {
-                            // Log migration errors but don't stop the hot-reload
+                        // Call the method with 'this' as the instance
+                        const script_function& migrate_func = migrate_method_it->second.as_function();
+                        std::vector<script_value> args = {instance_value};
+                        auto result = migrate_func(args);
+                        if (!result) {
+                            // Migration failed - log but continue with hot-reload
                             std::cerr << "Hot reload migration error for " << name_
-                                      << ": " << e.what() << std::endl;
+                                      << ": " << result.message() << std::endl;
                         }
+                        // Migration completed (successfully or with error logged)
                     } else {
                         // No hot_reload_migrate method provided
                     }

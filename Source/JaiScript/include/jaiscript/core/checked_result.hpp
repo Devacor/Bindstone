@@ -29,6 +29,7 @@ private:
         std::error_code error_;
     };
     bool has_value_;
+    std::string message_;  // Optional detailed error message
 
 public:
     // Success constructor
@@ -38,13 +39,27 @@ public:
     checked_result(const T& value) noexcept(std::is_nothrow_copy_constructible_v<T>)
         : value_(value), has_value_(true) {}
 
-    // Error constructor
+    // Error constructor without message
     checked_result(std::error_code ec) noexcept
         : error_(ec), has_value_(false) {}
 
+    // Error constructor with message
+    checked_result(std::error_code ec, std::string msg)
+        : error_(ec), has_value_(false), message_(std::move(msg)) {}
+
+    // Copy constructor
+    checked_result(const checked_result& other)
+        : has_value_(other.has_value_), message_(other.message_) {
+        if (has_value_) {
+            new (&value_) T(other.value_);
+        } else {
+            new (&error_) std::error_code(other.error_);
+        }
+    }
+
     // Move constructor
     checked_result(checked_result&& other) noexcept(std::is_nothrow_move_constructible_v<T>)
-        : has_value_(other.has_value_) {
+        : has_value_(other.has_value_), message_(std::move(other.message_)) {
         if (has_value_) {
             new (&value_) T(std::move(other.value_));
         } else {
@@ -90,6 +105,11 @@ public:
     // Get error
     [[nodiscard]] std::error_code error() const noexcept {
         return error_;
+    }
+
+    // Get error message if available
+    [[nodiscard]] const std::string& message() const noexcept {
+        return message_;
     }
 
     // Monadic operations for convenience

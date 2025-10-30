@@ -17,69 +17,69 @@ namespace jai {
 void interpreter::init_builtin_methods() {
     // Array methods
     array_methods_ = {
-        {string_symbolizer_->intern("size"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("size"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("size() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");
         }
         return interp->make_value(static_cast<script_int>(self.as_array().size()));
     }},
 
-        {string_symbolizer_->intern("push"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("push"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
-            throw runtime_error("push() takes exactly one argument");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "push() takes exactly one argument");
         }
         auto& arrayPtr = self.get_array_storage();
         arrayPtr->push_back(args[0].clone());  // Deep copy when pushing
         return interp->make_value();
     }},
 
-        {string_symbolizer_->intern("pop"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("pop"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("pop() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pop() takes no arguments");
         }
         auto& arrayPtr = self.get_array_storage();
         if (arrayPtr->empty()) {
-            throw runtime_error("Cannot pop from empty array");
+            return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot pop from empty array");
         }
         script_value last = arrayPtr->back();
         arrayPtr->pop_back();
         return last;
     }},
 
-        {string_symbolizer_->intern("empty"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("empty"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("empty() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "empty() takes no arguments");
         }
         return interp->make_value(self.as_array().empty());
     }},
 
-        {string_symbolizer_->intern("clear"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("clear"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("clear() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "clear() takes no arguments");
         }
         auto& arrayPtr = self.get_array_storage();
         arrayPtr->clear();
         return interp->make_value();
     }},
 
-        {string_symbolizer_->intern("front"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("front"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("front() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "front() takes no arguments");
         }
         const auto& arr = self.as_array();
         if (arr.empty()) {
-            throw runtime_error("Cannot get front of empty array");
+            return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get front of empty array");
         }
         return arr.front();
     }},
 
-        {string_symbolizer_->intern("back"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("back"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("back() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "back() takes no arguments");
         }
         const auto& arr = self.as_array();
         if (arr.empty()) {
-            throw runtime_error("Cannot get back of empty array");
+            return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get back of empty array");
         }
         return arr.back();
     }}
@@ -87,49 +87,49 @@ void interpreter::init_builtin_methods() {
 
     // Map methods
     map_methods_ = {
-        {string_symbolizer_->intern("size"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("size"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("size() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "size() takes no arguments");
         }
         return interp->make_value(static_cast<script_int>(self.as_map().size()));
     }},
 
-        {string_symbolizer_->intern("empty"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("empty"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("empty() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "empty() takes no arguments");
         }
         return interp->make_value(self.as_map().empty());
     }},
 
-        {string_symbolizer_->intern("clear"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("clear"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("clear() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "clear() takes no arguments");
         }
         auto& mapPtr = self.get_map_storage();
         mapPtr->clear();
         return interp->make_value();
     }},
 
-        {string_symbolizer_->intern("contains"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("contains"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
-            throw runtime_error("contains() takes exactly one argument");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
         }
         const auto& map = self.as_map();
         return interp->make_value(map.find(args[0]) != map.end());
     }},
 
-        {string_symbolizer_->intern("erase"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("erase"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
-            throw runtime_error("erase() takes exactly one argument");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "erase() takes exactly one argument");
         }
         auto& mapPtr = self.get_map_storage();
         mapPtr->erase(args[0]);
         return interp->make_value();
     }},
 
-        {string_symbolizer_->intern("keys"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("keys"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("keys() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "keys() takes no arguments");
         }
         const auto& map = self.as_map();
         script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
@@ -141,9 +141,9 @@ void interpreter::init_builtin_methods() {
         return result;
     }},
 
-        {string_symbolizer_->intern("values"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("values"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("values() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "values() takes no arguments");
         }
         const auto& map = self.as_map();
         script_value result = script_value::make_array(nullptr, interp->get_engine_ref());
@@ -158,20 +158,20 @@ void interpreter::init_builtin_methods() {
 
     // Weak pointer methods
     weak_ptr_methods_ = {
-        {string_symbolizer_->intern("lock"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("lock"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("lock() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "lock() takes no arguments");
         }
-        
+
         if (!self.is_weak_ptr()) {
-            throw runtime_error("lock() can only be called on weak_ptr");
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "lock() can only be called on weak_ptr");
         }
-        
+
         auto weak_ptr = self.get_weak_ptr();
         if (auto locked = weak_ptr.lock()) {
             // Reconstruct a script_value from the object_holder
             script_value result(std::monostate{}, interp->get_engine_ref());
-            
+
             // Get the original type info from the weak_ptr's type info
             auto weak_type_info = self.get_type_info();
             if (weak_type_info && weak_type_info->element_type()) {
@@ -180,13 +180,13 @@ void interpreter::init_builtin_methods() {
                 // Fallback: use the object type
                 result.set_type_info(type_info::make_object(locked->type_name));
             }
-            
+
             // Create the object value
             result = script_value::make_object(locked->type_name, locked->data, interp->get_engine_ref());
             if (weak_type_info && weak_type_info->element_type()) {
                 result.set_type_info(weak_type_info->element_type());
             }
-            
+
             return result;
         } else {
             // weak_ptr is expired, return null
@@ -194,28 +194,28 @@ void interpreter::init_builtin_methods() {
         }
     }},
 
-        {string_symbolizer_->intern("expired"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("expired"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("expired() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "expired() takes no arguments");
         }
-        
+
         if (!self.is_weak_ptr()) {
-            throw runtime_error("expired() can only be called on weak_ptr");
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "expired() can only be called on weak_ptr");
         }
-        
+
         auto weak_ptr = self.get_weak_ptr();
         return interp->make_value(weak_ptr.expired());
     }},
 
-        {string_symbolizer_->intern("reset"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("reset"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("reset() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reset() takes no arguments");
         }
-        
+
         if (!self.is_weak_ptr()) {
-            throw runtime_error("reset() can only be called on weak_ptr");
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "reset() can only be called on weak_ptr");
         }
-        
+
         // Reset the weak_ptr to null
         auto& weak_storage = self.get_weak_ptr_storage();
         weak_storage.reset();
@@ -226,25 +226,25 @@ void interpreter::init_builtin_methods() {
 
     // Shared pointer methods
     shared_ptr_methods_ = {
-        {string_symbolizer_->intern("reset"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("reset"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("reset() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reset() takes no arguments");
         }
-        
+
         // In JaiScript, all objects are internally shared_ptr<object_holder>
         // Reset it to null while preserving the shared_ptr type
         auto current_type_info = self.get_type_info();
         self = script_value::make_null(interp->get_engine_ref());
         self.set_type_info(current_type_info); // Preserve the shared_ptr<T> type
-        
+
         return self; // Return the reset shared_ptr
     }},
 
-        {string_symbolizer_->intern("use_count"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("use_count"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("use_count() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "use_count() takes no arguments");
         }
-        
+
         if (self.is_object()) {
             auto obj_holder = self.get_object_holder();
             if (obj_holder && obj_holder->data) {
@@ -253,16 +253,16 @@ void interpreter::init_builtin_methods() {
                 return interp->make_value(static_cast<script_int>(count));
             }
         }
-        
+
         // Not a valid shared_ptr
         return interp->make_value(static_cast<script_int>(0));
     }},
 
-        {string_symbolizer_->intern("unique"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> script_value {
+        {string_symbolizer_->intern("unique"), [](interpreter* interp, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
-            throw runtime_error("unique() takes no arguments");
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "unique() takes no arguments");
         }
-        
+
         if (self.is_object()) {
             auto obj_holder = self.get_object_holder();
             if (obj_holder && obj_holder->data) {
@@ -271,7 +271,7 @@ void interpreter::init_builtin_methods() {
                 return interp->make_value(is_unique);
             }
         }
-        
+
         // Not a valid shared_ptr
         return interp->make_value(false);
     }}
@@ -559,13 +559,13 @@ std::string resolve_include_path(const std::string& path, std::shared_ptr<engine
 // Helper to create a bound method - binds 'this' as the first argument
 script_value interpreter::create_bound_method(const script_value& this_obj, const script_value& method) {
     auto engine_weak = this_obj.get_engine_ref();
-    return script_value::make_function([this_obj, method](const std::vector<script_value>& args) -> script_value {
+    return script_value::make_function([this_obj, method](const std::vector<script_value>& args) -> checked_result<script_value> {
         // Create a new argument list with 'this' as the first argument
         std::vector<script_value> method_args;
         method_args.reserve(args.size() + 1);
         method_args.push_back(this_obj);
         method_args.insert(method_args.end(), args.begin(), args.end());
-        
+
         // Call the method with 'this' included
         const auto& method_func = method.as_function();
         return method_func(method_args);
@@ -1610,7 +1610,12 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
             if (opFunc.is_function()) {
                 const script_function& func = opFunc.as_function();
                 std::vector<script_value> args = {left, right};
-                push_value(func(args));
+                auto result = func(args);
+                if (!result) {
+                    // Function returned error - propagate it up
+                    return checked_result<void>(result.error(), result.message());
+                }
+                push_value(std::move(result.value()));
                 return {};
             }
         } catch (const std::exception& e) {
@@ -1714,7 +1719,12 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     if (getMethod.is_function()) {
                         const script_function& func = getMethod.as_function();
                         std::vector<script_value> args = {left, right};
-                        push_value(func(args));
+                        auto result = func(args);
+                        if (!result) {
+                            // Function returned error - propagate it up
+                            return checked_result<void>(result.error(), result.message());
+                        }
+                        push_value(std::move(result.value()));
                         return {};
                     }
                 } catch (const std::exception&) {
@@ -1881,7 +1891,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             if (opFunc.is_function()) {
                                 const script_function& func = opFunc.as_function();
                                 std::vector<script_value> args = {currentValue, rightValue};
-                                resultValue = func(args);
+                                auto result = func(args);
+                                if (!result) {
+                                    // Function returned error - propagate it up
+                                    return checked_result<void>(result.error(), result.message());
+                                }
+                                resultValue = std::move(result.value());
                                 customOpFound = true;
                             }
                         } catch (const std::exception&) {
@@ -1918,7 +1933,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             if (opFunc.is_function()) {
                                 const script_function& func = opFunc.as_function();
                                 std::vector<script_value> args = {currentValue, rightValue};
-                                resultValue = func(args);
+                                auto result = func(args);
+                                if (!result) {
+                                    // Function returned error - propagate it up
+                                    return checked_result<void>(result.error(), result.message());
+                                }
+                                resultValue = std::move(result.value());
                                 customOpFound = true;
                             }
                         } catch (const std::exception&) {
@@ -1953,7 +1973,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             if (opFunc.is_function()) {
                                 const script_function& func = opFunc.as_function();
                                 std::vector<script_value> args = {currentValue, rightValue};
-                                resultValue = func(args);
+                                auto result = func(args);
+                                if (!result) {
+                                    // Function returned error - propagate it up
+                                    return checked_result<void>(result.error(), result.message());
+                                }
+                                resultValue = std::move(result.value());
                                 customOpFound = true;
                             }
                         } catch (const std::exception&) {
@@ -2111,7 +2136,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Call the setter with 'this' and the value
                 const script_function& func = setter.as_function();
                 std::vector<script_value> args = {objectValue, std::move(resultValue.clone())};
-                func(args);
+                auto result = func(args);
+                if (!result) {
+                    // Setter failed - propagate error
+                    return checked_result<void>(result.error(), result.message());
+                }
             } else if (instance->has_field(memberExpr->member)) {
                 // Direct field assignment (deep copy)
                 instance->set_field(memberExpr->member, std::move(resultValue.clone()));
@@ -2146,7 +2175,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 if (opFunc.is_function()) {
                     const script_function& func = opFunc.as_function();
                     std::vector<script_value> args = {currentValue, rightValue};
-                    resultValue = func(args);
+                    auto result = func(args);
+                    if (!result) {
+                        // Function returned error - propagate it up
+                        return checked_result<void>(result.error(), result.message());
+                    }
+                    resultValue = std::move(result.value());
                 } else {
                     throw runtime_error("Not a function");
                 }
@@ -2391,7 +2425,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Call the setter with 'this' and the value
                 const script_function& func = setter.as_function();
                 std::vector<script_value> args = {dereferenced, std::move(value.clone())};
-                func(args);
+                auto result = func(args);
+                if (!result) {
+                    // Setter failed - propagate error
+                    return checked_result<void>(result.error(), result.message());
+                }
             } else if (instance->has_field(memberExpr->member)) {
                 // Direct field assignment (deep copy)
                 instance->set_field(memberExpr->member, std::move(value.clone()));
@@ -2942,43 +2980,21 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
     // Store argument metadata in a member variable so call_function can access it
     current_arg_metadata_ = std::move(argMetadata);
     
-    // Call the function with C++ exception handling
+    // Call the function - now returns checked_result instead of throwing
     const script_function& func = callee.as_function();
-    script_value result = script_value::make_null(engine_ref_);
-    
-    try {
-        result = func(arguments);
-    } catch (const script_exception& e) {
-        // Convert script exceptions to interpreter exception state
-        current_arg_metadata_.clear();
-        active_exception_value_ = make_value(std::string(e.what()));
-        current_exception_ = e;
-        is_unwinding_ = true;
-        push_value(make_value());  // Push a null value since the call failed
-        return {};
-    } catch (const std::runtime_error& e) {
-        // Wrap C++ runtime_error with message and trigger exception handling
-        current_arg_metadata_.clear();
-        active_exception_value_ = make_value(std::string(e.what()));
-        current_exception_ = script_exception(e.what());
-        is_unwinding_ = true;
-        push_value(make_value());  // Push a null value since the call failed
-        return {};
-    } catch (const std::exception& e) {
-        // Other C++ exceptions use their what() message
-        current_arg_metadata_.clear();
-        active_exception_value_ = make_value(std::string(e.what()));
-        current_exception_ = script_exception(e.what());
-        is_unwinding_ = true;
-        push_value(make_value());  // Push a null value since the call failed
-        return {};
-    }
+    auto result_checked = func(arguments);
 
     // Clear argument metadata
     current_arg_metadata_.clear();
 
-    // Push result onto the stack
-    push_value(result);
+    // Check if function call succeeded
+    if (!result_checked) {
+        // Function returned an error via checked_result - propagate it up
+        return checked_result<void>(result_checked.error(), result_checked.message());
+    }
+
+    // Push successful result onto the stack
+    push_value(std::move(result_checked.value()));
     return {};
 }
 
@@ -3095,7 +3111,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 // Capture namespace_id to provide access to namespace variables
                 uint64_t namespace_id = name_id;
                 std::string member_name = expr->member;
-                script_function namespace_func = [this, overloads, name, namespace_id, fallback_class, member_name](const std::vector<script_value>& args) -> script_value {
+                script_function namespace_func = [this, overloads, name, namespace_id, fallback_class, member_name](const std::vector<script_value>& args) -> checked_result<script_value> {
                     // Find matching overload by arity in namespace
                     for (const auto& func_decl : overloads) {
                         if (func_decl->parameters.size() == args.size()) {
@@ -3137,8 +3153,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                     }
 
                     // Neither namespace nor class has matching method
-                    throw runtime_error("No matching function overload in namespace '" + name + "' for " +
-                                       std::to_string(args.size()) + " arguments");
+                    return checked_result<script_value>(make_error_code(runtime_error_code::not_a_function),
+                        "No matching function overload in namespace '" + name + "' for " + std::to_string(args.size()) + " arguments");
                 };
 
                 push_value(script_value::make_function(namespace_func, engine_ref_));
@@ -3225,7 +3241,12 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 // Call the getter with no arguments to get the live C++ value
                 auto func = getter_method.as_function();
                 std::vector<script_value> no_args;
-                script_value static_value = func(no_args);
+                auto result = func(no_args);
+                if (!result) {
+                    // Function returned error - propagate it up
+                    return checked_result<void>(result.error(), result.message());
+                }
+                script_value static_value = std::move(result.value());
                 push_value(static_value);
                 return {};
             }
@@ -3302,7 +3323,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the array value by moving it
-            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> script_value {
+            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
                 return method(this, capturedValue, args);
             };
 
@@ -3327,7 +3348,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the map value by moving it
-            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> script_value {
+            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
                 return method(this, capturedValue, args);
             };
 
@@ -3348,7 +3369,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the weak_ptr value by moving it
-            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> script_value {
+            script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
                 return method(this, capturedValue, args);
             };
 
@@ -3372,7 +3393,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 const builtin_method& method = methodIt->second;
 
                 // Create a wrapper function that captures the shared_ptr value by moving it
-                script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> script_value {
+                script_function boundMethod = [this, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
                     return method(this, capturedValue, args);
                 };
 
@@ -3423,7 +3444,12 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                     // Call the getter with 'this' as argument
                     const script_function& func = getter.as_function();
                     std::vector<script_value> args = {objectValue};
-                    push_value(func(args));
+                    auto result = func(args);
+                    if (!result) {
+                        // Function returned error - propagate it up
+                        return checked_result<void>(result.error(), result.message());
+                    }
+                    push_value(std::move(result.value()));
                     return {};
                 }
             } catch (const std::exception&) {
@@ -3869,8 +3895,12 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
         if (constructorFunc.is_function()) {
             // std::cerr << "DEBUG: Found constructor function for: " << className << std::endl;
             const script_function& func = constructorFunc.as_function();
-            script_value instance = func(args);
-            push_value(std::move(instance));
+            auto result = func(args);
+            if (!result) {
+                // Function returned error - propagate it up
+                return checked_result<void>(result.error(), result.message());
+            }
+            push_value(std::move(result.value()));
             return {};
         }
         // std::cerr << "DEBUG: Constructor found but not a function for: " << className << std::endl;
@@ -4214,7 +4244,12 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                         
                         if (pairConstructor.is_function()) {
                             const script_function& func = pairConstructor.as_function();
-                            loop_var = func(args);
+                            auto result = func(args);
+                            if (!result) {
+                                // Function returned error - propagate it up
+                                return checked_result<void>(result.error(), result.message());
+                            }
+                            loop_var = std::move(result.value());
                         } else {
                             pop_scope();
                             return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] pair type not registered - make sure stdlib is loaded
@@ -4231,7 +4266,12 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
 
                         if (pairConstructor.is_function()) {
                             const script_function& func = pairConstructor.as_function();
-                            loop_var = func(args);
+                            auto result = func(args);
+                            if (!result) {
+                                // Function returned error - propagate it up
+                                return checked_result<void>(result.error(), result.message());
+                            }
+                            loop_var = std::move(result.value());
                         } else {
                             pop_scope();
                             return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] pair type not registered - make sure stdlib is loaded
@@ -5017,7 +5057,12 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                     script_value cpp_ctor = self->environment_->get(parent_name);
                                     if (cpp_ctor.is_function()) {
                                         // Call C++ constructor with init_args
-                                        script_value cpp_obj = cpp_ctor.as_function()(init_args);
+                                        auto result = cpp_ctor.as_function()(init_args);
+                                        if (!result) {
+                                            // Constructor failed - throw exception
+                                            throw runtime_error(result.message());
+                                        }
+                                        script_value cpp_obj = std::move(result.value());
 
                                         // Extract the C++ object and store it in _cpp_object field
                                         if (cpp_obj.is_object()) {

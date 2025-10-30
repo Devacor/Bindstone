@@ -245,7 +245,7 @@ namespace jai {
         using class_lookup_callback = std::function<std::shared_ptr<class_definition>(const std::string&)>;
         
         // Method type for built-in type methods
-        using builtin_method = std::function<script_value(interpreter*, script_value&, const std::vector<script_value>&)>;
+        using builtin_method = std::function<checked_result<script_value>(interpreter*, script_value&, const std::vector<script_value>&)>;
         
         interpreter();
         interpreter(string_symbolizer* external_symbolizer);
@@ -687,7 +687,7 @@ namespace jai {
         void reset_environment_pool();
         
         // Callback for resolving subscript operators when built-in logic fails
-        using subscript_resolver = std::function<script_value(const std::vector<script_value>&)>;
+        using subscript_resolver = std::function<checked_result<script_value>(const std::vector<script_value>&)>;
         subscript_resolver subscriptResolver_;
         
         // Static method registries for built-in types

@@ -1,5 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 
 namespace jai::foundry::tests {
 
@@ -152,8 +153,9 @@ public:
                 }
                 
                 class Derived : Base {
-                    // This should NOT override the private method when private is supported
-                    auto internal() { return 99; }
+                    // When private is supported, this should NOT override the private method
+                    // For now, we use 'override' keyword to explicitly shadow the base method
+                    auto internal() override { return 99; }
                     auto public_method() override { return internal() * 3; }
                 }
             )");
@@ -161,10 +163,43 @@ public:
             auto result = engine->execute("Base b = Derived(); b.public_method();");
             check_eq(result.as<int>(), 297);  // 99 * 3
         });
-        
+
+        test("shadowing_without_override_fails", [this]() {
+            auto engine = engine::make();
+
+            // Attempting to shadow a base class method without 'override' keyword should fail
+            check_throws([&]() {
+                engine->execute(R"(
+                    class Base {
+                        auto method() { return 42; }
+                    }
+
+                    class Derived : Base {
+                        // Missing 'override' keyword - should fail
+                        auto method() { return 99; }
+                    }
+                )");
+            });
+
+            // Also test that using 'override' makes it work
+            engine->execute(R"(
+                class BaseOk {
+                    auto method() { return 42; }
+                }
+
+                class DerivedOk : BaseOk {
+                    auto method() override { return 99; }
+                }
+            )");
+
+            auto result = engine->execute("BaseOk b = DerivedOk(); b.method();");
+            check_eq(result.as<int>(), 99);
+        });
+
         test("constructor_with_override_in_same_class", [this]() {
             auto engine = engine::make();
-            
+            jai::stdlib::register_all(*engine);  // Register stdlib including to_string
+
             // Class with both constructor and override methods
             engine->execute(R"(
                 class Vehicle {
@@ -295,6 +330,246 @@ public:
             
             auto result = engine->execute("Math m = AdvancedMath(); m.calculate(5);");
             check_eq(result.as<int>(), 25);
+        });
+
+        test("static_method_cannot_use_override", [this]() {
+            auto engine = engine::make();
+
+            // Static methods cannot use 'override' keyword - they're not virtual
+            check_throws([&]() {
+                engine->execute(R"(
+                    class Base {
+                        auto method() { return 42; }
+                    }
+
+                    class Derived : Base {
+                        static auto method() override { return 99; }
+                    }
+                )");
+            });
+        });
+
+        test("instance_method_cannot_override_static", [this]() {
+            auto engine = engine::make();
+
+            // Attempting to override static method with instance should fail
+            check_throws([&]() {
+                engine->execute(R"(
+                    class Base {
+                        static auto method() { return 42; }
+                    }
+
+                    class Derived : Base {
+                        auto method() override { return 99; }
+                    }
+                )");
+            });
+        });
+
+        test("static_in_base_static_in_derived_same_name", [this]() {
+            auto engine = engine::make();
+
+            // Both base and derived have static method with same name
+            // Static methods don't need override - they're fully qualified
+            engine->execute(R"(
+                class Base {
+                    static auto method() { return 1; }
+                }
+
+                class Derived : Base {
+                    static auto method() { return 2; }
+                }
+            )");
+
+            // Static methods: ONLY accessible via Class::method()
+            // 1. Base::method()
+            auto result1 = engine->execute("Base::method();");
+            check_eq(result1.as<int>(), 1);
+
+            // 2. Derived::method()
+            auto result2 = engine->execute("Derived::method();");
+            check_eq(result2.as<int>(), 2);
+
+            // 3. instance.method() should NOT work for static methods
+            check_throws([&]() {
+                engine->execute("Base b = Base(); b.method();");
+            });
+
+            check_throws([&]() {
+                engine->execute("Derived d = Derived(); d.method();");
+            });
+        });
+
+        test("instance_in_base_static_in_derived_same_name", [this]() {
+            auto engine = engine::make();
+
+            // Base has instance method, derived adds static with same name
+            // Different namespaces - both should work
+            engine->execute(R"(
+                class Base {
+                    auto method() { return 10; }
+                }
+
+                class Derived : Base {
+                    static auto method() { return 20; }
+                }
+            )");
+
+            // Test all 4 access patterns:
+            // 1. Base::method() - no static method in Base, should fail
+            check_throws([&]() {
+                engine->execute("Base::method();");
+            });
+
+            // 2. Base instance.method() - instance method
+            auto result2 = engine->execute("Base b = Base(); b.method();");
+            check_eq(result2.as<int>(), 10);
+
+            // 3. Derived::method() - static method
+            auto result3 = engine->execute("Derived::method();");
+            check_eq(result3.as<int>(), 20);
+
+            // 4. Derived instance.method() - inherited instance method
+            auto result4 = engine->execute("Derived d = Derived(); d.method();");
+            check_eq(result4.as<int>(), 10);  // Inherits Base's instance method
+        });
+
+        test("static_in_base_instance_in_derived_same_name", [this]() {
+            auto engine = engine::make();
+
+            // Base has static method, derived adds instance with same name
+            // Different namespaces - both should work
+            engine->execute(R"(
+                class Base {
+                    Base() {}
+                    static auto method() { return 100; }
+                }
+
+                class Derived : Base {
+                    Derived() : super() {}
+                    auto method() { return 200; }
+                }
+            )");
+
+            // Base::method() - static method works
+            auto result1 = engine->execute("Base::method();");
+            check_eq(result1.as<int>(), 100);
+
+            // Base instance.method() - no instance method in Base, should fail
+            check_throws([&]() {
+                engine->execute("Base b = Base(); b.method();");
+            });
+
+            // Derived::method() - static methods are NOT inherited (C++ semantics)
+            // Derived doesn't have its own static method, so this should fail
+            check_throws([&]() {
+                engine->execute("Derived::method();");
+            });
+
+            // Derived instance.method() - instance method works
+            auto result2 = engine->execute("Derived d = Derived(); d.method();");
+            check_eq(result2.as<int>(), 200);
+        });
+
+        test("instance_in_base_instance_in_derived_same_name", [this]() {
+            auto engine = engine::make();
+
+            // Both have instance methods - must use override
+            engine->execute(R"(
+                class Base {
+                    auto method() { return 5; }
+                }
+
+                class Derived : Base {
+                    auto method() override { return 50; }
+                }
+            )");
+
+            // Test all 4 access patterns:
+            // 1. Base::method() - no static method, should fail
+            check_throws([&]() {
+                engine->execute("Base::method();");
+            });
+
+            // 2. Base instance.method() - instance method
+            auto result2 = engine->execute("Base b = Base(); b.method();");
+            check_eq(result2.as<int>(), 5);
+
+            // 3. Derived::method() - no static method, should fail
+            check_throws([&]() {
+                engine->execute("Derived::method();");
+            });
+
+            // 4. Derived instance.method() - overridden instance method
+            auto result4 = engine->execute("Derived d = Derived(); d.method();");
+            check_eq(result4.as<int>(), 50);
+
+            // Bonus: polymorphic call
+            auto result5 = engine->execute("Base b2 = Derived(); b2.method();");
+            check_eq(result5.as<int>(), 50);  // Virtual dispatch
+        });
+
+        test("static_methods_no_virtual_dispatch", [this]() {
+            auto engine = engine::make();
+
+            // Static methods are resolved at compile-time via Class::
+            engine->execute(R"(
+                class Base {
+                    static auto getValue() { return 1; }
+                    auto getInstance() { return Base::getValue(); }
+                }
+
+                class Derived : Base {
+                    static auto getValue() { return 2; }
+                }
+            )");
+
+            // When called through base reference, uses base's static method
+            auto result1 = engine->execute("Base b = Derived(); b.getInstance();");
+            check_eq(result1.as<int>(), 1);  // Uses Base::getValue(), not Derived::getValue()
+
+            // Direct static calls use the class specified
+            auto result2 = engine->execute("Base::getValue();");
+            check_eq(result2.as<int>(), 1);
+
+            auto result3 = engine->execute("Derived::getValue();");
+            check_eq(result3.as<int>(), 2);
+        });
+
+        test("mixed_static_instance_same_name", [this]() {
+            auto engine = engine::make();
+
+            // A class can have both static and instance methods with same name
+            // They're in different namespaces (Class::method vs obj.method)
+            engine->execute(R"(
+                class Counter {
+                    int value = 0;
+                    static int total = 0;
+
+                    Counter(int v) {
+                        value = v;
+                        total = total + v;
+                    }
+
+                    auto getValue() { return value; }
+                    static auto getValue() { return total; }
+                }
+            )");
+
+            // Instance method
+            auto result1 = engine->execute("Counter c = Counter(10); c.getValue();");
+            check_eq(result1.as<int>(), 10);
+
+            // Static method
+            auto result2 = engine->execute("Counter::getValue();");
+            check_eq(result2.as<int>(), 10);  // total accumulated
+
+            // Create another instance
+            engine->execute("Counter c2 = Counter(5);");
+
+            // Static method sees accumulated total
+            auto result3 = engine->execute("Counter::getValue();");
+            check_eq(result3.as<int>(), 15);
         });
     }
 };

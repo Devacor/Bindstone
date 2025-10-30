@@ -24,6 +24,7 @@ namespace jai {
     class class_definition;
     class class_registry;
     class execution_backend;
+    class string_symbolizer;
     
     namespace serialization {
         class serialization_registry;
@@ -393,7 +394,10 @@ namespace jai {
         void set_backend(std::unique_ptr<execution_backend> backend);
         backend_type get_backend_type() const;
         std::string get_backend_name() const;
-        
+
+        // Get string symbolizer for interning identifiers
+        string_symbolizer* get_symbolizer();
+
         // Register C++ type converters for custom types
         template<typename T>
         void register_type_converter(const std::string& type_name) {

@@ -182,4 +182,4 @@ public:
 } // namespace jai::foundry::tests
 
 // Auto-register this test suite with Foundry
-// FOUNDRY_REGISTER(jai::foundry::tests::performance_benchmarks)  // Temporarily disabled
+FOUNDRY_REGISTER(jai::foundry::tests::performance_benchmarks)

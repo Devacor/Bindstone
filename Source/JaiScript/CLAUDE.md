@@ -68,20 +68,16 @@ High-performance C++-like scripting language with hot-reload support. Snake_case
 
 ## Testing
 
-**CRITICAL:** Use GDB for debugging instead of creating minimal tests. Only create new tests in `tests/foundry/`.
-
+**Test Organization:**
 ```
-tests/foundry/     # NEW TESTS HERE (use #include <jaiscript/testing/foundry.hpp>)
-├── core/          # Engine, value, parser, lexer, type conversion, deep copy
-├── language/      # Operators, functions, control flow, arrays, maps
-├── integration/   # C++ bindings, serialization, shared_ptr
-├── vm/            # Virtual machine specific tests
-└── performance/   # Benchmarks and stress tests
-tests/legacy/      # Old tests (migrating to foundry)
-└── dev-tools/     # Debug utilities
+tests/language/      # Foundry test suites (control flow, functions, operators, script classes, etc.)
+tests/                # Test runner and additional test files
+└── main_test_runner.cpp  # Foundry test auto-discovery and execution
 ```
 
 ### Foundry Framework (Multi-Instance Safe)
+
+Tests use the custom Foundry framework for organized, auto-registered test suites.
 
 ```cpp
 #include <jaiscript/testing/foundry.hpp>
@@ -93,54 +89,39 @@ public:
     my_tests() : suite("My Test Suite") {}
     void forge_tests() override {
         test("example_test", [this]() {
-            engine engine;
-            check_eq(engine.execute("2 + 2").as<int>(), 4);
+            auto js_engine = engine::make();
+            check_eq(js_engine->execute("2 + 2").as_int(), 4);
         });
     }
 };
 }
-FOUNDRY_REGISTER(jai::foundry::tests::my_tests)  // Auto-registers or creates main()
+FOUNDRY_REGISTER(my_tests)  // Auto-registers for discovery
 ```
 
-**Building (ALWAYS USE ISOLATED BUILDS FOR CONCURRENT WORK):**
-```bash
-cd tests/foundry
-
-# DEFAULT: Build single test (no .o conflicts between instances)
-make isolated-core/value_semantics_tests.cpp
-make isolated-language/operator_tests.cpp
-make isolated-build-core     # All core tests as isolated executables
-./isolated_lexer_tests
-
-# ONLY when testing everything (avoid if others working):
-make clean && make
-./quench
-
-make clean-isolated          # Cleanup isolated builds
-```
-
-**Auto-Registration:** FOUNDRY_REGISTER creates global registry entry OR main() function based on build mode. No manual registration needed.
-
-**Concurrent Work Examples:**
-```bash
-# Instance 1: Working on parser
-make isolated-core/parser_tests.cpp
-gdb ./isolated_parser_tests
-
-# Instance 2: Working on values (no conflicts!)
-make isolated-core/value_semantics_tests.cpp
-
-# Instance 3: Full suite (only when needed)
-./quench "operator"  # Filter by name
-```
+**Assertions:**
+- `check(condition)` - Assert condition is true
+- `check_eq(actual, expected)` - Assert equality
+- Test fails on first failed assertion
 
 ## Development Workflow
 
-**ALWAYS:** Build only your specific test. Use GDB. Don't create minimal repros.
+**General Approach:**
+1. Build the project in Visual Studio (or via command line)
+2. Run tests to identify failures
+3. Use Visual Studio debugger to investigate issues
+4. Fix code and rebuild
+5. Verify tests pass
 
-**Adding Features:** Check existing tests first. Add to appropriate foundry category.
+**Adding Features:**
+- Check existing tests first to understand patterns
+- Add new tests to appropriate test file in `tests/language/`
+- Follow existing Foundry framework patterns
 
-**Fixing Bugs:** Reproduce in existing test, use GDB, fix, add regression test to same file.
+**Fixing Bugs:**
+- Reproduce in existing test or add new test case
+- Use Visual Studio debugger (F5) to step through code
+- Fix issue and verify test passes
+- Add regression test to same file
 
 ## Architecture
 
@@ -260,10 +241,10 @@ for (auto& kv : scores) {
 
 ## Important Reminders
 
-1. **NO TEST BLOAT** - Use existing test infrastructure
-2. **GDB FIRST** - Debug with GDB before creating minimal tests  
-3. **CLEAN UP** - Delete temporary test files immediately
-4. **ORGANIZED TESTS** - Put tests in appropriate existing files
+1. **Use Existing Test Infrastructure** - Don't create new test files unnecessarily
+2. **Debug First** - Use Visual Studio debugger to investigate issues before adding tests
+3. **Organized Tests** - Add tests to appropriate existing files in `tests/language/`
+4. **Build System** - Always build via Visual Studio or CMake, executable is in `out/build/x64-Debug/bin/`
 
 ## Bytecode VM
 
@@ -275,65 +256,87 @@ for (auto& kv : scores) {
 
 **Next:** Minimal VM with core opcodes
 
-## Build Commands
+## Build System
 
-### Windows (MSVC/CMake - Primary Build System)
+### Primary Build System: Visual Studio 2022 + CMake + Ninja
 
-**Location:** Project uses CMake with Ninja generator. Build directory: `out/build/x64-Debug/`
+**Overview:**
+- The project uses CMake as the build system with Ninja as the generator
+- Visual Studio 2022 is used to open the CMakeLists.txt folder directly
+- CMake automatically generates build files in `out/build/x64-Debug/` (or other configurations)
+- The test executable is built as `bin/jaiscript_tests.exe`
 
-**Building the library:**
-```batch
-REM Set up Visual Studio environment and build with CMake
-call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"
-cd /d D:\git\Bindstone\Source\JaiScript\out\build\x64-Debug
-cmake --build . --target jaiscript
+**Opening the Project:**
+1. Open Visual Studio 2022
+2. File → Open → Folder
+3. Navigate to `D:\git\Bindstone\Source\JaiScript`
+4. VS will automatically detect CMakeLists.txt and configure the project
+
+**Building in Visual Studio:**
+1. Select build configuration (usually `x64-Debug`) from the dropdown
+2. Build → Build All (or Ctrl+Shift+B)
+3. To build just tests: Right-click CMakeLists.txt → Build → jaiscript_tests
+
+**Build Output Location:**
+- Debug builds: `D:\git\Bindstone\Source\JaiScript\out\build\x64-Debug\bin\jaiscript_tests.exe`
+- Release builds: `D:\git\Bindstone\Source\JaiScript\out\build\x64-Release\bin\jaiscript_tests.exe`
+
+### Running Tests
+
+**From Visual Studio:**
+- Debug → Start Without Debugging (Ctrl+F5) to run tests
+- Or use Test Explorer if configured
+
+**From Command Line:**
+```powershell
+# Navigate to build output directory
+cd D:\git\Bindstone\Source\JaiScript\out\build\x64-Debug\bin
+
+# Run all tests
+.\jaiscript_tests.exe
+
+# Run tests matching a filter (searches suite names)
+.\jaiscript_tests.exe "Script Class"
+
+# Run specific test by name
+.\jaiscript_tests.exe "class_destructor_basic"
 ```
 
-**Building tests:**
+**Test Output:**
+- Tests auto-discover and run all registered Foundry test suites
+- Filter parameter searches suite names (not individual test names)
+- Returns exit code 0 on success, non-zero on failure
+
+### Command Line Build (Alternative)
+
+If you need to build from command line without Visual Studio:
+
 ```batch
+REM Set up Visual Studio environment
 call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"
+
+REM Navigate to build directory
 cd /d D:\git\Bindstone\Source\JaiScript\out\build\x64-Debug
+
+REM Build everything
+cmake --build .
+
+REM Or build just tests
 cmake --build . --target jaiscript_tests
-```
 
-**Running tests:**
-```batch
-REM Run all tests
+REM Run tests
 .\bin\jaiscript_tests.exe
-
-REM Run specific test suite
-.\bin\jaiscript_tests.exe "Comprehensive"
-
-REM Run specific test by name
-.\bin\jaiscript_tests.exe "mixed_scopes_comprehensive"
 ```
 
-**Important:** Always use the Visual Studio Developer Command Prompt environment for building, or call `VsDevCmd.bat` first to set up paths.
+### Legacy: Linux/WSL Build (No Longer Primary)
 
-### Linux/WSL (Make - Alternative)
+**Note:** The project previously used WSL for development but now primarily uses Windows native builds.
 
+If needed, Linux builds can still be done using Make:
 ```bash
 cd Source/JaiScript/tests/foundry
-
-# DEFAULT: Isolated builds (for concurrent work)
 make isolated-core/lexer_tests.cpp
-make isolated-language/operator_tests.cpp
-make isolated-build-core            # All core tests isolated
-./isolated_lexer_tests              # Executables have 'isolated_' prefix
-
-# Full suite (avoid if others working)
-make clean && make && ./quench
-./quench "operator"                  # Filter by name
-
-# Debug
-gdb ./isolated_parser_tests
-
-# Cleanup
-make clean          # Main build
-make clean-isolated # Isolated builds
-
-# Legacy (if needed)
-cd ../legacy && make && ./test_engine
+./isolated_lexer_tests
 ```
 
 ---
@@ -408,15 +411,17 @@ class Tiger : Cat {
 
 ## File Structure
 - `include/jaiscript/` - Headers (core/, detail/, jvm/, stdlib/, testing/)
-- `src/implementation/` - Core implementation (engine.cpp, interpreter.cpp, parser.cpp, etc.)
-- `tests/foundry/` - Modern test suite with isolated builds
-- `tests/legacy/` - Legacy tests being migrated
+- `source/implementation/` - Core implementation (engine.cpp, interpreter.cpp, parser.cpp, etc.)
+- `tests/language/` - Foundry test suites (script classes, control flow, functions, operators, etc.)
+- `tests/main_test_runner.cpp` - Test auto-discovery and runner
 
 ## Testing Approach
-- Use `tests/foundry/` for new tests with `#include <jaiscript/testing/foundry.hpp>`
-- Build isolated tests: `make isolated-core/test_name.cpp`
-- Use GDB for debugging: `gdb ./isolated_test_name`
-- Avoid creating minimal repros - use existing test infrastructure
+- Tests are in `tests/language/` using Foundry framework
+- Build in Visual Studio 2022 (opens CMakeLists.txt folder)
+- Test executable: `out/build/x64-Debug/bin/jaiscript_tests.exe`
+- Run all: `.\jaiscript_tests.exe` or run with filter: `.\jaiscript_tests.exe "Script Class"`
+- Debug with Visual Studio debugger (F5)
+- Avoid creating new test files - use existing test infrastructure
 
 ## Key APIs
 ```cpp

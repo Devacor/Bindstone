@@ -283,7 +283,7 @@ public:
             check_eq(result.as<bool>(), true);
         });
         
-        test("weak_ptr_script_class", [this]() {
+        test("weak_ptr_script_class_simplified", [this]() {
             auto eng = engine::make();
             stdlib::register_all(*eng);
             
@@ -293,19 +293,22 @@ public:
                     string name = "";
                     int value = 0;
                     weak_ptr<ScriptNode> parent = weak_ptr<ScriptNode>();
-                    array children = [];
+                    array<ScriptNode> children = [];
                     
                     ScriptNode(string n, int val) {
                         name = n;
                         value = val;
                     }
                     
-                    add_child(ScriptNode child) {
+                    auto add_child(ScriptNode child) {
+                        // Set parent on the child and push to children array
+                        child.parent = weak_from_this();
                         children.push(child);
-                        child.parent = weak_ptr<ScriptNode>(this);
+                        // Return the modified child so caller can reassign if needed
+                        return child;
                     }
-                    
-                    get_parent_name() {
+
+                    auto get_parent_name() {
                         auto p = parent.lock();
                         if (p != null) {
                             return p.name;
@@ -313,7 +316,7 @@ public:
                         return "no parent";
                     }
                     
-                    sum_tree() {
+                    auto sum_tree() {
                         auto sum = value;
                         for (auto i = 0; i < children.size(); i = i + 1) {
                             sum = sum + children[i].sum_tree();
@@ -328,10 +331,11 @@ public:
                 auto child1 = ScriptNode("child1", 2);
                 auto child2 = ScriptNode("child2", 3);
                 auto grandchild = ScriptNode("grandchild", 4);
-                
-                root.add_child(child1);
-                root.add_child(child2);
-                child1.add_child(grandchild);
+
+                // Set up tree structure using add_child (returns modified child due to value semantics)
+                child1 = root.add_child(child1);
+                child2 = root.add_child(child2);
+                grandchild = child1.add_child(grandchild);
                 
                 // Test parent relationships
                 auto test1 = child1.get_parent_name() == "root";
@@ -347,7 +351,7 @@ public:
             
             check_eq(result.as<bool>(), true);
         });
-        
+
         test("weak_ptr_script_class_lifetime", [this]() {
             auto eng = engine::make();
             stdlib::register_all(*eng);
@@ -432,12 +436,15 @@ public:
                         value = v;
                     }
                     
-                    link_next(DNode node) {
+                    auto link_next(DNode node) {
+                        // Set next and prev to create bidirectional link
+                        node.prev = weak_from_this();
                         next = node;
-                        node.prev = weak_ptr<DNode>(this);
+                        // Return modified node so caller can reassign if needed
+                        return node;
                     }
-                    
-                    count_forward() {
+
+                    auto count_forward() {
                         auto count = 1;
                         if (next != null) {
                             count = count + next.count_forward();
@@ -445,7 +452,7 @@ public:
                         return count;
                     }
                     
-                    count_backward() {
+                    auto count_backward() {
                         auto count = 1;
                         auto p = prev.lock();
                         if (p != null) {
@@ -460,9 +467,10 @@ public:
                 auto node1 = DNode(1);
                 auto node2 = DNode(2);
                 auto node3 = DNode(3);
-                
-                node1.link_next(node2);
-                node2.link_next(node3);
+
+                // Reassign to get modified nodes with parent pointers set
+                node2 = node1.link_next(node2);
+                node3 = node2.link_next(node3);
                 
                 // Test forward counting
                 auto forward = node1.count_forward() == 3;

@@ -212,7 +212,10 @@ struct engine::implementation {
     
     // Shared string symbolizer for consistent variable name mapping
     string_symbolizer stringSymbolizer;
-    
+
+    // Cached symbol IDs for common type names (initialized in constructor)
+    uint64_t class_definition_type_id_;
+
     // Type name registry for custom classes (maps typeid name to user-friendly name)
     std::unordered_map<std::string, std::string> typeNameRegistry;
     
@@ -225,7 +228,7 @@ struct engine::implementation {
     
     execution_backend_ptr backend;
     backend_type current_backend_type = backend_type::interpreter; // Default to interpreter
-    
+
     // Include/Import support
     std::vector<std::string> include_paths;
     engine::import_behavior import_behavior = engine::import_behavior::file_timestamp; // Default
@@ -253,7 +256,8 @@ struct engine::implementation {
 };
 
 engine::implementation::implementation()
-    : conversions(std::make_shared<conversions::conversion_registry>()) {
+    : conversions(std::make_shared<conversions::conversion_registry>()),
+      class_definition_type_id_(stringSymbolizer.intern("class_definition")) {
     globalEnvironment = std::make_shared<environment>(&stringSymbolizer);
 
     // Use unique_ptr with custom deleter for automatic cleanup
@@ -569,9 +573,9 @@ void engine::initialize_engine_reference() {
     // - shared_ptr<T>(obj)         // Constructor syntax
     
     // weak_ptr methods are now registered as instance methods on weak_ptr objects
-    // See interpreter::weakPtrMethods_ for lock() and expired() implementations
-    
-    // expired() is now a method on weak_ptr objects - see interpreter::weakPtrMethods_
+    // See interpreter::weak_ptr_methods_ for lock() and expired() implementations
+
+    // expired() is now a method on weak_ptr objects - see interpreter::weak_ptr_methods_
 }
 
 
@@ -663,7 +667,7 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
         // Parse and execute
         lexer lexer(scriptContent, impl->registeredTemplateTypes);
         auto tokens = lexer.tokenize();
-        parser parser(tokens, impl->registeredTemplateTypes);
+        parser parser(tokens, &impl->stringSymbolizer, impl->registeredTemplateTypes);
         auto declarations = parser.parse();  // Will throw parse_error if parsing failed
 
         script_value result = impl->backend->execute(declarations);
@@ -902,6 +906,10 @@ void engine::add_functionWithArityAndTypes(const std::string& name, script_funct
     }
 }
 
+string_symbolizer* engine::get_symbolizer() {
+    return &impl->stringSymbolizer;
+}
+
 void engine::add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef) {
     impl->classes[name] = classDef;
     // Also register with the unified class_registry for both C++ and script classes
@@ -909,7 +917,8 @@ void engine::add_class_impl(const std::string& name, std::shared_ptr<class_defin
 
     // Store the class definition in the global environment with __class_ prefix
     // This allows static member access (ClassName::static_field) to work for C++ classes
-    impl->globalEnvironment->define("__class_" + name, script_value::make_object("class_definition", classDef, weak_from_this()));
+    // Use optimized make_object with cached type_id for fast type checking
+    impl->globalEnvironment->define("__class_" + name, script_value::make_object("class_definition", impl->class_definition_type_id_, classDef, weak_from_this()));
 }
 
 std::shared_ptr<class_definition> engine::get_class_definition(const std::string& name) const {

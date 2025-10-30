@@ -21,12 +21,12 @@ class function_decl;
 // Script class definition - now inherits from class_definition!
 class script_class_definition : public class_definition {
 public:
-    // Constructor
-    script_class_definition(const std::string& name, std::weak_ptr<engine> eng) 
-        : class_definition(name, class_type::script_class, eng) {
+    // Constructor - takes pre-interned type_id from parser or runtime
+    script_class_definition(const std::string& name, uint64_t type_id, std::weak_ptr<engine> eng)
+        : class_definition(name, type_id, class_type::script_class, eng) {
         // That's it! Everything else is inherited from class_definition
     }
-    
+
     // Helper to add a script method from AST
     void add_method_from_ast(const std::string& name,
                             std::shared_ptr<function_decl> ast,
@@ -163,15 +163,16 @@ inline void class_definition::add_script_method(const std::string& name, std::sh
 
             // Create a method environment that provides implicit 'this' field access
             auto method_env = std::make_shared<method_environment>(
-                interp->get_current_environment(), 
+                interp->get_current_environment(),
                 interp->get_string_symbolizer(),
                 this_obj
             );
             method_env->define("this", this_obj);
-            
+
             // Call the interpreter method directly
             return interp->execute_method_ast(ast, method_env, method_args);
-        }
+        },
+        engine_ref_  // Pass engine reference for proper function value creation
     ));
 }
 
@@ -192,7 +193,8 @@ inline void class_definition::add_static_script_method(const std::string& name, 
 
             // Call the interpreter method directly without 'this'
             return interp->execute_method_ast(ast, static_env, args);
-        }
+        },
+        engine_ref_  // Pass engine reference for proper function value creation
     ));
 }
 

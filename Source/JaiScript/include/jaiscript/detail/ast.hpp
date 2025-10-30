@@ -90,6 +90,7 @@ namespace jai {
         virtual checked_result<void> visit_variable_decl(class variable_decl* decl) = 0;
         virtual checked_result<void> visit_function_decl(class function_decl* decl) = 0;
         virtual checked_result<void> visit_class_decl(class class_decl* decl) = 0;
+        virtual checked_result<void> visit_namespace_decl(class namespace_decl* decl) = 0;
         virtual checked_result<void> visit_expression_decl(class expression_decl* decl) = 0;
         virtual checked_result<void> visit_include_decl(class include_decl* decl) = 0;
         virtual checked_result<void> visit_import_decl(class import_decl* decl) = 0;
@@ -546,11 +547,15 @@ namespace jai {
     public:
         type_info_ptr type;
         std::string name;
+        uint64_t name_id = UINT64_MAX;  // Interned name for fast lookup (UINT64_MAX = not interned)
         expression_ptr initializer;  // Can be null
         bool is_static = false;      // For static class members
 
         variable_decl(const source_location& loc, type_info_ptr t, const std::string& n, expression_ptr init = nullptr)
             : declaration(loc), type(t), name(n), initializer(init), is_static(false) {}
+
+        variable_decl(const source_location& loc, type_info_ptr t, const std::string& n, uint64_t nid, expression_ptr init = nullptr)
+            : declaration(loc), type(t), name(n), name_id(nid), initializer(init), is_static(false) {}
 
         [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
             return visitor->visit_variable_decl(this);
@@ -599,14 +604,36 @@ namespace jai {
         };
 
         std::string name;
+        uint64_t name_id = UINT64_MAX;  // Interned name for fast comparison (UINT64_MAX = not interned)
         std::vector<std::string> base_classes;
         std::vector<member> members;
 
         class_decl(const source_location& loc, const std::string& n)
             : declaration(loc), name(n) {}
 
+        class_decl(const source_location& loc, const std::string& n, uint64_t nid)
+            : declaration(loc), name(n), name_id(nid) {}
+
         [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
             return visitor->visit_class_decl(this);
+        }
+    };
+
+    // Namespace declaration
+    class namespace_decl : public declaration {
+    public:
+        std::string name;
+        uint64_t name_id = UINT64_MAX;  // Interned name for fast comparison (UINT64_MAX = not interned)
+        std::vector<declaration_ptr> declarations;  // Can hold functions, classes, variables
+
+        namespace_decl(const source_location& loc, const std::string& n)
+            : declaration(loc), name(n) {}
+
+        namespace_decl(const source_location& loc, const std::string& n, uint64_t nid)
+            : declaration(loc), name(n), name_id(nid) {}
+
+        [[nodiscard]] checked_result<void> accept(ast_visitor* visitor) override {
+            return visitor->visit_namespace_decl(this);
         }
     };
 

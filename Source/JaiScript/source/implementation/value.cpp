@@ -61,14 +61,6 @@ script_value script_value::make_cpp_object(const std::string& type_name, std::sh
     return v;
 }
 
-script_value script_value::make_function(const script_function& func) {
-    // TODO: This method is deprecated but still used by code that doesn't have engine access
-    script_value v;
-    v.type_info_ = type_info::make_function(type_info::make_void(), {}); // TODO: Proper type info
-    v.storage_ = func;
-    return v;
-}
-
 // Engine-aware factory method implementations
 script_value script_value::make_array(type_info_ptr element_type, std::weak_ptr<engine> eng) {
     if (eng.expired()) {
@@ -100,6 +92,22 @@ script_value script_value::make_object(const std::string& type_name, std::shared
     obj->type_name = type_name;
     obj->data = data;
     obj->is_cpp_class_instance = true;  // make_object is for class_instance wrapper objects
+    v.storage_ = obj;
+    return v;
+}
+
+// Optimized version with cached type_id (for interpreter namespace objects)
+script_value script_value::make_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, std::weak_ptr<engine> eng) {
+    if (eng.expired()) {
+        throw runtime_error("Cannot create object with expired engine reference");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = type_info::make_object(type_name);
+    auto obj = std::make_shared<object_holder>();
+    obj->type_name = type_name;
+    obj->type_id = type_id;  // Set the cached type_id for fast comparison
+    obj->data = data;
+    obj->is_cpp_class_instance = false;  // Namespace objects are not C++ class instances
     v.storage_ = obj;
     return v;
 }
@@ -254,11 +262,36 @@ script_value script_value::clone() const {
             break;
         }
         default:
-            // For primitive types and functions, shallow copy is fine
-            result.storage_ = storage_;
+            // For cpp_bound values, we need to read the actual value and create an independent copy
+            if (is_cpp_bound()) {
+                // Read the actual value from the C++ variable and create a new independent value
+                // This breaks the binding - the clone is no longer bound to the C++ variable
+                if (is_int()) {
+                    result.storage_ = as_int();
+                    result.cpp_bound_ptr_ = nullptr;  // Not bound
+                } else if (is_float()) {
+                    result.storage_ = as_float();
+                    result.cpp_bound_ptr_ = nullptr;
+                } else if (is_bool()) {
+                    result.storage_ = as_bool();
+                    result.cpp_bound_ptr_ = nullptr;
+                } else if (is_char()) {
+                    result.storage_ = as_char();
+                    result.cpp_bound_ptr_ = nullptr;
+                } else if (is_string()) {
+                    result.storage_ = as_string();
+                    result.cpp_bound_ptr_ = nullptr;
+                } else {
+                    // For other cpp_bound types, fall back to shallow copy
+                    result.storage_ = storage_;
+                }
+            } else {
+                // For primitive types and functions, shallow copy is fine
+                result.storage_ = storage_;
+            }
             break;
     }
-    
+
     return result;
 }
 

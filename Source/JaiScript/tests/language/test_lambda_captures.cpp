@@ -1,8 +1,8 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <format>
 
-using namespace jai;
-using namespace jai::foundry;
+namespace jai::foundry::tests {
 
 class lambda_capture_tests : public suite {
 public:
@@ -10,23 +10,23 @@ public:
     
     void forge_tests() override {
         test("no_capture_lambda", [this]() {
-            engine engine;
-            auto result = engine.execute("[](auto x) -> auto { return x + 1; }(5)");
-            check_eq(result.as<script_int>(), 6);
+            auto eng = engine::make();
+            auto result = eng->execute("[](auto x) -> auto { return x + 1; }(5)");
+            check_eq(result.as<int>(), 6);
         });
         
         test("empty_default_capture", [this]() {
-            engine engine;
+            auto eng = engine::make();
             try {
-                auto result = engine.execute("[=](auto x) -> auto { return x + 1; }(5)");
-                check_eq(result.as<script_int>(), 6);
+                auto result = eng->execute("[=](auto x) -> auto { return x + 1; }(5)");
+                check_eq(result.as<int>(), 6);
             } catch (const std::exception& e) {
                 throw test_failure(std::format("Failed with [=]: {}", e.what()));
             }
         });
-        
+
         test("capture_all_by_value", [this]() {
-            engine engine;
+            auto eng = engine::make();
             
             std::string script = R"(
                 auto x = 10;
@@ -44,12 +44,12 @@ public:
                 lambda(5);  // Should use original values: 10 + 20 + 30 + 5 = 65
             )";
             
-            auto result = engine.execute(script);
-            check_eq(result.as<script_int>(), 65);
+            auto result = eng->execute(script);
+            check_eq(result.as<int>(), 65);
         });
-        
+
         test("capture_all_by_reference", [this]() {
-            engine engine;
+            auto eng = engine::make();
             
             std::string script = R"(
                 auto a = 1;
@@ -67,12 +67,12 @@ public:
                 result1 * 100 + result2;   // Should be 3060
             )";
             
-            auto result = engine.execute(script);
-            check_eq(result.as<script_int>(), 3060);
+            auto result = eng->execute(script);
+            check_eq(result.as<int>(), 3060);
         });
-        
+
         test("mixed_capture_value_default_with_ref", [this]() {
-            engine engine;
+            auto eng = engine::make();
             
             std::string script = R"(
                 auto x = 10;
@@ -93,12 +93,12 @@ public:
                 result1 * 100 + result2;   // Should be 3234
             )";
             
-            auto result = engine.execute(script);
-            check_eq(result.as<script_int>(), 3234);
+            auto result = eng->execute(script);
+            check_eq(result.as<int>(), 3234);
         });
-        
+
         test("explicit_captures", [this]() {
-            engine engine;
+            auto eng = engine::make();
             
             std::string script = R"(
                 auto x = 10;
@@ -114,12 +114,12 @@ public:
                 lambda(5);  // Should be 10 + 20 + 5 = 35
             )";
             
-            auto result = engine.execute(script);
-            check_eq(result.as<script_int>(), 35);
+            auto result = eng->execute(script);
+            check_eq(result.as<int>(), 35);
         });
-        
+
         test("reference_capture_modifies_original", [this]() {
-            engine engine;
+            auto eng = engine::make();
             
             std::string script = R"(
                 auto counter = 0;
@@ -133,33 +133,33 @@ public:
                 counter;                  // Check final counter value
             )";
             
-            auto result = engine.execute(script);
-            check_eq(result.as<script_int>(), 2);
+            auto result = eng->execute(script);
+            check_eq(result.as<int>(), 2);
         });
-        
+
         // Debug test - simple case
         test("debug_simple_default_capture", [this]() {
-            engine engine;
+            auto eng = engine::make();
             
             // This is the simplest possible test of [=]
-            auto result = engine.execute(R"(
+            auto result = eng->execute(R"(
                 auto f = [=]() -> auto { return 42; };
                 f()
             )");
-            check_eq(result.as<script_int>(), 42);
+            check_eq(result.as<int>(), 42);
         });
-        
+
         // Debug test - parameter only
         test("debug_parameter_with_default_capture", [this]() {
-            engine engine;
+            auto eng = engine::make();
             
             // Test [=] with only parameter usage
             try {
-                auto result = engine.execute(R"(
+                auto result = eng->execute(R"(
                     auto f = [=](auto x) -> auto { return x; };
                     f(99)
                 )");
-                check_eq(result.as<script_int>(), 99);
+                check_eq(result.as<int>(), 99);
             } catch (const std::exception& e) {
                 throw test_failure(std::format("Parameter lookup failed: {}", e.what()));
             }
@@ -167,7 +167,8 @@ public:
     }
 };
 
-int main() {
-    lambda_capture_tests tests;
-    return tests.quench();
-}
+} // namespace jai::foundry::tests
+
+// Auto-register with the test framework
+using lambda_capture_tests = jai::foundry::tests::lambda_capture_tests;
+FOUNDRY_REGISTER(lambda_capture_tests)

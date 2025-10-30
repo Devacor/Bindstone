@@ -109,18 +109,24 @@ public:
  * - [[unlikely]] on error branches in macros
  * - std::error_code is 16 bytes (int + const error_category* pointer)
  * - RVO (Return Value Optimization) on success path
+ * - Optional message for detailed error context (only allocated on error with message)
  */
 template<>
 class [[nodiscard]] checked_result<void> {
 private:
     std::error_code error_;
+    std::string message_;  // Optional detailed error message
 
 public:
     // Success constructor - optimize for RVO
     checked_result() noexcept : error_() {}
 
-    // Error constructor
+    // Error constructor without message
     checked_result(std::error_code ec) noexcept : error_(ec) {}
+
+    // Error constructor with message
+    checked_result(std::error_code ec, std::string msg) noexcept
+        : error_(ec), message_(std::move(msg)) {}
 
     // Check if successful (hot path - inline hint)
     [[nodiscard]] inline explicit operator bool() const noexcept {
@@ -138,6 +144,11 @@ public:
     // Get error (cold path - only called when has_error)
     [[nodiscard]] inline std::error_code error() const noexcept {
         return error_;
+    }
+
+    // Get error message if available
+    [[nodiscard]] inline const std::string& message() const noexcept {
+        return message_;
     }
 
     // Propagate error to caller

@@ -48,7 +48,7 @@ public:
 
                 check_eq(result.as<int>(), 84);
             } catch (const std::exception& e) {
-                fail("Exception: " + std::string(e.what()));
+                throw test_failure("Exception: " + std::string(e.what()));
             }
         });
     }

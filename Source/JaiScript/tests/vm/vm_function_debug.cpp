@@ -3,6 +3,7 @@
 #include <jaiscript/jvm/compiler.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
+#include <jaiscript/detail/interpreter.hpp>  // For string_symbolizer
 #include <iostream>
 
 using namespace jai;
@@ -20,8 +21,10 @@ public:
             
             lexer lex(code);
             auto tokens = lex.tokenize();
-            
-            parser parse(tokens);
+
+            string_symbolizer symbolizer;
+            std::unordered_set<std::string> empty_types;
+            parser parse(tokens, &symbolizer, empty_types);
             auto declarations = parse.parse();
             
             std::cout << "\n=== PARSED DECLARATIONS ===\n";

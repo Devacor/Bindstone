@@ -132,16 +132,17 @@ namespace jai {
         std::unordered_map<std::string, script_value> get_all_variables() const;
         
         // Reset environment for reuse (optimization helper)
-        void reset(std::shared_ptr<environment> new_parent);
+        virtual void reset(std::shared_ptr<environment> new_parent);
         
         // Get parent environment (needed for method_environment handling)
         std::shared_ptr<environment> get_parent() const { return parent_; }
         
     private:
-        std::unordered_map<uint64_t, script_value> values_;  // Use symbolized string IDs
+        std::unordered_map<uint64_t, script_value> values_;  // Use symbolized string IDs for fast lookup
+        std::vector<uint64_t> declaration_order_;  // Track declaration order for LIFO destruction
         std::shared_ptr<environment> parent_;
         string_symbolizer* symbolizer_;
-        
+
         // Internal get method with recursion depth tracking
         script_value get(uint64_t id, int depth) const;
         const script_value& get_ref(uint64_t id, int depth) const;
@@ -187,7 +188,23 @@ namespace jai {
             parent_ = parent;
             this_object_ = std::move(this_obj);
         }
-        
+
+        // Override base reset to clear this_object_
+        void reset(std::shared_ptr<environment> new_parent) override {
+            // Clear local values using base implementation
+            environment::reset(new_parent);
+            // Also clear the this object to release its reference
+            this_object_ = script_value::make_null(std::weak_ptr<engine>{});
+            bound_method_storage_ = script_value::make_null(std::weak_ptr<engine>{});
+        }
+
+        // Clear just the this_object without clearing local values
+        // Called when a method/constructor returns to ensure timely destruction
+        void clear_this_reference() {
+            this_object_ = script_value::make_null(std::weak_ptr<engine>{});
+            bound_method_storage_ = script_value::make_null(std::weak_ptr<engine>{});
+        }
+
     private:
         script_value this_object_;
         mutable script_value bound_method_storage_;  // Storage for bound methods
@@ -260,6 +277,11 @@ namespace jai {
         void set_engine_reference(std::weak_ptr<engine> engine_ref) {
             engine_ref_ = std::move(engine_ref);
         }
+
+        // Get engine reference (for internal use in lambdas)
+        std::weak_ptr<engine> get_engine_ref() const {
+            return engine_ref_;
+        }
         
         // Helper to create script_value with engine context
         script_value make_value(script_int i) const {
@@ -303,8 +325,13 @@ namespace jai {
             }
             throw runtime_error("Engine reference expired - cannot create script_value");
         }
-        
-        
+
+        // Helper to create namespace-related objects with both type_name and type_id for fast comparison
+        template<typename T>
+        script_value make_namespace_object(uint64_t type_id, const char* type_name, std::shared_ptr<T> data) const {
+            return script_value::make_object(type_name, type_id, std::static_pointer_cast<void>(data), engine_ref_);
+        }
+
         // Execute a list of declarations and return the last value
         script_value execute(const std::vector<declaration_ptr>& declarations);
         
@@ -377,6 +404,7 @@ namespace jai {
         checked_result<void> visit_variable_decl(variable_decl* decl) override;
         checked_result<void> visit_function_decl(function_decl* decl) override;
         checked_result<void> visit_class_decl(class_decl* decl) override;
+        checked_result<void> visit_namespace_decl(namespace_decl* decl) override;
         checked_result<void> visit_expression_decl(expression_decl* decl) override;
         checked_result<void> visit_include_decl(include_decl* decl) override;
         checked_result<void> visit_import_decl(import_decl* decl) override;
@@ -572,7 +600,21 @@ namespace jai {
         
         // Class lookup callback for finding C++ classes
         class_lookup_callback class_lookup_callback_;
-        
+
+        // Namespace registry (flat - no true nesting)
+        struct namespace_data {
+            std::unordered_map<std::string, std::vector<std::shared_ptr<function_decl>>> functions;  // function_name -> overloads
+            std::unordered_map<std::string, script_value> variables;  // variable_name -> value
+            std::unordered_map<std::string, std::shared_ptr<class_definition>> classes;  // class_name -> definition
+        };
+        std::unordered_map<uint64_t, std::shared_ptr<namespace_data>> namespaces_;  // namespace_id (interned name) -> data
+
+        // Cached symbol IDs for namespace object type names (initialized in constructor)
+        uint64_t namespace_function_type_id_;
+        uint64_t namespace_class_type_id_;
+        uint64_t namespace_identifier_type_id_;
+        uint64_t class_definition_type_id_;
+
         // Engine reference for script_value creation (weak reference to avoid circular dependency)
         std::weak_ptr<engine> engine_ref_;
         
@@ -600,12 +642,23 @@ namespace jai {
         
         // Type conversion helpers (inlined for performance)
         inline bool is_truthy(const script_value& value) {
-            if (value.is_null()) return false;
-            if (value.is_bool()) return value.as_bool();
-            if (value.is_int()) return value.as_int() != 0;
-            if (value.is_float()) return value.as_float() != 0.0;
-            if (value.is_string()) return !value.as_string().empty();
-            return true;  // Other types are truthy
+            // OPTIMIZATION: Get type ONCE instead of multiple is_*() calls
+            // Each is_*() call checks type_info_->base_type, so cache it
+            // For loop conditions like "i < 100" (returns bool), this is a single check
+            switch (value.type()) {
+                case script_value_type::jai_null_type:
+                    return false;
+                case script_value_type::jai_bool_type:
+                    return value.as_bool();
+                case script_value_type::jai_int_type:
+                    return value.as_int() != 0;
+                case script_value_type::jai_float_type:
+                    return value.as_float() != 0.0;
+                case script_value_type::jai_string_type:
+                    return !value.as_string().empty();
+                default:
+                    return true;  // Arrays, maps, objects, functions are truthy
+            }
         }
         
         inline script_value to_numeric(const script_value& value) {
@@ -628,7 +681,7 @@ namespace jai {
         // Function call optimization helpers
         std::shared_ptr<environment> get_pooled_environment(std::shared_ptr<environment> parent);
         std::shared_ptr<method_environment> get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj);
-        void release_environment(std::shared_ptr<environment> env);
+        void release_environment(std::shared_ptr<environment> env, bool clear_now = true);
         void reset_environment_pool();
         
         // Callback for resolving subscript operators when built-in logic fails
@@ -636,10 +689,10 @@ namespace jai {
         subscript_resolver subscriptResolver_;
         
         // Static method registries for built-in types
-        static const std::unordered_map<std::string, builtin_method> arrayMethods_;
-        static const std::unordered_map<std::string, builtin_method> mapMethods_;
-        static const std::unordered_map<std::string, builtin_method> weakPtrMethods_;
-        static const std::unordered_map<std::string, builtin_method> sharedPtrMethods_;
+        static const std::unordered_map<std::string, builtin_method> array_methods_;
+        static const std::unordered_map<std::string, builtin_method> map_methods_;
+        static const std::unordered_map<std::string, builtin_method> weak_ptr_methods_;
+        static const std::unordered_map<std::string, builtin_method> shared_ptr_methods_;
         
         // Helper to access value's private storage (since interpreter is a friend)
         static std::shared_ptr<std::vector<script_value>>& get_array_storage(const script_value& value) {

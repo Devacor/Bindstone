@@ -54,7 +54,7 @@ public:
                 check_eq(result.as<int>(), 42);
             } catch (const std::exception& e) {
                 std::cout << "Exception: " << e.what() << std::endl;
-                fail("Exception: " + std::string(e.what()));
+                throw test_failure("Exception: " + std::string(e.what()));
             }
         });
 
@@ -96,7 +96,7 @@ public:
                 check_eq(result.as<bool>(), true);
             } catch (const std::exception& e) {
                 std::cout << "Exception: " << e.what() << std::endl;
-                fail("Exception: " + std::string(e.what()));
+                throw test_failure("Exception: " + std::string(e.what()));
             }
         });
     }

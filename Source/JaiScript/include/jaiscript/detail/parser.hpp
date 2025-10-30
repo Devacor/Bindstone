@@ -10,10 +10,13 @@
 
 namespace jai {
 
+    // Forward declaration
+    class string_symbolizer;
+
     class parser {
     public:
-        parser(const std::vector<token>& tokens, const std::string& filename = "<script>");
-        parser(const std::vector<token>& tokens, const std::unordered_set<std::string>& registeredTemplateTypes, const std::string& filename = "<script>");
+        // One true constructor with dependency injection
+        parser(const std::vector<token>& tokens, string_symbolizer* symbolizer, const std::unordered_set<std::string>& registeredTemplateTypes, const std::string& filename = "<script>");
         
         // Parse the entire program
         std::vector<declaration_ptr> parse();
@@ -28,6 +31,7 @@ namespace jai {
         size_t current_ = 0;
         std::vector<std::string> errors_;
         std::unordered_set<std::string> registered_template_types_;
+        string_symbolizer* symbolizer_ = nullptr;  // Optional: for interning identifiers at parse time
         
         // token buffer for handling >> splitting in generic contexts
         std::optional<token> pushed_back_token_;
@@ -49,6 +53,7 @@ namespace jai {
         // declaration parsing
         declaration_ptr declaration();
         declaration_ptr class_declaration();
+        declaration_ptr namespace_declaration();
         declaration_ptr function_declaration();
         declaration_ptr variable_declaration();
         declaration_ptr include_declaration();
@@ -88,6 +93,7 @@ namespace jai {
         // Helper parsers
         expression_ptr finish_call(expression_ptr callee);
         expression_ptr finish_member_access(expression_ptr object, bool is_arrow);
+        bool looks_like_map_literal();  // Lookahead to distinguish map literals from blocks
         expression_ptr parse_map_literal();
         type_info_ptr parse_type();
         std::vector<parameter> parse_parameter_list();

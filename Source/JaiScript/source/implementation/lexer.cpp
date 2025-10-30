@@ -21,6 +21,7 @@ const std::unordered_map<std::string, token_type> lexer::keywords_ = {
     {"int", token_type::int_keyword},
     {"map", token_type::map_keyword},
     {"array", token_type::array_keyword},
+    {"namespace", token_type::namespace_keyword},
     {"null", token_type::null_keyword},
     {"nullptr", token_type::null_keyword},
     {"override", token_type::override_keyword},

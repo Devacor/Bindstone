@@ -154,12 +154,13 @@ namespace jai {
         static script_value make_cpp_object(const std::string& type_name, std::shared_ptr<void> data);
     public:
         static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env);
-        static script_value make_function(const script_function& func);
-        
-        // Engine-aware factory methods (preferred)
+
+        // Engine-aware factory methods (preferred - ALWAYS use these)
         static script_value make_array(type_info_ptr element_type, std::weak_ptr<engine> eng);
         static script_value make_map(type_info_ptr keyType, type_info_ptr valueType, std::weak_ptr<engine> eng);
         static script_value make_object(const std::string& type_name, std::shared_ptr<void> data, std::weak_ptr<engine> eng);
+        // Optimized version with cached type_id (for interpreter namespace objects)
+        static script_value make_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, std::weak_ptr<engine> eng);
         // Internal factory method for raw C++ objects - use make_object for general use
         static script_value make_cpp_object(const std::string& type_name, std::shared_ptr<void> data, std::weak_ptr<engine> eng);
     public:
@@ -891,16 +892,17 @@ namespace jai {
         // For object storage - external serialization will handle this
         struct object_holder {
             std::string type_name;           // Type identification for serialization
+            uint64_t type_id = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
             std::shared_ptr<void> data;     // The actual object
             bool is_cpp_class_instance = false;  // True if data is a class_instance wrapping a C++ object
-            
+
             // Note: Serialization functions will be managed externally
             // by ISerializer implementations to keep JaiScript dependency-free
         };
         
         // Reference wrapper for reference types
         struct reference_holder {
-            script_value* target;  // Points to the referenced value
+            script_value* target = nullptr;  // Points to the referenced value
             std::weak_ptr<environment> sourceEnv;  // environment that owns the target
         };
         

@@ -1,20 +1,43 @@
 # JaiScript Foundry Test Suite
 
 # Collect all test suite files
-file(GLOB_RECURSE TEST_SOURCES
+set(TEST_SOURCES_GLOB
     containers/*.cpp
     containers/*.hpp
+    foundry/*.cpp
+    foundry/*.hpp
     integration/*.cpp
     integration/*.hpp
     language/*.cpp
     language/*.hpp
-    # performance/*.cpp  # Temporarily disabled
-    # performance/*.hpp
     semantics/*.cpp
     semantics/*.hpp
     # vm/*.cpp  # VM backend not yet implemented - excluded for now
     # vm/*.hpp
 )
+
+# Add performance benchmarks if enabled
+if(JAISCRIPT_ENABLE_BENCHMARKS)
+    list(APPEND TEST_SOURCES_GLOB
+        performance/*.cpp
+        performance/*.hpp
+    )
+    message(STATUS "JaiScript: Performance benchmarks ENABLED (may increase test runtime)")
+
+    # Check if ChaiScript is available for comparison benchmarks
+    set(CHAISCRIPT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../External/ChaiScript-6.1.0")
+    if(EXISTS "${CHAISCRIPT_ROOT}/include/chaiscript/chaiscript.hpp")
+        message(STATUS "JaiScript: ChaiScript found - enabling comparison benchmarks")
+        set(HAVE_CHAISCRIPT ON)
+    else()
+        message(STATUS "JaiScript: ChaiScript not found at ${CHAISCRIPT_ROOT}")
+        set(HAVE_CHAISCRIPT OFF)
+    endif()
+else()
+    message(STATUS "JaiScript: Performance benchmarks DISABLED (use -DJAISCRIPT_ENABLE_BENCHMARKS=ON to enable)")
+endif()
+
+file(GLOB_RECURSE TEST_SOURCES ${TEST_SOURCES_GLOB})
 
 # Create test executable
 add_executable(jaiscript_tests
@@ -29,6 +52,18 @@ target_link_libraries(jaiscript_tests PRIVATE jaiscript)
 target_include_directories(jaiscript_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# Add ChaiScript support if available
+if(HAVE_CHAISCRIPT)
+    target_include_directories(jaiscript_tests PRIVATE
+        "${CHAISCRIPT_ROOT}/include"
+    )
+    target_compile_definitions(jaiscript_tests PRIVATE
+        HAVE_CHAISCRIPT=1
+        CHAISCRIPT_NO_THREADS=1  # ChaiScript thread support not needed for benchmarks
+    )
+    message(STATUS "JaiScript: ChaiScript include path: ${CHAISCRIPT_ROOT}/include")
+endif()
 
 # Platform-specific settings
 if(MSVC)
@@ -58,6 +93,7 @@ add_test(NAME LanguageTests COMMAND jaiscript_tests "Language")
 add_test(NAME SemanticsTests COMMAND jaiscript_tests "semantics")
 add_test(NAME ContainerTests COMMAND jaiscript_tests "Container")
 add_test(NAME StaticTests COMMAND jaiscript_tests "Static")
+add_test(NAME NamespaceTests COMMAND jaiscript_tests "Namespace")
 
 # Create a separate executable target for static method tests only
 # This appears in VS dropdown for easy debugging
@@ -73,6 +109,21 @@ target_include_directories(static_method_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 if(MSVC)
     target_compile_options(static_method_tests PRIVATE /W3 /EHsc /permissive- /bigobj)
     set_property(TARGET static_method_tests PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    )
+endif()
+
+# Create a test executable for string static methods proof-of-concept
+add_executable(test_string_static_method
+    test_string_static_method.cpp
+)
+
+target_link_libraries(test_string_static_method PRIVATE jaiscript)
+target_include_directories(test_string_static_method PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+if(MSVC)
+    target_compile_options(test_string_static_method PRIVATE /W3 /EHsc /permissive- /bigobj)
+    set_property(TARGET test_string_static_method PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
     )
 endif()

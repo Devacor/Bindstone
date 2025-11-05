@@ -4,6 +4,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <iostream>
 
 // Include class_definition from class_builder.hpp
 #include <jaiscript/core/class_builder.hpp>
@@ -87,8 +88,8 @@ public:
         // Store AST for potential VM compilation later
         method_asts_[name] = ast;
         
-        // Use inherited add_script_method
-        add_script_method(name, ast, interp);
+        // Use inherited add_script_method - pass current environment as definition environment
+        add_script_method(name, ast, interp, interp->get_current_environment());
         
         // Set metadata for this method
         method_metadata metadata;
@@ -129,27 +130,48 @@ public:
         return destructor_ast_;
     }
     
+    // Add field initializer AST (will be evaluated at instance construction time)
+    void add_field_initializer_ast(const std::string& field_name, expression_ptr initializer) {
+        field_initializer_asts_[field_name] = initializer;
+    }
+
+    // Get field initializer AST (for instance construction)
+    expression_ptr get_field_initializer_ast(const std::string& field_name) const {
+        auto it = field_initializer_asts_.find(field_name);
+        if (it != field_initializer_asts_.end()) {
+            return it->second;
+        }
+        return nullptr;
+    }
+
+    // Get all field initializer ASTs
+    const std::map<std::string, expression_ptr>& get_field_initializer_asts() const {
+        return field_initializer_asts_;
+    }
+
     // Clear all stored ASTs (for hot reload)
     void clear_asts() {
         method_asts_.clear();
         constructor_asts_.clear();
         destructor_ast_.reset();
+        field_initializer_asts_.clear();
     }
-    
+
 private:
     // Store ASTs for potential VM compilation
     std::map<std::string, std::shared_ptr<function_decl>> method_asts_;
     std::vector<std::shared_ptr<function_decl>> constructor_asts_;
     std::shared_ptr<function_decl> destructor_ast_;
+    std::map<std::string, expression_ptr> field_initializer_asts_;
 };
 
 // For backward compatibility during migration
 using script_class_instance = class_instance;
 
 // Implementation of add_script_method (needs full interpreter definition)
-inline void class_definition::add_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp) {
+inline void class_definition::add_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env) {
     methods_.insert_or_assign(name, script_value::make_function(
-        [ast, interp, name](const std::vector<script_value>& args) -> script_value {
+        [ast, interp, name, definition_env](const std::vector<script_value>& args) -> script_value {
             // First argument should be 'this' object
             if (args.empty()) {
                 throw runtime_error("Method called without 'this' object");
@@ -162,31 +184,37 @@ inline void class_definition::add_script_method(const std::string& name, std::sh
             std::vector<script_value> method_args(args.begin() + 1, args.end());
 
             // Create a method environment that provides implicit 'this' field access
-            auto method_env = std::make_shared<method_environment>(
-                interp->get_current_environment(),
-                interp->get_string_symbolizer(),
+            // Use definition_env (captured at class definition time) as parent
+            auto method_env = interp->get_pooled_method_environment(
+                definition_env,
                 this_obj
             );
             method_env->define("this", this_obj);
 
             // Call the interpreter method directly
-            return interp->execute_method_ast(ast, method_env, method_args);
+            auto result = interp->execute_method_ast(ast, method_env, method_args);
+
+            // Release the method environment back to the pool
+            interp->release_environment(method_env, false);
+
+            return result;
         },
         engine_ref_  // Pass engine reference for proper function value creation
     ));
 }
 
 // Implementation of add_static_script_method (needs full interpreter definition)
-inline void class_definition::add_static_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp) {
+inline void class_definition::add_static_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env) {
     // Capture shared_ptr to this class definition (C++ scope rules for static methods)
     std::shared_ptr<class_definition> class_def = shared_from_this();
 
     static_methods_.insert_or_assign(name, script_value::make_function(
-        [ast, interp, class_def](const std::vector<script_value>& args) -> script_value {
+        [ast, interp, class_def, definition_env](const std::vector<script_value>& args) -> script_value {
             // Create a static method environment (C++ scope rules for static members)
             // This environment automatically resolves unqualified static member access
+            // Use definition_env (captured at class definition time) as parent
             auto static_env = std::make_shared<static_method_environment>(
-                interp->get_current_environment(),
+                definition_env,
                 interp->get_string_symbolizer(),
                 class_def
             );

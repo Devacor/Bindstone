@@ -29,6 +29,11 @@ target_include_directories(jaiscript
 # C++20 requirement
 target_compile_features(jaiscript PUBLIC cxx_std_20)
 
+# Enable environment cycle detection (always on for debugging circular parent chains)
+target_compile_definitions(jaiscript PRIVATE
+    JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES
+)
+
 # Platform-specific settings
 if(MSVC)
     target_compile_options(jaiscript PRIVATE

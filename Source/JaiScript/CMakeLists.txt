@@ -21,6 +21,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 option(JAISCRIPT_BUILD_TESTS "Build JaiScript test suite" ON)
 option(JAISCRIPT_ENABLE_PROFILING "Enable profiling instrumentation" OFF)
 option(JAISCRIPT_ENABLE_BENCHMARKS "Enable performance benchmark tests" OFF)
+option(JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES "Enable debugging environment cycles" OFF)
 
 # Optimization settings for different build configurations
 if(MSVC)
@@ -65,5 +66,5 @@ add_subdirectory(source)
 
 # Tests (Foundry test suite)
 if(JAISCRIPT_BUILD_TESTS)
-    add_subdirectory(tests)
+    add_subdirectory(source/tests)
 endif()

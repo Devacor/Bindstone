@@ -1,0 +1,88 @@
+#include <iostream>
+#include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/value.hpp>
+
+using namespace jai;
+
+int main() {
+    try {
+        engine eng;
+        
+        // Test 1: Check if map assignment creates a copy or shares reference
+        std::cout << "Test 1: Map assignment behavior\n";
+        auto result = eng.execute(R"(
+            var map1 = {{"a", 1}, {"b", 2}};
+            var map2 = map1;  // Assignment - copy or reference?
+            
+            // Modify map2
+            map2["c"] = 3;
+            map2["a"] = 10;
+            
+            // Check if map1 was affected
+            var map1_has_c = false;
+            for (var key : map1) {
+                if (key == "c") {
+                    map1_has_c = true;
+                }
+            }
+            
+            // Return results as an array
+            [map1["a"], map1.size(), map1_has_c, map2["a"], map2.size()]
+        )");
+        
+        if (result.is_array()) {
+            auto& arr = result.as_array();
+            std::cout << "map1[\"a\"] = " << arr[0].as_int() << "\n";
+            std::cout << "map1.size() = " << arr[1].as_int() << "\n";
+            std::cout << "map1 has key \"c\" = " << (arr[2].as_bool() ? "true" : "false") << "\n";
+            std::cout << "map2[\"a\"] = " << arr[3].as_int() << "\n";
+            std::cout << "map2.size() = " << arr[4].as_int() << "\n";
+            
+            if (arr[0].as_int() == 10 && arr[2].as_bool()) {
+                std::cout << "Result: Maps share the same underlying storage (shallow copy)\n";
+            } else {
+                std::cout << "Result: Maps have separate storage (deep copy)\n";
+            }
+        }
+        
+        // Test 2: Direct C++ script_value assignment
+        std::cout << "\nTest 2: C++ script_value map assignment\n";
+        
+        auto map1 = script_value::make_map(
+            type_info::make_string(), 
+            type_info::make_int()
+        );
+        
+        // Add some initial data
+        auto& map1_data = const_cast<std::map<script_value, script_value>&>(map1.as_map());
+        map1_data[script_value("x")] = script_value(100);
+        map1_data[script_value("y")] = script_value(200);
+        
+        // Copy the script_value
+        script_value map2 = map1;  // Uses default copy constructor
+        
+        // Modify map2
+        auto& map2_data = const_cast<std::map<script_value, script_value>&>(map2.as_map());
+        map2_data[script_value("x")] = script_value(999);
+        map2_data[script_value("z")] = script_value(300);
+        
+        // Check map1
+        std::cout << "After modifying map2:\n";
+        std::cout << "map1[\"x\"] = " << map1.as_map().at(script_value("x")).as_int() << "\n";
+        std::cout << "map1.size() = " << map1.as_map().size() << "\n";
+        std::cout << "map2[\"x\"] = " << map2.as_map().at(script_value("x")).as_int() << "\n";
+        std::cout << "map2.size() = " << map2.as_map().size() << "\n";
+        
+        if (map1.as_map().at(script_value("x")).as_int() == 999) {
+            std::cout << "Result: C++ script_value assignment shares map storage\n";
+        } else {
+            std::cout << "Result: C++ script_value assignment creates separate map storage\n";
+        }
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+        return 1;
+    }
+    
+    return 0;
+}

@@ -1644,6 +1644,12 @@ declaration_ptr parser::class_declaration() {
                         func->name_id = symbolizer_->intern(name.lexeme);
                         func->is_static = is_static;
                         func->is_override = is_override;
+
+                        // Validate: static methods cannot use override keyword
+                        if (is_static && is_override) {
+                            throw parse_error("Static methods cannot use 'override' keyword - they are not virtual", name.location);
+                        }
+
                         consume(token_type::left_paren, "Expected '(' after function name");
                         func->parameters = parse_parameter_list();
                         consume(token_type::right_paren, "Expected ')' after parameters");
@@ -1658,6 +1664,10 @@ declaration_ptr parser::class_declaration() {
                         }
                         if (match(token_type::override_keyword)) {
                             func->is_override = true;
+                            // Validate: static methods cannot use override keyword
+                            if (is_static) {
+                                throw parse_error("Static methods cannot use 'override' keyword - they are not virtual", previous().location);
+                            }
                         }
                         if (match(token_type::colon)) {
                             do {
@@ -1751,7 +1761,12 @@ declaration_ptr parser::class_declaration() {
                     if (match(token_type::override_keyword)) {
                         func->is_override = true;
                     }
-                    
+
+                    // Validate: static methods cannot use override keyword
+                    if (func->is_static && func->is_override) {
+                        throw parse_error("Static methods cannot use 'override' keyword - they are not virtual", name.location);
+                    }
+
                     // Parse constructor initialization list if present
                     if (match(token_type::colon)) {
                         do {

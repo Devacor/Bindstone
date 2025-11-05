@@ -134,21 +134,27 @@ script_value script_value::make_weak_ptr(const script_value& value, std::weak_pt
     }
     script_value v(std::monostate{}, eng);
     v.type_info_ = type_info::make_weak_ptr(value.get_type_info());
-    
-    if (value.type() == script_value_type::jai_object_type) {
+
+    // Only accept shared_ptr types for weak_ptr creation
+    // Regular objects have value semantics and get cloned when passed as parameters,
+    // so creating a weak_ptr from them doesn't work correctly
+    if (value.type() == script_value_type::jai_shared_ptr_type) {
         // Get the shared_ptr<object_holder> from the value
         auto holder = value.get_object_holder();
         if (!holder) {
             throw runtime_error("Failed to get object_holder from script_value");
         }
-        
+
         // Create a weak_ptr from the shared_ptr
         std::weak_ptr<object_holder> weak = holder;
-        
+
         // Store the weak_ptr directly in the variant
         v.storage_ = weak;
+    } else if (value.type() == script_value_type::jai_object_type) {
+        // This is a regular object with value semantics
+        throw runtime_error("Cannot create weak_ptr from a value-semantic object. Use shared_ptr<T> to enable reference semantics: auto obj = shared_ptr<T>(...); auto weak = weak_ptr<T>(obj);");
     } else {
-        throw runtime_error("weak_ptr can only be created from objects");
+        throw runtime_error("weak_ptr can only be created from shared_ptr<T>");
     }
     
     return v;
@@ -196,6 +202,14 @@ script_value script_value::clone() const {
     if (engine_ref_.expired()) {
         throw runtime_error("Cannot clone script_value: missing engine reference");
     }
+
+    // Check if this is a shared_ptr type - don't clone, just share
+    // shared_ptr<T> is a TYPE MARKER that indicates reference semantics
+    if (type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type) {
+        // Just return a shallow copy (shares the underlying object_holder)
+        return *this;
+    }
+
     script_value result(std::monostate{}, engine_ref_);  // Preserve engine reference!
     result.type_info_ = type_info_;
     result.cpp_bound_ptr_ = cpp_bound_ptr_;  // Preserve C++ binding
@@ -224,17 +238,18 @@ script_value script_value::clone() const {
             break;
         }
         case script_value_type::jai_object_type: {
-            // Deep copy for objects
+            // Regular objects have VALUE semantics by default (deep copy)
+            // Only shared_ptr<T> has reference semantics (handled by early return above)
             auto obj_holder = std::get<std::shared_ptr<object_holder>>(storage_);
-            
+
             // Check if this is a class_instance that supports deep copy
             if (obj_holder->is_cpp_class_instance) {
                 // This is a class_instance, safe to static_cast
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-                
+
                 // Use class_instance's deep_copy method
                 auto new_instance = instance->deep_copy();
-                
+
                 // Create new object_holder
                 auto new_holder = std::make_shared<object_holder>();
                 new_holder->type_name = obj_holder->type_name;

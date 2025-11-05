@@ -90,9 +90,14 @@ public:
     
     const script_value& get_field(const std::string& name, bool throw_if_missing = true) const;
     script_value& get_field(const std::string& name, bool throw_if_missing = true);
-    
+
     bool has_field(const std::string& name) const;
-    
+
+    // Check if field has been set on this instance (not just defined in class)
+    bool has_field_value(const std::string& name) const {
+        return fields_.find(name) != fields_.end();
+    }
+
     const std::string& get_class_name() const { return class_name_; }
     
     
@@ -244,10 +249,10 @@ public:
     
     // Add a script method (wraps AST execution in a function)
     // Implementation moved to script_class.hpp to avoid circular dependency
-    void add_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp);
-    
+    void add_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env);
+
     // Add a static script method (wraps AST execution in a function without 'this')
-    void add_static_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp);
+    void add_static_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env);
     
     // Add a field with default value
     void add_field(const std::string& name, const script_value& default_value) {
@@ -806,6 +811,20 @@ public:
         methods_ = new_methods;
         static_methods_ = new_static_methods;
 
+        // Update field_defaults_ BEFORE migrating instances so that get_field() sees correct fields
+        // This prevents removed fields from being lazily re-created from old defaults
+        field_defaults_.clear();
+        for (const auto& [name, value] : new_field_defaults) {
+            if (value.get_engine_ref().expired() && !engine_ref_.expired()) {
+                // Create a copy with engine reference
+                script_value value_with_engine(value);
+                value_with_engine.set_engine_ref(engine_ref_);
+                field_defaults_[name] = value_with_engine;
+            } else {
+                field_defaults_[name] = value;
+            }
+        }
+
         // Migrate all instances and clean up expired ones in a single pass
         size_t write_idx = 0;
         for (size_t read_idx = 0; read_idx < instances_.size(); ++read_idx) {
@@ -867,20 +886,6 @@ public:
             }
         }
         instances_.resize(write_idx);  // Trim expired instances
-        
-        // NOW update the class definition after all migrations are complete
-        // Ensure all field defaults have engine references
-        field_defaults_.clear();
-        for (const auto& [name, value] : new_field_defaults) {
-            if (value.get_engine_ref().expired() && !engine_ref_.expired()) {
-                // Create a copy with engine reference
-                script_value value_with_engine(value);
-                value_with_engine.set_engine_ref(engine_ref_);
-                field_defaults_[name] = value_with_engine;
-            } else {
-                field_defaults_[name] = value;
-            }
-        }
 
         // Clear method metadata since methods have been updated
         method_metadata_.clear();
@@ -2260,8 +2265,19 @@ inline const script_value& class_instance::get_field(const std::string& name, bo
         if (default_it != field_defaults.end()) {
             return default_it->second;  // Return reference to the default
         }
+
+        // Check parent classes for inherited field defaults
+        for (const auto& parent : def->get_parent_classes()) {
+            if (parent) {
+                auto& parent_defaults = parent->get_all_field_defaults();
+                auto parent_it = parent_defaults.find(name);
+                if (parent_it != parent_defaults.end()) {
+                    return parent_it->second;
+                }
+            }
+        }
     }
-    
+
     if (throw_if_missing) {
         throw runtime_error("Field '" + name + "' not found and no default value available");
     }
@@ -2287,8 +2303,21 @@ inline script_value& class_instance::get_field(const std::string& name, bool thr
             auto [new_it, _] = fields_.emplace(name, default_it->second.clone());
             return new_it->second;
         }
+
+        // Check parent classes for inherited field defaults
+        for (const auto& parent : def->get_parent_classes()) {
+            if (parent) {
+                auto& parent_defaults = parent->get_all_field_defaults();
+                auto parent_it = parent_defaults.find(name);
+                if (parent_it != parent_defaults.end()) {
+                    // Create the field with a clone of the parent's default value
+                    auto [new_it, _] = fields_.emplace(name, parent_it->second.clone());
+                    return new_it->second;
+                }
+            }
+        }
     }
-    
+
     if (throw_if_missing) {
         throw runtime_error("Field '" + name + "' not found and no default value available");
     }
@@ -2301,9 +2330,19 @@ inline script_value& class_instance::get_field(const std::string& name, bool thr
 
 inline bool class_instance::has_field(const std::string& name) const {
     // Check if the field exists in this instance
-    // After hot reload with migrate_fields, the instance will have exactly
-    // the fields it should have - new fields are added and old fields removed
-    return fields_.find(name) != fields_.end();
+    if (fields_.find(name) != fields_.end()) {
+        return true;
+    }
+
+    // Check class definition for inherited fields
+    if (auto def = class_definition_.lock()) {
+        const auto& all_fields = def->get_all_field_defaults();
+        if (all_fields.find(name) != all_fields.end()) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 inline script_value class_instance::get_method(const std::string& name, bool throw_if_missing) const {

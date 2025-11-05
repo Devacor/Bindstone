@@ -241,12 +241,34 @@ namespace jai {
         bool is_bool() const { return deref().type() == script_value_type::jai_bool_type; }
         bool is_array() const { return deref().type() == script_value_type::jai_array_type; }
         bool is_map() const { return deref().type() == script_value_type::jai_map_type; }
-        bool is_object() const { return deref().type() == script_value_type::jai_object_type; }
+        bool is_object() const {
+            auto t = deref().type();
+            return t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type;
+        }
         bool is_function() const { return deref().type() == script_value_type::jai_function_type; }
         bool is_reference() const { return type() == script_value_type::jai_reference_type; }  // Don't deref for this check!
         bool is_cpp_bound() const { return cpp_bound_ptr_ != nullptr; }
         bool is_weak_ptr() const { return deref().type() == script_value_type::jai_weak_ptr_type; }
-        
+
+        // Type marker helpers - check if value has shared_ptr<T> or weak_ptr<T> type info
+        bool is_shared_ptr_type() const {
+            return type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type;
+        }
+
+        bool is_weak_ptr_type() const {
+            return type_info_ && type_info_->base_type == script_value_type::jai_weak_ptr_type;
+        }
+
+        // Check if this type has reference semantics (shared ownership by default)
+        bool has_reference_semantics() const {
+            const auto t = deref().type();
+            return t == script_value_type::jai_object_type ||
+                   t == script_value_type::jai_shared_ptr_type ||
+                   t == script_value_type::jai_array_type ||
+                   t == script_value_type::jai_map_type ||
+                   t == script_value_type::jai_function_type;
+        }
+
         // script_value extraction (inlined for performance)
         inline script_int as_int() const {
             const script_value& val = deref();
@@ -504,7 +526,8 @@ namespace jai {
                         return as_map();     // as_map() already returns const std::map<script_value, script_value>&
                     } else {
                         // For user-defined types stored as objects - use the same logic as by-value extraction
-                        if (type() == script_value_type::jai_object_type) {
+                        auto t = type();
+                        if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
                             // First try to get shared_ptr<base_type> and dereference it
                             try {
                                 auto ptr = as<std::shared_ptr<base_type>>();
@@ -641,7 +664,8 @@ namespace jai {
             }
             // Support for shared_ptr extraction from objects
             else if constexpr (std::is_same_v<T, std::shared_ptr<jai::class_instance>>) {
-                if (type() != script_value_type::jai_object_type) {
+                auto t = type();
+                if (t != script_value_type::jai_object_type && t != script_value_type::jai_shared_ptr_type) {
                     throw runtime_error("script_value is not an object (type=" + std::to_string(static_cast<int>(type())) + ")");
                 }
                 auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
@@ -655,7 +679,8 @@ namespace jai {
                 // Special handling for shared_ptr types that aren't class_instance
                 if constexpr (is_specialization_v<T, std::shared_ptr>) {
                     // For shared_ptr types, try to extract as object
-                    if (type() == script_value_type::jai_object_type) {
+                    auto t = type();
+                    if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
                         auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
                         // Try to cast the void* to the requested type
                         using element_type = typename T::element_type;
@@ -736,9 +761,10 @@ namespace jai {
                              !is_specialization_v<T, std::vector> &&
                              !is_specialization_v<T, std::map>) {
                 // Custom converter already checked above
-                
+
                 // For custom classes, try to extract shared_ptr and dereference
-                if (type() == script_value_type::jai_object_type) {
+                auto t = type();
+                if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
                     auto ptr = as<std::shared_ptr<T>>();
                     return *ptr;
                 }
@@ -925,19 +951,30 @@ namespace jai {
         // Extract object_holder for class_instance operations
         // Returns nullptr if not an object type
         std::shared_ptr<object_holder> get_object_holder() {
-            if (type() == script_value_type::jai_object_type) {
+            auto t = type();
+            if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
+                // After refactor: both object and shared_ptr store object_holder directly
+                // shared_ptr<T> is just a type marker affecting clone behavior
                 return std::get<std::shared_ptr<object_holder>>(storage_);
             }
             return nullptr;
         }
         
         const std::shared_ptr<object_holder> get_object_holder() const {
-            if (type() == script_value_type::jai_object_type) {
+            auto t = type();
+            if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
+                // After refactor: both object and shared_ptr store object_holder directly
+                // shared_ptr<T> is just a type marker affecting clone behavior
                 return std::get<std::shared_ptr<object_holder>>(storage_);
             }
             return nullptr;
         }
-        
+
+        // Set object holder directly (used when restoring from weak_ptr.lock())
+        void set_object_holder(std::shared_ptr<object_holder> holder) {
+            storage_ = holder;
+        }
+
         // Get raw array storage for interpreter operations
         std::shared_ptr<std::vector<script_value>>& get_array_storage() {
             if (type() != script_value_type::jai_array_type) {
@@ -1036,6 +1073,26 @@ namespace jai {
             } else {
                 throw runtime_error("Cannot set weak_ptr on non-weak_ptr script_value");
             }
+        }
+
+        // Direct shared_ptr assignment for interpreter use
+        void set_shared_ptr(const std::shared_ptr<script_value>& shared) {
+            if (type() == script_value_type::jai_shared_ptr_type) {
+                storage_ = shared;
+            } else {
+                throw runtime_error("Cannot set shared_ptr on non-shared_ptr script_value");
+            }
+        }
+
+        // Get the wrapped value from a shared_ptr
+        script_value get_shared_ptr_value() const {
+            if (type() == script_value_type::jai_shared_ptr_type) {
+                auto wrapped = std::get<std::shared_ptr<script_value>>(storage_);
+                if (wrapped) {
+                    return *wrapped;
+                }
+            }
+            throw runtime_error("Cannot get wrapped value from non-shared_ptr script_value");
         }
         
         // Create an empty weak_ptr value

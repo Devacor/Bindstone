@@ -1,0 +1,595 @@
+#include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/serialization.hpp>
+#include <jaiscript/core/class_builder.hpp>
+#include <memory>
+#include <sstream>
+#include <cereal/archives/binary.hpp>
+#include <cereal/types/memory.hpp>
+#include <cereal/types/string.hpp>
+#include <cereal/types/vector.hpp>
+#include <cereal/types/map.hpp>
+
+namespace jai::foundry::tests {
+
+// Test classes for serialization
+class simple_object {
+public:
+    int value;
+    std::string name;
+    
+    simple_object() : value(0) {}
+    simple_object(int v, const std::string& n) : value(v), name(n) {}
+    
+    template<class Archive>
+    void serialize(Archive& ar) {
+        ar(value, name);
+    }
+    
+    bool operator==(const simple_object& other) const {
+        return value == other.value && name == other.name;
+    }
+};
+
+// Class with shared_ptr members
+class node {
+public:
+    int id;
+    std::shared_ptr<node> next;
+    std::weak_ptr<node> parent;
+    
+    node() : id(0) {}
+    explicit node(int i) : id(i) {}
+    
+    template<class Archive>
+    void serialize(Archive& ar) {
+        ar(id, next, parent);
+    }
+};
+
+// Class that uses enable_shared_from_this
+class shared_resource : public std::enable_shared_from_this<shared_resource> {
+public:
+    std::string resource_name;
+    int ref_count;
+    
+    shared_resource() : ref_count(0) {}
+    explicit shared_resource(const std::string& name) : resource_name(name), ref_count(0) {}
+    
+    std::shared_ptr<shared_resource> get_shared() {
+        ref_count++;
+        return shared_from_this();
+    }
+    
+    template<class Archive>
+    void serialize(Archive& ar) {
+        ar(resource_name, ref_count);
+    }
+};
+
+// Circular reference test class
+class circular_node {
+public:
+    int value;
+    std::shared_ptr<circular_node> child;
+    std::weak_ptr<circular_node> parent;
+    
+    circular_node() : value(0) {}
+    explicit circular_node(int v) : value(v) {}
+    
+    template<class Archive>
+    void serialize(Archive& ar) {
+        ar(value, child, parent);
+    }
+};
+
+// Implementation of binary serializer using Cereal
+class binary_serializer : public ISerializer {
+public:
+    std::vector<uint8_t> serializescript_value(const script_value& value) override {
+        std::stringstream ss;
+        {
+            cereal::BinaryOutputArchive ar(ss);
+            serialize_value(ar, value);
+        }
+        
+        std::string str = ss.str();
+        return std::vector<uint8_t>(str.begin(), str.end());
+    }
+    
+    script_value deserializescript_value(const std::vector<uint8_t>& data) override {
+        std::string str(data.begin(), data.end());
+        std::stringstream ss(str);
+        
+        cereal::BinaryInputArchive ar(ss);
+        return deserialize_value(ar);
+    }
+    
+    // Register custom type serialization
+    template<typename T>
+    void register_type(const std::string& type_name) {
+        custom_serializers_[type_name] = {
+            // Serializer
+            [](cereal::BinaryOutputArchive& ar, const void* ptr) {
+                ar(*static_cast<const T*>(ptr));
+            },
+            // Deserializer  
+            [](cereal::BinaryInputArchive& ar) -> std::shared_ptr<void> {
+                auto obj = std::make_shared<T>();
+                ar(*obj);
+                return obj;
+            }
+        };
+    }
+    
+private:
+    struct type_handlers {
+        std::function<void(cereal::BinaryOutputArchive&, const void*)> serializer;
+        std::function<std::shared_ptr<void>(cereal::BinaryInputArchive&)> deserializer;
+    };
+    
+    std::map<std::string, type_handlers> custom_serializers_;
+    
+    void serialize_value(cereal::BinaryOutputArchive& ar, const script_value& value) {
+        // Serialize type tag
+        auto type = value.get_type();
+        ar(static_cast<int>(type));
+        
+        switch (type) {
+            case script_type::null:
+                // Nothing to serialize
+                break;
+                
+            case script_type::boolean:
+                ar(value.as<script_bool>());
+                break;
+                
+            case script_type::integer:
+                ar(value.as<script_int>());
+                break;
+                
+            case script_type::floating:
+                ar(value.as<script_float>());
+                break;
+                
+            case script_type::string:
+                ar(value.as<script_string>());
+                break;
+                
+            case script_type::array: {
+                auto& arr = value.as<script_array>();
+                ar(arr.size());
+                for (const auto& elem : arr) {
+                    serialize_value(ar, elem);
+                }
+                break;
+            }
+                
+            case script_type::map: {
+                auto& map = value.as<script_map>();
+                ar(map.size());
+                for (const auto& [key, val] : map) {
+                    ar(key);
+                    serialize_value(ar, val);
+                }
+                break;
+            }
+                
+            case script_type::object: {
+                // For custom objects, we need type information
+                // This is a simplified implementation
+                ar(std::string("custom_object"));
+                break;
+            }
+                
+            default:
+                throw std::runtime_error("Unsupported type for serialization");
+        }
+    }
+    
+    script_value deserialize_value(cereal::BinaryInputArchive& ar) {
+        int type_tag;
+        ar(type_tag);
+        auto type = static_cast<script_type>(type_tag);
+        
+        switch (type) {
+            case script_type::null:
+                return script_value();
+                
+            case script_type::boolean: {
+                script_bool val;
+                ar(val);
+                return script_value(val);
+            }
+                
+            case script_type::integer: {
+                script_int val;
+                ar(val);
+                return script_value(val);
+            }
+                
+            case script_type::floating: {
+                script_float val;
+                ar(val);
+                return script_value(val);
+            }
+                
+            case script_type::string: {
+                script_string val;
+                ar(val);
+                return script_value(val);
+            }
+                
+            case script_type::array: {
+                size_t size;
+                ar(size);
+                script_array arr;
+                arr.reserve(size);
+                for (size_t i = 0; i < size; ++i) {
+                    arr.push_back(deserialize_value(ar));
+                }
+                return script_value(std::move(arr));
+            }
+                
+            case script_type::map: {
+                size_t size;
+                ar(size);
+                script_map map;
+                for (size_t i = 0; i < size; ++i) {
+                    script_string key;
+                    ar(key);
+                    map[key] = deserialize_value(ar);
+                }
+                return script_value(std::move(map));
+            }
+                
+            case script_type::object: {
+                std::string type_name;
+                ar(type_name);
+                // Would look up in custom_serializers_ here
+                return script_value(); // Placeholder
+            }
+                
+            default:
+                throw std::runtime_error("Unknown type tag in deserialization");
+        }
+    }
+};
+
+class binary_serialization_tests : public suite {
+public:
+    binary_serialization_tests() : suite("Binary Serialization") {}
+    
+    void forge_tests() override {
+        test("basic_types_serialization", [this]() {
+            binary_serializer serializer;
+            
+            // Test null
+            script_value null_val;
+            auto null_data = serializer.serializescript_value(null_val);
+            auto null_result = serializer.deserializescript_value(null_data);
+            check(null_result.is_null());
+            
+            // Test boolean
+            script_value bool_val(true);
+            auto bool_data = serializer.serializescript_value(bool_val);
+            auto bool_result = serializer.deserializescript_value(bool_data);
+            check_eq(bool_result.as<script_bool>(), true);
+            
+            // Test integer
+            script_value int_val(script_int(42));
+            auto int_data = serializer.serializescript_value(int_val);
+            auto int_result = serializer.deserializescript_value(int_data);
+            check_eq(int_result.as<script_int>(), 42);
+            
+            // Test float
+            script_value float_val(3.14);
+            auto float_data = serializer.serializescript_value(float_val);
+            auto float_result = serializer.deserializescript_value(float_data);
+            check_near(float_result.as<script_float>(), 3.14, 0.001);
+            
+            // Test string
+            script_value str_val("Hello, World!");
+            auto str_data = serializer.serializescript_value(str_val);
+            auto str_result = serializer.deserializescript_value(str_data);
+            check_eq(str_result.as<script_string>(), "Hello, World!");
+        });
+        
+        test("array_serialization", [this]() {
+            binary_serializer serializer;
+            
+            script_array arr;
+            arr.push_back(script_value(1));
+            arr.push_back(script_value("test"));
+            arr.push_back(script_value(3.14));
+            
+            script_value arr_val(arr);
+            auto data = serializer.serializescript_value(arr_val);
+            auto result = serializer.deserializescript_value(data);
+            
+            check(result.is_array());
+            auto& result_arr = result.as<script_array>();
+            check_eq(result_arr.size(), size_t(3));
+            check_eq(result_arr[0].as<script_int>(), 1);
+            check_eq(result_arr[1].as<script_string>(), "test");
+            check_near(result_arr[2].as<script_float>(), 3.14, 0.001);
+        });
+        
+        test("map_serialization", [this]() {
+            binary_serializer serializer;
+            
+            script_map map;
+            map["name"] = script_value("John");
+            map["age"] = script_value(30);
+            map["height"] = script_value(5.9);
+            
+            script_value map_val(map);
+            auto data = serializer.serializescript_value(map_val);
+            auto result = serializer.deserializescript_value(data);
+            
+            check(result.is_map());
+            auto& result_map = result.as<script_map>();
+            check_eq(result_map.size(), size_t(3));
+            check_eq(result_map["name"].as<script_string>(), "John");
+            check_eq(result_map["age"].as<script_int>(), 30);
+            check_near(result_map["height"].as<script_float>(), 5.9, 0.001);
+        });
+        
+        test("shared_ptr_basic", [this]() {
+            // Test basic shared_ptr serialization
+            auto obj1 = std::make_shared<simple_object>(42, "test");
+            
+            std::stringstream ss;
+            {
+                cereal::BinaryOutputArchive ar(ss);
+                ar(obj1);
+            }
+            
+            std::shared_ptr<simple_object> obj2;
+            {
+                cereal::BinaryInputArchive ar(ss);
+                ar(obj2);
+            }
+            
+            check(obj2 != nullptr);
+            check_eq(obj2->value, 42);
+            check_eq(obj2->name, "test");
+        });
+        
+        test("shared_ptr_deduplication", [this]() {
+            // Test that multiple shared_ptrs to same object are deduplicated
+            auto obj = std::make_shared<simple_object>(100, "shared");
+            auto ptr1 = obj;
+            auto ptr2 = obj;
+            
+            std::stringstream ss;
+            {
+                cereal::BinaryOutputArchive ar(ss);
+                ar(ptr1, ptr2);
+            }
+            
+            std::shared_ptr<simple_object> result1, result2;
+            {
+                cereal::BinaryInputArchive ar(ss);
+                ar(result1, result2);
+            }
+            
+            check(result1 != nullptr);
+            check(result2 != nullptr);
+            check(result1 == result2); // Should point to same object
+            check_eq(result1->value, 100);
+        });
+        
+        test("weak_ptr_serialization", [this]() {
+            // Test weak_ptr serialization
+            auto shared = std::make_shared<simple_object>(50, "weak_test");
+            std::weak_ptr<simple_object> weak = shared;
+            
+            std::stringstream ss;
+            {
+                cereal::BinaryOutputArchive ar(ss);
+                ar(shared, weak);
+            }
+            
+            std::shared_ptr<simple_object> result_shared;
+            std::weak_ptr<simple_object> result_weak;
+            {
+                cereal::BinaryInputArchive ar(ss);
+                ar(result_shared, result_weak);
+            }
+            
+            check(!result_weak.expired());
+            auto locked = result_weak.lock();
+            check(locked != nullptr);
+            check(locked == result_shared);
+            check_eq(locked->value, 50);
+        });
+        
+        test("circular_reference", [this]() {
+            // Test circular references with shared_ptr
+            auto node1 = std::make_shared<circular_node>(1);
+            auto node2 = std::make_shared<circular_node>(2);
+            
+            node1->child = node2;
+            node2->parent = node1;
+            node2->child = node1; // Circular reference
+            
+            std::stringstream ss;
+            {
+                cereal::BinaryOutputArchive ar(ss);
+                ar(node1, node2);
+            }
+            
+            std::shared_ptr<circular_node> result1, result2;
+            {
+                cereal::BinaryInputArchive ar(ss);
+                ar(result1, result2);
+            }
+            
+            check(result1 != nullptr);
+            check(result2 != nullptr);
+            check_eq(result1->value, 1);
+            check_eq(result2->value, 2);
+            check(result1->child == result2);
+            check(result2->child == result1);
+            check(!result2->parent.expired());
+            check(result2->parent.lock() == result1);
+        });
+        
+        test("enable_shared_from_this", [this]() {
+            // Test enable_shared_from_this support
+            auto resource = std::make_shared<shared_resource>("test_resource");
+            auto shared1 = resource->get_shared();
+            auto shared2 = resource->get_shared();
+            
+            check_eq(resource->ref_count, 2);
+            
+            std::stringstream ss;
+            {
+                cereal::BinaryOutputArchive ar(ss);
+                ar(resource, shared1, shared2);
+            }
+            
+            std::shared_ptr<shared_resource> result_resource, result1, result2;
+            {
+                cereal::BinaryInputArchive ar(ss);
+                ar(result_resource, result1, result2);
+            }
+            
+            check(result_resource != nullptr);
+            check(result1 == result_resource);
+            check(result2 == result_resource);
+            check_eq(result_resource->resource_name, "test_resource");
+        });
+        
+        test("null_shared_ptr", [this]() {
+            // Test null shared_ptr handling
+            std::shared_ptr<simple_object> null_ptr;
+            
+            std::stringstream ss;
+            {
+                cereal::BinaryOutputArchive ar(ss);
+                ar(null_ptr);
+            }
+            
+            std::shared_ptr<simple_object> result;
+            {
+                cereal::BinaryInputArchive ar(ss);
+                ar(result);
+            }
+            
+            check(result == nullptr);
+        });
+        
+        test("expired_weak_ptr", [this]() {
+            // Test expired weak_ptr handling
+            std::weak_ptr<simple_object> expired_weak;
+            {
+                auto temp = std::make_shared<simple_object>(99, "temporary");
+                expired_weak = temp;
+            } // temp goes out of scope, weak_ptr expires
+            
+            check(expired_weak.expired());
+            
+            std::stringstream ss;
+            {
+                cereal::BinaryOutputArchive ar(ss);
+                ar(expired_weak);
+            }
+            
+            std::weak_ptr<simple_object> result_weak;
+            {
+                cereal::BinaryInputArchive ar(ss);
+                ar(result_weak);
+            }
+            
+            check(result_weak.expired());
+        });
+        
+        test("complex_object_graph", [this]() {
+            // Test complex object graph with multiple shared/weak references
+            auto root = std::make_shared<node>(1);
+            auto child1 = std::make_shared<node>(2);
+            auto child2 = std::make_shared<node>(3);
+            auto grandchild = std::make_shared<node>(4);
+            
+            root->next = child1;
+            child1->parent = root;
+            child1->next = child2;
+            child2->parent = child1;
+            child2->next = grandchild;
+            grandchild->parent = child2;
+            
+            std::stringstream ss;
+            {
+                cereal::BinaryOutputArchive ar(ss);
+                ar(root);
+            }
+            
+            std::shared_ptr<node> result_root;
+            {
+                cereal::BinaryInputArchive ar(ss);
+                ar(result_root);
+            }
+            
+            // Verify the entire graph was reconstructed correctly
+            check(result_root != nullptr);
+            check_eq(result_root->id, 1);
+            
+            auto r_child1 = result_root->next;
+            check(r_child1 != nullptr);
+            check_eq(r_child1->id, 2);
+            check(r_child1->parent.lock() == result_root);
+            
+            auto r_child2 = r_child1->next;
+            check(r_child2 != nullptr);
+            check_eq(r_child2->id, 3);
+            check(r_child2->parent.lock() == r_child1);
+            
+            auto r_grandchild = r_child2->next;
+            check(r_grandchild != nullptr);
+            check_eq(r_grandchild->id, 4);
+            check(r_grandchild->parent.lock() == r_child2);
+        });
+        
+        test("shared_ptr_polymorphism", [this]() {
+            // Test polymorphic shared_ptr serialization
+            // This would require more setup with base/derived classes
+            // For now, we'll test that the infrastructure supports it
+            
+            auto obj = std::make_shared<simple_object>(123, "polymorphic");
+            std::shared_ptr<void> void_ptr = obj;
+            
+            // In a real implementation, we'd need type registration
+            // to properly handle void* -> concrete type conversion
+            check(void_ptr != nullptr);
+        });
+        
+        benchmark("serialization_performance", [this]() {
+            binary_serializer serializer;
+            
+            // Create a complex structure
+            script_map map;
+            for (int i = 0; i < 100; ++i) {
+                script_array arr;
+                arr.push_back(script_value(i));
+                arr.push_back(script_value("value_" + std::to_string(i)));
+                arr.push_back(script_value(i * 1.5));
+                map["key_" + std::to_string(i)] = script_value(arr);
+            }
+            
+            script_value complex_val(map);
+            
+            // Benchmark serialization
+            auto data = serializer.serializescript_value(complex_val);
+            
+            // Benchmark deserialization
+            auto result = serializer.deserializescript_value(data);
+        });
+    }
+};
+
+// Enable isolated test execution
+CONDITIONAL_ISOLATED_TEST(binary_serialization_tests)
+
+} // namespace jai::foundry::tests

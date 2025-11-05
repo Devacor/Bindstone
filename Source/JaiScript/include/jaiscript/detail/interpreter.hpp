@@ -15,6 +15,9 @@
 
 namespace jai {
 
+    // Forward declarations
+    class script_class_definition;
+
     // Transparent hasher for string_view lookup in unordered_map<string, ...>
     struct string_hash {
         using is_transparent = void;  // Enable heterogeneous lookup
@@ -86,7 +89,9 @@ namespace jai {
     public:
         environment(string_symbolizer* symbolizer) : symbolizer_(symbolizer) {}
         environment(std::shared_ptr<environment> parent, string_symbolizer* symbolizer)
-            : parent_(parent), symbolizer_(symbolizer) {}
+            : parent_(parent), symbolizer_(symbolizer) {
+            validate_parent_chain(parent);
+        }
         virtual ~environment() = default;
         
         // Reference tracking for proper reference parameter support
@@ -133,10 +138,80 @@ namespace jai {
         
         // Reset environment for reuse (optimization helper)
         virtual void reset(std::shared_ptr<environment> new_parent);
-        
+
+        // Clear all values but keep parent chain intact (for proper scope cleanup)
+        void clear_values();
+
         // Get parent environment (needed for method_environment handling)
         std::shared_ptr<environment> get_parent() const { return parent_; }
-        
+
+        // Set parent environment with validation (use this instead of directly setting parent_)
+        void set_parent(std::shared_ptr<environment> new_parent) {
+            validate_parent_chain(new_parent);
+            parent_ = new_parent;
+        }
+
+    protected:
+        // Debug helper to validate parent chain doesn't create a cycle
+        // Only active when JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES is defined
+        void validate_parent_chain(std::shared_ptr<environment> new_parent) const {
+#ifdef JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES
+            if (!new_parent) return;  // nullptr parent is always valid
+
+            // Check if new_parent's chain eventually points back to 'this'
+            std::unordered_set<const environment*> visited;
+            auto current = new_parent;
+
+            while (current) {
+                // If we encounter 'this', we're creating a cycle!
+                if (current.get() == this) {
+                    std::cerr << "ERROR: Circular parent chain detected!\n";
+                    std::cerr << "  Attempting to set parent of environment " << this
+                              << " (type: " << typeid(*this).name() << ")\n";
+                    std::cerr << "  to parent " << new_parent.get()
+                              << " (type: " << typeid(*new_parent).name() << ")\n";
+                    std::cerr << "  but new_parent's chain already includes this environment!\n";
+                    std::cerr << "  Chain depth before cycle: " << visited.size() << "\n";
+
+                    // Print the chain
+                    std::cerr << "  Parent chain: ";
+                    auto trace = new_parent;
+                    int depth = 0;
+                    while (trace && depth < 10) {
+                        std::cerr << trace.get() << " (" << typeid(*trace).name() << ")";
+                        if (trace.get() == this) {
+                            std::cerr << " <- CYCLE HERE!";
+                        }
+                        trace = trace->parent_;
+                        if (trace) std::cerr << " -> ";
+                        depth++;
+                    }
+                    std::cerr << "\n";
+
+                    // Throw to break and get a stack trace
+                    throw runtime_error("Circular environment parent chain detected!");
+                }
+
+                // Check for other cycles in the parent chain
+                if (visited.count(current.get()) > 0) {
+                    std::cerr << "ERROR: Parent chain already has a cycle before this assignment!\n";
+                    std::cerr << "  Environment at " << current.get()
+                              << " (type: " << typeid(*current).name() << ") appears twice\n";
+                    throw runtime_error("Circular environment parent chain detected in new_parent's existing chain!");
+                }
+
+                visited.insert(current.get());
+                current = current->parent_;
+
+                // Sanity check - prevent infinite loops even in debug mode
+                if (visited.size() > 1000) {
+                    std::cerr << "ERROR: Parent chain depth exceeds 1000! Likely a cycle.\n";
+                    throw runtime_error("Parent chain too deep - likely circular!");
+                }
+            }
+#endif
+        }
+
     private:
         std::unordered_map<uint64_t, script_value> values_;  // Use symbolized string IDs for fast lookup
         std::vector<uint64_t> declaration_order_;  // Track declaration order for LIFO destruction
@@ -185,7 +260,8 @@ namespace jai {
         void reset(std::shared_ptr<environment> parent, script_value this_obj) {
             // Clear local values
             values_.clear();
-            parent_ = parent;
+            // Use set_parent helper which validates the chain (debug mode only)
+            set_parent(parent);
             this_object_ = std::move(this_obj);
         }
 
@@ -238,7 +314,36 @@ namespace jai {
         std::shared_ptr<class_definition> class_def_;
         mutable script_value bound_method_storage_;  // Storage for bound methods
     };
-    
+
+    // Forward declare interpreter for scoped_method_environment
+    class interpreter;
+
+    // RAII wrapper for method environments to ensure proper cleanup
+    // Automatically defines 'this' and releases the environment with clear=true on destruction
+    class scoped_method_environment {
+    public:
+        scoped_method_environment(
+            interpreter* interp,
+            std::shared_ptr<environment> parent,
+            const script_value& this_obj);
+
+        ~scoped_method_environment();
+
+        // Get the managed environment
+        std::shared_ptr<method_environment> get() const { return env_; }
+
+        // Implicit conversion to method_environment for convenience
+        operator std::shared_ptr<method_environment>() const { return env_; }
+
+        // Prevent copying
+        scoped_method_environment(const scoped_method_environment&) = delete;
+        scoped_method_environment& operator=(const scoped_method_environment&) = delete;
+
+    private:
+        interpreter* interp_;
+        std::shared_ptr<method_environment> env_;
+    };
+
     // The interpreter implements the visitor pattern to execute the AST
     class interpreter : public ast_visitor, public std::enable_shared_from_this<interpreter> {
     public:
@@ -415,6 +520,16 @@ namespace jai {
         
         // Accessors for script class support
         std::shared_ptr<environment> get_current_environment() const { return environment_; }
+
+        // Get the global (root) environment by walking up the parent chain
+        std::shared_ptr<environment> get_global_environment() const {
+            auto global_env = environment_;
+            while (global_env && global_env->get_parent()) {
+                global_env = global_env->get_parent();
+            }
+            return global_env ? global_env : environment_;
+        }
+
         string_symbolizer* get_string_symbolizer() const { return string_symbolizer_; }
         
         // Access to current argument metadata for reference parameter support
@@ -423,10 +538,33 @@ namespace jai {
         }
         
         // Execute a method AST with a given environment
-        script_value execute_method_ast(std::shared_ptr<function_decl> ast, 
+        script_value execute_method_ast(std::shared_ptr<function_decl> ast,
                                       std::shared_ptr<environment> method_env,
                                       const std::vector<script_value>& args);
-                                      
+
+        // Evaluate field initializers for a script class instance at construction time
+        // This should be called BEFORE the constructor body executes
+        void evaluate_field_initializers(std::shared_ptr<class_instance> instance,
+                                        std::shared_ptr<script_class_definition> class_def,
+                                        std::shared_ptr<environment> init_env);
+
+        // Parameter binding semantics
+        enum class parameter_semantics {
+            value,       // Clone the argument (default C++ behavior)
+            reference    // Share the argument (auto&, shared_ptr<T>)
+        };
+
+        // Determine whether a parameter should use value or reference semantics
+        parameter_semantics get_parameter_semantics(
+            const parameter& param,
+            const script_value& arg) const;
+
+        // Bind a parameter according to C++ semantics
+        // Returns cloned value for value semantics, or shared reference for reference semantics
+        script_value bind_parameter(
+            const parameter& param,
+            const script_value& arg) const;
+
         // Helper to create a bound method - binds 'this' as the first argument
         static script_value create_bound_method(const script_value& this_obj, const script_value& method);
         
@@ -559,6 +697,13 @@ namespace jai {
             bool empty() const { return top_ == 0; }
             size_t size() const { return top_; }
 
+            const script_value& peek_at(size_t index) const {
+                if (index >= top_) {
+                    throw runtime_error("Internal error: stack index out of range");
+                }
+                return values_[index];
+            }
+
             void clear() {
                 // Actually destroy the values to release references
                 values_.clear();
@@ -616,6 +761,8 @@ namespace jai {
         uint64_t class_definition_type_id_;
         uint64_t weak_ptr_holder_type_id_;
         uint64_t shared_ptr_holder_type_id_;
+        uint64_t weak_from_this_id_;
+        uint64_t shared_from_this_id_;
 
         // Engine reference for script_value creation (weak reference to avoid circular dependency)
         std::weak_ptr<engine> engine_ref_;
@@ -680,11 +827,6 @@ namespace jai {
         void validate_function_arguments(const std::vector<parameter>& params, const std::vector<script_value>& args);
         script_value make_function(std::shared_ptr<script_defined_function> func);
         
-        // Function call optimization helpers
-        std::shared_ptr<environment> get_pooled_environment(std::shared_ptr<environment> parent);
-        std::shared_ptr<method_environment> get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj);
-        void release_environment(std::shared_ptr<environment> env, bool clear_now = true);
-        void reset_environment_pool();
         
         // Callback for resolving subscript operators when built-in logic fails
         using subscript_resolver = std::function<checked_result<script_value>(const std::vector<script_value>&)>;
@@ -714,6 +856,12 @@ namespace jai {
         void set_subscript_resolver(subscript_resolver resolver) {
             subscriptResolver_ = std::move(resolver);
         }
+
+        // Environment pooling functions (public so class_definition can use them)
+        std::shared_ptr<environment> get_pooled_environment(std::shared_ptr<environment> parent);
+        std::shared_ptr<method_environment> get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj);
+        void release_environment(std::shared_ptr<environment> env, bool clear_now = true);
+        void reset_environment_pool();
     };
     
 } // namespace jai

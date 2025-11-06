@@ -657,7 +657,7 @@ checked_result<script_value> environment::get(uint64_t id, int depth) const {
     // Prevent infinite recursion in environment chains
     const int MAX_RECURSION_DEPTH = 100;
     if (depth > MAX_RECURSION_DEPTH) {
-        const std::string& name = symbolizer_->get_string(id);
+        std::string name{symbolizer_->get_string(id)};
         return checked_result<script_value>(make_error_code(runtime_error_code::max_recursion_depth),
             "Maximum environment recursion depth exceeded for variable '" + name + "' at depth " + std::to_string(depth));
     }
@@ -674,7 +674,7 @@ checked_result<script_value> environment::get(uint64_t id, int depth) const {
     }
 
     // Need to get the name for error message
-    const std::string& name = symbolizer_->get_string(id);
+    std::string name{symbolizer_->get_string(id)};
     return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable),
         "Undefined variable '" + name + "'");
 }
@@ -692,7 +692,7 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
 }
 
 checked_result<std::reference_wrapper<const script_value>> environment::get_ref(uint64_t id) const {
-    const std::string& name = symbolizer_->get_string(id);
+    std::string name{symbolizer_->get_string(id)};
     if (name == "getValue") {
         std::cerr << "  this type: " << typeid(*this).name() << "\n";
     }
@@ -704,7 +704,7 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
     // The public version delegates here
     const int MAX_RECURSION_DEPTH = 100;
     if (depth > MAX_RECURSION_DEPTH) {
-        const std::string& name = symbolizer_->get_string(id);
+        std::string name{symbolizer_->get_string(id)};
         return checked_result<std::reference_wrapper<const script_value>>(
             make_error_code(runtime_error_code::max_recursion_depth),
             "Maximum environment recursion depth exceeded for variable '" + name + "' at depth " + std::to_string(depth));
@@ -718,7 +718,7 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
     if (parent_) {
         // For proper virtual dispatch, we need to call the public virtual method
         // on the parent, not this internal version
-        const std::string& name = symbolizer_->get_string(id);
+        std::string name{symbolizer_->get_string(id)};
         if (name == "getValue") {
             std::cerr << "  parent type: " << typeid(*parent_).name() << "\n";
         }
@@ -728,7 +728,7 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
     }
 
     // Need to get the name for error message
-    const std::string& name = symbolizer_->get_string(id);
+    std::string name{symbolizer_->get_string(id)};
     return checked_result<std::reference_wrapper<const script_value>>(
         make_error_code(runtime_error_code::undefined_variable),
         "Undefined variable '" + name + "'");
@@ -750,7 +750,7 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
         return parent_->get_ref(id);
     }
 
-    const std::string& name = symbolizer_->get_string(id);
+    std::string name{symbolizer_->get_string(id)};
     return checked_result<std::reference_wrapper<script_value>>(
         make_error_code(runtime_error_code::undefined_variable),
         "Undefined variable '" + name + "'");
@@ -774,7 +774,7 @@ void environment::assign(uint64_t id, const script_value& value) {
         return;
     }
     
-    const std::string& name = symbolizer_->get_string(id);
+    std::string name{symbolizer_->get_string(id)};
     throw runtime_error("Undefined variable '" + name + "'");
 }
 
@@ -790,7 +790,7 @@ void environment::assign(uint64_t id, script_value&& value) {
         return;
     }
     
-    const std::string& name = symbolizer_->get_string(id);
+    std::string name{symbolizer_->get_string(id)};
     throw runtime_error("Undefined variable '" + name + "'");
 }
 
@@ -807,8 +807,8 @@ bool environment::contains(uint64_t id) const {
     return parent_ ? parent_->contains(id) : false;
 }
 
-std::unordered_map<std::string, script_value> environment::get_local_variables() const {
-    std::unordered_map<std::string, script_value> result;
+std::unordered_map<std::string_view, script_value> environment::get_local_variables() const {
+    std::unordered_map<std::string_view, script_value> result;
     for (const auto& [id, value] : values_) {
         result[symbolizer_->get_string(id)] = value;
     }
@@ -836,20 +836,19 @@ void environment::reset(std::shared_ptr<environment> new_parent) {
     parent_ = new_parent;
 }
 
-std::unordered_map<std::string, script_value> environment::get_all_variables() const {
-    std::unordered_map<std::string, script_value> allVars;
-    
+std::unordered_map<std::string_view, script_value> environment::get_all_variables() const {
+    std::unordered_map<std::string_view, script_value> allVars;
+
     // Start with parent's variables (if any)
     if (parent_) {
         allVars = parent_->get_all_variables();
     }
-    
+
     // Add/override with local variables
     for (const auto& [id, value] : values_) {
-        const std::string& name = symbolizer_->get_string(id);
-        allVars[name] = value;
+        allVars[symbolizer_->get_string(id)] = value;
     }
-    
+
     return allVars;
 }
 
@@ -973,7 +972,7 @@ checked_result<script_value> method_environment::get(uint64_t id) const {
     }
 
     // If not found, check 'this' object fields and methods
-    const std::string& name = symbolizer_->get_string(id);
+    std::string name{symbolizer_->get_string(id)};
     auto this_type = this_object_.type();
     if (name != "this" && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
         auto obj_holder = this_object_.get_object_holder();
@@ -1062,7 +1061,7 @@ void method_environment::assign(const std::string& name, const script_value& val
 
 void method_environment::assign(uint64_t id, const script_value& value) {
     // Convert to string name and use the string version
-    const std::string& name = symbolizer_->get_string(id);
+    std::string name{symbolizer_->get_string(id)};
     assign(name, value);
 }
 
@@ -1114,7 +1113,7 @@ checked_result<script_value> static_method_environment::get(uint64_t id) const {
     }
 
     // If not found, check static fields
-    const std::string& name = symbolizer_->get_string(id);
+    std::string name{symbolizer_->get_string(id)};
 
     if (class_def_ && class_def_->has_static_field(name)) {
         return class_def_->get_static_field(name);
@@ -1157,7 +1156,7 @@ checked_result<std::reference_wrapper<const script_value>> static_method_environ
     }
 
     // If not found, check static fields
-    const std::string& name = symbolizer_->get_string(id);
+    std::string name{symbolizer_->get_string(id)};
     if (class_def_ && class_def_->has_static_field(name)) {
         const script_value* field_ptr = class_def_->get_static_field_ptr(name);
         if (field_ptr) {
@@ -1197,7 +1196,7 @@ checked_result<std::reference_wrapper<script_value>> static_method_environment::
     }
 
     // If not found, check static fields (return non-const reference)
-    const std::string& name = symbolizer_->get_string(id);
+    std::string name{symbolizer_->get_string(id)};
     if (class_def_ && class_def_->has_static_field(name)) {
         script_value* field_ptr = class_def_->get_static_field_ptr(name);
         if (field_ptr) {
@@ -1258,12 +1257,12 @@ void static_method_environment::assign(const std::string& name, script_value&& v
 }
 
 void static_method_environment::assign(uint64_t id, const script_value& value) {
-    const std::string& name = symbolizer_->get_string(id);
+    std::string name{symbolizer_->get_string(id)};
     assign(name, value);
 }
 
 void static_method_environment::assign(uint64_t id, script_value&& value) {
-    const std::string& name = symbolizer_->get_string(id);
+    std::string name{symbolizer_->get_string(id)};
     assign(name, std::move(value));
 }
 
@@ -1487,7 +1486,7 @@ bool interpreter::has_variable(const std::string& name) const {
     return environment_->contains(name);
 }
 
-std::unordered_map<std::string, script_value> interpreter::get_all_variables() const {
+std::unordered_map<std::string_view, script_value> interpreter::get_all_variables() const {
     // Since we should be at root scope after execution, just return local variables
     return environment_->get_local_variables();
 }

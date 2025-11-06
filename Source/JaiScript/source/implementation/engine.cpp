@@ -196,7 +196,8 @@ struct engine::implementation {
     };
     
     // Track which globals should NOT be serialized (most are serializable by default)
-    std::unordered_set<std::string> nonSerializableGlobals;
+    // Uses string_view pointing into symbolizer storage for efficiency
+    std::unordered_set<std::string_view, sv_hash, sv_equal> nonSerializableGlobals;
     
     // Overloaded functions (support multiple functions with same name)
     std::unordered_map<std::string, OverloadSet> overloadedFunctions;
@@ -828,14 +829,17 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
 }
 
 void engine::add_global(const std::string& name, script_value value, bool is_serializable) {
-    impl->global_environment_->define(name, std::move(value));
-    
-    // Track if this global should NOT be serialized
+    // Intern the name and get a stable string_view for tracking
+    uint64_t id = impl->string_symbolizer_.intern(name);
+    impl->global_environment_->define(id, std::move(value));
+
+    // Track if this global should NOT be serialized (using string_view from symbolizer)
+    std::string_view name_view = impl->string_symbolizer_.get_string(id);
     if (!is_serializable) {
-        impl->nonSerializableGlobals.insert(name);
+        impl->nonSerializableGlobals.insert(name_view);
     } else {
         // In case it was previously marked as non-serializable
-        impl->nonSerializableGlobals.erase(name);
+        impl->nonSerializableGlobals.erase(name_view);
     }
 }
 
@@ -1138,7 +1142,7 @@ engine::state engine::get_state() const {
     // Filter out non-serializable ones
     for (const auto& [name, value] : allVars) {
         if (impl->nonSerializableGlobals.find(name) == impl->nonSerializableGlobals.end()) {
-            orderedGlobals[name] = value;
+            orderedGlobals[std::string{name}] = value;
         }
     }
     
@@ -1155,7 +1159,7 @@ void engine::set_state(const state& state) {
     // Copy over non-serializable globals
     for (const auto& [name, value] : currentVars) {
         if (impl->nonSerializableGlobals.find(name) != impl->nonSerializableGlobals.end()) {
-            newEnv->define(name, value);
+            newEnv->define(std::string{name}, value);
         }
     }
     
@@ -1442,7 +1446,7 @@ type_info* engine::get_type_info_object(uint64_t type_id) {
 
     // If not found, we need to look up the class name from the type_id
     // This should only happen if the type_id was created but the type_info wasn't interned yet
-    const std::string& class_name = impl->string_symbolizer_.get_string(type_id);
+    std::string_view class_name = impl->string_symbolizer_.get_string(type_id);
     if (class_name.empty()) {
         return nullptr; // Invalid type_id
     }

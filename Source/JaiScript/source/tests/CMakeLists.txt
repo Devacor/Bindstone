@@ -29,7 +29,7 @@ if(JAISCRIPT_ENABLE_BENCHMARKS)
     message(STATUS "JaiScript: Performance benchmarks ENABLED (may increase test runtime)")
 
     # Check if ChaiScript is available for comparison benchmarks
-    set(CHAISCRIPT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../External/ChaiScript-6.1.0")
+    set(CHAISCRIPT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../External/ChaiScript-6.1.0")
     if(EXISTS "${CHAISCRIPT_ROOT}/include/chaiscript/chaiscript.hpp")
         message(STATUS "JaiScript: ChaiScript found - enabling comparison benchmarks")
         set(HAVE_CHAISCRIPT ON)

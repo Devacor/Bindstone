@@ -1134,7 +1134,7 @@ namespace class_builder_detail {
 
         // Store the C++ object in the class_instance
         instance->set_field(class_constants::CPP_OBJECT_FIELD,
-            script_value::make_cpp_object(class_name, cpp_obj, eng));
+            script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, eng));
 
         // Return wrapped object
         return script_value::make_object(class_name, instance, eng);
@@ -1297,10 +1297,10 @@ public:
                     
                     // Create a class_instance to hold it
                     auto instance = class_def->create_instance();
-                    
+
                     // Store the C++ object in the class_instance as a special field
-                    instance->set_field(class_constants::CPP_OBJECT_FIELD, script_value::make_cpp_object(class_name, cpp_obj, engine_ref));
-                    
+                    instance->set_field(class_constants::CPP_OBJECT_FIELD, script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ref));
+
                     // Return the class_instance wrapped in a value
                     return script_value::make_object(class_name, instance, engine_ref);
                 } catch (const std::exception& e) {
@@ -1327,7 +1327,7 @@ public:
                     auto instance = class_def->create_instance();
 
                     // Store the C++ object in the class_instance as a special field
-                    instance->set_field(class_constants::CPP_OBJECT_FIELD, script_value::make_cpp_object(class_name, cpp_obj, engine_ref));
+                    instance->set_field(class_constants::CPP_OBJECT_FIELD, script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ref));
 
                     // Return the class_instance wrapped in a value
                     return script_value::make_object(class_name, instance, engine_ref);
@@ -1557,9 +1557,9 @@ public:
             
             // Create a class_instance to hold it
             auto class_instance = class_def->create_instance();
-            class_instance->set_field(class_constants::CPP_OBJECT_FIELD, script_value::make_cpp_object(class_name, 
-                std::make_shared<T>(std::move(instance))));
-            
+            class_instance->set_field(class_constants::CPP_OBJECT_FIELD, script_value::make_cpp_object(class_name,
+                class_def->get_type_id(), std::make_shared<T>(std::move(instance)), engine_weak));
+
             if (auto eng = engine_weak.lock()) {
                 return script_value::make_object(class_name, class_instance, eng);
             }
@@ -2151,11 +2151,17 @@ public:
                 // From script_value to shared_ptr<T>
                 [class_name = class_name_](const script_value& v) -> std::shared_ptr<T> {
                     if (v.is_object()) {
-                        // Try to extract as shared_ptr<class_instance> first
-                        if (v.as<std::shared_ptr<class_instance>>()) {
-                            auto instance = v.as<std::shared_ptr<class_instance>>();
-                            // Extract the C++ object from the instance
-                            return instance->get_cpp_object_as<T>();
+                        // Check if this is a raw C++ object or a class_instance wrapper
+                        auto obj_holder = v.get_object_holder();
+                        if (obj_holder) {
+                            if (obj_holder->is_class_instance_wrapper) {
+                                // This is a class_instance wrapper - extract the class_instance then get the C++ object
+                                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+                                return instance->get_cpp_object_as<T>();
+                            } else {
+                                // This is a raw C++ object - extract it directly
+                                return std::static_pointer_cast<T>(obj_holder->data);
+                            }
                         }
                     }
                     throw runtime_error("Cannot convert script_value to shared_ptr<" + class_name + ">");
@@ -2168,8 +2174,8 @@ public:
                     
                     // Create a class_instance to wrap the object
                     auto instance = class_def->create_instance();
-                    instance->set_field(class_constants::CPP_OBJECT_FIELD, 
-                        script_value::make_cpp_object(class_name, std::static_pointer_cast<void>(obj), engine_weak));
+                    instance->set_field(class_constants::CPP_OBJECT_FIELD,
+                        script_value::make_cpp_object(class_name, class_def->get_type_id(), std::static_pointer_cast<void>(obj), engine_weak));
                     
                     // Return wrapped in script_value
                     return script_value::make_object(class_name, std::static_pointer_cast<void>(instance), engine_weak);
@@ -2191,8 +2197,8 @@ public:
                     auto cpp_obj = std::make_shared<T>(*static_cast<const T*>(obj));
                     
                     // Store the C++ object in the class_instance
-                    instance->set_field("_cpp_object", script_value::make_cpp_object(class_name, 
-                        std::static_pointer_cast<void>(cpp_obj), engine_weak));
+                    instance->set_field("_cpp_object", script_value::make_cpp_object(class_name,
+                        class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_weak));
                     
                     // Return the class_instance wrapped in a value
                     if (auto eng = engine_weak.lock()) {
@@ -2261,9 +2267,9 @@ public:
                         auto cpp_obj = std::make_shared<T>(obj);
                         
                         // Store the C++ object in the class_instance
-                        instance->set_field(class_constants::CPP_OBJECT_FIELD, 
-                            script_value::make_cpp_object(class_name, 
-                                std::static_pointer_cast<void>(cpp_obj), engine_weak));
+                        instance->set_field(class_constants::CPP_OBJECT_FIELD,
+                            script_value::make_cpp_object(class_name,
+                                class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_weak));
                         
                         // Return the class_instance wrapped in a value
                         if (auto eng = engine_weak.lock()) {
@@ -2332,7 +2338,7 @@ public:
                         // Store the shared_ptr directly (no copy needed)
                         instance->set_field(class_constants::CPP_OBJECT_FIELD,
                             script_value::make_cpp_object(class_name,
-                                std::static_pointer_cast<void>(obj), engine_weak));
+                                class_def->get_type_id(), std::static_pointer_cast<void>(obj), engine_weak));
                         
                         // Return the class_instance wrapped in a value
                         if (auto eng = engine_weak.lock()) {
@@ -2381,9 +2387,9 @@ private:
                     [class_def = class_def_, class_name = class_name_, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const T& obj) -> script_value {
                         auto instance = class_def->create_instance();
                         auto cpp_obj = std::make_shared<T>(obj);
-                        instance->set_field(class_constants::CPP_OBJECT_FIELD, 
-                            script_value::make_cpp_object(class_name, 
-                                std::static_pointer_cast<void>(cpp_obj), engine_weak));
+                        instance->set_field(class_constants::CPP_OBJECT_FIELD,
+                            script_value::make_cpp_object(class_name,
+                                class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_weak));
                         return script_value::make_object(class_name, instance, engine_weak);
                     }
                 );
@@ -2601,7 +2607,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
                         // Wrap in a new script_value (use engine ref from the existing value)
                         auto eng_ref = value.get_engine_ref();
                         new_instance->set_field(class_constants::CPP_OBJECT_FIELD,
-                            script_value::make_cpp_object(class_name_, new_cpp_obj, eng_ref));
+                            script_value::make_cpp_object(class_name_, class_def->get_type_id(), new_cpp_obj, eng_ref));
                         continue;
                     }
                 }

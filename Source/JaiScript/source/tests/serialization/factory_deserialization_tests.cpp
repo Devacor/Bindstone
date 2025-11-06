@@ -103,7 +103,7 @@ public:
             auto class_def = eng->get_class_definition("ContextRequiredObject");
             auto instance = class_def->create_instance();
             instance->set_field(class_constants::CPP_OBJECT_FIELD,
-                script_value::make_cpp_object("ContextRequiredObject", original, eng));
+                script_value::make_cpp_object("ContextRequiredObject", class_def->get_type_id(), original, eng));
             script_value obj_val = script_value::make_object("ContextRequiredObject", instance, eng);
 
             // Serialize to binary
@@ -159,7 +159,7 @@ public:
             auto class_def = eng->get_class_definition("PropertyPrereadObject");
             auto instance = class_def->create_instance();
             instance->set_field(class_constants::CPP_OBJECT_FIELD,
-                script_value::make_cpp_object("PropertyPrereadObject", original, eng));
+                script_value::make_cpp_object("PropertyPrereadObject", class_def->get_type_id(), original, eng));
             script_value obj_val = script_value::make_object("PropertyPrereadObject", instance, eng);
 
             // Serialize to binary
@@ -208,7 +208,7 @@ public:
             auto class_def = eng->get_class_definition("ComplexObject");
             auto instance = class_def->create_instance();
             instance->set_field(class_constants::CPP_OBJECT_FIELD,
-                script_value::make_cpp_object("ComplexObject", original, eng));
+                script_value::make_cpp_object("ComplexObject", class_def->get_type_id(), original, eng));
             script_value obj_val = script_value::make_object("ComplexObject", instance, eng);
 
             // Serialize to binary

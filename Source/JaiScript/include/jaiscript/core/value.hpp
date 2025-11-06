@@ -161,8 +161,8 @@ namespace jai {
         static script_value make_object(const std::string& type_name, std::shared_ptr<void> data, std::weak_ptr<engine> eng);
         // Optimized version with cached type_id
         static script_value make_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, std::weak_ptr<engine> eng, bool is_cpp_class = true);
-        // Internal factory method for raw C++ objects - use make_object for general use
-        static script_value make_cpp_object(const std::string& type_name, std::shared_ptr<void> data, std::weak_ptr<engine> eng);
+        // Internal factory method for raw C++ objects - always requires type_id to avoid re-interning
+        static script_value make_cpp_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, std::weak_ptr<engine> eng);
     public:
         static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env, std::weak_ptr<engine> eng);
         static script_value make_function(const script_function& func, std::weak_ptr<engine> eng);
@@ -174,22 +174,6 @@ namespace jai {
         
         // Template factory methods removed - use engine->make_object instead
         // This ensures proper type name registration
-        
-    private:
-        template<typename T>
-        static script_value make_cpp_object(std::shared_ptr<T> data) {
-            return make_cpp_object(typeid(T).name(), std::static_pointer_cast<void>(data));
-        }
-    public:
-        
-        // Engine-aware template factory methods removed - use engine->make_object instead
-        // This ensures proper type name registration and avoids circular dependencies
-        
-    private:
-        template<typename T>
-        static script_value make_cpp_object(std::shared_ptr<T> data, std::weak_ptr<engine> eng) {
-            return make_cpp_object(typeid(T).name(), std::static_pointer_cast<void>(data), eng);
-        }
     public:
         
         // Engine-aware object creation through registered class system
@@ -293,14 +277,11 @@ namespace jai {
         }
         
         inline const script_string& as_string() const {
-            const script_value& val = deref();
-            if (val.type() != script_value_type::jai_string_type) {
-                throw runtime_error("script_value is not a string");
+            auto result = checked_as_string();
+            if (!result) {
+                throw runtime_error(result.message());
             }
-            if (val.cpp_bound_ptr_) {
-                return *static_cast<const script_string*>(val.cpp_bound_ptr_);
-            }
-            return std::get<script_string>(val.storage_);
+            return *result.value();
         }
         
         inline script_bool as_bool() const {
@@ -326,13 +307,16 @@ namespace jai {
         }
         
         inline const std::vector<script_value>& as_array() const {
-            if (type() != script_value_type::jai_array_type) {
-                throw runtime_error("script_value is not an array");
+            auto result = checked_as_array();
+            if (!result) {
+                throw runtime_error(result.message());
             }
-            return *std::get<std::shared_ptr<std::vector<script_value>>>(storage_);
+            return *result.value();
         }
         
         inline std::vector<script_value>& as_array() {
+            // For non-const, we can't use checked_as_array() which returns const&
+            // So we check type and return mutable reference directly
             if (type() != script_value_type::jai_array_type) {
                 throw runtime_error("script_value is not an array");
             }
@@ -340,10 +324,11 @@ namespace jai {
         }
         
         inline const std::map<script_value, script_value>& as_map() const {
-            if (type() != script_value_type::jai_map_type) {
-                throw runtime_error("script_value is not a map");
+            auto result = checked_as_map();
+            if (!result) {
+                throw runtime_error(result.message());
             }
-            return *std::get<std::shared_ptr<std::map<script_value, script_value>>>(storage_);
+            return *result.value();
         }
         
         inline std::map<script_value, script_value>& as_map() {
@@ -398,378 +383,14 @@ namespace jai {
         }
         
         // Generic extraction with type checking
-        // HOT PATH OPTIMIZATION: Specialize common types to avoid template overhead
+        // Thin wrapper around checked_as<T>() that throws on error
         template<typename T>
         T as() const {
-            // FAST PATH: Direct type specializations for hot types (avoids constexpr cascade)
-            // These will be resolved at compile-time to direct function calls
-            if constexpr (std::is_same_v<T, script_int>) {
-                // Inline the deref + variant access to avoid function call overhead
-                const script_value& val = deref();
-                if (val.cpp_bound_ptr_) {
-                    return static_cast<script_int>(*static_cast<const int*>(val.cpp_bound_ptr_));
-                }
-                // Direct variant access with single type check
-                if (val.type() == script_value_type::jai_int_type) {
-                    return std::get<script_int>(val.storage_);
-                } else if (val.type() == script_value_type::jai_float_type) {
-                    // Float to int conversion
-                    return static_cast<script_int>(std::get<script_float>(val.storage_));
-                }
-                // Debug: Show actual type and type_info state
-                std::string error_msg = "script_value is not an integer or float. Actual type: " +
-                    std::to_string(static_cast<int>(val.type())) +
-                    " (type_info ptr: " + (val.type_info_ ? "valid" : "nullptr") + ")";
-                throw runtime_error(error_msg);
+            auto result = checked_as<T>();
+            if (!result) {
+                throw runtime_error(result.message().empty() ? "Type conversion failed" : result.message());
             }
-            else if constexpr (std::is_same_v<T, script_float> || std::is_same_v<T, double>) {
-                // Inline hot path for float access
-                const script_value& val = deref();
-                if (val.cpp_bound_ptr_) {
-                    return *static_cast<const script_float*>(val.cpp_bound_ptr_);
-                }
-                // Direct variant access with type conversion
-                if (val.type() == script_value_type::jai_float_type) {
-                    return std::get<script_float>(val.storage_);
-                } else if (val.type() == script_value_type::jai_int_type) {
-                    return static_cast<script_float>(std::get<script_int>(val.storage_));
-                }
-                throw runtime_error("script_value is not a float or integer");
-            }
-            else if constexpr (std::is_same_v<T, script_bool>) {
-                // Inline hot path for bool access
-                const script_value& val = deref();
-                if (val.cpp_bound_ptr_) {
-                    return *static_cast<const script_bool*>(val.cpp_bound_ptr_);
-                }
-                if (val.type() == script_value_type::jai_bool_type) {
-                    return std::get<script_bool>(val.storage_);
-                }
-                throw runtime_error("script_value is not a boolean");
-            }
-            else if constexpr (std::is_same_v<T, script_char>) {
-                // Inline hot path for char access
-                const script_value& val = deref();
-                if (val.cpp_bound_ptr_) {
-                    return *static_cast<const script_char*>(val.cpp_bound_ptr_);
-                }
-                if (val.type() == script_value_type::jai_char_type) {
-                    return std::get<script_char>(val.storage_);
-                }
-                throw runtime_error("script_value is not a character");
-            }
-            // MEDIUM PATH: Common integral conversions (inlined to avoid cascading checks)
-            else if constexpr (std::is_same_v<T, int>) {
-                script_int val = as<script_int>();  // Uses fast path above
-                if (val < std::numeric_limits<int>::min() || val > std::numeric_limits<int>::max()) {
-                    throw runtime_error("Integer value out of range for int");
-                }
-                return static_cast<int>(val);
-            }
-            else if constexpr (std::is_same_v<T, int64_t>) {
-                return static_cast<int64_t>(as<script_int>());  // Uses fast path, no bounds check
-            }
-            else if constexpr (std::is_same_v<T, float>) {
-                // Inline float conversion to avoid double dispatch
-                const script_value& val = deref();
-                if (val.type() == script_value_type::jai_float_type) {
-                    if (val.cpp_bound_ptr_) {
-                        return static_cast<float>(*static_cast<const script_float*>(val.cpp_bound_ptr_));
-                    }
-                    return static_cast<float>(std::get<script_float>(val.storage_));
-                } else if (val.type() == script_value_type::jai_int_type) {
-                    if (val.cpp_bound_ptr_) {
-                        return static_cast<float>(*static_cast<const int*>(val.cpp_bound_ptr_));
-                    }
-                    return static_cast<float>(std::get<script_int>(val.storage_));
-                }
-                throw runtime_error("Cannot convert script_value to float");
-            }
-            // SLOWER PATH: Everything else (original implementation)
-            // Handle reference types
-            else if constexpr (std::is_reference_v<T>) {
-                using base_type = std::remove_cv_t<std::remove_reference_t<T>>;
-
-                // For const references, we can return references to our internal data
-                if constexpr (std::is_const_v<std::remove_reference_t<T>>) {
-                    if constexpr (std::is_same_v<base_type, script_int>) {
-                        if (type() != script_value_type::jai_int_type) {
-                            throw runtime_error("script_value is not an integer");
-                        }
-                        return std::get<script_int>(storage_);
-                    } else if constexpr (std::is_same_v<base_type, script_float>) {
-                        if (type() != script_value_type::jai_float_type) {
-                            throw runtime_error("script_value is not a float");
-                        }
-                        return std::get<script_float>(storage_);
-                    } else if constexpr (std::is_same_v<base_type, script_bool>) {
-                        if (type() != script_value_type::jai_bool_type) {
-                            throw runtime_error("script_value is not a boolean");
-                        }
-                        return std::get<script_bool>(storage_);
-                    } else if constexpr (std::is_same_v<base_type, script_char>) {
-                        if (type() != script_value_type::jai_char_type) {
-                            throw runtime_error("script_value is not a character");
-                        }
-                        return std::get<script_char>(storage_);
-                    } else if constexpr (std::is_same_v<base_type, script_string> || std::is_same_v<base_type, std::string>) {
-                        return as_string();  // as_string() already returns const script_string&
-                    } else if constexpr (std::is_same_v<base_type, std::vector<script_value>>) {
-                        return as_array();   // as_array() already returns const std::vector<script_value>&
-                    } else if constexpr (std::is_same_v<base_type, std::map<script_value, script_value>>) {
-                        return as_map();     // as_map() already returns const std::map<script_value, script_value>&
-                    } else {
-                        // For user-defined types stored as objects - use the same logic as by-value extraction
-                        auto t = type();
-                        if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
-                            // First try to get shared_ptr<base_type> and dereference it
-                            try {
-                                auto ptr = as<std::shared_ptr<base_type>>();
-                                return *ptr;
-                            } catch (const std::exception&) {
-                                // If shared_ptr extraction fails, this might not be the right type
-                                throw runtime_error("Cannot extract const reference to custom type - type mismatch");
-                            }
-                        }
-                        throw runtime_error("Unsupported type for const reference extraction");
-                    }
-                } else {
-                    // For non-const references, we can't return references to our internal data
-                    // as it would break const-correctness, so we throw an error
-                    throw runtime_error("Cannot extract non-const reference from const script_value");
-                }
-            }
-            else if constexpr (std::is_same_v<T, script_string>) {
-                return as_string();
-            } else if constexpr (std::is_same_v<T, int8_t>) {
-                script_int val = as<script_int>();
-                if (val < std::numeric_limits<int8_t>::min() || val > std::numeric_limits<int8_t>::max()) {
-                    throw runtime_error("Integer value out of range for int8_t");
-                }
-                return static_cast<int8_t>(val);
-            } else if constexpr (std::is_same_v<T, int16_t>) {
-                script_int val = as<script_int>();
-                if (val < std::numeric_limits<int16_t>::min() || val > std::numeric_limits<int16_t>::max()) {
-                    throw runtime_error("Integer value out of range for int16_t");
-                }
-                return static_cast<int16_t>(val);
-            } else if constexpr (std::is_same_v<T, int32_t>) {
-                script_int val = as<script_int>();
-                if (val < std::numeric_limits<int32_t>::min() || val > std::numeric_limits<int32_t>::max()) {
-                    throw runtime_error("Integer value out of range for int32_t");
-                }
-                return static_cast<int32_t>(val);
-            }
-            // Unsigned integer types with bounds checking
-            else if constexpr (std::is_same_v<T, uint8_t>) {
-                script_int val = as<script_int>();
-                if (val < 0 || val > std::numeric_limits<uint8_t>::max()) {
-                    throw runtime_error("Integer value out of range for uint8_t (must be 0-255)");
-                }
-                return static_cast<uint8_t>(val);
-            } else if constexpr (std::is_same_v<T, uint16_t>) {
-                script_int val = as<script_int>();
-                if (val < 0 || val > std::numeric_limits<uint16_t>::max()) {
-                    throw runtime_error("Integer value out of range for uint16_t (must be non-negative)");
-                }
-                return static_cast<uint16_t>(val);
-            } else if constexpr (std::is_same_v<T, uint32_t>) {
-                script_int val = as<script_int>();
-                if (val < 0 || val > std::numeric_limits<uint32_t>::max()) {
-                    throw runtime_error("Integer value out of range for uint32_t (must be non-negative)");
-                }
-                return static_cast<uint32_t>(val);
-            } else if constexpr (std::is_same_v<T, uint64_t>) {
-                script_int val = as<script_int>();
-                if (val < 0) {
-                    throw runtime_error("Integer value must be non-negative for uint64_t");
-                }
-                return static_cast<uint64_t>(val);
-            } else if constexpr (std::is_same_v<T, size_t>) {
-                script_int val = as<script_int>();
-                if (val < 0) {
-                    throw runtime_error("Integer value must be non-negative for size_t");
-                }
-                return static_cast<size_t>(val);
-            } else if constexpr (std::is_same_v<T, std::string>) {
-                return as_string();  // script_string is already std::string
-            }
-            // Check custom converter FIRST for vector types
-            else if constexpr (is_specialization_v<T, std::vector>) {
-                // Use engine's conversion registry first
-                if (auto eng = engine_ref_.lock()) {
-                    auto registry = get_engine_conversion_registry(eng.get());
-                    if (registry && registry->template has_conversion<T>()) {
-                        return registry->template convert_from_script<T>(*this);
-                    }
-                }
-                
-                // Built-in vector handling
-                if (type() != script_value_type::jai_array_type) {
-                    throw runtime_error("Cannot convert non-array to vector");
-                }
-                
-                using element_type = typename T::value_type;
-                T result;
-                const auto& arr = as_array();
-                result.reserve(arr.size());
-                
-                for (const auto& elem : arr) {
-                    if constexpr (std::is_same_v<element_type, script_value>) {
-                        result.push_back(elem);
-                    } else {
-                        result.push_back(elem.as<element_type>());
-                    }
-                }
-                return result;
-            }
-            // Check custom converter FIRST for map types
-            else if constexpr (is_specialization_v<T, std::map>) {
-                // Use engine's conversion registry first
-                if (auto eng = engine_ref_.lock()) {
-                    auto registry = get_engine_conversion_registry(eng.get());
-                    if (registry && registry->template has_conversion<T>()) {
-                        return registry->template convert_from_script<T>(*this);
-                    }
-                }
-                
-                // Built-in map handling
-                if (type() != script_value_type::jai_map_type) {
-                    throw runtime_error("Cannot convert non-map to std::map");
-                }
-                
-                using key_type = typename T::key_type;
-                using mapped_type = typename T::mapped_type;
-                T result;
-                const auto& m = as_map();
-                
-                for (const auto& [k, v] : m) {
-                    if constexpr (std::is_same_v<key_type, script_value> && std::is_same_v<mapped_type, script_value>) {
-                        result.emplace(k, v);
-                    } else if constexpr (std::is_same_v<key_type, script_value>) {
-                        result.emplace(k, v.as<mapped_type>());
-                    } else if constexpr (std::is_same_v<mapped_type, script_value>) {
-                        result.emplace(k.as<key_type>(), v);
-                    } else {
-                        result.emplace(k.as<key_type>(), v.as<mapped_type>());
-                    }
-                }
-                return result;
-            }
-            // Support for shared_ptr extraction from objects
-            else if constexpr (std::is_same_v<T, std::shared_ptr<jai::class_instance>>) {
-                auto t = type();
-                if (t != script_value_type::jai_object_type && t != script_value_type::jai_shared_ptr_type) {
-                    throw runtime_error("script_value is not an object (type=" + std::to_string(static_cast<int>(type())) + ")");
-                }
-                auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
-                if (!objHolder->is_class_instance_wrapper) {
-                    throw runtime_error("Object is not a class_instance (type_name=" + objHolder->type_name + ")");
-                }
-                return std::static_pointer_cast<class_instance>(objHolder->data);
-            }
-            // Check custom converter for other class types
-            else if constexpr (std::is_class_v<T> && !std::is_same_v<T, std::string>) {
-                // Special handling for shared_ptr types that aren't class_instance
-                if constexpr (is_specialization_v<T, std::shared_ptr>) {
-                    // For shared_ptr types, try to extract as object
-                    auto t = type();
-                    if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
-                        auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
-                        // Try to cast the void* to the requested type
-                        using element_type = typename T::element_type;
-                        // If this is a C++ object stored in the holder, return it
-                        if (!objHolder->is_class_instance_wrapper) {
-                            return std::static_pointer_cast<element_type>(objHolder->data);
-                        } else {
-                            // This is a class_instance wrapper
-                            // We can't directly access class_instance methods here due to circular dependencies
-                            // Instead, use the custom extractor if available
-                            if (auto eng = engine_ref_.lock()) {
-                                auto registry = get_engine_conversion_registry(eng.get());
-                                if (registry) {
-                                    auto extracted = registry->extract_custom_object(objHolder->type_name, objHolder->data);
-                                    if (extracted) {
-                                        return std::static_pointer_cast<element_type>(extracted);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Use engine's conversion registry
-                if (auto eng = engine_ref_.lock()) {
-                    auto registry = get_engine_conversion_registry(eng.get());
-                    if (registry && registry->template has_conversion<T>()) {
-                        return registry->template convert_from_script<T>(*this);
-                    }
-                }
-                // No conversion available
-                throw runtime_error("No conversion available for type " + std::string(typeid(T).name()));
-            }
-            // Support for shared_ptr<void> extraction
-            else if constexpr (std::is_same_v<T, std::shared_ptr<void>>) {
-                if (type() != script_value_type::jai_object_type) {
-                    throw runtime_error("script_value is not an object");
-                }
-                auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
-                return objHolder->data;
-            }
-            // Support for shared_ptr<user_type> extraction from objects
-            else if constexpr (is_specialization_v<T, std::shared_ptr>) {
-                // First check if there's a registered conversion for this shared_ptr type
-                if (auto eng = engine_ref_.lock()) {
-                    auto registry = get_engine_conversion_registry(eng.get());
-                    if (registry && registry->template has_conversion<T>()) {
-                        return registry->template convert_from_script<T>(*this);
-                    }
-                }
-                
-                // Fall back to default shared_ptr extraction
-                if (type() != script_value_type::jai_object_type) {
-                    throw runtime_error("script_value is not an object");
-                }
-                auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
-                
-                // Check if we need to use the custom extractor (for class_instance wrapping)
-                // Only use extractor if this is a class_instance wrapper
-                if (objHolder->is_class_instance_wrapper) {
-                    if (auto eng = engine_ref_.lock()) {
-                        auto registry = get_engine_conversion_registry(eng.get());
-                        if (registry) {
-                            auto extracted = registry->extract_custom_object(objHolder->type_name, objHolder->data);
-                            if (extracted) {
-                                return std::static_pointer_cast<typename T::element_type>(extracted);
-                            }
-                        }
-                    }
-                }
-                
-                // Otherwise use static cast (for objects created directly)
-                return std::static_pointer_cast<typename T::element_type>(objHolder->data);
-            }
-            // Support for extracting custom objects by value (dereference shared_ptr)
-            else if constexpr (std::is_class_v<T> && 
-                             !std::is_same_v<T, std::string> &&
-                             !is_specialization_v<T, std::vector> &&
-                             !is_specialization_v<T, std::map>) {
-                // Custom converter already checked above
-
-                // For custom classes, try to extract shared_ptr and dereference
-                auto t = type();
-                if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
-                    auto ptr = as<std::shared_ptr<T>>();
-                    return *ptr;
-                }
-                throw runtime_error("Cannot extract custom type by value from non-object");
-            }
-            else {
-                throw runtime_error("Unsupported type conversion");
-            }
-            
-            // This should be unreachable, but some compilers need it
-            throw runtime_error("Internal error: fell through all type conversions");
+            return std::move(result.value());
         }
         
         // Non-const version of as() for extracting non-const references
@@ -823,43 +444,593 @@ namespace jai {
             }
         }
 
-        // checked_as<T>() - Returns checked_result instead of throwing exceptions
+        // ============================================================================
+        // CHECKED HELPER METHODS - Return checked_result instead of throwing
+        // Using pointers to avoid reference_wrapper complexity and try/catch overhead
+        // ============================================================================
+
+        inline checked_result<const script_string*> checked_as_string() const {
+            const script_value& val = deref();
+            if (val.type() != script_value_type::jai_string_type) {
+                return checked_result<const script_string*>(
+                    make_error_code(runtime_error_code::type_mismatch),
+                    "script_value is not a string"
+                );
+            }
+            if (val.cpp_bound_ptr_) {
+                return checked_result<const script_string*>(static_cast<const script_string*>(val.cpp_bound_ptr_));
+            }
+            return checked_result<const script_string*>(&std::get<script_string>(val.storage_));
+        }
+
+        inline checked_result<const std::vector<script_value>*> checked_as_array() const {
+            if (type() != script_value_type::jai_array_type) {
+                return checked_result<const std::vector<script_value>*>(
+                    make_error_code(runtime_error_code::not_an_array),
+                    "script_value is not an array"
+                );
+            }
+            return checked_result<const std::vector<script_value>*>(std::get<std::shared_ptr<std::vector<script_value>>>(storage_).get());
+        }
+
+        inline checked_result<const std::map<script_value, script_value>*> checked_as_map() const {
+            if (type() != script_value_type::jai_map_type) {
+                return checked_result<const std::map<script_value, script_value>*>(
+                    make_error_code(runtime_error_code::not_a_map),
+                    "script_value is not a map"
+                );
+            }
+            return checked_result<const std::map<script_value, script_value>*>(std::get<std::shared_ptr<std::map<script_value, script_value>>>(storage_).get());
+        }
+
+        // ============================================================================
+        // COMPREHENSIVE checked_as<T>() - Returns checked_result instead of throwing
+        // ============================================================================
         template<typename T>
         checked_result<T> checked_as() const {
+            // FAST PATH: Direct type specializations for hot types
+            if constexpr (std::is_same_v<T, script_int>) {
+                const script_value& val = deref();
+                if (val.cpp_bound_ptr_) {
+                    return checked_result<T>(static_cast<script_int>(*static_cast<const int*>(val.cpp_bound_ptr_)));
+                }
+                if (val.type() == script_value_type::jai_int_type) {
+                    return checked_result<T>(std::get<script_int>(val.storage_));
+                } else if (val.type() == script_value_type::jai_float_type) {
+                    return checked_result<T>(static_cast<script_int>(std::get<script_float>(val.storage_)));
+                }
+                return checked_result<T>(
+                    make_error_code(runtime_error_code::type_mismatch),
+                    "script_value is not an integer or float. Actual type: " +
+                    std::to_string(static_cast<int>(val.type()))
+                );
+            }
+            else if constexpr (std::is_same_v<T, script_float> || std::is_same_v<T, double>) {
+                const script_value& val = deref();
+                if (val.cpp_bound_ptr_) {
+                    return checked_result<T>(*static_cast<const script_float*>(val.cpp_bound_ptr_));
+                }
+                if (val.type() == script_value_type::jai_float_type) {
+                    return checked_result<T>(std::get<script_float>(val.storage_));
+                } else if (val.type() == script_value_type::jai_int_type) {
+                    return checked_result<T>(static_cast<script_float>(std::get<script_int>(val.storage_)));
+                }
+                return checked_result<T>(
+                    make_error_code(runtime_error_code::type_mismatch),
+                    "script_value is not a float or integer"
+                );
+            }
+            else if constexpr (std::is_same_v<T, script_bool>) {
+                const script_value& val = deref();
+                if (val.cpp_bound_ptr_) {
+                    return checked_result<T>(*static_cast<const script_bool*>(val.cpp_bound_ptr_));
+                }
+                if (val.type() == script_value_type::jai_bool_type) {
+                    return checked_result<T>(std::get<script_bool>(val.storage_));
+                }
+                return checked_result<T>(
+                    make_error_code(runtime_error_code::type_mismatch),
+                    "script_value is not a boolean"
+                );
+            }
+            else if constexpr (std::is_same_v<T, script_char>) {
+                const script_value& val = deref();
+                if (val.cpp_bound_ptr_) {
+                    return checked_result<T>(*static_cast<const script_char*>(val.cpp_bound_ptr_));
+                }
+                if (val.type() == script_value_type::jai_char_type) {
+                    return checked_result<T>(std::get<script_char>(val.storage_));
+                }
+                return checked_result<T>(
+                    make_error_code(runtime_error_code::type_mismatch),
+                    "script_value is not a character"
+                );
+            }
+            // MEDIUM PATH: Common integral conversions
+            else if constexpr (std::is_same_v<T, int>) {
+                auto val_result = checked_as<script_int>();
+                if (!val_result) {
+                    return checked_result<T>(val_result.error(), val_result.message());
+                }
+                script_int val = val_result.value();
+                if (val < std::numeric_limits<int>::min() || val > std::numeric_limits<int>::max()) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Integer value out of range for int"
+                    );
+                }
+                return checked_result<T>(static_cast<int>(val));
+            }
+            else if constexpr (std::is_same_v<T, int64_t>) {
+                auto val_result = checked_as<script_int>();
+                if (!val_result) {
+                    return checked_result<T>(val_result.error(), val_result.message());
+                }
+                return checked_result<T>(static_cast<int64_t>(val_result.value()));
+            }
+            else if constexpr (std::is_same_v<T, float>) {
+                const script_value& val = deref();
+                if (val.type() == script_value_type::jai_float_type) {
+                    if (val.cpp_bound_ptr_) {
+                        return checked_result<T>(static_cast<float>(*static_cast<const script_float*>(val.cpp_bound_ptr_)));
+                    }
+                    return checked_result<T>(static_cast<float>(std::get<script_float>(val.storage_)));
+                } else if (val.type() == script_value_type::jai_int_type) {
+                    if (val.cpp_bound_ptr_) {
+                        return checked_result<T>(static_cast<float>(*static_cast<const int*>(val.cpp_bound_ptr_)));
+                    }
+                    return checked_result<T>(static_cast<float>(std::get<script_int>(val.storage_)));
+                }
+                return checked_result<T>(
+                    make_error_code(runtime_error_code::type_mismatch),
+                    "Cannot convert script_value to float"
+                );
+            }
+            // String types
+            else if constexpr (std::is_same_v<T, script_string> || std::is_same_v<T, std::string>) {
+                auto str_result = checked_as_string();
+                if (!str_result) {
+                    return checked_result<T>(str_result.error(), str_result.message());
+                }
+                return checked_result<T>(*str_result.value());
+            }
+            // Handle reference types (now supported via checked_result<T&> specialization)
+            else if constexpr (std::is_reference_v<T>) {
+                using base_type = std::remove_cv_t<std::remove_reference_t<T>>;
+
+                if constexpr (std::is_const_v<std::remove_reference_t<T>>) {
+                    if constexpr (std::is_same_v<base_type, script_int>) {
+                        if (type() != script_value_type::jai_int_type) {
+                            return checked_result<T>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                "script_value is not an integer"
+                            );
+                        }
+                        return checked_result<T>(std::get<script_int>(storage_));
+                    } else if constexpr (std::is_same_v<base_type, script_float>) {
+                        if (type() != script_value_type::jai_float_type) {
+                            return checked_result<T>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                "script_value is not a float"
+                            );
+                        }
+                        return checked_result<T>(std::get<script_float>(storage_));
+                    } else if constexpr (std::is_same_v<base_type, script_bool>) {
+                        if (type() != script_value_type::jai_bool_type) {
+                            return checked_result<T>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                "script_value is not a boolean"
+                            );
+                        }
+                        return checked_result<T>(std::get<script_bool>(storage_));
+                    } else if constexpr (std::is_same_v<base_type, script_char>) {
+                        if (type() != script_value_type::jai_char_type) {
+                            return checked_result<T>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                "script_value is not a character"
+                            );
+                        }
+                        return checked_result<T>(std::get<script_char>(storage_));
+                    } else if constexpr (std::is_same_v<base_type, script_string> || std::is_same_v<base_type, std::string>) {
+                        auto str_result = checked_as_string();
+                        if (!str_result) {
+                            return checked_result<T>(str_result.error(), str_result.message());
+                        }
+                        return checked_result<T>(*str_result.value());
+                    } else if constexpr (std::is_same_v<base_type, std::vector<script_value>>) {
+                        auto arr_result = checked_as_array();
+                        if (!arr_result) {
+                            return checked_result<T>(arr_result.error(), arr_result.message());
+                        }
+                        return checked_result<T>(*arr_result.value());
+                    } else if constexpr (std::is_same_v<base_type, std::map<script_value, script_value>>) {
+                        auto map_result = checked_as_map();
+                        if (!map_result) {
+                            return checked_result<T>(map_result.error(), map_result.message());
+                        }
+                        return checked_result<T>(*map_result.value());
+                    } else {
+                        auto t = type();
+                        if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
+                            auto ptr_result = checked_as<std::shared_ptr<base_type>>();
+                            if (!ptr_result) {
+                                return checked_result<T>(ptr_result.error(), ptr_result.message());
+                            }
+                            return checked_result<T>(*ptr_result.value());
+                        }
+                        return checked_result<T>(
+                            make_error_code(runtime_error_code::type_mismatch),
+                            "Unsupported type for const reference extraction"
+                        );
+                    }
+                } else {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Cannot extract non-const reference from const script_value"
+                    );
+                }
+            }
+            // Signed integer types with bounds checking
+            else if constexpr (std::is_same_v<T, int8_t>) {
+                auto val_result = checked_as<script_int>();
+                if (!val_result) {
+                    return checked_result<T>(val_result.error(), val_result.message());
+                }
+                script_int val = val_result.value();
+                if (val < std::numeric_limits<int8_t>::min() || val > std::numeric_limits<int8_t>::max()) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Integer value out of range for int8_t"
+                    );
+                }
+                return checked_result<T>(static_cast<int8_t>(val));
+            }
+            else if constexpr (std::is_same_v<T, int16_t>) {
+                auto val_result = checked_as<script_int>();
+                if (!val_result) {
+                    return checked_result<T>(val_result.error(), val_result.message());
+                }
+                script_int val = val_result.value();
+                if (val < std::numeric_limits<int16_t>::min() || val > std::numeric_limits<int16_t>::max()) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Integer value out of range for int16_t"
+                    );
+                }
+                return checked_result<T>(static_cast<int16_t>(val));
+            }
+            else if constexpr (std::is_same_v<T, int32_t>) {
+                auto val_result = checked_as<script_int>();
+                if (!val_result) {
+                    return checked_result<T>(val_result.error(), val_result.message());
+                }
+                script_int val = val_result.value();
+                if (val < std::numeric_limits<int32_t>::min() || val > std::numeric_limits<int32_t>::max()) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Integer value out of range for int32_t"
+                    );
+                }
+                return checked_result<T>(static_cast<int32_t>(val));
+            }
+            // Unsigned integer types with bounds checking
+            else if constexpr (std::is_same_v<T, uint8_t>) {
+                auto val_result = checked_as<script_int>();
+                if (!val_result) {
+                    return checked_result<T>(val_result.error(), val_result.message());
+                }
+                script_int val = val_result.value();
+                if (val < 0 || val > std::numeric_limits<uint8_t>::max()) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Integer value out of range for uint8_t (must be 0-255)"
+                    );
+                }
+                return checked_result<T>(static_cast<uint8_t>(val));
+            }
+            else if constexpr (std::is_same_v<T, uint16_t>) {
+                auto val_result = checked_as<script_int>();
+                if (!val_result) {
+                    return checked_result<T>(val_result.error(), val_result.message());
+                }
+                script_int val = val_result.value();
+                if (val < 0 || val > std::numeric_limits<uint16_t>::max()) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Integer value out of range for uint16_t (must be non-negative)"
+                    );
+                }
+                return checked_result<T>(static_cast<uint16_t>(val));
+            }
+            else if constexpr (std::is_same_v<T, uint32_t>) {
+                auto val_result = checked_as<script_int>();
+                if (!val_result) {
+                    return checked_result<T>(val_result.error(), val_result.message());
+                }
+                script_int val = val_result.value();
+                if (val < 0 || val > std::numeric_limits<uint32_t>::max()) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Integer value out of range for uint32_t (must be non-negative)"
+                    );
+                }
+                return checked_result<T>(static_cast<uint32_t>(val));
+            }
+            else if constexpr (std::is_same_v<T, uint64_t>) {
+                auto val_result = checked_as<script_int>();
+                if (!val_result) {
+                    return checked_result<T>(val_result.error(), val_result.message());
+                }
+                script_int val = val_result.value();
+                if (val < 0) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Integer value must be non-negative for uint64_t"
+                    );
+                }
+                return checked_result<T>(static_cast<uint64_t>(val));
+            }
+            else if constexpr (std::is_same_v<T, size_t>) {
+                auto val_result = checked_as<script_int>();
+                if (!val_result) {
+                    return checked_result<T>(val_result.error(), val_result.message());
+                }
+                script_int val = val_result.value();
+                if (val < 0) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Integer value must be non-negative for size_t"
+                    );
+                }
+                return checked_result<T>(static_cast<size_t>(val));
+            }
+            // Vector types
+            else if constexpr (is_specialization_v<T, std::vector>) {
+                // Use engine's conversion registry first
+                if (auto eng = engine_ref_.lock()) {
+                    auto registry = get_engine_conversion_registry(eng.get());
+                    if (registry && registry->template has_conversion<T>()) {
+                        try {
+                            return checked_result<T>(registry->template convert_from_script<T>(*this));
+                        } catch (const runtime_error& e) {
+                            return checked_result<T>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                e.what()
+                            );
+                        } catch (...) {
+                            return checked_result<T>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                "Custom conversion failed"
+                            );
+                        }
+                    }
+                }
+
+                // Built-in vector handling
+                if (type() != script_value_type::jai_array_type) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::not_an_array),
+                        "Cannot convert non-array to vector"
+                    );
+                }
+
+                using element_type = typename T::value_type;
+                T result;
+                auto arr_result = checked_as_array();
+                if (!arr_result) {
+                    return checked_result<T>(arr_result.error(), arr_result.message());
+                }
+                const auto& arr = *arr_result.value();
+                result.reserve(arr.size());
+
+                for (const auto& elem : arr) {
+                    if constexpr (std::is_same_v<element_type, script_value>) {
+                        result.push_back(elem);
+                    } else {
+                        auto elem_result = elem.checked_as<element_type>();
+                        if (!elem_result) {
+                            return checked_result<T>(elem_result.error(),
+                                "Failed to convert array element: " + elem_result.message());
+                        }
+                        result.push_back(elem_result.value());
+                    }
+                }
+                return checked_result<T>(std::move(result));
+            }
+            // Map types
+            else if constexpr (is_specialization_v<T, std::map>) {
+                // Use engine's conversion registry first
+                if (auto eng = engine_ref_.lock()) {
+                    auto registry = get_engine_conversion_registry(eng.get());
+                    if (registry && registry->template has_conversion<T>()) {
+                        try {
+                            return checked_result<T>(registry->template convert_from_script<T>(*this));
+                        } catch (const runtime_error& e) {
+                            return checked_result<T>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                e.what()
+                            );
+                        } catch (...) {
+                            return checked_result<T>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                "Custom conversion failed"
+                            );
+                        }
+                    }
+                }
+
+                // Built-in map handling
+                if (type() != script_value_type::jai_map_type) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::not_a_map),
+                        "Cannot convert non-map to std::map"
+                    );
+                }
+
+                using key_type = typename T::key_type;
+                using mapped_type = typename T::mapped_type;
+                T result;
+                auto map_result = checked_as_map();
+                if (!map_result) {
+                    return checked_result<T>(map_result.error(), map_result.message());
+                }
+                const auto& m = *map_result.value();
+
+                for (const auto& [k, v] : m) {
+                    if constexpr (std::is_same_v<key_type, script_value> && std::is_same_v<mapped_type, script_value>) {
+                        result.emplace(k, v);
+                    } else if constexpr (std::is_same_v<key_type, script_value>) {
+                        auto val_result = v.checked_as<mapped_type>();
+                        if (!val_result) {
+                            return checked_result<T>(val_result.error(),
+                                "Failed to convert map value: " + val_result.message());
+                        }
+                        result.emplace(k, val_result.value());
+                    } else if constexpr (std::is_same_v<mapped_type, script_value>) {
+                        auto key_result = k.checked_as<key_type>();
+                        if (!key_result) {
+                            return checked_result<T>(key_result.error(),
+                                "Failed to convert map key: " + key_result.message());
+                        }
+                        result.emplace(key_result.value(), v);
+                    } else {
+                        auto key_result = k.checked_as<key_type>();
+                        if (!key_result) {
+                            return checked_result<T>(key_result.error(),
+                                "Failed to convert map key: " + key_result.message());
+                        }
+                        auto val_result = v.checked_as<mapped_type>();
+                        if (!val_result) {
+                            return checked_result<T>(val_result.error(),
+                                "Failed to convert map value: " + val_result.message());
+                        }
+                        result.emplace(key_result.value(), val_result.value());
+                    }
+                }
+                return checked_result<T>(std::move(result));
+            }
             // Support for shared_ptr<class_instance> extraction from objects
-            if constexpr (std::is_same_v<T, std::shared_ptr<jai::class_instance>>) {
+            else if constexpr (std::is_same_v<T, std::shared_ptr<jai::class_instance>>) {
                 auto t = type();
                 if (t != script_value_type::jai_object_type && t != script_value_type::jai_shared_ptr_type) {
                     return checked_result<T>(
-                        make_error_code(runtime_error_code::type_mismatch),
+                        make_error_code(runtime_error_code::not_an_object),
                         "script_value is not an object (type=" + std::to_string(static_cast<int>(type())) + ")"
                     );
                 }
                 auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
                 if (!objHolder->is_class_instance_wrapper) {
                     return checked_result<T>(
-                        make_error_code(runtime_error_code::type_mismatch),
+                        make_error_code(runtime_error_code::not_a_class),
                         "Object is not a class_instance (type_name=" + objHolder->type_name + ")"
                     );
                 }
                 return checked_result<T>(std::static_pointer_cast<class_instance>(objHolder->data));
             }
-            // For other types, fall back to as() wrapped in try/catch for now
-            // TODO: Implement checked versions for all types
-            else {
-                try {
-                    return checked_result<T>(as<T>());
-                } catch (const runtime_error& e) {
+            // Support for shared_ptr<void> extraction
+            else if constexpr (std::is_same_v<T, std::shared_ptr<void>>) {
+                if (type() != script_value_type::jai_object_type) {
                     return checked_result<T>(
-                        make_error_code(runtime_error_code::type_mismatch),
-                        e.what()
-                    );
-                } catch (...) {
-                    return checked_result<T>(
-                        make_error_code(runtime_error_code::type_mismatch),
-                        "Type conversion failed"
+                        make_error_code(runtime_error_code::not_an_object),
+                        "script_value is not an object"
                     );
                 }
+                auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
+                return checked_result<T>(objHolder->data);
+            }
+            // Support for other shared_ptr types
+            else if constexpr (is_specialization_v<T, std::shared_ptr>) {
+                // First check if there's a registered conversion
+                if (auto eng = engine_ref_.lock()) {
+                    auto registry = get_engine_conversion_registry(eng.get());
+                    if (registry && registry->template has_conversion<T>()) {
+                        try {
+                            return checked_result<T>(registry->template convert_from_script<T>(*this));
+                        } catch (const runtime_error& e) {
+                            return checked_result<T>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                e.what()
+                            );
+                        } catch (...) {
+                            return checked_result<T>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                "Custom conversion failed"
+                            );
+                        }
+                    }
+                }
+
+                // Fall back to default shared_ptr extraction
+                auto t = type();
+                if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
+                    auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
+
+                    // Check if we need to use the custom extractor
+                    if (objHolder->is_class_instance_wrapper) {
+                        if (auto eng = engine_ref_.lock()) {
+                            auto registry = get_engine_conversion_registry(eng.get());
+                            if (registry) {
+                                auto extracted = registry->extract_custom_object(objHolder->type_name, objHolder->data);
+                                if (extracted) {
+                                    return checked_result<T>(std::static_pointer_cast<typename T::element_type>(extracted));
+                                }
+                            }
+                        }
+                    }
+
+                    // Otherwise use static cast
+                    return checked_result<T>(std::static_pointer_cast<typename T::element_type>(objHolder->data));
+                }
+
+                return checked_result<T>(
+                    make_error_code(runtime_error_code::not_an_object),
+                    "script_value is not an object"
+                );
+            }
+            // Support for extracting custom objects by value (dereference shared_ptr)
+            else if constexpr (std::is_class_v<T> &&
+                             !std::is_same_v<T, std::string> &&
+                             !is_specialization_v<T, std::vector> &&
+                             !is_specialization_v<T, std::map>) {
+                // Check custom converter first
+                if (auto eng = engine_ref_.lock()) {
+                    auto registry = get_engine_conversion_registry(eng.get());
+                    if (registry && registry->template has_conversion<T>()) {
+                        try {
+                            return checked_result<T>(registry->template convert_from_script<T>(*this));
+                        } catch (const runtime_error& e) {
+                            return checked_result<T>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                e.what()
+                            );
+                        } catch (...) {
+                            return checked_result<T>(
+                                make_error_code(runtime_error_code::type_mismatch),
+                                "Custom conversion failed"
+                            );
+                        }
+                    }
+                }
+
+                // For custom classes, try to extract shared_ptr and dereference
+                auto t = type();
+                if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) {
+                    auto ptr_result = checked_as<std::shared_ptr<T>>();
+                    if (!ptr_result) {
+                        return checked_result<T>(ptr_result.error(), ptr_result.message());
+                    }
+                    return checked_result<T>(*ptr_result.value());
+                }
+                return checked_result<T>(
+                    make_error_code(runtime_error_code::type_mismatch),
+                    "Cannot extract custom type by value from non-object"
+                );
+            }
+            else {
+                return checked_result<T>(
+                    make_error_code(runtime_error_code::type_mismatch),
+                    "Unsupported type conversion"
+                );
             }
         }
 
@@ -1132,7 +1303,8 @@ namespace jai {
         
         // Create a weak_ptr from an object
         // Create a weak_ptr from an object (implemented in value.cpp)
-        static script_value make_weak_ptr(const script_value& obj, std::weak_ptr<engine> eng);
+        // Returns checked_result to avoid throwing exceptions
+        static checked_result<script_value> make_weak_ptr(const script_value& obj, std::weak_ptr<engine> eng);
         
         // Set type info for special cases (like weak_ptr creation)
         void set_type_info(type_info_ptr type) {

@@ -697,7 +697,7 @@ private:
             .method("get_parent_name", &TreeNode::get_parent_name)
             .method("child_count", &TreeNode::child_count)
             .property("name", &TreeNode::name)
-            .property("parent", &TreeNode::parent)
+            .property("parent", &TreeNode::parent, jai::skip_type_check)  // Circular dependency: TreeNode references itself
             // Don't expose children vector directly - use methods instead
             .build();
     }

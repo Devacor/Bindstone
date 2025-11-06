@@ -1,4 +1,5 @@
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/core/engine.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/detail/interpreter.hpp>  // For string_symbolizer
@@ -20,12 +21,18 @@ public:
             // Also test with a simple expression to understand the issue
             std::cout << "\n=== TESTING SIMPLE EXPRESSION ===\n";
             std::string simpleCode = "42;";
+            auto eng = engine::make();
             lexer simpleLex(simpleCode);
             auto simpleTokens = simpleLex.tokenize();
             string_symbolizer symbolizer;
             std::unordered_set<std::string> empty_types;
-            parser simpleParse(simpleTokens, &symbolizer, empty_types);
-            auto simpleDecls = simpleParse.parse();
+            parser simpleParse(simpleTokens, &symbolizer, eng.get(), empty_types);
+            auto simpleResult = simpleParse.parse();
+            if (!simpleResult) {
+                std::cerr << "Parse failed for simple expression: " << simpleResult.error().message() << "\n";
+                return;
+            }
+            auto& simpleDecls = simpleResult.value();
             std::cout << "Simple '42;' produces " << simpleDecls.size() << " declarations\n";
             
             // Test just the function declaration alone
@@ -42,8 +49,13 @@ public:
 
             string_symbolizer symbolizer2;
             std::unordered_set<std::string> empty_types2;
-            parser funcParse(funcTokens, &symbolizer2, empty_types2);
-            auto funcDecls = funcParse.parse();
+            parser funcParse(funcTokens, &symbolizer2, eng.get(), empty_types2);
+            auto funcResult = funcParse.parse();
+            if (!funcResult) {
+                std::cerr << "Parse failed for function: " << funcResult.error().message() << "\n";
+                return;
+            }
+            auto& funcDecls = funcResult.value();
             std::cout << "Function alone produces " << funcDecls.size() << " declarations\n";
             if (funcDecls.size() > 0) {
                 if (auto* func_decl = dynamic_cast<function_decl*>(funcDecls[0].get())) {
@@ -71,9 +83,14 @@ public:
 
             string_symbolizer symbolizer3;
             std::unordered_set<std::string> empty_types3;
-            parser parse(tokens, &symbolizer3, empty_types3);
-            auto declarations = parse.parse();
-            
+            parser parse(tokens, &symbolizer3, eng.get(), empty_types3);
+            auto parseResult = parse.parse();
+            if (!parseResult) {
+                std::cerr << "Parse failed: " << parseResult.error().message() << "\n";
+                return;
+            }
+            auto& declarations = parseResult.value();
+
             std::cout << "\n=== DECLARATIONS ===\n";
             std::cout << "Total: " << declarations.size() << "\n";
             
@@ -137,9 +154,14 @@ public:
                 auto tokens2 = lex2.tokenize();
                 string_symbolizer symbolizer4;
                 std::unordered_set<std::string> empty_types4;
-                parser parse2(tokens2, &symbolizer4, empty_types4);
-                auto declarations2 = parse2.parse();
-                
+                parser parse2(tokens2, &symbolizer4, eng.get(), empty_types4);
+                auto parse2Result = parse2.parse();
+                if (!parse2Result) {
+                    std::cerr << "Parse failed with semicolon: " << parse2Result.error().message() << "\n";
+                    return;
+                }
+                auto& declarations2 = parse2Result.value();
+
                 std::cout << "With ';' after function: " << declarations2.size() << " declarations\n";
                 
                 // Try newline separation
@@ -150,9 +172,14 @@ public:
                 auto tokens3 = lex3.tokenize();
                 string_symbolizer symbolizer5;
                 std::unordered_set<std::string> empty_types5;
-                parser parse3(tokens3, &symbolizer5, empty_types5);
-                auto declarations3 = parse3.parse();
-                
+                parser parse3(tokens3, &symbolizer5, eng.get(), empty_types5);
+                auto parse3Result = parse3.parse();
+                if (!parse3Result) {
+                    std::cerr << "Parse failed with newline: " << parse3Result.error().message() << "\n";
+                    return;
+                }
+                auto& declarations3 = parse3Result.value();
+
                 std::cout << "With newline: " << declarations3.size() << " declarations\n";
             } else {
                 std::cout << "\nParser working correctly!\n";

@@ -83,32 +83,34 @@ namespace jai {
         
         // AST literal constructor - ONLY for parser to create placeholder values in AST nodes
         // These values should NEVER be used directly, only as templates for interpreter
+        // type_info_ is set to nullptr since these are temporary placeholders without engine context
         struct ast_literal_tag {};
-        script_value(ast_literal_tag, script_int i) : type_info_(type_info::make_int()), storage_(i) {}
-        script_value(ast_literal_tag, script_float f) : type_info_(type_info::make_float()), storage_(f) {}
-        script_value(ast_literal_tag, const script_string& s) : type_info_(type_info::make_string()), storage_(s) {}
-        script_value(ast_literal_tag, script_char c) : type_info_(type_info::make_char()), storage_(c) {}
-        script_value(ast_literal_tag, script_bool b) : type_info_(type_info::make_bool()), storage_(b) {}
+        script_value(ast_literal_tag, script_int i) : type_info_(nullptr), storage_(i) {}
+        script_value(ast_literal_tag, script_float f) : type_info_(nullptr), storage_(f) {}
+        script_value(ast_literal_tag, const script_string& s) : type_info_(nullptr), storage_(s) {}
+        script_value(ast_literal_tag, script_char c) : type_info_(nullptr), storage_(c) {}
+        script_value(ast_literal_tag, script_bool b) : type_info_(nullptr), storage_(b) {}
         script_value(ast_literal_tag, std::monostate) : type_info_(nullptr), storage_(std::monostate{}) {}
-        script_value(script_int i, std::weak_ptr<engine> eng) : type_info_(type_info::make_int()), engine_ref_(eng), storage_(i) {}
-        script_value(script_float f, std::weak_ptr<engine> eng) : type_info_(type_info::make_float()), engine_ref_(eng), storage_(f) {}
-        script_value(const script_string& s, std::weak_ptr<engine> eng) : type_info_(type_info::make_string()), engine_ref_(eng), storage_(s) {}
-        script_value(script_string&& s, std::weak_ptr<engine> eng) : type_info_(type_info::make_string()), engine_ref_(eng), storage_(std::move(s)) {}
-        script_value(const char* s, std::weak_ptr<engine> eng) : type_info_(type_info::make_string()), engine_ref_(eng), storage_(script_string(s)) {}
-        script_value(script_char c, std::weak_ptr<engine> eng) : type_info_(type_info::make_char()), engine_ref_(eng), storage_(c) {}
-        script_value(script_bool b, std::weak_ptr<engine> eng) : type_info_(type_info::make_bool()), engine_ref_(eng), storage_(b) {}
+        script_value(script_int i, std::weak_ptr<engine> eng);
+        script_value(script_float f, std::weak_ptr<engine> eng);
+        script_value(const script_string& s, std::weak_ptr<engine> eng);
+        script_value(script_string&& s, std::weak_ptr<engine> eng);
+        script_value(const char* s, std::weak_ptr<engine> eng);
+        script_value(script_char c, std::weak_ptr<engine> eng);
+        script_value(script_bool b, std::weak_ptr<engine> eng);
         
         // Template constructors for all numeric types - ALL require engine references
-        
+        // NOTE: Implementations are in value_impl.hpp (include after engine.hpp)
+
         // Engine-aware template constructors for integral types (preferred)
         template<typename T>
         requires (std::is_integral_v<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char> && !std::is_same_v<T, script_int>)
-        script_value(T i, std::weak_ptr<engine> eng) : type_info_(type_info::make_int()), engine_ref_(eng), storage_(script_int(i)) {}
-        
+        script_value(T i, std::weak_ptr<engine> eng);
+
         // Engine-aware template constructors for floating point types (preferred)
         template<typename T>
         requires (std::is_floating_point_v<T> && !std::is_same_v<T, script_float>)
-        script_value(T f, std::weak_ptr<engine> eng) : type_info_(type_info::make_float()), engine_ref_(eng), storage_(script_float(f)) {}
+        script_value(T f, std::weak_ptr<engine> eng);
 
         // Delete pointer constructors - use add_global_ref instead
         template<typename T>
@@ -146,12 +148,9 @@ namespace jai {
         // Explicit deep copy method
         script_value clone() const;
         
-        // Factory methods for complex types
+        // Factory methods for complex types (deprecated - use engine-aware versions below)
         static script_value make_array(type_info_ptr element_type);
         static script_value make_map(type_info_ptr keyType, type_info_ptr valueType);
-        static script_value make_object(const std::string& type_name, std::shared_ptr<void> data);
-        // Internal factory method for raw C++ objects - use make_object for general use
-        static script_value make_cpp_object(const std::string& type_name, std::shared_ptr<void> data);
     public:
         static script_value make_reference(script_value* target, const std::shared_ptr<environment>& env);
 
@@ -168,40 +167,9 @@ namespace jai {
         static script_value make_function(const script_function& func, std::weak_ptr<engine> eng);
         
         // Factory method for C++ bound values
+        // NOTE: Implementation is in value_impl.hpp (include after engine.hpp)
         template<typename T>
-        static script_value make_cpp_bound(T* target, std::weak_ptr<engine> eng) {
-            script_value val(std::monostate{}, eng);
-
-            // Map C++ types to script types
-            if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
-                // Integer types (int, long, int64_t, etc.) -> script_int
-                val.type_info_ = type_info::make<script_int>();
-                val.storage_ = script_int{0};
-            } else if constexpr (std::is_floating_point_v<T>) {
-                // Floating point types (float, double) -> script_float
-                val.type_info_ = type_info::make<script_float>();
-                val.storage_ = script_float{0.0};
-            } else if constexpr (std::is_same_v<T, bool>) {
-                // bool -> script_bool
-                val.type_info_ = type_info::make<script_bool>();
-                val.storage_ = script_bool{false};
-            } else if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, script_string>) {
-                // string types -> script_string
-                val.type_info_ = type_info::make<script_string>();
-                val.storage_ = script_string{};
-            } else if constexpr (std::is_same_v<T, char>) {
-                // char -> script_char
-                val.type_info_ = type_info::make<script_char>();
-                val.storage_ = script_char{'\0'};
-            } else {
-                // For complex types, we'll need special handling
-                val.type_info_ = type_info::make<T>();
-                val.storage_ = std::monostate{};
-            }
-
-            val.cpp_bound_ptr_ = static_cast<void*>(target);
-            return val;
-        }
+        static script_value make_cpp_bound(T* target, std::weak_ptr<engine> eng);
         
         // Template factory methods removed - use engine->make_object instead
         // This ensures proper type name registration
@@ -229,8 +197,29 @@ namespace jai {
         
         // Type information
         type_info_ptr get_type_info() const { return type_info_; }
-        script_value_type type() const { 
-            return type_info_ ? type_info_->base_type : script_value_type::jai_null_type; 
+        script_value_type type() const {
+            return type_info_ ? type_info_->base_type : script_value_type::jai_null_type;
+        }
+
+        // Get type from storage variant - useful for AST literals that have nullptr type_info
+        script_value_type storage_type() const {
+            switch (storage_.index()) {
+                case 0: return script_value_type::jai_null_type;        // std::monostate
+                case 1: return script_value_type::jai_int_type;         // script_int
+                case 2: return script_value_type::jai_float_type;       // script_float
+                case 3: return script_value_type::jai_string_type;      // script_string
+                case 4: return script_value_type::jai_char_type;        // script_char
+                case 5: return script_value_type::jai_bool_type;        // script_bool
+                case 6: return script_value_type::jai_array_type;       // Array
+                case 7: return script_value_type::jai_map_type;         // Map
+                case 8: return script_value_type::jai_object_type;      // Object
+                case 9: return script_value_type::jai_function_type;    // Function
+                case 10: return script_value_type::jai_reference_type;  // Reference
+                case 11: return script_value_type::jai_shared_ptr_type; // shared_ptr
+                case 12: return script_value_type::jai_weak_ptr_type;   // weak_ptr
+                case 13: return script_value_type::jai_invalid_type;    // invalid_tag
+                default: return script_value_type::jai_invalid_type;
+            }
         }
         bool is_null() const { return deref().type() == script_value_type::jai_null_type; }
         bool is_invalid() const { return deref().type() == script_value_type::jai_invalid_type; }
@@ -426,7 +415,11 @@ namespace jai {
                     // Float to int conversion
                     return static_cast<script_int>(std::get<script_float>(val.storage_));
                 }
-                throw runtime_error("script_value is not an integer or float");
+                // Debug: Show actual type and type_info state
+                std::string error_msg = "script_value is not an integer or float. Actual type: " +
+                    std::to_string(static_cast<int>(val.type())) +
+                    " (type_info ptr: " + (val.type_info_ ? "valid" : "nullptr") + ")";
+                throw runtime_error(error_msg);
             }
             else if constexpr (std::is_same_v<T, script_float> || std::is_same_v<T, double>) {
                 // Inline hot path for float access
@@ -669,7 +662,7 @@ namespace jai {
                     throw runtime_error("script_value is not an object (type=" + std::to_string(static_cast<int>(type())) + ")");
                 }
                 auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
-                if (!objHolder->is_cpp_class_instance) {
+                if (!objHolder->is_class_instance_wrapper) {
                     throw runtime_error("Object is not a class_instance (type_name=" + objHolder->type_name + ")");
                 }
                 return std::static_pointer_cast<class_instance>(objHolder->data);
@@ -685,7 +678,7 @@ namespace jai {
                         // Try to cast the void* to the requested type
                         using element_type = typename T::element_type;
                         // If this is a C++ object stored in the holder, return it
-                        if (!objHolder->is_cpp_class_instance) {
+                        if (!objHolder->is_class_instance_wrapper) {
                             return std::static_pointer_cast<element_type>(objHolder->data);
                         } else {
                             // This is a class_instance wrapper
@@ -740,7 +733,7 @@ namespace jai {
                 
                 // Check if we need to use the custom extractor (for class_instance wrapping)
                 // Only use extractor if this is a class_instance wrapper
-                if (objHolder->is_cpp_class_instance) {
+                if (objHolder->is_class_instance_wrapper) {
                     if (auto eng = engine_ref_.lock()) {
                         auto registry = get_engine_conversion_registry(eng.get());
                         if (registry) {
@@ -907,7 +900,7 @@ namespace jai {
             std::string type_name;           // Type identification for serialization
             uint64_t type_id = UINT64_MAX;  // Interned type name ID for fast comparison (UINT64_MAX = not set)
             std::shared_ptr<void> data;     // The actual object
-            bool is_cpp_class_instance = false;  // True if data is a class_instance wrapping a C++ object
+            bool is_class_instance_wrapper = false;  // True if data is a class_instance object (both C++ and script classes), false for raw data
 
             // Note: Serialization functions will be managed externally
             // by ISerializer implementations to keep JaiScript dependency-free
@@ -947,6 +940,9 @@ namespace jai {
     public:
         // Method to set engine reference after construction
         void set_engine_ref(std::weak_ptr<engine> eng) { engine_ref_ = eng; }
+
+        // Access raw storage for AST literals (bypasses type checking)
+        const storage& get_storage() const { return storage_; }
         
         // Extract object_holder for class_instance operations
         // Returns nullptr if not an object type
@@ -1007,12 +1003,7 @@ namespace jai {
         }
         
         // Factory method for invalid values (used as sentinel for non-existent fields/methods)
-        static script_value make_invalid(std::weak_ptr<engine> eng) {
-            script_value val(std::monostate{}, eng);  // Start with null
-            val.storage_ = invalid_tag{};  // Change to invalid
-            val.type_info_ = type_info::make_invalid();  // Set proper type info
-            return val;
-        }
+        static script_value make_invalid(std::weak_ptr<engine> eng);
         
         // Check if this value has a valid engine reference
         bool has_valid_engine_ref() const {
@@ -1059,7 +1050,7 @@ namespace jai {
         // Safe class_instance extraction from object_holder
         std::shared_ptr<class_instance> get_class_instance() {
             auto holder = get_object_holder();
-            if (holder && holder->is_cpp_class_instance) {
+            if (holder && holder->is_class_instance_wrapper) {
                 return std::static_pointer_cast<class_instance>(holder->data);
             }
             return nullptr;
@@ -1096,12 +1087,7 @@ namespace jai {
         }
         
         // Create an empty weak_ptr value
-        static script_value make_empty_weak_ptr(type_info_ptr weak_ptr_type, std::weak_ptr<engine> eng) {
-            script_value v(std::monostate{}, eng);
-            v.type_info_ = weak_ptr_type ? weak_ptr_type : type_info::make_weak_ptr(nullptr);
-            v.storage_ = std::weak_ptr<object_holder>();
-            return v;
-        }
+        static script_value make_empty_weak_ptr(type_info_ptr weak_ptr_type, std::weak_ptr<engine> eng);
         
         // Create a weak_ptr from an object
         // Create a weak_ptr from an object (implemented in value.cpp)

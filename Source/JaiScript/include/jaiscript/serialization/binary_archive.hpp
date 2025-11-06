@@ -12,15 +12,22 @@ namespace serialization {
 // Binary archive writer - produces portable binary format
 class binary_archive_writer : public archive_writer {
 public:
-    binary_archive_writer() = default;
-    explicit binary_archive_writer(std::vector<uint8_t>& buffer) : buffer_(&buffer) {
+    binary_archive_writer() : archive_writer() {}
+    explicit binary_archive_writer(std::vector<uint8_t>& buffer) : archive_writer(), buffer_(&buffer) {
         buffer_->clear();
     }
-    
+    explicit binary_archive_writer(std::weak_ptr<engine> eng) : archive_writer(eng) {}
+    binary_archive_writer(std::vector<uint8_t>& buffer, std::weak_ptr<engine> eng) : archive_writer(eng), buffer_(&buffer) {
+        buffer_->clear();
+    }
+
+    // Binary format REQUIRES explicit property keys array (no named fields)
+    bool needs_property_keys() const override { return true; }
+
     // Get the serialized data
     const std::vector<uint8_t>& data() const { return owned_buffer_.empty() ? *buffer_ : owned_buffer_; }
     std::vector<uint8_t>& data() { return owned_buffer_.empty() ? *buffer_ : owned_buffer_; }
-    
+
     // Basic type serialization (little-endian for portability)
     void write_int8(int8_t value) override {
         write_raw(&value, sizeof(value));
@@ -112,7 +119,21 @@ public:
         // We write them for debugging but they're not required for deserialization
         write_string(name);
     }
-    
+
+    // Map serialization - Binary uses array of key-value pairs
+    void begin_map(size_t size) override {
+        write_uint8(0x05); // Map marker
+        write_uint32(static_cast<uint32_t>(size));
+    }
+
+    void end_map() override {
+        write_uint8(0x06); // End map marker
+    }
+
+    void write_map_key(const std::string& key) override {
+        write_string(key);
+    }
+
     void write_value(const script_value& value) override {
         // Write type tag first
         write_uint8(static_cast<uint8_t>(value.type()));
@@ -162,20 +183,59 @@ public:
             }
             
             case script_value_type::jai_weak_ptr_type: {
-                // Handle weak_ptr - for now just write a null since we changed the type
-                // TODO: Implement proper serialization for weak_ptr<object_holder>
-                write_uint32(0);  // null
+                // Serialize weak_ptr by tracking the shared_ptr it references
+                auto weak = value.get_weak_ptr();
+                auto shared = weak.lock();  // Try to lock to get shared_ptr<object_holder>
+
+                if (!shared) {
+                    // Expired or null weak_ptr
+                    write_uint32(0);
+                } else {
+                    // Track the shared_ptr and write its ID
+                    auto [id, is_new] = track_shared_ptr(shared.get());
+                    write_uint32(id);
+
+                    // If this is the first time seeing this shared object, serialize the data
+                    // This makes serialization order-independent: weak_ptr can come before or after shared_ptr
+                    if (is_new) {
+                        // Create a script_value from the object_holder using factory method
+                        script_value shared_val = script_value::make_object(
+                            shared->type_name,
+                            shared->type_id,
+                            shared->data,
+                            engine_ref_,
+                            shared->is_class_instance_wrapper
+                        );
+                        write_value(shared_val);
+                    }
+                }
                 break;
             }
             
             case script_value_type::jai_object_type: {
-                // Self-describing binary format: property names array + values in order
+                // Self-describing binary format: type name + version + property names array + values in order
                 auto type_info = value.get_type_info();
                 std::string type_name = type_info ? type_info->type_name : "unknown";
-                
+
                 // Write type name first
                 write_string(type_name);
-                
+
+                // Look up version from serialization metadata
+                uint32_t version = 1;  // Default version
+                if (auto eng = engine_ref_.lock()) {
+                    const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
+                    if (metadata) {
+                        version = metadata->current_version;
+                    } else {
+                        // Runtime validation: Ensure type is registered
+                        throw serialization_error(
+                            "Cannot serialize unregistered type '" + type_name + "'. " +
+                            "Register the type with class_builder before serialization."
+                        );
+                    }
+                }
+                write_uint32(version);
+
                 // Collect properties and values
                 std::vector<std::string> property_names;
                 std::vector<script_value> property_values;
@@ -258,12 +318,26 @@ private:
 // Binary archive reader
 class binary_archive_reader : public archive_reader {
 public:
-    explicit binary_archive_reader(const std::vector<uint8_t>& data, std::weak_ptr<engine> eng = {}) 
-        : archive_reader(eng), data_(data), pos_(0) {}
-    
-    explicit binary_archive_reader(const void* data, size_t size, std::weak_ptr<engine> eng = {})
-        : archive_reader(eng), data_(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size), pos_(0) {}
-    
+    // Engine is REQUIRED for binary reading since we need to create script_values
+    explicit binary_archive_reader(const std::vector<uint8_t>& data, std::weak_ptr<engine> eng)
+        : archive_reader(eng), data_(data), pos_(0) {
+        if (eng.expired()) {
+            throw serialization_error("binary_archive_reader requires a valid engine reference");
+        }
+    }
+
+    explicit binary_archive_reader(const void* data, size_t size, std::weak_ptr<engine> eng)
+        : archive_reader(eng), data_(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size), pos_(0) {
+        if (eng.expired()) {
+            throw serialization_error("binary_archive_reader requires a valid engine reference");
+        }
+    }
+
+    virtual ~binary_archive_reader() = default;
+
+    // Binary format REQUIRES explicit property keys array (no named fields)
+    bool needs_property_keys() const override { return true; }
+
     // Basic type deserialization
     int8_t read_int8() override {
         int8_t value;
@@ -379,13 +453,39 @@ public:
         name = read_string();
         return true;
     }
-    
+
+    // Map deserialization - Binary reads from array of key-value pairs
+    size_t begin_map() override {
+        if (pos_ >= data_.size()) return 0;
+
+        uint8_t marker = read_uint8();
+        if (marker != 0x05) {
+            throw serialization_error("Expected map marker (0x05)");
+        }
+
+        uint32_t size = read_uint32();
+        return size;
+    }
+
+    void end_map() override {
+        uint8_t marker = read_uint8();
+        if (marker != 0x06) {
+            throw serialization_error("Expected end map marker (0x06)");
+        }
+    }
+
+    bool read_map_key(std::string& key) override {
+        if (pos_ >= data_.size()) return false;
+        key = read_string();
+        return true;
+    }
+
     bool has_property(const std::string& name) override {
         // In binary format, properties are stored in order
         // This is a simplified implementation
         return true;
     }
-    
+
     script_value read_value() override {
         // Get engine reference once at the start
         auto eng = engine_ref_.lock();
@@ -430,7 +530,7 @@ public:
             
             case script_value_type::jai_map_type: {
                 uint32_t size = read_uint32();
-                script_value map_val = script_value::make_map(type_info::make_string(), nullptr, eng_weak);
+                script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng_weak);
                 auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
                 
                 for (uint32_t i = 0; i < size; ++i) {
@@ -442,68 +542,151 @@ public:
             }
             
             case script_value_type::jai_weak_ptr_type: {
-                // For now, just read the null marker and return a null value
-                // TODO: Implement proper deserialization for weak_ptr<object_holder>
+                // Read the shared_ptr ID this weak_ptr references
                 uint32_t id = read_uint32();
-                return script_value::make_null(eng_weak);
+
+                if (id == 0) {
+                    // Null or expired weak_ptr - create empty weak_ptr
+                    script_value v(std::monostate{}, eng_weak);
+                    v.set_type_info(eng->get_type_info_weak_ptr(nullptr));
+                    v.storage_ = std::weak_ptr<script_value::object_holder>();
+                    return v;
+                }
+
+                // Check if we've already reconstructed this object
+                script_value existing_obj = get_shared_ptr(id);
+
+                if (!existing_obj.is_invalid()) {
+                    // Object was already reconstructed, get its object_holder and create weak_ptr
+                    auto obj_holder = existing_obj.get_object_holder();
+                    if (obj_holder) {
+                        script_value weak_val(std::monostate{}, eng_weak);
+                        weak_val.set_type_info(eng->get_type_info_weak_ptr(existing_obj.get_type_info()));
+                        weak_val.storage_ = std::weak_ptr<script_value::object_holder>(obj_holder);
+                        return weak_val;
+                    }
+                }
+
+                // First time seeing this ID - need to deserialize the object
+                script_value obj_val = read_value();  // Recursively read the object (already properly wrapped)
+
+                // Register the object for future references
+                register_shared_ptr(id, obj_val);
+
+                // Get the object_holder from the deserialized object
+                auto obj_holder = obj_val.get_object_holder();
+                if (!obj_holder) {
+                    // Object doesn't have an object_holder (shouldn't happen for valid objects)
+                    throw std::runtime_error("Deserialized weak_ptr object has no object_holder");
+                }
+
+                // Create weak_ptr to the object_holder
+                script_value weak_val(std::monostate{}, eng_weak);
+                weak_val.set_type_info(eng->get_type_info_weak_ptr(obj_val.get_type_info()));
+                weak_val.storage_ = std::weak_ptr<script_value::object_holder>(obj_holder);
+                return weak_val;
             }
             
             case script_value_type::jai_object_type: {
-                // Read self-describing object: type name + property names array + values
+                // Read self-describing object: type name + version + property names array + values
                 std::string type_name = read_string();
+                uint32_t version = read_uint32();
                 uint32_t property_count = read_uint32();
-                
+
+                // Check if there's a custom factory for this type
+                auto eng = engine_ref_.lock();
+                if (eng) {
+                    const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
+                    if (metadata && metadata->custom_construct) {
+                        // Use custom factory for construction with proper version
+                        script_value constructed_obj = metadata->custom_construct(*this, version);
+
+                        // Now hydrate the object's properties
+                        auto instance = constructed_obj.as<std::shared_ptr<class_instance>>();
+                        if (instance) {
+                            auto class_def = instance->get_class_definition();
+                            if (class_def) {
+                                // Read property names in order
+                                std::vector<std::string> property_names;
+                                property_names.reserve(property_count);
+                                for (uint32_t i = 0; i < property_count; ++i) {
+                                    property_names.push_back(read_string());
+                                }
+
+                                // Read and set each property
+                                for (uint32_t i = 0; i < property_count; ++i) {
+                                    const auto& prop_name = property_names[i];
+                                    script_value prop_value = read_value();
+
+                                    // Try to find setter
+                                    auto setter = class_def->get_method("_set_" + prop_name);
+                                    if (setter.type() == script_value_type::jai_function_type) {
+                                        try {
+                                            std::vector<script_value> args = {constructed_obj, prop_value};
+                                            (void)setter.as_function()(args);  // Explicitly discard return value
+                                        } catch (...) {
+                                            // Skip properties that fail to set
+                                        }
+                                    }
+                                }
+
+                                // Call post_deserialize hook if it exists
+                                // Pass both the object and the version number for migration logic
+                                auto post_deserialize = class_def->get_method("post_deserialize");
+                                if (post_deserialize.type() == script_value_type::jai_function_type) {
+                                    try {
+                                        auto eng = engine_ref_.lock();
+                                        if (eng) {
+                                            std::vector<script_value> args = {
+                                                constructed_obj,
+                                                script_value(static_cast<script_int>(version), eng->weak_from_this())
+                                            };
+                                            (void)post_deserialize.as_function()(args);
+                                        }
+                                    } catch (...) {
+                                        // Hook failed, but continue
+                                    }
+                                }
+                            }
+                        }
+
+                        return constructed_obj;
+                    }
+                }
+
+                // No custom factory - use default deserialization path
                 // Read property names in order
                 std::vector<std::string> property_names;
                 property_names.reserve(property_count);
                 for (uint32_t i = 0; i < property_count; ++i) {
                     property_names.push_back(read_string());
                 }
-                
+
                 // Read property values in same order
                 std::vector<script_value> property_values;
                 property_values.reserve(property_count);
                 for (uint32_t i = 0; i < property_count; ++i) {
                     property_values.push_back(read_value());
                 }
-                
+
                 // Convert to map for reconstruction by from_binary
-                script_value map_val = script_value::make_map(type_info::make_string(), nullptr, eng_weak);
+                script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng_weak);
                 auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
-                
+
                 // Add type information
                 map.insert_or_assign(script_value("_type_", eng_weak), script_value(type_name, eng_weak));
-                
+
                 // Add properties in the order they were serialized
                 for (uint32_t i = 0; i < property_count; ++i) {
                     map.insert_or_assign(script_value(property_names[i], eng_weak), property_values[i]);
                 }
-                
+
                 return map_val;  // Return as map for reconstruction by from_binary
             }
             
             default:
                 throw serialization_error("Unsupported type tag in binary deserialization: " + 
                                         std::to_string(type_tag));
-        }
-    }
-
-protected:
-    void skip_property_impl(type_info_ptr type) override {
-        // Skip based on type - this needs to match the write format
-        if (type->type_name == "int8" || type->type_name == "uint8" || type->type_name == "bool") {
-            pos_ += 1;
-        } else if (type->type_name == "int16" || type->type_name == "uint16") {
-            pos_ += 2;
-        } else if (type->type_name == "int32" || type->type_name == "uint32" || type->type_name == "float") {
-            pos_ += 4;
-        } else if (type->type_name == "int64" || type->type_name == "uint64" || type->type_name == "double") {
-            pos_ += 8;
-        } else if (type->type_name == "string") {
-            uint32_t size = read_uint32();
-            pos_ += size;
-        } else {
-            throw runtime_error("Cannot skip unknown type: " + type->type_name);
         }
     }
 

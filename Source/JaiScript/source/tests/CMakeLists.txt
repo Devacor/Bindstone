@@ -10,8 +10,12 @@ set(TEST_SOURCES_GLOB
     integration/*.hpp
     language/*.cpp
     language/*.hpp
+    properties/*.cpp
+    properties/*.hpp
     semantics/*.cpp
     semantics/*.hpp
+    serialization/*.cpp
+    serialization/*.hpp
     # vm/*.cpp  # VM backend not yet implemented - excluded for now
     # vm/*.hpp
 )
@@ -99,6 +103,7 @@ add_test(NAME SemanticsTests COMMAND jaiscript_tests "semantics")
 add_test(NAME ContainerTests COMMAND jaiscript_tests "Container")
 add_test(NAME StaticTests COMMAND jaiscript_tests "Static")
 add_test(NAME NamespaceTests COMMAND jaiscript_tests "Namespace")
+add_test(NAME SerializationTests COMMAND jaiscript_tests "Serialization")
 
 # Create a separate executable target for static method tests only
 # This appears in VS dropdown for easy debugging

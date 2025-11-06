@@ -11,8 +11,13 @@ namespace serialization {
 
 class json_archive_writer : public archive_writer {
 public:
-    json_archive_writer(int indent = 2) : indent_(indent), current_depth_(0) {}
-    
+    json_archive_writer(int indent = 2) : archive_writer(), indent_(indent), current_depth_(0) {}
+    json_archive_writer(int indent, std::weak_ptr<engine> eng) : archive_writer(eng), indent_(indent), current_depth_(0) {}
+    explicit json_archive_writer(std::weak_ptr<engine> eng) : archive_writer(eng), indent_(2), current_depth_(0) {}
+
+    // JSON doesn't need explicit property keys array (object keys are self-describing)
+    bool needs_property_keys() const override { return false; }
+
     // Basic type serialization
     void write_int8(int8_t value) override { write_json_value(value); }
     void write_int16(int16_t value) override { write_json_value(value); }
@@ -44,7 +49,8 @@ public:
     
     // Object/array structure
     void begin_object(const std::string& type_name, uint32_t version) override {
-        if (in_container() && !first_in_container_.top()) {
+        // Only add comma if we're in an array (not object, since write_property_name handles that)
+        if (in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
             oss_ << ',';
         }
         write_newline();
@@ -76,7 +82,8 @@ public:
     }
     
     void begin_array(size_t size) override {
-        if (in_container() && !first_in_container_.top()) {
+        // Only add comma if we're in an array (not object, since write_property_name handles that)
+        if (in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
             oss_ << ',';
         }
         write_newline();
@@ -108,15 +115,77 @@ public:
         oss_ << '"' << escape_json_string_local(name) << "\": ";
         first_in_container_.top() = false;
     }
-    
+
+    // Map serialization - JSON uses native object format
+    void begin_map(size_t size) override {
+        // Same as begin_array but we'll write it as an object
+        if (in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
+            oss_ << ',';
+        }
+        write_newline();
+        write_indent();
+        oss_ << '{';
+        current_depth_++;
+        container_stack_.push(ContainerType::Object);
+        first_in_container_.push(true);
+    }
+
+    void end_map() override {
+        current_depth_--;
+        container_stack_.pop();
+        first_in_container_.pop();
+        write_newline();
+        write_indent();
+        oss_ << '}';
+        if (in_container()) {
+            first_in_container_.top() = false;
+        }
+    }
+
+    void write_map_key(const std::string& key) override {
+        // Same as write_property_name
+        if (!first_in_container_.top()) {
+            oss_ << ',';
+        }
+        write_newline();
+        write_indent();
+        oss_ << '"' << escape_json_string_local(key) << "\": ";
+        first_in_container_.top() = false;
+    }
+
     void write_value(const script_value& value) override {
         // Handle shared_ptr types with proper tracking, delegate others to stdlib
         switch (value.type()) {
             
             case script_value_type::jai_weak_ptr_type: {
-                // Handle weak_ptr - for now just write null
-                // TODO: Implement proper serialization for weak_ptr<object_holder>
-                oss_ << "null";
+                // Serialize weak_ptr by tracking the shared_ptr it references
+                auto weak = value.get_weak_ptr();
+                auto shared = weak.lock();  // Try to lock to get shared_ptr<object_holder>
+
+                if (!shared) {
+                    // Expired or null weak_ptr
+                    oss_ << "{\"$weak_ptr_id\": 0}";
+                } else {
+                    // Track the shared_ptr and write its ID
+                    auto [id, is_new] = track_shared_ptr(shared.get());
+                    oss_ << "{\"$weak_ptr_id\": " << id;
+
+                    // If this is the first time seeing this object, serialize it inline
+                    if (is_new) {
+                        oss_ << ", \"$weak_ptr_data\": ";
+                        // Create a script_value from the object_holder using factory method
+                        script_value shared_val = script_value::make_object(
+                            shared->type_name,
+                            shared->type_id,
+                            shared->data,
+                            engine_ref_,
+                            shared->is_class_instance_wrapper
+                        );
+                        write_value(shared_val);
+                    }
+
+                    oss_ << "}";
+                }
                 break;
             }
             
@@ -152,10 +221,28 @@ public:
                 break;
             }
             
-            default:
+            default: {
+                // Runtime validation: Check if object types are registered
+                if (value.type() == script_value_type::jai_object_type) {
+                    auto type_info = value.get_type_info();
+                    std::string type_name = type_info ? type_info->type_name : "unknown";
+
+                    auto eng = engine_ref_.lock();
+                    if (eng) {
+                        const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
+                        if (!metadata || metadata->properties.empty()) {
+                            throw serialization_error(
+                                "Cannot serialize unregistered type '" + type_name + "'. " +
+                                "Register the type with class_builder before serialization, or ensure it has registered properties."
+                            );
+                        }
+                    }
+                }
+
                 // Use the existing to_json implementation for other types
                 oss_ << to_json_impl_fallback(value, 0, 0);  // No indentation, we handle it ourselves
                 break;
+            }
         }
     }
     
@@ -319,13 +406,22 @@ private:
 
 class json_archive_reader : public archive_reader {
 public:
-    json_archive_reader(const std::string& json_string, std::weak_ptr<engine> eng = {}) 
+    // Engine is REQUIRED for JSON reading since we need to create script_values
+    json_archive_reader(const std::string& json_string, std::weak_ptr<engine> eng)
         : archive_reader(eng), json_(json_string), pos_(0) {
+        if (eng.expired()) {
+            throw serialization_error("json_archive_reader requires a valid engine reference");
+        }
         root_value_ = parse_json();
         current_value_ = &root_value_;
         path_stack_.push_back("");
     }
-    
+
+    virtual ~json_archive_reader() = default;
+
+    // JSON doesn't need explicit property keys array (object keys are self-describing)
+    bool needs_property_keys() const override { return false; }
+
     // Basic type deserialization
     int8_t read_int8() override { return static_cast<int8_t>(read_value().as<script_int>()); }
     int16_t read_int16() override { return static_cast<int16_t>(read_value().as<script_int>()); }
@@ -353,11 +449,30 @@ public:
     
     // Object/array structure
     bool begin_object(std::string& type_name, uint32_t& version) override {
-        if (!current_value_->is_map()) {
+        // Determine which value to check
+        const script_value* value_to_check = nullptr;
+
+        if (current_property_value_) {
+            // Use value from read_property_name()
+            value_to_check = current_property_value_;
+        } else if (!array_stack_.empty()) {
+            // We're inside an array - read the next element
+            auto& arr_state = array_stack_.top();
+            if (arr_state.index < arr_state.array.size()) {
+                temp_value_ = arr_state.array[arr_state.index++];
+                value_to_check = &temp_value_;
+            } else {
+                return false;
+            }
+        } else {
+            value_to_check = current_value_;
+        }
+
+        if (!value_to_check || !value_to_check->is_map()) {
             return false;
         }
-        
-        const auto& map = current_value_->as_map();
+
+        const auto& map = value_to_check->as_map();
         
         // Get engine reference for creating script_values
         auto eng = engine_ref_.lock();
@@ -386,7 +501,10 @@ public:
         
         // Set up iteration state
         object_stack_.push(ObjectState{map, map.begin()});
-        
+
+        // Clear current_property_value_ after using it (consumed)
+        current_property_value_ = nullptr;
+
         return true;
     }
     
@@ -397,12 +515,35 @@ public:
     }
     
     size_t begin_array() override {
-        if (!current_value_->is_array()) {
+        // Determine which value to check
+        const script_value* value_to_check = nullptr;
+
+        if (current_property_value_) {
+            // Use value from read_property_name()
+            value_to_check = current_property_value_;
+        } else if (!array_stack_.empty()) {
+            // We're inside an array - read the next element
+            auto& arr_state = array_stack_.top();
+            if (arr_state.index < arr_state.array.size()) {
+                temp_value_ = arr_state.array[arr_state.index++];
+                value_to_check = &temp_value_;
+            } else {
+                return 0;
+            }
+        } else {
+            value_to_check = current_value_;
+        }
+
+        if (!value_to_check || !value_to_check->is_array()) {
             return 0;
         }
-        
-        const auto& arr = current_value_->as_array();
+
+        const auto& arr = value_to_check->as_array();
         array_stack_.push(ArrayState{arr, 0});
+
+        // Clear current_property_value_ after using it (consumed)
+        current_property_value_ = nullptr;
+
         return arr.size();
     }
     
@@ -416,9 +557,9 @@ public:
         if (object_stack_.empty()) {
             return false;
         }
-        
+
         auto& obj_state = object_stack_.top();
-        
+
         // Skip metadata fields
         while (obj_state.current != obj_state.map.end()) {
             const std::string& prop_name = obj_state.current->first.as_string();
@@ -430,10 +571,64 @@ public:
             }
             ++obj_state.current;
         }
-        
+
         return false;
     }
-    
+
+    // Map deserialization - JSON reads from native object format
+    size_t begin_map() override {
+        // Use same logic as begin_object but without type/version reading
+        const script_value* value_to_check = nullptr;
+
+        if (current_property_value_) {
+            value_to_check = current_property_value_;
+        } else if (!array_stack_.empty()) {
+            auto& arr_state = array_stack_.top();
+            if (arr_state.index < arr_state.array.size()) {
+                temp_value_ = arr_state.array[arr_state.index++];
+                value_to_check = &temp_value_;
+            } else {
+                return 0;
+            }
+        } else {
+            value_to_check = current_value_;
+        }
+
+        if (!value_to_check || !value_to_check->is_map()) {
+            return 0;
+        }
+
+        const auto& map = value_to_check->as_map();
+        object_stack_.push(ObjectState{map, map.begin()});
+        current_property_value_ = nullptr;
+
+        return map.size();
+    }
+
+    void end_map() override {
+        if (!object_stack_.empty()) {
+            object_stack_.pop();
+        }
+    }
+
+    bool read_map_key(std::string& key) override {
+        // Same as read_property_name but without filtering metadata
+        if (object_stack_.empty()) {
+            return false;
+        }
+
+        auto& obj_state = object_stack_.top();
+
+        if (obj_state.current != obj_state.map.end()) {
+            key = obj_state.current->first.as_string();
+            current_property_value_ = &obj_state.current->second;
+            ++obj_state.current;
+            return true;
+        }
+
+        return false;
+    }
+
     bool has_property(const std::string& name) override {
         if (object_stack_.empty()) {
             return false;
@@ -479,22 +674,64 @@ public:
             }
             auto eng_weak = eng->weak_from_this();
             
-            // Check for weak_ptr_ref
-            auto weak_ref_it = map.find(script_value("_weak_ptr_ref", eng_weak));
-            if (weak_ref_it != map.end() && weak_ref_it->second.type() == script_value_type::jai_int_type) {
-                // For now, return null for weak_ptr references
-                // TODO: Implement proper deserialization for weak_ptr<object_holder>
-                return script_value::make_null(eng_weak);
+            // Check for weak_ptr serialization format: {"$weak_ptr_id": id, "$weak_ptr_data": <optional>}
+            auto weak_id_it = map.find(script_value("$weak_ptr_id", eng_weak));
+            if (weak_id_it != map.end() && weak_id_it->second.type() == script_value_type::jai_int_type) {
+                uint32_t id = static_cast<uint32_t>(weak_id_it->second.as<script_int>());
+
+                if (id == 0) {
+                    // Null or expired weak_ptr
+                    script_value v(std::monostate{}, eng_weak);
+                    v.set_type_info(eng->get_type_info_weak_ptr(nullptr));
+                    v.storage_ = std::weak_ptr<script_value::object_holder>();
+                    return v;
+                }
+
+                // Check if we've already reconstructed this object
+                script_value existing_obj = get_shared_ptr(id);
+
+                if (!existing_obj.is_invalid()) {
+                    // Object was already reconstructed, get its object_holder and create weak_ptr
+                    auto obj_holder = existing_obj.get_object_holder();
+                    if (obj_holder) {
+                        script_value weak_val(std::monostate{}, eng_weak);
+                        weak_val.set_type_info(eng->get_type_info_weak_ptr(existing_obj.get_type_info()));
+                        weak_val.storage_ = std::weak_ptr<script_value::object_holder>(obj_holder);
+                        return weak_val;
+                    }
+                }
+
+                // First time seeing this ID - check for inline data
+                auto weak_data_it = map.find(script_value("$weak_ptr_data", eng_weak));
+                if (weak_data_it != map.end()) {
+                    script_value obj_val = weak_data_it->second;  // Already properly wrapped
+
+                    // Register the object for future references
+                    register_shared_ptr(id, obj_val);
+
+                    // Get the object_holder from the deserialized object
+                    auto obj_holder = obj_val.get_object_holder();
+                    if (!obj_holder) {
+                        // Object doesn't have an object_holder (shouldn't happen for valid objects)
+                        throw std::runtime_error("Deserialized weak_ptr object has no object_holder");
+                    }
+
+                    // Create weak_ptr to the object_holder
+                    script_value weak_val(std::monostate{}, eng_weak);
+                    weak_val.set_type_info(eng->get_type_info_weak_ptr(obj_val.get_type_info()));
+                    weak_val.storage_ = std::weak_ptr<script_value::object_holder>(obj_holder);
+                    return weak_val;
+                } else {
+                    // No data found - return null weak_ptr (object was never serialized)
+                    script_value v(std::monostate{}, eng_weak);
+                    v.set_type_info(eng->get_type_info_weak_ptr(nullptr));
+                    v.storage_ = std::weak_ptr<script_value::object_holder>();
+                    return v;
+                }
             }
         }
         
         return result;
-    }
-
-protected:
-    void skip_property_impl(type_info_ptr type) override {
-        // For JSON, we just read and discard the value
-        read_value();
     }
 
 private:
@@ -503,8 +740,9 @@ private:
     script_value root_value_;
     const script_value* current_value_;
     const script_value* current_property_value_ = nullptr;
+    script_value temp_value_;  // Temporary storage for array elements
     std::vector<std::string> path_stack_;
-    
+
     // JSON parsing methods
     script_value parse_json() {
         pos_ = 0;
@@ -614,8 +852,13 @@ private:
     
     script_value parse_object(std::weak_ptr<engine> eng_weak) {
         expect('{');
-        
-        script_value map_val = script_value::make_map(type_info::make_string(), nullptr, eng_weak);
+
+        auto eng = eng_weak.lock();
+        if (!eng) {
+            throw serialization_error("Engine reference expired during JSON deserialization");
+        }
+
+        script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng_weak);
         auto& map = const_cast<std::map<script_value, script_value>&>(map_val.as_map());
         
         if (peek() == '}') {

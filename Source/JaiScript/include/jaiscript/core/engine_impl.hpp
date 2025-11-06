@@ -46,8 +46,20 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng) {
 // Implementation of engine-aware vector conversion function
 template<typename T>
 script_value conversions::convert_vector_to_script_array(const std::vector<T>& vec, engine* eng) {
-    // Use nullptr for element type to indicate generic array
-    auto script_array = script_value::make_array(nullptr, get_engine_weak_ptr(eng));
+    // Create array with proper element type info for registered types
+    type_info_ptr element_type;
+    if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
+                   std::is_same_v<T, float> || std::is_same_v<T, double> ||
+                   std::is_same_v<T, bool> || std::is_same_v<T, char> ||
+                   std::is_same_v<T, std::string> || std::is_same_v<T, script_value>) {
+        // For basic types, use nullptr (generic array)
+        element_type = nullptr;
+    } else {
+        // For registered types, create persistent type_info
+        element_type = eng->get_type_info_for_cpp_type<T>();
+    }
+
+    auto script_array = script_value::make_array(element_type, get_engine_weak_ptr(eng));
     auto& arr = const_cast<std::vector<script_value>&>(script_array.as_array());
     
     for (const auto& item : vec) {
@@ -80,8 +92,31 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
 // Engine-aware map conversion implementation
 template<typename K, typename V>
 script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& stdmap, engine* eng) {
-    // Use nullptr for key/value types to indicate generic map
-    auto script_map = script_value::make_map(nullptr, nullptr, get_engine_weak_ptr(eng));
+    // Create map with proper key/value type info for registered types
+    type_info_ptr key_type;
+    type_info_ptr value_type;
+
+    // Determine key type
+    if constexpr (std::is_same_v<K, int> || std::is_same_v<K, int64_t> ||
+                   std::is_same_v<K, float> || std::is_same_v<K, double> ||
+                   std::is_same_v<K, bool> || std::is_same_v<K, char> ||
+                   std::is_same_v<K, std::string> || std::is_same_v<K, script_value>) {
+        key_type = nullptr;
+    } else {
+        key_type = eng->get_type_info_for_cpp_type<K>();
+    }
+
+    // Determine value type
+    if constexpr (std::is_same_v<V, int> || std::is_same_v<V, int64_t> ||
+                   std::is_same_v<V, float> || std::is_same_v<V, double> ||
+                   std::is_same_v<V, bool> || std::is_same_v<V, char> ||
+                   std::is_same_v<V, std::string> || std::is_same_v<V, script_value>) {
+        value_type = nullptr;
+    } else {
+        value_type = eng->get_type_info_for_cpp_type<V>();
+    }
+
+    auto script_map = script_value::make_map(key_type, value_type, get_engine_weak_ptr(eng));
     auto& map = const_cast<std::map<script_value, script_value>&>(script_map.as_map());
     
     for (const auto& [key, value] : stdmap) {

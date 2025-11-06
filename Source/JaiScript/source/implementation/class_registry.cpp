@@ -5,24 +5,28 @@
 
 namespace jai {
 
-void class_registry::register_script_class(std::shared_ptr<script_class_definition> class_def) {
+checked_result<void> class_registry::register_script_class(std::shared_ptr<script_class_definition> class_def) {
     if (!class_def) {
-        throw std::runtime_error("Cannot register null script class definition");
+        return checked_result<void>(make_error_code(runtime_error_code::class_not_found));
     }
-    
+
     // Register the class
     script_classes_[class_def->get_name()] = class_def;
-    
+
     // Validate the complete hierarchy
     validate_class_hierarchy(class_def->get_name());
+
+    return {};
 }
 
-void class_registry::register_cpp_class(std::shared_ptr<class_definition> class_def) {
+checked_result<void> class_registry::register_cpp_class(std::shared_ptr<class_definition> class_def) {
     if (!class_def) {
-        throw std::runtime_error("Cannot register null C++ class definition");
+        return checked_result<void>(make_error_code(runtime_error_code::class_not_found));
     }
-    
+
     cpp_classes_[class_def->get_name()] = class_def;
+
+    return {};
 }
 
 std::shared_ptr<script_class_definition> class_registry::find_script_class(const std::string& name) {

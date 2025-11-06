@@ -1,4 +1,5 @@
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/core/engine.hpp>
 #include <jaiscript/jvm/virtual_machine.hpp>
 #include <jaiscript/jvm/compiler.hpp>
 #include <jaiscript/detail/lexer.hpp>
@@ -18,13 +19,14 @@ public:
         test("vm_function_works_with_semicolon", [this]() {
             // Test with explicit semicolon separation
             std::string code = "fun double(x) { return x * 2; }; double(21);";
-            
+
+            auto eng = engine::make();
             lexer lex(code);
             auto tokens = lex.tokenize();
 
             string_symbolizer symbolizer;
             std::unordered_set<std::string> empty_types;
-            parser parse(tokens, &symbolizer, empty_types);
+            parser parse(tokens, &symbolizer, eng.get(), empty_types);
             auto declarations = parse.parse();
             
             std::cout << "\n=== PARSED DECLARATIONS ===\n";

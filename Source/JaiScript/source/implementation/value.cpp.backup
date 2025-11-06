@@ -3,65 +3,19 @@
 
 namespace jai {
 
-// Constructor implementations
-script_value::script_value(script_int i, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(i) {
-    if (auto e = eng.lock()) {
-        type_info_ = e->get_type_info_int();
-    }
-}
-
-script_value::script_value(script_float f, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(f) {
-    if (auto e = eng.lock()) {
-        type_info_ = e->get_type_info_float();
-    }
-}
-
-script_value::script_value(const script_string& s, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(s) {
-    if (auto e = eng.lock()) {
-        type_info_ = e->get_type_info_string();
-    }
-}
-
-script_value::script_value(script_string&& s, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(std::move(s)) {
-    if (auto e = eng.lock()) {
-        type_info_ = e->get_type_info_string();
-    }
-}
-
-script_value::script_value(const char* s, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(script_string(s)) {
-    if (auto e = eng.lock()) {
-        type_info_ = e->get_type_info_string();
-    }
-}
-
-script_value::script_value(script_char c, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(c) {
-    if (auto e = eng.lock()) {
-        type_info_ = e->get_type_info_char();
-    }
-}
-
-script_value::script_value(script_bool b, std::weak_ptr<engine> eng) : type_info_(nullptr), engine_ref_(eng), storage_(b) {
-    if (auto e = eng.lock()) {
-        type_info_ = e->get_type_info_bool();
-    }
-}
-
-// Factory methods (DEPRECATED - use engine-aware versions instead)
-// These are kept for backwards compatibility but should not be used in new code
+// Factory methods
 script_value script_value::make_array(type_info_ptr element_type) {
-    // WARNING: This creates a type_info without interning - use make_array(element_type, engine) instead
     script_value v;
-    // We cannot use engine interning here as we don't have an engine reference
-    // This method is deprecated and should be replaced with the engine-aware version
-    throw runtime_error("make_array without engine parameter is deprecated - use make_array(element_type, engine) instead");
+    v.type_info_ = type_info::make_array(element_type);
+    v.storage_ = std::make_shared<std::vector<script_value>>();
+    return v;
 }
 
 script_value script_value::make_map(type_info_ptr keyType, type_info_ptr valueType) {
-    // WARNING: This creates a type_info without interning - use make_map(keyType, valueType, engine) instead
     script_value v;
-    // We cannot use engine interning here as we don't have an engine reference
-    // This method is deprecated and should be replaced with the engine-aware version
-    throw runtime_error("make_map without engine parameter is deprecated - use make_map(keyType, valueType, engine) instead");
+    v.type_info_ = type_info::make_map(keyType, valueType);
+    v.storage_ = std::make_shared<std::map<script_value, script_value>>();
+    return v;
 }
 
 
@@ -74,16 +28,36 @@ script_value script_value::make_reference(script_value* target, const std::share
     if (eng_ref.expired()) {
         throw runtime_error("Cannot create reference: target has no valid engine reference");
     }
-    auto locked_engine = eng_ref.lock();
-    if (!locked_engine) {
-        throw runtime_error("Cannot create reference: engine reference expired");
-    }
     script_value v(std::monostate{}, eng_ref);  // Use engine reference from target
-    v.type_info_ = locked_engine->get_type_info_reference(target->get_type_info());
+    v.type_info_ = type_info::make_reference(target->get_type_info());
     auto ref = std::make_shared<reference_holder>();
     ref->target = target;
     ref->sourceEnv = env;  // Store weak reference to environment
     v.storage_ = ref;
+    return v;
+}
+
+script_value script_value::make_object(const std::string& type_name, std::shared_ptr<void> data) {
+    // TODO: This method is deprecated but still used by converters that don't have engine access
+    script_value v;
+    v.type_info_ = type_info::make_object(type_name);
+    auto obj = std::make_shared<object_holder>();
+    obj->type_name = type_name;
+    obj->data = data;
+    obj->is_cpp_class_instance = true;  // make_object is for class_instance wrapper objects
+    v.storage_ = obj;
+    return v;
+}
+
+script_value script_value::make_cpp_object(const std::string& type_name, std::shared_ptr<void> data) {
+    // TODO: This method is deprecated but still used by converters that don't have engine access
+    script_value v;
+    v.type_info_ = type_info::make_object(type_name);
+    auto obj = std::make_shared<object_holder>();
+    obj->type_name = type_name;
+    obj->data = data;
+    obj->is_cpp_class_instance = false;  // make_cpp_object is for raw C++ objects
+    v.storage_ = obj;
     return v;
 }
 
@@ -92,12 +66,8 @@ script_value script_value::make_array(type_info_ptr element_type, std::weak_ptr<
     if (eng.expired()) {
         throw runtime_error("Cannot create array with expired engine reference");
     }
-    auto locked_engine = eng.lock();
-    if (!locked_engine) {
-        throw runtime_error("Cannot create array: engine reference expired");
-    }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = locked_engine->get_type_info_array(element_type);
+    v.type_info_ = type_info::make_array(element_type);
     v.storage_ = std::make_shared<std::vector<script_value>>();
     return v;
 }
@@ -106,12 +76,8 @@ script_value script_value::make_map(type_info_ptr keyType, type_info_ptr valueTy
     if (eng.expired()) {
         throw runtime_error("Cannot create map with expired engine reference");
     }
-    auto locked_engine = eng.lock();
-    if (!locked_engine) {
-        throw runtime_error("Cannot create map: engine reference expired");
-    }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = locked_engine->get_type_info_map(keyType, valueType);
+    v.type_info_ = type_info::make_map(keyType, valueType);
     v.storage_ = std::make_shared<std::map<script_value, script_value>>();
     return v;
 }
@@ -137,27 +103,13 @@ script_value script_value::make_object(const std::string& type_name, uint64_t ty
     if (eng.expired()) {
         throw runtime_error("Cannot create object with expired engine reference");
     }
-    // CRITICAL: Get persistent type_info from class registry (fast O(1) lookup by type_id)
-    // NEVER use type_info::make_object() - it creates a TEMPORARY that gets freed (0xDDDDDDDD)
-    auto locked_engine = eng.lock();
-    if (!locked_engine) {
-        throw runtime_error("Cannot create object: engine reference expired");
-    }
-
-    auto class_def = locked_engine->get_class_definition(type_id);
-    if (!class_def) {
-        throw runtime_error("Cannot create object of unregistered class '" + type_name +
-            "'. Classes must be registered with engine.register_class() before instantiation.");
-    }
-
     script_value v(std::monostate{}, eng);
-    v.type_info_ = class_def->get_type_info();
-
+    v.type_info_ = type_info::make_object(type_name);
     auto obj = std::make_shared<object_holder>();
     obj->type_name = type_name;
     obj->type_id = type_id;  // Set the cached type_id for fast comparison
     obj->data = data;
-    obj->is_class_instance_wrapper = is_cpp_class;  // True when data is a class_instance object (both C++ and script classes), false for raw data
+    obj->is_cpp_class_instance = is_cpp_class;  // True for C++ class instances, false for metadata objects
     v.storage_ = obj;
     return v;
 }
@@ -166,61 +118,22 @@ script_value script_value::make_cpp_object(const std::string& type_name, std::sh
     if (eng.expired()) {
         throw runtime_error("Cannot create cpp_object with expired engine reference");
     }
-
-    // CRITICAL: Get persistent type_info from class registry (fast O(1) lookup by type_id)
-    auto locked_engine = eng.lock();
-    if (!locked_engine) {
-        throw runtime_error("Cannot create cpp_object: engine reference expired");
-    }
-
-    uint64_t type_id = locked_engine->get_symbolizer()->intern(type_name);
-    auto class_def = locked_engine->get_class_definition(type_id);
-    if (!class_def) {
-        throw runtime_error("Cannot create cpp_object of unregistered class '" + type_name +
-            "'. Classes must be registered with engine.register_class() before instantiation.");
-    }
-
     script_value v(std::monostate{}, eng);
-    v.type_info_ = class_def->get_type_info();
-
+    v.type_info_ = type_info::make_object(type_name);
     auto obj = std::make_shared<object_holder>();
     obj->type_name = type_name;
     obj->data = data;
-    obj->is_class_instance_wrapper = false;  // make_cpp_object is for raw C++ objects
+    obj->is_cpp_class_instance = false;  // make_cpp_object is for raw C++ objects
     v.storage_ = obj;
     return v;
-}
-
-script_value script_value::make_empty_weak_ptr(type_info_ptr weak_ptr_type, std::weak_ptr<engine> eng) {
-    script_value v(std::monostate{}, eng);
-    if (weak_ptr_type) {
-        v.type_info_ = weak_ptr_type;
-    } else if (auto e = eng.lock()) {
-        v.type_info_ = e->get_type_info_weak_ptr(nullptr);
-    }
-    v.storage_ = std::weak_ptr<object_holder>();
-    return v;
-}
-
-script_value script_value::make_invalid(std::weak_ptr<engine> eng) {
-    script_value val(std::monostate{}, eng);  // Start with null
-    val.storage_ = invalid_tag{};  // Change to invalid
-    if (auto e = eng.lock()) {
-        val.type_info_ = e->get_type_info_invalid();  // Set proper type info
-    }
-    return val;
 }
 
 script_value script_value::make_weak_ptr(const script_value& value, std::weak_ptr<engine> eng) {
     if (eng.expired()) {
         throw runtime_error("Cannot create weak_ptr with expired engine reference");
     }
-    auto locked_engine = eng.lock();
-    if (!locked_engine) {
-        throw runtime_error("Cannot create weak_ptr: engine reference expired");
-    }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = locked_engine->get_type_info_weak_ptr(value.get_type_info());
+    v.type_info_ = type_info::make_weak_ptr(value.get_type_info());
 
     // Only accept shared_ptr types for weak_ptr creation
     // Regular objects have value semantics and get cloned when passed as parameters,
@@ -257,12 +170,8 @@ script_value script_value::make_function(const script_function& func, std::weak_
     if (eng.expired()) {
         throw runtime_error("Cannot create function with expired engine reference");
     }
-    auto locked_engine = eng.lock();
-    if (!locked_engine) {
-        throw runtime_error("Cannot create function: engine reference expired");
-    }
     script_value v(std::monostate{}, eng);
-    v.type_info_ = locked_engine->get_type_info_function(locked_engine->get_type_info_void(), {}); // TODO: Proper type info
+    v.type_info_ = type_info::make_function(type_info::make_void(), {}); // TODO: Proper type info
     v.storage_ = func;
     return v;
 }
@@ -280,6 +189,20 @@ script_value::script_value(const script_value& other)
 // Copy assignment operator (shallow copy for reference semantics)
 script_value& script_value::operator=(const script_value& other) {
     if (this != &other) {
+        // Validate that other is not in an invalid state before copying
+        // Check for obviously corrupted pointers (common patterns like 0xFFFFFFFFFFFFFFF7)
+        if (other.type_info_) {
+            uintptr_t ptr_val = reinterpret_cast<uintptr_t>(other.type_info_.get());
+            // Check if pointer looks corrupted (very high addresses, aligned oddly, etc.)
+            if (ptr_val == 0xFFFFFFFFFFFFFFF7 || ptr_val == 0xCDCDCDCDCDCDCDCD ||
+                ptr_val == 0xDDDDDDDDDDDDDDDD || ptr_val == 0xFEEEFEEEFEEEFEEE ||
+                (ptr_val & 0xFFFF000000000000) == 0xFFFF000000000000) {
+                std::string msg = "Attempting to copy from invalid script_value with corrupted type_info pointer: 0x" +
+                    std::to_string(ptr_val);
+                throw runtime_error(msg);
+            }
+        }
+
         type_info_ = other.type_info_;
         engine_ref_ = other.engine_ref_;
         storage_ = other.storage_;
@@ -334,7 +257,7 @@ script_value script_value::clone() const {
             auto obj_holder = std::get<std::shared_ptr<object_holder>>(storage_);
 
             // Check if this is a class_instance that supports deep copy
-            if (obj_holder->is_class_instance_wrapper) {
+            if (obj_holder->is_cpp_class_instance) {
                 // This is a class_instance, safe to static_cast
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
@@ -345,7 +268,7 @@ script_value script_value::clone() const {
                 auto new_holder = std::make_shared<object_holder>();
                 new_holder->type_name = obj_holder->type_name;
                 new_holder->data = new_instance;
-                new_holder->is_class_instance_wrapper = true;
+                new_holder->is_cpp_class_instance = true;
                 result.storage_ = new_holder;
             } else {
                 // For raw C++ objects, use shallow copy for now

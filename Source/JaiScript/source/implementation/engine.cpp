@@ -203,7 +203,10 @@ struct engine::implementation {
     
     // Registered classes
     std::unordered_map<std::string, std::shared_ptr<class_definition>> classes;
-    
+
+    // Type ID to class definition mapping for fast lookups (type_id is interned string)
+    std::unordered_map<uint64_t, std::shared_ptr<class_definition>> classesByTypeId;
+
     // Type index to class definition mapping for efficient lookups
     std::unordered_map<std::type_index, std::shared_ptr<class_definition>> classesByType;
     
@@ -211,20 +214,57 @@ struct engine::implementation {
     std::unordered_map<std::string, size_t> functionArities;
     
     // Shared string symbolizer for consistent variable name mapping
-    string_symbolizer stringSymbolizer;
+    string_symbolizer string_symbolizer_;
 
     // Cached symbol IDs for common type names (initialized in constructor)
     uint64_t class_definition_type_id_;
 
     // Type name registry for custom classes (maps typeid name to user-friendly name)
     std::unordered_map<std::string, std::string> typeNameRegistry;
-    
+
+    // Composite key for type interning - avoids string construction on lookup
+    struct type_key {
+        script_value_type base_type;
+        uint64_t param1_id = 0;  // For array<T>, map<K,_>, weak_ptr<T>, reference<T>, etc.
+        uint64_t param2_id = 0;  // For map<_,V>
+
+        bool operator==(const type_key& other) const {
+            return base_type == other.base_type &&
+                   param1_id == other.param1_id &&
+                   param2_id == other.param2_id;
+        }
+    };
+
+    struct type_key_hash {
+        size_t operator()(const type_key& k) const {
+            size_t h = std::hash<int>{}(static_cast<int>(k.base_type));
+            h ^= k.param1_id + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= k.param2_id + 0x9e3779b9 + (h << 6) + (h >> 2);
+            return h;
+        }
+    };
+
+    // Type info storage - engine owns all type_info objects (raw pointers are safe because map doesn't invalidate on insert)
+    std::unordered_map<type_key, type_info, type_key_hash> type_infos_;
+
+    // Secondary index for O(1) lookup by type ID (stores pointers into type_infos_)
+    std::unordered_map<uint64_t, type_info*> type_id_index_;
+
+    // Commonly used type_info pointers for fast access
+    type_info* type_info_int_ = nullptr;
+    type_info* type_info_float_ = nullptr;
+    type_info* type_info_string_ = nullptr;
+    type_info* type_info_bool_ = nullptr;
+    type_info* type_info_char_ = nullptr;
+    type_info* type_info_void_ = nullptr;
+    type_info* type_info_invalid_ = nullptr;
+
     
     // Template type registry for parsing (stores base template names like "Point", "MyMap")
     std::unordered_set<std::string> registeredTemplateTypes;
     
     // Global environment shared with interpreter
-    std::shared_ptr<environment> globalEnvironment;
+    std::shared_ptr<environment> global_environment_;
     
     execution_backend_ptr backend;
     backend_type current_backend_type = backend_type::interpreter; // Default to interpreter
@@ -257,8 +297,8 @@ struct engine::implementation {
 
 engine::implementation::implementation()
     : conversions(std::make_shared<conversions::conversion_registry>()),
-      class_definition_type_id_(stringSymbolizer.intern("class_definition")) {
-    globalEnvironment = std::make_shared<environment>(&stringSymbolizer);
+      class_definition_type_id_(string_symbolizer_.intern("class_definition")) {
+    global_environment_ = std::make_shared<environment>(&string_symbolizer_);
 
     // Use unique_ptr with custom deleter for automatic cleanup
     char* backend_env_raw = nullptr;
@@ -270,17 +310,17 @@ engine::implementation::implementation()
         std::string backend_str(backend_env.get());
         if (backend_str == "jvm" || backend_str == "vm") {
             current_backend_type = backend_type::jvm;
-            backend = jvm::create_vm_backend(&stringSymbolizer, globalEnvironment);
+            backend = jvm::create_vm_backend(&string_symbolizer_, global_environment_);
         } else if (backend_str == "auto") {
             current_backend_type = backend_type::auto_select;
-            backend = std::make_unique<interpreter_backend>(&stringSymbolizer, globalEnvironment);
+            backend = std::make_unique<interpreter_backend>(&string_symbolizer_, global_environment_);
         } else {
             current_backend_type = backend_type::interpreter;
-            backend = std::make_unique<interpreter_backend>(&stringSymbolizer, globalEnvironment);
+            backend = std::make_unique<interpreter_backend>(&string_symbolizer_, global_environment_);
         }
     } else {
         current_backend_type = backend_type::interpreter;
-        backend = std::make_unique<interpreter_backend>(&stringSymbolizer, globalEnvironment);
+        backend = std::make_unique<interpreter_backend>(&string_symbolizer_, global_environment_);
     }
     
     
@@ -293,6 +333,36 @@ engine::implementation::implementation()
         return nullptr;
     });
     
+    // Initialize commonly used type_info objects for fast access
+    // These are interned immediately so basic types are always available
+    type_info int_info = type_info::make_int(string_symbolizer_);
+    type_info_int_ = &type_infos_.emplace(type_key{script_value_type::jai_int_type, 0, 0}, int_info).first->second;
+    type_id_index_[type_info_int_->id] = type_info_int_;
+
+    type_info float_info = type_info::make_float(string_symbolizer_);
+    type_info_float_ = &type_infos_.emplace(type_key{script_value_type::jai_float_type, 0, 0}, float_info).first->second;
+    type_id_index_[type_info_float_->id] = type_info_float_;
+
+    type_info string_info = type_info::make_string(string_symbolizer_);
+    type_info_string_ = &type_infos_.emplace(type_key{script_value_type::jai_string_type, 0, 0}, string_info).first->second;
+    type_id_index_[type_info_string_->id] = type_info_string_;
+
+    type_info bool_info = type_info::make_bool(string_symbolizer_);
+    type_info_bool_ = &type_infos_.emplace(type_key{script_value_type::jai_bool_type, 0, 0}, bool_info).first->second;
+    type_id_index_[type_info_bool_->id] = type_info_bool_;
+
+    type_info char_info = type_info::make_char(string_symbolizer_);
+    type_info_char_ = &type_infos_.emplace(type_key{script_value_type::jai_char_type, 0, 0}, char_info).first->second;
+    type_id_index_[type_info_char_->id] = type_info_char_;
+
+    type_info void_info = type_info::make_void(string_symbolizer_);
+    type_info_void_ = &type_infos_.emplace(type_key{script_value_type::jai_null_type, 0, 0}, void_info).first->second;
+    type_id_index_[type_info_void_->id] = type_info_void_;
+
+    type_info invalid_info = type_info::make_invalid(string_symbolizer_);
+    type_info_invalid_ = &type_infos_.emplace(type_key{script_value_type::jai_invalid_type, 0, 0}, invalid_info).first->second;
+    type_id_index_[type_info_invalid_->id] = type_info_invalid_;
+
     // Register standard C++ implicit conversions
     // NOTE: These conversions can't use engine reference yet because the engine isn't fully constructed
     // They will be updated to use proper engine references in initialize_engine_reference()
@@ -324,7 +394,7 @@ void engine::implementation::updateOverloadedFunction(const std::string& name, e
     
     // Update in global environment
     script_value dispatcherValue = script_value::make_function(dispatcher, engine_ptr->weak_from_this());
-    globalEnvironment->define(name, dispatcherValue);
+    global_environment_->define(name, dispatcherValue);
 }
 
 engine::engine() : impl(std::make_unique<implementation>()) {
@@ -543,7 +613,24 @@ void engine::initialize_engine_reference() {
     
     // Register standard container conversions now that we have engine reference
     add_standard_conversions();
-    
+
+    // BOOTSTRAP: Manually register class_definition to avoid chicken-and-egg problem
+    // We can't use class_builder because it would try to create a script_value wrapping
+    // a class_definition, which requires class_definition to already be registered!
+    {
+        auto class_def = std::make_shared<class_definition>("class_definition",
+            impl->class_definition_type_id_, class_definition::cpp_class, engine_weak);
+        // Manually set the persistent type_info using engine's interning
+        class_def->set_type_info(get_type_info_object("class_definition"));
+        // Register in all the maps
+        impl->classes["class_definition"] = class_def;
+        impl->classesByTypeId[impl->class_definition_type_id_] = class_def;
+        auto reg_result = impl->class_registry_.register_cpp_class(class_def);
+        if (!reg_result) {
+            throw runtime_error("Failed to register class_definition metaclass during bootstrap");
+        }
+    }
+
     // Register int64_t to int conversion with bounds checking
     conversions::conversion_manager conv_manager(impl->conversions, this);
     conv_manager.add_custom_conversion<int>(
@@ -598,7 +685,7 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
             
             // Switch backend if needed
             if (selected_type == backend_type::jvm && dynamic_cast<interpreter_backend*>(impl->backend.get())) {
-                impl->backend = jvm::create_vm_backend(&impl->stringSymbolizer, impl->globalEnvironment);
+                impl->backend = jvm::create_vm_backend(&impl->string_symbolizer_, impl->global_environment_);
                 impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
                                                           impl->overloadedFunctions.count("-") > 0 ||
                                                           impl->overloadedFunctions.count("*") > 0 ||
@@ -628,7 +715,7 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
                     return nullptr;
                 });
             } else if (selected_type == backend_type::interpreter && !dynamic_cast<interpreter_backend*>(impl->backend.get())) {
-                impl->backend = std::make_unique<interpreter_backend>(&impl->stringSymbolizer, impl->globalEnvironment);
+                impl->backend = std::make_unique<interpreter_backend>(&impl->string_symbolizer_, impl->global_environment_);
                 impl->backend->set_has_custom_numeric_ops(impl->overloadedFunctions.count("+") > 0 || 
                                                           impl->overloadedFunctions.count("-") > 0 ||
                                                           impl->overloadedFunctions.count("*") > 0 ||
@@ -675,10 +762,15 @@ script_value engine::execute(const std::string& scriptContent, const instance_va
         // Parse and execute
         lexer lexer(scriptContent, impl->registeredTemplateTypes);
         auto tokens = lexer.tokenize();
-        parser parser(tokens, &impl->stringSymbolizer, impl->registeredTemplateTypes);
-        auto declarations = parser.parse();  // Will throw parse_error if parsing failed
+        parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
+        auto parse_result = parser.parse();
 
-        script_value result = impl->backend->execute(declarations);
+        // Convert checked_result to exception at API boundary
+        if (!parse_result) {
+            throw parse_error("Parse error: " + parse_result.error().message());
+        }
+
+        script_value result = impl->backend->execute(parse_result.value());
 
         // Check for unhandled script exception
         if (impl->backend->is_unwinding()) {
@@ -736,7 +828,7 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
 }
 
 void engine::add_global(const std::string& name, script_value value, bool is_serializable) {
-    impl->globalEnvironment->define(name, std::move(value));
+    impl->global_environment_->define(name, std::move(value));
     
     // Track if this global should NOT be serialized
     if (!is_serializable) {
@@ -763,13 +855,12 @@ void engine::add_functionWithArity(const std::string& name, script_function func
     // Check if we have an existing function with this name
     bool hasExistingFunction = false;
     std::optional<script_value> existing_opt;
-    try {
-        existing_opt = impl->globalEnvironment->get(name);
+    auto existing_result = impl->global_environment_->get(name);
+    if (existing_result) {
+        existing_opt = std::move(existing_result.value());
         hasExistingFunction = existing_opt && existing_opt->is_function();
-    } catch (...) {
-        // Variable doesn't exist, which is fine
     }
-    
+
     auto overloadIt = impl->overloadedFunctions.find(name);
     
     if (hasExistingFunction) {
@@ -797,22 +888,21 @@ void engine::add_functionWithArity(const std::string& name, script_function func
         // No existing function, just add normally
         // Store arity info for future use
         script_value funcValue = script_value::make_function(func, weak_from_this());
-        impl->globalEnvironment->define(name, funcValue);
+        impl->global_environment_->define(name, funcValue);
         impl->functionArities[name] = arity;
     }
 }
 
 void engine::add_overloaded_function(const std::string& name, size_t argCount, script_function func) {
-    // Check if we need to move an existing function from globalEnvironment
+    // Check if we need to move an existing function from global_environment_
     bool hasExistingFunction = false;
     std::optional<script_value> existing_opt;
-    try {
-        existing_opt = impl->globalEnvironment->get(name);
+    auto existing_result = impl->global_environment_->get(name);
+    if (existing_result) {
+        existing_opt = std::move(existing_result.value());
         hasExistingFunction = existing_opt && existing_opt->is_function();
-    } catch (...) {
-        // Variable doesn't exist, which is fine
     }
-    
+
     if (hasExistingFunction) {
         // Move existing function to overloaded set first
         // Check if we have arity info for the existing function
@@ -838,16 +928,15 @@ void engine::add_overloaded_function(const std::string& name, size_t argCount, s
 }
 
 void engine::add_overloaded_functionWithTypes(const std::string& name, size_t argCount, script_function func, const std::vector<script_value_type>& paramTypes) {
-    // Check if we need to move an existing function from globalEnvironment
+    // Check if we need to move an existing function from global_environment_
     bool hasExistingFunction = false;
     std::optional<script_value> existing_opt;
-    try {
-        existing_opt = impl->globalEnvironment->get(name);
+    auto existing_result = impl->global_environment_->get(name);
+    if (existing_result) {
+        existing_opt = std::move(existing_result.value());
         hasExistingFunction = existing_opt && existing_opt->is_function();
-    } catch (...) {
-        // Variable doesn't exist, which is fine
     }
-    
+
     if (hasExistingFunction) {
         // Move existing function to overloaded set first
         // Check if we have arity info for the existing function
@@ -869,13 +958,12 @@ void engine::add_functionWithArityAndTypes(const std::string& name, script_funct
     // Check if we have an existing function with this name
     bool hasExistingFunction = false;
     std::optional<script_value> existing_opt;
-    try {
-        existing_opt = impl->globalEnvironment->get(name);
+    auto existing_result = impl->global_environment_->get(name);
+    if (existing_result) {
+        existing_opt = std::move(existing_result.value());
         hasExistingFunction = existing_opt && existing_opt->is_function();
-    } catch (...) {
-        // Variable doesn't exist, which is fine
     }
-    
+
     auto overloadIt = impl->overloadedFunctions.find(name);
     
     if (hasExistingFunction) {
@@ -908,36 +996,67 @@ void engine::add_functionWithArityAndTypes(const std::string& name, script_funct
         } else {
             // No type info, add normally
             script_value funcValue = script_value::make_function(func, weak_from_this());
-            impl->globalEnvironment->define(name, funcValue);
+            impl->global_environment_->define(name, funcValue);
             impl->functionArities[name] = arity;
         }
     }
 }
 
 string_symbolizer* engine::get_symbolizer() {
-    return &impl->stringSymbolizer;
+    return &impl->string_symbolizer_;
 }
 
 uint64_t engine::symbolize(const std::string& str) {
-    return impl->stringSymbolizer.intern(str);
+    return impl->string_symbolizer_.intern(str);
 }
 
 void engine::add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef) {
     impl->classes[name] = classDef;
+    impl->classesByTypeId[classDef->get_type_id()] = classDef;  // Fast lookup by interned type_id
     // Also register with the unified class_registry for both C++ and script classes
-    impl->class_registry_.register_cpp_class(classDef);
+    auto reg_result = impl->class_registry_.register_cpp_class(classDef);
+    if (!reg_result) {
+        throw runtime_error("Failed to register C++ class: " + name);
+    }
 
     // Store the class definition in the global environment with __class_ prefix
     // This allows static member access (ClassName::static_field) to work for C++ classes
     // Use optimized make_object with cached type_id for fast type checking
-    impl->globalEnvironment->define("__class_" + name, script_value::make_object("class_definition", impl->class_definition_type_id_, classDef, weak_from_this()));
+    impl->global_environment_->define("__class_" + name, script_value::make_object("class_definition", impl->class_definition_type_id_, classDef, weak_from_this()));
 }
 
 std::shared_ptr<class_definition> engine::get_class_definition(const std::string& name) const {
+    // First check C++ classes
     auto it = impl->classes.find(name);
     if (it != impl->classes.end()) {
         return it->second;
     }
+
+    // Also check script classes (script_class_definition inherits from class_definition)
+    auto script_class = impl->class_registry_.find_script_class(name);
+    if (script_class) {
+        return std::static_pointer_cast<class_definition>(script_class);
+    }
+
+    return nullptr;
+}
+
+std::shared_ptr<class_definition> engine::get_class_definition(uint64_t type_id) const {
+    // First check C++ classes by type_id
+    auto it = impl->classesByTypeId.find(type_id);
+    if (it != impl->classesByTypeId.end()) {
+        return it->second;
+    }
+
+    // For script classes, we need to check each one since they're not indexed by type_id
+    // This is slower but script classes should eventually be added to classesByTypeId as well
+    // TODO: Index script classes by type_id for O(1) lookup
+    for (const auto& [name, script_class] : impl->class_registry_.script_classes_) {
+        if (impl->string_symbolizer_.intern(name) == type_id) {
+            return std::static_pointer_cast<class_definition>(script_class);
+        }
+    }
+
     return nullptr;
 }
 
@@ -991,13 +1110,9 @@ bool engine::has_variable(const std::string& name) const {
 
 bool engine::has_function(const std::string& name) const {
     // Check if there's a function in global environment
-    try {
-        script_value val = impl->globalEnvironment->get(name);
-        if (val.is_function()) {
-            return true;
-        }
-    } catch (...) {
-        // Not found
+    auto val_result = impl->global_environment_->get(name);
+    if (val_result && val_result.value().is_function()) {
+        return true;
     }
     
     // Check overloaded functions
@@ -1010,7 +1125,7 @@ bool engine::is_type_name(const std::string& name) const {
 }
 
 std::shared_ptr<environment> engine::get_global_environment() const {
-    return impl->globalEnvironment;
+    return impl->global_environment_;
 }
 
 engine::state engine::get_state() const {
@@ -1018,7 +1133,7 @@ engine::state engine::get_state() const {
     std::map<std::string, script_value> orderedGlobals;
     
     // Get all variables from the global environment
-    auto allVars = impl->globalEnvironment->get_all_variables();
+    auto allVars = impl->global_environment_->get_all_variables();
     
     // Filter out non-serializable ones
     for (const auto& [name, value] : allVars) {
@@ -1032,10 +1147,10 @@ engine::state engine::get_state() const {
 
 void engine::set_state(const state& state) {
     // Get all current variables
-    auto currentVars = impl->globalEnvironment->get_all_variables();
+    auto currentVars = impl->global_environment_->get_all_variables();
     
     // Create a new environment with only non-serializable globals
-    auto newEnv = std::make_shared<environment>(&impl->stringSymbolizer);
+    auto newEnv = std::make_shared<environment>(&impl->string_symbolizer_);
     
     // Copy over non-serializable globals
     for (const auto& [name, value] : currentVars) {
@@ -1050,10 +1165,10 @@ void engine::set_state(const state& state) {
     }
     
     // Replace the global environment
-    impl->globalEnvironment = newEnv;
+    impl->global_environment_ = newEnv;
     
     // Update the backend to use the new environment
-    impl->backend = std::make_unique<interpreter_backend>(&impl->stringSymbolizer, impl->globalEnvironment);
+    impl->backend = std::make_unique<interpreter_backend>(&impl->string_symbolizer_, impl->global_environment_);
 }
 
 bool engine::can_hot_reload(const std::string& scriptPath) const {
@@ -1127,13 +1242,13 @@ void engine::set_backend(backend_type type) {
     
     switch (type) {
         case backend_type::jvm:
-            impl->backend = jvm::create_vm_backend(&impl->stringSymbolizer, impl->globalEnvironment);
+            impl->backend = jvm::create_vm_backend(&impl->string_symbolizer_, impl->global_environment_);
             break;
         case backend_type::interpreter:
-            impl->backend = std::make_unique<interpreter_backend>(&impl->stringSymbolizer, impl->globalEnvironment);
+            impl->backend = std::make_unique<interpreter_backend>(&impl->string_symbolizer_, impl->global_environment_);
             break;
         case backend_type::auto_select:
-            impl->backend = std::make_unique<interpreter_backend>(&impl->stringSymbolizer, impl->globalEnvironment);
+            impl->backend = std::make_unique<interpreter_backend>(&impl->string_symbolizer_, impl->global_environment_);
             break;
     }
     
@@ -1226,6 +1341,223 @@ void engine::add_standard_conversions() {
 
 std::shared_ptr<conversions::conversion_registry> engine::get_conversion_registry() const {
     return impl->conversions;
+}
+
+// === TYPE INFO INTERNING METHODS ===
+
+type_info* engine::get_type_info_int() {
+    return impl->type_info_int_;
+}
+
+type_info* engine::get_type_info_float() {
+    return impl->type_info_float_;
+}
+
+type_info* engine::get_type_info_string() {
+    return impl->type_info_string_;
+}
+
+type_info* engine::get_type_info_bool() {
+    return impl->type_info_bool_;
+}
+
+type_info* engine::get_type_info_char() {
+    return impl->type_info_char_;
+}
+
+type_info* engine::get_type_info_void() {
+    return impl->type_info_void_;
+}
+
+type_info* engine::get_type_info_invalid() {
+    return impl->type_info_invalid_;
+}
+
+type_info* engine::get_type_info_array(type_info* element_type) {
+    // Use composite key for fast lookup - no string construction needed on cache hit
+    implementation::type_key key{script_value_type::jai_array_type, element_type ? element_type->id : 0, 0};
+
+    // Check if we already have this type interned
+    auto it = impl->type_infos_.find(key);
+    if (it != impl->type_infos_.end()) {
+        return &it->second;
+    }
+
+    // Cache miss - construct full type_info and insert
+    type_info temp = type_info::make_array(impl->string_symbolizer_, element_type);
+    auto result = impl->type_infos_.emplace(key, temp);
+    type_info* ptr = &result.first->second;
+    impl->type_id_index_[ptr->id] = ptr;
+    return ptr;
+}
+
+type_info* engine::get_type_info_map(type_info* key_type, type_info* value_type) {
+    // Use composite key for fast lookup - no string construction needed on cache hit
+    implementation::type_key key{script_value_type::jai_map_type,
+                              key_type ? key_type->id : 0,
+                              value_type ? value_type->id : 0};
+
+    // Check if we already have this type interned
+    auto it = impl->type_infos_.find(key);
+    if (it != impl->type_infos_.end()) {
+        return &it->second;
+    }
+
+    // Cache miss - construct full type_info and insert
+    type_info temp = type_info::make_map(impl->string_symbolizer_, key_type, value_type);
+    auto result = impl->type_infos_.emplace(key, temp);
+    type_info* ptr = &result.first->second;
+    impl->type_id_index_[ptr->id] = ptr;
+    return ptr;
+}
+
+type_info* engine::get_type_info_object(const std::string& class_name) {
+    // Use composite key for fast lookup
+    uint64_t class_name_id = impl->string_symbolizer_.intern(class_name);
+    implementation::type_key key{script_value_type::jai_object_type, class_name_id, 0};
+
+    // Check if we already have this type interned
+    auto it = impl->type_infos_.find(key);
+    if (it != impl->type_infos_.end()) {
+        return &it->second;
+    }
+
+    // Cache miss - construct full type_info and insert
+    type_info temp = type_info::make_object(impl->string_symbolizer_, class_name);
+    auto result = impl->type_infos_.emplace(key, temp);
+    type_info* ptr = &result.first->second;
+    impl->type_id_index_[ptr->id] = ptr;
+    return ptr;
+}
+
+type_info* engine::get_type_info_object(uint64_t type_id) {
+    // Use composite key for fast lookup
+    implementation::type_key key{script_value_type::jai_object_type, type_id, 0};
+
+    // Check if we already have this type interned
+    auto it = impl->type_infos_.find(key);
+    if (it != impl->type_infos_.end()) {
+        return &it->second;
+    }
+
+    // If not found, we need to look up the class name from the type_id
+    // This should only happen if the type_id was created but the type_info wasn't interned yet
+    const std::string& class_name = impl->string_symbolizer_.get_string(type_id);
+    if (class_name.empty()) {
+        return nullptr; // Invalid type_id
+    }
+
+    // Cache miss - construct full type_info and insert
+    type_info temp = type_info::make_object(impl->string_symbolizer_, class_name);
+    auto result = impl->type_infos_.emplace(key, temp);
+    type_info* ptr = &result.first->second;
+    impl->type_id_index_[ptr->id] = ptr;
+    return ptr;
+}
+
+type_info* engine::get_type_info_weak_ptr(type_info* pointee_type) {
+    // Use composite key for fast lookup - no string construction needed on cache hit
+    implementation::type_key key{script_value_type::jai_weak_ptr_type, pointee_type ? pointee_type->id : 0, 0};
+
+    // Check if we already have this type interned
+    auto it = impl->type_infos_.find(key);
+    if (it != impl->type_infos_.end()) {
+        return &it->second;
+    }
+
+    // Cache miss - construct full type_info and insert
+    type_info temp = type_info::make_weak_ptr(impl->string_symbolizer_, pointee_type);
+    auto result = impl->type_infos_.emplace(key, temp);
+    type_info* ptr = &result.first->second;
+    impl->type_id_index_[ptr->id] = ptr;
+    return ptr;
+}
+
+type_info* engine::get_type_info_reference(type_info* referenced_type) {
+    // Use composite key for fast lookup - no string construction needed on cache hit
+    implementation::type_key key{script_value_type::jai_reference_type, referenced_type ? referenced_type->id : 0, 0};
+
+    // Check if we already have this type interned
+    auto it = impl->type_infos_.find(key);
+    if (it != impl->type_infos_.end()) {
+        return &it->second;
+    }
+
+    // Cache miss - construct full type_info and insert
+    type_info temp = type_info::make_reference(impl->string_symbolizer_, referenced_type);
+    auto result = impl->type_infos_.emplace(key, temp);
+    type_info* ptr = &result.first->second;
+    impl->type_id_index_[ptr->id] = ptr;
+    return ptr;
+}
+
+type_info* engine::get_type_info_function(type_info* return_type, const std::vector<type_info*>& arg_types) {
+    // Convert raw pointers to type_info_ptr
+    std::vector<type_info_ptr> arg_type_ptrs;
+    arg_type_ptrs.reserve(arg_types.size());
+    for (auto* arg : arg_types) {
+        arg_type_ptrs.push_back(type_info_ptr(arg));
+    }
+
+    // Create type_info and use generic get_type_info which handles composite keys
+    type_info temp = type_info::make_function(impl->string_symbolizer_, return_type, arg_type_ptrs);
+    return get_type_info(temp);
+}
+
+type_info* engine::get_type_info(const type_info& temp) {
+    // Build composite key from temp's fields
+    uint64_t param1_id = 0, param2_id = 0;
+
+    switch (temp.base_type) {
+        case script_value_type::jai_array_type:
+        case script_value_type::jai_weak_ptr_type:
+        case script_value_type::jai_reference_type:
+            // Single type parameter
+            param1_id = temp.type_params.empty() ? 0 : (temp.type_params[0] ? temp.type_params[0]->id : 0);
+            break;
+        case script_value_type::jai_map_type:
+            // Two type parameters
+            param1_id = temp.type_params.empty() ? 0 : (temp.type_params[0] ? temp.type_params[0]->id : 0);
+            param2_id = temp.type_params.size() < 2 ? 0 : (temp.type_params[1] ? temp.type_params[1]->id : 0);
+            break;
+        case script_value_type::jai_object_type:
+        case script_value_type::jai_function_type:
+            // Object and function types: use temp.id which encodes full signature
+            param1_id = temp.id;
+            break;
+        default:
+            // Primitive types have no parameters
+            break;
+    }
+
+    implementation::type_key key{temp.base_type, param1_id, param2_id};
+
+    // Check if we already have this type interned
+    auto it = impl->type_infos_.find(key);
+    if (it != impl->type_infos_.end()) {
+        return &it->second;
+    }
+
+    // Insert the new type_info and return pointer to it
+    auto result = impl->type_infos_.emplace(key, temp);
+    type_info* ptr = &result.first->second;
+    impl->type_id_index_[ptr->id] = ptr;
+    return ptr;
+}
+
+type_info* engine::get_type_info_by_id(uint64_t type_id) {
+    // O(1) lookup via secondary index
+    auto it = impl->type_id_index_.find(type_id);
+    if (it != impl->type_id_index_.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+type_info* engine::get_type_info_by_name(const std::string& canonical_name) {
+    // Intern the name to get the ID, then do ID-based lookup
+    uint64_t type_id = impl->string_symbolizer_.intern(canonical_name);
+    return get_type_info_by_id(type_id);
 }
 
 void engine::set_conversion_registry(std::shared_ptr<conversions::conversion_registry> registry) {

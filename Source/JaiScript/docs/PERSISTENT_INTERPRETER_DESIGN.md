@@ -28,7 +28,7 @@ public:
     
     // Push a new scope for local variables
     std::shared_ptr<Environment> pushScope() {
-        environment_ = std::make_shared<Environment>(environment_, stringSymbolizer_);
+        environment_ = std::make_shared<Environment>(environment_, string_symbolizer__);
         return environment_;
     }
     
@@ -54,7 +54,7 @@ class Engine::Implementation {
     std::unique_ptr<Interpreter> interpreter;
     
     Implementation() {
-        interpreter = std::make_unique<Interpreter>(&stringSymbolizer);
+        interpreter = std::make_unique<Interpreter>(&string_symbolizer_);
         setupInterpreter();
     }
     

@@ -467,7 +467,7 @@ namespace stdlib {
         // from_json implementation - now with automatic object reconstruction and shared_ptr support
         engine.add_function("from_json", [engine_weak](const std::string& json) -> script_value {
             // Use JSON archive for shared_ptr reconstruction
-            serialization::json_archive_reader reader(json);
+            serialization::json_archive_reader reader(json, engine_weak);
             script_value data = reader.read_value();
             
             // Helper function to automatically reconstruct objects with _type_
@@ -519,39 +519,72 @@ namespace stdlib {
                             if (!has_custom_constructor) {
                                 // Fallback: Create default instance and set properties
                                 instance = eng->execute(type_name + "()");
-                                
+
                                 // Set all properties (except _type_)
                                 for (const auto& [key, value] : map) {
                                     if (key.is_string() && key.as_string() != "_type_") {
                                         std::string propName = key.as_string();
-                                        
+
                                         // Process nested values recursively
                                         script_value propValue = processValue(value);
-                                        
+
                                         // Set the property using a clean temporary approach
                                         std::string tempVar = "_json_temp_" + propName;
                                         eng->add_global(tempVar, propValue);
                                         eng->add_global("_json_obj", instance);
-                                        
+
                                         eng->execute("_json_obj." + propName + " = " + tempVar);
                                         instance = eng->get_variable("_json_obj");
-                                        
+
                                         // Clean up
                                         eng->execute(tempVar + " = null");
                                     }
                                 }
-                                
+
                                 eng->execute("_json_obj = null");
                             }
+
+                            // Call post_deserialize hook if it exists (for both custom and fallback paths)
+                            // Pass both the object and the version number for migration logic
+                            try {
+                                auto class_instance_ptr = instance.as<std::shared_ptr<class_instance>>();
+                                if (class_instance_ptr) {
+                                    auto class_def = class_instance_ptr->get_class_definition();
+                                    if (class_def) {
+                                        script_value post_deserialize = class_def->get_method("post_deserialize");
+                                        if (post_deserialize.type() == script_value_type::jai_function_type) {
+                                            // Extract version from map (default to 1 if not present)
+                                            script_int version = 1;
+                                            auto versionIt = map.find(script_value("_version_", engine_weak));
+                                            if (versionIt != map.end() && versionIt->second.is_int()) {
+                                                version = versionIt->second.as<script_int>();
+                                            }
+
+                                            std::vector<script_value> args = {
+                                                instance,
+                                                script_value(version, engine_weak)
+                                            };
+                                            (void)post_deserialize.as_function()(args);
+                                        }
+                                    }
+                                }
+                            } catch (...) {
+                                // Hook failed, but continue
+                            }
+
                             return instance;
                             
                         } catch (...) {
                             // If object reconstruction fails, return as processed map
                         }
                     }
-                    
+
                     // Process map values recursively
-                    script_value mapValue = script_value::make_map(type_info::make_string(), nullptr);
+                    auto eng = engine_weak.lock();
+                    if (!eng) {
+                        throw runtime_error("Engine no longer exists");
+                    }
+                    script_value mapValue = script_value::make_map(eng->get_type_info_string(), nullptr, engine_weak);
                     auto& resultMap = const_cast<std::map<script_value, script_value>&>(mapValue.as_map());
                     for (const auto& [k, v] : map) {
                         resultMap[k] = processValue(v);
@@ -607,9 +640,9 @@ namespace stdlib {
             script_string binary_data = args[0].as<script_string>();
             // Convert string back to binary data
             std::vector<uint8_t> data(binary_data.begin(), binary_data.end());
-            
+
             // Create binary archive reader and deserialize
-            serialization::binary_archive_reader reader(data);
+            serialization::binary_archive_reader reader(data, engine_weak);
             
             script_value result = reader.read_value();
             

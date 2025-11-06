@@ -1,6 +1,7 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/containers.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
+#include <jaiscript/core/class_registry.hpp>
 #include <stdexcept>
 #include <sstream>
 #include <cmath>
@@ -495,7 +496,9 @@ void interpreter::init_builtin_methods() {
                 result.set_type_info(weak_type_info->element_type());
             } else {
                 // Fallback: use the object type
-                result.set_type_info(type_info::make_object(locked->type_name));
+                if (auto eng = interp->get_engine_ref().lock()) {
+                    result.set_type_info(eng->get_type_info_object(locked->type_name));
+                }
             }
 
             // Directly assign the locked shared_ptr
@@ -631,46 +634,49 @@ void environment::define(uint64_t id, script_value&& value) {
     values_[id] = std::move(value);
 }
 
-script_value environment::get(const std::string& name) const {
+checked_result<script_value> environment::get(const std::string& name) const {
     uint64_t id = symbolizer_->intern(name);
     auto it = values_.find(id);
     if (it != values_.end()) {
         return it->second;
     }
-    
+
     if (parent_) {
         return parent_->get(name);
     }
-    
-    throw runtime_error("Undefined variable '" + name + "'");
+
+    return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable),
+        "Undefined variable '" + name + "'");
 }
 
-script_value environment::get(uint64_t id) const {
+checked_result<script_value> environment::get(uint64_t id) const {
     return get(id, 0);
 }
 
-script_value environment::get(uint64_t id, int depth) const {
+checked_result<script_value> environment::get(uint64_t id, int depth) const {
     // Prevent infinite recursion in environment chains
     const int MAX_RECURSION_DEPTH = 100;
     if (depth > MAX_RECURSION_DEPTH) {
         const std::string& name = symbolizer_->get_string(id);
-        throw runtime_error("Maximum environment recursion depth exceeded for variable '" + name + "' at depth " + std::to_string(depth));
+        return checked_result<script_value>(make_error_code(runtime_error_code::max_recursion_depth),
+            "Maximum environment recursion depth exceeded for variable '" + name + "' at depth " + std::to_string(depth));
     }
-    
-    
-    
+
+
+
     auto it = values_.find(id);
     if (it != values_.end()) {
         return it->second;
     }
-    
+
     if (parent_) {
         return parent_->get(id, depth + 1);
     }
-    
+
     // Need to get the name for error message
     const std::string& name = symbolizer_->get_string(id);
-    throw runtime_error("Undefined variable '" + name + "'");
+    return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable),
+        "Undefined variable '" + name + "'");
 }
 
 void environment::assign(const std::string& name, const script_value& value) {
@@ -679,13 +685,13 @@ void environment::assign(const std::string& name, const script_value& value) {
     assign(id, value);
 }
 
-const script_value& environment::get_ref(const std::string& name) const {
+checked_result<std::reference_wrapper<const script_value>> environment::get_ref(const std::string& name) const {
     uint64_t id = symbolizer_->intern(name);
     // Use numeric ID for recursion to avoid re-interning at each parent level
     return get_ref(id);
 }
 
-const script_value& environment::get_ref(uint64_t id) const {
+checked_result<std::reference_wrapper<const script_value>> environment::get_ref(uint64_t id) const {
     const std::string& name = symbolizer_->get_string(id);
     if (name == "getValue") {
         std::cerr << "  this type: " << typeid(*this).name() << "\n";
@@ -693,20 +699,22 @@ const script_value& environment::get_ref(uint64_t id) const {
     return get_ref(id, 0);
 }
 
-const script_value& environment::get_ref(uint64_t id, int depth) const {
+checked_result<std::reference_wrapper<const script_value>> environment::get_ref(uint64_t id, int depth) const {
     // This version with depth is only called internally for recursion tracking
     // The public version delegates here
     const int MAX_RECURSION_DEPTH = 100;
     if (depth > MAX_RECURSION_DEPTH) {
         const std::string& name = symbolizer_->get_string(id);
-        throw runtime_error("Maximum environment recursion depth exceeded for variable '" + name + "' at depth " + std::to_string(depth));
+        return checked_result<std::reference_wrapper<const script_value>>(
+            make_error_code(runtime_error_code::max_recursion_depth),
+            "Maximum environment recursion depth exceeded for variable '" + name + "' at depth " + std::to_string(depth));
     }
-    
+
     auto it = values_.find(id);
     if (it != values_.end()) {
-        return it->second;
+        return std::cref(it->second);
     }
-    
+
     if (parent_) {
         // For proper virtual dispatch, we need to call the public virtual method
         // on the parent, not this internal version
@@ -714,32 +722,38 @@ const script_value& environment::get_ref(uint64_t id, int depth) const {
         if (name == "getValue") {
             std::cerr << "  parent type: " << typeid(*parent_).name() << "\n";
         }
-        return parent_->get_ref(id);
+        // Cast to const to call the const overload
+        const environment* const_parent = parent_.get();
+        return const_parent->get_ref(id);
     }
-    
+
     // Need to get the name for error message
     const std::string& name = symbolizer_->get_string(id);
-    throw runtime_error("Undefined variable '" + name + "'");
+    return checked_result<std::reference_wrapper<const script_value>>(
+        make_error_code(runtime_error_code::undefined_variable),
+        "Undefined variable '" + name + "'");
 }
 
-script_value& environment::get_ref(const std::string& name) {
+checked_result<std::reference_wrapper<script_value>> environment::get_ref(const std::string& name) {
     uint64_t id = symbolizer_->intern(name);
     // Use numeric ID for recursion to avoid re-interning at each parent level
     return get_ref(id);
 }
 
-script_value& environment::get_ref(uint64_t id) {
+checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64_t id) {
     auto it = values_.find(id);
     if (it != values_.end()) {
-        return it->second;
+        return std::ref(it->second);
     }
-    
+
     if (parent_) {
         return parent_->get_ref(id);
     }
-    
+
     const std::string& name = symbolizer_->get_string(id);
-    throw runtime_error("Undefined variable '" + name + "'");
+    return checked_result<std::reference_wrapper<script_value>>(
+        make_error_code(runtime_error_code::undefined_variable),
+        "Undefined variable '" + name + "'");
 }
 
 void environment::assign(const std::string& name, script_value&& value) {
@@ -896,280 +910,36 @@ script_value interpreter::create_bound_method(const script_value& this_obj, cons
 }
 
 // method_environment implementation
-script_value method_environment::get(const std::string& name) const {
+checked_result<script_value> method_environment::get(const std::string& name) const {
     // DEBUG: Log method environment lookup
     // std::cerr << "DEBUG: method_environment::get(\"" << name << "\")\n";
-    
+
     // Special handling for 'this'
     if (name == "this") {
         return this_object_;
     }
 
     // First try normal environment lookup
-    try {
-        return environment::get(name);
-    } catch (const runtime_error&) {
-        // During class definition, we shouldn't resolve methods - let the unresolved identifier handling take over
-        // The this_object_ might be invalid during class parsing
-        auto this_type = this_object_.type();
-        if (name != "this" && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
-            auto obj_holder = this_object_.get_object_holder();
-            if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-                
-                // Try to get field first (non-throwing) - now returns a reference
-                const script_value& field_ref = instance->get_field(name, false);
-                if (!field_ref.is_invalid()) {
-                    return field_ref;
-                }
-                
-                // Try to get method (non-throwing)
-                script_value method = instance->get_method(name, false);
-                if (!method.is_invalid()) {
-                    // Found the method! Store in instance member
-                    bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
-                    return bound_method_storage_;
-                }
-                
-                // Try to get static field from class definition
-                auto class_def = instance->get_class_definition();
-                if (class_def && class_def->has_static_field(name)) {
-                    return class_def->get_static_field(name);
-                }
-            }
-        }
-        // Re-throw the original error
-        throw;
-    }
-}
-
-script_value method_environment::get(uint64_t id) const {
-    // Special handling for 'this' using cached ID
-    if (id == symbolizer_->get_this_id()) {
-        return this_object_;
+    auto env_result = environment::get(name);
+    if (env_result) {
+        return env_result;
     }
 
-    // First try normal environment lookup
-    try {
-        return environment::get(id);
-    } catch (const runtime_error&) {
-        // If not found, check 'this' object fields and methods
-        const std::string& name = symbolizer_->get_string(id);
-        auto this_type = this_object_.type();
-        if (name != "this" && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
-            auto obj_holder = this_object_.get_object_holder();
-            if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-
-                // Try to get field first (non-throwing) - now returns a reference
-                const script_value& field_ref = instance->get_field(name, false);
-                if (!field_ref.is_invalid()) {
-                    return field_ref;
-                }
-
-                // Try to get method (non-throwing)
-                script_value method = instance->get_method(name, false);
-                if (!method.is_invalid()) {
-                    // Found the method! Store in instance member
-                    bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
-                    return bound_method_storage_;
-                }
-
-                // Try to get static field from class definition
-                auto class_def = instance->get_class_definition();
-                if (class_def && class_def->has_static_field(name)) {
-                    return class_def->get_static_field(name);
-                }
-            }
-        }
-        // Re-throw the original error
-        throw runtime_error("Undefined variable '" + name + "'");
-    }
-}
-
-const script_value& method_environment::get_ref(const std::string& name) const {
-    
-    // First check if it's in our local values
-    uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        return it->second;
-    }
-    
-    
-    // Then try parent environment lookup
-    if (parent_) {
-        try {
-            return parent_->get_ref(name);
-        } catch (const runtime_error&) {
-            // Not in parent, fall through to check 'this'
-        }
-    }
-    
-    // Finally, check 'this' object fields and methods
-        auto this_type = this_object_.type();
-        if (name != "this" && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
-            auto obj_holder = this_object_.get_object_holder();
-            if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-                
-                // Try to get field first (non-throwing) - now returns a reference
-                const script_value& field_ref = instance->get_field(name, false);
-                if (!field_ref.is_invalid()) {
-                    return field_ref;
-                }
-                
-                // Try to get method (non-throwing)
-                script_value method = instance->get_method(name, false);
-                if (!method.is_invalid()) {
-                    // Found the method! Store in instance member
-                    bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
-                    return bound_method_storage_;
-                }
-                
-                // Try to get static field from class definition
-                auto class_def = instance->get_class_definition();
-                if (class_def && class_def->has_static_field(name)) {
-                    return class_def->get_static_field(name);
-                }
-            }
-        }
-        throw runtime_error("Undefined variable '" + name + "'");
-}
-
-const script_value& method_environment::get_ref(uint64_t id) const {
-    // Force no inlining
-    volatile int x = 42;
-    (void)x;
-    
-    const std::string& name = symbolizer_->get_string(id);
-    
-    // First check if it's in our local values (parameters, local variables)
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        return it->second;
-    }
-    
-    // Then try parent environment lookup
-    if (parent_) {
-        try {
-            return parent_->get_ref(id);
-        } catch (const runtime_error&) {
-            // Not in parent, fall through to check 'this'
-        }
-    }
-    
-    // Finally, check 'this' object fields and methods as fallback
+    // If not found in environment, check 'this' object fields and methods
+    // During class definition, we shouldn't resolve methods - let the unresolved identifier handling take over
+    // The this_object_ might be invalid during class parsing
     auto this_type = this_object_.type();
-    if (name != "this" && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
-            auto obj_holder = this_object_.get_object_holder();
-            if (obj_holder && obj_holder->data) {
-                auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-                
-                // Try to get field first (non-throwing) - now returns a reference
-                const script_value& field_ref = instance->get_field(name, false);
-                if (!field_ref.is_invalid()) {
-                    return field_ref;
-                }
-                
-                // Try to get method (non-throwing)
-                script_value method = instance->get_method(name, false);
-                if (!method.is_invalid()) {
-                    // Found the method! Store in instance member
-                    bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
-                    return bound_method_storage_;
-                }
-                
-                // Try to get static field from class definition
-                auto class_def = instance->get_class_definition();
-                if (class_def && class_def->has_static_field(name)) {
-                    return class_def->get_static_field(name);
-                }
-            }
-        }
-        throw runtime_error("Undefined variable '" + name + "'");
-}
-
-script_value& method_environment::get_ref(const std::string& name) {
-    
-    // First check if it's in our local values
-    uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        return it->second;
-    }
-    
-    // Then try parent environment lookup
-    if (parent_) {
-        try {
-            return parent_->get_ref(name);
-        } catch (const runtime_error&) {
-            // Not in parent, fall through to check 'this'
-        }
-    }
-    
-    // Finally, check 'this' object fields and methods
-    if (name != "this" && this_object_.type() == script_value_type::jai_object_type && !this_object_.is_null()) {
+    if (name != "this" && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
         auto obj_holder = this_object_.get_object_holder();
         if (obj_holder && obj_holder->data) {
             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
                 
-            // Try to get field first (non-throwing) - now returns a reference
-            script_value& field_ref = instance->get_field(name, false);
-            if (!field_ref.is_invalid()) {
-                return field_ref;
-            }
+                // Try to get field first (non-throwing) - now returns a reference
+                const script_value& field_ref = instance->get_field(name, false);
+                if (!field_ref.is_invalid()) {
+                    return field_ref;
+                }
                 
-            // Try to get method
-            script_value method = instance->get_method(name, false);
-            if (!method.is_invalid()) {
-                // Found the method! Store in instance member
-                bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
-                return bound_method_storage_;
-            }
-                
-            // Try to get static field from class definition
-            auto class_def = instance->get_class_definition();
-            if (class_def && class_def->has_static_field(name)) {
-                return class_def->get_static_field(name);
-            }
-        }
-    }
-    throw runtime_error("Undefined variable '" + name + "'");
-}
-
-script_value& method_environment::get_ref(uint64_t id) {
-    const std::string& name = symbolizer_->get_string(id);
-    
-    
-    // First check if it's in our local values (parameters, local variables)
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        return it->second;
-    }
-    
-    // Then try parent environment lookup
-    if (parent_) {
-        try {
-            return parent_->get_ref(id);
-        } catch (const runtime_error&) {
-            // Not in parent, fall through to check 'this'
-        }
-    }
-    
-    // Finally, check 'this' object fields and methods as fallback
-    auto this_type = this_object_.type();
-    if (name != "this" && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
-        auto obj_holder = this_object_.get_object_holder();
-        if (obj_holder && obj_holder->data) {
-            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-            
-            // Try to get field first (non-throwing) - now returns a reference
-            script_value& field_ref = instance->get_field(name, false);
-            if (!field_ref.is_invalid()) {
-                return field_ref;
-            }
-            
             // Try to get method (non-throwing)
             script_value method = instance->get_method(name, false);
             if (!method.is_invalid()) {
@@ -1177,7 +947,7 @@ script_value& method_environment::get_ref(uint64_t id) {
                 bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
                 return bound_method_storage_;
             }
-            
+
             // Try to get static field from class definition
             auto class_def = instance->get_class_definition();
             if (class_def && class_def->has_static_field(name)) {
@@ -1185,7 +955,77 @@ script_value& method_environment::get_ref(uint64_t id) {
             }
         }
     }
-    throw runtime_error("Undefined variable '" + name + "'");
+
+    // Nothing found - return the original error from environment lookup
+    return env_result;
+}
+
+checked_result<script_value> method_environment::get(uint64_t id) const {
+    // Special handling for 'this' using cached ID
+    if (id == symbolizer_->get_this_id()) {
+        return this_object_;
+    }
+
+    // First try normal environment lookup
+    auto env_result = environment::get(id);
+    if (env_result) {
+        return env_result;
+    }
+
+    // If not found, check 'this' object fields and methods
+    const std::string& name = symbolizer_->get_string(id);
+    auto this_type = this_object_.type();
+    if (name != "this" && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
+        auto obj_holder = this_object_.get_object_holder();
+        if (obj_holder && obj_holder->data) {
+            auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
+
+            // Try to get field first (non-throwing) - now returns a reference
+            const script_value& field_ref = instance->get_field(name, false);
+            if (!field_ref.is_invalid()) {
+                return field_ref;
+            }
+
+            // Try to get method (non-throwing)
+            script_value method = instance->get_method(name, false);
+            if (!method.is_invalid()) {
+                // Found the method! Store in instance member
+                bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
+                return bound_method_storage_;
+            }
+
+            // Try to get static field from class definition
+            auto class_def = instance->get_class_definition();
+            if (class_def && class_def->has_static_field(name)) {
+                return class_def->get_static_field(name);
+            }
+        }
+    }
+
+    // Nothing found - return the original error from environment lookup
+    return env_result;
+}
+
+checked_result<std::reference_wrapper<const script_value>> method_environment::get_ref(const std::string& name) const {
+    // For 'this', we can't return a reference to this_object_ because it might be temporary
+    // Just delegate to base class which will throw
+    uint64_t id = symbolizer_->intern(name);
+    return environment::get_ref(id);
+}
+
+checked_result<std::reference_wrapper<const script_value>> method_environment::get_ref(uint64_t id) const {
+    // Delegate to base class - method_environment doesn't support get_ref for 'this' object fields
+    return environment::get_ref(id);
+}
+
+checked_result<std::reference_wrapper<script_value>> method_environment::get_ref(const std::string& name) {
+    uint64_t id = symbolizer_->intern(name);
+    return environment::get_ref(id);
+}
+
+checked_result<std::reference_wrapper<script_value>> method_environment::get_ref(uint64_t id) {
+    // Delegate to base class - method_environment doesn't support get_ref for 'this' object fields
+    return environment::get_ref(id);
 }
 
 void method_environment::assign(const std::string& name, const script_value& value) {
@@ -1245,120 +1085,128 @@ bool method_environment::contains(uint64_t id) const {
 }
 
 // static_method_environment implementation
-script_value static_method_environment::get(const std::string& name) const {
+checked_result<script_value> static_method_environment::get(const std::string& name) const {
     // First try normal environment lookup
-    try {
-        return environment::get(name);
-    } catch (const runtime_error&) {
-        // If not found, check static fields
-        if (class_def_ && class_def_->has_static_field(name)) {
-            return class_def_->get_static_field(name);
-        }
-
-        // Also check static methods (for calling other static methods)
-        if (class_def_ && class_def_->has_static_method(name)) {
-            return class_def_->get_static_method(name);
-        }
-
-        // Re-throw the original error
-        throw;
-    }
-}
-
-script_value static_method_environment::get(uint64_t id) const {
-    // First try normal environment lookup
-    try {
-        return environment::get(id);
-    } catch (const runtime_error&) {
-        // If not found, check static fields
-        const std::string& name = symbolizer_->get_string(id);
-
-        if (class_def_ && class_def_->has_static_field(name)) {
-            return class_def_->get_static_field(name);
-        }
-
-        // Also check static methods (for calling other static methods)
-        if (class_def_ && class_def_->has_static_method(name)) {
-            return class_def_->get_static_method(name);
-        }
-
-        // Re-throw the original error
-        throw runtime_error("Undefined variable '" + name + "'");
-    }
-}
-
-const script_value& static_method_environment::get_ref(const std::string& name) const {
-    // First check if it's in our local values
-    uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        return it->second;
+    auto env_result = environment::get(name);
+    if (env_result) {
+        return env_result;
     }
 
-    // Then try parent environment lookup
-    if (parent_) {
-        try {
-            return parent_->get_ref(name);
-        } catch (const runtime_error&) {
-            // Continue to static field check
-        }
-    }
-
-    // Check static fields
+    // If not found, check static fields
     if (class_def_ && class_def_->has_static_field(name)) {
         return class_def_->get_static_field(name);
     }
 
-    // Check static methods (for calling other static methods)
+    // Also check static methods (for calling other static methods)
     if (class_def_ && class_def_->has_static_method(name)) {
-        // Store in bound_method_storage_ to return a reference
-        bound_method_storage_ = class_def_->get_static_method(name);
-        return bound_method_storage_;
+        return class_def_->get_static_method(name);
     }
 
-    throw runtime_error("Undefined variable '" + name + "'");
+    // Nothing found - return the original error from environment lookup
+    return env_result;
 }
 
-const script_value& static_method_environment::get_ref(uint64_t id) const {
+checked_result<script_value> static_method_environment::get(uint64_t id) const {
+    // First try normal environment lookup
+    auto env_result = environment::get(id);
+    if (env_result) {
+        return env_result;
+    }
+
+    // If not found, check static fields
     const std::string& name = symbolizer_->get_string(id);
-    return get_ref(name);
-}
 
-script_value& static_method_environment::get_ref(const std::string& name) {
-    // First check if it's in our local values
-    uint64_t id = symbolizer_->intern(name);
-    auto it = values_.find(id);
-    if (it != values_.end()) {
-        return it->second;
-    }
-
-    // Then try parent environment lookup
-    if (parent_) {
-        try {
-            return parent_->get_ref(name);
-        } catch (const runtime_error&) {
-            // Continue to static field check
-        }
-    }
-
-    // Check static fields
     if (class_def_ && class_def_->has_static_field(name)) {
         return class_def_->get_static_field(name);
     }
 
-    // Check static methods (for calling other static methods)
+    // Also check static methods (for calling other static methods)
     if (class_def_ && class_def_->has_static_method(name)) {
-        // Store in bound_method_storage_ to return a reference
-        bound_method_storage_ = class_def_->get_static_method(name);
-        return bound_method_storage_;
+        return class_def_->get_static_method(name);
     }
 
-    throw runtime_error("Undefined variable '" + name + "'");
+    // Nothing found - return the original error from environment lookup
+    return env_result;
 }
 
-script_value& static_method_environment::get_ref(uint64_t id) {
+checked_result<std::reference_wrapper<const script_value>> static_method_environment::get_ref(const std::string& name) const {
+    // First try normal environment lookup
+    uint64_t id = symbolizer_->intern(name);
+    auto env_result = environment::get_ref(id);
+    if (env_result) {
+        return env_result;
+    }
+
+    // If not found, check static fields (return reference to the field in class_def)
+    if (class_def_ && class_def_->has_static_field(name)) {
+        const script_value* field_ptr = class_def_->get_static_field_ptr(name);
+        if (field_ptr) {
+            return std::cref(*field_ptr);
+        }
+    }
+
+    // Nothing found - return the original error
+    return env_result;
+}
+
+checked_result<std::reference_wrapper<const script_value>> static_method_environment::get_ref(uint64_t id) const {
+    // First try normal environment lookup
+    auto env_result = environment::get_ref(id);
+    if (env_result) {
+        return env_result;
+    }
+
+    // If not found, check static fields
     const std::string& name = symbolizer_->get_string(id);
-    return get_ref(name);
+    if (class_def_ && class_def_->has_static_field(name)) {
+        const script_value* field_ptr = class_def_->get_static_field_ptr(name);
+        if (field_ptr) {
+            return std::cref(*field_ptr);
+        }
+    }
+
+    // Nothing found - return the original error
+    return env_result;
+}
+
+checked_result<std::reference_wrapper<script_value>> static_method_environment::get_ref(const std::string& name) {
+    // First try normal environment lookup
+    uint64_t id = symbolizer_->intern(name);
+    auto env_result = environment::get_ref(id);
+    if (env_result) {
+        return env_result;
+    }
+
+    // If not found, check static fields (return non-const reference)
+    if (class_def_ && class_def_->has_static_field(name)) {
+        script_value* field_ptr = class_def_->get_static_field_ptr(name);
+        if (field_ptr) {
+            return std::ref(*field_ptr);
+        }
+    }
+
+    // Nothing found - return the original error
+    return env_result;
+}
+
+checked_result<std::reference_wrapper<script_value>> static_method_environment::get_ref(uint64_t id) {
+    // First try normal environment lookup
+    auto env_result = environment::get_ref(id);
+    if (env_result) {
+        return env_result;
+    }
+
+    // If not found, check static fields (return non-const reference)
+    const std::string& name = symbolizer_->get_string(id);
+    if (class_def_ && class_def_->has_static_field(name)) {
+        script_value* field_ptr = class_def_->get_static_field_ptr(name);
+        if (field_ptr) {
+            return std::ref(*field_ptr);
+        }
+    }
+
+    // Nothing found - return the original error
+    return env_result;
 }
 
 void static_method_environment::assign(const std::string& name, const script_value& value) {
@@ -1628,7 +1476,11 @@ script_value interpreter::evaluate(expression_ptr expr) {
 
 // Variable access methods
 script_value interpreter::get_variable(const std::string& name) const {
-    return environment_->get(name).deref();
+    auto result = environment_->get(name);
+    if (!result) {
+        throw runtime_error(result.message());
+    }
+    return result.value().deref();
 }
 
 bool interpreter::has_variable(const std::string& name) const {
@@ -1643,25 +1495,31 @@ std::unordered_map<std::string, script_value> interpreter::get_all_variables() c
 
 // expression visitors
 checked_result<void> interpreter::visit_literal_expr(literal_expr* expr) {
-    // Literals are created at parse time without engine references
-    // Create a new value with the proper engine reference based on the literal's type
-    switch (expr->value.type()) {
-        case script_value_type::jai_int_type:
-            push_value(make_value(expr->value.as_int()));
+    // Literals are created at parse time without engine references and type_info set to nullptr
+    // Extract raw values from storage and recreate with proper type_info
+    // We can't use as_int()/as_string() etc because they check type() which returns jai_null_type for AST literals
+
+    // Access the raw storage variant directly
+    const auto& storage = expr->value.get_storage();
+
+    // Determine type from variant index and extract + recreate value
+    switch (storage.index()) {
+        case 1:  // script_int
+            push_value(make_value(std::get<script_int>(storage)));
             break;
-        case script_value_type::jai_float_type:
-            push_value(make_value(expr->value.as_float()));
+        case 2:  // script_float
+            push_value(make_value(std::get<script_float>(storage)));
             break;
-        case script_value_type::jai_string_type:
-            push_value(make_value(expr->value.as_string()));
+        case 3:  // script_string
+            push_value(make_value(std::get<script_string>(storage)));
             break;
-        case script_value_type::jai_char_type:
-            push_value(make_value(expr->value.as_char()));
+        case 4:  // script_char
+            push_value(make_value(std::get<script_char>(storage)));
             break;
-        case script_value_type::jai_bool_type:
-            push_value(make_value(expr->value.as_bool()));
+        case 5:  // script_bool
+            push_value(make_value(std::get<script_bool>(storage)));
             break;
-        case script_value_type::jai_null_type:
+        case 0:  // std::monostate (null)
             push_value(make_value());
             break;
         default:
@@ -1690,23 +1548,21 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         std::string base_type = expr->name.substr(0, pos);
         
         // Look up the constructor function for this type
-        try {
-            script_value constructor_func = environment_->get(base_type);
-            if (constructor_func.is_function()) {
-                push_value(constructor_func);
-                return checked_result<void>();
-            }
-        } catch (const runtime_error&) {
-            // Fall through to normal error handling
+        auto ctor_result = environment_->get(base_type);
+        if (ctor_result && ctor_result.value().is_function()) {
+            push_value(std::move(ctor_result.value()));
+            return checked_result<void>();
         }
+        // Fall through to normal error handling if not found
     }
     
     // Use parser's pre-computed symbol ID (always set by parser)
     // Try to get the variable from environment
-    try {
-        const script_value& val = environment_->get_ref(expr->symbol_id);
+    auto ref_result = environment_->get_ref(expr->symbol_id);
+    if (ref_result) {
+        const script_value& val = ref_result.value().get();
         push_value(val.deref());  // Automatically handles references
-    } catch (const runtime_error&) {
+    } else {
         // If we're in a class method context, collect unresolved identifier
         if (current_class_context_ && current_class_context_->in_method) {
             // Add to unresolved identifiers for later validation
@@ -1718,25 +1574,31 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
 
 
         // Variable not found - check if it's a member of 'this'
-        try {
-            script_value this_val = environment_->get("this");
+        auto this_result = environment_->get("this");
+        if (this_result) {
+            script_value this_val = std::move(this_result.value());
             if (this_val.is_object()) {
                 // Try to access as a member of 'this'
                 auto obj_holder = this_val.get_object_holder();
-                std::shared_ptr<class_instance> instance;
 
-                // For C++ classes, is_cpp_class_instance is true and data is class_instance
-                if (obj_holder->is_cpp_class_instance) {
-                    instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-                } else {
-                    // For script classes, the data IS a class_instance directly
-                    instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-                }
+                // Both C++ and script classes wrap data in class_instance (script_class_instance inherits from class_instance)
+                // is_class_instance_wrapper should be true for both
+                std::shared_ptr<class_instance> instance = obj_holder->is_class_instance_wrapper
+                    ? std::static_pointer_cast<class_instance>(obj_holder->data)
+                    : nullptr;
 
                 if (instance) {
                     // Check instance fields first
                     if (instance->has_field(expr->name)) {
                         push_value(instance->get_field(expr->name));
+                        return checked_result<void>();
+                    }
+
+                    // Check for methods (returns bound method)
+                    script_value method = instance->get_method(expr->name, false);
+                    if (!method.is_invalid()) {
+                        script_value bound_method = create_bound_method(this_val, method);
+                        push_value(std::move(bound_method));
                         return checked_result<void>();
                     }
 
@@ -1748,8 +1610,6 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
                     }
                 }
             }
-        } catch (...) {
-            // No 'this' in scope
         }
 
         // Use error code instead of exception state
@@ -1940,24 +1800,18 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
     
     // Check for custom operator function (excluding subscript)
     if (!opName.empty() && environment_ && environment_->contains(opName)) {
-        try {
-            script_value opFunc = environment_->get(opName);
-            if (opFunc.is_function()) {
-                const script_function& func = opFunc.as_function();
-                std::vector<script_value> args = {left, right};
-                auto result = func(args);
-                if (!result) {
-                    // Function returned error - propagate it up
-                    return checked_result<void>(result.error(), result.message());
-                }
-                push_value(std::move(result.value()));
-                return {};
+        auto op_result = environment_->get(opName);
+        if (op_result && op_result.value().is_function()) {
+            script_value opFunc = std::move(op_result.value());
+            const script_function& func = opFunc.as_function();
+            std::vector<script_value> args = {left, right};
+            auto result = func(args);
+            if (!result) {
+                // Function returned error - propagate it up
+                return checked_result<void>(result.error(), result.message());
             }
-        } catch (const std::exception& e) {
-            std::string error = e.what();
-            if (error.find("Undefined variable") == std::string::npos) {
-                throw;
-            }
+            push_value(std::move(result.value()));
+            return {};
         }
     }
 
@@ -2010,7 +1864,8 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                     // If this created a new entry with default constructor, it has invalid engine reference
                     if (!value_ref.has_valid_engine_ref()) {
                         if (!left.has_valid_engine_ref()) {
-                            throw runtime_error("Invalid script_value: both map and new entry missing engine reference");
+                            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                                "Invalid script_value: both map and new entry missing engine reference");
                         }
                         value_ref.set_engine_ref(left.get_engine_ref());
                     }
@@ -2049,24 +1904,22 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
             }
         } else {
             if (left.is_object()) {
-                try {
-                    script_value getMethod = environment_->get("[]");
-                    if (getMethod.is_function()) {
-                        const script_function& func = getMethod.as_function();
-                        std::vector<script_value> args = {left, right};
-                        auto result = func(args);
-                        if (!result) {
-                            // Function returned error - propagate it up
-                            return checked_result<void>(result.error(), result.message());
-                        }
-                        push_value(std::move(result.value()));
-                        return {};
+                auto method_result = environment_->get("[]");
+                if (method_result && method_result.value().is_function()) {
+                    script_value getMethod = std::move(method_result.value());
+                    const script_function& func = getMethod.as_function();
+                    std::vector<script_value> args = {left, right};
+                    auto result = func(args);
+                    if (!result) {
+                        // Function returned error - propagate it up
+                        return checked_result<void>(result.error(), result.message());
                     }
-                } catch (const std::exception&) {
-                    // No custom [] operator, continue with error
+                    push_value(std::move(result.value()));
+                    return {};
                 }
             }
-            throw runtime_error("Subscript can only be used on arrays, maps, or types with [] operator");
+            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                "Subscript can only be used on arrays, maps, or types with [] operator");
         }
         return {};
     }
@@ -2150,7 +2003,11 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                 if (identifier->symbol_id == UINT64_MAX) {
                     identifier->symbol_id = string_symbolizer_->intern(identifier->name);
                 }
-                script_value currentValue = environment_->get(identifier->symbol_id);
+                auto val_result = environment_->get(identifier->symbol_id);
+                if (!val_result) {
+                    return checked_result<void>(val_result.error(), val_result.message());
+                }
+                script_value currentValue = std::move(val_result.value());
                 script_value newValue = script_value::make_null(engine_ref_);
 
                 // Use single type() call + switch for faster type checking
@@ -2207,7 +2064,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             if (identifier->symbol_id == UINT64_MAX) {
                 identifier->symbol_id = string_symbolizer_->intern(identifier->name);
             }
-            script_value currentValue = environment_->get_ref(identifier->symbol_id);
+            auto ref_result = environment_->get_ref(identifier->symbol_id);
+            if (!ref_result) {
+                throw runtime_error(ref_result.message());
+            }
+            script_value currentValue = ref_result.value().get();
 
             // Evaluate the right-hand side
             JAISCRIPT_TRY(expr->value->accept(this));
@@ -2221,21 +2082,18 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 case token_type::plus_equal: {
                     // Only check for custom operators if we know they exist (fast path optimization)
                     if (has_custom_numeric_ops_ && environment_ && environment_->contains("+")) {
-                        try {
-                            script_value opFunc = environment_->get("+");
-                            if (opFunc.is_function()) {
-                                const script_function& func = opFunc.as_function();
-                                std::vector<script_value> args = {currentValue, rightValue};
-                                auto result = func(args);
-                                if (!result) {
-                                    // Function returned error - propagate it up
-                                    return checked_result<void>(result.error(), result.message());
-                                }
-                                resultValue = std::move(result.value());
-                                customOpFound = true;
+                        auto op_result = environment_->get("+");
+                        if (op_result && op_result.value().is_function()) {
+                            script_value opFunc = std::move(op_result.value());
+                            const script_function& func = opFunc.as_function();
+                            std::vector<script_value> args = {currentValue, rightValue};
+                            auto result = func(args);
+                            if (!result) {
+                                // Function returned error - propagate it up
+                                return checked_result<void>(result.error(), result.message());
                             }
-                        } catch (const std::exception&) {
-                            // Custom operator failed, try built-in
+                            resultValue = std::move(result.value());
+                            customOpFound = true;
                         }
                     }
 
@@ -2266,21 +2124,18 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // Only check for custom operators if we know they exist (fast path optimization)
                     customOpFound = false;
                     if (has_custom_numeric_ops_ && environment_ && environment_->contains("-")) {
-                        try {
-                            script_value opFunc = environment_->get("-");
-                            if (opFunc.is_function()) {
-                                const script_function& func = opFunc.as_function();
-                                std::vector<script_value> args = {currentValue, rightValue};
-                                auto result = func(args);
-                                if (!result) {
-                                    // Function returned error - propagate it up
-                                    return checked_result<void>(result.error(), result.message());
-                                }
-                                resultValue = std::move(result.value());
-                                customOpFound = true;
+                        auto op_result = environment_->get("-");
+                        if (op_result && op_result.value().is_function()) {
+                            script_value opFunc = std::move(op_result.value());
+                            const script_function& func = opFunc.as_function();
+                            std::vector<script_value> args = {currentValue, rightValue};
+                            auto result = func(args);
+                            if (!result) {
+                                // Function returned error - propagate it up
+                                return checked_result<void>(result.error(), result.message());
                             }
-                        } catch (const std::exception&) {
-                            // Custom operator failed, try built-in
+                            resultValue = std::move(result.value());
+                            customOpFound = true;
                         }
                     }
                     
@@ -2309,21 +2164,18 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // Only check for custom operators if we know they exist (fast path optimization)
                     customOpFound = false;
                     if (has_custom_numeric_ops_ && environment_ && environment_->contains("*")) {
-                        try {
-                            script_value opFunc = environment_->get("*");
-                            if (opFunc.is_function()) {
-                                const script_function& func = opFunc.as_function();
-                                std::vector<script_value> args = {currentValue, rightValue};
-                                auto result = func(args);
-                                if (!result) {
-                                    // Function returned error - propagate it up
-                                    return checked_result<void>(result.error(), result.message());
-                                }
-                                resultValue = std::move(result.value());
-                                customOpFound = true;
+                        auto op_result = environment_->get("*");
+                        if (op_result && op_result.value().is_function()) {
+                            script_value opFunc = std::move(op_result.value());
+                            const script_function& func = opFunc.as_function();
+                            std::vector<script_value> args = {currentValue, rightValue};
+                            auto result = func(args);
+                            if (!result) {
+                                // Function returned error - propagate it up
+                                return checked_result<void>(result.error(), result.message());
                             }
-                        } catch (const std::exception&) {
-                            // Custom operator failed, try built-in
+                            resultValue = std::move(result.value());
+                            customOpFound = true;
                         }
                     }
                     
@@ -2413,7 +2265,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         } else if (currentValue.is_string() && rightValue.is_string()) {
                             resultValue = make_value(currentValue.as_string() + rightValue.as_string());
                         } else {
-                            throw runtime_error("Invalid operands for +=");
+                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                                "Invalid operands for +=");
                         }
                     }
                     break;
@@ -2424,7 +2277,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
                         resultValue = make_value(currentValue.as_float() - rightValue.as_float());
                     } else {
-                        throw runtime_error("Invalid operands for -=");
+                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                            "Invalid operands for -=");
                     }
                     break;
                 }
@@ -2434,25 +2288,30 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     } else if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
                         resultValue = make_value(currentValue.as_float() * rightValue.as_float());
                     } else {
-                        throw runtime_error("Invalid operands for *=");
+                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                            "Invalid operands for *=");
                     }
                     break;
                 }
                 case token_type::slash_equal: {
                     if (rightValue.is_int() && rightValue.as_int() == 0) {
-                        throw runtime_error("Division by zero");
+                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
+                            "Division by zero");
                     } else if (rightValue.is_float() && rightValue.as_float() == 0.0) {
-                        throw runtime_error("Division by zero");
+                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
+                            "Division by zero");
                     }
                     if ((currentValue.is_int() || currentValue.is_float()) && (rightValue.is_int() || rightValue.is_float())) {
                         resultValue = make_value(currentValue.as_float() / rightValue.as_float());
                     } else {
-                        throw runtime_error("Invalid operands for /=");
+                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                            "Invalid operands for /=");
                     }
                     break;
                 }
                 default:
-                    throw runtime_error("Unsupported compound assignment operator");
+                    return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                        "Unsupported compound assignment operator");
             }
             
             // Now assign the result back to the property
@@ -2475,7 +2334,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // Extract the class_instance
             auto objHolder = objectValue.get_object_holder();
             if (!objHolder) {
-                throw runtime_error("Cannot assign property to non-object value");
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                    "Cannot assign property to non-object value");
             }
             auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
             
@@ -2519,21 +2379,18 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             script_value resultValue = script_value::make_null(engine_ref_);
             
             // Try custom operators first
-            try {
-                script_value opFunc = environment_->get(std::string(1, expr->op.lexeme[0]));
-                if (opFunc.is_function()) {
-                    const script_function& func = opFunc.as_function();
-                    std::vector<script_value> args = {currentValue, rightValue};
-                    auto result = func(args);
-                    if (!result) {
-                        // Function returned error - propagate it up
-                        return checked_result<void>(result.error(), result.message());
-                    }
-                    resultValue = std::move(result.value());
-                } else {
-                    throw runtime_error("Not a function");
+            auto op_result = environment_->get(std::string(1, expr->op.lexeme[0]));
+            if (op_result && op_result.value().is_function()) {
+                script_value opFunc = std::move(op_result.value());
+                const script_function& func = opFunc.as_function();
+                std::vector<script_value> args = {currentValue, rightValue};
+                auto result = func(args);
+                if (!result) {
+                    // Function returned error - propagate it up
+                    return checked_result<void>(result.error(), result.message());
                 }
-            } catch (const std::exception&) {
+                resultValue = std::move(result.value());
+            } else {
                 // Fall back to built-in operators
                 switch (expr->op.type) {
                     case token_type::plus_equal:
@@ -2552,18 +2409,21 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     case token_type::slash_equal:
                         if ((rightValue.is_int() && rightValue.as_int() == 0) ||
                             (rightValue.is_float() && rightValue.as_float() == 0.0)) {
-                            throw runtime_error("Division by zero");
+                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
+                                "Division by zero");
                         }
                         resultValue = evaluate_arithmetic(currentValue, token_type::slash, rightValue);
                         break;
                     case token_type::percent_equal:
                         if (rightValue.is_int() && rightValue.as_int() == 0) {
-                            throw runtime_error("Modulo by zero");
+                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
+                                "Modulo by zero");
                         }
                         resultValue = evaluate_arithmetic(currentValue, token_type::percent, rightValue);
                         break;
                     default:
-                        throw runtime_error("Unknown compound assignment operator");
+                        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                            "Unknown compound assignment operator");
                 }
             }
             
@@ -2628,11 +2488,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         environment_->assign(identifier->symbol_id, std::move(weak));
                     } else if (value.type() == script_value_type::jai_object_type) {
                         // Helpful error for value-semantic objects
-                        throw runtime_error("Cannot assign value-semantic object to weak_ptr. Use shared_ptr<T> to enable reference semantics.");
+                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                            "Cannot assign value-semantic object to weak_ptr. Use shared_ptr<T> to enable reference semantics.");
                     } else {
                         auto type_info = value.get_type_info();
                         std::string type_name = type_info ? type_info->type_name : "unknown";
-                        throw runtime_error("Cannot assign " + type_name + " to weak_ptr");
+                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                            "Cannot assign " + type_name + " to weak_ptr");
                     }
                 } else if (currentVal && currentVal->get_type_info() &&
                           currentVal->get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
@@ -2641,7 +2503,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         // Assign null - that's fine
                         environment_->assign(identifier->symbol_id, std::move(value));
                     } else if (value.is_weak_ptr()) {
-                        throw runtime_error("Cannot assign weak_ptr to shared_ptr - use weak.lock() instead");
+                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                            "Cannot assign weak_ptr to shared_ptr - use weak.lock() instead");
                     } else if (value.type() == script_value_type::jai_object_type) {
                         // Assign object to shared_ptr - just update the value but keep the shared_ptr type info
                         auto type_info = currentVal->get_type_info();
@@ -2650,7 +2513,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     } else {
                         auto type_info = value.get_type_info();
                         std::string type_name = type_info ? type_info->type_name : "unknown";
-                        throw runtime_error("Cannot assign " + type_name + " to shared_ptr");
+                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                            "Cannot assign " + type_name + " to shared_ptr");
                     }
                 } else {
                     // Regular variable assignment
@@ -2668,11 +2532,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Try static_method_environment's assign (which handles static fields)
                 // or instance method's 'this' field assignment
                 bool assigned_to_member = false;
-                try {
-                    script_value this_val = environment_->get("this");
+                auto this_result = environment_->get("this");
+                if (this_result) {
+                    script_value this_val = std::move(this_result.value());
                     if (this_val.is_object()) {
                         auto obj_holder = this_val.get_object_holder();
-                        if (obj_holder->is_cpp_class_instance || obj_holder->data) {
+                        if (obj_holder->is_class_instance_wrapper) {
                             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
                             // First try instance fields
@@ -2689,9 +2554,6 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             }
                         }
                     }
-                } catch (...) {
-                    // No 'this' in scope - that's OK, might be in static method
-                    // Let environment->assign() handle it (static_method_environment will check static fields)
                 }
 
                 if (!assigned_to_member) {
@@ -2711,25 +2573,28 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // For static assignment, get the class definition
                 auto* ident_expr = dynamic_cast<identifier_expr*>(memberExpr->object.get());
                 if (!ident_expr) {
-                    throw runtime_error("Static member assignment requires a class name");
+                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                        "Static member assignment requires a class name");
                 }
                 
                 std::string class_name = ident_expr->name;
-                script_value class_var = script_value::make_null(engine_ref_);
-                
-                try {
-                    class_var = environment_->get("__class_" + class_name);
-                } catch (const runtime_error&) {
-                    throw runtime_error("Class '" + class_name + "' not found");
+
+                auto class_result = environment_->get("__class_" + class_name);
+                if (!class_result) {
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                        "Class '" + class_name + "' not found");
                 }
-                
+                script_value class_var = std::move(class_result.value());
+
                 if (!class_var.is_object()) {
-                    throw runtime_error("'" + class_name + "' is not a class");
+                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                        "'" + class_name + "' is not a class");
                 }
-                
+
                 auto objHolder = class_var.get_object_holder();
                 if (!objHolder || objHolder->type_name != "class_definition") {
-                    throw runtime_error("'" + class_name + "' is not a valid class");
+                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                        "'" + class_name + "' is not a valid class");
                 }
                 
                 auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
@@ -2740,7 +2605,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 
                 // Set the static field
                 if (!class_def->set_static_field(memberExpr->member, value.clone())) {
-                    throw runtime_error("Cannot assign to static member: field '" + memberExpr->member + "' not found");
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                        "Cannot assign to static member: field '" + memberExpr->member + "' not found");
                 }
 
 
@@ -2771,7 +2637,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             // Extract the class_instance
             auto objHolder = dereferenced.get_object_holder();
             if (!objHolder) {
-                throw runtime_error("Cannot assign property to non-object value");
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                    "Cannot assign property to non-object value");
             }
             auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
 
@@ -3308,25 +3175,25 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
             }
 
             // Get 'this' from the current environment
-            try {
-                script_value this_val = environment_->get("this");
-                if (!this_val.is_object()) {
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        ident_expr->name + "() can only be called from within a method");
-                }
-
-                if (ident_expr->symbol_id == weak_from_this_id_) {
-                    // Create a weak_ptr from the 'this' object
-                    push_value(script_value::make_weak_ptr(this_val, engine_ref_));
-                    return {};
-                } else {  // shared_from_this
-                    // Just return the shared_ptr (which is already 'this')
-                    push_value(this_val);
-                    return {};
-                }
-            } catch (const runtime_error&) {
+            auto this_result = environment_->get("this");
+            if (!this_result) {
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                     ident_expr->name + "() can only be called from within a method");
+            }
+            script_value this_val = std::move(this_result.value());
+            if (!this_val.is_object()) {
+                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                    ident_expr->name + "() can only be called from within a method");
+            }
+
+            if (ident_expr->symbol_id == weak_from_this_id_) {
+                // Create a weak_ptr from the 'this' object
+                push_value(script_value::make_weak_ptr(this_val, engine_ref_));
+                return {};
+            } else {  // shared_from_this
+                // Just return the shared_ptr (which is already 'this')
+                push_value(this_val);
+                return {};
             }
         }
     }
@@ -3498,17 +3365,17 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
                 // Check if there's also a class with the same name (for fallback)
                 std::shared_ptr<class_definition> fallback_class;
-                try {
-                    script_value class_var = environment_->get("__class_" + name);
+                auto class_var_result = environment_->get("__class_" + name);
+                if (class_var_result) {
+                    script_value class_var = std::move(class_var_result.value());
                     if (class_var.is_object()) {
                         auto objHolder = class_var.get_object_holder();
                         if (objHolder && objHolder->type_name == "class_definition") {
                             fallback_class = std::static_pointer_cast<class_definition>(objHolder->data);
                         }
                     }
-                } catch (const runtime_error&) {
-                    // No class with this name - that's fine
                 }
+                // No class with this name - that's fine, fallback_class remains null
 
                 // Create a script_function that dispatches based on arity
                 // Capture namespace_id to provide access to namespace variables
@@ -3543,15 +3410,12 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
                     // No matching overload found in namespace - try fallback to class static method
                     if (fallback_class) {
-                        try {
-                            script_value static_method = fallback_class->get_static_method(member_name, false);
-                            if (!static_method.is_null() && static_method.is_function()) {
-                                // Call the class static method
-                                auto func = static_method.as_function();
-                                return func(args);
-                            }
-                        } catch (const runtime_error&) {
-                            // Class method not found or error calling it
+                        // get_static_method with false doesn't throw - returns null if not found
+                        script_value static_method = fallback_class->get_static_method(member_name, false);
+                        if (!static_method.is_null() && static_method.is_function()) {
+                            // Call the class static method
+                            auto func = static_method.as_function();
+                            return func(args);
                         }
                     }
 
@@ -3576,28 +3440,24 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             auto class_it = ns_data->classes.find(expr->member_id);
             if (class_it != ns_data->classes.end()) {
                 // Found a class in the namespace - return the constructor
-                try {
-                    script_value ctor_func = environment_->get(expr->member_id);
-                    push_value(ctor_func);
-                    return {};
-                } catch (const runtime_error&) {
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Class constructor not found
+                auto ctor_result = environment_->get(expr->member_id);
+                if (!ctor_result) {
+                    return checked_result<void>(ctor_result.error(), ctor_result.message());
                 }
+                push_value(std::move(ctor_result.value()));
+                return {};
             }
 
             // Member not found in namespace - fall through to check class static methods
         }
 
         // PRIORITY 2: Look up the class definition
-        script_value class_var = script_value::make_null(engine_ref_);
-
-        try {
-            // Try to find the class definition
-            class_var = environment_->get("__class_" + name);
-        } catch (const runtime_error&) {
+        auto class_var_result = environment_->get("__class_" + name);
+        if (!class_var_result) {
             // Class not found
-            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
+            return checked_result<void>(class_var_result.error(), class_var_result.message());
         }
+        script_value class_var = std::move(class_var_result.value());
 
         if (!class_var.is_object()) {
             // Not a class
@@ -3614,47 +3474,37 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         auto class_def = std::static_pointer_cast<class_definition>(objHolder->data);
 
         // Try static method first (most common case for :: access)
-        try {
-            script_value static_method = class_def->get_static_method(expr->member, false);
-            if (!static_method.is_null()) {
-                push_value(static_method);
-                return {};
-            }
-        } catch (const runtime_error&) {
-            // Method not found, continue
+        // get_static_method with false doesn't throw - returns null if not found
+        script_value static_method = class_def->get_static_method(expr->member, false);
+        if (!static_method.is_null()) {
+            push_value(static_method);
+            return {};
         }
 
         // Try static field access
-        try {
-            script_value static_value = class_def->get_static_field(expr->member);
-            if (!static_value.is_null()) {
-                push_value(static_value);
-                return {};
-            }
-            // Field not found (returned null), try getter as fallback
-        } catch (const runtime_error&) {
-            // Field not found, try getter as fallback
+        // get_static_field returns null if not found
+        script_value static_value = class_def->get_static_field(expr->member);
+        if (!static_value.is_null()) {
+            push_value(static_value);
+            return {};
         }
 
         // Try getter method as fallback (for C++ bound properties)
         std::string getter_name = "_get_" + expr->member;
-        try {
-            script_value getter_method = class_def->get_static_method(getter_name, false);
-            if (!getter_method.is_null() && getter_method.is_function()) {
-                // Call the getter with no arguments to get the live C++ value
-                auto func = getter_method.as_function();
-                std::vector<script_value> no_args;
-                auto result = func(no_args);
-                if (!result) {
-                    // Function returned error - propagate it up
-                    return checked_result<void>(result.error(), result.message());
-                }
-                script_value static_value = std::move(result.value());
-                push_value(static_value);
-                return {};
+        // get_static_method with false doesn't throw - returns null if not found
+        script_value getter_method = class_def->get_static_method(getter_name, false);
+        if (!getter_method.is_null() && getter_method.is_function()) {
+            // Call the getter with no arguments to get the live C++ value
+            auto func = getter_method.as_function();
+            std::vector<script_value> no_args;
+            auto result = func(no_args);
+            if (!result) {
+                // Function returned error - propagate it up
+                return checked_result<void>(result.error(), result.message());
             }
-        } catch (const runtime_error&) {
-            // No getter method either
+            script_value static_value = std::move(result.value());
+            push_value(static_value);
+            return {};
         }
 
         // Class has no static member
@@ -3819,20 +3669,15 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
     auto objHolder = objectValue.get_object_holder();
 
 
-    // Get the class_instance - could be script or C++ class
-    std::shared_ptr<class_instance> instance;
-
-    // For C++ classes, is_cpp_class_instance is true and data is class_instance
-    if (objHolder->is_cpp_class_instance) {
-        instance = std::static_pointer_cast<class_instance>(objHolder->data);
-    } else {
-        // For script classes, the data IS a class_instance directly
-        // Try to cast it (will fail if it's not a class_instance)
-        instance = std::static_pointer_cast<class_instance>(objHolder->data);
+    // Get the class_instance - both C++ and script classes use class_instance wrapper
+    // (script_class_instance inherits from class_instance)
+    if (!objHolder->is_class_instance_wrapper) {
+        // Cannot access member on non-class object
+        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
 
+    std::shared_ptr<class_instance> instance = std::static_pointer_cast<class_instance>(objHolder->data);
     if (!instance) {
-        // Cannot access member on non-class object
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
 
@@ -4018,8 +3863,10 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         }
                     } else {
                         // Capture by value - deep copy at capture time
-                        script_value capturedValue = environment_->get(var_id);
-                        captureEnv->define(var_id, capturedValue.clone());
+                        auto capture_result = environment_->get(var_id);
+                        if (capture_result) {
+                            captureEnv->define(var_id, capture_result.value().clone());
+                        }
                     }
                 }
             }
@@ -4032,11 +3879,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             bool can_capture = environment_->contains(capture.symbol_id);
             if (!can_capture && capture.symbol_id == this_id) {
                 // Try to get 'this' - method_environment will provide it
-                try {
-                    script_value this_test = environment_->get(this_id);
+                auto this_test_result = environment_->get(this_id);
+                if (this_test_result) {
                     can_capture = true;
-                } catch (...) {
-                    // 'this' not available
                 }
             }
 
@@ -4053,8 +3898,11 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     }
                 } else {
                     // Capture by value - deep copy at capture time
-                    script_value capturedValue = environment_->get(capture.symbol_id);
-                    captureEnv->define(capture.symbol_id, capturedValue.clone());
+                    auto capture_result = environment_->get(capture.symbol_id);
+                    if (!capture_result) {
+                        return checked_result<void>(capture_result.error(), capture_result.message());
+                    }
+                    captureEnv->define(capture.symbol_id, capture_result.value().clone());
                 }
             } else {
                 // Cannot capture undefined variable
@@ -4066,7 +3914,11 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         // so that member variables can be accessed without "this."
         if (captures_this) {
             // Get the 'this' object that was captured
-            script_value this_obj = captureEnv->get(this_id);
+            auto this_result = captureEnv->get(this_id);
+            if (!this_result) {
+                throw runtime_error(this_result.message());
+            }
+            script_value this_obj = std::move(this_result.value());
 
             // Create a method_environment with the captured 'this' object
             // The parent is closure_env (the environment where the lambda was defined)
@@ -4080,7 +3932,10 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             // Copy all captured variables (except 'this') into the method_environment
             for (const auto& capture : expr->captures) {
                 if (capture.symbol_id != this_id && captureEnv->contains(capture.symbol_id)) {
-                    method_env->define(capture.symbol_id, captureEnv->get(capture.symbol_id));
+                    auto capture_result = captureEnv->get(capture.symbol_id);
+                    if (capture_result) {
+                        method_env->define(capture.symbol_id, std::move(capture_result.value()));
+                    }
                 }
             }
 
@@ -4089,7 +3944,10 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 for (const auto& varName : used_variables) {
                     uint64_t var_id = string_symbolizer_->intern(varName);
                     if (var_id != this_id && captureEnv->contains(var_id)) {
-                        method_env->define(var_id, captureEnv->get(var_id));
+                        auto var_result = captureEnv->get(var_id);
+                        if (var_result) {
+                            method_env->define(var_id, std::move(var_result.value()));
+                        }
                     }
                 }
             }
@@ -4173,9 +4031,11 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
         // Create empty array with the specified element type
         auto element_type = expr->type->element_type();
         if (!element_type) {
-            element_type = type_info::make_int(); // Default to int if no type specified
+            if (auto eng = engine_ref_.lock()) {
+                element_type = eng->get_type_info_int(); // Default to int if no type specified
+            }
         }
-        push_value(script_value::make_array(element_type));
+        push_value(script_value::make_array(element_type, engine_ref_));
         return {};
     }
 
@@ -4189,9 +4049,11 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
         // Create empty map with the specified key/value types
         auto key_type = expr->type->key_type();
         auto value_type = expr->type->value_type();
-        if (!key_type) key_type = type_info::make_string();
-        if (!value_type) value_type = type_info::make_int();
-        push_value(script_value::make_map(key_type, value_type));
+        if (auto eng = engine_ref_.lock()) {
+            if (!key_type) key_type = eng->get_type_info_string();
+            if (!value_type) value_type = eng->get_type_info_int();
+        }
+        push_value(script_value::make_map(key_type, value_type, engine_ref_));
         return {};
     }
     
@@ -4299,24 +4161,17 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
 
     // Look for a constructor function registered with this class name
     // The class builder registers constructors as overloaded functions
-    try {
-        // std::cerr << "DEBUG: Looking for constructor: " << className << std::endl;
-        script_value constructorFunc = environment_->get(className);
-        if (constructorFunc.is_function()) {
-            // std::cerr << "DEBUG: Found constructor function for: " << className << std::endl;
-            const script_function& func = constructorFunc.as_function();
-            auto result = func(args);
-            if (!result) {
-                // Function returned error - propagate it up
-                return checked_result<void>(result.error(), result.message());
-            }
-            push_value(std::move(result.value()));
-            return {};
+    auto ctor_result = environment_->get(className);
+    if (ctor_result && ctor_result.value().is_function()) {
+        script_value constructorFunc = std::move(ctor_result.value());
+        const script_function& func = constructorFunc.as_function();
+        auto result = func(args);
+        if (!result) {
+            // Function returned error - propagate it up
+            return checked_result<void>(result.error(), result.message());
         }
-        // std::cerr << "DEBUG: Constructor found but not a function for: " << className << std::endl;
-    } catch (const runtime_error&) {
-        // Constructor function not found, fall through to error
-        // std::cerr << "DEBUG: Constructor not found for: " << className << " - " << e.what() << std::endl;
+        push_value(std::move(result.value()));
+        return {};
     }
 
     // No constructor found for class
@@ -4342,7 +4197,10 @@ checked_result<void> interpreter::visit_ternary_expr(ternary_expr* expr) {
 
 checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* expr) {
     // Create array script_value with mixed element type (for now)
-    auto element_type = type_info::make_int(); // TODO: Better type inference
+    type_info_ptr element_type = nullptr;
+    if (auto eng = engine_ref_.lock()) {
+        element_type = eng->get_type_info_int(); // TODO: Better type inference
+    }
     script_value arrayValue = script_value::make_array(element_type, engine_ref_);
 
     // Get the internal vector to populate
@@ -4360,8 +4218,12 @@ checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* e
 
 checked_result<void> interpreter::visit_map_literal_expr(map_literal_expr* expr) {
     // Create map script_value with mixed key/value types (for now)
-    auto keyType = type_info::make_string(); // TODO: Better type inference
-    auto valueType = type_info::make_int(); // TODO: Better type inference
+    type_info_ptr keyType = nullptr;
+    type_info_ptr valueType = nullptr;
+    if (auto eng = engine_ref_.lock()) {
+        keyType = eng->get_type_info_string(); // TODO: Better type inference
+        valueType = eng->get_type_info_int(); // TODO: Better type inference
+    }
     script_value mapValue = script_value::make_map(keyType, valueType, engine_ref_);
 
     // Get the internal map to populate
@@ -4394,13 +4256,12 @@ checked_result<void> interpreter::visit_this_expr(this_expr* expr) {
     }
 
     // Try to get 'this' from the current environment
-    try {
-        script_value this_val = environment_->get("this");
-        push_value(this_val);
-    } catch (const runtime_error&) {
+    auto this_result = environment_->get("this");
+    if (!this_result) {
         // 'this' can only be used inside methods
         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
     }
+    push_value(std::move(this_result.value()));
     return {};
 }
 
@@ -4409,15 +4270,20 @@ checked_result<void> interpreter::visit_super_expr(super_expr* expr) {
     // Constructor delegation (Enemy() : super()) is handled in the parser/constructor
 
     // Get 'this' from the environment - super only makes sense in instance methods
-    auto this_value = environment_->get("this");
+    auto this_result = environment_->get("this");
+    if (!this_result) {
+        // 'this' not found - super used outside of class method
+        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
+    }
+    script_value this_value = std::move(this_result.value());
     if (this_value.is_null()) {
-        // 'super' used outside of class method
+        // 'this' is null - super used outside of class method
         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
     }
 
     // Push 'this' onto the stack - visit_member_expr will handle the parent lookup
     // when it detects that the object expression is a super_expr
-    push_value(this_value);
+    push_value(std::move(this_value));
     return {};
 }
 
@@ -4650,8 +4516,13 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                         
                         // Look up the pair constructor function
                         uint64_t pair_symbol_id = string_symbolizer_->intern("pair");
-                        script_value pairConstructor = environment_->get_ref(pair_symbol_id);
-                        
+                        auto pair_result = environment_->get_ref(pair_symbol_id);
+                        if (!pair_result) {
+                            pop_scope();
+                            return checked_result<void>(pair_result.error(), pair_result.message());
+                        }
+                        const script_value& pairConstructor = pair_result.value().get();
+
                         if (pairConstructor.is_function()) {
                             const script_function& func = pairConstructor.as_function();
                             auto result = func(args);
@@ -4672,7 +4543,12 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
 
                         // Look up the pair constructor function using symbol ID
                         uint64_t pair_symbol_id = string_symbolizer_->intern("pair");
-                        script_value pairConstructor = environment_->get_ref(pair_symbol_id);
+                        auto pair_result = environment_->get_ref(pair_symbol_id);
+                        if (!pair_result) {
+                            pop_scope();
+                            return checked_result<void>(pair_result.error(), pair_result.message());
+                        }
+                        const script_value& pairConstructor = pair_result.value().get();
 
                         if (pairConstructor.is_function()) {
                             const script_function& func = pairConstructor.as_function();
@@ -5027,8 +4903,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     static const std::string CLASS_PREFIX = "__class_";
     std::string class_var_name = CLASS_PREFIX + decl->name;
     
-    try {
-        auto existing = environment_->get(class_var_name);
+    auto existing_result = environment_->get(class_var_name);
+    if (existing_result) {
+        script_value existing = std::move(existing_result.value());
         if (!existing.is_null() && existing.is_object()) {
             // Class already exists - extract from object holder
             auto objHolder = existing.get_object_holder();
@@ -5037,9 +4914,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 is_redefinition = true;
             }
         }
-    } catch (...) {
-        // Class doesn't exist yet
     }
+    // If result failed, class doesn't exist yet - that's fine
     
     if (!class_def) {
         // Create a new script class definition
@@ -5075,10 +4951,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         for (const std::string& base_name : decl->base_classes) {
             // First try to find a script class
             script_value base_class_var = script_value::make_null(engine_ref_);
-            try {
-                base_class_var = environment_->get("__class_" + base_name);
-            } catch (...) {
-                // Script class not found, will try C++ class below
+            auto base_result = environment_->get("__class_" + base_name);
+            if (base_result) {
+                base_class_var = std::move(base_result.value());
             }
 
             std::shared_ptr<class_definition> base_class_def;
@@ -5460,9 +5335,11 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             // Create instance
             auto instance = class_def->create_instance();
             // Instance created
-            
-            // Create 'this' value
-            auto this_value = script_value::make_object(class_name, instance, self->engine_ref_);
+
+            // Create 'this' value using the class_def's registered name and type_id
+            // This ensures we use the exact name/id that was registered (e.g., with namespace)
+            // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
+            auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, self->engine_ref_, true);
 
             // Create a regular environment for field initializers and constructor initializer arguments
             // Use the captured definition environment as the parent
@@ -5544,8 +5421,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                 try {
                                     // Get the C++ class constructor function
                                     auto parent_name = parent_class->get_name();
-                                    script_value cpp_ctor = self->environment_->get(parent_name);
-                                    if (cpp_ctor.is_function()) {
+                                    auto ctor_result = self->environment_->get(parent_name);
+                                    if (ctor_result && ctor_result.value().is_function()) {
+                                        script_value cpp_ctor = std::move(ctor_result.value());
                                         // Call C++ constructor with init_args
                                         auto result = cpp_ctor.as_function()(init_args);
                                         if (!result) {
@@ -5667,7 +5545,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             // Default constructor instance created
 
             // Create 'this' value for field initializer evaluation
-            auto this_value = script_value::make_object(class_name, instance, self->engine_ref_);
+            // Use class_def's registered name and type_id to handle namespaces correctly
+            // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
+            auto this_value = script_value::make_object(class_def->get_name(), class_def->get_type_id(), instance, self->engine_ref_, true);
 
             // Find the root (global) environment with cycle detection
             std::unordered_set<environment*> visited;
@@ -5840,6 +5720,17 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         }
     }
 
+    // CRITICAL: Register the script class in the class registry
+    // This makes it available for type lookups and prevents "unregistered class" errors
+    auto eng = engine_ref_.lock();
+    if (!eng) {
+        return checked_result<void>(make_error_code(runtime_error_code::engine_destroyed));
+    }
+    auto register_result = eng->get_class_registry().register_script_class(class_def);
+    if (!register_result) {
+        return register_result;
+    }
+
     // Store the class definition in a special variable for later retrieval
     // This allows inheritance and other features to work
     environment_->define(class_var_name, script_value::make_object("class_definition", class_definition_type_id_, class_def, engine_ref_, false));
@@ -5896,9 +5787,10 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             // If so, check for collision with class static methods
             if (!func_decl->is_override) {
                 uint64_t class_var_id = string_symbolizer_->intern("__class_" + decl->name);
-                try {
-                    script_value class_var = environment_->get(class_var_id);
-                    if (class_var.is_object()) {
+                auto class_result = environment_->get(class_var_id);
+                if (class_result && class_result.value().is_object()) {
+                    script_value class_var = std::move(class_result.value());
+                    {
                         auto obj_holder = class_var.get_object_holder();
                         if (obj_holder && obj_holder->type_id == class_definition_type_id_) {
                             auto class_def = std::static_pointer_cast<class_definition>(obj_holder->data);
@@ -5914,8 +5806,6 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                             }
                         }
                     }
-                } catch (const runtime_error&) {
-                    // Class doesn't exist - that's fine
                 }
             }
 

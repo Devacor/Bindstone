@@ -12,6 +12,7 @@
 #include "conversion_registry.hpp"
 #include "bound_array.hpp"
 #include "bound_map.hpp"
+#include "bound_cpp_vector.hpp"
 #include <jaiscript/serialization/archive.hpp>
 #include <string>
 #include <memory>
@@ -1650,9 +1651,19 @@ private:
             auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
             
-            if (auto eng = engine_weak.lock()) {
-                return detail::value_converter<P>::to(cpp_obj.get()->*member, eng.get());
-            }
+			if (auto eng = engine_weak.lock()) {
+				// Special handling for std::vector<T> - wrap in bound_cpp_vector for zero-copy access
+				if constexpr (is_specialization_v<P, std::vector>) {
+					using element_type = typename P::value_type;
+					// Create bound_cpp_vector wrapper that references the C++ vector directly
+					auto wrapper = std::make_shared<bound_cpp_vector<element_type>>(
+						cpp_obj.get()->*member, eng);
+					return eng->make_object(wrapper);
+				}
+				else {
+					return detail::value_converter<P>::to(cpp_obj.get()->*member, eng.get());
+				}
+			}
             throw runtime_error("Engine no longer exists");
         });
         
@@ -1725,7 +1736,32 @@ private:
             }
             return script_value(std::monostate{}, engine_weak); // null
         });
-        
+
+        // Register bound_cpp_vector<T> if this property is a std::vector
+        if constexpr (is_specialization_v<P, std::vector>) {
+            using element_type = typename P::value_type;
+            std::string wrapper_type_name = std::string("bound_cpp_vector<") + typeid(element_type).name() + ">";
+
+            // Check if already registered
+            auto existing = engine_.get_class_definition_by_type(std::type_index(typeid(bound_cpp_vector<element_type>)));
+            if (!existing) {
+                // Register bound_cpp_vector<element_type> with array-like methods
+                class_builder<bound_cpp_vector<element_type>>(engine_, wrapper_type_name)
+                    .method("size", &bound_cpp_vector<element_type>::size)
+                    .method("empty", &bound_cpp_vector<element_type>::empty)
+                    .method("clear", &bound_cpp_vector<element_type>::clear)
+                    .method("push_back", static_cast<void(bound_cpp_vector<element_type>::*)(const element_type&)>(&bound_cpp_vector<element_type>::push_back))
+                    .method("push", static_cast<void(bound_cpp_vector<element_type>::*)(const element_type&)>(&bound_cpp_vector<element_type>::push_back)) // Alias
+                    .method("pop_back", &bound_cpp_vector<element_type>::pop_back)
+                    .method("pop", &bound_cpp_vector<element_type>::pop_back) // Alias
+                    .method("front", static_cast<element_type&(bound_cpp_vector<element_type>::*)()>(&bound_cpp_vector<element_type>::front))
+                    .method("back", static_cast<element_type&(bound_cpp_vector<element_type>::*)()>(&bound_cpp_vector<element_type>::back))
+                    .method("at", static_cast<element_type&(bound_cpp_vector<element_type>::*)(size_t)>(&bound_cpp_vector<element_type>::at))
+                    .method("[]", static_cast<element_type&(bound_cpp_vector<element_type>::*)(size_t)>(&bound_cpp_vector<element_type>::operator[]))
+                    .build();
+            }
+        }
+
         return *this;
     }
 

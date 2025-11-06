@@ -4,6 +4,7 @@
 #include <jaiscript/properties/property.hpp>
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/properties/macros.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 #include <memory>
 #include <vector>
 
@@ -42,6 +43,7 @@ public:
         test("basic_vector_access", [this]() {
             // Test basic access to pre-populated vector
             auto eng = engine::make();
+            stdlib::register_all(eng);
 
             class_builder<Cat>(*eng, "Cat")
                 .constructor<>()

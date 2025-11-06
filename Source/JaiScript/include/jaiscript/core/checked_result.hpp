@@ -274,7 +274,7 @@ public:
     do { \
         auto __result = (expr); \
         if (!__result) [[unlikely]] { \
-            return __result.error(); \
+            return {__result.error(), __result.message()}; \
         } \
     } while(0)
 
@@ -286,7 +286,8 @@ public:
 #define JAISCRIPT_TRY_ASSIGN(var, expr) \
     auto JAISCRIPT_CONCAT(__temp_result_, __LINE__) = (expr); \
     if (!JAISCRIPT_CONCAT(__temp_result_, __LINE__)) [[unlikely]] { \
-        return JAISCRIPT_CONCAT(__temp_result_, __LINE__).error(); \
+        return {JAISCRIPT_CONCAT(__temp_result_, __LINE__).error(), \
+                JAISCRIPT_CONCAT(__temp_result_, __LINE__).message()}; \
     } \
     var = std::move(JAISCRIPT_CONCAT(__temp_result_, __LINE__).value());
 

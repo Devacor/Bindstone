@@ -10,6 +10,7 @@
 #include <memory>
 #include <type_traits>
 #include <typeinfo>
+#include <string_view>
 
 namespace jai {
 
@@ -49,7 +50,7 @@ namespace jai {
 
         // Constructors
         type_info(script_value_type type) : base_type(type) {}
-        type_info(script_value_type type, const std::string& name) : base_type(type), type_name(name) {}
+        type_info(script_value_type type, std::string_view name) : base_type(type), type_name(name) {}
 
         // Type checking
         bool is_array() const { return base_type == script_value_type::jai_array_type; }
@@ -278,7 +279,7 @@ namespace jai {
         }
 
         // Object<T>
-        static type_info make_object(string_symbolizer& symbolizer, const std::string& className) {
+        static type_info make_object(string_symbolizer& symbolizer, std::string_view className) {
             type_info info(script_value_type::jai_object_type, className);
             info.id = symbolizer.intern(info.canonical_name());
             return info;

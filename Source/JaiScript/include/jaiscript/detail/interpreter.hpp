@@ -66,12 +66,12 @@ namespace jai {
         // Get a pointer to a value (for references)
         script_value* get_value_ptr(uint64_t id);
         
-        // Get all variables in this scope (not including parent scopes)  
-        // Returns a new map with string keys for compatibility
-        std::unordered_map<std::string, script_value> get_local_variables() const;
-        
+        // Get all variables in this scope (not including parent scopes)
+        // Returns a map with string_view keys pointing into the symbolizer (stable until engine destruction)
+        std::unordered_map<std::string_view, script_value> get_local_variables() const;
+
         // Get all variables including parent scopes
-        std::unordered_map<std::string, script_value> get_all_variables() const;
+        std::unordered_map<std::string_view, script_value> get_all_variables() const;
         
         // Reset environment for reuse (optimization helper)
         virtual void reset(std::shared_ptr<environment> new_parent);
@@ -403,7 +403,7 @@ namespace jai {
         // Variable access methods
         script_value get_variable(const std::string& name) const;
         bool has_variable(const std::string& name) const;
-        std::unordered_map<std::string, script_value> get_all_variables() const;
+        std::unordered_map<std::string_view, script_value> get_all_variables() const;
         
         // Exception handling methods
         bool is_unwinding() const { return is_unwinding_; }

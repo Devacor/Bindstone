@@ -129,7 +129,7 @@ namespace jai {
                     // Store the C++ object in the special field (same pattern as class_builder)
                     // Using the constant "_cpp_object" directly to avoid circular include
                     instance->set_field("_cpp_object",
-                        script_value::make_cpp_object(type_name, std::static_pointer_cast<void>(data), weak_from_this()));
+                        script_value::make_cpp_object(type_name, class_def->get_type_id(), std::static_pointer_cast<void>(data), weak_from_this()));
 
                     // Return the class_instance wrapped in a script_value
                     return script_value::make_object(type_name, instance, weak_from_this());
@@ -139,7 +139,8 @@ namespace jai {
             }
 
             // Fallback: store as raw C++ object (properties won't work)
-            return script_value::make_cpp_object(type_name, std::static_pointer_cast<void>(data), weak_from_this());
+            auto type_id = get_symbolizer()->intern(type_name);
+            return script_value::make_cpp_object(type_name, type_id, std::static_pointer_cast<void>(data), weak_from_this());
         }
         
         // Convenient script_value creation methods
@@ -412,9 +413,10 @@ namespace jai {
         void register_type_converter(const std::string& type_name) {
             // Register a converter that creates a script_value from this type
             auto engine_weak = weak_from_this();
-            auto toValue = [type_name, engine_weak](const T& obj) -> script_value {
+            auto type_id = get_symbolizer()->intern(type_name);
+            auto toValue = [type_name, type_id, engine_weak](const T& obj) -> script_value {
                 auto sharedObj = std::make_shared<T>(obj);
-                return script_value::make_cpp_object(type_name, std::static_pointer_cast<void>(sharedObj), engine_weak);
+                return script_value::make_cpp_object(type_name, type_id, std::static_pointer_cast<void>(sharedObj), engine_weak);
             };
             
             // Store this converter (implementation will handle the storage)

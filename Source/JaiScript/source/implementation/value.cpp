@@ -162,7 +162,8 @@ script_value script_value::make_object(const std::string& type_name, uint64_t ty
     return v;
 }
 
-script_value script_value::make_cpp_object(const std::string& type_name, std::shared_ptr<void> data, std::weak_ptr<engine> eng) {
+// Factory method for raw C++ objects - requires type_id to avoid re-interning
+script_value script_value::make_cpp_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, std::weak_ptr<engine> eng) {
     if (eng.expired()) {
         throw runtime_error("Cannot create cpp_object with expired engine reference");
     }
@@ -173,7 +174,6 @@ script_value script_value::make_cpp_object(const std::string& type_name, std::sh
         throw runtime_error("Cannot create cpp_object: engine reference expired");
     }
 
-    uint64_t type_id = locked_engine->get_symbolizer()->intern(type_name);
     auto class_def = locked_engine->get_class_definition(type_id);
     if (!class_def) {
         throw runtime_error("Cannot create cpp_object of unregistered class '" + type_name +
@@ -185,6 +185,7 @@ script_value script_value::make_cpp_object(const std::string& type_name, std::sh
 
     auto obj = std::make_shared<object_holder>();
     obj->type_name = type_name;
+    obj->type_id = type_id;  // Use the provided type_id directly (no re-interning)
     obj->data = data;
     obj->is_class_instance_wrapper = false;  // make_cpp_object is for raw C++ objects
     v.storage_ = obj;
@@ -211,13 +212,17 @@ script_value script_value::make_invalid(std::weak_ptr<engine> eng) {
     return val;
 }
 
-script_value script_value::make_weak_ptr(const script_value& value, std::weak_ptr<engine> eng) {
+checked_result<script_value> script_value::make_weak_ptr(const script_value& value, std::weak_ptr<engine> eng) {
     if (eng.expired()) {
-        throw runtime_error("Cannot create weak_ptr with expired engine reference");
+        return checked_result<script_value>(
+            make_error_code(runtime_error_code::unsupported_operation),
+            "Cannot create weak_ptr with expired engine reference");
     }
     auto locked_engine = eng.lock();
     if (!locked_engine) {
-        throw runtime_error("Cannot create weak_ptr: engine reference expired");
+        return checked_result<script_value>(
+            make_error_code(runtime_error_code::unsupported_operation),
+            "Cannot create weak_ptr: engine reference expired");
     }
     script_value v(std::monostate{}, eng);
     v.type_info_ = locked_engine->get_type_info_weak_ptr(value.get_type_info());
@@ -229,7 +234,9 @@ script_value script_value::make_weak_ptr(const script_value& value, std::weak_pt
         // Get the shared_ptr<object_holder> from the value
         auto holder = value.get_object_holder();
         if (!holder) {
-            throw runtime_error("Failed to get object_holder from script_value");
+            return checked_result<script_value>(
+                make_error_code(runtime_error_code::unsupported_operation),
+                "Failed to get object_holder from script_value");
         }
 
         // Create a weak_ptr from the shared_ptr
@@ -239,12 +246,16 @@ script_value script_value::make_weak_ptr(const script_value& value, std::weak_pt
         v.storage_ = weak;
     } else if (value.type() == script_value_type::jai_object_type) {
         // This is a regular object with value semantics
-        throw runtime_error("Cannot create weak_ptr from a value-semantic object. Use shared_ptr<T> to enable reference semantics: auto obj = shared_ptr<T>(...); auto weak = weak_ptr<T>(obj);");
+        return checked_result<script_value>(
+            make_error_code(runtime_error_code::type_mismatch),
+            "Cannot create weak_ptr from a value-semantic object. Use shared_ptr<T> to enable reference semantics: auto obj = shared_ptr<T>(...); auto weak = weak_ptr<T>(obj);");
     } else {
-        throw runtime_error("weak_ptr can only be created from shared_ptr<T>");
+        return checked_result<script_value>(
+            make_error_code(runtime_error_code::type_mismatch),
+            "weak_ptr can only be created from shared_ptr<T>");
     }
-    
-    return v;
+
+    return checked_result<script_value>(v);
 }
 
 script_value script_value::make_reference(script_value* target, const std::shared_ptr<environment>& env, std::weak_ptr<engine> eng) {
@@ -344,6 +355,7 @@ script_value script_value::clone() const {
                 // Create new object_holder
                 auto new_holder = std::make_shared<object_holder>();
                 new_holder->type_name = obj_holder->type_name;
+                new_holder->type_id = obj_holder->type_id;  // Preserve the cached type_id
                 new_holder->data = new_instance;
                 new_holder->is_class_instance_wrapper = true;
                 result.storage_ = new_holder;

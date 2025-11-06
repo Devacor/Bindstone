@@ -122,6 +122,96 @@ public:
 };
 
 /**
+ * Partial specialization for reference types - uses std::reference_wrapper internally
+ * This allows checked_result to work with reference types despite the union limitation
+ */
+template<typename T>
+class [[nodiscard]] checked_result<T&> {
+private:
+    union {
+        std::reference_wrapper<T> value_;
+        std::error_code error_;
+    };
+    bool has_value_;
+    std::string message_;
+
+public:
+    // Success constructor from reference
+    checked_result(T& value) noexcept
+        : value_(std::ref(value)), has_value_(true) {}
+
+    // Error constructor without message
+    checked_result(std::error_code ec) noexcept
+        : error_(ec), has_value_(false) {}
+
+    // Error constructor with message
+    checked_result(std::error_code ec, std::string msg)
+        : error_(ec), has_value_(false), message_(std::move(msg)) {}
+
+    // Copy constructor
+    checked_result(const checked_result& other)
+        : has_value_(other.has_value_), message_(other.message_) {
+        if (has_value_) {
+            new (&value_) std::reference_wrapper<T>(other.value_);
+        } else {
+            new (&error_) std::error_code(other.error_);
+        }
+    }
+
+    // Move constructor
+    checked_result(checked_result&& other) noexcept
+        : has_value_(other.has_value_), message_(std::move(other.message_)) {
+        if (has_value_) {
+            new (&value_) std::reference_wrapper<T>(other.value_);
+        } else {
+            new (&error_) std::error_code(other.error_);
+        }
+    }
+
+    // Destructor
+    ~checked_result() {
+        if (has_value_) {
+            value_.~reference_wrapper<T>();
+        } else {
+            error_.~error_code();
+        }
+    }
+
+    // Check if successful
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return has_value_;
+    }
+
+    [[nodiscard]] bool has_value() const noexcept {
+        return has_value_;
+    }
+
+    [[nodiscard]] bool has_error() const noexcept {
+        return !has_value_;
+    }
+
+    // Get value (returns actual reference, not reference_wrapper)
+    [[nodiscard]] T& value() const noexcept {
+        return value_.get();
+    }
+
+    // Get error
+    [[nodiscard]] std::error_code error() const noexcept {
+        return error_;
+    }
+
+    // Get error message if available
+    [[nodiscard]] const std::string& message() const noexcept {
+        return message_;
+    }
+
+    // Propagate error to caller
+    [[nodiscard]] checked_result<T&> propagate() && {
+        return std::move(*this);
+    }
+};
+
+/**
  * Specialization for void - represents success/failure without a value
  * Optimized to just store error_code (default constructed = success)
  *

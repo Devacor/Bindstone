@@ -2502,8 +2502,11 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         environment_->assign(identifier->symbol_id, std::move(value));
                     } else if (value.type() == script_value_type::jai_shared_ptr_type) {
                         // Convert shared_ptr to weak_ptr
-                        script_value weak = script_value::make_weak_ptr(value, engine_ref_);
-                        environment_->assign(identifier->symbol_id, std::move(weak));
+                        auto weak_result = script_value::make_weak_ptr(value, engine_ref_);
+                        if (!weak_result) {
+                            return checked_result<void>(weak_result.error(), weak_result.message());
+                        }
+                        environment_->assign(identifier->symbol_id, std::move(weak_result.value()));
                     } else if (value.type() == script_value_type::jai_object_type) {
                         // Helpful error for value-semantic objects
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
@@ -2818,8 +2821,11 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
                 environment_->define(decl->name_id, std::move(value));
             } else if (value.type() == script_value_type::jai_shared_ptr_type) {
                 // Initialize with shared_ptr - create weak_ptr from it
-                script_value weak = script_value::make_weak_ptr(value, engine_ref_);
-                environment_->define(decl->name_id, std::move(weak));
+                auto weak_result = script_value::make_weak_ptr(value, engine_ref_);
+                if (!weak_result) {
+                    return checked_result<void>(weak_result.error(), weak_result.message());
+                }
+                environment_->define(decl->name_id, std::move(weak_result.value()));
             } else if (value.type() == script_value_type::jai_object_type) {
                 // Helpful error for value-semantic objects
                 throw runtime_error("Cannot initialize weak_ptr from a value-semantic object. Use shared_ptr<T> to enable reference semantics.");
@@ -3206,7 +3212,11 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
 
             if (ident_expr->symbol_id == weak_from_this_id_) {
                 // Create a weak_ptr from the 'this' object
-                push_value(script_value::make_weak_ptr(this_val, engine_ref_));
+                auto weak_result = script_value::make_weak_ptr(this_val, engine_ref_);
+                if (!weak_result) {
+                    return checked_result<void>(weak_result.error(), weak_result.message());
+                }
+                push_value(std::move(weak_result.value()));
                 return {};
             } else {  // shared_from_this
                 // Just return the shared_ptr (which is already 'this')
@@ -4106,14 +4116,20 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
             if (obj.type() != script_value_type::jai_shared_ptr_type) {
                 if (obj.type() == script_value_type::jai_object_type) {
                     // Helpful error for value-semantic objects
-                    throw runtime_error("Cannot create weak_ptr from a value-semantic object. Use shared_ptr<T>: auto obj = shared_ptr<" + expr->type->type_params[0]->type_name + ">(...); auto weak = weak_ptr<" + expr->type->type_params[0]->type_name + ">(obj);");
+                    return checked_result<void>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Cannot create weak_ptr from a value-semantic object. Use shared_ptr<T>: auto obj = shared_ptr<" + expr->type->type_params[0]->type_name + ">(...); auto weak = weak_ptr<" + expr->type->type_params[0]->type_name + ">(obj);");
                 } else {
                     return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
                 }
             }
 
             // Create weak_ptr from the shared_ptr
-            push_value(script_value::make_weak_ptr(obj, engine_ref_));
+            auto weak_result = script_value::make_weak_ptr(obj, engine_ref_);
+            if (!weak_result) {
+                return checked_result<void>(weak_result.error(), weak_result.message());
+            }
+            push_value(std::move(weak_result.value()));
         } else {
             // weak_ptr() expects 0 or 1 arguments
             return checked_result<void>(make_error_code(runtime_error_code::argument_count_mismatch));  // [ErrorText] Invalid argument count

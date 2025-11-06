@@ -1904,6 +1904,24 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
             }
         } else {
             if (left.is_object()) {
+                // First, try to find operator[] as a method on the object (for class instances)
+                auto instance_result = left.checked_as<std::shared_ptr<class_instance>>();
+                if (instance_result) {
+                    auto instance = instance_result.value();
+                    script_value method = instance->get_method("[]", false);
+                    if (method.is_function()) {
+                        const script_function& func = method.as_function();
+                        std::vector<script_value> args = {left, right};
+                        auto result = func(args);
+                        if (!result) {
+                            return checked_result<void>(result.error(), result.message());
+                        }
+                        push_value(std::move(result.value()));
+                        return {};
+                    }
+                }
+
+                // Fall back to global [] operator function
                 auto method_result = environment_->get("[]");
                 if (method_result && method_result.value().is_function()) {
                     script_value getMethod = std::move(method_result.value());

@@ -6,6 +6,7 @@
 #include "types.hpp"
 #include "type_info.hpp"
 #include "conversion_registry.hpp"
+#include "runtime_errors.hpp"
 #include <jaiscript/jaiscript_fwd.hpp>
 #include <variant>
 #include <memory>
@@ -821,7 +822,47 @@ namespace jai {
                 return const_cast<const script_value*>(this)->as<T>();
             }
         }
-        
+
+        // checked_as<T>() - Returns checked_result instead of throwing exceptions
+        template<typename T>
+        checked_result<T> checked_as() const {
+            // Support for shared_ptr<class_instance> extraction from objects
+            if constexpr (std::is_same_v<T, std::shared_ptr<jai::class_instance>>) {
+                auto t = type();
+                if (t != script_value_type::jai_object_type && t != script_value_type::jai_shared_ptr_type) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "script_value is not an object (type=" + std::to_string(static_cast<int>(type())) + ")"
+                    );
+                }
+                auto objHolder = std::get<std::shared_ptr<object_holder>>(storage_);
+                if (!objHolder->is_class_instance_wrapper) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Object is not a class_instance (type_name=" + objHolder->type_name + ")"
+                    );
+                }
+                return checked_result<T>(std::static_pointer_cast<class_instance>(objHolder->data));
+            }
+            // For other types, fall back to as() wrapped in try/catch for now
+            // TODO: Implement checked versions for all types
+            else {
+                try {
+                    return checked_result<T>(as<T>());
+                } catch (const runtime_error& e) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        e.what()
+                    );
+                } catch (...) {
+                    return checked_result<T>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Type conversion failed"
+                    );
+                }
+            }
+        }
+
         // Conversion to string for debugging
         std::string to_string() const;
         

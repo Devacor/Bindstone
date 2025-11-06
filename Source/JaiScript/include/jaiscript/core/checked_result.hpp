@@ -32,9 +32,10 @@ private:
     std::string message_;  // Optional detailed error message
 
 public:
-    // Success constructor
-    checked_result(T&& value) noexcept(std::is_nothrow_move_constructible_v<T>)
-        : value_(std::forward<T>(value)), has_value_(true) {}
+    // Success constructor - templated to allow implicit conversion from derived types
+    template<typename U, typename = std::enable_if_t<std::is_convertible_v<U, T>>>
+    checked_result(U&& value) noexcept(std::is_nothrow_constructible_v<T, U>)
+        : value_(std::forward<U>(value)), has_value_(true) {}
 
     checked_result(const T& value) noexcept(std::is_nothrow_copy_constructible_v<T>)
         : value_(value), has_value_(true) {}
@@ -186,6 +187,18 @@ public:
             return __result.error(); \
         } \
     } while(0)
+
+// Convenience macro for early return on error with value extraction
+// Usage: JAISCRIPT_TRY_ASSIGN(auto x, some_function());
+// Uses double indirection to properly expand __LINE__ before token pasting (works on MSVC/GCC/Clang)
+#define JAISCRIPT_CONCAT_IMPL(a, b) a##b
+#define JAISCRIPT_CONCAT(a, b) JAISCRIPT_CONCAT_IMPL(a, b)
+#define JAISCRIPT_TRY_ASSIGN(var, expr) \
+    auto JAISCRIPT_CONCAT(__temp_result_, __LINE__) = (expr); \
+    if (!JAISCRIPT_CONCAT(__temp_result_, __LINE__)) [[unlikely]] { \
+        return JAISCRIPT_CONCAT(__temp_result_, __LINE__).error(); \
+    } \
+    var = std::move(JAISCRIPT_CONCAT(__temp_result_, __LINE__).value());
 
 // Convenience macro for propagating errors in loops where we need to break instead of return
 // Usage: JAISCRIPT_TRY_BREAK(expr->left->accept(this));

@@ -1,7 +1,13 @@
 #pragma once
 
+#ifndef JAISCRIPT_SERIALIZATION_ARCHIVE_HPP
+#define JAISCRIPT_SERIALIZATION_ARCHIVE_HPP
+#define JAISCRIPT_ARCHIVE_HPP_INCLUDED
+
+#include <jaiscript/serialization/serialization_metadata.hpp>
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/type_info.hpp>
+#include <jaiscript/core/engine.hpp>
 #include <string>
 #include <vector>
 #include <memory>
@@ -47,31 +53,51 @@ class json_archive_reader;
 // Archive writer interface
 class archive_writer {
 protected:
+    // Engine reference for creating script_values during serialization
+    std::weak_ptr<engine> engine_ref_;
+
     // Shared pointer tracking to prevent duplicate serialization
     std::unordered_map<const void*, uint32_t> shared_ptr_ids_;
     uint32_t next_shared_id_ = 1;  // 0 reserved for null
-    
+
     // Check if a shared_ptr has been serialized before
     // Returns: pair<id, is_new> where is_new indicates if this is the first time
     std::pair<uint32_t, bool> track_shared_ptr(const void* raw_ptr) {
         if (raw_ptr == nullptr) {
             return {0, false};  // null pointer
         }
-        
+
         auto it = shared_ptr_ids_.find(raw_ptr);
         if (it != shared_ptr_ids_.end()) {
             return {it->second, false};  // Already seen
         }
-        
+
         // New shared_ptr
         uint32_t id = next_shared_id_++;
         shared_ptr_ids_[raw_ptr] = id;
         return {id, true};
     }
-    
+
 public:
+    // Constructor that accepts engine reference
+    explicit archive_writer(std::weak_ptr<engine> eng = {}) : engine_ref_(eng) {}
+
     virtual ~archive_writer() = default;
-    
+
+    // Set engine reference
+    void set_engine(std::weak_ptr<engine> eng) {
+        engine_ref_ = eng;
+    }
+
+    // Get engine reference
+    std::weak_ptr<engine> get_engine() const {
+        return engine_ref_;
+    }
+
+    // Does this archive format require explicit property keys array?
+    // Binary: true (no named fields), JSON: false (has object keys)
+    virtual bool needs_property_keys() const = 0;
+
     // Basic type serialization
     virtual void write_int8(int8_t value) = 0;
     virtual void write_int16(int16_t value) = 0;
@@ -93,7 +119,12 @@ public:
     virtual void begin_array(size_t size) = 0;
     virtual void end_array() = 0;
     virtual void write_property_name(const std::string& name) = 0;
-    
+
+    // Map serialization (format-specific: JSON uses object, binary uses array)
+    virtual void begin_map(size_t size) = 0;
+    virtual void end_map() = 0;
+    virtual void write_map_key(const std::string& key) = 0;
+
     // Generic value writing (determines type at runtime)
     virtual void write_value(const script_value& value) = 0;
     
@@ -157,9 +188,12 @@ class archive_reader {
 protected:
     // Engine reference for creating script_values
     std::weak_ptr<engine> engine_ref_;
-    
+
     // Shared pointer tracking for deserialization
     std::unordered_map<uint32_t, script_value> id_to_shared_ptr_;  // ID -> reconstructed shared_ptr
+
+    // User context storage (for dependency injection during deserialization)
+    std::map<std::type_index, void*> user_contexts_;
     
     // Register a reconstructed shared_ptr
     void register_shared_ptr(uint32_t id, const script_value& ptr) {
@@ -186,15 +220,40 @@ protected:
     
 public:
     // Constructor that accepts engine reference
-    explicit archive_reader(std::weak_ptr<engine> eng = {}) : engine_ref_(eng) {}
-    
+    // Engine is REQUIRED for readers since they create script_values during deserialization
+    explicit archive_reader(std::weak_ptr<engine> eng) : engine_ref_(eng) {}
+
     virtual ~archive_reader() = default;
     
     // Set engine reference (for readers that can't pass it in constructor)
     void set_engine(std::weak_ptr<engine> eng) {
         engine_ref_ = eng;
     }
-    
+
+    // Get engine reference
+    std::weak_ptr<engine> get_engine() const {
+        return engine_ref_;
+    }
+
+    // Does this archive format require explicit property keys array?
+    // Binary: true (no named fields), JSON: false (has object keys)
+    virtual bool needs_property_keys() const = 0;
+
+    // User context support (similar to Cereal's get_user_data)
+    template<typename ContextType>
+    ContextType* get_user_context() const {
+        auto it = user_contexts_.find(std::type_index(typeid(ContextType)));
+        if (it != user_contexts_.end()) {
+            return static_cast<ContextType*>(it->second);
+        }
+        return nullptr;
+    }
+
+    template<typename ContextType>
+    void set_user_context(ContextType* context) {
+        user_contexts_[std::type_index(typeid(ContextType))] = context;
+    }
+
     // Basic type deserialization
     virtual int8_t read_int8() = 0;
     virtual int16_t read_int16() = 0;
@@ -216,19 +275,45 @@ public:
     virtual size_t begin_array() = 0;
     virtual void end_array() = 0;
     virtual bool read_property_name(std::string& name) = 0;
-    
+
+    // Map deserialization (format-specific: JSON uses object, binary uses array)
+    virtual size_t begin_map() = 0;
+    virtual void end_map() = 0;
+    virtual bool read_map_key(std::string& key) = 0;
+
     // Check if property exists in current object
     virtual bool has_property(const std::string& name) = 0;
-    
+
     // Generic value reading (determines type from stream)
     virtual script_value read_value() = 0;
-    
-    // Skip a property of known type (for deleted properties)
+
+    // Read a specific property by name and convert to C++ type
+    // Used for property pre-reading before construction
     template<typename T>
-    void skip_property() {
-        skip_property_impl(type_info::make<T>());
+    T read_property(const std::string& property_name) {
+        std::string name;
+        if (!read_property_name(name) || name != property_name) {
+            throw serialization_error("Expected property '" + property_name + "' but found '" + name + "'");
+        }
+
+        script_value value = read_value();
+
+        // Convert script_value to C++ type
+        if constexpr (std::is_same_v<T, std::string>) {
+            return value.as<std::string>();
+        } else if constexpr (std::is_integral_v<T>) {
+            return static_cast<T>(value.as<script_int>());
+        } else if constexpr (std::is_floating_point_v<T>) {
+            return static_cast<T>(value.as<script_float>());
+        } else if constexpr (std::is_same_v<T, bool>) {
+            return value.as<bool>();
+        } else {
+            // For complex types, assume they can be extracted directly
+            // This will work for shared_ptr<T> if value holds an object
+            return value.as<T>();
+        }
     }
-    
+
     // Version being deserialized
     uint32_t get_version() const { return version_; }
     
@@ -273,77 +358,23 @@ public:
     }
 
 protected:
-    virtual void skip_property_impl(type_info_ptr type) = 0;
     uint32_t version_ = 0;
-};
-
-// Serialization metadata for properties
-struct property_metadata {
-    std::string name;
-    type_info_ptr type;
-    uint32_t version_added = 1;
-    uint32_t version_removed = UINT32_MAX;
-    bool is_deleted = false;
-    
-    // Network flags
-    enum network_flags : uint32_t {
-        none = 0,
-        reliable = 1 << 0,
-        unreliable = 1 << 1,
-        immediate = 1 << 2,
-        compress_position = 1 << 3,
-        throttle_100ms = 1 << 4,
-        throttle_500ms = 1 << 5
-    };
-    uint32_t network_flags = network_flags::none;
-    
-    bool is_active_in_version(uint32_t version) const {
-        return version >= version_added && version < version_removed && !is_deleted;
-    }
-};
-
-// Class serialization metadata
-struct class_metadata {
-    std::string class_name;
-    uint32_t current_version = 1;
-    std::vector<property_metadata> properties;
-    std::map<uint32_t, std::vector<std::string>> version_property_lists;
-    
-    // Custom serialization functions
-    std::function<void(archive_writer&, const script_value&, uint32_t)> custom_save;
-    std::function<script_value(archive_reader&, uint32_t)> custom_construct;
-    
-    std::vector<std::string> get_properties_for_version(uint32_t version) const {
-        auto it = version_property_lists.find(version);
-        if (it != version_property_lists.end()) {
-            return it->second;
-        }
-        
-        // Default: all properties active in this version, in registration order
-        std::vector<std::string> result;
-        for (const auto& prop : properties) {
-            if (prop.is_active_in_version(version)) {
-                result.push_back(prop.name);
-            }
-        }
-        return result;
-    }
 };
 
 // Registry for class serialization metadata - now tied to engine instance
 class serialization_registry {
 public:
     serialization_registry() = default;
-    
+
     void register_class(const std::string& class_name, const class_metadata& metadata) {
         classes_[class_name] = metadata;
     }
-    
+
     const class_metadata* get_class_metadata(const std::string& class_name) const {
         auto it = classes_.find(class_name);
         return it != classes_.end() ? &it->second : nullptr;
     }
-    
+
     bool has_class(const std::string& class_name) const {
         return classes_.find(class_name) != classes_.end();
     }
@@ -352,25 +383,6 @@ private:
     std::map<std::string, class_metadata> classes_;
 };
 
-// Helper functions for version tagging
-struct version_added {
-    uint32_t version;
-    explicit version_added(uint32_t v) : version(v) {}
-};
-
-struct version_removed {
-    uint32_t version;
-    explicit version_removed(uint32_t v) : version(v) {}
-};
-
-struct network_flags {
-    uint32_t flags;
-    explicit network_flags(uint32_t f) : flags(f) {}
-};
-
-// Convenience functions
-inline version_added added_v(uint32_t version) { return version_added(version); }
-inline version_removed removed_v(uint32_t version) { return version_removed(version); }
-
 } // namespace serialization
 } // namespace jai
+#endif // JAISCRIPT_SERIALIZATION_ARCHIVE_HPP

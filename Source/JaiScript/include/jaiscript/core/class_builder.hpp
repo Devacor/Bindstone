@@ -2,6 +2,7 @@
 
 #ifndef __JAISCRIPT_CORE_CLASS_BUILDER_HPP__
 #define __JAISCRIPT_CORE_CLASS_BUILDER_HPP__
+#define JAISCRIPT_CLASS_BUILDER_HPP_INCLUDED
 
 #include "engine.hpp"
 #include "value.hpp"
@@ -205,17 +206,33 @@ public:
     virtual ~class_definition() = default;
     
     // Constructor for C++ classes (existing)
-    class_definition(const std::string& name, uint64_t type_id, std::weak_ptr<engine> eng) : name_(name), type_id_(type_id), class_type_(cpp_class), engine_ref_(eng) {}
+    class_definition(const std::string& name, uint64_t type_id, std::weak_ptr<engine> eng)
+        : name_(name), type_id_(type_id), type_info_(nullptr), class_type_(cpp_class), engine_ref_(eng) {
+        if (auto e = eng.lock()) {
+            type_info_ = e->get_type_info_object(name);
+        }
+    }
 
     // Constructor for script classes
-    class_definition(const std::string& name, uint64_t type_id, class_type type, std::weak_ptr<engine> eng) : name_(name), type_id_(type_id), class_type_(type), engine_ref_(eng) {}
+    class_definition(const std::string& name, uint64_t type_id, class_type type, std::weak_ptr<engine> eng)
+        : name_(name), type_id_(type_id), type_info_(nullptr), class_type_(type), engine_ref_(eng) {
+        if (auto e = eng.lock()) {
+            type_info_ = e->get_type_info_object(name);
+        }
+    }
     
     // Get the class type
     class_type get_class_type() const { return class_type_; }
     bool is_script_class() const { return class_type_ == script_class; }
     bool is_cpp_class() const { return class_type_ == cpp_class; }
     bool is_vm_class() const { return class_type_ == vm_class; }
-    
+
+    // Get the persistent type_info for this class
+    type_info_ptr get_type_info() const { return type_info_; }
+
+    // Set the persistent type_info (used for bootstrap registration)
+    void set_type_info(type_info_ptr type_info) { type_info_ = type_info; }
+
     // Add a method to the class
     void add_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
         methods_.insert_or_assign(name, script_value::make_function(func, engine_ref_));
@@ -951,6 +968,7 @@ public:
 private:
     std::string name_;
     uint64_t type_id_;  // Interned type name for fast comparisons
+    type_info_ptr type_info_;  // Persistent type_info for this class
     std::weak_ptr<engine> engine_ref_;  // Engine reference for script_value creation
     std::unordered_map<std::string, script_value> methods_;
     std::unordered_map<uint64_t, std::vector<size_t>> method_arities_;  // Track arities for C++ methods (name_id -> list of arities)
@@ -1090,6 +1108,140 @@ template<typename T>
 concept has_engine_constructor = requires(std::weak_ptr<engine> eng) {
     T(eng);
 };
+
+// Detail namespace for factory registration helpers
+namespace class_builder_detail {
+    using namespace serialization;
+
+    // Helper to create wrapped script_value from C++ object
+    template<typename T>
+    script_value wrap_cpp_object(std::shared_ptr<T> cpp_obj, const std::string& class_name, std::weak_ptr<engine> engine_weak) {
+        // Get engine for wrapping
+        auto eng = engine_weak.lock();
+        if (!eng) {
+            throw serialization_error("Engine expired during deserialization");
+        }
+
+        // Get class definition
+        auto class_def = eng->get_class_definition(class_name);
+        if (!class_def) {
+            throw serialization_error("Class definition not found: " + class_name);
+        }
+
+        // Create a class_instance to hold it
+        auto instance = class_def->create_instance();
+
+        // Store the C++ object in the class_instance
+        instance->set_field(class_constants::CPP_OBJECT_FIELD,
+            script_value::make_cpp_object(class_name, cpp_obj, eng));
+
+        // Return wrapped object
+        return script_value::make_object(class_name, instance, eng);
+    }
+
+    // Archive-only factory registration (no context needed)
+    template<typename T, typename FactoryFunc>
+    std::function<script_value(serialization::archive_reader&, uint32_t)>
+    make_archive_only_factory(FactoryFunc&& factory, std::string class_name, std::weak_ptr<engine> engine_weak) {
+        return [factory = std::forward<FactoryFunc>(factory), class_name = std::move(class_name), engine_weak]
+               (serialization::archive_reader& archive, uint32_t version) -> script_value {
+            auto cpp_obj = factory(archive);
+            return wrap_cpp_object<T>(cpp_obj, class_name, engine_weak);
+        };
+    }
+
+    // Forward declarations for context-based deserialization factories
+    // These functions require archive_reader to be fully defined before instantiation.
+    // Implementations are provided in class_builder_serialization.hpp which should be
+    // included explicitly by code that uses these context-based factories.
+    template<typename T, typename ContextType, typename FactoryFunc>
+    std::function<script_value(serialization::archive_reader&, uint32_t)>
+    make_context_only_factory(FactoryFunc&& factory, std::string class_name, std::weak_ptr<engine> engine_weak);
+
+    template<typename T, typename ContextType, typename FactoryFunc>
+    std::function<script_value(serialization::archive_reader&, uint32_t)>
+    make_context_archive_factory(FactoryFunc&& factory, std::string class_name, std::weak_ptr<engine> engine_weak);
+}
+
+// Tag for opting out of registration-time type dependency validation
+// Use this with .property() to acknowledge circular dependencies
+// Example: .property("child", &Parent::child, skip_type_check)
+struct skip_type_check_t {};
+inline constexpr skip_type_check_t skip_type_check{};
+
+namespace class_builder_validation {
+    // Helper to detect if a type is a standard container
+    template<typename T>
+    struct is_std_container : std::false_type {};
+
+    template<typename... Args>
+    struct is_std_container<std::vector<Args...>> : std::true_type {};
+
+    template<typename... Args>
+    struct is_std_container<std::map<Args...>> : std::true_type {};
+
+    template<typename... Args>
+    struct is_std_container<std::unordered_map<Args...>> : std::true_type {};
+
+    template<typename... Args>
+    struct is_std_container<std::set<Args...>> : std::true_type {};
+
+    template<typename... Args>
+    struct is_std_container<std::unordered_set<Args...>> : std::true_type {};
+
+    // Helper to unwrap smart pointers to get the inner type
+    // For std::shared_ptr<T>, std::weak_ptr<T>, std::unique_ptr<T> -> extracts T
+    // For other types -> returns the type as-is
+    template<typename T>
+    struct unwrap_smart_pointer {
+        using type = T;
+    };
+
+    template<typename U>
+    struct unwrap_smart_pointer<std::shared_ptr<U>> {
+        using type = U;
+    };
+
+    template<typename U>
+    struct unwrap_smart_pointer<std::weak_ptr<U>> {
+        using type = U;
+    };
+
+    template<typename U>
+    struct unwrap_smart_pointer<std::unique_ptr<U>> {
+        using type = U;
+    };
+
+    template<typename T>
+    using unwrap_smart_pointer_t = typename unwrap_smart_pointer<T>::type;
+
+    // Helper to get the validation type (unwraps smart pointers and removes cv/ref)
+    // For std::shared_ptr<CustomType> -> extracts CustomType
+    // For int& -> extracts int
+    template<typename T>
+    struct get_validation_type {
+        using bare_type = std::remove_cv_t<std::remove_reference_t<T>>;
+        using type = unwrap_smart_pointer_t<bare_type>;
+    };
+
+    template<typename T>
+    using get_validation_type_t = typename get_validation_type<T>::type;
+
+    // Helper to determine if a type needs registration validation
+    // Returns true for types that should be registered with class_builder
+    // Returns false for primitives, std::string, STL containers, and script_value
+    // IMPORTANT: Smart pointers are unwrapped - we validate the inner type
+    template<typename T>
+    constexpr bool needs_registration_check() {
+        using inner_type = get_validation_type_t<T>;  // Unwrap smart pointers
+
+        return !std::is_fundamental_v<inner_type> &&
+               !std::is_same_v<inner_type, std::string> &&
+               !is_std_container<inner_type>::value &&
+               !std::is_same_v<inner_type, script_value> &&
+               std::is_class_v<inner_type>;
+    }
+}
 
 // Builder pattern for registering C++ classes to JaiScript
 template<typename T>
@@ -1433,39 +1585,55 @@ public:
         serialization_metadata_.current_version = v;
         return *this;
     }
-    
-    // Add deleted property for binary compatibility
-    template<typename PropType>
-    class_builder& deleted_property(const std::string& name, 
-                                  serialization::version_removed removed = serialization::version_removed(UINT32_MAX)) {
-        serialization::property_metadata prop_meta;
-        prop_meta.name = name;
-        prop_meta.type = type_info::make<PropType>();
-        prop_meta.is_deleted = true;
-        prop_meta.version_removed = removed.version;
-        
-        serialization_metadata_.properties.push_back(prop_meta);
-        return *this;
-    }
-    
-    // Specify explicit property list for a version
-    class_builder& version_properties(uint32_t version, const std::vector<std::string>& properties) {
-        serialization_metadata_.version_property_lists[version] = properties;
-        return *this;
-    }
 
-    // Add property/field binding
+    // Add property/field binding (with automatic registration validation)
     template<typename P>
     class_builder& property(const std::string& name, P T::*member) {
+        return property_impl<P>(name, member, false);
+    }
+
+    // Add property/field binding (opt-out of registration validation)
+    // Use this to explicitly acknowledge circular dependencies
+    template<typename P>
+    class_builder& property(const std::string& name, P T::*member, skip_type_check_t) {
+        return property_impl<P>(name, member, true);
+    }
+
+private:
+    // Internal implementation for property registration with validation
+    template<typename P>
+    class_builder& property_impl(const std::string& name, P T::*member, bool skip_validation) {
+        // Validate that property type is registered (unless explicitly skipped)
+        if constexpr (class_builder_validation::needs_registration_check<P>()) {
+            if (!skip_validation) {
+                // Extract the validation type (unwraps smart pointers)
+                using validation_type_t = typename class_builder_validation::get_validation_type<P>::type;
+
+                // Check if this type has been registered with class_builder
+                // We use std::type_index to identify types, just like the rest of the codebase
+                auto prop_type_index = std::type_index(typeid(validation_type_t));
+                auto registered_class = engine_.get_class_definition_by_type(prop_type_index);
+
+                if (!registered_class) {
+                    throw std::runtime_error(
+                        "Property '" + name + "' of class '" + class_name_ + "' uses unregistered type '" +
+                        typeid(P).name() + "'. " +
+                        "You must register this type with class_builder before registering '" + class_name_ + "', " +
+                        "or use skip_type_check to explicitly acknowledge circular dependencies:\n" +
+                        "  .property(\"" + name + "\", &" + class_name_ + "::" + name + ", jai::skip_type_check)"
+                    );
+                }
+            }
+        }
+
         // Register the property as a special field that knows how to access the C++ member
         // We'll store a lambda that can get/set the value
         class_def_->add_field(name, script_value(std::monostate{}, std::weak_ptr<engine>(engine_.shared_from_this()))); // Register field name
-        
+
         // Register serialization metadata
         serialization::property_metadata prop_meta;
         prop_meta.name = name;
-        prop_meta.type = type_info::make<P>();
-        prop_meta.version_added = 1; // Default to version 1
+        prop_meta.type = engine_.get_type_info_for_cpp_type<P>();
         serialization_metadata_.properties.push_back(prop_meta);
         
         // Add a special method that handles property access
@@ -1560,89 +1728,174 @@ public:
         
         return *this;
     }
-    
-    // Add property with lambda getter/setter
+
+public:
+    // Add property with getter/setter (supports both lambdas and member function pointers)
     template<typename Getter, typename Setter>
     class_builder& property(const std::string& name, Getter&& getter, Setter&& setter) {
         // Register the property as a field
         class_def_->add_field(name, script_value(std::monostate{}, std::weak_ptr<engine>(engine_.shared_from_this()))); // Register field name
-        
+
+        // Register serialization metadata
+        constexpr bool is_read_only = std::is_null_pointer_v<std::decay_t<Setter>> || std::is_same_v<std::decay_t<Setter>, std::nullptr_t>;
+
+        serialization::property_metadata prop_meta;
+        prop_meta.name = name;
+        prop_meta.read_only = is_read_only;
+
+        // Try to deduce type from getter return type
+        if constexpr (std::is_member_function_pointer_v<std::decay_t<Getter>>) {
+            using getter_traits = detail::function_traits<std::decay_t<Getter>>;
+            using return_type = typename getter_traits::return_type;
+            prop_meta.type = engine_.get_type_info_for_cpp_type<std::decay_t<return_type>>();
+        } else {
+            // For lambdas, we can't easily deduce the type at compile time
+            // Leave type as nullptr - it will be determined at runtime if needed
+            prop_meta.type = nullptr;
+        }
+
+        serialization_metadata_.properties.push_back(prop_meta);
+
         // Add getter method
-        class_def_->add_method("_get_" + name, [getter = std::forward<Getter>(getter)](const std::vector<script_value>& args) -> script_value {
+        class_def_->add_method("_get_" + name, [getter = std::forward<Getter>(getter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Property getter called without 'this' object");
             }
-            
+
             // Extract the class_instance from the first argument (this)
             auto instance = args[0].as<std::shared_ptr<class_instance>>();
-            
+
             // Get the C++ object from the special field
             auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-            
-            // Call the getter lambda with the C++ object
-            return detail::value_converter<decltype(getter(*cpp_obj))>::to(getter(*cpp_obj));
-        });
-        
-        // Add setter method
-        class_def_->add_method("_set_" + name, [setter = std::forward<Setter>(setter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
-            if (args.size() < 2) {
-                throw runtime_error("Property setter requires 'this' and value");
+
+            // Check if getter is a member function pointer
+            if constexpr (std::is_member_function_pointer_v<std::decay_t<Getter>>) {
+                // Call member function pointer: (obj->*getter)()
+                if (auto eng = engine_weak.lock()) {
+                    return detail::value_converter<decltype((cpp_obj.get()->*getter)())>::to((cpp_obj.get()->*getter)(), eng.get());
+                }
+                throw runtime_error("Engine no longer exists");
+            } else {
+                // Call lambda: getter(*cpp_obj)
+                if (auto eng = engine_weak.lock()) {
+                    return detail::value_converter<decltype(getter(*cpp_obj))>::to(getter(*cpp_obj), eng.get());
+                }
+                throw runtime_error("Engine no longer exists");
             }
-            
-            // Extract the class_instance from the first argument (this)
-            auto instance = args[0].as<std::shared_ptr<class_instance>>();
-            
-            // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
-            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-            
-            // Extract the value to set
-            using setter_traits = detail::function_traits<std::decay_t<Setter>>;
-            using value_type = std::tuple_element_t<1, typename setter_traits::argument_types>;
-            auto value = args[1].as<value_type>();
-            
-            // Call the setter lambda
-            setter(*cpp_obj, value);
-            return script_value(std::monostate{}, engine_weak); // null
         });
         
+        // Add setter method - use different implementations based on setter type
+        if constexpr (std::is_null_pointer_v<std::decay_t<Setter>> || std::is_same_v<std::decay_t<Setter>, std::nullptr_t>) {
+            // Readonly property - add a no-op setter
+            class_def_->add_method("_set_" + name, [engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+                // Read-only property, do nothing
+                return script_value(std::monostate{}, engine_weak);
+            });
+        } else if constexpr (std::is_member_function_pointer_v<std::decay_t<Setter>>) {
+            // Member function pointer setter
+            class_def_->add_method("_set_" + name, [setter = std::forward<Setter>(setter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+                if (args.size() < 2) {
+                    throw runtime_error("Property setter requires 'this' and value");
+                }
+                auto instance = args[0].as<std::shared_ptr<class_instance>>();
+                auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+                auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
+
+                using setter_traits = detail::function_traits<std::decay_t<Setter>>;
+                using value_type = std::tuple_element_t<0, typename setter_traits::argument_types>;
+                auto value = args[1].as<value_type>();
+                (cpp_obj.get()->*setter)(value);
+                return script_value(std::monostate{}, engine_weak);
+            });
+        } else {
+            // Lambda setter
+            class_def_->add_method("_set_" + name, [setter = std::forward<Setter>(setter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+                if (args.size() < 2) {
+                    throw runtime_error("Property setter requires 'this' and value");
+                }
+                auto instance = args[0].as<std::shared_ptr<class_instance>>();
+                auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+                auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
+
+                using setter_traits = detail::function_traits<std::decay_t<Setter>>;
+                using value_type = std::tuple_element_t<1, typename setter_traits::argument_types>;
+                auto value = args[1].as<value_type>();
+                setter(*cpp_obj, value);
+                return script_value(std::monostate{}, engine_weak);
+            });
+        }
+
         // Also add traditional getter/setter methods for compatibility
         std::string getterName = "get" + name;
         getterName[3] = std::toupper(getterName[3]); // Capitalize first letter
-        
-        class_def_->add_method(getterName, [getter = std::forward<Getter>(getter)](const std::vector<script_value>& args) -> script_value {
+
+        class_def_->add_method(getterName, [getter = std::forward<Getter>(getter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
             if (args.empty()) {
                 throw runtime_error("Getter called without 'this' object");
             }
-            
+
             auto instance = args[0].as<std::shared_ptr<class_instance>>();
             auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-            
-            return detail::value_converter<decltype(getter(*cpp_obj))>::to(getter(*cpp_obj));
+
+            // Check if getter is a member function pointer
+            if constexpr (std::is_member_function_pointer_v<std::decay_t<Getter>>) {
+                if (auto eng = engine_weak.lock()) {
+                    return detail::value_converter<decltype((cpp_obj.get()->*getter)())>::to((cpp_obj.get()->*getter)(), eng.get());
+                }
+                throw runtime_error("Engine no longer exists");
+            } else {
+                if (auto eng = engine_weak.lock()) {
+                    return detail::value_converter<decltype(getter(*cpp_obj))>::to(getter(*cpp_obj), eng.get());
+                }
+                throw runtime_error("Engine no longer exists");
+            }
         });
-        
-        // Add setter
+
+        // Add setter - use different implementations based on setter type
         std::string setterName = "set" + name;
         setterName[3] = std::toupper(setterName[3]); // Capitalize first letter
-        
-        class_def_->add_method(setterName, [setter = std::forward<Setter>(setter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
-            if (args.size() < 2) {
-                throw runtime_error("Setter requires 'this' and value");
-            }
-            
-            auto instance = args[0].as<std::shared_ptr<class_instance>>();
-            auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
-            auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
-            
-            using setter_traits = detail::function_traits<std::decay_t<Setter>>;
-            using value_type = std::tuple_element_t<1, typename setter_traits::argument_types>;
-            auto value = args[1].as<value_type>();
-            
-            setter(*cpp_obj, value);
-            return script_value(std::monostate{}, engine_weak); // null
-        });
+
+        if constexpr (std::is_null_pointer_v<std::decay_t<Setter>> || std::is_same_v<std::decay_t<Setter>, std::nullptr_t>) {
+            // Read-only property - throw error when trying to set
+            class_def_->add_method(setterName, [prop_name = name, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+                throw runtime_error("Property '" + prop_name + "' is read-only");
+                return script_value(std::monostate{}, engine_weak);
+            });
+        } else if constexpr (std::is_member_function_pointer_v<std::decay_t<Setter>>) {
+            // Member function pointer setter
+            class_def_->add_method(setterName, [setter = std::forward<Setter>(setter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+                if (args.size() < 2) {
+                    throw runtime_error("Setter requires 'this' and value");
+                }
+                auto instance = args[0].as<std::shared_ptr<class_instance>>();
+                auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+                auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
+
+                using setter_traits = detail::function_traits<std::decay_t<Setter>>;
+                using value_type = std::tuple_element_t<0, typename setter_traits::argument_types>;
+                auto value = args[1].as<value_type>();
+                (cpp_obj.get()->*setter)(value);
+                return script_value(std::monostate{}, engine_weak);
+            });
+        } else {
+            // Lambda setter
+            class_def_->add_method(setterName, [setter = std::forward<Setter>(setter), engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const std::vector<script_value>& args) -> script_value {
+                if (args.size() < 2) {
+                    throw runtime_error("Setter requires 'this' and value");
+                }
+                auto instance = args[0].as<std::shared_ptr<class_instance>>();
+                auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+                auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
+
+                using setter_traits = detail::function_traits<std::decay_t<Setter>>;
+                using value_type = std::tuple_element_t<1, typename setter_traits::argument_types>;
+                auto value = args[1].as<value_type>();
+                setter(*cpp_obj, value);
+                return script_value(std::monostate{}, engine_weak);
+            });
+        }
         
         return *this;
     }
@@ -1743,7 +1996,89 @@ public:
         // Usage: .add_type_conversion<SafeComponent<Button>, std::shared_ptr<Button>>([](const auto& item) { return item.self(); })
         return *this;
     }
-    
+
+private:
+
+public:
+    // Register a deserialization factory for non-default constructors
+    // Supports three signatures automatically detected via template metaprogramming:
+    // 1. Archive-only: [](serialization::archive_reader& archive) -> std::shared_ptr<T>
+    // 2. Context-only: [](ContextType* ctx) -> std::shared_ptr<T>
+    // 3. Context + archive: [](ContextType* ctx, serialization::archive_reader& archive) -> std::shared_ptr<T>
+    template<typename ContextType = void, typename FactoryFunc>
+    class_builder& deserialization_factory(FactoryFunc&& factory) {
+        using namespace serialization;
+
+        // Detect factory signature using function traits
+        using factory_traits = detail::function_traits<std::decay_t<FactoryFunc>>;
+        constexpr size_t arg_count = factory_traits::arity;
+
+        // Dispatch to appropriate helper based on signature
+        if constexpr (arg_count == 1) {
+            // Check if single arg is serialization::archive_reader& or context pointer
+            using arg0_type = std::tuple_element_t<0, typename factory_traits::argument_types>;
+
+            // Check if the decayed type (without reference/pointer) is archive_reader
+            if constexpr (std::is_same_v<std::decay_t<arg0_type>, serialization::archive_reader>) {
+                // Archive-only factory: [](serialization::archive_reader& archive) -> std::shared_ptr<T>
+                serialization_metadata_.custom_construct =
+                    class_builder_detail::make_archive_only_factory<T>(
+                        std::forward<FactoryFunc>(factory), class_name_, engine_.weak_from_this());
+            } else if constexpr (!std::is_void_v<ContextType>) {
+                // Context-only factory: [](ContextType* ctx) -> std::shared_ptr<T>
+                serialization_metadata_.custom_construct =
+                    class_builder_detail::make_context_only_factory<T, ContextType>(
+                        std::forward<FactoryFunc>(factory), class_name_, engine_.weak_from_this());
+            } else {
+                // Context-only factory requires ContextType to be specified
+                static_assert(!std::is_void_v<ContextType>,
+                    "Context-only factory requires a non-void ContextType template parameter. "
+                    "Use deserialization_factory<YourContextType>([](YourContextType* ctx) { ... })");
+            }
+        } else if constexpr (arg_count == 2) {
+            if constexpr (!std::is_void_v<ContextType>) {
+                // Context + archive factory: [](ContextType* ctx, serialization::archive_reader& archive) -> std::shared_ptr<T>
+                serialization_metadata_.custom_construct =
+                    class_builder_detail::make_context_archive_factory<T, ContextType>(
+                        std::forward<FactoryFunc>(factory), class_name_, engine_.weak_from_this());
+            } else {
+                static_assert(!std::is_void_v<ContextType>,
+                    "Context+archive factory requires a non-void ContextType template parameter. "
+                    "Use deserialization_factory<YourContextType>([](YourContextType* ctx, serialization::archive_reader& ar) { ... })");
+            }
+        } else {
+            static_assert(arg_count <= 2, "Deserialization factory must take 1 or 2 arguments");
+        }
+
+        return *this;
+    }
+
+    // Register post-deserialization hook for migration and data transformation
+    // This is a convenience method that registers a "post_deserialize" method
+    // that will be automatically called after properties are loaded from archives
+    //
+    // The hook receives the version number that was serialized, which can be used
+    // for migration logic. You can use either signature:
+    //
+    // Examples:
+    //   // Without version parameter (simple computed values)
+    //   .post_deserialize_hook([](MyClass& self) {
+    //       self.computed_field = self.width * self.height;
+    //   })
+    //
+    //   // With version parameter (for migration)
+    //   .post_deserialize_hook([](MyClass& self, int version) {
+    //       if (version < 2) {
+    //           // Migrate from v1 to v2
+    //           self.new_field = self.compute_from_old_fields();
+    //       }
+    //   })
+    template<typename Callable>
+    class_builder& post_deserialize_hook(Callable&& callable) {
+        // Register as a regular method named "post_deserialize"
+        return method("post_deserialize", std::forward<Callable>(callable));
+    }
+
     // Finalize registration
     void build() {
         // Register automatic copy function for copyable types
@@ -1848,7 +2183,7 @@ public:
                             throw runtime_error("Cannot convert: script_value is not an object type");
                         }
                         
-                        if (!objHolder->is_cpp_class_instance) {
+                        if (!objHolder->is_class_instance_wrapper) {
                             throw runtime_error("Object is not a class_instance wrapper");
                         }
                         
@@ -1921,7 +2256,7 @@ public:
                         }
                         
                         // Check if it's a raw C++ object (not wrapped in class_instance)
-                        if (!objHolder->is_cpp_class_instance) {
+                        if (!objHolder->is_class_instance_wrapper) {
                             // Direct C++ object - just cast and return
                             return std::static_pointer_cast<T>(objHolder->data);
                         }
@@ -1959,9 +2294,9 @@ public:
                         auto instance = class_def->create_instance();
                         
                         // Store the shared_ptr directly (no copy needed)
-                        instance->set_field(class_constants::CPP_OBJECT_FIELD, 
-                            script_value::make_cpp_object(class_name, 
-                                std::static_pointer_cast<void>(obj)));
+                        instance->set_field(class_constants::CPP_OBJECT_FIELD,
+                            script_value::make_cpp_object(class_name,
+                                std::static_pointer_cast<void>(obj), engine_weak));
                         
                         // Return the class_instance wrapped in a value
                         if (auto eng = engine_weak.lock()) {
@@ -2227,9 +2562,10 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
                         // Use the copy function to create a new C++ object
                         auto new_cpp_obj = class_def->copy_object(cpp_obj.get());
 
-                        // Wrap in a new script_value
+                        // Wrap in a new script_value (use engine ref from the existing value)
+                        auto eng_ref = value.get_engine_ref();
                         new_instance->set_field(class_constants::CPP_OBJECT_FIELD,
-                            script_value::make_cpp_object(class_name_, new_cpp_obj));
+                            script_value::make_cpp_object(class_name_, new_cpp_obj, eng_ref));
                         continue;
                     }
                 }
@@ -2350,12 +2686,6 @@ inline script_value class_instance::get_method(const std::string& name, bool thr
         return def->get_method(name, throw_if_missing);
     }
 
-    // DEBUG: Diagnose why class_definition_ weak_ptr failed to lock
-    std::cerr << "[DEBUG] class_instance::get_method('" << name << "') - class_definition_ failed to lock for class '"
-              << class_name_ << "'" << std::endl;
-    std::cerr << "[DEBUG] class_definition_.expired() = " << class_definition_.expired() << std::endl;
-    std::cerr << "[DEBUG] class_definition_.use_count() = " << class_definition_.use_count() << std::endl;
-
     if (throw_if_missing) {
         throw runtime_error("Class definition not available for method '" + name + "' lookup");
     }
@@ -2369,6 +2699,10 @@ inline class_instance::~class_instance() {
         class_def->unregister_instance(this);
     }
 }
+
+// Context-based factory implementations use type erasure (see make_context_extractor above)
+// to avoid MSVC template instantiation issues with incomplete archive_reader type.
+// The make_context_extractor function is instantiated at call sites where archive_reader is fully defined.
 
 } // namespace jai
 

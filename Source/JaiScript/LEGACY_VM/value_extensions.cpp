@@ -69,7 +69,7 @@ std::shared_ptr<script_class_instance> script_value_class_extensions::as_script_
     if (value.type() == script_value_type::jai_object_type) {
         // Extract script_class_instance from object holder
         auto obj_holder = value.get_object_holder();
-        if (obj_holder && obj_holder->is_cpp_class_instance) {
+        if (obj_holder && obj_holder->is_class_instance_wrapper) {
             return std::static_pointer_cast<script_class_instance>(obj_holder->data);
         }
     }
@@ -97,7 +97,7 @@ bool script_value_class_extensions::is_script_class_instance(const script_value&
     }
     
     auto obj_holder = value.get_object_holder();
-    if (obj_holder && obj_holder->is_cpp_class_instance) {
+    if (obj_holder && obj_holder->is_class_instance_wrapper) {
         auto instance = std::dynamic_pointer_cast<script_class_instance>(obj_holder->data);
         return instance != nullptr;
     }

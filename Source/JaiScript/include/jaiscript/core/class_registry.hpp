@@ -19,10 +19,10 @@ class class_registry {
 public:
     
     // Register script-defined class
-    void register_script_class(std::shared_ptr<script_class_definition> class_def);
-    
+    checked_result<void> register_script_class(std::shared_ptr<script_class_definition> class_def);
+
     // Register C++ class (existing class_builder)
-    void register_cpp_class(std::shared_ptr<class_definition> class_def);
+    checked_result<void> register_cpp_class(std::shared_ptr<class_definition> class_def);
     
     // Unified lookup
     std::shared_ptr<script_class_definition> find_script_class(const std::string& name);

@@ -7,7 +7,7 @@
 4. ✅ Renamed LocalVariables to InstanceVariables
 5. ✅ Unified globals system - eliminated cppGlobals/scriptGlobals
 6. ✅ Added nonSerializableGlobals set to track which globals shouldn't be serialized
-7. ✅ Updated all function registration methods to use globalEnvironment
+7. ✅ Updated all function registration methods to use global_environment_
 8. ✅ Updated getVariable/hasVariable/hasFunction methods
 9. ✅ Updated state serialization to filter by nonSerializableGlobals
 10. ✅ Implemented Environment::getAllVariables() method
@@ -15,7 +15,7 @@
 12. ✅ Tested the unified globals implementation
 
 ## Key Changes Made
-- **Single source of truth**: All globals now stored in globalEnvironment only
+- **Single source of truth**: All globals now stored in global_environment_ only
 - **Persistent interpreter**: No recreation overhead on each execution
 - **Serialization control**: nonSerializableGlobals set tracks which globals to exclude
 - **Cleaner API**: execute/executeFile instead of eval/fileEval
@@ -24,7 +24,7 @@
 ## Architecture Summary
 ```cpp
 // Engine now maintains:
-- globalEnvironment: std::shared_ptr<Environment> // All globals here
+- global_environment_: std::shared_ptr<Environment> // All globals here
 - nonSerializableGlobals: std::unordered_set<std::string> // Track exclusions
 - interpreter: std::unique_ptr<Interpreter> // Persistent, reused
 

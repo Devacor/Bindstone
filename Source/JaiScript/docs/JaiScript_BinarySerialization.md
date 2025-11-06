@@ -51,28 +51,24 @@ class Player : public MV::PropertyOwner {
 
 ## Version-Based Schema Evolution
 
-### Property Registration with Version History
+### Property Registration with Versioning
 ```cpp
 make_class_builder<GameEntity>(engine, "GameEntity")
-    .version(4)  // Current version
-    
-    // Version 1 properties (original)
+    .version(4)  // Current version - used for save format identification
+
+    // Register all current properties
     .property("position", &GameEntity::position)
     .property("health", &GameEntity::health)
-    
-    // Version 2 additions
-    .property("mana", &GameEntity::mana, version_added(2))
-    .property("level", &GameEntity::level, version_added(2))
-    
-    // Version 3 changes
-    .deleted_property<int>("score", version_removed(3))  // Keep for binary compatibility
-    .property("experience", &GameEntity::experience, version_added(3))
-    
-    // Version 4 changes
-    .property("inventory", &GameEntity::inventory, version_added(4))
-    
-    // Note: No need for explicit version_properties() - binary format is self-describing
-    
+    .property("mana", &GameEntity::mana)
+    .property("level", &GameEntity::level)
+    .property("experience", &GameEntity::experience)
+    .property("inventory", &GameEntity::inventory)
+
+    // No need for deleted_property or version_added/version_removed!
+    // The self-describing format handles schema evolution automatically:
+    // - Old saves with missing properties: Properties retain default values
+    // - Old saves with extra properties: Extra properties are skipped gracefully
+
     .build();
 ```
 
@@ -96,10 +92,10 @@ Version 3: "GameEntity" | 5 | ["position", "health", "mana", "level", "experienc
 ```
 
 Key principles:
-- **Self-describing format**: Property names embedded in binary data
-- **Version independence**: Can deserialize any version order
-- **Deleted property handling**: Missing properties skipped gracefully during load
-- **Type safety**: Deleted properties retain type info for proper error handling
+- **Self-describing format**: Property names embedded in binary data with type tags
+- **Version independence**: Can deserialize any version, order-independent
+- **Automatic schema evolution**: Missing properties retain defaults, extra properties skipped
+- **No manual migration needed**: Format handles forward and backward compatibility automatically
 
 ## Multi-Format Archive System
 

@@ -201,10 +201,10 @@ namespace stdlib {
         // Create shared instances that can be used as singletons
         auto skip_newline_ptr = std::make_shared<skip_newline_t>();
         auto skip_flush_ptr = std::make_shared<skip_flush_t>();
-        
-        // Register global instances
-        engine.add_global("skip_newline", script_value::make_object("skip_newline_t", skip_newline_ptr));
-        engine.add_global("skip_flush", script_value::make_object("skip_flush_t", skip_flush_ptr));
+
+        // Register global instances (use engine::make_object which automatically uses weak_from_this)
+        engine.add_global("skip_newline", engine.make_object(skip_newline_ptr));
+        engine.add_global("skip_flush", engine.make_object(skip_flush_ptr));
         // print function - formatted output to stdout
         // 
         // Usage:

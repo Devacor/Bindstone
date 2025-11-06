@@ -12,6 +12,7 @@
 // conversion_registry_templates.hpp moved to after engine class definition
 #include "bound_array.hpp"
 #include "bound_map.hpp"
+#include <jaiscript/serialization/serialization_metadata.hpp>
 #include <memory>
 #include <optional>
 #include <unordered_set>
@@ -25,9 +26,11 @@ namespace jai {
     class class_registry;
     class execution_backend;
     class string_symbolizer;
-    
+
     namespace serialization {
         class serialization_registry;
+        // Note: serialization metadata structs (property_metadata, class_metadata, etc.)
+        // are defined in serialization_metadata.hpp which is included above
     }
     
     // Backend type enumeration
@@ -260,7 +263,10 @@ namespace jai {
         
         // Get class definition by name
         std::shared_ptr<class_definition> get_class_definition(const std::string& name) const;
-        
+
+        // Get class definition by type_id (faster than string lookup)
+        std::shared_ptr<class_definition> get_class_definition(uint64_t type_id) const;
+
         // Get registered script name for a C++ type
         template<typename T>
         std::string get_registered_name() const;
@@ -405,9 +411,10 @@ namespace jai {
         template<typename T>
         void register_type_converter(const std::string& type_name) {
             // Register a converter that creates a script_value from this type
-            auto toValue = [type_name](const T& obj) -> script_value {
+            auto engine_weak = weak_from_this();
+            auto toValue = [type_name, engine_weak](const T& obj) -> script_value {
                 auto sharedObj = std::make_shared<T>(obj);
-                return script_value::make_cpp_object(type_name, std::static_pointer_cast<void>(sharedObj));
+                return script_value::make_cpp_object(type_name, std::static_pointer_cast<void>(sharedObj), engine_weak);
             };
             
             // Store this converter (implementation will handle the storage)
@@ -431,7 +438,45 @@ namespace jai {
         
         // Get the class registry for this engine
         class_registry& get_class_registry();
-        
+
+        // === TYPE INFO INTERNING ===
+        // Get or create type_info for basic types (fast O(1) access for common types)
+        type_info* get_type_info_int();
+        type_info* get_type_info_float();
+        type_info* get_type_info_string();
+        type_info* get_type_info_bool();
+        type_info* get_type_info_char();
+        type_info* get_type_info_void();
+        type_info* get_type_info_invalid();
+
+        // Get or create type_info for arrays/maps (interned by type_id)
+        type_info* get_type_info_array(type_info* element_type);
+        type_info* get_type_info_map(type_info* key_type, type_info* value_type);
+        type_info* get_type_info_weak_ptr(type_info* pointee_type);
+        type_info* get_type_info_reference(type_info* referenced_type);
+        type_info* get_type_info_function(type_info* return_type, const std::vector<type_info*>& arg_types);
+
+        // Get or create type_info for object types (uses class_definition's type_info)
+        type_info* get_type_info_object(const std::string& class_name);
+        type_info* get_type_info_object(uint64_t type_id);
+
+        // Generic helper to intern any type_info
+        type_info* get_type_info(const type_info& temp);
+
+        // Direct lookup by interned ID (fastest - O(1) with no string operations)
+        type_info* get_type_info_by_id(uint64_t type_id);
+
+        // Lookup by canonical name (interns the name first, then does ID lookup)
+        type_info* get_type_info_by_name(const std::string& canonical_name);
+
+        // Template method to get type_info for any C++ type
+        template<typename T>
+        type_info* get_type_info_for_cpp_type() {
+            if (!get_symbolizer()) return nullptr;
+            type_info temp = type_info::make<T>(*get_symbolizer());
+            return get_type_info(temp);
+        }
+
         // Reference support for function parameters
         script_value try_create_reference(size_t arg_index, const script_value& fallback);
         
@@ -549,5 +594,6 @@ namespace jai {
 // Include template implementations that need both engine and other headers
 #include "engine_impl.hpp"
 #include "conversion_registry_templates.hpp"
+#include "value_impl.hpp"
 
 #endif // __JAISCRIPT_CORE_ENGINE_HPP__

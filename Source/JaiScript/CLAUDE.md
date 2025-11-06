@@ -126,7 +126,7 @@ FOUNDRY_REGISTER(my_tests)  // Auto-registers for discovery
 
 ## Architecture
 
-**Engine:** `globalEnvironment` (all globals), `nonSerializableGlobals` (exclude from serialization), `interpreter` (persistent, reused).
+**Engine:** `global_environment_` (all globals), `nonSerializableGlobals` (exclude from serialization), `interpreter` (persistent, reused).
 
 **Values:** Type-erased `std::variant`, custom class_instance extractor, move semantics, thread-local for reference params.
 

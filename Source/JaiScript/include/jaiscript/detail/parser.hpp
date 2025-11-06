@@ -3,6 +3,8 @@
 #include "lexer.hpp"
 #include "ast.hpp"
 #include <jaiscript/core/types.hpp>
+#include <jaiscript/core/checked_result.hpp>
+#include <jaiscript/core/parse_errors.hpp>
 #include <vector>
 #include <memory>
 #include <optional>
@@ -12,14 +14,15 @@ namespace jai {
 
     // Forward declaration
     class string_symbolizer;
+    class engine;
 
     class parser {
     public:
         // One true constructor with dependency injection
-        parser(const std::vector<token>& tokens, string_symbolizer* symbolizer, const std::unordered_set<std::string>& registeredTemplateTypes, const std::string& filename = "<script>");
-        
+        parser(const std::vector<token>& tokens, string_symbolizer* symbolizer, engine* eng, const std::unordered_set<std::string>& registeredTemplateTypes, const std::string& filename = "<script>");
+
         // Parse the entire program
-        std::vector<declaration_ptr> parse();
+        checked_result<std::vector<declaration_ptr>> parse();
         
         // Check if parsing had errors
         bool has_errors() const { return !errors_.empty(); }
@@ -32,6 +35,7 @@ namespace jai {
         std::vector<std::string> errors_;
         std::unordered_set<std::string> registered_template_types_;
         string_symbolizer* symbolizer_ = nullptr;  // Optional: for interning identifiers at parse time
+        engine* engine_ = nullptr;  // Engine for interning type_info objects
 
         // token buffer for handling >> splitting in generic contexts
         std::optional<token> pushed_back_token_;
@@ -40,7 +44,7 @@ namespace jai {
         std::vector<std::string> current_namespace_path_;
         
         // Error handling
-        void error(const std::string& message, const token& token);
+        void report_error(const std::string& message, const token& token);  // Logs error to errors_ vector
         void synchronize();  // Error recovery
         
         // token management
@@ -51,62 +55,66 @@ namespace jai {
         bool check(token_type type) const;
         bool match(token_type type);
         bool match(std::initializer_list<token_type> types);
-        token consume(token_type type, const std::string& message);
+        checked_result<token> consume(token_type type, const std::string& message);
         
         // declaration parsing
-        declaration_ptr declaration();
-        declaration_ptr class_declaration();
-        declaration_ptr namespace_declaration();
-        declaration_ptr function_declaration();
-        declaration_ptr variable_declaration();
-        declaration_ptr include_declaration();
-        declaration_ptr import_declaration();
+        checked_result<declaration_ptr> declaration();
+        checked_result<declaration_ptr> class_declaration();
+        checked_result<declaration_ptr> namespace_declaration();
+        checked_result<declaration_ptr> function_declaration();
+        checked_result<declaration_ptr> variable_declaration();
+        checked_result<declaration_ptr> include_declaration();
+        checked_result<declaration_ptr> import_declaration();
         
         // statement parsing
-        statement_ptr statement();
-        statement_ptr expression_statement();
-        statement_ptr block_statement();
-        statement_ptr if_statement();
-        statement_ptr while_statement();
-        statement_ptr for_statement();
-        statement_ptr return_statement();
-        statement_ptr break_statement();
-        statement_ptr continue_statement();
-        statement_ptr try_statement();
-        statement_ptr switch_statement();
+        checked_result<statement_ptr> statement();
+        checked_result<statement_ptr> expression_statement();
+        checked_result<statement_ptr> block_statement();
+        checked_result<statement_ptr> if_statement();
+        checked_result<statement_ptr> while_statement();
+        checked_result<statement_ptr> for_statement();
+        checked_result<statement_ptr> return_statement();
+        checked_result<statement_ptr> break_statement();
+        checked_result<statement_ptr> continue_statement();
+        checked_result<statement_ptr> try_statement();
+        checked_result<statement_ptr> switch_statement();
         
         // expression parsing (precedence climbing)
-        expression_ptr expression();
-        expression_ptr assignment();
-        expression_ptr ternary();
-        expression_ptr logical_or();
-        expression_ptr logical_and();
-        expression_ptr bitwise_or();
-        expression_ptr bitwise_xor();
-        expression_ptr bitwise_and();
-        expression_ptr equality();
-        expression_ptr relational();
-        expression_ptr shift();
-        expression_ptr additive();
-        expression_ptr multiplicative();
-        expression_ptr unary();
-        expression_ptr postfix();
-        expression_ptr primary();
+        checked_result<expression_ptr> expression();
+        checked_result<expression_ptr> assignment();
+        checked_result<expression_ptr> ternary();
+        checked_result<expression_ptr> logical_or();
+        checked_result<expression_ptr> logical_and();
+        checked_result<expression_ptr> bitwise_or();
+        checked_result<expression_ptr> bitwise_xor();
+        checked_result<expression_ptr> bitwise_and();
+        checked_result<expression_ptr> equality();
+        checked_result<expression_ptr> relational();
+        checked_result<expression_ptr> shift();
+        checked_result<expression_ptr> additive();
+        checked_result<expression_ptr> multiplicative();
+        checked_result<expression_ptr> unary();
+        checked_result<expression_ptr> postfix();
+        checked_result<expression_ptr> primary();
         
         // Helper parsers
-        expression_ptr finish_call(expression_ptr callee);
-        expression_ptr finish_member_access(expression_ptr object, bool is_arrow);
+        checked_result<expression_ptr> finish_call(expression_ptr callee);
+        checked_result<expression_ptr> finish_member_access(expression_ptr object, bool is_arrow);
         bool looks_like_map_literal();  // Lookahead to distinguish map literals from blocks
-        expression_ptr parse_map_literal();
-        type_info_ptr parse_type();
-        std::vector<parameter> parse_parameter_list();
-        
+        checked_result<expression_ptr> parse_map_literal();
+        checked_result<type_info_ptr> parse_type();
+
+        // Helper to create and store a type_info object, returning a pointer to it
+        type_info_ptr store_type_info(type_info&& info);
+
+        checked_result<std::vector<parameter>> parse_parameter_list();
+
         // Lambda parsing
-        expression_ptr lambda_expression();
-        std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture_default> parse_capture_list();
-        
+        checked_result<expression_ptr> lambda_expression();
+        checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture_default>> parse_capture_list();
+
         // Helper for parsing function bodies
-        declaration_ptr parse_function_body(const std::string& name, type_info_ptr return_type);
+        checked_result<declaration_ptr> parse_function_body(const std::string& name, type_info_ptr return_type);
         
         // Helper for parsing > in generic contexts (handles >> token splitting)
         void consume_greater_in_generic(const std::string& message);

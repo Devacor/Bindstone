@@ -8,6 +8,7 @@ set(JAISCRIPT_SOURCES
     implementation/interpreter.cpp
     implementation/interpreter_dispatch.cpp
     implementation/lexer.cpp
+    implementation/parse_errors.cpp
     implementation/parser.cpp
     implementation/runtime_errors.cpp
     implementation/type_info.cpp
@@ -40,6 +41,7 @@ if(MSVC)
         /W3                 # Warning level 3
         /EHsc              # Exception handling model
         /permissive-       # Standards conformance
+        /bigobj            # Allow more sections in object files (needed for heavy template usage)
     )
 
     # Profiling support for MSVC

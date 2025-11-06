@@ -4,6 +4,7 @@
 #define __JAISCRIPT_DETAIL_INTERPRETER_HPP__
 
 #include "ast.hpp"
+#include "string_symbolizer.hpp"
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/types.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
@@ -17,72 +18,6 @@ namespace jai {
 
     // Forward declarations
     class script_class_definition;
-
-    // Transparent hasher for string_view lookup in unordered_map<string, ...>
-    struct string_hash {
-        using is_transparent = void;  // Enable heterogeneous lookup
-
-        [[nodiscard]] size_t operator()(std::string_view sv) const noexcept {
-            return std::hash<std::string_view>{}(sv);
-        }
-
-        [[nodiscard]] size_t operator()(const std::string& s) const noexcept {
-            return std::hash<std::string>{}(s);
-        }
-    };
-
-    // Transparent equality for string_view lookup
-    struct string_equal {
-        using is_transparent = void;
-
-        [[nodiscard]] bool operator()(std::string_view lhs, std::string_view rhs) const noexcept {
-            return lhs == rhs;
-        }
-    };
-
-    // script_string symbolizer for faster variable lookups (like FName in Unreal engine)
-    // IMPORTANT: This is a LOCAL-ONLY optimization. script_string IDs are NOT deterministic
-    // across sessions/machines. Always serialize actual string names, never IDs!
-    // For network sync or save/load, use the original string keys, not symbolized IDs.
-    class string_symbolizer {
-    private:
-        std::unordered_map<std::string, uint64_t, string_hash, string_equal> string_id_map_;
-        std::vector<std::string> strings_;
-        mutable uint64_t cached_this_id_ = UINT64_MAX;  // Cached ID for "this"
-
-    public:
-        string_symbolizer() {
-            // Reserve capacity for typical script usage
-            strings_.reserve(256);
-            string_id_map_.reserve(256);
-        }
-
-        uint64_t intern(std::string_view str) {
-            // C++20 heterogeneous lookup - avoid string construction on lookup
-            // Only create string if we need to insert
-            if (auto it = string_id_map_.find(str); it != string_id_map_.end()) {
-                return it->second;
-            }
-
-            // Not found - need to insert
-            uint64_t id = static_cast<uint64_t>(strings_.size());
-            strings_.emplace_back(str);
-            string_id_map_.emplace(strings_.back(), id);  // Use the stored string
-            return id;
-        }
-        
-        const std::string& get_string(uint64_t id) const {
-            return strings_[id];
-        }
-        
-        // Get cached "this" ID (lazily initialized)
-        uint64_t get_this_id() const {
-            if (cached_this_id_ == UINT64_MAX) {
-                cached_this_id_ = const_cast<string_symbolizer*>(this)->intern("this");
-            }
-            return cached_this_id_;
-        }
-    };
 
     // environment for storing variables in a scope
     class environment {
@@ -107,14 +42,16 @@ namespace jai {
         void define(uint64_t id, script_value&& value);
         
         // Get a variable value (searches parent scopes)
-        virtual script_value get(const std::string& name) const;
-        virtual script_value get(uint64_t id) const;  // Optimized direct lookup
+        // Returns checked_result to avoid exceptions in regular control flow
+        virtual checked_result<script_value> get(const std::string& name) const;
+        virtual checked_result<script_value> get(uint64_t id) const;  // Optimized direct lookup
         
         // Get a reference to variable value (for avoiding copies)
-        virtual const script_value& get_ref(const std::string& name) const;
-        virtual const script_value& get_ref(uint64_t id) const;
-        virtual script_value& get_ref(const std::string& name);
-        virtual script_value& get_ref(uint64_t id);
+        // Returns checked_result to avoid exceptions in regular control flow
+        virtual checked_result<std::reference_wrapper<const script_value>> get_ref(const std::string& name) const;
+        virtual checked_result<std::reference_wrapper<const script_value>> get_ref(uint64_t id) const;
+        virtual checked_result<std::reference_wrapper<script_value>> get_ref(const std::string& name);
+        virtual checked_result<std::reference_wrapper<script_value>> get_ref(uint64_t id);
         
         // Assign to an existing variable (searches parent scopes)
         virtual void assign(const std::string& name, const script_value& value);
@@ -219,8 +156,8 @@ namespace jai {
         string_symbolizer* symbolizer_;
 
         // Internal get method with recursion depth tracking
-        script_value get(uint64_t id, int depth) const;
-        const script_value& get_ref(uint64_t id, int depth) const;
+        checked_result<script_value> get(uint64_t id, int depth) const;
+        checked_result<std::reference_wrapper<const script_value>> get_ref(uint64_t id, int depth) const;
         
         friend class interpreter;
         friend class method_environment;
@@ -236,14 +173,14 @@ namespace jai {
         }
         
         // Override get to check 'this' object fields as fallback
-        script_value get(const std::string& name) const override;
-        script_value get(uint64_t id) const override;
-        
+        checked_result<script_value> get(const std::string& name) const override;
+        checked_result<script_value> get(uint64_t id) const override;
+
         // Override get_ref to check 'this' object fields as fallback
-        const script_value& get_ref(const std::string& name) const override;
-        const script_value& get_ref(uint64_t id) const override;
-        script_value& get_ref(const std::string& name) override;
-        script_value& get_ref(uint64_t id) override;
+        checked_result<std::reference_wrapper<const script_value>> get_ref(const std::string& name) const override;
+        checked_result<std::reference_wrapper<const script_value>> get_ref(uint64_t id) const override;
+        checked_result<std::reference_wrapper<script_value>> get_ref(const std::string& name) override;
+        checked_result<std::reference_wrapper<script_value>> get_ref(uint64_t id) override;
         
         // Override assign to update 'this' object fields when appropriate
         void assign(const std::string& name, const script_value& value) override;
@@ -295,14 +232,14 @@ namespace jai {
         }
         
         // Override get to check static fields as fallback
-        script_value get(const std::string& name) const override;
-        script_value get(uint64_t id) const override;
-        
+        checked_result<script_value> get(const std::string& name) const override;
+        checked_result<script_value> get(uint64_t id) const override;
+
         // Override get_ref to check static fields as fallback
-        const script_value& get_ref(const std::string& name) const override;
-        const script_value& get_ref(uint64_t id) const override;
-        script_value& get_ref(const std::string& name) override;
-        script_value& get_ref(uint64_t id) override;
+        checked_result<std::reference_wrapper<const script_value>> get_ref(const std::string& name) const override;
+        checked_result<std::reference_wrapper<const script_value>> get_ref(uint64_t id) const override;
+        checked_result<std::reference_wrapper<script_value>> get_ref(const std::string& name) override;
+        checked_result<std::reference_wrapper<script_value>> get_ref(uint64_t id) override;
         
         // Override assign to update static fields when appropriate
         void assign(const std::string& name, const script_value& value) override;
@@ -689,8 +626,8 @@ namespace jai {
                     throw runtime_error("Internal error: empty value stack");
                 }
                 script_value result = std::move(values_[--top_]);
-                // Clear the moved-from value to release references
-                values_[top_] = script_value::make_null(std::weak_ptr<engine>{});
+                // Note: moved-from value is in valid but unspecified state, which is fine
+                // Don't create a new null value here as it would have invalid engine_ref
                 return result;
             }
             

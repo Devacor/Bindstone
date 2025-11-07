@@ -305,7 +305,30 @@ namespace jai {
             }
             return std::get<script_char>(val.storage_);
         }
-        
+
+        // ============================================================================
+        // UNCHECKED ACCESSORS - Ultra-fast direct access without type checking
+        // ONLY use these when you've already verified the type (e.g., via type() switch)
+        // These provide zero-overhead access with no branching or error checking
+        // Uses std::get_if which returns a pointer without throwing (faster than std::get)
+        // ============================================================================
+
+        inline script_bool unchecked_as_bool() const noexcept {
+            return *std::get_if<static_cast<size_t>(storage_index::jai_bool)>(&storage_);
+        }
+
+        inline script_int unchecked_as_int() const noexcept {
+            return *std::get_if<static_cast<size_t>(storage_index::jai_int)>(&storage_);
+        }
+
+        inline script_float unchecked_as_float() const noexcept {
+            return *std::get_if<static_cast<size_t>(storage_index::jai_float)>(&storage_);
+        }
+
+        inline const script_string& unchecked_as_string() const noexcept {
+            return *std::get_if<static_cast<size_t>(storage_index::jai_string)>(&storage_);
+        }
+
         inline const std::vector<script_value>& as_array() const {
             auto result = checked_as_array();
             if (!result) {
@@ -1127,23 +1150,42 @@ namespace jai {
         
         // Tag type for invalid values
         struct invalid_tag {};
-        
+
+        // Variant indices for ultra-fast unchecked access
+        // IMPORTANT: Keep this enum in sync with the storage variant below!
+        enum class storage_index : size_t {
+            jai_null = 0,
+            jai_int = 1,
+            jai_float = 2,
+            jai_string = 3,
+            jai_char = 4,
+            jai_bool = 5,
+            jai_array = 6,
+            jai_map = 7,
+            jai_object = 8,
+            jai_function = 9,
+            jai_reference = 10,
+            jai_shared_ptr = 11,
+            jai_weak_ptr = 12,
+            jai_invalid = 13
+        };
+
         // Type-erased storage using variant for efficiency
         using storage = std::variant<
-            std::monostate,                               // Null
-            script_int,                                           // script_int
-            script_float,                                         // script_float
-            script_string,                                        // script_string
-            script_char,                                          // script_char
-            script_bool,                                          // script_bool
-            std::shared_ptr<std::vector<script_value>>,          // Array<T>
-            std::shared_ptr<std::map<script_value, script_value>>,      // Map<K,V>
-            std::shared_ptr<object_holder>,                // Object<T>
-            script_function,                                // Function
-            std::shared_ptr<reference_holder>,             // T&
-            std::shared_ptr<script_value>,                       // shared_ptr<T>
-            std::weak_ptr<object_holder>,                         // weak_ptr<T>
-            invalid_tag                                           // Invalid value marker
+            std::monostate,                               // 0 - Null
+            script_int,                                   // 1 - script_int
+            script_float,                                 // 2 - script_float
+            script_string,                                // 3 - script_string
+            script_char,                                  // 4 - script_char
+            script_bool,                                  // 5 - script_bool
+            std::shared_ptr<std::vector<script_value>>,   // 6 - Array<T>
+            std::shared_ptr<std::map<script_value, script_value>>, // 7 - Map<K,V>
+            std::shared_ptr<object_holder>,               // 8 - Object<T>
+            script_function,                              // 9 - Function
+            std::shared_ptr<reference_holder>,            // 10 - T&
+            std::shared_ptr<script_value>,                // 11 - shared_ptr<T>
+            std::weak_ptr<object_holder>,                 // 12 - weak_ptr<T>
+            invalid_tag                                   // 13 - Invalid value marker
         >;
         
         storage storage_;

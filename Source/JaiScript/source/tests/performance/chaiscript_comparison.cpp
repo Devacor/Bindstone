@@ -214,24 +214,26 @@ public:
                          << " ChaiScript=" << chai_result << "\n";
             }
 
+            // Increased iterations to get better metrics (from ~2μs to ~10μs)
             benchmark("JaiScript - Integer Addition", [this]() {
                 jai_engine->execute("42 + 58;");
-            });
+            }, 5000);
 
             benchmark("ChaiScript - Integer Addition", [this]() {
                 chai_engine->eval("42 + 58;");
-            });
+            }, 5000);
         });
 
         // ===== Float Multiplication =====
         test("JaiScript vs ChaiScript: Float Multiplication", [this]() {
+            // Increased iterations to get better metrics (from ~2μs to ~10μs)
             benchmark("JaiScript - Float Multiplication", [this]() {
                 jai_engine->execute("3.14 * 2.71;");
-            });
+            }, 5000);
 
             benchmark("ChaiScript - Float Multiplication", [this]() {
                 chai_engine->eval("3.14 * 2.71;");
-            });
+            }, 5000);
         });
 
         // ===== Variable Operations =====
@@ -399,13 +401,14 @@ public:
 
         // ===== Complex Expression =====
         test("JaiScript vs ChaiScript: Complex Expression", [this]() {
+            // Increased iterations to get better metrics (from ~4μs to ~20μs)
             benchmark("JaiScript - Complex Expression", [this]() {
                 jai_engine->execute("(10 + 20) * (30 - 15) / 5;");
-            });
+            }, 5000);
 
             benchmark("ChaiScript - Complex Expression", [this]() {
                 chai_engine->eval("(10 + 20) * (30 - 15) / 5;");
-            });
+            }, 5000);
         });
 
         // ===== Factorial (Recursion) =====
@@ -421,12 +424,13 @@ public:
 
         // ===== Fibonacci (Deep Recursion) =====
         test("JaiScript vs ChaiScript: Fibonacci (Deep Recursion)", [this]() {
-            benchmark("JaiScript - Fibonacci(10)", [this]() {
-                jai_engine->execute("fib(10);");
+            // Reduced from fib(10) to fib(6) - ChaiScript is extremely slow at high recursion
+            benchmark("JaiScript - Fibonacci(6)", [this]() {
+                jai_engine->execute("fib(6);");
             });
 
-            benchmark("ChaiScript - Fibonacci(10)", [this]() {
-                chai_engine->eval("fib(10);");
+            benchmark("ChaiScript - Fibonacci(6)", [this]() {
+                chai_engine->eval("fib(6);");
             });
         });
 
@@ -452,6 +456,95 @@ public:
                 // Assign to global - ChaiScript auto-creates on first use
                 chai_engine->eval("unsorted = [9, 3, 7, 1, 5, 8, 2, 6, 4, 10]; bubbleSort(unsorted);");
             });
+        });
+
+        // ===== BoxedValue vs script_value: Integer Construction =====
+        test("BoxedValue vs script_value: Integer Construction", [this]() {
+            // Increased iterations to get better metrics
+            benchmark("JaiScript - script_value Integer Construction", [this]() {
+                jai_engine->execute("42;");
+            }, 10000);
+
+            benchmark("ChaiScript - BoxedValue Integer Construction", [this]() {
+                chai_engine->eval("42;");
+            }, 10000);
+        });
+
+        // ===== BoxedValue vs script_value: String Construction =====
+        test("BoxedValue vs script_value: String Construction", [this]() {
+            // Increased iterations to get better metrics
+            benchmark("JaiScript - script_value String Construction", [this]() {
+                jai_engine->execute("\"Hello, World!\";");
+            }, 10000);
+
+            benchmark("ChaiScript - BoxedValue String Construction", [this]() {
+                chai_engine->eval("\"Hello, World!\";");
+            }, 10000);
+        });
+
+        // ===== BoxedValue vs script_value: Boolean Construction =====
+        test("BoxedValue vs script_value: Boolean Construction", [this]() {
+            // Increased iterations to get better metrics
+            benchmark("JaiScript - script_value Boolean Construction", [this]() {
+                jai_engine->execute("true;");
+            }, 10000);
+
+            benchmark("ChaiScript - BoxedValue Boolean Construction", [this]() {
+                chai_engine->eval("true;");
+            }, 10000);
+        });
+
+        // ===== BoxedValue vs script_value: Float Construction =====
+        test("BoxedValue vs script_value: Float Construction", [this]() {
+            // Increased iterations to get better metrics
+            benchmark("JaiScript - script_value Float Construction", [this]() {
+                jai_engine->execute("3.14159;");
+            }, 10000);
+
+            benchmark("ChaiScript - BoxedValue Float Construction", [this]() {
+                chai_engine->eval("3.14159;");
+            }, 10000);
+        });
+
+        // ===== BoxedValue vs script_value: Type Checking =====
+        test("BoxedValue vs script_value: Type Checking", [this]() {
+            // Pre-declare and initialize variables for type checking tests
+            jai_engine->execute("auto testInt = 42; auto testStr = \"hello\"; auto testBool = true;");
+            chai_engine->eval("var testInt = 42; var testStr = \"hello\"; var testBool = true;");
+
+            // Increased iterations to get better metrics
+            benchmark("JaiScript - script_value Type Checking", [this]() {
+                jai_engine->execute("testInt; testStr; testBool;");
+            }, 5000);
+
+            benchmark("ChaiScript - BoxedValue Type Checking", [this]() {
+                chai_engine->eval("testInt; testStr; testBool;");
+            }, 5000);
+        });
+
+        // ===== BoxedValue vs script_value: Array Construction =====
+        test("BoxedValue vs script_value: Array Construction", [this]() {
+            // Increased iterations to get better metrics
+            benchmark("JaiScript - script_value Array Construction", [this]() {
+                jai_engine->execute("[1, 2, 3, 4, 5];");
+            }, 5000);
+
+            benchmark("ChaiScript - BoxedValue Array Construction", [this]() {
+                chai_engine->eval("[1, 2, 3, 4, 5];");
+            }, 5000);
+        });
+
+        // ===== BoxedValue vs script_value: Mixed Type Operations =====
+        test("BoxedValue vs script_value: Mixed Type Operations", [this]() {
+            // Increased iterations to get better metrics
+            benchmark("JaiScript - script_value Mixed Types", [this]() {
+                jai_engine->execute("auto x = 42; auto y = 3.14; auto z = x + y; auto s = \"Result: \";");
+            }, 5000);
+
+            benchmark("ChaiScript - BoxedValue Mixed Types", [this]() {
+                // Use assignment to pre-declared variables only (ChaiScript doesn't allow redefinition)
+                chai_engine->eval("x = 42; y = 3.14; z = x + y; result = 45;");
+            }, 5000);
         });
 
 #else

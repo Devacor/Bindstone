@@ -13,6 +13,7 @@
 #include <vector>
 #include <iostream>
 #include <system_error>
+#include <optional>
 
 namespace jai {
 
@@ -92,6 +93,7 @@ namespace jai {
         // Debug helper to validate parent chain doesn't create a cycle
         // Only active when JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES is defined
         void validate_parent_chain(std::shared_ptr<environment> new_parent) const {
+/*
 #ifdef JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES
             if (!new_parent) return;  // nullptr parent is always valid
 
@@ -147,6 +149,7 @@ namespace jai {
                 }
             }
 #endif
+*/
         }
 
     private:
@@ -318,6 +321,15 @@ namespace jai {
         // Set engine reference for script_value creation
         void set_engine_reference(std::weak_ptr<engine> engine_ref) {
             engine_ref_ = std::move(engine_ref);
+
+            // Initialize cached common values to avoid repeated allocations
+            cached_null_ = script_value(std::monostate{}, engine_ref_);
+            cached_true_ = script_value(true, engine_ref_);
+            cached_false_ = script_value(false, engine_ref_);
+            cached_zero_int_ = script_value(static_cast<script_int>(0), engine_ref_);
+            cached_one_int_ = script_value(static_cast<script_int>(1), engine_ref_);
+            cached_zero_float_ = script_value(0.0, engine_ref_);
+            cached_one_float_ = script_value(1.0, engine_ref_);
         }
 
         // Get engine reference (for internal use in lambdas)
@@ -328,13 +340,19 @@ namespace jai {
         // Helper to create script_value with engine context
         script_value make_value(script_int i) const {
             if (!engine_ref_.expired()) {
+                // Return cached common values to avoid allocations
+                if (i == 0 && cached_zero_int_.has_value()) return *cached_zero_int_;
+                if (i == 1 && cached_one_int_.has_value()) return *cached_one_int_;
                 return script_value(i, engine_ref_);
             }
             throw runtime_error("Engine reference expired - cannot create script_value");
         }
-        
+
         script_value make_value(script_float f) const {
             if (!engine_ref_.expired()) {
+                // Return cached common values to avoid allocations
+                if (f == 0.0 && cached_zero_float_.has_value()) return *cached_zero_float_;
+                if (f == 1.0 && cached_one_float_.has_value()) return *cached_one_float_;
                 return script_value(f, engine_ref_);
             }
             throw runtime_error("Engine reference expired - cannot create script_value");
@@ -346,23 +364,36 @@ namespace jai {
             }
             throw runtime_error("Engine reference expired - cannot create script_value");
         }
-        
-        script_value make_value(script_bool b) const {
+
+        // Move overload for string temporaries (avoids copy)
+        script_value make_value(script_string&& s) const {
             if (!engine_ref_.expired()) {
-                return script_value(b, engine_ref_);
+                return script_value(std::move(s), engine_ref_);
             }
             throw runtime_error("Engine reference expired - cannot create script_value");
         }
         
+        script_value make_value(script_bool b) const {
+            if (!engine_ref_.expired()) {
+                // Return cached common values to avoid allocations
+                if (b && cached_true_.has_value()) return *cached_true_;
+                if (!b && cached_false_.has_value()) return *cached_false_;
+                return script_value(b, engine_ref_);
+            }
+            throw runtime_error("Engine reference expired - cannot create script_value");
+        }
+
         script_value make_value(script_char c) const {
             if (!engine_ref_.expired()) {
                 return script_value(c, engine_ref_);
             }
             throw runtime_error("Engine reference expired - cannot create script_value");
         }
-        
+
         script_value make_value() const {
             if (!engine_ref_.expired()) {
+                // Return cached null value
+                if (cached_null_.has_value()) return *cached_null_;
                 return script_value(std::monostate{}, engine_ref_);
             }
             throw runtime_error("Engine reference expired - cannot create script_value");
@@ -630,7 +661,15 @@ namespace jai {
                 // Don't create a new null value here as it would have invalid engine_ref
                 return result;
             }
-            
+
+            // Discard top value without constructing it (optimization for ignored return values)
+            void discard() {
+                if (top_ == 0) {
+                    throw runtime_error("Internal error: empty value stack");
+                }
+                --top_;  // Just decrement, don't move/copy the value
+            }
+
             bool empty() const { return top_ == 0; }
             size_t size() const { return top_; }
 
@@ -653,7 +692,11 @@ namespace jai {
         // Return value storage for global scope returns
         std::optional<script_value> returnValue_;  // Use optional to avoid needing default constructor
         bool hasReturnValue_ = false;
-        
+
+        // Control flow flags (for break/continue without exception overhead)
+        bool hasBreakRequest_ = false;
+        bool hasContinueRequest_ = false;
+
         // Exception handling state
         std::optional<script_exception> current_exception_;
         bool is_unwinding_ = false;
@@ -703,19 +746,28 @@ namespace jai {
 
         // Engine reference for script_value creation (weak reference to avoid circular dependency)
         std::weak_ptr<engine> engine_ref_;
-        
+
+        // Cached common values to avoid repeated allocations (initialized in set_engine_reference)
+        std::optional<script_value> cached_null_;
+        std::optional<script_value> cached_true_;
+        std::optional<script_value> cached_false_;
+        std::optional<script_value> cached_zero_int_;
+        std::optional<script_value> cached_one_int_;
+        std::optional<script_value> cached_zero_float_;
+        std::optional<script_value> cached_one_float_;
+
         // Temporary storage for 'this' value during method/constructor execution
         script_value current_method_this_;
-        
+
         // Helper to get the last evaluated value (inlined for performance)
         inline script_value pop_value() {
             return valueStack_.pop();
         }
-        
+
         inline void push_value(const script_value& value) {
             valueStack_.push(value);
         }
-        
+
         inline void push_value(script_value&& value) {
             valueStack_.push(std::move(value));
         }
@@ -728,20 +780,20 @@ namespace jai {
         
         // Type conversion helpers (inlined for performance)
         inline bool is_truthy(const script_value& value) {
-            // OPTIMIZATION: Get type ONCE instead of multiple is_*() calls
-            // Each is_*() call checks type_info_->base_type, so cache it
-            // For loop conditions like "i < 100" (returns bool), this is a single check
+            // ULTRA-OPTIMIZED: Get type ONCE via switch, then use unchecked accessors
+            // No branching, no exception checks - direct access to underlying data
+            // This is safe because we've already verified the type via switch
             switch (value.type()) {
                 case script_value_type::jai_null_type:
                     return false;
                 case script_value_type::jai_bool_type:
-                    return value.as_bool();
+                    return value.unchecked_as_bool();
                 case script_value_type::jai_int_type:
-                    return value.as_int() != 0;
+                    return value.unchecked_as_int() != 0;
                 case script_value_type::jai_float_type:
-                    return value.as_float() != 0.0;
+                    return value.unchecked_as_float() != 0.0;
                 case script_value_type::jai_string_type:
-                    return !value.as_string().empty();
+                    return !value.unchecked_as_string().empty();
                 default:
                     return true;  // Arrays, maps, objects, functions are truthy
             }

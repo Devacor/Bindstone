@@ -209,7 +209,7 @@ namespace jai {
         void reset(std::shared_ptr<environment> new_parent) override {
             // Clear local values using base implementation
             environment::reset(new_parent);
-            // Also clear the this object to release its reference
+            // Also clear the this object to release its reference (no engine ref needed for cleanup)
             this_object_ = script_value::make_null(std::weak_ptr<engine>{});
             bound_method_storage_ = script_value::make_null(std::weak_ptr<engine>{});
         }
@@ -427,8 +427,8 @@ namespace jai {
         
         // Return value access (for global scope return statements)
         bool has_return_value() const { return hasReturnValue_; }
-        script_value get_return_value() const { 
-            return returnValue_.value_or(script_value::make_null(engine_ref_)); 
+        script_value get_return_value() const {
+            return returnValue_.value_or(make_value());
         }
         
         // Variable access methods
@@ -705,7 +705,7 @@ namespace jai {
         // Class parsing context - tracks unresolved identifiers in methods
         struct class_context {
             std::string class_name;
-            std::set<std::string> unresolved_identifiers;  // Identifiers found in methods but not yet resolved
+            std::set<uint64_t> unresolved_identifiers;  // Interned IDs of identifiers found in methods but not yet resolved
             bool in_method = false;
         };
         std::optional<class_context> current_class_context_;
@@ -743,6 +743,32 @@ namespace jai {
         uint64_t shared_ptr_holder_type_id_;
         uint64_t weak_from_this_id_;
         uint64_t shared_from_this_id_;
+
+        // Cached symbol IDs for operator overloading (initialized in constructor)
+        uint64_t op_plus_id_;
+        uint64_t op_minus_id_;
+        uint64_t op_star_id_;
+        uint64_t op_slash_id_;
+        uint64_t op_percent_id_;
+        uint64_t op_less_id_;
+        uint64_t op_less_equal_id_;
+        uint64_t op_greater_id_;
+        uint64_t op_greater_equal_id_;
+        uint64_t op_equal_equal_id_;
+        uint64_t op_bang_equal_id_;
+        uint64_t op_spaceship_id_;
+        uint64_t op_ampersand_id_;
+        uint64_t op_pipe_id_;
+        uint64_t op_caret_id_;
+        uint64_t op_left_shift_id_;
+        uint64_t op_right_shift_id_;
+        uint64_t subscript_op_id_;  // "[]"
+
+		// Cached symbol IDs for common keywords (initialized in constructor)
+		uint64_t this_id_;
+		uint64_t super_id_;
+		uint64_t getValue_id_;
+		uint64_t cpp_object_field_id_;  // "_cpp_object"
 
         // Engine reference for script_value creation (weak reference to avoid circular dependency)
         std::weak_ptr<engine> engine_ref_;

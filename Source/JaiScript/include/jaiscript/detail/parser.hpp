@@ -104,6 +104,9 @@ namespace jai {
         checked_result<expression_ptr> parse_map_literal();
         checked_result<type_info_ptr> parse_type();
 
+        // Constant folding optimization: evaluates literal operations at parse time
+        expression_ptr try_constant_fold(expression_ptr left, const token& op, expression_ptr right);
+
         // Helper to create and store a type_info object, returning a pointer to it
         type_info_ptr store_type_info(type_info&& info);
 

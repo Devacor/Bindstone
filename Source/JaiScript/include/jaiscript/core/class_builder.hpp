@@ -48,11 +48,6 @@ namespace jai {
 
 namespace jai {
 
-// Common constants for the class system
-namespace class_constants {
-    inline const std::string CPP_OBJECT_FIELD = "_cpp_object";
-}
-
 // Common types for class system
 enum class access_level {
     public_access,
@@ -78,55 +73,55 @@ public:
     ~class_instance();
     
     // Field access
-    void set_field(const std::string& name, const script_value& value) {
+    void set_field(uint64_t id, const script_value& value) {
         // Check if the field already exists and is a reference
-        auto it = fields_.find(name);
+        auto it = fields_.find(id);
         if (it != fields_.end() && it->second.is_reference()) {
             // If the field is a reference, update the referenced value instead of replacing the reference
             it->second.deref() = value;
         } else {
             // Normal field assignment
-            fields_.insert_or_assign(name, value);
+            fields_.insert_or_assign(id, value);
         }
     }
     
-    const script_value& get_field(const std::string& name, bool throw_if_missing = true) const;
-    script_value& get_field(const std::string& name, bool throw_if_missing = true);
+    const script_value& get_field(uint64_t id, bool throw_if_missing = true) const;
+    script_value& get_field(uint64_t id, bool throw_if_missing = true);
 
-    bool has_field(const std::string& name) const;
+    bool has_field(uint64_t id) const;
 
     // Check if field has been set on this instance (not just defined in class)
-    bool has_field_value(const std::string& name) const {
-        return fields_.find(name) != fields_.end();
+    bool has_field_value(uint64_t id) const {
+        return fields_.find(id) != fields_.end();
     }
 
     const std::string& get_class_name() const { return class_name_; }
     
     
     // Migrate fields for hot reload
-    void migrate_fields(const std::set<std::string>& old_field_names,
-                       const std::unordered_map<std::string, script_value>& new_field_defaults) {
-        std::unordered_map<std::string, script_value> new_fields;
+    void migrate_fields(const std::set<uint64_t>& old_field_ids,
+                       const std::unordered_map<uint64_t, script_value>& new_field_defaults) {
+        std::unordered_map<uint64_t, script_value> new_fields;
         new_fields.reserve(new_field_defaults.size());  // Pre-allocate for efficiency
-        
+
         // Keep existing fields that are still in the new definition
-        for (const auto& [name, default_value] : new_field_defaults) {
-            auto it = fields_.find(name);
+        for (const auto& [id, default_value] : new_field_defaults) {
+            auto it = fields_.find(id);
             if (it != fields_.end()) {
                 // Field exists in both old and new - keep current value
-                new_fields.emplace(name, std::move(it->second));
+                new_fields.emplace(id, std::move(it->second));
             } else {
                 // New field - use default value
-                new_fields.emplace(name, default_value.clone());
+                new_fields.emplace(id, default_value.clone());
             }
         }
-        
+
         // Replace fields map (removes old fields)
         fields_ = std::move(new_fields);
     }
     
     // Get method from class definition
-    script_value get_method(const std::string& name, bool throw_if_missing = true) const;
+    script_value get_method(uint64_t id, bool throw_if_missing = true) const;
     
     // Set the class definition this instance belongs to
     void set_class_definition(std::shared_ptr<class_definition> class_def) {
@@ -134,7 +129,7 @@ public:
     }
     
     // Get all fields for implicit this support
-    const std::unordered_map<std::string, script_value>& get_fields() const {
+    const std::unordered_map<uint64_t, script_value>& get_fields() const {
         return fields_;
     }
     
@@ -151,7 +146,10 @@ public:
     
     // Get the underlying C++ object (if this is a C++ class instance)
     std::shared_ptr<void> get_cpp_object() const {
-        auto cpp_field = get_field(class_constants::CPP_OBJECT_FIELD);
+        uint64_t field_id = get_cpp_object_field_id();
+        if (field_id == 0) return nullptr;
+
+        auto cpp_field = get_field(field_id);
         if (!cpp_field.is_null() && cpp_field.is_object()) {
             // Extract the object_holder's data
             // This requires friend access or a public method
@@ -159,27 +157,34 @@ public:
         }
         return nullptr;
     }
-    
+
     // Get the C++ object as a specific type
     template<typename T>
     std::shared_ptr<T> get_cpp_object_as() const {
         auto obj = get_cpp_object();
         return std::static_pointer_cast<T>(obj);
     }
-    
+
     // Check if this instance has a C++ object
     bool has_cpp_object() const {
-        return !get_field(class_constants::CPP_OBJECT_FIELD).is_null();
+        uint64_t field_id = get_cpp_object_field_id();
+        if (field_id == 0) return false;
+        return !get_field(field_id).is_null();
     }
     
     // Deep copy this instance
     std::shared_ptr<class_instance> deep_copy() const;
-    
+
+    // Helper to get the CPP_OBJECT_FIELD ID (cached for performance)
+    // Implemented after class_definition is complete
+    uint64_t get_cpp_object_field_id() const;
+
 private:
     std::string class_name_;
-    std::unordered_map<std::string, script_value> fields_;
+    std::unordered_map<uint64_t, script_value> fields_;
     std::weak_ptr<class_definition> class_definition_;
-    
+    mutable uint64_t cpp_object_field_id_ = 0;  // Cached field ID
+
     static std::shared_ptr<void> extract_cpp_object_impl(const script_value& val);
 };
 
@@ -236,32 +241,32 @@ public:
 
     // Add a method to the class
     void add_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
-        methods_.insert_or_assign(name, script_value::make_function(func, engine_ref_));
+        auto eng = engine_ref_.lock();
+        if (!eng) return;
+
+        uint64_t name_id = eng->symbolize(name);
+        methods_.insert_or_assign(name_id, script_value::make_function(func, engine_ref_));
 
         // If arity is provided, store it for arity-aware method resolution
         if (arity != SIZE_MAX) {
-            auto eng = engine_ref_.lock();
-            if (eng) {
-                uint64_t name_id = eng->symbolize(name);
-                // Track arity for C++ methods
-                method_arities_[name_id].push_back(arity);
-            }
+            // Track arity for C++ methods
+            method_arities_[name_id].push_back(arity);
         }
     }
     
     // Add a static method to the class (with optional arity for C++ methods)
     void add_static_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
-        static_methods_.insert_or_assign(name, script_value::make_function(func, engine_ref_));
+        auto eng = engine_ref_.lock();
+        if (!eng) return;
+
+        uint64_t name_id = eng->symbolize(name);
+        static_methods_.insert_or_assign(name_id, script_value::make_function(func, engine_ref_));
 
         // If arity is provided, store it for arity-aware collision detection
         // (arity == SIZE_MAX means arity unknown, typically for generic lambdas)
         if (arity != SIZE_MAX) {
-            auto eng = engine_ref_.lock();
-            if (eng) {
-                uint64_t name_id = eng->symbolize(name);
-                // Track arity for C++ methods
-                static_method_arities_[name_id].push_back(arity);
-            }
+            // Track arity for C++ methods
+            static_method_arities_[name_id].push_back(arity);
         }
     }
     
@@ -274,35 +279,48 @@ public:
     
     // Add a field with default value
     void add_field(const std::string& name, const script_value& default_value) {
+        auto eng = engine_ref_.lock();
+        if (!eng) return;
+
+        uint64_t name_id = eng->symbolize(name);
+
         // Ensure the default value has an engine reference
         if (default_value.get_engine_ref().expired() && !engine_ref_.expired()) {
             // Create a copy with engine reference
             script_value value_with_engine(default_value);
             value_with_engine.set_engine_ref(engine_ref_);
-            field_defaults_.insert_or_assign(name, value_with_engine);
+            field_defaults_.insert_or_assign(name_id, value_with_engine);
         } else {
-            field_defaults_.insert_or_assign(name, default_value);
+            field_defaults_.insert_or_assign(name_id, default_value);
         }
         field_defaults_cache_valid_ = false;  // Invalidate cache
     }
-    
+
     // Add a field with null default value
     void add_field(const std::string& name) {
-        field_defaults_.insert_or_assign(name, script_value(std::monostate{}, engine_ref_));
+        auto eng = engine_ref_.lock();
+        if (!eng) return;
+
+        uint64_t name_id = eng->symbolize(name);
+        field_defaults_.insert_or_assign(name_id, script_value(std::monostate{}, engine_ref_));
         field_defaults_cache_valid_ = false;  // Invalidate cache
     }
     
     // Add a static field with initial value
     void add_static_field(const std::string& name, const script_value& initial_value) {
-        static_fields_.insert(name);
-        
+        auto eng = engine_ref_.lock();
+        if (!eng) return;
+
+        uint64_t name_id = eng->symbolize(name);
+        static_fields_.insert(name_id);
+
         // Ensure the value has an engine reference
         if (initial_value.get_engine_ref().expired() && !engine_ref_.expired()) {
             script_value value_with_engine(initial_value);
             value_with_engine.set_engine_ref(engine_ref_);
-            static_field_values_.insert_or_assign(name, value_with_engine);
+            static_field_values_.insert_or_assign(name_id, value_with_engine);
         } else {
-            static_field_values_.insert_or_assign(name, initial_value);
+            static_field_values_.insert_or_assign(name_id, initial_value);
         }
     }
     
@@ -310,7 +328,11 @@ public:
     // Returns nullptr if not found. Does NOT check parent classes (C++ semantics).
     // Static members belong to the class itself, they are not inherited.
     const script_value* get_static_field_ptr(const std::string& name) const {
-        auto it = static_field_values_.find(name);
+        auto eng = engine_ref_.lock();
+        if (!eng) return nullptr;
+
+        uint64_t name_id = eng->symbolize(name);
+        auto it = static_field_values_.find(name_id);
         if (it != static_field_values_.end()) {
             return &it->second;
         }
@@ -321,7 +343,11 @@ public:
     // Returns nullptr if not found. Does NOT check parent classes (C++ semantics).
     // Static members belong to the class itself, they are not inherited.
     script_value* get_static_field_ptr(const std::string& name) {
-        auto it = static_field_values_.find(name);
+        auto eng = engine_ref_.lock();
+        if (!eng) return nullptr;
+
+        uint64_t name_id = eng->symbolize(name);
+        auto it = static_field_values_.find(name_id);
         if (it != static_field_values_.end()) {
             return &it->second;
         }
@@ -356,7 +382,11 @@ public:
     // No exceptions. Callers MUST check return value (enforced by [[nodiscard]]).
     // Does NOT check parent classes (C++ semantics) - static members are not inherited.
     [[nodiscard]] bool set_static_field(const std::string& name, const script_value& value) {
-        auto it = static_field_values_.find(name);
+        auto eng = engine_ref_.lock();
+        if (!eng) return false;
+
+        uint64_t name_id = eng->symbolize(name);
+        auto it = static_field_values_.find(name_id);
         if (it != static_field_values_.end()) {
             it->second = value;
             return true;
@@ -364,20 +394,28 @@ public:
 
         return false;  // Field not found - static members are not inherited
     }
-    
+
     // Check if field is static (does NOT check parent classes - C++ semantics)
     bool is_static_field(const std::string& name) const {
-        return static_fields_.find(name) != static_fields_.end();
+        auto eng = engine_ref_.lock();
+        if (!eng) return false;
+
+        uint64_t name_id = eng->symbolize(name);
+        return static_fields_.find(name_id) != static_fields_.end();
     }
 
     // Check if static field exists (does NOT check parent classes - C++ semantics)
     bool has_static_field(const std::string& name) const {
-        return static_field_values_.find(name) != static_field_values_.end();
+        auto eng = engine_ref_.lock();
+        if (!eng) return false;
+
+        uint64_t name_id = eng->symbolize(name);
+        return static_field_values_.find(name_id) != static_field_values_.end();
     }
     
     // Get a method
-    script_value get_method(const std::string& name, bool throw_if_missing = true) const {
-        auto it = methods_.find(name);
+    script_value get_method(uint64_t id, bool throw_if_missing = true) const {
+        auto it = methods_.find(id);
         if (it != methods_.end()) {
             return it->second;
         }
@@ -385,7 +423,7 @@ public:
         // Check parent classes (left-to-right) if we have inheritance
         for (const auto& parent : parent_classes_) {
             if (parent) {
-                auto result = parent->get_method(name, false);
+                auto result = parent->get_method(id, false);
                 if (!result.is_invalid()) {
                     return result;
                 }
@@ -393,6 +431,13 @@ public:
         }
 
         if (throw_if_missing) {
+            // Get the method name from the symbolizer for error message
+            std::string name;
+            if (auto eng = engine_ref_.lock()) {
+                name = eng->get_symbolizer()->get_string(id);
+            } else {
+                name = std::to_string(id);
+            }
             throw runtime_error("Method '" + name + "' not found in class '" + name_ + "'");
         }
 
@@ -401,55 +446,60 @@ public:
     }
     
     // Check if this class has a method (does not check parent classes)
-    bool has_method(const std::string& name) const {
-        return methods_.find(name) != methods_.end();
+    bool has_method(uint64_t id) const {
+        return methods_.find(id) != methods_.end();
     }
-    
+
     // Get a static method (does NOT check parent classes - C++ semantics)
     // Static methods belong to the class itself, they are not inherited.
-    script_value get_static_method(const std::string& name, bool throw_if_missing = true) const {
-        auto it = static_methods_.find(name);
+    script_value get_static_method(uint64_t id, bool throw_if_missing = true) const {
+        auto it = static_methods_.find(id);
         if (it != static_methods_.end()) {
             return it->second;
         }
 
         if (throw_if_missing) {
+            // Get the method name from the symbolizer for error message
+            std::string name;
+            if (auto eng = engine_ref_.lock()) {
+                name = eng->get_symbolizer()->get_string(id);
+            } else {
+                name = std::to_string(id);
+            }
             throw runtime_error("Static method '" + name + "' not found in class '" + name_ + "'");
         }
         return script_value::make_null(engine_ref_);
     }
 
     // Check if this class has a static method (does NOT check parent classes - C++ semantics)
-    bool has_static_method(const std::string& name) const {
-        return static_methods_.find(name) != static_methods_.end();
+    bool has_static_method(uint64_t id) const {
+        return static_methods_.find(id) != static_methods_.end();
     }
 
     // Check if this class has a static method with specific name_id and arity
     // Defined in script_class.hpp where function_decl is available
     bool has_static_method_with_arity(uint64_t name_id, size_t arity) const;
 
-    // DEPRECATED: Static methods are not inherited (C++ semantics)
-    // This method exists for backward compatibility but just checks the current class
-    bool has_static_method_recursive(const std::string& name) const {
-        return has_static_method(name);
-    }
-
     // Get all static field names (only this class, not parent)
-    std::vector<std::string> get_static_field_names() const {
-        std::vector<std::string> names;
+    std::vector<std::string_view> get_static_field_names() const {
+        std::vector<std::string_view> names;
         names.reserve(static_fields_.size());
-        for (const auto& field_name : static_fields_) {
-            names.push_back(field_name);
+        if (auto eng = engine_ref_.lock()) {
+            for (const auto& field_id : static_fields_) {
+                names.push_back(eng->get_symbolizer()->get_string(field_id));
+            }
         }
         return names;
     }
 
     // Get all static method names (only this class, not parent)
-    std::vector<std::string> get_static_method_names() const {
-        std::vector<std::string> names;
+    std::vector<std::string_view> get_static_method_names() const {
+        std::vector<std::string_view> names;
         names.reserve(static_methods_.size());
-        for (const auto& [method_name, _] : static_methods_) {
-            names.push_back(method_name);
+        if (auto eng = engine_ref_.lock()) {
+            for (const auto& [method_id, _] : static_methods_) {
+                names.push_back(eng->get_symbolizer()->get_string(method_id));
+            }
         }
         return names;
     }
@@ -461,10 +511,15 @@ public:
 
         // Check if this is a script class with a destructor
         std::shared_ptr<class_instance> instance;
-        if (is_script_class() && has_method("~" + name_)) {
+        auto destructor_name = "~" + name_;
+        uint64_t destructor_id = 0;
+        if (auto eng = engine_ref_.lock()) {
+            destructor_id = eng->symbolize(destructor_name);
+        }
+
+        if (is_script_class() && destructor_id != 0 && has_method(destructor_id)) {
             // Create with custom deleter to call script destructor
             auto class_def = shared_from_this();
-            auto destructor_name = "~" + name_;
 
             instance = std::shared_ptr<class_instance>(raw_instance,
                 [class_def, destructor_name](class_instance* ptr) {
@@ -478,7 +533,13 @@ public:
 
                             // First call this class's destructor
                             auto current_destructor_name = "~" + current_class->name_;
-                            auto method_it = current_class->methods_.find(current_destructor_name);
+                            uint64_t destructor_id = 0;
+                            if (auto eng = current_class->get_engine_ref().lock()) {
+                                destructor_id = eng->symbolize(current_destructor_name);
+                            }
+                            if (destructor_id == 0) return;
+
+                            auto method_it = current_class->methods_.find(destructor_id);
 
                             if (method_it != current_class->methods_.end()) {
                                 try {
@@ -540,7 +601,7 @@ public:
     }
     
     // Get all field defaults including inherited ones
-    const std::unordered_map<std::string, script_value>& get_all_field_defaults() const {
+    const std::unordered_map<uint64_t, script_value>& get_all_field_defaults() const {
         // Rebuild cache if invalid
         if (!field_defaults_cache_valid_) {
             all_field_defaults_cache_.clear();
@@ -549,23 +610,23 @@ public:
             for (const auto& parent : parent_classes_) {
                 if (parent) {
                     const auto& parent_fields = parent->get_all_field_defaults();
-                    for (const auto& [name, value] : parent_fields) {
+                    for (const auto& [id, value] : parent_fields) {
                         // Only add if not already present (left-to-right: first parent wins)
-                        if (all_field_defaults_cache_.find(name) == all_field_defaults_cache_.end()) {
-                            all_field_defaults_cache_[name] = value;
+                        if (all_field_defaults_cache_.find(id) == all_field_defaults_cache_.end()) {
+                            all_field_defaults_cache_[id] = value;
                         }
                     }
                 }
             }
 
             // Add/override with our fields (derived class always wins)
-            for (const auto& [name, value] : field_defaults_) {
-                all_field_defaults_cache_.insert_or_assign(name, value);
+            for (const auto& [id, value] : field_defaults_) {
+                all_field_defaults_cache_.insert_or_assign(id, value);
             }
 
             field_defaults_cache_valid_ = true;
         }
-        
+
         return all_field_defaults_cache_;
     }
     
@@ -671,12 +732,24 @@ public:
 
     // Get the engine reference
     std::weak_ptr<engine> get_engine_ref() const { return engine_ref_; }
-    
+
+    // Helper to get the CPP_OBJECT_FIELD ID (cached for performance)
+    uint64_t get_cpp_object_field_id() const {
+        if (cpp_object_field_id_ == 0) {
+            if (auto eng = engine_ref_.lock()) {
+                cpp_object_field_id_ = eng->symbolize(class_constants::CPP_OBJECT_FIELD);
+            }
+        }
+        return cpp_object_field_id_;
+    }
+
     // Get all registered property names from fieldDefaults_
     std::vector<std::string> get_property_names() const {
         std::vector<std::string> properties;
-        for (const auto& [name, default_value] : field_defaults_) {
-            properties.push_back(name);
+        if (auto eng = engine_ref_.lock()) {
+            for (const auto& [id, default_value] : field_defaults_) {
+                properties.push_back(std::string(eng->get_symbolizer()->get_string(id)));
+            }
         }
         return properties;
     }
@@ -719,18 +792,27 @@ public:
     
     // Set metadata for a method
     void set_method_metadata(const std::string& name, const method_metadata& metadata) {
-        method_metadata_[name] = metadata;
+        auto eng = engine_ref_.lock();
+        if (!eng) return;
+        uint64_t name_id = eng->symbolize(name);
+        method_metadata_[name_id] = metadata;
     }
-    
+
     // Get metadata for a method
     const method_metadata* get_method_metadata(const std::string& name) const {
-        auto it = method_metadata_.find(name);
+        auto eng = engine_ref_.lock();
+        if (!eng) return nullptr;
+        uint64_t name_id = eng->symbolize(name);
+        auto it = method_metadata_.find(name_id);
         return it != method_metadata_.end() ? &it->second : nullptr;
     }
-    
+
     // Get mutable metadata for a method (for updating)
     method_metadata* get_method_metadata_mutable(const std::string& name) {
-        auto it = method_metadata_.find(name);
+        auto eng = engine_ref_.lock();
+        if (!eng) return nullptr;
+        uint64_t name_id = eng->symbolize(name);
+        auto it = method_metadata_.find(name_id);
         return it != method_metadata_.end() ? &it->second : nullptr;
     }
     
@@ -741,20 +823,25 @@ public:
     };
     
     method_info find_method(const std::string& name) {
+        auto eng = engine_ref_.lock();
+        if (!eng) return { nullptr, nullptr };
+
+        uint64_t name_id = eng->symbolize(name);
+
         // First check this class
-        if (has_method(name)) {
+        if (has_method(name_id)) {
             return { shared_from_this(), get_method_metadata_mutable(name) };
         }
-        
+
         // Check parent classes
         auto parent = get_parent();
         while (parent) {
-            if (parent->has_method(name)) {
+            if (parent->has_method(name_id)) {
                 return { parent, parent->get_method_metadata_mutable(name) };
             }
             parent = parent->get_parent();
         }
-        
+
         return { nullptr, nullptr };
     }
     
@@ -764,9 +851,9 @@ public:
     }
     
     // Hot reload support - migrate all instances
-    void redefine_class(const std::unordered_map<std::string, script_value>& new_field_defaults,
-                        const std::unordered_map<std::string, script_value>& new_methods,
-                        const std::unordered_map<std::string, script_value>& new_static_methods,
+    void redefine_class(const std::unordered_map<uint64_t, script_value>& new_field_defaults,
+                        const std::unordered_map<uint64_t, script_value>& new_methods,
+                        const std::unordered_map<uint64_t, script_value>& new_static_methods,
                         std::weak_ptr<engine> engine_ref) {
         field_defaults_cache_valid_ = false;  // Invalidate cache on hot reload
         // Compute fingerprint for the new definition
@@ -791,39 +878,43 @@ public:
         }
         // Check if fields have changed
         bool fields_changed = false;
-        
+
         // Quick size check first
         if (field_defaults_.size() != new_field_defaults.size()) {
             fields_changed = true;
         } else {
-            // Check if all field names match
-            for (const auto& [name, _] : field_defaults_) {
-                if (new_field_defaults.find(name) == new_field_defaults.end()) {
+            // Check if all field IDs match
+            for (const auto& [id, _] : field_defaults_) {
+                if (new_field_defaults.find(id) == new_field_defaults.end()) {
                     fields_changed = true;
                     break;
                 }
             }
             // Also check the reverse - any new fields not in old?
             if (!fields_changed) {
-                for (const auto& [name, _] : new_field_defaults) {
-                    if (field_defaults_.find(name) == field_defaults_.end()) {
+                for (const auto& [id, _] : new_field_defaults) {
+                    if (field_defaults_.find(id) == field_defaults_.end()) {
                         fields_changed = true;
                         break;
                     }
                 }
             }
         }
-        
-        // Store old field names for migration (only if needed)
-        std::set<std::string> old_fields;
+
+        // Store old field IDs for migration (only if needed)
+        std::set<uint64_t> old_fields;
         if (fields_changed) {
-            for (const auto& [name, _] : field_defaults_) {
-                old_fields.insert(name);
+            for (const auto& [id, _] : field_defaults_) {
+                old_fields.insert(id);
             }
         }
-        
+
         // Check if new class has a hot_reload_migrate method
-        auto migrate_method_it = new_methods.find("hot_reload_migrate");
+        uint64_t migrate_method_id = 0;
+        if (auto eng = engine_ref.lock()) {
+            migrate_method_id = eng->symbolize("hot_reload_migrate");
+        }
+        auto migrate_method_it = new_methods.find(migrate_method_id);
 
         // Update methods BEFORE migrating instances so that hot_reload_migrate can access new getters/setters
         methods_ = new_methods;
@@ -832,14 +923,14 @@ public:
         // Update field_defaults_ BEFORE migrating instances so that get_field() sees correct fields
         // This prevents removed fields from being lazily re-created from old defaults
         field_defaults_.clear();
-        for (const auto& [name, value] : new_field_defaults) {
-            if (value.get_engine_ref().expired() && !engine_ref_.expired()) {
+        for (const auto& [id, value] : new_field_defaults) {
+            if (value.get_engine_ref().expired() && !engine_ref.expired()) {
                 // Create a copy with engine reference
                 script_value value_with_engine(value);
-                value_with_engine.set_engine_ref(engine_ref_);
-                field_defaults_[name] = value_with_engine;
+                value_with_engine.set_engine_ref(engine_ref);
+                field_defaults_[id] = value_with_engine;
             } else {
-                field_defaults_[name] = value;
+                field_defaults_[id] = value;
             }
         }
 
@@ -932,14 +1023,14 @@ public:
     void update_instances_from_base() {
         field_defaults_cache_valid_ = false;  // Invalidate cache when base class changes
         const auto& all_fields = get_all_field_defaults();
-        std::set<std::string> dummy_old_fields; // Not used for base updates
-        
+        std::set<uint64_t> dummy_old_fields; // Not used for base updates
+
         for (auto& weak_instance : instances_) {
             if (auto instance = weak_instance.lock()) {
                 instance->migrate_fields(dummy_old_fields, all_fields);
             }
         }
-        
+
         // Recursively notify derived classes (for multi-level inheritance)
         for (auto& weak_derived : derived_classes_) {
             if (auto derived = weak_derived.lock()) {
@@ -971,18 +1062,19 @@ private:
     uint64_t type_id_;  // Interned type name for fast comparisons
     type_info_ptr type_info_;  // Persistent type_info for this class
     std::weak_ptr<engine> engine_ref_;  // Engine reference for script_value creation
-    std::unordered_map<std::string, script_value> methods_;
+    std::unordered_map<uint64_t, script_value> methods_;
     std::unordered_map<uint64_t, std::vector<size_t>> method_arities_;  // Track arities for C++ methods (name_id -> list of arities)
-    std::unordered_map<std::string, script_value> static_methods_;  // Static method storage (keyed by name string for now)
+    std::unordered_map<uint64_t, script_value> static_methods_;  // Static method storage
     std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> static_method_overloads_;  // Track overloads by name_id and arity (for script methods)
     std::unordered_map<uint64_t, std::vector<size_t>> static_method_arities_;  // Track arities for C++ methods (name_id -> list of arities)
-    std::unordered_map<std::string, script_value> field_defaults_;
-    std::unordered_map<std::string, script_value> static_field_values_;  // Static field storage
-    std::unordered_set<std::string> static_fields_;  // Track which fields are static
+    std::unordered_map<uint64_t, script_value> field_defaults_;
+    std::unordered_map<uint64_t, script_value> static_field_values_;  // Static field storage
+    std::unordered_set<uint64_t> static_fields_;  // Track which fields are static
     std::vector<std::shared_ptr<class_definition>> parent_classes_;  // Support multiple inheritance
-    mutable std::unordered_map<std::string, script_value> all_field_defaults_cache_;
+    mutable std::unordered_map<uint64_t, script_value> all_field_defaults_cache_;
     mutable bool field_defaults_cache_valid_ = false;
-    
+    mutable uint64_t cpp_object_field_id_ = 0;  // Cached field ID for CPP_OBJECT_FIELD
+
     // Script class specific fields
     class_type class_type_;
     access_level default_access_ = access_level::public_access;
@@ -994,7 +1086,7 @@ private:
     copy_function copy_function_;
     
     // Method metadata for optimizations
-    std::unordered_map<std::string, method_metadata> method_metadata_;
+    std::unordered_map<uint64_t, method_metadata> method_metadata_;
     
     // Track all instances for hot reload
     std::vector<std::weak_ptr<class_instance>> instances_;
@@ -1013,34 +1105,34 @@ private:
     
     // Compute fingerprint for a class definition
     static size_t compute_fingerprint(
-        const std::unordered_map<std::string, script_value>& field_defaults,
-        const std::unordered_map<std::string, script_value>& methods,
-        const std::unordered_map<std::string, script_value>& static_methods = {}) {
-        
+        const std::unordered_map<uint64_t, script_value>& field_defaults,
+        const std::unordered_map<uint64_t, script_value>& methods,
+        const std::unordered_map<uint64_t, script_value>& static_methods = {}) {
+
         size_t hash = 0;
-        
-        // Hash fields (names and types, not values)
-        // Sort by name for consistent ordering
-        std::vector<std::string> field_names;
-        field_names.reserve(field_defaults.size());
-        for (const auto& [name, _] : field_defaults) {
-            field_names.push_back(name);
+
+        // Hash fields (IDs and types, not values)
+        // Sort by ID for consistent ordering
+        std::vector<uint64_t> field_ids;
+        field_ids.reserve(field_defaults.size());
+        for (const auto& [id, _] : field_defaults) {
+            field_ids.push_back(id);
         }
-        std::sort(field_names.begin(), field_names.end());
-        
-        for (const auto& name : field_names) {
-            hash_combine(hash, name);
+        std::sort(field_ids.begin(), field_ids.end());
+
+        for (const auto& id : field_ids) {
+            hash_combine(hash, id);
             // Could also hash default value types if needed
         }
-        
-        // Hash methods (names and their identity)
-        // We need to detect when method implementations change, not just names
-        std::vector<std::pair<std::string, size_t>> method_hashes;
+
+        // Hash methods (IDs and their identity)
+        // We need to detect when method implementations change, not just IDs
+        std::vector<std::pair<uint64_t, size_t>> method_hashes;
         method_hashes.reserve(methods.size());
-        for (const auto& [name, value] : methods) {
-            // Hash the method name AND something about its implementation
+        for (const auto& [id, value] : methods) {
+            // Hash the method ID AND something about its implementation
             // For functions, we can use the internal function object address as a discriminator
-            // This detects when the same method name gets a new implementation
+            // This detects when the same method ID gets a new implementation
             size_t impl_hash = 0;
             if (value.is_function()) {
                 try {
@@ -1056,19 +1148,19 @@ private:
                     impl_hash = 0;
                 }
             }
-            method_hashes.emplace_back(name, impl_hash);
+            method_hashes.emplace_back(id, impl_hash);
         }
         std::sort(method_hashes.begin(), method_hashes.end());
 
-        for (const auto& [name, impl_hash] : method_hashes) {
-            hash_combine(hash, name);
+        for (const auto& [id, impl_hash] : method_hashes) {
+            hash_combine(hash, id);
             hash_combine(hash, impl_hash); // Include implementation identity
         }
-        
-        // Hash static methods (names and their identity)
-        std::vector<std::pair<std::string, size_t>> static_method_hashes;
+
+        // Hash static methods (IDs and their identity)
+        std::vector<std::pair<uint64_t, size_t>> static_method_hashes;
         static_method_hashes.reserve(static_methods.size());
-        for (const auto& [name, value] : static_methods) {
+        for (const auto& [id, value] : static_methods) {
             size_t impl_hash = 0;
             if (value.is_function()) {
                 try {
@@ -1080,16 +1172,16 @@ private:
                     impl_hash = 0;
                 }
             }
-            static_method_hashes.emplace_back(name, impl_hash);
+            static_method_hashes.emplace_back(id, impl_hash);
         }
         std::sort(static_method_hashes.begin(), static_method_hashes.end());
 
-        for (const auto& [name, impl_hash] : static_method_hashes) {
-            hash_combine(hash, name);
+        for (const auto& [id, impl_hash] : static_method_hashes) {
+            hash_combine(hash, id);
             hash_combine(hash, std::string("static")); // Distinguish from instance methods
             hash_combine(hash, impl_hash); // Include implementation identity
         }
-        
+
         return hash;
     }
 };
@@ -1133,7 +1225,8 @@ namespace class_builder_detail {
         auto instance = class_def->create_instance();
 
         // Store the C++ object in the class_instance
-        instance->set_field(class_constants::CPP_OBJECT_FIELD,
+        uint64_t cpp_object_field_id = eng->symbolize(class_constants::CPP_OBJECT_FIELD);
+        instance->set_field(cpp_object_field_id,
             script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, eng));
 
         // Return wrapped object
@@ -1299,7 +1392,7 @@ public:
                     auto instance = class_def->create_instance();
 
                     // Store the C++ object in the class_instance as a special field
-                    instance->set_field(class_constants::CPP_OBJECT_FIELD, script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ref));
+                    instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ref));
 
                     // Return the class_instance wrapped in a value
                     return script_value::make_object(class_name, instance, engine_ref);
@@ -1327,7 +1420,7 @@ public:
                     auto instance = class_def->create_instance();
 
                     // Store the C++ object in the class_instance as a special field
-                    instance->set_field(class_constants::CPP_OBJECT_FIELD, script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ref));
+                    instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ref));
 
                     // Return the class_instance wrapped in a value
                     return script_value::make_object(class_name, instance, engine_ref);
@@ -1358,7 +1451,7 @@ public:
             auto instance = args[0].as<std::shared_ptr<class_instance>>();
             
             // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
             
             // Call the method with unpacked arguments
@@ -1393,7 +1486,7 @@ public:
             auto instance = args[0].as<std::shared_ptr<class_instance>>();
             
             // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
             
             // Call the method with unpacked arguments
@@ -1439,7 +1532,7 @@ public:
                 
                 // Extract the C++ object from the class_instance
                 auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+                auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
                 auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
                 
                 // Call the lambda with the C++ object as first argument and remaining args
@@ -1557,7 +1650,7 @@ public:
             
             // Create a class_instance to hold it
             auto class_instance = class_def->create_instance();
-            class_instance->set_field(class_constants::CPP_OBJECT_FIELD, script_value::make_cpp_object(class_name,
+            class_instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name,
                 class_def->get_type_id(), std::make_shared<T>(std::move(instance)), engine_weak));
 
             if (auto eng = engine_weak.lock()) {
@@ -1648,7 +1741,7 @@ private:
             auto instance = args[0].as<std::shared_ptr<class_instance>>();
             
             // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
             
 			if (auto eng = engine_weak.lock()) {
@@ -1676,7 +1769,7 @@ private:
             auto instance = args[0].as<std::shared_ptr<class_instance>>();
             
             // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
             
             // Special case: if P is script_value, don't convert
@@ -1702,7 +1795,7 @@ private:
             auto instance = args[0].as<std::shared_ptr<class_instance>>();
             
             // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
             
             if (auto eng = engine_weak.lock()) {
@@ -1724,7 +1817,7 @@ private:
             auto instance = args[0].as<std::shared_ptr<class_instance>>();
             
             // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
             
             // Special case: if P is script_value, don't convert
@@ -1802,7 +1895,7 @@ public:
             auto instance = args[0].as<std::shared_ptr<class_instance>>();
 
             // Get the C++ object from the special field
-            auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
 
             // Check if getter is a member function pointer
@@ -1835,7 +1928,7 @@ public:
                     throw runtime_error("Property setter requires 'this' and value");
                 }
                 auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+                auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
                 auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
 
                 using setter_traits = detail::function_traits<std::decay_t<Setter>>;
@@ -1851,7 +1944,7 @@ public:
                     throw runtime_error("Property setter requires 'this' and value");
                 }
                 auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+                auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
                 auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
 
                 using setter_traits = detail::function_traits<std::decay_t<Setter>>;
@@ -1872,7 +1965,7 @@ public:
             }
 
             auto instance = args[0].as<std::shared_ptr<class_instance>>();
-            auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+            auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
             auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
 
             // Check if getter is a member function pointer
@@ -1906,7 +1999,7 @@ public:
                     throw runtime_error("Setter requires 'this' and value");
                 }
                 auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+                auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
                 auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
 
                 using setter_traits = detail::function_traits<std::decay_t<Setter>>;
@@ -1922,7 +2015,7 @@ public:
                     throw runtime_error("Setter requires 'this' and value");
                 }
                 auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+                auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
                 auto cpp_obj = cpp_obj_value.as<std::shared_ptr<T>>();
 
                 using setter_traits = detail::function_traits<std::decay_t<Setter>>;
@@ -2174,7 +2267,7 @@ public:
                     
                     // Create a class_instance to wrap the object
                     auto instance = class_def->create_instance();
-                    instance->set_field(class_constants::CPP_OBJECT_FIELD,
+                    instance->set_field(instance->get_cpp_object_field_id(),
                         script_value::make_cpp_object(class_name, class_def->get_type_id(), std::static_pointer_cast<void>(obj), engine_weak));
                     
                     // Return wrapped in script_value
@@ -2195,10 +2288,13 @@ public:
                     
                     // Create a shared_ptr to the C++ object (by copying)
                     auto cpp_obj = std::make_shared<T>(*static_cast<const T*>(obj));
-                    
+
                     // Store the C++ object in the class_instance
-                    instance->set_field("_cpp_object", script_value::make_cpp_object(class_name,
-                        class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_weak));
+                    if (auto eng = engine_weak.lock()) {
+                        uint64_t cpp_object_field_id = eng->symbolize(class_constants::CPP_OBJECT_FIELD);
+                        instance->set_field(cpp_object_field_id, script_value::make_cpp_object(class_name,
+                            class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_weak));
+                    }
                     
                     // Return the class_instance wrapped in a value
                     if (auto eng = engine_weak.lock()) {
@@ -2236,7 +2332,7 @@ public:
                         }
                         
                         // Get the C++ object field directly - don't use has_field since it's an internal field
-                        auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+                        auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
                         if (cpp_obj_value.is_null()) {
                             throw runtime_error("C++ object field not found in class_instance");
                         }
@@ -2267,7 +2363,7 @@ public:
                         auto cpp_obj = std::make_shared<T>(obj);
                         
                         // Store the C++ object in the class_instance
-                        instance->set_field(class_constants::CPP_OBJECT_FIELD,
+                        instance->set_field(instance->get_cpp_object_field_id(),
                             script_value::make_cpp_object(class_name,
                                 class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_weak));
                         
@@ -2310,7 +2406,7 @@ public:
                         }
                         
                         // Get the C++ object field
-                        auto cpp_obj_value = instance->get_field(class_constants::CPP_OBJECT_FIELD);
+                        auto cpp_obj_value = instance->get_field(instance->get_cpp_object_field_id());
                         if (cpp_obj_value.is_null()) {
                             throw runtime_error("C++ object field not found in class_instance");
                         }
@@ -2336,7 +2432,7 @@ public:
                         auto instance = class_def->create_instance();
                         
                         // Store the shared_ptr directly (no copy needed)
-                        instance->set_field(class_constants::CPP_OBJECT_FIELD,
+                        instance->set_field(instance->get_cpp_object_field_id(),
                             script_value::make_cpp_object(class_name,
                                 class_def->get_type_id(), std::static_pointer_cast<void>(obj), engine_weak));
                         
@@ -2387,7 +2483,7 @@ private:
                     [class_def = class_def_, class_name = class_name_, engine_weak = std::weak_ptr<engine>(engine_.shared_from_this())](const T& obj) -> script_value {
                         auto instance = class_def->create_instance();
                         auto cpp_obj = std::make_shared<T>(obj);
-                        instance->set_field(class_constants::CPP_OBJECT_FIELD,
+                        instance->set_field(instance->get_cpp_object_field_id(),
                             script_value::make_cpp_object(class_name,
                                 class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_weak));
                         return script_value::make_object(class_name, instance, engine_weak);
@@ -2588,13 +2684,26 @@ inline std::shared_ptr<void> class_instance::extract_cpp_object_impl(const scrip
     return nullptr;
 }
 
+// Implementation of get_cpp_object_field_id() after class_definition is complete
+inline uint64_t class_instance::get_cpp_object_field_id() const {
+    if (cpp_object_field_id_ == 0) {
+        if (auto def = class_definition_.lock()) {
+            if (auto eng = def->get_engine_ref().lock()) {
+                cpp_object_field_id_ = eng->symbolize(class_constants::CPP_OBJECT_FIELD);
+            }
+        }
+    }
+    return cpp_object_field_id_;
+}
+
 inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
     auto new_instance = std::make_shared<class_instance>(class_name_);
 
     // Copy all fields
-    for (const auto& [name, value] : fields_) {
+    uint64_t cpp_obj_id = get_cpp_object_field_id();
+    for (const auto& [id, value] : fields_) {
         // Special handling for _cpp_object field
-        if (name == class_constants::CPP_OBJECT_FIELD && !value.is_null()) {
+        if (id == cpp_obj_id && !value.is_null()) {
             // Get the class definition to access copy function
             if (auto class_def = class_definition_.lock()) {
                 if (class_def->has_copy_function()) {
@@ -2606,7 +2715,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
 
                         // Wrap in a new script_value (use engine ref from the existing value)
                         auto eng_ref = value.get_engine_ref();
-                        new_instance->set_field(class_constants::CPP_OBJECT_FIELD,
+                        new_instance->set_field(cpp_obj_id,
                             script_value::make_cpp_object(class_name_, class_def->get_type_id(), new_cpp_obj, eng_ref));
                         continue;
                     }
@@ -2615,7 +2724,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
         }
 
         // For other fields, use script_value's clone method for deep copy
-        new_instance->set_field(name, value.clone());
+        new_instance->set_field(id, value.clone());
     }
 
     // Copy class definition reference
@@ -2630,16 +2739,16 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
 }
 
 // Implementations that depend on class_definition being complete
-inline const script_value& class_instance::get_field(const std::string& name, bool throw_if_missing) const {
-    auto it = fields_.find(name);
+inline const script_value& class_instance::get_field(uint64_t id, bool throw_if_missing) const {
+    auto it = fields_.find(id);
     if (it != fields_.end()) {
         return it->second;
     }
-    
+
     // If not in instance fields, check class definition for default value
     if (auto def = class_definition_.lock()) {
         auto& field_defaults = def->get_all_field_defaults();
-        auto default_it = field_defaults.find(name);
+        auto default_it = field_defaults.find(id);
         if (default_it != field_defaults.end()) {
             return default_it->second;  // Return reference to the default
         }
@@ -2648,7 +2757,7 @@ inline const script_value& class_instance::get_field(const std::string& name, bo
         for (const auto& parent : def->get_parent_classes()) {
             if (parent) {
                 auto& parent_defaults = parent->get_all_field_defaults();
-                auto parent_it = parent_defaults.find(name);
+                auto parent_it = parent_defaults.find(id);
                 if (parent_it != parent_defaults.end()) {
                     return parent_it->second;
                 }
@@ -2657,28 +2766,39 @@ inline const script_value& class_instance::get_field(const std::string& name, bo
     }
 
     if (throw_if_missing) {
-        throw runtime_error("Field '" + name + "' not found and no default value available");
+        // Get the field name from the symbolizer for error message
+        std::string field_name;
+        if (auto def = class_definition_.lock()) {
+            if (auto eng = def->get_engine_ref().lock()) {
+                field_name = eng->get_symbolizer()->get_string(id);
+            } else {
+                field_name = std::to_string(id);
+            }
+        } else {
+            field_name = std::to_string(id);
+        }
+        throw runtime_error("Field '" + field_name + "' not found and no default value available");
     }
-    
+
     // For non-throwing case, we need to return a reference to something
     // Create a static invalid value to return
     static thread_local script_value invalid_value = script_value::make_invalid(std::weak_ptr<engine>{});
     return invalid_value;
 }
 
-inline script_value& class_instance::get_field(const std::string& name, bool throw_if_missing) {
-    auto it = fields_.find(name);
+inline script_value& class_instance::get_field(uint64_t id, bool throw_if_missing) {
+    auto it = fields_.find(id);
     if (it != fields_.end()) {
         return it->second;
     }
-    
+
     // If not in instance fields, we need to create it with the default value
     if (auto def = class_definition_.lock()) {
         auto& field_defaults = def->get_all_field_defaults();
-        auto default_it = field_defaults.find(name);
+        auto default_it = field_defaults.find(id);
         if (default_it != field_defaults.end()) {
             // Create the field with a clone of the default value
-            auto [new_it, _] = fields_.emplace(name, default_it->second.clone());
+            auto [new_it, _] = fields_.emplace(id, default_it->second.clone());
             return new_it->second;
         }
 
@@ -2686,10 +2806,10 @@ inline script_value& class_instance::get_field(const std::string& name, bool thr
         for (const auto& parent : def->get_parent_classes()) {
             if (parent) {
                 auto& parent_defaults = parent->get_all_field_defaults();
-                auto parent_it = parent_defaults.find(name);
+                auto parent_it = parent_defaults.find(id);
                 if (parent_it != parent_defaults.end()) {
                     // Create the field with a clone of the parent's default value
-                    auto [new_it, _] = fields_.emplace(name, parent_it->second.clone());
+                    auto [new_it, _] = fields_.emplace(id, parent_it->second.clone());
                     return new_it->second;
                 }
             }
@@ -2697,25 +2817,36 @@ inline script_value& class_instance::get_field(const std::string& name, bool thr
     }
 
     if (throw_if_missing) {
-        throw runtime_error("Field '" + name + "' not found and no default value available");
+        // Get the field name from the symbolizer for error message
+        std::string field_name;
+        if (auto def = class_definition_.lock()) {
+            if (auto eng = def->get_engine_ref().lock()) {
+                field_name = eng->get_symbolizer()->get_string(id);
+            } else {
+                field_name = std::to_string(id);
+            }
+        } else {
+            field_name = std::to_string(id);
+        }
+        throw runtime_error("Field '" + field_name + "' not found and no default value available");
     }
-    
+
     // For non-throwing case, we need to return a reference to something
     // Create a static invalid value to return
     static thread_local script_value invalid_value = script_value::make_invalid(std::weak_ptr<engine>{});
     return invalid_value;
 }
 
-inline bool class_instance::has_field(const std::string& name) const {
+inline bool class_instance::has_field(uint64_t id) const {
     // Check if the field exists in this instance
-    if (fields_.find(name) != fields_.end()) {
+    if (fields_.find(id) != fields_.end()) {
         return true;
     }
 
     // Check class definition for inherited fields
     if (auto def = class_definition_.lock()) {
         const auto& all_fields = def->get_all_field_defaults();
-        if (all_fields.find(name) != all_fields.end()) {
+        if (all_fields.find(id) != all_fields.end()) {
             return true;
         }
     }
@@ -2723,13 +2854,13 @@ inline bool class_instance::has_field(const std::string& name) const {
     return false;
 }
 
-inline script_value class_instance::get_method(const std::string& name, bool throw_if_missing) const {
+inline script_value class_instance::get_method(uint64_t id, bool throw_if_missing) const {
     if (auto def = class_definition_.lock()) {
-        return def->get_method(name, throw_if_missing);
+        return def->get_method(id, throw_if_missing);
     }
 
     if (throw_if_missing) {
-        throw runtime_error("Class definition not available for method '" + name + "' lookup");
+        throw runtime_error("Class definition not available for method with ID " + std::to_string(id) + " lookup");
     }
     return script_value::make_invalid(std::weak_ptr<engine>{});
 }

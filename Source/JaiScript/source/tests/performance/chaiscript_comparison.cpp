@@ -411,6 +411,19 @@ public:
             }, 5000);
         });
 
+        // ===== Constant Folding Optimization =====
+        test("JaiScript vs ChaiScript: Constant Folding", [this]() {
+            // JaiScript should fold constants at parse-time, ChaiScript evaluates at runtime
+            // Test with pure constant expression that should be optimized to a single literal
+            benchmark("JaiScript - Constant Expression (Parse-time Folding)", [this]() {
+                jai_engine->execute("2 + 3 * 4 - 5 / 2;");  // Should fold to single literal
+            }, 10000);
+
+            benchmark("ChaiScript - Constant Expression (Runtime Evaluation)", [this]() {
+                chai_engine->eval("2 + 3 * 4 - 5 / 2;");  // Evaluates at runtime
+            }, 10000);
+        });
+
         // ===== Factorial (Recursion) =====
         test("JaiScript vs ChaiScript: Factorial (Recursion)", [this]() {
             benchmark("JaiScript - Factorial(10)", [this]() {

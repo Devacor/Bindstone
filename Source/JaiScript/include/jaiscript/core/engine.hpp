@@ -21,6 +21,11 @@
 
 namespace jai {
 
+    // Class constants namespace (shared with class_builder.hpp)
+    namespace class_constants {
+        inline const std::string CPP_OBJECT_FIELD = "_cpp_object";
+    }
+
     // Forward declarations
     class class_definition;
     class class_registry;
@@ -127,8 +132,9 @@ namespace jai {
                     auto instance = class_def->create_instance();
 
                     // Store the C++ object in the special field (same pattern as class_builder)
-                    // Using the constant "_cpp_object" directly to avoid circular include
-                    instance->set_field("_cpp_object",
+                    // Intern the constant field name to ID
+                    uint64_t cpp_object_field_id = symbolize(class_constants::CPP_OBJECT_FIELD);
+                    instance->set_field(cpp_object_field_id,
                         script_value::make_cpp_object(type_name, class_def->get_type_id(), std::static_pointer_cast<void>(data), weak_from_this()));
 
                     // Return the class_instance wrapped in a script_value
@@ -589,8 +595,7 @@ namespace jai {
             }
         }
     };
-    
-    
+
 } // namespace jai
 
 // Include template implementations that need both engine and other headers

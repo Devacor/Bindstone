@@ -909,13 +909,115 @@ checked_result<expression_ptr> parser::shift() {
     return expr;
 }
 
+// Constant folding optimization: evaluates literal operations at parse time
+// If both operands are literals, compute the result now instead of at runtime
+expression_ptr parser::try_constant_fold(expression_ptr left, const token& op, expression_ptr right) {
+    auto* leftLit = dynamic_cast<literal_expr*>(left.get());
+    auto* rightLit = dynamic_cast<literal_expr*>(right.get());
+
+    if (!leftLit || !rightLit) {
+        // Not both literals, return binary_expr
+        return std::make_shared<binary_expr>(op.location, left, op, right);
+    }
+
+    const script_value& leftVal = leftLit->value;
+    const script_value& rightVal = rightLit->value;
+
+    // Fold integer arithmetic (most common case)
+    if (leftVal.is_int() && rightVal.is_int()) {
+        script_int leftInt = leftVal.as_int();
+        script_int rightInt = rightVal.as_int();
+        script_int result = 0;
+
+        switch (op.type) {
+            case token_type::plus:
+                result = leftInt + rightInt;
+                break;
+            case token_type::minus:
+                result = leftInt - rightInt;
+                break;
+            case token_type::star:
+                result = leftInt * rightInt;
+                break;
+            case token_type::slash:
+                if (rightInt == 0) {
+                    // Don't fold division by zero - let runtime handle it
+                    return std::make_shared<binary_expr>(op.location, left, op, right);
+                }
+                result = leftInt / rightInt;
+                break;
+            case token_type::percent:
+                if (rightInt == 0) {
+                    // Don't fold modulo by zero - let runtime handle it
+                    return std::make_shared<binary_expr>(op.location, left, op, right);
+                }
+                result = leftInt % rightInt;
+                break;
+            default:
+                // Unsupported operation for constant folding
+                return std::make_shared<binary_expr>(op.location, left, op, right);
+        }
+
+        // Create a folded literal with the computed value
+        return std::make_shared<literal_expr>(op.location, script_value(result, leftVal.get_engine_ref()));
+    }
+
+    // Fold float arithmetic
+    if ((leftVal.is_float() || leftVal.is_int()) && (rightVal.is_float() || rightVal.is_int())) {
+        script_float leftFloat = leftVal.is_int() ? static_cast<script_float>(leftVal.as_int()) : leftVal.as_float();
+        script_float rightFloat = rightVal.is_int() ? static_cast<script_float>(rightVal.as_int()) : rightVal.as_float();
+        script_float result = 0.0;
+
+        switch (op.type) {
+            case token_type::plus:
+                result = leftFloat + rightFloat;
+                break;
+            case token_type::minus:
+                result = leftFloat - rightFloat;
+                break;
+            case token_type::star:
+                result = leftFloat * rightFloat;
+                break;
+            case token_type::slash:
+                if (rightFloat == 0.0) {
+                    // Don't fold division by zero - let runtime handle it
+                    return std::make_shared<binary_expr>(op.location, left, op, right);
+                }
+                result = leftFloat / rightFloat;
+                break;
+            case token_type::percent:
+                if (rightFloat == 0.0) {
+                    // Don't fold modulo by zero - let runtime handle it
+                    return std::make_shared<binary_expr>(op.location, left, op, right);
+                }
+                result = std::fmod(leftFloat, rightFloat);
+                break;
+            default:
+                // Unsupported operation for constant folding
+                return std::make_shared<binary_expr>(op.location, left, op, right);
+        }
+
+        // Create a folded literal with the computed value
+        return std::make_shared<literal_expr>(op.location, script_value(result, leftVal.get_engine_ref()));
+    }
+
+    // Fold string concatenation
+    if (op.type == token_type::plus && leftVal.is_string() && rightVal.is_string()) {
+        script_string result = leftVal.as_string() + rightVal.as_string();
+        return std::make_shared<literal_expr>(op.location, script_value(result, leftVal.get_engine_ref()));
+    }
+
+    // Can't fold this operation
+    return std::make_shared<binary_expr>(op.location, left, op, right);
+}
+
 checked_result<expression_ptr> parser::additive() {
     JAISCRIPT_TRY_ASSIGN(expression_ptr expr, multiplicative());
 
     while (match({token_type::plus, token_type::minus})) {
         token op = previous();
         JAISCRIPT_TRY_ASSIGN(expression_ptr right, multiplicative());
-        expr = std::make_shared<binary_expr>(op.location, expr, op, right);
+        expr = try_constant_fold(expr, op, right);  // Try constant folding
     }
 
     return expr;
@@ -927,7 +1029,7 @@ checked_result<expression_ptr> parser::multiplicative() {
     while (match({token_type::star, token_type::slash, token_type::percent})) {
         token op = previous();
         JAISCRIPT_TRY_ASSIGN(expression_ptr right, unary());
-        expr = std::make_shared<binary_expr>(op.location, expr, op, right);
+        expr = try_constant_fold(expr, op, right);  // Try constant folding
     }
 
     return expr;

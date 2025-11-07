@@ -508,7 +508,7 @@ void interpreter::init_builtin_methods() {
             return result;
         } else {
             // weak_ptr is expired, return null
-            return script_value::make_null(interp->get_engine_ref());
+            return interp->make_value();
         }
     }},
 
@@ -552,7 +552,7 @@ void interpreter::init_builtin_methods() {
         // In JaiScript, all objects are internally shared_ptr<object_holder>
         // Reset it to null while preserving the shared_ptr type
         auto current_type_info = self.get_type_info();
-        self = script_value::make_null(interp->get_engine_ref());
+        self = interp->make_value();
         self.set_type_info(current_type_info); // Preserve the shared_ptr<T> type
 
         return self; // Return the reset shared_ptr
@@ -692,10 +692,6 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
 }
 
 checked_result<std::reference_wrapper<const script_value>> environment::get_ref(uint64_t id) const {
-    std::string name{symbolizer_->get_string(id)};
-    if (name == "getValue") {
-        std::cerr << "  this type: " << typeid(*this).name() << "\n";
-    }
     return get_ref(id, 0);
 }
 
@@ -718,10 +714,6 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
     if (parent_) {
         // For proper virtual dispatch, we need to call the public virtual method
         // on the parent, not this internal version
-        std::string name{symbolizer_->get_string(id)};
-        if (name == "getValue") {
-            std::cerr << "  parent type: " << typeid(*parent_).name() << "\n";
-        }
         // Cast to const to call the const overload
         const environment* const_parent = parent_.get();
         return const_parent->get_ref(id);
@@ -932,25 +924,33 @@ checked_result<script_value> method_environment::get(const std::string& name) co
         auto obj_holder = this_object_.get_object_holder();
         if (obj_holder && obj_holder->data) {
             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-                
-                // Try to get field first (non-throwing) - now returns a reference
-                const script_value& field_ref = instance->get_field(name, false);
-                if (!field_ref.is_invalid()) {
-                    return field_ref;
-                }
-                
-            // Try to get method (non-throwing)
-            script_value method = instance->get_method(name, false);
-            if (!method.is_invalid()) {
-                // Found the method! Store in instance member
-                bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
-                return bound_method_storage_;
-            }
 
-            // Try to get static field from class definition
+            // Intern the name to ID
             auto class_def = instance->get_class_definition();
-            if (class_def && class_def->has_static_field(name)) {
-                return class_def->get_static_field(name);
+            if (class_def) {
+                auto eng = class_def->get_engine_ref().lock();
+                if (eng) {
+                    uint64_t name_id = eng->symbolize(name);
+
+                    // Try to get field first (non-throwing) - now returns a reference
+                    const script_value& field_ref = instance->get_field(name_id, false);
+                    if (!field_ref.is_invalid()) {
+                        return field_ref;
+                    }
+
+                    // Try to get method (non-throwing)
+                    script_value method = instance->get_method(name_id, false);
+                    if (!method.is_invalid()) {
+                        // Found the method! Store in instance member
+                        bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
+                        return bound_method_storage_;
+                    }
+
+                    // Try to get static field from class definition
+                    if (class_def->has_static_field(name)) {
+                        return class_def->get_static_field(name);
+                    }
+                }
             }
         }
     }
@@ -972,21 +972,20 @@ checked_result<script_value> method_environment::get(uint64_t id) const {
     }
 
     // If not found, check 'this' object fields and methods
-    std::string name{symbolizer_->get_string(id)};
     auto this_type = this_object_.type();
-    if (name != "this" && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
+    if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type) && !this_object_.is_null()) {
         auto obj_holder = this_object_.get_object_holder();
         if (obj_holder && obj_holder->data) {
             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
             // Try to get field first (non-throwing) - now returns a reference
-            const script_value& field_ref = instance->get_field(name, false);
+            const script_value& field_ref = instance->get_field(id, false);
             if (!field_ref.is_invalid()) {
                 return field_ref;
             }
 
             // Try to get method (non-throwing)
-            script_value method = instance->get_method(name, false);
+            script_value method = instance->get_method(id, false);
             if (!method.is_invalid()) {
                 // Found the method! Store in instance member
                 bound_method_storage_ = interpreter::create_bound_method(this_object_, method);
@@ -995,8 +994,12 @@ checked_result<script_value> method_environment::get(uint64_t id) const {
 
             // Try to get static field from class definition
             auto class_def = instance->get_class_definition();
-            if (class_def && class_def->has_static_field(name)) {
-                return class_def->get_static_field(name);
+            if (class_def) {
+                // Convert ID back to string for static field lookup (public API uses strings)
+                std::string name = std::string(symbolizer_->get_string(id));
+                if (class_def->has_static_field(name)) {
+                    return class_def->get_static_field(name);
+                }
             }
         }
     }
@@ -1044,12 +1047,12 @@ void method_environment::assign(const std::string& name, const script_value& val
     
     // If not found anywhere and 'this' has this field, update it
     auto this_type = this_object_.type();
-    if (name != "this" && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
+    if (id != symbolizer_->get_this_id() && (this_type == script_value_type::jai_object_type || this_type == script_value_type::jai_shared_ptr_type)) {
         auto obj_holder = this_object_.get_object_holder();
         if (obj_holder && obj_holder->data) {
             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
-            if (instance && instance->has_field(name)) {
-                instance->set_field(name, value.clone());
+            if (instance && instance->has_field(id)) {
+                instance->set_field(id, value.clone());
                 return;
             }
         }
@@ -1097,8 +1100,14 @@ checked_result<script_value> static_method_environment::get(const std::string& n
     }
 
     // Also check static methods (for calling other static methods)
-    if (class_def_ && class_def_->has_static_method(name)) {
-        return class_def_->get_static_method(name);
+    if (class_def_) {
+        auto eng = class_def_->get_engine_ref().lock();
+        if (eng) {
+            uint64_t name_id = eng->symbolize(name);
+            if (class_def_->has_static_method(name_id)) {
+                return class_def_->get_static_method(name_id);
+            }
+        }
     }
 
     // Nothing found - return the original error from environment lookup
@@ -1120,8 +1129,8 @@ checked_result<script_value> static_method_environment::get(uint64_t id) const {
     }
 
     // Also check static methods (for calling other static methods)
-    if (class_def_ && class_def_->has_static_method(name)) {
-        return class_def_->get_static_method(name);
+    if (class_def_ && class_def_->has_static_method(id)) {
+        return class_def_->get_static_method(id);
     }
 
     // Nothing found - return the original error from environment lookup
@@ -1288,6 +1297,32 @@ interpreter::interpreter()
     weak_from_this_id_ = string_symbolizer_->intern("weak_from_this");
     shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
 
+    // Initialize cached operator symbol IDs for fast operator overload lookup
+    op_plus_id_ = string_symbolizer_->intern("+");
+    op_minus_id_ = string_symbolizer_->intern("-");
+    op_star_id_ = string_symbolizer_->intern("*");
+    op_slash_id_ = string_symbolizer_->intern("/");
+    op_percent_id_ = string_symbolizer_->intern("%");
+    op_less_id_ = string_symbolizer_->intern("<");
+    op_less_equal_id_ = string_symbolizer_->intern("<=");
+    op_greater_id_ = string_symbolizer_->intern(">");
+    op_greater_equal_id_ = string_symbolizer_->intern(">=");
+    op_equal_equal_id_ = string_symbolizer_->intern("==");
+    op_bang_equal_id_ = string_symbolizer_->intern("!=");
+    op_spaceship_id_ = string_symbolizer_->intern("<=>");
+    op_ampersand_id_ = string_symbolizer_->intern("&");
+    op_pipe_id_ = string_symbolizer_->intern("|");
+    op_caret_id_ = string_symbolizer_->intern("^");
+    op_left_shift_id_ = string_symbolizer_->intern("<<");
+    op_right_shift_id_ = string_symbolizer_->intern(">>");
+    subscript_op_id_ = string_symbolizer_->intern("[]");
+
+	// Initialize cached keyword symbol IDs for fast keyword checks
+	this_id_ = string_symbolizer_->intern("this");
+	super_id_ = string_symbolizer_->intern("super");
+	getValue_id_ = string_symbolizer_->intern("getValue");
+	cpp_object_field_id_ = string_symbolizer_->intern(class_constants::CPP_OBJECT_FIELD);
+
     // Initialize built-in method registries with interned method names
     init_builtin_methods();
 
@@ -1316,6 +1351,32 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     shared_ptr_holder_type_id_ = string_symbolizer_->intern("shared_ptr_holder");
     weak_from_this_id_ = string_symbolizer_->intern("weak_from_this");
     shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
+
+    // Initialize cached operator symbol IDs for fast operator overload lookup
+    op_plus_id_ = string_symbolizer_->intern("+");
+    op_minus_id_ = string_symbolizer_->intern("-");
+    op_star_id_ = string_symbolizer_->intern("*");
+    op_slash_id_ = string_symbolizer_->intern("/");
+    op_percent_id_ = string_symbolizer_->intern("%");
+    op_less_id_ = string_symbolizer_->intern("<");
+    op_less_equal_id_ = string_symbolizer_->intern("<=");
+    op_greater_id_ = string_symbolizer_->intern(">");
+    op_greater_equal_id_ = string_symbolizer_->intern(">=");
+    op_equal_equal_id_ = string_symbolizer_->intern("==");
+    op_bang_equal_id_ = string_symbolizer_->intern("!=");
+    op_spaceship_id_ = string_symbolizer_->intern("<=>");
+    op_ampersand_id_ = string_symbolizer_->intern("&");
+    op_pipe_id_ = string_symbolizer_->intern("|");
+    op_caret_id_ = string_symbolizer_->intern("^");
+    op_left_shift_id_ = string_symbolizer_->intern("<<");
+    op_right_shift_id_ = string_symbolizer_->intern(">>");
+    subscript_op_id_ = string_symbolizer_->intern("[]");
+
+	// Initialize cached keyword symbol IDs for fast keyword checks
+	this_id_ = string_symbolizer_->intern("this");
+	super_id_ = string_symbolizer_->intern("super");
+	getValue_id_ = string_symbolizer_->intern("getValue");
+	cpp_object_field_id_ = string_symbolizer_->intern(class_constants::CPP_OBJECT_FIELD);
 
     // Initialize built-in method registries with interned method names
     init_builtin_methods();
@@ -1346,6 +1407,26 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     weak_from_this_id_ = string_symbolizer_->intern("weak_from_this");
     shared_from_this_id_ = string_symbolizer_->intern("shared_from_this");
 
+    // Initialize cached operator symbol IDs for fast operator overload lookup
+    op_plus_id_ = string_symbolizer_->intern("+");
+    op_minus_id_ = string_symbolizer_->intern("-");
+    op_star_id_ = string_symbolizer_->intern("*");
+    op_slash_id_ = string_symbolizer_->intern("/");
+    op_percent_id_ = string_symbolizer_->intern("%");
+    op_less_id_ = string_symbolizer_->intern("<");
+    op_less_equal_id_ = string_symbolizer_->intern("<=");
+    op_greater_id_ = string_symbolizer_->intern(">");
+    op_greater_equal_id_ = string_symbolizer_->intern(">=");
+    op_equal_equal_id_ = string_symbolizer_->intern("==");
+    op_bang_equal_id_ = string_symbolizer_->intern("!=");
+    op_spaceship_id_ = string_symbolizer_->intern("<=>");
+    op_ampersand_id_ = string_symbolizer_->intern("&");
+    op_pipe_id_ = string_symbolizer_->intern("|");
+    op_caret_id_ = string_symbolizer_->intern("^");
+    op_left_shift_id_ = string_symbolizer_->intern("<<");
+    op_right_shift_id_ = string_symbolizer_->intern(">>");
+    subscript_op_id_ = string_symbolizer_->intern("[]");
+
     // Initialize built-in method registries with interned method names
     init_builtin_methods();
 
@@ -1366,13 +1447,13 @@ void interpreter::add_global(const std::string& name, const script_value& value)
 void interpreter::prepare_for_execution() {
     // Clear execution state
     valueStack_.clear();
-    returnValue_ = make_value();
+    returnValue_.reset();  // No need to create a value - value_or() will create it if needed
     hasReturnValue_ = false;
 
     // Clear exception state
     current_exception_.reset();
     is_unwinding_ = false;
-    active_exception_value_ = make_value();
+    active_exception_value_.reset();  // No need to create a value here either
     current_catch_var_.clear();
 
     // Reset to global scope but keep all variables defined at global scope
@@ -1403,7 +1484,7 @@ void interpreter::define_variable(const std::string& name, const script_value& v
 
 script_value interpreter::execute(const std::vector<declaration_ptr>& declarations) {
     // std::cerr << "DEBUG: interpreter::execute called with " << declarations.size() << " declarations\n";
-    script_value last_script_value = script_value::make_null(engine_ref_);
+    script_value last_script_value = make_value();
     hasReturnValue_ = false;  // Reset return value state
 
     for (size_t i = 0; i < declarations.size(); i++) {
@@ -1468,7 +1549,7 @@ script_value interpreter::evaluate(expression_ptr expr) {
     auto result = expr->accept(this);
     if (!result) {
         // Return null on error
-        return script_value::make_null(engine_ref_);
+        return make_value();
     }
     return pop_value();
 }
@@ -1531,7 +1612,7 @@ checked_result<void> interpreter::visit_literal_expr(literal_expr* expr) {
 }
 
 checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
-    if (expr->name == "getValue") {
+    if (expr->symbol_id == getValue_id_) {
     }
     // Check if this identifier is the current catch variable
     if (!current_catch_var_.empty() && expr->name == current_catch_var_) {
@@ -1564,8 +1645,8 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
     } else {
         // If we're in a class method context, collect unresolved identifier
         if (current_class_context_ && current_class_context_->in_method) {
-            // Add to unresolved identifiers for later validation
-            current_class_context_->unresolved_identifiers.insert(expr->name);
+            // Add to unresolved identifiers for later validation (using pre-computed ID)
+            current_class_context_->unresolved_identifiers.insert(expr->symbol_id);
             // Push a placeholder value to continue parsing
             push_value(make_value());
             return checked_result<void>();
@@ -1573,7 +1654,7 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
 
 
         // Variable not found - check if it's a member of 'this'
-        auto this_result = environment_->get("this");
+        auto this_result = environment_->get(this_id_);
         if (this_result) {
             script_value this_val = std::move(this_result.value());
             if (this_val.is_object()) {
@@ -1587,14 +1668,17 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
                     : nullptr;
 
                 if (instance) {
+                    // Intern the name to ID
+                    uint64_t name_id = string_symbolizer_->intern(expr->name);
+
                     // Check instance fields first
-                    if (instance->has_field(expr->name)) {
-                        push_value(instance->get_field(expr->name));
+                    if (instance->has_field(name_id)) {
+                        push_value(instance->get_field(name_id));
                         return checked_result<void>();
                     }
 
                     // Check for methods (returns bound method)
-                    script_value method = instance->get_method(expr->name, false);
+                    script_value method = instance->get_method(name_id, false);
                     if (!method.is_invalid()) {
                         script_value bound_method = create_bound_method(this_val, method);
                         push_value(std::move(bound_method));
@@ -1618,123 +1702,154 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
 }
 
 checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
-    // ULTRA-FAST PATH: Literal expressions like "2 + 3" - avoid all AST traversal
-    if (auto* leftLit = dynamic_cast<literal_expr*>(expr->left.get())) {
-        if (auto* rightLit = dynamic_cast<literal_expr*>(expr->right.get())) {
-            const script_value& leftVal = leftLit->value;
-            const script_value& rightVal = rightLit->value;
-            
-            // Fast path for integer arithmetic (most common case) - but only if no custom ops
-            if (leftVal.is_int() && rightVal.is_int() && can_use_fast_path(expr->op.type)) {
-                script_int leftInt = leftVal.as_int();
-                script_int rightInt = rightVal.as_int();
-                
-                switch (expr->op.type) {
-                    case token_type::plus:
-                        push_value(make_value(leftInt + rightInt));
-                        return {};
-                    case token_type::minus:
-                        push_value(make_value(leftInt - rightInt));
-                        return {};
-                    case token_type::star:
-                        push_value(make_value(leftInt * rightInt));
-                        return {};
-                    case token_type::slash:
-                        if (rightInt == 0) {
-                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));  // [ErrorText] Division by zero
-                        }
-                        push_value(make_value(leftInt / rightInt));
-                        return {};
-                    case token_type::percent:
-                        if (rightInt == 0) {
-                            return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero));  // [ErrorText] Modulo by zero
-                        }
-                        push_value(make_value(leftInt % rightInt));
-                        return {};
-                    case token_type::less:
-                        push_value(make_value(leftInt < rightInt));
-                        return {};
-                    case token_type::less_equal:
-                        push_value(make_value(leftInt <= rightInt));
-                        return {};
-                    case token_type::greater:
-                        push_value(make_value(leftInt > rightInt));
-                        return {};
-                    case token_type::greater_equal:
-                        push_value(make_value(leftInt >= rightInt));
-                        return {};
-                    case token_type::equal_equal:
-                        push_value(make_value(leftInt == rightInt));
-                        return {};
-                    case token_type::bang_equal:
-                        push_value(make_value(leftInt != rightInt));
-                        return {};
-                    case token_type::spaceship:
-                        push_value(make_value(leftInt < rightInt ? script_int(-1) : (leftInt > rightInt ? script_int(1) : script_int(0))));
-                        return {};
-                    default:
-                        break; // Fall through to normal path
-                }
-            }
-            // Fast path for float arithmetic - but only if no custom ops
-            else if ((leftVal.is_float() || leftVal.is_int()) && (rightVal.is_float() || rightVal.is_int()) && can_use_fast_path(expr->op.type)) {
-                script_float leftFloat = leftVal.is_int() ? static_cast<script_float>(leftVal.as_int()) : leftVal.as_float();
-                script_float rightFloat = rightVal.is_int() ? static_cast<script_float>(rightVal.as_int()) : rightVal.as_float();
-                
-                switch (expr->op.type) {
-                    case token_type::plus:
-                        push_value(make_value(leftFloat + rightFloat));
-                        return {};
-                    case token_type::minus:
-                        push_value(make_value(leftFloat - rightFloat));
-                        return {};
-                    case token_type::star:
-                        push_value(make_value(leftFloat * rightFloat));
-                        return {};
-                    case token_type::slash:
-                        if (rightFloat == 0.0) {
-                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));  // [ErrorText] Division by zero
-                        }
-                        push_value(make_value(leftFloat / rightFloat));
-                        return {};
-                    case token_type::percent:
-                        if (rightFloat == 0.0) {
-                            return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero));  // [ErrorText] Modulo by zero
-                        }
-                        push_value(make_value(std::fmod(leftFloat, rightFloat)));
-                        return {};
-                    case token_type::less:
-                        push_value(make_value(leftFloat < rightFloat));
-                        return {};
-                    case token_type::less_equal:
-                        push_value(make_value(leftFloat <= rightFloat));
-                        return {};
-                    case token_type::greater:
-                        push_value(make_value(leftFloat > rightFloat));
-                        return {};
-                    case token_type::greater_equal:
-                        push_value(make_value(leftFloat >= rightFloat));
-                        return {};
-                    case token_type::equal_equal:
-                        push_value(make_value(leftFloat == rightFloat));
-                        return {};
-                    case token_type::bang_equal:
-                        push_value(make_value(leftFloat != rightFloat));
-                        return {};
-                    case token_type::spaceship:
-                        push_value(make_value(leftFloat < rightFloat ? script_int(-1) : (leftFloat > rightFloat ? script_int(1) : script_int(0))));
-                        return {};
-                    default:
-                        break;
-                }
-            }
-            // Fast path for string concatenation
-            else if (expr->op.type == token_type::plus && leftVal.is_string() && rightVal.is_string()) {
-                push_value(make_value(leftVal.as_string() + rightVal.as_string()));
-                return {};
-            }
-        }
-    }
+    // Track if we've pre-fetched values to avoid duplicate lookups
+    bool already_have_values = false;
+    std::optional<script_value> pre_fetched_left, pre_fetched_right;
+
+	// FAST PATH: identifier + identifier (e.g., "a + b", "sum + i") - eliminates 2 virtual calls
+	// Skip logical operators - they need short-circuit evaluation
+	if (expr->op.type != token_type::ampersand_ampersand && expr->op.type != token_type::pipe_pipe) {
+		if (auto* leftId = dynamic_cast<identifier_expr*>(expr->left.get())) {
+			if (auto* rightId = dynamic_cast<identifier_expr*>(expr->right.get())) {
+				// Both operands are simple identifiers - direct variable lookup without AST traversal
+				// This is safe because we check dynamic_cast, so order of operations is preserved
+
+				// Get both values directly from environment
+				auto leftResult = environment_->get(leftId->symbol_id);
+				if (!leftResult) {
+					return checked_result<void>(leftResult.error(), leftResult.message());
+				}
+				script_value leftVal = std::move(leftResult.value()).deref();
+
+				auto rightResult = environment_->get(rightId->symbol_id);
+				if (!rightResult) {
+					return checked_result<void>(rightResult.error(), rightResult.message());
+				}
+				script_value rightVal = std::move(rightResult.value()).deref();
+
+				// Fast path for integer arithmetic (most common in loops)
+				if (can_use_fast_path(expr->op.type)) {
+					auto leftType = leftVal.type();
+					auto rightType = rightVal.type();
+
+					if (leftType == script_value_type::jai_int_type && rightType == script_value_type::jai_int_type) {
+						script_int leftInt = leftVal.unchecked_as_int();
+						script_int rightInt = rightVal.unchecked_as_int();
+
+						switch (expr->op.type) {
+						case token_type::plus:
+							push_value(make_value(leftInt + rightInt));
+							return {};
+						case token_type::minus:
+							push_value(make_value(leftInt - rightInt));
+							return {};
+						case token_type::star:
+							push_value(make_value(leftInt * rightInt));
+							return {};
+						case token_type::slash:
+							if (rightInt == 0) {
+								return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+							}
+							push_value(make_value(leftInt / rightInt));
+							return {};
+						case token_type::percent:
+							if (rightInt == 0) {
+								return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero));
+							}
+							push_value(make_value(leftInt % rightInt));
+							return {};
+						case token_type::less:
+							push_value(make_value(leftInt < rightInt));
+							return {};
+						case token_type::less_equal:
+							push_value(make_value(leftInt <= rightInt));
+							return {};
+						case token_type::greater:
+							push_value(make_value(leftInt > rightInt));
+							return {};
+						case token_type::greater_equal:
+							push_value(make_value(leftInt >= rightInt));
+							return {};
+						case token_type::equal_equal:
+							push_value(make_value(leftInt == rightInt));
+							return {};
+						case token_type::bang_equal:
+							push_value(make_value(leftInt != rightInt));
+							return {};
+						default:
+							break; // Fall through to normal path
+						}
+					}
+					// Fast path for float/mixed arithmetic
+					else if ((leftType == script_value_type::jai_int_type || leftType == script_value_type::jai_float_type) &&
+						(rightType == script_value_type::jai_int_type || rightType == script_value_type::jai_float_type)) {
+						script_float leftFloat = leftType == script_value_type::jai_int_type ?
+							static_cast<script_float>(leftVal.unchecked_as_int()) : leftVal.unchecked_as_float();
+						script_float rightFloat = rightType == script_value_type::jai_int_type ?
+							static_cast<script_float>(rightVal.unchecked_as_int()) : rightVal.unchecked_as_float();
+
+						switch (expr->op.type) {
+						case token_type::plus:
+							push_value(make_value(leftFloat + rightFloat));
+							return {};
+						case token_type::minus:
+							push_value(make_value(leftFloat - rightFloat));
+							return {};
+						case token_type::star:
+							push_value(make_value(leftFloat * rightFloat));
+							return {};
+						case token_type::slash:
+							if (rightFloat == 0.0) {
+								return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
+							}
+							push_value(make_value(leftFloat / rightFloat));
+							return {};
+						case token_type::percent:
+							if (rightFloat == 0.0) {
+								return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero));
+							}
+							push_value(make_value(std::fmod(leftFloat, rightFloat)));
+							return {};
+						case token_type::less:
+							push_value(make_value(leftFloat < rightFloat));
+							return {};
+						case token_type::less_equal:
+							push_value(make_value(leftFloat <= rightFloat));
+							return {};
+						case token_type::greater:
+							push_value(make_value(leftFloat > rightFloat));
+							return {};
+						case token_type::greater_equal:
+							push_value(make_value(leftFloat >= rightFloat));
+							return {};
+						case token_type::equal_equal:
+							push_value(make_value(leftFloat == rightFloat));
+							return {};
+						case token_type::bang_equal:
+							push_value(make_value(leftFloat != rightFloat));
+							return {};
+						default:
+							break;
+						}
+					}
+					// Fast path for string concatenation (common operation)
+					else if (expr->op.type == token_type::plus &&
+						leftType == script_value_type::jai_string_type &&
+						rightType == script_value_type::jai_string_type) {
+						const script_string& leftStr = leftVal.unchecked_as_string();
+						const script_string& rightStr = rightVal.unchecked_as_string();
+						push_value(make_value(leftStr + rightStr));
+						return {};
+					}
+				}
+
+				// Fast path didn't handle it - save values to avoid re-fetching
+				pre_fetched_left = std::move(leftVal);
+				pre_fetched_right = std::move(rightVal);
+				already_have_values = true;
+			}
+		}
+	}
 
     // Handle logical operators specially for short-circuit evaluation
     if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
@@ -1761,45 +1876,60 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
         return {};
     }
 
-    // Evaluate operands once and use them throughout
-    JAISCRIPT_TRY(expr->left->accept(this));
-    script_value left_raw = pop_value();  // Keep raw value for subscript handling
-    script_value left = left_raw.deref();  // Dereferenced version for most operations
+    // Evaluate operands once and use them throughout (or use pre-fetched values)
+    std::optional<script_value> left_raw_opt, left_opt, right_opt;
 
-    JAISCRIPT_TRY(expr->right->accept(this));
-    // Check if we're unwinding due to an exception in the right expression
-    if (is_unwinding_) {
-        // Don't try to pop a value that wasn't pushed due to the exception
-        return {};
+    if (already_have_values) {
+        // Use pre-fetched values from fast path (already dereferenced)
+        left_opt = std::move(*pre_fetched_left);
+        left_raw_opt = *left_opt;  // Already dereferenced
+        right_opt = std::move(*pre_fetched_right);
+    } else {
+        // Normal path: evaluate via AST traversal
+        JAISCRIPT_TRY(expr->left->accept(this));
+        left_raw_opt = pop_value();  // Keep raw value for subscript handling
+        left_opt = left_raw_opt->deref();  // Dereferenced version for most operations
+
+        JAISCRIPT_TRY(expr->right->accept(this));
+        // Check if we're unwinding due to an exception in the right expression
+        if (is_unwinding_) {
+            // Don't try to pop a value that wasn't pushed due to the exception
+            return {};
+        }
+        right_opt = pop_value().deref();  // Handle references safely
     }
-    script_value right = pop_value().deref();  // Handle references safely
+
+    // Extract values from optional (guaranteed to have values at this point)
+    script_value& left_raw = *left_raw_opt;
+    script_value& left = *left_opt;
+    script_value& right = *right_opt;
     
-    // Check for custom operator functions first
-    std::string opName;
+    // Check for custom operator functions first using cached symbol IDs (eliminates string construction)
+    uint64_t op_symbol_id = 0;
     switch (expr->op.type) {
-        case token_type::plus: opName = "+"; break;
-        case token_type::minus: opName = "-"; break;
-        case token_type::star: opName = "*"; break;
-        case token_type::slash: opName = "/"; break;
-        case token_type::percent: opName = "%"; break;
-        case token_type::less: opName = "<"; break;
-        case token_type::less_equal: opName = "<="; break;
-        case token_type::greater: opName = ">"; break;
-        case token_type::greater_equal: opName = ">="; break;
-        case token_type::equal_equal: opName = "=="; break;
-        case token_type::bang_equal: opName = "!="; break;
-        case token_type::spaceship: opName = "<=>"; break;
-        case token_type::ampersand: opName = "&"; break;
-        case token_type::pipe: opName = "|"; break;
-        case token_type::caret: opName = "^"; break;
-        case token_type::left_shift: opName = "<<"; break;
-        case token_type::right_shift: opName = ">>"; break;
+        case token_type::plus: op_symbol_id = op_plus_id_; break;
+        case token_type::minus: op_symbol_id = op_minus_id_; break;
+        case token_type::star: op_symbol_id = op_star_id_; break;
+        case token_type::slash: op_symbol_id = op_slash_id_; break;
+        case token_type::percent: op_symbol_id = op_percent_id_; break;
+        case token_type::less: op_symbol_id = op_less_id_; break;
+        case token_type::less_equal: op_symbol_id = op_less_equal_id_; break;
+        case token_type::greater: op_symbol_id = op_greater_id_; break;
+        case token_type::greater_equal: op_symbol_id = op_greater_equal_id_; break;
+        case token_type::equal_equal: op_symbol_id = op_equal_equal_id_; break;
+        case token_type::bang_equal: op_symbol_id = op_bang_equal_id_; break;
+        case token_type::spaceship: op_symbol_id = op_spaceship_id_; break;
+        case token_type::ampersand: op_symbol_id = op_ampersand_id_; break;
+        case token_type::pipe: op_symbol_id = op_pipe_id_; break;
+        case token_type::caret: op_symbol_id = op_caret_id_; break;
+        case token_type::left_shift: op_symbol_id = op_left_shift_id_; break;
+        case token_type::right_shift: op_symbol_id = op_right_shift_id_; break;
         default: break;
     }
-    
+
     // Check for custom operator function (excluding subscript)
-    if (!opName.empty() && environment_ && environment_->contains(opName)) {
-        auto op_result = environment_->get(opName);
+    if (op_symbol_id != 0 && environment_ && environment_->contains(op_symbol_id)) {
+        auto op_result = environment_->get(op_symbol_id);
         if (op_result && op_result.value().is_function()) {
             script_value opFunc = std::move(op_result.value());
             const script_function& func = opFunc.as_function();
@@ -1907,7 +2037,8 @@ checked_result<void> interpreter::visit_binary_expr(binary_expr* expr) {
                 auto instance_result = left.checked_as<std::shared_ptr<class_instance>>();
                 if (instance_result) {
                     auto instance = instance_result.value();
-                    script_value method = instance->get_method("[]", false);
+                    // Use cached subscript operator ID
+                    script_value method = instance->get_method(subscript_op_id_, false);
                     if (method.is_function()) {
                         const script_function& func = method.as_function();
                         std::vector<script_value> args = {left, right};
@@ -2025,7 +2156,7 @@ checked_result<void> interpreter::visit_unary_expr(unary_expr* expr) {
                     return checked_result<void>(val_result.error(), val_result.message());
                 }
                 script_value currentValue = std::move(val_result.value());
-                script_value newValue = script_value::make_null(engine_ref_);
+                script_value newValue = make_value();
 
                 // Use single type() call + switch for faster type checking
                 switch (currentValue.type()) {
@@ -2092,7 +2223,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             script_value rightValue = pop_value();
             
             // Perform the compound operation - try custom operators first, then built-in types
-            script_value resultValue = script_value::make_null(engine_ref_);
+            script_value resultValue = make_value();
             bool customOpFound = false;
             
             switch (expr->op.type) {
@@ -2269,7 +2400,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             script_value rightValue = pop_value();
             
             // Perform the compound operation
-            script_value resultValue = script_value::make_null(engine_ref_);
+            script_value resultValue = make_value();
             bool customOpFound = false;
             
             switch (expr->op.type) {
@@ -2355,9 +2486,13 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     "Cannot assign property to non-object value");
             }
             auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
-            
+
+            // Intern the member name to ID
+            uint64_t member_id = string_symbolizer_->intern(memberExpr->member);
+
             // Check if there's a property setter
-            script_value setter = instance->get_method("_set_" + memberExpr->member, false);
+            uint64_t setter_id = string_symbolizer_->intern("_set_" + memberExpr->member);
+            script_value setter = instance->get_method(setter_id, false);
             if (!setter.is_null()) {
                 // Call the setter with 'this' and the value
                 const script_function& func = setter.as_function();
@@ -2367,9 +2502,9 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // Setter failed - propagate error
                     return checked_result<void>(result.error(), result.message());
                 }
-            } else if (instance->has_field(memberExpr->member)) {
+            } else if (instance->has_field(member_id)) {
                 // Direct field assignment (deep copy)
-                instance->set_field(memberExpr->member, std::move(resultValue.clone()));
+                instance->set_field(member_id, std::move(resultValue.clone()));
             } else {
                 // Set exception state instead of throwing
                 active_exception_value_ = make_value("Cannot assign to non-existent member '" + memberExpr->member + "'");
@@ -2393,7 +2528,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             script_value rightValue = pop_value();
             
             // Perform the compound operation
-            script_value resultValue = script_value::make_null(engine_ref_);
+            script_value resultValue = make_value();
             
             // Try custom operators first
             auto op_result = environment_->get(std::string(1, expr->op.lexeme[0]));
@@ -2508,13 +2643,19 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                         environment_->assign(identifier->symbol_id, std::move(weak_result.value()));
                     } else if (value.type() == script_value_type::jai_object_type) {
                         // Helpful error for value-semantic objects
+                        auto type_info = currentVal->get_type_info();
+                        std::string weak_type = type_info && !type_info->type_params.empty() ?
+                            "weak_ptr<" + type_info->type_params[0]->type_name + ">" : "weak_ptr";
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Cannot assign value-semantic object to weak_ptr. Use shared_ptr<T> to enable reference semantics.");
+                            "Cannot assign value-semantic object to " + weak_type + ". Use shared_ptr<T> to enable reference semantics.");
                     } else {
                         auto type_info = value.get_type_info();
                         std::string type_name = type_info ? type_info->type_name : "unknown";
+                        auto weak_type_info = currentVal->get_type_info();
+                        std::string weak_type = weak_type_info && !weak_type_info->type_params.empty() ?
+                            "weak_ptr<" + weak_type_info->type_params[0]->type_name + ">" : "weak_ptr";
                         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Cannot assign " + type_name + " to weak_ptr");
+                            "Cannot assign " + type_name + " to " + weak_type + ". Use shared_ptr<T> to enable reference semantics.");
                     }
                 } else if (currentVal && currentVal->get_type_info() &&
                           currentVal->get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
@@ -2552,7 +2693,7 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                 // Try static_method_environment's assign (which handles static fields)
                 // or instance method's 'this' field assignment
                 bool assigned_to_member = false;
-                auto this_result = environment_->get("this");
+                auto this_result = environment_->get(this_id_);
                 if (this_result) {
                     script_value this_val = std::move(this_result.value());
                     if (this_val.is_object()) {
@@ -2561,8 +2702,8 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
 
                             // First try instance fields
-                            if (instance->has_field(identifier->name)) {
-                                instance->set_field(identifier->name, std::move(value.clone()));
+                            if (instance->has_field(identifier->symbol_id)) {
+                                instance->set_field(identifier->symbol_id, std::move(value.clone()));
                                 assigned_to_member = true;
                             }
                             // Then try static fields
@@ -2662,8 +2803,12 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
             }
             auto instance = std::static_pointer_cast<class_instance>(objHolder->data);
 
+            // Intern the member name to ID
+            uint64_t member_id = string_symbolizer_->intern(memberExpr->member);
+
             // Check if there's a property setter first (for C++ properties)
-            script_value setter = instance->get_method("_set_" + memberExpr->member, false);
+            uint64_t setter_id = string_symbolizer_->intern("_set_" + memberExpr->member);
+            script_value setter = instance->get_method(setter_id, false);
             if (!setter.is_null()) {
                 // Call the setter with 'this' and the value
                 const script_function& func = setter.as_function();
@@ -2673,9 +2818,9 @@ checked_result<void> interpreter::visit_assignment_expr(assignment_expr* expr) {
                     // Setter failed - propagate error
                     return checked_result<void>(result.error(), result.message());
                 }
-            } else if (instance->has_field(memberExpr->member)) {
+            } else if (instance->has_field(member_id)) {
                 // Direct field assignment (deep copy)
-                instance->set_field(memberExpr->member, std::move(value.clone()));
+                instance->set_field(member_id, std::move(value.clone()));
             } else {
                 // Set exception state instead of throwing
                 active_exception_value_ = make_value("Cannot assign to non-existent member '" + memberExpr->member + "'");
@@ -2838,7 +2983,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         // shared_ptr<T> variable - handle initialization
         if (!decl->initializer) {
             // No initializer - create null shared_ptr
-            script_value null_ptr = script_value::make_null(engine_ref_);
+            script_value null_ptr = make_value();
             null_ptr.set_type_info(decl->type);  // Mark as shared_ptr type
             environment_->define(decl->name_id, std::move(null_ptr));
         } else {
@@ -2922,7 +3067,7 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
         }
     } else {
         // Regular variable declaration
-        script_value value = script_value::make_null(engine_ref_);
+        script_value value = make_value();
         if (decl->initializer) {
             JAISCRIPT_TRY(decl->initializer->accept(this));
             value = std::move(pop_value());
@@ -3198,7 +3343,7 @@ checked_result<void> interpreter::visit_call_expr(call_expr* expr) {
             }
 
             // Get 'this' from the current environment
-            auto this_result = environment_->get("this");
+            auto this_result = environment_->get(this_id_);
             if (!this_result) {
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                     ident_expr->name + "() can only be called from within a method");
@@ -3364,8 +3509,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                     // Found! This is namespace::class, and we're accessing a static member
                     auto class_def = class_check->second;
 
-                    // Try to get the static method
-                    script_value static_method = class_def->get_static_method(expr->member, false);
+                    // Try to get the static method (use pre-computed member_id from parser)
+                    script_value static_method = class_def->get_static_method(expr->member_id, false);
                     if (!static_method.is_null()) {
                         push_value(static_method);
                         return {};
@@ -3407,8 +3552,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                 // Create a script_function that dispatches based on arity
                 // Capture namespace_id to provide access to namespace variables
                 uint64_t namespace_id = name_id;
-                std::string member_name = expr->member;
-                script_function namespace_func = [this, overloads, name, namespace_id, fallback_class, member_name](const std::vector<script_value>& args) -> checked_result<script_value> {
+                uint64_t member_id = expr->member_id;
+                script_function namespace_func = [this, overloads, name, namespace_id, fallback_class, member_id](const std::vector<script_value>& args) -> checked_result<script_value> {
                     // Find matching overload by arity in namespace
                     for (const auto& func_decl : overloads) {
                         if (func_decl->parameters.size() == args.size()) {
@@ -3438,7 +3583,7 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
                     // No matching overload found in namespace - try fallback to class static method
                     if (fallback_class) {
                         // get_static_method with false doesn't throw - returns null if not found
-                        script_value static_method = fallback_class->get_static_method(member_name, false);
+                        script_value static_method = fallback_class->get_static_method(member_id, false);
                         if (!static_method.is_null() && static_method.is_function()) {
                             // Call the class static method
                             auto func = static_method.as_function();
@@ -3502,13 +3647,13 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
         // Try static method first (most common case for :: access)
         // get_static_method with false doesn't throw - returns null if not found
-        script_value static_method = class_def->get_static_method(expr->member, false);
+        script_value static_method = class_def->get_static_method(expr->member_id, false);
         if (!static_method.is_null()) {
             push_value(static_method);
             return {};
         }
 
-        // Try static field access
+        // Try static field access (still uses string for now - static fields not yet migrated)
         // get_static_field returns null if not found
         script_value static_value = class_def->get_static_field(expr->member);
         if (!static_value.is_null()) {
@@ -3518,8 +3663,9 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
 
         // Try getter method as fallback (for C++ bound properties)
         std::string getter_name = "_get_" + expr->member;
+        uint64_t getter_id = string_symbolizer_->intern(getter_name);
         // get_static_method with false doesn't throw - returns null if not found
-        script_value getter_method = class_def->get_static_method(getter_name, false);
+        script_value getter_method = class_def->get_static_method(getter_id, false);
         if (!getter_method.is_null() && getter_method.is_function()) {
             // Call the getter with no arguments to get the live C++ value
             auto func = getter_method.as_function();
@@ -3583,8 +3729,8 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
         }
 
-        // Look for the method in the parent class
-        script_value method = parent_def->get_method(expr->member);
+        // Look for the method in the parent class (use pre-computed member_id from parser)
+        script_value method = parent_def->get_method(expr->member_id);
         if (method.is_null()) {
             // Parent class has no method
             return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
@@ -3708,14 +3854,18 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
 
+    // Use pre-computed member_id from parser
+    uint64_t member_id = expr->member_id;
+
     // First check if it's a field (registered by the property() method)
-    bool has_field_result = instance->has_field(expr->member);
+    bool has_field_result = instance->has_field(member_id);
     if (has_field_result) {
         // For script classes, always access fields directly
         // For C++ classes, check if there's a property getter method
         if (!instance->is_script_class()) {
             try {
-                script_value getter = instance->get_method("_get_" + expr->member);
+                uint64_t getter_id = string_symbolizer_->intern("_get_" + expr->member);
+                script_value getter = instance->get_method(getter_id);
                 if (!getter.is_null()) {
                     // Call the getter with 'this' as argument
                     const script_function& func = getter.as_function();
@@ -3733,12 +3883,12 @@ checked_result<void> interpreter::visit_member_expr(member_expr* expr) {
             }
         }
         // Return the field value directly (for script classes or if no getter)
-        push_value(instance->get_field(expr->member));
+        push_value(instance->get_field(member_id));
         return {};
     }
 
     // Otherwise, look for a method (pass false to avoid throwing)
-    script_value method = instance->get_method(expr->member, false);
+    script_value method = instance->get_method(member_id, false);
     if (!method.is_null() && !method.is_invalid()) {
         // Return a bound method (function that has 'this' pre-bound)
         // We'll create a wrapper function that includes the object as first argument
@@ -4119,7 +4269,11 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
                         make_error_code(runtime_error_code::type_mismatch),
                         "Cannot create weak_ptr from a value-semantic object. Use shared_ptr<T>: auto obj = shared_ptr<" + expr->type->type_params[0]->type_name + ">(...); auto weak = weak_ptr<" + expr->type->type_params[0]->type_name + ">(obj);");
                 } else {
-                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Type error
+                    auto type_info = obj.get_type_info();
+                    std::string type_name = type_info ? type_info->type_name : "unknown";
+                    return checked_result<void>(
+                        make_error_code(runtime_error_code::type_mismatch),
+                        "Cannot create weak_ptr from " + type_name + ". Use shared_ptr<T> to enable reference semantics: auto obj = shared_ptr<" + expr->type->type_params[0]->type_name + ">(...); auto weak = weak_ptr<" + expr->type->type_params[0]->type_name + ">(obj);");
                 }
             }
 
@@ -4142,7 +4296,7 @@ checked_result<void> interpreter::visit_new_expr(new_expr* expr) {
 
         if (expr->arguments.empty()) {
             // No arguments - create empty shared_ptr (null)
-            push_value(script_value::make_null(engine_ref_));
+            push_value(make_value());
         } else if (expr->arguments.size() == 1) {
             // One argument - mark it as shared_ptr type
             JAISCRIPT_TRY(expr->arguments[0]->accept(this));
@@ -4292,7 +4446,7 @@ checked_result<void> interpreter::visit_this_expr(this_expr* expr) {
     }
 
     // Try to get 'this' from the current environment
-    auto this_result = environment_->get("this");
+    auto this_result = environment_->get(this_id_);
     if (!this_result) {
         // 'this' can only be used inside methods
         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
@@ -4306,7 +4460,7 @@ checked_result<void> interpreter::visit_super_expr(super_expr* expr) {
     // Constructor delegation (Enemy() : super()) is handled in the parser/constructor
 
     // Get 'this' from the environment - super only makes sense in instance methods
-    auto this_result = environment_->get("this");
+    auto this_result = environment_->get(this_id_);
     if (!this_result) {
         // 'this' not found - super used outside of class method
         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable));  // [ErrorText] Undefined variable
@@ -4508,7 +4662,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             auto& array_storage = container.get_array_storage();
 
             for (size_t i = 0; i < array_storage->size(); ++i) {
-                script_value loop_var = script_value::make_null(engine_ref_);
+                script_value loop_var = make_value();
 
                 if (stmt->is_reference) {
                     // Create a reference to the actual array element
@@ -4546,7 +4700,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
             
             for (auto it = map_storage->begin(); it != map_storage->end(); ++it) {
                 // Create a pair object using the registered stdlib::script_pair type
-                script_value loop_var = script_value::make_null(engine_ref_);
+                script_value loop_var = make_value();
                 
                 try {
                     if (stmt->is_reference) {
@@ -4972,10 +5126,10 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         class_def->clear_asts();
     }
     
-    // Collect new field defaults and methods
-    std::unordered_map<std::string, script_value> new_field_defaults;
-    std::unordered_map<std::string, script_value> new_methods;
-    std::unordered_map<std::string, script_value> new_static_methods;
+    // Collect new field defaults and methods (using uint64_t IDs for performance)
+    std::unordered_map<uint64_t, script_value> new_field_defaults;
+    std::unordered_map<uint64_t, script_value> new_methods;
+    std::unordered_map<uint64_t, script_value> new_static_methods;
     
     // Reserve capacity based on member count for efficiency
     if (!decl->members.empty()) {
@@ -4995,7 +5149,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         // Look up each base class definition
         for (const std::string& base_name : decl->base_classes) {
             // First try to find a script class
-            script_value base_class_var = script_value::make_null(engine_ref_);
+            script_value base_class_var = make_value();
             auto base_result = environment_->get("__class_" + base_name);
             if (base_result) {
                 base_class_var = std::move(base_result.value());
@@ -5054,13 +5208,13 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         }
     }
 
-    // Collect field names defined in this class (before evaluating them)
+    // Collect field IDs defined in this class (before evaluating them)
     // This is needed for multiple inheritance conflict detection
-    std::unordered_set<std::string> derived_field_names;
+    std::unordered_set<uint64_t> derived_field_names;
     for (const auto& member : decl->members) {
         auto* var_decl = dynamic_cast<variable_decl*>(member.declaration.get());
         if (var_decl && !var_decl->is_static) {
-            derived_field_names.insert(var_decl->name);
+            derived_field_names.insert(var_decl->name_id);
         }
     }
 
@@ -5069,22 +5223,25 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     // But if the derived class defines its own version, it shadows the parent fields (allowed)
     if (!decl->base_classes.empty() && decl->base_classes.size() > 1) {
         const auto& parent_classes = class_def->get_parent_classes();
-        std::unordered_map<std::string, std::vector<std::string>> field_sources;
+        std::unordered_map<uint64_t, std::vector<std::string>> field_sources;
 
         // Collect all fields from each parent (including inherited ones)
         for (const auto& parent : parent_classes) {
             const auto& parent_fields = parent->get_all_field_defaults();
-            for (const auto& [field_name, _] : parent_fields) {
+            for (const auto& [field_id, _] : parent_fields) {
                 // Skip fields that are redefined in the derived class (shadowing is allowed)
-                if (derived_field_names.find(field_name) == derived_field_names.end()) {
-                    field_sources[field_name].push_back(parent->get_name());
+                if (derived_field_names.find(field_id) == derived_field_names.end()) {
+                    field_sources[field_id].push_back(parent->get_name());
                 }
             }
         }
 
         // Check for conflicts (field appears in multiple parents and NOT redefined in derived)
-        for (const auto& [field_name, sources] : field_sources) {
+        for (const auto& [field_id, sources] : field_sources) {
             if (sources.size() > 1) {
+                // Convert ID back to string for error message
+                std::string field_name = std::string(string_symbolizer_->get_string(field_id));
+
                 // Build error message with all conflicting parents
                 std::string parent_list;
                 for (size_t i = 0; i < sources.size(); ++i) {
@@ -5114,6 +5271,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
             // Field declaration
             script_value default_val(std::monostate{}, engine_ref_);  // Ensure engine reference
             std::string field_name = var_decl->name;
+            // Use pre-computed ID from parser (already interned during parsing)
+            uint64_t field_id = var_decl->name_id;
             expression_ptr initializer_ast = nullptr;
 
             if (var_decl->initializer) {
@@ -5157,16 +5316,18 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                         // Store the initializer AST in the script class definition
                         class_def->add_field_initializer_ast(field_name, initializer_ast);
                     }
-                    // Also add a null default value to the field_defaults map
+                    // Also add a null default value to the field_defaults map (using ID for performance)
                     // This ensures the field exists but will be properly initialized later
-                    new_field_defaults[field_name] = default_val;
+                    new_field_defaults[field_id] = default_val;
                 }
             }
 
         } else if (func_decl) {
             // Method declaration
             auto method_name = func_decl->name;
-            
+            // Use pre-computed ID from parser (already interned during parsing)
+            uint64_t method_id = func_decl->name_id;
+
             // Check for constructor
             if (method_name == decl->name) {
                 // Constructor
@@ -5266,8 +5427,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                             // Call the interpreter method directly without 'this'
                             return self->execute_method_ast(method_ast, static_env, args);
                         };
-                        
-                        new_static_methods[method_name] = script_value::make_function(static_method_func, engine_ref_);
+
+                        new_static_methods[method_id] = script_value::make_function(static_method_func, engine_ref_);
                     } else {
                         // Instance method - has 'this' parameter
                         auto method_func = [weak_self = std::weak_ptr<interpreter>(shared_from_this()),
@@ -5304,8 +5465,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
                             return result;
                         };
-                        
-                        new_methods[method_name] = script_value::make_function(method_func, engine_ref_);
+
+                        new_methods[method_id] = script_value::make_function(method_func, engine_ref_);
                     }
                 } else {
                     // For new classes, add method normally
@@ -5354,7 +5515,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         auto ctor_dispatcher = [weak_self = std::weak_ptr<interpreter>(shared_from_this()),
                                class_def,
                                definition_env,
-                               class_name = decl->name](const std::vector<script_value>& args) -> script_value {
+                               class_name = decl->name,
+                               cpp_object_field_id = cpp_object_field_id_](const std::vector<script_value>& args) -> script_value {
             auto self = weak_self.lock();
             if (!self) {
                 throw runtime_error("Interpreter was destroyed before constructor call");
@@ -5480,9 +5642,9 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                                         // Extract the C++ object and store it in _cpp_object field
                                         if (cpp_obj.is_object()) {
                                             auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
-                                            if (cpp_instance && cpp_instance->has_field("_cpp_object")) {
+                                            if (cpp_instance && cpp_instance->has_field(cpp_object_field_id)) {
                                                 // Copy _cpp_object from parent to derived instance
-                                                instance->set_field("_cpp_object", cpp_instance->get_field("_cpp_object"));
+                                                instance->set_field(cpp_object_field_id, cpp_instance->get_field(cpp_object_field_id));
                                             }
                                         }
                                     }
@@ -5628,12 +5790,15 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
     // If this is a redefinition, we need to call redefine_class to update all instances
     if (is_redefinition) {
         // Evaluate field initializer ASTs to get actual default values for hot reload
-        std::unordered_map<std::string, script_value> field_defaults_with_engine;
+        std::unordered_map<uint64_t, script_value> field_defaults_with_engine;
         field_defaults_with_engine.reserve(new_field_defaults.size());
 
-        for (const auto& [name, value] : new_field_defaults) {
+        for (const auto& [field_id, value] : new_field_defaults) {
+            // Convert ID back to string for get_field_initializer_ast (which still uses strings)
+            std::string field_name = std::string(string_symbolizer_->get_string(field_id));
+
             // Get the field initializer AST from the class definition
-            auto initializer_ast = class_def->get_field_initializer_ast(name);
+            auto initializer_ast = class_def->get_field_initializer_ast(field_name);
             script_value evaluated_value = value;
 
             if (initializer_ast) {
@@ -5648,42 +5813,47 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 evaluated_value.set_engine_ref(engine_ref_);
             }
 
-            field_defaults_with_engine[name] = evaluated_value;
+            field_defaults_with_engine[field_id] = evaluated_value;
         }
-        
+
         // Generate getter and setter methods for all fields (including new ones)
         // This is needed for hot reload to work properly with property access
-        for (const auto& [field_name, default_val] : field_defaults_with_engine) {
+        for (const auto& [field_id, default_val] : field_defaults_with_engine) {
+            // Get field name for getter/setter method names
+            std::string field_name = std::string(string_symbolizer_->get_string(field_id));
+
             // Add getter method
-            auto getter = [field_name, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
+            auto getter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
                 if (args.empty()) {
                     throw runtime_error("Property getter called without 'this' object");
                 }
-                
+
                 // Extract the class_instance from the first argument (this)
                 auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                
-                // Get the field value
-                return instance->get_field(field_name);
+
+                // Get the field value using the cached ID
+                return instance->get_field(field_id);
             };
-            new_methods["_get_" + field_name] = script_value::make_function(getter, engine_ref_);
-            
+            uint64_t getter_id = string_symbolizer_->intern("_get_" + field_name);
+            new_methods[getter_id] = script_value::make_function(getter, engine_ref_);
+
             // Add setter method
-            auto setter = [field_name, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
+            auto setter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
                 if (args.size() != 2) {
                     throw runtime_error("Property setter requires 'this' object and value");
                 }
-                
+
                 // Extract the class_instance from the first argument (this)
                 auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                
-                // Set the field value
-                instance->set_field(field_name, args[1]);
-                
+
+                // Set the field value using the cached ID
+                instance->set_field(field_id, args[1]);
+
                 // Return the value that was set
                 return args[1];
             };
-            new_methods["_set_" + field_name] = script_value::make_function(setter, engine_ref_);
+            uint64_t setter_id = string_symbolizer_->intern("_set_" + field_name);
+            new_methods[setter_id] = script_value::make_function(setter, engine_ref_);
         }
         
         
@@ -5692,38 +5862,40 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, engine_ref_);
     } else {
         // For new classes, add the fields normally
-        for (const auto& [field_name, default_val] : new_field_defaults) {
+        for (const auto& [field_id, default_val] : new_field_defaults) {
+            // Convert ID back to string for add_field (legacy API)
+            std::string field_name = std::string(string_symbolizer_->get_string(field_id));
             class_def->add_field(field_name, default_val);
-            
+
             // Generate getter and setter methods for script class fields
             // This enables property-style access (obj.field) to work properly
-            
-            // Add getter method
-            auto getter = [field_name, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
+
+            // Add getter method - capture field_id for performance
+            auto getter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
                 if (args.empty()) {
                     throw runtime_error("Property getter called without 'this' object");
                 }
-                
+
                 // Extract the class_instance from the first argument (this)
                 auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                
-                // Get the field value
-                return instance->get_field(field_name);
+
+                // Get the field value using ID
+                return instance->get_field(field_id);
             };
             class_def->add_method("_get_" + field_name, getter);
-            
-            // Add setter method
-            auto setter = [field_name, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
+
+            // Add setter method - capture field_id for performance
+            auto setter = [field_id, weak_eng = engine_ref_](const std::vector<script_value>& args) -> script_value {
                 if (args.size() != 2) {
                     throw runtime_error("Property setter requires 'this' object and value");
                 }
-                
+
                 // Extract the class_instance from the first argument (this)
                 auto instance = args[0].as<std::shared_ptr<class_instance>>();
-                
-                // Set the field value
-                instance->set_field(field_name, args[1]);
-                
+
+                // Set the field value using ID
+                instance->set_field(field_id, args[1]);
+
                 // Return the value that was set
                 return args[1];
             };
@@ -5738,18 +5910,21 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         // Get all fields including inherited ones (already efficient)
         auto all_fields = class_def->get_all_field_defaults();
         
-        // Check each unresolved identifier
+        // Check each unresolved identifier (already stored as IDs)
         std::vector<std::string> undefined_identifiers;
-        for (const auto& identifier : current_class_context_->unresolved_identifiers) {
+        for (const auto& identifier_id : current_class_context_->unresolved_identifiers) {
             // Skip special keywords that are always valid in methods
-            if (identifier == "this" || identifier == "super") continue;
-            
-            // Check if it's a field
-            if (all_fields.find(identifier) != all_fields.end()) continue;
-            
+            if (identifier_id == this_id_ || identifier_id == super_id_) continue;
+
+            // Check if it's a field (all_fields uses ID-based keys)
+            if (all_fields.find(identifier_id) != all_fields.end()) continue;
+
+            // Convert ID back to string for find_method (which still uses strings)
+            std::string identifier = std::string(string_symbolizer_->get_string(identifier_id));
+
             // Check if it's a method (including inherited)
             if (class_def->find_method(identifier).owner_class != nullptr) continue;
-            
+
             // Not found as field or method
             undefined_identifiers.push_back(identifier);
         }
@@ -6051,8 +6226,9 @@ void interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> in
                 field_value.set_engine_ref(engine_ref_);
             }
 
-            // Set the field on the instance
-            instance->set_field(field_name, field_value);
+            // Set the field on the instance (intern the name to ID)
+            uint64_t field_id = string_symbolizer_->intern(field_name);
+            instance->set_field(field_id, field_value);
         }
     }
 
@@ -6254,7 +6430,7 @@ script_value interpreter::call_function(const script_defined_function& function,
         }
         
         // Get return value
-        script_value result = script_value::make_null(engine_ref_);
+        script_value result = make_value();
         bool is_constructor_with_implicit_return = false;
 
         if (hasReturnValue_) {
@@ -6410,7 +6586,7 @@ void interpreter::reset_environment_pool() {
     }
     for (auto& env : method_environment_pool_) {
         // Reset the method environment (clear values and this_object to release references)
-        env->reset(nullptr, script_value::make_null(engine_ref_));
+        env->reset(nullptr, make_value());
     }
 }
 

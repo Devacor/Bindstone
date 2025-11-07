@@ -246,19 +246,23 @@ public:
                     if (instance) {
                         auto class_def = instance->get_class_definition();
                         if (class_def) {
-                            for (const auto& prop_name : class_def->get_property_names()) {
-                                auto getter = class_def->get_method("_get_" + prop_name);
-                                if (getter.type() == script_value_type::jai_function_type) {
-                                    try {
-                                        std::vector<script_value> args = {value};
-                                        auto result = getter.as_function()(args);
-                                        if (result) {
-                                            property_names.push_back(prop_name);
-                                            property_values.push_back(std::move(result.value()));
+                            auto eng = class_def->get_engine_ref().lock();
+                            if (eng) {
+                                for (const auto& prop_name : class_def->get_property_names()) {
+                                    uint64_t getter_id = eng->symbolize("_get_" + prop_name);
+                                    auto getter = class_def->get_method(getter_id);
+                                    if (getter.type() == script_value_type::jai_function_type) {
+                                        try {
+                                            std::vector<script_value> args = {value};
+                                            auto result = getter.as_function()(args);
+                                            if (result) {
+                                                property_names.push_back(prop_name);
+                                                property_values.push_back(std::move(result.value()));
+                                            }
+                                            // Skip properties that fail (result has error)
+                                        } catch (...) {
+                                            // Skip properties that fail
                                         }
-                                        // Skip properties that fail (result has error)
-                                    } catch (...) {
-                                        // Skip properties that fail
                                     }
                                 }
                             }
@@ -614,37 +618,46 @@ public:
                                 }
 
                                 // Read and set each property
-                                for (uint32_t i = 0; i < property_count; ++i) {
-                                    const auto& prop_name = property_names[i];
-                                    script_value prop_value = read_value();
+                                auto eng = class_def->get_engine_ref().lock();
+                                if (eng) {
+                                    for (uint32_t i = 0; i < property_count; ++i) {
+                                        const auto& prop_name = property_names[i];
+                                        script_value prop_value = read_value();
 
-                                    // Try to find setter
-                                    auto setter = class_def->get_method("_set_" + prop_name);
-                                    if (setter.type() == script_value_type::jai_function_type) {
-                                        try {
-                                            std::vector<script_value> args = {constructed_obj, prop_value};
-                                            (void)setter.as_function()(args);  // Explicitly discard return value
-                                        } catch (...) {
-                                            // Skip properties that fail to set
+                                        // Try to find setter
+                                        uint64_t setter_id = eng->symbolize("_set_" + prop_name);
+                                        auto setter = class_def->get_method(setter_id);
+                                        if (setter.type() == script_value_type::jai_function_type) {
+                                            try {
+                                                std::vector<script_value> args = {constructed_obj, prop_value};
+                                                (void)setter.as_function()(args);  // Explicitly discard return value
+                                            } catch (...) {
+                                                // Skip properties that fail to set
+                                            }
                                         }
+                                    }
+                                } else {
+                                    // Still need to read values to keep stream position correct
+                                    for (uint32_t i = 0; i < property_count; ++i) {
+                                        (void)read_value();
                                     }
                                 }
 
                                 // Call post_deserialize hook if it exists
                                 // Pass both the object and the version number for migration logic
-                                auto post_deserialize = class_def->get_method("post_deserialize");
-                                if (post_deserialize.type() == script_value_type::jai_function_type) {
-                                    try {
-                                        auto eng = engine_ref_.lock();
-                                        if (eng) {
+                                if (eng) {
+                                    uint64_t post_deserialize_id = eng->symbolize("post_deserialize");
+                                    auto post_deserialize = class_def->get_method(post_deserialize_id);
+                                    if (post_deserialize.type() == script_value_type::jai_function_type) {
+                                        try {
                                             std::vector<script_value> args = {
                                                 constructed_obj,
                                                 script_value(static_cast<script_int>(version), eng->weak_from_this())
                                             };
                                             (void)post_deserialize.as_function()(args);
+                                        } catch (...) {
+                                            // Hook failed, but continue
                                         }
-                                    } catch (...) {
-                                        // Hook failed, but continue
                                     }
                                 }
                             }

@@ -1278,7 +1278,7 @@ interpreter::interpreter()
     
     // Pre-populate environment pool
     for (size_t i = 0; i < 8; ++i) {
-        environment_pool_.push_back(std::make_shared<environment>(nullptr, string_symbolizer_));
+        environment_pool_.emplace_back(std::make_shared<environment>(nullptr, string_symbolizer_));
     }
 
     // Initialize cached type IDs for fast object type comparison
@@ -1307,7 +1307,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
 
     // Pre-populate environment pool
     for (size_t i = 0; i < 8; ++i) {
-        environment_pool_.push_back(std::make_shared<environment>(nullptr, string_symbolizer_));
+        environment_pool_.emplace_back(std::make_shared<environment>(nullptr, string_symbolizer_));
     }
 
     // Initialize cached type IDs for fast object type comparison
@@ -1336,7 +1336,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
 
     // Pre-populate environment pool
     for (size_t i = 0; i < 8; ++i) {
-        environment_pool_.push_back(std::make_shared<environment>(nullptr, string_symbolizer_));
+        environment_pool_.emplace_back(std::make_shared<environment>(nullptr, string_symbolizer_));
     }
 
     // Initialize cached type IDs for fast object type comparison
@@ -2950,9 +2950,9 @@ checked_result<void> interpreter::visit_variable_decl(variable_decl* decl) {
 
 // Binary operation helpers
 script_value interpreter::evaluate_arithmetic(const script_value& left, token_type op, const script_value& right) {
-    // Special case for string concatenation
+    // Special case for string concatenation (use move to avoid copying the temporary)
     if (op == token_type::plus && (left.is_string() || right.is_string())) {
-        return make_value(left.to_string() + right.to_string());
+        return make_value(left.to_string() + right.to_string());  // Move overload selected automatically
     }
     
     // Fast path for pure integer arithmetic (avoid float conversion)
@@ -4239,6 +4239,9 @@ checked_result<void> interpreter::visit_array_literal_expr(array_literal_expr* e
     // Get the internal vector to populate
     auto& array = const_cast<std::vector<script_value>&>(arrayValue.as_array());
 
+    // Reserve capacity to avoid reallocations (optimization)
+    array.reserve(expr->elements.size());
+
     // Evaluate each element and add to array
     for (const auto& element : expr->elements) {
         JAISCRIPT_TRY(element->accept(this));
@@ -4361,26 +4364,32 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
     while (true) {
         // Evaluate the condition
         JAISCRIPT_TRY(stmt->condition->accept(this));
-        script_value conditionValue = pop_value();
 
-        // Check if we should continue the loop
-        if (!is_truthy(conditionValue)) {
+        // Phase 2: Boolean fast path optimization (ChaiScript-style)
+        const auto& val = valueStack_.top();
+        bool is_true = is_truthy(val);
+
+        valueStack_.discard();
+
+        if (!is_true) {
             break;
         }
 
-        try {
-            // Execute the loop body
-            auto result = stmt->body->accept(this);
-            if (!result) return result;
-        } catch (const break_exception&) {
-            // Break out of the loop
+        // Execute the loop body
+        auto result = stmt->body->accept(this);
+        if (!result) return result;
+
+        // Check for control flow changes (break/continue/return)
+        if (hasBreakRequest_) {
+            hasBreakRequest_ = false;  // Clear the flag
             break;
-        } catch (const continue_exception&) {
-            // Continue to next iteration
+        }
+
+        if (hasContinueRequest_) {
+            hasContinueRequest_ = false;  // Clear the flag
             continue;
         }
 
-        // Check if a return statement was executed
         if (hasReturnValue_) {
             break;
         }
@@ -4394,84 +4403,81 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
     auto loop_env = get_pooled_environment(environment_);
     environment_ = loop_env;
 
-    try {
-        // Execute initialization (if present)
-        if (stmt->initializer) {
-            auto result = stmt->initializer->accept(this);
-            if (!result) {
-                release_environment(loop_env);
-                environment_ = previous;
-                return result;
-            }
+    // Error capture for lambdas (avoid throwing from hot path)
+    std::optional<checked_result<void>> error;
+
+    // Lambda helpers (ChaiScript-style) for cleaner, more optimizable code
+    auto eval_condition = [&]() -> bool {
+        if (!stmt->condition) return true;  // No condition = infinite loop
+
+        auto result = stmt->condition->accept(this);
+        if (!result) {
+            error = result;  // Capture error, signal loop termination
+            return false;
         }
 
-        while (true) {
-            // Check condition (if present, default to true)
-            if (stmt->condition) {
-                auto result = stmt->condition->accept(this);
-                if (!result) {
-                    release_environment(loop_env);
-                    environment_ = previous;
-                    return result;
-                }
-                script_value conditionValue = pop_value();
-                if (!is_truthy(conditionValue)) {
-                    break;
-                }
-            }
+        // Optimized: Use is_truthy with unchecked accessors
+        const auto& val = valueStack_.top();
+        bool is_true = is_truthy(val);
 
-            try {
-                // Execute the loop body
-                auto result = stmt->body->accept(this);
-                if (!result) {
-                    release_environment(loop_env);
-                    environment_ = previous;
-                    return result;
-                }
-            } catch (const break_exception&) {
-                // Break out of the loop
-                break;
-            } catch (const continue_exception&) {
-                // Continue to next iteration, but execute update first
-                if (stmt->update) {
-                    auto result = stmt->update->accept(this);
-                    if (!result) {
-                        release_environment(loop_env);
-                        environment_ = previous;
-                        return result;
-                    }
-                    // Pop the update result if it leaves a value on the stack
-                    if (!valueStack_.empty()) {
-                        pop_value();
-                    }
-                }
-                continue;
-            }
+        valueStack_.discard();
+        return is_true;
+    };
 
-            // Check if a return statement was executed
-            if (hasReturnValue_) {
-                break;
-            }
+    auto eval_update = [&]() {
+        if (!stmt->update) return;
 
-            // Execute update expression (if present)
-            if (stmt->update) {
-                auto result = stmt->update->accept(this);
-                if (!result) {
-                    release_environment(loop_env);
-                    environment_ = previous;
-                    return result;
-                }
-                // Pop the update result if it leaves a value on the stack
-                if (!valueStack_.empty()) {
-                    pop_value();
-                }
-            }
+        auto result = stmt->update->accept(this);
+        if (!result) {
+            error = result;  // Capture error, loop will terminate on next condition check
+            return;
         }
-    } catch (...) {
-        // Release the loop environment even if an error occurs
-        release_environment(loop_env);
-        environment_ = previous;
-        throw;
+
+        // Discard the update result if it leaves a value on the stack (optimization)
+        if (!valueStack_.empty()) {
+            valueStack_.discard();
+        }
+    };
+
+    // Execute initialization (if present)
+    if (stmt->initializer) {
+        auto result = stmt->initializer->accept(this);
+        if (!result) {
+            release_environment(loop_env);
+            environment_ = previous;
+            return result;
+        }
+    }
+
+    // Native C++ for-loop structure (more recognizable to compiler optimizer)
+    // Pattern: for(init; condition; update) { body; }
+    for (; eval_condition(); eval_update()) {
+        // Check if lambda captured an error
+        if (error) break;
+
+        // Execute the loop body
+        auto result = stmt->body->accept(this);
+        if (!result) {
+            release_environment(loop_env);
+            environment_ = previous;
+            return result;
+        }
+
+        // Check for control flow changes (break/continue/return)
+        // These need to happen BEFORE update (continue) or skip update (break/return)
+        if (hasBreakRequest_) {
+            hasBreakRequest_ = false;
+            break;
+        }
+
+        if (hasReturnValue_) {
+            break;
+        }
+
+        if (hasContinueRequest_) {
+            hasContinueRequest_ = false;
+            continue;  // Will execute update in for-loop increment
+        }
     }
 
     // Release the loop environment to destroy all loop variables
@@ -4479,6 +4485,12 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 
     // Restore previous environment
     environment_ = previous;
+
+    // If lambda captured an error, propagate it
+    if (error) {
+        return *error;
+    }
+
     return {};
 }
 
@@ -4656,13 +4668,13 @@ checked_result<void> interpreter::visit_return_stmt(return_stmt* stmt) {
 }
 
 checked_result<void> interpreter::visit_break_stmt(break_stmt* stmt) {
-    throw break_exception();
-    return {};  // Unreachable but needed for signature
+    hasBreakRequest_ = true;
+    return {};
 }
 
 checked_result<void> interpreter::visit_continue_stmt(continue_stmt* stmt) {
-    throw continue_exception();
-    return {};  // Unreachable but needed for signature
+    hasContinueRequest_ = true;
+    return {};
 }
 
 checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
@@ -5843,7 +5855,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             }
 
             // Store function declaration
-            overloads.push_back(std::make_shared<function_decl>(*func_decl));
+            overloads.emplace_back(std::make_shared<function_decl>(*func_decl));
 
         } else if (auto* var_decl = dynamic_cast<variable_decl*>(member_decl.get())) {
             // Intern the variable name if not already done
@@ -6342,7 +6354,7 @@ std::shared_ptr<environment> interpreter::get_pooled_environment(std::shared_ptr
     } else {
         // Pool is exhausted, create new environment and add to pool
         auto newEnv = std::make_shared<environment>(parent, string_symbolizer_);
-        environment_pool_.push_back(newEnv);
+        environment_pool_.emplace_back(newEnv);
         ++environment_pool_index_;
         return newEnv;
     }
@@ -6381,7 +6393,7 @@ std::shared_ptr<method_environment> interpreter::get_pooled_method_environment(s
     } else {
         // Pool is exhausted, create new method environment and add to pool
         auto newEnv = std::make_shared<method_environment>(parent, string_symbolizer_, std::move(this_obj));
-        method_environment_pool_.push_back(newEnv);
+        method_environment_pool_.emplace_back(newEnv);
         ++method_environment_pool_index_;
         return newEnv;
     }

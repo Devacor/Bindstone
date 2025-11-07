@@ -98,7 +98,11 @@ script_value script_value::make_array(type_info_ptr element_type, std::weak_ptr<
     }
     script_value v(std::monostate{}, eng);
     v.type_info_ = locked_engine->get_type_info_array(element_type);
-    v.storage_ = std::make_shared<std::vector<script_value>>();
+
+    // Create vector with small default capacity to avoid first few reallocations
+    auto vec = std::make_shared<std::vector<script_value>>();
+    vec->reserve(16);  // Reserve space for 16 elements (common small array size)
+    v.storage_ = vec;
     return v;
 }
 

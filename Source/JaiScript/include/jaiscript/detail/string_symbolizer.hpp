@@ -54,11 +54,11 @@ namespace jai {
 		}
 
 		// Fast path for known keys (no allocation). Returns empty view if OOB.
-		[[nodiscard]] std::string_view get_string(id_type id) const noexcept {
+		[[nodiscard]] inline std::string_view get_string(id_type id) const noexcept {
 			return id < ids_.size() ? ids_[id] : std::string_view{};
 		}
 
-		[[nodiscard]] id_type get_this_id() const noexcept { return this_id_; }
+		[[nodiscard]] inline id_type get_this_id() const noexcept { return this_id_; }
 
 		// Optional: batch intern to amortize rehashes.
 		template <class Range>

@@ -157,28 +157,32 @@ namespace stdlib {
                     first = false;
                     
                     // Serialize all registered properties
-                    for (const auto& propName : classDef->get_property_names()) {
-                        // Call the getter method to get property value
-                        auto getter = classDef->get_method("_get_" + propName);
-                        if (getter.type() == script_value_type::jai_function_type) {
-                            try {
-                                // Call getter with instance as 'this'
-                                std::vector<script_value> args = { val }; // Pass the instance itself
-                                auto result = getter.as_function()(args);
-                                if (result) {
-                                    script_value propscript_value = std::move(result.value());
+                    auto eng = classDef->get_engine_ref().lock();
+                    if (eng) {
+                        for (const auto& propName : classDef->get_property_names()) {
+                            // Call the getter method to get property value
+                            uint64_t getter_id = eng->symbolize("_get_" + propName);
+                            auto getter = classDef->get_method(getter_id);
+                            if (getter.type() == script_value_type::jai_function_type) {
+                                try {
+                                    // Call getter with instance as 'this'
+                                    std::vector<script_value> args = { val }; // Pass the instance itself
+                                    auto result = getter.as_function()(args);
+                                    if (result) {
+                                        script_value propscript_value = std::move(result.value());
 
-                                    if (!first) {
-                                        oss << ',';
-                                        if (pretty) oss << '\n' << next_indent;
+                                        if (!first) {
+                                            oss << ',';
+                                            if (pretty) oss << '\n' << next_indent;
+                                        }
+                                        first = false;
+                                        oss << "\"" << propName << "\": ";
+                                        oss << to_json_impl(propscript_value, indent, current_depth + 1);
                                     }
-                                    first = false;
-                                    oss << "\"" << propName << "\": ";
-                                    oss << to_json_impl(propscript_value, indent, current_depth + 1);
+                                    // Skip properties that fail (result has error)
+                                } catch (...) {
+                                    // Skip properties that fail to serialize
                                 }
-                                // Skip properties that fail (result has error)
-                            } catch (...) {
-                                // Skip properties that fail to serialize
                             }
                         }
                     }
@@ -500,7 +504,10 @@ namespace stdlib {
                                 if (temp_class_instance) {
                                     auto class_def = temp_class_instance->get_class_definition();
                                     if (class_def) {
-                                        script_value custom_constructor = class_def->get_method("_serialize_construct");
+                                        auto eng = class_def->get_engine_ref().lock();
+                                        if (eng) {
+                                            uint64_t serialize_construct_id = eng->symbolize("_serialize_construct");
+                                            script_value custom_constructor = class_def->get_method(serialize_construct_id);
                                         if (custom_constructor.type() == script_value_type::jai_function_type) {
                                             // Use custom serialization constructor
                                             std::vector<script_value> args = { val };
@@ -509,6 +516,7 @@ namespace stdlib {
                                                 instance = std::move(result.value());
                                                 has_custom_constructor = true;
                                             }
+                                        }
                                         }
                                     }
                                 }
@@ -551,7 +559,10 @@ namespace stdlib {
                                 if (class_instance_ptr) {
                                     auto class_def = class_instance_ptr->get_class_definition();
                                     if (class_def) {
-                                        script_value post_deserialize = class_def->get_method("post_deserialize");
+                                        auto eng = class_def->get_engine_ref().lock();
+                                        if (!eng) return instance;
+                                        uint64_t post_deserialize_id = eng->symbolize("post_deserialize");
+                                        script_value post_deserialize = class_def->get_method(post_deserialize_id);
                                         if (post_deserialize.type() == script_value_type::jai_function_type) {
                                             // Extract version from map (default to 1 if not present)
                                             script_int version = 1;

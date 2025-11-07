@@ -33,6 +33,16 @@
           "name": "JAISCRIPT_ENABLE_BENCHMARKS",
           "value": "True",
           "type": "BOOL"
+        },
+        {
+          "name": "JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES",
+          "value": "False",
+          "type": "BOOL"
+        },
+        {
+          "name": "JAISCRIPT_ENABLE_PROFILING",
+          "value": "True",
+          "type": "BOOL"
         }
       ]
     },

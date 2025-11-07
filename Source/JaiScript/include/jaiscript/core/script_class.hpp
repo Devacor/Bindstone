@@ -33,10 +33,15 @@ public:
                             std::shared_ptr<function_decl> ast,
                             interpreter* interp,
                             bool is_hot_reload = false) {
+        // Intern the name for fast lookups
+        auto eng = get_engine_ref().lock();
+        if (!eng) return;
+        uint64_t name_id = eng->symbolize(name);
+
         // Constructors and destructors don't need override validation
         bool is_constructor = (name == get_name());
         bool is_destructor = (name.size() > 0 && name[0] == '~');
-        
+
         // Find if this method exists in parent classes
         auto method_info = find_method(name);
         
@@ -67,7 +72,7 @@ public:
                 }
                 // Check parent for the same method
                 current = current->get_parent();
-                if (current && !current->has_method(name)) {
+                if (current && !current->has_method(name_id)) {
                     break; // Method doesn't exist higher up
                 }
             }
@@ -170,7 +175,11 @@ using script_class_instance = class_instance;
 
 // Implementation of add_script_method (needs full interpreter definition)
 inline void class_definition::add_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env) {
-    methods_.insert_or_assign(name, script_value::make_function(
+    auto eng = engine_ref_.lock();
+    if (!eng) return;
+
+    uint64_t name_id = eng->symbolize(name);
+    methods_.insert_or_assign(name_id, script_value::make_function(
         [ast, interp, name, definition_env](const std::vector<script_value>& args) -> script_value {
             // First argument should be 'this' object
             if (args.empty()) {
@@ -205,10 +214,15 @@ inline void class_definition::add_script_method(const std::string& name, std::sh
 
 // Implementation of add_static_script_method (needs full interpreter definition)
 inline void class_definition::add_static_script_method(const std::string& name, std::shared_ptr<function_decl> ast, interpreter* interp, std::shared_ptr<environment> definition_env) {
+    auto eng = engine_ref_.lock();
+    if (!eng) return;
+
+    uint64_t name_id = eng->symbolize(name);
+
     // Capture shared_ptr to this class definition (C++ scope rules for static methods)
     std::shared_ptr<class_definition> class_def = shared_from_this();
 
-    static_methods_.insert_or_assign(name, script_value::make_function(
+    static_methods_.insert_or_assign(name_id, script_value::make_function(
         [ast, interp, class_def, definition_env](const std::vector<script_value>& args) -> script_value {
             // Create a static method environment (C++ scope rules for static members)
             // This environment automatically resolves unqualified static member access
@@ -226,11 +240,11 @@ inline void class_definition::add_static_script_method(const std::string& name, 
     ));
 
     // Also store in overloads map for arity-aware lookup
-    uint64_t name_id = ast->name_id;
-    if (name_id == UINT64_MAX) {
-        name_id = interp->get_string_symbolizer()->intern(name);
+    uint64_t method_name_id = ast->name_id;
+    if (method_name_id == UINT64_MAX) {
+        method_name_id = interp->get_string_symbolizer()->intern(name);
     }
-    static_method_overloads_[name_id].push_back(ast);
+    static_method_overloads_[method_name_id].push_back(ast);
 }
 
 // Implementation of has_static_method_with_arity (needs full function_decl definition)

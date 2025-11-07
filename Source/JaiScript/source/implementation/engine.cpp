@@ -220,6 +220,25 @@ struct engine::implementation {
     // Cached symbol IDs for common type names (initialized in constructor)
     uint64_t class_definition_type_id_;
 
+    // Cached symbol IDs for operator overloading (initialized in initialize_engine_reference)
+    uint64_t op_plus_id_ = 0;
+    uint64_t op_minus_id_ = 0;
+    uint64_t op_star_id_ = 0;
+    uint64_t op_slash_id_ = 0;
+    uint64_t op_percent_id_ = 0;
+    uint64_t op_less_id_ = 0;
+    uint64_t op_less_equal_id_ = 0;
+    uint64_t op_greater_id_ = 0;
+    uint64_t op_greater_equal_id_ = 0;
+    uint64_t op_equal_equal_id_ = 0;
+    uint64_t op_bang_equal_id_ = 0;
+    uint64_t op_spaceship_id_ = 0;
+    uint64_t op_ampersand_id_ = 0;
+    uint64_t op_pipe_id_ = 0;
+    uint64_t op_caret_id_ = 0;
+    uint64_t op_left_shift_id_ = 0;
+    uint64_t op_right_shift_id_ = 0;
+
     // Type name registry for custom classes (maps typeid name to user-friendly name)
     std::unordered_map<std::string, std::string> typeNameRegistry;
 
@@ -442,7 +461,26 @@ void engine::initialize_engine_reference() {
     
     // Pass the engine reference to the conversion registry
     impl->conversions->set_engine(weak_from_this());
-    
+
+    // Initialize cached operator symbol IDs for fast operator overload lookup
+    impl->op_plus_id_ = impl->string_symbolizer_.intern("+");
+    impl->op_minus_id_ = impl->string_symbolizer_.intern("-");
+    impl->op_star_id_ = impl->string_symbolizer_.intern("*");
+    impl->op_slash_id_ = impl->string_symbolizer_.intern("/");
+    impl->op_percent_id_ = impl->string_symbolizer_.intern("%");
+    impl->op_less_id_ = impl->string_symbolizer_.intern("<");
+    impl->op_less_equal_id_ = impl->string_symbolizer_.intern("<=");
+    impl->op_greater_id_ = impl->string_symbolizer_.intern(">");
+    impl->op_greater_equal_id_ = impl->string_symbolizer_.intern(">=");
+    impl->op_equal_equal_id_ = impl->string_symbolizer_.intern("==");
+    impl->op_bang_equal_id_ = impl->string_symbolizer_.intern("!=");
+    impl->op_spaceship_id_ = impl->string_symbolizer_.intern("<=>");
+    impl->op_ampersand_id_ = impl->string_symbolizer_.intern("&");
+    impl->op_pipe_id_ = impl->string_symbolizer_.intern("|");
+    impl->op_caret_id_ = impl->string_symbolizer_.intern("^");
+    impl->op_left_shift_id_ = impl->string_symbolizer_.intern("<<");
+    impl->op_right_shift_id_ = impl->string_symbolizer_.intern(">>");
+
     // Now that we have a proper engine reference, add conversions and functions that create script_value
     auto engine_weak = weak_from_this();
     
@@ -454,9 +492,10 @@ void engine::initialize_engine_reference() {
         if (classIt != impl->classes.end()) {
             // This is a registered class, obj should be a class_instance
             auto instance = std::static_pointer_cast<class_instance>(obj);
-            
+
             // Get the C++ object from the special field
-            script_value cppObjValue = instance->get_field("_cpp_object");
+            uint64_t cpp_object_field_id = symbolize(class_constants::CPP_OBJECT_FIELD);
+            script_value cppObjValue = instance->get_field(cpp_object_field_id);
             if (!cppObjValue.is_null() && cppObjValue.type() == script_value_type::jai_object_type) {
                 // Direct access to the object_holder to avoid recursive extraction
                 auto objHolder = cppObjValue.get_object_holder();
